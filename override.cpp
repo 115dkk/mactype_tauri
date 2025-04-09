@@ -46,6 +46,8 @@ typedef HRESULT (WINAPI* __DWriteCreateFactory)(
 CFontCache FontCache;
 CDCArray DCArray;
 CDCRelationCache DCRelation;
+CDCHwndCache DCHwndCache;
+CDCRefCache DCRef; // HDC reference count
 //CPaintBufferCache PaintBufferCache;
 wstring nullstring;
 BOOL g_ccbRender = true;
@@ -1092,9 +1094,16 @@ int DisplayFromDC(HDC dc) {
 	if (it != DCRelation.end()) {
 		dc = it->second;
 	}
-	auto hwnd = WindowFromDC(dc);
+	HWND hwnd = NULL;
+	auto dit = DCHwndCache.find(dc);
+	if (dit != DCHwndCache.end()) {
+		hwnd = dit->second;
+	}
+	else {
+		hwnd = WindowFromDC(dc);
+	}
 	if (hwnd) {
-		auto monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+		auto monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL);
 		if (!monitor) return -1;	// Minimized window?
 
 		MONITORINFOEX mi;
@@ -1781,20 +1790,70 @@ HRESULT WINAPI IMPL_EndBufferedPaint(HPAINTBUFFER hBufferedPaint, BOOL fUpdateTa
 }
 */
 
+void inline hdcAddRef(HDC dc)  {
+	auto it = DCRef.find(dc);
+	if (it == DCRef.end()) {
+		DCRef[dc] = 1;
+	}
+	else {
+		DCRef[dc] = it->second+1;
+	}
+}
+
+void inline hdcReleaseRef(HDC dc) {
+	auto it = DCRef.find(dc);
+	if (it != DCRef.end()) {
+		if (it->second > 1) {
+			DCRef[dc] = it->second-1;
+		}
+		else {
+			TRACE(L"%d is removed\n", dc);
+			DCRef.erase(it);
+		}
+	}
+}
+
+HWND getMyActiveWindow() {
+	HWND activeHwnd = GetForegroundWindow();
+	if (activeHwnd) {
+		DWORD processId;
+		GetWindowThreadProcessId(activeHwnd, &processId);
+		if (processId == GetCurrentProcessId()) {
+			// the active window belongs to the current process.
+			return activeHwnd;
+		}
+	}
+	// enum current top-level windows and return the first one.
+	EnumThreadWindows(GetCurrentThreadId(), [](HWND hwnd, LPARAM lParam)->BOOL {
+		*(HWND*)lParam = hwnd;
+		return false;
+		}, LPARAM(&activeHwnd));
+	return activeHwnd;
+}
+
 HDC WINAPI IMPL_CreateCompatibleDC(_In_opt_ HDC hdc) {
-	auto memdc = ORIG_CreateCompatibleDC(hdc);
-	if (memdc && hdc) {
+	auto memdc = CreateCompatibleDC(hdc);
+	if (memdc) {
+		TRACE(L"CreateCompatibleDC: %d->%d\n", memdc, hdc);
 		CCriticalSectionLock __lock(CCriticalSectionLock::CS_DCRELATION);
 		// unchain dc relations
 		auto it = DCRelation.find(hdc);
 		if (it != DCRelation.end()) {
-			TRACE(L"CreateCompatibleDC: %d->%d->%d\n", memdc, hdc, it->second);
+			TRACE(L"Unchain: %d->%d->%d\n", memdc, hdc, it->second);
 			hdc = it->second;
 		}
-		else {
-			TRACE(L"CreateCompatibleDC: %d->%d\n", memdc, hdc);
+
+		hdcAddRef(memdc);
+		if (hdc) {
+			DCRelation[memdc] = hdc;
+			hdcAddRef(hdc);
 		}
-		DCRelation[memdc] = hdc;
+		else {
+			// hdc = 0, create a relationship
+			auto hWnd = getMyActiveWindow();
+			TRACE(L"[CreateCompatibleDC] Relation %d->%d\n", memdc, hWnd);
+			DCHwndCache[memdc] = hWnd;
+		}
 	}
 	return memdc;
 }
@@ -1804,9 +1863,34 @@ BOOL WINAPI IMPL_DeleteDC(_In_ HDC hdc) {
 	if (ret) {
 		CCriticalSectionLock __lock(CCriticalSectionLock::CS_DCRELATION);
 		DCRelation.erase(hdc);
+		hdcReleaseRef(hdc);
 		TRACE(L"DeleteDC %d", hdc);
 	}
 	return ret;
 }
+
+HDC WINAPI IMPL_GetDC(_In_opt_ HWND hWnd) {
+	auto dc = ORIG_GetDC(hWnd);
+	if (dc) {
+		if (!hWnd) {
+			hWnd = getMyActiveWindow();
+		}
+		if (hWnd) {
+			CCriticalSectionLock __lock(CCriticalSectionLock::CS_DCRELATION);
+			TRACE(L"[GetDC] Custom Relation %d->%d\n", dc, hWnd);
+			hdcAddRef(dc);
+			DCHwndCache[dc] = hWnd;
+		}
+	}
+	return dc;
+}
+
+BOOL WINAPI IMPL_ReleaseDC(_In_opt_ HWND hWnd, _In_ HDC hDC) {
+	CCriticalSectionLock __lock(CCriticalSectionLock::CS_DCRELATION);
+	hdcReleaseRef(hDC);
+	return ORIG_ReleaseDC(hWnd, hDC);
+}
+
+
 
 //EOF

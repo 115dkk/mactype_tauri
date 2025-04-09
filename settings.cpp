@@ -1757,7 +1757,7 @@ CFontSubstitutesInfo::lookup(LOGFONT& lf) const
 			{
 				mylf.lfClipPrecision = FONT_MAGIC_NUMBER;
 				HFONT tempfont = CreateFontIndirect(&mylf);
-				HDC dc=CreateCompatibleDC(NULL);
+				HDC dc = CreateCompatibleDC(NULL);
 				HFONT oldfont = SelectFont(dc, tempfont);
 				ORIG_GetTextFaceW(dc, LF_FACESIZE, mylf.lfFaceName);
 				SelectFont(dc, oldfont);

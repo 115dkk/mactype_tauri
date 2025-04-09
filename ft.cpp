@@ -35,6 +35,8 @@
 //#include <tttables.h>	// FT_TRUETYPE_TABLES_H
 #include <freetype/ftoutln.h>	// FT_OUTLINE_H
 #include <freetype/fttrigon.h>	//FT_TRIGONOMETRY_H
+#include FT_MULTIPLE_MASTERS_H
+#include FT_SFNT_NAMES_H
 
 #ifdef FT_LCD_FILTER_H
 #include <freetype/ftlcdfil.h>	// FT_LCD_FILTER_H
@@ -54,9 +56,9 @@ FT_BitmapGlyphRec empty_glyph = {};//优化控制字
 #define FT_PosToInt(x)		(((x) + (1 << 5)) >> 6)
 #define RESOLUTION_X 72
 #define RESOLUTION_Y 72
-FT_Error New_FT_Outline_Embolden(FT_Outline*  outline, FT_Pos str_h, FT_Pos str_v, FT_Int font_size);
-FT_Error Old_FT_Outline_Embolden(FT_Outline*  outline, FT_Pos strength);
-FT_Error Vert_FT_Outline_Embolden(FT_Outline*  outline, FT_Pos strength);
+FT_Error New_FT_Outline_Embolden(FT_Outline* outline, FT_Pos str_h, FT_Pos str_v, FT_Int font_size);
+FT_Error Old_FT_Outline_Embolden(FT_Outline* outline, FT_Pos strength);
+FT_Error Vert_FT_Outline_Embolden(FT_Outline* outline, FT_Pos strength);
 ControlIder CID;
 
 #if _MSC_VER <= 1200
@@ -76,6 +78,49 @@ COLORREF GetPaletteColor(HDC hdc, UINT paletteindex)
 	memset(&lppe, 0, sizeof(lppe));
 	GetPaletteEntries(hpal, paletteindex & 0xffff, 1, &lppe);
 	return RGB(lppe.peRed, lppe.peGreen, lppe.peBlue);
+}
+
+bool EmBoldVariableFont(const FT_Face face, int boldWeight) {
+	FT_MM_Var* mm_var = nullptr;
+	auto error = FT_Get_MM_Var(face, &mm_var);
+	if (error) {
+		return false;	// not a varaible font
+	}
+	auto num_axes = mm_var->num_axis;
+	auto coords = new FT_Fixed[num_axes];
+	bool axisFound = false;
+
+	// Find 'wght' axis and set coordinates
+	for (unsigned int i = 0; i < num_axes; ++i) {
+		FT_Var_Axis* axis = &mm_var->axis[i];
+		if (axis->tag == FT_MAKE_TAG('w', 'g', 'h', 't')) {
+			axisFound = true;
+			// fix out-of-range bold weight
+			if (boldWeight < axis->minimum) {
+				boldWeight = axis->minimum;
+			}
+			if (boldWeight > axis->maximum) {
+				boldWeight = axis->maximum;
+			}
+			coords[i] = boldWeight;
+		}
+		else {
+			// Set other axes to their default values
+			coords[i] = axis->def;
+		}
+	}
+
+	if (!axisFound) {
+		return false;	// no "wght" axis found
+	}
+
+	// Apply the design coordinates
+	FT_Set_Var_Design_Coordinates(face, num_axes, coords);	// we will continue whatsoever
+
+	// Free the MM_Var structure (we've copied the data we need)
+	FT_Done_MM_Var(freetype_library, mm_var);
+	mm_var = nullptr; // Avoid double free later
+	return true;
 }
 
 
@@ -99,9 +144,9 @@ void Log(wchar_t* Msg)
 	fclose(f);
 }
 
-extern "C" FT_Error FT_Glyph_To_BitmapEx(FT_Glyph* the_glyph,
+extern "C" FT_Error FT_Glyph_To_BitmapEx(FT_Glyph * the_glyph,
 	FT_Render_Mode  render_mode,
-	FT_Vector* origin,
+	FT_Vector * origin,
 	FT_Bool         destroy,
 	FT_Bool			loadcolor,
 	FT_UInt			glyphindex,
@@ -156,7 +201,7 @@ public:
 	void initRGB();
 	double* GetRGBTable() { return RGB2CRT.data(); }
 	BYTE doAB(BYTE fg, BYTE bg, int alpha);
-	void gettunetbl(int paramalpha, BOOL lcd, BOOL dark, const int * &tblR, const int * &tblG, const int * &tblB) const;
+	void gettunetbl(int paramalpha, BOOL lcd, BOOL dark, const int*& tblR, const int*& tblG, const int*& tblB) const;
 	inline int conv1(BYTE n) {
 		return tbl1[n];
 	}
@@ -173,7 +218,7 @@ const int CAlphaBlend::BASE = 0x4000;
 
 static CAlphaBlend s_AlphaBlendTable;
 
-void CAlphaBlend::gettunetbl(int paramalpha, BOOL lcd, BOOL dark, const int * &tblR, const int * &tblG, const int * &tblB) const
+void CAlphaBlend::gettunetbl(int paramalpha, BOOL lcd, BOOL dark, const int*& tblR, const int*& tblG, const int*& tblB) const
 {
 	if (paramalpha == 1) {	//获取文字混合表
 		if (lcd) {
@@ -213,7 +258,7 @@ void CAlphaBlend::gettunetbl(int paramalpha, BOOL lcd, BOOL dark, const int * &t
 
 void CAlphaBlend::initRGB()
 {
-	for (int i = 0; i<256; i++)
+	for (int i = 0; i < 256; i++)
 		RGB2CRT[i] = pow(i / 255.0, 2.2);
 }
 
@@ -321,19 +366,19 @@ class CAlphaBlendColorOne
 private:
 	BYTE fg;
 	int temp_fg;
-	const int *tunetbl;
+	const int* tunetbl;
 	BYTE bg0;
 	int alpha0;
 	BYTE c0;
 public:
 	CAlphaBlendColorOne()
 		: fg(0), temp_fg(0), tunetbl(NULL), bg0(0), alpha0(0), c0(0) {}
-	void init(BYTE f, const int *tbl);
+	void init(BYTE f, const int* tbl);
 	~CAlphaBlendColorOne() {};
 	BYTE doAB(BYTE bg, int alpha);
 };
 
-FORCEINLINE void CAlphaBlendColorOne::init(BYTE f, const int *tbl)
+FORCEINLINE void CAlphaBlendColorOne::init(BYTE f, const int* tbl)
 {
 	fg = f;
 	temp_fg = s_AlphaBlendTable.conv1(fg);
@@ -369,9 +414,9 @@ private:
 
 FORCEINLINE CAlphaBlendColor::CAlphaBlendColor(COLORREF newColor, int paramalpha, BOOL lcd, BOOL dark, BOOL gbr)
 {
-	const int *tblR;
-	const int *tblG;
-	const int *tblB;
+	const int* tblR;
+	const int* tblG;
+	const int* tblB;
 	s_AlphaBlendTable.gettunetbl(paramalpha, lcd, dark, tblR, tblG, tblB);
 	if (!gbr) {
 		r.init(GetRValue(newColor), tblR);
@@ -485,7 +530,7 @@ typedef struct
 	CAlphaBlendColor* solid;
 	CAlphaBlendColor* shadow;	//alpha blender
 	bool bInvertColor;	// invert color for chrome/skia
-} FreeTypeGlyphInfo, *PFreeTypeGlyphInfo;
+} FreeTypeGlyphInfo, * PFreeTypeGlyphInfo;
 
 
 // 2階調
@@ -493,7 +538,7 @@ static void FreeTypeDrawBitmapPixelModeMono(FreeTypeGlyphInfo& FTGInfo,
 	CAlphaBlendColor& ab, int x, int y)
 {
 	CBitmapCache& cache = *FTGInfo.FTInfo->pCache;
-	const FT_Bitmap *bitmap = &FTGInfo.FTGlyph->bitmap;
+	const FT_Bitmap* bitmap = &FTGInfo.FTGlyph->bitmap;
 	BYTE alphatuner = FTGInfo.FTInfo->params->alphatuner;
 	int i, j;
 	int dx, dy;	// display
@@ -506,8 +551,8 @@ static void FreeTypeDrawBitmapPixelModeMono(FreeTypeGlyphInfo& FTGInfo,
 	const COLORREF color = RGB2DIB(FTGInfo.FTInfo->Color());
 
 	const SIZE cachebufsize = cache.Size();
-	DWORD * const cachebufp = (DWORD *)cache.GetPixels();
-	DWORD * cachebufrowp;
+	DWORD* const cachebufp = (DWORD*)cache.GetPixels();
+	DWORD* cachebufrowp;
 
 	int left, top, width, height;
 	if (x < 0) {
@@ -541,7 +586,7 @@ static void FreeTypeDrawBitmapPixelModeLCD(FreeTypeGlyphInfo& FTGInfo,
 	CAlphaBlendColor& ab, int x, int y)
 {
 	CBitmapCache& cache = *FTGInfo.FTInfo->pCache;
-	const FT_Bitmap *bitmap = &FTGInfo.FTGlyph->bitmap;
+	const FT_Bitmap* bitmap = &FTGInfo.FTGlyph->bitmap;
 	BYTE alphatuner = FTGInfo.FTInfo->params->alphatuner;
 	int AAMode = FTGInfo.AAMode;
 	int i, j;
@@ -555,8 +600,8 @@ static void FreeTypeDrawBitmapPixelModeLCD(FreeTypeGlyphInfo& FTGInfo,
 	const COLORREF color = FTGInfo.FTInfo->Color();
 
 	const SIZE cachebufsize = cache.Size();
-	DWORD * const cachebufp = (DWORD *)cache.GetPixels();
-	DWORD * cachebufrowp;
+	DWORD* const cachebufp = (DWORD*)cache.GetPixels();
+	DWORD* cachebufrowp;
 
 	// LCDは3サブピクセル分ある
 	int left, top, width, height;
@@ -657,7 +702,7 @@ static void FreeTypeDrawBitmapPixelModeLCD(FreeTypeGlyphInfo& FTGInfo,
 
 COLORREF _rgbamixer(COLORREF bkColor, int b, int g, int r, int a) {
 	int bkr = GetRValue(bkColor), bkg = GetGValue(bkColor), bkb = GetBValue(bkColor);
-	return a << 24 | (bkb - a*bkb / 255 + b) << 16 | (bkg - a*bkg / 255 + g) << 8 | (bkr - a*bkr / 255 + r);
+	return a << 24 | (bkb - a * bkb / 255 + b) << 16 | (bkg - a * bkg / 255 + g) << 8 | (bkr - a * bkr / 255 + r);
 }
 
 // color blender for color font
@@ -682,7 +727,7 @@ COLORREF _invert_rgbamixer(COLORREF bkColor, int b, int g, int r, int a) {
 static void FreeTypeDrawBitmapPixelModeBGRA(FreeTypeGlyphInfo& FTGInfo, int x, int y)
 {
 	CBitmapCache& cache = *FTGInfo.FTInfo->pCache;
-	const FT_Bitmap *bitmap = &FTGInfo.FTGlyph->bitmap;
+	const FT_Bitmap* bitmap = &FTGInfo.FTGlyph->bitmap;
 	BYTE alphatuner = FTGInfo.FTInfo->params->alphatuner;
 	BOOL bAlphaDraw = FTGInfo.FTInfo->params->alpha != 1;
 	int AAMode = FTGInfo.AAMode;
@@ -701,8 +746,8 @@ static void FreeTypeDrawBitmapPixelModeBGRA(FreeTypeGlyphInfo& FTGInfo, int x, i
 	const COLORREF color = FTGInfo.FTInfo->Color();
 
 	const SIZE cachebufsize = cache.Size();
-	DWORD * const cachebufp = (DWORD *)cache.GetPixels();
-	DWORD * cachebufrowp;
+	DWORD* const cachebufp = (DWORD*)cache.GetPixels();
+	DWORD* cachebufrowp;
 	typedef COLORREF(*pfnmixer) (COLORREF bkColor, int b, int g, int r, int a);
 
 	pfnmixer mixer = FTGInfo.bInvertColor ? _invert_rgbamixer : _rgbamixer;
@@ -752,14 +797,14 @@ static void FreeTypeDrawBitmapGray(FreeTypeGlyphInfo& FTGInfo, CAlphaBlendColor&
 	FT_Bytes p;
 
 	CBitmapCache& cache = *FTGInfo.FTInfo->pCache;
-	const FT_Bitmap *bitmap = &FTGInfo.FTGlyph->bitmap;
+	const FT_Bitmap* bitmap = &FTGInfo.FTGlyph->bitmap;
 	BYTE alphatuner = FTGInfo.FTInfo->params->alphatuner;
 
 	BOOL bAlphaDraw = FTGInfo.FTInfo->params->alpha != 1;
 	const COLORREF color = FTGInfo.FTInfo->Color();
 	const SIZE cachebufsize = cache.Size();
-	DWORD * const cachebufp = (DWORD *)cache.GetPixels();
-	DWORD * cachebufrowp;
+	DWORD* const cachebufp = (DWORD*)cache.GetPixels();
+	DWORD* cachebufrowp;
 
 	int left, top, width, height;
 	if (x < 0) {
@@ -826,7 +871,7 @@ static void FreeTypeDrawBitmapPixelModeMonoV(FreeTypeGlyphInfo& FTGInfo,
 	CAlphaBlendColor& ab, int x, int y)
 {
 	CBitmapCache& cache = *FTGInfo.FTInfo->pCache;
-	FT_Bitmap *bitmap = &FTGInfo.FTGlyph->bitmap;
+	FT_Bitmap* bitmap = &FTGInfo.FTGlyph->bitmap;
 	int i, j;
 	int dx, dy;	// display
 	FT_Bytes p;
@@ -860,7 +905,7 @@ static void FreeTypeDrawBitmapPixelModeLCDV(FreeTypeGlyphInfo& FTGInfo,
 	CAlphaBlendColor& ab, int x, int y)
 {
 	CBitmapCache& cache = *FTGInfo.FTInfo->pCache;
-	const FT_Bitmap *bitmap = &FTGInfo.FTGlyph->bitmap;
+	const FT_Bitmap* bitmap = &FTGInfo.FTGlyph->bitmap;
 	BYTE alphatuner = FTGInfo.FTInfo->params->alphatuner;
 	int AAMode = FTGInfo.AAMode;
 	int i, j;
@@ -949,7 +994,7 @@ static void FreeTypeDrawBitmapPixelModeLCDV(FreeTypeGlyphInfo& FTGInfo,
 void FreeTypeDrawBitmapGrayV(FreeTypeGlyphInfo& FTGInfo, CAlphaBlendColor& ab, int x, int y)
 {
 	CBitmapCache& cache = *FTGInfo.FTInfo->pCache;
-	const FT_Bitmap *bitmap = &FTGInfo.FTGlyph->bitmap;
+	const FT_Bitmap* bitmap = &FTGInfo.FTGlyph->bitmap;
 	BYTE alphatuner = FTGInfo.FTInfo->params->alphatuner;
 	int i, j;
 	int dx, dy;	// display
@@ -1006,7 +1051,7 @@ class CGGOGlyphLoader
 {
 private:
 	FT_Library m_lib;
-	const FT_Glyph_Class *m_clazz;
+	const FT_Glyph_Class* m_clazz;
 	BYTE bgtbl[0x41];
 	static int CALLBACK EnumFontFamProc(const LOGFONT* lplf, const TEXTMETRIC* lptm, DWORD FontType, LPARAM lParam);
 public:
@@ -1014,7 +1059,7 @@ public:
 	~CGGOGlyphLoader() {}
 	bool init(FT_Library freetype_library);
 	FT_Library getlib() { return m_lib; }
-	const FT_Glyph_Class * getclazz() { return m_clazz; }
+	const FT_Glyph_Class* getclazz() { return m_clazz; }
 	BYTE convbgpixel(BYTE val) { return bgtbl[val]; }
 };
 static CGGOGlyphLoader s_GGOGlyphLoader;
@@ -1032,7 +1077,7 @@ int CALLBACK CGGOGlyphLoader::EnumFontFamProc(const LOGFONT* lplf, const TEXTMET
 		return TRUE;
 	}
 
-	const FT_Glyph_Class *clazz = NULL;
+	const FT_Glyph_Class* clazz = NULL;
 	FT_Face face = pFont->GetFace();
 	FT_Error err = FT_Set_Pixel_Sizes(face, 0, 12);//optimized
 	if (!err) {
@@ -1096,7 +1141,7 @@ class CGGOOutlineGlyph
 private:
 	FT_OutlineGlyph m_ptr;
 	static FT_F26Dot6 toF26Dot6(const FIXED& fx) {
-		return *(LONG *)(&fx) >> 10;
+		return *(LONG*)(&fx) >> 10;
 	}
 	static FT_Fixed toFixed(const short n) {
 		return (FT_Fixed)n << 16;
@@ -1134,7 +1179,7 @@ bool
 CGGOOutlineGlyph::init(DWORD bufsize, PVOID bufp, const GLYPHMETRICS& gm)
 {
 	done();
-	m_ptr = (FT_OutlineGlyph)calloc(1, sizeof *m_ptr);
+	m_ptr = (FT_OutlineGlyph)calloc(1, sizeof * m_ptr);
 	if (!m_ptr) {
 		return false;
 	}
@@ -1158,7 +1203,7 @@ CGGOOutlineGlyph::init(DWORD bufsize, PVOID bufp, const GLYPHMETRICS& gm)
 	while (ttphp < ttphpend) {
 		LPTTPOLYCURVE ttpcp = (LPTTPOLYCURVE)(ttphp + 1);
 		LPTTPOLYCURVE ttpcpend = (LPTTPOLYCURVE)((PBYTE)ttphp + ttphp->cb);
-		if ((PVOID)ttpcpend >(PVOID)ttphpend) {
+		if ((PVOID)ttpcpend > (PVOID)ttphpend) {
 			break;
 		}
 		++outline.n_points;
@@ -1174,15 +1219,15 @@ CGGOOutlineGlyph::init(DWORD bufsize, PVOID bufp, const GLYPHMETRICS& gm)
 	if (ttphp != ttphpend) {
 		return false;
 	}
-	outline.points = (FT_Vector *)calloc(outline.n_points, sizeof *outline.points);
-	outline.tags = (unsigned char *)calloc(outline.n_points, sizeof *outline.tags);
-	outline.contours = (unsigned short *)calloc(outline.n_contours, sizeof *outline.contours);
+	outline.points = (FT_Vector*)calloc(outline.n_points, sizeof * outline.points);
+	outline.tags = (unsigned char*)calloc(outline.n_points, sizeof * outline.tags);
+	outline.contours = (unsigned short*)calloc(outline.n_contours, sizeof * outline.contours);
 	if (!outline.points || !outline.tags || !outline.contours) {
 		done();
 		return false;
 	}
 
-	unsigned short *cp = outline.contours;
+	unsigned short* cp = outline.contours;
 	short ppos = 0;
 
 	ttphp = (LPTTPOLYGONHEADER)bufp;
@@ -1272,6 +1317,86 @@ public:
 	DWORD getsize() { return m_size; }
 };
 
+bool IsSFNTNameMatch(const FT_Face& face, FT_UInt nameID, wstring name) {
+	// get sfnt name by platform id
+	auto getSfntName = [](FT_SfntName& fn)->wstring {
+		switch (fn.platform_id) {
+		case 0: {
+			return wstring(reinterpret_cast<wchar_t*>(fn.string), fn.string_len);
+		}
+		case 1: {
+			//	macintosh
+			return to_wide_string(string(reinterpret_cast<char*>(fn.string), fn.string_len));
+		}
+		case 3: {
+			// Windows
+			switch (fn.encoding_id) {
+			case 1: {
+				return to_utf16le(wstring(reinterpret_cast<wchar_t*>(fn.string), fn.string_len));
+			}
+			default:
+				return to_wide_string(string(reinterpret_cast<char*>(fn.string), fn.string_len));
+			}
+		}
+		}
+		return L"";
+		};
+
+	auto getWordSet = [](const wstring& str) {
+		set<wstring> words;
+		wstringstream ss(to_lower_case(str));
+		wstring word;
+		while (ss >> word) {
+			if (word != L"regular")	// drop the regular style as it can be omitted
+				words.insert(word);
+		}
+		return words;
+		};
+
+	auto compareStyle = [&](const wstring nameA, const wstring nameB)->bool {
+		auto setA = getWordSet(nameA);
+		auto setB = getWordSet(nameB);
+		return setA == setB;
+		};
+
+	FT_SfntName sfntName;
+	FT_UInt nameCount = FT_Get_Sfnt_Name_Count(face);
+	for (FT_UInt i = 0; i < nameCount; ++i) {
+		if (FT_Get_Sfnt_Name(face, i, &sfntName) == 0) {
+			if (sfntName.name_id == nameID) {
+				if (sfntName.string_len > 0 && sfntName.string) {
+					wstring fontName = getSfntName(sfntName);
+					if (compareStyle(fontName, name)) {
+						return true;
+					}
+				}
+			}
+		}
+	}
+	return false;
+}
+
+void VarFontByAlias(const FT_Face& face, const wstring& lfStyleName) {
+	FT_MM_Var* mm_var = nullptr;
+	auto error = FT_Get_MM_Var(face, &mm_var);
+	if (error) {
+		return;	// not a varaible font
+	}
+	if (!mm_var->num_namedstyles) return;	// no named instance, nothing to adjust.
+
+	for (unsigned int i = 0; i < mm_var->num_namedstyles; ++i) {
+		auto& style = mm_var->namedstyle[i];
+		if (IsSFNTNameMatch(face, style.strid, lfStyleName)) {
+			// found it
+			FT_Set_Named_Instance(face, i);
+			break;
+		}
+	}
+	// Free the MM_Var structure
+	FT_Done_MM_Var(freetype_library, mm_var);
+	mm_var = nullptr; // Avoid double free later
+}
+
 BOOL FreeTypePrepare(FreeTypeDrawInfo& FTInfo)
 {
 	//CDebugElapsedCounter cntr("FreeTypePrepare");
@@ -1336,10 +1461,10 @@ BOOL FreeTypePrepare(FreeTypeDrawInfo& FTInfo)
 		scaler.face_id = face_id;
 
 		height = FTInfo.params->otm->otmTextMetrics.tmHeight - FTInfo.params->otm->otmTextMetrics.tmInternalLeading;	//Snowie!!剪掉空白高度，bugfix。
-																														// 				if(lf.lfHeight > 0){
-																														// 					scaler.height = height;
-																														// 				}
-																														// 				else{
+		// 				if(lf.lfHeight > 0){
+		// 					scaler.height = height;
+		// 				}
+		// 				else{
 		scaler.height = height;
 		//				}
 		//Snowie!!
@@ -1355,7 +1480,7 @@ BOOL FreeTypePrepare(FreeTypeDrawInfo& FTInfo)
 			scaler.width = scaler.height;
 		if (bVertical)
 			swap(scaler.width, scaler.height);//如果是竖向字体，交换宽高
-											  //!!Snowie
+		//!!Snowie
 		scaler.pixel = 1;
 		scaler.x_res = 0;
 		scaler.y_res = 0;
@@ -1419,7 +1544,7 @@ BOOL FreeTypePrepare(FreeTypeDrawInfo& FTInfo)
 		font_type.face_id = face_id;
 		font_type.width = scaler.width;//freetype_face->size->metrics.x_ppem;
 		font_type.height = scaler.height;//freetype_face->size->metrics.y_ppem;
-										 //Snowie!!
+		//Snowie!!
 		FTInfo.height = font_type.height;
 		FTInfo.width = font_type.width;
 
@@ -1495,7 +1620,7 @@ BOOL FreeTypePrepare(FreeTypeDrawInfo& FTInfo)
 		}
 	}
 
-	if (pSettings->HintSmallFont() /*&& font_type.flags & FT_LOAD_TARGET_LIGHT*/ && font_type.height != -1 && font_type.height<12)  //通用设置不使用hinting，但是打开了小字体hinting开关
+	if (pSettings->HintSmallFont() /*&& font_type.flags & FT_LOAD_TARGET_LIGHT*/ && font_type.height != -1 && font_type.height < 12)  //通用设置不使用hinting，但是打开了小字体hinting开关
 	{
 		/*
 		if (!(freetype_face->face_flags & FT_FACE_FLAG_TRICKY))	//如果不是tricky字体
@@ -1568,10 +1693,10 @@ struct CGGOFont
 class ClpDx
 {
 private:
-	const INT *p;
+	const INT* p;
 	const INT step;
 public:
-	ClpDx(const INT *lpDx, UINT etoOptions) : p(lpDx), step((etoOptions & ETO_PDY) ? 2 : 1) {
+	ClpDx(const INT* lpDx, UINT etoOptions) : p(lpDx), step((etoOptions& ETO_PDY) ? 2 : 1) {
 	}
 	~ClpDx() {
 	}
@@ -1669,22 +1794,22 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 	}
 
 
-	WORD * gi = new WORD[cbString];
-	WORD * ggi = gi;
+	WORD* gi = new WORD[cbString];
+	WORD* ggi = gi;
 
 
 	//Snowie!!
 
 	//Fast fontlink
-	WORD ** lpfontlink = NULL;
+	WORD** lpfontlink = NULL;
 	HFONT hOldFont = NULL;
 	if (!bGlyphIndex && bWindowsLink)	//使用Windows fontlink
 	{
 		lpfontlink = (WORD**)new LPVOID[FTInfo.face_id_list_num];
-		for (int i = 0; i<LinkNum; i++)
+		for (int i = 0; i < LinkNum; i++)
 		{
 			lpfontlink[i] = new WORD[cbString];
-			ZeroMemory(lpfontlink[i], sizeof(WORD)*cbString);	//初始化为无链接
+			ZeroMemory(lpfontlink[i], sizeof(WORD) * cbString);	//初始化为无链接
 		}
 		//
 		hOldFont = (HFONT)GetCurrentObject(FTInfo.hdc, OBJ_FONT);	//加载第一个字体
@@ -1738,7 +1863,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 				*AAList = chData->GetAAMode();
 				CCriticalSectionLock __lock(CCriticalSectionLock::CS_LIBRARY);
 				FT_Glyph_Ref_Copy((FT_Referenced_Glyph)chData->GetGlyph(render_mode), glyph_bitmap);	// cached img-> glyph_bitmap
-																										//TRACE(_T("Cache Hit: %wc, size:%d, 0x%8.8X\n"), wch, chData->GetWidth(), glyph_bitmap);
+				//TRACE(_T("Cache Hit: %wc, size:%d, 0x%8.8X\n"), wch, chData->GetWidth(), glyph_bitmap);
 			}
 		}
 		if (!*glyph_bitmap) {	// case: no cache found
@@ -1788,12 +1913,12 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 							f_glyph = true;
 							FTInfo.font_type.face_id = FTInfo.face_id_list[j];
 							freetype_face = FTInfo.GetFace(j);	//同时更新对应faceid的实际face
-																//接下来更新对应的fontsetting
+							//接下来更新对应的fontsetting
 							FTInfo.font_type.flags = FT_LOAD_NO_BITMAP | FT_LOAD_IGNORE_GLOBAL_ADVANCE_WIDTH;
 							// ヒンティング
 							//extern CFontSetCache g_fsetcache;
 							//pfs = g_fsetcache.Get(FTInfo.font_type.face_id);
-							if (FTInfo.font_type.face_id == FTInfo.face_id_simsun && j>0)
+							if (FTInfo.font_type.face_id == FTInfo.face_id_simsun && j > 0)
 							{
 								switch (FTInfo.font_type.height)
 								{
@@ -1847,7 +1972,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 										break;
 									}
 								}
-								if (pSettings->HintSmallFont() && FTInfo.font_type.flags & FT_LOAD_TARGET_LIGHT && FTInfo.font_type.height != -1 && FTInfo.font_type.height<12)  //通用设置不使用hinting，但是打开了小字体hinting开关
+								if (pSettings->HintSmallFont() && FTInfo.font_type.flags & FT_LOAD_TARGET_LIGHT && FTInfo.font_type.height != -1 && FTInfo.font_type.height < 12)  //通用设置不使用hinting，但是打开了小字体hinting开关
 									FTInfo.font_type.flags = FTInfo.font_type.flags & (~FT_LOAD_NO_HINTING)/* | (pfi->FontHasHinting() ? FT_LOAD_DEFAULT : FT_LOAD_FORCE_AUTOHINT)*/;
 
 								AAMode = *AAList/*pfs->GetAntiAliasMode()*/;
@@ -1886,7 +2011,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 				{
 					if (wch) {
 						*glyph_bitmap = NULL;	//无效文字
-												//ORIG_ExtTextOutW(FTInfo.hdc, FTInfo.x, FTInfo.yTop, FTInfo.GetETO(), NULL, &wch, 1, NULL);
+						//ORIG_ExtTextOutW(FTInfo.hdc, FTInfo.x, FTInfo.yTop, FTInfo.GetETO(), NULL, &wch, 1, NULL);
 					}
 					BOOL isc = bGlyphIndex ? false : (CID.myiswcntrl(*lpString));
 					if (isc == CNTRL_UNICODE_PLANE)
@@ -1909,8 +2034,8 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 					if (isc == CNTRL_COMPLEX_TEXT)	//控制字
 					{
 						cx = dxWidth;	//服从windows的宽度调度
-										//if (!dxWidth)
-										//	CID.setcntrlAttribute(wch, CNTRL_ZERO_WIDTH);
+						//if (!dxWidth)
+						//	CID.setcntrlAttribute(wch, CNTRL_ZERO_WIDTH);
 					}
 					if (lpString < lpEnd - 1) {
 						FTInfo.x += dxWidth;
@@ -1928,7 +2053,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 						//FTInfo.px = FTInfo.x+Max(clpdx.get(cx), abc.abcA+(int)abc.abcB+abc.abcC);	//无效文字的情况下，绘图宽度=鼠标位置
 						FTInfo.px = FTInfo.x + cx;
 						FTInfo.x += dxWidth;//Max(clpdx.get(cx), cx);/*(int)abc.abcB+abc.abcC*///Max(clpdx.get(cx), abc.abcB? abc.abcA:0);
-											//}
+						//}
 					}
 					if (!isc)
 						FTInfo.x += FTInfo.params->charExtra;
@@ -1936,10 +2061,10 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 				goto cont;
 			}
 
-			// 縦書き
+			// vertical font found
 			if (bVertical) {
 				glyph_index = ft2vert_get_gid(
-					(struct ft2vert_st *)freetype_face->generic.data,
+					(struct ft2vert_st*)freetype_face->generic.data,
 					glyph_index);
 			}
 
@@ -1960,7 +2085,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 			if (bVertical && IsVerticalChar(wch)) {
 				FTInfo.font_type.flags |= FT_LOAD_VERTICAL_LAYOUT;
 				if (bLcdMode) {
-					if ((FTInfo.font_type.flags&FT_LOAD_TARGET_LCD) == FT_LOAD_TARGET_LCD) {
+					if ((FTInfo.font_type.flags & FT_LOAD_TARGET_LCD) == FT_LOAD_TARGET_LCD) {
 						FTInfo.font_type.flags &= ~FT_LOAD_TARGET_LCD;
 						FTInfo.font_type.flags |= FT_LOAD_TARGET_LCD_V;
 					}
@@ -1972,7 +2097,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 					swap(FTInfo.font_type.height, FTInfo.font_type.width);	//交换无法旋转的文字宽高
 				FTInfo.font_type.flags &= ~FT_LOAD_VERTICAL_LAYOUT;
 				if (bLcdMode) {
-					if (FTInfo.font_type.flags&FT_LOAD_TARGET_LCD_V == FT_LOAD_TARGET_LCD_V) {
+					if (FTInfo.font_type.flags & FT_LOAD_TARGET_LCD_V == FT_LOAD_TARGET_LCD_V) {
 						FTInfo.font_type.flags &= ~FT_LOAD_TARGET_LCD_V;
 						FTInfo.font_type.flags |= FT_LOAD_TARGET_LCD;
 					}
@@ -1984,8 +2109,8 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 
 				bool bRequiredownsize;
 
-				bIsIndivBold = freetype_face->style_flags & FT_STYLE_FLAG_BOLD;	//是独立粗体
-				bIsBold = (IsFontBold(lf) && !bIsIndivBold);	//是仿粗体
+				bIsIndivBold = freetype_face->style_flags & FT_STYLE_FLAG_BOLD;	// separate bold font?
+				bIsBold = (IsFontBold(lf) && !bIsIndivBold);	// bold font creation required but no separate bold font found, we need to embold the regular bold to mimic it
 				bRequiredownsize = bIsBold && /*(pSettings->BolderMode()==2 || (*/pSettings->BolderMode() != 1 /*&& FTInfo.height>FT_BOLD_LOW))*/;
 				if (bRequiredownsize)
 				{
@@ -2032,7 +2157,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 					str_h = str_v = FTInfo.pfi->GetExactBoldWeight() << 2;
 				if (bIsBold) {
 					fbold = true;
-					str_h += FTInfo.font_type.height<24 ? FTInfo.pfi->GetFTWeight() : (FTInfo.pfi->GetFTWeight()*FTInfo.font_type.height / 24);
+					str_h += FTInfo.font_type.height < 24 ? FTInfo.pfi->GetFTWeight() : (FTInfo.pfi->GetFTWeight() * FTInfo.font_type.height / 24);
 					str_v = str_h;
 				}
 				if ((str_h || str_v) && New_FT_Outline_Embolden(
@@ -2136,7 +2261,7 @@ gdiexit:
 
 	if (!bGlyphIndex && bWindowsLink)
 	{
-		for (int i = 0; i<LinkNum; i++)
+		for (int i = 0; i < LinkNum; i++)
 			delete lpfontlink[i];
 		delete lpfontlink;
 	}
@@ -2190,8 +2315,8 @@ BOOL ForEachGetGlyphGGO(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString
 	// 			return false;
 	// 		}		
 
-	WORD * gi = new WORD[cbString];
-	WORD * ggi = gi;
+	WORD* gi = new WORD[cbString];
+	WORD* ggi = gi;
 	//int* gdi32w = new int[cbString];
 	//int* ggdi32 = gdi32w;
 	//SIZE* szSize =new SIZE[cbString];
@@ -2200,15 +2325,15 @@ BOOL ForEachGetGlyphGGO(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString
 	//Snowie!!
 
 	//Fast fontlink
-	WORD ** lpfontlink = NULL;
+	WORD** lpfontlink = NULL;
 	HFONT hOldFont = NULL;
 	if (!bGlyphIndex && bWindowsLink)	//使用Windows fontlink
 	{
 		lpfontlink = (WORD**)new LPVOID[FTInfo.face_id_list_num];
-		for (int i = 0; i<LinkNum; i++)
+		for (int i = 0; i < LinkNum; i++)
 		{
 			lpfontlink[i] = new WORD[cbString];
-			ZeroMemory(lpfontlink[i], sizeof(WORD)*cbString);	//初始化为无链接
+			ZeroMemory(lpfontlink[i], sizeof(WORD) * cbString);	//初始化为无链接
 		}
 		//
 		hOldFont = (HFONT)GetCurrentObject(FTInfo.hdc, OBJ_FONT);	//加载第一个字体
@@ -2349,7 +2474,7 @@ BOOL ForEachGetGlyphGGO(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString
 				{
 					if (wch) {
 						*glyph_bitmap = NULL;	//无效文字
-												//ORIG_ExtTextOutW(FTInfo.hdc, FTInfo.x, FTInfo.yTop, FTInfo.GetETO(), NULL, &wch, 1, NULL);
+						//ORIG_ExtTextOutW(FTInfo.hdc, FTInfo.x, FTInfo.yTop, FTInfo.GetETO(), NULL, &wch, 1, NULL);
 					}
 					BOOL isc = bGlyphIndex ? false : (CID.myiswcntrl(*lpString));
 					if (isc)
@@ -2391,7 +2516,7 @@ BOOL ForEachGetGlyphGGO(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString
 			if (bVertical && IsVerticalChar(wch)) {
 				FTInfo.font_type.flags |= FT_LOAD_VERTICAL_LAYOUT;
 				if (bLcdMode) {
-					if (FTInfo.font_type.flags&FT_LOAD_TARGET_LCD == FT_LOAD_TARGET_LCD) {
+					if (FTInfo.font_type.flags & FT_LOAD_TARGET_LCD == FT_LOAD_TARGET_LCD) {
 						FTInfo.font_type.flags &= ~FT_LOAD_TARGET_LCD;
 						FTInfo.font_type.flags |= FT_LOAD_TARGET_LCD_V;
 					}
@@ -2403,7 +2528,7 @@ BOOL ForEachGetGlyphGGO(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString
 					swap(FTInfo.font_type.height, FTInfo.font_type.width);	//交换无法旋转的文字宽高
 				FTInfo.font_type.flags &= ~FT_LOAD_VERTICAL_LAYOUT;
 				if (bLcdMode) {
-					if (FTInfo.font_type.flags&FT_LOAD_TARGET_LCD_V == FT_LOAD_TARGET_LCD_V) {
+					if (FTInfo.font_type.flags & FT_LOAD_TARGET_LCD_V == FT_LOAD_TARGET_LCD_V) {
 						FTInfo.font_type.flags &= ~FT_LOAD_TARGET_LCD_V;
 						FTInfo.font_type.flags |= FT_LOAD_TARGET_LCD;
 					}
@@ -2454,7 +2579,7 @@ BOOL ForEachGetGlyphGGO(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString
 					str_h = str_v = FTInfo.pfi->GetExactBoldWeight() << 2;
 				if (bIsBold) {
 					fbold = true;
-					str_h += FTInfo.font_type.height<24 ? FTInfo.pfi->GetFTWeight() : (FTInfo.pfi->GetFTWeight()*FTInfo.font_type.height / 24);
+					str_h += FTInfo.font_type.height < 24 ? FTInfo.pfi->GetFTWeight() : (FTInfo.pfi->GetFTWeight() * FTInfo.font_type.height / 24);
 					str_v = str_h;
 				}
 				if ((str_h || str_v) && New_FT_Outline_Embolden(
@@ -2493,7 +2618,7 @@ BOOL ForEachGetGlyphGGO(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString
 			int dy = clpdx.gety(0);
 			int dx = clpdx.get(bWidthGDI32 ? gdi32x : cx);	//获得宽度
 			int left = FT_BitmapGlyph((*glyph_bitmap)->ft_glyph)->left;
-			if (FTInfo.x + left< FTInfo.xBase)
+			if (FTInfo.x + left < FTInfo.xBase)
 				FTInfo.xBase = FTInfo.x + left;	//如果有字符是负数起始位置的（合成符号）， 调整文字的起始位置
 
 			if (lpString < lpEnd - 1) {
@@ -2541,7 +2666,7 @@ gdiexit:
 
 	if (!bGlyphIndex && bWindowsLink)
 	{
-		for (int i = 0; i<LinkNum; i++)
+		for (int i = 0; i < LinkNum; i++)
 			delete lpfontlink[i];
 		delete lpfontlink;
 	}
@@ -2586,7 +2711,7 @@ BOOL CALLBACK TextOutCallback(FreeTypeGlyphInfo& FTGInfo)
 		const CGdippSettings* pSettings = CGdippSettings::GetInstance();
 		if (bVertical && IsVerticalChar(FTGInfo.wch) &&
 			pSettings->FontLoader() == SETTING_FONTLOADER_FREETYPE) {
-			if (FTInfo->params->alpha>1)
+			if (FTInfo->params->alpha > 1)
 			{
 				FreeTypeDrawBitmapV(FTGInfo, *FTGInfo.shadow, FTInfo->x + FTInfo->sx,
 					FTInfo->yTop + FTInfo->params->otm->otmTextMetrics.tmHeight - (glyph_bitmap->left + glyph_bitmap->bitmap.width) - 1 + FTInfo->sy);//画阴影
@@ -2600,7 +2725,7 @@ BOOL CALLBACK TextOutCallback(FreeTypeGlyphInfo& FTGInfo)
 			}
 		}
 		else {
-			if (FTInfo->params->alpha>1)
+			if (FTInfo->params->alpha > 1)
 			{
 				FreeTypeDrawBitmap(FTGInfo, *FTGInfo.shadow,
 					FTInfo->x + glyph_bitmap->left + FTInfo->sx,
@@ -2630,7 +2755,7 @@ int IsColorDark(DWORD Color, double Gamma)
 	//===============================================================
 	static double s_multipler = 116 / pow(100, (double)1.0 / 3.0);	//预计算常数,强制使用double版本
 	double* RGBTable = s_AlphaBlendTable.GetRGBTable();	//获得显示器转换表
-	double ret = pow(23.9746*RGBTable[GetRValue(Color)] + 73.0653*RGBTable[GetGValue(Color)] + 6.13799*RGBTable[GetBValue(Color)], 1.0 / 3.0)*s_multipler - 16;
+	double ret = pow(23.9746 * RGBTable[GetRValue(Color)] + 73.0653 * RGBTable[GetGValue(Color)] + 6.13799 * RGBTable[GetBValue(Color)], 1.0 / 3.0) * s_multipler - 16;
 	return max(int(ret + 0.499), 0);
 
 	/*double r = GetRValue(Color)/255.0;
@@ -2700,14 +2825,14 @@ BOOL FreeTypeTextOut(
 	LPCWSTR lpString,  // 文字列
 	int cbString,      // 文字数
 	FreeTypeDrawInfo& FTInfo,
-	FT_Referenced_Glyph * Glyphs,
+	FT_Referenced_Glyph* Glyphs,
 	FT_DRAW_STATE* drState
 )
 {
 	if (cbString <= 0 || lpString == NULL)
 		return FALSE;
-	CAlphaBlendColor * solid = NULL;
-	CAlphaBlendColor * shadow = NULL;
+	CAlphaBlendColor* solid = NULL;
+	CAlphaBlendColor* shadow = NULL;
 
 	//CCriticalSectionLock __lock;
 
@@ -2739,7 +2864,7 @@ BOOL FreeTypeTextOut(
 		else
 		{
 			diff = abs(lightdiff - darkdiff);
-			if (diff<10)
+			if (diff < 10)
 				FTInfo.params->alpha = 1;
 			else
 				FTInfo.params->alphatuner = max(1, 100 / diff);	//根据色差调整阴影浓度
@@ -2771,7 +2896,7 @@ BOOL FreeTypeTextOut(
 	//计算下划线或删除线的信息
 	int decorationInfo_height;
 	int decorationInfo_thickness;
-	OUTLINETEXTMETRIC &decorationInfo_otm = *FTInfo.params->otm;
+	OUTLINETEXTMETRIC& decorationInfo_otm = *FTInfo.params->otm;
 	if (lf.lfUnderline || lf.lfStrikeOut) {
 
 		if (lf.lfUnderline) {
@@ -2808,7 +2933,7 @@ BOOL FreeTypeTextOut(
 	//===============计算完成==========================
 
 	FreeTypeGlyphInfo FTGInfo = { &FTInfo, 0, 0, 0, solid, shadow, pSettings->InvertColor() };
-	for (int i = 0; i<cbString; ++i, ++lpString)
+	for (int i = 0; i < cbString; ++i, ++lpString)
 	{
 		WCHAR wch = *lpString;
 		if (Glyphs[i])	// paint text with FreeType
@@ -2822,7 +2947,7 @@ BOOL FreeTypeTextOut(
 		{
 			int j = i;
 			FT_DRAW_STATE st = drState[i];
-			while (++j<cbString && !Glyphs[j] && drState[j] == st) {};
+			while (++j < cbString && !Glyphs[j] && drState[j] == st) {};
 			if (st == FT_DRAW_EMBEDDED_BITMAP)
 				ORIG_ExtTextOutW(hdc, FTInfo.x, FTInfo.yTop, FTInfo.GetETO() & ETO_IGNORELANGUAGE, NULL, lpString, j - i, FTInfo.lpDx ? FTInfo.lpDx + i : NULL);
 			else
@@ -2939,9 +3064,9 @@ BOOL FreeTypeGetGlyph(	//获得所有图形和需要的宽度
 
 
 
-void VertFinalizer(void *object) {
+void VertFinalizer(void* object) {
 	FT_Face face = (FT_Face)object;
-	ft2vert_final(face, (struct ft2vert_st *)face->generic.data);
+	ft2vert_final(face, (struct ft2vert_st*)face->generic.data);
 }
 //
 // グリフをIVSで指定された字形をサポートするかどうか調べ、
@@ -3041,9 +3166,9 @@ FT_Error face_requester(
 	face = pData->GetFace();
 	if (!face)
 		return 0x6;	//something wrong with the freetype that we aren't clear yet.
-					//Assert(face != NULL);
+	//Assert(face != NULL);
 
-					// Charmapを設定しておく
+	// Charmapを設定しておく
 	ret = FT_Select_Charmap(face, FT_ENCODING_UNICODE);
 	if (ret != FT_Err_Ok)
 		ret = FT_Select_Charmap(face, FT_ENCODING_MS_SYMBOL);
@@ -3076,10 +3201,12 @@ FT_Error face_requester(
 		FT_Done_Face(face);
 		return ret;
 	}
-	struct ft2vert_st *vert = ft2vert_init(face);
+	struct ft2vert_st* vert = ft2vert_init(face);
 	face->generic.data = vert;
 	face->generic.finalizer = VertFinalizer;
 
+	// select named instance for variable font
+	VarFontByAlias(face, pfi->GetStyleName());
 	*aface = face;
 	return 0;
 }
@@ -3096,7 +3223,7 @@ return RGB(major, minor, patch);
 
 
 //新太字アルゴリズム
-FT_Error New_FT_Outline_Embolden(FT_Outline*  outline, FT_Pos str_h, FT_Pos str_v, FT_Int font_size)
+FT_Error New_FT_Outline_Embolden(FT_Outline* outline, FT_Pos str_h, FT_Pos str_v, FT_Int font_size)
 {
 	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
 	int orientation = 0;
@@ -3117,7 +3244,7 @@ FT_Error New_FT_Outline_Embolden(FT_Outline*  outline, FT_Pos str_h, FT_Pos str_
 		if (font_size>FT_BOLD_LOW || str_h<16)
 		Vert_FT_Outline_Embolden( outline, str_v );
 		Old_FT_Outline_Embolden( outline, str_h );*/
-		if (font_size<FT_BOLD_LOW && str_h>32)
+		if (font_size < FT_BOLD_LOW && str_h>32)
 		{
 			FT_Outline_EmboldenXY(outline, str_h, Min(long(32), str_v));
 		}
@@ -3129,9 +3256,9 @@ FT_Error New_FT_Outline_Embolden(FT_Outline*  outline, FT_Pos str_h, FT_Pos str_
 }
 
 //横方向だけ太らせるFT_Outline_Embolden
-FT_Error Old_FT_Outline_Embolden(FT_Outline*  outline, FT_Pos strength)
+FT_Error Old_FT_Outline_Embolden(FT_Outline* outline, FT_Pos strength)
 {
-	FT_Vector*	points;
+	FT_Vector* points;
 	FT_Vector	v_prev, v_first, v_next, v_cur;
 	FT_Angle	rotate, angle_in, angle_out;
 	FT_Int		c, n, first;
@@ -3217,9 +3344,9 @@ FT_Error Old_FT_Outline_Embolden(FT_Outline*  outline, FT_Pos strength)
 }
 
 //こっちは縦方向
-FT_Error Vert_FT_Outline_Embolden(FT_Outline*  outline, FT_Pos strength)
+FT_Error Vert_FT_Outline_Embolden(FT_Outline* outline, FT_Pos strength)
 {
-	FT_Vector*	points;
+	FT_Vector* points;
 	FT_Vector	v_prev, v_first, v_next, v_cur;
 	FT_Angle	rotate, angle_in, angle_out;
 	FT_Int		c, n, first;
@@ -3302,7 +3429,7 @@ FT_Error Vert_FT_Outline_Embolden(FT_Outline*  outline, FT_Pos strength)
 	}
 
 	return FT_Err_Ok;
-}
+		}
 
 BOOL FontLInit(void) {
 	CCriticalSectionLock __lock;

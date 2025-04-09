@@ -311,7 +311,7 @@ private:
 	LONG volatile count;
 	CFontSettings m_set;
 	StringHashFont m_hash;
-	wstring	m_fullname, m_familyname;
+	wstring	m_fullname, m_familyname, m_stylename;
 	typedef map<UINT, FreeTypeFontCache*>	CacheArray;
 	CacheArray m_cache;
 	//快速链接
@@ -403,10 +403,10 @@ public:
 				memset(otm, 0, nSize);
 				otm->otmSize = nSize;
 				GetOutlineTextMetrics(hdc, nSize, otm);
-				m_fullname = (wstring)(LPWSTR)((DWORD_PTR)otm + (DWORD_PTR)otm->otmpFullName);
+				m_fullname = wstring((LPWSTR)((DWORD_PTR)otm + (DWORD_PTR)otm->otmpFullName));
 				TCHAR * localname = (LPWSTR)((DWORD_PTR)otm+(DWORD_PTR)otm->otmpFamilyName);
-				wstring styleName = (wstring)(LPWSTR)((DWORD_PTR)otm + (DWORD_PTR)otm->otmpStyleName);
-				m_fullname = MakeUniqueFontName(m_fullname, localname, styleName);
+				m_stylename = wstring((LPWSTR)((DWORD_PTR)otm + (DWORD_PTR)otm->otmpStyleName));
+				m_fullname = MakeUniqueFontName(m_fullname, localname, m_stylename);
 
 				TCHAR buff[LF_FACESIZE+1];				
 				GetFontLocalName(localname, buff);
@@ -499,6 +499,7 @@ public:
 
 	INT_PTR GetId() const { return m_id; }
 	LPCTSTR GetName() const { return m_hash.c_str(); }
+	wstring GetStyleName() const { return m_stylename; }
 	int GetFontWeight() const { return m_weight; }
 	int GetExactBoldWeight() const {return m_set.GetBoldWeight(); }
 	int GetFTWeight() const { return m_ftWeight; }

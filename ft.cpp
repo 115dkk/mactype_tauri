@@ -1331,6 +1331,7 @@ bool IsSFNTNameMatch(const FT_Face& face, FT_UInt nameID, wstring name) {
 		case 3: {
 			// Windows
 			switch (fn.encoding_id) {
+			case 0:
 			case 1: {
 				return to_utf16le(wstring(reinterpret_cast<wchar_t*>(fn.string), fn.string_len));
 			}
@@ -1388,7 +1389,7 @@ void VarFontByAlias(const FT_Face& face, const wstring& lfStyleName) {
 		auto& style = mm_var->namedstyle[i];
 		if (IsSFNTNameMatch(face, style.strid, lfStyleName)) {
 			// found it
-			FT_Set_Named_Instance(face, i);
+			FT_Set_Named_Instance(face, i+1);
 			break;
 		}
 	}

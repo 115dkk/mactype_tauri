@@ -216,16 +216,16 @@ FARPROC K32GetProcAddress(LPCSTR lpProcName)
 {
 #ifndef _WIN64
 	//序数渡しには対応しない
-	Assert(!IS_INTRESOURCE(lpProcName));
+	//Assert(!IS_INTRESOURCE(lpProcName));
 
 	//kernel32のベースアドレス取得
 	LPBYTE pBase = (LPBYTE)GetModuleHandleA("kernel32.dll");
 
 	//この辺は100%成功するはずなのでエラーチェックしない
 	PIMAGE_DOS_HEADER pdosh = (PIMAGE_DOS_HEADER)pBase;
-	Assert(pdosh->e_magic == IMAGE_DOS_SIGNATURE);
+	//Assert(pdosh->e_magic == IMAGE_DOS_SIGNATURE);
 	PIMAGE_NT_HEADERS pnth = (PIMAGE_NT_HEADERS)(pBase + pdosh->e_lfanew);
-	Assert(pnth->Signature == IMAGE_NT_SIGNATURE);
+	//Assert(pnth->Signature == IMAGE_NT_SIGNATURE);
 
 	const DWORD offs = pnth->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
 	const DWORD size = pnth->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
@@ -251,15 +251,12 @@ FARPROC K32GetProcAddress(LPCSTR lpProcName)
 	}
 	return NULL;
 #else
-	Assert(!IS_INTRESOURCE(lpProcName));
+	//Assert(!IS_INTRESOURCE(lpProcName));
 
 	//kernel32のベースアドレス取得
 	WCHAR sysdir[MAX_PATH];
 	GetWindowsDirectory(sysdir, MAX_PATH);
-	if (GetModuleHandle(_T("kernelbase.dll")))	//查看自己是否加载了Kernelbase.dll文件，存在则说明是win7系统
-		wcscat(sysdir, L"\\SysWow64\\kernelbase.dll");
-	else
-		wcscat(sysdir, L"\\SysWow64\\kernel32.dll");	//不存在就是vista
+	wcscat(sysdir, L"\\SysWow64\\kernel32.dll");	// ¼ÓÔØkernel32.dll
 	HANDLE hFile = CreateFile(sysdir, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, NULL, NULL);
 	if (hFile == INVALID_HANDLE_VALUE)
 		return NULL;
@@ -300,7 +297,7 @@ public:
 	}
 	bool initWow64(LPDWORD remoteaddr, LONG orgEIP)	//Wow64初始化
 	{
-		//WORD境界チェック
+		//WORD嫬奅僠僃僢僋
 		C_ASSERT((offsetof(opcode_data, dllpath) & 1) == 0);
 
 		register BYTE* p = code;
@@ -310,38 +307,282 @@ public:
 #define emit_dw(w)	emit_(WORD, w)
 #define emit_dd(d)	emit_(DWORD, d)
 
-		//なぜかGetProcAddressでLoadLibraryWのアドレスが正しく取れないことがあるので
-		//kernel32のヘッダから自前で取得する
-		FARPROC pfn = K32GetProcAddress("LoadLibraryExW");
-		if(!pfn)
+		//側偤偐GetProcAddress偱LoadLibraryW偺傾僪儗僗偑惓偟偔庢傟側偄偙偲偑偁傞偺偱
+		//kernel32偺僿僢僟偐傜帺慜偱庢摼偡傞
+		static FARPROC pfn = K32GetProcAddress("LoadLibraryExW");
+		if (!pfn)
 			return false;
 
 		emit_db(0x60);		//pushad
 
 		/*
+		* obsolete.
 			mov eax,fs:[0x30]
 			mov eax,[eax+0x0c]
 			mov esi,[eax+0x1c]
 			lodsd
 			move ax,[eax+$08]//这个时候eax中保存的就是k32的基址了
 			在win7获得的是KernelBase.dll的地址
-		*/
-		emit_db(0x64); 
-		emit_db(0xA1); 
-		emit_db(0x30); 
-		emit_db(00); 
-		emit_db(00); 
-		emit_db(00); 
-		emit_db(0x8B); 
-		emit_db(0x40); 
-		emit_db(0x0C); 
-		emit_db(0x8B); 
-		emit_db(0x70); 
-		emit_db(0x1C); 
-		emit_db(0xAD); 
-		emit_db(0x8B); 
+		
+		emit_db(0x64);
+		emit_db(0xA1);
+		emit_db(0x30);
+		emit_db(00);
+		emit_db(00);
+		emit_db(00);
+		emit_db(0x8B);
+		emit_db(0x40);
+		emit_db(0x0C);
+		emit_db(0x8B);
+		emit_db(0x70);
+		emit_db(0x1C);
+		emit_db(0xAD);
+		emit_db(0x8B);
 		emit_db(0x40);
 		emit_db(0x08);		//use assemble to fetch kernel base
+*/
+/* faster way of simple comparison of 3 key letters of kernel32.dll. insecure but fast.
+001D0001 | 64:8B1D 30000000         | mov ebx,dword ptr fs:[30]                         |
+001D0008 | 8B5B 0C                  | mov ebx,dword ptr ds:[ebx+C]                      |
+001D000B | 8B73 0C                  | mov esi,dword ptr ds:[ebx+C]                      |
+001D000E | 8BD6                     | mov edx,esi                                       |
+001D0010 | 8B5A 18                  | mov ebx,dword ptr ds:[edx+18]                     | loop start
+001D0013 | 8B7A 30                  | mov edi,dword ptr ds:[edx+30]                     |
+001D0016 | 0FB74A 2C                | movzx ecx,word ptr ds:[edx+2C]                    |
+001D001A | 66:83F9 18               | cmp cx,18                                         |
+001D001E | 75 27                    | jne 1D0047                                        | length not match
+001D0020 | 85FF                     | test edi,edi                                      |
+001D0022 | 74 23                    | je 1D0047                                         |
+001D0024 | 8A07                     | mov al,byte ptr ds:[edi]                          |
+001D0026 | 3C 6B                    | cmp al,6B                                         | 6B:'k'
+001D0028 | 74 04                    | je 1D002E                                         |
+001D002A | 3C 4B                    | cmp al,4B                                         | 4B:'K'
+001D002C | 75 19                    | jne 1D0047                                        | not K or k
+001D002E | 66:837F 0C 33            | cmp word ptr ds:[edi+C],33                        | 33:'3'
+001D0033 | 75 12                    | jne 1D0047                                        |
+001D0035 | 66:837F 10 2E            | cmp word ptr ds:[edi+10],2E                       | 2E:'.'
+001D003A | 75 0B                    | jne 1D0047                                        |
+001D003C | 8A47 16                  | mov al,byte ptr ds:[edi+16]                       |
+001D003F | 3C 6C                    | cmp al,6C                                         | 6C:'l'
+001D0041 | 74 0C                    | je 1D004F                                         |
+001D0043 | 3C 4C                    | cmp al,4C                                         | 4C:'L'
+001D0045 | 74 08                    | je 1D004F                                         |
+001D0047 | 8B12                     | mov edx,dword ptr ds:[edx]                        | next entry
+001D0049 | 3BD6                     | cmp edx,esi                                       |
+001D004B | 75 C3                    | jne 1D0010                                        | loop back
+001D004D | EB 12                    | jmp 1D0061                                        | not found
+001D004F | 8BC3                     | mov eax,ebx                                       | eax=imagebase of kernel32.dll
+
+		emit_db(0x64);
+		emit_db(0x8B);
+		emit_db(0x1D);
+		emit_db(0x30);
+		emit_db(0x00);
+		emit_db(0x00);
+		emit_db(0x00);
+		emit_db(0x8B);
+		emit_db(0x5B);
+		emit_db(0x0C);
+		emit_db(0x8B);
+		emit_db(0x73);
+		emit_db(0x0C);
+		emit_db(0x8B);
+		emit_db(0xD6);
+		emit_db(0x8B);
+		emit_db(0x5A);
+		emit_db(0x18);
+		emit_db(0x8B);
+		emit_db(0x7A);
+		emit_db(0x30);
+		emit_db(0x0F);
+		emit_db(0xB7);
+		emit_db(0x4A);
+		emit_db(0x2C);
+		emit_db(0x66);
+		emit_db(0x83);
+		emit_db(0xF9);
+		emit_db(0x18);
+		emit_db(0x75);
+		emit_db(0x27);
+		emit_db(0x85);
+		emit_db(0xFF);
+		emit_db(0x74);
+		emit_db(0x23);
+		emit_db(0x8A);
+		emit_db(0x07);
+		emit_db(0x3C);
+		emit_db(0x6B);
+		emit_db(0x74);
+		emit_db(0x04);
+		emit_db(0x3C);
+		emit_db(0x4B);
+		emit_db(0x75);
+		emit_db(0x19);
+		emit_db(0x66);
+		emit_db(0x83);
+		emit_db(0x7F);
+		emit_db(0x0C);
+		emit_db(0x33);
+		emit_db(0x75);
+		emit_db(0x12);
+		emit_db(0x66);
+		emit_db(0x83);
+		emit_db(0x7F);
+		emit_db(0x10);
+		emit_db(0x2E);
+		emit_db(0x75);
+		emit_db(0x0B);
+		emit_db(0x8A);
+		emit_db(0x47);
+		emit_db(0x16);
+		emit_db(0x3C);
+		emit_db(0x6C);
+		emit_db(0x74);
+		emit_db(0x0C);
+		emit_db(0x3C);
+		emit_db(0x4C);
+		emit_db(0x74);
+		emit_db(0x08);
+		emit_db(0x8B);
+		emit_db(0x12);
+		emit_db(0x3B);
+		emit_db(0xD6);
+		emit_db(0x75);
+		emit_db(0xC3);
+		emit_db(0xEB);
+		emit_db(0x12);
+		emit_db(0x8B);
+		emit_db(0xC3);
+*/
+
+/*
+001D0001 | BE 3FD6EC8F   | mov esi,8FECD63F                                  | target hash value for kernel32.dll
+001D0006 | 64:8B0D 30000 | mov ecx,dword ptr fs:[30]                         |
+001D000D | 8B49 0C       | mov ecx,dword ptr ds:[ecx+C]                      |
+001D0010 | 8B69 0C       | mov ebp,dword ptr ds:[ecx+C]                      |
+001D0013 | 8BD5          | mov edx,ebp                                       |
+001D0015 | 8B5A 18       | mov ebx,dword ptr ds:[edx+18]                     | loop start
+001D0018 | 8B7A 30       | mov edi,dword ptr ds:[edx+30]                     |
+001D001B | 0FB74A 2C     | movzx ecx,word ptr ds:[edx+2C]                    |
+001D001F | 85FF          | test edi,edi                                      |
+001D0021 | 74 2E         | je 1D0051                                         | skip for empty name dlls
+001D0023 | 66:83F9 18    | cmp cx,18                                         | check length
+001D0027 | 75 28         | jne 1D0051                                        |
+001D0029 | D1E9          | shr ecx,1                                         | ecx = length of unicode name of the dll
+001D002B | E3 24         | jecxz 1D0051                                      |
+001D002D | 52            | push edx                                          |
+001D002E | 33D2          | xor edx,edx                                       | use edx to hash dll names
+001D0030 | 0FB607        | movzx eax,byte ptr ds:[edi]                       | letter->al with zero expanding
+001D0033 | 8A67 01       | mov ah,byte ptr ds:[edi+1]                        |
+001D0036 | 84C0          | test al,al                                        |
+001D0038 | 3C 41         | cmp al,41                                         | 41:'A'
+001D003A | 7C 06         | jl 1D0042                                         |
+001D003C | 3C 5A         | cmp al,5A                                         | 5A:'Z'
+001D003E | 7F 02         | jg 1D0042                                         |
+001D0040 | 04 20         | add al,20                                         | convert uppercased letters to lowercased
+001D0042 | C1CA 0D       | ror edx,D                                         |
+001D0045 | 03D0          | add edx,eax                                       | 
+001D0047 | 83C7 02       | add edi,2                                         | next letter
+001D004A | E2 E4         | loop 1D0030                                       |
+001D004C | 3BD6          | cmp edx,esi                                       | 
+001D004E | 5A            | pop edx                                           |
+001D004F | 74 08         | je 1D0059                                         | match found
+001D0051 | 8B12          | mov edx,dword ptr ds:[edx]                        |
+001D0053 | 3BD5          | cmp edx,ebp                                       | check if we reached the end of the link table
+001D0055 | 75 BE         | jne 1D0015                                        |
+001D0057 | EB 12         | jmp 1D006B                                        |
+001D0059 | 8BC3          | mov eax,ebx                                       | ebx->eax = image base of kernel32.dll
+*/
+DWORD hash = 0x8FECD63F; // hash of kernel32.dll
+emit_db(0xBE);
+emit_dd(hash);
+
+emit_db(0x64);
+emit_db(0x8B);
+emit_db(0x0D);
+emit_db(0x30);
+emit_db(0x00);
+emit_db(0x00);
+emit_db(0x00);
+emit_db(0x8B);
+emit_db(0x49);
+emit_db(0x0C);
+emit_db(0x8B);
+emit_db(0x69);
+emit_db(0x0C);
+emit_db(0x8B);
+emit_db(0xD5);
+emit_db(0x8B);
+emit_db(0x5A);
+emit_db(0x18);
+emit_db(0x8B);
+emit_db(0x7A);
+emit_db(0x30);
+emit_db(0x0F);
+emit_db(0xB7);
+emit_db(0x4A);
+emit_db(0x2C);
+emit_db(0x85);
+emit_db(0xFF);
+emit_db(0x74);
+emit_db(0x2E);
+emit_db(0x66);
+emit_db(0x83);
+emit_db(0xF9);
+emit_db(0x18);
+emit_db(0x75);
+emit_db(0x28);
+emit_db(0xD1);
+emit_db(0xE9);
+emit_db(0xE3);
+emit_db(0x24);
+emit_db(0x52);
+emit_db(0x33);
+emit_db(0xD2);
+emit_db(0x0F);
+emit_db(0xB6);
+emit_db(0x07);
+emit_db(0x8A);
+emit_db(0x67);
+emit_db(0x01);
+emit_db(0x84);
+emit_db(0xC0);
+emit_db(0x3C);
+emit_db(0x41);
+emit_db(0x7C);
+emit_db(0x06);
+emit_db(0x3C);
+emit_db(0x5A);
+emit_db(0x7F);
+emit_db(0x02);
+emit_db(0x04);
+emit_db(0x20);
+emit_db(0xC1);
+emit_db(0xCA);
+emit_db(0x0D);
+emit_db(0x03);
+emit_db(0xD0);
+emit_db(0x83);
+emit_db(0xC7);
+emit_db(0x02);
+emit_db(0xE2);
+emit_db(0xE4);
+emit_db(0x3B);
+emit_db(0xD6);
+emit_db(0x5A);
+emit_db(0x74);
+emit_db(0x08);
+emit_db(0x8B);
+emit_db(0x12);
+emit_db(0x3B);
+emit_db(0xD5);
+emit_db(0x75);
+emit_db(0xBE);
+emit_db(0xEB);
+emit_db(0x12);
+emit_db(0x8B);
+emit_db(0xC3);
+
 
 		emit_dw(0x006A);	//push 0
 		emit_dw(0x006A);	//push 0
@@ -376,7 +617,7 @@ public:
 
 		//なぜかGetProcAddressでLoadLibraryWのアドレスが正しく取れないことがあるので
 		//kernel32のヘッダから自前で取得する
-		FARPROC pfn = K32GetProcAddress("LoadLibraryW");
+		static FARPROC pfn = K32GetProcAddress("LoadLibraryW");
 		if(!pfn)
 			return false;
 
@@ -587,7 +828,11 @@ emit_dw(0xD0FF);	//call eax
 
 		//なぜかGetProcAddressでLoadLibraryWのアドレスが正しく取れないことがあるので
 		//kernel32のヘッダから自前で取得する
-		FARPROC pfn = GetProcAddress(GetModuleHandle(L"kernel32.dll"), "LoadLibraryW");
+		static FARPROC pfn = (FARPROC)((INT_PTR)CDllHelper::MyGetProcAddress(GetModuleHandle(L"kernel32.dll"), L"LoadLibraryW") - (INT_PTR)GetModuleHandle(L"kernel32.dll"));
+		/*WCHAR msg[500] = { 0 };
+		wsprintf(msg, L"API paddr: 0x%I64x\r\nOffset: %x\r\nAPI addr: 0x%I64x\r\nKernel32.dll: 0x%I64x\r\nKernelBase: 0x%I64x", (DWORD_PTR)pfn, *(PDWORD)pfn, *(PDWORD)pfn + (DWORD_PTR)GetModuleHandle(L"kernel32.dll"),
+			(DWORD_PTR)GetModuleHandle(L"kernel32.dll"), (DWORD_PTR)GetModuleHandle(L"kernelbase.dll"));
+		MessageBoxW(NULL, msg, NULL, MB_OK);*/
 		//if(!pfn)
 		//	return false;
 		//emit_db(0xEB);
@@ -634,23 +879,340 @@ emit_dw(0xD0FF);	//call eax
 		emit_db(0xD6);
 		emit_dd(0x28c48348);
 */
+
+//shellcode to find imagebase of kernel32.dll (under x64)
+//rax will store the imagebase of kernel32.dll, fast but not reliable. does not work in some scenarios
+/*
+| 65 48 8B  | mov rax,qword ptr gs:[60]                                                  |
+| 48 8B 40  | mov rax,qword ptr ds:[rax+18]                                              |
+| 48 8B 40  | mov rax,qword ptr ds:[rax+30]                                              |
+| 48 8B 00  | mov rax,qword ptr ds:[rax]                                                 |
+| 48 8B 00  | mov rax,qword ptr ds:[rax]                                                 |
+| 48 8B 40  | mov rax,qword ptr ds:[rax+10]                                              |
+
+		emit_db(0x65);
+		emit_db(0x48);
+		emit_db(0x8B);
+		emit_db(0x04);
+		emit_db(0x25);
+		emit_db(0x60);
+		emit_db(0x00);
+		emit_db(0x00);
+		emit_db(0x00);
+		emit_db(0x48);
+		emit_db(0x8B);
+		emit_db(0x40);
+		emit_db(0x18);
+		emit_db(0x48);
+		emit_db(0x8B);
+		emit_db(0x40);
+		emit_db(0x30);
+		emit_db(0x48);
+		emit_db(0x8B);
+		emit_db(0x00);
+		emit_db(0x48);
+		emit_db(0x8B);
+		emit_db(0x00);
+		emit_db(0x48);
+		emit_db(0x8B);
+		emit_db(0x40);
+		emit_db(0x10);
+*/
+/* plan B, accurate search through PEB
+00000233B6160004  | 6548:8B0425 60000000     | mov rax,qword ptr gs:[60]                                       |
+00000233B616000D  | 48:8B40 18               | mov rax,qword ptr ds:[rax+18]                                   |
+00000233B6160011  | 48:8B50 10               | mov rdx,qword ptr ds:[rax+10]                                   |
+00000233B6160015  | 4C:8B4A 30               | mov r9,qword ptr ds:[rdx+30]                                    |
+00000233B6160019  | 4C:8B42 60               | mov r8,qword ptr ds:[rdx+60]                                    |
+00000233B616001D  | 0FB74A 58                | movzx ecx,word ptr ds:[rdx+58]                                  |
+00000233B6160021  | 66:83F9 18               | cmp cx,18                                                       |
+00000233B6160025  | 75 2C                    | jne 233B6160053                                                 |
+00000233B6160027  | 4D:85C0                  | test r8,r8                                                      |
+00000233B616002A  | 74 27                    | je 233B6160053                                                  |
+00000233B616002C  | 41:8A00                  | mov al,byte ptr ds:[r8]                                         |
+00000233B616002F  | 3C 6B                    | cmp al,6B                                                       | 6B:'k'
+00000233B6160031  | 74 04                    | je 233B6160037                                                  |
+00000233B6160033  | 3C 4B                    | cmp al,4B                                                       | 4B:'K'
+00000233B6160035  | 75 1C                    | jne 233B6160053                                                 |
+00000233B6160037  | 6641:8378 0C 33          | cmp word ptr ds:[r8+C],33                                       | 33:'3'
+00000233B616003D  | 75 14                    | jne 233B6160053                                                 |
+00000233B616003F  | 6641:8378 10 2E          | cmp word ptr ds:[r8+10],2E                                      | 2E:'.'
+00000233B6160045  | 75 0C                    | jne 233B6160053                                                 |
+00000233B6160047  | 41:8A40 16               | mov al,byte ptr ds:[r8+16]                                      |
+00000233B616004B  | 3C 6C                    | cmp al,6C                                                       | 6C:'l'
+00000233B616004D  | 74 0F                    | je 233B616005E                                                  | found
+00000233B616004F  | 3C 4C                    | cmp al,4C                                                       | 4C:'L'
+00000233B6160051  | 74 0B                    | je 233B616005E                                                  | found
+00000233B6160053  | 48:8B12                  | mov rdx,qword ptr ds:[rdx]                                      |
+00000233B6160056  | 48:3B50 10               | cmp rdx,qword ptr ds:[rax+10]                                   |
+00000233B616005A  | 75 B9                    | jne 233B6160015                                                 | loop back
+00000233B616005C  | EB 25                    | jmp 233B6160083                                                 | not found
+00000233B616005E  | 49:8BC1                  | mov rax,r9                                                      | :found, r9->imagebase
+		
+		emit_db(0x65);
+		emit_db(0x48);
+		emit_db(0x8B);
+		emit_db(0x04);
+		emit_db(0x25);
+		emit_db(0x60);
+		emit_db(0x00);
+		emit_db(0x00);
+		emit_db(0x00);
+		emit_db(0x48);
+		emit_db(0x8B);
+		emit_db(0x40);
+		emit_db(0x18);
+		emit_db(0x48);
+		emit_db(0x8B);
+		emit_db(0x50);
+		emit_db(0x10);
+		emit_db(0x4C);
+		emit_db(0x8B);
+		emit_db(0x4A);
+		emit_db(0x30);
+		emit_db(0x4C);
+		emit_db(0x8B);
+		emit_db(0x42);
+		emit_db(0x60);
+		emit_db(0x0F);
+		emit_db(0xB7);
+		emit_db(0x4A);
+		emit_db(0x58);
+		emit_db(0x66);
+		emit_db(0x83);
+		emit_db(0xF9);
+		emit_db(0x18);
+		emit_db(0x75);
+		emit_db(0x2C);
+		emit_db(0x4D);
+		emit_db(0x85);
+		emit_db(0xC0);
+		emit_db(0x74);
+		emit_db(0x27);
+		emit_db(0x41);
+		emit_db(0x8A);
+		emit_db(0x00);
+		emit_db(0x3C);
+		emit_db(0x6B);
+		emit_db(0x74);
+		emit_db(0x04);
+		emit_db(0x3C);
+		emit_db(0x4B);
+		emit_db(0x75);
+		emit_db(0x1C);
+		emit_db(0x66);
+		emit_db(0x41);
+		emit_db(0x83);
+		emit_db(0x78);
+		emit_db(0x0C);
+		emit_db(0x33);
+		emit_db(0x75);
+		emit_db(0x14);
+		emit_db(0x66);
+		emit_db(0x41);
+		emit_db(0x83);
+		emit_db(0x78);
+		emit_db(0x10);
+		emit_db(0x2E);
+		emit_db(0x75);
+		emit_db(0x0C);
+		emit_db(0x41);
+		emit_db(0x8A);
+		emit_db(0x40);
+		emit_db(0x16);
+		emit_db(0x3C);
+		emit_db(0x6C);
+		emit_db(0x74);
+		emit_db(0x0F);
+		emit_db(0x3C);
+		emit_db(0x4C);
+		emit_db(0x74);
+		emit_db(0x0B);
+		emit_db(0x48);
+		emit_db(0x8B);
+		emit_db(0x12);
+		emit_db(0x48);
+		emit_db(0x3B);
+		emit_db(0x50);
+		emit_db(0x10);
+		emit_db(0x75);
+		emit_db(0xB9);
+		emit_db(0xEB);
+		emit_db(0x25);
+		emit_db(0x49);
+		emit_db(0x8B);
+		emit_db(0xC1);
+		*/
+/*
+0000024429180004  | 41:BC 72785CE1           | mov r12d,8FECD63F                                               |
+000002442918000A  | 6548:8B0425 60000000     | mov rax,qword ptr gs:[60]                                       |
+0000024429180013  | 48:8B40 18               | mov rax,qword ptr ds:[rax+18]                                   |
+0000024429180017  | 48:8B50 10               | mov rdx,qword ptr ds:[rax+10]                                   |
+000002442918001B  | 4C:8BFA                  | mov r15,rdx                                                     | r15=link start
+000002442918001E  | 4C:8B4A 30               | mov r9,qword ptr ds:[rdx+30]                                    | loop start, r9=imagebase
+0000024429180022  | 4C:8B42 60               | mov r8,qword ptr ds:[rdx+60]                                    |
+0000024429180026  | 0FB74A 58                | movzx ecx,word ptr ds:[rdx+58]                                  |
+000002442918002A  | 83F9 18                  | cmp ecx,18                                                      | quick length check
+000002442918002D  | 75 2B                    | jne 2442918005A                                                 |
+000001EE63DE002F  | D1E9                     | shr ecx,1                                                       | ecx >> 1 = length
+000002442918002F  | 4D:33DB                  | xor r11,r11                                                     | r11=hash
+0000024429180032  | 41:0FB700                | movzx eax,word ptr ds:[r8]                                      |
+0000024429180036  | 0FB6D8                   | movzx ebx,al                                                    |
+0000024429180039  | 80FB 41                  | cmp bl,41                                                       | 41:'A'
+000002442918003C  | 7C 08                    | jl 24429180046                                                  |
+000002442918003E  | 80FB 5A                  | cmp bl,5A                                                       | 5A:'Z'
+0000024429180041  | 7F 03                    | jg 24429180046                                                  |
+0000024429180043  | 80C3 20                  | add bl,20                                                       | change uppercased letters to lowercased
+0000024429180046  | 41:C1CB 0D               | ror r11d,D                                                      |
+000002442918004A  | 44:03DB                  | add r11d,ebx                                                    |
+000002442918004D  | 49:83C0 02               | add r8,2                                                        |
+0000024429180051  | FFC9                     | dec ecx                                                         |
+0000024429180053  | 75 DD                    | jne 24429180032                                                 |
+0000024429180055  | 45:3BDC                  | cmp r11d,r12d                                                   | hash check
+0000024429180058  | 74 0A                    | je 24429180064                                                  |
+000002442918005A  | 48:8B12                  | mov rdx,qword ptr ds:[rdx]                                      | not found, next
+000002442918005D  | 49:3BD7                  | cmp rdx,r15                                                     |
+0000024429180060  | 75 BC                    | jne 2442918001E                                                 |
+0000024429180062  | EB 25                    | jmp 24429180089                                                 | not found, skip loading
+0000024429180064  | 49:8BC1                  | mov rax,r9                                                      | found, rax=imagebase
+*/
+
+DWORD hash = 0x8FECD63F;
+emit_db(0x41);
+emit_db(0xBC);
+emit_dd(hash);
+
+emit_db(0x65);
+emit_db(0x48);
+emit_db(0x8B);
+emit_db(0x04);
+emit_db(0x25);
+emit_db(0x60);
+emit_db(0x00);
+emit_db(0x00);
+emit_db(0x00);
+emit_db(0x48);
+emit_db(0x8B);
+emit_db(0x40);
+emit_db(0x18);
+emit_db(0x48);
+emit_db(0x8B);
+emit_db(0x50);
+emit_db(0x10);
+emit_db(0x4C);
+emit_db(0x8B);
+emit_db(0xFA);
+emit_db(0x4C);
+emit_db(0x8B);
+emit_db(0x4A);
+emit_db(0x30);
+emit_db(0x4C);
+emit_db(0x8B);
+emit_db(0x42);
+emit_db(0x60);
+emit_db(0x0F);
+emit_db(0xB7);
+emit_db(0x4A);
+emit_db(0x58);
+emit_db(0x83);
+emit_db(0xF9);
+emit_db(0x18);
+emit_db(0x75);
+emit_db(0x2D);
+emit_db(0xD1);
+emit_db(0xE9);
+emit_db(0x4D);
+emit_db(0x33);
+emit_db(0xDB);
+emit_db(0x41);
+emit_db(0x0F);
+emit_db(0xB7);
+emit_db(0x00);
+emit_db(0x0F);
+emit_db(0xB6);
+emit_db(0xD8);
+emit_db(0x80);
+emit_db(0xFB);
+emit_db(0x41);
+emit_db(0x7C);
+emit_db(0x08);
+emit_db(0x80);
+emit_db(0xFB);
+emit_db(0x5A);
+emit_db(0x7F);
+emit_db(0x03);
+emit_db(0x80);
+emit_db(0xC3);
+emit_db(0x20);
+emit_db(0x41);
+emit_db(0xC1);
+emit_db(0xCB);
+emit_db(0x0D);
+emit_db(0x44);
+emit_db(0x03);
+emit_db(0xDB);
+emit_db(0x49);
+emit_db(0x83);
+emit_db(0xC0);
+emit_db(0x02);
+emit_db(0xFF);
+emit_db(0xC9);
+emit_db(0x75);
+emit_db(0xDD);
+emit_db(0x45);
+emit_db(0x3B);
+emit_db(0xDC);
+emit_db(0x74);
+emit_db(0x0A);
+emit_db(0x48);
+emit_db(0x8B);
+emit_db(0x12);
+emit_db(0x49);
+emit_db(0x3B);
+emit_db(0xD7);
+emit_db(0x75);
+emit_db(0xBA);
+emit_db(0xEB);
+emit_db(0x25);
+emit_db(0x49);
+emit_db(0x8B);
+emit_db(0xC1);
+
+
+		// === end of shellcode ===
+
 		emit_dd(0x28ec8348);	//sub rsp,28h
 		emit_db(0x48);		//mov rcx, dllpath
 		emit_db(0xB9);
 		emit_ddp((DWORD_PTR)remoteaddr + offsetof(opcode_data, dllpath));
-		emit_db(0x48);		//mov rsi, LoadLibraryW
-		emit_db(0xBE);		
-		emit_ddp(pfn);
-		//emit_db(0x48);
-		emit_db(0xFF);	//call rdi
-		emit_db(0xD6);
+
+		emit_db(0x48);	// mov rdx, rax
+		emit_db(0x89);
+		emit_db(0xC2);
+
+		emit_db(0x48);	// add rax, offset of LoadLibrary IAT 
+		emit_db(0x05);
+		emit_dd(pfn);
+
+		/*  __asm:
+				mov eax,dword ptr ds:[rax]
+				add rdx,rax
+				call rdx
+		*/
+		emit_db(0x8B);
+		emit_db(0x00);
+		emit_db(0x48);
+		emit_db(0x01);
+		emit_db(0xC2);
+		emit_db(0xFF);
+		emit_db(0xD2);
 
 		emit_dd(0x28c48348);	//add rsp,28h
-		emit_db(0x5B);	
-		emit_db(0x5A);	
-		emit_db(0x59);	
+		emit_db(0x5B);
+		emit_db(0x5A);
+		emit_db(0x59);
 		emit_db(0x58);		//popad		
-		
+
 		emit_db(0x48);		//mov rdi, orgRip
 		emit_db(0xBE);
 		emit_ddp(orgEIP);

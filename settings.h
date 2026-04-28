@@ -594,7 +594,8 @@ private:
 		ATTR_ShadowBuffer,
 		ATTR_MaxBitmap, 
 		ATTR_DirectWrite, 
-		ATTR_HintSmallFont
+		ATTR_HintSmallFont,
+		ATTR_PixelLayout
 	};
 	typedef CArray<CFontIndividual>		IndividualArray;
 public:
@@ -613,6 +614,47 @@ public:
 		return result;
 	}
 	ULONG WINAPI GetVersion(void){ return MACTYPE_VERSION; };
+	static void UpdatePixelLayout() {
+		const CGdippSettings* pSettings = CGdippSettings::GetInstance();
+		if (pSettings->HarmonyLCD()) {
+			FT_Library_SetLcdFilter(NULL, FT_LCD_FILTER_NONE);
+			// Harmony LCD rendering
+			if (pSettings->m_bUseCustomPixelLayout) {
+				FT_Vector  sub[3] = { { pSettings->m_arrPixelLayout[0], pSettings->m_arrPixelLayout[1]},
+										{pSettings->m_arrPixelLayout[2], pSettings->m_arrPixelLayout[3]},
+										{pSettings->m_arrPixelLayout[4], pSettings->m_arrPixelLayout[5]} };	// custom layout
+				FT_Library_SetLcdGeometry(freetype_library, sub);
+			}
+			else {
+				switch (pSettings->m_FontSettings.GetAntiAliasMode()) {
+				case 0:
+				case 1: {
+					FT_Vector  sub[3] = { { 0, 0 }, { 0, 0 },	 { 0, 0 } };	// gray scale
+					FT_Library_SetLcdGeometry(freetype_library, sub);
+					break;
+				}
+				case 2: //RGB
+				case 4: {
+					FT_Vector  sub[3] = { { -21, 0 }, { 0, 0 },	 { 21, 0 } };
+					FT_Library_SetLcdGeometry(freetype_library, sub);
+					break;
+				}
+				case 3:	//BGR
+				case 5: {
+					FT_Vector  sub[3] = { { 21, 0 }, { 0, 0 },	 { -21, 0 } };
+					FT_Library_SetLcdGeometry(freetype_library, sub);
+					break;
+				}
+				case 6: {
+					//Pentile
+					FT_Vector  sub[3] = { {-11, 16}, {-11, -16}, {22, 0} };
+					FT_Library_SetLcdGeometry(freetype_library, sub);
+					break;
+				}
+				}
+			}
+		}
+	}
 	static void UpdateLcdFilter()
 	{
 		const CGdippSettings* pSettings = CGdippSettings::GetInstance();
@@ -630,24 +672,6 @@ public:
 				memcpy(buff, pSettings->LcdFilterWeights(), sizeof(buff));
 				FT_Library_SetLcdFilterWeights(freetype_library, buff);
 			}
-			/*
-			else
-			switch (nLcdFilter)
-			{
-			case FT_LCD_FILTER_NONE:
-			case FT_LCD_FILTER_DEFAULT:
-			case FT_LCD_FILTER_LEGACY:
-			{
-			FT_Library_SetLcdFilterWeights(freetype_library,
-			(unsigned char*)"\x10\x40\x70\x40\x10" );
-			break;
-			}
-			case FT_LCD_FILTER_LIGHT:
-			default:
-			FT_Library_SetLcdFilterWeights(freetype_library,
-			(unsigned char*)"\x00\x55\x56\x55\x00" );
-			}*/
-
 		}
 	}
 
@@ -740,6 +764,15 @@ public:
 			break;
 		case ATTR_MaxBitmap:
 			pSettings->m_nBitmapHeight = nValue;
+			break;
+		case ATTR_PixelLayout:
+			pSettings->m_bUseCustomPixelLayout = false;
+			if (nValue && !IsBadReadPtr((void*)nValue, sizeof(pSettings->m_arrPixelLayout)))	//如果指针有效
+			{
+				memcpy(pSettings->m_arrPixelLayout, (void*)nValue, sizeof(pSettings->m_arrPixelLayout));	//复制数据
+				pSettings->m_bUseCustomPixelLayout = true;
+			}
+			UpdatePixelLayout();
 			break;
 		case ATTR_ShadowBuffer:
 			if (nValue && !IsBadReadPtr((void*)nValue, sizeof(pSettings->m_nShadow)))	//指针有效

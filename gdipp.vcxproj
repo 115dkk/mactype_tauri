@@ -400,7 +400,7 @@
       <FavorSizeOrSpeed>Neither</FavorSizeOrSpeed>
       <EnableFiberSafeOptimizations>false</EnableFiberSafeOptimizations>
       <WholeProgramOptimization>false</WholeProgramOptimization>
-      <PreprocessorDefinitions>STATIC_LIB;WIN32;_DEBUG;_WINDOWS;_USRDLL;GDIPP_EXPORTS;_GDIPP_DLL;EASYHOOK;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>STATIC_LIB;EASYHOOK;WIN32;_WINDOWS;_USRDLL;GDIPP_EXPORTS;_GDIPP_DLL;EASYHOOK;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>true</MinimalRebuild>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>

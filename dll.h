@@ -29,3 +29,13 @@ private:
 	PIMAGE_NT_HEADERS32 pNTHeader;
 	PIMAGE_SECTION_HEADER pSectionHeader;
 };
+
+class CDllHelper {
+private:
+	static int StringLengthA(char* str);
+	static wchar_t* CharToWChar_T(char* str);
+	static wchar_t ToLowerW(wchar_t ch);
+	static bool StringMatches(wchar_t* str1, wchar_t* str2);
+public:
+	static void* MyGetProcAddress(HMODULE dllBase, wchar_t* procName);
+};

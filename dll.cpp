@@ -344,3 +344,149 @@ void CMemLoadDll::CopyDllDatas(void* pDest, void* pSrc)
  pSectionHeader = (PIMAGE_SECTION_HEADER)((DWORD_PTR)pNTHeader + sizeof(IMAGE_NT_HEADERS32));
  return ;
 }
+
+
+
+
+// =========== Dll helper to treat dlls our own way ================
+/*
+* StringLengthA
+*
+* Use: Retrieve length of char string
+* Parameters: char string
+* Return: Length of string
+*/
+int CDllHelper::StringLengthA(char* str) {
+	int length;
+
+	for (length = 0; str[length] != '\0'; length++) {}
+	return length;
+}
+/*
+* CharToWChar_T
+*
+* Use: Convert char string to wchar_t string - caller responsible for freeing memory
+* Parameters: char string
+* Return: wchar_t string
+*/
+wchar_t* CDllHelper::CharToWChar_T(char* str) {
+	int length = StringLengthA(str);
+
+	if (str == nullptr) {
+		return nullptr;
+	}
+
+	wchar_t* wstr_t = (wchar_t*)malloc(sizeof(wchar_t) * length + 2);
+
+	for (int i = 0; i < length; i++) {
+		wstr_t[i] = str[i];
+	}
+	wstr_t[length] = '\0';
+	return wstr_t;
+}
+/*
+* ToLowerW
+*
+* Use: Convert char to lower case if necessary
+* Parameters: char
+* Return: char
+*/
+wchar_t CDllHelper::ToLowerW(wchar_t ch) {
+	if (ch > 0x40 && ch < 0x5B) {
+		return ch + 0x20;
+	}
+	return ch;
+}
+/*
+* StringMatches
+*
+* Use: Case Insensitive String Compare
+* Parameters: two wchar_t strings
+* Return: Result of wchar_t equality
+*/
+bool CDllHelper::StringMatches(wchar_t* str1, wchar_t* str2) {
+	if (str1 == nullptr || str2 == nullptr || wcslen(str1) != wcslen(str2)) {
+		return false;
+	}
+
+	for (int i = 0; str1[i] != '\0' && str2[i] != '\0'; i++) {
+		if (ToLowerW(str1[i]) != ToLowerW(str2[i])) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/*
+* GetProcAddress
+*
+* Use: Independent GetProcAddress using TIB/PEB/LDR
+* Parameters: wchar_t string with DLL Name, wchar_t string with Function Name
+* Return: void* to Function - nullptr if not found
+*/
+void* CDllHelper::MyGetProcAddress(HMODULE dllBase, wchar_t* procName) {
+	void* procAddr = nullptr;
+
+	//DllBase as unsigned long for arithmetic
+	unsigned long long dllBaseAddr = (unsigned long long)dllBase;
+
+	//Cast DllBase to use struct
+	PIMAGE_DOS_HEADER dosHeader = (PIMAGE_DOS_HEADER)dllBaseAddr;
+
+	//Calculate NTHeader and Cast
+	PIMAGE_NT_HEADERS64 pNtHeader = (PIMAGE_NT_HEADERS64)(dllBaseAddr + dosHeader->e_lfanew);
+
+	//Calculate ExportDir Address and Cast
+	PIMAGE_EXPORT_DIRECTORY pExportDir = (PIMAGE_EXPORT_DIRECTORY)(dllBaseAddr + pNtHeader->OptionalHeader.DataDirectory[0].VirtualAddress);
+
+	//Calculate AddressOfNames Absolute and Cast
+	unsigned int* NameRVA = (unsigned int*)(dllBaseAddr + pExportDir->AddressOfNames);
+
+	//Iterate over AddressOfNames
+	for (int i = 0; i < pExportDir->NumberOfNames; i++) {
+		//Calculate Absolute Address and cast
+		char* name = (char*)(dllBaseAddr + NameRVA[i]);
+		wchar_t* wname = CharToWChar_T(name);
+		if (StringMatches(wname, procName)) {
+			free(wname);
+
+			//Lookup Ordinal
+			unsigned short NameOrdinal = ((unsigned short*)(dllBaseAddr + pExportDir->AddressOfNameOrdinals))[i];
+
+			//Use Ordinal to Lookup Function Address and Calculate Absolute
+			unsigned int addr = ((unsigned int*)(dllBaseAddr + pExportDir->AddressOfFunctions))[NameOrdinal];
+			void* paddr = &((unsigned int*)(dllBaseAddr + pExportDir->AddressOfFunctions))[NameOrdinal];
+
+			//Function is forwarded
+			if (addr > pNtHeader->OptionalHeader.DataDirectory[0].VirtualAddress && addr < pNtHeader->OptionalHeader.DataDirectory[0].VirtualAddress + pNtHeader->OptionalHeader.DataDirectory[0].Size) {
+				//Grab and Parse Forward String
+				continue;
+				/*char* forwardStr = (char*)(dllBaseAddr + addr);
+
+				wchar_t** str_arr = ParseForwardString(forwardStr);
+
+				//Attempt to load library if not loaded
+				if (!LibraryLoaded(str_arr[0])) {
+				void* dllBase = _LoadLibraryW(str_arr[0]);
+				}
+
+				//Recurse using forward information
+				procAddr = GetProcAddress(str_arr[0], str_arr[1]);
+				free(str_arr[0]);
+				free(str_arr[1]);
+				free(str_arr);*/
+			}
+			else {
+				procAddr = (void*)(dllBaseAddr + addr);	// the real func addr, this is what we ought to use
+				// but in some cases, the IAT can be forged, meaning that the IAT we got here is not the real one in the file.
+				// hence, we only pass the offset of IAT to the shellcode, and let shellcode search for its IAT and caculate the function address there.
+				procAddr = paddr; // the offset to the func IAT, it's a DWORD, you get real address by (imgbase + *(dword*)(imgbase+paddr))
+			}
+			break;
+		}
+		if (wname != nullptr) {
+			free(wname);
+		}
+	}
+	return procAddr;
+}

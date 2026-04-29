@@ -292,7 +292,7 @@ void HookFactory(ID2D1Factory* pD2D1Factory) {
 		// methods declared in the header.
 		HOOK(ptr, CreateWicBitmapRenderTarget, 13);
 		HOOK(ptr, CreateHwndRenderTarget, 14);
-		HOOK(ptr, CreateDxgiSurfaceRenderTarget, 15);
+		//HOOK(ptr, CreateDxgiSurfaceRenderTarget, 15);
 		HOOK(ptr, CreateDCRenderTarget, 16);
 		MyDebug(L"ID2D1Factory hooked");
 
@@ -1495,7 +1495,7 @@ void HookD2DDll()
 		);
 	//Sleep(30 * 1000);
 #ifdef DEBUG
-	MessageBox(0, L"HookD2DDll", NULL, MB_OK);
+	//MessageBox(0, L"HookD2DDll", NULL, MB_OK);
 #endif
 	HMODULE d2d1 = GetModuleHandle(_T("d2d1.dll"));
 	HMODULE dw = GetModuleHandle(_T("dwrite.dll"));

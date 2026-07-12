@@ -1,10 +1,11 @@
+mod execution;
 mod generated_settings;
 mod preview;
 mod profile;
 
 use serde::Serialize;
 use std::{env, fs, path::PathBuf, sync::Mutex, thread, time::Duration};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use preview::{PreviewManager, PreviewResult, PreviewSample};
 use profile::{IndividualSetting, ProfileDocument, ProfileSnapshot};
@@ -20,6 +21,7 @@ struct PreviewState(Mutex<PreviewManager>);
 struct LaunchContext {
     view: String,
     ci_smoke: bool,
+    tray_start: bool,
 }
 
 #[derive(Serialize)]
@@ -50,7 +52,10 @@ fn requested_view() -> String {
     while let Some(argument) = args.next() {
         if argument == "--ci-view" {
             if let Some(value) = args.next() {
-                if matches!(value.as_str(), "overview" | "profiles" | "diagnostics") {
+                if matches!(
+                    value.as_str(),
+                    "overview" | "profiles" | "execution" | "diagnostics"
+                ) {
                     return value;
                 }
             }
@@ -59,11 +64,16 @@ fn requested_view() -> String {
     "overview".to_owned()
 }
 
+fn starts_in_tray() -> bool {
+    env::args().any(|argument| argument == "--tray")
+}
+
 #[tauri::command]
 fn launch_context() -> LaunchContext {
     LaunchContext {
         view: requested_view(),
         ci_smoke: env::var_os("MACTYPE_CI_SMOKE_FILE").is_some(),
+        tray_start: starts_in_tray(),
     }
 }
 
@@ -95,6 +105,23 @@ fn scan_installation() -> InstallationStatus {
         core_version: None,
         findings,
     }
+}
+
+#[tauri::command]
+fn execution_status() -> execution::ExecutionStatus {
+    execution::status(installation_root().as_deref())
+}
+
+#[tauri::command]
+fn set_session_autostart(enabled: bool) -> Result<bool, String> {
+    execution::set_autostart(enabled)
+}
+
+#[tauri::command]
+fn launch_with_mactype(target: String, arguments: Vec<String>) -> Result<u32, String> {
+    let root =
+        installation_root().ok_or_else(|| "MacType installation was not found".to_owned())?;
+    execution::launch_with_mactype(&root, &target, &arguments)
 }
 
 fn installation_root() -> Option<PathBuf> {
@@ -368,6 +395,20 @@ fn ci_verify_profile_workflow(state: State<'_, ProfileState>) -> Result<(), Stri
 }
 
 #[tauri::command]
+fn ci_verify_tray_mode(app: AppHandle) -> Result<(), String> {
+    if env::var_os("MACTYPE_CI_SMOKE_FILE").is_none() || !starts_in_tray() {
+        return Err("tray verification requires CI smoke with --tray".to_owned());
+    }
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window was not created".to_owned())?;
+    if window.is_visible().map_err(|error| error.to_string())? {
+        return Err("main window is visible during --tray startup".to_owned());
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn frontend_ready(app: AppHandle, view: String) -> Result<(), String> {
     let Some(marker_path) = env::var_os("MACTYPE_CI_SMOKE_FILE") else {
         return Ok(());
@@ -406,6 +447,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             launch_context,
             scan_installation,
+            execution_status,
+            set_session_autostart,
+            launch_with_mactype,
             list_profiles,
             open_profile,
             open_default_profile,
@@ -419,9 +463,57 @@ pub fn run() {
             preview_diagnostics,
             ci_force_preview_crash,
             ci_verify_profile_workflow,
+            ci_verify_tray_mode,
             frontend_ready,
             frontend_failed
         ])
+        .setup(|app| {
+            use tauri::{
+                menu::{Menu, MenuItem},
+                tray::TrayIconBuilder,
+            };
+            let show = MenuItem::with_id(app, "show", "Control Center 열기", true, None::<&str>)?;
+            let hide = MenuItem::with_id(app, "hide", "창 숨기기", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "종료", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show, &hide, &quit])?;
+            let mut tray = TrayIconBuilder::new()
+                .menu(&menu)
+                .tooltip("MacType Control Center")
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "hide" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.hide();
+                        }
+                    }
+                    "quit" => app.exit(0),
+                    _ => {}
+                });
+            if let Some(icon) = app.default_window_icon().cloned() {
+                tray = tray.icon(icon);
+            }
+            tray.build(app)?;
+            if starts_in_tray() {
+                if let Some(window) = app.get_webview_window("main") {
+                    window.hide()?;
+                }
+            }
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if env::var_os("MACTYPE_CI_SMOKE_FILE").is_none() {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .run(tauri::generate_context!())
         .expect("failed to run MacType Control Center");
 }
@@ -432,7 +524,7 @@ mod tests {
     fn unsupported_view_is_not_accepted_by_launch_parser_contract() {
         assert!(!matches!(
             "settings",
-            "overview" | "profiles" | "diagnostics"
+            "overview" | "profiles" | "execution" | "diagnostics"
         ));
     }
 }

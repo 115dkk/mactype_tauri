@@ -55,3 +55,24 @@ test("profile editor categories and collections remain interactive", async ({ pa
   expect(horizontalOverflow, "interactive profile editor must not have horizontal scrolling").toBe(false);
   expect(failures, failures.join("\n")).toEqual([]);
 });
+
+test("execution mode controls remain interactive without enabling system modes", async ({ page }) => {
+  const failures: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") failures.push(`console: ${message.text()}`);
+  });
+  page.on("pageerror", (error) => failures.push(`pageerror: ${error.message}`));
+
+  await page.goto("/?view=execution&gallery=1", { waitUntil: "networkidle" });
+  const autostart = page.getByRole("checkbox");
+  await autostart.check();
+  await expect(page.getByText("로그인할 때 트레이로 시작합니다.")).toBeVisible();
+  await page.getByRole("textbox", { name: "실행 파일의 전체 경로" }).fill("C:\\Windows\\System32\\notepad.exe");
+  await page.getByRole("button", { name: "MacType로 실행" }).click();
+  await expect(page.getByText(/MacLoader를 통해 프로세스 4242/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "시스템 범위 모드" })).toBeVisible();
+
+  const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+  expect(horizontalOverflow, "execution controls must not have horizontal scrolling").toBe(false);
+  expect(failures, failures.join("\n")).toEqual([]);
+});

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useReducer } from "react";
-import { Activity, FolderCog, Home, Moon, Sun } from "lucide-react";
+import { Activity, FolderCog, Home, Moon, PlayCircle, Sun } from "lucide-react";
 import { DiagnosticsPage } from "../pages/DiagnosticsPage";
 import { OverviewPage } from "../pages/OverviewPage";
 import { ProfilesPage } from "../pages/ProfilesPage";
+import { ExecutionPage } from "../pages/ExecutionPage";
 import { fallbackStatus, navigation, type InstallationStatus, type ViewId } from "./model";
-import { loadLaunchContext, reportFrontendReady, scanInstallation } from "./tauri";
+import { loadLaunchContext, reportFrontendFailure, reportFrontendReady, scanInstallation, verifyTrayModeForCi } from "./tauri";
 
 interface State {
   view: ViewId;
@@ -12,12 +13,13 @@ interface State {
   status: InstallationStatus;
   ready: boolean;
   ciSmoke: boolean;
+  trayStart: boolean;
 }
 
 type Action =
   | { type: "navigate"; view: ViewId }
   | { type: "toggle-theme" }
-  | { type: "launched"; view: ViewId; ciSmoke: boolean }
+  | { type: "launched"; view: ViewId; ciSmoke: boolean; trayStart: boolean }
   | { type: "status"; status: InstallationStatus };
 
 function reducer(state: State, action: Action): State {
@@ -27,13 +29,13 @@ function reducer(state: State, action: Action): State {
     case "toggle-theme":
       return { ...state, theme: state.theme === "light" ? "dark" : "light" };
     case "launched":
-      return { ...state, view: action.view, ciSmoke: action.ciSmoke, ready: true };
+      return { ...state, view: action.view, ciSmoke: action.ciSmoke, trayStart: action.trayStart, ready: true };
     case "status":
       return { ...state, status: action.status };
   }
 }
 
-const iconByView = { overview: Home, profiles: FolderCog, diagnostics: Activity } as const;
+const iconByView = { overview: Home, profiles: FolderCog, execution: PlayCircle, diagnostics: Activity } as const;
 
 export function App() {
   const [state, dispatch] = useReducer(reducer, {
@@ -42,13 +44,14 @@ export function App() {
     status: fallbackStatus,
     ready: false,
     ciSmoke: false,
+    trayStart: false,
   });
 
   useEffect(() => {
     let active = true;
     void Promise.all([loadLaunchContext(), scanInstallation()]).then(([context, status]) => {
       if (!active) return;
-      dispatch({ type: "launched", view: context.view, ciSmoke: context.ciSmoke });
+      dispatch({ type: "launched", view: context.view, ciSmoke: context.ciSmoke, trayStart: context.trayStart });
       if (status) dispatch({ type: "status", status });
     });
     return () => {
@@ -61,11 +64,18 @@ export function App() {
     document.documentElement.dataset.theme = state.theme;
     document.body.dataset.view = state.view;
     document.body.dataset.rendered = "true";
-    if (state.view !== "profiles" || !state.ciSmoke) void reportFrontendReady(state.view);
-  }, [state.ciSmoke, state.ready, state.theme, state.view]);
+    if (state.ciSmoke && state.trayStart) {
+      void verifyTrayModeForCi()
+        .then(() => reportFrontendReady(state.view))
+        .catch((error: unknown) => reportFrontendFailure(state.view, error instanceof Error ? error.message : String(error)));
+    } else if (!state.ciSmoke || (state.view !== "profiles" && state.view !== "execution")) {
+      void reportFrontendReady(state.view);
+    }
+  }, [state.ciSmoke, state.ready, state.theme, state.trayStart, state.view]);
 
   const page = useMemo(() => {
     if (state.view === "profiles") return <ProfilesPage ciSmoke={state.ciSmoke} onPreviewReady={() => void reportFrontendReady("profiles")} />;
+    if (state.view === "execution") return <ExecutionPage ciSmoke={state.ciSmoke} onReady={() => void reportFrontendReady("execution")} />;
     if (state.view === "diagnostics") return <DiagnosticsPage status={state.status} />;
     return <OverviewPage status={state.status} onOpenProfiles={() => dispatch({ type: "navigate", view: "profiles" })} />;
   }, [state.ciSmoke, state.status, state.view]);

@@ -17,3 +17,7 @@ Rust owns a line-preserving INI document. It retains BOM, encoding, line endings
 The editor reads installed profiles but creates user-owned copies under `%LOCALAPPDATA%\MacType\ControlCenter\profiles`; it never needs elevation to duplicate a profile from `Program Files`. Scalar settings use the public core's `[General]` keys. Structured `[Individual]`, font include/exclude, and module include/exclude sections retain their surrounding comments while edited entries are validated and replaced.
 
 `shared/settings-schema.json` is the source for generated Rust, TypeScript, and C++ setting definitions. CI regenerates and rejects drift.
+
+## Execution boundary
+
+The open Tauri executable owns the notification icon and close-to-tray lifecycle. Its optional login startup entry is user-scoped. Manual mode invokes the public `MacLoader.exe` directly with an executable path and argument vector; no shell string is accepted. Legacy `MacTray.exe -service` and AppInit registry mode are detected read-only and never controlled. The evidence and safety decision are recorded in `docs/legacy-behavior-notes.md`.

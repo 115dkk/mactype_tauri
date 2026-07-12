@@ -1,6 +1,6 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { settingsSchema } from "../generated/settings";
-import type { IndividualSetting, InstallationStatus, LaunchContext, PreviewRequest, PreviewResult, ProfileEntry, ProfileSnapshot, ViewId } from "./model";
+import type { ExecutionStatus, IndividualSetting, InstallationStatus, LaunchContext, PreviewRequest, PreviewResult, ProfileEntry, ProfileSnapshot, ViewId } from "./model";
 
 function isTauriRuntime(): boolean {
   return "__TAURI_INTERNALS__" in window;
@@ -22,11 +22,29 @@ export async function loadLaunchContext(): Promise<LaunchContext> {
   const requested = new URLSearchParams(window.location.search).get("view");
   if (!isTauriRuntime()) {
     return {
-      view: requested === "profiles" || requested === "diagnostics" ? requested : "overview",
+      view: requested === "profiles" || requested === "execution" || requested === "diagnostics" ? requested : "overview",
       ciSmoke: false,
+      trayStart: false,
     };
   }
   return invoke<LaunchContext>("launch_context");
+}
+
+export async function loadExecutionStatus(): Promise<ExecutionStatus> {
+  if (!isTauriRuntime()) {
+    return { trayAvailable: true, autoStart: false, manualLauncherAvailable: true, legacyServiceDetected: true, legacyServiceRunning: true, registryModeDetected: false, systemModesSupported: false, systemModeNote: "시스템 모드는 안전성 검토 결과 읽기 전용으로 표시됩니다." };
+  }
+  return invoke<ExecutionStatus>("execution_status");
+}
+
+export async function setSessionAutostart(enabled: boolean): Promise<boolean> {
+  if (!isTauriRuntime()) return enabled;
+  return invoke<boolean>("set_session_autostart", { enabled });
+}
+
+export async function launchTargetWithMactype(target: string, arguments_: ReadonlyArray<string>): Promise<number> {
+  if (!isTauriRuntime()) return 4242;
+  return invoke<number>("launch_with_mactype", { target, arguments: arguments_ });
 }
 
 export async function scanInstallation(): Promise<InstallationStatus | null> {
@@ -105,6 +123,11 @@ export async function forcePreviewCrashForCi(): Promise<void> {
 export async function verifyProfileWorkflowForCi(): Promise<void> {
   if (!isTauriRuntime()) return;
   await invoke("ci_verify_profile_workflow");
+}
+
+export async function verifyTrayModeForCi(): Promise<void> {
+  if (!isTauriRuntime()) return;
+  await invoke("ci_verify_tray_mode");
 }
 
 export async function reportFrontendReady(view: ViewId): Promise<void> {

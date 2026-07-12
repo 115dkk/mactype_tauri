@@ -8,6 +8,8 @@ The Control Center uses three independent required checks so a failure identifie
 
 The profiles window smoke is stronger than a launch check: it points the app at an x86 fixture DLL with the public `IControlCenter` ABI, waits for Helper IPC plus WIC PNG output, force-terminates the child, and requires a second PNG after automatic restart. It then duplicates the fixture profile, changes a scalar, an `[Individual]` row, and an excluded module, atomically saves and reopens the copy, and only then writes the ready marker. Frontend smoke failures write their error into the marker so CI reports the actual failed contract instead of a generic timeout.
 
+The execution window smoke creates the real Tauri tray icon, queries HKCU startup, SCM service state, and both AppInit registry views, then reports ready. Gallery tests exercise the non-admin startup and manual-launch controls in the browser fallback while asserting that no system-mode apply action exists.
+
 Velopack is not used. The installer is per-user and does not request elevation. It contains the open Control Center and x86 Preview Helper. It does not copy Delphi GUI programs, profiles, translations, MacType DLLs, services, or registry settings; the first trial uses an existing installation selected by the user.
 
 Tags matching `control-center-v*` build a prerelease installer. The release job uses the same artifacts and checks as pull requests.

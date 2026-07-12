@@ -107,6 +107,15 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .list-grid textarea { width: 100%; padding: var(--space-2); resize: vertical; font-family: Consolas, monospace; font-size: 12px; }
 .preview-footer { color: var(--color-muted); font-size: 12px; }
 .inline-error { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); color: var(--color-danger); font-size: 12px; }
+.execution-option { display: flex; align-items: center; justify-content: space-between; gap: var(--space-6); padding: var(--space-4); }
+.execution-option > div { display: flex; align-items: center; gap: var(--space-3); }
+.execution-option p, .manual-launcher label > span, .system-mode-note { color: var(--color-muted); }
+.manual-launcher { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(220px, 0.8fr) auto; align-items: end; gap: var(--space-4); padding: var(--space-4); }
+.manual-launcher label { display: grid; gap: var(--space-1); }
+.manual-launcher input, .manual-launcher textarea { width: 100%; padding: var(--space-2); }
+.system-mode-note { display: flex; align-items: flex-start; gap: var(--space-3); padding: var(--space-4); border-top: 1px solid var(--color-border); background: var(--color-surface-subtle); }
+.system-mode-note svg { flex: 0 0 auto; color: var(--color-warning); }
+.success-message { margin-top: var(--space-4); color: var(--color-success); font-weight: 600; }
 .diagnostic-list code { font-variant-numeric: tabular-nums; }
 .log-view > div { display: grid; grid-template-columns: 72px 112px minmax(0, 1fr); gap: var(--space-3); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-border); }
 .log-view > div:last-child { border-bottom: 0; }
@@ -139,6 +148,8 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
   .individual-row > strong { grid-column: 1 / -1; }
   .individual-row > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .list-grid { grid-template-columns: 1fr; }
+  .execution-option { align-items: flex-start; flex-direction: column; }
+  .manual-launcher { grid-template-columns: 1fr; }
   .log-view > div { grid-template-columns: 64px minmax(0, 1fr); }
   .log-view p { grid-column: 1 / -1; }
 }
@@ -146,6 +157,7 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 @media (min-width: 768px) and (max-width: 1023px) {
   :root { --nav-width: 176px; --settings-index-width: 168px; --settings-control-width: 176px; }
   .page { padding: var(--space-6); }
+  .manual-launcher { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

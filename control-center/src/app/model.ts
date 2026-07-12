@@ -1,8 +1,9 @@
-export type ViewId = "overview" | "profiles" | "diagnostics";
+export type ViewId = "overview" | "profiles" | "execution" | "diagnostics";
 
 export interface LaunchContext {
   view: ViewId;
   ciSmoke: boolean;
+  trayStart: boolean;
 }
 
 export interface InstallationStatus {
@@ -17,6 +18,17 @@ export interface DiagnosticEntry {
   area: string;
   message: string;
   severity: "info" | "warning" | "error";
+}
+
+export interface ExecutionStatus {
+  trayAvailable: boolean;
+  autoStart: boolean;
+  manualLauncherAvailable: boolean;
+  legacyServiceDetected: boolean;
+  legacyServiceRunning: boolean;
+  registryModeDetected: boolean;
+  systemModesSupported: boolean;
+  systemModeNote: string;
 }
 
 export interface ProfileSnapshot {
@@ -79,6 +91,7 @@ export interface PreviewResult {
 export const navigation: ReadonlyArray<{ id: ViewId; label: string; description: string }> = [
   { id: "overview", label: "개요", description: "설치와 적용 상태" },
   { id: "profiles", label: "프로필", description: "렌더링 설정 편집" },
+  { id: "execution", label: "실행", description: "트레이와 수동 실행" },
   { id: "diagnostics", label: "진단", description: "구성 요소와 로그" },
 ];
 

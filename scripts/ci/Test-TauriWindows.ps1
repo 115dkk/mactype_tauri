@@ -9,7 +9,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$views = @('overview', 'profiles', 'diagnostics')
+$views = @('overview', 'profiles', 'execution', 'diagnostics')
 $resolvedExecutable = (Resolve-Path -LiteralPath $Executable).Path
 $resolvedPreviewHelper = (Resolve-Path -LiteralPath $PreviewHelper).Path
 $fixtureRoot = if ($InstallationRoot) {

@@ -48,12 +48,14 @@ jobs:
             fi
             sleep 1
           done
-          npx --yes lighthouse@13.4.0 'http://localhost:4173/?view=overview' \
-            --quiet \
-            --chrome-flags='--headless --no-sandbox' \
-            --output=json \
-            --output-path=../artifacts/frontend-gallery/lighthouse.json
-          node ../scripts/ci/Assert-Lighthouse.mjs ../artifacts/frontend-gallery/lighthouse.json
+          for run in 1 2 3; do
+            npx --yes lighthouse@13.4.0 'http://localhost:4173/?view=overview' \
+              --quiet \
+              --chrome-flags='--headless --no-sandbox' \
+              --output=json \
+              --output-path="../artifacts/frontend-gallery/lighthouse-$run.json"
+          done
+          node ../scripts/ci/Assert-Lighthouse.mjs ../artifacts/frontend-gallery/lighthouse-*.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:

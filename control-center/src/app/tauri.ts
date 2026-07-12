@@ -1,6 +1,6 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { settingsSchema } from "../generated/settings";
-import type { InstallationStatus, LaunchContext, PreviewRequest, PreviewResult, ProfileSnapshot, ViewId } from "./model";
+import type { IndividualSetting, InstallationStatus, LaunchContext, PreviewRequest, PreviewResult, ProfileEntry, ProfileSnapshot, ViewId } from "./model";
 
 function isTauriRuntime(): boolean {
   return "__TAURI_INTERNALS__" in window;
@@ -14,6 +14,8 @@ const fallbackProfile: ProfileSnapshot = {
   originalHash: "browser-gallery",
   values: Object.fromEntries(settingsSchema.map((setting) => [setting.id, setting.default])),
   dirtyKeys: [],
+  individuals: [{ fontFace: "Segoe UI", values: [1, 2, null, null, null, 1] }],
+  lists: { excludeFonts: ["Raster Fonts"], includeFonts: [], excludeModules: ["fontview.exe"], includeModules: [] },
 };
 
 export async function loadLaunchContext(): Promise<LaunchContext> {
@@ -37,9 +39,34 @@ export async function openDefaultProfile(): Promise<ProfileSnapshot | null> {
   return invoke<ProfileSnapshot | null>("open_default_profile");
 }
 
+export async function listProfiles(): Promise<ReadonlyArray<ProfileEntry>> {
+  if (!isTauriRuntime()) return [{ name: "Default", path: fallbackProfile.path }];
+  return invoke<ProfileEntry[]>("list_profiles");
+}
+
+export async function openProfile(path: string): Promise<ProfileSnapshot> {
+  if (!isTauriRuntime()) return { ...fallbackProfile, path };
+  return invoke<ProfileSnapshot>("open_profile", { path });
+}
+
+export async function duplicateProfile(name: string): Promise<ProfileSnapshot> {
+  if (!isTauriRuntime()) return { ...fallbackProfile, path: `C:\\Program Files\\MacType\\ini\\${name}.ini` };
+  return invoke<ProfileSnapshot>("duplicate_profile", { name });
+}
+
 export async function updateProfileSetting(settingId: string, value: number): Promise<ProfileSnapshot | null> {
   if (!isTauriRuntime()) return null;
   return invoke<ProfileSnapshot>("update_profile_setting", { settingId, value });
+}
+
+export async function updateProfileIndividuals(entries: ReadonlyArray<IndividualSetting>): Promise<ProfileSnapshot | null> {
+  if (!isTauriRuntime()) return null;
+  return invoke<ProfileSnapshot>("update_profile_individuals", { entries });
+}
+
+export async function updateProfileList(kind: string, entries: ReadonlyArray<string>): Promise<ProfileSnapshot | null> {
+  if (!isTauriRuntime()) return null;
+  return invoke<ProfileSnapshot>("update_profile_list", { kind, entries });
 }
 
 export async function saveProfile(): Promise<ProfileSnapshot | null> {
@@ -75,7 +102,17 @@ export async function forcePreviewCrashForCi(): Promise<void> {
   await invoke("ci_force_preview_crash");
 }
 
+export async function verifyProfileWorkflowForCi(): Promise<void> {
+  if (!isTauriRuntime()) return;
+  await invoke("ci_verify_profile_workflow");
+}
+
 export async function reportFrontendReady(view: ViewId): Promise<void> {
   if (!isTauriRuntime()) return;
   await invoke("frontend_ready", { view });
+}
+
+export async function reportFrontendFailure(view: ViewId, message: string): Promise<void> {
+  if (!isTauriRuntime()) return;
+  await invoke("frontend_failed", { view, message });
 }

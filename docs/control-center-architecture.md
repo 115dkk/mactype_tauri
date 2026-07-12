@@ -14,4 +14,6 @@ Preview pixels are rendered into a top-down 32-bit DIB and encoded through WIC. 
 
 Rust owns a line-preserving INI document. It retains BOM, encoding, line endings, blank lines, comments, unknown entries, and ordering. Only the value slice of a changed key is rewritten. Save compares the original SHA-256, flushes a same-directory temporary file, keeps one backup, and uses `ReplaceFileW` on Windows.
 
+The editor reads installed profiles but creates user-owned copies under `%LOCALAPPDATA%\MacType\ControlCenter\profiles`; it never needs elevation to duplicate a profile from `Program Files`. Scalar settings use the public core's `[General]` keys. Structured `[Individual]`, font include/exclude, and module include/exclude sections retain their surrounding comments while edited entries are validated and replaced.
+
 `shared/settings-schema.json` is the source for generated Rust, TypeScript, and C++ setting definitions. CI regenerates and rejects drift.

@@ -27,6 +27,25 @@ export interface ProfileSnapshot {
   originalHash: string;
   values: Record<string, number>;
   dirtyKeys: ReadonlyArray<string>;
+  individuals: ReadonlyArray<IndividualSetting>;
+  lists: ProfileLists;
+}
+
+export interface ProfileEntry {
+  name: string;
+  path: string;
+}
+
+export interface IndividualSetting {
+  fontFace: string;
+  values: Array<number | null>;
+}
+
+export interface ProfileLists {
+  excludeFonts: ReadonlyArray<string>;
+  includeFonts: ReadonlyArray<string>;
+  excludeModules: ReadonlyArray<string>;
+  includeModules: ReadonlyArray<string>;
 }
 
 export interface PreviewSample {

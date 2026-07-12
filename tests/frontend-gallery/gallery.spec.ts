@@ -27,3 +27,31 @@ for (const view of galleryViews) {
     });
   });
 }
+
+test("profile editor categories and collections remain interactive", async ({ page }) => {
+  const failures: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") failures.push(`console: ${message.text()}`);
+  });
+  page.on("pageerror", (error) => failures.push(`pageerror: ${error.message}`));
+
+  await page.goto("/?view=profiles&gallery=1", { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "LCD·픽셀 배열" }).click();
+  await expect(page.getByRole("heading", { name: "LCD·픽셀 배열" })).toBeVisible();
+  await page.getByRole("checkbox", { name: "고급 설정 표시" }).check();
+  await expect(page.getByText("빨강 채널 튜닝", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "글꼴별 설정" }).click();
+  await page.getByRole("textbox", { name: "추가할 글꼴 이름" }).fill("Test Font");
+  await page.getByRole("button", { name: "글꼴 추가" }).click();
+  await expect(page.getByText("Test Font", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "포함·제외" }).click();
+  await expect(page.getByText("제외 프로그램", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "어두운 배경" }).click();
+  await expect(page.getByRole("img", { name: "현재 설정의 글자 렌더링 프리뷰" })).toHaveAttribute("data-dark", "true");
+
+  const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+  expect(horizontalOverflow, "interactive profile editor must not have horizontal scrolling").toBe(false);
+  expect(failures, failures.join("\n")).toEqual([]);
+});

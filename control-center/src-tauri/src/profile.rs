@@ -1,6 +1,6 @@
 use crate::generated_settings::{SettingDefinition, SettingValueType, SETTINGS};
 use encoding_rs::{EUC_KR, WINDOWS_1252};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -58,6 +58,7 @@ enum IniNode {
         raw: String,
     },
     Unknown {
+        section: String,
         raw: String,
     },
 }
@@ -69,7 +70,7 @@ impl IniNode {
             | Self::Comment { raw }
             | Self::Section { raw, .. }
             | Self::KeyValue { raw, .. }
-            | Self::Unknown { raw } => raw,
+            | Self::Unknown { raw, .. } => raw,
         }
     }
 }
@@ -95,6 +96,24 @@ pub struct ProfileSnapshot {
     pub original_hash: String,
     pub values: BTreeMap<String, f64>,
     pub dirty_keys: Vec<String>,
+    pub individuals: Vec<IndividualSetting>,
+    pub lists: ProfileLists,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndividualSetting {
+    pub font_face: String,
+    pub values: Vec<Option<i32>>,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileLists {
+    pub exclude_fonts: Vec<String>,
+    pub include_fonts: Vec<String>,
+    pub exclude_modules: Vec<String>,
+    pub include_modules: Vec<String>,
 }
 
 fn hash(bytes: &[u8]) -> [u8; 32] {
@@ -240,12 +259,14 @@ fn parse_nodes(text: &str) -> Vec<IniNode> {
             }
             let Some(separator) = body.find('=') else {
                 return IniNode::Unknown {
+                    section: section.clone(),
                     raw: line.to_owned(),
                 };
             };
             let key = body[..separator].trim();
             if key.is_empty() {
                 return IniNode::Unknown {
+                    section: section.clone(),
                     raw: line.to_owned(),
                 };
             }
@@ -273,6 +294,20 @@ fn schema(setting_id: &str) -> Result<&'static SettingDefinition, String> {
         .iter()
         .find(|item| item.id == setting_id)
         .ok_or_else(|| format!("unknown setting id: {setting_id}"))
+}
+
+fn validate_entry(value: &str, label: &str) -> Result<(), String> {
+    if value.trim().is_empty()
+        || value
+            .chars()
+            .any(|character| matches!(character, '\r' | '\n'))
+        || value.starts_with(['[', ';', '#'])
+    {
+        return Err(format!(
+            "{label} is empty or contains an unsupported character"
+        ));
+    }
+    Ok(())
 }
 
 impl ProfileDocument {
@@ -316,6 +351,71 @@ impl ProfileDocument {
                 .collect(),
             values,
             dirty_keys: self.dirty_keys.iter().cloned().collect(),
+            individuals: self.individuals(),
+            lists: ProfileLists {
+                exclude_fonts: self.list_entries("Exclude"),
+                include_fonts: self.list_entries("Include"),
+                exclude_modules: self.list_entries("ExcludeModule"),
+                include_modules: self.list_entries("IncludeModule"),
+            },
+        }
+    }
+
+    fn individuals(&self) -> Vec<IndividualSetting> {
+        self.nodes
+            .iter()
+            .filter_map(|node| match node {
+                IniNode::KeyValue {
+                    section,
+                    key,
+                    value,
+                    ..
+                } if section.eq_ignore_ascii_case("Individual") => Some(IndividualSetting {
+                    font_face: key.to_owned(),
+                    values: value
+                        .split(',')
+                        .take(6)
+                        .map(|part| {
+                            let trimmed = part.trim();
+                            if trimmed.is_empty() {
+                                None
+                            } else {
+                                trimmed.parse::<i32>().ok()
+                            }
+                        })
+                        .chain(std::iter::repeat(None))
+                        .take(6)
+                        .collect(),
+                }),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn list_entries(&self, target: &str) -> Vec<String> {
+        self.nodes
+            .iter()
+            .filter_map(|node| match node {
+                IniNode::Unknown { section, raw } if section.eq_ignore_ascii_case(target) => {
+                    let value = raw.trim();
+                    (!value.is_empty()).then(|| value.to_owned())
+                }
+                IniNode::KeyValue {
+                    section,
+                    key,
+                    value,
+                    ..
+                } if section.eq_ignore_ascii_case(target) => Some(format!("{key}={value}")),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn ending(&self) -> &'static str {
+        match self.line_ending {
+            LineEnding::CrLf => "\r\n",
+            LineEnding::Lf => "\n",
+            LineEnding::Cr => "\r",
         }
     }
 
@@ -379,11 +479,7 @@ impl ProfileDocument {
                 }
             }
         }
-        let ending = match self.line_ending {
-            LineEnding::CrLf => "\r\n",
-            LineEnding::Lf => "\n",
-            LineEnding::Cr => "\r",
-        };
+        let ending = self.ending();
         let has_section = self.nodes.iter().any(|node| matches!(node, IniNode::Section { name, .. } if name.eq_ignore_ascii_case(setting.section)));
         if !has_section {
             self.nodes.push(IniNode::Section {
@@ -416,6 +512,156 @@ impl ProfileDocument {
         Ok(())
     }
 
+    fn section_range(&mut self, section: &str) -> std::ops::Range<usize> {
+        let start = self
+            .nodes
+            .iter()
+            .position(|node| matches!(node, IniNode::Section { name, .. } if name.eq_ignore_ascii_case(section)))
+            .unwrap_or_else(|| {
+                let ending = self.ending();
+                self.nodes.push(IniNode::Section {
+                    name: section.to_owned(),
+                    raw: format!("[{section}]{ending}"),
+                });
+                self.nodes.len() - 1
+            });
+        let end = self.nodes[start + 1..]
+            .iter()
+            .position(|node| matches!(node, IniNode::Section { .. }))
+            .map_or(self.nodes.len(), |offset| start + 1 + offset);
+        start + 1..end
+    }
+
+    pub fn set_individuals(&mut self, entries: Vec<IndividualSetting>) -> Result<(), String> {
+        let bounds = [(0, 2), (-1, 6), (-64, 64), (-32, 32), (-32, 32), (0, 1)];
+        let mut seen = BTreeSet::new();
+        for entry in &entries {
+            validate_entry(&entry.font_face, "font face")?;
+            if entry.font_face.contains('=') {
+                return Err("font face cannot contain '='".to_owned());
+            }
+            if !seen.insert(entry.font_face.to_lowercase()) {
+                return Err(format!("duplicate font face: {}", entry.font_face));
+            }
+            if entry.values.len() != 6 {
+                return Err("individual font settings require exactly six values".to_owned());
+            }
+            for (index, value) in entry.values.iter().enumerate() {
+                if let Some(value) = value {
+                    let (minimum, maximum) = bounds[index];
+                    if *value < minimum || *value > maximum {
+                        return Err(format!(
+                            "{} value {} must be between {minimum} and {maximum}",
+                            entry.font_face,
+                            index + 1
+                        ));
+                    }
+                }
+            }
+        }
+        let range = self.section_range("Individual");
+        let insert_at = range.start;
+        let mut replacement = self
+            .nodes
+            .drain(range)
+            .filter(|node| {
+                !matches!(node, IniNode::KeyValue { section, .. } if section.eq_ignore_ascii_case("Individual"))
+            })
+            .collect::<Vec<_>>();
+        let ending = self.ending();
+        replacement.extend(entries.into_iter().map(|entry| {
+            let value = entry
+                .values
+                .iter()
+                .map(|value| value.map_or_else(String::new, |value| value.to_string()))
+                .collect::<Vec<_>>()
+                .join(",");
+            IniNode::KeyValue {
+                section: "Individual".to_owned(),
+                key: entry.font_face.clone(),
+                value: value.clone(),
+                prefix: entry.font_face.clone(),
+                separator: "=".to_owned(),
+                suffix: ending.to_owned(),
+                raw: format!("{}={value}{ending}", entry.font_face),
+            }
+        }));
+        self.nodes.splice(insert_at..insert_at, replacement);
+        self.dirty_keys.insert("section:Individual".to_owned());
+        Ok(())
+    }
+
+    pub fn set_list(&mut self, kind: &str, entries: Vec<String>) -> Result<(), String> {
+        let section = match kind {
+            "excludeFonts" => "Exclude",
+            "includeFonts" => "Include",
+            "excludeModules" => "ExcludeModule",
+            "includeModules" => "IncludeModule",
+            _ => return Err(format!("unknown profile list: {kind}")),
+        };
+        let mut normalized = Vec::new();
+        let mut seen = BTreeSet::new();
+        for entry in entries {
+            let entry = entry.trim().to_owned();
+            validate_entry(&entry, "list entry")?;
+            if seen.insert(entry.to_lowercase()) {
+                normalized.push(entry);
+            }
+        }
+        let range = self.section_range(section);
+        let insert_at = range.start;
+        let mut replacement = self
+            .nodes
+            .drain(range)
+            .filter(|node| match node {
+                IniNode::Unknown {
+                    section: item_section,
+                    ..
+                }
+                | IniNode::KeyValue {
+                    section: item_section,
+                    ..
+                } => !item_section.eq_ignore_ascii_case(section),
+                _ => true,
+            })
+            .collect::<Vec<_>>();
+        let ending = self.ending();
+        replacement.extend(normalized.into_iter().map(|entry| IniNode::Unknown {
+            section: section.to_owned(),
+            raw: format!("{entry}{ending}"),
+        }));
+        self.nodes.splice(insert_at..insert_at, replacement);
+        self.dirty_keys.insert(format!("section:{section}"));
+        Ok(())
+    }
+
+    pub fn duplicate_in(&self, directory: &Path, name: &str) -> Result<Self, String> {
+        let stem = name.trim().trim_end_matches(".ini");
+        validate_entry(stem, "profile name")?;
+        if stem
+            .chars()
+            .any(|character| "<>:\"/\\|?*".contains(character))
+        {
+            return Err("profile name contains a Windows-reserved character".to_owned());
+        }
+        fs::create_dir_all(directory).map_err(|error| error.to_string())?;
+        let destination = directory.join(format!("{stem}.ini"));
+        if destination.exists() {
+            return Err("a profile with that name already exists".to_owned());
+        }
+        let bytes = self.encoded()?;
+        let mut output = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&destination)
+            .map_err(|error| error.to_string())?;
+        output
+            .write_all(&bytes)
+            .map_err(|error| error.to_string())?;
+        output.sync_all().map_err(|error| error.to_string())?;
+        Self::open(destination)
+    }
+
     pub fn encoded(&self) -> Result<Vec<u8>, String> {
         let text = self.nodes.iter().map(IniNode::raw).collect::<String>();
         encode(&text, self.encoding, self.bom)
@@ -439,6 +685,7 @@ impl ProfileDocument {
         let mut file = File::create(&temporary).map_err(|error| error.to_string())?;
         file.write_all(&bytes).map_err(|error| error.to_string())?;
         file.sync_all().map_err(|error| error.to_string())?;
+        drop(file);
         replace_file(&self.path, &temporary, &backup)?;
         self.original_hash = hash(&bytes);
         self.dirty_keys.clear();
@@ -498,7 +745,7 @@ mod tests {
 
     #[test]
     fn unchanged_utf8_profile_round_trips_byte_for_byte() {
-        let bytes = b"\xEF\xBB\xBF; keep\r\n[FreeType]\r\nUnknown = 7\r\nNormalWeight = 2  \r\n";
+        let bytes = b"\xEF\xBB\xBF; keep\r\n[General]\r\nUnknown = 7\r\nNormalWeight = 2  \r\n";
         let path = temp_profile(bytes);
         let document = ProfileDocument::open(&path).unwrap();
         assert_eq!(document.encoded().unwrap(), bytes);
@@ -507,31 +754,31 @@ mod tests {
 
     #[test]
     fn changing_one_key_preserves_comments_order_and_unknown_lines() {
-        let bytes = b"; keep\r\n[FreeType]\r\nUnknown = 7\r\nNormalWeight = 2  \r\n# tail\r\n";
+        let bytes = b"; keep\r\n[General]\r\nUnknown = 7\r\nNormalWeight = 2  \r\n# tail\r\n";
         let path = temp_profile(bytes);
         let mut document = ProfileDocument::open(&path).unwrap();
         document.set_value("normal_weight", 4.0).unwrap();
         let rendered = String::from_utf8(document.encoded().unwrap()).unwrap();
         assert_eq!(
             rendered,
-            "; keep\r\n[FreeType]\r\nUnknown = 7\r\nNormalWeight = 4  \r\n# tail\r\n"
+            "; keep\r\n[General]\r\nUnknown = 7\r\nNormalWeight = 4  \r\n# tail\r\n"
         );
         let _ = fs::remove_file(path);
     }
 
     #[test]
     fn detects_external_change_before_save() {
-        let path = temp_profile(b"[FreeType]\nNormalWeight=0\n");
+        let path = temp_profile(b"[General]\nNormalWeight=0\n");
         let mut document = ProfileDocument::open(&path).unwrap();
         document.set_value("normal_weight", 3.0).unwrap();
-        fs::write(&path, b"[FreeType]\nNormalWeight=9\n").unwrap();
+        fs::write(&path, b"[General]\nNormalWeight=9\n").unwrap();
         assert!(document.save().unwrap_err().contains("changed on disk"));
         let _ = fs::remove_file(path);
     }
 
     #[test]
     fn preserves_utf16le_bom_and_line_endings() {
-        let text = "[FreeType]\r\nGammaValue=1.2\r\n";
+        let text = "[General]\r\nGammaValue=1.2\r\n";
         let mut bytes = vec![0xFF, 0xFE];
         for unit in text.encode_utf16() {
             bytes.extend_from_slice(&unit.to_le_bytes());
@@ -551,7 +798,55 @@ mod tests {
         document.set_value("normal_weight", 5.0).unwrap();
         document.set_value("normal_weight", 6.0).unwrap();
         let rendered = String::from_utf8(document.encoded().unwrap()).unwrap();
-        assert_eq!(rendered, "; empty profile\n[FreeType]\nNormalWeight=6\n");
+        assert_eq!(rendered, "; empty profile\n[General]\nNormalWeight=6\n");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn edits_individual_fonts_and_lists_without_dropping_comments() {
+        let path = temp_profile(
+            b"[Individual]\n; keep\nSegoe UI=1,2,3,4,5,1\n[Exclude]\n; fonts\nTahoma\n",
+        );
+        let mut document = ProfileDocument::open(&path).unwrap();
+        document
+            .set_individuals(vec![IndividualSetting {
+                font_face: "Malgun Gothic".to_owned(),
+                values: vec![Some(1), Some(2), None, Some(4), None, Some(1)],
+            }])
+            .unwrap();
+        document
+            .set_list("excludeFonts", vec!["Arial".to_owned(), "Arial".to_owned()])
+            .unwrap();
+        let rendered = String::from_utf8(document.encoded().unwrap()).unwrap();
+        assert!(rendered.contains("; keep\nMalgun Gothic=1,2,,4,,1\n"));
+        assert!(rendered.contains("; fonts\nArial\n"));
+        assert!(!rendered.contains("Tahoma"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn duplicate_preserves_encoded_profile_and_refuses_overwrite() {
+        let path = temp_profile(b"[General]\nNormalWeight=2\n");
+        let document = ProfileDocument::open(&path).unwrap();
+        let name = format!(
+            "mactype-copy-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let parent = path.parent().unwrap();
+        let mut copy = document.duplicate_in(parent, &name).unwrap();
+        assert_eq!(copy.encoded().unwrap(), document.encoded().unwrap());
+        assert!(document
+            .duplicate_in(parent, &name)
+            .unwrap_err()
+            .contains("already exists"));
+        copy.set_value("normal_weight", 7.0).unwrap();
+        copy.save().unwrap();
+        let reopened = ProfileDocument::open(&copy.path).unwrap();
+        assert_eq!(reopened.snapshot().values.get("normal_weight"), Some(&7.0));
+        let _ = fs::remove_file(copy.path);
         let _ = fs::remove_file(path);
     }
 }

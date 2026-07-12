@@ -2,6 +2,7 @@
 param()
 
 $ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $true
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $dependencyRoot = Join-Path $root 'build\core-dependencies'
 $libraryRoot = Join-Path $root 'deps\lib'
@@ -31,7 +32,7 @@ Build-Freetype -Platform Win32 -BuildName 'freetype-x86' -OutputName 'freetype.l
 Build-Freetype -Platform x64 -BuildName 'freetype-x64' -OutputName 'freetype64.lib'
 
 $iniSolution = Join-Path $iniParserRoot 'IniParser.sln'
-msbuild $iniSolution /m /t:Rebuild /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
+msbuild $iniSolution /m /t:Rebuild /p:Configuration=Release /p:Platform=x86 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
 msbuild $iniSolution /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
 
 $ini32 = Get-ChildItem -LiteralPath $iniParserRoot -Recurse -File -Filter 'IniParser.lib' | Where-Object { $_.FullName -notmatch '[\\/]x64[\\/]' } | Select-Object -First 1

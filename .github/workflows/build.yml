@@ -1,0 +1,70 @@
+name: Build and package
+
+on:
+  workflow_call:
+  pull_request:
+  push:
+    branches: [directwrite, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  legacy-core:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build official dependencies and MacType x86/x64 core
+        shell: pwsh
+        run: .github/scripts/Build-LegacyCore.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mactype-legacy-core
+          path: artifacts/legacy-core
+          if-no-files-found: error
+
+  windows-build:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: control-center/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: microsoft/setup-msbuild@v2
+      - name: Install frontend dependencies
+        working-directory: control-center
+        run: pnpm install --frozen-lockfile
+      - name: Build preview helper, frontend, and Tauri program
+        shell: pwsh
+        run: .github/scripts/Build-ControlCenter.ps1 -Configuration Release -SkipInstall
+      - name: Smoke-test every Tauri window state
+        shell: pwsh
+        run: scripts/ci/Test-TauriWindows.ps1 -Executable control-center/src-tauri/target/release/mactype-control-center.exe
+      - name: Build Inno Setup installer
+        shell: pwsh
+        run: |
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' `
+            /DAppVersion=0.1.0 `
+            /DSourceRoot="${{ github.workspace }}" `
+            /DOutputRoot="${{ github.workspace }}\artifacts\installer" `
+            /DAppExe="${{ github.workspace }}\control-center\src-tauri\target\release\mactype-control-center.exe" `
+            /DPreviewExe="${{ github.workspace }}\build\preview-helper\Release\mactype-preview32.exe" `
+            installer\mactype-control-center.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mactype-control-center-windows
+          path: |
+            artifacts/installer/*.exe
+            control-center/src-tauri/target/release/mactype-control-center.exe
+            build/preview-helper/Release/mactype-preview32.exe
+          if-no-files-found: error

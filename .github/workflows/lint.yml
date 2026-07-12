@@ -1,0 +1,69 @@
+name: Lint gates
+
+on:
+  pull_request:
+  push:
+    branches: [directwrite, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: control-center/pnpm-lock.yaml
+      - working-directory: control-center
+        run: pnpm install --frozen-lockfile
+      - working-directory: control-center
+        run: pnpm lint
+      - working-directory: control-center
+        run: pnpm build
+
+  rust:
+    runs-on: windows-2022
+    defaults:
+      run:
+        working-directory: control-center/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test --all-targets
+
+  cpp:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: Enforce style only on new public helper code
+        shell: pwsh
+        run: scripts/ci/Test-NewCppStyle.ps1
+      - name: Configure x86 helper
+        run: cmake -S preview-helper -B build/preview-helper -A Win32 -DBUILD_TESTING=ON
+      - name: Build with warnings as errors
+        run: cmake --build build/preview-helper --config Release --parallel
+      - name: Run protocol tests
+        run: ctest --test-dir build/preview-helper -C Release --output-on-failure
+
+  legacy-core-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify lint exception boundary
+        shell: bash
+        run: |
+          test -f docs/lint-policy.md
+          ! grep -R "preview-helper\|control-center" docs/lint-policy.md | grep -q "excluded"

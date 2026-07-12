@@ -10,6 +10,6 @@ The profiles window smoke is stronger than a launch check: it points the app at 
 
 The execution window smoke creates the real Tauri tray icon, queries HKCU startup, SCM service state, and both AppInit registry views, then reports ready. Gallery tests exercise the non-admin startup and manual-launch controls in the browser fallback while asserting that no system-mode apply action exists.
 
-Velopack is not used. The installer is per-user and does not request elevation. It contains the open Control Center and x86 Preview Helper. It does not copy Delphi GUI programs, profiles, translations, MacType DLLs, services, or registry settings; the first trial uses an existing installation selected by the user.
+Velopack is not used. The Phase 5 installer is per-user and does not request elevation. It contains the open Control Center, x86 Preview Helper, source-built x86/x64 Detours core and MacLoader, and newly authored profile and translation files. It never copies Delphi GUI programs, existing profiles/translations, services, updater binaries, or registry-mode settings. CI performs a real baseline install, version upgrade, installed-app and manual-loader launch, and uninstall cleanliness test.
 
 Tags matching `control-center-v*` build a prerelease installer. The release job uses the same artifacts and checks as pull requests.

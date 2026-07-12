@@ -79,9 +79,7 @@ fn launch_context() -> LaunchContext {
 
 #[tauri::command]
 fn scan_installation() -> InstallationStatus {
-    let root = env::var_os("MACTYPE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("ProgramFiles").map(|path| PathBuf::from(path).join("MacType")));
+    let root = installation_root();
 
     let finding = |label: &str, file: &str| {
         let ok = root.as_ref().is_some_and(|path| path.join(file).is_file());
@@ -95,7 +93,7 @@ fn scan_installation() -> InstallationStatus {
     let findings = vec![
         finding("32비트 코어", "MacType.dll"),
         finding("64비트 코어", "MacType64.dll"),
-        finding("32비트 EasyHook", "EasyHK32.dll"),
+        finding("수동 실행 로더", "MacLoader.exe"),
     ];
     let ready = findings.iter().all(|item| item.ok);
 
@@ -127,6 +125,12 @@ fn launch_with_mactype(target: String, arguments: Vec<String>) -> Result<u32, St
 fn installation_root() -> Option<PathBuf> {
     env::var_os("MACTYPE_HOME")
         .map(PathBuf::from)
+        .or_else(|| {
+            env::current_exe()
+                .ok()
+                .and_then(|executable| executable.parent().map(PathBuf::from))
+                .filter(|path| path.join("MacType.dll").is_file())
+        })
         .or_else(|| env::var_os("ProgramFiles").map(|path| PathBuf::from(path).join("MacType")))
 }
 

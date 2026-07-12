@@ -231,9 +231,8 @@ bool PreviewRuntime::initialize(std::string& error) {
     error = "MacType.dll was not found in the selected installation root";
     return false;
   }
-  if (!regular_file(install_root_ + L"\\EasyHK32.dll") ||
-      !regular_file(install_root_ + L"\\MacType.ini")) {
-    error = "EasyHK32.dll or MacType.ini is missing from the selected installation root";
+  if (!regular_file(install_root_ + L"\\MacType.ini")) {
+    error = "MacType.ini is missing from the selected installation root";
     return false;
   }
   if (!x86_image(dll_path_)) {

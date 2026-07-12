@@ -6,7 +6,7 @@ The x64 Tauri process never loads `MacType.dll`. It owns profile files, validati
 
 The parent starts the Helper directly with `std::process::Command`, redirected stdin/stdout/stderr, and no shell. MTPC v1 frames have fixed little-endian headers and bounded JSON/PNG lengths. A reader thread consumes responses while stderr is retained in a 100-line diagnostic buffer. Requests time out after two seconds; the parent terminates and restarts the Helper once before returning an error.
 
-The Helper validates an x86 PE image, `EasyHK32.dll`, `MacType.ini`, and `CreateControlCenter`. Current public installers do not all export `DllGetVersion`, so that export is reported as an optional capability and `IControlCenter::GetVersion` is the authoritative core version. All `IControlCenter` mutation and GDI rendering remains in the x86 process.
+The Helper validates an x86 PE image, `MacType.ini`, and `CreateControlCenter`. `EasyHK32.dll` is optional because the independent `Rel+Detours` package has no external EasyHook runtime dependency. Current public installers do not all export `DllGetVersion`, so that export is reported as an optional capability and `IControlCenter::GetVersion` is the authoritative core version. All `IControlCenter` mutation and GDI rendering remains in the x86 process.
 
 Preview pixels are rendered into a top-down 32-bit DIB and encoded through WIC. PNG bytes cross only the binary frame section. Tauri writes them under app-local data and the WebView reads the narrowly scoped asset URL; no base64 image is retained in application state.
 

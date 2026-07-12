@@ -12,20 +12,31 @@ $iniParserRoot = Join-Path $dependencyRoot 'IniParser'
 $detoursRoot = Join-Path $dependencyRoot 'Detours'
 $wow64extRoot = Join-Path $dependencyRoot 'wow64ext'
 
+$msbuildCommand = Get-Command msbuild -ErrorAction SilentlyContinue
+$msbuild = if ($msbuildCommand) {
+    $msbuildCommand.Source
+} else {
+    @(
+        'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe',
+        'C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\MSBuild\Current\Bin\MSBuild.exe'
+    ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+}
+if (-not $msbuild) { throw 'MSBuild was not found. Install Visual Studio Build Tools with the C++ workload.' }
+
 New-Item -ItemType Directory -Force -Path $dependencyRoot, $libraryRoot, $artifactRoot | Out-Null
 
-if (-not (Test-Path -LiteralPath $freetypeRoot)) {
-    git clone --depth 1 https://github.com/snowie2000/freetype.git $freetypeRoot
+function Sync-Dependency([string] $Url, [string] $Path, [string] $Commit) {
+    if (-not (Test-Path -LiteralPath $Path)) {
+        git clone --filter=blob:none --no-checkout $Url $Path
+    }
+    git -C $Path fetch --depth 1 origin $Commit
+    git -C $Path checkout --detach $Commit
 }
-if (-not (Test-Path -LiteralPath $iniParserRoot)) {
-    git clone --depth 1 https://github.com/snowie2000/IniParser.git $iniParserRoot
-}
-if (-not (Test-Path -LiteralPath $detoursRoot)) {
-    git clone --depth 1 https://github.com/microsoft/Detours.git $detoursRoot
-}
-if (-not (Test-Path -LiteralPath $wow64extRoot)) {
-    git clone --depth 1 https://github.com/snowie2000/rewolf-wow64ext.git $wow64extRoot
-}
+
+Sync-Dependency -Url 'https://github.com/snowie2000/freetype.git' -Path $freetypeRoot -Commit 'ef771574d04721baf45a1b66bfb4692193603088'
+Sync-Dependency -Url 'https://github.com/snowie2000/IniParser.git' -Path $iniParserRoot -Commit 'a457397ffa9d20e8df43e2c143c60da78c16c059'
+Sync-Dependency -Url 'https://github.com/microsoft/Detours.git' -Path $detoursRoot -Commit 'd644ce94e8c7f7f5a31591577c78134ea3ac1fae'
+Sync-Dependency -Url 'https://github.com/snowie2000/rewolf-wow64ext.git' -Path $wow64extRoot -Commit '667359c7967249dd9d28d8f8cef65b60e7e2d963'
 
 function Build-Freetype([string] $Platform, [string] $BuildName, [string] $OutputName) {
     $buildPath = Join-Path $dependencyRoot $BuildName
@@ -40,8 +51,8 @@ Build-Freetype -Platform Win32 -BuildName 'freetype-x86' -OutputName 'freetype.l
 Build-Freetype -Platform x64 -BuildName 'freetype-x64' -OutputName 'freetype64.lib'
 
 $iniSolution = Join-Path $iniParserRoot 'IniParser.sln'
-msbuild $iniSolution /m /t:Rebuild /p:Configuration=Release /p:Platform=x86 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
-msbuild $iniSolution /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
+& $msbuild $iniSolution /m /t:Rebuild /p:Configuration=Release /p:Platform=x86 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
+& $msbuild $iniSolution /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
 
 $ini32 = Get-ChildItem -LiteralPath $iniParserRoot -Recurse -File -Filter 'IniParser.lib' | Where-Object { $_.FullName -notmatch '[\\/]x64[\\/]' } | Select-Object -First 1
 $ini64 = Get-ChildItem -LiteralPath $iniParserRoot -Recurse -File -Filter 'IniParser64.lib' | Select-Object -First 1
@@ -50,20 +61,20 @@ Copy-Item -LiteralPath $ini32.FullName -Destination (Join-Path $libraryRoot 'ini
 Copy-Item -LiteralPath $ini64.FullName -Destination (Join-Path $libraryRoot 'iniparser64.lib') -Force
 
 $detoursSolution = Join-Path $detoursRoot 'vc\Detours.sln'
-msbuild $detoursSolution /m /t:Rebuild /p:Configuration=ReleaseMD /p:Platform=x86 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
+& $msbuild $detoursSolution /m /t:Rebuild /p:Configuration=ReleaseMD /p:Platform=x86 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
 $detours32 = Get-ChildItem -LiteralPath $detoursRoot -Recurse -File -Filter 'detours.lib' | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
 if (-not $detours32) { throw 'Detours x86 library was not produced.' }
 Copy-Item -LiteralPath $detours32.FullName -Destination (Join-Path $libraryRoot 'detours.lib') -Force
 Copy-Item -LiteralPath $detours32.FullName -Destination (Join-Path $root 'detours.lib') -Force
 
-msbuild $detoursSolution /m /t:Rebuild /p:Configuration=ReleaseMD /p:Platform=x64 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
+& $msbuild $detoursSolution /m /t:Rebuild /p:Configuration=ReleaseMD /p:Platform=x64 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
 $detours64 = Get-ChildItem -LiteralPath $detoursRoot -Recurse -File -Filter 'detours.lib' | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
 if (-not $detours64) { throw 'Detours x64 library was not produced.' }
 Copy-Item -LiteralPath $detours64.FullName -Destination (Join-Path $libraryRoot 'detours64.lib') -Force
 Copy-Item -LiteralPath $detours64.FullName -Destination (Join-Path $root 'detours64.lib') -Force
 
 $wow64Solution = Join-Path $wow64extRoot 'src\wow64ext.sln'
-msbuild $wow64Solution /m /t:Rebuild /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
+& $msbuild $wow64Solution /m /t:Rebuild /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
 $wow64Library = Get-ChildItem -LiteralPath $wow64extRoot -Recurse -File -Filter 'wow64ext.lib' | Sort-Object Length -Descending | Select-Object -First 1
 if (-not $wow64Library) { throw 'wow64ext x86 library was not produced.' }
 Copy-Item -LiteralPath $wow64Library.FullName -Destination (Join-Path $libraryRoot 'wow64ext.lib') -Force
@@ -71,18 +82,20 @@ Copy-Item -LiteralPath $wow64Library.FullName -Destination (Join-Path $libraryRo
 $env:FREETYPE_PATH = $freetypeRoot
 $env:INI_PARSER_PATH = $iniParserRoot
 $solution = Join-Path $root 'gdipp.sln'
-msbuild $solution /m /t:Rebuild '/p:Configuration=Rel+Detours' /p:Platform=Win32 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
-msbuild $solution /m /t:Rebuild '/p:Configuration=Rel+Detours' /p:Platform=x64 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
+& $msbuild $solution /m /t:Rebuild '/p:Configuration=Rel+Detours' /p:Platform=Win32 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
+& $msbuild $solution /m /t:Rebuild '/p:Configuration=Rel+Detours' /p:Platform=x64 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
 
-$expected = @(
-    (Join-Path $root 'Rel+Detours\MacType.Core.dll'),
-    (Join-Path $root 'Release\macloader.exe'),
-    (Join-Path $root 'x64\Rel+Detours\MacType64.Core.dll'),
-    (Join-Path $root 'x64\Release\macloader64.exe')
+$artifacts = @(
+    @{ Source = (Join-Path $root 'Rel+Detours\MacType.Core.dll'); Destination = 'MacType.Core.dll' },
+    @{ Source = (Join-Path $root 'Rel+Detours\MacType.Core.dll'); Destination = 'MacType.dll' },
+    @{ Source = (Join-Path $root 'Release\macloader.exe'); Destination = 'MacLoader.exe' },
+    @{ Source = (Join-Path $root 'x64\Rel+Detours\MacType64.Core.dll'); Destination = 'MacType64.Core.dll' },
+    @{ Source = (Join-Path $root 'x64\Rel+Detours\MacType64.Core.dll'); Destination = 'MacType64.dll' },
+    @{ Source = (Join-Path $root 'x64\Release\macloader64.exe'); Destination = 'MacLoader64.exe' }
 )
-foreach ($file in $expected) {
-    if (-not (Test-Path -LiteralPath $file)) { throw "Expected core artifact missing: $file" }
-    Copy-Item -LiteralPath $file -Destination $artifactRoot -Force
+foreach ($artifact in $artifacts) {
+    if (-not (Test-Path -LiteralPath $artifact.Source)) { throw "Expected core artifact missing: $($artifact.Source)" }
+    Copy-Item -LiteralPath $artifact.Source -Destination (Join-Path $artifactRoot $artifact.Destination) -Force
 }
 
-Write-Host "Legacy core source build produced $($expected.Count) verified artifacts."
+Write-Host "Legacy core source build produced $($artifacts.Count) verified package artifacts."

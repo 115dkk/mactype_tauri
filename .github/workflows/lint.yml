@@ -71,3 +71,6 @@ jobs:
         run: |
           test -f docs/lint-policy.md
           ! grep -R "preview-helper\|control-center" docs/lint-policy.md | grep -q "excluded"
+      - name: Verify independent distribution provenance and translations
+        shell: pwsh
+        run: scripts/ci/Test-DistributionPolicy.ps1

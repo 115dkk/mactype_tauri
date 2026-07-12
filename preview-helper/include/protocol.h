@@ -17,10 +17,14 @@ enum class MessageKind : std::uint16_t {
   ping = 2,
   render_preview = 3,
   shutdown = 4,
+  load_profile = 5,
+  show_native_preview = 6,
+  hide_native_preview = 7,
   hello_ack = 101,
   pong = 102,
   preview_rendered = 103,
   ack = 104,
+  native_preview_state = 105,
   error = 199,
 };
 

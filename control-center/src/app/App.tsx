@@ -11,12 +11,13 @@ interface State {
   theme: "light" | "dark";
   status: InstallationStatus;
   ready: boolean;
+  ciSmoke: boolean;
 }
 
 type Action =
   | { type: "navigate"; view: ViewId }
   | { type: "toggle-theme" }
-  | { type: "launched"; view: ViewId }
+  | { type: "launched"; view: ViewId; ciSmoke: boolean }
   | { type: "status"; status: InstallationStatus };
 
 function reducer(state: State, action: Action): State {
@@ -26,7 +27,7 @@ function reducer(state: State, action: Action): State {
     case "toggle-theme":
       return { ...state, theme: state.theme === "light" ? "dark" : "light" };
     case "launched":
-      return { ...state, view: action.view, ready: true };
+      return { ...state, view: action.view, ciSmoke: action.ciSmoke, ready: true };
     case "status":
       return { ...state, status: action.status };
   }
@@ -40,13 +41,14 @@ export function App() {
     theme: "light",
     status: fallbackStatus,
     ready: false,
+    ciSmoke: false,
   });
 
   useEffect(() => {
     let active = true;
     void Promise.all([loadLaunchContext(), scanInstallation()]).then(([context, status]) => {
       if (!active) return;
-      dispatch({ type: "launched", view: context.view });
+      dispatch({ type: "launched", view: context.view, ciSmoke: context.ciSmoke });
       if (status) dispatch({ type: "status", status });
     });
     return () => {
@@ -59,14 +61,14 @@ export function App() {
     document.documentElement.dataset.theme = state.theme;
     document.body.dataset.view = state.view;
     document.body.dataset.rendered = "true";
-    void reportFrontendReady(state.view);
-  }, [state.ready, state.theme, state.view]);
+    if (state.view !== "profiles" || !state.ciSmoke) void reportFrontendReady(state.view);
+  }, [state.ciSmoke, state.ready, state.theme, state.view]);
 
   const page = useMemo(() => {
-    if (state.view === "profiles") return <ProfilesPage />;
+    if (state.view === "profiles") return <ProfilesPage ciSmoke={state.ciSmoke} onPreviewReady={() => void reportFrontendReady("profiles")} />;
     if (state.view === "diagnostics") return <DiagnosticsPage status={state.status} />;
     return <OverviewPage status={state.status} onOpenProfiles={() => dispatch({ type: "navigate", view: "profiles" })} />;
-  }, [state.status, state.view]);
+  }, [state.ciSmoke, state.status, state.view]);
 
   return (
     <div className="app-shell" data-testid="app-shell">

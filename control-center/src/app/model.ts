@@ -19,6 +19,44 @@ export interface DiagnosticEntry {
   severity: "info" | "warning" | "error";
 }
 
+export interface ProfileSnapshot {
+  path: string;
+  encoding: string;
+  bom: string;
+  lineEnding: string;
+  originalHash: string;
+  values: Record<string, number>;
+  dirtyKeys: ReadonlyArray<string>;
+}
+
+export interface PreviewSample {
+  text: string;
+  fontFace: string;
+  fontSizePt: number;
+  widthPx: number;
+  heightPx: number;
+  dpi: number;
+  foreground: string;
+  background: string;
+}
+
+export interface PreviewRequest {
+  profilePath: string;
+  overrides: Record<string, number>;
+  sample: PreviewSample;
+  displayScale: number;
+}
+
+export interface PreviewResult {
+  requestId: number;
+  imagePath: string;
+  width: number;
+  height: number;
+  dpi: number;
+  elapsedMs: number;
+  coreVersion: number;
+}
+
 export const navigation: ReadonlyArray<{ id: ViewId; label: string; description: string }> = [
   { id: "overview", label: "개요", description: "설치와 적용 상태" },
   { id: "profiles", label: "프로필", description: "렌더링 설정 편집" },

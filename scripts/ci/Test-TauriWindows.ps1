@@ -2,16 +2,27 @@
 param(
     [Parameter(Mandatory)]
     [string] $Executable,
+    [Parameter(Mandatory)]
+    [string] $PreviewHelper,
+    [string] $InstallationRoot,
     [int] $TimeoutSeconds = 25
 )
 
 $ErrorActionPreference = 'Stop'
 $views = @('overview', 'profiles', 'diagnostics')
 $resolvedExecutable = (Resolve-Path -LiteralPath $Executable).Path
+$resolvedPreviewHelper = (Resolve-Path -LiteralPath $PreviewHelper).Path
+$fixtureRoot = if ($InstallationRoot) {
+    (Resolve-Path -LiteralPath $InstallationRoot).Path
+} else {
+    Split-Path -Parent $resolvedPreviewHelper
+}
 $markerRoot = Join-Path $env:TEMP ("mactype-window-smoke-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $markerRoot | Out-Null
 
 try {
+    $env:MACTYPE_HOME = $fixtureRoot
+    $env:MACTYPE_PREVIEW_HELPER = $resolvedPreviewHelper
     foreach ($view in $views) {
         $marker = Join-Path $markerRoot "$view.ready"
         $env:MACTYPE_CI_SMOKE_FILE = $marker
@@ -41,5 +52,7 @@ try {
 }
 finally {
     Remove-Item Env:MACTYPE_CI_SMOKE_FILE -ErrorAction SilentlyContinue
+    Remove-Item Env:MACTYPE_HOME -ErrorAction SilentlyContinue
+    Remove-Item Env:MACTYPE_PREVIEW_HELPER -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $markerRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

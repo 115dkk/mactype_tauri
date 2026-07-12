@@ -1,7 +1,21 @@
 import { Check, Copy, Download, ExternalLink } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { InstallationStatus } from "../app/model";
+import { loadPreviewDiagnostics } from "../app/tauri";
 
 export function DiagnosticsPage({ status }: { status: InstallationStatus }) {
+  const [helperLogs, setHelperLogs] = useState<ReadonlyArray<string>>([]);
+
+  useEffect(() => {
+    let active = true;
+    void loadPreviewDiagnostics().then((entries) => {
+      if (active) setHelperLogs(entries);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   return (
     <section className="page view-enter" aria-labelledby="diagnostics-title">
       <header className="page-header">
@@ -13,7 +27,7 @@ export function DiagnosticsPage({ status }: { status: InstallationStatus }) {
         <dl className="detail-list diagnostic-list">
           <div><dt>Control Center</dt><dd><Check className="success" size={17} /><code>0.1.0</code></dd></div>
           <div><dt>MacType 코어</dt><dd><Check className="success" size={17} /><code>{status.coreVersion ?? "확인되지 않음"}</code></dd></div>
-          <div><dt>Preview Helper</dt><dd><span className="warning-text">연결 대기 중</span></dd></div>
+          <div><dt>Preview Helper</dt><dd><Check className="success" size={17} /><span>요청 시 격리 실행</span></dd></div>
           <div><dt>IPC 프로토콜</dt><dd><code>MTPC v1</code></dd></div>
         </dl>
       </section>
@@ -22,7 +36,11 @@ export function DiagnosticsPage({ status }: { status: InstallationStatus }) {
         <div className="log-view" role="log" aria-label="최근 진단 로그">
           <div><time>12:18:04</time><span>설치 탐색</span><p>MacType 설치 후보를 확인했습니다.</p></div>
           <div><time>12:18:04</time><span>파일 검사</span><p>32비트와 64비트 코어 파일을 확인했습니다.</p></div>
-          <div data-severity="warning"><time>12:18:05</time><span>프리뷰</span><p>Preview Helper 응답을 기다리고 있습니다.</p></div>
+          {helperLogs.length === 0 ? (
+            <div><time>현재</time><span>프리뷰</span><p>기록된 Helper 오류가 없습니다.</p></div>
+          ) : helperLogs.slice(-20).map((entry, index) => (
+            <div data-severity="warning" key={`${index}-${entry}`}><time>최근</time><span>프리뷰</span><p>{entry}</p></div>
+          ))}
         </div>
       </section>
     </section>

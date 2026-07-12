@@ -11,14 +11,22 @@ $helperBuild = Join-Path $root 'build\preview-helper'
 $helperOutput = Join-Path $helperBuild "$Configuration\mactype-preview32.exe"
 
 cmake -S (Join-Path $root 'preview-helper') -B $helperBuild -A Win32 -DBUILD_TESTING=ON
+if ($LASTEXITCODE -ne 0) { throw "Preview helper configuration failed with exit code $LASTEXITCODE." }
 cmake --build $helperBuild --config $Configuration --parallel
+if ($LASTEXITCODE -ne 0) { throw "Preview helper build failed with exit code $LASTEXITCODE." }
 ctest --test-dir $helperBuild -C $Configuration --output-on-failure
+if ($LASTEXITCODE -ne 0) { throw "Preview helper tests failed with exit code $LASTEXITCODE." }
 
 Push-Location (Join-Path $root 'control-center')
 try {
-    if (-not $SkipInstall) { pnpm install --frozen-lockfile }
+    if (-not $SkipInstall) {
+        pnpm install --frozen-lockfile
+        if ($LASTEXITCODE -ne 0) { throw "Frontend dependency installation failed with exit code $LASTEXITCODE." }
+    }
     pnpm build
+    if ($LASTEXITCODE -ne 0) { throw "Frontend build failed with exit code $LASTEXITCODE." }
     pnpm tauri build --no-bundle
+    if ($LASTEXITCODE -ne 0) { throw "Tauri build failed with exit code $LASTEXITCODE." }
 }
 finally {
     Pop-Location

@@ -4,9 +4,10 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "generate:settings": "node ../scripts/generate-settings.mjs",
     "dev": "vite",
     "preview": "vite preview",
-    "build": "tsc -b && vite build",
+    "build": "pnpm generate:settings && tsc -b && vite build",
     "lint": "eslint . --max-warnings 0",
     "test:gallery": "playwright test -c ../tests/frontend-gallery/playwright.config.ts",
     "tauri": "tauri"

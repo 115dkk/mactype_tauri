@@ -49,7 +49,7 @@ jobs:
         run: .github/scripts/Build-ControlCenter.ps1 -Configuration Release -SkipInstall
       - name: Smoke-test every Tauri window state
         shell: pwsh
-        run: scripts/ci/Test-TauriWindows.ps1 -Executable control-center/src-tauri/target/release/mactype-control-center.exe
+        run: scripts/ci/Test-TauriWindows.ps1 -Executable control-center/src-tauri/target/release/mactype-control-center.exe -PreviewHelper build/preview-helper/Release/mactype-preview32.exe
       - name: Build Inno Setup installer
         shell: pwsh
         run: |

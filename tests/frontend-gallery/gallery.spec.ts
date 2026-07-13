@@ -66,6 +66,19 @@ test("profile editor categories and collections remain interactive", async ({ pa
   await page.getByRole("checkbox", { name: "고급 설정 표시" }).check();
   await expect(page.getByText("빨강 채널 튜닝", { exact: true })).toBeVisible();
 
+  await page.getByRole("button", { name: "고급·실험" }).click();
+  await expect(page.getByText("DirectWrite 감마", { exact: true })).toBeVisible();
+  const shadow = page.getByRole("group", { name: "그림자 버퍼" });
+  await shadow.getByRole("checkbox").check();
+  await shadow.getByRole("spinbutton", { name: "가로 위치" }).fill("-2");
+  await shadow.getByRole("spinbutton", { name: "세로 위치" }).fill("3");
+  const lcdWeights = page.getByRole("group", { name: "사용자 지정 LCD 필터 가중치" });
+  await lcdWeights.getByRole("checkbox").check();
+  await expect(lcdWeights.getByRole("spinbutton")).toHaveCount(5);
+  const pixelLayout = page.getByRole("group", { name: "사용자 지정 픽셀 배열" });
+  await pixelLayout.getByRole("checkbox").check();
+  await expect(pixelLayout.getByRole("spinbutton")).toHaveCount(6);
+
   await page.getByRole("button", { name: "글꼴별 설정" }).click();
   await page.getByRole("textbox", { name: "추가할 글꼴 이름" }).fill("Test Font");
   await page.getByRole("button", { name: "글꼴 추가" }).click();
@@ -73,8 +86,12 @@ test("profile editor categories and collections remain interactive", async ({ pa
 
   await page.getByRole("button", { name: "포함·제외" }).click();
   await expect(page.getByText("제외 프로그램", { exact: true })).toBeVisible();
+  await expect(page.getByText("주입 해제 DLL", { exact: true })).toBeVisible();
+  await expect(page.getByText("글꼴 대체 제외 모듈", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "어두운 배경" }).click();
   await expect(page.getByRole("img", { name: "현재 설정의 글자 렌더링 프리뷰" })).toHaveAttribute("data-dark", "true");
+  await page.getByRole("button", { name: "실제 적용" }).click();
+  await expect(page.locator('[data-operation="apply-profile"]')).toContainText("Default.ini");
 
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   expect(horizontalOverflow, "interactive profile editor must not have horizontal scrolling").toBe(false);
@@ -93,6 +110,10 @@ test("execution mode controls remain interactive without enabling system modes",
   await autostart.check();
   await expect(page.getByText("로그인할 때 트레이로 시작합니다.")).toBeVisible();
   await page.getByRole("textbox", { name: "실행 파일의 전체 경로" }).fill("C:\\Windows\\System32\\notepad.exe");
+  await page.getByRole("button", { name: "트레이에 등록" }).click();
+  await expect(page.getByText("C:\\Windows\\System32\\notepad.exe", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "등록 프로그램 실행" }).click();
+  await expect(page.getByText(/등록 프로그램 1개를 MacType로 시작/)).toBeVisible();
   await page.getByRole("button", { name: "MacType로 실행" }).click();
   await expect(page.getByText(/MacLoader를 통해 프로세스 4242/)).toBeVisible();
   await expect(page.getByRole("heading", { name: "시스템 범위 모드" })).toBeVisible();
@@ -100,6 +121,22 @@ test("execution mode controls remain interactive without enabling system modes",
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   expect(horizontalOverflow, "execution controls must not have horizontal scrolling").toBe(false);
   expect(failures, failures.join("\n")).toEqual([]);
+});
+
+test("overview and diagnostic actions always produce visible results", async ({ page }) => {
+  await page.goto("/?view=overview&gallery=1&lang=ko", { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "설치 위치 다시 찾기" }).click();
+  await expect(page.locator('[data-operation="relocate"]')).toBeVisible();
+  await page.getByRole("button", { name: "다시 연결" }).click();
+  await expect(page.locator('[data-operation="reconnect"]')).toBeVisible();
+
+  await page.getByRole("button", { name: "진단" }).click();
+  await page.getByRole("button", { name: "진단 파일 내보내기" }).click();
+  await expect(page.locator('[data-operation="export"]')).toContainText("diagnostics-gallery.txt");
+  await page.getByRole("button", { name: "진단 정보 복사" }).click();
+  await expect(page.locator('[data-operation="copy"]')).toBeVisible();
+  await page.getByRole("button", { name: "로그 폴더 열기" }).click();
+  await expect(page.locator('[data-operation="folder"]')).toContainText("ControlCenter");
 });
 
 test("language setting switches every supported locale and persists", async ({ page }, testInfo) => {

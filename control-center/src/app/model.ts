@@ -29,6 +29,19 @@ export interface ExecutionStatus {
   registryModeDetected: boolean;
   systemModesSupported: boolean;
   systemModeNote: string;
+  injectionReady: boolean;
+  activeProfile: string | null;
+  sessionTargets: ReadonlyArray<SessionTarget>;
+}
+
+export interface SessionTarget {
+  target: string;
+  arguments: ReadonlyArray<string>;
+}
+
+export interface AppliedProfile {
+  sourceProfile: string;
+  runtimeRoot: string;
 }
 
 export interface ProfileSnapshot {
@@ -41,6 +54,7 @@ export interface ProfileSnapshot {
   dirtyKeys: ReadonlyArray<string>;
   individuals: ReadonlyArray<IndividualSetting>;
   lists: ProfileLists;
+  advanced: AdvancedProfile;
 }
 
 export interface ProfileEntry {
@@ -58,6 +72,27 @@ export interface ProfileLists {
   includeFonts: ReadonlyArray<string>;
   excludeModules: ReadonlyArray<string>;
   includeModules: ReadonlyArray<string>;
+  unloadDlls: ReadonlyArray<string>;
+  excludeSubstitutionModules: ReadonlyArray<string>;
+}
+
+export interface ShadowSetting {
+  offsetX: number;
+  offsetY: number;
+  darkAlpha: number;
+  darkColor: number;
+  lightAlpha: number;
+  lightColor: number;
+}
+
+export interface AdvancedProfile {
+  shadow: ShadowSetting | null;
+  lcdFilterWeight: ReadonlyArray<number> | null;
+  pixelLayout: ReadonlyArray<number> | null;
+  displayAffinity: ReadonlyArray<number>;
+  fontSubstitutes: ReadonlyArray<string>;
+  infinalityGammaCorrection: ReadonlyArray<number>;
+  infinalityFilterParams: ReadonlyArray<number>;
 }
 
 export interface PreviewSample {

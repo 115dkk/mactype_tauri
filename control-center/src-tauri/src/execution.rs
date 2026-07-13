@@ -1,5 +1,40 @@
-use serde::Serialize;
-use std::{env, path::Path, process::Command};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::{
+    env, fs,
+    io::Write,
+    path::{Path, PathBuf},
+    process::Command,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+const RUNTIME_ARTIFACTS: [(&str, bool); 4] = [
+    ("MacLoader.exe", true),
+    ("MacType.dll", true),
+    ("MacLoader64.exe", false),
+    ("MacType64.dll", false),
+];
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ActiveRuntime {
+    runtime_root: PathBuf,
+    source_profile: PathBuf,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionTarget {
+    pub target: String,
+    pub arguments: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppliedProfile {
+    pub source_profile: String,
+    pub runtime_root: String,
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -12,20 +47,212 @@ pub struct ExecutionStatus {
     pub registry_mode_detected: bool,
     pub system_modes_supported: bool,
     pub system_mode_note: String,
+    pub injection_ready: bool,
+    pub active_profile: Option<String>,
+    pub session_targets: Vec<SessionTarget>,
+}
+
+fn data_root() -> Result<PathBuf, String> {
+    env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .map(|path| path.join("MacType").join("ControlCenter"))
+        .ok_or_else(|| "LOCALAPPDATA is not available".to_owned())
+}
+
+fn runtime_root() -> Result<PathBuf, String> {
+    Ok(data_root()?.join("runtime"))
+}
+
+fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "destination has no parent directory".to_owned())?;
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_nanos();
+    let temporary = path.with_extension(format!("tmp-{}-{nonce}", std::process::id()));
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .map_err(|error| error.to_string())?;
+    file.write_all(bytes).map_err(|error| error.to_string())?;
+    file.sync_all().map_err(|error| error.to_string())?;
+    drop(file);
+    replace_file(&temporary, path).inspect_err(|_| {
+        let _ = fs::remove_file(&temporary);
+    })
+}
+
+#[cfg(windows)]
+fn replace_file(source: &Path, destination: &Path) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let result = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        Err(std::io::Error::last_os_error().to_string())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn replace_file(source: &Path, destination: &Path) -> Result<(), String> {
+    if destination.exists() {
+        fs::remove_file(destination).map_err(|error| error.to_string())?;
+    }
+    fs::rename(source, destination).map_err(|error| error.to_string())
+}
+
+fn active_runtime_from(base: &Path) -> Result<ActiveRuntime, String> {
+    let bytes = fs::read(base.join("active.json")).map_err(|error| error.to_string())?;
+    let active: ActiveRuntime =
+        serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+    let generations =
+        fs::canonicalize(base.join("generations")).map_err(|error| error.to_string())?;
+    let root = fs::canonicalize(&active.runtime_root).map_err(|error| error.to_string())?;
+    if !root.starts_with(&generations)
+        || !root.join("MacLoader.exe").is_file()
+        || !root.join("MacType.dll").is_file()
+        || !root.join("MacType.ini").is_file()
+        || !root.join("profile.ini").is_file()
+    {
+        return Err(
+            "active MacType runtime is incomplete or outside the managed directory".to_owned(),
+        );
+    }
+    Ok(ActiveRuntime {
+        runtime_root: root,
+        ..active
+    })
+}
+
+fn active_runtime() -> Result<ActiveRuntime, String> {
+    active_runtime_from(&runtime_root()?)
+}
+
+fn prepare_runtime_at(
+    base: &Path,
+    installation_root: &Path,
+    source_profile: &Path,
+    profile_bytes: &[u8],
+) -> Result<ActiveRuntime, String> {
+    let installation = fs::canonicalize(installation_root).map_err(|error| error.to_string())?;
+    let mut sources = Vec::new();
+    let mut fingerprint = Sha256::new();
+    fingerprint.update(profile_bytes);
+    for (name, required) in RUNTIME_ARTIFACTS {
+        let candidate = installation.join(name);
+        if !candidate.is_file() {
+            if required {
+                return Err(format!("{name} was not found in the selected installation"));
+            }
+            continue;
+        }
+        let source = fs::canonicalize(&candidate).map_err(|error| error.to_string())?;
+        if source.parent() != Some(installation.as_path()) {
+            return Err(format!("{name} resolves outside the selected installation"));
+        }
+        let bytes = fs::read(&source).map_err(|error| error.to_string())?;
+        fingerprint.update(name.as_bytes());
+        fingerprint.update(&bytes);
+        sources.push((name, source));
+    }
+    let digest = fingerprint.finalize();
+    let id = digest[..12]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let generations = base.join("generations");
+    fs::create_dir_all(&generations).map_err(|error| error.to_string())?;
+    let generation = generations.join(&id);
+    if !generation.exists() {
+        let staging = generations.join(format!(".stage-{id}-{}", std::process::id()));
+        if staging.exists() {
+            fs::remove_dir_all(&staging).map_err(|error| error.to_string())?;
+        }
+        fs::create_dir(&staging).map_err(|error| error.to_string())?;
+        for (name, source) in &sources {
+            fs::copy(source, staging.join(name)).map_err(|error| error.to_string())?;
+        }
+        fs::write(staging.join("profile.ini"), profile_bytes).map_err(|error| error.to_string())?;
+        fs::write(
+            staging.join("MacType.ini"),
+            b"[General]\r\nAlternativeFile=profile.ini\r\n",
+        )
+        .map_err(|error| error.to_string())?;
+        match fs::rename(&staging, &generation) {
+            Ok(()) => {}
+            Err(_) if generation.is_dir() => {
+                fs::remove_dir_all(&staging).map_err(|error| error.to_string())?;
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    let active = ActiveRuntime {
+        runtime_root: generation,
+        source_profile: source_profile.to_path_buf(),
+    };
+    atomic_write(
+        &base.join("active.json"),
+        &serde_json::to_vec_pretty(&active).map_err(|error| error.to_string())?,
+    )?;
+    active_runtime_from(base)
+}
+
+pub fn apply_profile(
+    installation_root: &Path,
+    source_profile: &Path,
+    profile_bytes: &[u8],
+) -> Result<AppliedProfile, String> {
+    let active = prepare_runtime_at(
+        &runtime_root()?,
+        installation_root,
+        source_profile,
+        profile_bytes,
+    )?;
+    Ok(AppliedProfile {
+        source_profile: active.source_profile.to_string_lossy().into_owned(),
+        runtime_root: active.runtime_root.to_string_lossy().into_owned(),
+    })
 }
 
 pub fn status(installation_root: Option<&Path>) -> ExecutionStatus {
     let (legacy_service_detected, legacy_service_running) = service_status();
+    let active = active_runtime().ok();
     ExecutionStatus {
         tray_available: true,
         auto_start: autostart_value().is_some(),
-        manual_launcher_available: installation_root
-            .is_some_and(|root| root.join("MacLoader.exe").is_file()),
+        manual_launcher_available: installation_root.is_some() && active.is_some(),
         legacy_service_detected,
         legacy_service_running,
         registry_mode_detected: registry_mode_detected(),
         system_modes_supported: false,
         system_mode_note: "기존 MacTray 서비스는 비공개 Delphi 실행 파일이므로 제어하지 않습니다. AppInit 레지스트리 모드는 공식 프로젝트가 부팅 장애 위험 때문에 제거했으므로 읽기 전용으로만 감지합니다.".to_owned(),
+        injection_ready: active.is_some(),
+        active_profile: active.map(|runtime| runtime.source_profile.to_string_lossy().into_owned()),
+        session_targets: session_targets().unwrap_or_default(),
     }
 }
 
@@ -34,17 +261,13 @@ pub fn set_autostart(enabled: bool) -> Result<bool, String> {
     Ok(autostart_value().is_some())
 }
 
-pub fn launch_with_mactype(
-    installation_root: &Path,
-    target: &str,
-    arguments: &[String],
-) -> Result<u32, String> {
+fn validate_launch(target: &str, arguments: &[String]) -> Result<PathBuf, String> {
     if arguments.len() > 32 || arguments.iter().any(|argument| argument.len() > 4096) {
         return Err(
             "manual launch accepts at most 32 arguments of 4096 characters each".to_owned(),
         );
     }
-    let target = std::fs::canonicalize(target).map_err(|error| error.to_string())?;
+    let target = fs::canonicalize(target).map_err(|error| error.to_string())?;
     if !target.is_file()
         || !target
             .extension()
@@ -52,17 +275,83 @@ pub fn launch_with_mactype(
     {
         return Err("manual launch target must be an existing .exe file".to_owned());
     }
-    let loader = installation_root.join("MacLoader.exe");
-    if !loader.is_file() {
-        return Err("MacLoader.exe was not found in the selected installation".to_owned());
-    }
+    Ok(target)
+}
+
+pub fn launch_with_mactype(target: &str, arguments: &[String]) -> Result<u32, String> {
+    let target = validate_launch(target, arguments)?;
+    let active =
+        active_runtime().map_err(|_| "apply a profile before launching with MacType".to_owned())?;
+    let loader = active.runtime_root.join("MacLoader.exe");
     Command::new(loader)
         .arg(&target)
         .args(arguments)
-        .current_dir(installation_root)
+        .current_dir(&active.runtime_root)
         .spawn()
         .map(|child| child.id())
         .map_err(|error| error.to_string())
+}
+
+fn session_targets_path() -> Result<PathBuf, String> {
+    Ok(data_root()?.join("session-targets.json"))
+}
+
+pub fn session_targets() -> Result<Vec<SessionTarget>, String> {
+    let path = session_targets_path()?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let bytes = fs::read(path).map_err(|error| error.to_string())?;
+    let targets: Vec<SessionTarget> =
+        serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+    if targets.len() > 32 {
+        return Err("session target list exceeds 32 entries".to_owned());
+    }
+    Ok(targets)
+}
+
+pub fn register_session_target(
+    target: &str,
+    arguments: &[String],
+) -> Result<Vec<SessionTarget>, String> {
+    let target = validate_launch(target, arguments)?
+        .to_string_lossy()
+        .into_owned();
+    let mut targets = session_targets()?;
+    if !targets
+        .iter()
+        .any(|entry| entry.target.eq_ignore_ascii_case(&target))
+    {
+        if targets.len() == 32 {
+            return Err("session target list already contains 32 entries".to_owned());
+        }
+        targets.push(SessionTarget {
+            target,
+            arguments: arguments.to_vec(),
+        });
+    }
+    atomic_write(
+        &session_targets_path()?,
+        &serde_json::to_vec_pretty(&targets).map_err(|error| error.to_string())?,
+    )?;
+    Ok(targets)
+}
+
+pub fn remove_session_target(target: &str) -> Result<Vec<SessionTarget>, String> {
+    let mut targets = session_targets()?;
+    targets.retain(|entry| !entry.target.eq_ignore_ascii_case(target));
+    atomic_write(
+        &session_targets_path()?,
+        &serde_json::to_vec_pretty(&targets).map_err(|error| error.to_string())?,
+    )?;
+    Ok(targets)
+}
+
+pub fn launch_registered_targets() -> Result<Vec<u32>, String> {
+    session_targets()?
+        .iter()
+        .map(|entry| launch_with_mactype(&entry.target, &entry.arguments))
+        .collect()
 }
 
 #[cfg(windows)]
@@ -244,12 +533,43 @@ mod tests {
 
     #[test]
     fn manual_launcher_rejects_non_executable_targets() {
-        let error = launch_with_mactype(Path::new("."), "Cargo.toml", &[]).unwrap_err();
+        let error = launch_with_mactype("Cargo.toml", &[]).unwrap_err();
         assert!(error.contains("existing .exe") || error.contains("cannot find"));
     }
 
     #[test]
     fn status_never_claims_unsupported_system_modes() {
         assert!(!status(None).system_modes_supported);
+    }
+
+    #[test]
+    fn applied_profile_builds_a_self_contained_loader_generation() {
+        let root = env::temp_dir().join(format!("mactype-runtime-test-{}", std::process::id()));
+        let installation = root.join("installation");
+        let runtime = root.join("runtime");
+        fs::create_dir_all(&installation).unwrap();
+        fs::write(installation.join("MacLoader.exe"), b"loader").unwrap();
+        fs::write(installation.join("MacType.dll"), b"core").unwrap();
+        let profile = b"[General]\r\nNormalWeight=7\r\n";
+        let active = prepare_runtime_at(
+            &runtime,
+            &installation,
+            Path::new("C:/profiles/User.ini"),
+            profile,
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read(active.runtime_root.join("profile.ini")).unwrap(),
+            profile
+        );
+        assert_eq!(
+            fs::read(active.runtime_root.join("MacType.ini")).unwrap(),
+            b"[General]\r\nAlternativeFile=profile.ini\r\n"
+        );
+        assert!(active.runtime_root.join("MacLoader.exe").is_file());
+        assert!(active.runtime_root.join("MacType.dll").is_file());
+        let reopened = active_runtime_from(&runtime).unwrap();
+        assert_eq!(reopened.source_profile, Path::new("C:/profiles/User.ini"));
+        fs::remove_dir_all(root).unwrap();
     }
 }

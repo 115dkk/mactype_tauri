@@ -1,5 +1,5 @@
 use crate::generated_settings::{SettingDefinition, SettingValueType, SETTINGS};
-use encoding_rs::{EUC_KR, WINDOWS_1252};
+use encoding_rs::{Encoding, BIG5, EUC_KR, GB18030, SHIFT_JIS, WINDOWS_1252};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -9,13 +9,16 @@ use std::{
     path::{Path, PathBuf},
 };
 
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum TextEncoding {
     Utf8,
     Utf16Le,
     Utf16Be,
     EucKr,
+    Gb18030,
+    Big5,
+    ShiftJis,
     Windows1252,
 }
 
@@ -83,6 +86,7 @@ pub struct ProfileDocument {
     line_ending: LineEnding,
     nodes: Vec<IniNode>,
     original_hash: [u8; 32],
+    original_legacy_lines: Option<Vec<(String, Vec<u8>)>>,
     dirty_keys: BTreeSet<String>,
 }
 
@@ -98,6 +102,7 @@ pub struct ProfileSnapshot {
     pub dirty_keys: Vec<String>,
     pub individuals: Vec<IndividualSetting>,
     pub lists: ProfileLists,
+    pub advanced: AdvancedProfile,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -114,6 +119,31 @@ pub struct ProfileLists {
     pub include_fonts: Vec<String>,
     pub exclude_modules: Vec<String>,
     pub include_modules: Vec<String>,
+    pub unload_dlls: Vec<String>,
+    pub exclude_substitution_modules: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShadowSetting {
+    pub offset_x: i32,
+    pub offset_y: i32,
+    pub dark_alpha: i32,
+    pub dark_color: u32,
+    pub light_alpha: i32,
+    pub light_color: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdvancedProfile {
+    pub shadow: Option<ShadowSetting>,
+    pub lcd_filter_weight: Option<Vec<i32>>,
+    pub pixel_layout: Option<Vec<i32>>,
+    pub display_affinity: Vec<i32>,
+    pub font_substitutes: Vec<String>,
+    pub infinality_gamma_correction: Vec<i32>,
+    pub infinality_filter_params: Vec<i32>,
 }
 
 fn hash(bytes: &[u8]) -> [u8; 32] {
@@ -153,16 +183,94 @@ fn decode(bytes: &[u8]) -> Result<(String, TextEncoding, BomKind), String> {
     if let Ok(text) = String::from_utf8(bytes.to_vec()) {
         return Ok((text, TextEncoding::Utf8, BomKind::None));
     }
-    let (korean, _, korean_errors) = EUC_KR.decode(bytes);
-    if !korean_errors {
-        return Ok((korean.into_owned(), TextEncoding::EucKr, BomKind::None));
+    let candidates = [
+        (TextEncoding::Gb18030, GB18030),
+        (TextEncoding::Big5, BIG5),
+        (TextEncoding::ShiftJis, SHIFT_JIS),
+        (TextEncoding::EucKr, EUC_KR),
+        (TextEncoding::Windows1252, WINDOWS_1252),
+    ];
+    candidates
+        .into_iter()
+        .filter_map(|(encoding, codec)| {
+            let (text, _, decode_errors) = codec.decode(bytes);
+            if decode_errors {
+                return None;
+            }
+            let text = text.into_owned();
+            Some((legacy_score(&text, encoding), text, encoding))
+        })
+        .max_by_key(|candidate| candidate.0)
+        .map(|(_, text, encoding)| (text, encoding, BomKind::None))
+        .ok_or_else(|| {
+            "profile is not valid UTF-8, UTF-16, GB18030, Big5, Shift-JIS, EUC-KR, or Windows-1252"
+                .to_owned()
+        })
+}
+
+fn legacy_score(text: &str, encoding: TextEncoding) -> i64 {
+    let sections = text
+        .lines()
+        .filter(|line| {
+            let line = line.trim();
+            line.starts_with('[') && line.ends_with(']')
+        })
+        .count() as i64;
+    let assignments = text.lines().filter(|line| line.contains('=')).count() as i64;
+    let mut hangul = 0_i64;
+    let mut kana = 0_i64;
+    let mut han = 0_i64;
+    let mut latin = 0_i64;
+    let mut controls = 0_i64;
+    let mut simplified = 0_i64;
+    let mut traditional = 0_i64;
+    const SIMPLIFIED: &str = "简体汉语配置设置默认启用关闭字体进程缓存试验权重过滤阴影";
+    const TRADITIONAL: &str = "簡體漢語設定預設啟用關閉字型程序快取試驗權重過濾陰影";
+    for character in text.chars() {
+        match character {
+            '\u{ac00}'..='\u{d7af}' => hangul += 1,
+            '\u{3040}'..='\u{30ff}' => kana += 1,
+            '\u{3400}'..='\u{9fff}' => han += 1,
+            'A'..='Z' | 'a'..='z' | '\u{00c0}'..='\u{024f}' => latin += 1,
+            character if character.is_control() && !matches!(character, '\r' | '\n' | '\t') => {
+                controls += 1
+            }
+            _ => {}
+        }
+        if SIMPLIFIED.contains(character) {
+            simplified += 1;
+        }
+        if TRADITIONAL.contains(character) {
+            traditional += 1;
+        }
     }
-    let (western, _, _) = WINDOWS_1252.decode(bytes);
-    Ok((
-        western.into_owned(),
-        TextEncoding::Windows1252,
-        BomKind::None,
-    ))
+    let structure = sections * 100 + assignments * 12 - controls * 200;
+    structure
+        + match encoding {
+            TextEncoding::Gb18030 => {
+                han * 3 + simplified * 18 - traditional * 3 - hangul * 12 - kana * 12
+                    + i64::from(han > 0) * 10
+            }
+            TextEncoding::Big5 => {
+                han * 3 + traditional * 18 - simplified * 3 - hangul * 12 - kana * 12
+                    + i64::from(han > 0) * 10
+            }
+            TextEncoding::ShiftJis => kana * 20 + han * 2 - hangul * 12 + i64::from(kana > 0) * 10,
+            TextEncoding::EucKr => hangul * 20 + han - kana * 12 + i64::from(hangul > 0) * 10,
+            TextEncoding::Windows1252 => latin * 3 - (hangul + kana + han) * 8,
+            TextEncoding::Utf8 | TextEncoding::Utf16Le | TextEncoding::Utf16Be => 0,
+        }
+}
+
+fn legacy_codec(encoding: TextEncoding) -> Option<&'static Encoding> {
+    match encoding {
+        TextEncoding::EucKr => Some(EUC_KR),
+        TextEncoding::Gb18030 => Some(GB18030),
+        TextEncoding::Big5 => Some(BIG5),
+        TextEncoding::ShiftJis => Some(SHIFT_JIS),
+        TextEncoding::Windows1252 => Some(WINDOWS_1252),
+        TextEncoding::Utf8 | TextEncoding::Utf16Le | TextEncoding::Utf16Be => None,
+    }
 }
 
 fn encode(text: &str, encoding: TextEncoding, bom: BomKind) -> Result<Vec<u8>, String> {
@@ -189,12 +297,12 @@ fn encode(text: &str, encoding: TextEncoding, bom: BomKind) -> Result<Vec<u8>, S
                 output.extend_from_slice(&bytes);
             }
         }
-        TextEncoding::EucKr | TextEncoding::Windows1252 => {
-            let codec = if matches!(encoding, TextEncoding::EucKr) {
-                EUC_KR
-            } else {
-                WINDOWS_1252
-            };
+        TextEncoding::EucKr
+        | TextEncoding::Gb18030
+        | TextEncoding::Big5
+        | TextEncoding::ShiftJis
+        | TextEncoding::Windows1252 => {
+            let codec = legacy_codec(encoding).expect("legacy encoding must have a codec");
             let (encoded, _, had_errors) = codec.encode(text);
             if had_errors {
                 return Err(
@@ -231,6 +339,44 @@ fn split_lines(text: &str) -> Vec<&str> {
         lines.push(&text[start..]);
     }
     lines
+}
+
+fn split_byte_lines(bytes: &[u8]) -> Vec<&[u8]> {
+    let mut lines = Vec::new();
+    let mut start = 0;
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'\r' {
+            index += usize::from(bytes.get(index + 1) == Some(&b'\n'));
+            lines.push(&bytes[start..=index]);
+            start = index + 1;
+        } else if bytes[index] == b'\n' {
+            lines.push(&bytes[start..=index]);
+            start = index + 1;
+        }
+        index += 1;
+    }
+    if start < bytes.len() {
+        lines.push(&bytes[start..]);
+    }
+    lines
+}
+
+fn legacy_original_lines(
+    bytes: &[u8],
+    text: &str,
+    encoding: TextEncoding,
+) -> Option<Vec<(String, Vec<u8>)>> {
+    legacy_codec(encoding)?;
+    let text_lines = split_lines(text);
+    let byte_lines = split_byte_lines(bytes);
+    (text_lines.len() == byte_lines.len()).then(|| {
+        text_lines
+            .into_iter()
+            .zip(byte_lines)
+            .map(|(line, bytes)| (line.to_owned(), bytes.to_vec()))
+            .collect()
+    })
 }
 
 fn parse_nodes(text: &str) -> Vec<IniNode> {
@@ -323,8 +469,13 @@ impl ProfileDocument {
             line_ending: detect_line_ending(&text),
             nodes: parse_nodes(&text),
             original_hash,
+            original_legacy_lines: legacy_original_lines(&bytes, &text, encoding),
             dirty_keys: BTreeSet::new(),
         })
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
     pub fn snapshot(&self) -> ProfileSnapshot {
@@ -357,7 +508,127 @@ impl ProfileDocument {
                 include_fonts: self.list_entries("Include"),
                 exclude_modules: self.list_entries("ExcludeModule"),
                 include_modules: self.list_entries("IncludeModule"),
+                unload_dlls: self.list_entries("UnloadDLL"),
+                exclude_substitution_modules: self.list_entries("ExcludeSub"),
             },
+            advanced: self.advanced(),
+        }
+    }
+
+    fn raw_value(&self, section_name: &str, key_name: &str) -> Option<&str> {
+        let sections: &[&str] = if section_name.eq_ignore_ascii_case("General") {
+            &["FreeType", "General"]
+        } else {
+            std::slice::from_ref(&section_name)
+        };
+        sections.iter().find_map(|target| {
+            self.nodes.iter().rev().find_map(|node| match node {
+                IniNode::KeyValue {
+                    section,
+                    key,
+                    value,
+                    ..
+                } if section.eq_ignore_ascii_case(target) && key.eq_ignore_ascii_case(key_name) => {
+                    Some(value.as_str())
+                }
+                _ => None,
+            })
+        })
+    }
+
+    fn parse_vector(&self, section: &str, key: &str, length: usize) -> Option<Vec<i32>> {
+        let values = self
+            .raw_value(section, key)?
+            .split(|character: char| character == ',' || character.is_whitespace())
+            .filter(|part| !part.is_empty())
+            .map(|part| part.trim().parse::<i32>().ok())
+            .collect::<Option<Vec<_>>>()?;
+        (values.len() == length).then_some(values)
+    }
+
+    fn advanced(&self) -> AdvancedProfile {
+        let shadow = self
+            .parse_vector("General", "Shadow", 6)
+            .map(|values| ShadowSetting {
+                offset_x: values[0],
+                offset_y: values[1],
+                dark_alpha: values[2],
+                dark_color: u32::from_str_radix(
+                    self.raw_value("General", "Shadow")
+                        .unwrap()
+                        .split(',')
+                        .nth(3)
+                        .unwrap()
+                        .trim()
+                        .trim_start_matches("0x"),
+                    16,
+                )
+                .unwrap_or(0),
+                light_alpha: values[4],
+                light_color: u32::from_str_radix(
+                    self.raw_value("General", "Shadow")
+                        .unwrap()
+                        .split(',')
+                        .nth(5)
+                        .unwrap()
+                        .trim()
+                        .trim_start_matches("0x"),
+                    16,
+                )
+                .unwrap_or(0),
+            })
+            .or_else(|| {
+                let raw = self.raw_value("General", "Shadow")?;
+                let parts = raw.split(',').map(str::trim).collect::<Vec<_>>();
+                if parts.len() < 3 {
+                    return None;
+                }
+                Some(ShadowSetting {
+                    offset_x: parts[0].parse().ok()?,
+                    offset_y: parts[1].parse().ok()?,
+                    dark_alpha: parts[2].parse().ok()?,
+                    dark_color: parts
+                        .get(3)
+                        .and_then(|value| {
+                            u32::from_str_radix(value.trim_start_matches("0x"), 16).ok()
+                        })
+                        .unwrap_or(0),
+                    light_alpha: parts
+                        .get(4)
+                        .and_then(|value| value.parse().ok())
+                        .unwrap_or_else(|| parts[2].parse().unwrap_or(0)),
+                    light_color: parts
+                        .get(5)
+                        .and_then(|value| {
+                            u32::from_str_radix(value.trim_start_matches("0x"), 16).ok()
+                        })
+                        .unwrap_or(0),
+                })
+            });
+        let parse_or = |key: &str, length: usize, default: &[i32]| {
+            self.parse_vector("Infinality", key, length)
+                .unwrap_or_else(|| default.to_vec())
+        };
+        AdvancedProfile {
+            shadow,
+            lcd_filter_weight: self.parse_vector("General", "LcdFilterWeight", 5),
+            pixel_layout: self.parse_vector("General", "PixelLayout", 6),
+            display_affinity: self
+                .raw_value("General", "DisplayAffinity")
+                .map(|value| {
+                    value
+                        .split(',')
+                        .filter_map(|part| part.trim().parse().ok())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            font_substitutes: self.list_entries("FontSubstitutes"),
+            infinality_gamma_correction: parse_or("INFINALITY_FT_GAMMA_CORRECTION", 2, &[0, 100]),
+            infinality_filter_params: parse_or(
+                "INFINALITY_FT_FILTER_PARAMS",
+                5,
+                &[11, 22, 38, 22, 11],
+            ),
         }
     }
 
@@ -420,19 +691,77 @@ impl ProfileDocument {
     }
 
     fn value(&self, setting: &SettingDefinition) -> Option<&str> {
-        self.nodes.iter().rev().find_map(|node| match node {
-            IniNode::KeyValue {
+        self.raw_value(setting.section, setting.key)
+    }
+
+    fn set_raw_value(
+        &mut self,
+        section_name: &str,
+        key_name: &str,
+        value: Option<String>,
+        dirty_key: &str,
+    ) {
+        let sections: &[&str] = if section_name.eq_ignore_ascii_case("General") {
+            &["FreeType", "General"]
+        } else {
+            std::slice::from_ref(&section_name)
+        };
+        if value.is_none() {
+            self.nodes.retain(|node| !matches!(node, IniNode::KeyValue { section, key, .. } if sections.iter().any(|target| section.eq_ignore_ascii_case(target)) && key.eq_ignore_ascii_case(key_name)));
+            self.dirty_keys.insert(dirty_key.to_owned());
+            return;
+        }
+        let rendered = value.unwrap();
+        let target_section = sections.iter().find(|target| self.nodes.iter().any(|node| matches!(node, IniNode::KeyValue { section, key, .. } if section.eq_ignore_ascii_case(target) && key.eq_ignore_ascii_case(key_name)))).copied().unwrap_or(section_name);
+        for node in self.nodes.iter_mut().rev() {
+            if let IniNode::KeyValue {
                 section,
                 key,
                 value,
-                ..
-            } if section.eq_ignore_ascii_case(setting.section)
-                && key.eq_ignore_ascii_case(setting.key) =>
+                prefix,
+                separator,
+                suffix,
+                raw,
+            } = node
             {
-                Some(value.as_str())
+                if section.eq_ignore_ascii_case(target_section)
+                    && key.eq_ignore_ascii_case(key_name)
+                {
+                    *value = rendered.clone();
+                    *raw = format!("{prefix}{separator}{rendered}{suffix}");
+                    self.dirty_keys.insert(dirty_key.to_owned());
+                    return;
+                }
             }
-            _ => None,
-        })
+        }
+        let ending = self.ending();
+        if !self.nodes.iter().any(|node| matches!(node, IniNode::Section { name, .. } if name.eq_ignore_ascii_case(target_section))) {
+            self.nodes.push(IniNode::Section { name: target_section.to_owned(), raw: format!("[{target_section}]{ending}") });
+        }
+        let insert_at = self
+            .nodes
+            .iter()
+            .rposition(|node| match node {
+                IniNode::Section { name, .. } => name.eq_ignore_ascii_case(target_section),
+                IniNode::KeyValue { section, .. } | IniNode::Unknown { section, .. } => {
+                    section.eq_ignore_ascii_case(target_section)
+                }
+                _ => false,
+            })
+            .map_or(self.nodes.len(), |index| index + 1);
+        self.nodes.insert(
+            insert_at,
+            IniNode::KeyValue {
+                section: target_section.to_owned(),
+                key: key_name.to_owned(),
+                value: rendered.clone(),
+                prefix: key_name.to_owned(),
+                separator: "=".to_owned(),
+                suffix: ending.to_owned(),
+                raw: format!("{key_name}={rendered}{ending}"),
+            },
+        );
+        self.dirty_keys.insert(dirty_key.to_owned());
     }
 
     pub fn set_value(&mut self, setting_id: &str, value: f64) -> Result<(), String> {
@@ -458,57 +787,134 @@ impl ProfileDocument {
             }
             result
         };
-        for node in self.nodes.iter_mut().rev() {
-            if let IniNode::KeyValue {
-                section,
-                key,
-                value,
-                prefix,
-                separator,
-                suffix,
-                raw,
-            } = node
-            {
-                if section.eq_ignore_ascii_case(setting.section)
-                    && key.eq_ignore_ascii_case(setting.key)
+        self.set_raw_value(setting.section, setting.key, Some(rendered), setting_id);
+        Ok(())
+    }
+
+    pub fn set_advanced(&mut self, advanced: AdvancedProfile) -> Result<(), String> {
+        let vector = |values: &[i32],
+                      length: usize,
+                      min: i32,
+                      max: i32,
+                      name: &str|
+         -> Result<String, String> {
+            if values.len() != length || values.iter().any(|value| *value < min || *value > max) {
+                return Err(format!(
+                    "{name} requires {length} values between {min} and {max}"
+                ));
+            }
+            Ok(values
+                .iter()
+                .map(i32::to_string)
+                .collect::<Vec<_>>()
+                .join(","))
+        };
+        let AdvancedProfile {
+            shadow,
+            lcd_filter_weight,
+            pixel_layout,
+            display_affinity,
+            font_substitutes,
+            infinality_gamma_correction,
+            infinality_filter_params,
+        } = advanced;
+        let shadow = shadow
+            .map(|value| {
+                if !(0..=255).contains(&value.dark_alpha)
+                    || !(0..=255).contains(&value.light_alpha)
+                    || value.dark_color > 0xFFFFFF
+                    || value.light_color > 0xFFFFFF
                 {
-                    *value = rendered.clone();
-                    *raw = format!("{prefix}{separator}{rendered}{suffix}");
-                    self.dirty_keys.insert(setting_id.to_owned());
-                    return Ok(());
+                    return Err("shadow alpha or color is outside its supported range".to_owned());
                 }
+                Ok(format!(
+                    "{},{},{},{:06X},{},{:06X}",
+                    value.offset_x,
+                    value.offset_y,
+                    value.dark_alpha,
+                    value.dark_color,
+                    value.light_alpha,
+                    value.light_color
+                ))
+            })
+            .transpose()?;
+        let lcd = lcd_filter_weight
+            .as_deref()
+            .map(|values| vector(values, 5, 0, 255, "LCD filter weight"))
+            .transpose()?;
+        let pixel = pixel_layout
+            .as_deref()
+            .map(|values| vector(values, 6, -128, 127, "pixel layout"))
+            .transpose()?;
+        if display_affinity
+            .iter()
+            .any(|value| !(0..=255).contains(value))
+        {
+            return Err("display affinity IDs must be between 0 and 255".to_owned());
+        }
+        let affinity = (!display_affinity.is_empty()).then(|| {
+            display_affinity
+                .iter()
+                .map(i32::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        });
+        for mapping in &font_substitutes {
+            let Some((source, replacement)) = mapping.split_once('=') else {
+                return Err("font substitutions must use Source font=Replacement font".to_owned());
+            };
+            if source.trim().is_empty() || replacement.trim().is_empty() {
+                return Err(
+                    "font substitutions require both source and replacement fonts".to_owned(),
+                );
             }
         }
-        let ending = self.ending();
-        let has_section = self.nodes.iter().any(|node| matches!(node, IniNode::Section { name, .. } if name.eq_ignore_ascii_case(setting.section)));
-        if !has_section {
-            self.nodes.push(IniNode::Section {
-                name: setting.section.to_owned(),
-                raw: format!("[{0}]{ending}", setting.section),
-            });
-        }
-        let insert_at = self
-            .nodes
-            .iter()
-            .rposition(|node| match node {
-                IniNode::Section { name, .. } => name.eq_ignore_ascii_case(setting.section),
-                IniNode::KeyValue { section, .. } => section.eq_ignore_ascii_case(setting.section),
-                _ => false,
-            })
-            .map_or(self.nodes.len(), |index| index + 1);
-        self.nodes.insert(
-            insert_at.min(self.nodes.len()),
-            IniNode::KeyValue {
-                section: setting.section.to_owned(),
-                key: setting.key.to_owned(),
-                value: rendered.clone(),
-                prefix: setting.key.to_owned(),
-                separator: "=".to_owned(),
-                suffix: ending.to_owned(),
-                raw: format!("{}={rendered}{ending}", setting.key),
-            },
+        let gamma = vector(
+            &infinality_gamma_correction,
+            2,
+            -1000,
+            1000,
+            "Infinality gamma correction",
+        )?
+        .replace(',', " ");
+        let filter = vector(
+            &infinality_filter_params,
+            5,
+            0,
+            255,
+            "Infinality filter parameters",
+        )?
+        .replace(',', " ");
+
+        // Apply only after every field has been validated so a rejected edit cannot
+        // leave an in-memory profile partially changed.
+        self.set_raw_value("General", "Shadow", shadow, "advanced:shadow");
+        self.set_raw_value(
+            "General",
+            "LcdFilterWeight",
+            lcd,
+            "advanced:lcdFilterWeight",
         );
-        self.dirty_keys.insert(setting_id.to_owned());
+        self.set_raw_value("General", "PixelLayout", pixel, "advanced:pixelLayout");
+        self.set_raw_value(
+            "General",
+            "DisplayAffinity",
+            affinity,
+            "advanced:displayAffinity",
+        );
+        self.set_list("fontSubstitutes", font_substitutes)?;
+        self.set_raw_value(
+            "Infinality",
+            "INFINALITY_FT_GAMMA_CORRECTION",
+            Some(gamma),
+            "advanced:infinalityGammaCorrection",
+        );
+        self.set_raw_value(
+            "Infinality",
+            "INFINALITY_FT_FILTER_PARAMS",
+            Some(filter),
+            "advanced:infinalityFilterParams",
+        );
         Ok(())
     }
 
@@ -597,6 +1003,9 @@ impl ProfileDocument {
             "includeFonts" => "Include",
             "excludeModules" => "ExcludeModule",
             "includeModules" => "IncludeModule",
+            "unloadDlls" => "UnloadDLL",
+            "excludeSubstitutionModules" => "ExcludeSub",
+            "fontSubstitutes" => "FontSubstitutes",
             _ => return Err(format!("unknown profile list: {kind}")),
         };
         let mut normalized = Vec::new();
@@ -663,8 +1072,34 @@ impl ProfileDocument {
     }
 
     pub fn encoded(&self) -> Result<Vec<u8>, String> {
-        let text = self.nodes.iter().map(IniNode::raw).collect::<String>();
-        encode(&text, self.encoding, self.bom)
+        let Some(original_lines) = &self.original_legacy_lines else {
+            let text = self.nodes.iter().map(IniNode::raw).collect::<String>();
+            return encode(&text, self.encoding, self.bom);
+        };
+        let codec = legacy_codec(self.encoding).expect("legacy lines require a legacy codec");
+        let mut used = vec![false; original_lines.len()];
+        let mut output = Vec::new();
+        for node in &self.nodes {
+            let raw = node.raw();
+            if let Some((index, (_, bytes))) = original_lines
+                .iter()
+                .enumerate()
+                .find(|(index, (line, _))| !used[*index] && line == raw)
+            {
+                used[index] = true;
+                output.extend_from_slice(bytes);
+                continue;
+            }
+            let (encoded, _, had_errors) = codec.encode(raw);
+            if had_errors {
+                return Err(
+                    "profile contains text that cannot be represented in its original encoding"
+                        .to_owned(),
+                );
+            }
+            output.extend_from_slice(&encoded);
+        }
+        Ok(output)
     }
 
     pub fn save(&mut self) -> Result<(), String> {
@@ -688,6 +1123,8 @@ impl ProfileDocument {
         drop(file);
         replace_file(&self.path, &temporary, &backup)?;
         self.original_hash = hash(&bytes);
+        let text = self.nodes.iter().map(IniNode::raw).collect::<String>();
+        self.original_legacy_lines = legacy_original_lines(&bytes, &text, self.encoding);
         self.dirty_keys.clear();
         Ok(())
     }
@@ -847,6 +1284,118 @@ mod tests {
         let reopened = ProfileDocument::open(&copy.path).unwrap();
         assert_eq!(reopened.snapshot().values.get("normal_weight"), Some(&7.0));
         let _ = fs::remove_file(copy.path);
+        let _ = fs::remove_file(path);
+    }
+
+    fn legacy_round_trip(codec: &'static Encoding, expected: TextEncoding, comment: &str) {
+        let source = format!("; {comment}\r\n[General]\r\nNormalWeight=2\r\nUnknown=유지\r\n")
+            .replace("Unknown=유지\r\n", "Unknown=keep\r\n");
+        let (bytes, _, had_errors) = codec.encode(&source);
+        assert!(!had_errors);
+        let path = temp_profile(bytes.as_ref());
+        let mut document = ProfileDocument::open(&path).unwrap();
+        assert_eq!(document.encoding, expected, "decoded text: {source}");
+        assert_eq!(document.encoded().unwrap(), bytes.as_ref());
+        document.set_value("normal_weight", 7.0).unwrap();
+        let changed = document.encoded().unwrap();
+        let (decoded, _, decode_errors) = codec.decode(&changed);
+        assert!(!decode_errors);
+        assert!(decoded.contains(comment));
+        assert!(decoded.contains("NormalWeight=7"));
+        fs::write(&path, &changed).unwrap();
+        let reopened = ProfileDocument::open(&path).unwrap();
+        assert_eq!(reopened.encoding, expected);
+        assert_eq!(reopened.encoded().unwrap(), changed);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn gb18030_profile_round_trips_after_edit() {
+        legacy_round_trip(GB18030, TextEncoding::Gb18030, "简体中文配置与字体设置");
+    }
+
+    #[test]
+    fn big5_profile_round_trips_after_edit() {
+        legacy_round_trip(BIG5, TextEncoding::Big5, "繁體中文設定與字型調整");
+    }
+
+    #[test]
+    fn shift_jis_profile_round_trips_after_edit() {
+        legacy_round_trip(SHIFT_JIS, TextEncoding::ShiftJis, "日本語プロファイル設定");
+    }
+
+    #[test]
+    fn advanced_profile_and_freetype_precedence_round_trip() {
+        let source = b"[FreeType]\r\nNormalWeight=3\r\nLcdFilterWeight=8,77,86,77,8\r\nPixelLayout=-21,0,0,0,21,0\r\n[General]\r\nNormalWeight=2\r\nShadow=1,2,4,112233,5,AABBCC\r\nDisplayAffinity=0,2\r\n[FontSubstitutes]\r\nArial=Segoe UI\r\n[Infinality]\r\nINFINALITY_FT_GAMMA_CORRECTION=0 100\r\nINFINALITY_FT_FILTER_PARAMS=11 22 38 22 11\r\n";
+        let path = temp_profile(source);
+        let mut document = ProfileDocument::open(&path).unwrap();
+        let snapshot = document.snapshot();
+        assert_eq!(snapshot.values.get("normal_weight"), Some(&3.0));
+        assert_eq!(
+            snapshot.advanced.lcd_filter_weight,
+            Some(vec![8, 77, 86, 77, 8])
+        );
+        assert_eq!(
+            snapshot.advanced.pixel_layout,
+            Some(vec![-21, 0, 0, 0, 21, 0])
+        );
+        assert_eq!(snapshot.advanced.display_affinity, vec![0, 2]);
+        assert_eq!(snapshot.advanced.font_substitutes, vec!["Arial=Segoe UI"]);
+        assert_eq!(snapshot.advanced.infinality_gamma_correction, vec![0, 100]);
+        assert_eq!(
+            snapshot.advanced.infinality_filter_params,
+            vec![11, 22, 38, 22, 11]
+        );
+        document.set_value("normal_weight", 7.0).unwrap();
+        document
+            .set_advanced(AdvancedProfile {
+                shadow: Some(ShadowSetting {
+                    offset_x: -2,
+                    offset_y: 3,
+                    dark_alpha: 6,
+                    dark_color: 0x010203,
+                    light_alpha: 7,
+                    light_color: 0xA0B0C0,
+                }),
+                lcd_filter_weight: Some(vec![1, 2, 3, 4, 5]),
+                pixel_layout: Some(vec![-20, 0, 0, 0, 20, 0]),
+                display_affinity: vec![1, 3],
+                font_substitutes: vec!["Tahoma=Segoe UI".to_owned()],
+                infinality_gamma_correction: vec![5, 95],
+                infinality_filter_params: vec![10, 20, 40, 20, 10],
+            })
+            .unwrap();
+        document
+            .set_list("unloadDlls", vec!["example.dll".to_owned()])
+            .unwrap();
+        document
+            .set_list("excludeSubstitutionModules", vec!["legacy.exe".to_owned()])
+            .unwrap();
+        let rendered = String::from_utf8(document.encoded().unwrap()).unwrap();
+        assert!(rendered.contains("[FreeType]\r\nNormalWeight=7"));
+        assert!(rendered.contains("NormalWeight=2"));
+        assert!(rendered.contains("Shadow=-2,3,6,010203,7,A0B0C0"));
+        assert!(rendered.contains("LcdFilterWeight=1,2,3,4,5"));
+        assert!(rendered.contains("PixelLayout=-20,0,0,0,20,0"));
+        assert!(rendered.contains("DisplayAffinity=1,3"));
+        assert!(rendered.contains("Tahoma=Segoe UI"));
+        assert!(rendered.contains("INFINALITY_FT_GAMMA_CORRECTION=5 95"));
+        assert!(rendered.contains("INFINALITY_FT_FILTER_PARAMS=10 20 40 20 10"));
+        assert!(rendered.contains("[UnloadDLL]\r\nexample.dll"));
+        assert!(rendered.contains("[ExcludeSub]\r\nlegacy.exe"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn rejected_advanced_edit_is_transactional() {
+        let path = temp_profile(b"[General]\r\nShadow=1,2,3,010203,4,A0B0C0\r\n");
+        let mut document = ProfileDocument::open(&path).unwrap();
+        let before = document.encoded().unwrap();
+        let mut advanced = document.snapshot().advanced;
+        advanced.shadow = None;
+        advanced.font_substitutes = vec!["missing separator".to_owned()];
+        assert!(document.set_advanced(advanced).is_err());
+        assert_eq!(document.encoded().unwrap(), before);
         let _ = fs::remove_file(path);
     }
 }

@@ -16,5 +16,13 @@ export default defineConfig({
   build: {
     target: "chrome105",
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ["react", "react-dom"],
+          icons: ["lucide-react"],
+        },
+      },
+    },
   },
 });

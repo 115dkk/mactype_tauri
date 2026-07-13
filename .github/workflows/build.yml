@@ -80,11 +80,47 @@ jobs:
       - name: Verify install, upgrade, launch, and uninstall
         shell: pwsh
         run: scripts/ci/Test-InstallerWindows.ps1 -BaselineInstaller (Get-ChildItem artifacts/installer-baseline/*.exe | Select-Object -First 1).FullName -Installer (Get-ChildItem artifacts/installer/*.exe | Select-Object -First 1).FullName
+      - name: Write installer checksum
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem artifacts/installer/*.exe | Select-Object -First 1
+          $hash = (Get-FileHash -Algorithm SHA256 $installer.FullName).Hash.ToLowerInvariant()
+          "$hash  $($installer.Name)" | Set-Content -Encoding ascii artifacts/installer/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
           name: mactype-control-center-windows
           path: |
             artifacts/installer/*.exe
+            artifacts/installer/SHA256SUMS.txt
             control-center/src-tauri/target/release/mactype-control-center.exe
             build/preview-helper/Release/mactype-preview32.exe
           if-no-files-found: error
+
+  release-main-snapshot:
+    name: Publish installable main snapshot
+    needs: windows-build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mactype-control-center-windows
+          path: release
+      - name: Publish automatic pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: control-center-ci-${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          name: MacType Control Center CI #${{ github.run_number }}
+          body: |
+            Automated installable snapshot from the fully validated `main` build at `${{ github.sha }}`.
+
+            The Windows installer passed core build, Tauri window smoke tests, tray startup, clean install, upgrade, launch, and uninstall checks before publication. Verify the download with `SHA256SUMS.txt`.
+          prerelease: true
+          generate_release_notes: false
+          fail_on_unmatched_files: true
+          files: |
+            release/artifacts/installer/*.exe
+            release/artifacts/installer/SHA256SUMS.txt

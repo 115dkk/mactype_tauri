@@ -1,6 +1,7 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { settingsSchema } from "../generated/settings";
 import type { ExecutionStatus, IndividualSetting, InstallationStatus, LaunchContext, PreviewRequest, PreviewResult, ProfileEntry, ProfileSnapshot, ViewId } from "./model";
+import type { Locale } from "../i18n/i18n";
 
 function isTauriRuntime(): boolean {
   return "__TAURI_INTERNALS__" in window;
@@ -28,6 +29,11 @@ export async function loadLaunchContext(): Promise<LaunchContext> {
     };
   }
   return invoke<LaunchContext>("launch_context");
+}
+
+export async function setApplicationLocale(locale: Locale): Promise<void> {
+  if (!isTauriRuntime()) return;
+  await invoke("set_application_locale", { locale });
 }
 
 export async function loadExecutionStatus(): Promise<ExecutionStatus> {

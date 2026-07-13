@@ -18,6 +18,12 @@ The editor reads installed profiles but creates user-owned copies under `%LOCALA
 
 `shared/settings-schema.json` is the source for generated Rust, TypeScript, and C++ setting definitions. CI regenerates and rejects drift.
 
+## Localization boundary
+
+The React frontend owns ten complete runtime catalogs: Korean, English, Simplified Chinese, Traditional Chinese, Japanese, French, German, Spanish, Portuguese, and Arabic. An explicit `?lang=` value takes precedence and is persisted per user; otherwise the stored preference or the browser language selects the initial locale. Chinese script and regional subtags are normalized separately (`zh-Hant`, Taiwan, Hong Kong, and Macao select Traditional Chinese), while unsupported locales fall back to English.
+
+Changing the language updates visible text, the document title, accessibility labels, the HTML language and direction, and the native Tauri tray menu without restarting. Arabic sets native right-to-left document direction and direction-aware navigation and editor borders. CI requires exact catalog key and placeholder parity, coverage for all generated settings, native tray-menu tests, and real browser rendering of every view, viewport, and locale.
+
 ## Execution boundary
 
 The open Tauri executable owns the notification icon and close-to-tray lifecycle. Its optional login startup entry is user-scoped. Manual mode invokes the public `MacLoader.exe` directly with an executable path and argument vector; no shell string is accepted. Legacy `MacTray.exe -service` and AppInit registry mode are detected read-only and never controlled. The evidence and safety decision are recorded in `docs/legacy-behavior-notes.md`.

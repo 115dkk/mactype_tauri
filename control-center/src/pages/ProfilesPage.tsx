@@ -2,6 +2,7 @@ import { AlertTriangle, CopyPlus, Plus, RotateCcw, Save, Search, SlidersHorizont
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { settingsSchema } from "../generated/settings";
 import type { IndividualSetting, PreviewRequest, PreviewResult, ProfileEntry, ProfileSnapshot } from "../app/model";
+import { settingMessageKey, settingOptionMessageKey, useI18n } from "../i18n/i18n";
 import {
   duplicateProfile,
   forcePreviewCrashForCi,
@@ -21,28 +22,30 @@ import {
 
 type GroupId = "basic" | "shape" | "lcd" | "individual" | "lists";
 
-const groups: ReadonlyArray<{ id: GroupId; label: string; description: string }> = [
-  { id: "basic", label: "기본 설정", description: "힌팅, 커닝과 글꼴 로딩 방식을 설정합니다." },
-  { id: "shape", label: "글자 모양", description: "획 굵기, 감마와 대비를 조정합니다." },
-  { id: "lcd", label: "LCD·픽셀 배열", description: "서브픽셀 순서, 필터와 채널별 튜닝을 설정합니다." },
-  { id: "individual", label: "글꼴별 설정", description: "특정 글꼴에만 적용할 여섯 가지 값을 관리합니다." },
-  { id: "lists", label: "포함·제외", description: "글꼴과 프로그램의 포함·제외 목록을 편집합니다." },
-];
-
-const individualLabels = ["힌팅", "AA", "일반 굵기", "굵은 굵기", "기울임", "커닝"];
-const listDefinitions = [
-  { kind: "excludeFonts", label: "제외 글꼴", help: "한 줄에 글꼴 이름 하나" },
-  { kind: "includeFonts", label: "포함 글꼴", help: "목록이 있으면 지정한 글꼴만 처리" },
-  { kind: "excludeModules", label: "제외 프로그램", help: "예: fontview.exe" },
-  { kind: "includeModules", label: "포함 프로그램", help: "목록이 있으면 지정한 프로그램만 처리" },
-] as const;
-
 interface ProfilesPageProps {
   ciSmoke?: boolean;
   onPreviewReady?: () => void;
 }
 
 export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPageProps) {
+  const { locale, t } = useI18n();
+  const groups = useMemo<ReadonlyArray<{ id: GroupId; label: string; description: string }>>(() => [
+    { id: "basic", label: t("group.basic.label"), description: t("group.basic.description") },
+    { id: "shape", label: t("group.shape.label"), description: t("group.shape.description") },
+    { id: "lcd", label: t("group.lcd.label"), description: t("group.lcd.description") },
+    { id: "individual", label: t("group.individual.label"), description: t("group.individual.description") },
+    { id: "lists", label: t("group.lists.label"), description: t("group.lists.description") },
+  ], [t]);
+  const individualLabels = useMemo(() => [
+    t("individual.hinting"), t("individual.aa"), t("individual.normalWeight"),
+    t("individual.boldWeight"), t("individual.slant"), t("individual.kerning"),
+  ], [t]);
+  const listDefinitions = useMemo(() => [
+    { kind: "excludeFonts", label: t("list.excludeFonts.label"), help: t("list.excludeFonts.help") },
+    { kind: "includeFonts", label: t("list.includeFonts.label"), help: t("list.includeFonts.help") },
+    { kind: "excludeModules", label: t("list.excludeModules.label"), help: t("list.excludeModules.help") },
+    { kind: "includeModules", label: t("list.includeModules.label"), help: t("list.includeModules.help") },
+  ] as const, [t]);
   const [profile, setProfile] = useState<ProfileSnapshot | null>(null);
   const [profiles, setProfiles] = useState<ReadonlyArray<ProfileEntry>>([]);
   const [values, setValues] = useState<Record<string, number>>(
@@ -57,7 +60,8 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
   const [fontFace, setFontFace] = useState("Segoe UI");
   const [fontSize, setFontSize] = useState(14);
   const [darkPreview, setDarkPreview] = useState(false);
-  const [sampleText, setSampleText] = useState("MacType 프리뷰 123 ABC\n가나다라마바사 아자차카타파하");
+  const [sampleText, setSampleText] = useState(() => t("profiles.sampleText"));
+  const previousDefaultSample = useRef(sampleText);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -71,6 +75,12 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
   const restartVerified = useRef(false);
   const ciReadyRequestId = useRef<number | null>(null);
   const ciWorkflowVerified = useRef(false);
+
+  useEffect(() => {
+    const nextDefault = t("profiles.sampleText");
+    setSampleText((current) => current === previousDefaultSample.current ? nextDefault : current);
+    previousDefaultSample.current = nextDefault;
+  }, [locale, t]);
 
   const applySnapshot = useCallback((opened: ProfileSnapshot) => {
     setProfile(opened);
@@ -164,9 +174,10 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
     return settingsSchema.filter((setting) => {
       if (!needle && setting.group !== activeGroup) return false;
       if (!needle && setting.advanced && !showAdvanced) return false;
-      return !needle || `${setting.label} ${setting.description} ${setting.key}`.toLocaleLowerCase().includes(needle);
+      const localized = `${t(settingMessageKey(setting.id, "label"))} ${t(settingMessageKey(setting.id, "description"))} ${setting.key}`;
+      return !needle || localized.toLocaleLowerCase().includes(needle);
     });
-  }, [activeGroup, query, showAdvanced]);
+  }, [activeGroup, query, showAdvanced, t]);
 
   const changeSetting = (settingId: string, value: number) => {
     setValues((current) => ({ ...current, [settingId]: value }));
@@ -254,46 +265,48 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
     <section className="page profile-page view-enter" aria-labelledby="profiles-title">
       <header className="page-header compact profile-header">
         <div>
-          <h1 id="profiles-title">프로필</h1>
-          <p>{loading ? "프로필 검색 중" : `${profile?.path.split(/[\\/]/).pop() ?? "프로필 없음"} · 저장되지 않은 변경 ${dirtyCount}개`}</p>
+          <h1 id="profiles-title">{t("nav.profiles")}</h1>
+          <p>{loading ? t("profiles.searching") : t("profiles.summary", { name: profile?.path.split(/[\\/]/).pop() ?? t("profiles.none"), count: dirtyCount })}</p>
         </div>
         <div className="header-actions profile-actions">
-          <select aria-label="프로필 선택" disabled={profiles.length === 0} onChange={(event) => void chooseProfile(event.target.value)} value={profile?.path ?? ""}>
+          <select aria-label={t("profiles.select")} disabled={profiles.length === 0} onChange={(event) => void chooseProfile(event.target.value)} value={profile?.path ?? ""}>
             {profiles.map((entry) => <option key={entry.path} value={entry.path}>{entry.name}</option>)}
           </select>
-          <input aria-label="복제 프로필 이름" onChange={(event) => setCopyName(event.target.value)} placeholder="새 프로필 이름" value={copyName} />
-          <button className="button secondary" disabled={!profile || !copyName.trim()} onClick={() => void duplicate()} type="button"><CopyPlus aria-hidden="true" size={16} /> 복제</button>
-          <button className="button primary" disabled={!profile || dirtyCount === 0 || saving} onClick={() => void save()} type="button"><Save aria-hidden="true" size={17} /> {saving ? "저장 중" : "저장"}</button>
+          <input aria-label={t("profiles.copyName")} onChange={(event) => setCopyName(event.target.value)} placeholder={t("profiles.newName")} value={copyName} />
+          <button className="button secondary" disabled={!profile || !copyName.trim()} onClick={() => void duplicate()} type="button"><CopyPlus aria-hidden="true" size={16} /> {t("profiles.duplicate")}</button>
+          <button className="button primary" disabled={!profile || dirtyCount === 0 || saving} onClick={() => void save()} type="button"><Save aria-hidden="true" size={17} /> {saving ? t("profiles.saving") : t("profiles.save")}</button>
         </div>
       </header>
 
       <div className="profile-layout">
-        <aside className="settings-index" aria-label="설정 구역">
-          <label className="search-field"><Search aria-hidden="true" size={16} /><span className="sr-only">설정 검색</span><input onChange={(event) => setQuery(event.target.value)} placeholder="설정 검색" type="search" value={query} /></label>
+        <aside className="settings-index" aria-label={t("profiles.sections")}>
+          <label className="search-field"><Search aria-hidden="true" size={16} /><span className="sr-only">{t("profiles.search")}</span><input onChange={(event) => setQuery(event.target.value)} placeholder={t("profiles.search")} type="search" value={query} /></label>
           <ul>{groups.map((group) => <li key={group.id}><button data-selected={!query && activeGroup === group.id} onClick={() => { setActiveGroup(group.id); setQuery(""); }} type="button">{group.label}</button></li>)}</ul>
-          <label className="checkbox-row"><input checked={showAdvanced} onChange={(event) => setShowAdvanced(event.target.checked)} type="checkbox" /> 고급 설정 표시</label>
+          <label className="checkbox-row"><input checked={showAdvanced} onChange={(event) => setShowAdvanced(event.target.checked)} type="checkbox" /> {t("profiles.showAdvanced")}</label>
         </aside>
 
         <div className="settings-workspace">
           <div className="settings-form">
-            <div className="section-heading"><div><h2>{query ? "검색 결과" : activeDefinition.label}</h2><p>{query ? `“${query}”와 일치하는 모든 구역의 설정입니다.` : activeDefinition.description}</p></div></div>
+            <div className="section-heading"><div><h2>{query ? t("profiles.searchResults") : activeDefinition.label}</h2><p>{query ? t("profiles.searchDescription", { query }) : activeDefinition.description}</p></div></div>
 
             {(query || activeGroup === "basic" || activeGroup === "shape" || activeGroup === "lcd") && filteredSettings.map((setting) => {
               const value = values[setting.id] ?? setting.default;
               const dirty = profile?.dirtyKeys.includes(setting.id) ?? false;
+              const settingLabel = t(settingMessageKey(setting.id, "label"));
+              const settingDescription = t(settingMessageKey(setting.id, "description"));
               return (
                 <div className="setting-row" key={setting.id}>
-                  <div><label htmlFor={setting.id}>{setting.label} {dirty && <span className="dirty-mark">변경됨</span>}</label><p>{setting.description} 기본값 {setting.default}, 허용 범위 {setting.min}–{setting.max}{setting.apply === "restart_required" ? " · 재시작 필요" : ""}</p></div>
+                  <div><label htmlFor={setting.id}>{settingLabel} {dirty && <span className="dirty-mark">{t("profiles.changed")}</span>}</label><p>{settingDescription} {t("profiles.settingMeta", { default: setting.default, min: setting.min, max: setting.max })}{setting.apply === "restart_required" ? ` · ${t("profiles.restartRequired")}` : ""}</p></div>
                   <div className="range-control">
                     {setting.control === "select" && "options" in setting ? (
-                      <select id={setting.id} onChange={(event) => changeSetting(setting.id, Number(event.target.value))} value={value}>{setting.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
+                      <select id={setting.id} onChange={(event) => changeSetting(setting.id, Number(event.target.value))} value={value}>{setting.options.map((option) => <option key={option.value} value={option.value}>{t(settingOptionMessageKey(setting.id, option.value))}</option>)}</select>
                     ) : setting.control === "boolean" ? (
-                      <label className="switch-control"><input checked={value === 1} id={setting.id} onChange={(event) => changeSetting(setting.id, event.target.checked ? 1 : 0)} type="checkbox" /><span>{value === 1 ? "사용" : "사용 안 함"}</span></label>
+                      <label className="switch-control"><input checked={value === 1} id={setting.id} onChange={(event) => changeSetting(setting.id, event.target.checked ? 1 : 0)} type="checkbox" /><span>{value === 1 ? t("profiles.enabled") : t("profiles.disabled")}</span></label>
                     ) : (
                       <input id={setting.id} max={setting.max} min={setting.min} onChange={(event) => changeSetting(setting.id, Number(event.target.value))} step={setting.type === "integer" ? 1 : 0.01} type="range" value={value} />
                     )}
                     <output htmlFor={setting.id}>{value}{setting.unit === "px" ? " px" : ""}</output>
-                    <button className="icon-button" aria-label={`${setting.label} 초기화`} onClick={() => changeSetting(setting.id, setting.default)} type="button"><RotateCcw aria-hidden="true" size={15} /></button>
+                    <button className="icon-button" aria-label={t("profiles.reset", { setting: settingLabel })} onClick={() => changeSetting(setting.id, setting.default)} type="button"><RotateCcw aria-hidden="true" size={15} /></button>
                   </div>
                 </div>
               );
@@ -301,15 +314,15 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
 
             {!query && activeGroup === "individual" && (
               <div className="collection-editor">
-                <div className="inline-create"><input aria-label="추가할 글꼴 이름" onChange={(event) => setNewFont(event.target.value)} placeholder="예: Segoe UI" value={newFont} /><button className="button secondary" onClick={addIndividual} type="button"><Plus aria-hidden="true" size={16} /> 글꼴 추가</button></div>
+                <div className="inline-create"><input aria-label={t("profiles.addFontName")} onChange={(event) => setNewFont(event.target.value)} placeholder={t("profiles.fontExample")} value={newFont} /><button className="button secondary" onClick={addIndividual} type="button"><Plus aria-hidden="true" size={16} /> {t("profiles.addFont")}</button></div>
                 {individuals.map((entry, rowIndex) => (
                   <div className="individual-row" key={`${entry.fontFace}-${rowIndex}`}>
                     <strong>{entry.fontFace}</strong>
-                    <div>{individualLabels.map((label, valueIndex) => <label key={label}><span>{label}</span><input aria-label={`${entry.fontFace} ${label}`} max={valueIndex === 2 ? 64 : valueIndex === 3 || valueIndex === 4 ? 32 : valueIndex === 1 ? 6 : valueIndex === 0 ? 2 : 1} min={valueIndex === 2 ? -64 : valueIndex === 3 || valueIndex === 4 ? -32 : valueIndex === 1 ? -1 : 0} onChange={(event) => { const next = individuals.map((item) => ({ ...item, values: [...item.values] })); next[rowIndex].values[valueIndex] = event.target.value === "" ? null : Number(event.target.value); void commitIndividuals(next); }} placeholder="상속" type="number" value={entry.values[valueIndex] ?? ""} /></label>)}</div>
-                    <button className="icon-button" aria-label={`${entry.fontFace} 제거`} onClick={() => void commitIndividuals(individuals.filter((_, index) => index !== rowIndex))} type="button"><Trash2 aria-hidden="true" size={15} /></button>
+                    <div>{individualLabels.map((label, valueIndex) => <label key={label}><span>{label}</span><input aria-label={`${entry.fontFace} ${label}`} max={valueIndex === 2 ? 64 : valueIndex === 3 || valueIndex === 4 ? 32 : valueIndex === 1 ? 6 : valueIndex === 0 ? 2 : 1} min={valueIndex === 2 ? -64 : valueIndex === 3 || valueIndex === 4 ? -32 : valueIndex === 1 ? -1 : 0} onChange={(event) => { const next = individuals.map((item) => ({ ...item, values: [...item.values] })); next[rowIndex].values[valueIndex] = event.target.value === "" ? null : Number(event.target.value); void commitIndividuals(next); }} placeholder={t("profiles.inherit")} type="number" value={entry.values[valueIndex] ?? ""} /></label>)}</div>
+                    <button className="icon-button" aria-label={t("profiles.remove", { name: entry.fontFace })} onClick={() => void commitIndividuals(individuals.filter((_, index) => index !== rowIndex))} type="button"><Trash2 aria-hidden="true" size={15} /></button>
                   </div>
                 ))}
-                {individuals.length === 0 && <p className="empty-state">글꼴별 설정이 없습니다. 비워 둔 값은 기본 설정을 상속합니다.</p>}
+                {individuals.length === 0 && <p className="empty-state">{t("profiles.emptyIndividuals")}</p>}
               </div>
             )}
 
@@ -317,13 +330,13 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
           </div>
 
           <section className="preview-panel" aria-labelledby="preview-title">
-            <div className="preview-toolbar"><div><SlidersHorizontal aria-hidden="true" size={17} /><h2 id="preview-title">프리뷰</h2></div><div className="preview-controls"><select aria-label="프리뷰 글꼴" onChange={(event) => setFontFace(event.target.value)} value={fontFace}><option>Segoe UI</option><option>맑은 고딕</option><option>Tahoma</option></select><select aria-label="프리뷰 크기" onChange={(event) => setFontSize(Number(event.target.value))} value={fontSize}><option value="12">12 pt</option><option value="14">14 pt</option><option value="18">18 pt</option></select><button className="text-action" onClick={() => setDarkPreview((current) => !current)} type="button">{darkPreview ? "밝은 배경" : "어두운 배경"}</button></div></div>
-            <textarea className="sample-input" aria-label="프리뷰 예시 문장" onChange={(event) => setSampleText(event.target.value)} rows={2} value={sampleText} />
-            <div className="preview-canvas" data-dark={darkPreview} ref={canvasRef} role="img" aria-label="현재 설정의 글자 렌더링 프리뷰">
-              {preview ? <img alt="MacType Helper가 렌더링한 글자 프리뷰" height={preview.height / displayScale} onLoad={() => { if (ciSmoke && ciReadyRequestId.current === preview.requestId && !ciWorkflowVerified.current) { ciWorkflowVerified.current = true; void verifyProfileWorkflowForCi().then(() => onPreviewReady?.()).catch((error: unknown) => { const message = error instanceof Error ? error.message : String(error); setPreviewError(message); void reportFrontendFailure("profiles", message); }); } }} src={previewImageUrl(preview.imagePath)} width={preview.width / displayScale} /> : <><p>MacType 프리뷰 123 ABC</p><p>가나다라마바사 아자차카타파하</p><span>Helper 응답 대기 중</span></>}
+            <div className="preview-toolbar"><div><SlidersHorizontal aria-hidden="true" size={17} /><h2 id="preview-title">{t("profiles.preview")}</h2></div><div className="preview-controls"><select aria-label={t("profiles.previewFont")} onChange={(event) => setFontFace(event.target.value)} value={fontFace}><option>Segoe UI</option><option value="맑은 고딕">{t("profiles.fontMalgun")}</option><option>Tahoma</option></select><select aria-label={t("profiles.previewSize")} onChange={(event) => setFontSize(Number(event.target.value))} value={fontSize}><option value="12">12 pt</option><option value="14">14 pt</option><option value="18">18 pt</option></select><button className="text-action" onClick={() => setDarkPreview((current) => !current)} type="button">{darkPreview ? t("profiles.lightBackground") : t("profiles.darkBackground")}</button></div></div>
+            <textarea className="sample-input" aria-label={t("profiles.sampleAria")} onChange={(event) => setSampleText(event.target.value)} rows={2} value={sampleText} />
+            <div className="preview-canvas" data-dark={darkPreview} ref={canvasRef} role="img" aria-label={t("profiles.previewAria")}>
+              {preview ? <img alt={t("profiles.previewImageAlt")} height={preview.height / displayScale} onLoad={() => { if (ciSmoke && ciReadyRequestId.current === preview.requestId && !ciWorkflowVerified.current) { ciWorkflowVerified.current = true; void verifyProfileWorkflowForCi().then(() => onPreviewReady?.()).catch((error: unknown) => { const message = error instanceof Error ? error.message : String(error); setPreviewError(message); void reportFrontendFailure("profiles", message); }); } }} src={previewImageUrl(preview.imagePath)} width={preview.width / displayScale} /> : <><p>{t("profiles.sampleText").split("\n")[0]}</p><p>{t("profiles.sampleText").split("\n")[1]}</p><span>{t("profiles.helperWaiting")}</span></>}
             </div>
             {previewError && <p className="inline-error"><AlertTriangle aria-hidden="true" size={15} /> {previewError}</p>}
-            <div className="preview-footer"><span>{preview ? `요청 ${preview.requestId} · ${preview.dpi} DPI · ${preview.elapsedMs} ms` : "프리뷰 준비 중"}</span><button className="text-action" onClick={() => void toggleNativePreview()} type="button">{nativeVisible ? "실제 창 닫기" : "실제 창에서 보기"}</button></div>
+            <div className="preview-footer"><span>{preview ? t("profiles.previewRequest", { request: preview.requestId, dpi: preview.dpi, elapsed: preview.elapsedMs }) : t("profiles.previewReady")}</span><button className="text-action" onClick={() => void toggleNativePreview()} type="button">{nativeVisible ? t("profiles.closeNative") : t("profiles.openNative")}</button></div>
           </section>
         </div>
       </div>

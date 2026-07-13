@@ -1,4 +1,5 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { settingsSchema } from "../generated/settings";
 import { fallbackStatus, type AdvancedProfile, type AppliedProfile, type ExecutionStatus, type IndividualSetting, type InstallationStatus, type LaunchContext, type PreviewRequest, type PreviewResult, type ProfileEntry, type ProfileSnapshot, type SessionTarget, type ViewId } from "./model";
 import type { Locale } from "../i18n/i18n";
@@ -42,6 +43,23 @@ export async function loadExecutionStatus(): Promise<ExecutionStatus> {
     return { trayAvailable: true, autoStart: false, manualLauncherAvailable: true, legacyServiceDetected: true, legacyServiceRunning: true, registryModeDetected: false, systemModesSupported: false, systemModeNote: "시스템 모드는 안전성 검토 결과 읽기 전용으로 표시됩니다.", injectionReady: true, activeProfile: fallbackProfile.path, sessionTargets: [] };
   }
   return invoke<ExecutionStatus>("execution_status");
+}
+
+export async function pickExecutable(filterName: string): Promise<string | null> {
+  if (!isTauriRuntime()) return "C:\\Windows\\System32\\notepad.exe";
+  const selected = await open({
+    directory: false,
+    multiple: false,
+    filters: [{ name: filterName, extensions: ["exe"] }],
+  });
+  return typeof selected === "string" ? selected : null;
+}
+
+export async function loadInstalledFontFamilies(): Promise<ReadonlyArray<string>> {
+  if (!isTauriRuntime()) {
+    return ["Segoe UI", "Arial", "Calibri", "Cambria", "Consolas", "맑은 고딕", "Microsoft YaHei UI", "Microsoft JhengHei UI", "Meiryo", "Tahoma"];
+  }
+  return invoke<string[]>("installed_font_families");
 }
 
 export async function setSessionAutostart(enabled: boolean): Promise<boolean> {

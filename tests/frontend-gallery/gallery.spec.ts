@@ -78,13 +78,17 @@ test("profile editor categories and collections remain interactive", async ({ pa
   const pixelLayout = page.getByRole("group", { name: "사용자 지정 픽셀 배열" });
   await pixelLayout.getByRole("checkbox").check();
   await expect(pixelLayout.getByRole("spinbutton")).toHaveCount(6);
+  const substitutionsBefore = await page.getByRole("combobox", { name: "원본 글꼴" }).count();
+  await page.getByRole("button", { name: "글꼴 대체 추가" }).click();
+  await expect(page.getByRole("combobox", { name: "원본 글꼴" })).toHaveCount(substitutionsBefore + 1);
 
   await page.getByRole("button", { name: "글꼴별 설정" }).click();
-  await page.getByRole("textbox", { name: "추가할 글꼴 이름" }).fill("Test Font");
-  await page.getByRole("button", { name: "글꼴 추가" }).click();
-  await expect(page.getByText("Test Font", { exact: true })).toBeVisible();
+  await page.getByRole("combobox", { name: "설치된 글꼴 선택" }).selectOption("Arial");
+  await expect(page.locator(".individual-row > strong").filter({ hasText: "Arial" })).toBeVisible();
 
   await page.getByRole("button", { name: "포함·제외" }).click();
+  await page.getByRole("combobox", { name: "제외 글꼴 · 목록에 글꼴 추가" }).selectOption("Calibri");
+  await expect(page.locator(".font-list-editor li > span").filter({ hasText: "Calibri" })).toBeVisible();
   await expect(page.getByText("제외 프로그램", { exact: true })).toBeVisible();
   await expect(page.getByText("주입 해제 DLL", { exact: true })).toBeVisible();
   await expect(page.getByText("글꼴 대체 제외 모듈", { exact: true })).toBeVisible();
@@ -109,9 +113,11 @@ test("execution mode controls remain interactive without enabling system modes",
   const autostart = page.getByRole("checkbox");
   await autostart.check();
   await expect(page.getByText("로그인할 때 트레이로 시작합니다.")).toBeVisible();
-  await page.getByRole("textbox", { name: "실행 파일의 전체 경로" }).fill("C:\\Windows\\System32\\notepad.exe");
+  await expect(page.getByRole("textbox", { name: "실행 파일의 전체 경로" })).toHaveCount(0);
+  await page.getByRole("button", { name: "실행 파일 선택" }).click();
+  await expect(page.getByTitle("C:\\Windows\\System32\\notepad.exe", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "트레이에 등록" }).click();
-  await expect(page.getByText("C:\\Windows\\System32\\notepad.exe", { exact: true })).toBeVisible();
+  await expect(page.locator(".registered-launchers li code").filter({ hasText: "C:\\Windows\\System32\\notepad.exe" })).toBeVisible();
   await page.getByRole("button", { name: "등록 프로그램 실행" }).click();
   await expect(page.getByText(/등록 프로그램 1개를 MacType로 시작/)).toBeVisible();
   await page.getByRole("button", { name: "MacType로 실행" }).click();

@@ -11,10 +11,14 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $views = @('overview', 'profiles', 'execution', 'diagnostics')
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $resolvedExecutable = (Resolve-Path -LiteralPath $Executable).Path
 $resolvedPreviewHelper = (Resolve-Path -LiteralPath $PreviewHelper).Path
 $resolvedInstallation = (Resolve-Path -LiteralPath $InstallationRoot).Path
 $manualTarget = Join-Path (Split-Path -Parent $resolvedPreviewHelper) 'manual-launch-target.exe'
+if (-not (Test-Path -LiteralPath $manualTarget)) {
+    $manualTarget = Join-Path $root 'build\preview-helper\Release\manual-launch-target.exe'
+}
 if (-not (Test-Path -LiteralPath $manualTarget)) { throw "Manual launch smoke target is missing: $manualTarget" }
 $markerRoot = Join-Path $env:TEMP ("mactype-window-smoke-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $markerRoot | Out-Null

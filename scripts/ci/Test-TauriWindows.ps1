@@ -33,7 +33,11 @@ foreach ($required in @('MacLoader.exe', 'MacType.dll')) {
     if (-not (Test-Path -LiteralPath (Join-Path $fixtureRoot $required))) { throw "Installation smoke fixture is missing $required." }
 }
 $sourceIni = Join-Path $resolvedInstallation 'ini'
-if (Test-Path -LiteralPath $sourceIni) { Copy-Item -LiteralPath (Join-Path $sourceIni '*') -Destination (Join-Path $fixtureRoot 'ini') -Recurse -Force }
+if (Test-Path -LiteralPath $sourceIni) {
+    Get-ChildItem -LiteralPath $sourceIni -Force | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $fixtureRoot 'ini') -Recurse -Force
+    }
+}
 $defaultProfile = Join-Path $fixtureRoot 'ini\Default.ini'
 if (-not (Test-Path -LiteralPath $defaultProfile)) { "[FreeType]`r`nNormalWeight=0`r`nGammaValue=1.0`r`n" | Set-Content -LiteralPath $defaultProfile -Encoding utf8NoBOM }
 $globalConfig = Join-Path $fixtureRoot 'MacType.ini'

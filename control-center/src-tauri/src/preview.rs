@@ -238,6 +238,7 @@ impl HelperProcess {
 pub struct PreviewManager {
     helper: Option<HelperProcess>,
     install_root: Option<PathBuf>,
+    core_version: Option<u32>,
     next_request_id: u64,
     diagnostics: VecDeque<String>,
 }
@@ -267,7 +268,14 @@ impl PreviewManager {
             helper.stop(self.next_id());
             return Err("preview helper did not acknowledge the protocol".to_owned());
         }
+        let metadata: HelloMetadata =
+            serde_json::from_slice(&hello.json).map_err(|error| error.to_string())?;
+        if metadata.protocol_version != VERSION || metadata.core_version == 0 {
+            helper.stop(self.next_id());
+            return Err("preview helper returned invalid core metadata".to_owned());
+        }
         self.install_root = Some(install_root.to_path_buf());
+        self.core_version = Some(metadata.core_version);
         self.helper = Some(helper);
         Ok(())
     }
@@ -281,6 +289,7 @@ impl PreviewManager {
             helper.stop(id);
         }
         self.install_root = None;
+        self.core_version = None;
     }
 
     fn request_built<F>(
@@ -332,6 +341,20 @@ impl PreviewManager {
         result
     }
 
+    pub fn probe_core_version(&mut self, install_root: &Path) -> Result<u32, String> {
+        if self.install_root.as_deref() != Some(install_root) || self.helper.is_none() {
+            self.stop();
+            self.start(install_root)?;
+        }
+        self.core_version
+            .ok_or_else(|| "preview helper did not report a core version".to_owned())
+    }
+
+    pub fn reconnect(&mut self, install_root: &Path) -> Result<u32, String> {
+        self.stop();
+        self.probe_core_version(install_root)
+    }
+
     pub fn force_terminate_for_ci(&mut self) -> Result<(), String> {
         let helper = self
             .helper
@@ -341,6 +364,13 @@ impl PreviewManager {
         helper.child.wait().map_err(|error| error.to_string())?;
         Ok(())
     }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HelloMetadata {
+    protocol_version: u16,
+    core_version: u32,
 }
 
 impl Drop for PreviewManager {
@@ -489,5 +519,16 @@ mod tests {
         assert!(read_frame(&mut bytes.as_slice())
             .unwrap_err()
             .contains("size limit"));
+    }
+
+    #[test]
+    fn hello_metadata_requires_the_real_core_version() {
+        let metadata: HelloMetadata = serde_json::from_slice(
+            br#"{"protocolVersion":1,"coreVersion":20220712,"dllGetVersion":true}"#,
+        )
+        .unwrap();
+        assert_eq!(metadata.protocol_version, VERSION);
+        assert_eq!(metadata.core_version, 20220712);
+        assert!(serde_json::from_slice::<HelloMetadata>(br#"{"protocolVersion":1}"#).is_err());
     }
 }

@@ -5,7 +5,7 @@ import { OverviewPage } from "../pages/OverviewPage";
 import { ProfilesPage } from "../pages/ProfilesPage";
 import { ExecutionPage } from "../pages/ExecutionPage";
 import { fallbackStatus, type InstallationStatus, type ViewId } from "./model";
-import { loadLaunchContext, reportFrontendFailure, reportFrontendReady, scanInstallation, verifyTrayModeForCi } from "./tauri";
+import { loadLaunchContext, reconnectPreview, rediscoverInstallation, reportFrontendFailure, reportFrontendReady, scanInstallation, verifyTrayModeForCi } from "./tauri";
 import { localeOptions, useI18n, type Locale } from "../i18n/i18n";
 
 interface State {
@@ -80,7 +80,20 @@ export function App() {
     if (state.view === "profiles") return <ProfilesPage ciSmoke={state.ciSmoke} onPreviewReady={() => void reportFrontendReady("profiles")} />;
     if (state.view === "execution") return <ExecutionPage ciSmoke={state.ciSmoke} onReady={() => void reportFrontendReady("execution")} />;
     if (state.view === "diagnostics") return <DiagnosticsPage status={state.status} />;
-    return <OverviewPage status={state.status} onOpenProfiles={() => dispatch({ type: "navigate", view: "profiles" })} />;
+    return <OverviewPage
+      status={state.status}
+      onOpenProfiles={() => dispatch({ type: "navigate", view: "profiles" })}
+      onReconnect={async () => {
+        const status = await reconnectPreview();
+        dispatch({ type: "status", status });
+        return status;
+      }}
+      onRelocate={async () => {
+        const status = await rediscoverInstallation();
+        dispatch({ type: "status", status });
+        return status;
+      }}
+    />;
   }, [state.ciSmoke, state.status, state.view]);
 
   return (

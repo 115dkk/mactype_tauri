@@ -1,9 +1,10 @@
-import { AlertTriangle, CopyPlus, Plus, RotateCcw, Save, Search, SlidersHorizontal, Trash2 } from "lucide-react";
+import { AlertTriangle, CopyPlus, Play, Plus, RotateCcw, Save, Search, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { settingsSchema } from "../generated/settings";
-import type { IndividualSetting, PreviewRequest, PreviewResult, ProfileEntry, ProfileSnapshot } from "../app/model";
+import type { AdvancedProfile, IndividualSetting, PreviewRequest, PreviewResult, ProfileEntry, ProfileSnapshot } from "../app/model";
 import { settingMessageKey, settingOptionMessageKey, useI18n } from "../i18n/i18n";
 import {
+  applyOpenProfile,
   duplicateProfile,
   forcePreviewCrashForCi,
   listProfiles,
@@ -15,12 +16,13 @@ import {
   saveProfile,
   setNativePreview,
   updateProfileIndividuals,
+  updateProfileAdvanced,
   updateProfileList,
   updateProfileSetting,
   verifyProfileWorkflowForCi,
 } from "../app/tauri";
 
-type GroupId = "basic" | "shape" | "lcd" | "individual" | "lists";
+type GroupId = "basic" | "shape" | "lcd" | "advanced" | "individual" | "lists";
 
 interface ProfilesPageProps {
   ciSmoke?: boolean;
@@ -33,6 +35,7 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
     { id: "basic", label: t("group.basic.label"), description: t("group.basic.description") },
     { id: "shape", label: t("group.shape.label"), description: t("group.shape.description") },
     { id: "lcd", label: t("group.lcd.label"), description: t("group.lcd.description") },
+    { id: "advanced", label: t("group.advanced.label"), description: t("group.advanced.description") },
     { id: "individual", label: t("group.individual.label"), description: t("group.individual.description") },
     { id: "lists", label: t("group.lists.label"), description: t("group.lists.description") },
   ], [t]);
@@ -45,6 +48,8 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
     { kind: "includeFonts", label: t("list.includeFonts.label"), help: t("list.includeFonts.help") },
     { kind: "excludeModules", label: t("list.excludeModules.label"), help: t("list.excludeModules.help") },
     { kind: "includeModules", label: t("list.includeModules.label"), help: t("list.includeModules.help") },
+    { kind: "unloadDlls", label: t("list.unloadDlls.label"), help: t("list.unloadDlls.help") },
+    { kind: "excludeSubstitutionModules", label: t("list.excludeSubstitutionModules.label"), help: t("list.excludeSubstitutionModules.help") },
   ] as const, [t]);
   const [profile, setProfile] = useState<ProfileSnapshot | null>(null);
   const [profiles, setProfiles] = useState<ReadonlyArray<ProfileEntry>>([]);
@@ -53,6 +58,7 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
   );
   const [individuals, setIndividuals] = useState<IndividualSetting[]>([]);
   const [listDrafts, setListDrafts] = useState<Record<string, string>>({});
+  const [advanced, setAdvanced] = useState<AdvancedProfile>({ shadow: null, lcdFilterWeight: null, pixelLayout: null, displayAffinity: [], fontSubstitutes: [], infinalityGammaCorrection: [0, 100], infinalityFilterParams: [11, 22, 38, 22, 11] });
   const [activeGroup, setActiveGroup] = useState<GroupId>("basic");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [copyName, setCopyName] = useState("");
@@ -66,6 +72,8 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [appliedProfile, setAppliedProfile] = useState<string | null>(null);
   const [nativeVisible, setNativeVisible] = useState(false);
   const [query, setQuery] = useState("");
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -91,6 +99,18 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
       includeFonts: opened.lists.includeFonts.join("\n"),
       excludeModules: opened.lists.excludeModules.join("\n"),
       includeModules: opened.lists.includeModules.join("\n"),
+      unloadDlls: opened.lists.unloadDlls.join("\n"),
+      excludeSubstitutionModules: opened.lists.excludeSubstitutionModules.join("\n"),
+    });
+    setAdvanced({
+      ...opened.advanced,
+      shadow: opened.advanced.shadow ? { ...opened.advanced.shadow } : null,
+      lcdFilterWeight: opened.advanced.lcdFilterWeight ? [...opened.advanced.lcdFilterWeight] : null,
+      pixelLayout: opened.advanced.pixelLayout ? [...opened.advanced.pixelLayout] : null,
+      displayAffinity: [...opened.advanced.displayAffinity],
+      fontSubstitutes: [...opened.advanced.fontSubstitutes],
+      infinalityGammaCorrection: [...opened.advanced.infinalityGammaCorrection],
+      infinalityFilterParams: [...opened.advanced.infinalityFilterParams],
     });
   }, []);
 
@@ -221,6 +241,19 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
     }
   };
 
+  const apply = async () => {
+    setApplying(true);
+    try {
+      const applied = await applyOpenProfile();
+      setAppliedProfile(applied.sourceProfile);
+      setPreviewError(null);
+    } catch (error: unknown) {
+      setPreviewError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setApplying(false);
+    }
+  };
+
   const commitIndividuals = async (next: IndividualSetting[]) => {
     setIndividuals(next);
     try {
@@ -247,6 +280,19 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
       setPreviewError(error instanceof Error ? error.message : String(error));
     }
   };
+
+  const commitAdvanced = async (next: AdvancedProfile) => {
+    setAdvanced(next);
+    try {
+      const snapshot = await updateProfileAdvanced(next);
+      if (snapshot) setProfile(snapshot);
+    } catch (error: unknown) {
+      setPreviewError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const updateVector = (values: ReadonlyArray<number>, index: number, value: number) => values.map((current, currentIndex) => currentIndex === index ? value : current);
+  const colorValue = (value: number) => `#${value.toString(16).padStart(6, "0")}`;
 
   const toggleNativePreview = async () => {
     try {
@@ -275,8 +321,11 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
           <input aria-label={t("profiles.copyName")} onChange={(event) => setCopyName(event.target.value)} placeholder={t("profiles.newName")} value={copyName} />
           <button className="button secondary" disabled={!profile || !copyName.trim()} onClick={() => void duplicate()} type="button"><CopyPlus aria-hidden="true" size={16} /> {t("profiles.duplicate")}</button>
           <button className="button primary" disabled={!profile || dirtyCount === 0 || saving} onClick={() => void save()} type="button"><Save aria-hidden="true" size={17} /> {saving ? t("profiles.saving") : t("profiles.save")}</button>
+          <button className="button primary" disabled={!profile || applying} onClick={() => void apply()} type="button"><Play aria-hidden="true" size={17} /> {applying ? t("profiles.applying") : t("profiles.apply")}</button>
         </div>
       </header>
+
+      {appliedProfile && <p aria-live="polite" className="success-message profile-apply-message" data-operation="apply-profile">{t("profiles.applied", { name: appliedProfile.split(/[\\/]/).pop() ?? appliedProfile })}</p>}
 
       <div className="profile-layout">
         <aside className="settings-index" aria-label={t("profiles.sections")}>
@@ -289,7 +338,7 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
           <div className="settings-form">
             <div className="section-heading"><div><h2>{query ? t("profiles.searchResults") : activeDefinition.label}</h2><p>{query ? t("profiles.searchDescription", { query }) : activeDefinition.description}</p></div></div>
 
-            {(query || activeGroup === "basic" || activeGroup === "shape" || activeGroup === "lcd") && filteredSettings.map((setting) => {
+            {(query || activeGroup === "basic" || activeGroup === "shape" || activeGroup === "lcd" || activeGroup === "advanced") && filteredSettings.map((setting) => {
               const value = values[setting.id] ?? setting.default;
               const dirty = profile?.dirtyKeys.includes(setting.id) ?? false;
               const settingLabel = t(settingMessageKey(setting.id, "label"));
@@ -311,6 +360,36 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
                 </div>
               );
             })}
+
+            {!query && activeGroup === "advanced" && (
+              <div className="advanced-editor">
+                <fieldset>
+                  <legend>{t("advanced.shadow")}</legend><p>{t("advanced.shadowHelp")}</p>
+                  <label className="checkbox-row"><input checked={advanced.shadow !== null} onChange={(event) => void commitAdvanced({ ...advanced, shadow: event.target.checked ? { offsetX: 1, offsetY: 1, darkAlpha: 4, darkColor: 0, lightAlpha: 4, lightColor: 0 } : null })} type="checkbox" /> {t("advanced.enableCustom")}</label>
+                  {advanced.shadow && <div className="advanced-grid">{(["offsetX", "offsetY", "darkAlpha", "lightAlpha"] as const).map((key) => <label key={key}><span>{t(`advanced.${key}`)}</span><input max={key.includes("Alpha") ? 255 : 128} min={key.includes("Alpha") ? 0 : -128} onChange={(event) => setAdvanced({ ...advanced, shadow: { ...advanced.shadow!, [key]: Number(event.target.value) } })} onBlur={() => void commitAdvanced(advanced)} type="number" value={advanced.shadow?.[key] ?? 0} /></label>)}{(["darkColor", "lightColor"] as const).map((key) => <label key={key}><span>{t(`advanced.${key}`)}</span><input onChange={(event) => void commitAdvanced({ ...advanced, shadow: { ...advanced.shadow!, [key]: Number.parseInt(event.target.value.slice(1), 16) } })} type="color" value={colorValue(advanced.shadow?.[key] ?? 0)} /></label>)}</div>}
+                </fieldset>
+                <fieldset>
+                  <legend>{t("advanced.lcdWeight")}</legend><p>{t("advanced.lcdWeightHelp")}</p>
+                  <label className="checkbox-row"><input checked={advanced.lcdFilterWeight !== null} onChange={(event) => void commitAdvanced({ ...advanced, lcdFilterWeight: event.target.checked ? [8, 77, 86, 77, 8] : null })} type="checkbox" /> {t("advanced.enableCustom")}</label>
+                  {advanced.lcdFilterWeight && <div className="vector-grid">{advanced.lcdFilterWeight.map((value, index) => <label key={index}><span>{index + 1}</span><input max={255} min={0} onChange={(event) => setAdvanced({ ...advanced, lcdFilterWeight: updateVector(advanced.lcdFilterWeight!, index, Number(event.target.value)) })} onBlur={() => void commitAdvanced(advanced)} type="number" value={value} /></label>)}</div>}
+                </fieldset>
+                <fieldset>
+                  <legend>{t("advanced.pixelLayout")}</legend><p>{t("advanced.pixelLayoutHelp")}</p>
+                  <label className="checkbox-row"><input checked={advanced.pixelLayout !== null} onChange={(event) => void commitAdvanced({ ...advanced, pixelLayout: event.target.checked ? [-21, 0, 0, 0, 21, 0] : null })} type="checkbox" /> {t("advanced.enableCustom")}</label>
+                  {advanced.pixelLayout && <div className="vector-grid">{advanced.pixelLayout.map((value, index) => <label key={index}><span>{["R x", "R y", "G x", "G y", "B x", "B y"][index]}</span><input max={127} min={-128} onChange={(event) => setAdvanced({ ...advanced, pixelLayout: updateVector(advanced.pixelLayout!, index, Number(event.target.value)) })} onBlur={() => void commitAdvanced(advanced)} type="number" value={value} /></label>)}</div>}
+                </fieldset>
+                <fieldset className="advanced-text-fields">
+                  <legend>{t("advanced.routing")}</legend>
+                  <label><span>{t("advanced.displayAffinity")}</span><small>{t("advanced.displayAffinityHelp")}</small><input onChange={(event) => setAdvanced({ ...advanced, displayAffinity: event.target.value.split(",").map((part) => Number(part.trim())).filter(Number.isInteger) })} onBlur={() => void commitAdvanced(advanced)} type="text" value={advanced.displayAffinity.join(", ")} /></label>
+                  <label><span>{t("advanced.fontSubstitutes")}</span><small>{t("advanced.fontSubstitutesHelp")}</small><textarea onChange={(event) => setAdvanced({ ...advanced, fontSubstitutes: event.target.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) })} onBlur={() => void commitAdvanced(advanced)} rows={5} value={advanced.fontSubstitutes.join("\n")} /></label>
+                </fieldset>
+                <fieldset>
+                  <legend>Infinality</legend>
+                  <p>{t("advanced.infinalityVectorsHelp")}</p>
+                  <div className="vector-grid">{advanced.infinalityGammaCorrection.map((value, index) => <label key={`gamma-${index}`}><span>{t("advanced.gammaCorrection")} {index + 1}</span><input onChange={(event) => setAdvanced({ ...advanced, infinalityGammaCorrection: updateVector(advanced.infinalityGammaCorrection, index, Number(event.target.value)) })} onBlur={() => void commitAdvanced(advanced)} type="number" value={value} /></label>)}{advanced.infinalityFilterParams.map((value, index) => <label key={`filter-${index}`}><span>{t("advanced.filterParams")} {index + 1}</span><input max={255} min={0} onChange={(event) => setAdvanced({ ...advanced, infinalityFilterParams: updateVector(advanced.infinalityFilterParams, index, Number(event.target.value)) })} onBlur={() => void commitAdvanced(advanced)} type="number" value={value} /></label>)}</div>
+                </fieldset>
+              </div>
+            )}
 
             {!query && activeGroup === "individual" && (
               <div className="collection-editor">

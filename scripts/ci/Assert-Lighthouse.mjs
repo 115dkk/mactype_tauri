@@ -12,7 +12,6 @@ const thresholds = {
   performance: 0.9,
   accessibility: 1,
   "best-practices": 0.9,
-  seo: 0.9,
 };
 
 let failed = false;

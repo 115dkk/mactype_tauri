@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Minimum capability set for the main control center window",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "dialog:allow-open"]
 }

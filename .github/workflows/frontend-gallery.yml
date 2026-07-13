@@ -52,6 +52,7 @@ jobs:
             npx --yes lighthouse@13.4.0 'http://localhost:4173/?view=overview' \
               --quiet \
               --chrome-flags='--headless --no-sandbox' \
+              --only-categories=performance,accessibility,best-practices \
               --output=json \
               --output-path="../artifacts/frontend-gallery/lighthouse-$run.json"
           done

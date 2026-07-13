@@ -1,5 +1,6 @@
 mod diagnostics;
 mod execution;
+mod fonts;
 mod generated_settings;
 mod preview;
 mod profile;
@@ -168,6 +169,11 @@ fn launch_context() -> LaunchContext {
         ci_smoke: env::var_os("MACTYPE_CI_SMOKE_FILE").is_some(),
         tray_start: starts_in_tray(),
     }
+}
+
+#[tauri::command]
+fn installed_font_families() -> Result<Vec<String>, String> {
+    fonts::installed_families()
 }
 
 #[tauri::command]
@@ -766,10 +772,12 @@ fn frontend_failed(app: AppHandle, view: String, message: String) -> Result<(), 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(ProfileState::default())
         .manage(PreviewState::default())
         .invoke_handler(tauri::generate_handler![
             launch_context,
+            installed_font_families,
             set_application_locale,
             scan_installation,
             rediscover_installation,

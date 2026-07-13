@@ -1,7 +1,7 @@
-import { AlertTriangle, Check, Play, RefreshCw, ShieldAlert, Trash2, UserPlus } from "lucide-react";
+import { AlertTriangle, Check, FileCode2, FolderOpen, Play, RefreshCw, ShieldAlert, Trash2, UserPlus } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { ExecutionStatus } from "../app/model";
-import { launchRegisteredTargets, launchTargetWithMactype, loadExecutionStatus, registerSessionTarget, removeSessionTarget, reportFrontendFailure, setSessionAutostart, verifyInjectionWorkflowForCi } from "../app/tauri";
+import { launchRegisteredTargets, launchTargetWithMactype, loadExecutionStatus, pickExecutable, registerSessionTarget, removeSessionTarget, reportFrontendFailure, setSessionAutostart, verifyInjectionWorkflowForCi } from "../app/tauri";
 import { useI18n } from "../i18n/i18n";
 
 export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean; onReady?: () => void }) {
@@ -58,6 +58,16 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
   };
 
   const argumentsFromEditor = () => argumentsText.split(/\r?\n/).map((argument) => argument.trim()).filter(Boolean);
+
+  const chooseTarget = async () => {
+    try {
+      const selected = await pickExecutable(t("execution.executableFilter"));
+      if (selected) setTarget(selected);
+      setError(null);
+    } catch (caught: unknown) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
 
   const register = async () => {
     try {
@@ -116,7 +126,17 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
       <section className="section-block" aria-labelledby="manual-title">
         <div className="section-heading"><div><h2 id="manual-title">{t("execution.manualTitle")}</h2><p>{t("execution.manualDescription")}</p></div></div>
         <div className="manual-launcher">
-          <label><span>{t("execution.path")}</span><input onChange={(event) => setTarget(event.target.value)} placeholder="C:\\Windows\\System32\\notepad.exe" type="text" value={target} /></label>
+          <div className="target-picker">
+            <span>{t("execution.path")}</span>
+            <div className="target-selection" data-empty={!target}>
+              <FileCode2 aria-hidden="true" size={22} />
+              <div>
+                <strong>{target.split(/[\\/]/).pop() || t("execution.noExecutableSelected")}</strong>
+                {target && <code title={target}>{target}</code>}
+              </div>
+              <button className="button secondary" onClick={() => void chooseTarget()} type="button"><FolderOpen aria-hidden="true" size={17} /> {target ? t("execution.changeExecutable") : t("execution.chooseExecutable")}</button>
+            </div>
+          </div>
           <label><span>{t("execution.arguments")}</span><textarea onChange={(event) => setArgumentsText(event.target.value)} placeholder={t("execution.argumentsPlaceholder")} rows={3} value={argumentsText} /></label>
           <div className="manual-actions"><button className="button secondary" disabled={!status?.injectionReady || !target.trim()} onClick={() => void register()} type="button"><UserPlus aria-hidden="true" size={17} /> {t("execution.register")}</button><button className="button primary" disabled={!status?.manualLauncherAvailable || !target.trim()} onClick={() => void launch()} type="button"><Play aria-hidden="true" size={17} /> {t("execution.launch")}</button></div>
         </div>

@@ -343,7 +343,7 @@
   "advanced.displayAffinity": "顯示器關聯",
   "advanced.displayAffinityHelp": "以逗號分隔的顯示器 ID。",
   "advanced.fontSubstitutes": "字型替代對應",
-  "advanced.fontSubstitutesHelp": "每行輸入一個 原字型=替代字型。",
+  "advanced.fontSubstitutesHelp": "從已安裝字型中選擇原始字型和替代字型。",
   "advanced.infinalityVectorsHelp": "以空格分隔儲存的 Infinality 向量設定。",
   "advanced.gammaCorrection": "Gamma 校正",
   "advanced.filterParams": "濾鏡係數",

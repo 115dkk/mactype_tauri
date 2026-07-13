@@ -343,7 +343,7 @@
   "advanced.displayAffinity": "디스플레이 선호도",
   "advanced.displayAffinityHelp": "쉼표로 구분한 디스플레이 ID입니다.",
   "advanced.fontSubstitutes": "글꼴 대체 매핑",
-  "advanced.fontSubstitutesHelp": "한 줄에 원본=대체 글꼴 형식으로 입력합니다.",
+  "advanced.fontSubstitutesHelp": "설치된 글꼴 목록에서 원본과 대체 글꼴을 선택합니다.",
   "advanced.infinalityVectorsHelp": "공백으로 저장되는 Infinality 벡터 설정입니다.",
   "advanced.gammaCorrection": "감마 보정",
   "advanced.filterParams": "필터 계수",

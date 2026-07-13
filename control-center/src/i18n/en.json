@@ -343,7 +343,7 @@
   "advanced.displayAffinity": "Display affinity",
   "advanced.displayAffinityHelp": "Comma-separated display IDs.",
   "advanced.fontSubstitutes": "Font substitution mappings",
-  "advanced.fontSubstitutesHelp": "Enter one source=target font mapping per line.",
+  "advanced.fontSubstitutesHelp": "Choose the source and replacement from installed fonts.",
   "advanced.infinalityVectorsHelp": "Infinality vector settings stored as space-separated values.",
   "advanced.gammaCorrection": "Gamma correction",
   "advanced.filterParams": "Filter coefficients",

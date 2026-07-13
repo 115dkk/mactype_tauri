@@ -343,7 +343,7 @@
   "advanced.displayAffinity": "ディスプレイの優先指定",
   "advanced.displayAffinityHelp": "カンマ区切りのディスプレイ ID。",
   "advanced.fontSubstitutes": "フォント置換マッピング",
-  "advanced.fontSubstitutesHelp": "1 行に 元フォント=置換先 を入力します。",
+  "advanced.fontSubstitutesHelp": "インストール済み一覧から置換元と置換先のフォントを選択します。",
   "advanced.infinalityVectorsHelp": "空白区切りで保存される Infinality ベクトル設定です。",
   "advanced.gammaCorrection": "ガンマ補正",
   "advanced.filterParams": "フィルター係数",

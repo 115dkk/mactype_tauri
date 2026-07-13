@@ -343,7 +343,7 @@
   "advanced.displayAffinity": "ارتباط الشاشة",
   "advanced.displayAffinityHelp": "معرّفات الشاشات مفصولة بفواصل.",
   "advanced.fontSubstitutes": "خرائط استبدال الخطوط",
-  "advanced.fontSubstitutesHelp": "أدخل تعيين source=target واحدًا في كل سطر.",
+  "advanced.fontSubstitutesHelp": "اختر الخط الأصلي والخط البديل من الخطوط المثبّتة.",
   "advanced.infinalityVectorsHelp": "إعدادات متجهات Infinality المحفوظة بفواصل مسافة.",
   "advanced.gammaCorrection": "تصحيح جاما",
   "advanced.filterParams": "معاملات المرشح",

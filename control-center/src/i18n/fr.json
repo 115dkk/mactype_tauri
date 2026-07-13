@@ -343,7 +343,7 @@
   "advanced.displayAffinity": "Affinité d’affichage",
   "advanced.displayAffinityHelp": "Identifiants d’écran séparés par des virgules.",
   "advanced.fontSubstitutes": "Substitutions de polices",
-  "advanced.fontSubstitutesHelp": "Une substitution source=cible par ligne.",
+  "advanced.fontSubstitutesHelp": "Choisissez les polices source et de remplacement parmi les polices installées.",
   "advanced.infinalityVectorsHelp": "Vecteurs Infinality enregistrés avec des espaces.",
   "advanced.gammaCorrection": "Correction gamma",
   "advanced.filterParams": "Coefficients du filtre",

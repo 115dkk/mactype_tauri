@@ -343,7 +343,7 @@
   "advanced.displayAffinity": "Afinidad de pantalla",
   "advanced.displayAffinityHelp": "ID de pantalla separados por comas.",
   "advanced.fontSubstitutes": "Mapas de sustitución de fuentes",
-  "advanced.fontSubstitutesHelp": "Una asignación origen=destino por línea.",
+  "advanced.fontSubstitutesHelp": "Seleccione las fuentes original y de sustitución entre las instaladas.",
   "advanced.infinalityVectorsHelp": "Vectores Infinality guardados con espacios.",
   "advanced.gammaCorrection": "Corrección gamma",
   "advanced.filterParams": "Coeficientes del filtro",

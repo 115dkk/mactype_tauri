@@ -343,7 +343,7 @@
   "advanced.displayAffinity": "Anzeigeaffinität",
   "advanced.displayAffinityHelp": "Kommagetrennte Anzeige-IDs.",
   "advanced.fontSubstitutes": "Schriftersetzungen",
-  "advanced.fontSubstitutesHelp": "Eine Zuordnung Quelle=Ziel pro Zeile.",
+  "advanced.fontSubstitutesHelp": "Quell- und Ersatzschriftart aus den installierten Schriftarten auswählen.",
   "advanced.infinalityVectorsHelp": "Mit Leerzeichen gespeicherte Infinality-Vektoren.",
   "advanced.gammaCorrection": "Gammakorrektur",
   "advanced.filterParams": "Filterkoeffizienten",

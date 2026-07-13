@@ -343,7 +343,7 @@
   "advanced.displayAffinity": "Afinidade de ecrã",
   "advanced.displayAffinityHelp": "IDs de ecrã separados por vírgulas.",
   "advanced.fontSubstitutes": "Mapeamentos de substituição de tipos de letra",
-  "advanced.fontSubstitutesHelp": "Um mapeamento origem=destino por linha.",
+  "advanced.fontSubstitutesHelp": "Selecione os tipos de letra de origem e substituição entre os instalados.",
   "advanced.infinalityVectorsHelp": "Vetores Infinality guardados com espaços.",
   "advanced.gammaCorrection": "Correção de gama",
   "advanced.filterParams": "Coeficientes do filtro",

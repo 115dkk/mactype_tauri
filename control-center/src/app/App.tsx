@@ -122,7 +122,12 @@ export function App() {
               ))}
             </select>
           </label>
-          <button className="theme-toggle" onClick={() => dispatch({ type: "toggle-theme" })} type="button">
+          <button
+            aria-label={state.theme === "light" ? t("app.themeDark") : t("app.themeLight")}
+            className="theme-toggle"
+            onClick={() => dispatch({ type: "toggle-theme" })}
+            type="button"
+          >
             {state.theme === "light" ? <Moon aria-hidden="true" size={17} /> : <Sun aria-hidden="true" size={17} />}
             <span>{state.theme === "light" ? t("app.themeDark") : t("app.themeLight")}</span>
           </button>

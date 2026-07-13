@@ -112,6 +112,7 @@ test("language setting switches every supported locale and persists", async ({ p
   }
 
   await page.locator(".language-control select").selectOption("en");
+  await expect(page.getByRole("button", { name: "Dark theme" })).toBeVisible();
 
   await page.goto("/?view=overview&gallery=1", { waitUntil: "networkidle" });
   await expect(page.getByRole("combobox", { name: "Display language" })).toHaveValue("en");

@@ -64,6 +64,49 @@ fn requested_view() -> String {
     "overview".to_owned()
 }
 
+fn tray_menu_labels(locale: &str) -> (&'static str, &'static str, &'static str) {
+    match locale {
+        "en" => ("Open Control Center", "Hide window", "Quit"),
+        "zh-CN" => ("显示控制中心", "隐藏到托盘", "退出"),
+        "zh-TW" => ("顯示控制中心", "隱藏至系統匣", "結束"),
+        "ja" => ("コントロールセンターを開く", "ウィンドウを隠す", "終了"),
+        "fr" => (
+            "Ouvrir le Centre de contrôle",
+            "Masquer la fenêtre",
+            "Quitter",
+        ),
+        "de" => ("Kontrollzentrum öffnen", "Fenster ausblenden", "Beenden"),
+        "es" => ("Abrir el Centro de control", "Ocultar ventana", "Salir"),
+        "pt" => ("Abrir o Centro de Controlo", "Ocultar janela", "Sair"),
+        "ar" => ("فتح مركز التحكم", "إخفاء النافذة", "إنهاء"),
+        _ => ("Control Center 열기", "창 숨기기", "종료"),
+    }
+}
+
+#[tauri::command]
+fn set_application_locale(app: AppHandle, locale: String) -> Result<(), String> {
+    use tauri::menu::{Menu, MenuItem};
+
+    if !matches!(
+        locale.as_str(),
+        "ko" | "en" | "zh-CN" | "zh-TW" | "ja" | "fr" | "de" | "es" | "pt" | "ar"
+    ) {
+        return Err("unsupported application locale".to_owned());
+    }
+    let (show_label, hide_label, quit_label) = tray_menu_labels(&locale);
+    let show = MenuItem::with_id(&app, "show", show_label, true, None::<&str>)
+        .map_err(|error| error.to_string())?;
+    let hide = MenuItem::with_id(&app, "hide", hide_label, true, None::<&str>)
+        .map_err(|error| error.to_string())?;
+    let quit = MenuItem::with_id(&app, "quit", quit_label, true, None::<&str>)
+        .map_err(|error| error.to_string())?;
+    let menu = Menu::with_items(&app, &[&show, &hide, &quit]).map_err(|error| error.to_string())?;
+    let tray = app
+        .tray_by_id("main")
+        .ok_or_else(|| "Control Center tray is not available".to_owned())?;
+    tray.set_menu(Some(menu)).map_err(|error| error.to_string())
+}
+
 fn starts_in_tray() -> bool {
     env::args().any(|argument| argument == "--tray")
 }
@@ -450,6 +493,7 @@ pub fn run() {
         .manage(PreviewState::default())
         .invoke_handler(tauri::generate_handler![
             launch_context,
+            set_application_locale,
             scan_installation,
             execution_status,
             set_session_autostart,
@@ -476,11 +520,12 @@ pub fn run() {
                 menu::{Menu, MenuItem},
                 tray::TrayIconBuilder,
             };
-            let show = MenuItem::with_id(app, "show", "Control Center 열기", true, None::<&str>)?;
-            let hide = MenuItem::with_id(app, "hide", "창 숨기기", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "종료", true, None::<&str>)?;
+            let (show_label, hide_label, quit_label) = tray_menu_labels("ko");
+            let show = MenuItem::with_id(app, "show", show_label, true, None::<&str>)?;
+            let hide = MenuItem::with_id(app, "hide", hide_label, true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &hide, &quit])?;
-            let mut tray = TrayIconBuilder::new()
+            let mut tray = TrayIconBuilder::with_id("main")
                 .menu(&menu)
                 .tooltip("MacType Control Center")
                 .show_menu_on_left_click(false)
@@ -524,6 +569,32 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    use super::tray_menu_labels;
+
+    #[test]
+    fn tray_menu_labels_follow_supported_locale() {
+        assert_eq!(
+            tray_menu_labels("en"),
+            ("Open Control Center", "Hide window", "Quit")
+        );
+        assert_eq!(
+            tray_menu_labels("ko"),
+            ("Control Center 열기", "창 숨기기", "종료")
+        );
+        assert_eq!(
+            tray_menu_labels("zh-CN"),
+            ("显示控制中心", "隐藏到托盘", "退出")
+        );
+        assert_eq!(
+            tray_menu_labels("zh-TW"),
+            ("顯示控制中心", "隱藏至系統匣", "結束")
+        );
+        assert_eq!(
+            tray_menu_labels("ar"),
+            ("فتح مركز التحكم", "إخفاء النافذة", "إنهاء")
+        );
+    }
+
     #[test]
     fn unsupported_view_is_not_accepted_by_launch_parser_contract() {
         assert!(!matches!(

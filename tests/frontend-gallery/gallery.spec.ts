@@ -1,31 +1,56 @@
 import { expect, test } from "@playwright/test";
 import path from "node:path";
-import { galleryViews } from "./windows";
+import { galleryLocales, galleryViews } from "./windows";
 
 const galleryRoot = path.resolve(__dirname, "../../artifacts/frontend-gallery");
 
-for (const view of galleryViews) {
-  test(`${view.id} renders without crash or console errors`, async ({ page }, testInfo) => {
-    const failures: string[] = [];
-    page.on("console", (message) => {
-      if (message.type() === "error") failures.push(`console: ${message.text()}`);
-    });
-    page.on("pageerror", (error) => failures.push(`pageerror: ${error.message}`));
-    page.on("crash", () => failures.push("renderer process crashed"));
-
-    await page.goto(`/?view=${view.id}&gallery=1`, { waitUntil: "networkidle" });
-    await expect(page.locator("body")).toHaveAttribute("data-rendered", "true");
-    await expect(page.locator("body")).toHaveAttribute("data-view", view.id);
-    await expect(page.getByRole("heading", { level: 1, name: view.title })).toBeVisible();
-    const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
-    expect(horizontalOverflow, "window must not have horizontal scrolling").toBe(false);
-    expect(failures, failures.join("\n")).toEqual([]);
-
-    await page.screenshot({
-      path: path.join(galleryRoot, `${testInfo.project.name}-${view.id}.png`),
-      fullPage: true,
-    });
+async function overflowingElements(page: import("@playwright/test").Page) {
+  return page.evaluate(() => {
+    const viewportWidth = document.documentElement.clientWidth;
+    const isClippedByAncestor = (element: HTMLElement) => {
+      let parent = element.parentElement;
+      while (parent && parent !== document.body) {
+        const overflowX = window.getComputedStyle(parent).overflowX;
+        if (["auto", "scroll", "hidden", "clip"].includes(overflowX)) return true;
+        parent = parent.parentElement;
+      }
+      return false;
+    };
+    return [...document.querySelectorAll<HTMLElement>("body *")]
+      .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+      .filter(({ element, rect }) => (rect.right > viewportWidth + 1 || rect.left < -1) && !isClippedByAncestor(element))
+      .map(({ element, rect }) => `${element.tagName.toLowerCase()}.${element.className || "-"} [${Math.round(rect.left)}, ${Math.round(rect.right)}]`)
+      .slice(0, 12);
   });
+}
+
+for (const view of galleryViews) {
+  for (const locale of galleryLocales) {
+    test(`${view.id} renders fully in ${locale.id}`, async ({ page }, testInfo) => {
+      const failures: string[] = [];
+      page.on("console", (message) => {
+        if (message.type() === "error") failures.push(`console: ${message.text()}`);
+      });
+      page.on("pageerror", (error) => failures.push(`pageerror: ${error.message}`));
+      page.on("crash", () => failures.push("renderer process crashed"));
+
+      await page.goto(`/?view=${view.id}&gallery=1&lang=${locale.id}`, { waitUntil: "networkidle" });
+      await expect(page.locator("html")).toHaveAttribute("lang", locale.id);
+      await expect(page.locator("html")).toHaveAttribute("dir", locale.direction);
+      await expect(page.locator("body")).toHaveAttribute("data-rendered", "true");
+      await expect(page.locator("body")).toHaveAttribute("data-view", view.id);
+      await expect(page.locator("body")).toHaveAttribute("data-locale", locale.id);
+      await expect(page.getByRole("heading", { level: 1, name: view.title[locale.id] })).toBeVisible();
+      expect(await page.locator("main").innerText()).toMatch(locale.script);
+      expect(await overflowingElements(page), `${locale.id} view must not overflow horizontally`).toEqual([]);
+      expect(failures, failures.join("\n")).toEqual([]);
+
+      await page.screenshot({
+        path: path.join(galleryRoot, `${testInfo.project.name}-${view.id}-${locale.id}.png`),
+        fullPage: true,
+      });
+    });
+  }
 }
 
 test("profile editor categories and collections remain interactive", async ({ page }) => {
@@ -35,7 +60,7 @@ test("profile editor categories and collections remain interactive", async ({ pa
   });
   page.on("pageerror", (error) => failures.push(`pageerror: ${error.message}`));
 
-  await page.goto("/?view=profiles&gallery=1", { waitUntil: "networkidle" });
+  await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "LCD·픽셀 배열" }).click();
   await expect(page.getByRole("heading", { name: "LCD·픽셀 배열" })).toBeVisible();
   await page.getByRole("checkbox", { name: "고급 설정 표시" }).check();
@@ -63,7 +88,7 @@ test("execution mode controls remain interactive without enabling system modes",
   });
   page.on("pageerror", (error) => failures.push(`pageerror: ${error.message}`));
 
-  await page.goto("/?view=execution&gallery=1", { waitUntil: "networkidle" });
+  await page.goto("/?view=execution&gallery=1&lang=ko", { waitUntil: "networkidle" });
   const autostart = page.getByRole("checkbox");
   await autostart.check();
   await expect(page.getByText("로그인할 때 트레이로 시작합니다.")).toBeVisible();
@@ -75,4 +100,21 @@ test("execution mode controls remain interactive without enabling system modes",
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   expect(horizontalOverflow, "execution controls must not have horizontal scrolling").toBe(false);
   expect(failures, failures.join("\n")).toEqual([]);
+});
+
+test("language setting switches every supported locale and persists", async ({ page }, testInfo) => {
+  await page.goto("/?view=overview&gallery=1&lang=ko", { waitUntil: "networkidle" });
+  for (const locale of galleryLocales) {
+    await page.locator(".language-control select").selectOption(locale.id);
+    await expect(page.locator("html")).toHaveAttribute("lang", locale.id);
+    await expect(page.locator("html")).toHaveAttribute("dir", locale.direction);
+    await expect(page.getByRole("heading", { level: 1, name: galleryViews[0].title[locale.id] })).toBeVisible();
+  }
+
+  await page.locator(".language-control select").selectOption("en");
+
+  await page.goto("/?view=overview&gallery=1", { waitUntil: "networkidle" });
+  await expect(page.getByRole("combobox", { name: "Display language" })).toHaveValue("en");
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-language-en.png`), fullPage: true });
 });

@@ -88,20 +88,13 @@ export interface PreviewResult {
   coreVersion: number;
 }
 
-export const navigation: ReadonlyArray<{ id: ViewId; label: string; description: string }> = [
-  { id: "overview", label: "개요", description: "설치와 적용 상태" },
-  { id: "profiles", label: "프로필", description: "렌더링 설정 편집" },
-  { id: "execution", label: "실행", description: "트레이와 수동 실행" },
-  { id: "diagnostics", label: "진단", description: "구성 요소와 로그" },
-];
-
 export const fallbackStatus: InstallationStatus = {
   state: "incomplete",
   root: "C:\\Program Files\\MacType",
   coreVersion: "1.2025.6.9",
   findings: [
-    { label: "32비트 코어", value: "MacType.dll", ok: true },
-    { label: "64비트 코어", value: "MacType64.dll", ok: true },
-    { label: "프리뷰 연결", value: "대기 중", ok: false },
+    { label: "core32", value: "MacType.dll", ok: true },
+    { label: "core64", value: "MacType64.dll", ok: true },
+    { label: "preview", value: "waiting", ok: false },
   ],
 };

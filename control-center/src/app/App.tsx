@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useReducer } from "react";
-import { Activity, FolderCog, Home, Moon, PlayCircle, Sun } from "lucide-react";
+import { Activity, FolderCog, Home, Languages, Moon, PlayCircle, Sun } from "lucide-react";
 import { DiagnosticsPage } from "../pages/DiagnosticsPage";
 import { OverviewPage } from "../pages/OverviewPage";
 import { ProfilesPage } from "../pages/ProfilesPage";
 import { ExecutionPage } from "../pages/ExecutionPage";
-import { fallbackStatus, navigation, type InstallationStatus, type ViewId } from "./model";
+import { fallbackStatus, type InstallationStatus, type ViewId } from "./model";
 import { loadLaunchContext, reportFrontendFailure, reportFrontendReady, scanInstallation, verifyTrayModeForCi } from "./tauri";
+import { localeOptions, useI18n, type Locale } from "../i18n/i18n";
 
 interface State {
   view: ViewId;
@@ -36,8 +37,10 @@ function reducer(state: State, action: Action): State {
 }
 
 const iconByView = { overview: Home, profiles: FolderCog, execution: PlayCircle, diagnostics: Activity } as const;
+const navigation: ReadonlyArray<ViewId> = ["overview", "profiles", "execution", "diagnostics"];
 
 export function App() {
+  const { locale, setLocale, t } = useI18n();
   const [state, dispatch] = useReducer(reducer, {
     view: "overview",
     theme: "light",
@@ -82,7 +85,7 @@ export function App() {
 
   return (
     <div className="app-shell" data-testid="app-shell">
-      <aside className="navigation" aria-label="주 메뉴">
+      <aside className="navigation" aria-label={t("app.mainMenu")}>
         <div className="product-lockup">
           <img src="/mactype-icon.png" alt="" width="32" height="32" />
           <div>
@@ -91,26 +94,39 @@ export function App() {
           </div>
         </div>
         <nav>
-          {navigation.map((item) => {
-            const Icon = iconByView[item.id];
+          {navigation.map((view) => {
+            const Icon = iconByView[view];
             return (
               <button
                 className="nav-item"
-                data-selected={state.view === item.id}
-                key={item.id}
-                onClick={() => dispatch({ type: "navigate", view: item.id })}
+                data-selected={state.view === view}
+                key={view}
+                onClick={() => dispatch({ type: "navigate", view })}
                 type="button"
               >
                 <Icon aria-hidden="true" size={18} strokeWidth={1.8} />
-                <span>{item.label}</span>
+                <span>{t(`nav.${view}`)}</span>
               </button>
             );
           })}
         </nav>
-        <button className="theme-toggle" onClick={() => dispatch({ type: "toggle-theme" })} type="button">
-          {state.theme === "light" ? <Moon aria-hidden="true" size={17} /> : <Sun aria-hidden="true" size={17} />}
-          {state.theme === "light" ? "어두운 테마" : "밝은 테마"}
-        </button>
+        <div className="navigation-preferences">
+          <label className="language-control">
+            <Languages aria-hidden="true" size={17} />
+            <span className="sr-only">{t("app.language")}</span>
+            <select aria-label={t("app.language")} onChange={(event) => setLocale(event.target.value as Locale)} value={locale}>
+              {localeOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {t(option.labelKey)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button className="theme-toggle" onClick={() => dispatch({ type: "toggle-theme" })} type="button">
+            {state.theme === "light" ? <Moon aria-hidden="true" size={17} /> : <Sun aria-hidden="true" size={17} />}
+            <span>{state.theme === "light" ? t("app.themeDark") : t("app.themeLight")}</span>
+          </button>
+        </div>
       </aside>
       <main className="work-area" id="main-content" tabIndex={-1}>
         {page}

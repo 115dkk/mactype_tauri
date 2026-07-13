@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "build": "pnpm generate:settings && tsc -b && vite build",
     "lint": "eslint . --max-warnings 0",
+    "test:i18n": "node ../scripts/ci/Test-I18n.mjs",
     "test:gallery": "playwright test -c ../tests/frontend-gallery/playwright.config.ts",
     "tauri": "tauri"
   },

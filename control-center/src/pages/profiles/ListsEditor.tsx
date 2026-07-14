@@ -25,14 +25,15 @@ export function ListsEditor({ definitions, drafts, fontFamilies, installedFontKe
   return (
     <div className="list-grid">{definitions.map((definition) => {
       if (definition.kind === "excludeFonts" || definition.kind === "includeFonts") {
-        const entries = (drafts[definition.kind] ?? "").split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean);
+        const kind: "excludeFonts" | "includeFonts" = definition.kind;
+        const entries = (drafts[kind] ?? "").split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean);
         const available = fontFamilies.filter((font) => installedFontKeys.has(font.toLocaleLowerCase()) && !entries.some((entry) => entry.toLocaleLowerCase() === font.toLocaleLowerCase()));
         return (
-          <section className="font-list-editor" key={definition.kind}>
+          <section className="font-list-editor" key={kind}>
             <strong>{definition.label}</strong>
             <span>{definition.help}</span>
-            <ul>{entries.map((font) => <li key={font}><span>{fontOptionLabel(font)}</span><button className="icon-button" aria-label={t("profiles.remove", { name: font })} onClick={() => onUpdateFontList(definition.kind, entries.filter((entry) => entry !== font))} type="button"><Trash2 aria-hidden="true" size={14} /></button></li>)}</ul>
-            <select aria-label={`${definition.label} · ${t("profiles.addFontToList")}`} disabled={available.length === 0} onChange={(event) => { if (event.target.value) onUpdateFontList(definition.kind, [...entries, event.target.value]); }} value=""><option value="">{t("profiles.addFontToList")}</option>{available.map((font) => <option key={font} value={font}>{font}</option>)}</select>
+            <ul>{entries.map((font) => <li key={font}><span>{fontOptionLabel(font)}</span><button className="icon-button" aria-label={t("profiles.remove", { name: font })} onClick={() => onUpdateFontList(kind, entries.filter((entry) => entry !== font))} type="button"><Trash2 aria-hidden="true" size={14} /></button></li>)}</ul>
+            <select aria-label={`${definition.label} · ${t("profiles.addFontToList")}`} disabled={available.length === 0} onChange={(event) => { if (event.target.value) onUpdateFontList(kind, [...entries, event.target.value]); }} value=""><option value="">{t("profiles.addFontToList")}</option>{available.map((font) => <option key={font} value={font}>{font}</option>)}</select>
           </section>
         );
       }

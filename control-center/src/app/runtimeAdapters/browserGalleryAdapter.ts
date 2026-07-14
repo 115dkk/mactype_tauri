@@ -25,139 +25,143 @@ const fallbackProfile: ProfileSnapshot = {
 };
 
 export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
-  async loadLaunchContext(): Promise<LaunchContext> {
+  loadLaunchContext(): Promise<LaunchContext> {
     const requested = new URLSearchParams(window.location.search).get("view");
-    return {
+    return Promise.resolve<LaunchContext>({
       view: requested === "profiles" || requested === "execution" || requested === "diagnostics" ? requested : "overview",
       ciSmoke: false,
       trayStart: false,
-    };
+    });
   },
 
-  async setApplicationLocale(): Promise<void> {},
-
-  async loadExecutionStatus(): Promise<ExecutionStatus> {
-    return { trayAvailable: true, autoStart: false, manualLauncherAvailable: true, legacyServiceDetected: true, legacyServiceRunning: true, registryModeDetected: false, systemModesSupported: false, systemModeNote: "시스템 모드는 안전성 검토 결과 읽기 전용으로 표시됩니다.", injectionReady: true, activeProfile: fallbackProfile.path, sessionTargets: [] };
+  setApplicationLocale(): Promise<void> {
+    return Promise.resolve();
   },
 
-  async pickExecutable(): Promise<string | null> {
-    return "C:\\Windows\\System32\\notepad.exe";
+  loadExecutionStatus(): Promise<ExecutionStatus> {
+    return Promise.resolve<ExecutionStatus>({ trayAvailable: true, autoStart: false, manualLauncherAvailable: true, legacyServiceDetected: true, legacyServiceRunning: true, registryModeDetected: false, systemModesSupported: false, systemModeNote: "시스템 모드는 안전성 검토 결과 읽기 전용으로 표시됩니다.", injectionReady: true, activeProfile: fallbackProfile.path, sessionTargets: [] });
   },
 
-  async loadInstalledFontFamilies(): Promise<ReadonlyArray<string>> {
-    return ["Segoe UI", "Arial", "Calibri", "Cambria", "Consolas", "맑은 고딕", "Microsoft YaHei UI", "Microsoft JhengHei UI", "Meiryo", "Tahoma"];
+  pickExecutable(): Promise<string | null> {
+    return Promise.resolve("C:\\Windows\\System32\\notepad.exe");
   },
 
-  async setSessionAutostart(enabled: boolean): Promise<boolean> {
-    return enabled;
+  loadInstalledFontFamilies(): Promise<ReadonlyArray<string>> {
+    return Promise.resolve(["Segoe UI", "Arial", "Calibri", "Cambria", "Consolas", "맑은 고딕", "Microsoft YaHei UI", "Microsoft JhengHei UI", "Meiryo", "Tahoma"]);
   },
 
-  async launchTargetWithMactype(): Promise<number> {
-    return 4242;
+  setSessionAutostart(enabled: boolean): Promise<boolean> {
+    return Promise.resolve(enabled);
   },
 
-  async scanInstallation(): Promise<InstallationStatus | null> {
-    return null;
+  launchTargetWithMactype(): Promise<number> {
+    return Promise.resolve(4242);
   },
 
-  async applyOpenProfile(): Promise<AppliedProfile> {
-    return { sourceProfile: fallbackProfile.path, runtimeRoot: "C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\runtime\\generations\\gallery" };
+  scanInstallation(): Promise<InstallationStatus | null> {
+    return Promise.resolve(null);
   },
 
-  async registerSessionTarget(target: string, arguments_: ReadonlyArray<string>): Promise<ReadonlyArray<SessionTarget>> {
-    return [{ target, arguments: arguments_ }];
+  applyOpenProfile(): Promise<AppliedProfile> {
+    return Promise.resolve<AppliedProfile>({ sourceProfile: fallbackProfile.path, runtimeRoot: "C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\runtime\\generations\\gallery" });
   },
 
-  async removeSessionTarget(): Promise<ReadonlyArray<SessionTarget>> {
-    return [];
+  registerSessionTarget(target: string, arguments_: ReadonlyArray<string>): Promise<ReadonlyArray<SessionTarget>> {
+    return Promise.resolve<ReadonlyArray<SessionTarget>>([{ target, arguments: arguments_ }]);
   },
 
-  async launchRegisteredTargets(): Promise<ReadonlyArray<number>> {
-    return [4242];
+  removeSessionTarget(): Promise<ReadonlyArray<SessionTarget>> {
+    return Promise.resolve([]);
   },
 
-  async rediscoverInstallation(): Promise<InstallationStatus> {
-    return { ...fallbackStatus, state: "ready" };
+  launchRegisteredTargets(): Promise<ReadonlyArray<number>> {
+    return Promise.resolve([4242]);
   },
 
-  async reconnectPreview(): Promise<InstallationStatus> {
-    return {
+  rediscoverInstallation(): Promise<InstallationStatus> {
+    return Promise.resolve<InstallationStatus>({ ...fallbackStatus, state: "ready" });
+  },
+
+  reconnectPreview(): Promise<InstallationStatus> {
+    return Promise.resolve<InstallationStatus>({
       ...fallbackStatus,
       state: "ready",
       findings: fallbackStatus.findings.map((finding) => finding.label === "preview" ? { ...finding, value: "connected", ok: true } : finding),
-    };
+    });
   },
 
-  async loadDiagnosticReport(): Promise<string> {
-    return `MacType Control Center diagnostics\ncontrolCenterVersion=0.1.0\ncoreVersion=${fallbackStatus.coreVersion}\n`;
+  loadDiagnosticReport(): Promise<string> {
+    return Promise.resolve(`MacType Control Center diagnostics\ncontrolCenterVersion=0.1.0\ncoreVersion=${fallbackStatus.coreVersion}\n`);
   },
 
-  async exportDiagnostics(): Promise<string> {
-    return "C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\logs\\diagnostics-gallery.txt";
+  exportDiagnostics(): Promise<string> {
+    return Promise.resolve("C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\logs\\diagnostics-gallery.txt");
   },
 
-  async copyDiagnostics(): Promise<void> {},
-
-  async openLogFolder(): Promise<string> {
-    return "C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\logs";
+  copyDiagnostics(): Promise<void> {
+    return Promise.resolve();
   },
 
-  async openDefaultProfile(): Promise<ProfileSnapshot | null> {
-    return fallbackProfile;
+  openLogFolder(): Promise<string> {
+    return Promise.resolve("C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\logs");
   },
 
-  async listProfiles(): Promise<ReadonlyArray<ProfileEntry>> {
-    return [{ name: "Default", path: fallbackProfile.path }];
+  openDefaultProfile(): Promise<ProfileSnapshot | null> {
+    return Promise.resolve(fallbackProfile);
   },
 
-  async openProfile(path: string): Promise<ProfileSnapshot> {
-    return { ...fallbackProfile, path };
+  listProfiles(): Promise<ReadonlyArray<ProfileEntry>> {
+    return Promise.resolve([{ name: "Default", path: fallbackProfile.path }]);
   },
 
-  async duplicateProfile(name: string): Promise<ProfileSnapshot> {
-    return { ...fallbackProfile, path: `C:\\Program Files\\MacType\\ini\\${name}.ini` };
+  openProfile(path: string): Promise<ProfileSnapshot> {
+    return Promise.resolve({ ...fallbackProfile, path });
   },
 
-  async updateProfileSetting(): Promise<ProfileSnapshot | null> {
-    return null;
+  duplicateProfile(name: string): Promise<ProfileSnapshot> {
+    return Promise.resolve({ ...fallbackProfile, path: `C:\\Program Files\\MacType\\ini\\${name}.ini` });
   },
 
-  async updateProfileIndividuals(): Promise<ProfileSnapshot | null> {
-    return null;
+  updateProfileSetting(): Promise<ProfileSnapshot | null> {
+    return Promise.resolve(null);
   },
 
-  async updateProfileList(): Promise<ProfileSnapshot | null> {
-    return null;
+  updateProfileIndividuals(): Promise<ProfileSnapshot | null> {
+    return Promise.resolve(null);
   },
 
-  async updateProfileAdvanced(): Promise<ProfileSnapshot | null> {
-    return null;
+  updateProfileList(): Promise<ProfileSnapshot | null> {
+    return Promise.resolve(null);
   },
 
-  async saveProfile(): Promise<ProfileSnapshot | null> {
-    return null;
+  updateProfileAdvanced(): Promise<ProfileSnapshot | null> {
+    return Promise.resolve(null);
   },
 
-  async renderProfilePreview(): Promise<null> {
-    return null;
+  saveProfile(): Promise<ProfileSnapshot | null> {
+    return Promise.resolve(null);
   },
 
-  async setNativePreview(visible: boolean): Promise<boolean> {
-    return visible;
+  renderProfilePreview(): Promise<null> {
+    return Promise.resolve(null);
+  },
+
+  setNativePreview(visible: boolean): Promise<boolean> {
+    return Promise.resolve(visible);
   },
 
   previewImageUrl(path: string): string {
     return path;
   },
 
-  async loadPreviewDiagnostics(): Promise<ReadonlyArray<string>> {
-    return [];
+  loadPreviewDiagnostics(): Promise<ReadonlyArray<string>> {
+    return Promise.resolve([]);
   },
 
-  async forcePreviewCrashForCi(): Promise<void> {},
-  async verifyProfileWorkflowForCi(): Promise<void> {},
-  async verifyInjectionWorkflowForCi(): Promise<void> {},
-  async verifyTrayModeForCi(): Promise<void> {},
-  async reportFrontendReady(): Promise<void> {},
-  async reportFrontendFailure(): Promise<void> {},
+  forcePreviewCrashForCi: () => Promise.resolve(),
+  verifyProfileWorkflowForCi: () => Promise.resolve(),
+  verifyInjectionWorkflowForCi: () => Promise.resolve(),
+  verifyTrayModeForCi: () => Promise.resolve(),
+  reportFrontendReady: () => Promise.resolve(),
+  reportFrontendFailure: () => Promise.resolve(),
 };

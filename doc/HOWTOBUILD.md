@@ -94,13 +94,13 @@ pwsh -NoProfile -File .github/scripts/Build-ControlCenter.ps1 -Configuration Rel
 
 The script installs the locked frontend dependencies automatically. A successful build produces:
 
-- `control-center/src-tauri/target/release/mactype-control-center.exe`
+- `artifacts/application/MacType Control Center.exe`
 - `build/preview-helper/Release/mactype-preview32.exe`
 
 For local testing, launch the Control Center from the repository root so it can find the development copy of the Preview Helper:
 
 ```powershell
-.\control-center\src-tauri\target\release\mactype-control-center.exe
+& '.\artifacts\application\MacType Control Center.exe'
 ```
 
 The Control Center can discover an existing MacType installation, or let the user select one through the interface.

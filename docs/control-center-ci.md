@@ -26,6 +26,8 @@ The workflow uses a GitHub-hosted Windows runner to:
 
 The downloadable artifact is named `mactype-control-center-<version>`. It contains the installer, `SHA256SUMS.txt`, the Control Center executable, and the Preview Helper. GitHub retains the artifact for 14 days.
 
+The installer file and the installed frontend executable both use the stable filename `MacType Control Center.exe`. The application version remains in Windows metadata and the artifact label, not in the user-facing `.exe` filename.
+
 Velopack is not used. The installer continues to use the existing MacType icon and the repository's Inno Setup definition.
 
 ## Scope and local checks

@@ -31,7 +31,7 @@ try {
     Invoke-Installer -File $resolvedBaselineInstaller -Arguments $installerArguments -Label 'Baseline installer'
 
     $expected = @(
-        'mactype-control-center.exe',
+        'MacType Control Center.exe',
         'mactype-preview32.exe',
         'MacType.dll',
         'MacType64.dll',
@@ -66,12 +66,12 @@ try {
     }
 
     & (Join-Path $root 'scripts\ci\Test-TauriWindows.ps1') `
-        -Executable (Join-Path $installRoot 'mactype-control-center.exe') `
+        -Executable (Join-Path $installRoot 'MacType Control Center.exe') `
         -PreviewHelper (Join-Path $installRoot 'mactype-preview32.exe') `
         -InstallationRoot $installRoot
 
     & (Join-Path $root 'scripts\ci\Test-TrayWindows.ps1') `
-        -Executable (Join-Path $installRoot 'mactype-control-center.exe')
+        -Executable (Join-Path $installRoot 'MacType Control Center.exe')
 
     $manualTarget = Join-Path $root 'build\preview-helper\Release\manual-launch-target.exe'
     $manualMarker = Join-Path $env:TEMP ("mactype-manual-launch-" + [Guid]::NewGuid().ToString('N') + '.ready')
@@ -94,7 +94,7 @@ try {
     }
 
     Invoke-Installer -File $resolvedInstaller -Arguments $installerArguments -Label 'Upgrade installer'
-    if (-not (Test-Path -LiteralPath (Join-Path $installRoot 'mactype-control-center.exe'))) {
+    if (-not (Test-Path -LiteralPath (Join-Path $installRoot 'MacType Control Center.exe'))) {
         throw 'Upgrade removed the installed application.'
     }
 

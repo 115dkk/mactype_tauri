@@ -32,11 +32,16 @@ finally {
     Pop-Location
 }
 
-$app = Join-Path $root 'control-center\src-tauri\target\release\mactype-control-center.exe'
+$compiledApp = Join-Path $root 'control-center\src-tauri\target\release\mactype-control-center.exe'
 if ($Configuration -eq 'Debug') {
-    $app = Join-Path $root 'control-center\src-tauri\target\debug\mactype-control-center.exe'
+    $compiledApp = Join-Path $root 'control-center\src-tauri\target\debug\mactype-control-center.exe'
 }
-if (-not (Test-Path -LiteralPath $app)) { throw "Tauri executable missing: $app" }
+if (-not (Test-Path -LiteralPath $compiledApp)) { throw "Tauri executable missing: $compiledApp" }
 if (-not (Test-Path -LiteralPath $helperOutput)) { throw "Preview helper missing: $helperOutput" }
+
+$applicationOutput = Join-Path $root 'artifacts\application'
+New-Item -ItemType Directory -Path $applicationOutput -Force | Out-Null
+$app = Join-Path $applicationOutput 'MacType Control Center.exe'
+Copy-Item -LiteralPath $compiledApp -Destination $app -Force
 
 [pscustomobject]@{ App = $app; PreviewHelper = $helperOutput }

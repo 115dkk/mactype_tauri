@@ -1,8 +1,8 @@
-import { AlertTriangle, ArrowRight, CopyPlus, Play, Plus, RotateCcw, Save, Search, SlidersHorizontal, Trash2 } from "lucide-react";
+import { AlertTriangle, CopyPlus, Play, Save, Search, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { settingsSchema } from "../generated/settings";
 import type { AdvancedProfile, IndividualSetting, PreviewRequest, PreviewResult, ProfileEntry, ProfileSnapshot } from "../app/model";
-import { settingMessageKey, settingOptionMessageKey, useI18n } from "../i18n/i18n";
+import { settingMessageKey, useI18n } from "../i18n/i18n";
 import {
   applyOpenProfile,
   duplicateProfile,
@@ -22,15 +22,13 @@ import {
   updateProfileSetting,
   verifyProfileWorkflowForCi,
 } from "../app/tauri";
+import { AdvancedSettings } from "./profiles/AdvancedSettings";
+import { IndividualSettings } from "./profiles/IndividualSettings";
+import { ListsEditor } from "./profiles/ListsEditor";
+import { BasicSettings, LcdSettings, SearchSettings, ShapeSettings } from "./profiles/SchemaSettings";
+import { splitSubstitution } from "./profiles/profileEditorUtils";
 
 type GroupId = "basic" | "shape" | "lcd" | "advanced" | "individual" | "lists";
-
-const splitSubstitution = (mapping: string) => {
-  const separator = mapping.indexOf("=");
-  return separator < 0
-    ? { source: mapping, replacement: mapping }
-    : { source: mapping.slice(0, separator).trim(), replacement: mapping.slice(separator + 1).trim() };
-};
 
 interface ProfilesPageProps {
   ciSmoke?: boolean;
@@ -334,31 +332,6 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
     }
   };
 
-  const updateSubstitution = (index: number, key: "source" | "replacement", value: string) => {
-    const substitutions = advanced.fontSubstitutes.map((mapping, currentIndex) => {
-      if (currentIndex !== index) return mapping;
-      const pair = splitSubstitution(mapping);
-      return `${key === "source" ? value : pair.source}=${key === "replacement" ? value : pair.replacement}`;
-    });
-    void commitAdvanced({ ...advanced, fontSubstitutes: substitutions });
-  };
-
-  const addSubstitution = () => {
-    if (fontFamilies.length < 2) return;
-    const used = new Set(advanced.fontSubstitutes.map((mapping) => splitSubstitution(mapping).source.toLocaleLowerCase()));
-    const source = fontFamilies.find((font) => !used.has(font.toLocaleLowerCase())) ?? fontFamilies[0];
-    const replacement = fontFamilies.find((font) => font !== source && font === "Segoe UI")
-      ?? fontFamilies.find((font) => font !== source)
-      ?? source;
-    void commitAdvanced({ ...advanced, fontSubstitutes: [...advanced.fontSubstitutes, `${source}=${replacement}`] });
-  };
-
-  const removeSubstitution = (index: number) => {
-    void commitAdvanced({ ...advanced, fontSubstitutes: advanced.fontSubstitutes.filter((_, currentIndex) => currentIndex !== index) });
-  };
-
-  const fontListEntries = (kind: "excludeFonts" | "includeFonts") => (listDrafts[kind] ?? "").split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean);
-
   const updateFontList = async (kind: "excludeFonts" | "includeFonts", entries: ReadonlyArray<string>) => {
     setListDrafts((current) => ({ ...current, [kind]: entries.join("\n") }));
     try {
@@ -368,9 +341,6 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
       setPreviewError(error instanceof Error ? error.message : String(error));
     }
   };
-
-  const updateVector = (values: ReadonlyArray<number>, index: number, value: number) => values.map((current, currentIndex) => currentIndex === index ? value : current);
-  const colorValue = (value: number) => `#${value.toString(16).padStart(6, "0")}`;
 
   const toggleNativePreview = async () => {
     try {
@@ -416,105 +386,51 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
           <div className="settings-form">
             <div className="section-heading"><div><h2>{query ? t("profiles.searchResults") : activeDefinition.label}</h2><p>{query ? t("profiles.searchDescription", { query }) : activeDefinition.description}</p></div></div>
 
-            {(query || activeGroup === "basic" || activeGroup === "shape" || activeGroup === "lcd" || activeGroup === "advanced") && filteredSettings.map((setting) => {
-              const value = values[setting.id] ?? setting.default;
-              const dirty = profile?.dirtyKeys.includes(setting.id) ?? false;
-              const settingLabel = t(settingMessageKey(setting.id, "label"));
-              const settingDescription = t(settingMessageKey(setting.id, "description"));
-              return (
-                <div className="setting-row" key={setting.id}>
-                  <div><label htmlFor={setting.id}>{settingLabel} {dirty && <span className="dirty-mark">{t("profiles.changed")}</span>}</label><p>{settingDescription} {t("profiles.settingMeta", { default: setting.default, min: setting.min, max: setting.max })}{setting.apply === "restart_required" ? ` · ${t("profiles.restartRequired")}` : ""}</p></div>
-                  <div className="range-control">
-                    {setting.control === "select" && "options" in setting ? (
-                      <select id={setting.id} onChange={(event) => changeSetting(setting.id, Number(event.target.value))} value={value}>{setting.options.map((option) => <option key={option.value} value={option.value}>{t(settingOptionMessageKey(setting.id, option.value))}</option>)}</select>
-                    ) : setting.control === "boolean" ? (
-                      <label className="switch-control"><input checked={value === 1} id={setting.id} onChange={(event) => changeSetting(setting.id, event.target.checked ? 1 : 0)} type="checkbox" /><span>{value === 1 ? t("profiles.enabled") : t("profiles.disabled")}</span></label>
-                    ) : (
-                      <input id={setting.id} max={setting.max} min={setting.min} onChange={(event) => changeSetting(setting.id, Number(event.target.value))} step={setting.type === "integer" ? 1 : 0.01} type="range" value={value} />
-                    )}
-                    <output htmlFor={setting.id}>{value}{setting.unit === "px" ? " px" : ""}</output>
-                    <button className="icon-button" aria-label={t("profiles.reset", { setting: settingLabel })} onClick={() => changeSetting(setting.id, setting.default)} type="button"><RotateCcw aria-hidden="true" size={15} /></button>
-                  </div>
-                </div>
-              );
-            })}
+            {query && <SearchSettings dirtyKeys={profile?.dirtyKeys ?? []} onChange={changeSetting} settings={filteredSettings} t={t} values={values} />}
+            {!query && activeGroup === "basic" && <BasicSettings dirtyKeys={profile?.dirtyKeys ?? []} onChange={changeSetting} settings={filteredSettings} t={t} values={values} />}
+            {!query && activeGroup === "shape" && <ShapeSettings dirtyKeys={profile?.dirtyKeys ?? []} onChange={changeSetting} settings={filteredSettings} t={t} values={values} />}
+            {!query && activeGroup === "lcd" && <LcdSettings dirtyKeys={profile?.dirtyKeys ?? []} onChange={changeSetting} settings={filteredSettings} t={t} values={values} />}
 
             {!query && activeGroup === "advanced" && (
-              <div className="advanced-editor">
-                <fieldset>
-                  <legend>{t("advanced.shadow")}</legend><p>{t("advanced.shadowHelp")}</p>
-                  <label className="checkbox-row"><input checked={advanced.shadow !== null} onChange={(event) => void commitAdvanced({ ...advanced, shadow: event.target.checked ? { offsetX: 1, offsetY: 1, darkAlpha: 4, darkColor: 0, lightAlpha: 4, lightColor: 0 } : null })} type="checkbox" /> {t("advanced.enableCustom")}</label>
-                  {advanced.shadow && <div className="advanced-grid">{(["offsetX", "offsetY", "darkAlpha", "lightAlpha"] as const).map((key) => <label key={key}><span>{t(`advanced.${key}`)}</span><input max={key.includes("Alpha") ? 255 : 128} min={key.includes("Alpha") ? 0 : -128} onChange={(event) => setAdvanced({ ...advanced, shadow: { ...advanced.shadow!, [key]: Number(event.target.value) } })} onBlur={() => void commitAdvanced(advanced)} type="number" value={advanced.shadow?.[key] ?? 0} /></label>)}{(["darkColor", "lightColor"] as const).map((key) => <label key={key}><span>{t(`advanced.${key}`)}</span><input onChange={(event) => void commitAdvanced({ ...advanced, shadow: { ...advanced.shadow!, [key]: Number.parseInt(event.target.value.slice(1), 16) } })} type="color" value={colorValue(advanced.shadow?.[key] ?? 0)} /></label>)}</div>}
-                </fieldset>
-                <fieldset>
-                  <legend>{t("advanced.lcdWeight")}</legend><p>{t("advanced.lcdWeightHelp")}</p>
-                  <label className="checkbox-row"><input checked={advanced.lcdFilterWeight !== null} onChange={(event) => void commitAdvanced({ ...advanced, lcdFilterWeight: event.target.checked ? [8, 77, 86, 77, 8] : null })} type="checkbox" /> {t("advanced.enableCustom")}</label>
-                  {advanced.lcdFilterWeight && <div className="vector-grid">{advanced.lcdFilterWeight.map((value, index) => <label key={index}><span>{index + 1}</span><input max={255} min={0} onChange={(event) => setAdvanced({ ...advanced, lcdFilterWeight: updateVector(advanced.lcdFilterWeight!, index, Number(event.target.value)) })} onBlur={() => void commitAdvanced(advanced)} type="number" value={value} /></label>)}</div>}
-                </fieldset>
-                <fieldset>
-                  <legend>{t("advanced.pixelLayout")}</legend><p>{t("advanced.pixelLayoutHelp")}</p>
-                  <label className="checkbox-row"><input checked={advanced.pixelLayout !== null} onChange={(event) => void commitAdvanced({ ...advanced, pixelLayout: event.target.checked ? [-21, 0, 0, 0, 21, 0] : null })} type="checkbox" /> {t("advanced.enableCustom")}</label>
-                  {advanced.pixelLayout && <div className="vector-grid">{advanced.pixelLayout.map((value, index) => <label key={index}><span>{["R x", "R y", "G x", "G y", "B x", "B y"][index]}</span><input max={127} min={-128} onChange={(event) => setAdvanced({ ...advanced, pixelLayout: updateVector(advanced.pixelLayout!, index, Number(event.target.value)) })} onBlur={() => void commitAdvanced(advanced)} type="number" value={value} /></label>)}</div>}
-                </fieldset>
-                <fieldset className="advanced-text-fields">
-                  <legend>{t("advanced.routing")}</legend>
-                  <label><span>{t("advanced.displayAffinity")}</span><small>{t("advanced.displayAffinityHelp")}</small><input onChange={(event) => setAdvanced({ ...advanced, displayAffinity: event.target.value.split(",").map((part) => Number(part.trim())).filter(Number.isInteger) })} onBlur={() => void commitAdvanced(advanced)} type="text" value={advanced.displayAffinity.join(", ")} /></label>
-                  <div className="font-substitution-editor">
-                    <strong>{t("advanced.fontSubstitutes")}</strong>
-                    <small>{t("advanced.fontSubstitutesHelp")}</small>
-                    <div className="font-substitution-list">
-                      {advanced.fontSubstitutes.map((mapping, index) => {
-                        const pair = splitSubstitution(mapping);
-                        return (
-                          <div className="font-substitution-row" key={`${mapping}-${index}`}>
-                            <label><span className="sr-only">{t("profiles.sourceFont")}</span><select aria-label={t("profiles.sourceFont")} onChange={(event) => updateSubstitution(index, "source", event.target.value)} value={pair.source}>{fontFamilies.map((font) => <option key={font} value={font}>{fontOptionLabel(font)}</option>)}</select></label>
-                            <ArrowRight aria-hidden="true" size={16} />
-                            <label><span className="sr-only">{t("profiles.replacementFont")}</span><select aria-label={t("profiles.replacementFont")} onChange={(event) => updateSubstitution(index, "replacement", event.target.value)} value={pair.replacement}>{fontFamilies.map((font) => <option key={font} value={font}>{fontOptionLabel(font)}</option>)}</select></label>
-                            <button className="icon-button" aria-label={t("profiles.remove", { name: pair.source })} onClick={() => removeSubstitution(index)} type="button"><Trash2 aria-hidden="true" size={15} /></button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <button className="button secondary font-add-button" disabled={fontFamilies.length < 2} onClick={addSubstitution} type="button"><Plus aria-hidden="true" size={16} /> {t("profiles.addSubstitution")}</button>
-                  </div>
-                </fieldset>
-                <fieldset>
-                  <legend>Infinality</legend>
-                  <p>{t("advanced.infinalityVectorsHelp")}</p>
-                  <div className="vector-grid">{advanced.infinalityGammaCorrection.map((value, index) => <label key={`gamma-${index}`}><span>{t("advanced.gammaCorrection")} {index + 1}</span><input onChange={(event) => setAdvanced({ ...advanced, infinalityGammaCorrection: updateVector(advanced.infinalityGammaCorrection, index, Number(event.target.value)) })} onBlur={() => void commitAdvanced(advanced)} type="number" value={value} /></label>)}{advanced.infinalityFilterParams.map((value, index) => <label key={`filter-${index}`}><span>{t("advanced.filterParams")} {index + 1}</span><input max={255} min={0} onChange={(event) => setAdvanced({ ...advanced, infinalityFilterParams: updateVector(advanced.infinalityFilterParams, index, Number(event.target.value)) })} onBlur={() => void commitAdvanced(advanced)} type="number" value={value} /></label>)}</div>
-                </fieldset>
-              </div>
+              <AdvancedSettings
+                advanced={advanced}
+                dirtyKeys={profile?.dirtyKeys ?? []}
+                fontFamilies={fontFamilies}
+                fontOptionLabel={fontOptionLabel}
+                onAdvancedChange={setAdvanced}
+                onAdvancedCommit={(next) => void commitAdvanced(next)}
+                onSettingChange={changeSetting}
+                settings={filteredSettings}
+                t={t}
+                values={values}
+              />
             )}
 
             {!query && activeGroup === "individual" && (
-              <div className="collection-editor">
-                <div className="font-picker-row"><label htmlFor="individual-font-picker">{t("profiles.selectFont")}</label><select id="individual-font-picker" onChange={(event) => addIndividual(event.target.value)} value=""><option value="">{t("profiles.selectFont")}</option>{fontFamilies.filter((font) => installedFontKeys.has(font.toLocaleLowerCase()) && !individuals.some((entry) => entry.fontFace.toLocaleLowerCase() === font.toLocaleLowerCase())).map((font) => <option key={font} value={font}>{font}</option>)}</select></div>
-                {individuals.map((entry, rowIndex) => (
-                  <div className="individual-row" key={`${entry.fontFace}-${rowIndex}`}>
-                    <strong>{entry.fontFace}</strong>
-                    <div>{individualLabels.map((label, valueIndex) => <label key={label}><span>{label}</span><input aria-label={`${entry.fontFace} ${label}`} max={valueIndex === 2 ? 64 : valueIndex === 3 || valueIndex === 4 ? 32 : valueIndex === 1 ? 6 : valueIndex === 0 ? 2 : 1} min={valueIndex === 2 ? -64 : valueIndex === 3 || valueIndex === 4 ? -32 : valueIndex === 1 ? -1 : 0} onChange={(event) => { const next = individuals.map((item) => ({ ...item, values: [...item.values] })); next[rowIndex].values[valueIndex] = event.target.value === "" ? null : Number(event.target.value); void commitIndividuals(next); }} placeholder={t("profiles.inherit")} type="number" value={entry.values[valueIndex] ?? ""} /></label>)}</div>
-                    <button className="icon-button" aria-label={t("profiles.remove", { name: entry.fontFace })} onClick={() => void commitIndividuals(individuals.filter((_, index) => index !== rowIndex))} type="button"><Trash2 aria-hidden="true" size={15} /></button>
-                  </div>
-                ))}
-                {individuals.length === 0 && <p className="empty-state">{t("profiles.emptyIndividuals")}</p>}
-              </div>
+              <IndividualSettings
+                fontFamilies={fontFamilies}
+                individualLabels={individualLabels}
+                individuals={individuals}
+                installedFontKeys={installedFontKeys}
+                onAdd={addIndividual}
+                onCommit={(next) => void commitIndividuals(next)}
+                t={t}
+              />
             )}
 
-            {!query && activeGroup === "lists" && <div className="list-grid">{listDefinitions.map((definition) => {
-              if (definition.kind === "excludeFonts" || definition.kind === "includeFonts") {
-                const entries = fontListEntries(definition.kind);
-                const available = fontFamilies.filter((font) => installedFontKeys.has(font.toLocaleLowerCase()) && !entries.some((entry) => entry.toLocaleLowerCase() === font.toLocaleLowerCase()));
-                return (
-                  <section className="font-list-editor" key={definition.kind}>
-                    <strong>{definition.label}</strong>
-                    <span>{definition.help}</span>
-                    <ul>{entries.map((font) => <li key={font}><span>{fontOptionLabel(font)}</span><button className="icon-button" aria-label={t("profiles.remove", { name: font })} onClick={() => void updateFontList(definition.kind, entries.filter((entry) => entry !== font))} type="button"><Trash2 aria-hidden="true" size={14} /></button></li>)}</ul>
-                    <select aria-label={`${definition.label} · ${t("profiles.addFontToList")}`} disabled={available.length === 0} onChange={(event) => { if (event.target.value) void updateFontList(definition.kind, [...entries, event.target.value]); }} value=""><option value="">{t("profiles.addFontToList")}</option>{available.map((font) => <option key={font} value={font}>{font}</option>)}</select>
-                  </section>
-                );
-              }
-              return <label key={definition.kind}><strong>{definition.label}</strong><span>{definition.help}</span><textarea onBlur={() => void commitList(definition.kind)} onChange={(event) => setListDrafts((current) => ({ ...current, [definition.kind]: event.target.value }))} rows={6} value={listDrafts[definition.kind] ?? ""} /></label>;
-            })}</div>}
+            {!query && activeGroup === "lists" && (
+              <ListsEditor
+                definitions={listDefinitions}
+                drafts={listDrafts}
+                fontFamilies={fontFamilies}
+                fontOptionLabel={fontOptionLabel}
+                installedFontKeys={installedFontKeys}
+                onCommit={(kind) => void commitList(kind)}
+                onDraftChange={(kind, value) => setListDrafts((current) => ({ ...current, [kind]: value }))}
+                onUpdateFontList={(kind, entries) => void updateFontList(kind, entries)}
+                t={t}
+              />
+            )}
           </div>
 
           <section className="preview-panel" aria-labelledby="preview-title">

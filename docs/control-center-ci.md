@@ -14,4 +14,6 @@ The Windows build also releases a suspended stampede of identical Control Center
 
 Velopack is not used. The Phase 5 installer is per-user and does not request elevation. It contains the open Control Center, x86 Preview Helper, source-built x86/x64 Detours core and MacLoader, and newly authored profile and translation files. It never copies Delphi GUI programs, existing profiles/translations, services, updater binaries, or registry-mode settings. CI performs a real baseline install, version upgrade, installed-app and manual-loader launch, and uninstall cleanliness test.
 
+The installer file and the installed frontend executable both use the stable filename `MacType Control Center.exe`. The application version remains in Windows metadata and release metadata, not in the user-facing `.exe` filename.
+
 Tags matching `control-center-v*` build a named prerelease installer. In addition, every successful push to `main` publishes an installable `control-center-ci-<run>` prerelease with a SHA-256 checksum. Both release paths reuse the installer that already passed the same core build, real-window, tray, install, upgrade, launch, and uninstall checks as pull requests; pull requests themselves retain read-only repository permissions and cannot publish releases.

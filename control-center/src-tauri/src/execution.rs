@@ -45,8 +45,7 @@ pub struct ExecutionStatus {
     pub tray_available: bool,
     pub auto_start: bool,
     pub manual_launcher_available: bool,
-    pub legacy_service_detected: bool,
-    pub legacy_service_running: bool,
+    pub legacy_service: crate::legacy_service::LegacyServiceStatus,
     pub registry_mode_detected: bool,
     pub system_modes_supported: bool,
     pub system_mode_note: String,
@@ -242,17 +241,17 @@ pub fn apply_profile(
 }
 
 pub fn status(installation_root: Option<&Path>) -> ExecutionStatus {
-    let (legacy_service_detected, legacy_service_running) = service_status();
+    let registry_mode_detected = registry_mode_detected();
+    let legacy_service = crate::legacy_service::status(registry_mode_detected);
     let active = active_runtime().ok();
     ExecutionStatus {
         tray_available: true,
         auto_start: autostart_value().is_some(),
         manual_launcher_available: installation_root.is_some() && active.is_some(),
-        legacy_service_detected,
-        legacy_service_running,
-        registry_mode_detected: registry_mode_detected(),
+        legacy_service,
+        registry_mode_detected,
         system_modes_supported: false,
-        system_mode_note: "기존 MacTray 서비스는 비공개 Delphi 실행 파일이므로 제어하지 않습니다. AppInit 레지스트리 모드는 공식 프로젝트가 부팅 장애 위험 때문에 제거했으므로 읽기 전용으로만 감지합니다.".to_owned(),
+        system_mode_note: "레거시 MacTray 서비스는 검증된 Program Files 설치만 사용자 동의와 UAC 승인 후 제어합니다. AppInit 레지스트리 모드는 부팅 장애 위험 때문에 읽기 전용으로만 감지합니다.".to_owned(),
         injection_ready: active.is_some(),
         active_profile: active.map(|runtime| runtime.source_profile.to_string_lossy().into_owned()),
         session_targets: session_targets().unwrap_or_default(),
@@ -468,7 +467,7 @@ fn set_autostart_impl(_enabled: bool) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-fn registry_mode_detected() -> bool {
+pub(crate) fn registry_mode_detected() -> bool {
     use windows_sys::Win32::System::Registry::{
         HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6432KEY, RRF_SUBKEY_WOW6464KEY,
     };
@@ -487,47 +486,8 @@ fn registry_mode_detected() -> bool {
 }
 
 #[cfg(not(windows))]
-fn registry_mode_detected() -> bool {
+pub(crate) fn registry_mode_detected() -> bool {
     false
-}
-
-#[cfg(windows)]
-fn service_status() -> (bool, bool) {
-    use windows_sys::Win32::System::Services::{
-        CloseServiceHandle, OpenSCManagerW, OpenServiceW, QueryServiceStatusEx, SC_MANAGER_CONNECT,
-        SC_STATUS_PROCESS_INFO, SERVICE_QUERY_STATUS, SERVICE_RUNNING, SERVICE_STATUS_PROCESS,
-    };
-    let manager = unsafe { OpenSCManagerW(std::ptr::null(), std::ptr::null(), SC_MANAGER_CONNECT) };
-    if manager.is_null() {
-        return (false, false);
-    }
-    let name = wide("MacType");
-    let service = unsafe { OpenServiceW(manager, name.as_ptr(), SERVICE_QUERY_STATUS) };
-    if service.is_null() {
-        unsafe { CloseServiceHandle(manager) };
-        return (false, false);
-    }
-    let mut status = SERVICE_STATUS_PROCESS::default();
-    let mut needed = 0u32;
-    let ok = unsafe {
-        QueryServiceStatusEx(
-            service,
-            SC_STATUS_PROCESS_INFO,
-            (&mut status as *mut SERVICE_STATUS_PROCESS).cast(),
-            std::mem::size_of::<SERVICE_STATUS_PROCESS>() as u32,
-            &mut needed,
-        )
-    } != 0;
-    unsafe {
-        CloseServiceHandle(service);
-        CloseServiceHandle(manager);
-    }
-    (true, ok && status.dwCurrentState == SERVICE_RUNNING)
-}
-
-#[cfg(not(windows))]
-fn service_status() -> (bool, bool) {
-    (false, false)
 }
 
 #[tauri::command]

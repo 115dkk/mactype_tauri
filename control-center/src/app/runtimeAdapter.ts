@@ -5,6 +5,8 @@ import type {
   ExecutionStatus,
   IndividualSetting,
   InstallationStatus,
+  LegacyProfileCandidate,
+  LegacyServiceStatus,
   LaunchContext,
   PreviewRequest,
   PreviewResult,
@@ -20,7 +22,9 @@ export interface ControlCenterRuntimeAdapter {
   loadLaunchContext(): Promise<LaunchContext>;
   setApplicationLocale(locale: Locale): Promise<void>;
   loadExecutionStatus(): Promise<ExecutionStatus>;
+  manageLegacyService(action: "install" | "remove" | "start" | "stop"): Promise<LegacyServiceStatus>;
   pickExecutable(filterName: string): Promise<string | null>;
+  pickIniProfile(filterName: string): Promise<string | null>;
   loadInstalledFontFamilies(): Promise<ReadonlyArray<string>>;
   setSessionAutostart(enabled: boolean): Promise<boolean>;
   launchTargetWithMactype(target: string, arguments_: ReadonlyArray<string>): Promise<number>;
@@ -36,6 +40,9 @@ export interface ControlCenterRuntimeAdapter {
   copyDiagnostics(): Promise<void>;
   openLogFolder(): Promise<string>;
   openDefaultProfile(): Promise<ProfileSnapshot | null>;
+  currentProfile(): Promise<ProfileSnapshot | null>;
+  discoverLegacyProfile(): Promise<LegacyProfileCandidate | null>;
+  importProfile(path: string): Promise<ProfileSnapshot>;
   listProfiles(): Promise<ReadonlyArray<ProfileEntry>>;
   openProfile(path: string): Promise<ProfileSnapshot>;
   duplicateProfile(name: string): Promise<ProfileSnapshot>;

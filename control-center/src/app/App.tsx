@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useReducer } from "react";
-import { Activity, FolderCog, Home, Languages, Moon, PlayCircle, Sun } from "lucide-react";
+import { Activity, FileCog, FolderCog, Home, Languages, Moon, PlayCircle, Sun } from "lucide-react";
 import { DiagnosticsPage } from "../pages/DiagnosticsPage";
 import { OverviewPage } from "../pages/OverviewPage";
 import { ProfilesPage } from "../pages/ProfilesPage";
 import { ExecutionPage } from "../pages/ExecutionPage";
+import { FileSettingsPage } from "../pages/FileSettingsPage";
 import { fallbackStatus, type InstallationStatus, type ViewId } from "./model";
 import { loadLaunchContext, reconnectPreview, rediscoverInstallation, reportFrontendFailure, reportFrontendReady, scanInstallation, verifyTrayModeForCi } from "./tauri";
 import { localeOptions, useI18n, type Locale } from "../i18n/i18n";
@@ -36,8 +37,8 @@ function reducer(state: State, action: Action): State {
   }
 }
 
-const iconByView = { overview: Home, profiles: FolderCog, execution: PlayCircle, diagnostics: Activity } as const;
-const navigation: ReadonlyArray<ViewId> = ["overview", "profiles", "execution", "diagnostics"];
+const iconByView = { overview: Home, files: FileCog, profiles: FolderCog, execution: PlayCircle, diagnostics: Activity } as const;
+const navigation: ReadonlyArray<ViewId> = ["overview", "files", "profiles", "execution", "diagnostics"];
 
 export function App() {
   const { locale, setLocale, t } = useI18n();
@@ -77,12 +78,13 @@ export function App() {
   }, [state.ciSmoke, state.ready, state.theme, state.trayStart, state.view]);
 
   const page = useMemo(() => {
+    if (state.view === "files") return <FileSettingsPage />;
     if (state.view === "profiles") return <ProfilesPage ciSmoke={state.ciSmoke} onPreviewReady={() => void reportFrontendReady("profiles")} />;
     if (state.view === "execution") return <ExecutionPage ciSmoke={state.ciSmoke} onReady={() => void reportFrontendReady("execution")} />;
     if (state.view === "diagnostics") return <DiagnosticsPage status={state.status} />;
     return <OverviewPage
       status={state.status}
-      onOpenProfiles={() => dispatch({ type: "navigate", view: "profiles" })}
+      onOpenProfiles={() => dispatch({ type: "navigate", view: "files" })}
       onReconnect={async () => {
         const status = await reconnectPreview();
         dispatch({ type: "status", status });

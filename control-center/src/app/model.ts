@@ -1,4 +1,4 @@
-export type ViewId = "overview" | "profiles" | "execution" | "diagnostics";
+export type ViewId = "overview" | "files" | "profiles" | "execution" | "diagnostics";
 
 export interface LaunchContext {
   view: ViewId;
@@ -24,8 +24,7 @@ export interface ExecutionStatus {
   trayAvailable: boolean;
   autoStart: boolean;
   manualLauncherAvailable: boolean;
-  legacyServiceDetected: boolean;
-  legacyServiceRunning: boolean;
+  legacyService: LegacyServiceStatus;
   registryModeDetected: boolean;
   systemModesSupported: boolean;
   systemModeNote: string;
@@ -60,6 +59,25 @@ export interface ProfileSnapshot {
 export interface ProfileEntry {
   name: string;
   path: string;
+}
+
+export interface LegacyServiceStatus {
+  presence: "absent" | "owned" | "compatible-unquoted" | "foreign" | "delete-pending" | "inaccessible";
+  state: "stopped" | "start-pending" | "stop-pending" | "running" | "continue-pending" | "pause-pending" | "paused" | "unknown";
+  binaryPath: string | null;
+  win32Error: number | null;
+  trustedBinaryAvailable: boolean;
+  registryConflict: boolean;
+  canInstall: boolean;
+  canRemove: boolean;
+  canStart: boolean;
+  canStop: boolean;
+}
+
+export interface LegacyProfileCandidate {
+  name: string;
+  path: string;
+  source: "alternative-file";
 }
 
 export interface IndividualSetting {

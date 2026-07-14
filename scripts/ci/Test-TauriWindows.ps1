@@ -10,7 +10,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$views = @('overview', 'profiles', 'execution', 'diagnostics')
+$views = @('overview', 'files', 'profiles', 'execution', 'diagnostics')
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $resolvedExecutable = (Resolve-Path -LiteralPath $Executable).Path
 $resolvedPreviewHelper = (Resolve-Path -LiteralPath $PreviewHelper).Path

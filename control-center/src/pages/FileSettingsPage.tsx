@@ -1,0 +1,180 @@
+import { AlertTriangle, Check, CopyPlus, FileInput, FolderOpen, Play, Save } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import type { LegacyProfileCandidate, ProfileEntry, ProfileSnapshot } from "../app/model";
+import {
+  applyOpenProfile,
+  currentProfile,
+  discoverLegacyProfile,
+  duplicateProfile,
+  importProfile,
+  listProfiles,
+  openDefaultProfile,
+  openProfile,
+  pickIniProfile,
+  saveProfile,
+} from "../app/tauri";
+import { useI18n } from "../i18n/i18n";
+
+export function FileSettingsPage() {
+  const { t } = useI18n();
+  const [profile, setProfile] = useState<ProfileSnapshot | null>(null);
+  const [profiles, setProfiles] = useState<ReadonlyArray<ProfileEntry>>([]);
+  const [legacy, setLegacy] = useState<LegacyProfileCandidate | null>(null);
+  const [copyName, setCopyName] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const refreshProfiles = useCallback(async () => {
+    setProfiles(await listProfiles());
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void Promise.all([currentProfile(), listProfiles(), discoverLegacyProfile()])
+      .then(async ([opened, available, detected]) => {
+        const selected = opened ?? await openDefaultProfile();
+        if (!active) return;
+        setProfile(selected);
+        setProfiles(available);
+        setLegacy(detected);
+      })
+      .catch((caught: unknown) => {
+        if (active) setError(caught instanceof Error ? caught.message : String(caught));
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const run = async (operation: string, action: () => Promise<ProfileSnapshot>, success: (opened: ProfileSnapshot) => string) => {
+    setBusy(operation);
+    try {
+      const opened = await action();
+      setProfile(opened);
+      await refreshProfiles();
+      setMessage(success(opened));
+      setError(null);
+    } catch (caught: unknown) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+      setMessage(null);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const chooseProfile = async (path: string) => {
+    await run("open", () => openProfile(path), (opened) => t("files.opened", { name: fileName(opened.path) }));
+  };
+
+  const duplicate = async () => {
+    const name = copyName.trim();
+    if (!name) return;
+    await run("duplicate", () => duplicateProfile(name), (opened) => {
+      setCopyName("");
+      return t("files.duplicated", { name: fileName(opened.path) });
+    });
+  };
+
+  const save = async () => {
+    await run("save", async () => {
+      const saved = await saveProfile();
+      if (!saved) throw new Error(t("profiles.none"));
+      return saved;
+    }, (opened) => t("files.saved", { name: fileName(opened.path) }));
+  };
+
+  const apply = async () => {
+    setBusy("apply");
+    try {
+      const applied = await applyOpenProfile();
+      setMessage(t("files.applied", { name: fileName(applied.sourceProfile) }));
+      setError(null);
+    } catch (caught: unknown) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+      setMessage(null);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const importFrom = async (path: string) => {
+    await run("import", () => importProfile(path), (opened) => t("files.imported", { name: fileName(opened.path) }));
+  };
+
+  const chooseImport = async () => {
+    try {
+      const selected = await pickIniProfile(t("files.iniFilter"));
+      if (selected) await importFrom(selected);
+    } catch (caught: unknown) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
+  const dirtyCount = profile?.dirtyKeys.length ?? 0;
+
+  return (
+    <section className="page view-enter" aria-labelledby="files-title">
+      <header className="page-header">
+        <div><h1 id="files-title">{t("nav.files")}</h1><p>{t("files.subtitle")}</p></div>
+      </header>
+
+      {legacy && (
+        <section className="legacy-import-banner" aria-labelledby="legacy-import-title">
+          <FileInput aria-hidden="true" size={22} />
+          <div>
+            <h2 id="legacy-import-title">{t("files.detectedTitle")}</h2>
+            <p>{t("files.detectedDescription", { name: legacy.name })}</p>
+            <code title={legacy.path}>{legacy.path}</code>
+          </div>
+          <button className="button primary" disabled={busy !== null} onClick={() => void importFrom(legacy.path)} type="button">
+            {busy === "import" ? t("files.importing") : t("files.importDetected")}
+          </button>
+        </section>
+      )}
+
+      <section className="section-block" aria-labelledby="current-file-title">
+        <div className="section-heading"><div><h2 id="current-file-title">{t("files.currentTitle")}</h2><p>{t("files.currentDescription")}</p></div></div>
+        <div className="file-selection-grid">
+          <label>
+            <span>{t("profiles.select")}</span>
+            <select disabled={!profiles.length || busy !== null} onChange={(event) => void chooseProfile(event.target.value)} value={profile?.path ?? ""}>
+              {profiles.map((entry) => <option key={entry.path} value={entry.path}>{entry.name}</option>)}
+            </select>
+          </label>
+          <div className="selected-file-summary" data-empty={!profile}>
+            <FolderOpen aria-hidden="true" size={22} />
+            <div><strong>{profile ? fileName(profile.path) : t("profiles.none")}</strong>{profile && <code title={profile.path}>{profile.path}</code>}</div>
+          </div>
+        </div>
+        <dl className="detail-list compact-details">
+          <div><dt>{t("files.encoding")}</dt><dd>{profile?.encoding ?? "—"}</dd></div>
+          <div><dt>{t("files.lineEnding")}</dt><dd>{profile?.lineEnding ?? "—"}</dd></div>
+          <div><dt>{t("files.unsaved")}</dt><dd>{dirtyCount ? t("files.unsavedCount", { count: dirtyCount }) : t("files.noUnsaved")}</dd></div>
+        </dl>
+        <div className="file-primary-actions">
+          <button className="button secondary" disabled={!profile || dirtyCount === 0 || busy !== null} onClick={() => void save()} type="button"><Save aria-hidden="true" size={17} /> {busy === "save" ? t("profiles.saving") : t("profiles.save")}</button>
+          <button className="button primary" disabled={!profile || busy !== null} onClick={() => void apply()} type="button"><Play aria-hidden="true" size={17} /> {busy === "apply" ? t("profiles.applying") : t("profiles.apply")}</button>
+        </div>
+      </section>
+
+      <div className="file-tools-grid">
+        <section className="section-block" aria-labelledby="import-file-title">
+          <div className="section-heading"><div><h2 id="import-file-title">{t("files.importTitle")}</h2><p>{t("files.importDescription")}</p></div></div>
+          <div className="file-tool-body"><button className="button secondary" disabled={busy !== null} onClick={() => void chooseImport()} type="button"><FileInput aria-hidden="true" size={17} /> {busy === "import" ? t("files.importing") : t("files.chooseImport")}</button></div>
+        </section>
+        <section className="section-block" aria-labelledby="duplicate-file-title">
+          <div className="section-heading"><div><h2 id="duplicate-file-title">{t("files.duplicateTitle")}</h2><p>{t("files.duplicateDescription")}</p></div></div>
+          <div className="file-tool-body inline-create"><input aria-label={t("profiles.copyName")} onChange={(event) => setCopyName(event.target.value)} placeholder={t("profiles.newName")} value={copyName} /><button className="button secondary" disabled={!profile || !copyName.trim() || busy !== null} onClick={() => void duplicate()} type="button"><CopyPlus aria-hidden="true" size={16} /> {t("profiles.duplicate")}</button></div>
+        </section>
+      </div>
+
+      {message && <p aria-live="polite" className="success-message" data-operation="file-settings"><Check aria-hidden="true" size={16} /> {message}</p>}
+      {error && <p className="inline-error"><AlertTriangle aria-hidden="true" size={15} /> {error}</p>}
+    </section>
+  );
+}
+
+function fileName(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
+}

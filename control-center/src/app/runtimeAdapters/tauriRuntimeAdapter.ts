@@ -7,6 +7,8 @@ import type {
   ExecutionStatus,
   IndividualSetting,
   InstallationStatus,
+  LegacyProfileCandidate,
+  LegacyServiceStatus,
   LaunchContext,
   PreviewRequest,
   PreviewResult,
@@ -25,12 +27,22 @@ export const tauriRuntimeAdapter: ControlCenterRuntimeAdapter = {
   },
 
   loadExecutionStatus: () => invoke<ExecutionStatus>("execution_status"),
+  manageLegacyService: (action) => invoke<LegacyServiceStatus>("manage_legacy_service", { action }),
 
   async pickExecutable(filterName: string): Promise<string | null> {
     const selected = await open({
       directory: false,
       multiple: false,
       filters: [{ name: filterName, extensions: ["exe"] }],
+    });
+    return typeof selected === "string" ? selected : null;
+  },
+
+  async pickIniProfile(filterName: string): Promise<string | null> {
+    const selected = await open({
+      directory: false,
+      multiple: false,
+      filters: [{ name: filterName, extensions: ["ini"] }],
     });
     return typeof selected === "string" ? selected : null;
   },
@@ -54,6 +66,9 @@ export const tauriRuntimeAdapter: ControlCenterRuntimeAdapter = {
 
   openLogFolder: () => invoke<string>("open_log_folder"),
   openDefaultProfile: () => invoke<ProfileSnapshot | null>("open_default_profile"),
+  currentProfile: () => invoke<ProfileSnapshot | null>("current_profile"),
+  discoverLegacyProfile: () => invoke<LegacyProfileCandidate | null>("discover_legacy_profile"),
+  importProfile: (path: string) => invoke<ProfileSnapshot>("import_profile", { path }),
   listProfiles: () => invoke<ProfileEntry[]>("list_profiles"),
   openProfile: (path: string) => invoke<ProfileSnapshot>("open_profile", { path }),
   duplicateProfile: (name: string) => invoke<ProfileSnapshot>("duplicate_profile", { name }),

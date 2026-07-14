@@ -14,7 +14,9 @@ Preview pixels are rendered into a top-down 32-bit DIB and encoded through WIC. 
 
 Rust owns a line-preserving INI document. It retains BOM, encoding, line endings, blank lines, comments, unknown entries, and ordering. Only the value slice of a changed key is rewritten. Save compares the original SHA-256, flushes a same-directory temporary file, keeps one backup, and uses `ReplaceFileW` on Windows.
 
-The editor reads installed profiles but creates user-owned copies under `%LOCALAPPDATA%\MacType\ControlCenter\profiles`; it never needs elevation to duplicate a profile from `Program Files`. Scalar settings use the public core's `[General]` keys. Structured `[Individual]`, font include/exclude, and module include/exclude sections retain their surrounding comments while edited entries are validated and replaced.
+The editor reads installed profiles but creates user-owned copies under `%LOCALAPPDATA%\MacType\ControlCenter\profiles`; it never needs elevation to duplicate a profile from `Program Files`. File selection, native `.ini` import, duplication, save, and apply live in a dedicated settings-file view instead of being mixed into the setting editor. The view discovers the profile selected by an existing installation's `MacType.ini`, explains the source, and imports it only after explicit user consent. Imports are strictly decoded as INI documents, copied byte-for-byte, and receive a collision-safe name.
+
+Scalar settings use the public core's `[General]` keys. Structured `[Individual]`, font include/exclude, and module include/exclude sections retain their surrounding comments while edited entries are validated and replaced. The legacy-codec gate vendors a pinned, licensed 70-profile community corpus and requires correct encoding detection, byte-identical no-edit round trips, edit/save/reopen behavior, and line-ending/BOM preservation without network access.
 
 `shared/settings-schema.json` is the source for generated Rust, TypeScript, and C++ setting definitions. CI regenerates and rejects drift.
 
@@ -26,4 +28,6 @@ Changing the language updates visible text, the document title, accessibility la
 
 ## Execution boundary
 
-The open Tauri executable owns the notification icon and close-to-tray lifecycle. Its optional login startup entry is user-scoped. Manual mode invokes the public `MacLoader.exe` directly with an executable path and argument vector; no shell string is accepted. Legacy `MacTray.exe -service` and AppInit registry mode are detected read-only and never controlled. The evidence and safety decision are recorded in `docs/legacy-behavior-notes.md`.
+The open Tauri executable owns the notification icon and close-to-tray lifecycle. Its optional login startup entry is user-scoped. The GUI remains `asInvoker`; privileged legacy-service operations are isolated in a one-shot verb allowlisted broker dispatched before Tauri starts. AppInit registry mode remains read-only. Manual mode invokes the public `MacLoader.exe` directly with an executable path and argument vector; no shell string is accepted. The evidence and safety decisions are recorded in `docs/legacy-behavior-notes.md`.
+
+The official single-instance plugin is registered before every other Tauri plugin. On Windows, a pre-Tauri per-session startup mutex serializes cold starts until the first process has created its IPC window and completed setup, closing the plugin's mutex-to-window race. Later launches send their arguments to the existing process, which shows, unminimizes, and focuses the main window. The privileged service broker exits before this gate and therefore never participates in GUI instance arbitration.

@@ -5,6 +5,8 @@ import type {
   ExecutionStatus,
   IndividualSetting,
   InstallationStatus,
+  LegacyProfileCandidate,
+  LegacyServiceStatus,
   LaunchContext,
   PreviewRequest,
   PreviewResult,
@@ -29,6 +31,14 @@ export async function loadExecutionStatus(): Promise<ExecutionStatus> {
 
 export async function pickExecutable(filterName: string): Promise<string | null> {
   return getRuntimeAdapter().pickExecutable(filterName);
+}
+
+export async function manageLegacyService(action: "install" | "remove" | "start" | "stop"): Promise<LegacyServiceStatus> {
+  return getRuntimeAdapter().manageLegacyService(action);
+}
+
+export async function pickIniProfile(filterName: string): Promise<string | null> {
+  return getRuntimeAdapter().pickIniProfile(filterName);
 }
 
 export async function loadInstalledFontFamilies(): Promise<ReadonlyArray<string>> {
@@ -89,6 +99,18 @@ export async function openLogFolder(): Promise<string> {
 
 export async function openDefaultProfile(): Promise<ProfileSnapshot | null> {
   return getRuntimeAdapter().openDefaultProfile();
+}
+
+export async function currentProfile(): Promise<ProfileSnapshot | null> {
+  return getRuntimeAdapter().currentProfile();
+}
+
+export async function discoverLegacyProfile(): Promise<LegacyProfileCandidate | null> {
+  return getRuntimeAdapter().discoverLegacyProfile();
+}
+
+export async function importProfile(path: string): Promise<ProfileSnapshot> {
+  return getRuntimeAdapter().importProfile(path);
 }
 
 export async function listProfiles(): Promise<ReadonlyArray<ProfileEntry>> {

@@ -1,7 +1,7 @@
 import { AlertTriangle, Check, FileCode2, FolderOpen, Play, RefreshCw, ShieldAlert, Trash2, UserPlus } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { ExecutionStatus } from "../app/model";
-import { launchRegisteredTargets, launchTargetWithMactype, loadExecutionStatus, pickExecutable, registerSessionTarget, removeSessionTarget, reportFrontendFailure, setSessionAutostart, verifyInjectionWorkflowForCi } from "../app/tauri";
+import { launchRegisteredTargets, launchTargetWithMactype, loadExecutionStatus, manageLegacyService, pickExecutable, registerSessionTarget, removeSessionTarget, reportFrontendFailure, setSessionAutostart, verifyInjectionWorkflowForCi } from "../app/tauri";
 import { useI18n } from "../i18n/i18n";
 
 export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean; onReady?: () => void }) {
@@ -11,6 +11,7 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
   const [argumentsText, setArgumentsText] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [serviceBusy, setServiceBusy] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -101,6 +102,23 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
     }
   };
 
+  const manageService = async (action: "install" | "remove" | "start" | "stop") => {
+    setServiceBusy(action);
+    try {
+      const legacyService = await manageLegacyService(action);
+      setStatus((current) => current ? { ...current, legacyService } : current);
+      setMessage(t("execution.serviceActionDone"));
+      setError(null);
+    } catch (caught: unknown) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+      setMessage(null);
+    } finally {
+      setServiceBusy(null);
+    }
+  };
+
+  const service = status?.legacyService;
+
   return (
     <section className="page view-enter" aria-labelledby="execution-title">
       <header className="page-header">
@@ -145,9 +163,24 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
       <section className="section-block" aria-labelledby="system-title">
         <div className="section-heading"><div><h2 id="system-title">{t("execution.systemTitle")}</h2><p>{t("execution.systemDescription")}</p></div></div>
         <dl className="detail-list">
-          <div><dt>{t("execution.legacyService")}</dt><dd>{status?.legacyServiceDetected ? <AlertTriangle className="warning" size={17} /> : <Check className="success" size={17} />}<span>{status?.legacyServiceDetected ? t("execution.detected", { state: status.legacyServiceRunning ? t("execution.running") : t("execution.stopped") }) : t("execution.notDetected")}</span></dd></div>
+          <div><dt>{t("execution.legacyService")}</dt><dd>{service?.presence === "owned" ? <Check className="success" size={17} /> : <AlertTriangle className="warning" size={17} />}<span>{service ? `${t(`execution.servicePresence.${service.presence}`)} · ${t(`execution.serviceState.${service.state}`)}` : t("execution.checking")}</span></dd></div>
           <div><dt>{t("execution.appInit")}</dt><dd>{status?.registryModeDetected ? <ShieldAlert className="warning" size={17} /> : <Check className="success" size={17} />}<span>{status?.registryModeDetected ? t("execution.entryDetected") : t("profiles.disabled")}</span></dd></div>
         </dl>
+        <div className="service-controls">
+          <div>
+            <strong>{t("execution.serviceControlTitle")}</strong>
+            <p>{t("execution.serviceControlDescription")}</p>
+            {service?.binaryPath && <code title={service.binaryPath}>{service.binaryPath}</code>}
+            {service?.registryConflict && <p className="warning-text">{t("execution.serviceRegistryConflict")}</p>}
+            {service?.presence === "foreign" && <p className="warning-text">{t("execution.serviceForeign")}</p>}
+          </div>
+          <div className="service-actions">
+            <button className="button secondary" disabled={!service?.canInstall || serviceBusy !== null} onClick={() => void manageService("install")} type="button">{serviceBusy === "install" ? t("execution.serviceWorking") : t("execution.serviceInstall")}</button>
+            <button className="button secondary" disabled={!service?.canStart || serviceBusy !== null} onClick={() => void manageService("start")} type="button">{serviceBusy === "start" ? t("execution.serviceWorking") : t("execution.serviceStart")}</button>
+            <button className="button secondary" disabled={!service?.canStop || serviceBusy !== null} onClick={() => void manageService("stop")} type="button">{serviceBusy === "stop" ? t("execution.serviceWorking") : t("execution.serviceStop")}</button>
+            <button className="button secondary danger" disabled={!service?.canRemove || serviceBusy !== null} onClick={() => void manageService("remove")} type="button">{serviceBusy === "remove" ? t("execution.serviceWorking") : t("execution.serviceRemove")}</button>
+          </div>
+        </div>
         <div className="system-mode-note"><ShieldAlert aria-hidden="true" size={19} /><p>{status ? t("execution.systemNote") : t("execution.checking")}</p></div>
       </section>
 

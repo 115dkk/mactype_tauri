@@ -3,8 +3,10 @@ mod diagnostics;
 mod execution;
 mod fonts;
 mod generated_settings;
+mod legacy_service;
 mod preview;
 mod profile;
+mod single_instance;
 
 use std::{env, path::PathBuf};
 use tauri::Manager;
@@ -21,9 +23,21 @@ pub(crate) fn installation_root() -> Option<PathBuf> {
         .or_else(|| env::var_os("ProgramFiles").map(|path| PathBuf::from(path).join("MacType")))
 }
 
+pub fn dispatch_privileged_command() -> Option<i32> {
+    legacy_service::dispatch_privileged_command()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let mut startup_gate = Some(
+        single_instance::StartupGate::acquire()
+            .expect("failed to acquire the single-instance startup gate"),
+    );
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            let restored = app::restore_main_window(app).is_ok();
+            let _ = single_instance::record_activation(args, cwd, restored);
+        }))
         .plugin(tauri_plugin_dialog::init())
         .manage(profile::ProfileState::default())
         .manage(preview::PreviewState::default())
@@ -39,6 +53,7 @@ pub fn run() {
             diagnostics::copy_diagnostics,
             diagnostics::open_log_folder,
             execution::execution_status,
+            legacy_service::manage_legacy_service,
             execution::set_session_autostart,
             execution::launch_with_mactype,
             execution::apply_open_profile,
@@ -48,6 +63,9 @@ pub fn run() {
             profile::list_profiles,
             profile::open_profile,
             profile::open_default_profile,
+            profile::current_profile,
+            profile::discover_legacy_profile,
+            profile::import_profile,
             profile::update_profile_setting,
             profile::update_profile_individuals,
             profile::update_profile_list,
@@ -64,7 +82,7 @@ pub fn run() {
             app::frontend_ready,
             app::frontend_failed
         ])
-        .setup(|app| {
+        .setup(move |app| {
             use tauri::{
                 menu::{Menu, MenuItem},
                 tray::TrayIconBuilder,
@@ -81,10 +99,7 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
+                        let _ = app::restore_main_window(app);
                     }
                     "hide" => {
                         if let Some(window) = app.get_webview_window("main") {
@@ -107,6 +122,10 @@ pub fn run() {
                 }
                 let _ = execution::launch_registered_targets();
             }
+            if let Some(gate) = startup_gate.take() {
+                gate.release()?;
+            }
+            single_instance::write_ready_marker()?;
             Ok(())
         })
         .on_window_event(|window, event| {

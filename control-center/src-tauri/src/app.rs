@@ -2,6 +2,15 @@ use serde::Serialize;
 use std::{env, fs, path::PathBuf, thread, time::Duration};
 use tauri::{AppHandle, Manager};
 
+pub(crate) fn restore_main_window(app: &AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window was not created".to_owned())?;
+    window.show().map_err(|error| error.to_string())?;
+    window.unminimize().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LaunchContext {
@@ -17,7 +26,7 @@ fn requested_view() -> String {
             if let Some(value) = args.next() {
                 if matches!(
                     value.as_str(),
-                    "overview" | "profiles" | "execution" | "diagnostics"
+                    "overview" | "files" | "profiles" | "execution" | "diagnostics"
                 ) {
                     return value;
                 }
@@ -236,7 +245,7 @@ mod tests {
     fn unsupported_view_is_not_accepted_by_launch_parser_contract() {
         assert!(!matches!(
             "settings",
-            "overview" | "profiles" | "execution" | "diagnostics"
+            "overview" | "files" | "profiles" | "execution" | "diagnostics"
         ));
     }
 }

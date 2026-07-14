@@ -12,11 +12,13 @@ The legacy `MacTray.exe` implementation is not in the public core and is not shi
 
 ## Legacy service
 
-An official installation may register a service named `MacType` whose image is `MacTray.exe -service`. The Control Center queries that service with the Service Control Manager API so users can see conflicts, but it does not start, stop, install, or remove it. Doing so would retain a dependency on the abandoned private Delphi executable and would not constitute an open replacement.
+An official installation may register a service named `MacType` whose image is `MacTray.exe -service`. The Control Center reads both the Service Control Manager configuration and runtime state, and only treats a service as owned when its executable resolves to the verified `MacTray.exe` under Program Files and its service type, account, startup mode, argument, error mode, and `winmgmt` dependency match the official layout. A matching historical unquoted command line is shown as a repairable compatibility state; foreign, inaccessible, and deletion-pending services are never mutated.
+
+Installing and removing this legacy mode remains an interoperability feature, not part of the independent distribution. The normal Control Center always runs as the current user. A user-initiated action starts a short-lived `runas` broker which accepts only `install`, `remove`, `start`, or `stop`, revalidates the trusted binary and current SCM state, and then uses the official `MacTray.exe /INSTALL /SILENT` or `/UNINSTALL /SILENT` path plus SCM start/stop calls. The status is queried again after every operation. An existing AppInit MacType configuration blocks installation and start to avoid double injection.
 
 ## AppInit registry mode
 
-The official project removed registry mode from its wizard because an incorrect configuration can prevent Windows from booting. Its manual guide modifies both 64-bit and 32-bit `AppInit_DLLs`, enables `LoadAppInit_DLLs`, weakens `RequireSignedAppInit_DLLs`, and changes the system `PATH`. The Control Center detects an existing MacType AppInit entry read-only and deliberately provides no apply action. No administrator broker is built while every proposed privileged operation is rejected by policy; an executable that merely wraps the legacy Delphi service or a boot-risk registry recipe would violate the architecture rather than complete it.
+The official project removed registry mode from its wizard because an incorrect configuration can prevent Windows from booting. Its manual guide modifies both 64-bit and 32-bit `AppInit_DLLs`, enables `LoadAppInit_DLLs`, weakens `RequireSignedAppInit_DLLs`, and changes the system `PATH`. The Control Center detects an existing MacType AppInit entry read-only and deliberately provides no apply action. The narrowly scoped service broker cannot write AppInit, IFEO, or arbitrary registry values.
 
 Primary references:
 

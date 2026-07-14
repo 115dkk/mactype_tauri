@@ -1,13 +1,26 @@
 use crate::generated_settings::{SettingDefinition, SettingValueType, SETTINGS};
-use encoding_rs::{Encoding, BIG5, EUC_KR, GB18030, SHIFT_JIS, WINDOWS_1252};
+use crate::{execution, installation_root};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
+    env,
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
+    sync::Mutex,
 };
+use tauri::State;
+
+mod codec;
+
+use codec::{
+    decode, detect_line_ending, encode, encode_preserving_legacy_lines, original_legacy_lines,
+    split_lines, OriginalLegacyLines,
+};
+
+#[cfg(test)]
+use encoding_rs::{Encoding, BIG5, GB18030, SHIFT_JIS};
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -86,8 +99,18 @@ pub struct ProfileDocument {
     line_ending: LineEnding,
     nodes: Vec<IniNode>,
     original_hash: [u8; 32],
-    original_legacy_lines: Option<Vec<(String, Vec<u8>)>>,
+    original_legacy_lines: Option<OriginalLegacyLines>,
     dirty_keys: BTreeSet<String>,
+}
+
+#[derive(Default)]
+pub(crate) struct ProfileState(pub(crate) Mutex<Option<ProfileDocument>>);
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProfileEntry {
+    name: String,
+    path: String,
 }
 
 #[derive(Serialize)]
@@ -148,235 +171,6 @@ pub struct AdvancedProfile {
 
 fn hash(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
-}
-
-fn decode(bytes: &[u8]) -> Result<(String, TextEncoding, BomKind), String> {
-    if let Some(body) = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
-        return String::from_utf8(body.to_vec())
-            .map(|text| (text, TextEncoding::Utf8, BomKind::Utf8))
-            .map_err(|error| error.to_string());
-    }
-    if let Some(body) = bytes.strip_prefix(&[0xFF, 0xFE]) {
-        if body.len() % 2 != 0 {
-            return Err("UTF-16LE profile has an odd byte length".to_owned());
-        }
-        let units = body
-            .chunks_exact(2)
-            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
-            .collect::<Vec<_>>();
-        return String::from_utf16(&units)
-            .map(|text| (text, TextEncoding::Utf16Le, BomKind::Utf16Le))
-            .map_err(|error| error.to_string());
-    }
-    if let Some(body) = bytes.strip_prefix(&[0xFE, 0xFF]) {
-        if body.len() % 2 != 0 {
-            return Err("UTF-16BE profile has an odd byte length".to_owned());
-        }
-        let units = body
-            .chunks_exact(2)
-            .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
-            .collect::<Vec<_>>();
-        return String::from_utf16(&units)
-            .map(|text| (text, TextEncoding::Utf16Be, BomKind::Utf16Be))
-            .map_err(|error| error.to_string());
-    }
-    if let Ok(text) = String::from_utf8(bytes.to_vec()) {
-        return Ok((text, TextEncoding::Utf8, BomKind::None));
-    }
-    let candidates = [
-        (TextEncoding::Gb18030, GB18030),
-        (TextEncoding::Big5, BIG5),
-        (TextEncoding::ShiftJis, SHIFT_JIS),
-        (TextEncoding::EucKr, EUC_KR),
-        (TextEncoding::Windows1252, WINDOWS_1252),
-    ];
-    candidates
-        .into_iter()
-        .filter_map(|(encoding, codec)| {
-            let (text, _, decode_errors) = codec.decode(bytes);
-            if decode_errors {
-                return None;
-            }
-            let text = text.into_owned();
-            Some((legacy_score(&text, encoding), text, encoding))
-        })
-        .max_by_key(|candidate| candidate.0)
-        .map(|(_, text, encoding)| (text, encoding, BomKind::None))
-        .ok_or_else(|| {
-            "profile is not valid UTF-8, UTF-16, GB18030, Big5, Shift-JIS, EUC-KR, or Windows-1252"
-                .to_owned()
-        })
-}
-
-fn legacy_score(text: &str, encoding: TextEncoding) -> i64 {
-    let sections = text
-        .lines()
-        .filter(|line| {
-            let line = line.trim();
-            line.starts_with('[') && line.ends_with(']')
-        })
-        .count() as i64;
-    let assignments = text.lines().filter(|line| line.contains('=')).count() as i64;
-    let mut hangul = 0_i64;
-    let mut kana = 0_i64;
-    let mut han = 0_i64;
-    let mut latin = 0_i64;
-    let mut controls = 0_i64;
-    let mut simplified = 0_i64;
-    let mut traditional = 0_i64;
-    const SIMPLIFIED: &str = "简体汉语配置设置默认启用关闭字体进程缓存试验权重过滤阴影";
-    const TRADITIONAL: &str = "簡體漢語設定預設啟用關閉字型程序快取試驗權重過濾陰影";
-    for character in text.chars() {
-        match character {
-            '\u{ac00}'..='\u{d7af}' => hangul += 1,
-            '\u{3040}'..='\u{30ff}' => kana += 1,
-            '\u{3400}'..='\u{9fff}' => han += 1,
-            'A'..='Z' | 'a'..='z' | '\u{00c0}'..='\u{024f}' => latin += 1,
-            character if character.is_control() && !matches!(character, '\r' | '\n' | '\t') => {
-                controls += 1
-            }
-            _ => {}
-        }
-        if SIMPLIFIED.contains(character) {
-            simplified += 1;
-        }
-        if TRADITIONAL.contains(character) {
-            traditional += 1;
-        }
-    }
-    let structure = sections * 100 + assignments * 12 - controls * 200;
-    structure
-        + match encoding {
-            TextEncoding::Gb18030 => {
-                han * 3 + simplified * 18 - traditional * 3 - hangul * 12 - kana * 12
-                    + i64::from(han > 0) * 10
-            }
-            TextEncoding::Big5 => {
-                han * 3 + traditional * 18 - simplified * 3 - hangul * 12 - kana * 12
-                    + i64::from(han > 0) * 10
-            }
-            TextEncoding::ShiftJis => kana * 20 + han * 2 - hangul * 12 + i64::from(kana > 0) * 10,
-            TextEncoding::EucKr => hangul * 20 + han - kana * 12 + i64::from(hangul > 0) * 10,
-            TextEncoding::Windows1252 => latin * 3 - (hangul + kana + han) * 8,
-            TextEncoding::Utf8 | TextEncoding::Utf16Le | TextEncoding::Utf16Be => 0,
-        }
-}
-
-fn legacy_codec(encoding: TextEncoding) -> Option<&'static Encoding> {
-    match encoding {
-        TextEncoding::EucKr => Some(EUC_KR),
-        TextEncoding::Gb18030 => Some(GB18030),
-        TextEncoding::Big5 => Some(BIG5),
-        TextEncoding::ShiftJis => Some(SHIFT_JIS),
-        TextEncoding::Windows1252 => Some(WINDOWS_1252),
-        TextEncoding::Utf8 | TextEncoding::Utf16Le | TextEncoding::Utf16Be => None,
-    }
-}
-
-fn encode(text: &str, encoding: TextEncoding, bom: BomKind) -> Result<Vec<u8>, String> {
-    let mut output = Vec::new();
-    match encoding {
-        TextEncoding::Utf8 => {
-            if matches!(bom, BomKind::Utf8) {
-                output.extend_from_slice(&[0xEF, 0xBB, 0xBF]);
-            }
-            output.extend_from_slice(text.as_bytes());
-        }
-        TextEncoding::Utf16Le | TextEncoding::Utf16Be => {
-            if matches!(bom, BomKind::Utf16Le) {
-                output.extend_from_slice(&[0xFF, 0xFE]);
-            } else if matches!(bom, BomKind::Utf16Be) {
-                output.extend_from_slice(&[0xFE, 0xFF]);
-            }
-            for unit in text.encode_utf16() {
-                let bytes = if matches!(encoding, TextEncoding::Utf16Le) {
-                    unit.to_le_bytes()
-                } else {
-                    unit.to_be_bytes()
-                };
-                output.extend_from_slice(&bytes);
-            }
-        }
-        TextEncoding::EucKr
-        | TextEncoding::Gb18030
-        | TextEncoding::Big5
-        | TextEncoding::ShiftJis
-        | TextEncoding::Windows1252 => {
-            let codec = legacy_codec(encoding).expect("legacy encoding must have a codec");
-            let (encoded, _, had_errors) = codec.encode(text);
-            if had_errors {
-                return Err(
-                    "profile contains text that cannot be represented in its original encoding"
-                        .to_owned(),
-                );
-            }
-            output.extend_from_slice(&encoded);
-        }
-    }
-    Ok(output)
-}
-
-fn detect_line_ending(text: &str) -> LineEnding {
-    if text.contains("\r\n") {
-        LineEnding::CrLf
-    } else if text.contains('\n') {
-        LineEnding::Lf
-    } else {
-        LineEnding::Cr
-    }
-}
-
-fn split_lines(text: &str) -> Vec<&str> {
-    let mut lines = Vec::new();
-    let mut start = 0;
-    for (index, character) in text.char_indices() {
-        if character == '\n' || (character == '\r' && !text[index..].starts_with("\r\n")) {
-            lines.push(&text[start..=index]);
-            start = index + 1;
-        }
-    }
-    if start < text.len() {
-        lines.push(&text[start..]);
-    }
-    lines
-}
-
-fn split_byte_lines(bytes: &[u8]) -> Vec<&[u8]> {
-    let mut lines = Vec::new();
-    let mut start = 0;
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'\r' {
-            index += usize::from(bytes.get(index + 1) == Some(&b'\n'));
-            lines.push(&bytes[start..=index]);
-            start = index + 1;
-        } else if bytes[index] == b'\n' {
-            lines.push(&bytes[start..=index]);
-            start = index + 1;
-        }
-        index += 1;
-    }
-    if start < bytes.len() {
-        lines.push(&bytes[start..]);
-    }
-    lines
-}
-
-fn legacy_original_lines(
-    bytes: &[u8],
-    text: &str,
-    encoding: TextEncoding,
-) -> Option<Vec<(String, Vec<u8>)>> {
-    legacy_codec(encoding)?;
-    let text_lines = split_lines(text);
-    let byte_lines = split_byte_lines(bytes);
-    (text_lines.len() == byte_lines.len()).then(|| {
-        text_lines
-            .into_iter()
-            .zip(byte_lines)
-            .map(|(line, bytes)| (line.to_owned(), bytes.to_vec()))
-            .collect()
-    })
 }
 
 fn parse_nodes(text: &str) -> Vec<IniNode> {
@@ -469,7 +263,7 @@ impl ProfileDocument {
             line_ending: detect_line_ending(&text),
             nodes: parse_nodes(&text),
             original_hash,
-            original_legacy_lines: legacy_original_lines(&bytes, &text, encoding),
+            original_legacy_lines: original_legacy_lines(&bytes, &text, encoding),
             dirty_keys: BTreeSet::new(),
         })
     }
@@ -1076,30 +870,11 @@ impl ProfileDocument {
             let text = self.nodes.iter().map(IniNode::raw).collect::<String>();
             return encode(&text, self.encoding, self.bom);
         };
-        let codec = legacy_codec(self.encoding).expect("legacy lines require a legacy codec");
-        let mut used = vec![false; original_lines.len()];
-        let mut output = Vec::new();
-        for node in &self.nodes {
-            let raw = node.raw();
-            if let Some((index, (_, bytes))) = original_lines
-                .iter()
-                .enumerate()
-                .find(|(index, (line, _))| !used[*index] && line == raw)
-            {
-                used[index] = true;
-                output.extend_from_slice(bytes);
-                continue;
-            }
-            let (encoded, _, had_errors) = codec.encode(raw);
-            if had_errors {
-                return Err(
-                    "profile contains text that cannot be represented in its original encoding"
-                        .to_owned(),
-                );
-            }
-            output.extend_from_slice(&encoded);
-        }
-        Ok(output)
+        encode_preserving_legacy_lines(
+            self.nodes.iter().map(IniNode::raw),
+            original_lines,
+            self.encoding,
+        )
     }
 
     pub fn save(&mut self) -> Result<(), String> {
@@ -1124,7 +899,7 @@ impl ProfileDocument {
         replace_file(&self.path, &temporary, &backup)?;
         self.original_hash = hash(&bytes);
         let text = self.nodes.iter().map(IniNode::raw).collect::<String>();
-        self.original_legacy_lines = legacy_original_lines(&bytes, &text, self.encoding);
+        self.original_legacy_lines = original_legacy_lines(&bytes, &text, self.encoding);
         self.dirty_keys.clear();
         Ok(())
     }
@@ -1163,6 +938,251 @@ fn replace_file(destination: &Path, replacement: &Path, backup: &Path) -> Result
 fn replace_file(destination: &Path, replacement: &Path, backup: &Path) -> Result<(), String> {
     fs::copy(destination, backup).map_err(|error| error.to_string())?;
     fs::rename(replacement, destination).map_err(|error| error.to_string())
+}
+
+fn user_profile_root() -> Option<PathBuf> {
+    env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .map(|path| path.join("MacType").join("ControlCenter").join("profiles"))
+}
+
+fn find_default_profile() -> Option<PathBuf> {
+    let root = installation_root()?;
+    let profile_root = root.join("ini");
+    let default = profile_root.join("Default.ini");
+    if default.is_file() {
+        return Some(default);
+    }
+    let profile = fs::read_dir(&profile_root).ok().and_then(|entries| {
+        entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .find(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("ini"))
+            })
+    });
+    profile.or_else(|| {
+        root.join("MacType.ini")
+            .is_file()
+            .then(|| root.join("MacType.ini"))
+    })
+}
+
+#[tauri::command]
+pub(crate) fn list_profiles() -> Result<Vec<ProfileEntry>, String> {
+    let root =
+        installation_root().ok_or_else(|| "MacType installation was not found".to_owned())?;
+    let profile_root = root.join("ini");
+    let mut paths = fs::read_dir(&profile_root)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let root_profile = root.join("MacType.ini");
+    if paths.is_empty() && root_profile.is_file() {
+        paths.push(root_profile);
+    }
+    if let Some(user_root) = user_profile_root() {
+        if let Ok(entries) = fs::read_dir(user_root) {
+            paths.extend(entries.filter_map(Result::ok).map(|entry| entry.path()));
+        }
+    }
+    let mut profiles = paths
+        .into_iter()
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("ini"))
+        })
+        .map(|path| ProfileEntry {
+            name: path
+                .file_stem()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            path: path.to_string_lossy().into_owned(),
+        })
+        .collect::<Vec<_>>();
+    profiles.sort_by_key(|profile| profile.name.to_lowercase());
+    Ok(profiles)
+}
+
+#[tauri::command]
+pub(crate) fn open_profile(
+    path: String,
+    state: State<'_, ProfileState>,
+) -> Result<ProfileSnapshot, String> {
+    let document = ProfileDocument::open(PathBuf::from(path))?;
+    let snapshot = document.snapshot();
+    *state
+        .0
+        .lock()
+        .map_err(|_| "profile lock is poisoned".to_owned())? = Some(document);
+    Ok(snapshot)
+}
+
+#[tauri::command]
+pub(crate) fn open_default_profile(
+    state: State<'_, ProfileState>,
+) -> Result<Option<ProfileSnapshot>, String> {
+    let Some(path) = find_default_profile() else {
+        return Ok(None);
+    };
+    open_profile(path.to_string_lossy().into_owned(), state).map(Some)
+}
+
+#[tauri::command]
+pub(crate) fn update_profile_setting(
+    setting_id: String,
+    value: f64,
+    state: State<'_, ProfileState>,
+) -> Result<ProfileSnapshot, String> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "profile lock is poisoned".to_owned())?;
+    let document = guard
+        .as_mut()
+        .ok_or_else(|| "no profile is open".to_owned())?;
+    document.set_value(&setting_id, value)?;
+    Ok(document.snapshot())
+}
+
+#[tauri::command]
+pub(crate) fn update_profile_individuals(
+    entries: Vec<IndividualSetting>,
+    state: State<'_, ProfileState>,
+) -> Result<ProfileSnapshot, String> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "profile lock is poisoned".to_owned())?;
+    let document = guard
+        .as_mut()
+        .ok_or_else(|| "no profile is open".to_owned())?;
+    document.set_individuals(entries)?;
+    Ok(document.snapshot())
+}
+
+#[tauri::command]
+pub(crate) fn update_profile_list(
+    kind: String,
+    entries: Vec<String>,
+    state: State<'_, ProfileState>,
+) -> Result<ProfileSnapshot, String> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "profile lock is poisoned".to_owned())?;
+    let document = guard
+        .as_mut()
+        .ok_or_else(|| "no profile is open".to_owned())?;
+    document.set_list(&kind, entries)?;
+    Ok(document.snapshot())
+}
+
+#[tauri::command]
+pub(crate) fn update_profile_advanced(
+    advanced: AdvancedProfile,
+    state: State<'_, ProfileState>,
+) -> Result<ProfileSnapshot, String> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "profile lock is poisoned".to_owned())?;
+    let document = guard
+        .as_mut()
+        .ok_or_else(|| "no profile is open".to_owned())?;
+    document.set_advanced(advanced)?;
+    Ok(document.snapshot())
+}
+
+#[tauri::command]
+pub(crate) fn duplicate_profile(
+    name: String,
+    state: State<'_, ProfileState>,
+) -> Result<ProfileSnapshot, String> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "profile lock is poisoned".to_owned())?;
+    let current = guard
+        .as_ref()
+        .ok_or_else(|| "no profile is open".to_owned())?;
+    let directory =
+        user_profile_root().ok_or_else(|| "LOCALAPPDATA is not available".to_owned())?;
+    let duplicate = current.duplicate_in(&directory, &name)?;
+    let snapshot = duplicate.snapshot();
+    *guard = Some(duplicate);
+    Ok(snapshot)
+}
+
+#[tauri::command]
+pub(crate) fn save_profile(state: State<'_, ProfileState>) -> Result<ProfileSnapshot, String> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "profile lock is poisoned".to_owned())?;
+    let document = guard
+        .as_mut()
+        .ok_or_else(|| "no profile is open".to_owned())?;
+    document.save()?;
+    Ok(document.snapshot())
+}
+
+#[tauri::command]
+pub(crate) fn ci_verify_profile_workflow(state: State<'_, ProfileState>) -> Result<(), String> {
+    let marker = env::var_os("MACTYPE_CI_SMOKE_FILE").ok_or_else(|| {
+        "profile workflow verification is available only during CI smoke tests".to_owned()
+    })?;
+    let directory = PathBuf::from(marker)
+        .parent()
+        .ok_or_else(|| "CI marker has no parent directory".to_owned())?
+        .join("profile-workflow");
+    let guard = state
+        .0
+        .lock()
+        .map_err(|_| "profile lock is poisoned".to_owned())?;
+    let current = guard
+        .as_ref()
+        .ok_or_else(|| "no profile is open".to_owned())?;
+    let name = format!("phase3-{}", std::process::id());
+    let mut copy = current.duplicate_in(&directory, &name)?;
+    copy.set_value("normal_weight", 7.0)?;
+    copy.set_individuals(vec![IndividualSetting {
+        font_face: "CI Test Font".to_owned(),
+        values: vec![Some(1), Some(2), None, Some(3), None, Some(1)],
+    }])?;
+    copy.set_list("excludeModules", vec!["ci-test.exe".to_owned()])?;
+    copy.save()?;
+    let path = directory.join(format!("{name}.ini"));
+    let reopened_document = ProfileDocument::open(&path)?;
+    let reopened = reopened_document.snapshot();
+    if reopened.values.get("normal_weight") != Some(&7.0)
+        || reopened.individuals.len() != 1
+        || reopened.lists.exclude_modules != vec!["ci-test.exe".to_owned()]
+    {
+        return Err("saved Phase 3 profile did not reopen with the expected values".to_owned());
+    }
+    let installation =
+        installation_root().ok_or_else(|| "MacType installation was not found".to_owned())?;
+    let encoded = reopened_document.encoded()?;
+    let applied = execution::apply_profile(&installation, &path, &encoded)?;
+    let applied_root = PathBuf::from(&applied.runtime_root);
+    if fs::read(applied_root.join("profile.ini")).map_err(|error| error.to_string())? != encoded
+        || fs::read(applied_root.join("MacType.ini")).map_err(|error| error.to_string())?
+            != b"[General]\r\nAlternativeFile=profile.ini\r\n"
+        || !applied_root.join("MacLoader.exe").is_file()
+        || !applied_root.join("MacType.dll").is_file()
+    {
+        return Err(
+            "applied profile runtime is incomplete or does not preserve the profile".to_owned(),
+        );
+    }
+    drop(guard);
+    fs::remove_dir_all(directory).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

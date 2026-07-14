@@ -1,0 +1,61 @@
+import type { Locale } from "../i18n/i18n";
+import type {
+  AdvancedProfile,
+  AppliedProfile,
+  ExecutionStatus,
+  IndividualSetting,
+  InstallationStatus,
+  LaunchContext,
+  PreviewRequest,
+  PreviewResult,
+  ProfileEntry,
+  ProfileSnapshot,
+  SessionTarget,
+  ViewId,
+} from "./model";
+import { browserGalleryAdapter } from "./runtimeAdapters/browserGalleryAdapter";
+import { tauriRuntimeAdapter } from "./runtimeAdapters/tauriRuntimeAdapter";
+
+export interface ControlCenterRuntimeAdapter {
+  loadLaunchContext(): Promise<LaunchContext>;
+  setApplicationLocale(locale: Locale): Promise<void>;
+  loadExecutionStatus(): Promise<ExecutionStatus>;
+  pickExecutable(filterName: string): Promise<string | null>;
+  loadInstalledFontFamilies(): Promise<ReadonlyArray<string>>;
+  setSessionAutostart(enabled: boolean): Promise<boolean>;
+  launchTargetWithMactype(target: string, arguments_: ReadonlyArray<string>): Promise<number>;
+  scanInstallation(): Promise<InstallationStatus | null>;
+  applyOpenProfile(): Promise<AppliedProfile>;
+  registerSessionTarget(target: string, arguments_: ReadonlyArray<string>): Promise<ReadonlyArray<SessionTarget>>;
+  removeSessionTarget(target: string): Promise<ReadonlyArray<SessionTarget>>;
+  launchRegisteredTargets(): Promise<ReadonlyArray<number>>;
+  rediscoverInstallation(): Promise<InstallationStatus>;
+  reconnectPreview(): Promise<InstallationStatus>;
+  loadDiagnosticReport(): Promise<string>;
+  exportDiagnostics(): Promise<string>;
+  copyDiagnostics(): Promise<void>;
+  openLogFolder(): Promise<string>;
+  openDefaultProfile(): Promise<ProfileSnapshot | null>;
+  listProfiles(): Promise<ReadonlyArray<ProfileEntry>>;
+  openProfile(path: string): Promise<ProfileSnapshot>;
+  duplicateProfile(name: string): Promise<ProfileSnapshot>;
+  updateProfileSetting(settingId: string, value: number): Promise<ProfileSnapshot | null>;
+  updateProfileIndividuals(entries: ReadonlyArray<IndividualSetting>): Promise<ProfileSnapshot | null>;
+  updateProfileList(kind: string, entries: ReadonlyArray<string>): Promise<ProfileSnapshot | null>;
+  updateProfileAdvanced(advanced: AdvancedProfile): Promise<ProfileSnapshot | null>;
+  saveProfile(): Promise<ProfileSnapshot | null>;
+  renderProfilePreview(request: PreviewRequest): Promise<PreviewResult | null>;
+  setNativePreview(visible: boolean): Promise<boolean>;
+  previewImageUrl(path: string): string;
+  loadPreviewDiagnostics(): Promise<ReadonlyArray<string>>;
+  forcePreviewCrashForCi(): Promise<void>;
+  verifyProfileWorkflowForCi(): Promise<void>;
+  verifyInjectionWorkflowForCi(): Promise<void>;
+  verifyTrayModeForCi(): Promise<void>;
+  reportFrontendReady(view: ViewId): Promise<void>;
+  reportFrontendFailure(view: ViewId, message: string): Promise<void>;
+}
+
+export function getRuntimeAdapter(): ControlCenterRuntimeAdapter {
+  return "__TAURI_INTERNALS__" in window ? tauriRuntimeAdapter : browserGalleryAdapter;
+}

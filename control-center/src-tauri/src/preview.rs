@@ -1,3 +1,4 @@
+use crate::installation_root;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -9,7 +10,7 @@ use std::{
     thread,
     time::Duration,
 };
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, State};
 
 const MAGIC: u32 = 0x4350_544D;
 const VERSION: u16 = 1;
@@ -243,6 +244,25 @@ pub struct PreviewManager {
     diagnostics: VecDeque<String>,
 }
 
+#[derive(Default)]
+pub(crate) struct PreviewState(pub(crate) Mutex<PreviewManager>);
+
+#[derive(Serialize)]
+pub(crate) struct Finding {
+    pub(crate) label: String,
+    pub(crate) value: String,
+    pub(crate) ok: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InstallationStatus {
+    pub(crate) state: String,
+    pub(crate) root: Option<String>,
+    pub(crate) core_version: Option<String>,
+    pub(crate) findings: Vec<Finding>,
+}
+
 impl PreviewManager {
     fn next_id(&mut self) -> u64 {
         self.next_request_id = self.next_request_id.wrapping_add(1).max(1);
@@ -464,7 +484,7 @@ pub fn render_preview(
     })
 }
 
-pub fn set_native_preview(
+fn set_native_preview_impl(
     manager: &mut PreviewManager,
     install_root: &Path,
     visible: bool,
@@ -486,6 +506,169 @@ pub fn set_native_preview(
         .unwrap_or(false))
 }
 
+#[tauri::command]
+pub(crate) fn format_core_version(version: u32) -> String {
+    let raw = version.to_string();
+    if raw.len() == 8 && raw.starts_with("20") {
+        let month = raw[4..6].parse::<u8>().unwrap_or_default();
+        let day = raw[6..8].parse::<u8>().unwrap_or_default();
+        if (1..=12).contains(&month) && (1..=31).contains(&day) {
+            return format!("{}.{}.{}", &raw[..4], month, day);
+        }
+    }
+    raw
+}
+
+pub(crate) fn collect_installation(
+    manager: &mut PreviewManager,
+    reconnect: bool,
+) -> InstallationStatus {
+    let root = installation_root();
+
+    let finding = |label: &str, file: &str| {
+        let ok = root.as_ref().is_some_and(|path| path.join(file).is_file());
+        Finding {
+            label: label.to_owned(),
+            value: file.to_owned(),
+            ok,
+        }
+    };
+
+    let mut findings = vec![
+        finding("32비트 코어", "MacType.dll"),
+        finding("64비트 코어", "MacType64.dll"),
+        finding("수동 실행 로더", "MacLoader.exe"),
+    ];
+    let core_version = root.as_deref().and_then(|path| {
+        let result = if reconnect {
+            manager.reconnect(path)
+        } else {
+            manager.probe_core_version(path)
+        };
+        match result {
+            Ok(version) => {
+                findings.push(Finding {
+                    label: "preview".to_owned(),
+                    value: "connected".to_owned(),
+                    ok: true,
+                });
+                Some(format_core_version(version))
+            }
+            Err(error) => {
+                findings.push(Finding {
+                    label: "preview".to_owned(),
+                    value: error,
+                    ok: false,
+                });
+                None
+            }
+        }
+    });
+    let ready = !findings.is_empty() && findings.iter().all(|item| item.ok);
+
+    InstallationStatus {
+        state: if root.is_none() {
+            "not-found"
+        } else if ready {
+            "ready"
+        } else {
+            "incomplete"
+        }
+        .to_owned(),
+        root: root.map(|path| path.to_string_lossy().into_owned()),
+        core_version,
+        findings,
+    }
+}
+
+#[tauri::command]
+pub(crate) fn scan_installation(
+    state: State<'_, PreviewState>,
+) -> Result<InstallationStatus, String> {
+    let mut manager = state
+        .0
+        .lock()
+        .map_err(|_| "preview lock is poisoned".to_owned())?;
+    Ok(collect_installation(&mut manager, false))
+}
+
+#[tauri::command]
+pub(crate) fn rediscover_installation(
+    state: State<'_, PreviewState>,
+) -> Result<InstallationStatus, String> {
+    scan_installation(state)
+}
+
+#[tauri::command]
+pub(crate) fn reconnect_preview(
+    state: State<'_, PreviewState>,
+) -> Result<InstallationStatus, String> {
+    let mut manager = state
+        .0
+        .lock()
+        .map_err(|_| "preview lock is poisoned".to_owned())?;
+    Ok(collect_installation(&mut manager, true))
+}
+
+#[tauri::command]
+pub(crate) fn render_profile_preview(
+    app: AppHandle,
+    profile_path: String,
+    overrides: std::collections::BTreeMap<String, f64>,
+    sample: PreviewSample,
+    state: State<'_, PreviewState>,
+) -> Result<PreviewResult, String> {
+    let root =
+        installation_root().ok_or_else(|| "MacType installation was not found".to_owned())?;
+    let mut manager = state
+        .0
+        .lock()
+        .map_err(|_| "preview lock is poisoned".to_owned())?;
+    render_preview(
+        &app,
+        &mut manager,
+        &root,
+        &profile_path,
+        &overrides,
+        &sample,
+    )
+}
+
+#[tauri::command]
+pub(crate) fn set_native_preview(
+    visible: bool,
+    state: State<'_, PreviewState>,
+) -> Result<bool, String> {
+    let root =
+        installation_root().ok_or_else(|| "MacType installation was not found".to_owned())?;
+    let mut manager = state
+        .0
+        .lock()
+        .map_err(|_| "preview lock is poisoned".to_owned())?;
+    set_native_preview_impl(&mut manager, &root, visible)
+}
+
+#[tauri::command]
+pub(crate) fn preview_diagnostics(state: State<'_, PreviewState>) -> Result<Vec<String>, String> {
+    let manager = state
+        .0
+        .lock()
+        .map_err(|_| "preview lock is poisoned".to_owned())?;
+    Ok(manager.diagnostics())
+}
+
+#[tauri::command]
+pub(crate) fn ci_force_preview_crash(state: State<'_, PreviewState>) -> Result<(), String> {
+    if env::var_os("MACTYPE_CI_SMOKE_FILE").is_none() {
+        return Err("preview crash injection is available only during CI smoke tests".to_owned());
+    }
+    let mut manager = state
+        .0
+        .lock()
+        .map_err(|_| "preview lock is poisoned".to_owned())?;
+    manager.force_terminate_for_ci()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -505,6 +688,12 @@ mod tests {
         assert_eq!(decoded.request_id, original.request_id);
         assert_eq!(decoded.json, original.json);
         assert_eq!(decoded.binary, original.binary);
+    }
+
+    #[test]
+    fn core_build_date_is_displayed_as_a_version() {
+        assert_eq!(format_core_version(20220712), "2022.7.12");
+        assert_eq!(format_core_version(42), "42");
     }
 
     #[test]

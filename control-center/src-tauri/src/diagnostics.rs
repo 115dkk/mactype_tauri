@@ -1,9 +1,11 @@
+use crate::preview::{collect_installation, PreviewManager, PreviewState};
 use std::{
     env, fs,
     path::{Path, PathBuf},
     process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
+use tauri::State;
 
 pub fn log_root() -> Result<PathBuf, String> {
     env::var_os("LOCALAPPDATA")
@@ -32,7 +34,8 @@ pub fn export(report: &str) -> Result<String, String> {
     export_to(&log_root()?, report, timestamp).map(|path| path.to_string_lossy().into_owned())
 }
 
-pub fn open_log_folder() -> Result<String, String> {
+#[tauri::command]
+pub(crate) fn open_log_folder() -> Result<String, String> {
     let directory = log_root()?;
     fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
     #[cfg(windows)]
@@ -91,6 +94,63 @@ pub fn copy_to_clipboard(report: &str) -> Result<(), String> {
 #[cfg(not(windows))]
 pub fn copy_to_clipboard(_report: &str) -> Result<(), String> {
     Err("copying diagnostics is supported only on Windows".to_owned())
+}
+
+fn diagnostic_report_text(manager: &mut PreviewManager) -> String {
+    let status = collect_installation(manager, false);
+    let mut report = String::from("MacType Control Center diagnostics\n");
+    report.push_str(&format!(
+        "controlCenterVersion={}\n",
+        env!("CARGO_PKG_VERSION")
+    ));
+    report.push_str(&format!("os={}\n", env::consts::OS));
+    report.push_str(&format!("arch={}\n", env::consts::ARCH));
+    report.push_str(&format!("state={}\n", status.state));
+    report.push_str(&format!(
+        "installationRoot={}\n",
+        status.root.as_deref().unwrap_or("not-found")
+    ));
+    report.push_str(&format!(
+        "coreVersion={}\n",
+        status.core_version.as_deref().unwrap_or("unknown")
+    ));
+    for finding in status.findings {
+        report.push_str(&format!(
+            "finding.{}={} ({})\n",
+            finding.label,
+            finding.value,
+            if finding.ok { "ok" } else { "failed" }
+        ));
+    }
+    let entries = manager.diagnostics();
+    report.push_str(&format!("previewLogEntries={}\n", entries.len()));
+    for entry in entries.iter().rev().take(20).rev() {
+        report.push_str("previewLog=");
+        report.push_str(&entry.replace(['\r', '\n'], " "));
+        report.push('\n');
+    }
+    report
+}
+
+#[tauri::command]
+pub(crate) fn diagnostic_report(state: State<'_, PreviewState>) -> Result<String, String> {
+    let mut manager = state
+        .0
+        .lock()
+        .map_err(|_| "preview lock is poisoned".to_owned())?;
+    Ok(diagnostic_report_text(&mut manager))
+}
+
+#[tauri::command]
+pub(crate) fn export_diagnostics(state: State<'_, PreviewState>) -> Result<String, String> {
+    let report = diagnostic_report(state)?;
+    export(&report)
+}
+
+#[tauri::command]
+pub(crate) fn copy_diagnostics(state: State<'_, PreviewState>) -> Result<(), String> {
+    let report = diagnostic_report(state)?;
+    copy_to_clipboard(&report)
 }
 
 #[cfg(test)]

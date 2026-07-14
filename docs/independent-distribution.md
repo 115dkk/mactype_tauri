@@ -4,7 +4,7 @@ The Phase 5 installer does not require an existing MacType installation. CI buil
 
 ## Installed manifest
 
-- `mactype-control-center.exe`
+- `MacType Control Center.exe`
 - `mactype-preview32.exe`
 - source-built `MacType.dll`, `MacType64.dll`, `MacType.Core.dll`, and `MacType64.Core.dll`
 - source-built `MacLoader.exe` and `MacLoader64.exe`

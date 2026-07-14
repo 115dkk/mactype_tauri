@@ -2,7 +2,7 @@
   #define AppVersion "0.1.0"
 #endif
 #ifndef AppExe
-  #error AppExe must point to mactype-control-center.exe
+  #error AppExe must point to MacType Control Center.exe
 #endif
 #ifndef PreviewExe
   #error PreviewExe must point to mactype-preview32.exe
@@ -16,6 +16,7 @@
 #ifndef OutputRoot
   #define OutputRoot "..\artifacts\installer"
 #endif
+#define ControlCenterExeName "MacType Control Center.exe"
 
 [Setup]
 AppId={{AF6B9697-3DF2-46C4-B203-79194967AE7A}
@@ -29,10 +30,10 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#OutputRoot}
-OutputBaseFilename=MacType-Control-Center-{#AppVersion}-setup
+OutputBaseFilename=MacType Control Center
 SetupIconFile={#SourceRoot}\assets\mactype.ico
 LicenseFile={#SourceRoot}\LICENSE
-UninstallDisplayIcon={app}\mactype-control-center.exe
+UninstallDisplayIcon={app}\{#ControlCenterExeName}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -47,7 +48,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 
 [Files]
-Source: "{#AppExe}"; DestDir: "{app}"; DestName: "mactype-control-center.exe"; Flags: ignoreversion
+Source: "{#AppExe}"; DestDir: "{app}"; DestName: "{#ControlCenterExeName}"; Flags: ignoreversion
 Source: "{#PreviewExe}"; DestDir: "{app}"; DestName: "mactype-preview32.exe"; Flags: ignoreversion
 Source: "{#CoreRoot}\MacType.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#CoreRoot}\MacType64.dll"; DestDir: "{app}"; Flags: ignoreversion
@@ -62,10 +63,10 @@ Source: "{#SourceRoot}\distribution\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; F
 Source: "{#SourceRoot}\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\MacType Control Center"; Filename: "{app}\mactype-control-center.exe"; WorkingDir: "{app}"
+Name: "{autoprograms}\MacType Control Center"; Filename: "{app}\{#ControlCenterExeName}"; WorkingDir: "{app}"
 
 [Run]
-Filename: "{app}\mactype-control-center.exe"; Description: "MacType Control Center 실행"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#ControlCenterExeName}"; Description: "MacType Control Center 실행"; Flags: nowait postinstall skipifsilent
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "MacTypeControlCenter"; Flags: uninsdeletevalue dontcreatekey

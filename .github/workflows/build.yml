@@ -89,11 +89,19 @@ jobs:
           $installer = Get-ChildItem artifacts/installer/*.exe | Select-Object -First 1
           $hash = (Get-FileHash -Algorithm SHA256 $installer.FullName).Hash.ToLowerInvariant()
           "$hash  $($installer.Name)" | Set-Content -Encoding ascii artifacts/installer/SHA256SUMS.txt
+      - name: Preserve the installer filename for GitHub Releases
+        shell: pwsh
+        run: |
+          Compress-Archive `
+            -LiteralPath 'artifacts/installer/MacType Control Center.exe', 'artifacts/installer/SHA256SUMS.txt' `
+            -DestinationPath 'artifacts/installer/MacType-Control-Center.zip' `
+            -Force
       - uses: actions/upload-artifact@v4
         with:
           name: mactype-control-center-windows
           path: |
             artifacts/installer/*.exe
+            artifacts/installer/*.zip
             artifacts/installer/SHA256SUMS.txt
             artifacts/application/MacType Control Center.exe
             build/preview-helper/Release/mactype-preview32.exe
@@ -125,5 +133,5 @@ jobs:
           generate_release_notes: false
           fail_on_unmatched_files: true
           files: |
-            release/artifacts/installer/*.exe
+            release/artifacts/installer/MacType-Control-Center.zip
             release/artifacts/installer/SHA256SUMS.txt

@@ -64,6 +64,65 @@
 
     Last but easiest step: Put all `.lib` files you built earlier into a `lib` folder in the root of MacType, click build and enjoy.
 
+## Building the Control Center (Tauri)
+
+The Control Center can be built separately from the legacy MacType solution. The repository script builds the 32-bit Preview Helper, runs its protocol tests, builds the React frontend, and compiles the Tauri executable. It does not modify an installed copy of MacType.
+
+### Prerequisites
+
+- Windows 10 or 11
+- Visual Studio 2022 Build Tools with **Desktop development with C++**, MSVC, CMake, and a Windows SDK
+- Node.js 22
+- pnpm 11.7.0
+- the stable Rust MSVC toolchain
+- Microsoft Edge WebView2 Runtime, which is included with supported Windows versions
+
+After installing Node.js and `rustup`, enable the repository's pnpm and Rust versions:
+
+```powershell
+corepack enable
+corepack prepare pnpm@11.7.0 --activate
+rustup toolchain install stable-x86_64-pc-windows-msvc
+rustup default stable-x86_64-pc-windows-msvc
+```
+
+From the repository root, run:
+
+```powershell
+pwsh -NoProfile -File .github/scripts/Build-ControlCenter.ps1 -Configuration Release
+```
+
+The script installs the locked frontend dependencies automatically. A successful build produces:
+
+- `control-center/src-tauri/target/release/mactype-control-center.exe`
+- `build/preview-helper/Release/mactype-preview32.exe`
+
+For local testing, launch the Control Center from the repository root so it can find the development copy of the Preview Helper:
+
+```powershell
+.\control-center\src-tauri\target\release\mactype-control-center.exe
+```
+
+The Control Center can discover an existing MacType installation, or let the user select one through the interface.
+
+For frontend-only design work that does not require Rust or native Windows integration, see the [Control Center design maintenance guide](../docs/design-maintenance.md).
+
+## Build an installer with GitHub Actions
+
+Maintainers do not need to reproduce the complete legacy-core and installer toolchain locally. The repository contains a manual Windows build workflow that creates an installable package on a GitHub-hosted runner.
+
+1. Open the repository's **Actions** tab.
+2. Select **Build MacType Control Center**.
+3. Select **Run workflow**.
+4. Choose the branch to build.
+5. Enter a version such as `0.1.0` or `0.1.0-preview.1`.
+6. Select **Run workflow** and wait for both build jobs to finish.
+7. Open the completed run and download `mactype-control-center-<version>` from **Artifacts**.
+
+The artifact contains the per-user Inno Setup installer, `SHA256SUMS.txt`, the standalone Control Center executable, and the Preview Helper. It is retained for 14 days. The workflow builds the x86 and x64 MacType core from source before packaging the Control Center, so no prebuilt core files need to be prepared by the maintainer.
+
+The workflow is defined in [`.github/workflows/build.yml`](../.github/workflows/build.yml). It runs only when explicitly dispatched; opening or merging a pull request does not start it automatically, and it does not publish a GitHub Release.
+
 ## FAQ
 
 Q: Where are the sources of loader and tuner in the repo?

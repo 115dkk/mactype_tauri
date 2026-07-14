@@ -1,23 +1,28 @@
-name: Build and package
+name: Build MacType Control Center
+
+run-name: Build Control Center ${{ inputs.version }} from ${{ github.ref_name }}
 
 on:
-  workflow_call:
-  pull_request:
-  push:
-    branches: [directwrite, main]
   workflow_dispatch:
+    inputs:
+      version:
+        description: Version embedded in the generated installer
+        required: true
+        default: 0.1.0
+        type: string
 
 permissions:
   contents: read
 
 jobs:
   legacy-core:
+    name: Build MacType x86/x64 core
     runs-on: windows-2022
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: microsoft/setup-msbuild@v2
-      - name: Build official dependencies and MacType x86/x64 core
+      - name: Build public dependencies and MacType core
         shell: pwsh
         run: .github/scripts/Build-LegacyCore.ps1
       - uses: actions/upload-artifact@v4
@@ -25,13 +30,23 @@ jobs:
           name: mactype-legacy-core
           path: artifacts/legacy-core
           if-no-files-found: error
+          retention-days: 14
 
-  windows-build:
+  control-center:
+    name: Build Windows application and installer
     needs: legacy-core
     runs-on: windows-2022
     timeout-minutes: 45
+    env:
+      APP_VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@v4
+      - name: Validate installer version
+        shell: pwsh
+        run: |
+          if ($env:APP_VERSION -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$') {
+            throw "Version must look like 1.2.3 or 1.2.3-preview.1, got '$env:APP_VERSION'."
+          }
       - uses: pnpm/action-setup@v4
         with:
           version: 11.7.0
@@ -49,81 +64,35 @@ jobs:
       - name: Install frontend dependencies
         working-directory: control-center
         run: pnpm install --frozen-lockfile
-      - name: Build preview helper, frontend, and Tauri program
+      - name: Build preview helper, frontend, and Tauri application
         shell: pwsh
         run: .github/scripts/Build-ControlCenter.ps1 -Configuration Release -SkipInstall
-      - name: Stress-test single-instance startup
-        shell: pwsh
-        run: scripts/ci/Test-SingleInstanceWindows.ps1 -Executable control-center/src-tauri/target/release/mactype-control-center.exe
-      - name: Smoke-test every Tauri window state
-        shell: pwsh
-        run: scripts/ci/Test-TauriWindows.ps1 -Executable control-center/src-tauri/target/release/mactype-control-center.exe -PreviewHelper build/preview-helper/Release/mactype-preview32.exe -InstallationRoot artifacts/legacy-core
-      - name: Smoke-test hidden tray startup
-        shell: pwsh
-        run: scripts/ci/Test-TrayWindows.ps1 -Executable control-center/src-tauri/target/release/mactype-control-center.exe
-      - name: Build Inno Setup installer
+      - name: Build per-user installer
         shell: pwsh
         run: |
           & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' `
-            /DAppVersion=0.0.9 `
-            /DSourceRoot="${{ github.workspace }}" `
-            /DOutputRoot="${{ github.workspace }}\artifacts\installer-baseline" `
-            /DAppExe="${{ github.workspace }}\control-center\src-tauri\target\release\mactype-control-center.exe" `
-            /DPreviewExe="${{ github.workspace }}\build\preview-helper\Release\mactype-preview32.exe" `
-            /DCoreRoot="${{ github.workspace }}\artifacts\legacy-core" `
-            installer\mactype-control-center.iss
-          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' `
-            /DAppVersion=0.1.0 `
+            /DAppVersion="$env:APP_VERSION" `
             /DSourceRoot="${{ github.workspace }}" `
             /DOutputRoot="${{ github.workspace }}\artifacts\installer" `
             /DAppExe="${{ github.workspace }}\control-center\src-tauri\target\release\mactype-control-center.exe" `
             /DPreviewExe="${{ github.workspace }}\build\preview-helper\Release\mactype-preview32.exe" `
             /DCoreRoot="${{ github.workspace }}\artifacts\legacy-core" `
             installer\mactype-control-center.iss
-      - name: Verify install, upgrade, launch, and uninstall
-        shell: pwsh
-        run: scripts/ci/Test-InstallerWindows.ps1 -BaselineInstaller (Get-ChildItem artifacts/installer-baseline/*.exe | Select-Object -First 1).FullName -Installer (Get-ChildItem artifacts/installer/*.exe | Select-Object -First 1).FullName
-      - name: Write installer checksum
+      - name: Write SHA-256 checksum
         shell: pwsh
         run: |
           $installer = Get-ChildItem artifacts/installer/*.exe | Select-Object -First 1
+          if (-not $installer) { throw 'The installer was not created.' }
           $hash = (Get-FileHash -Algorithm SHA256 $installer.FullName).Hash.ToLowerInvariant()
           "$hash  $($installer.Name)" | Set-Content -Encoding ascii artifacts/installer/SHA256SUMS.txt
-      - uses: actions/upload-artifact@v4
+      - name: Upload installable build
+        uses: actions/upload-artifact@v4
         with:
-          name: mactype-control-center-windows
+          name: mactype-control-center-${{ inputs.version }}
           path: |
             artifacts/installer/*.exe
             artifacts/installer/SHA256SUMS.txt
             control-center/src-tauri/target/release/mactype-control-center.exe
             build/preview-helper/Release/mactype-preview32.exe
           if-no-files-found: error
-
-  release-main-snapshot:
-    name: Publish installable main snapshot
-    needs: windows-build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: mactype-control-center-windows
-          path: release
-      - name: Publish automatic pre-release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: control-center-ci-${{ github.run_number }}
-          target_commitish: ${{ github.sha }}
-          name: MacType Control Center CI #${{ github.run_number }}
-          body: |
-            Automated installable snapshot from the fully validated `main` build at `${{ github.sha }}`.
-
-            The Windows installer passed core build, Tauri window smoke tests, tray startup, clean install, upgrade, launch, and uninstall checks before publication. Verify the download with `SHA256SUMS.txt`.
-          prerelease: true
-          generate_release_notes: false
-          fail_on_unmatched_files: true
-          files: |
-            release/artifacts/installer/*.exe
-            release/artifacts/installer/SHA256SUMS.txt
+          retention-days: 14

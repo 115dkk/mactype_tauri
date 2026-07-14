@@ -1,17 +1,47 @@
-# Control Center CI and release
+# Manual Control Center build
 
-The Control Center uses three independent required checks so a failure identifies the broken contract.
+The upstream-oriented workflow is build automation, not a merge gate. It does not run for pull requests, pushes, tags, or a schedule, and it does not create a GitHub Release.
 
-1. `Build and package` has two independent Windows jobs. One builds FreeType, IniParser, Detours, wow64ext, and the current MacType `Rel+Detours` x86/x64 core. The other compiles the Win32 preview process, production frontend, Rust/Tauri executable, exercises the real WebView2 window states, and creates an Inno Setup installer.
-2. `Frontend window gallery` opens every public view, including the settings-file workflow, in all ten supported locales at 390, 768, and 1280 pixels. Browser interactions also import a discovered legacy profile with consent, use the native-import adapter, save and apply a profile, exercise allowed legacy-service transitions, switch profile categories, reveal advanced LCD settings, add a font-specific entry, open include/exclude editing, change the preview background, and prove that a language choice persists. JavaScript exceptions, console errors, renderer crashes, missing readiness markers, wrong text direction, and horizontal overflow fail the job. Localized screenshots and Playwright traces are retained for human review.
-3. `Lint gates` runs frontend, Rust, and new C++ lint as blocking jobs, rejects generated settings sources that differ from `shared/settings-schema.json`, and verifies exact message-key and placeholder parity plus every generated setting across all ten locale catalogs. The legacy core boundary is documented in `docs/lint-policy.md`.
+## Run the build
 
-The profiles window smoke is stronger than a launch check: it points the app at an x86 fixture DLL with the public `IControlCenter` ABI, waits for Helper IPC plus WIC PNG output, force-terminates the child, and requires a second PNG after automatic restart. It then duplicates the fixture profile, changes a scalar, an `[Individual]` row, and an excluded module, atomically saves and reopens the copy, and only then writes the ready marker. Frontend smoke failures write their error into the marker so CI reports the actual failed contract instead of a generic timeout.
+1. Open **Actions** in the repository.
+2. Select **Build MacType Control Center**.
+3. Choose **Run workflow**.
+4. Select the branch or commit to build.
+5. Enter the installer version, such as `0.1.0` or `0.1.0-preview.1`.
+6. Start the workflow and download its artifact when both jobs finish.
 
-The execution window smoke creates the real Tauri tray icon, queries HKCU startup, SCM service state, and both AppInit registry views, then reports ready. Gallery tests exercise the non-admin startup, manual-launch controls, and a fake legacy-service state machine without changing a runner service. Rust tests require foreign, inaccessible, registry-conflicting, and deletion-pending states to expose no unsafe mutation capability.
+The only workflow file is `.github/workflows/build.yml`, and its only trigger is `workflow_dispatch`. This keeps ordinary upstream merges independent of the project's previous CI matrix while still giving maintainers a reproducible Windows build.
 
-The Windows build also releases a suspended stampede of identical Control Center processes. It fails unless exactly one process survives, all secondaries exit successfully, every secondary reaches the first instance callback, and the callback restores the existing window. Static policy checks keep the main executable `asInvoker`, `uiAccess=false`, and the Inno installer `PrivilegesRequired=lowest`.
+## What it builds
 
-Velopack is not used. The Phase 5 installer is per-user and does not request elevation. It contains the open Control Center, x86 Preview Helper, source-built x86/x64 Detours core and MacLoader, and newly authored profile and translation files. It never copies Delphi GUI programs, existing profiles/translations, services, updater binaries, or registry-mode settings. CI performs a real baseline install, version upgrade, installed-app and manual-loader launch, and uninstall cleanliness test.
+The workflow uses a GitHub-hosted Windows runner to:
 
-Tags matching `control-center-v*` build a named prerelease installer. In addition, every successful push to `main` publishes an installable `control-center-ci-<run>` prerelease with a SHA-256 checksum. Both release paths reuse the installer that already passed the same core build, real-window, tray, install, upgrade, launch, and uninstall checks as pull requests; pull requests themselves retain read-only repository permissions and cannot publish releases.
+- build the x86 and x64 MacType legacy core from source;
+- build and test the Win32 Preview Helper;
+- install the locked frontend dependencies and produce the production frontend;
+- compile the Rust/Tauri Control Center executable;
+- create the per-user Inno Setup installer; and
+- write a SHA-256 checksum for the installer.
+
+The downloadable artifact is named `mactype-control-center-<version>`. It contains the installer, `SHA256SUMS.txt`, the Control Center executable, and the Preview Helper. GitHub retains the artifact for 14 days.
+
+Velopack is not used. The installer continues to use the existing MacType icon and the repository's Inno Setup definition.
+
+## Scope and local checks
+
+This workflow deliberately does not publish a release and is not a required pull-request check. A maintainer can download and test the artifact before deciding whether to merge or publish it.
+
+Frontend-only changes can be checked locally without compiling Rust:
+
+```powershell
+cd control-center
+pnpm install --frozen-lockfile
+pnpm test:i18n
+pnpm test:settings
+pnpm lint
+pnpm build
+pnpm test:gallery
+```
+
+The repository's build and test scripts remain available for deeper local or downstream validation; they are no longer attached to upstream pull requests automatically.

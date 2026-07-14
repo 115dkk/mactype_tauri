@@ -46,12 +46,15 @@ pub(super) fn decode(bytes: &[u8]) -> Result<(String, TextEncoding, BomKind), St
     candidates
         .into_iter()
         .filter_map(|(encoding, codec)| {
-            let (text, _, decode_errors) = codec.decode(bytes);
-            if decode_errors {
+            let text = codec
+                .decode_without_bom_handling_and_without_replacement(bytes)?
+                .into_owned();
+            let (round_trip, _, encode_errors) = codec.encode(&text);
+            if encode_errors || round_trip.as_ref() != bytes {
                 return None;
             }
-            let text = text.into_owned();
-            Some((legacy_score(&text, encoding), text, encoding))
+            let score = legacy_score(&text, encoding);
+            Some((score, text, encoding))
         })
         .max_by_key(|candidate| candidate.0)
         .map(|(_, text, encoding)| (text, encoding, BomKind::None))
@@ -73,18 +76,20 @@ fn legacy_score(text: &str, encoding: TextEncoding) -> i64 {
     let mut hangul = 0_i64;
     let mut kana = 0_i64;
     let mut han = 0_i64;
-    let mut latin = 0_i64;
+    let mut non_ascii = 0_i64;
     let mut controls = 0_i64;
     let mut simplified = 0_i64;
     let mut traditional = 0_i64;
     const SIMPLIFIED: &str = "简体汉语配置设置默认启用关闭字体进程缓存试验权重过滤阴影";
     const TRADITIONAL: &str = "簡體漢語設定預設啟用關閉字型程序快取試驗權重過濾陰影";
     for character in text.chars() {
+        if !character.is_ascii() {
+            non_ascii += 1;
+        }
         match character {
             '\u{ac00}'..='\u{d7af}' => hangul += 1,
             '\u{3040}'..='\u{30ff}' => kana += 1,
             '\u{3400}'..='\u{9fff}' => han += 1,
-            'A'..='Z' | 'a'..='z' | '\u{00c0}'..='\u{024f}' => latin += 1,
             character if character.is_control() && !matches!(character, '\r' | '\n' | '\t') => {
                 controls += 1
             }
@@ -103,6 +108,11 @@ fn legacy_score(text: &str, encoding: TextEncoding) -> i64 {
             TextEncoding::Gb18030 => {
                 han * 3 + simplified * 18 - traditional * 3 - hangul * 12 - kana * 12
                     + i64::from(han > 0) * 10
+                    // GB18030 is the backward-compatible superset of the
+                    // CP936/GBK encoding used by legacy MacType profiles.
+                    // Prefer it when permissive Big5 mappings make an
+                    // otherwise ambiguous byte stream score nearly the same.
+                    + 75
             }
             TextEncoding::Big5 => {
                 han * 3 + traditional * 18 - simplified * 3 - hangul * 12 - kana * 12
@@ -110,7 +120,10 @@ fn legacy_score(text: &str, encoding: TextEncoding) -> i64 {
             }
             TextEncoding::ShiftJis => kana * 20 + han * 2 - hangul * 12 + i64::from(kana > 0) * 10,
             TextEncoding::EucKr => hangul * 20 + han - kana * 12 + i64::from(hangul > 0) * 10,
-            TextEncoding::Windows1252 => latin * 3 - (hangul + kana + han) * 8,
+            // ASCII is identical in every compatible candidate and therefore
+            // is not evidence for Windows-1252. Decoding a CJK profile as
+            // Windows-1252 instead produces non-ASCII mojibake.
+            TextEncoding::Windows1252 => -non_ascii * 8 - (hangul + kana + han) * 8,
             TextEncoding::Utf8 | TextEncoding::Utf16Le | TextEncoding::Utf16Be => 0,
         }
 }

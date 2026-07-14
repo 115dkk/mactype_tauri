@@ -14,13 +14,16 @@ use tauri::State;
 
 mod codec;
 
+#[cfg(test)]
+mod upstream_corpus_tests;
+
 use codec::{
     decode, detect_line_ending, encode, encode_preserving_legacy_lines, original_legacy_lines,
     split_lines, OriginalLegacyLines,
 };
 
 #[cfg(test)]
-use encoding_rs::{Encoding, BIG5, GB18030, SHIFT_JIS};
+use encoding_rs::{Encoding, BIG5, GB18030, SHIFT_JIS, WINDOWS_1252};
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -1342,6 +1345,15 @@ mod tests {
     #[test]
     fn shift_jis_profile_round_trips_after_edit() {
         legacy_round_trip(SHIFT_JIS, TextEncoding::ShiftJis, "日本語プロファイル設定");
+    }
+
+    #[test]
+    fn windows_1252_profile_round_trips_after_edit() {
+        legacy_round_trip(
+            WINDOWS_1252,
+            TextEncoding::Windows1252,
+            "Profil français: qualité élevée",
+        );
     }
 
     #[test]

@@ -68,6 +68,11 @@ pub fn installed_families() -> Result<Vec<String>, String> {
     Err("installed font discovery is supported only on Windows".to_owned())
 }
 
+#[tauri::command]
+pub(crate) fn installed_font_families() -> Result<Vec<String>, String> {
+    installed_families()
+}
+
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;

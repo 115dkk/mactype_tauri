@@ -1,12 +1,16 @@
 use crate::generated_settings::{SettingDefinition, SettingValueType, SETTINGS};
+use crate::{execution, installation_root};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
+    env,
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
+    sync::Mutex,
 };
+use tauri::State;
 
 mod codec;
 
@@ -97,6 +101,16 @@ pub struct ProfileDocument {
     original_hash: [u8; 32],
     original_legacy_lines: Option<OriginalLegacyLines>,
     dirty_keys: BTreeSet<String>,
+}
+
+#[derive(Default)]
+pub(crate) struct ProfileState(pub(crate) Mutex<Option<ProfileDocument>>);
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProfileEntry {
+    name: String,
+    path: String,
 }
 
 #[derive(Serialize)]
@@ -924,6 +938,251 @@ fn replace_file(destination: &Path, replacement: &Path, backup: &Path) -> Result
 fn replace_file(destination: &Path, replacement: &Path, backup: &Path) -> Result<(), String> {
     fs::copy(destination, backup).map_err(|error| error.to_string())?;
     fs::rename(replacement, destination).map_err(|error| error.to_string())
+}
+
+fn user_profile_root() -> Option<PathBuf> {
+    env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .map(|path| path.join("MacType").join("ControlCenter").join("profiles"))
+}
+
+fn find_default_profile() -> Option<PathBuf> {
+    let root = installation_root()?;
+    let profile_root = root.join("ini");
+    let default = profile_root.join("Default.ini");
+    if default.is_file() {
+        return Some(default);
+    }
+    let profile = fs::read_dir(&profile_root).ok().and_then(|entries| {
+        entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .find(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("ini"))
+            })
+    });
+    profile.or_else(|| {
+        root.join("MacType.ini")
+            .is_file()
+            .then(|| root.join("MacType.ini"))
+    })
+}
+
+#[tauri::command]
+pub(crate) fn list_profiles() -> Result<Vec<ProfileEntry>, String> {
+    let root =
+        installation_root().ok_or_else(|| "MacType installation was not found".to_owned())?;
+    let profile_root = root.join("ini");
+    let mut paths = fs::read_dir(&profile_root)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let root_profile = root.join("MacType.ini");
+    if paths.is_empty() && root_profile.is_file() {
+        paths.push(root_profile);
+    }
+    if let Some(user_root) = user_profile_root() {
+        if let Ok(entries) = fs::read_dir(user_root) {
+            paths.extend(entries.filter_map(Result::ok).map(|entry| entry.path()));
+        }
+    }
+    let mut profiles = paths
+        .into_iter()
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("ini"))
+        })
+        .map(|path| ProfileEntry {
+            name: path
+                .file_stem()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            path: path.to_string_lossy().into_owned(),
+        })
+        .collect::<Vec<_>>();
+    profiles.sort_by_key(|profile| profile.name.to_lowercase());
+    Ok(profiles)
+}
+
+#[tauri::command]
+pub(crate) fn open_profile(
+    path: String,
+    state: State<'_, ProfileState>,
+) -> Result<ProfileSnapshot, String> {
+    let document = ProfileDocument::open(PathBuf::from(path))?;
+    let snapshot = document.snapshot();
+    *state
+        .0
+        .lock()
+        .map_err(|_| "profile lock is poisoned".to_owned())? = Some(document);
+    Ok(snapshot)
+}
+
+#[tauri::command]
+pub(crate) fn open_default_profile(
+    state: State<'_, ProfileState>,
+) -> Result<Option<ProfileSnapshot>, String> {
+    let Some(path) = find_default_profile() else {
+        return Ok(None);
+    };
+    open_profile(path.to_string_lossy().into_owned(), state).map(Some)
+}
+
+#[tauri::command]
+pub(crate) fn update_profile_setting(
+    setting_id: String,
+    value: f64,
+    state: State<'_, ProfileState>,
+) -> Result<ProfileSnapshot, String> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "profile lock is poisoned".to_owned())?;
+    let document = guard
+        .as_mut()
+        .ok_or_else(|| "no profile is open".to_owned())?;
+    document.set_value(&setting_id, value)?;
+    Ok(document.snapshot())
+}
+
+#[tauri::command]
+pub(crate) fn update_profile_individuals(
+    entries: Vec<IndividualSetting>,
+    state: State<'_, ProfileState>,
+) -> Result<ProfileSnapshot, String> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "profile lock is poisoned".to_owned())?;
+    let document = guard
+        .as_mut()
+        .ok_or_else(|| "no profile is open".to_owned())?;
+    document.set_individuals(entries)?;
+    Ok(document.snapshot())
+}
+
+#[tauri::command]
+pub(crate) fn update_profile_list(
+    kind: String,
+    entries: Vec<String>,
+    state: State<'_, ProfileState>,
+) -> Result<ProfileSnapshot, String> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "profile lock is poisoned".to_owned())?;
+    let document = guard
+        .as_mut()
+        .ok_or_else(|| "no profile is open".to_owned())?;
+    document.set_list(&kind, entries)?;
+    Ok(document.snapshot())
+}
+
+#[tauri::command]
+pub(crate) fn update_profile_advanced(
+    advanced: AdvancedProfile,
+    state: State<'_, ProfileState>,
+) -> Result<ProfileSnapshot, String> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "profile lock is poisoned".to_owned())?;
+    let document = guard
+        .as_mut()
+        .ok_or_else(|| "no profile is open".to_owned())?;
+    document.set_advanced(advanced)?;
+    Ok(document.snapshot())
+}
+
+#[tauri::command]
+pub(crate) fn duplicate_profile(
+    name: String,
+    state: State<'_, ProfileState>,
+) -> Result<ProfileSnapshot, String> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "profile lock is poisoned".to_owned())?;
+    let current = guard
+        .as_ref()
+        .ok_or_else(|| "no profile is open".to_owned())?;
+    let directory =
+        user_profile_root().ok_or_else(|| "LOCALAPPDATA is not available".to_owned())?;
+    let duplicate = current.duplicate_in(&directory, &name)?;
+    let snapshot = duplicate.snapshot();
+    *guard = Some(duplicate);
+    Ok(snapshot)
+}
+
+#[tauri::command]
+pub(crate) fn save_profile(state: State<'_, ProfileState>) -> Result<ProfileSnapshot, String> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "profile lock is poisoned".to_owned())?;
+    let document = guard
+        .as_mut()
+        .ok_or_else(|| "no profile is open".to_owned())?;
+    document.save()?;
+    Ok(document.snapshot())
+}
+
+#[tauri::command]
+pub(crate) fn ci_verify_profile_workflow(state: State<'_, ProfileState>) -> Result<(), String> {
+    let marker = env::var_os("MACTYPE_CI_SMOKE_FILE").ok_or_else(|| {
+        "profile workflow verification is available only during CI smoke tests".to_owned()
+    })?;
+    let directory = PathBuf::from(marker)
+        .parent()
+        .ok_or_else(|| "CI marker has no parent directory".to_owned())?
+        .join("profile-workflow");
+    let guard = state
+        .0
+        .lock()
+        .map_err(|_| "profile lock is poisoned".to_owned())?;
+    let current = guard
+        .as_ref()
+        .ok_or_else(|| "no profile is open".to_owned())?;
+    let name = format!("phase3-{}", std::process::id());
+    let mut copy = current.duplicate_in(&directory, &name)?;
+    copy.set_value("normal_weight", 7.0)?;
+    copy.set_individuals(vec![IndividualSetting {
+        font_face: "CI Test Font".to_owned(),
+        values: vec![Some(1), Some(2), None, Some(3), None, Some(1)],
+    }])?;
+    copy.set_list("excludeModules", vec!["ci-test.exe".to_owned()])?;
+    copy.save()?;
+    let path = directory.join(format!("{name}.ini"));
+    let reopened_document = ProfileDocument::open(&path)?;
+    let reopened = reopened_document.snapshot();
+    if reopened.values.get("normal_weight") != Some(&7.0)
+        || reopened.individuals.len() != 1
+        || reopened.lists.exclude_modules != vec!["ci-test.exe".to_owned()]
+    {
+        return Err("saved Phase 3 profile did not reopen with the expected values".to_owned());
+    }
+    let installation =
+        installation_root().ok_or_else(|| "MacType installation was not found".to_owned())?;
+    let encoded = reopened_document.encoded()?;
+    let applied = execution::apply_profile(&installation, &path, &encoded)?;
+    let applied_root = PathBuf::from(&applied.runtime_root);
+    if fs::read(applied_root.join("profile.ini")).map_err(|error| error.to_string())? != encoded
+        || fs::read(applied_root.join("MacType.ini")).map_err(|error| error.to_string())?
+            != b"[General]\r\nAlternativeFile=profile.ini\r\n"
+        || !applied_root.join("MacLoader.exe").is_file()
+        || !applied_root.join("MacType.dll").is_file()
+    {
+        return Err(
+            "applied profile runtime is incomplete or does not preserve the profile".to_owned(),
+        );
+    }
+    drop(guard);
+    fs::remove_dir_all(directory).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

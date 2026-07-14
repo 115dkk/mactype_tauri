@@ -1,3 +1,4 @@
+use crate::{installation_root, profile::ProfileState};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -5,8 +6,10 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     process::Command,
-    time::{SystemTime, UNIX_EPOCH},
+    thread,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
+use tauri::State;
 
 const RUNTIME_ARTIFACTS: [(&str, bool); 4] = [
     ("MacLoader.exe", true),
@@ -278,7 +281,7 @@ fn validate_launch(target: &str, arguments: &[String]) -> Result<PathBuf, String
     Ok(target)
 }
 
-pub fn launch_with_mactype(target: &str, arguments: &[String]) -> Result<u32, String> {
+fn launch_with_mactype_impl(target: &str, arguments: &[String]) -> Result<u32, String> {
     let target = validate_launch(target, arguments)?;
     let active =
         active_runtime().map_err(|_| "apply a profile before launching with MacType".to_owned())?;
@@ -310,7 +313,7 @@ pub fn session_targets() -> Result<Vec<SessionTarget>, String> {
     Ok(targets)
 }
 
-pub fn register_session_target(
+fn register_session_target_impl(
     target: &str,
     arguments: &[String],
 ) -> Result<Vec<SessionTarget>, String> {
@@ -337,7 +340,7 @@ pub fn register_session_target(
     Ok(targets)
 }
 
-pub fn remove_session_target(target: &str) -> Result<Vec<SessionTarget>, String> {
+fn remove_session_target_impl(target: &str) -> Result<Vec<SessionTarget>, String> {
     let mut targets = session_targets()?;
     targets.retain(|entry| !entry.target.eq_ignore_ascii_case(target));
     atomic_write(
@@ -347,10 +350,10 @@ pub fn remove_session_target(target: &str) -> Result<Vec<SessionTarget>, String>
     Ok(targets)
 }
 
-pub fn launch_registered_targets() -> Result<Vec<u32>, String> {
+fn launch_registered_targets_impl() -> Result<Vec<u32>, String> {
     session_targets()?
         .iter()
-        .map(|entry| launch_with_mactype(&entry.target, &entry.arguments))
+        .map(|entry| launch_with_mactype_impl(&entry.target, &entry.arguments))
         .collect()
 }
 
@@ -527,13 +530,96 @@ fn service_status() -> (bool, bool) {
     (false, false)
 }
 
+#[tauri::command]
+pub(crate) fn execution_status() -> ExecutionStatus {
+    status(installation_root().as_deref())
+}
+
+#[tauri::command]
+pub(crate) fn set_session_autostart(enabled: bool) -> Result<bool, String> {
+    set_autostart(enabled)
+}
+
+#[tauri::command]
+pub(crate) fn launch_with_mactype(target: String, arguments: Vec<String>) -> Result<u32, String> {
+    launch_with_mactype_impl(&target, &arguments)
+}
+
+#[tauri::command]
+pub(crate) fn apply_open_profile(state: State<'_, ProfileState>) -> Result<AppliedProfile, String> {
+    let root =
+        installation_root().ok_or_else(|| "MacType installation was not found".to_owned())?;
+    let guard = state
+        .0
+        .lock()
+        .map_err(|_| "profile lock is poisoned".to_owned())?;
+    let profile = guard
+        .as_ref()
+        .ok_or_else(|| "no profile is open".to_owned())?;
+    apply_profile(&root, profile.path(), &profile.encoded()?)
+}
+
+#[tauri::command]
+pub(crate) fn register_session_target(
+    target: String,
+    arguments: Vec<String>,
+) -> Result<Vec<SessionTarget>, String> {
+    register_session_target_impl(&target, &arguments)
+}
+
+#[tauri::command]
+pub(crate) fn remove_session_target(target: String) -> Result<Vec<SessionTarget>, String> {
+    remove_session_target_impl(&target)
+}
+
+#[tauri::command]
+pub(crate) fn launch_registered_targets() -> Result<Vec<u32>, String> {
+    launch_registered_targets_impl()
+}
+
+#[tauri::command]
+pub(crate) fn ci_verify_injection_workflow() -> Result<(), String> {
+    let smoke_marker = env::var_os("MACTYPE_CI_SMOKE_FILE").ok_or_else(|| {
+        "injection verification is available only during CI smoke tests".to_owned()
+    })?;
+    let target = env::var_os("MACTYPE_CI_MANUAL_TARGET")
+        .ok_or_else(|| "MACTYPE_CI_MANUAL_TARGET is not available".to_owned())?;
+    let marker = PathBuf::from(smoke_marker)
+        .parent()
+        .ok_or_else(|| "CI marker has no parent directory".to_owned())?
+        .join("injection.ready");
+    if marker.exists() {
+        fs::remove_file(&marker).map_err(|error| error.to_string())?;
+    }
+    let target = target.to_string_lossy().into_owned();
+    let arguments = vec![marker.to_string_lossy().into_owned()];
+    register_session_target_impl(&target, &arguments)?;
+    launch_registered_targets_impl()?;
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !marker.is_file() && std::time::Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(100));
+    }
+    remove_session_target_impl(&target)?;
+    if !marker.is_file() {
+        return Err("managed MacLoader did not start the registered injected target".to_owned());
+    }
+    let content = fs::read_to_string(&marker).map_err(|error| error.to_string())?;
+    fs::remove_file(&marker).map_err(|error| error.to_string())?;
+    if content.trim() != "mactype-manual-launch-ready" {
+        return Err(format!(
+            "injected target wrote an invalid marker: {content}"
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn manual_launcher_rejects_non_executable_targets() {
-        let error = launch_with_mactype("Cargo.toml", &[]).unwrap_err();
+        let error = launch_with_mactype_impl("Cargo.toml", &[]).unwrap_err();
         assert!(error.contains("existing .exe") || error.contains("cannot find"));
     }
 

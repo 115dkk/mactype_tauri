@@ -4,6 +4,8 @@ import {
   type AppliedProfile,
   type ExecutionStatus,
   type InstallationStatus,
+  type LegacyProfileCandidate,
+  type LegacyServiceStatus,
   type LaunchContext,
   type ProfileEntry,
   type ProfileSnapshot,
@@ -24,11 +26,24 @@ const fallbackProfile: ProfileSnapshot = {
   advanced: { shadow: null, lcdFilterWeight: null, pixelLayout: null, displayAffinity: [], fontSubstitutes: [], infinalityGammaCorrection: [0, 100], infinalityFilterParams: [11, 22, 38, 22, 11] },
 };
 
+const galleryService: LegacyServiceStatus = {
+  presence: "owned",
+  state: "running",
+  binaryPath: "C:\\Program Files\\MacType\\MacTray.exe -service",
+  win32Error: null,
+  trustedBinaryAvailable: true,
+  registryConflict: false,
+  canInstall: false,
+  canRemove: true,
+  canStart: false,
+  canStop: true,
+};
+
 export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
   loadLaunchContext(): Promise<LaunchContext> {
     const requested = new URLSearchParams(window.location.search).get("view");
     return Promise.resolve<LaunchContext>({
-      view: requested === "profiles" || requested === "execution" || requested === "diagnostics" ? requested : "overview",
+      view: requested === "files" || requested === "profiles" || requested === "execution" || requested === "diagnostics" ? requested : "overview",
       ciSmoke: false,
       trayStart: false,
     });
@@ -39,11 +54,28 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
   },
 
   loadExecutionStatus(): Promise<ExecutionStatus> {
-    return Promise.resolve<ExecutionStatus>({ trayAvailable: true, autoStart: false, manualLauncherAvailable: true, legacyServiceDetected: true, legacyServiceRunning: true, registryModeDetected: false, systemModesSupported: false, systemModeNote: "시스템 모드는 안전성 검토 결과 읽기 전용으로 표시됩니다.", injectionReady: true, activeProfile: fallbackProfile.path, sessionTargets: [] });
+    return Promise.resolve<ExecutionStatus>({ trayAvailable: true, autoStart: false, manualLauncherAvailable: true, legacyService: galleryService, registryModeDetected: false, systemModesSupported: false, systemModeNote: "검증된 레거시 서비스만 UAC 승인 후 제어하며 레지스트리 모드는 읽기 전용입니다.", injectionReady: true, activeProfile: fallbackProfile.path, sessionTargets: [] });
+  },
+
+  manageLegacyService(action): Promise<LegacyServiceStatus> {
+    const state = action === "stop" || action === "remove" ? "stopped" : "running";
+    return Promise.resolve({
+      ...galleryService,
+      presence: action === "remove" ? "absent" : "owned",
+      state,
+      canInstall: action === "remove",
+      canRemove: action !== "remove",
+      canStart: action === "stop",
+      canStop: action === "start" || action === "install",
+    });
   },
 
   pickExecutable(): Promise<string | null> {
     return Promise.resolve("C:\\Windows\\System32\\notepad.exe");
+  },
+
+  pickIniProfile(): Promise<string | null> {
+    return Promise.resolve("C:\\Users\\Gallery\\Downloads\\Community.ini");
   },
 
   loadInstalledFontFamilies(): Promise<ReadonlyArray<string>> {
@@ -108,6 +140,18 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
 
   openDefaultProfile(): Promise<ProfileSnapshot | null> {
     return Promise.resolve(fallbackProfile);
+  },
+
+  currentProfile(): Promise<ProfileSnapshot | null> {
+    return Promise.resolve(fallbackProfile);
+  },
+
+  discoverLegacyProfile(): Promise<LegacyProfileCandidate | null> {
+    return Promise.resolve({ name: "Pretendard forever", path: "C:\\Program Files\\MacType\\ini\\pretendard forever.ini", source: "alternative-file" });
+  },
+
+  importProfile(path: string): Promise<ProfileSnapshot> {
+    return Promise.resolve({ ...fallbackProfile, path: `C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\profiles\\${path.split(/[\\/]/).pop() ?? "Imported.ini"}` });
   },
 
   listProfiles(): Promise<ReadonlyArray<ProfileEntry>> {

@@ -4,6 +4,10 @@ export const galleryViews = [
     title: { ko: "개요", en: "Overview", "zh-CN": "概览", "zh-TW": "總覽", ja: "概要", fr: "Vue d’ensemble", de: "Übersicht", es: "Resumen", pt: "Visão geral", ar: "نظرة عامة" },
   },
   {
+    id: "files",
+    title: { ko: "설정 파일", en: "Settings files", "zh-CN": "设置文件", "zh-TW": "設定檔案", ja: "設定ファイル", fr: "Fichiers de réglages", de: "Einstellungsdateien", es: "Archivos de configuración", pt: "Ficheiros de definições", ar: "ملفات الإعدادات" },
+  },
+  {
     id: "profiles",
     title: { ko: "프로필", en: "Profiles", "zh-CN": "配置文件", "zh-TW": "設定檔", ja: "プロファイル", fr: "Profils", de: "Profile", es: "Perfiles", pt: "Perfis", ar: "ملفات التعريف" },
   },

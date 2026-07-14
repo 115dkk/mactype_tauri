@@ -94,15 +94,38 @@ test("profile editor categories and collections remain interactive", async ({ pa
   await expect(page.getByText("글꼴 대체 제외 모듈", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "어두운 배경" }).click();
   await expect(page.getByRole("img", { name: "현재 설정의 글자 렌더링 프리뷰" })).toHaveAttribute("data-dark", "true");
-  await page.getByRole("button", { name: "실제 적용" }).click();
-  await expect(page.locator('[data-operation="apply-profile"]')).toContainText("Default.ini");
-
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   expect(horizontalOverflow, "interactive profile editor must not have horizontal scrolling").toBe(false);
   expect(failures, failures.join("\n")).toEqual([]);
 });
 
-test("execution mode controls remain interactive without enabling system modes", async ({ page }) => {
+test("settings files can be selected, imported, copied, saved, and applied without typing a path", async ({ page }) => {
+  const failures: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") failures.push(`console: ${message.text()}`);
+  });
+  page.on("pageerror", (error) => failures.push(`pageerror: ${error.message}`));
+
+  await page.goto("/?view=files&gallery=1&lang=ko", { waitUntil: "networkidle" });
+  await expect(page.getByRole("heading", { name: "기존 MacType 설정을 찾았습니다" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: /경로|path/i })).toHaveCount(0);
+  await page.getByRole("button", { name: "이 설정 가져오기" }).click();
+  await expect(page.locator('[data-operation="file-settings"]')).toContainText("개인 프로필로 가져왔습니다");
+
+  await page.getByRole("button", { name: "INI 파일 선택" }).click();
+  await expect(page.locator('[data-operation="file-settings"]')).toContainText("Community.ini");
+  await page.getByRole("textbox", { name: "복제 프로필 이름" }).fill("Gallery copy");
+  await page.getByRole("button", { name: "복제" }).click();
+  await expect(page.locator('[data-operation="file-settings"]')).toContainText("Gallery copy.ini");
+  await page.getByRole("button", { name: "실제 적용" }).click();
+  await expect(page.locator('[data-operation="file-settings"]')).toContainText("실행 프로필로 적용");
+
+  const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+  expect(horizontalOverflow, "settings-file controls must not have horizontal scrolling").toBe(false);
+  expect(failures, failures.join("\n")).toEqual([]);
+});
+
+test("execution and verified legacy service controls remain interactive", async ({ page }) => {
   const failures: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") failures.push(`console: ${message.text()}`);
@@ -123,6 +146,17 @@ test("execution mode controls remain interactive without enabling system modes",
   await page.getByRole("button", { name: "MacType로 실행" }).click();
   await expect(page.getByText(/MacLoader를 통해 프로세스 4242/)).toBeVisible();
   await expect(page.getByRole("heading", { name: "시스템 범위 모드" })).toBeVisible();
+
+  await expect(page.getByText("검증된 MacTray 서비스 · 실행 중", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "서비스 중지" }).click();
+  await expect(page.getByText("검증된 MacTray 서비스 · 중지됨", { exact: true })).toBeVisible();
+  await expect(page.getByText("서비스 상태를 갱신했습니다.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "서비스 시작" }).click();
+  await expect(page.getByText("검증된 MacTray 서비스 · 실행 중", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "서비스 제거" }).click();
+  await expect(page.getByText("설치되지 않음 · 중지됨", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "서비스 설치" }).click();
+  await expect(page.getByText("검증된 MacTray 서비스 · 실행 중", { exact: true })).toBeVisible();
 
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   expect(horizontalOverflow, "execution controls must not have horizontal scrolling").toBe(false);

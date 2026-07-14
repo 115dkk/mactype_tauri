@@ -116,6 +116,14 @@ pub(crate) struct ProfileEntry {
     path: String,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LegacyProfileCandidate {
+    name: String,
+    path: String,
+    source: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileSnapshot {
@@ -949,6 +957,96 @@ fn user_profile_root() -> Option<PathBuf> {
         .map(|path| path.join("MacType").join("ControlCenter").join("profiles"))
 }
 
+fn discover_legacy_profile_at(root: &Path) -> Result<Option<LegacyProfileCandidate>, String> {
+    let configuration = root.join("MacType.ini");
+    if !configuration.is_file() {
+        return Ok(None);
+    }
+    let document = ProfileDocument::open(&configuration)?;
+    let primary = || LegacyProfileCandidate {
+        name: configuration
+            .file_stem()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "MacType profile".to_owned()),
+        path: configuration.to_string_lossy().into_owned(),
+        source: "primary-file".to_owned(),
+    };
+    let Some(alternative) = document.raw_value("General", "AlternativeFile") else {
+        return Ok(Some(primary()));
+    };
+    let alternative = alternative.trim().trim_matches('"');
+    if alternative.is_empty() {
+        return Ok(Some(primary()));
+    }
+    let candidate = PathBuf::from(alternative);
+    let candidate = if candidate.is_absolute() {
+        candidate
+    } else {
+        root.join(candidate)
+    };
+    if !candidate.is_file()
+        || !candidate
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("ini"))
+    {
+        return Ok(None);
+    }
+    let path = candidate;
+    Ok(Some(LegacyProfileCandidate {
+        name: path
+            .file_stem()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "MacType profile".to_owned()),
+        path: path.to_string_lossy().into_owned(),
+        source: "alternative-file".to_owned(),
+    }))
+}
+
+fn import_profile_to(source: &Path, directory: &Path) -> Result<ProfileDocument, String> {
+    if !source.is_file()
+        || !source
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("ini"))
+    {
+        return Err("select an existing INI profile".to_owned());
+    }
+    let source = fs::canonicalize(source).map_err(|error| error.to_string())?;
+    let _validated = ProfileDocument::open(&source)?;
+    let bytes = fs::read(&source).map_err(|error| error.to_string())?;
+    let stem = source
+        .file_stem()
+        .map(|name| name.to_string_lossy().into_owned())
+        .ok_or_else(|| "profile has no file name".to_owned())?;
+    validate_entry(&stem, "profile name")?;
+    fs::create_dir_all(directory).map_err(|error| error.to_string())?;
+
+    for suffix in 1..=999 {
+        let name = if suffix == 1 {
+            format!("{stem}.ini")
+        } else {
+            format!("{stem} ({suffix}).ini")
+        };
+        let destination = directory.join(name);
+        let mut output = match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&destination)
+        {
+            Ok(output) => output,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.to_string()),
+        };
+        if let Err(error) = output.write_all(&bytes).and_then(|()| output.sync_all()) {
+            drop(output);
+            let _ = fs::remove_file(&destination);
+            return Err(error.to_string());
+        }
+        drop(output);
+        return ProfileDocument::open(destination);
+    }
+    Err("too many profiles have the same name".to_owned())
+}
+
 fn find_default_profile() -> Option<PathBuf> {
     let root = installation_root()?;
     let profile_root = root.join("ini");
@@ -1034,6 +1132,41 @@ pub(crate) fn open_default_profile(
         return Ok(None);
     };
     open_profile(path.to_string_lossy().into_owned(), state).map(Some)
+}
+
+#[tauri::command]
+pub(crate) fn current_profile(
+    state: State<'_, ProfileState>,
+) -> Result<Option<ProfileSnapshot>, String> {
+    let guard = state
+        .0
+        .lock()
+        .map_err(|_| "profile lock is poisoned".to_owned())?;
+    Ok(guard.as_ref().map(ProfileDocument::snapshot))
+}
+
+#[tauri::command]
+pub(crate) fn discover_legacy_profile() -> Result<Option<LegacyProfileCandidate>, String> {
+    let Some(root) = installation_root() else {
+        return Ok(None);
+    };
+    discover_legacy_profile_at(&root)
+}
+
+#[tauri::command]
+pub(crate) fn import_profile(
+    path: String,
+    state: State<'_, ProfileState>,
+) -> Result<ProfileSnapshot, String> {
+    let directory =
+        user_profile_root().ok_or_else(|| "LOCALAPPDATA is not available".to_owned())?;
+    let document = import_profile_to(Path::new(&path), &directory)?;
+    let snapshot = document.snapshot();
+    *state
+        .0
+        .lock()
+        .map_err(|_| "profile lock is poisoned".to_owned())? = Some(document);
+    Ok(snapshot)
 }
 
 #[tauri::command]
@@ -1354,6 +1487,78 @@ mod tests {
             TextEncoding::Windows1252,
             "Profil français: qualité élevée",
         );
+    }
+
+    #[test]
+    fn discovers_the_profile_selected_by_legacy_mactype() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("mactype-discovery-{unique}"));
+        let ini = root.join("ini");
+        fs::create_dir_all(&ini).unwrap();
+        fs::write(
+            root.join("MacType.ini"),
+            b"[General]\r\nAlternativeFile=ini\\Community.ini\r\n",
+        )
+        .unwrap();
+        fs::write(
+            ini.join("Community.ini"),
+            b"[General]\r\nNormalWeight=2\r\n",
+        )
+        .unwrap();
+
+        let candidate = discover_legacy_profile_at(&root).unwrap().unwrap();
+        assert_eq!(candidate.name, "Community");
+        assert_eq!(PathBuf::from(candidate.path), ini.join("Community.ini"));
+        assert_eq!(candidate.source, "alternative-file");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn discovers_mactype_ini_when_no_alternative_profile_is_selected() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("mactype-primary-discovery-{unique}"));
+        fs::create_dir_all(&root).unwrap();
+        let configuration = root.join("MacType.ini");
+        fs::write(
+            &configuration,
+            b"[General]\r\nNormalWeight=2\r\nHookChildProcesses=1\r\n",
+        )
+        .unwrap();
+
+        let candidate = discover_legacy_profile_at(&root).unwrap().unwrap();
+        assert_eq!(candidate.name, "MacType");
+        assert_eq!(PathBuf::from(candidate.path), configuration);
+        assert_eq!(candidate.source, "primary-file");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn imported_profile_preserves_bytes_and_avoids_name_collisions() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("mactype-import-{unique}"));
+        let source_root = root.join("source");
+        let destination = root.join("profiles");
+        fs::create_dir_all(&source_root).unwrap();
+        let source = source_root.join("Community.ini");
+        let bytes = b"; untouched\r\n[General]\r\nNormalWeight=2  \r\n";
+        fs::write(&source, bytes).unwrap();
+
+        let first = import_profile_to(&source, &destination).unwrap();
+        let second = import_profile_to(&source, &destination).unwrap();
+        assert_eq!(first.path(), destination.join("Community.ini"));
+        assert_eq!(second.path(), destination.join("Community (2).ini"));
+        assert_eq!(fs::read(first.path()).unwrap(), bytes);
+        assert_eq!(fs::read(second.path()).unwrap(), bytes);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

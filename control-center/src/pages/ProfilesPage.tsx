@@ -1,20 +1,16 @@
-import { AlertTriangle, CopyPlus, Play, Save, Search, SlidersHorizontal } from "lucide-react";
+import { AlertTriangle, Search, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { settingsSchema } from "../generated/settings";
-import type { AdvancedProfile, IndividualSetting, PreviewRequest, PreviewResult, ProfileEntry, ProfileSnapshot } from "../app/model";
+import type { AdvancedProfile, IndividualSetting, PreviewRequest, PreviewResult, ProfileSnapshot } from "../app/model";
 import { settingMessageKey, useI18n } from "../i18n/i18n";
 import {
-  applyOpenProfile,
-  duplicateProfile,
+  currentProfile,
   forcePreviewCrashForCi,
   loadInstalledFontFamilies,
-  listProfiles,
   openDefaultProfile,
-  openProfile,
   previewImageUrl,
   reportFrontendFailure,
   renderProfilePreview,
-  saveProfile,
   setNativePreview,
   updateProfileIndividuals,
   updateProfileAdvanced,
@@ -58,7 +54,6 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
     { kind: "excludeSubstitutionModules", label: t("list.excludeSubstitutionModules.label"), help: t("list.excludeSubstitutionModules.help") },
   ] as const, [t]);
   const [profile, setProfile] = useState<ProfileSnapshot | null>(null);
-  const [profiles, setProfiles] = useState<ReadonlyArray<ProfileEntry>>([]);
   const [values, setValues] = useState<Record<string, number>>(
     Object.fromEntries(settingsSchema.map((setting) => [setting.id, setting.default])),
   );
@@ -67,7 +62,6 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
   const [advanced, setAdvanced] = useState<AdvancedProfile>({ shadow: null, lcdFilterWeight: null, pixelLayout: null, displayAffinity: [], fontSubstitutes: [], infinalityGammaCorrection: [0, 100], infinalityFilterParams: [11, 22, 38, 22, 11] });
   const [activeGroup, setActiveGroup] = useState<GroupId>("basic");
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [copyName, setCopyName] = useState("");
   const [installedFonts, setInstalledFonts] = useState<ReadonlyArray<string>>([]);
   const [fontFace, setFontFace] = useState("Segoe UI");
   const [fontSize, setFontSize] = useState(14);
@@ -77,9 +71,6 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [applying, setApplying] = useState(false);
-  const [appliedProfile, setAppliedProfile] = useState<string | null>(null);
   const [nativeVisible, setNativeVisible] = useState(false);
   const [query, setQuery] = useState("");
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -142,10 +133,10 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
 
   useEffect(() => {
     let active = true;
-    void Promise.all([openDefaultProfile(), listProfiles()])
-      .then(([opened, available]) => {
+    void currentProfile()
+      .then(async (current) => current ?? await openDefaultProfile())
+      .then((opened) => {
         if (!active) return;
-        setProfiles(available);
         if (opened) applySnapshot(opened);
       })
       .catch((error: unknown) => {
@@ -250,52 +241,6 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
       .catch((error: unknown) => setPreviewError(error instanceof Error ? error.message : String(error)));
   };
 
-  const chooseProfile = async (path: string) => {
-    try {
-      applySnapshot(await openProfile(path));
-      setPreviewError(null);
-    } catch (error: unknown) {
-      setPreviewError(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  const duplicate = async () => {
-    if (!copyName.trim()) return;
-    try {
-      const opened = await duplicateProfile(copyName);
-      applySnapshot(opened);
-      setProfiles(await listProfiles());
-      setCopyName("");
-    } catch (error: unknown) {
-      setPreviewError(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      const saved = await saveProfile();
-      if (saved) applySnapshot(saved);
-    } catch (error: unknown) {
-      setPreviewError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const apply = async () => {
-    setApplying(true);
-    try {
-      const applied = await applyOpenProfile();
-      setAppliedProfile(applied.sourceProfile);
-      setPreviewError(null);
-    } catch (error: unknown) {
-      setPreviewError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setApplying(false);
-    }
-  };
-
   const commitIndividuals = async (next: IndividualSetting[]) => {
     setIndividuals(next);
     try {
@@ -362,18 +307,7 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
           <h1 id="profiles-title">{t("nav.profiles")}</h1>
           <p>{loading ? t("profiles.searching") : t("profiles.summary", { name: profile?.path.split(/[\\/]/).pop() ?? t("profiles.none"), count: dirtyCount })}</p>
         </div>
-        <div className="header-actions profile-actions">
-          <select aria-label={t("profiles.select")} disabled={profiles.length === 0} onChange={(event) => void chooseProfile(event.target.value)} value={profile?.path ?? ""}>
-            {profiles.map((entry) => <option key={entry.path} value={entry.path}>{entry.name}</option>)}
-          </select>
-          <input aria-label={t("profiles.copyName")} onChange={(event) => setCopyName(event.target.value)} placeholder={t("profiles.newName")} value={copyName} />
-          <button className="button secondary" disabled={!profile || !copyName.trim()} onClick={() => void duplicate()} type="button"><CopyPlus aria-hidden="true" size={16} /> {t("profiles.duplicate")}</button>
-          <button className="button primary" disabled={!profile || dirtyCount === 0 || saving} onClick={() => void save()} type="button"><Save aria-hidden="true" size={17} /> {saving ? t("profiles.saving") : t("profiles.save")}</button>
-          <button className="button primary" disabled={!profile || applying} onClick={() => void apply()} type="button"><Play aria-hidden="true" size={17} /> {applying ? t("profiles.applying") : t("profiles.apply")}</button>
-        </div>
       </header>
-
-      {appliedProfile && <p aria-live="polite" className="success-message profile-apply-message" data-operation="apply-profile">{t("profiles.applied", { name: appliedProfile.split(/[\\/]/).pop() ?? appliedProfile })}</p>}
 
       <div className="profile-layout">
         <aside className="settings-index" aria-label={t("profiles.sections")}>

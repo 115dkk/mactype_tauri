@@ -1,7 +1,7 @@
-import { AlertTriangle, Check, FileCode2, FolderOpen, Play, RefreshCw, ShieldAlert, Trash2, UserPlus } from "lucide-react";
+import { AlertTriangle, Check, FileCode2, FolderOpen, Play, Power, PowerOff, RefreshCw, ShieldAlert, Trash2, UserPlus } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { ExecutionStatus } from "../app/model";
-import { launchRegisteredTargets, launchTargetWithMactype, loadExecutionStatus, manageLegacyService, pickExecutable, registerSessionTarget, removeSessionTarget, reportFrontendFailure, setSessionAutostart, verifyInjectionWorkflowForCi } from "../app/tauri";
+import { activateSystemInjection, launchRegisteredTargets, launchTargetWithMactype, loadExecutionStatus, manageLegacyService, pickExecutable, registerSessionTarget, removeSessionTarget, reportFrontendFailure, setSessionAutostart, verifyInjectionWorkflowForCi } from "../app/tauri";
 import { useI18n } from "../i18n/i18n";
 
 export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean; onReady?: () => void }) {
@@ -106,8 +106,24 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
     setServiceBusy(action);
     try {
       const legacyService = await manageLegacyService(action);
-      setStatus((current) => current ? { ...current, legacyService } : current);
-      setMessage(t("execution.serviceActionDone"));
+      const systemInjectionActive = (legacyService.presence === "owned" || legacyService.presence === "compatible-unquoted") && legacyService.state === "running";
+      setStatus((current) => current ? { ...current, legacyService, systemInjectionActive } : current);
+      setMessage(action === "stop" ? t("execution.systemPaused") : action === "start" ? t("execution.systemResumed") : t("execution.serviceActionDone"));
+      setError(null);
+    } catch (caught: unknown) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+      setMessage(null);
+    } finally {
+      setServiceBusy(null);
+    }
+  };
+
+  const activateSystem = async () => {
+    setServiceBusy("activate");
+    try {
+      const nextStatus = await activateSystemInjection();
+      setStatus(nextStatus);
+      setMessage(t("execution.systemActivated"));
       setError(null);
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -162,8 +178,25 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
 
       <section className="section-block" aria-labelledby="system-title">
         <div className="section-heading"><div><h2 id="system-title">{t("execution.systemTitle")}</h2><p>{t("execution.systemDescription")}</p></div></div>
+        <div className="system-injection-control" data-active={status?.systemInjectionActive ?? false}>
+          <div className="system-injection-state">
+            <span className="system-injection-icon">{status?.systemInjectionActive ? <Power aria-hidden="true" size={20} /> : <PowerOff aria-hidden="true" size={20} />}</span>
+            <div>
+              <strong>{status?.systemInjectionActive ? t("execution.systemActiveTitle") : t("execution.systemInactiveTitle")}</strong>
+              <p>{status?.systemInjectionActive ? t("execution.systemActiveDescription") : t("execution.systemInactiveDescription")}</p>
+            </div>
+          </div>
+          <button
+            className={status?.systemInjectionActive ? "button secondary system-injection-action" : "button primary system-injection-action"}
+            disabled={!status || serviceBusy !== null || (status.systemInjectionActive ? !service?.canStop : !status.systemModesSupported)}
+            onClick={() => void (status?.systemInjectionActive ? manageService("stop") : activateSystem())}
+            type="button"
+          >
+            {serviceBusy ? t("execution.serviceWorking") : status?.systemInjectionActive ? t("execution.systemPause") : t("execution.systemApply")}
+          </button>
+        </div>
         <dl className="detail-list">
-          <div><dt>{t("execution.legacyService")}</dt><dd>{service?.presence === "owned" ? <Check className="success" size={17} /> : <AlertTriangle className="warning" size={17} />}<span>{service ? `${t(`execution.servicePresence.${service.presence}`)} · ${t(`execution.serviceState.${service.state}`)}` : t("execution.checking")}</span></dd></div>
+          <div><dt>{t("execution.legacyService")}</dt><dd>{service && (service.presence === "owned" || service.presence === "compatible-unquoted") ? <Check className="success" size={17} /> : <AlertTriangle className="warning" size={17} />}<span>{service ? `${t(`execution.servicePresence.${service.presence}`)} · ${t(`execution.serviceState.${service.state}`)}` : t("execution.checking")}</span></dd></div>
           <div><dt>{t("execution.appInit")}</dt><dd>{status?.registryModeDetected ? <ShieldAlert className="warning" size={17} /> : <Check className="success" size={17} />}<span>{status?.registryModeDetected ? t("execution.entryDetected") : t("profiles.disabled")}</span></dd></div>
         </dl>
         <div className="service-controls">

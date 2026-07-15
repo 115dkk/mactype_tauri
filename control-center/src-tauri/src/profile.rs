@@ -1,5 +1,5 @@
 use crate::generated_settings::{SettingDefinition, SettingValueType, SETTINGS};
-use crate::{execution, installation_root};
+use crate::{execution, installation_root, legacy_service};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -1092,11 +1092,19 @@ fn discover_legacy_profile_at(root: &Path) -> Result<Option<LegacyProfileCandida
         return Ok(None);
     }
     let path = candidate;
+    let managed_source_name = path
+        .file_name()
+        .is_some_and(|name| name.eq_ignore_ascii_case("ControlCenter.ini"))
+        .then(|| document.raw_value("General", "ControlCenterSourceProfile"))
+        .flatten()
+        .and_then(|source| Path::new(source.trim().trim_matches('"')).file_stem())
+        .map(|name| name.to_string_lossy().into_owned());
     Ok(Some(LegacyProfileCandidate {
-        name: path
-            .file_stem()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "MacType profile".to_owned()),
+        name: managed_source_name.unwrap_or_else(|| {
+            path.file_stem()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "MacType profile".to_owned())
+        }),
         path: path.to_string_lossy().into_owned(),
         source: "alternative-file".to_owned(),
     }))
@@ -1168,6 +1176,67 @@ fn find_default_profile() -> Option<PathBuf> {
             .is_file()
             .then(|| root.join("MacType.ini"))
     })
+}
+
+pub(crate) fn default_profile_payload() -> Result<(PathBuf, Vec<u8>), String> {
+    let path = find_default_profile()
+        .ok_or_else(|| "a default MacType profile was not found".to_owned())?;
+    let bytes = fs::read(&path).map_err(|error| error.to_string())?;
+    ProfileDocument::open(&path)?;
+    Ok((path, bytes))
+}
+
+pub(crate) fn install_system_profile_at(
+    root: &Path,
+    source_profile: &Path,
+    profile_bytes: &[u8],
+) -> Result<(), String> {
+    if profile_bytes.is_empty() || profile_bytes.len() > 4 * 1024 * 1024 {
+        return Err("system profile must be between 1 byte and 4 MiB".to_owned());
+    }
+    let source_name = source_profile
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "system profile has no valid file name".to_owned())?;
+    if !source_name.to_ascii_lowercase().ends_with(".ini") {
+        return Err("system profile must be an INI file".to_owned());
+    }
+
+    let profile_root = root.join("ini");
+    fs::create_dir_all(&profile_root).map_err(|error| error.to_string())?;
+    let destination = profile_root.join("ControlCenter.ini");
+    let temporary = profile_root.join(format!(
+        ".ControlCenter.ini.mactype-{}.tmp",
+        std::process::id()
+    ));
+    let mut output = File::create(&temporary).map_err(|error| error.to_string())?;
+    output
+        .write_all(profile_bytes)
+        .map_err(|error| error.to_string())?;
+    output.sync_all().map_err(|error| error.to_string())?;
+    drop(output);
+    if destination.exists() {
+        let backup = destination.with_extension("ini.bak");
+        replace_file(&destination, &temporary, &backup)?;
+    } else {
+        fs::rename(&temporary, &destination).map_err(|error| error.to_string())?;
+    }
+
+    let configuration = root.join("MacType.ini");
+    let mut document = ProfileDocument::open(&configuration)?;
+    document.set_raw_value(
+        "General",
+        "AlternativeFile",
+        Some(r"ini\ControlCenter.ini".to_owned()),
+        "system:alternative-file",
+    );
+    document.set_raw_value(
+        "General",
+        "ControlCenterSourceProfile",
+        Some(source_profile.to_string_lossy().into_owned()),
+        "system:source-profile",
+    );
+    document.save()
 }
 
 #[tauri::command]
@@ -1247,7 +1316,7 @@ pub(crate) fn current_profile(
 
 #[tauri::command]
 pub(crate) fn discover_legacy_profile() -> Result<Option<LegacyProfileCandidate>, String> {
-    let Some(root) = installation_root() else {
+    let Some(root) = legacy_service::trusted_installation_root() else {
         return Ok(None);
     };
     discover_legacy_profile_at(&root)
@@ -1774,6 +1843,47 @@ mod tests {
         assert_eq!(candidate.name, "MacType");
         assert_eq!(PathBuf::from(candidate.path), configuration);
         assert_eq!(candidate.source, "primary-file");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn installs_a_managed_system_profile_without_losing_the_source_identity() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("mactype-system-profile-{unique}"));
+        fs::create_dir_all(root.join("ini")).unwrap();
+        fs::write(
+            root.join("MacType.ini"),
+            b"; keep this comment\r\n[General]\r\nAlternativeFile=ini\\Default.ini\r\nLoadType=1\r\n",
+        )
+        .unwrap();
+        let source = Path::new(r"C:\Users\Test\profiles\Pretendard forever.ini");
+        let bytes = b"[General]\r\nNormalWeight=7\r\n";
+
+        install_system_profile_at(&root, source, bytes).unwrap();
+
+        assert_eq!(
+            fs::read(root.join("ini").join("ControlCenter.ini")).unwrap(),
+            bytes
+        );
+        let configuration = ProfileDocument::open(root.join("MacType.ini")).unwrap();
+        assert_eq!(
+            configuration.raw_value("General", "AlternativeFile"),
+            Some(r"ini\ControlCenter.ini")
+        );
+        assert_eq!(
+            configuration.raw_value("General", "ControlCenterSourceProfile"),
+            Some(source.to_string_lossy().as_ref())
+        );
+        assert_eq!(configuration.raw_value("General", "LoadType"), Some("1"));
+        let candidate = discover_legacy_profile_at(&root).unwrap().unwrap();
+        assert_eq!(candidate.name, "Pretendard forever");
+        assert_eq!(
+            PathBuf::from(candidate.path),
+            root.join("ini").join("ControlCenter.ini")
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -23,6 +23,7 @@ export interface ControlCenterRuntimeAdapter {
   setApplicationLocale(locale: Locale): Promise<void>;
   loadExecutionStatus(): Promise<ExecutionStatus>;
   manageLegacyService(action: "install" | "remove" | "start" | "stop"): Promise<LegacyServiceStatus>;
+  activateSystemInjection(): Promise<ExecutionStatus>;
   pickExecutable(filterName: string): Promise<string | null>;
   pickIniProfile(filterName: string): Promise<string | null>;
   pickIniExportPath(filterName: string, defaultName: string): Promise<string | null>;

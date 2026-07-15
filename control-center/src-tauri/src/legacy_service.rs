@@ -139,9 +139,18 @@ fn is_trusted_mactray_layout(program_files: &Path, candidate: &Path) -> bool {
             .eq_ignore_ascii_case("MacTray.exe")
 }
 
+#[derive(Debug, PartialEq)]
+enum PrivilegedAction {
+    Apply {
+        profile_path: PathBuf,
+        source_profile: PathBuf,
+    },
+    Named(&'static str),
+}
+
 fn privileged_action_from_arguments(
     arguments: impl IntoIterator<Item = OsString>,
-) -> Result<Option<&'static str>, String> {
+) -> Result<Option<PrivilegedAction>, String> {
     let mut arguments = arguments.into_iter();
     let _executable = arguments.next();
     let arguments = arguments.collect::<Vec<_>>();
@@ -150,14 +159,20 @@ fn privileged_action_from_arguments(
     if !arguments.iter().any(|argument| argument == broker_flag) {
         return Ok(None);
     }
-    if arguments.len() != 2 || arguments[0] != broker_flag {
+    if arguments.len() < 2
+        || !matches!(arguments.first(), Some(argument) if argument == broker_flag)
+    {
         return Err("invalid legacy service broker invocation".to_owned());
     }
     match arguments[1].to_str() {
-        Some("install") => Ok(Some("install")),
-        Some("remove") => Ok(Some("remove")),
-        Some("start") => Ok(Some("start")),
-        Some("stop") => Ok(Some("stop")),
+        Some("apply") if arguments.len() == 4 => Ok(Some(PrivilegedAction::Apply {
+            profile_path: PathBuf::from(&arguments[2]),
+            source_profile: PathBuf::from(&arguments[3]),
+        })),
+        Some("install") if arguments.len() == 2 => Ok(Some(PrivilegedAction::Named("install"))),
+        Some("remove") if arguments.len() == 2 => Ok(Some(PrivilegedAction::Named("remove"))),
+        Some("start") if arguments.len() == 2 => Ok(Some(PrivilegedAction::Named("start"))),
+        Some("stop") if arguments.len() == 2 => Ok(Some(PrivilegedAction::Named("stop"))),
         _ => Err("unsupported legacy service action".to_owned()),
     }
 }
@@ -469,10 +484,77 @@ mod windows {
         }
     }
 
-    pub(super) fn privileged_mutate(action: &str) -> Result<(), String> {
+    pub(super) fn privileged_mutate(action: &PrivilegedAction) -> Result<(), String> {
         let before = query(crate::execution::registry_mode_detected());
         match action {
-            "install" => {
+            PrivilegedAction::Apply {
+                profile_path,
+                source_profile,
+            } => {
+                if before.registry_conflict {
+                    return Err(
+                        "AppInit registry mode must be disabled before system injection".to_owned(),
+                    );
+                }
+                if !matches!(
+                    before.presence,
+                    ServicePresence::Absent
+                        | ServicePresence::Owned
+                        | ServicePresence::CompatibleUnquoted
+                ) {
+                    return Err(
+                        "the MacType service is not in a safe state for profile activation"
+                            .to_owned(),
+                    );
+                }
+                let root = trusted_mactray_path()
+                    .and_then(|path| path.parent().map(PathBuf::from))
+                    .ok_or_else(|| "trusted Program Files MacTray.exe was not found".to_owned())?;
+                let profile_path =
+                    std::fs::canonicalize(profile_path).map_err(|error| error.to_string())?;
+                if !profile_path
+                    .file_name()
+                    .is_some_and(|name| name.eq_ignore_ascii_case("profile.ini"))
+                {
+                    return Err("the elevated profile payload has an unexpected name".to_owned());
+                }
+                let profile_bytes =
+                    std::fs::read(profile_path).map_err(|error| error.to_string())?;
+                crate::profile::install_system_profile_at(
+                    &root,
+                    source_profile.as_path(),
+                    &profile_bytes,
+                )?;
+                match before.presence {
+                    ServicePresence::Absent => {
+                        run_mactray("/INSTALL")?;
+                        let installed = query(false);
+                        if !matches!(
+                            installed.presence,
+                            ServicePresence::Owned | ServicePresence::CompatibleUnquoted
+                        ) {
+                            return Err(
+                                "MacTray did not install an owned MacType service".to_owned()
+                            );
+                        }
+                        if installed.state != ServiceRuntimeState::Running {
+                            start()?;
+                        }
+                    }
+                    ServicePresence::Owned | ServicePresence::CompatibleUnquoted => {
+                        if before.state == ServiceRuntimeState::Running {
+                            stop()?;
+                        }
+                        let after_stop = query(false);
+                        if after_stop.state != ServiceRuntimeState::Running {
+                            start()?;
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+                wait_for(ServiceRuntimeState::Running)
+            }
+            PrivilegedAction::Named("install") => {
                 if !before.can_install {
                     return Err(
                         "legacy service installation is not safe in the current state".to_owned(),
@@ -491,7 +573,7 @@ mod windows {
                 }
                 wait_for(ServiceRuntimeState::Running)
             }
-            "remove" => {
+            PrivilegedAction::Named("remove") => {
                 if !before.can_remove {
                     return Err("only an owned MacType service can be removed".to_owned());
                 }
@@ -501,13 +583,13 @@ mod windows {
                 run_mactray("/UNINSTALL")?;
                 wait_until_absent()
             }
-            "start" => {
+            PrivilegedAction::Named("start") => {
                 if !before.can_start {
                     return Err("legacy service cannot be started in the current state".to_owned());
                 }
                 start()
             }
-            "stop" => {
+            PrivilegedAction::Named("stop") => {
                 if !before.can_stop {
                     return Err("legacy service cannot be stopped in the current state".to_owned());
                 }
@@ -517,14 +599,34 @@ mod windows {
         }
     }
 
+    fn quoted_parameter(path: &Path) -> Result<String, String> {
+        let value = path.to_string_lossy();
+        if value.contains('"') {
+            return Err(
+                "Windows paths passed to the elevated broker cannot contain quotes".to_owned(),
+            );
+        }
+        Ok(format!("\"{value}\""))
+    }
+
     pub(super) fn run_elevated(action: &str) -> Result<(), String> {
-        if !matches!(action, "install" | "remove" | "start" | "stop") {
+        if !matches!(action, "apply" | "install" | "remove" | "start" | "stop") {
             return Err("unsupported legacy service action".to_owned());
         }
         let executable = std::env::current_exe().map_err(|error| error.to_string())?;
         let executable = wide(executable.as_os_str());
         let verb = wide("runas");
-        let parameters = wide(format!("--legacy-service-broker {action}"));
+        let parameters = if action == "apply" {
+            let (source_profile, profile_path) = crate::execution::active_system_profile_paths()?;
+            format!(
+                "--legacy-service-broker apply {} {}",
+                quoted_parameter(&profile_path)?,
+                quoted_parameter(&source_profile)?
+            )
+        } else {
+            format!("--legacy-service-broker {action}")
+        };
+        let parameters = wide(parameters);
         let mut info = SHELLEXECUTEINFOW {
             cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
             fMask: SEE_MASK_NOCLOSEPROCESS,
@@ -569,6 +671,29 @@ mod windows {
     }
 }
 
+pub(crate) fn trusted_installation_root() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        windows::trusted_mactray_path().and_then(|path| path.parent().map(PathBuf::from))
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+pub(crate) fn activate_active_profile() -> Result<LegacyServiceStatus, String> {
+    #[cfg(windows)]
+    {
+        windows::run_elevated("apply")?;
+        Ok(status(crate::execution::registry_mode_detected()))
+    }
+    #[cfg(not(windows))]
+    {
+        Err("system-wide MacType injection is available only on Windows".to_owned())
+    }
+}
+
 pub(crate) fn status(registry_conflict: bool) -> LegacyServiceStatus {
     #[cfg(windows)]
     {
@@ -592,6 +717,10 @@ pub(crate) fn manage_legacy_service(action: String) -> Result<LegacyServiceStatu
     #[cfg(windows)]
     {
         windows::run_elevated(&action)?;
+        crate::execution::record_system_injection_choice(matches!(
+            action.as_str(),
+            "install" | "start"
+        ))?;
         Ok(status(crate::execution::registry_mode_detected()))
     }
     #[cfg(not(windows))]
@@ -610,7 +739,7 @@ pub(crate) fn dispatch_privileged_command() -> Option<i32> {
     let result = {
         #[cfg(windows)]
         {
-            windows::privileged_mutate(action)
+            windows::privileged_mutate(&action)
         }
         #[cfg(not(windows))]
         {
@@ -825,7 +954,7 @@ mod tests {
         ));
     }
 
-    fn broker_arguments(arguments: &[&str]) -> Result<Option<&'static str>, String> {
+    fn broker_arguments(arguments: &[&str]) -> Result<Option<PrivilegedAction>, String> {
         privileged_action_from_arguments(arguments.iter().map(OsString::from))
     }
 
@@ -835,9 +964,24 @@ mod tests {
             assert_eq!(
                 broker_arguments(&["control-center.exe", "--legacy-service-broker", action])
                     .unwrap(),
-                Some(action)
+                Some(PrivilegedAction::Named(action))
             );
         }
+
+        assert_eq!(
+            broker_arguments(&[
+                "control-center.exe",
+                "--legacy-service-broker",
+                "apply",
+                r"C:\Users\Test\runtime\profile.ini",
+                r"C:\Users\Test\profiles\Current.ini",
+            ])
+            .unwrap(),
+            Some(PrivilegedAction::Apply {
+                profile_path: PathBuf::from(r"C:\Users\Test\runtime\profile.ini"),
+                source_profile: PathBuf::from(r"C:\Users\Test\profiles\Current.ini"),
+            })
+        );
 
         assert_eq!(broker_arguments(&["control-center.exe"]).unwrap(), None);
         assert!(broker_arguments(&[
@@ -847,6 +991,9 @@ mod tests {
             "unexpected"
         ])
         .is_err());
+        assert!(
+            broker_arguments(&["control-center.exe", "--legacy-service-broker", "apply"]).is_err()
+        );
         assert!(broker_arguments(&[
             "control-center.exe",
             "--tray",

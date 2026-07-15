@@ -96,7 +96,10 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
   },
 
   loadExecutionStatus(): Promise<ExecutionStatus> {
-    return Promise.resolve<ExecutionStatus>({ trayAvailable: true, autoStart: false, manualLauncherAvailable: true, legacyService: galleryService, registryModeDetected: false, systemModesSupported: false, systemModeNote: "검증된 레거시 서비스만 UAC 승인 후 제어하며 레지스트리 모드는 읽기 전용입니다.", injectionReady: true, activeProfile: fallbackProfile.path, sessionTargets: [] });
+    const activeProfile = new URLSearchParams(window.location.search).has("legacy-applied")
+      ? "C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\profiles\\Pretendard forever.ini"
+      : fallbackProfile.path;
+    return Promise.resolve<ExecutionStatus>({ trayAvailable: true, autoStart: false, manualLauncherAvailable: true, legacyService: galleryService, registryModeDetected: false, systemModesSupported: true, systemInjectionActive: true, systemModeNote: "검증된 레거시 서비스로 현재 프로필을 시스템 범위에 적용합니다.", injectionReady: true, activeProfile, sessionTargets: [] });
   },
 
   manageLegacyService(action): Promise<LegacyServiceStatus> {
@@ -110,6 +113,10 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
       canStart: action === "stop",
       canStop: action === "start" || action === "install",
     });
+  },
+
+  activateSystemInjection(): Promise<ExecutionStatus> {
+    return this.loadExecutionStatus();
   },
 
   pickExecutable(): Promise<string | null> {

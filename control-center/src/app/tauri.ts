@@ -37,6 +37,10 @@ export async function manageLegacyService(action: "install" | "remove" | "start"
   return getRuntimeAdapter().manageLegacyService(action);
 }
 
+export async function activateSystemInjection(): Promise<ExecutionStatus> {
+  return getRuntimeAdapter().activateSystemInjection();
+}
+
 export async function pickIniProfile(filterName: string): Promise<string | null> {
   return getRuntimeAdapter().pickIniProfile(filterName);
 }

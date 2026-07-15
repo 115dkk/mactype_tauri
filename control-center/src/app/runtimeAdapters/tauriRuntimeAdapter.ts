@@ -28,6 +28,7 @@ export const tauriRuntimeAdapter: ControlCenterRuntimeAdapter = {
 
   loadExecutionStatus: () => invoke<ExecutionStatus>("execution_status"),
   manageLegacyService: (action) => invoke<LegacyServiceStatus>("manage_legacy_service", { action }),
+  activateSystemInjection: () => invoke<ExecutionStatus>("activate_system_injection"),
 
   async pickExecutable(filterName: string): Promise<string | null> {
     const selected = await open({

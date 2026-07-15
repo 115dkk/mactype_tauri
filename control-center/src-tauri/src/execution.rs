@@ -48,6 +48,7 @@ pub struct ExecutionStatus {
     pub legacy_service: crate::legacy_service::LegacyServiceStatus,
     pub registry_mode_detected: bool,
     pub system_modes_supported: bool,
+    pub system_injection_active: bool,
     pub system_mode_note: String,
     pub injection_ready: bool,
     pub active_profile: Option<String>,
@@ -154,6 +155,40 @@ fn active_runtime() -> Result<ActiveRuntime, String> {
     active_runtime_from(&runtime_root()?)
 }
 
+pub(crate) fn active_system_profile_paths() -> Result<(PathBuf, PathBuf), String> {
+    let active = active_runtime()?;
+    let profile = fs::canonicalize(active.runtime_root.join("profile.ini"))
+        .map_err(|error| error.to_string())?;
+    let length = fs::metadata(&profile)
+        .map_err(|error| error.to_string())?
+        .len();
+    if length == 0 || length > 4 * 1024 * 1024 {
+        return Err("active system profile must be between 1 byte and 4 MiB".to_owned());
+    }
+    Ok((active.source_profile, profile))
+}
+
+fn system_injection_pause_path() -> Result<PathBuf, String> {
+    Ok(data_root()?.join("system-injection-paused"))
+}
+
+pub(crate) fn record_system_injection_choice(enabled: bool) -> Result<(), String> {
+    let marker = system_injection_pause_path()?;
+    if enabled {
+        match fs::remove_file(marker) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.to_string()),
+        }
+    } else {
+        atomic_write(&marker, b"paused\n")
+    }
+}
+
+fn system_injection_paused() -> bool {
+    system_injection_pause_path().is_ok_and(|path| path.is_file())
+}
+
 fn prepare_runtime_at(
     base: &Path,
     installation_root: &Path,
@@ -244,14 +279,30 @@ pub fn status(installation_root: Option<&Path>) -> ExecutionStatus {
     let registry_mode_detected = registry_mode_detected();
     let legacy_service = crate::legacy_service::status(registry_mode_detected);
     let active = active_runtime().ok();
+    let service_owned = matches!(
+        legacy_service.presence,
+        crate::legacy_service::ServicePresence::Owned
+            | crate::legacy_service::ServicePresence::CompatibleUnquoted
+    );
+    let system_injection_active = service_owned
+        && legacy_service.state == crate::legacy_service::ServiceRuntimeState::Running;
+    let system_modes_supported = legacy_service.trusted_binary_available
+        && !legacy_service.registry_conflict
+        && matches!(
+            legacy_service.presence,
+            crate::legacy_service::ServicePresence::Absent
+                | crate::legacy_service::ServicePresence::Owned
+                | crate::legacy_service::ServicePresence::CompatibleUnquoted
+        );
     ExecutionStatus {
         tray_available: true,
         auto_start: autostart_value().is_some(),
         manual_launcher_available: installation_root.is_some() && active.is_some(),
         legacy_service,
         registry_mode_detected,
-        system_modes_supported: false,
-        system_mode_note: "레거시 MacTray 서비스는 검증된 Program Files 설치만 사용자 동의와 UAC 승인 후 제어합니다. AppInit 레지스트리 모드는 부팅 장애 위험 때문에 읽기 전용으로만 감지합니다.".to_owned(),
+        system_modes_supported,
+        system_injection_active,
+        system_mode_note: "검증된 Program Files MacTray 서비스를 통해 현재 프로필을 시스템 범위로 적용합니다. AppInit 레지스트리 모드는 읽기 전용입니다.".to_owned(),
         injection_ready: active.is_some(),
         active_profile: active.map(|runtime| runtime.source_profile.to_string_lossy().into_owned()),
         session_targets: session_targets().unwrap_or_default(),
@@ -516,7 +567,51 @@ pub(crate) fn apply_open_profile(state: State<'_, ProfileState>) -> Result<Appli
     let profile = guard
         .as_ref()
         .ok_or_else(|| "no profile is open".to_owned())?;
-    apply_profile(&root, profile.path(), &profile.encoded()?)
+    let applied = apply_profile(&root, profile.path(), &profile.encoded()?)?;
+    if env::var_os("MACTYPE_CI_SMOKE_FILE").is_none() {
+        crate::legacy_service::activate_active_profile()?;
+        record_system_injection_choice(true)?;
+    }
+    Ok(applied)
+}
+
+fn ensure_active_runtime() -> Result<bool, String> {
+    if active_runtime().is_ok() {
+        return Ok(false);
+    }
+    let root =
+        installation_root().ok_or_else(|| "MacType installation was not found".to_owned())?;
+    let (path, bytes) = crate::profile::default_profile_payload()?;
+    apply_profile(&root, &path, &bytes)?;
+    Ok(true)
+}
+
+pub(crate) fn ensure_system_injection_on_tray_start() -> Result<(), String> {
+    if system_injection_paused() || env::var_os("MACTYPE_CI_SMOKE_FILE").is_some() {
+        return Ok(());
+    }
+    let prepared_default = ensure_active_runtime()?;
+    let service = crate::legacy_service::status(registry_mode_detected());
+    if !prepared_default
+        && matches!(
+            service.presence,
+            crate::legacy_service::ServicePresence::Owned
+                | crate::legacy_service::ServicePresence::CompatibleUnquoted
+        )
+        && service.state == crate::legacy_service::ServiceRuntimeState::Running
+    {
+        return Ok(());
+    }
+    crate::legacy_service::activate_active_profile()?;
+    record_system_injection_choice(true)
+}
+
+#[tauri::command]
+pub(crate) fn activate_system_injection() -> Result<ExecutionStatus, String> {
+    ensure_active_runtime()?;
+    crate::legacy_service::activate_active_profile()?;
+    record_system_injection_choice(true)?;
+    Ok(status(installation_root().as_deref()))
 }
 
 #[tauri::command]
@@ -584,8 +679,27 @@ mod tests {
     }
 
     #[test]
-    fn status_never_claims_unsupported_system_modes() {
-        assert!(!status(None).system_modes_supported);
+    fn system_injection_status_matches_the_verified_service() {
+        let status = status(None);
+        let service = &status.legacy_service;
+        let safe_presence = matches!(
+            service.presence,
+            crate::legacy_service::ServicePresence::Absent
+                | crate::legacy_service::ServicePresence::Owned
+                | crate::legacy_service::ServicePresence::CompatibleUnquoted
+        );
+        assert_eq!(
+            status.system_modes_supported,
+            service.trusted_binary_available && !service.registry_conflict && safe_presence
+        );
+        assert_eq!(
+            status.system_injection_active,
+            matches!(
+                service.presence,
+                crate::legacy_service::ServicePresence::Owned
+                    | crate::legacy_service::ServicePresence::CompatibleUnquoted
+            ) && service.state == crate::legacy_service::ServiceRuntimeState::Running
+        );
     }
 
     #[test]

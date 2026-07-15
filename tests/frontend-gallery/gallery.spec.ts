@@ -75,7 +75,7 @@ test("profile editor categories and collections remain interactive", async ({ pa
   await expect(redo).toBeEnabled();
   await redo.click();
   await page.getByRole("button", { name: "지금 적용" }).click();
-  await expect(page.locator(".profile-message")).toContainText("실제 MacType 실행 경로에 적용했습니다");
+  await expect(page.locator(".profile-message")).toContainText("실제 MacType 시스템 범위에 적용했습니다");
   await expect(discard).toBeEnabled();
   await discard.click();
   await expect(discard).toBeDisabled();
@@ -152,7 +152,7 @@ test("settings files support import, save as, export, reveal, and apply without 
   await page.getByRole("button", { name: "내보낼 위치 선택" }).click();
   await expect(page.locator('[data-operation="file-settings"]')).toContainText("내보냈습니다");
   await page.getByRole("button", { name: "실제 적용" }).click();
-  await expect(page.locator('[data-operation="file-settings"]')).toContainText("실행 프로필로 적용");
+  await expect(page.locator('[data-operation="file-settings"]')).toContainText("시스템 프로필로 적용");
 
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   expect(horizontalOverflow, "settings-file controls must not have horizontal scrolling").toBe(false);
@@ -181,11 +181,14 @@ test("execution and verified legacy service controls remain interactive", async 
   await expect(page.getByText(/MacLoader를 통해 프로세스 4242/)).toBeVisible();
   await expect(page.getByRole("heading", { name: "시스템 범위 모드" })).toBeVisible();
 
-  await expect(page.getByText("검증된 MacTray 서비스 · 실행 중", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "서비스 중지" }).click();
-  await expect(page.getByText("검증된 MacTray 서비스 · 중지됨", { exact: true })).toBeVisible();
-  await expect(page.getByText("서비스 상태를 갱신했습니다.", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "서비스 시작" }).click();
+  await expect(page.getByText("MacType 시스템 적용 중", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "잠시 적용 끄기" }).click();
+  await expect(page.getByText("MacType 시스템 적용 꺼짐", { exact: true })).toBeVisible();
+  await expect(page.getByText("MacType 시스템 적용을 잠시 껐습니다.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "현재 프로필 적용" }).click();
+  await expect(page.getByText("MacType 시스템 적용 중", { exact: true })).toBeVisible();
+  await expect(page.getByText("현재 프로필을 시스템 범위에 적용했습니다.", { exact: true })).toBeVisible();
+
   await expect(page.getByText("검증된 MacTray 서비스 · 실행 중", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "서비스 제거" }).click();
   await expect(page.getByText("설치되지 않음 · 중지됨", { exact: true })).toBeVisible();
@@ -306,4 +309,9 @@ test("settings files fall back to the applied profile", async ({ page }) => {
   const applied = "C:\\Program Files\\MacType\\ini\\Default.ini";
   await page.goto("/?view=files&gallery=1&lang=ko&fresh=1", { waitUntil: "networkidle" });
   await expect(page.locator(".file-selection-grid select")).toHaveValue(applied);
+});
+
+test("settings files do not claim the already applied legacy profile is different", async ({ page }) => {
+  await page.goto("/?view=files&gallery=1&lang=ko&legacy-applied=1", { waitUntil: "networkidle" });
+  await expect(page.locator(".legacy-import-banner")).toHaveCount(0);
 });

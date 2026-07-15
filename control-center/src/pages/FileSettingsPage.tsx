@@ -41,7 +41,7 @@ export function FileSettingsPage() {
         if (!active) return;
         setProfile(selected);
         setProfiles(available);
-        setLegacy(detected);
+        setLegacy(detected && sameProfileIdentity(detected, execution.activeProfile) ? null : detected);
       })
       .catch((caught: unknown) => {
         if (active) setError(caught instanceof Error ? caught.message : String(caught));
@@ -93,6 +93,7 @@ export function FileSettingsPage() {
     setBusy("apply");
     try {
       const applied = await applyOpenProfile();
+      setLegacy((detected) => detected && sameProfileIdentity(detected, applied.sourceProfile) ? null : detected);
       setMessage(t("files.applied", { name: fileName(applied.sourceProfile) }));
       setError(null);
     } catch (caught: unknown) {
@@ -216,4 +217,10 @@ export function FileSettingsPage() {
 
 function fileName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
+}
+
+function sameProfileIdentity(candidate: LegacyProfileCandidate, activeProfile: string | null): boolean {
+  if (!activeProfile) return false;
+  const stem = (path: string) => fileName(path).replace(/\.ini$/i, "").toLocaleLowerCase();
+  return candidate.name.toLocaleLowerCase() === stem(activeProfile) || stem(candidate.path) === stem(activeProfile);
 }

@@ -57,6 +57,7 @@ pub fn run() {
             execution::set_session_autostart,
             execution::launch_with_mactype,
             execution::apply_open_profile,
+            execution::activate_system_injection,
             execution::register_session_target,
             execution::remove_session_target,
             execution::launch_registered_targets,
@@ -112,7 +113,10 @@ pub fn run() {
                         }
                     }
                     "inject" => {
-                        let _ = execution::launch_registered_targets();
+                        std::thread::spawn(|| {
+                            let _ = execution::ensure_system_injection_on_tray_start();
+                            let _ = execution::launch_registered_targets();
+                        });
                     }
                     "quit" => app.exit(0),
                     _ => {}
@@ -125,7 +129,10 @@ pub fn run() {
                 if let Some(window) = app.get_webview_window("main") {
                     window.hide()?;
                 }
-                let _ = execution::launch_registered_targets();
+                std::thread::spawn(|| {
+                    let _ = execution::ensure_system_injection_on_tray_start();
+                    let _ = execution::launch_registered_targets();
+                });
             }
             if let Some(gate) = startup_gate.take() {
                 gate.release()?;

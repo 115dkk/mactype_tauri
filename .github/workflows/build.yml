@@ -20,12 +20,12 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: microsoft/setup-msbuild@v2
+      - uses: actions/checkout@v7
+      - uses: microsoft/setup-msbuild@v3
       - name: Build public dependencies and MacType core
         shell: pwsh
         run: .github/scripts/Build-LegacyCore.ps1
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: mactype-legacy-core
           path: artifacts/legacy-core
@@ -40,24 +40,24 @@ jobs:
     env:
       APP_VERSION: ${{ inputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Validate installer version
         shell: pwsh
         run: |
           if ($env:APP_VERSION -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$') {
             throw "Version must look like 1.2.3 or 1.2.3-preview.1, got '$env:APP_VERSION'."
           }
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.7.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: control-center/pnpm-lock.yaml
       - uses: dtolnay/rust-toolchain@stable
-      - uses: microsoft/setup-msbuild@v2
-      - uses: actions/download-artifact@v4
+      - uses: microsoft/setup-msbuild@v3
+      - uses: actions/download-artifact@v8
         with:
           name: mactype-legacy-core
           path: artifacts/legacy-core
@@ -86,7 +86,7 @@ jobs:
           $hash = (Get-FileHash -Algorithm SHA256 $installer.FullName).Hash.ToLowerInvariant()
           "$hash  $($installer.Name)" | Set-Content -Encoding ascii artifacts/installer/SHA256SUMS.txt
       - name: Upload installable build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mactype-control-center-${{ inputs.version }}
           path: |

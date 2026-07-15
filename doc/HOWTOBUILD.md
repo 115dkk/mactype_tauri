@@ -72,7 +72,7 @@ The Control Center can be built separately from the legacy MacType solution. The
 
 - Windows 10 or 11
 - Visual Studio 2022 Build Tools with **Desktop development with C++**, MSVC, CMake, and a Windows SDK
-- Node.js 22
+- Node.js 24
 - pnpm 11.7.0
 - the stable Rust MSVC toolchain
 - Microsoft Edge WebView2 Runtime, which is included with supported Windows versions

@@ -51,6 +51,8 @@ export interface ProfileSnapshot {
   originalHash: string;
   values: Record<string, number>;
   dirtyKeys: ReadonlyArray<string>;
+  canUndo: boolean;
+  canRedo: boolean;
   individuals: ReadonlyArray<IndividualSetting>;
   lists: ProfileLists;
   advanced: AdvancedProfile;

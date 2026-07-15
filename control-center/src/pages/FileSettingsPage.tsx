@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, CopyPlus, FileInput, FolderOpen, Play, Save } from "lucide-react";
+import { AlertTriangle, Check, FileInput, FileOutput, FolderOpen, Play, Save, SaveAll } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { LegacyProfileCandidate, ProfileEntry, ProfileSnapshot } from "../app/model";
 import {
@@ -6,11 +6,14 @@ import {
   currentProfile,
   discoverLegacyProfile,
   duplicateProfile,
+  exportProfile,
   importProfile,
   listProfiles,
   openDefaultProfile,
   openProfile,
   pickIniProfile,
+  pickIniExportPath,
+  revealProfileFile,
   saveProfile,
 } from "../app/tauri";
 import { useI18n } from "../i18n/i18n";
@@ -111,6 +114,39 @@ export function FileSettingsPage() {
     }
   };
 
+  const exportIni = async () => {
+    if (!profile) return;
+    setBusy("export");
+    try {
+      const defaultName = fileName(profile.path);
+      const selected = await pickIniExportPath(t("files.iniFilter"), defaultName);
+      if (selected) {
+        const destination = await exportProfile(selected);
+        setMessage(t("files.exported", { name: fileName(destination) }));
+        setError(null);
+      }
+    } catch (caught: unknown) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+      setMessage(null);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const revealCurrentProfile = async () => {
+    setBusy("reveal");
+    try {
+      const path = await revealProfileFile();
+      setMessage(t("files.revealed", { name: fileName(path) }));
+      setError(null);
+    } catch (caught: unknown) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+      setMessage(null);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const dirtyCount = profile?.dirtyKeys.length ?? 0;
 
   return (
@@ -144,7 +180,7 @@ export function FileSettingsPage() {
           </label>
           <div className="selected-file-summary" data-empty={!profile}>
             <FolderOpen aria-hidden="true" size={22} />
-            <div><strong>{profile ? fileName(profile.path) : t("profiles.none")}</strong>{profile && <code title={profile.path}>{profile.path}</code>}</div>
+            <div><strong>{profile ? fileName(profile.path) : t("profiles.none")}</strong>{profile && <div className="selected-file-path"><code title={profile.path}>{profile.path}</code><button aria-label={t("files.reveal")} className="icon-button" disabled={busy !== null} onClick={() => void revealCurrentProfile()} title={t("files.reveal")} type="button"><FolderOpen aria-hidden="true" size={15} /></button></div>}</div>
           </div>
         </div>
         <dl className="detail-list compact-details">
@@ -154,6 +190,7 @@ export function FileSettingsPage() {
         </dl>
         <div className="file-primary-actions">
           <button className="button secondary" disabled={!profile || dirtyCount === 0 || busy !== null} onClick={() => void save()} type="button"><Save aria-hidden="true" size={17} /> {busy === "save" ? t("profiles.saving") : t("profiles.save")}</button>
+          <div className="file-save-as"><input aria-label={t("profiles.copyName")} disabled={!profile || busy !== null} onChange={(event) => setCopyName(event.target.value)} placeholder={t("files.saveAsName")} value={copyName} /><button className="button secondary" disabled={!profile || !copyName.trim() || busy !== null} onClick={() => void duplicate()} type="button"><SaveAll aria-hidden="true" size={16} /> {t("files.saveAs")}</button></div>
           <button className="button primary" disabled={!profile || busy !== null} onClick={() => void apply()} type="button"><Play aria-hidden="true" size={17} /> {busy === "apply" ? t("profiles.applying") : t("profiles.apply")}</button>
         </div>
       </section>
@@ -163,9 +200,9 @@ export function FileSettingsPage() {
           <div className="section-heading"><div><h2 id="import-file-title">{t("files.importTitle")}</h2><p>{t("files.importDescription")}</p></div></div>
           <div className="file-tool-body"><button className="button secondary" disabled={busy !== null} onClick={() => void chooseImport()} type="button"><FileInput aria-hidden="true" size={17} /> {busy === "import" ? t("files.importing") : t("files.chooseImport")}</button></div>
         </section>
-        <section className="section-block" aria-labelledby="duplicate-file-title">
-          <div className="section-heading"><div><h2 id="duplicate-file-title">{t("files.duplicateTitle")}</h2><p>{t("files.duplicateDescription")}</p></div></div>
-          <div className="file-tool-body inline-create"><input aria-label={t("profiles.copyName")} onChange={(event) => setCopyName(event.target.value)} placeholder={t("profiles.newName")} value={copyName} /><button className="button secondary" disabled={!profile || !copyName.trim() || busy !== null} onClick={() => void duplicate()} type="button"><CopyPlus aria-hidden="true" size={16} /> {t("profiles.duplicate")}</button></div>
+        <section className="section-block" aria-labelledby="export-file-title">
+          <div className="section-heading"><div><h2 id="export-file-title">{t("files.exportTitle")}</h2><p>{t("files.exportDescription")}</p></div></div>
+          <div className="file-tool-body"><button className="button secondary" disabled={!profile || busy !== null} onClick={() => void exportIni()} type="button"><FileOutput aria-hidden="true" size={17} /> {busy === "export" ? t("files.exporting") : t("files.chooseExport")}</button></div>
         </section>
       </div>
 

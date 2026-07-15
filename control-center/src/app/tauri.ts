@@ -41,6 +41,10 @@ export async function pickIniProfile(filterName: string): Promise<string | null>
   return getRuntimeAdapter().pickIniProfile(filterName);
 }
 
+export async function pickIniExportPath(filterName: string, defaultName: string): Promise<string | null> {
+  return getRuntimeAdapter().pickIniExportPath(filterName, defaultName);
+}
+
 export async function loadInstalledFontFamilies(): Promise<ReadonlyArray<string>> {
   return getRuntimeAdapter().loadInstalledFontFamilies();
 }
@@ -139,6 +143,26 @@ export async function updateProfileList(kind: string, entries: ReadonlyArray<str
 
 export async function updateProfileAdvanced(advanced: AdvancedProfile): Promise<ProfileSnapshot | null> {
   return getRuntimeAdapter().updateProfileAdvanced(advanced);
+}
+
+export async function undoProfile(): Promise<ProfileSnapshot> {
+  return getRuntimeAdapter().undoProfile();
+}
+
+export async function redoProfile(): Promise<ProfileSnapshot> {
+  return getRuntimeAdapter().redoProfile();
+}
+
+export async function discardProfileChanges(): Promise<ProfileSnapshot> {
+  return getRuntimeAdapter().discardProfileChanges();
+}
+
+export async function exportProfile(path: string): Promise<string> {
+  return getRuntimeAdapter().exportProfile(path);
+}
+
+export async function revealProfileFile(): Promise<string> {
+  return getRuntimeAdapter().revealProfileFile();
 }
 
 export async function saveProfile(): Promise<ProfileSnapshot | null> {

@@ -21,10 +21,51 @@ const fallbackProfile: ProfileSnapshot = {
   originalHash: "browser-gallery",
   values: Object.fromEntries(settingsSchema.map((setting) => [setting.id, setting.default])),
   dirtyKeys: [],
+  canUndo: false,
+  canRedo: false,
   individuals: [{ fontFace: "Segoe UI", values: [1, 2, null, null, null, 1] }],
   lists: { excludeFonts: ["Raster Fonts"], includeFonts: [], excludeModules: ["fontview.exe"], includeModules: [], unloadDlls: [], excludeSubstitutionModules: [] },
   advanced: { shadow: null, lcdFilterWeight: null, pixelLayout: null, displayAffinity: [], fontSubstitutes: [], infinalityGammaCorrection: [0, 100], infinalityFilterParams: [11, 22, 38, 22, 11] },
 };
+
+const cloneProfile = (profile: ProfileSnapshot): ProfileSnapshot => structuredClone(profile);
+let galleryProfile = cloneProfile(fallbackProfile);
+let savedGalleryProfile = cloneProfile(fallbackProfile);
+const galleryUndo: ProfileSnapshot[] = [];
+const galleryRedo: ProfileSnapshot[] = [];
+
+function openGalleryProfile(profile: ProfileSnapshot): ProfileSnapshot {
+  galleryProfile = { ...cloneProfile(profile), canUndo: false, canRedo: false };
+  savedGalleryProfile = cloneProfile(galleryProfile);
+  galleryUndo.length = 0;
+  galleryRedo.length = 0;
+  return cloneProfile(galleryProfile);
+}
+
+function editGalleryProfile(update: (profile: ProfileSnapshot) => ProfileSnapshot, dirtyKey: string): ProfileSnapshot {
+  galleryUndo.push(cloneProfile(galleryProfile));
+  galleryRedo.length = 0;
+  const next = update(cloneProfile(galleryProfile));
+  galleryProfile = {
+    ...next,
+    dirtyKeys: [...new Set([...next.dirtyKeys, dirtyKey])],
+    canUndo: true,
+    canRedo: false,
+  };
+  return cloneProfile(galleryProfile);
+}
+
+function moveGalleryHistory(from: ProfileSnapshot[], to: ProfileSnapshot[]): ProfileSnapshot {
+  const destination = from.pop();
+  if (!destination) return cloneProfile(galleryProfile);
+  to.push(cloneProfile(galleryProfile));
+  galleryProfile = {
+    ...cloneProfile(destination),
+    canUndo: galleryUndo.length > 0,
+    canRedo: galleryRedo.length > 0,
+  };
+  return cloneProfile(galleryProfile);
+}
 
 const galleryService: LegacyServiceStatus = {
   presence: "owned",
@@ -78,6 +119,10 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
     return Promise.resolve("C:\\Users\\Gallery\\Downloads\\Community.ini");
   },
 
+  pickIniExportPath(_filterName, defaultName): Promise<string | null> {
+    return Promise.resolve(`C:\\Users\\Gallery\\Documents\\${defaultName}`);
+  },
+
   loadInstalledFontFamilies(): Promise<ReadonlyArray<string>> {
     return Promise.resolve(["Segoe UI", "Arial", "Calibri", "Cambria", "Consolas", "맑은 고딕", "Microsoft YaHei UI", "Microsoft JhengHei UI", "Meiryo", "Tahoma"]);
   },
@@ -95,7 +140,7 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
   },
 
   applyOpenProfile(): Promise<AppliedProfile> {
-    return Promise.resolve<AppliedProfile>({ sourceProfile: fallbackProfile.path, runtimeRoot: "C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\runtime\\generations\\gallery" });
+    return Promise.resolve<AppliedProfile>({ sourceProfile: galleryProfile.path, runtimeRoot: "C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\runtime\\generations\\gallery" });
   },
 
   registerSessionTarget(target: string, arguments_: ReadonlyArray<string>): Promise<ReadonlyArray<SessionTarget>> {
@@ -139,11 +184,11 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
   },
 
   openDefaultProfile(): Promise<ProfileSnapshot | null> {
-    return Promise.resolve(fallbackProfile);
+    return Promise.resolve(openGalleryProfile(fallbackProfile));
   },
 
   currentProfile(): Promise<ProfileSnapshot | null> {
-    return Promise.resolve(fallbackProfile);
+    return Promise.resolve(cloneProfile(galleryProfile));
   },
 
   discoverLegacyProfile(): Promise<LegacyProfileCandidate | null> {
@@ -151,7 +196,7 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
   },
 
   importProfile(path: string): Promise<ProfileSnapshot> {
-    return Promise.resolve({ ...fallbackProfile, path: `C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\profiles\\${path.split(/[\\/]/).pop() ?? "Imported.ini"}` });
+    return Promise.resolve(openGalleryProfile({ ...fallbackProfile, path: `C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\profiles\\${path.split(/[\\/]/).pop() ?? "Imported.ini"}` }));
   },
 
   listProfiles(): Promise<ReadonlyArray<ProfileEntry>> {
@@ -159,31 +204,55 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
   },
 
   openProfile(path: string): Promise<ProfileSnapshot> {
-    return Promise.resolve({ ...fallbackProfile, path });
+    return Promise.resolve(openGalleryProfile({ ...fallbackProfile, path }));
   },
 
   duplicateProfile(name: string): Promise<ProfileSnapshot> {
-    return Promise.resolve({ ...fallbackProfile, path: `C:\\Program Files\\MacType\\ini\\${name}.ini` });
+    return Promise.resolve(openGalleryProfile({ ...galleryProfile, path: `C:\\Program Files\\MacType\\ini\\${name}.ini` }));
   },
 
-  updateProfileSetting(): Promise<ProfileSnapshot | null> {
-    return Promise.resolve(null);
+  updateProfileSetting(settingId, value): Promise<ProfileSnapshot | null> {
+    return Promise.resolve(editGalleryProfile((profile) => ({ ...profile, values: { ...profile.values, [settingId]: value } }), settingId));
   },
 
-  updateProfileIndividuals(): Promise<ProfileSnapshot | null> {
-    return Promise.resolve(null);
+  updateProfileIndividuals(entries): Promise<ProfileSnapshot | null> {
+    return Promise.resolve(editGalleryProfile((profile) => ({ ...profile, individuals: structuredClone(entries) }), "section:Individual"));
   },
 
-  updateProfileList(): Promise<ProfileSnapshot | null> {
-    return Promise.resolve(null);
+  updateProfileList(kind, entries): Promise<ProfileSnapshot | null> {
+    return Promise.resolve(editGalleryProfile((profile) => ({ ...profile, lists: { ...profile.lists, [kind]: [...entries] } }), `section:${kind}`));
   },
 
-  updateProfileAdvanced(): Promise<ProfileSnapshot | null> {
-    return Promise.resolve(null);
+  updateProfileAdvanced(advanced): Promise<ProfileSnapshot | null> {
+    return Promise.resolve(editGalleryProfile((profile) => ({ ...profile, advanced: structuredClone(advanced) }), "advanced"));
+  },
+
+  undoProfile(): Promise<ProfileSnapshot> {
+    return Promise.resolve(moveGalleryHistory(galleryUndo, galleryRedo));
+  },
+
+  redoProfile(): Promise<ProfileSnapshot> {
+    return Promise.resolve(moveGalleryHistory(galleryRedo, galleryUndo));
+  },
+
+  discardProfileChanges(): Promise<ProfileSnapshot> {
+    return Promise.resolve(openGalleryProfile(savedGalleryProfile));
+  },
+
+  exportProfile(path: string): Promise<string> {
+    return Promise.resolve(path);
+  },
+
+  revealProfileFile(): Promise<string> {
+    return Promise.resolve(galleryProfile.path);
   },
 
   saveProfile(): Promise<ProfileSnapshot | null> {
-    return Promise.resolve(null);
+    galleryProfile = { ...galleryProfile, dirtyKeys: [], canUndo: false, canRedo: false };
+    savedGalleryProfile = cloneProfile(galleryProfile);
+    galleryUndo.length = 0;
+    galleryRedo.length = 0;
+    return Promise.resolve(cloneProfile(galleryProfile));
   },
 
   renderProfilePreview(): Promise<null> {

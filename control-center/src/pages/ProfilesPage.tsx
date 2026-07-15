@@ -1,21 +1,26 @@
-import { AlertTriangle, Search, SlidersHorizontal } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, Play, Redo2, RotateCcw, Save, Search, SlidersHorizontal, Undo2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { settingsSchema } from "../generated/settings";
 import type { AdvancedProfile, IndividualSetting, PreviewRequest, PreviewResult, ProfileSnapshot } from "../app/model";
 import { settingMessageKey, useI18n } from "../i18n/i18n";
 import {
+  applyOpenProfile,
   currentProfile,
+  discardProfileChanges,
   forcePreviewCrashForCi,
   loadInstalledFontFamilies,
   openDefaultProfile,
   previewImageUrl,
   reportFrontendFailure,
   renderProfilePreview,
+  redoProfile,
+  saveProfile,
   setNativePreview,
   updateProfileIndividuals,
   updateProfileAdvanced,
   updateProfileList,
   updateProfileSetting,
+  undoProfile,
   verifyProfileWorkflowForCi,
 } from "../app/tauri";
 import { AdvancedSettings } from "./profiles/AdvancedSettings";
@@ -25,6 +30,11 @@ import { BasicSettings, LcdSettings, SearchSettings, ShapeSettings } from "./pro
 import { splitSubstitution } from "./profiles/profileEditorUtils";
 
 type GroupId = "basic" | "shape" | "lcd" | "advanced" | "individual" | "lists";
+
+const DEFAULT_PREVIEW_HEIGHT = 320;
+const MIN_PREVIEW_HEIGHT = DEFAULT_PREVIEW_HEIGHT * 2 / 5;
+const MAX_PREVIEW_HEIGHT = 520;
+const MIN_SETTINGS_HEIGHT = 220;
 
 interface ProfilesPageProps {
   ciSmoke?: boolean;
@@ -73,7 +83,14 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
   const [loading, setLoading] = useState(true);
   const [nativeVisible, setNativeVisible] = useState(false);
   const [query, setQuery] = useState("");
+  const [pendingEdits, setPendingEdits] = useState(0);
+  const [profileCommand, setProfileCommand] = useState<"undo" | "redo" | "discard" | "save" | "apply" | null>(null);
+  const [profileMessage, setProfileMessage] = useState<string | null>(null);
+  const [previewHeight, setPreviewHeight] = useState(DEFAULT_PREVIEW_HEIGHT);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const mutationQueue = useRef<Promise<void>>(Promise.resolve());
+  const resizeStart = useRef<{ pointerId: number; y: number; height: number } | null>(null);
   const pendingPreview = useRef<PreviewRequest | null>(null);
   const previewRunning = useRef(false);
   const newestResponse = useRef(0);
@@ -129,6 +146,19 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
       infinalityGammaCorrection: [...opened.advanced.infinalityGammaCorrection],
       infinalityFilterParams: [...opened.advanced.infinalityFilterParams],
     });
+  }, []);
+
+  const queueProfileMutation = useCallback((mutation: () => Promise<ProfileSnapshot | null>) => {
+    setPendingEdits((current) => current + 1);
+    const operation = mutationQueue.current.then(mutation);
+    mutationQueue.current = operation.then(() => undefined, () => undefined);
+    void operation
+      .then((snapshot) => {
+        if (snapshot) setProfile(snapshot);
+        setProfileMessage(null);
+      })
+      .catch((error: unknown) => setPreviewError(error instanceof Error ? error.message : String(error)))
+      .finally(() => setPendingEdits((current) => Math.max(0, current - 1)));
   }, []);
 
   useEffect(() => {
@@ -202,6 +232,7 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
     const timer = window.setTimeout(() => {
       const displayScale = window.devicePixelRatio || 1;
       const width = Math.max(320, canvasRef.current?.clientWidth ?? 760);
+      const height = Math.max(72, canvasRef.current?.clientHeight ?? 180);
       pendingPreview.current = {
         profilePath: profile.path,
         overrides: values,
@@ -211,7 +242,7 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
           fontFace,
           fontSizePt: fontSize,
           widthPx: Math.round(width * displayScale),
-          heightPx: Math.round(180 * displayScale),
+          heightPx: Math.round(height * displayScale),
           dpi: Math.round(96 * displayScale),
           foreground: darkPreview ? "#F1F3F5" : "#181D23",
           background: darkPreview ? "#171A1F" : "#EEF1F4",
@@ -220,7 +251,7 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
       void drainPreviewQueue();
     }, 40);
     return () => window.clearTimeout(timer);
-  }, [darkPreview, drainPreviewQueue, fontFace, fontSize, profile, sampleText, values]);
+  }, [darkPreview, drainPreviewQueue, fontFace, fontSize, previewHeight, profile, sampleText, values]);
 
   const filteredSettings = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
@@ -234,21 +265,12 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
 
   const changeSetting = (settingId: string, value: number) => {
     setValues((current) => ({ ...current, [settingId]: value }));
-    void updateProfileSetting(settingId, value)
-      .then((snapshot) => {
-        if (snapshot) setProfile(snapshot);
-      })
-      .catch((error: unknown) => setPreviewError(error instanceof Error ? error.message : String(error)));
+    queueProfileMutation(() => updateProfileSetting(settingId, value));
   };
 
-  const commitIndividuals = async (next: IndividualSetting[]) => {
+  const commitIndividuals = (next: IndividualSetting[]) => {
     setIndividuals(next);
-    try {
-      const snapshot = await updateProfileIndividuals(next);
-      if (snapshot) setProfile(snapshot);
-    } catch (error: unknown) {
-      setPreviewError(error instanceof Error ? error.message : String(error));
-    }
+    queueProfileMutation(() => updateProfileIndividuals(next));
   };
 
   const addIndividual = (font: string) => {
@@ -257,34 +279,103 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
     void commitIndividuals([...individuals, { fontFace: font, values: [null, null, null, null, null, null] }]);
   };
 
-  const commitList = async (kind: string) => {
+  const commitList = (kind: string) => {
     const entries = (listDrafts[kind] ?? "").split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean);
-    try {
-      const snapshot = await updateProfileList(kind, entries);
-      if (snapshot) setProfile(snapshot);
-    } catch (error: unknown) {
-      setPreviewError(error instanceof Error ? error.message : String(error));
-    }
+    queueProfileMutation(() => updateProfileList(kind, entries));
   };
 
-  const commitAdvanced = async (next: AdvancedProfile) => {
+  const commitAdvanced = (next: AdvancedProfile) => {
     setAdvanced(next);
+    queueProfileMutation(() => updateProfileAdvanced(next));
+  };
+
+  const updateFontList = (kind: "excludeFonts" | "includeFonts", entries: ReadonlyArray<string>) => {
+    setListDrafts((current) => ({ ...current, [kind]: entries.join("\n") }));
+    queueProfileMutation(() => updateProfileList(kind, entries));
+  };
+
+  const runHistoryCommand = async (
+    command: "undo" | "redo" | "discard",
+    action: () => Promise<ProfileSnapshot>,
+  ) => {
+    setProfileCommand(command);
     try {
-      const snapshot = await updateProfileAdvanced(next);
-      if (snapshot) setProfile(snapshot);
+      await mutationQueue.current;
+      applySnapshot(await action());
+      setProfileMessage(null);
+      setPreviewError(null);
     } catch (error: unknown) {
       setPreviewError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setProfileCommand(null);
     }
   };
 
-  const updateFontList = async (kind: "excludeFonts" | "includeFonts", entries: ReadonlyArray<string>) => {
-    setListDrafts((current) => ({ ...current, [kind]: entries.join("\n") }));
+  const applyProfile = async () => {
+    setProfileCommand("apply");
     try {
-      const snapshot = await updateProfileList(kind, entries);
-      if (snapshot) setProfile(snapshot);
+      await mutationQueue.current;
+      const applied = await applyOpenProfile();
+      const name = applied.sourceProfile.split(/[\\/]/).pop() ?? applied.sourceProfile;
+      setProfileMessage(t("profiles.applied", { name }));
+      setPreviewError(null);
     } catch (error: unknown) {
       setPreviewError(error instanceof Error ? error.message : String(error));
+      setProfileMessage(null);
+    } finally {
+      setProfileCommand(null);
     }
+  };
+
+  const saveCurrentProfile = async () => {
+    setProfileCommand("save");
+    try {
+      await mutationQueue.current;
+      const saved = await saveProfile();
+      if (!saved) throw new Error(t("profiles.none"));
+      applySnapshot(saved);
+      const name = saved.path.split(/[\\/]/).pop() ?? saved.path;
+      setProfileMessage(t("profiles.savedNow", { name }));
+      setPreviewError(null);
+    } catch (error: unknown) {
+      setPreviewError(error instanceof Error ? error.message : String(error));
+      setProfileMessage(null);
+    } finally {
+      setProfileCommand(null);
+    }
+  };
+
+  const maximumPreviewHeight = () => Math.max(
+    MIN_PREVIEW_HEIGHT,
+    Math.min(MAX_PREVIEW_HEIGHT, (workspaceRef.current?.clientHeight ?? MAX_PREVIEW_HEIGHT + MIN_SETTINGS_HEIGHT) - MIN_SETTINGS_HEIGHT),
+  );
+  const clampPreviewHeight = (height: number) => Math.min(maximumPreviewHeight(), Math.max(MIN_PREVIEW_HEIGHT, height));
+  const resizePreviewFromKeyboard = (event: KeyboardEvent<HTMLDivElement>) => {
+    const increments: Partial<Record<string, number>> = { ArrowUp: 16, ArrowDown: -16, PageUp: 48, PageDown: -48 };
+    if (event.key === "Home") {
+      event.preventDefault();
+      setPreviewHeight(MIN_PREVIEW_HEIGHT);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setPreviewHeight(maximumPreviewHeight());
+    } else if (increments[event.key]) {
+      event.preventDefault();
+      setPreviewHeight((current) => clampPreviewHeight(current + increments[event.key]!));
+    }
+  };
+  const startPreviewResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    resizeStart.current = { pointerId: event.pointerId, y: event.clientY, height: previewHeight };
+  };
+  const continuePreviewResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const start = resizeStart.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    setPreviewHeight(clampPreviewHeight(start.height + start.y - event.clientY));
+  };
+  const finishPreviewResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (resizeStart.current?.pointerId !== event.pointerId) return;
+    resizeStart.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
   const toggleNativePreview = async () => {
@@ -306,6 +397,14 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
         <div>
           <h1 id="profiles-title">{t("nav.profiles")}</h1>
           <p>{loading ? t("profiles.searching") : t("profiles.summary", { name: profile?.path.split(/[\\/]/).pop() ?? t("profiles.none"), count: dirtyCount })}</p>
+          {profileMessage && <p aria-live="polite" className="profile-message">{profileMessage}</p>}
+        </div>
+        <div aria-label={t("profiles.editActions")} className="profile-history-actions" role="toolbar">
+          <button className="button secondary compact-action" disabled={!profile?.canUndo || pendingEdits > 0 || profileCommand !== null} onClick={() => void runHistoryCommand("undo", undoProfile)} type="button"><Undo2 aria-hidden="true" size={16} /> {t("profiles.undo")}</button>
+          <button className="button secondary compact-action" disabled={!profile?.canRedo || pendingEdits > 0 || profileCommand !== null} onClick={() => void runHistoryCommand("redo", redoProfile)} type="button"><Redo2 aria-hidden="true" size={16} /> {t("profiles.redo")}</button>
+          <button className="button secondary compact-action" disabled={!profile || dirtyCount === 0 || pendingEdits > 0 || profileCommand !== null} onClick={() => void runHistoryCommand("discard", discardProfileChanges)} title={t("profiles.discardDescription")} type="button"><RotateCcw aria-hidden="true" size={16} /> {t("profiles.discard")}</button>
+          <button className="button secondary compact-action" disabled={!profile || dirtyCount === 0 || pendingEdits > 0 || profileCommand !== null} onClick={() => void saveCurrentProfile()} type="button"><Save aria-hidden="true" size={16} /> {profileCommand === "save" ? t("profiles.saving") : t("profiles.saveNow")}</button>
+          <button className="button primary compact-action" disabled={!profile || pendingEdits > 0 || profileCommand !== null} onClick={() => void applyProfile()} type="button"><Play aria-hidden="true" size={16} /> {profileCommand === "apply" ? t("profiles.applying") : t("profiles.applyNow")}</button>
         </div>
       </header>
 
@@ -316,7 +415,7 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
           <label className="checkbox-row"><input checked={showAdvanced} onChange={(event) => setShowAdvanced(event.target.checked)} type="checkbox" /> {t("profiles.showAdvanced")}</label>
         </aside>
 
-        <div className="settings-workspace">
+        <div className="settings-workspace" ref={workspaceRef}>
           <div className="settings-form">
             <div className="section-heading"><div><h2>{query ? t("profiles.searchResults") : activeDefinition.label}</h2><p>{query ? t("profiles.searchDescription", { query }) : activeDefinition.description}</p></div></div>
 
@@ -367,7 +466,22 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
             )}
           </div>
 
-          <section className="preview-panel" aria-labelledby="preview-title">
+          <section className="preview-panel" aria-labelledby="preview-title" data-compact={previewHeight < 220} style={{ height: previewHeight }}>
+            <div
+              aria-label={t("profiles.previewResize")}
+              aria-orientation="horizontal"
+              aria-valuemax={MAX_PREVIEW_HEIGHT}
+              aria-valuemin={MIN_PREVIEW_HEIGHT}
+              aria-valuenow={Math.round(previewHeight)}
+              className="preview-resizer"
+              onKeyDown={resizePreviewFromKeyboard}
+              onPointerCancel={finishPreviewResize}
+              onPointerDown={startPreviewResize}
+              onPointerMove={continuePreviewResize}
+              onPointerUp={finishPreviewResize}
+              role="separator"
+              tabIndex={0}
+            ><span aria-hidden="true" /></div>
             <div className="preview-toolbar"><div><SlidersHorizontal aria-hidden="true" size={17} /><h2 id="preview-title">{t("profiles.preview")}</h2></div><div className="preview-controls"><select aria-label={t("profiles.previewFont")} onChange={(event) => setFontFace(event.target.value)} value={fontFace}>{fontFamilies.map((font) => <option key={font} value={font}>{fontOptionLabel(font)}</option>)}</select><select aria-label={t("profiles.previewSize")} onChange={(event) => setFontSize(Number(event.target.value))} value={fontSize}><option value="12">12 pt</option><option value="14">14 pt</option><option value="18">18 pt</option></select><button className="text-action" onClick={() => setDarkPreview((current) => !current)} type="button">{darkPreview ? t("profiles.lightBackground") : t("profiles.darkBackground")}</button></div></div>
             <textarea className="sample-input" aria-label={t("profiles.sampleAria")} onChange={(event) => setSampleText(event.target.value)} rows={2} value={sampleText} />
             <div className="preview-canvas" data-dark={darkPreview} ref={canvasRef} role="img" aria-label={t("profiles.previewAria")}>

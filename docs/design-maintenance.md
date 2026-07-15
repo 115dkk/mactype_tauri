@@ -20,6 +20,8 @@ Those paths define native behavior, IPC, packaging, or the MacType setting model
 | Colors, spacing, control height, radii, animation timing, navigation width | `control-center/src/styles/tokens.css` | Both `:root` and `:root[data-theme="dark"]` |
 | Shared controls, cards, grids, page spacing, responsive behavior, RTL rules | `control-center/src/styles/app.css` | The mobile and tablet media queries at the end of the file |
 | Application shell, navigation order, navigation icons, theme switch | `control-center/src/app/App.tsx` | `ViewId` in `control-center/src/app/model.ts` when adding or removing a page |
+| Custom title bar layout, icon, and window-control icons | `control-center/src/components/WindowTitleBar.tsx` | `.window-titlebar`, `.window-title`, and `.window-controls` in `app.css` |
+| Language picker layout, option order, and scrollable menu | `control-center/src/components/LanguagePicker.tsx` and `control-center/src/i18n/i18n.ts` | `.language-*` selectors in `app.css`, including dark and mobile states |
 | Overview layout | `control-center/src/pages/OverviewPage.tsx` | Overview interaction assertions in `tests/frontend-gallery/gallery.spec.ts` |
 | Settings-file and migration layout | `control-center/src/pages/FileSettingsPage.tsx` | `.legacy-import-*` and `.file-*` selectors in `app.css` |
 | Profile editor shell and preview placement | `control-center/src/pages/ProfilesPage.tsx` | `control-center/src/pages/profiles/` for individual editor sections |
@@ -58,6 +60,14 @@ Keep focus-visible styling and disabled-state contrast. Do not remove visible fo
 Edit the relevant component in `control-center/src/pages` and its selectors in `app.css`. Page components should decide structure and accessibility; CSS should decide placement and presentation. Keep user-facing copy in the locale catalogs rather than embedding it in TSX.
 
 For grid children that contain paths, translations, or font names, use `minmax(0, 1fr)` and `min-width: 0`. Test long German, Chinese, and Arabic content instead of relying on English width.
+
+### Change the custom title bar
+
+The visible title bar is ordinary React and CSS. Change its markup, logo, text, or Lucide icons in `WindowTitleBar.tsx`; change its height with `--titlebar-height` in `tokens.css`; and change colors, borders, hover states, or control widths in the `.window-titlebar`, `.window-title`, and `.window-controls` rules in `app.css`. None of those changes requires Rust.
+
+Keep `data-tauri-drag-region` on the non-interactive title area so the real window remains draggable. Keep minimize, maximize/restore, and close as separate buttons with translated `aria-label` values. `WindowTitleBar.tsx` calls the narrow Tauri window API only after detecting the native runtime, so the same component remains visible and safe in browser gallery mode.
+
+The native frame is disabled once in `control-center/src-tauri/tauri.conf.json`, and the matching window-control permissions live in `control-center/src-tauri/capabilities/default.json`. Treat those as platform wiring, not design files. Ordinary title-bar redesign must leave them alone. Only restoring the operating-system title bar or adding a new native window operation should require a separate native configuration change.
 
 ### Add a navigation page without native behavior
 

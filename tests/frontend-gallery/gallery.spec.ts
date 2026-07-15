@@ -339,6 +339,21 @@ test("dark language menu and custom titlebar follow the application theme", asyn
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-dark-language-titlebar.png`), fullPage: true });
 });
 
+test("theme setting persists across launches", async ({ page }) => {
+  await page.goto("/?view=overview&gallery=1&lang=ko", { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "어두운 테마" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+
+  await page.reload({ waitUntil: "networkidle" });
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(page.getByRole("button", { name: "밝은 테마" })).toBeVisible();
+
+  await page.getByRole("button", { name: "밝은 테마" }).click();
+  await page.reload({ waitUntil: "networkidle" });
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(page.getByRole("button", { name: "어두운 테마" })).toBeVisible();
+});
+
 test("settings files prefer the most recently worked profile", async ({ page }) => {
   const recent = "C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\profiles\\Recent.ini";
   await page.addInitScript(({ key, value }) => window.localStorage.setItem(key, value), {

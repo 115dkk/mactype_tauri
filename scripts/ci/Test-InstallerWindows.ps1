@@ -19,6 +19,12 @@ if (-not $resolvedInstallRoot.StartsWith($resolvedTempRoot, [StringComparison]::
 }
 $installerArguments = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=$installRoot")
 $manualMarker = $null
+$desktopShortcut = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)) 'MacType Control Center.lnk'
+$userStateMarker = Join-Path $env:LOCALAPPDATA ("net.mactype.control-center\installer-state-" + [Guid]::NewGuid().ToString('N') + '.marker')
+
+if (Test-Path -LiteralPath $desktopShortcut) {
+    throw "Refusing to replace an existing desktop shortcut during installer testing: $desktopShortcut"
+}
 
 function Invoke-Installer([string] $File, [string[]] $Arguments, [string] $Label) {
     $process = Start-Process -FilePath $File -ArgumentList $Arguments -PassThru -Wait -WindowStyle Hidden
@@ -93,9 +99,29 @@ try {
         throw "Manual launch target wrote an invalid marker: $manualContent"
     }
 
-    Invoke-Installer -File $resolvedInstaller -Arguments $installerArguments -Label 'Upgrade installer'
+    New-Item -ItemType Directory -Path (Split-Path -Parent $userStateMarker) -Force | Out-Null
+    Set-Content -LiteralPath $userStateMarker -Value 'preserve-user-settings' -NoNewline
+
+    Invoke-Installer -File $resolvedInstaller -Arguments ($installerArguments + '/TASKS=desktopicon') -Label 'Upgrade installer'
     if (-not (Test-Path -LiteralPath (Join-Path $installRoot 'MacType Control Center.exe'))) {
         throw 'Upgrade removed the installed application.'
+    }
+    if (-not (Test-Path -LiteralPath $desktopShortcut -PathType Leaf)) {
+        throw 'Upgrade did not create the requested desktop shortcut.'
+    }
+    $shortcutShell = New-Object -ComObject WScript.Shell
+    try {
+        $shortcut = $shortcutShell.CreateShortcut($desktopShortcut)
+        $expectedShortcutTarget = [IO.Path]::GetFullPath((Join-Path $installRoot 'MacType Control Center.exe'))
+        if (-not $expectedShortcutTarget.Equals([IO.Path]::GetFullPath($shortcut.TargetPath), [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Desktop shortcut targets '$($shortcut.TargetPath)' instead of '$expectedShortcutTarget'."
+        }
+    }
+    finally {
+        [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shortcutShell)
+    }
+    if ((Get-Content -LiteralPath $userStateMarker -Raw) -ne 'preserve-user-settings') {
+        throw 'Upgrade changed application user settings.'
     }
 
     $uninstaller = Get-ChildItem -LiteralPath $installRoot -File -Filter 'unins*.exe' | Select-Object -First 1
@@ -105,7 +131,13 @@ try {
         $remaining = Get-ChildItem -LiteralPath $installRoot -Force -ErrorAction SilentlyContinue
         if ($remaining) { throw "Uninstall left files behind in $installRoot." }
     }
-    Write-Host 'PASS: independent install, upgrade, launch, and uninstall'
+    if (Test-Path -LiteralPath $desktopShortcut) {
+        throw 'Uninstall left the desktop shortcut behind.'
+    }
+    if ((Get-Content -LiteralPath $userStateMarker -Raw) -ne 'preserve-user-settings') {
+        throw 'Uninstall removed or changed application user settings.'
+    }
+    Write-Host 'PASS: independent install, settings-preserving upgrade, desktop shortcut, launch, and uninstall'
 }
 finally {
     if ($manualMarker -and (Test-Path -LiteralPath $manualMarker)) {
@@ -117,5 +149,11 @@ finally {
             Start-Process -FilePath $uninstaller.FullName -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait -WindowStyle Hidden | Out-Null
         }
         Remove-Item -LiteralPath $installRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path -LiteralPath $desktopShortcut) {
+        Remove-Item -LiteralPath $desktopShortcut -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path -LiteralPath $userStateMarker) {
+        Remove-Item -LiteralPath $userStateMarker -Force -ErrorAction SilentlyContinue
     }
 }

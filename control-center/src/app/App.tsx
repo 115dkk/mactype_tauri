@@ -10,12 +10,13 @@ import { loadLaunchContext, reconnectPreview, rediscoverInstallation, reportFron
 import { useI18n } from "../i18n/i18n";
 import { LanguagePicker } from "../components/LanguagePicker";
 import { WindowTitleBar } from "../components/WindowTitleBar";
+import { applyThemePreference, loadThemePreference, type ThemePreference } from "./themePreference";
 
 interface State {
   view: ViewId;
   profileMode: ProfileMode;
   settingsExpanded: boolean;
-  theme: "light" | "dark";
+  theme: ThemePreference;
   status: InstallationStatus;
   ready: boolean;
   ciSmoke: boolean;
@@ -57,13 +58,17 @@ const primaryNavigation = [
   { view: "diagnostics", icon: Activity },
 ] as const;
 
-export function App() {
+interface AppProps {
+  initialTheme?: ThemePreference;
+}
+
+export function App({ initialTheme = loadThemePreference() }: AppProps) {
   const { t } = useI18n();
   const [state, dispatch] = useReducer(reducer, {
     view: "overview",
     profileMode: "advanced",
     settingsExpanded: true,
-    theme: "light",
+    theme: initialTheme,
     status: fallbackStatus,
     ready: false,
     ciSmoke: false,
@@ -83,8 +88,11 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    applyThemePreference(state.theme);
+  }, [state.theme]);
+
+  useEffect(() => {
     if (!state.ready) return;
-    document.documentElement.dataset.theme = state.theme;
     document.body.dataset.view = state.view;
     document.body.dataset.profileMode = state.profileMode;
     document.body.dataset.rendered = "true";
@@ -95,7 +103,7 @@ export function App() {
     } else if (!state.ciSmoke || (state.view !== "profiles" && state.view !== "execution")) {
       void reportFrontendReady(state.view);
     }
-  }, [state.ciSmoke, state.profileMode, state.ready, state.theme, state.trayStart, state.view]);
+  }, [state.ciSmoke, state.profileMode, state.ready, state.trayStart, state.view]);
 
   const page = useMemo(() => {
     if (state.view === "files") return <FileSettingsPage />;

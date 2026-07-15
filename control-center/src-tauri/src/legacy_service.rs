@@ -51,6 +51,13 @@ struct ServiceConfiguration {
     dependencies: Vec<String>,
 }
 
+fn service_command_path(path: &Path) -> String {
+    let path = path.to_string_lossy();
+    path.strip_prefix(r"\\?\")
+        .unwrap_or(path.as_ref())
+        .to_owned()
+}
+
 fn classify_configuration(configuration: &ServiceConfiguration, trusted: &Path) -> ServicePresence {
     const SERVICE_WIN32_OWN_PROCESS: u32 = 0x10;
     const SERVICE_AUTO_START: u32 = 2;
@@ -67,7 +74,10 @@ fn classify_configuration(configuration: &ServiceConfiguration, trusted: &Path) 
     {
         return ServicePresence::Foreign;
     }
-    let trusted = trusted.to_string_lossy();
+    // `std::fs::canonicalize` returns an extended-length (`\\?\`) path on
+    // Windows, while the Service Control Manager normally returns ImagePath
+    // without that prefix. Both strings identify the same trusted executable.
+    let trusted = service_command_path(trusted);
     let quoted = format!("\"{trusted}\" -service");
     let unquoted = format!("{trusted} -service");
     let actual = configuration.binary_path.trim();
@@ -663,6 +673,33 @@ mod tests {
         assert!(status.can_remove);
         assert!(!status.can_install);
         assert!(!status.can_stop);
+    }
+
+    #[test]
+    fn canonicalized_windows_path_matches_the_service_manager_image_path() {
+        let canonical = Path::new(r"\\?\C:\Program Files\MacType\MacTray.exe");
+        let mut configuration =
+            official_configuration(Path::new(r"C:\Program Files\MacType\MacTray.exe"));
+
+        assert_eq!(
+            classify_configuration(&configuration, canonical),
+            ServicePresence::Owned
+        );
+
+        configuration.binary_path = r"C:\Program Files\MacType\MacTray.exe -service".to_owned();
+        let presence = classify_configuration(&configuration, canonical);
+        assert_eq!(presence, ServicePresence::CompatibleUnquoted);
+
+        let status = with_capabilities(
+            presence,
+            ServiceRuntimeState::Running,
+            Some(configuration.binary_path),
+            None,
+            true,
+            false,
+        );
+        assert!(status.can_remove);
+        assert!(status.can_stop);
     }
 
     #[test]

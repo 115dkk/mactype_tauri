@@ -1,5 +1,5 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import type { Locale } from "../../i18n/i18n";
 import type {
   AdvancedProfile,
@@ -47,6 +47,14 @@ export const tauriRuntimeAdapter: ControlCenterRuntimeAdapter = {
     return typeof selected === "string" ? selected : null;
   },
 
+  async pickIniExportPath(filterName: string, defaultName: string): Promise<string | null> {
+    const selected = await save({
+      defaultPath: defaultName,
+      filters: [{ name: filterName, extensions: ["ini"] }],
+    });
+    return typeof selected === "string" ? selected : null;
+  },
+
   loadInstalledFontFamilies: () => invoke<string[]>("installed_font_families"),
   setSessionAutostart: (enabled: boolean) => invoke<boolean>("set_session_autostart", { enabled }),
   launchTargetWithMactype: (target: string, arguments_: ReadonlyArray<string>) => invoke<number>("launch_with_mactype", { target, arguments: arguments_ }),
@@ -76,6 +84,11 @@ export const tauriRuntimeAdapter: ControlCenterRuntimeAdapter = {
   updateProfileIndividuals: (entries: ReadonlyArray<IndividualSetting>) => invoke<ProfileSnapshot>("update_profile_individuals", { entries }),
   updateProfileList: (kind: string, entries: ReadonlyArray<string>) => invoke<ProfileSnapshot>("update_profile_list", { kind, entries }),
   updateProfileAdvanced: (advanced: AdvancedProfile) => invoke<ProfileSnapshot>("update_profile_advanced", { advanced }),
+  undoProfile: () => invoke<ProfileSnapshot>("undo_profile"),
+  redoProfile: () => invoke<ProfileSnapshot>("redo_profile"),
+  discardProfileChanges: () => invoke<ProfileSnapshot>("discard_profile_changes"),
+  exportProfile: (path: string) => invoke<string>("export_profile", { path }),
+  revealProfileFile: () => invoke<string>("reveal_profile_file"),
   saveProfile: () => invoke<ProfileSnapshot>("save_profile"),
   renderProfilePreview: (request: PreviewRequest) => invoke<PreviewResult>("render_profile_preview", {
     profilePath: request.profilePath,

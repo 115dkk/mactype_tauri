@@ -25,6 +25,7 @@ export interface ControlCenterRuntimeAdapter {
   manageLegacyService(action: "install" | "remove" | "start" | "stop"): Promise<LegacyServiceStatus>;
   pickExecutable(filterName: string): Promise<string | null>;
   pickIniProfile(filterName: string): Promise<string | null>;
+  pickIniExportPath(filterName: string, defaultName: string): Promise<string | null>;
   loadInstalledFontFamilies(): Promise<ReadonlyArray<string>>;
   setSessionAutostart(enabled: boolean): Promise<boolean>;
   launchTargetWithMactype(target: string, arguments_: ReadonlyArray<string>): Promise<number>;
@@ -50,6 +51,11 @@ export interface ControlCenterRuntimeAdapter {
   updateProfileIndividuals(entries: ReadonlyArray<IndividualSetting>): Promise<ProfileSnapshot | null>;
   updateProfileList(kind: string, entries: ReadonlyArray<string>): Promise<ProfileSnapshot | null>;
   updateProfileAdvanced(advanced: AdvancedProfile): Promise<ProfileSnapshot | null>;
+  undoProfile(): Promise<ProfileSnapshot>;
+  redoProfile(): Promise<ProfileSnapshot>;
+  discardProfileChanges(): Promise<ProfileSnapshot>;
+  exportProfile(path: string): Promise<string>;
+  revealProfileFile(): Promise<string>;
   saveProfile(): Promise<ProfileSnapshot | null>;
   renderProfilePreview(request: PreviewRequest): Promise<PreviewResult | null>;
   setNativePreview(visible: boolean): Promise<boolean>;

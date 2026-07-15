@@ -55,7 +55,7 @@ pub enum LineEnding {
     Cr,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 enum IniNode {
     Blank {
         raw: String,
@@ -94,6 +94,12 @@ impl IniNode {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct ProfileRevision {
+    nodes: Vec<IniNode>,
+    dirty_keys: BTreeSet<String>,
+}
+
 #[derive(Debug)]
 pub struct ProfileDocument {
     path: PathBuf,
@@ -104,6 +110,8 @@ pub struct ProfileDocument {
     original_hash: [u8; 32],
     original_legacy_lines: Option<OriginalLegacyLines>,
     dirty_keys: BTreeSet<String>,
+    undo_history: Vec<ProfileRevision>,
+    redo_history: Vec<ProfileRevision>,
 }
 
 #[derive(Default)]
@@ -134,6 +142,8 @@ pub struct ProfileSnapshot {
     pub original_hash: String,
     pub values: BTreeMap<String, f64>,
     pub dirty_keys: Vec<String>,
+    pub can_undo: bool,
+    pub can_redo: bool,
     pub individuals: Vec<IndividualSetting>,
     pub lists: ProfileLists,
     pub advanced: AdvancedProfile,
@@ -276,6 +286,8 @@ impl ProfileDocument {
             original_hash,
             original_legacy_lines: original_legacy_lines(&bytes, &text, encoding),
             dirty_keys: BTreeSet::new(),
+            undo_history: Vec::new(),
+            redo_history: Vec::new(),
         })
     }
 
@@ -307,6 +319,8 @@ impl ProfileDocument {
                 .collect(),
             values,
             dirty_keys: self.dirty_keys.iter().cloned().collect(),
+            can_undo: !self.undo_history.is_empty(),
+            can_redo: !self.redo_history.is_empty(),
             individuals: self.individuals(),
             lists: ProfileLists {
                 exclude_fonts: self.list_entries("Exclude"),
@@ -493,6 +507,70 @@ impl ProfileDocument {
             LineEnding::Lf => "\n",
             LineEnding::Cr => "\r",
         }
+    }
+
+    fn revision(&self) -> ProfileRevision {
+        ProfileRevision {
+            nodes: self.nodes.clone(),
+            dirty_keys: self.dirty_keys.clone(),
+        }
+    }
+
+    fn restore_revision(&mut self, revision: ProfileRevision) {
+        self.nodes = revision.nodes;
+        self.dirty_keys = revision.dirty_keys;
+    }
+
+    fn record_edit(
+        &mut self,
+        edit: impl FnOnce(&mut ProfileDocument) -> Result<(), String>,
+    ) -> Result<(), String> {
+        const HISTORY_LIMIT: usize = 100;
+        let previous = self.revision();
+        edit(self)?;
+        if self.revision() == previous {
+            return Ok(());
+        }
+        if self.undo_history.len() == HISTORY_LIMIT {
+            self.undo_history.remove(0);
+        }
+        self.undo_history.push(previous);
+        self.redo_history.clear();
+        Ok(())
+    }
+
+    pub fn update_value(&mut self, setting_id: &str, value: f64) -> Result<(), String> {
+        self.record_edit(|document| document.set_value(setting_id, value))
+    }
+
+    pub fn update_individuals(&mut self, entries: Vec<IndividualSetting>) -> Result<(), String> {
+        self.record_edit(|document| document.set_individuals(entries))
+    }
+
+    pub fn update_list(&mut self, kind: &str, entries: Vec<String>) -> Result<(), String> {
+        self.record_edit(|document| document.set_list(kind, entries))
+    }
+
+    pub fn update_advanced(&mut self, advanced: AdvancedProfile) -> Result<(), String> {
+        self.record_edit(|document| document.set_advanced(advanced))
+    }
+
+    pub fn undo(&mut self) -> bool {
+        let Some(previous) = self.undo_history.pop() else {
+            return false;
+        };
+        self.redo_history.push(self.revision());
+        self.restore_revision(previous);
+        true
+    }
+
+    pub fn redo(&mut self) -> bool {
+        let Some(next) = self.redo_history.pop() else {
+            return false;
+        };
+        self.undo_history.push(self.revision());
+        self.restore_revision(next);
+        true
     }
 
     fn value(&self, setting: &SettingDefinition) -> Option<&str> {
@@ -887,6 +965,27 @@ impl ProfileDocument {
         )
     }
 
+    pub fn export_to(&self, destination: &Path) -> Result<(), String> {
+        let parent = destination
+            .parent()
+            .filter(|path| path.is_dir())
+            .ok_or_else(|| "export destination directory does not exist".to_owned())?;
+        if destination.file_name().is_none() || parent == destination {
+            return Err("export destination must be an INI file".to_owned());
+        }
+        let bytes = self.encoded()?;
+        let mut output = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(destination)
+            .map_err(|error| error.to_string())?;
+        output
+            .write_all(&bytes)
+            .map_err(|error| error.to_string())?;
+        output.sync_all().map_err(|error| error.to_string())
+    }
+
     pub fn save(&mut self) -> Result<(), String> {
         let disk = fs::read(&self.path).map_err(|error| error.to_string())?;
         if hash(&disk) != self.original_hash {
@@ -911,6 +1010,8 @@ impl ProfileDocument {
         let text = self.nodes.iter().map(IniNode::raw).collect::<String>();
         self.original_legacy_lines = original_legacy_lines(&bytes, &text, self.encoding);
         self.dirty_keys.clear();
+        self.undo_history.clear();
+        self.redo_history.clear();
         Ok(())
     }
 }
@@ -1181,7 +1282,7 @@ pub(crate) fn update_profile_setting(
     let document = guard
         .as_mut()
         .ok_or_else(|| "no profile is open".to_owned())?;
-    document.set_value(&setting_id, value)?;
+    document.update_value(&setting_id, value)?;
     Ok(document.snapshot())
 }
 
@@ -1197,7 +1298,7 @@ pub(crate) fn update_profile_individuals(
     let document = guard
         .as_mut()
         .ok_or_else(|| "no profile is open".to_owned())?;
-    document.set_individuals(entries)?;
+    document.update_individuals(entries)?;
     Ok(document.snapshot())
 }
 
@@ -1214,7 +1315,7 @@ pub(crate) fn update_profile_list(
     let document = guard
         .as_mut()
         .ok_or_else(|| "no profile is open".to_owned())?;
-    document.set_list(&kind, entries)?;
+    document.update_list(&kind, entries)?;
     Ok(document.snapshot())
 }
 
@@ -1230,7 +1331,7 @@ pub(crate) fn update_profile_advanced(
     let document = guard
         .as_mut()
         .ok_or_else(|| "no profile is open".to_owned())?;
-    document.set_advanced(advanced)?;
+    document.update_advanced(advanced)?;
     Ok(document.snapshot())
 }
 
@@ -1265,6 +1366,98 @@ pub(crate) fn save_profile(state: State<'_, ProfileState>) -> Result<ProfileSnap
         .ok_or_else(|| "no profile is open".to_owned())?;
     document.save()?;
     Ok(document.snapshot())
+}
+
+#[tauri::command]
+pub(crate) fn undo_profile(state: State<'_, ProfileState>) -> Result<ProfileSnapshot, String> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "profile lock is poisoned".to_owned())?;
+    let document = guard
+        .as_mut()
+        .ok_or_else(|| "no profile is open".to_owned())?;
+    document.undo();
+    Ok(document.snapshot())
+}
+
+#[tauri::command]
+pub(crate) fn redo_profile(state: State<'_, ProfileState>) -> Result<ProfileSnapshot, String> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "profile lock is poisoned".to_owned())?;
+    let document = guard
+        .as_mut()
+        .ok_or_else(|| "no profile is open".to_owned())?;
+    document.redo();
+    Ok(document.snapshot())
+}
+
+#[tauri::command]
+pub(crate) fn discard_profile_changes(
+    state: State<'_, ProfileState>,
+) -> Result<ProfileSnapshot, String> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "profile lock is poisoned".to_owned())?;
+    let path = guard
+        .as_ref()
+        .ok_or_else(|| "no profile is open".to_owned())?
+        .path()
+        .to_path_buf();
+    let document = ProfileDocument::open(path)?;
+    let snapshot = document.snapshot();
+    *guard = Some(document);
+    Ok(snapshot)
+}
+
+#[tauri::command]
+pub(crate) fn export_profile(
+    path: String,
+    state: State<'_, ProfileState>,
+) -> Result<String, String> {
+    let destination = PathBuf::from(path);
+    let guard = state
+        .0
+        .lock()
+        .map_err(|_| "profile lock is poisoned".to_owned())?;
+    let document = guard
+        .as_ref()
+        .ok_or_else(|| "no profile is open".to_owned())?;
+    document.export_to(&destination)?;
+    Ok(destination.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub(crate) fn reveal_profile_file(state: State<'_, ProfileState>) -> Result<String, String> {
+    let guard = state
+        .0
+        .lock()
+        .map_err(|_| "profile lock is poisoned".to_owned())?;
+    let path = guard
+        .as_ref()
+        .ok_or_else(|| "no profile is open".to_owned())?
+        .path()
+        .to_path_buf();
+    reveal_file(&path)?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[cfg(windows)]
+fn reveal_file(path: &Path) -> Result<(), String> {
+    std::process::Command::new("explorer.exe")
+        .arg("/select,")
+        .arg(path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(not(windows))]
+fn reveal_file(_path: &Path) -> Result<(), String> {
+    Err("revealing a profile file is supported only on Windows".to_owned())
 }
 
 #[tauri::command]
@@ -1365,6 +1558,53 @@ mod tests {
         document.set_value("normal_weight", 3.0).unwrap();
         fs::write(&path, b"[General]\nNormalWeight=9\n").unwrap();
         assert!(document.save().unwrap_err().contains("changed on disk"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn profile_history_undoes_redoes_and_clears_after_save() {
+        let path = temp_profile(b"[General]\nNormalWeight=0\n");
+        let mut document = ProfileDocument::open(&path).unwrap();
+
+        document.update_value("normal_weight", 3.0).unwrap();
+        let changed = document.snapshot();
+        assert_eq!(changed.values.get("normal_weight"), Some(&3.0));
+        assert!(changed.can_undo);
+        assert!(!changed.can_redo);
+
+        assert!(document.undo());
+        let undone = document.snapshot();
+        assert_eq!(undone.values.get("normal_weight"), Some(&0.0));
+        assert!(undone.dirty_keys.is_empty());
+        assert!(undone.can_redo);
+
+        assert!(document.redo());
+        assert_eq!(document.snapshot().values.get("normal_weight"), Some(&3.0));
+        document.save().unwrap();
+        let saved = document.snapshot();
+        assert!(!saved.can_undo);
+        assert!(!saved.can_redo);
+        assert!(saved.dirty_keys.is_empty());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn export_includes_unsaved_edits_without_clearing_them() {
+        let path = temp_profile(b"[General]\nNormalWeight=0\n");
+        let mut document = ProfileDocument::open(&path).unwrap();
+        document.update_value("normal_weight", 6.0).unwrap();
+        let destination = path.with_extension("export.ini");
+
+        document.export_to(&destination).unwrap();
+
+        assert!(String::from_utf8(fs::read(&destination).unwrap())
+            .unwrap()
+            .contains("NormalWeight=6"));
+        let snapshot = document.snapshot();
+        assert_eq!(snapshot.path, path.to_string_lossy());
+        assert!(snapshot.dirty_keys.contains(&"normal_weight".to_owned()));
+        assert!(snapshot.can_undo);
+        let _ = fs::remove_file(destination);
         let _ = fs::remove_file(path);
     }
 

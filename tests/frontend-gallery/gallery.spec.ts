@@ -61,6 +61,36 @@ test("profile editor categories and collections remain interactive", async ({ pa
   page.on("pageerror", (error) => failures.push(`pageerror: ${error.message}`));
 
   await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
+  const undo = page.getByRole("button", { name: "되돌리기" });
+  const redo = page.getByRole("button", { name: "다시 하기" });
+  const discard = page.getByRole("button", { name: "초기화", exact: true });
+  await expect(undo).toBeDisabled();
+  const firstSelect = page.locator(".setting-row select").first();
+  const initialOption = await firstSelect.inputValue();
+  const nextOption = await firstSelect.locator("option").evaluateAll((options, current) => options.map((option) => (option as HTMLOptionElement).value).find((value) => value !== current), initialOption);
+  if (!nextOption) throw new Error("The first profile setting must expose an alternate option");
+  await firstSelect.selectOption(nextOption);
+  await expect(undo).toBeEnabled();
+  await undo.click();
+  await expect(redo).toBeEnabled();
+  await redo.click();
+  await page.getByRole("button", { name: "지금 적용" }).click();
+  await expect(page.locator(".profile-message")).toContainText("실제 MacType 실행 경로에 적용했습니다");
+  await expect(discard).toBeEnabled();
+  await discard.click();
+  await expect(discard).toBeDisabled();
+  await firstSelect.selectOption(nextOption);
+  await page.getByRole("button", { name: "지금 저장" }).click();
+  await expect(page.locator(".profile-message")).toContainText("지금 저장했습니다");
+  await expect(discard).toBeDisabled();
+
+  const previewResizer = page.getByRole("separator", { name: "프리뷰 영역 높이 조절" });
+  await expect(previewResizer).toHaveAttribute("aria-valuenow", "320");
+  await previewResizer.press("ArrowDown");
+  await expect(previewResizer).toHaveAttribute("aria-valuenow", "304");
+  await previewResizer.press("Home");
+  await expect(previewResizer).toHaveAttribute("aria-valuenow", "128");
+
   await page.getByRole("button", { name: "LCD·픽셀 배열" }).click();
   await expect(page.getByRole("heading", { name: "LCD·픽셀 배열" })).toBeVisible();
   await page.getByRole("checkbox", { name: "고급 설정 표시" }).check();
@@ -99,7 +129,7 @@ test("profile editor categories and collections remain interactive", async ({ pa
   expect(failures, failures.join("\n")).toEqual([]);
 });
 
-test("settings files can be selected, imported, copied, saved, and applied without typing a path", async ({ page }) => {
+test("settings files support import, save as, export, reveal, and apply without typing a path", async ({ page }) => {
   const failures: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") failures.push(`console: ${message.text()}`);
@@ -115,8 +145,12 @@ test("settings files can be selected, imported, copied, saved, and applied witho
   await page.getByRole("button", { name: "INI 파일 선택" }).click();
   await expect(page.locator('[data-operation="file-settings"]')).toContainText("Community.ini");
   await page.getByRole("textbox", { name: "복제 프로필 이름" }).fill("Gallery copy");
-  await page.getByRole("button", { name: "복제" }).click();
+  await page.getByRole("button", { name: "다른 이름으로 저장" }).click();
   await expect(page.locator('[data-operation="file-settings"]')).toContainText("Gallery copy.ini");
+  await page.getByRole("button", { name: "파일 위치 열기" }).click();
+  await expect(page.locator('[data-operation="file-settings"]')).toContainText("파일 위치를 열었습니다");
+  await page.getByRole("button", { name: "내보낼 위치 선택" }).click();
+  await expect(page.locator('[data-operation="file-settings"]')).toContainText("내보냈습니다");
   await page.getByRole("button", { name: "실제 적용" }).click();
   await expect(page.locator('[data-operation="file-settings"]')).toContainText("실행 프로필로 적용");
 

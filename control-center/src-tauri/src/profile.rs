@@ -691,8 +691,7 @@ impl ProfileDocument {
         )?
         .replace(',', " ");
 
-        // Apply only after every field has been validated so a rejected edit cannot
-        // leave an in-memory profile partially changed.
+        // Keep every fallible validation above mutations so rejected edits remain atomic.
         self.set_raw_value("General", "Shadow", shadow, "advanced:shadow");
         self.set_raw_value(
             "General",

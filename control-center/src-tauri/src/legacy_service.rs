@@ -74,9 +74,8 @@ fn classify_configuration(configuration: &ServiceConfiguration, trusted: &Path) 
     {
         return ServicePresence::Foreign;
     }
-    // `std::fs::canonicalize` returns an extended-length (`\\?\`) path on
-    // Windows, while the Service Control Manager normally returns ImagePath
-    // without that prefix. Both strings identify the same trusted executable.
+    // Strip canonicalize's `\\?\` prefix before comparing with SCM ImagePath,
+    // which normally omits it for the same executable.
     let trusted = service_command_path(trusted);
     let quoted = format!("\"{trusted}\" -service");
     let unquoted = format!("{trusted} -service");

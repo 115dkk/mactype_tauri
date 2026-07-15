@@ -27,6 +27,7 @@ export interface ExecutionStatus {
   legacyService: LegacyServiceStatus;
   registryModeDetected: boolean;
   systemModesSupported: boolean;
+  systemInjectionActive: boolean;
   systemModeNote: string;
   injectionReady: boolean;
   activeProfile: string | null;

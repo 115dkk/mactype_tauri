@@ -42,61 +42,61 @@ pub(crate) fn tray_menu_labels(
     match locale {
         "en" => (
             "Open Control Center",
-            "Launch registered apps with MacType",
+            "Apply MacType and launch registered apps",
             "Hide window",
             "Quit",
         ),
         "zh-CN" => (
             "显示控制中心",
-            "用 MacType 启动已登记程序",
+            "应用 MacType 并启动已登记程序",
             "隐藏到托盘",
             "退出",
         ),
         "zh-TW" => (
             "顯示控制中心",
-            "使用 MacType 啟動已登錄程式",
+            "套用 MacType 並啟動已登錄程式",
             "隱藏至系統匣",
             "結束",
         ),
         "ja" => (
             "コントロールセンターを開く",
-            "登録アプリを MacType で起動",
+            "MacType を適用して登録アプリを起動",
             "ウィンドウを隠す",
             "終了",
         ),
         "fr" => (
             "Ouvrir le Centre de contrôle",
-            "Lancer les applications inscrites avec MacType",
+            "Appliquer MacType et lancer les applications inscrites",
             "Masquer la fenêtre",
             "Quitter",
         ),
         "de" => (
             "Kontrollzentrum öffnen",
-            "Registrierte Apps mit MacType starten",
+            "MacType anwenden und registrierte Apps starten",
             "Fenster ausblenden",
             "Beenden",
         ),
         "es" => (
             "Abrir el Centro de control",
-            "Iniciar las aplicaciones registradas con MacType",
+            "Aplicar MacType e iniciar las aplicaciones registradas",
             "Ocultar ventana",
             "Salir",
         ),
         "pt" => (
             "Abrir o Centro de Controlo",
-            "Iniciar aplicações registadas com o MacType",
+            "Aplicar o MacType e iniciar aplicações registadas",
             "Ocultar janela",
             "Sair",
         ),
         "ar" => (
             "فتح مركز التحكم",
-            "تشغيل التطبيقات المسجلة عبر MacType",
+            "تطبيق MacType وتشغيل التطبيقات المسجلة",
             "إخفاء النافذة",
             "إنهاء",
         ),
         _ => (
             "Control Center 열기",
-            "등록 앱을 MacType로 실행",
+            "MacType 적용 및 등록 앱 실행",
             "창 숨기기",
             "종료",
         ),
@@ -198,7 +198,7 @@ mod tests {
             tray_menu_labels("en"),
             (
                 "Open Control Center",
-                "Launch registered apps with MacType",
+                "Apply MacType and launch registered apps",
                 "Hide window",
                 "Quit"
             )
@@ -207,7 +207,7 @@ mod tests {
             tray_menu_labels("ko"),
             (
                 "Control Center 열기",
-                "등록 앱을 MacType로 실행",
+                "MacType 적용 및 등록 앱 실행",
                 "창 숨기기",
                 "종료"
             )
@@ -216,7 +216,7 @@ mod tests {
             tray_menu_labels("zh-CN"),
             (
                 "显示控制中心",
-                "用 MacType 启动已登记程序",
+                "应用 MacType 并启动已登记程序",
                 "隐藏到托盘",
                 "退出"
             )
@@ -225,7 +225,7 @@ mod tests {
             tray_menu_labels("zh-TW"),
             (
                 "顯示控制中心",
-                "使用 MacType 啟動已登錄程式",
+                "套用 MacType 並啟動已登錄程式",
                 "隱藏至系統匣",
                 "結束"
             )
@@ -234,7 +234,7 @@ mod tests {
             tray_menu_labels("ar"),
             (
                 "فتح مركز التحكم",
-                "تشغيل التطبيقات المسجلة عبر MacType",
+                "تطبيق MacType وتشغيل التطبيقات المسجلة",
                 "إخفاء النافذة",
                 "إنهاء"
             )

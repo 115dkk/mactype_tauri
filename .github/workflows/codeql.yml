@@ -2,11 +2,8 @@ name: "CodeQL"
 
 on:
   schedule:
-    - cron: "0 4 * * 1" # 매주 월요일 04:00 UTC
-  workflow_dispatch: # Actions 탭에서 수동 실행
-
-# PR마다 돌리지 않는다.
-# 주 1회에만 돌리고 진짜 필요하면 수동으로 돌린다.
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
 
 jobs:
   analyze:
@@ -20,16 +17,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ── C++ 코어 (MSVC) ──
-          # MacType DLL은 Windows + MSVC 빌드가 필수.
-          # 자기 프로젝트의 빌드 명령에 맞게 수정할 것.
           - language: c-cpp
             os: windows-latest
             build-mode: manual
 
-          # ── Rust + TypeScript (Tauri GUI) ──
-          # autobuild가 Cargo.toml과 package.json을 자동 감지한다.
-          # Rust가 없는 프로젝트면 이 블록을 삭제.
           - language: javascript-typescript
             os: ubuntu-latest
             build-mode: none
@@ -45,7 +36,6 @@ jobs:
           build-mode: ${{ matrix.build-mode }}
           queries: security-extended
 
-      # C++ 수동 빌드 — 프로젝트에 맞게 수정 필요
       - if: matrix.build-mode == 'manual'
         name: Build C++ (MSVC)
         shell: cmd

@@ -1,6 +1,9 @@
 {
   "app.title": "MacType Control Center",
   "app.mainMenu": "Main menu",
+  "app.windowMinimize": "Minimize window",
+  "app.windowMaximize": "Maximize or restore window",
+  "app.windowClose": "Close window",
   "app.themeDark": "Dark theme",
   "app.themeLight": "Light theme",
   "app.language": "Display language",

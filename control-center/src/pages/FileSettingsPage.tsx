@@ -9,13 +9,14 @@ import {
   exportProfile,
   importProfile,
   listProfiles,
-  openDefaultProfile,
+  loadExecutionStatus,
   openProfile,
   pickIniProfile,
   pickIniExportPath,
   revealProfileFile,
   saveProfile,
 } from "../app/tauri";
+import { openPreferredProfile, rememberProfile } from "../app/profilePreference";
 import { useI18n } from "../i18n/i18n";
 
 export function FileSettingsPage() {
@@ -34,9 +35,9 @@ export function FileSettingsPage() {
 
   useEffect(() => {
     let active = true;
-    void Promise.all([currentProfile(), listProfiles(), discoverLegacyProfile()])
-      .then(async ([opened, available, detected]) => {
-        const selected = opened ?? await openDefaultProfile();
+    void Promise.all([currentProfile(), listProfiles(), discoverLegacyProfile(), loadExecutionStatus()])
+      .then(async ([opened, available, detected, execution]) => {
+        const selected = await openPreferredProfile(opened, available, execution.activeProfile);
         if (!active) return;
         setProfile(selected);
         setProfiles(available);
@@ -54,6 +55,7 @@ export function FileSettingsPage() {
     setBusy(operation);
     try {
       const opened = await action();
+      rememberProfile(opened.path);
       setProfile(opened);
       await refreshProfiles();
       setMessage(success(opened));

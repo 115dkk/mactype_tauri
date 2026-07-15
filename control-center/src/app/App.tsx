@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useReducer } from "react";
-import { Activity, FileCog, FolderCog, Home, Languages, Moon, PlayCircle, Sun } from "lucide-react";
+import { Activity, FileCog, FolderCog, Home, Moon, PlayCircle, Sun } from "lucide-react";
 import { DiagnosticsPage } from "../pages/DiagnosticsPage";
 import { OverviewPage } from "../pages/OverviewPage";
 import { ProfilesPage } from "../pages/ProfilesPage";
@@ -7,7 +7,9 @@ import { ExecutionPage } from "../pages/ExecutionPage";
 import { FileSettingsPage } from "../pages/FileSettingsPage";
 import { fallbackStatus, type InstallationStatus, type ViewId } from "./model";
 import { loadLaunchContext, reconnectPreview, rediscoverInstallation, reportFrontendFailure, reportFrontendReady, scanInstallation, verifyTrayModeForCi } from "./tauri";
-import { localeOptions, useI18n, type Locale } from "../i18n/i18n";
+import { useI18n } from "../i18n/i18n";
+import { LanguagePicker } from "../components/LanguagePicker";
+import { WindowTitleBar } from "../components/WindowTitleBar";
 
 interface State {
   view: ViewId;
@@ -41,7 +43,7 @@ const iconByView = { overview: Home, files: FileCog, profiles: FolderCog, execut
 const navigation: ReadonlyArray<ViewId> = ["overview", "files", "profiles", "execution", "diagnostics"];
 
 export function App() {
-  const { locale, setLocale, t } = useI18n();
+  const { t } = useI18n();
   const [state, dispatch] = useReducer(reducer, {
     view: "overview",
     theme: "light",
@@ -99,7 +101,9 @@ export function App() {
   }, [state.ciSmoke, state.status, state.view]);
 
   return (
-    <div className="app-shell" data-testid="app-shell">
+    <>
+      <WindowTitleBar />
+      <div className="app-shell" data-testid="app-shell">
       <aside className="navigation" aria-label={t("app.mainMenu")}>
         <div className="product-lockup">
           <img src="/mactype-icon.png" alt="" width="32" height="32" />
@@ -126,17 +130,7 @@ export function App() {
           })}
         </nav>
         <div className="navigation-preferences">
-          <label className="language-control">
-            <Languages aria-hidden="true" size={17} />
-            <span className="sr-only">{t("app.language")}</span>
-            <select aria-label={t("app.language")} onChange={(event) => setLocale(event.target.value as Locale)} value={locale}>
-              {localeOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {t(option.labelKey)}
-                </option>
-              ))}
-            </select>
-          </label>
+          <LanguagePicker />
           <button
             aria-label={state.theme === "light" ? t("app.themeDark") : t("app.themeLight")}
             className="theme-toggle"
@@ -151,6 +145,7 @@ export function App() {
       <main className="work-area" id="main-content" tabIndex={-1}>
         {page}
       </main>
-    </div>
+      </div>
+    </>
   );
 }

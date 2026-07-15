@@ -1,6 +1,9 @@
 {
   "app.title": "مركز تحكم MacType",
   "app.mainMenu": "القائمة الرئيسية",
+  "app.windowMinimize": "تصغير النافذة",
+  "app.windowMaximize": "تكبير النافذة أو استعادتها",
+  "app.windowClose": "إغلاق النافذة",
   "app.themeDark": "المظهر الداكن",
   "app.themeLight": "المظهر الفاتح",
   "app.language": "لغة العرض",

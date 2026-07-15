@@ -1,6 +1,9 @@
 {
   "app.title": "MacType 控制中心",
   "app.mainMenu": "主選單",
+  "app.windowMinimize": "最小化視窗",
+  "app.windowMaximize": "最大化或還原視窗",
+  "app.windowClose": "關閉視窗",
   "app.themeDark": "深色主題",
   "app.themeLight": "淺色主題",
   "app.language": "顯示語言",

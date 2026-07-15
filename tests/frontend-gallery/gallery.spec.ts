@@ -230,3 +230,42 @@ test("language setting switches every supported locale and persists", async ({ p
   await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-language-en.png`), fullPage: true });
 });
+
+test("sidebar preferences stay at the bottom and yield to scrolling when height is tight", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Desktop sidebar behavior is width-specific");
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/?view=overview&gallery=1&lang=ko", { waitUntil: "networkidle" });
+  const sidebar = page.locator(".navigation");
+  const preferences = page.locator(".navigation-preferences");
+
+  const roomyGap = await page.evaluate(() => {
+    const sidebarRect = document.querySelector<HTMLElement>(".navigation")!.getBoundingClientRect();
+    const preferencesRect = document.querySelector<HTMLElement>(".navigation-preferences")!.getBoundingClientRect();
+    return sidebarRect.bottom - preferencesRect.bottom;
+  });
+  expect(roomyGap).toBeCloseTo(16, 0);
+  await page.screenshot({ path: path.join(galleryRoot, "desktop-sidebar-preferences-roomy.png"), fullPage: true });
+
+  await page.setViewportSize({ width: 1280, height: 300 });
+  const tightMetrics = await sidebar.evaluate((element) => {
+    element.scrollTop = 0;
+    const preferencesRect = element.querySelector<HTMLElement>(".navigation-preferences")!.getBoundingClientRect();
+    return {
+      overflows: element.scrollHeight > element.clientHeight,
+      preferencesBelowFold: preferencesRect.bottom > element.getBoundingClientRect().bottom,
+    };
+  });
+  expect(tightMetrics).toEqual({ overflows: true, preferencesBelowFold: true });
+
+  await sidebar.evaluate((element) => element.scrollTo({ top: element.scrollHeight }));
+  await expect.poll(async () => {
+    const sidebarBox = await sidebar.boundingBox();
+    const preferencesBox = await preferences.boundingBox();
+    return Math.round((sidebarBox?.y ?? 0) + (sidebarBox?.height ?? 0) - ((preferencesBox?.y ?? 0) + (preferencesBox?.height ?? 0)));
+  }).toBe(16);
+  await page.screenshot({ path: path.join(galleryRoot, "desktop-sidebar-preferences-tight.png") });
+  await page.getByRole("button", { name: "어두운 테마" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.getByRole("combobox", { name: "표시 언어" }).selectOption("en");
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+});

@@ -9,7 +9,7 @@ export const galleryViews = [
   },
   {
     id: "profiles",
-    title: { ko: "프로필", en: "Profiles", "zh-CN": "配置文件", "zh-TW": "設定檔", ja: "プロファイル", fr: "Profils", de: "Profile", es: "Perfiles", pt: "Perfis", ar: "ملفات التعريف" },
+    title: { ko: "고급 조정", en: "Advanced tuning", "zh-CN": "高级调校", "zh-TW": "進階調校", ja: "詳細調整", fr: "Réglages avancés", de: "Erweiterte Anpassung", es: "Ajuste avanzado", pt: "Ajuste avançado", ar: "الضبط المتقدم" },
   },
   {
     id: "execution",

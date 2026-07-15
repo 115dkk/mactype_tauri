@@ -1,4 +1,4 @@
-import { AlertTriangle, Play, Redo2, RotateCcw, Save, Search, SlidersHorizontal, Undo2 } from "lucide-react";
+import { AlertTriangle, Eye, FastForward, ListRestart, Play, Redo2, RotateCcw, Save, Search, SlidersHorizontal, Undo2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { settingsSchema } from "../generated/settings";
 import type { AdvancedProfile, IndividualSetting, PreviewRequest, PreviewResult, ProfileSnapshot } from "../app/model";
@@ -30,20 +30,26 @@ import { IndividualSettings } from "./profiles/IndividualSettings";
 import { ListsEditor } from "./profiles/ListsEditor";
 import { BasicSettings, LcdSettings, SearchSettings, ShapeSettings } from "./profiles/SchemaSettings";
 import { splitSubstitution } from "./profiles/profileEditorUtils";
+import { WizardSettings } from "./profiles/WizardSettings";
+import { wizardSettingIds, wizardStepIds, type WizardStepId } from "./profiles/wizardModel";
 
 type GroupId = "basic" | "shape" | "lcd" | "advanced" | "individual" | "lists";
+type ProfileMode = "quick" | "advanced";
 
 const DEFAULT_PREVIEW_HEIGHT = 320;
+const QUICK_PREVIEW_HEIGHT = 240;
 const MIN_PREVIEW_HEIGHT = DEFAULT_PREVIEW_HEIGHT * 2 / 5;
 const MAX_PREVIEW_HEIGHT = 520;
 const MIN_SETTINGS_HEIGHT = 220;
 
 interface ProfilesPageProps {
   ciSmoke?: boolean;
+  mode?: ProfileMode;
+  onModeChange?: (mode: ProfileMode) => void;
   onPreviewReady?: () => void;
 }
 
-export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPageProps) {
+export function ProfilesPage({ ciSmoke = false, mode = "advanced", onModeChange, onPreviewReady }: ProfilesPageProps) {
   const { locale, t } = useI18n();
   const groups = useMemo<ReadonlyArray<{ id: GroupId; label: string; description: string }>>(() => [
     { id: "basic", label: t("group.basic.label"), description: t("group.basic.description") },
@@ -73,6 +79,7 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
   const [listDrafts, setListDrafts] = useState<Record<string, string>>({});
   const [advanced, setAdvanced] = useState<AdvancedProfile>({ shadow: null, lcdFilterWeight: null, pixelLayout: null, displayAffinity: [], fontSubstitutes: [], infinalityGammaCorrection: [0, 100], infinalityFilterParams: [11, 22, 38, 22, 11] });
   const [activeGroup, setActiveGroup] = useState<GroupId>("basic");
+  const [activeWizardStep, setActiveWizardStep] = useState<WizardStepId>("rendering");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [installedFonts, setInstalledFonts] = useState<ReadonlyArray<string>>([]);
   const [fontFace, setFontFace] = useState("Segoe UI");
@@ -90,6 +97,7 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
   const [previewHeight, setPreviewHeight] = useState(DEFAULT_PREVIEW_HEIGHT);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const previewPanelRef = useRef<HTMLElement>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const mutationQueue = useRef<Promise<void>>(Promise.resolve());
   const resizeStart = useRef<{ pointerId: number; y: number; height: number } | null>(null);
@@ -99,6 +107,10 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
   const restartVerified = useRef(false);
   const ciReadyRequestId = useRef<number | null>(null);
   const ciWorkflowVerified = useRef(false);
+
+  useEffect(() => {
+    if (mode === "quick") setPreviewHeight((current) => Math.min(current, QUICK_PREVIEW_HEIGHT));
+  }, [mode]);
 
   const fontFamilies = useMemo(() => {
     const referenced = [
@@ -348,6 +360,40 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
     }
   };
 
+  const showPreview = () => {
+    previewPanelRef.current?.scrollIntoView({ block: "center" });
+    previewPanelRef.current?.focus({ preventScroll: true });
+  };
+
+  const restoreWizardDefaults = () => {
+    for (const settingId of wizardSettingIds) {
+      const definition = settingsSchema.find((setting) => setting.id === settingId);
+      if (definition && values[settingId] !== definition.default) changeSetting(settingId, definition.default);
+    }
+    if (advanced.fontSubstitutes.length > 0) commitAdvanced({ ...advanced, fontSubstitutes: [] });
+  };
+
+  const openTuner = (group: GroupId) => {
+    setActiveGroup(group);
+    setQuery("");
+    onModeChange?.("advanced");
+  };
+
+  const tunerGroupForWizardStep: Record<WizardStepId, GroupId> = {
+    rendering: "lcd",
+    quality: "shape",
+    hinting: "basic",
+    gamma: "shape",
+    lcd: "lcd",
+    substitution: "advanced",
+    apply: "basic",
+  };
+
+  const skipWizardStep = () => {
+    const next = wizardStepIds[wizardStepIds.indexOf(activeWizardStep) + 1];
+    if (next) setActiveWizardStep(next);
+  };
+
   const maximumPreviewHeight = () => Math.max(
     MIN_PREVIEW_HEIGHT,
     Math.min(MAX_PREVIEW_HEIGHT, (workspaceRef.current?.clientHeight ?? MAX_PREVIEW_HEIGHT + MIN_SETTINGS_HEIGHT) - MIN_SETTINGS_HEIGHT),
@@ -391,14 +437,16 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
   };
 
   const activeDefinition = groups.find((group) => group.id === activeGroup) ?? groups[0];
+  const activeWizardLabel = t(`wizard.${activeWizardStep}`);
   const dirtyCount = profile?.dirtyKeys.length ?? 0;
   const displayScale = window.devicePixelRatio || 1;
 
   return (
-    <section className="page profile-page view-enter" aria-labelledby="profiles-title">
+    <section className="page profile-page view-enter" aria-labelledby="profiles-title" data-mode={mode}>
       <header className="page-header compact profile-header">
         <div>
-          <h1 id="profiles-title">{t("nav.profiles")}</h1>
+          <div className="profile-mode-title"><h1 id="profiles-title">{t(mode === "quick" ? "nav.quickSetup" : "nav.advancedTuning")}</h1><span>{mode === "quick" ? "Wizard" : "Tuner"}</span></div>
+          <p>{t(mode === "quick" ? "profiles.quickDescription" : "profiles.advancedDescription")}</p>
           <p>{loading ? t("profiles.searching") : t("profiles.summary", { name: profile?.path.split(/[\\/]/).pop() ?? t("profiles.none"), count: dirtyCount })}</p>
           {profileMessage && <p aria-live="polite" className="profile-message">{profileMessage}</p>}
         </div>
@@ -406,28 +454,43 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
           <button className="button secondary compact-action" disabled={!profile?.canUndo || pendingEdits > 0 || profileCommand !== null} onClick={() => void runHistoryCommand("undo", undoProfile)} type="button"><Undo2 aria-hidden="true" size={16} /> {t("profiles.undo")}</button>
           <button className="button secondary compact-action" disabled={!profile?.canRedo || pendingEdits > 0 || profileCommand !== null} onClick={() => void runHistoryCommand("redo", redoProfile)} type="button"><Redo2 aria-hidden="true" size={16} /> {t("profiles.redo")}</button>
           <button className="button secondary compact-action" disabled={!profile || dirtyCount === 0 || pendingEdits > 0 || profileCommand !== null} onClick={() => void runHistoryCommand("discard", discardProfileChanges)} title={t("profiles.discardDescription")} type="button"><RotateCcw aria-hidden="true" size={16} /> {t("profiles.discard")}</button>
-          <button className="button secondary compact-action" disabled={!profile || dirtyCount === 0 || pendingEdits > 0 || profileCommand !== null} onClick={() => void saveCurrentProfile()} type="button"><Save aria-hidden="true" size={16} /> {profileCommand === "save" ? t("profiles.saving") : t("profiles.saveNow")}</button>
-          <button className="button primary compact-action" disabled={!profile || pendingEdits > 0 || profileCommand !== null} onClick={() => void applyProfile()} type="button"><Play aria-hidden="true" size={16} /> {profileCommand === "apply" ? t("profiles.applying") : t("profiles.applyNow")}</button>
+          {mode === "advanced" && <button className="button secondary compact-action" disabled={!profile || dirtyCount === 0 || pendingEdits > 0 || profileCommand !== null} onClick={() => void saveCurrentProfile()} type="button"><Save aria-hidden="true" size={16} /> {profileCommand === "save" ? t("profiles.saving") : t("profiles.saveNow")}</button>}
+          {mode === "advanced" && <button className="button primary compact-action" disabled={!profile || pendingEdits > 0 || profileCommand !== null} onClick={() => void applyProfile()} type="button"><Play aria-hidden="true" size={16} /> {profileCommand === "apply" ? t("profiles.applying") : t("profiles.applyNow")}</button>}
         </div>
       </header>
 
+      {mode === "quick" && (
+        <div className="wizard-quick-actions" role="toolbar" aria-label={t("wizard.quickActions")}>
+          <strong>{t("wizard.quickActions")}</strong>
+          <button className="text-action" onClick={showPreview} type="button"><Eye aria-hidden="true" size={15} /> {t("profiles.preview")}</button>
+          <button className="text-action" onClick={() => setActiveWizardStep("substitution")} type="button">{t("advanced.fontSubstitutes")}</button>
+          <button className="text-action" onClick={() => openTuner("advanced")} type="button">{t("wizard.advancedSettings")}</button>
+          <button className="text-action" disabled={!profile || dirtyCount === 0 || pendingEdits > 0 || profileCommand !== null} onClick={() => void saveCurrentProfile()} type="button"><Save aria-hidden="true" size={15} /> {t("wizard.saveProfile")}</button>
+          <button className="text-action" disabled={!profile || pendingEdits > 0 || profileCommand !== null} onClick={restoreWizardDefaults} type="button"><ListRestart aria-hidden="true" size={15} /> {t("wizard.restoreDefaults")}</button>
+          <button className="text-action" onClick={() => openTuner(tunerGroupForWizardStep[activeWizardStep])} type="button">Tuner</button>
+          <button className="text-action" disabled={activeWizardStep === "apply"} onClick={skipWizardStep} type="button"><FastForward aria-hidden="true" size={15} /> {t("wizard.skip")}</button>
+        </div>
+      )}
+
       <div className="profile-layout">
-        <aside className="settings-index" aria-label={t("profiles.sections")}>
-          <label className="search-field"><Search aria-hidden="true" size={16} /><span className="sr-only">{t("profiles.search")}</span><input onChange={(event) => setQuery(event.target.value)} placeholder={t("profiles.search")} type="search" value={query} /></label>
-          <ul>{groups.map((group) => <li key={group.id}><button data-selected={!query && activeGroup === group.id} onClick={() => { setActiveGroup(group.id); setQuery(""); }} type="button">{group.label}</button></li>)}</ul>
-          <label className="checkbox-row"><input checked={showAdvanced} onChange={(event) => setShowAdvanced(event.target.checked)} type="checkbox" /> {t("profiles.showAdvanced")}</label>
+        <aside className="settings-index" aria-label={mode === "quick" ? t("wizard.progress") : t("profiles.sections")}>
+          {mode === "advanced" && <label className="search-field"><Search aria-hidden="true" size={16} /><span className="sr-only">{t("profiles.search")}</span><input onChange={(event) => setQuery(event.target.value)} placeholder={t("profiles.search")} type="search" value={query} /></label>}
+          <ul>{mode === "quick" ? wizardStepIds.map((step, index) => <li key={step}><button data-selected={activeWizardStep === step} onClick={() => setActiveWizardStep(step)} type="button"><span className="settings-step" aria-hidden="true">{index + 1}</span><span>{t(`wizard.${step}`)}</span></button></li>) : groups.map((group) => <li key={group.id}><button data-selected={!query && activeGroup === group.id} onClick={() => { setActiveGroup(group.id); setQuery(""); }} type="button"><span>{group.label}</span></button></li>)}</ul>
+          {mode === "advanced" && <label className="checkbox-row"><input checked={showAdvanced} onChange={(event) => setShowAdvanced(event.target.checked)} type="checkbox" /> {t("profiles.showAdvanced")}</label>}
         </aside>
 
         <div className="settings-workspace" ref={workspaceRef}>
           <div className="settings-form">
-            <div className="section-heading"><div><h2>{query ? t("profiles.searchResults") : activeDefinition.label}</h2><p>{query ? t("profiles.searchDescription", { query }) : activeDefinition.description}</p></div></div>
+            <div className="section-heading"><div><h2>{mode === "quick" ? activeWizardLabel : query ? t("profiles.searchResults") : activeDefinition.label}</h2><p>{mode === "quick" ? t("wizard.guidance") : query ? t("profiles.searchDescription", { query }) : activeDefinition.description}</p></div></div>
 
-            {query && <SearchSettings dirtyKeys={profile?.dirtyKeys ?? []} onChange={changeSetting} settings={filteredSettings} t={t} values={values} />}
-            {!query && activeGroup === "basic" && <BasicSettings dirtyKeys={profile?.dirtyKeys ?? []} onChange={changeSetting} settings={filteredSettings} t={t} values={values} />}
-            {!query && activeGroup === "shape" && <ShapeSettings dirtyKeys={profile?.dirtyKeys ?? []} onChange={changeSetting} settings={filteredSettings} t={t} values={values} />}
-            {!query && activeGroup === "lcd" && <LcdSettings dirtyKeys={profile?.dirtyKeys ?? []} onChange={changeSetting} settings={filteredSettings} t={t} values={values} />}
+            {mode === "quick" && <WizardSettings activeStep={activeWizardStep} advanced={advanced} busy={!profile || pendingEdits > 0 || profileCommand !== null} dirtyCount={dirtyCount} dirtyKeys={profile?.dirtyKeys ?? []} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} onAdvancedCommit={(next) => void commitAdvanced(next)} onApply={() => void applyProfile()} onPreview={showPreview} onSave={() => void saveCurrentProfile()} onSettingChange={changeSetting} onStepChange={setActiveWizardStep} settings={settingsSchema} t={t} values={values} />}
 
-            {!query && activeGroup === "advanced" && (
+            {mode === "advanced" && query && <SearchSettings dirtyKeys={profile?.dirtyKeys ?? []} onChange={changeSetting} settings={filteredSettings} t={t} values={values} />}
+            {mode === "advanced" && !query && activeGroup === "basic" && <BasicSettings dirtyKeys={profile?.dirtyKeys ?? []} onChange={changeSetting} settings={filteredSettings} t={t} values={values} />}
+            {mode === "advanced" && !query && activeGroup === "shape" && <ShapeSettings dirtyKeys={profile?.dirtyKeys ?? []} onChange={changeSetting} settings={filteredSettings} t={t} values={values} />}
+            {mode === "advanced" && !query && activeGroup === "lcd" && <LcdSettings dirtyKeys={profile?.dirtyKeys ?? []} onChange={changeSetting} settings={filteredSettings} t={t} values={values} />}
+
+            {mode === "advanced" && !query && activeGroup === "advanced" && (
               <AdvancedSettings
                 advanced={advanced}
                 dirtyKeys={profile?.dirtyKeys ?? []}
@@ -442,7 +505,7 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
               />
             )}
 
-            {!query && activeGroup === "individual" && (
+            {mode === "advanced" && !query && activeGroup === "individual" && (
               <IndividualSettings
                 fontFamilies={fontFamilies}
                 individualLabels={individualLabels}
@@ -454,7 +517,7 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
               />
             )}
 
-            {!query && activeGroup === "lists" && (
+            {mode === "advanced" && !query && activeGroup === "lists" && (
               <ListsEditor
                 definitions={listDefinitions}
                 drafts={listDrafts}
@@ -469,7 +532,7 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
             )}
           </div>
 
-          <section className="preview-panel" aria-labelledby="preview-title" data-compact={previewHeight < 220} style={{ height: previewHeight }}>
+          <section className="preview-panel" aria-labelledby="preview-title" data-compact={previewHeight < 220} ref={previewPanelRef} style={{ height: previewHeight }} tabIndex={-1}>
             <div
               aria-label={t("profiles.previewResize")}
               aria-orientation="horizontal"

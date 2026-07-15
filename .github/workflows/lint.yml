@@ -13,13 +13,13 @@ jobs:
   frontend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.7.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: control-center/pnpm-lock.yaml
       - working-directory: control-center
@@ -43,7 +43,7 @@ jobs:
       run:
         working-directory: control-center/src-tauri
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -57,8 +57,8 @@ jobs:
   cpp:
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
-      - uses: microsoft/setup-msbuild@v2
+      - uses: actions/checkout@v7
+      - uses: microsoft/setup-msbuild@v3
       - name: Enforce style only on new public helper code
         shell: pwsh
         run: scripts/ci/Test-NewCppStyle.ps1
@@ -72,7 +72,7 @@ jobs:
   legacy-core-policy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Verify lint exception boundary
         shell: bash
         run: |

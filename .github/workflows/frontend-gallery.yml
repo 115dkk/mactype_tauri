@@ -14,13 +14,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.7.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: control-center/pnpm-lock.yaml
       - name: Install
@@ -57,7 +57,7 @@ jobs:
               --output-path="../artifacts/frontend-gallery/lighthouse-$run.json"
           done
           node ../scripts/ci/Assert-Lighthouse.mjs ../artifacts/frontend-gallery/lighthouse-*.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: frontend-window-gallery

@@ -15,12 +15,12 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: microsoft/setup-msbuild@v2
+      - uses: actions/checkout@v7
+      - uses: microsoft/setup-msbuild@v3
       - name: Build official dependencies and MacType x86/x64 core
         shell: pwsh
         run: .github/scripts/Build-LegacyCore.ps1
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: mactype-legacy-core
           path: artifacts/legacy-core
@@ -31,18 +31,18 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.7.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: control-center/pnpm-lock.yaml
       - uses: dtolnay/rust-toolchain@stable
-      - uses: microsoft/setup-msbuild@v2
-      - uses: actions/download-artifact@v4
+      - uses: microsoft/setup-msbuild@v3
+      - uses: actions/download-artifact@v8
         with:
           name: mactype-legacy-core
           path: artifacts/legacy-core
@@ -96,7 +96,7 @@ jobs:
             -LiteralPath 'artifacts/installer/MacType Control Center.exe', 'artifacts/installer/SHA256SUMS.txt' `
             -DestinationPath 'artifacts/installer/MacType-Control-Center.zip' `
             -Force
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: mactype-control-center-windows
           path: |
@@ -115,12 +115,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: mactype-control-center-windows
           path: release
       - name: Publish automatic pre-release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: control-center-ci-${{ github.run_number }}
           target_commitish: ${{ github.sha }}

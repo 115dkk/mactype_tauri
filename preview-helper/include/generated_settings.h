@@ -27,4 +27,4 @@ inline constexpr std::array<SettingDefinition, 20> kSettings{{
     {"hint_small_font", 27, false},
     {"max_bitmap", 25, false},
 }};
-}  // namespace mactype
+}

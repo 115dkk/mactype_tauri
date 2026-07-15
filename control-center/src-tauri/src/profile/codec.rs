@@ -82,6 +82,9 @@ fn legacy_score(text: &str, encoding: TextEncoding) -> i64 {
     let mut traditional = 0_i64;
     const SIMPLIFIED: &str = "简体汉语配置设置默认启用关闭字体进程缓存试验权重过滤阴影";
     const TRADITIONAL: &str = "簡體漢語設定預設啟用關閉字型程序快取試驗權重過濾陰影";
+    // Let GB18030 win ambiguous ties: it covers legacy GBK/CP936, while Big5
+    // accepts some of the same byte streams through permissive mappings.
+    const GB18030_AMBIGUITY_BIAS: i64 = 75;
     for character in text.chars() {
         if !character.is_ascii() {
             non_ascii += 1;
@@ -108,11 +111,7 @@ fn legacy_score(text: &str, encoding: TextEncoding) -> i64 {
             TextEncoding::Gb18030 => {
                 han * 3 + simplified * 18 - traditional * 3 - hangul * 12 - kana * 12
                     + i64::from(han > 0) * 10
-                    // GB18030 is the backward-compatible superset of the
-                    // CP936/GBK encoding used by legacy MacType profiles.
-                    // Prefer it when permissive Big5 mappings make an
-                    // otherwise ambiguous byte stream score nearly the same.
-                    + 75
+                    + GB18030_AMBIGUITY_BIAS
             }
             TextEncoding::Big5 => {
                 han * 3 + traditional * 18 - simplified * 3 - hangul * 12 - kana * 12
@@ -120,9 +119,8 @@ fn legacy_score(text: &str, encoding: TextEncoding) -> i64 {
             }
             TextEncoding::ShiftJis => kana * 20 + han * 2 - hangul * 12 + i64::from(kana > 0) * 10,
             TextEncoding::EucKr => hangul * 20 + han - kana * 12 + i64::from(hangul > 0) * 10,
-            // ASCII is identical in every compatible candidate and therefore
-            // is not evidence for Windows-1252. Decoding a CJK profile as
-            // Windows-1252 instead produces non-ASCII mojibake.
+            // Never reward ASCII as Windows-1252 evidence: every candidate
+            // shares it, while Windows-1252 turns CJK bytes into mojibake.
             TextEncoding::Windows1252 => -non_ascii * 8 - (hangul + kana + han) * 8,
             TextEncoding::Utf8 | TextEncoding::Utf16Le | TextEncoding::Utf16Be => 0,
         }

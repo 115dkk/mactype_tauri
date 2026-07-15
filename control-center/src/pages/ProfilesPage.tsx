@@ -9,7 +9,8 @@ import {
   discardProfileChanges,
   forcePreviewCrashForCi,
   loadInstalledFontFamilies,
-  openDefaultProfile,
+  listProfiles,
+  loadExecutionStatus,
   previewImageUrl,
   reportFrontendFailure,
   renderProfilePreview,
@@ -23,6 +24,7 @@ import {
   undoProfile,
   verifyProfileWorkflowForCi,
 } from "../app/tauri";
+import { openPreferredProfile, rememberProfile } from "../app/profilePreference";
 import { AdvancedSettings } from "./profiles/AdvancedSettings";
 import { IndividualSettings } from "./profiles/IndividualSettings";
 import { ListsEditor } from "./profiles/ListsEditor";
@@ -125,6 +127,7 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
   }, [locale, t]);
 
   const applySnapshot = useCallback((opened: ProfileSnapshot) => {
+    rememberProfile(opened.path);
     setProfile(opened);
     setValues(opened.values);
     setIndividuals(opened.individuals.map((entry) => ({ ...entry, values: [...entry.values] })));
@@ -163,8 +166,8 @@ export function ProfilesPage({ ciSmoke = false, onPreviewReady }: ProfilesPagePr
 
   useEffect(() => {
     let active = true;
-    void currentProfile()
-      .then(async (current) => current ?? await openDefaultProfile())
+    void Promise.all([currentProfile(), listProfiles(), loadExecutionStatus()])
+      .then(([current, available, execution]) => openPreferredProfile(current, available, execution.activeProfile))
       .then((opened) => {
         if (!active) return;
         if (opened) applySnapshot(opened);

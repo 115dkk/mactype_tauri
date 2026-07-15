@@ -27,6 +27,7 @@ const fallbackProfile: ProfileSnapshot = {
   lists: { excludeFonts: ["Raster Fonts"], includeFonts: [], excludeModules: ["fontview.exe"], includeModules: [], unloadDlls: [], excludeSubstitutionModules: [] },
   advanced: { shadow: null, lcdFilterWeight: null, pixelLayout: null, displayAffinity: [], fontSubstitutes: [], infinalityGammaCorrection: [0, 100], infinalityFilterParams: [11, 22, 38, 22, 11] },
 };
+const recentGalleryProfile = { ...fallbackProfile, path: "C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\profiles\\Recent.ini" };
 
 const cloneProfile = (profile: ProfileSnapshot): ProfileSnapshot => structuredClone(profile);
 let galleryProfile = cloneProfile(fallbackProfile);
@@ -188,6 +189,7 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
   },
 
   currentProfile(): Promise<ProfileSnapshot | null> {
+    if (new URLSearchParams(window.location.search).has("fresh")) return Promise.resolve(null);
     return Promise.resolve(cloneProfile(galleryProfile));
   },
 
@@ -200,7 +202,10 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
   },
 
   listProfiles(): Promise<ReadonlyArray<ProfileEntry>> {
-    return Promise.resolve([{ name: "Default", path: fallbackProfile.path }]);
+    return Promise.resolve([
+      { name: "Default", path: fallbackProfile.path },
+      { name: "Recent", path: recentGalleryProfile.path },
+    ]);
   },
 
   openProfile(path: string): Promise<ProfileSnapshot> {

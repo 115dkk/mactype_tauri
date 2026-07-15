@@ -1,6 +1,9 @@
 {
   "app.title": "Centro de control de MacType",
   "app.mainMenu": "Menú principal",
+  "app.windowMinimize": "Minimizar ventana",
+  "app.windowMaximize": "Maximizar o restaurar ventana",
+  "app.windowClose": "Cerrar ventana",
   "app.themeDark": "Tema oscuro",
   "app.themeLight": "Tema claro",
   "app.language": "Idioma de visualización",

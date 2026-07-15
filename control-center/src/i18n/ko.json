@@ -1,6 +1,9 @@
 {
   "app.title": "MacType Control Center",
   "app.mainMenu": "주 메뉴",
+  "app.windowMinimize": "창 최소화",
+  "app.windowMaximize": "창 최대화 또는 복원",
+  "app.windowClose": "창 닫기",
   "app.themeDark": "어두운 테마",
   "app.themeLight": "밝은 테마",
   "app.language": "표시 언어",

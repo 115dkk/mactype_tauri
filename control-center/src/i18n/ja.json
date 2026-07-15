@@ -1,6 +1,9 @@
 {
   "app.title": "MacType コントロールセンター",
   "app.mainMenu": "メインメニュー",
+  "app.windowMinimize": "ウィンドウを最小化",
+  "app.windowMaximize": "ウィンドウを最大化または元に戻す",
+  "app.windowClose": "ウィンドウを閉じる",
   "app.themeDark": "ダークテーマ",
   "app.themeLight": "ライトテーマ",
   "app.language": "表示言語",

@@ -216,17 +216,19 @@ test("overview and diagnostic actions always produce visible results", async ({ 
 test("language setting switches every supported locale and persists", async ({ page }, testInfo) => {
   await page.goto("/?view=overview&gallery=1&lang=ko", { waitUntil: "networkidle" });
   for (const locale of galleryLocales) {
-    await page.locator(".language-control select").selectOption(locale.id);
+    await page.getByTestId("language-picker-trigger").click();
+    await page.locator(`[data-locale-option="${locale.id}"]`).click();
     await expect(page.locator("html")).toHaveAttribute("lang", locale.id);
     await expect(page.locator("html")).toHaveAttribute("dir", locale.direction);
     await expect(page.getByRole("heading", { level: 1, name: galleryViews[0].title[locale.id] })).toBeVisible();
   }
 
-  await page.locator(".language-control select").selectOption("en");
+  await page.getByTestId("language-picker-trigger").click();
+  await page.locator('[data-locale-option="en"]').click();
   await expect(page.getByRole("button", { name: "Dark theme" })).toBeVisible();
 
   await page.goto("/?view=overview&gallery=1", { waitUntil: "networkidle" });
-  await expect(page.getByRole("combobox", { name: "Display language" })).toHaveValue("en");
+  await expect(page.getByTestId("language-picker-trigger")).toHaveText("English");
   await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-language-en.png`), fullPage: true });
 });
@@ -266,6 +268,42 @@ test("sidebar preferences stay at the bottom and yield to scrolling when height 
   await page.screenshot({ path: path.join(galleryRoot, "desktop-sidebar-preferences-tight.png") });
   await page.getByRole("button", { name: "어두운 테마" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await page.getByRole("combobox", { name: "표시 언어" }).selectOption("en");
+  await page.getByTestId("language-picker-trigger").click();
+  await page.locator('[data-locale-option="en"]').click();
   await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+});
+
+test("dark language menu and custom titlebar follow the application theme", async ({ page }, testInfo) => {
+  await page.goto("/?view=overview&gallery=1&lang=ko", { waitUntil: "networkidle" });
+  await expect(page.getByRole("button", { name: "창 최소화" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "창 최대화 또는 복원" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "창 닫기" })).toBeVisible();
+
+  await page.getByRole("button", { name: "어두운 테마" }).click();
+  await page.getByTestId("language-picker-trigger").click();
+  const menu = page.getByRole("listbox", { name: "표시 언어" });
+  await expect(menu).toBeVisible();
+  const themeColors = await page.evaluate(() => ({
+    menu: getComputedStyle(document.querySelector<HTMLElement>(".language-menu")!).backgroundColor,
+    titlebar: getComputedStyle(document.querySelector<HTMLElement>(".window-titlebar")!).backgroundColor,
+  }));
+  expect(themeColors).toEqual({ menu: "rgb(25, 32, 39)", titlebar: "rgb(25, 32, 39)" });
+  expect(await menu.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-dark-language-titlebar.png`), fullPage: true });
+});
+
+test("settings files prefer the most recently worked profile", async ({ page }) => {
+  const recent = "C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\profiles\\Recent.ini";
+  await page.addInitScript(({ key, value }) => window.localStorage.setItem(key, value), {
+    key: "mactype-control-center.recent-profile",
+    value: recent,
+  });
+  await page.goto("/?view=files&gallery=1&lang=ko&fresh=1", { waitUntil: "networkidle" });
+  await expect(page.locator(".file-selection-grid select")).toHaveValue(recent);
+});
+
+test("settings files fall back to the applied profile", async ({ page }) => {
+  const applied = "C:\\Program Files\\MacType\\ini\\Default.ini";
+  await page.goto("/?view=files&gallery=1&lang=ko&fresh=1", { waitUntil: "networkidle" });
+  await expect(page.locator(".file-selection-grid select")).toHaveValue(applied);
 });

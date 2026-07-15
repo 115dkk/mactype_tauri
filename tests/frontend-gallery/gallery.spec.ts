@@ -129,6 +129,50 @@ test("profile editor categories and collections remain interactive", async ({ pa
   expect(failures, failures.join("\n")).toEqual([]);
 });
 
+test("settings navigation separates Wizard and Tuner without duplicating the editor", async ({ page }, testInfo) => {
+  await page.goto("/?view=overview&gallery=1&lang=ko", { waitUntil: "networkidle" });
+
+  const settingsToggle = page.getByRole("button", { name: "설정", exact: true });
+  await expect(settingsToggle).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("button", { name: /설정 파일/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /빠른 설정.*Wizard/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /고급 조정.*Tuner/ })).toBeVisible();
+
+  await page.getByRole("button", { name: /빠른 설정.*Wizard/ }).click();
+  await expect(page.locator(".profile-page")).toHaveAttribute("data-mode", "quick");
+  await expect(page.getByRole("heading", { level: 1, name: "빠른 설정" })).toBeVisible();
+  await expect(page.locator(".settings-index button")).toHaveCount(7);
+  await expect(page.locator(".settings-step")).toHaveCount(7);
+  await expect(page.locator(".settings-index").getByRole("button", { name: "고급·실험" })).toHaveCount(0);
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-wizard-rendering-ko.png`), fullPage: true });
+  await expect(page.getByRole("button", { name: "이전" })).toHaveCount(0);
+  await page.getByRole("button", { name: "진행" }).click();
+  await expect(page.getByRole("heading", { level: 2, name: "글꼴 품질" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "이전" })).toBeVisible();
+  await page.getByRole("button", { name: "현재 단계 건너뛰기" }).click();
+  await expect(page.getByRole("heading", { level: 2, name: "힌팅" })).toBeVisible();
+  await page.locator(".settings-index").getByRole("button", { name: "적용 및 미리보기" }).click();
+  await expect(page.getByRole("button", { name: "진행" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "MacType에 적용" })).toBeVisible();
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-wizard-apply-ko.png`), fullPage: true });
+
+  await page.getByRole("button", { name: "전체 고급 설정" }).click();
+  await expect(page.locator(".profile-page")).toHaveAttribute("data-mode", "advanced");
+  await expect(page.getByRole("heading", { level: 2, name: "고급·실험" })).toBeVisible();
+
+  await page.getByRole("button", { name: /고급 조정.*Tuner/ }).click();
+  await expect(page.locator(".profile-page")).toHaveAttribute("data-mode", "advanced");
+  await expect(page.getByRole("heading", { level: 1, name: "고급 조정" })).toBeVisible();
+  await expect(page.locator(".settings-index button")).toHaveCount(6);
+  await expect(page.getByRole("checkbox", { name: "고급 설정 표시" })).toBeVisible();
+
+  await settingsToggle.click();
+  await expect(settingsToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator("#settings-navigation")).toHaveCount(0);
+  await settingsToggle.click();
+  await expect(page.locator("#settings-navigation")).toBeVisible();
+});
+
 test("settings files support import, save as, export, reveal, and apply without typing a path", async ({ page }) => {
   const failures: string[] = [];
   page.on("console", (message) => {

@@ -1,9 +1,8 @@
-import { ArrowRight, Plus, Trash2 } from "lucide-react";
 import type { AdvancedProfile } from "../../app/model";
 import type { SettingDefinition } from "../../generated/settings";
 import type { I18nValue } from "../../i18n/i18n";
 import { SchemaSettings } from "./SchemaSettings";
-import { splitSubstitution } from "./profileEditorUtils";
+import { FontSubstitutionEditor } from "./FontSubstitutionEditor";
 
 interface AdvancedSettingsProps {
   settings: ReadonlyArray<SettingDefinition>;
@@ -35,29 +34,6 @@ export function AdvancedSettings({
   onAdvancedCommit,
   t,
 }: AdvancedSettingsProps) {
-  const updateSubstitution = (index: number, key: "source" | "replacement", value: string) => {
-    const substitutions = advanced.fontSubstitutes.map((mapping, currentIndex) => {
-      if (currentIndex !== index) return mapping;
-      const pair = splitSubstitution(mapping);
-      return `${key === "source" ? value : pair.source}=${key === "replacement" ? value : pair.replacement}`;
-    });
-    onAdvancedCommit({ ...advanced, fontSubstitutes: substitutions });
-  };
-
-  const addSubstitution = () => {
-    if (fontFamilies.length < 2) return;
-    const used = new Set(advanced.fontSubstitutes.map((mapping) => splitSubstitution(mapping).source.toLocaleLowerCase()));
-    const source = fontFamilies.find((font) => !used.has(font.toLocaleLowerCase())) ?? fontFamilies[0];
-    const replacement = fontFamilies.find((font) => font !== source && font === "Segoe UI")
-      ?? fontFamilies.find((font) => font !== source)
-      ?? source;
-    onAdvancedCommit({ ...advanced, fontSubstitutes: [...advanced.fontSubstitutes, `${source}=${replacement}`] });
-  };
-
-  const removeSubstitution = (index: number) => {
-    onAdvancedCommit({ ...advanced, fontSubstitutes: advanced.fontSubstitutes.filter((_, currentIndex) => currentIndex !== index) });
-  };
-
   return (
     <>
       <SchemaSettings dirtyKeys={dirtyKeys} onChange={onSettingChange} settings={settings} t={t} values={values} />
@@ -80,24 +56,7 @@ export function AdvancedSettings({
         <fieldset className="advanced-text-fields">
           <legend>{t("advanced.routing")}</legend>
           <label><span>{t("advanced.displayAffinity")}</span><small>{t("advanced.displayAffinityHelp")}</small><input onChange={(event) => onAdvancedChange({ ...advanced, displayAffinity: event.target.value.split(",").map((part) => Number(part.trim())).filter(Number.isInteger) })} onBlur={() => onAdvancedCommit(advanced)} type="text" value={advanced.displayAffinity.join(", ")} /></label>
-          <div className="font-substitution-editor">
-            <strong>{t("advanced.fontSubstitutes")}</strong>
-            <small>{t("advanced.fontSubstitutesHelp")}</small>
-            <div className="font-substitution-list">
-              {advanced.fontSubstitutes.map((mapping, index) => {
-                const pair = splitSubstitution(mapping);
-                return (
-                  <div className="font-substitution-row" key={`${mapping}-${index}`}>
-                    <label><span className="sr-only">{t("profiles.sourceFont")}</span><select aria-label={t("profiles.sourceFont")} onChange={(event) => updateSubstitution(index, "source", event.target.value)} value={pair.source}>{fontFamilies.map((font) => <option key={font} value={font}>{fontOptionLabel(font)}</option>)}</select></label>
-                    <ArrowRight aria-hidden="true" size={16} />
-                    <label><span className="sr-only">{t("profiles.replacementFont")}</span><select aria-label={t("profiles.replacementFont")} onChange={(event) => updateSubstitution(index, "replacement", event.target.value)} value={pair.replacement}>{fontFamilies.map((font) => <option key={font} value={font}>{fontOptionLabel(font)}</option>)}</select></label>
-                    <button className="icon-button" aria-label={t("profiles.remove", { name: pair.source })} onClick={() => removeSubstitution(index)} type="button"><Trash2 aria-hidden="true" size={15} /></button>
-                  </div>
-                );
-              })}
-            </div>
-            <button className="button secondary font-add-button" disabled={fontFamilies.length < 2} onClick={addSubstitution} type="button"><Plus aria-hidden="true" size={16} /> {t("profiles.addSubstitution")}</button>
-          </div>
+          <FontSubstitutionEditor advanced={advanced} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} onCommit={onAdvancedCommit} t={t} />
         </fieldset>
         <fieldset>
           <legend>Infinality</legend>

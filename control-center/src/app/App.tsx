@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useReducer } from "react";
-import { Activity, FileCog, FolderCog, Home, Moon, PlayCircle, Sun } from "lucide-react";
+import { Activity, ChevronDown, FileCog, Home, Moon, PlayCircle, Settings2, SlidersHorizontal, Sparkles, Sun } from "lucide-react";
 import { DiagnosticsPage } from "../pages/DiagnosticsPage";
 import { OverviewPage } from "../pages/OverviewPage";
 import { ProfilesPage } from "../pages/ProfilesPage";
@@ -13,6 +13,8 @@ import { WindowTitleBar } from "../components/WindowTitleBar";
 
 interface State {
   view: ViewId;
+  profileMode: ProfileMode;
+  settingsExpanded: boolean;
   theme: "light" | "dark";
   status: InstallationStatus;
   ready: boolean;
@@ -20,8 +22,11 @@ interface State {
   trayStart: boolean;
 }
 
+type ProfileMode = "quick" | "advanced";
+
 type Action =
-  | { type: "navigate"; view: ViewId }
+  | { type: "navigate"; view: ViewId; profileMode?: ProfileMode }
+  | { type: "toggle-settings" }
   | { type: "toggle-theme" }
   | { type: "launched"; view: ViewId; ciSmoke: boolean; trayStart: boolean }
   | { type: "status"; status: InstallationStatus };
@@ -29,7 +34,14 @@ type Action =
 function reducer(state: State, action: Action): State {
   switch (action.type) {
     case "navigate":
-      return { ...state, view: action.view };
+      return {
+        ...state,
+        view: action.view,
+        profileMode: action.profileMode ?? state.profileMode,
+        settingsExpanded: action.view === "files" || action.view === "profiles" ? true : state.settingsExpanded,
+      };
+    case "toggle-settings":
+      return { ...state, settingsExpanded: !state.settingsExpanded };
     case "toggle-theme":
       return { ...state, theme: state.theme === "light" ? "dark" : "light" };
     case "launched":
@@ -39,13 +51,18 @@ function reducer(state: State, action: Action): State {
   }
 }
 
-const iconByView = { overview: Home, files: FileCog, profiles: FolderCog, execution: PlayCircle, diagnostics: Activity } as const;
-const navigation: ReadonlyArray<ViewId> = ["overview", "files", "profiles", "execution", "diagnostics"];
+const primaryNavigation = [
+  { view: "overview", icon: Home },
+  { view: "execution", icon: PlayCircle },
+  { view: "diagnostics", icon: Activity },
+] as const;
 
 export function App() {
   const { t } = useI18n();
   const [state, dispatch] = useReducer(reducer, {
     view: "overview",
+    profileMode: "advanced",
+    settingsExpanded: true,
     theme: "light",
     status: fallbackStatus,
     ready: false,
@@ -69,6 +86,7 @@ export function App() {
     if (!state.ready) return;
     document.documentElement.dataset.theme = state.theme;
     document.body.dataset.view = state.view;
+    document.body.dataset.profileMode = state.profileMode;
     document.body.dataset.rendered = "true";
     if (state.ciSmoke && state.trayStart) {
       void verifyTrayModeForCi()
@@ -77,11 +95,11 @@ export function App() {
     } else if (!state.ciSmoke || (state.view !== "profiles" && state.view !== "execution")) {
       void reportFrontendReady(state.view);
     }
-  }, [state.ciSmoke, state.ready, state.theme, state.trayStart, state.view]);
+  }, [state.ciSmoke, state.profileMode, state.ready, state.theme, state.trayStart, state.view]);
 
   const page = useMemo(() => {
     if (state.view === "files") return <FileSettingsPage />;
-    if (state.view === "profiles") return <ProfilesPage ciSmoke={state.ciSmoke} onPreviewReady={() => void reportFrontendReady("profiles")} />;
+    if (state.view === "profiles") return <ProfilesPage ciSmoke={state.ciSmoke} mode={state.profileMode} onModeChange={(profileMode) => dispatch({ type: "navigate", view: "profiles", profileMode })} onPreviewReady={() => void reportFrontendReady("profiles")} />;
     if (state.view === "execution") return <ExecutionPage ciSmoke={state.ciSmoke} onReady={() => void reportFrontendReady("execution")} />;
     if (state.view === "diagnostics") return <DiagnosticsPage status={state.status} />;
     return <OverviewPage
@@ -98,7 +116,9 @@ export function App() {
         return status;
       }}
     />;
-  }, [state.ciSmoke, state.status, state.view]);
+  }, [state.ciSmoke, state.profileMode, state.status, state.view]);
+
+  const settingsSelected = state.view === "files" || state.view === "profiles";
 
   return (
     <>
@@ -113,21 +133,51 @@ export function App() {
           </div>
         </div>
         <nav>
-          {navigation.map((view) => {
-            const Icon = iconByView[view];
-            return (
+          {primaryNavigation.map(({ view, icon: Icon }, index) => (
+            <span className="primary-nav-slot" key={view}>
+              {index === 1 && (
+                <div className="nav-group">
+                  <button
+                    aria-controls="settings-navigation"
+                    aria-expanded={state.settingsExpanded}
+                    className="nav-item nav-group-toggle"
+                    data-selected={settingsSelected}
+                    onClick={() => dispatch({ type: "toggle-settings" })}
+                    type="button"
+                  >
+                    <Settings2 aria-hidden="true" size={18} strokeWidth={1.8} />
+                    <span>{t("nav.settings")}</span>
+                    <ChevronDown aria-hidden="true" className="nav-group-chevron" size={16} />
+                  </button>
+                  {state.settingsExpanded && (
+                    <div className="nav-submenu" id="settings-navigation">
+                      <button className="nav-item nav-subitem" data-selected={state.view === "files"} onClick={() => dispatch({ type: "navigate", view: "files" })} type="button">
+                        <FileCog aria-hidden="true" size={17} strokeWidth={1.8} />
+                        <span>{t("nav.files")}</span>
+                      </button>
+                      <button aria-label={`${t("nav.quickSetup")} (Wizard)`} className="nav-item nav-subitem" data-selected={state.view === "profiles" && state.profileMode === "quick"} onClick={() => dispatch({ type: "navigate", view: "profiles", profileMode: "quick" })} type="button">
+                        <Sparkles aria-hidden="true" size={17} strokeWidth={1.8} />
+                        <span>{t("nav.quickSetup")}<small>Wizard</small></span>
+                      </button>
+                      <button aria-label={`${t("nav.advancedTuning")} (Tuner)`} className="nav-item nav-subitem" data-selected={state.view === "profiles" && state.profileMode === "advanced"} onClick={() => dispatch({ type: "navigate", view: "profiles", profileMode: "advanced" })} type="button">
+                        <SlidersHorizontal aria-hidden="true" size={17} strokeWidth={1.8} />
+                        <span>{t("nav.advancedTuning")}<small>Tuner</small></span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
               <button
                 className="nav-item"
                 data-selected={state.view === view}
-                key={view}
                 onClick={() => dispatch({ type: "navigate", view })}
                 type="button"
               >
                 <Icon aria-hidden="true" size={18} strokeWidth={1.8} />
                 <span>{t(`nav.${view}`)}</span>
               </button>
-            );
-          })}
+            </span>
+          ))}
         </nav>
         <div className="navigation-preferences">
           <LanguagePicker />

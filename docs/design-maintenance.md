@@ -19,12 +19,12 @@ Those paths define native behavior, IPC, packaging, or the MacType setting model
 | --- | --- | --- |
 | Colors, spacing, control height, radii, animation timing, navigation width | `control-center/src/styles/tokens.css` | Both `:root` and `:root[data-theme="dark"]` |
 | Shared controls, cards, grids, page spacing, responsive behavior, RTL rules | `control-center/src/styles/app.css` | The mobile and tablet media queries at the end of the file |
-| Application shell, navigation order, navigation icons, theme switch | `control-center/src/app/App.tsx` | `ViewId` in `control-center/src/app/model.ts` when adding or removing a page |
+| Application shell, navigation order, expandable Settings group, navigation icons, theme switch | `control-center/src/app/App.tsx` | `.nav-group`, `.nav-submenu`, and `.nav-subitem` in `app.css` |
 | Custom title bar layout, icon, and window-control icons | `control-center/src/components/WindowTitleBar.tsx` | `.window-titlebar`, `.window-title`, and `.window-controls` in `app.css` |
 | Language picker layout, option order, and scrollable menu | `control-center/src/components/LanguagePicker.tsx` and `control-center/src/i18n/i18n.ts` | `.language-*` selectors in `app.css`, including dark and mobile states |
 | Overview layout | `control-center/src/pages/OverviewPage.tsx` | Overview interaction assertions in `tests/frontend-gallery/gallery.spec.ts` |
 | Settings-file and migration layout | `control-center/src/pages/FileSettingsPage.tsx` | `.legacy-import-*` and `.file-*` selectors in `app.css` |
-| Profile editor shell and preview placement | `control-center/src/pages/ProfilesPage.tsx` | `control-center/src/pages/profiles/` for individual editor sections |
+| Profile editor shell, Wizard/Tuner mode, quick actions, and preview placement | `control-center/src/pages/ProfilesPage.tsx` | `WizardSettings.tsx`, `wizardModel.ts`, and `.wizard-*` selectors in `app.css` |
 | Basic, shape, and LCD setting rows | `control-center/src/pages/profiles/SchemaSettings.tsx` | Shared `.setting-row`, `.range-control`, and `.number-control` selectors |
 | Advanced, per-font, and list editors | `control-center/src/pages/profiles/AdvancedSettings.tsx`, `IndividualSettings.tsx`, and `ListsEditor.tsx` | Font picker and collection selectors in `app.css` |
 | Execution and service-control layout | `control-center/src/pages/ExecutionPage.tsx` | `.manual-*`, `.service-*`, `.system-injection-*`, and `.system-mode-*` selectors |
@@ -75,6 +75,23 @@ The visible MacType on/off card is ordinary React and CSS. Change its markup and
 
 Keep the existing adapter calls behind the buttons. `systemInjectionActive` is the native truth from the verified service state, while `systemModesSupported` decides whether activation is safe to offer. Renaming, recoloring, or rearranging the card must not duplicate those decisions in the component. A new service action or a different safety policy is native behavior and should be reviewed separately from the design change.
 
+### Change Settings, Wizard, or Tuner navigation
+
+The expandable Settings group is entirely frontend-owned. Change its order, icons, labels, or nesting in `App.tsx`; change the hierarchy background, indentation, chevron, and mobile horizontal layout with `.nav-group*` and `.nav-sub*` in `app.css`. The three child entries intentionally reuse the existing `files` and `profiles` views, so ordinary menu redesign does not require a new `ViewId` or Rust launch parser change.
+
+Wizard and Tuner are two presentations of the same profile state, not separate native editors. `ProfilesPage.tsx` owns the selected presentation and shared save, apply, undo, preview, and profile-loading behavior. Keep those operations shared when changing either presentation.
+
+- Change the seven Wizard labels, order, and INI-setting membership in `control-center/src/pages/profiles/wizardModel.ts`.
+- Change Wizard step composition, the previous/continue row, and the final preview/save/apply card in `WizardSettings.tsx`.
+- Change the always-available quick-action placement in `ProfilesPage.tsx` and `.wizard-quick-actions`.
+- Change Tuner section composition in the existing editor components under `control-center/src/pages/profiles/`.
+- Change the shared font-substitution UI in `FontSubstitutionEditor.tsx`; both Wizard and Tuner consume it.
+- Change visual hierarchy, fixed progress controls, and compact Wizard preview height with `.wizard-*` and `.profile-page[data-mode="quick"]` in `app.css`.
+
+Keep Wizard step buttons directly selectable. The bottom navigation must show only Continue on the first step, both controls in the middle, and only Previous on the final step. Keep preview, font substitution, all advanced settings, profile save, restore defaults, Tuner, and skip available from every Wizard step. These are UX invariants covered by `tests/frontend-gallery/gallery.spec.ts`.
+
+All of the above is React, TypeScript, CSS, and locale JSON. Rust is only needed if a redesign introduces a genuinely new native operation or data source.
+
 ### Add a navigation page without native behavior
 
 For a frontend-only page:
@@ -115,6 +132,8 @@ http://localhost:1420/?gallery=1&view=files&lang=en
 http://localhost:1420/?gallery=1&view=profiles&lang=zh-CN
 http://localhost:1420/?gallery=1&view=execution&lang=ar
 ```
+
+The `profiles` URL opens Tuner, matching native launch behavior. To review Wizard, open that URL and choose **Settings → Quick setup (Wizard)** in the sidebar. Both presentations run against the same browser-gallery profile state.
 
 Use the in-app theme button to inspect dark mode. Browser mode is for design and interaction review; native Windows behavior remains behind the runtime adapter.
 

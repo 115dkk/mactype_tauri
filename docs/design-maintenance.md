@@ -27,7 +27,7 @@ Those paths define native behavior, IPC, packaging, or the MacType setting model
 | Profile editor shell and preview placement | `control-center/src/pages/ProfilesPage.tsx` | `control-center/src/pages/profiles/` for individual editor sections |
 | Basic, shape, and LCD setting rows | `control-center/src/pages/profiles/SchemaSettings.tsx` | Shared `.setting-row`, `.range-control`, and `.number-control` selectors |
 | Advanced, per-font, and list editors | `control-center/src/pages/profiles/AdvancedSettings.tsx`, `IndividualSettings.tsx`, and `ListsEditor.tsx` | Font picker and collection selectors in `app.css` |
-| Execution and service-control layout | `control-center/src/pages/ExecutionPage.tsx` | `.manual-*`, `.service-*`, and `.system-mode-*` selectors |
+| Execution and service-control layout | `control-center/src/pages/ExecutionPage.tsx` | `.manual-*`, `.service-*`, `.system-injection-*`, and `.system-mode-*` selectors |
 | Diagnostics layout | `control-center/src/pages/DiagnosticsPage.tsx` | `.diagnostic-*` and `.log-view` selectors |
 | User-facing text | Every JSON catalog under `control-center/src/i18n/` | All ten catalogs must contain the same keys and placeholders |
 | Locale order, language detection, RTL selection | `control-center/src/i18n/i18n.ts` and `I18nProvider.tsx` | `tests/frontend-gallery/windows.ts` |
@@ -68,6 +68,12 @@ The visible title bar is ordinary React and CSS. Change its markup, logo, text, 
 Keep `data-tauri-drag-region` on the non-interactive title area so the real window remains draggable. Keep minimize, maximize/restore, and close as separate buttons with translated `aria-label` values. `WindowTitleBar.tsx` calls the narrow Tauri window API only after detecting the native runtime, so the same component remains visible and safe in browser gallery mode.
 
 The native frame is disabled once in `control-center/src-tauri/tauri.conf.json`, and the matching window-control permissions live in `control-center/src-tauri/capabilities/default.json`. Treat those as platform wiring, not design files. Ordinary title-bar redesign must leave them alone. Only restoring the operating-system title bar or adding a new native window operation should require a separate native configuration change.
+
+### Change the system-application status card
+
+The visible MacType on/off card is ordinary React and CSS. Change its markup and Lucide icons in `ExecutionPage.tsx`; change its spacing, colors, responsive stacking, and 40-pixel action target in the `.system-injection-*` rules in `app.css`; and change its copy in every locale catalog. Browser gallery mode supplies both the service status and the activation result, so these visual changes do not require Rust.
+
+Keep the existing adapter calls behind the buttons. `systemInjectionActive` is the native truth from the verified service state, while `systemModesSupported` decides whether activation is safe to offer. Renaming, recoloring, or rearranging the card must not duplicate those decisions in the component. A new service action or a different safety policy is native behavior and should be reviewed separately from the design change.
 
 ### Add a navigation page without native behavior
 

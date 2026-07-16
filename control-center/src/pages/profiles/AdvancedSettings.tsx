@@ -12,6 +12,7 @@ interface AdvancedSettingsProps {
   fontFamilies: ReadonlyArray<string>;
   fontOptionLabel: (font: string) => string;
   onSettingChange: (settingId: string, value: number) => void;
+  onSettingPreview: (settingId: string, value: number) => void;
   onAdvancedChange: (profile: AdvancedProfile) => void;
   onAdvancedCommit: (profile: AdvancedProfile) => void;
   t: I18nValue["t"];
@@ -30,13 +31,14 @@ export function AdvancedSettings({
   fontFamilies,
   fontOptionLabel,
   onSettingChange,
+  onSettingPreview,
   onAdvancedChange,
   onAdvancedCommit,
   t,
 }: AdvancedSettingsProps) {
   return (
     <>
-      <SchemaSettings dirtyKeys={dirtyKeys} onChange={onSettingChange} settings={settings} t={t} values={values} />
+      <SchemaSettings dirtyKeys={dirtyKeys} onChange={onSettingChange} onPreviewChange={onSettingPreview} settings={settings} t={t} values={values} />
       <div className="advanced-editor">
         <fieldset>
           <legend>{t("advanced.shadow")}</legend><p>{t("advanced.shadowHelp")}</p>

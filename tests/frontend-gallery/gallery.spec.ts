@@ -176,6 +176,67 @@ test("settings navigation separates Wizard and Tuner without duplicating the edi
   await expect(page.locator("#settings-navigation")).toBeVisible();
 });
 
+test("slider drags and exact number edits create one undo revision per interaction", async ({ page }, testInfo) => {
+  await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "글자 모양", exact: true }).click();
+
+  const weightRow = page.locator(".setting-row").filter({ hasText: "일반 글자 굵기" });
+  const weightSlider = weightRow.locator('input[type="range"]');
+  const exactWeight = weightRow.locator('input[type="number"]');
+  const undo = page.getByRole("button", { name: "되돌리기", exact: true });
+  const redo = page.getByRole("button", { name: "다시 하기", exact: true });
+  await expect(weightSlider).toHaveCount(1);
+  await expect(exactWeight).toHaveValue("0");
+  const shapeLayout = await page.locator(".settings-form").evaluate((element) => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }));
+  expect(shapeLayout.scrollWidth, "slider rows must fit without hidden horizontal overflow").toBeLessThanOrEqual(shapeLayout.clientWidth);
+  const resetBounds = await weightRow.getByRole("button").boundingBox();
+  const formBounds = await page.locator(".settings-form").boundingBox();
+  if (!resetBounds || !formBounds) throw new Error("Slider reset button and settings form must be visible");
+  expect(resetBounds.x + resetBounds.width, "slider reset button must remain inside the visible settings form").toBeLessThanOrEqual(formBounds.x + formBounds.width + 1);
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-profile-exact-input-ko.png`), fullPage: true });
+
+  const sliderBox = await weightSlider.boundingBox();
+  if (!sliderBox) throw new Error("Normal weight slider must be visible");
+  const y = sliderBox.y + sliderBox.height / 2;
+  await page.mouse.move(sliderBox.x + sliderBox.width / 2, y);
+  await page.mouse.down();
+  await page.mouse.move(sliderBox.x + sliderBox.width * 0.75, y, { steps: 12 });
+  await page.mouse.up();
+
+  const draggedValue = await exactWeight.inputValue();
+  expect(Number(draggedValue)).toBeGreaterThan(0);
+  await undo.click();
+  await expect(exactWeight).toHaveValue("0");
+  await redo.click();
+  await expect(exactWeight).toHaveValue(draggedValue);
+
+  await exactWeight.focus();
+  await exactWeight.fill("6");
+  await exactWeight.fill("64");
+  await exactWeight.press("Tab");
+  await expect(exactWeight).toHaveValue("64");
+  await undo.click();
+  await expect(exactWeight).toHaveValue(draggedValue);
+
+  await exactWeight.focus();
+  await exactWeight.fill("6");
+  await exactWeight.fill("12");
+  await undo.click();
+  await expect(exactWeight).toHaveValue(draggedValue);
+
+  await page.getByRole("button", { name: "고급·실험", exact: true }).click();
+  await page.getByRole("checkbox", { name: "고급 설정 표시" }).check();
+  const cacheRow = page.locator(".setting-row").filter({ hasText: "CacheMaxFaces" });
+  const cacheValue = cacheRow.locator('input[type="number"]');
+  await expect(cacheRow.locator('input[type="range"]')).toHaveCount(0);
+  await expect(cacheValue).toHaveValue("64");
+  await cacheValue.fill("128");
+  await cacheValue.fill("256");
+  await cacheValue.press("Enter");
+  await undo.click();
+  await expect(cacheValue).toHaveValue("64");
+});
+
 test("settings files support import, save as, export, reveal, and apply without typing a path", async ({ page }) => {
   const failures: string[] = [];
   page.on("console", (message) => {

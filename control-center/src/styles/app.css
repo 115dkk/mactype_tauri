@@ -136,14 +136,14 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .setting-row p { margin-top: var(--space-1); color: var(--color-muted); font-size: 12px; }
 .dirty-mark { margin-left: var(--space-2); color: var(--color-primary); font-size: 12px; font-weight: 400; }
 [dir="rtl"] .dirty-mark { margin-right: var(--space-2); margin-left: 0; }
-.range-control { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) 48px var(--control-height); align-items: center; gap: var(--space-3); }
+.range-control { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) 72px var(--control-height); align-items: center; gap: var(--space-3); }
 .range-control > * { min-width: 0; }
-.range-control select { width: 100%; padding-inline: var(--space-2); }
+.range-control select, .range-control input[type="range"], .range-control input[type="number"] { width: 100%; }
+.range-control select, .range-control input[type="number"] { padding-inline: var(--space-2); }
+.range-control input[type="number"] { text-align: right; font-variant-numeric: tabular-nums; }
+.range-control.number-control, .range-control.discrete-control { grid-template-columns: minmax(0, 1fr) var(--control-height); }
 .switch-control { display: flex; align-items: center; gap: var(--space-2); font-weight: 400 !important; }
-.range-control output { overflow: hidden; padding: var(--space-1) var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface); text-align: right; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.number-control { display: grid; grid-template-columns: 88px 1fr; align-items: center; gap: var(--space-2); }
-.number-control input, .setting-row select { width: 100%; padding: 0 var(--space-2); }
-.number-control span { color: var(--color-muted); font-size: 12px; }
+.setting-row select { width: 100%; padding: 0 var(--space-2); }
 .preview-panel { display: grid; position: relative; grid-template-rows: 16px auto auto minmax(0, 1fr) auto; min-height: 0; margin-left: var(--space-5); }
 .preview-panel:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 [dir="rtl"] .preview-panel { margin-right: var(--space-5); margin-left: 0; }

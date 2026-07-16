@@ -278,8 +278,12 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
     });
   }, [activeGroup, query, showAdvanced, t]);
 
-  const changeSetting = (settingId: string, value: number) => {
+  const previewSetting = (settingId: string, value: number) => {
     setValues((current) => ({ ...current, [settingId]: value }));
+  };
+
+  const changeSetting = (settingId: string, value: number) => {
+    previewSetting(settingId, value);
     queueProfileMutation(() => updateProfileSetting(settingId, value));
   };
 
@@ -409,7 +413,16 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
 
   const activeDefinition = groups.find((group) => group.id === activeGroup) ?? groups[0];
   const activeWizardLabel = t(`wizard.${activeWizardStep}`);
-  const dirtyCount = profile?.dirtyKeys.length ?? 0;
+  const dirtyKeys = useMemo(() => {
+    const keys = new Set(profile?.dirtyKeys ?? []);
+    if (profile) {
+      for (const setting of settingsSchema) {
+        if (values[setting.id] !== profile.values[setting.id]) keys.add(setting.id);
+      }
+    }
+    return [...keys];
+  }, [profile, values]);
+  const dirtyCount = dirtyKeys.length;
   const displayScale = window.devicePixelRatio || 1;
 
   return (
@@ -441,22 +454,23 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
           <div className="settings-form">
             <div className="section-heading"><div><h2>{mode === "quick" ? activeWizardLabel : query ? t("profiles.searchResults") : activeDefinition.label}</h2><p>{mode === "quick" ? t("wizard.guidance") : query ? t("profiles.searchDescription", { query }) : activeDefinition.description}</p></div></div>
 
-            {mode === "quick" && <WizardSettings activeStep={activeWizardStep} advanced={advanced} busy={!profile || pendingEdits > 0 || profileCommand !== null} dirtyCount={dirtyCount} dirtyKeys={profile?.dirtyKeys ?? []} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} onAdvancedCommit={(next) => void commitAdvanced(next)} onApply={() => void applyProfile()} onPreview={showPreview} onSave={() => void saveCurrentProfile()} onSettingChange={changeSetting} onStepChange={setActiveWizardStep} settings={settingsSchema} t={t} values={values} />}
+            {mode === "quick" && <WizardSettings activeStep={activeWizardStep} advanced={advanced} busy={!profile || pendingEdits > 0 || profileCommand !== null} dirtyCount={dirtyCount} dirtyKeys={dirtyKeys} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} onAdvancedCommit={(next) => void commitAdvanced(next)} onApply={() => void applyProfile()} onPreview={showPreview} onSave={() => void saveCurrentProfile()} onSettingChange={changeSetting} onSettingPreview={previewSetting} onStepChange={setActiveWizardStep} settings={settingsSchema} t={t} values={values} />}
 
-            {mode === "advanced" && query && <SearchSettings dirtyKeys={profile?.dirtyKeys ?? []} onChange={changeSetting} settings={filteredSettings} t={t} values={values} />}
-            {mode === "advanced" && !query && activeGroup === "basic" && <BasicSettings dirtyKeys={profile?.dirtyKeys ?? []} onChange={changeSetting} settings={filteredSettings} t={t} values={values} />}
-            {mode === "advanced" && !query && activeGroup === "shape" && <ShapeSettings dirtyKeys={profile?.dirtyKeys ?? []} onChange={changeSetting} settings={filteredSettings} t={t} values={values} />}
-            {mode === "advanced" && !query && activeGroup === "lcd" && <LcdSettings dirtyKeys={profile?.dirtyKeys ?? []} onChange={changeSetting} settings={filteredSettings} t={t} values={values} />}
+            {mode === "advanced" && query && <SearchSettings dirtyKeys={dirtyKeys} onChange={changeSetting} onPreviewChange={previewSetting} settings={filteredSettings} t={t} values={values} />}
+            {mode === "advanced" && !query && activeGroup === "basic" && <BasicSettings dirtyKeys={dirtyKeys} onChange={changeSetting} onPreviewChange={previewSetting} settings={filteredSettings} t={t} values={values} />}
+            {mode === "advanced" && !query && activeGroup === "shape" && <ShapeSettings dirtyKeys={dirtyKeys} onChange={changeSetting} onPreviewChange={previewSetting} settings={filteredSettings} t={t} values={values} />}
+            {mode === "advanced" && !query && activeGroup === "lcd" && <LcdSettings dirtyKeys={dirtyKeys} onChange={changeSetting} onPreviewChange={previewSetting} settings={filteredSettings} t={t} values={values} />}
 
             {mode === "advanced" && !query && activeGroup === "advanced" && (
               <AdvancedSettings
                 advanced={advanced}
-                dirtyKeys={profile?.dirtyKeys ?? []}
+                dirtyKeys={dirtyKeys}
                 fontFamilies={fontFamilies}
                 fontOptionLabel={fontOptionLabel}
                 onAdvancedChange={setAdvanced}
                 onAdvancedCommit={(next) => void commitAdvanced(next)}
                 onSettingChange={changeSetting}
+                onSettingPreview={previewSetting}
                 settings={filteredSettings}
                 t={t}
                 values={values}

@@ -51,6 +51,10 @@ struct ServiceConfiguration {
     dependencies: Vec<String>,
 }
 
+const MACTYPE_SERVICE_TYPE: u32 = 0x10;
+const MACTYPE_SERVICE_START: u32 = 2;
+const MACTYPE_SERVICE_ERROR: u32 = 1;
+
 fn service_command_path(path: &Path) -> String {
     let path = path.to_string_lossy();
     path.strip_prefix(r"\\?\")
@@ -58,14 +62,21 @@ fn service_command_path(path: &Path) -> String {
         .to_owned()
 }
 
-fn classify_configuration(configuration: &ServiceConfiguration, trusted: &Path) -> ServicePresence {
-    const SERVICE_WIN32_OWN_PROCESS: u32 = 0x10;
-    const SERVICE_AUTO_START: u32 = 2;
-    const SERVICE_ERROR_NORMAL: u32 = 1;
+fn owned_service_configuration(path: &Path) -> ServiceConfiguration {
+    ServiceConfiguration {
+        binary_path: format!("\"{}\" -service", service_command_path(path)),
+        service_type: MACTYPE_SERVICE_TYPE,
+        start_type: MACTYPE_SERVICE_START,
+        error_control: MACTYPE_SERVICE_ERROR,
+        account: "LocalSystem".to_owned(),
+        dependencies: vec!["winmgmt".to_owned()],
+    }
+}
 
-    if configuration.service_type != SERVICE_WIN32_OWN_PROCESS
-        || configuration.start_type != SERVICE_AUTO_START
-        || configuration.error_control != SERVICE_ERROR_NORMAL
+fn classify_configuration(configuration: &ServiceConfiguration, trusted: &Path) -> ServicePresence {
+    if configuration.service_type != MACTYPE_SERVICE_TYPE
+        || configuration.start_type != MACTYPE_SERVICE_START
+        || configuration.error_control != MACTYPE_SERVICE_ERROR
         || !configuration.account.eq_ignore_ascii_case("LocalSystem")
         || !configuration
             .dependencies
@@ -180,23 +191,25 @@ fn privileged_action_from_arguments(
 #[cfg(windows)]
 mod windows {
     use super::*;
-    use std::{ffi::OsStr, os::windows::ffi::OsStrExt, process::Command, thread, time::Duration};
+    use std::{ffi::OsStr, os::windows::ffi::OsStrExt, thread, time::Duration};
     use windows_sys::Win32::{
         Foundation::{
-            CloseHandle, GetLastError, ERROR_CANCELLED, ERROR_INSUFFICIENT_BUFFER,
-            ERROR_SERVICE_ALREADY_RUNNING, ERROR_SERVICE_DOES_NOT_EXIST,
-            ERROR_SERVICE_MARKED_FOR_DELETE, ERROR_SERVICE_NOT_ACTIVE, HANDLE, WAIT_OBJECT_0,
+            CloseHandle, GetLastError, ERROR_CANCELLED, ERROR_DUPLICATE_SERVICE_NAME,
+            ERROR_INSUFFICIENT_BUFFER, ERROR_SERVICE_ALREADY_RUNNING, ERROR_SERVICE_DOES_NOT_EXIST,
+            ERROR_SERVICE_EXISTS, ERROR_SERVICE_MARKED_FOR_DELETE, ERROR_SERVICE_NOT_ACTIVE,
+            HANDLE, WAIT_OBJECT_0,
         },
         System::{
             Com::CoTaskMemFree,
             Services::{
-                CloseServiceHandle, ControlService, OpenSCManagerW, OpenServiceW,
-                QueryServiceConfigW, QueryServiceStatusEx, StartServiceW, QUERY_SERVICE_CONFIGW,
-                SC_HANDLE, SC_MANAGER_CONNECT, SC_STATUS_PROCESS_INFO, SERVICE_CONTINUE_PENDING,
-                SERVICE_CONTROL_STOP, SERVICE_PAUSED, SERVICE_PAUSE_PENDING, SERVICE_QUERY_CONFIG,
-                SERVICE_QUERY_STATUS, SERVICE_RUNNING, SERVICE_START, SERVICE_START_PENDING,
-                SERVICE_STATUS, SERVICE_STATUS_PROCESS, SERVICE_STOP, SERVICE_STOPPED,
-                SERVICE_STOP_PENDING,
+                CloseServiceHandle, ControlService, CreateServiceW, DeleteService, OpenSCManagerW,
+                OpenServiceW, QueryServiceConfigW, QueryServiceStatusEx, StartServiceW,
+                QUERY_SERVICE_CONFIGW, SC_HANDLE, SC_MANAGER_CONNECT, SC_MANAGER_CREATE_SERVICE,
+                SC_STATUS_PROCESS_INFO, SERVICE_AUTO_START, SERVICE_CONTINUE_PENDING,
+                SERVICE_CONTROL_STOP, SERVICE_ERROR_NORMAL, SERVICE_PAUSED, SERVICE_PAUSE_PENDING,
+                SERVICE_QUERY_CONFIG, SERVICE_QUERY_STATUS, SERVICE_RUNNING, SERVICE_START,
+                SERVICE_START_PENDING, SERVICE_STATUS, SERVICE_STATUS_PROCESS, SERVICE_STOP,
+                SERVICE_STOPPED, SERVICE_STOP_PENDING, SERVICE_WIN32_OWN_PROCESS,
             },
             Threading::{GetExitCodeProcess, WaitForSingleObject, INFINITE},
         },
@@ -216,6 +229,14 @@ mod windows {
 
     fn wide(value: impl AsRef<OsStr>) -> Vec<u16> {
         value.as_ref().encode_wide().chain(Some(0)).collect()
+    }
+
+    fn wide_multi(values: &[String]) -> Vec<u16> {
+        values
+            .iter()
+            .flat_map(|value| value.encode_utf16().chain(Some(0)))
+            .chain(Some(0))
+            .collect()
     }
 
     unsafe fn wide_string(pointer: *const u16) -> String {
@@ -470,18 +491,82 @@ mod windows {
         wait_for(ServiceRuntimeState::Stopped)
     }
 
-    fn run_mactray(argument: &str) -> Result<(), String> {
-        let path = trusted_mactray_path()
-            .ok_or_else(|| "trusted Program Files MacTray.exe was not found".to_owned())?;
-        let status = Command::new(path)
-            .args([argument, "/SILENT"])
-            .status()
-            .map_err(|error| error.to_string())?;
-        if status.success() {
+    fn create_owned_service(path: &Path) -> Result<(), String> {
+        let manager = unsafe {
+            OpenSCManagerW(
+                std::ptr::null(),
+                std::ptr::null(),
+                SC_MANAGER_CONNECT | SC_MANAGER_CREATE_SERVICE,
+            )
+        };
+        if manager.is_null() {
+            return Err(format!(
+                "OpenSCManagerW for service creation failed with {}",
+                unsafe { GetLastError() }
+            ));
+        }
+        let manager = ServiceHandle(manager);
+        let configuration = owned_service_configuration(path);
+        let name = wide("MacType");
+        let display_name = wide("MacType");
+        let binary_path = wide(&configuration.binary_path);
+        let dependencies = wide_multi(&configuration.dependencies);
+        let service = unsafe {
+            CreateServiceW(
+                manager.0,
+                name.as_ptr(),
+                display_name.as_ptr(),
+                SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_START | SERVICE_STOP,
+                SERVICE_WIN32_OWN_PROCESS,
+                SERVICE_AUTO_START,
+                SERVICE_ERROR_NORMAL,
+                binary_path.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null_mut(),
+                dependencies.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        };
+        if service.is_null() {
+            let code = unsafe { GetLastError() };
+            if matches!(code, ERROR_SERVICE_EXISTS | ERROR_DUPLICATE_SERVICE_NAME)
+                && matches!(
+                    query(false).presence,
+                    ServicePresence::Owned | ServicePresence::CompatibleUnquoted
+                )
+            {
+                return Ok(());
+            }
+            return Err(format!("CreateServiceW failed with {code}"));
+        }
+        drop(ServiceHandle(service));
+        let created = query(false);
+        if matches!(
+            created.presence,
+            ServicePresence::Owned | ServicePresence::CompatibleUnquoted
+        ) {
             Ok(())
         } else {
-            Err(format!("MacTray {argument} exited with {status}"))
+            Err("Windows created a MacType service with unexpected configuration".to_owned())
         }
+    }
+
+    fn delete_owned_service() -> Result<(), String> {
+        const DELETE_ACCESS: u32 = 0x0001_0000;
+        let service = open_for(DELETE_ACCESS | SERVICE_QUERY_STATUS)
+            .map_err(|code| format!("OpenServiceW for deletion failed with {code}"))?;
+        if unsafe { DeleteService(service.0) } == 0 {
+            let code = unsafe { GetLastError() };
+            if !matches!(
+                code,
+                ERROR_SERVICE_DOES_NOT_EXIST | ERROR_SERVICE_MARKED_FOR_DELETE
+            ) {
+                return Err(format!("DeleteService failed with {code}"));
+            }
+        }
+        drop(service);
+        wait_until_absent()
     }
 
     pub(super) fn privileged_mutate(action: &PrivilegedAction) -> Result<(), String> {
@@ -527,7 +612,9 @@ mod windows {
                 )?;
                 match before.presence {
                     ServicePresence::Absent => {
-                        run_mactray("/INSTALL")?;
+                        create_owned_service(&trusted_mactray_path().ok_or_else(|| {
+                            "trusted Program Files MacTray.exe was not found".to_owned()
+                        })?)?;
                         let installed = query(false);
                         if !matches!(
                             installed.presence,
@@ -560,7 +647,9 @@ mod windows {
                         "legacy service installation is not safe in the current state".to_owned(),
                     );
                 }
-                run_mactray("/INSTALL")?;
+                create_owned_service(&trusted_mactray_path().ok_or_else(|| {
+                    "trusted Program Files MacTray.exe was not found".to_owned()
+                })?)?;
                 let installed = query(false);
                 if !matches!(
                     installed.presence,
@@ -580,8 +669,7 @@ mod windows {
                 if before.state != ServiceRuntimeState::Stopped {
                     stop()?;
                 }
-                run_mactray("/UNINSTALL")?;
-                wait_until_absent()
+                delete_owned_service()
             }
             PrivilegedAction::Named("start") => {
                 if !before.can_start {
@@ -755,14 +843,23 @@ mod tests {
     use super::*;
 
     fn official_configuration(path: &Path) -> ServiceConfiguration {
-        ServiceConfiguration {
-            binary_path: format!("\"{}\" -service", path.display()),
-            service_type: 0x10,
-            start_type: 2,
-            error_control: 1,
-            account: "LocalSystem".to_owned(),
-            dependencies: vec!["winmgmt".to_owned()],
-        }
+        owned_service_configuration(path)
+    }
+
+    #[test]
+    fn direct_scm_registration_matches_the_owned_service_policy() {
+        let path = Path::new(r"C:\Program Files\MacType\MacTray.exe");
+        let configuration = owned_service_configuration(path);
+        assert_eq!(
+            classify_configuration(&configuration, path),
+            ServicePresence::Owned
+        );
+        assert_eq!(
+            configuration.binary_path,
+            r#""C:\Program Files\MacType\MacTray.exe" -service"#
+        );
+        assert_eq!(configuration.dependencies, ["winmgmt"]);
+        assert_eq!(configuration.account, "LocalSystem");
     }
 
     #[test]

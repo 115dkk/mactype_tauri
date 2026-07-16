@@ -1,4 +1,4 @@
-import { AlertTriangle, Eye, FastForward, ListRestart, Play, Redo2, RotateCcw, Save, Search, SlidersHorizontal, Undo2 } from "lucide-react";
+import { AlertTriangle, Play, Redo2, RotateCcw, Save, Search, SlidersHorizontal, Undo2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { settingsSchema } from "../generated/settings";
 import type { AdvancedProfile, IndividualSetting, PreviewRequest, PreviewResult, ProfileSnapshot } from "../app/model";
@@ -31,7 +31,7 @@ import { ListsEditor } from "./profiles/ListsEditor";
 import { BasicSettings, LcdSettings, SearchSettings, ShapeSettings } from "./profiles/SchemaSettings";
 import { splitSubstitution } from "./profiles/profileEditorUtils";
 import { WizardSettings } from "./profiles/WizardSettings";
-import { wizardSettingIds, wizardStepIds, type WizardStepId } from "./profiles/wizardModel";
+import { wizardStepIds, type WizardStepId } from "./profiles/wizardModel";
 
 type GroupId = "basic" | "shape" | "lcd" | "advanced" | "individual" | "lists";
 type ProfileMode = "quick" | "advanced";
@@ -49,7 +49,7 @@ interface ProfilesPageProps {
   onPreviewReady?: () => void;
 }
 
-export function ProfilesPage({ ciSmoke = false, mode = "advanced", onModeChange, onPreviewReady }: ProfilesPageProps) {
+export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewReady }: ProfilesPageProps) {
   const { locale, t } = useI18n();
   const groups = useMemo<ReadonlyArray<{ id: GroupId; label: string; description: string }>>(() => [
     { id: "basic", label: t("group.basic.label"), description: t("group.basic.description") },
@@ -365,35 +365,6 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onModeChange,
     previewPanelRef.current?.focus({ preventScroll: true });
   };
 
-  const restoreWizardDefaults = () => {
-    for (const settingId of wizardSettingIds) {
-      const definition = settingsSchema.find((setting) => setting.id === settingId);
-      if (definition && values[settingId] !== definition.default) changeSetting(settingId, definition.default);
-    }
-    if (advanced.fontSubstitutes.length > 0) commitAdvanced({ ...advanced, fontSubstitutes: [] });
-  };
-
-  const openTuner = (group: GroupId) => {
-    setActiveGroup(group);
-    setQuery("");
-    onModeChange?.("advanced");
-  };
-
-  const tunerGroupForWizardStep: Record<WizardStepId, GroupId> = {
-    rendering: "lcd",
-    quality: "shape",
-    hinting: "basic",
-    gamma: "shape",
-    lcd: "lcd",
-    substitution: "advanced",
-    apply: "basic",
-  };
-
-  const skipWizardStep = () => {
-    const next = wizardStepIds[wizardStepIds.indexOf(activeWizardStep) + 1];
-    if (next) setActiveWizardStep(next);
-  };
-
   const maximumPreviewHeight = () => Math.max(
     MIN_PREVIEW_HEIGHT,
     Math.min(MAX_PREVIEW_HEIGHT, (workspaceRef.current?.clientHeight ?? MAX_PREVIEW_HEIGHT + MIN_SETTINGS_HEIGHT) - MIN_SETTINGS_HEIGHT),
@@ -454,23 +425,10 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onModeChange,
           <button className="button secondary compact-action" disabled={!profile?.canUndo || pendingEdits > 0 || profileCommand !== null} onClick={() => void runHistoryCommand("undo", undoProfile)} type="button"><Undo2 aria-hidden="true" size={16} /> {t("profiles.undo")}</button>
           <button className="button secondary compact-action" disabled={!profile?.canRedo || pendingEdits > 0 || profileCommand !== null} onClick={() => void runHistoryCommand("redo", redoProfile)} type="button"><Redo2 aria-hidden="true" size={16} /> {t("profiles.redo")}</button>
           <button className="button secondary compact-action" disabled={!profile || dirtyCount === 0 || pendingEdits > 0 || profileCommand !== null} onClick={() => void runHistoryCommand("discard", discardProfileChanges)} title={t("profiles.discardDescription")} type="button"><RotateCcw aria-hidden="true" size={16} /> {t("profiles.discard")}</button>
-          {mode === "advanced" && <button className="button secondary compact-action" disabled={!profile || dirtyCount === 0 || pendingEdits > 0 || profileCommand !== null} onClick={() => void saveCurrentProfile()} type="button"><Save aria-hidden="true" size={16} /> {profileCommand === "save" ? t("profiles.saving") : t("profiles.saveNow")}</button>}
-          {mode === "advanced" && <button className="button primary compact-action" disabled={!profile || pendingEdits > 0 || profileCommand !== null} onClick={() => void applyProfile()} type="button"><Play aria-hidden="true" size={16} /> {profileCommand === "apply" ? t("profiles.applying") : t("profiles.applyNow")}</button>}
+          <button className="button secondary compact-action" disabled={!profile || dirtyCount === 0 || pendingEdits > 0 || profileCommand !== null} onClick={() => void saveCurrentProfile()} type="button"><Save aria-hidden="true" size={16} /> {profileCommand === "save" ? t("profiles.saving") : t("profiles.saveNow")}</button>
+          <button className="button primary compact-action" disabled={!profile || pendingEdits > 0 || profileCommand !== null} onClick={() => void applyProfile()} type="button"><Play aria-hidden="true" size={16} /> {profileCommand === "apply" ? t("profiles.applying") : t("profiles.applyNow")}</button>
         </div>
       </header>
-
-      {mode === "quick" && (
-        <div className="wizard-quick-actions" role="toolbar" aria-label={t("wizard.quickActions")}>
-          <strong>{t("wizard.quickActions")}</strong>
-          <button className="text-action" onClick={showPreview} type="button"><Eye aria-hidden="true" size={15} /> {t("profiles.preview")}</button>
-          <button className="text-action" onClick={() => setActiveWizardStep("substitution")} type="button">{t("advanced.fontSubstitutes")}</button>
-          <button className="text-action" onClick={() => openTuner("advanced")} type="button">{t("wizard.advancedSettings")}</button>
-          <button className="text-action" disabled={!profile || dirtyCount === 0 || pendingEdits > 0 || profileCommand !== null} onClick={() => void saveCurrentProfile()} type="button"><Save aria-hidden="true" size={15} /> {t("wizard.saveProfile")}</button>
-          <button className="text-action" disabled={!profile || pendingEdits > 0 || profileCommand !== null} onClick={restoreWizardDefaults} type="button"><ListRestart aria-hidden="true" size={15} /> {t("wizard.restoreDefaults")}</button>
-          <button className="text-action" onClick={() => openTuner(tunerGroupForWizardStep[activeWizardStep])} type="button">Tuner</button>
-          <button className="text-action" disabled={activeWizardStep === "apply"} onClick={skipWizardStep} type="button"><FastForward aria-hidden="true" size={15} /> {t("wizard.skip")}</button>
-        </div>
-      )}
 
       <div className="profile-layout">
         <aside className="settings-index" aria-label={mode === "quick" ? t("wizard.progress") : t("profiles.sections")}>

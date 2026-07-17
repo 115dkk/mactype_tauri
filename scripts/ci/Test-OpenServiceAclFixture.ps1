@@ -2,7 +2,9 @@
 param()
 
 $ErrorActionPreference = 'Stop'
+$supportModulePath = Join-Path $PSScriptRoot 'lib\OpenServiceTestSupport.psm1'
 $modulePath = Join-Path $PSScriptRoot 'lib\OpenServiceAclFixture.psm1'
+Import-Module $supportModulePath -Force
 Import-Module $modulePath -Force
 
 $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
@@ -14,6 +16,10 @@ $targetPath = Join-Path $temporaryRoot 'mactype-service.exe'
     'acl regression fixture',
     [System.Text.UTF8Encoding]::new($false)
 )
+$targetHash = Get-LowerFileSha256 -Path $targetPath
+if ($targetHash -notmatch '^[0-9a-f]{64}$') {
+    throw 'Importing the ACL fixture hid the caller-owned test-support commands.'
+}
 $missingServiceName = "MacTypeControlCenterAclFixture$PID"
 
 try {

@@ -8,6 +8,7 @@ $installerTest = Get-Content -LiteralPath (Join-Path $root 'scripts\ci\Test-Inst
 $installerDefinitionPath = Join-Path $root 'installer\mactype-control-center.iss'
 $innoFailureContractPath = Join-Path $root 'scripts\ci\Test-InnoInstallerFailureContract.ps1'
 $installerHelperPath = Join-Path $root 'scripts\ci\lib\InstallerWindowsAssertions.ps1'
+$snapshotContractPath = Join-Path $root 'scripts\ci\Test-InstallerSnapshotContract.ps1'
 $fixturePath = Join-Path $root '.github\scripts\Build-FailingServiceRuntimeFixture.ps1'
 
 foreach ($token in @(
@@ -110,13 +111,31 @@ foreach ($token in @(
     '$baselineApplicationSnapshot',
     '$baselineServiceSnapshot',
     'obsolete-from-prior-version.bin',
-    'Get-TreeSnapshot -Path $applicationRoot',
+    '-ExcludedRoot $serviceRoot',
     'Invoke-InstallerExpectedFailure',
     'Installer diagnostic logs:'
 )) {
     if (-not $installerTest.Contains($token)) {
         throw "Installer E2E does not prove automatic rollback at the installer boundary: $token"
     }
+}
+
+if (-not (Test-Path -LiteralPath $snapshotContractPath -PathType Leaf)) {
+    throw 'Installer immutable app-side snapshot contract test is missing.'
+}
+foreach ($token in @('-ExcludedRoot $ServiceRoot', 'Get-TreeSnapshotDifference')) {
+    if (-not $installerHelper.Contains($token)) {
+        throw "Installer app-side rollback diagnostics omit: $token"
+    }
+}
+foreach ($token in @('DirectorySeparatorChar', 'AltDirectorySeparatorChar', 'GetRelativePath')) {
+    if (-not $installerHelper.Contains($token)) {
+        throw "Installer snapshot exclusion is not host-platform path aware: $token"
+    }
+}
+if ($installerHelper -match "TrimEnd\('\\\\'\)" -or
+    $installerHelper -match "StartsWith\('\.\.\\\\'") {
+    throw 'Installer snapshot exclusion hard-codes a Windows path boundary in cross-platform policy code.'
 }
 
 $uploadSteps = [regex]::Matches(
@@ -128,5 +147,7 @@ foreach ($step in $uploadSteps) {
         throw 'The deliberate failing-upgrade fixture must never be uploaded as a release artifact.'
     }
 }
+
+& $snapshotContractPath
 
 Write-Host 'Installer failed-upgrade rollback policy passed.'

@@ -114,7 +114,9 @@ try {
         'obsolete app-side runtime payload',
         [Text.UTF8Encoding]::new($false)
     )
-    $baselineApplicationSnapshot = Get-TreeSnapshot -Path $applicationRoot
+    $baselineApplicationSnapshot = Get-TreeSnapshot `
+        -Path $applicationRoot `
+        -ExcludedRoot $serviceRoot
     $baselineServiceSnapshot = Get-ServiceSnapshot -Name $openServiceName
     $baselineRuntimeSnapshot = Get-TreeSnapshot -Path (Join-Path $serviceRoot ("bin\" + $baseline.RuntimeVersion))
     Assert-CommonDesktopShortcut -CommonDesktopShortcut $commonDesktopShortcut -ApplicationRoot $applicationRoot

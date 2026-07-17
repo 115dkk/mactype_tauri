@@ -1,7 +1,13 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-Import-Module (Join-Path $PSScriptRoot 'OpenServiceTestSupport.psm1') -Force
+if (-not ('MacType.ControlCenter.Ci.BoundedProcessRunner' -as [type])) {
+    Add-Type -Path @(
+        (Join-Path $PSScriptRoot 'BoundedProcessRunner.cs'),
+        (Join-Path $PSScriptRoot 'BoundedProcessIo.cs'),
+        (Join-Path $PSScriptRoot 'WindowsProcessJob.cs')
+    )
+}
 
 $script:UsersSid = 'S-1-5-32-545'
 $script:MaximumDiagnosticValueCharacters = 4096

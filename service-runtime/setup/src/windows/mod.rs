@@ -4,6 +4,7 @@ mod broker;
 mod installer;
 mod known_folders;
 mod machine_lock;
+mod runtime_recovery;
 pub(crate) mod scm;
 
 use mactype_service_contract::BrokerCommand;

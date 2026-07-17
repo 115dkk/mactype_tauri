@@ -24,12 +24,14 @@ impl RuntimeInstaller {
         current_version: &str,
     ) -> Result<(), SetupError> {
         let previous = if let Some(previous) = old_pointer
-            .filter(|pointer| pointer.version != current_version)
+            .filter(|pointer| pointer.version() != current_version)
             .cloned()
         {
             atomic_write(
                 &self.previous_runtime_pointer_path(),
-                &serde_json::to_vec(&previous)?,
+                &previous.to_bytes().map_err(|_| {
+                    SetupError::Runtime("previous runtime pointer is invalid".to_owned())
+                })?,
             )?;
             Some(previous)
         } else if self.previous_runtime_pointer_path().exists() {
@@ -44,7 +46,7 @@ impl RuntimeInstaller {
         };
         let mut retained = BTreeSet::from([current_version.to_owned()]);
         if let Some(previous) = previous {
-            retained.insert(previous.version);
+            retained.insert(previous.version().to_owned());
         }
         retained.extend(self.load_verified_migration_pins()?.into_keys());
         self.cleanup_stale_generations(&retained)

@@ -24,6 +24,7 @@ serde_json.workspace = true
 sha2.workspace = true
 
 [dev-dependencies]
+mactype-service-host = { path = "../host" }
 tempfile = "3"
 
 [target.'cfg(windows)'.dependencies]

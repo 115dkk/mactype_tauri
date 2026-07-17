@@ -197,7 +197,7 @@ impl RuntimeInstaller {
         }
         let bytes = read_bounded_regular_file(path, MAX_POINTER_BYTES, description)?;
         let pointer = validate_runtime_pointer(&bytes)?;
-        if !versions.contains(&pointer.version) {
+        if !versions.contains(pointer.version()) {
             return Err(SetupError::Runtime(format!(
                 "{description} does not name a receipted runtime generation"
             )));

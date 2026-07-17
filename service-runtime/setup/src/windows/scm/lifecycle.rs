@@ -4,7 +4,7 @@ use std::ptr;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use mactype_service_contract::effective_service_name;
+use mactype_service_contract::{effective_service_name, HealthReport, HealthState};
 use windows_sys::Win32::Foundation::{
     GetLastError, ERROR_SERVICE_ALREADY_RUNNING, ERROR_SERVICE_MARKED_FOR_DELETE,
     ERROR_SERVICE_NOT_ACTIVE,
@@ -20,7 +20,10 @@ use windows_sys::Win32::System::Services::{
 use super::configuration::{configure_metadata, quoted_image_path, validate_service_binary};
 use super::health::wait_for_ready_health;
 use super::{wide, ServiceHandle, ServiceManager, DISPLAY_NAME, HEALTH_TIMEOUT, STATE_TIMEOUT};
+use crate::storage::read_bounded_regular_file;
 use crate::SetupError;
+
+const MAX_PERSISTED_HEALTH_BYTES: u64 = 16 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AbsenceObservation {
@@ -146,7 +149,13 @@ impl ServiceManager {
                 return Err(SetupError::Io(io::Error::from_raw_os_error(error as i32)));
             }
         }
-        let status = wait_for_state(service.0, SERVICE_RUNNING, STATE_TIMEOUT)?;
+        let health_path = self.protected_root.join("health.json");
+        let status = wait_for_state(
+            service.0,
+            SERVICE_RUNNING,
+            STATE_TIMEOUT,
+            Some(&health_path),
+        )?;
         if status.dwProcessId == 0 {
             return Err(SetupError::Runtime(
                 "SCM reported a running service without a process identity".to_owned(),
@@ -188,7 +197,7 @@ impl ServiceManager {
                 return Err(SetupError::Io(io::Error::from_raw_os_error(error as i32)));
             }
         }
-        wait_for_state(service.0, SERVICE_STOPPED, STATE_TIMEOUT).map(|_| ())
+        wait_for_state(service.0, SERVICE_STOPPED, STATE_TIMEOUT, None).map(|_| ())
     }
 
     pub fn remove(&self) -> Result<(), SetupError> {
@@ -252,6 +261,7 @@ fn wait_for_state(
     service: SC_HANDLE,
     expected: u32,
     timeout: Duration,
+    failure_health_path: Option<&Path>,
 ) -> Result<SERVICE_STATUS_PROCESS, SetupError> {
     let deadline = Instant::now() + timeout;
     loop {
@@ -260,10 +270,11 @@ fn wait_for_state(
             return Ok(status);
         }
         if status.dwCurrentState == SERVICE_STOPPED && expected != SERVICE_STOPPED {
-            return Err(SetupError::Runtime(format!(
-                "service stopped before reaching state {expected} (win32={}, service={})",
-                status.dwWin32ExitCode, status.dwServiceSpecificExitCode
-            )));
+            return Err(stopped_before_expected_state_error(
+                &status,
+                expected,
+                failure_health_path,
+            ));
         }
         if Instant::now() >= deadline {
             return Err(SetupError::Runtime(format!(
@@ -274,9 +285,55 @@ fn wait_for_state(
     }
 }
 
+fn stopped_before_expected_state_error(
+    status: &SERVICE_STATUS_PROCESS,
+    expected: u32,
+    failure_health_path: Option<&Path>,
+) -> SetupError {
+    let mut message = format!(
+        "service stopped before reaching state {expected} (win32={}, service={})",
+        status.dwWin32ExitCode, status.dwServiceSpecificExitCode
+    );
+    if let Some(diagnostic) = failure_health_path.and_then(persisted_failure_diagnostic) {
+        message.push_str("; persisted health failure: ");
+        message.push_str(&diagnostic);
+    }
+    SetupError::Runtime(message)
+}
+
+fn persisted_failure_diagnostic(path: &Path) -> Option<String> {
+    let bytes = read_bounded_regular_file(
+        path,
+        MAX_PERSISTED_HEALTH_BYTES,
+        "persisted service health diagnostic",
+    )
+    .ok()?;
+    let report: HealthReport = serde_json::from_slice(&bytes).ok()?;
+    report.validate().ok()?;
+    if report.health != HealthState::Failed {
+        return None;
+    }
+    let error = report.last_error?;
+    Some(match error.win32_error {
+        Some(code) => format!("{}: {} (win32={code})", error.code, error.message),
+        None => format!("{}: {}", error.code, error.message),
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{absence_poll_action, AbsenceObservation, AbsencePollAction};
+    use mactype_service_contract::{
+        HealthReport, HealthState, InjectionTelemetry, ReadinessReport, StructuredServiceError,
+        HEALTH_PROTOCOL_VERSION,
+    };
+    use windows_sys::Win32::System::Services::{
+        SERVICE_RUNNING, SERVICE_STATUS_PROCESS, SERVICE_STOPPED,
+    };
+
+    use super::{
+        absence_poll_action, stopped_before_expected_state_error, AbsenceObservation,
+        AbsencePollAction,
+    };
 
     #[test]
     fn service_removal_waits_through_delete_pending_and_times_out_explicitly() {
@@ -296,5 +353,39 @@ mod tests {
         assert!(error
             .to_string()
             .contains("service name remained delete-pending"));
+    }
+
+    #[test]
+    fn stopped_service_diagnostic_includes_the_bounded_persisted_failure() {
+        let directory = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+        let health_path = directory.path().join("health.json");
+        let failure = HealthReport {
+            protocol_version: HEALTH_PROTOCOL_VERSION,
+            service_version: "0.2.0".to_owned(),
+            health: HealthState::Failed,
+            active_profile_digest: None,
+            readiness: ReadinessReport::initializing(),
+            injection: InjectionTelemetry::default(),
+            last_error: Some(StructuredServiceError {
+                code: "activation-recovery-required".to_owned(),
+                message: "the activation receipt did not own the candidate".to_owned(),
+                win32_error: None,
+            }),
+        };
+        std::fs::write(&health_path, serde_json::to_vec(&failure).unwrap()).unwrap();
+        let status = SERVICE_STATUS_PROCESS {
+            dwCurrentState: SERVICE_STOPPED,
+            dwWin32ExitCode: 1066,
+            dwServiceSpecificExitCode: 1,
+            ..SERVICE_STATUS_PROCESS::default()
+        };
+
+        let error =
+            stopped_before_expected_state_error(&status, SERVICE_RUNNING, Some(&health_path));
+        let message = error.to_string();
+
+        assert!(message.contains("win32=1066, service=1"));
+        assert!(message.contains("activation-recovery-required"));
+        assert!(message.contains("activation receipt did not own the candidate"));
     }
 }

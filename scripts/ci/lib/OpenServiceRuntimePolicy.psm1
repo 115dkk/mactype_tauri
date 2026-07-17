@@ -73,17 +73,84 @@ function Test-OpenServiceRuntimePolicy {
             $windowsBroker = Get-Content -LiteralPath $windowsBrokerPath -Raw
             $dispatch = Get-OpenServiceFunctionRegion -Text $windowsBroker -FunctionName 'run'
             $matchIndex = if ($dispatch) { $dispatch.IndexOf('match command') } else { -1 }
-            foreach ($recoveryCall in @(
-                'RuntimeInstaller::new(paths.clone()).recover_interrupted_activation()?',
-                'ProfileStore::new(paths.clone()).recover_interrupted_activation()?'
-            )) {
-                $recoveryIndex = if ($dispatch) { $dispatch.IndexOf($recoveryCall) } else { -1 }
+            $recoveryCalls = [ordered]@{
+                'runtime_recovery::recover(&paths, &manager)' = 'runtime_recovery::recover\s*\(\s*&paths\s*,\s*&manager\s*\)(?s:.*?)\?;'
+                'ProfileStore::new(paths.clone()).recover_interrupted_activation()' = 'ProfileStore::new\s*\(\s*paths\.clone\(\)\s*\)\s*\.recover_interrupted_activation\s*\(\s*\)(?s:.*?)\?;'
+            }
+            foreach ($entry in $recoveryCalls.GetEnumerator()) {
+                $recoveryMatch = if ($dispatch) {
+                    [regex]::Match($dispatch, $entry.Value)
+                } else {
+                    [System.Text.RegularExpressions.Match]::Empty
+                }
+                $recoveryIndex = if ($recoveryMatch.Success) { $recoveryMatch.Index } else { -1 }
                 if ($recoveryIndex -lt 0 -or $matchIndex -lt 0 -or $recoveryIndex -gt $matchIndex) {
-                    $failures.Add("service-runtime setup broker does not run '$recoveryCall' before dispatching every mutating verb.")
+                    $failures.Add("service-runtime setup broker does not run '$($entry.Key)' before dispatching every mutating verb.")
                 }
             }
-            if ($dispatch -match '(?s)if\s+!?matches!\s*\(\s*command.*?recover_interrupted_activation') {
+            if ($dispatch -match '(?s)if\s+!?matches!\s*\(\s*command.*?(?:recover_interrupted_activation|runtime_recovery::recover)') {
                 $failures.Add('service-runtime setup broker conditionally skips durable activation recovery for one or more mutating verbs.')
+            }
+        }
+
+        $windowsInstallerPath = Join-Path $serviceRoot 'setup\src\windows\installer.rs'
+        if (-not (Test-Path -LiteralPath $windowsInstallerPath -PathType Leaf)) {
+            $failures.Add('service-runtime Windows installer entry point is missing.')
+        } else {
+            $windowsInstaller = Get-Content -LiteralPath $windowsInstallerPath -Raw
+            foreach ($entryPoint in @('run_bootstrap', 'run_uninstall')) {
+                $entryRegion = Get-OpenServiceFunctionRegion -Text $windowsInstaller -FunctionName $entryPoint
+                if (-not $entryRegion -or
+                    $entryRegion -notmatch 'runtime_recovery::recover\s*\(\s*&paths\s*,\s*&manager\s*\)\s*\?;') {
+                    $failures.Add("service-runtime Windows installer '$entryPoint' does not reconcile the runtime pointer with the exact service image before continuing.")
+                }
+            }
+        }
+
+        $twoPhaseSites = @(
+            @{
+                Path = Join-Path $serviceRoot 'setup\src\windows\broker\service.rs'
+                Function = 'install'
+                Recovery = 'runtime_recovery::recover'
+            },
+            @{
+                Path = Join-Path $serviceRoot 'setup\src\windows\broker\service.rs'
+                Function = 'upgrade'
+                Recovery = 'restore_upgrade_state'
+            },
+            @{
+                Path = Join-Path $serviceRoot 'setup\src\windows\broker\service.rs'
+                Function = 'repair'
+                Recovery = 'runtime_recovery::recover'
+            },
+            @{
+                Path = Join-Path $serviceRoot 'setup\src\windows\installer\transaction.rs'
+                Function = 'apply_transaction'
+                Recovery = 'restore_after_failure'
+            }
+        )
+        foreach ($site in $twoPhaseSites) {
+            if (-not (Test-Path -LiteralPath $site.Path -PathType Leaf)) {
+                $failures.Add("service-runtime two-phase activation source is missing: $($site.Path).")
+                continue
+            }
+            $source = Get-Content -LiteralPath $site.Path -Raw
+            $region = Get-OpenServiceFunctionRegion -Text $source -FunctionName $site.Function
+            if (-not $region -or
+                $region -notmatch '(?:deploy|repair_current)_with_prepare_and_health_check' -or
+                -not $region.Contains($site.Recovery)) {
+                $failures.Add("service-runtime two-phase activation '$($site.Function)' does not route every error through '$($site.Recovery)'.")
+            }
+        }
+
+        foreach ($helper in @(
+            @{ Path = Join-Path $serviceRoot 'setup\src\windows\broker\service.rs'; Function = 'restore_upgrade_state' },
+            @{ Path = Join-Path $serviceRoot 'setup\src\windows\installer\transaction.rs'; Function = 'restore_after_failure' }
+        )) {
+            $source = Get-Content -LiteralPath $helper.Path -Raw
+            $region = Get-OpenServiceFunctionRegion -Text $source -FunctionName $helper.Function
+            if (-not $region -or -not $region.Contains('runtime_recovery::recover')) {
+                $failures.Add("service-runtime rollback helper '$($helper.Function)' does not perform exact runtime/service recovery.")
             }
         }
     }

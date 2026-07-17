@@ -3,8 +3,8 @@ mod service;
 
 use mactype_service_contract::{BrokerCommand, MachinePaths};
 
-use super::{known_folders, machine_lock, scm};
-use crate::{ProfileStore, RuntimeInstaller, SetupError};
+use super::{known_folders, machine_lock, runtime_recovery, scm};
+use crate::{ProfileStore, SetupError};
 
 struct BrokerContext {
     paths: MachinePaths,
@@ -18,9 +18,18 @@ pub(super) fn run(
     let _setup_lock = machine_lock::MachineSetupLock::acquire()?;
     let paths = known_folders::machine_paths()?;
     prepare_machine_storage_for_command(command, paths.service_root())?;
-    let manager = scm::ServiceManager::connect(paths.service_root().to_owned())?;
-    RuntimeInstaller::new(paths.clone()).recover_interrupted_activation()?;
-    ProfileStore::new(paths.clone()).recover_interrupted_activation()?;
+    let manager =
+        scm::ServiceManager::connect(paths.service_root().to_owned()).map_err(|error| {
+            error.at_machine_path("connect to Service Control Manager", paths.service_root())
+        })?;
+    runtime_recovery::recover(&paths, &manager).map_err(|error| {
+        error.at_machine_path("recover protected runtime state", paths.service_root())
+    })?;
+    ProfileStore::new(paths.clone())
+        .recover_interrupted_activation()
+        .map_err(|error| {
+            error.at_machine_path("recover protected profile state", paths.active_profile())
+        })?;
     let context = BrokerContext { paths, manager };
 
     match command {

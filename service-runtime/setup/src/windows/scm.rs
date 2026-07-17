@@ -16,6 +16,7 @@ use windows_sys::Win32::System::Services::{
 };
 
 use configuration::{query_config, service_configuration_matches_owned_contract as owns_config};
+#[cfg(feature = "ci-test-adapter")]
 pub use configuration::{
     service_configuration_matches_owned_contract, service_image_matches_protected_contract,
     ObservedServiceConfiguration,

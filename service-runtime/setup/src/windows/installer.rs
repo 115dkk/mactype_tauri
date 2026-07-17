@@ -4,7 +4,7 @@ mod transaction;
 
 use mactype_service_contract::MachinePaths;
 
-use super::{known_folders, machine_lock, scm};
+use super::{known_folders, machine_lock, runtime_recovery, scm};
 use crate::{
     run_install_bootstrap_with, run_uninstall_owned_with, BootstrapOutcome, BootstrapPreflight,
     InstallBootstrapBackend, OpenServiceObservation, RuntimeInstaller, SetupError,
@@ -16,6 +16,7 @@ pub fn run_bootstrap() -> Result<BootstrapOutcome, SetupError> {
     let paths = known_folders::machine_paths()?;
     preflight::validate_and_harden_installer_root(&paths)?;
     let manager = scm::ServiceManager::connect(paths.service_root().to_owned())?;
+    runtime_recovery::recover(&paths, &manager)?;
     run_install_bootstrap_with(&mut WindowsInstallerBackend::new(paths, manager))
 }
 
@@ -24,6 +25,7 @@ pub fn run_uninstall() -> Result<UninstallOutcome, SetupError> {
     let paths = known_folders::machine_paths()?;
     preflight::validate_and_harden_installer_root(&paths)?;
     let manager = scm::ServiceManager::connect(paths.service_root().to_owned())?;
+    runtime_recovery::recover(&paths, &manager)?;
     run_uninstall_owned_with(&mut WindowsInstallerBackend::new(paths, manager))
 }
 

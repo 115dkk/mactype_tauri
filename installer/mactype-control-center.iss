@@ -57,6 +57,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [InstallDelete]
 Type: filesandordirs; Name: "{app}\service-runtime"
 
+[UninstallDelete]
+Type: dirifempty; Name: "{app}"
+
 [Files]
 Source: "{#AppExe}"; DestDir: "{app}"; DestName: "{#ControlCenterExeName}"; Flags: ignoreversion
 Source: "{#PreviewExe}"; DestDir: "{app}"; DestName: "mactype-preview32.exe"; Flags: ignoreversion
@@ -99,18 +102,6 @@ var
   BrokerOutputError: Boolean;
   BrokerDiagnostic: String;
 
-procedure RunFixedBrokerOrFail(const Verb: String; const Operation: String);
-var
-  ResultCode: Integer;
-  Broker: String;
-begin
-  Broker := AddBackslash(ExpandConstant('{app}')) + SetupBrokerRelativePath;
-  if not Exec(Broker, Verb, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-    RaiseException(Operation + ' could not start the protected setup broker.');
-  if ResultCode <> 0 then
-    RaiseException(Operation + ' failed with setup broker exit code ' + IntToStr(ResultCode) + '.');
-end;
-
 procedure CaptureBrokerOutput(const S: String; const Error, FirstLine: Boolean);
 var
   Remaining: Integer;
@@ -148,14 +139,43 @@ begin
     Result := Result + #13#10#13#10 + BrokerDiagnostic;
 end;
 
-function RunStagedBootstrap(const Broker: String): String;
-var
-  ResultCode: Integer;
+procedure ResetBrokerCapture;
 begin
   BrokerApplied := False;
   BrokerAllowedBlocked := False;
   BrokerOutputError := False;
   BrokerDiagnostic := '';
+end;
+
+procedure RunFixedBrokerOrFail(const Verb: String; const Operation: String);
+var
+  ResultCode: Integer;
+  Broker: String;
+begin
+  ResetBrokerCapture;
+  ResultCode := -1;
+  Broker := AddBackslash(ExpandConstant('{app}')) + SetupBrokerRelativePath;
+  if not ExecAndLogOutput(
+    Broker,
+    Verb,
+    ExtractFileDir(Broker),
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode,
+    @CaptureBrokerOutput
+  ) then
+    RaiseException(BrokerFailure(Operation + ' could not start the protected setup broker.'));
+  if ResultCode <> 0 then
+    RaiseException(BrokerFailure(
+      Operation + ' failed with setup broker exit code ' + IntToStr(ResultCode) + '.'
+    ));
+end;
+
+function RunStagedBootstrap(const Broker: String): String;
+var
+  ResultCode: Integer;
+begin
+  ResetBrokerCapture;
   ResultCode := -1;
   if not ExecAndLogOutput(
     Broker,

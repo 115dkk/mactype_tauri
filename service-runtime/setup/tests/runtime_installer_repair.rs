@@ -5,11 +5,12 @@ mod active_support;
 #[path = "support/runtime_installer/core.rs"]
 mod support;
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::fs;
 
 use mactype_service_contract::{sha256_digest, MachinePaths};
-use mactype_service_setup::RuntimeInstaller;
+use mactype_service_setup::{RuntimeInstaller, RuntimeServiceBinding, SetupError};
 
 use active_support::active_version;
 use support::{payload, test_paths};
@@ -49,6 +50,119 @@ fn repair_refuses_to_turn_an_outdated_runtime_into_an_implicit_upgrade() {
 
     assert!(result.is_err());
     assert_eq!(active_version(paths.runtime_pointer()), "0.2.0");
+}
+
+#[test]
+fn same_version_repair_treats_the_exact_candidate_binding_as_the_previous_binding() {
+    let (base, paths) = test_paths();
+    let installer = RuntimeInstaller::new(paths.clone());
+    let payload = payload(base.path(), "0.2.0", b"service-v2");
+    installer
+        .deploy_with_health_check(&payload, |_| Ok(()))
+        .unwrap();
+
+    let repair = installer.repair_current_with_prepare_and_health_check(
+        &payload,
+        |_| Ok(()),
+        |_, _| {
+            Err(SetupError::Runtime(
+                "repair did not become Ready".to_owned(),
+            ))
+        },
+    );
+    assert!(repair.is_err());
+    assert!(paths.runtime_activation_journal().is_file());
+
+    let recovered = installer
+        .recover_interrupted_activation_with_service_binding(
+            |candidate, previous| {
+                assert_eq!(candidate, previous);
+                Ok(RuntimeServiceBinding::Candidate)
+            },
+            |_, _| {
+                panic!("an identical repair binding must not be reconfigured as its own rollback")
+            },
+        )
+        .unwrap()
+        .expect("same-version repair must recover the existing runtime");
+
+    assert_eq!(recovered.version(), "0.2.0");
+    assert_eq!(active_version(paths.runtime_pointer()), "0.2.0");
+    assert!(!paths.runtime_activation_journal().exists());
+}
+
+#[test]
+fn two_phase_repair_retry_refuses_pending_rollback_without_running_prepare() {
+    let (base, paths) = test_paths();
+    let installer = RuntimeInstaller::new(paths.clone());
+    let payload = payload(base.path(), "0.2.0", b"service-v2");
+    installer
+        .deploy_with_health_check(&payload, |_| Ok(()))
+        .unwrap();
+    installer
+        .repair_current_with_prepare_and_health_check(
+            &payload,
+            |_| Ok(()),
+            |_, _| {
+                Err(SetupError::Runtime(
+                    "repair did not become Ready".to_owned(),
+                ))
+            },
+        )
+        .unwrap_err();
+    let pointer_before = fs::read(paths.runtime_pointer()).unwrap();
+    let journal_before = fs::read(paths.runtime_activation_journal()).unwrap();
+    let prepare_called = Cell::new(false);
+
+    let error = installer
+        .repair_current_with_prepare_and_health_check(
+            &payload,
+            |_| {
+                prepare_called.set(true);
+                Ok(())
+            },
+            |_, _| Ok(()),
+        )
+        .unwrap_err();
+
+    assert!(error.to_string().contains("pending"));
+    assert!(!prepare_called.get());
+    assert_eq!(fs::read(paths.runtime_pointer()).unwrap(), pointer_before);
+    assert_eq!(
+        fs::read(paths.runtime_activation_journal()).unwrap(),
+        journal_before
+    );
+}
+
+#[test]
+fn two_phase_repair_refuses_a_pending_repair_journal_without_running_prepare() {
+    let (base, paths) = test_paths();
+    let installer = RuntimeInstaller::new(paths.clone());
+    let payload = payload(base.path(), "0.2.0", b"service-v2");
+    installer
+        .deploy_with_health_check(&payload, |_| Ok(()))
+        .unwrap();
+    let repair_journal = paths.service_root().join("runtime-repair.json");
+    let pending = b"pending repair transaction";
+    fs::write(&repair_journal, pending).unwrap();
+    let pointer_before = fs::read(paths.runtime_pointer()).unwrap();
+    let prepare_called = Cell::new(false);
+
+    let error = installer
+        .repair_current_with_prepare_and_health_check(
+            &payload,
+            |_| {
+                prepare_called.set(true);
+                Ok(())
+            },
+            |_, _| Ok(()),
+        )
+        .unwrap_err();
+
+    assert!(error.to_string().contains("pending runtime repair"));
+    assert!(!prepare_called.get());
+    assert_eq!(fs::read(paths.runtime_pointer()).unwrap(), pointer_before);
+    assert_eq!(fs::read(repair_journal).unwrap(), pending);
 }
 
 fn write_runtime_files(root: &std::path::Path, service: &[u8]) {

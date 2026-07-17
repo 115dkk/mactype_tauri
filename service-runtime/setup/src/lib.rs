@@ -15,7 +15,9 @@ pub use install_bootstrap::{
     UninstallOutcome,
 };
 pub use profile_store::ProfileStore;
-pub use runtime_installer::{FixedPayload, InstalledRuntime, RuntimeInstaller};
+pub use runtime_installer::{
+    FixedPayload, InstalledRuntime, RuntimeInstaller, RuntimeServiceBinding,
+};
 pub use storage::SetupError;
 
 #[cfg(all(windows, feature = "ci-test-adapter"))]

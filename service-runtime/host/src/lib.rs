@@ -8,6 +8,7 @@ mod profile_runtime;
 mod protected_path;
 mod runtime;
 mod runtime_assets;
+mod service_version;
 mod session_event_queue;
 mod startup_safety;
 mod status;

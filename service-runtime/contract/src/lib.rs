@@ -5,6 +5,7 @@ mod manifest;
 mod migration_pin;
 mod paths;
 mod profile;
+mod runtime_activation;
 
 pub use broker::{parse_broker_command, BrokerCommand, BrokerCommandError};
 pub use health::{
@@ -25,6 +26,13 @@ pub use paths::{MachinePathError, MachinePaths};
 pub use profile::{
     GenerationId, GenerationPointer, ProfileCatalog, ProfileError, SourceMetadata,
     MAX_PROFILE_BYTES, PROFILE_POINTER_SCHEMA,
+};
+pub use runtime_activation::{
+    parse_runtime_activation_receipt, valid_runtime_version_component,
+    ParsedRuntimeActivationReceipt, RuntimeActivationContractError, RuntimeActivationPhase,
+    RuntimeActivationReceipt, RuntimeGenerationPointer, LEGACY_RUNTIME_ACTIVATION_SCHEMA,
+    MAX_RUNTIME_ACTIVATION_RECEIPT_BYTES, MAX_RUNTIME_POINTER_BYTES, RUNTIME_ACTIVATION_SCHEMA,
+    RUNTIME_POINTER_SCHEMA, UNCOMMITTED_RUNTIME_ACTIVATION_SCHEMA,
 };
 
 pub const SERVICE_NAME: &str = "MacTypeControlCenter";

@@ -3,7 +3,9 @@ use std::io;
 use std::io::Read;
 use std::path::Path;
 
-pub(crate) const MAX_POINTER_BYTES: u64 = 64 * 1024;
+use mactype_service_contract::{RuntimeGenerationPointer, MAX_RUNTIME_POINTER_BYTES};
+
+pub(crate) const MAX_POINTER_BYTES: u64 = MAX_RUNTIME_POINTER_BYTES;
 
 pub(crate) fn read_bounded_regular_file(path: &Path, maximum_bytes: u64) -> io::Result<Vec<u8>> {
     let file = OpenOptions::new().read(true).open(path)?;
@@ -18,25 +20,9 @@ pub(crate) fn read_bounded_regular_file(path: &Path, maximum_bytes: u64) -> io::
 }
 
 pub(crate) fn runtime_pointer_version(bytes: &[u8]) -> Option<String> {
-    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
-    let object = value.as_object()?;
-    if object.len() != 2 || object.get("schema").and_then(serde_json::Value::as_u64) != Some(1) {
-        return None;
-    }
-    object
-        .get("version")
-        .and_then(serde_json::Value::as_str)
-        .filter(|version| safe_version_component(version))
-        .map(str::to_owned)
-}
-
-fn safe_version_component(version: &str) -> bool {
-    !version.is_empty()
-        && version.len() <= 64
-        && version
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+'))
-        && !matches!(version, "." | "..")
+    RuntimeGenerationPointer::parse(bytes)
+        .ok()
+        .map(|pointer| pointer.version().to_owned())
 }
 
 pub(crate) fn read_bounded_contents(reader: impl Read, maximum_bytes: u64) -> io::Result<Vec<u8>> {

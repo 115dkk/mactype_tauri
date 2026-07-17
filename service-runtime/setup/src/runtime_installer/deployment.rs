@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(feature = "ci-test-adapter")]
+use std::path::PathBuf;
 
 use mactype_service_contract::{
     verify_runtime_manifest, VerifiedRuntimeManifest, MAX_PROFILE_BYTES, MAX_RUNTIME_FILE_BYTES,

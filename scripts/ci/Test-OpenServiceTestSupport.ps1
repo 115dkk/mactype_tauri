@@ -259,4 +259,6 @@ try {
     Remove-Item -LiteralPath $temporaryRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+& (Join-Path $PSScriptRoot 'Test-OpenServiceAclFixture.ps1')
+
 Write-Host 'Open service CI support bounded-process and bounded-health tests passed.'

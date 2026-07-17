@@ -157,18 +157,181 @@ function Assert-UserMarkers {
 }
 
 function Get-TreeSnapshot {
-    param([Parameter(Mandatory)] [string] $Path)
+    param(
+        [Parameter(Mandatory)] [string] $Path,
+        [string] $ExcludedRoot
+    )
 
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
         throw "Cannot snapshot missing directory: $Path"
     }
+    function Test-RelativePathEscapesRoot {
+        param([Parameter(Mandatory)] [string] $RelativePath)
+
+        if ([IO.Path]::IsPathRooted($RelativePath) -or $RelativePath -eq '..') {
+            return $true
+        }
+        foreach ($separator in @(
+            [IO.Path]::DirectorySeparatorChar,
+            [IO.Path]::AltDirectorySeparatorChar
+        ) | Select-Object -Unique) {
+            if ($RelativePath.StartsWith("..$separator", [StringComparison]::Ordinal)) {
+                return $true
+            }
+        }
+        return $false
+    }
+
+    $resolvedRoot = [IO.Path]::GetFullPath($Path)
+    $resolvedExcludedRoot = $null
+    if ($ExcludedRoot) {
+        $resolvedExcludedRoot = [IO.Path]::GetFullPath($ExcludedRoot)
+        $relativeExcludedRoot = [IO.Path]::GetRelativePath($resolvedRoot, $resolvedExcludedRoot)
+        if (Test-RelativePathEscapesRoot -RelativePath $relativeExcludedRoot) {
+            throw "Excluded snapshot root is outside the application tree: $ExcludedRoot"
+        }
+    }
     @(
-        Get-ChildItem -LiteralPath $Path -Recurse -File | Sort-Object FullName | ForEach-Object {
-            $relative = [IO.Path]::GetRelativePath($Path, $_.FullName)
+        Get-ChildItem -LiteralPath $resolvedRoot -Recurse -File |
+            Where-Object {
+                if (-not $resolvedExcludedRoot) { return $true }
+                $relativeToExcludedRoot = [IO.Path]::GetRelativePath(
+                    $resolvedExcludedRoot,
+                    $_.FullName
+                )
+                Test-RelativePathEscapesRoot -RelativePath $relativeToExcludedRoot
+            } |
+            Sort-Object FullName |
+            ForEach-Object {
+            $relative = [IO.Path]::GetRelativePath($resolvedRoot, $_.FullName)
             $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             "$relative|$($_.Length)|$hash"
         }
     ) -join "`n"
+}
+
+function Get-TreeSnapshotDifference {
+    param(
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $ExpectedSnapshot,
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $ActualSnapshot
+    )
+
+    function ConvertTo-TreeSnapshotMap {
+        param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Snapshot)
+
+        $map = @{}
+        foreach ($line in ($Snapshot -split "`n")) {
+            if ($line.Length -eq 0) { continue }
+            if ($line -notmatch '^(?<path>[^|]+)\|(?<length>[0-9]+)\|(?<hash>[0-9a-f]{64})$') {
+                throw "Tree snapshot entry is invalid: $line"
+            }
+            $map[$Matches.path] = "$($Matches.length)|$($Matches.hash)"
+        }
+        return $map
+    }
+
+    $expected = ConvertTo-TreeSnapshotMap -Snapshot $ExpectedSnapshot
+    $actual = ConvertTo-TreeSnapshotMap -Snapshot $ActualSnapshot
+    @(
+        @($expected.Keys) + @($actual.Keys) |
+            Sort-Object -Unique |
+            ForEach-Object {
+                $relative = $_
+                $hasExpected = $expected.ContainsKey($relative)
+                $hasActual = $actual.ContainsKey($relative)
+                if (-not $hasExpected) {
+                    "added|$relative|actual=$($actual[$relative])"
+                }
+                elseif (-not $hasActual) {
+                    "removed|$relative|expected=$($expected[$relative])"
+                }
+                elseif ($expected[$relative] -cne $actual[$relative]) {
+                    "changed|$relative|expected=$($expected[$relative])|actual=$($actual[$relative])"
+                }
+            }
+    ) -join "`n"
+}
+
+function Get-BoundedTreeInventory {
+    param(
+        [Parameter(Mandatory)] [string] $Path,
+        [ValidateRange(1, 256)] [int] $MaximumEntries = 128
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) { return 'missing|.' }
+    $root = Get-Item -LiteralPath $Path -Force
+    $resolvedRoot = [IO.Path]::GetFullPath($root.FullName)
+    if (-not $root.PSIsContainer) {
+        $hash = (Get-FileHash -LiteralPath $root.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        return "file|.|$($root.Length)|$hash"
+    }
+
+    $lines = [Collections.Generic.List[string]]::new()
+    [void] $lines.Add('directory|.')
+    $pending = [Collections.Generic.Queue[IO.DirectoryInfo]]::new()
+    $pending.Enqueue($root)
+    $observedEntries = 0
+    $truncated = $false
+    while ($pending.Count -gt 0 -and -not $truncated) {
+        $directory = $pending.Dequeue()
+        $remaining = ($MaximumEntries + 1) - $observedEntries
+        $children = @(
+            Get-ChildItem -LiteralPath $directory.FullName -Force |
+                Select-Object -First $remaining
+        )
+        foreach ($child in $children) {
+            $observedEntries += 1
+            if ($observedEntries -gt $MaximumEntries) {
+                $truncated = $true
+                break
+            }
+            $relative = [IO.Path]::GetRelativePath($resolvedRoot, $child.FullName)
+            $isReparse = ($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+            if ($child.PSIsContainer) {
+                if ($isReparse) {
+                    [void] $lines.Add("reparse-directory|$relative")
+                }
+                else {
+                    [void] $lines.Add("directory|$relative")
+                    $pending.Enqueue($child)
+                }
+                continue
+            }
+            if ($isReparse) {
+                [void] $lines.Add("reparse-file|$relative|$($child.Length)")
+                continue
+            }
+            try {
+                $hash = (Get-FileHash -LiteralPath $child.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+                [void] $lines.Add("file|$relative|$($child.Length)|$hash")
+            }
+            catch {
+                [void] $lines.Add("file-unreadable|$relative|$($child.Length)|$($_.Exception.Message)")
+            }
+        }
+    }
+    if ($truncated -or $pending.Count -gt 0) {
+        [void] $lines.Add("truncated|maximum-entries=$MaximumEntries")
+    }
+    return $lines -join "`n"
+}
+
+function Wait-PathAbsent {
+    param(
+        [Parameter(Mandatory)] [string] $Path,
+        [ValidateRange(1, 60000)] [int] $TimeoutMilliseconds = 15000,
+        [ValidateRange(1, 1000)] [int] $PollMilliseconds = 50
+    )
+
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    while ($watch.ElapsedMilliseconds -lt $TimeoutMilliseconds) {
+        if (-not (Test-Path -LiteralPath $Path)) { return }
+        $remaining = $TimeoutMilliseconds - [int] $watch.ElapsedMilliseconds
+        Start-Sleep -Milliseconds ([Math]::Min($PollMilliseconds, [Math]::Max(1, $remaining)))
+    }
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    $inventory = Get-BoundedTreeInventory -Path $Path
+    throw "Path did not disappear within $TimeoutMilliseconds ms: $Path`nRemaining tree:`n$inventory"
 }
 
 function Assert-ServicePayload {
@@ -351,8 +514,12 @@ function Assert-BaselineRestoredAfterFailedUpgrade {
     )
 
     Assert-RequiredApplicationFiles -ApplicationRoot $ApplicationRoot
-    if ((Get-TreeSnapshot -Path $ApplicationRoot) -cne $BaselineApplicationSnapshot) {
-        throw 'Failed upgrade did not preserve the exact existing application file tree.'
+    $applicationSnapshot = Get-TreeSnapshot -Path $ApplicationRoot -ExcludedRoot $ServiceRoot
+    if ($applicationSnapshot -cne $BaselineApplicationSnapshot) {
+        $difference = Get-TreeSnapshotDifference `
+            -ExpectedSnapshot $BaselineApplicationSnapshot `
+            -ActualSnapshot $applicationSnapshot
+        throw "Failed upgrade did not preserve the exact existing application file tree.`n$difference"
     }
     if ((Get-ServiceSnapshot -Name $OpenServiceName) -cne $BaselineServiceSnapshot) {
         throw 'Failed upgrade did not restore the exact baseline service configuration and state.'

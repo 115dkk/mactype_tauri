@@ -47,14 +47,54 @@ function Test-OpenServiceWorkflowPolicy {
         )
 
     $hostedLifecyclePath = Join-Path $Root 'scripts\ci\Test-OpenServiceWindows.ps1'
-    $null = Test-RequiredTokens -Failures $failures -Path $hostedLifecyclePath `
+    $hostedLifecycle = Test-RequiredTokens -Failures $failures -Path $hostedLifecyclePath `
         -MissingMessage 'scripts/ci/Test-OpenServiceWindows.ps1 is missing.' `
-        -TokenMessage "hosted lifecycle verification is missing telemetry-binding token '{0}'." `
+        -TokenMessage "hosted lifecycle verification is missing required contract token '{0}'." `
         -Tokens @(
             'Assert-GenerationBoundMarkerTelemetry', 'runtimeGenerationId',
             'profileDigest', 'success.pid', 'success.sessionId',
-            'x86 and x64 marker telemetry is not bound to the same runtime generation'
+            'x86 and x64 marker telemetry is not bound to the same runtime generation',
+            'OpenServiceAclFixture.psm1', 'Invoke-OpenServiceAclRepairFixture',
+            '-RepairContext $stagedSetup', 'param($setupExecutable)',
+            "-Verb 'publish-profile' -InputBytes `$profileA",
+            "Assert-ActiveRuntimeProfile -ExpectedBytes `$profileA"
         )
+    if ($hostedLifecycle) {
+        $profilePublishToken = "-Verb 'publish-profile' -InputBytes `$profileA"
+        $profilePublishIndex = $hostedLifecycle.IndexOf($profilePublishToken)
+        $profileVerificationIndex = $hostedLifecycle.IndexOf(
+            "Assert-ActiveRuntimeProfile -ExpectedBytes `$profileA"
+        )
+        $aclRepairIndex = $hostedLifecycle.IndexOf('Invoke-OpenServiceAclRepairFixture')
+        if ([regex]::Matches(
+                $hostedLifecycle,
+                [regex]::Escape($profilePublishToken)
+            ).Count -ne 1) {
+            $failures.Add('hosted lifecycle must publish profile A exactly once.')
+        }
+        if ($profilePublishIndex -gt $aclRepairIndex -or
+            $profileVerificationIndex -gt $aclRepairIndex) {
+            $failures.Add(
+                'hosted lifecycle must publish and verify profile A before the exact ACL repair fixture.'
+            )
+        }
+    }
+
+    $aclFixtureModulePath = Join-Path $Root 'scripts\ci\lib\OpenServiceAclFixture.psm1'
+    $null = Test-RequiredTokens -Failures $failures -Path $aclFixtureModulePath `
+        -MissingMessage 'scripts/ci/lib/OpenServiceAclFixture.psm1 is missing.' `
+        -TokenMessage "exact ACL repair diagnostics are missing required token '{0}'." `
+        -Tokens @(
+            'S-1-5-32-545', 'exact-users-modify-repair',
+            'post-repair-verification', 'targetAclSddl', 'innerError',
+            'scQueryex', 'scQfailure', "-Name 'icacls'", 'RepairContext'
+        )
+
+    $supportTestPath = Join-Path $Root 'scripts\ci\Test-OpenServiceTestSupport.ps1'
+    $null = Test-RequiredTokens -Failures $failures -Path $supportTestPath `
+        -MissingMessage 'scripts/ci/Test-OpenServiceTestSupport.ps1 is missing.' `
+        -TokenMessage "open-service CI support tests do not execute required test '{0}'." `
+        -Tokens @('Test-OpenServiceAclFixture.ps1')
 
     $lintWorkflowPath = Join-Path $Root '.github\workflows\lint.yml'
     $null = Test-RequiredTokens -Failures $failures -Path $lintWorkflowPath `

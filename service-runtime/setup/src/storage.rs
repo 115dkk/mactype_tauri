@@ -12,6 +12,11 @@ static TEMPORARY_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 #[derive(Debug)]
 pub enum SetupError {
     Io(io::Error),
+    MachineOperation {
+        operation: &'static str,
+        path: PathBuf,
+        source: Box<SetupError>,
+    },
     InvalidProfile(ProfileError),
     InvalidMetadata,
     InvalidPointer,
@@ -27,6 +32,15 @@ impl fmt::Display for SetupError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(error) => write!(formatter, "machine storage I/O failed: {error}"),
+            Self::MachineOperation {
+                operation,
+                path,
+                source,
+            } => write!(
+                formatter,
+                "machine operation '{operation}' failed at {}: {source}",
+                path.display()
+            ),
             Self::InvalidProfile(error) => write!(formatter, "profile validation failed: {error}"),
             Self::InvalidMetadata => formatter.write_str("source metadata is invalid"),
             Self::InvalidPointer => formatter.write_str("generation pointer is invalid"),
@@ -54,7 +68,26 @@ impl fmt::Display for SetupError {
     }
 }
 
-impl std::error::Error for SetupError {}
+impl std::error::Error for SetupError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(error) => Some(error),
+            Self::MachineOperation { source, .. } => Some(source.as_ref()),
+            Self::InvalidProfile(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+impl SetupError {
+    pub(crate) fn at_machine_path(self, operation: &'static str, path: &Path) -> Self {
+        Self::MachineOperation {
+            operation,
+            path: path.to_owned(),
+            source: Box::new(self),
+        }
+    }
+}
 
 impl From<io::Error> for SetupError {
     fn from(value: io::Error) -> Self {

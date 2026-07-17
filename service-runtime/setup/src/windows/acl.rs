@@ -2,7 +2,10 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::ptr;
 
-use windows_sys::Win32::Foundation::{LocalFree, ERROR_SUCCESS, GENERIC_EXECUTE, GENERIC_READ};
+use windows_sys::Win32::Foundation::{
+    LocalFree, ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, GENERIC_EXECUTE,
+    GENERIC_READ,
+};
 use windows_sys::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, ConvertStringSidToSidW,
     GetNamedSecurityInfoW, TreeSetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
@@ -28,9 +31,26 @@ const MAX_PROTECTED_TREE_ENTRIES: usize = 100_000;
 const ACCESS_ALLOWED_ACE_KIND: u8 = 0;
 
 pub fn harden_machine_directory(path: &Path) -> Result<(), SetupError> {
-    let paths = collect_protected_tree(path)?;
-    let descriptor = OwnedSecurityDescriptor::from_sddl(MACHINE_TREE_SDDL)?;
-    let dacl = descriptor.dacl()?;
+    harden_machine_directory_observed(path, |_, _| {})
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HardeningObservation {
+    BeforeInspect,
+    BeforeVerify,
+}
+
+fn harden_machine_directory_observed(
+    path: &Path,
+    mut observe: impl FnMut(HardeningObservation, &Path),
+) -> Result<(), SetupError> {
+    let paths = collect_protected_tree(path, &mut observe)
+        .map_err(|error| error.at_machine_path("enumerate protected ACL tree", path))?;
+    let descriptor = OwnedSecurityDescriptor::from_sddl(MACHINE_TREE_SDDL)
+        .map_err(|error| error.at_machine_path("build protected ACL descriptor", path))?;
+    let dacl = descriptor
+        .dacl()
+        .map_err(|error| error.at_machine_path("read protected ACL descriptor", path))?;
     let path_wide = wide_path(path);
     let status = unsafe {
         TreeSetNamedSecurityInfoW(
@@ -48,26 +68,58 @@ pub fn harden_machine_directory(path: &Path) -> Result<(), SetupError> {
         )
     };
     if status != ERROR_SUCCESS {
-        return Err(SetupError::Io(io::Error::from_raw_os_error(status as i32)));
+        return Err(SetupError::Io(io::Error::from_raw_os_error(status as i32))
+            .at_machine_path("reset protected ACL tree", path));
     }
 
-    let sids = ExpectedSids::new()?;
+    let sids = ExpectedSids::new()
+        .map_err(|error| error.at_machine_path("build protected ACL trustees", path))?;
     for entry in paths {
-        verify_protected_acl(&entry, &sids, entry == path)?;
+        observe(HardeningObservation::BeforeVerify, &entry);
+        if let Err(error) = verify_protected_acl(&entry, &sids, entry == path) {
+            if entry != path && setup_error_confirms_disappeared_child(&entry, &error) {
+                continue;
+            }
+            return Err(error.at_machine_path("verify protected ACL entry", &entry));
+        }
     }
     Ok(())
 }
 
-fn collect_protected_tree(root: &Path) -> Result<Vec<PathBuf>, SetupError> {
+fn collect_protected_tree(
+    root: &Path,
+    observe: &mut impl FnMut(HardeningObservation, &Path),
+) -> Result<Vec<PathBuf>, SetupError> {
     reject_reparse_ancestors(root)?;
     let mut pending = vec![root.to_owned()];
     let mut result = Vec::new();
     let mut discovered = 1usize;
     while let Some(path) = pending.pop() {
-        reject_reparse_ancestors(&path)?;
-        let metadata = std::fs::metadata(&path)?;
+        observe(HardeningObservation::BeforeInspect, &path);
+        if let Err(error) = reject_reparse_ancestors(&path) {
+            if path != root && setup_error_confirms_disappeared_child(&path, &error) {
+                continue;
+            }
+            return Err(error);
+        }
+        let metadata = match std::fs::metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if path != root && io_error_confirms_disappeared_child(&path, &error) => {
+                continue;
+            }
+            Err(error) => return Err(error.into()),
+        };
         if metadata.is_dir() {
-            for entry in std::fs::read_dir(&path)? {
+            let children = match std::fs::read_dir(&path) {
+                Ok(children) => children,
+                Err(error)
+                    if path != root && io_error_confirms_disappeared_child(&path, &error) =>
+                {
+                    continue;
+                }
+                Err(error) => return Err(error.into()),
+            };
+            for entry in children {
                 if discovered == MAX_PROTECTED_TREE_ENTRIES {
                     return Err(SetupError::Runtime(
                         "protected machine tree exceeds the fixed ACL verification bound"
@@ -81,6 +133,27 @@ fn collect_protected_tree(root: &Path) -> Result<Vec<PathBuf>, SetupError> {
         result.push(path);
     }
     Ok(result)
+}
+
+fn setup_error_confirms_disappeared_child(path: &Path, error: &SetupError) -> bool {
+    match error {
+        SetupError::Io(error) => io_error_confirms_disappeared_child(path, error),
+        _ => false,
+    }
+}
+
+fn io_error_confirms_disappeared_child(path: &Path, error: &io::Error) -> bool {
+    is_windows_not_found(error)
+        && std::fs::symlink_metadata(path)
+            .is_err_and(|probe_error| is_windows_not_found(&probe_error))
+}
+
+fn is_windows_not_found(error: &io::Error) -> bool {
+    matches!(
+        error.raw_os_error(),
+        Some(code)
+            if code == ERROR_FILE_NOT_FOUND as i32 || code == ERROR_PATH_NOT_FOUND as i32
+    )
 }
 
 fn verify_protected_acl(
@@ -330,17 +403,27 @@ fn wide_path(path: &Path) -> Vec<u16> {
 #[cfg(test)]
 mod tests {
     use mactype_service_contract::BrokerCommand;
-    use std::path::Path;
+    #[cfg(feature = "ci-test-adapter")]
+    use mactype_service_contract::{sha256_digest, MachinePaths};
+    #[cfg(feature = "ci-test-adapter")]
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
     use windows_sys::Win32::Security::{CONTAINER_INHERIT_ACE, INHERITED_ACE, OBJECT_INHERIT_ACE};
 
     use crate::windows::broker::prepare_machine_storage_for_command;
+    #[cfg(feature = "ci-test-adapter")]
+    use crate::{FixedPayload, RuntimeInstaller};
 
     use super::{
-        ace_applies_to_current_object, harden_machine_directory, is_users_read_execute_mask,
-        verify_protected_acl, ExpectedSids, OwnedSecurityDescriptor, DACL_SECURITY_INFORMATION,
-        ERROR_SUCCESS, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, GENERIC_EXECUTE, GENERIC_READ,
-        INHERIT_ONLY_ACE, PROTECTED_DACL_SECURITY_INFORMATION, SE_FILE_OBJECT, TREE_SEC_INFO_RESET,
+        ace_applies_to_current_object, harden_machine_directory, harden_machine_directory_observed,
+        is_users_read_execute_mask, verify_protected_acl, ExpectedSids, HardeningObservation,
+        OwnedSecurityDescriptor, DACL_SECURITY_INFORMATION, ERROR_SUCCESS, FILE_GENERIC_EXECUTE,
+        FILE_GENERIC_READ, GENERIC_EXECUTE, GENERIC_READ, INHERIT_ONLY_ACE,
+        PROTECTED_DACL_SECURITY_INFORMATION, SE_FILE_OBJECT, TREE_SEC_INFO_RESET,
     };
+    #[cfg(feature = "ci-test-adapter")]
+    use super::{OwnedSid, ADMINISTRATORS_SID};
 
     const BASE_ACL: &str = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)";
 
@@ -350,6 +433,64 @@ mod tests {
 
         let result = harden_machine_directory(directory.path());
 
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
+    fn hardening_errors_identify_the_bounded_operation_and_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory.path().join("missing-machine-root");
+
+        let error = harden_machine_directory(&missing).unwrap_err();
+        let message = error.to_string();
+
+        assert!(
+            message.contains("enumerate protected ACL tree"),
+            "{message}"
+        );
+        assert!(
+            message.contains(&missing.display().to_string()),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn hardening_tolerates_a_discovered_child_that_disappears_before_inspection() {
+        let directory = tempfile::tempdir().unwrap();
+        let transient = directory.path().join("profile.ini.tmp");
+        std::fs::write(&transient, b"temporary profile").unwrap();
+        let mut removed = false;
+
+        let result = harden_machine_directory_observed(directory.path(), |observation, path| {
+            if observation == HardeningObservation::BeforeInspect && path == transient {
+                std::fs::remove_file(path).unwrap();
+                removed = true;
+            }
+        });
+
+        assert!(removed, "the fixture must reproduce the metadata race");
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
+    fn hardening_tolerates_a_collected_child_that_disappears_before_acl_verification() {
+        let directory = tempfile::tempdir().unwrap();
+        let transient = directory.path().join("health.json.tmp");
+        std::fs::write(&transient, b"temporary health snapshot").unwrap();
+        let mut removed = false;
+
+        let result = harden_machine_directory_observed(directory.path(), |observation, path| {
+            if observation == HardeningObservation::BeforeVerify && path == transient {
+                apply_acl(path, "D:P(A;;FA;;;WD)");
+                std::fs::remove_file(path).unwrap();
+                removed = true;
+            }
+        });
+
+        assert!(
+            removed,
+            "the fixture must reproduce the ACL verification race"
+        );
         assert!(result.is_ok(), "{result:?}");
     }
 
@@ -424,6 +565,79 @@ mod tests {
 
         verify_protected_acl(directory.path(), &sids, true).unwrap();
         verify_protected_acl(&service, &sids, false).unwrap();
+    }
+
+    #[test]
+    fn hardening_removes_the_exact_users_modify_ace_emitted_by_icacls() {
+        let directory = tempfile::tempdir().unwrap();
+        let _cleanup = ResetFixtureAclOnDrop(directory.path().to_owned());
+        let runtime = directory.path().join("bin").join("0.2.0");
+        std::fs::create_dir_all(&runtime).unwrap();
+        let service = runtime.join("mactype-service.exe");
+        std::fs::write(&service, b"service").unwrap();
+        harden_machine_directory(directory.path()).unwrap();
+
+        grant_users_modify_with_icacls(&service);
+        let sids = ExpectedSids::new().unwrap();
+        verify_protected_acl(&service, &sids, false)
+            .expect_err("the exact hosted-CI fixture must grant Users Modify");
+
+        harden_machine_directory(directory.path()).unwrap();
+
+        verify_protected_acl(directory.path(), &sids, true).unwrap();
+        verify_protected_acl(&service, &sids, false).unwrap();
+    }
+
+    #[cfg(feature = "ci-test-adapter")]
+    #[test]
+    fn administrator_required_fixture_never_skips_in_ci() {
+        assert_eq!(administrator_fixture_policy(false, true), Ok(true));
+        assert_eq!(administrator_fixture_policy(true, true), Ok(true));
+        assert_eq!(administrator_fixture_policy(false, false), Ok(false));
+        assert!(administrator_fixture_policy(true, false).is_err());
+    }
+
+    #[cfg(feature = "ci-test-adapter")]
+    #[test]
+    fn repair_lifecycle_survives_the_exact_users_modify_ace_emitted_by_icacls() {
+        match administrator_fixture_policy(
+            running_in_ci(),
+            current_token_is_enabled_administrator(),
+        ) {
+            Ok(true) => {}
+            Ok(false) => {
+                eprintln!(
+                    "skipped locally: protected runtime repair requires an enabled Administrator token"
+                );
+                return;
+            }
+            Err(message) => panic!("{message}"),
+        }
+        let base = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+        let _cleanup = ResetFixtureAclOnDrop(base.path().to_owned());
+        let program_files = base.path().join("Program Files");
+        let program_data = base.path().join("ProgramData");
+        std::fs::create_dir_all(&program_files).unwrap();
+        std::fs::create_dir_all(&program_data).unwrap();
+        let paths = MachinePaths::from_trusted_os_roots(&program_files, &program_data).unwrap();
+        let payload = test_payload(base.path(), "0.2.0");
+        let installer = RuntimeInstaller::new(paths.clone());
+        installer
+            .deploy_with_health_check(&payload, |_| Ok(()))
+            .unwrap();
+        harden_machine_directory(paths.service_root()).unwrap();
+        let service = paths
+            .runtime_versions()
+            .join("0.2.0")
+            .join("mactype-service.exe");
+        grant_users_modify_with_icacls(&service);
+
+        prepare_machine_storage_for_command(BrokerCommand::Repair, paths.service_root()).unwrap();
+        installer
+            .repair_current_with_health_check(&payload, |_| Ok(()))
+            .unwrap();
+
+        verify_protected_acl(&service, &ExpectedSids::new().unwrap(), false).unwrap();
     }
 
     #[test]
@@ -558,6 +772,98 @@ mod tests {
             )
         };
         assert_eq!(status, ERROR_SUCCESS);
+    }
+
+    fn grant_users_modify_with_icacls(path: &Path) {
+        let output = Command::new(r"C:\Windows\System32\icacls.exe")
+            .arg(path)
+            .args(["/grant", "*S-1-5-32-545:(M)"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "icacls failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    struct ResetFixtureAclOnDrop(PathBuf);
+
+    impl Drop for ResetFixtureAclOnDrop {
+        fn drop(&mut self) {
+            let _ = Command::new(r"C:\Windows\System32\icacls.exe")
+                .arg(&self.0)
+                .args(["/reset", "/T", "/C", "/Q"])
+                .output();
+        }
+    }
+
+    #[cfg(feature = "ci-test-adapter")]
+    fn administrator_fixture_policy(
+        running_in_ci: bool,
+        enabled_administrator: bool,
+    ) -> Result<bool, &'static str> {
+        if enabled_administrator {
+            Ok(true)
+        } else if running_in_ci {
+            Err("CI must provide an enabled Administrator token for the protected repair fixture")
+        } else {
+            Ok(false)
+        }
+    }
+
+    #[cfg(feature = "ci-test-adapter")]
+    fn running_in_ci() -> bool {
+        ["GITHUB_ACTIONS", "CI"]
+            .iter()
+            .any(|name| std::env::var(name).is_ok_and(|value| value.eq_ignore_ascii_case("true")))
+    }
+
+    #[cfg(feature = "ci-test-adapter")]
+    fn current_token_is_enabled_administrator() -> bool {
+        let administrators = match OwnedSid::from_string(ADMINISTRATORS_SID) {
+            Ok(sid) => sid,
+            Err(_) => return false,
+        };
+        let mut is_member = 0;
+        unsafe {
+            windows_sys::Win32::Security::CheckTokenMembership(
+                std::ptr::null_mut(),
+                administrators.0,
+                &mut is_member,
+            ) != 0
+                && is_member != 0
+        }
+    }
+
+    #[cfg(feature = "ci-test-adapter")]
+    fn test_payload(base: &Path, version: &str) -> FixedPayload {
+        let root = base.join("payload");
+        let files_root = root.join("files");
+        std::fs::create_dir_all(&files_root).unwrap();
+        let payload_files: [(&str, &[u8]); 5] = [
+            ("mactype-service.exe", b"service"),
+            ("mactype-injector32.exe", b"injector-32"),
+            ("mactype-injector64.exe", b"injector-64"),
+            ("MacType.dll", b"mactype-32"),
+            ("MacType64.dll", b"mactype-64"),
+        ];
+        let mut files = BTreeMap::new();
+        for (name, contents) in payload_files {
+            std::fs::write(files_root.join(name), contents).unwrap();
+            files.insert(name.to_owned(), sha256_digest(contents));
+        }
+        std::fs::write(
+            root.join("manifest.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "schema": 1,
+                "version": version,
+                "files": files,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        FixedPayload::from_test_root(root).unwrap()
     }
 
     fn acl_snapshot(path: &Path) -> Vec<(&'static str, u32, u8)> {

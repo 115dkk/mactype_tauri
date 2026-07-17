@@ -213,6 +213,69 @@ fn initializer_refuses_ready_while_a_durable_activation_recovery_is_pending() {
 }
 
 #[test]
+fn initializer_refuses_a_runtime_activation_receipt_for_a_different_candidate() {
+    let (_base, paths) = paths();
+    let bytes = b"[General]\r\nHintingMode=0\r\n";
+    install_active_profile(&paths, bytes);
+    install_active_runtime(&paths, bytes);
+    fs::write(
+        paths.runtime_activation_journal(),
+        br#"{"schema":3,"phase":"committed","previous":null,"activated":{"schema":1,"version":"0.3.0"}}"#,
+    )
+    .unwrap();
+
+    let error = ProtectedProfileInitializer::new(paths)
+        .initialize()
+        .err()
+        .expect("a receipt for a different runtime candidate must prevent Ready");
+
+    assert_eq!(error.code, "activation-recovery-required");
+}
+
+#[test]
+fn initializer_refuses_a_stale_matching_receipt_without_a_durable_commit_phase() {
+    let (_base, paths) = paths();
+    let bytes = b"[General]\r\nHintingMode=0\r\n";
+    install_active_profile(&paths, bytes);
+    install_active_runtime(&paths, bytes);
+    fs::write(
+        paths.runtime_activation_journal(),
+        br#"{"schema":2,"previous":null,"activated":{"schema":1,"version":"0.2.0"}}"#,
+    )
+    .unwrap();
+
+    let error = ProtectedProfileInitializer::new(paths)
+        .initialize()
+        .err()
+        .expect("a stale matching receipt without an explicit commit must prevent Ready");
+
+    assert_eq!(error.code, "activation-recovery-required");
+}
+
+#[test]
+fn initializer_refuses_legacy_uncommitted_and_rollback_required_receipts() {
+    let (_base, paths) = paths();
+    let bytes = b"[General]\r\nHintingMode=0\r\n";
+    install_active_profile(&paths, bytes);
+    install_active_runtime(&paths, bytes);
+
+    for receipt in [
+        br#"{"schema":1,"previous":null}"#.as_slice(),
+        br#"{"schema":3,"phase":"candidate","previous":null,"activated":{"schema":1,"version":"0.2.0"}}"#
+            .as_slice(),
+        br#"{"schema":3,"phase":"rollback-required","previous":null,"activated":{"schema":1,"version":"0.2.0"}}"#
+            .as_slice(),
+    ] {
+        fs::write(paths.runtime_activation_journal(), receipt).unwrap();
+        let error = ProtectedProfileInitializer::new(paths.clone())
+            .initialize()
+            .err()
+            .expect("legacy and uncommitted activation receipts must prevent Ready");
+        assert_eq!(error.code, "activation-recovery-required");
+    }
+}
+
+#[test]
 fn initializer_does_not_claim_ready_without_an_active_generation() {
     let (_base, paths) = paths();
     let error = ProtectedProfileInitializer::new(paths)

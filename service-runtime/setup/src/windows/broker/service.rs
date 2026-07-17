@@ -1,3 +1,4 @@
+use super::super::runtime_recovery;
 use super::BrokerContext;
 use crate::storage::create_protected_directory;
 use crate::{FixedPayload, ProfileStore, RuntimeInstaller, SetupError};
@@ -38,18 +39,16 @@ fn upgrade_plan(was_running: bool) -> UpgradePlan {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum UpgradeRecoveryStep {
-    StopFailedGeneration,
-    ReconfigurePrevious,
+    RecoverExactBinding,
     StartPreviousReady,
 }
 
 struct UpgradeRecoveryPlan(&'static [UpgradeRecoveryStep]);
 
 fn upgrade_recovery_plan(was_running: bool) -> UpgradeRecoveryPlan {
-    const STOPPED: &[UpgradeRecoveryStep] = &[UpgradeRecoveryStep::ReconfigurePrevious];
+    const STOPPED: &[UpgradeRecoveryStep] = &[UpgradeRecoveryStep::RecoverExactBinding];
     const RUNNING: &[UpgradeRecoveryStep] = &[
-        UpgradeRecoveryStep::StopFailedGeneration,
-        UpgradeRecoveryStep::ReconfigurePrevious,
+        UpgradeRecoveryStep::RecoverExactBinding,
         UpgradeRecoveryStep::StartPreviousReady,
     ];
     UpgradeRecoveryPlan(if was_running { RUNNING } else { STOPPED })
@@ -60,7 +59,20 @@ pub(super) fn install(context: &BrokerContext) -> Result<String, SetupError> {
     super::super::acl::harden_machine_directory(context.paths.service_root())?;
     let payload = FixedPayload::beside_setup_executable()?;
     let installed = RuntimeInstaller::new(context.paths.clone())
-        .deploy_with_health_check(&payload, |binary| context.manager.install(binary))?;
+        .deploy_with_prepare_and_health_check(
+            &payload,
+            |binary| context.manager.install(binary),
+            |_, _| Ok(()),
+        );
+    let installed = match installed {
+        Ok((installed, ())) => installed,
+        Err(operation) => {
+            if let Err(restoration) = runtime_recovery::recover(&context.paths, &context.manager) {
+                return Err(combine_operation_and_restore_error(operation, restoration));
+            }
+            return Err(operation);
+        }
+    };
     super::super::acl::harden_machine_directory(context.paths.service_root())?;
     Ok(version_result("install", installed.version()))
 }
@@ -74,17 +86,25 @@ pub(super) fn upgrade(context: &BrokerContext) -> Result<String, SetupError> {
     }
     let payload = FixedPayload::beside_setup_executable()?;
     let installer = RuntimeInstaller::new(context.paths.clone());
-    let installed = installer.deploy_with_health_check(&payload, |binary| {
-        context.manager.reconfigure(binary)?;
-        if plan.0.contains(&UpgradeStep::StartReady) {
-            context.manager.start_and_wait_ready()?;
-        }
-        Ok(())
-    });
+    let previous = installer.inspect_current_stable()?.ok_or_else(|| {
+        SetupError::Runtime("no active protected runtime exists before upgrade".to_owned())
+    })?;
+    let installed = installer
+        .deploy_with_prepare_and_health_check(
+            &payload,
+            |binary| context.manager.reconfigure(binary),
+            |_, _| {
+                if plan.0.contains(&UpgradeStep::StartReady) {
+                    context.manager.start_and_wait_ready()?;
+                }
+                Ok(())
+            },
+        )
+        .map(|(installed, ())| installed);
     let installed = match installed {
         Ok(installed) => installed,
         Err(operation) => {
-            if let Err(restoration) = restore_upgrade_state(context, &installer, &recovery_plan) {
+            if let Err(restoration) = restore_upgrade_state(context, &previous, &recovery_plan) {
                 return Err(combine_operation_and_restore_error(operation, restoration));
             }
             return Err(operation);
@@ -95,24 +115,53 @@ pub(super) fn upgrade(context: &BrokerContext) -> Result<String, SetupError> {
 }
 
 pub(super) fn repair(context: &BrokerContext) -> Result<String, SetupError> {
-    let plan = repair_plan(context.manager.is_running()?);
+    let plan = repair_plan(context.manager.is_running().map_err(|error| {
+        error.at_machine_path(
+            "inspect service state before repair",
+            context.paths.service_root(),
+        )
+    })?);
     if plan.0.contains(&RepairStep::Stop) {
-        context.manager.stop()?;
+        context.manager.stop().map_err(|error| {
+            error.at_machine_path("stop service before repair", context.paths.service_root())
+        })?;
     }
     let repair = (|| {
-        let payload = FixedPayload::beside_setup_executable()?;
+        let payload = FixedPayload::beside_setup_executable().map_err(|error| {
+            error.at_machine_path("locate fixed repair payload", context.paths.service_root())
+        })?;
         RuntimeInstaller::new(context.paths.clone())
-            .repair_current_with_health_check(&payload, |binary| {
-                context.manager.reconfigure(binary)
+            .repair_current_with_prepare_and_health_check(
+                &payload,
+                |binary| context.manager.reconfigure(binary),
+                |_, _| Ok(()),
+            )
+            .map_err(|error| {
+                error.at_machine_path(
+                    "repair protected runtime transaction",
+                    context.paths.service_root(),
+                )
             })?;
-        ProfileStore::new(context.paths.clone()).synchronize_active_runtime()?;
+        ProfileStore::new(context.paths.clone())
+            .synchronize_active_runtime()
+            .map_err(|error| {
+                error.at_machine_path(
+                    "synchronize active profile after repair",
+                    context.paths.active_profile(),
+                )
+            })?;
         super::super::acl::harden_machine_directory(context.paths.service_root())?;
         if plan.0.contains(&RepairStep::StartReady) {
-            context.manager.start_and_wait_ready()?;
+            context.manager.start_and_wait_ready().map_err(|error| {
+                error.at_machine_path("restart service after repair", context.paths.service_root())
+            })?;
         }
         Ok::<(), SetupError>(())
     })();
     if let Err(operation) = repair {
+        if let Err(restoration) = runtime_recovery::recover(&context.paths, &context.manager) {
+            return Err(combine_operation_and_restore_error(operation, restoration));
+        }
         if plan.0.contains(&RepairStep::StartReady) {
             if let Err(restoration) = context.manager.start_and_wait_ready() {
                 return Err(combine_operation_and_restore_error(operation, restoration));
@@ -158,18 +207,17 @@ pub(super) fn restore_runtime(context: &BrokerContext) -> Result<String, SetupEr
 
 fn restore_upgrade_state(
     context: &BrokerContext,
-    installer: &RuntimeInstaller,
+    previous: &crate::InstalledRuntime,
     plan: &UpgradeRecoveryPlan,
 ) -> Result<(), SetupError> {
-    if plan.0.contains(&UpgradeRecoveryStep::StopFailedGeneration) {
-        context.manager.stop()?;
+    debug_assert!(plan.0.contains(&UpgradeRecoveryStep::RecoverExactBinding));
+    let recovered = runtime_recovery::recover(&context.paths, &context.manager)?;
+    if recovered.as_ref() != Some(previous) {
+        return Err(SetupError::CleanupUnknown(
+            "failed upgrade did not recover the exact previous runtime; refusing to infer a service restart"
+                .to_owned(),
+        ));
     }
-    let previous = installer.current()?.ok_or_else(|| {
-        SetupError::Runtime(
-            "no previous protected runtime remains after upgrade failure".to_owned(),
-        )
-    })?;
-    context.manager.reconfigure(previous.service_binary())?;
     if plan.0.contains(&UpgradeRecoveryStep::StartPreviousReady) {
         context.manager.start_and_wait_ready()?;
     }
@@ -216,18 +264,17 @@ mod tests {
     }
 
     #[test]
-    fn running_upgrade_failure_stops_the_failed_generation_before_restoration() {
+    fn running_upgrade_failure_recovers_the_exact_binding_before_restart() {
         assert_eq!(
             upgrade_recovery_plan(true).0,
             &[
-                UpgradeRecoveryStep::StopFailedGeneration,
-                UpgradeRecoveryStep::ReconfigurePrevious,
+                UpgradeRecoveryStep::RecoverExactBinding,
                 UpgradeRecoveryStep::StartPreviousReady,
             ]
         );
         assert_eq!(
             upgrade_recovery_plan(false).0,
-            &[UpgradeRecoveryStep::ReconfigurePrevious]
+            &[UpgradeRecoveryStep::RecoverExactBinding]
         );
     }
 

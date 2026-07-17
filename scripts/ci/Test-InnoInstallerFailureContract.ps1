@@ -77,6 +77,13 @@ $fatalScriptPath = Join-Path $temporaryRoot 'fatal.iss'
 $legacyLogPath = Join-Path $temporaryRoot 'legacy.log'
 $fatalLogPath = Join-Path $temporaryRoot 'fatal.log'
 $fatalUpgradeLogPath = Join-Path $temporaryRoot 'fatal-upgrade.log'
+$emptyRootScriptPath = Join-Path $temporaryRoot 'empty-root-cleanup.iss'
+$emptyRootInstallLogPath = Join-Path $temporaryRoot 'empty-root-install.log'
+$emptyRootUninstallLogPath = Join-Path $temporaryRoot 'empty-root-uninstall.log'
+$foreignRootInstallLogPath = Join-Path $temporaryRoot 'foreign-root-install.log'
+$foreignRootUninstallLogPath = Join-Path $temporaryRoot 'foreign-root-uninstall.log'
+$emptyRootAppRoot = Join-Path $temporaryRoot 'pre-existing-empty-app'
+$foreignRootAppRoot = Join-Path $temporaryRoot 'pre-existing-foreign-app'
 $commandProcessorPath = Join-Path $env:SystemRoot 'System32\cmd.exe'
 $sourceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 
@@ -274,6 +281,96 @@ end;
         if (-not $fatalUpgradeLog.Contains($token)) {
             throw "Required-operation upgrade fixture log omits rollback evidence: $token`n$fatalUpgradeLog"
         }
+    }
+
+    $productInstallerDefinition = Get-Content -LiteralPath `
+        (Join-Path $sourceRoot 'installer\mactype-control-center.iss') -Raw
+    $rootCleanupEntry = [regex]::Match(
+        $productInstallerDefinition,
+        '(?m)^Type:\s*dirifempty;\s*Name:\s*"\{app\}"\s*$'
+    )
+    if (-not $rootCleanupEntry.Success) {
+        throw 'Product installer does not define exact empty application-root cleanup.'
+    }
+    $emptyRootCleanupScript = @"
+[Setup]
+AppId=MacTypeInnoEmptyRootCleanupContract-$PID
+AppName=MacType Inno empty root cleanup contract
+AppVersion=1.0
+DefaultDirName=$emptyRootAppRoot
+PrivilegesRequired=lowest
+UsePreviousAppDir=no
+CreateUninstallRegKey=no
+OutputDir=$outputRoot
+OutputBaseFilename=empty-root-cleanup
+DisableProgramGroupPage=yes
+Compression=none
+
+[Files]
+Source: "$payloadPath"; DestDir: "{app}"
+
+[UninstallDelete]
+$($rootCleanupEntry.Value)
+"@
+    [IO.File]::WriteAllText(
+        $emptyRootScriptPath,
+        $emptyRootCleanupScript,
+        [Text.UTF8Encoding]::new($false)
+    )
+    Invoke-ExpectedSuccess -File $Compiler -Arguments @('/Qp', $emptyRootScriptPath) `
+        -Label 'Compile exact empty application-root cleanup fixture'
+    $emptyRootInstaller = Join-Path $outputRoot 'empty-root-cleanup.exe'
+    $silentArguments = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-')
+
+    New-Item -ItemType Directory -Path $emptyRootAppRoot -Force | Out-Null
+    Invoke-ExpectedSuccess -File $emptyRootInstaller `
+        -Arguments ($silentArguments + "/DIR=$emptyRootAppRoot") `
+        -Label 'Install into pre-existing empty application root' `
+        -DiagnosticLogPath $emptyRootInstallLogPath
+    $emptyRootUninstaller = Get-ChildItem -LiteralPath $emptyRootAppRoot `
+        -File -Filter 'unins*.exe' | Select-Object -First 1
+    if (-not $emptyRootUninstaller) {
+        throw 'Empty-root cleanup fixture did not create an uninstaller.'
+    }
+    Invoke-ExpectedSuccess -File $emptyRootUninstaller.FullName `
+        -Arguments $silentArguments `
+        -Label 'Uninstall from pre-existing empty application root' `
+        -DiagnosticLogPath $emptyRootUninstallLogPath
+    Wait-PathAbsent -Path $emptyRootAppRoot -TimeoutMilliseconds 15000
+    if (Test-Path -LiteralPath $emptyRootAppRoot) {
+        throw 'Empty-root cleanup fixture left its pre-existing application root behind.'
+    }
+
+    New-Item -ItemType Directory -Path $foreignRootAppRoot -Force | Out-Null
+    $foreignMarkerPath = Join-Path $foreignRootAppRoot 'foreign-marker.txt'
+    [IO.File]::WriteAllText(
+        $foreignMarkerPath,
+        'foreign-user-file',
+        [Text.UTF8Encoding]::new($false)
+    )
+    Invoke-ExpectedSuccess -File $emptyRootInstaller `
+        -Arguments ($silentArguments + "/DIR=$foreignRootAppRoot") `
+        -Label 'Install beside foreign application-root file' `
+        -DiagnosticLogPath $foreignRootInstallLogPath
+    $foreignRootUninstaller = Get-ChildItem -LiteralPath $foreignRootAppRoot `
+        -File -Filter 'unins*.exe' | Select-Object -First 1
+    if (-not $foreignRootUninstaller) {
+        throw 'Foreign-root cleanup fixture did not create an uninstaller.'
+    }
+    Invoke-ExpectedSuccess -File $foreignRootUninstaller.FullName `
+        -Arguments $silentArguments `
+        -Label 'Uninstall beside foreign application-root file' `
+        -DiagnosticLogPath $foreignRootUninstallLogPath
+    Wait-PathAbsent -Path (Join-Path $foreignRootAppRoot 'payload.txt') `
+        -TimeoutMilliseconds 15000
+    Wait-PathAbsent -Path $foreignRootUninstaller.FullName -TimeoutMilliseconds 15000
+    $foreignRootEntries = @(Get-ChildItem -LiteralPath $foreignRootAppRoot -Force)
+    if (-not (Test-Path -LiteralPath $foreignMarkerPath -PathType Leaf) -or
+        [IO.File]::ReadAllText($foreignMarkerPath) -cne 'foreign-user-file' -or
+        $foreignRootEntries.Count -ne 1 -or
+        $foreignRootEntries[0].Name -cne 'foreign-marker.txt') {
+        $remainingTree = Get-BoundedTreeInventory -Path $foreignRootAppRoot
+        throw "Empty-root cleanup fixture recursively deleted a foreign application-root file.`nRemaining tree:`n$remainingTree"
     }
 
     $productFixtureRoot = Join-Path $temporaryRoot 'product-fixture'

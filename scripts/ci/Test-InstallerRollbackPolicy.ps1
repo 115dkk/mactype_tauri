@@ -8,6 +8,7 @@ $installerTest = Get-Content -LiteralPath (Join-Path $root 'scripts\ci\Test-Inst
 $installerDefinitionPath = Join-Path $root 'installer\mactype-control-center.iss'
 $innoFailureContractPath = Join-Path $root 'scripts\ci\Test-InnoInstallerFailureContract.ps1'
 $installerHelperPath = Join-Path $root 'scripts\ci\lib\InstallerWindowsAssertions.ps1'
+$snapshotContractPath = Join-Path $root 'scripts\ci\Test-InstallerSnapshotContract.ps1'
 $fixturePath = Join-Path $root '.github\scripts\Build-FailingServiceRuntimeFixture.ps1'
 
 foreach ($token in @(
@@ -44,6 +45,22 @@ foreach ($token in @(
         throw "Installer fatal-bootstrap classification/rollback contract is missing: $token"
     }
 }
+$fixedBrokerCall = [regex]::Match(
+    $installerDefinition,
+    '(?ms)^procedure\s+RunFixedBrokerOrFail\b.*?^end;'
+)
+if (-not $fixedBrokerCall.Success) {
+    throw 'Installer fixed-broker failure propagation procedure is missing.'
+}
+foreach ($token in @(
+    'ExecAndLogOutput',
+    '@CaptureBrokerOutput',
+    'BrokerFailure'
+)) {
+    if (-not $fixedBrokerCall.Value.Contains($token)) {
+        throw "Owned uninstall broker failures omit bounded diagnostics: $token"
+    }
+}
 if ($installerDefinition -match 'AfterInstall:\s*BootstrapMachineService' -or
     $installerDefinition -match '(?s)procedure\s+CurStepChanged\b.*?ssPostInstall.*?RunFixedBrokerOrFail') {
     throw 'Installer must complete required bootstrap before the Files phase begins.'
@@ -55,6 +72,17 @@ $installDeleteSection = [regex]::Match(
 if (-not $installDeleteSection.Success -or
     $installDeleteSection.Groups['body'].Value -notmatch '(?m)^Type:\s*filesandordirs;\s*Name:\s*"\{app\}\\service-runtime"\s*$') {
     throw 'Installer must remove the prior app-side runtime only after PrepareToInstall succeeds.'
+}
+$uninstallDeleteSection = [regex]::Match(
+    $installerDefinition,
+    '(?ms)^\[UninstallDelete\]\s*(?<body>.*?)(?=^\[[^]]+\]|\z)'
+)
+if (-not $uninstallDeleteSection.Success -or
+    $uninstallDeleteSection.Groups['body'].Value -notmatch '(?m)^Type:\s*dirifempty;\s*Name:\s*"\{app\}"\s*$') {
+    throw 'Installer must remove the exact application root when the protected bootstrap made it pre-exist and uninstall leaves it empty.'
+}
+if ($uninstallDeleteSection.Groups['body'].Value -match '(?im)^Type:\s*filesandordirs;\s*Name:\s*"\{app\}(?:[\\/]|"|\*)') {
+    throw 'Installer must never recursively delete the application root or its descendants during final cleanup.'
 }
 if (-not (Test-Path -LiteralPath $innoFailureContractPath -PathType Leaf) -or
     -not $workflow.Contains('scripts/ci/Test-InnoInstallerFailureContract.ps1')) {
@@ -70,7 +98,11 @@ foreach ($token in @(
     'Installation process succeeded.',
     'PrepareToInstall failed:',
     'ExitCode -ne 7',
-    'baseline-payload'
+    'baseline-payload',
+    'MacTypeInnoEmptyRootCleanupContract',
+    'foreign-marker.txt',
+    'Empty-root cleanup fixture left its pre-existing application root behind.',
+    'Empty-root cleanup fixture recursively deleted a foreign application-root file.'
 )) {
     if (-not $innoFailureContract.Contains($token)) {
         throw "Real Inno regression fixture is missing required RED/GREEN evidence: $token"
@@ -110,13 +142,40 @@ foreach ($token in @(
     '$baselineApplicationSnapshot',
     '$baselineServiceSnapshot',
     'obsolete-from-prior-version.bin',
-    'Get-TreeSnapshot -Path $applicationRoot',
+    '-ExcludedRoot $serviceRoot',
     'Invoke-InstallerExpectedFailure',
     'Installer diagnostic logs:'
 )) {
     if (-not $installerTest.Contains($token)) {
         throw "Installer E2E does not prove automatic rollback at the installer boundary: $token"
     }
+}
+
+if (-not (Test-Path -LiteralPath $snapshotContractPath -PathType Leaf)) {
+    throw 'Installer immutable app-side snapshot contract test is missing.'
+}
+foreach ($token in @(
+    '-ExcludedRoot $ServiceRoot',
+    'Get-TreeSnapshotDifference',
+    'Get-BoundedTreeInventory',
+    'Wait-PathAbsent'
+)) {
+    if (-not $installerHelper.Contains($token)) {
+        throw "Installer app-side rollback diagnostics omit: $token"
+    }
+}
+
+if (-not $installerTest.Contains('Wait-PathAbsent -Path $applicationRoot')) {
+    throw 'Installer E2E does not wait boundedly for the detached Inno uninstall phase.'
+}
+foreach ($token in @('DirectorySeparatorChar', 'AltDirectorySeparatorChar', 'GetRelativePath')) {
+    if (-not $installerHelper.Contains($token)) {
+        throw "Installer snapshot exclusion is not host-platform path aware: $token"
+    }
+}
+if ($installerHelper -match "TrimEnd\('\\\\'\)" -or
+    $installerHelper -match "StartsWith\('\.\.\\\\'") {
+    throw 'Installer snapshot exclusion hard-codes a Windows path boundary in cross-platform policy code.'
 }
 
 $uploadSteps = [regex]::Matches(
@@ -128,5 +187,7 @@ foreach ($step in $uploadSteps) {
         throw 'The deliberate failing-upgrade fixture must never be uploaded as a release artifact.'
     }
 }
+
+& $snapshotContractPath
 
 Write-Host 'Installer failed-upgrade rollback policy passed.'

@@ -2,8 +2,10 @@ use std::io;
 use std::path::Path;
 
 use mactype_service_contract::{
-    ComponentReadiness, GenerationId, GenerationPointer, MachinePaths, ProfileCatalog,
-    ReadinessReport, SourceMetadata, StructuredServiceError, MAX_PROFILE_BYTES,
+    parse_runtime_activation_receipt, ComponentReadiness, GenerationId, GenerationPointer,
+    MachinePaths, ParsedRuntimeActivationReceipt, ProfileCatalog, ReadinessReport,
+    RuntimeActivationPhase, RuntimeGenerationPointer, SourceMetadata, StructuredServiceError,
+    MAX_PROFILE_BYTES, MAX_RUNTIME_ACTIVATION_RECEIPT_BYTES,
 };
 
 use crate::protected_path::{
@@ -23,18 +25,11 @@ impl ProtectedProfileInitializer {
 
 impl RuntimeInitializer for ProtectedProfileInitializer {
     fn initialize(&self) -> Result<InitializedRuntime, StructuredServiceError> {
-        for journal in [
-            self.paths.runtime_activation_journal(),
-            self.paths.profile_activation_journal(),
-        ] {
-            if journal.exists() {
-                reject_reparse(journal)?;
-                return Err(service_error(
-                    "activation-recovery-required",
-                    "a protected activation journal requires setup recovery before start",
-                ));
-            }
+        if self.paths.profile_activation_journal().exists() {
+            reject_reparse(self.paths.profile_activation_journal())?;
+            return Err(activation_recovery_required());
         }
+        validate_runtime_activation_receipt(&self.paths)?;
         let pointer_bytes = read_bounded_protected_file(
             self.paths.active_profile(),
             MAX_POINTER_BYTES,
@@ -156,6 +151,60 @@ fn active_runtime_profile_path(
         ));
     }
     Ok(runtime_root.join("MacType.ini"))
+}
+
+fn validate_runtime_activation_receipt(paths: &MachinePaths) -> Result<(), StructuredServiceError> {
+    let journal_path = paths.runtime_activation_journal();
+    if !journal_path.exists() {
+        return Ok(());
+    }
+    let journal_bytes = read_bounded_protected_file(
+        journal_path,
+        MAX_RUNTIME_ACTIVATION_RECEIPT_BYTES,
+        (
+            "activation-recovery-required",
+            "the runtime activation receipt could not be read",
+        ),
+        (
+            "activation-recovery-required",
+            "the runtime activation receipt is not a bounded regular file",
+        ),
+    )?;
+    let ParsedRuntimeActivationReceipt::Current(receipt) =
+        parse_runtime_activation_receipt(&journal_bytes)
+            .map_err(|_| activation_recovery_required())?
+    else {
+        return Err(activation_recovery_required());
+    };
+    if receipt.phase() != RuntimeActivationPhase::Committed {
+        return Err(activation_recovery_required());
+    }
+
+    let pointer_bytes = read_bounded_protected_file(
+        paths.runtime_pointer(),
+        MAX_POINTER_BYTES,
+        (
+            "activation-recovery-required",
+            "the active runtime pointer could not be read during activation",
+        ),
+        (
+            "activation-recovery-required",
+            "the active runtime pointer is not a bounded regular file during activation",
+        ),
+    )?;
+    let active = RuntimeGenerationPointer::parse(&pointer_bytes)
+        .map_err(|_| activation_recovery_required())?;
+    if &active != receipt.activated() {
+        return Err(activation_recovery_required());
+    }
+    Ok(())
+}
+
+fn activation_recovery_required() -> StructuredServiceError {
+    service_error(
+        "activation-recovery-required",
+        "a protected activation journal requires setup recovery before start unless it durably commits and exactly owns the active runtime candidate",
+    )
 }
 
 fn read_bounded_protected_file(

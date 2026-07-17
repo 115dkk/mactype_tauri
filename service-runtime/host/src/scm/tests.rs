@@ -18,6 +18,7 @@ fn crash_once_adapter_accepts_only_the_fixed_marker_payload() {
 fn panic_failure_snapshot_is_a_valid_structured_report() {
     let report = failed_health_report("service-panic", "panic boundary", None);
     assert_eq!(report.health, HealthState::Failed);
+    assert_eq!(report.service_version, service_runtime_version());
     assert!(report.validate().is_ok());
     assert_eq!(report.last_error.unwrap().code, "service-panic");
 }

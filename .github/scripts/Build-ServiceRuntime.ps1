@@ -51,11 +51,24 @@ if ($runtimePackages.Count -ne 2 -or ($runtimePackages | Where-Object version -n
     throw "Service runtime package base version does not match payload version $Version."
 }
 
-cargo build `
-    --manifest-path $manifestPath `
-    --release `
-    -p mactype-service-host `
-    -p mactype-service-setup
+$hadServiceRuntimeVersion = Test-Path Env:\MACTYPE_SERVICE_RUNTIME_VERSION
+$previousServiceRuntimeVersion = $env:MACTYPE_SERVICE_RUNTIME_VERSION
+try {
+    $env:MACTYPE_SERVICE_RUNTIME_VERSION = $Version
+    cargo build `
+        --manifest-path $manifestPath `
+        --release `
+        -p mactype-service-host `
+        -p mactype-service-setup
+}
+finally {
+    if ($hadServiceRuntimeVersion) {
+        $env:MACTYPE_SERVICE_RUNTIME_VERSION = $previousServiceRuntimeVersion
+    }
+    else {
+        Remove-Item Env:\MACTYPE_SERVICE_RUNTIME_VERSION -ErrorAction SilentlyContinue
+    }
+}
 
 $target = Join-Path $root 'service-runtime\target\release'
 $setupSource = Join-Path $target 'mactype-service-setup.exe'

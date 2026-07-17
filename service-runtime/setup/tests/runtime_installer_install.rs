@@ -8,7 +8,8 @@ mod support;
 use std::fs;
 
 use mactype_service_contract::SourceMetadata;
-use mactype_service_setup::{ProfileStore, RuntimeInstaller};
+use mactype_service_host::{ProtectedProfileInitializer, RuntimeInitializer};
+use mactype_service_setup::{ProfileStore, RuntimeInstaller, SetupError};
 
 use active_support::active_version;
 use support::{payload, test_paths};
@@ -73,6 +74,83 @@ fn profile_published_before_runtime_is_materialized_before_health_check() {
             Ok(())
         })
         .unwrap();
+}
+
+#[test]
+fn production_profile_initializer_validates_the_candidate_during_activation_health_check() {
+    let (base, paths) = test_paths();
+    let bytes = b"[General]\r\nGammaValue=1.25\r\n";
+    let expected = ProfileStore::new(paths.clone())
+        .publish_and_activate(
+            bytes,
+            SourceMetadata {
+                display_name: "production startup candidate".to_owned(),
+            },
+        )
+        .unwrap();
+
+    let payload = payload(base.path(), "0.2.0", b"service-v2");
+    RuntimeInstaller::new(paths.clone())
+        .deploy_with_health_check(&payload, |_| {
+            let initialized = ProtectedProfileInitializer::new(paths.clone())
+                .initialize()
+                .map_err(|error| {
+                    SetupError::Runtime(format!(
+                        "production profile initialization failed at {}: {}",
+                        error.code, error.message
+                    ))
+                })?;
+            assert_eq!(
+                initialized.active_profile_digest.as_deref(),
+                Some(expected.as_str())
+            );
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn ready_activation_defers_only_exact_committed_receipt_cleanup() {
+    use std::cell::RefCell;
+    use std::fs::OpenOptions;
+    use std::os::windows::fs::OpenOptionsExt;
+
+    use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+
+    let (base, paths) = test_paths();
+    let bytes = b"[General]\r\nGammaValue=1.25\r\n";
+    ProfileStore::new(paths.clone())
+        .publish_and_activate(
+            bytes,
+            SourceMetadata {
+                display_name: "deferred activation cleanup".to_owned(),
+            },
+        )
+        .unwrap();
+    let installer = RuntimeInstaller::new(paths.clone());
+    let held_receipt = RefCell::new(None);
+
+    let installed = installer
+        .deploy_with_health_check(&payload(base.path(), "0.2.0", b"service-v2"), |_| {
+            let file = OpenOptions::new()
+                .read(true)
+                .share_mode(FILE_SHARE_READ)
+                .open(paths.runtime_activation_journal())?;
+            held_receipt.replace(Some(file));
+            Ok(())
+        })
+        .unwrap();
+
+    assert_eq!(installed.version(), "0.2.0");
+    assert!(paths.runtime_activation_journal().is_file());
+    drop(held_receipt.into_inner());
+    let recovered = installer
+        .recover_interrupted_activation()
+        .unwrap()
+        .expect("a committed Ready candidate must be finalized");
+    assert_eq!(recovered.version(), "0.2.0");
+    assert!(!paths.runtime_activation_journal().exists());
 }
 
 #[test]

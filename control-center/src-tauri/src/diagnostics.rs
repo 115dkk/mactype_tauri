@@ -1,4 +1,4 @@
-use crate::preview::{collect_installation, PreviewManager, PreviewState};
+use crate::preview::{PreviewDiagnosticSnapshot, PreviewState};
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -96,8 +96,8 @@ pub fn copy_to_clipboard(_report: &str) -> Result<(), String> {
     Err("copying diagnostics is supported only on Windows".to_owned())
 }
 
-fn diagnostic_report_text(manager: &mut PreviewManager) -> String {
-    let status = collect_installation(manager, false);
+fn diagnostic_report_text(snapshot: PreviewDiagnosticSnapshot) -> String {
+    let status = snapshot.status;
     let mut report = String::from("MacType Control Center diagnostics\n");
     report.push_str(&format!(
         "controlCenterVersion={}\n",
@@ -122,7 +122,7 @@ fn diagnostic_report_text(manager: &mut PreviewManager) -> String {
             if finding.ok { "ok" } else { "failed" }
         ));
     }
-    let entries = manager.diagnostics();
+    let entries = snapshot.entries;
     report.push_str(&format!("previewLogEntries={}\n", entries.len()));
     for entry in entries.iter().rev().take(20).rev() {
         report.push_str("previewLog=");
@@ -134,11 +134,7 @@ fn diagnostic_report_text(manager: &mut PreviewManager) -> String {
 
 #[tauri::command]
 pub(crate) fn diagnostic_report(state: State<'_, PreviewState>) -> Result<String, String> {
-    let mut manager = state
-        .0
-        .lock()
-        .map_err(|_| "preview lock is poisoned".to_owned())?;
-    Ok(diagnostic_report_text(&mut manager))
+    Ok(diagnostic_report_text(state.diagnostic_snapshot()?))
 }
 
 #[tauri::command]

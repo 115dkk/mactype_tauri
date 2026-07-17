@@ -3,6 +3,20 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+
+function listProductionRustSources(directory) {
+  const sources = [];
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name !== "tests") sources.push(...listProductionRustSources(entryPath));
+    } else if (entry.isFile() && entry.name.endsWith(".rs") && entry.name !== "tests.rs") {
+      sources.push(entryPath);
+    }
+  }
+  return sources.sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+}
+
 const schema = JSON.parse(fs.readFileSync(path.join(root, "shared/settings-schema.json"), "utf8"));
 const pairs = new Set(schema.map((setting) => `${setting.section}/${setting.key}`));
 const required = [
@@ -24,7 +38,12 @@ const missing = required.filter(([section, key]) => !pairs.has(`${section}/${key
 if (missing.length) throw new Error(`Settings schema is missing core settings: ${missing.map((pair) => pair.join("/")).join(", ")}`);
 if (schema.length !== 60) throw new Error(`Expected 60 scalar settings, found ${schema.length}`);
 
-const profile = fs.readFileSync(path.join(root, "control-center/src-tauri/src/profile.rs"), "utf8");
+const rustRoot = path.join(root, "control-center/src-tauri/src");
+const profileSources = [
+  path.join(rustRoot, "profile.rs"),
+  ...listProductionRustSources(path.join(rustRoot, "profile")),
+];
+const profile = profileSources.map((source) => fs.readFileSync(source, "utf8")).join("\n");
 for (const key of ["Shadow", "LcdFilterWeight", "PixelLayout", "DisplayAffinity", "FontSubstitutes", "UnloadDLL", "ExcludeSub", "INFINALITY_FT_GAMMA_CORRECTION", "INFINALITY_FT_FILTER_PARAMS"]) {
   if (!profile.includes(`\"${key}\"`)) throw new Error(`Structured profile editor is missing ${key}`);
 }

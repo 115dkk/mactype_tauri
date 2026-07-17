@@ -1,0 +1,198 @@
+use std::io;
+use std::path::Path;
+
+use mactype_service_contract::{
+    ComponentReadiness, GenerationId, GenerationPointer, MachinePaths, ProfileCatalog,
+    ReadinessReport, SourceMetadata, StructuredServiceError, MAX_PROFILE_BYTES,
+};
+
+use crate::protected_path::{
+    has_reparse_ancestor, read_bounded_regular_file, runtime_pointer_version, MAX_POINTER_BYTES,
+};
+use crate::{InitializedRuntime, RuntimeInitializer};
+
+pub struct ProtectedProfileInitializer {
+    paths: MachinePaths,
+}
+
+impl ProtectedProfileInitializer {
+    pub const fn new(paths: MachinePaths) -> Self {
+        Self { paths }
+    }
+}
+
+impl RuntimeInitializer for ProtectedProfileInitializer {
+    fn initialize(&self) -> Result<InitializedRuntime, StructuredServiceError> {
+        for journal in [
+            self.paths.runtime_activation_journal(),
+            self.paths.profile_activation_journal(),
+        ] {
+            if journal.exists() {
+                reject_reparse(journal)?;
+                return Err(service_error(
+                    "activation-recovery-required",
+                    "a protected activation journal requires setup recovery before start",
+                ));
+            }
+        }
+        let pointer_bytes = read_bounded_protected_file(
+            self.paths.active_profile(),
+            MAX_POINTER_BYTES,
+            (
+                "active-profile-unavailable",
+                "the protected active profile pointer could not be read",
+            ),
+            (
+                "active-profile-invalid",
+                "the protected active profile pointer is not a bounded regular file",
+            ),
+        )?;
+        let pointer: GenerationPointer = serde_json::from_slice(&pointer_bytes).map_err(|_| {
+            service_error(
+                "active-profile-invalid",
+                "the protected active profile pointer is invalid",
+            )
+        })?;
+
+        let profile_path = self
+            .paths
+            .profile_generations()
+            .join(pointer.generation().directory_name())
+            .join("profile.ini");
+        let bytes = read_bounded_protected_file(
+            &profile_path,
+            MAX_PROFILE_BYTES as u64,
+            (
+                "active-profile-unavailable",
+                "the protected profile generation could not be read",
+            ),
+            (
+                "active-profile-invalid",
+                "the protected profile generation is not a bounded regular file",
+            ),
+        )?;
+        let mut catalog = ProfileCatalog::new();
+        let calculated = catalog
+            .publish_machine_profile(
+                &bytes,
+                SourceMetadata {
+                    display_name: "service verification".to_owned(),
+                },
+            )
+            .map_err(|_| {
+                service_error(
+                    "active-profile-invalid",
+                    "the protected profile is not a valid INI",
+                )
+            })?;
+        if &calculated != pointer.generation() {
+            return Err(service_error(
+                "active-profile-tampered",
+                "the protected profile digest does not match its generation",
+            ));
+        }
+        let runtime_profile = active_runtime_profile_path(&self.paths)?;
+        let runtime_bytes = read_bounded_protected_file(
+            &runtime_profile,
+            MAX_PROFILE_BYTES as u64,
+            (
+                "runtime-profile-unavailable",
+                "the DLL-adjacent generated MacType.ini could not be read",
+            ),
+            (
+                "runtime-profile-invalid",
+                "the DLL-adjacent generated MacType.ini is not a bounded regular file",
+            ),
+        )?;
+        if runtime_bytes != bytes
+            || GenerationId::from_profile_bytes(&runtime_bytes) != *pointer.generation()
+        {
+            return Err(service_error(
+                "runtime-profile-mismatch",
+                "the DLL-adjacent generated MacType.ini does not match the active profile",
+            ));
+        }
+
+        Ok(InitializedRuntime::ready(
+            Some(calculated.as_str().to_owned()),
+            ReadinessReport {
+                profile: ComponentReadiness::Ready,
+                observer: ComponentReadiness::NotRequired,
+                injector32: ComponentReadiness::NotRequired,
+                injector64: ComponentReadiness::NotRequired,
+            },
+        ))
+    }
+}
+
+fn active_runtime_profile_path(
+    paths: &MachinePaths,
+) -> Result<std::path::PathBuf, StructuredServiceError> {
+    let pointer_path = paths.runtime_pointer();
+    let bytes = read_bounded_protected_file(
+        pointer_path,
+        MAX_POINTER_BYTES,
+        (
+            "active-runtime-unavailable",
+            "the protected active runtime pointer could not be read",
+        ),
+        (
+            "active-runtime-invalid",
+            "the protected active runtime pointer is not a bounded regular file",
+        ),
+    )?;
+    let version = runtime_pointer_version(&bytes).ok_or_else(|| {
+        service_error(
+            "active-runtime-invalid",
+            "the protected active runtime pointer has an unsupported value",
+        )
+    })?;
+    let runtime_root = paths.runtime_versions().join(version);
+    reject_reparse(&runtime_root)?;
+    if !runtime_root.is_dir() {
+        return Err(service_error(
+            "active-runtime-unavailable",
+            "the protected active runtime generation is missing",
+        ));
+    }
+    Ok(runtime_root.join("MacType.ini"))
+}
+
+fn read_bounded_protected_file(
+    path: &Path,
+    maximum_bytes: u64,
+    unavailable: (&str, &str),
+    invalid: (&str, &str),
+) -> Result<Vec<u8>, StructuredServiceError> {
+    reject_reparse(path)?;
+    read_bounded_regular_file(path, maximum_bytes).map_err(|error| {
+        if error.kind() == io::ErrorKind::InvalidData {
+            service_error(invalid.0, invalid.1)
+        } else {
+            service_error(unavailable.0, unavailable.1)
+        }
+    })
+}
+
+fn reject_reparse(path: &Path) -> Result<(), StructuredServiceError> {
+    if has_reparse_ancestor(path).map_err(|_| {
+        service_error(
+            "active-profile-inaccessible",
+            "the protected profile path could not be inspected",
+        )
+    })? {
+        return Err(service_error(
+            "active-profile-reparse",
+            "reparse points are forbidden in the protected profile path",
+        ));
+    }
+    Ok(())
+}
+
+fn service_error(code: &str, message: &str) -> StructuredServiceError {
+    StructuredServiceError {
+        code: code.to_owned(),
+        message: message.to_owned(),
+        win32_error: None,
+    }
+}

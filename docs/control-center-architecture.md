@@ -2,6 +2,10 @@
 
 The x64 Tauri process never loads `MacType.dll`. It owns profile files, validation, the child-process lifecycle, and the WebView. `mactype-preview32.exe` is the only process allowed to load the selected installation's x86 DLL.
 
+## Machine integration terminology
+
+`MachineIntegration` is the deep module behind the frontend system-integration seam. Its frontend adapter produces `ExecutionViewModel`; SCM flags, protected storage, migration receipts, helpers, and registry inspection remain implementation details. **신식 서비스** means the open-source `MacTypeControlCenter` runtime. **레거시 서비스** means the original `MacType` service hosted by `MacTray.exe`; it is a migration subject and fallback only.
+
 ## Preview boundary
 
 The parent starts the Helper directly with `std::process::Command`, redirected stdin/stdout/stderr, and no shell. MTPC v1 frames have fixed little-endian headers and bounded JSON/PNG lengths. A reader thread consumes responses while stderr is retained in a 100-line diagnostic buffer. Requests time out after two seconds; the parent terminates and restarts the Helper once before returning an error.
@@ -28,7 +32,11 @@ Changing the language updates visible text, the document title, accessibility la
 
 ## Execution boundary
 
-The open Tauri executable owns the notification icon and close-to-tray lifecycle. Its optional login startup entry is user-scoped. The GUI remains `asInvoker`; privileged legacy-service operations are isolated in a one-shot verb allowlisted broker dispatched before Tauri starts. AppInit registry mode remains read-only. Manual mode invokes the public `MacLoader.exe` directly with an executable path and argument vector; no shell string is accepted. The evidence and safety decisions are recorded in `docs/legacy-behavior-notes.md`.
+The open Tauri executable owns the notification icon and close-to-tray lifecycle. Its optional login startup entry is user-scoped. The GUI remains `asInvoker`; machine mutation is isolated in a one-shot fixed-verb broker dispatched before Tauri starts. AppInit registry mode remains read-only in normal UI flows. Manual mode invokes the public `MacLoader.exe` directly with an executable path and argument vector; no shell string is accepted.
+
+The 신식 서비스 is Tauri-free. Rust owns protected runtime/profile generations, SCM state, Ready health, WMI process observation, retry and deduplication policy, repair, and rollback. `ProcessTargetValidator` classifies an observed PID and returns only a verified eligible identity or an explicit skip. `InjectionOrchestrator` binds that identity to one generation and owns deduplication, retry, cancellation, bounded result history, telemetry, and terminal health classification. Service stop cancels an in-flight helper through its private Job Object instead of waiting for the normal 20-second bound. A fixed x86/x64 helper receives one inherited process handle and loads only its adjacent public MacType DLL. Normal target skips, pre-injection rejection, and confirmed service-stop cancellation preserve global Ready. Unknown post-injection cleanup or an invalid helper response degrades the generation until a later verified success; observer or protected-runtime failures may fail it.
+
+The 레거시 서비스 is detected through a strict official-layout adapter. Its configuration and profile can be backed up and restored only by the explicit migration flow. Normal startup, login startup, tray actions, profile application, and 신식 서비스 repair never execute or require MacTray. The normative safety contract is `docs/open-service-contract.md`.
 
 The official single-instance plugin is registered before every other Tauri plugin. On Windows, a pre-Tauri per-session startup mutex serializes cold starts until the first process has created its IPC window and completed setup, closing the plugin's mutex-to-window race. Later launches send their arguments to the existing process, which shows, unminimizes, and focuses the main window. The privileged service broker exits before this gate and therefore never participates in GUI instance arbitration.
 

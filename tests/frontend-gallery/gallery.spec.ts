@@ -237,6 +237,43 @@ test("slider drags and exact number edits create one undo revision per interacti
   await expect(cacheValue).toHaveValue("64");
 });
 
+test("a rejected profile mutation requires an explicit snapshot recovery before save or apply", async ({ page }) => {
+  await page.goto("/?view=profiles&gallery=1&lang=en&profile-fail-setting=normal_weight", { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "Glyph shape", exact: true }).click();
+
+  const normalWeight = page.locator(".setting-row").filter({ hasText: "Normal weight" }).locator('input[type="number"]');
+  const boldWeight = page.locator(".setting-row").filter({ hasText: "Bold weight" }).locator('input[type="number"]');
+  const save = page.getByRole("button", { name: "Save now", exact: true });
+  const apply = page.getByRole("button", { name: "Apply now", exact: true });
+
+  await normalWeight.fill("12");
+  await normalWeight.press("Tab");
+  await expect(page.getByText("Gallery profile mutation failed.", { exact: true })).toBeVisible();
+  await expect(save).toBeDisabled();
+  await expect(apply).toBeDisabled();
+
+  await boldWeight.fill("8");
+  await boldWeight.press("Tab");
+  await expect(save).toBeDisabled();
+  await expect(apply).toBeDisabled();
+
+  await page.getByRole("button", { name: "Reset", exact: true }).click();
+  await expect(normalWeight).toHaveValue("0");
+  await expect(boldWeight).toHaveValue("0");
+  await expect(apply).toBeEnabled();
+});
+
+test("an unmounted profile preview ignores an in-flight completion", async ({ page }) => {
+  await page.goto("/?view=profiles&gallery=1&lang=en&ci-smoke=1&preview-delay=1000", { waitUntil: "domcontentloaded" });
+  await expect.poll(() => page.evaluate(() => Number(window.sessionStorage.getItem("gallery-preview-started") ?? "0"))).toBeGreaterThan(0);
+
+  await page.getByRole("button", { name: "Overview", exact: true }).click();
+  await page.waitForTimeout(1200);
+
+  await expect.poll(() => page.evaluate(() => window.sessionStorage.getItem("gallery-preview-crashes") ?? "0")).toBe("0");
+  await expect.poll(() => page.evaluate(() => window.sessionStorage.getItem("gallery-profile-ready") ?? "0")).toBe("0");
+});
+
 test("settings files support import, save as, export, reveal, and apply without typing a path", async ({ page }) => {
   const failures: string[] = [];
   page.on("console", (message) => {
@@ -267,7 +304,7 @@ test("settings files support import, save as, export, reveal, and apply without 
   expect(failures, failures.join("\n")).toEqual([]);
 });
 
-test("execution and verified legacy service controls remain interactive", async ({ page }) => {
+test("execution and new system service controls remain interactive", async ({ page }) => {
   const failures: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") failures.push(`console: ${message.text()}`);
@@ -290,22 +327,239 @@ test("execution and verified legacy service controls remain interactive", async 
   await expect(page.getByRole("heading", { name: "시스템 범위 모드" })).toBeVisible();
 
   await expect(page.getByText("MacType 시스템 적용 중", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "잠시 적용 끄기" }).click();
+  await page.getByRole("button", { name: "새 프로세스 적용 중지" }).click();
   await expect(page.getByText("MacType 시스템 적용 꺼짐", { exact: true })).toBeVisible();
   await expect(page.getByText("MacType 시스템 적용을 잠시 껐습니다.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "현재 프로필 적용" }).click();
   await expect(page.getByText("MacType 시스템 적용 중", { exact: true })).toBeVisible();
   await expect(page.getByText("현재 프로필을 시스템 범위에 적용했습니다.", { exact: true })).toBeVisible();
 
-  await expect(page.getByText("검증된 MacTray 서비스 · 실행 중", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "서비스 제거" }).click();
-  await expect(page.getByText("설치되지 않음 · 중지됨", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "서비스 설치" }).click();
-  await expect(page.getByText("검증된 MacTray 서비스 · 실행 중", { exact: true })).toBeVisible();
+  await expect(page.locator('[data-service-backend="open-source"]')).toContainText("MacType Control Center 서비스");
+  await expect(page.locator('[data-service-backend="legacy-mactray"]')).toHaveCount(0);
 
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   expect(horizontalOverflow, "execution controls must not have horizontal scrolling").toBe(false);
   expect(failures, failures.join("\n")).toEqual([]);
+});
+
+test("open service health and legacy migration are separate user flows", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=ko&system-service=ready&legacy=migration-available", { waitUntil: "networkidle" });
+
+  const openService = page.locator('[data-service-backend="open-source"]');
+  await expect(openService).toBeVisible();
+  await expect(openService).toContainText("MacType Control Center 서비스");
+  await expect(openService).toContainText("준비 완료");
+  await expect(openService).toContainText("프로필 일치");
+  await expect(page.getByText("MacType 시스템 적용 중", { exact: true })).toBeVisible();
+
+  const legacy = page.locator('[data-service-backend="legacy-mactray"]');
+  await expect(legacy).toBeVisible();
+  await expect(legacy).toContainText("레거시 MacTray");
+  await expect(legacy.getByRole("button", { name: "마이그레이션" })).toBeVisible();
+  await expect(legacy.getByRole("button", { name: "레거시 서비스 제거" })).toBeDisabled();
+
+  await page.getByRole("button", { name: "새 프로세스 적용 중지" }).click();
+  await expect(page.getByText("MacType 시스템 적용 꺼짐", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "현재 프로필 적용" }).click();
+  await expect(page.getByText("MacType 시스템 적용 중", { exact: true })).toBeVisible();
+
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
+});
+
+test("legacy migration explains the verified transaction before it can continue", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy=migration-available", { waitUntil: "networkidle" });
+
+  const legacy = page.locator('[data-service-backend="legacy-mactray"]');
+  const migrationTrigger = legacy.getByRole("button", { name: "Migrate" });
+  await migrationTrigger.click();
+
+  const dialog = page.getByRole("dialog", { name: "Migrate legacy MacTray?" });
+  const cancel = dialog.getByRole("button", { name: "Cancel" });
+  const continueMigration = dialog.getByRole("button", { name: "Continue migration" });
+  await expect(dialog).toBeVisible();
+  await expect(cancel).toBeFocused();
+  await expect(dialog).toContainText("AppInit and exact legacy service configuration");
+  await expect(dialog).toContainText("current INI state");
+  await expect(dialog).toContainText("when a profile file exists");
+  await expect(dialog).toContainText("Stops the legacy service");
+  await expect(dialog).toContainText("installs and starts the new service");
+  await expect(dialog).toContainText("Ready health, matching profile digest, and x86 and x64 smoke checks");
+  await expect(dialog).toContainText("rolls back");
+  await expect(dialog).toContainText("does not remove the legacy service");
+
+  await page.keyboard.press("Shift+Tab");
+  await expect(continueMigration).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(cancel).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(migrationTrigger).toBeFocused();
+  await expect(page.getByText("Migration to the new service passed verification.", { exact: true })).toHaveCount(0);
+
+  await migrationTrigger.click();
+  await cancel.click();
+  await expect(migrationTrigger).toBeFocused();
+
+  await migrationTrigger.click();
+  await continueMigration.click();
+  await expect(page.getByText("Migration to the new service passed verification.", { exact: true })).toBeVisible();
+  await expect(migrationTrigger).toBeFocused();
+});
+
+test("system service path is read-only and can reveal its installed location", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=ko&system-service=ready", { waitUntil: "networkidle" });
+
+  const openService = page.locator('[data-service-backend="open-source"]');
+  const servicePath = "C:\\Program Files\\MacType Control Center\\Service\\mactype-service.exe";
+  await expect(openService.locator("code", { hasText: servicePath })).toBeVisible();
+  await expect(openService.getByRole("textbox")).toHaveCount(0);
+
+  const reveal = openService.getByRole("button", { name: "서비스 위치 열기" });
+  const bounds = await reveal.boundingBox();
+  if (!bounds) throw new Error("The reveal service location button must be visible");
+  expect(bounds.width).toBeGreaterThanOrEqual(40);
+  expect(bounds.height).toBeGreaterThanOrEqual(40);
+  await reveal.click();
+  await expect(page.getByText("서비스 파일 위치를 열었습니다.", { exact: true })).toBeVisible();
+});
+
+test("an absent service never exposes a binary path or location action", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available", { waitUntil: "networkidle" });
+
+  const openService = page.locator('[data-service-backend="open-source"]');
+  await expect(openService).toContainText("Not installed");
+  await expect(openService.locator(".service-path")).toHaveCount(0);
+  await expect(openService.getByRole("button", { name: "Open service location" })).toHaveCount(0);
+});
+
+test("outdated services upgrade while current unhealthy services repair", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=outdated", { waitUntil: "networkidle" });
+  const outdated = page.locator('[data-service-backend="open-source"]');
+  await expect(outdated.getByRole("button", { name: "Upgrade service" })).toBeEnabled();
+  await expect(outdated.getByRole("button", { name: "Repair service" })).toHaveCount(0);
+
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=degraded", { waitUntil: "networkidle" });
+  const degraded = page.locator('[data-service-backend="open-source"]');
+  await expect(degraded.getByRole("button", { name: "Repair service" })).toBeEnabled();
+  await expect(degraded.getByRole("button", { name: "Upgrade service" })).toHaveCount(0);
+
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=failed", { waitUntil: "networkidle" });
+  const failed = page.locator('[data-service-backend="open-source"]');
+  await expect(failed.getByRole("button", { name: "Repair service" })).toBeEnabled();
+  await expect(failed.getByRole("button", { name: "Upgrade service" })).toHaveCount(0);
+});
+
+test("a running unverified service remains stoppable without claiming it is inactive", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=degraded", { waitUntil: "networkidle" });
+
+  const openService = page.locator('[data-service-backend="open-source"]');
+  await expect(openService.getByRole("button", { name: "Stop applying to new processes" })).toBeEnabled();
+  await expect(openService).toContainText("Service running without verified system application");
+  await expect(openService).toContainText("The service is running, but verified system-wide rendering cannot be confirmed. Stop remains available for safe recovery.");
+  await expect(openService).not.toContainText("Reopen the target app in this state to compare rendering without the applied settings.");
+  await openService.getByRole("button", { name: "Stop applying to new processes" }).click();
+  await expect(page.getByText("MacType system application is temporarily off.", { exact: true })).toBeVisible();
+});
+
+test("a running profile mismatch remains stoppable and identifies the mismatched generation", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=profile-mismatch", { waitUntil: "networkidle" });
+
+  const openService = page.locator('[data-service-backend="open-source"]');
+  await expect(openService.getByRole("button", { name: "Stop applying to new processes" })).toBeEnabled();
+  await expect(openService).toContainText("Service running with a different profile");
+  await expect(openService).toContainText("The running generation does not match the profile expected by Control Center. Stop remains available; verified system application is not claimed.");
+  await expect(openService).toContainText("Profile mismatch or not yet verified");
+});
+
+test("AppInit conflict preserves the backend-authorized recovery stop", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=legacy-conflict&legacy=migration-available&raw-active=1", { waitUntil: "networkidle" });
+
+  const openService = page.locator('[data-service-backend="open-source"]');
+  await expect(openService.getByRole("button", { name: "Stop applying to new processes" })).toBeEnabled();
+  await expect(openService).toContainText("Service running while AppInit conflicts");
+  await expect(openService).toContainText("The new service is running, but AppInit registry mode prevents a verified system state. Stop remains available; other mutations stay blocked.");
+  await expect(openService).not.toContainText("MacType system-wide rendering active");
+  const statusRow = openService.locator(".detail-list > div").filter({ hasText: "New service status" });
+  await expect(statusRow.locator(".warning")).toBeVisible();
+  await expect(statusRow.locator(".success")).toHaveCount(0);
+  for (const name of ["Install service", "Start service", "Remove service"]) {
+    await expect(openService.getByRole("button", { name })).toBeDisabled();
+  }
+  const legacy = page.locator('[data-service-backend="legacy-mactray"]');
+  await expect(legacy.getByRole("button", { name: "Migrate" })).toBeDisabled();
+  await expect(legacy.getByRole("button", { name: "Remove legacy service" })).toBeDisabled();
+});
+
+for (const legacyState of ["running", "stopped", "start-pending", "stop-pending", "paused", "unknown", "continue-pending", "pause-pending"] as const) {
+  test(`legacy migration requires a stable ${legacyState} service`, async ({ page }) => {
+    await page.goto(`/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy=migration-available&legacy-state=${legacyState}`, { waitUntil: "networkidle" });
+
+    const migrate = page.locator('[data-service-backend="legacy-mactray"]').getByRole("button", { name: "Migrate" });
+    if (legacyState === "running" || legacyState === "stopped") await expect(migrate).toBeEnabled();
+    else await expect(migrate).toBeDisabled();
+  });
+}
+
+for (const fixture of ["ready", "degraded", "profile-mismatch", "legacy-conflict", "migration-available", "foreign-service"]) {
+  test(`open service gallery renders ${fixture} without claiming SCM running is ready`, async ({ page }, testInfo) => {
+    await page.goto(`/?view=execution&gallery=1&lang=en&system-service=${fixture}`, { waitUntil: "networkidle" });
+    const openService = page.locator('[data-service-backend="open-source"]');
+    await expect(openService).toBeVisible();
+    if (fixture !== "ready" && fixture !== "legacy-conflict") {
+      await expect(page.getByText("MacType system-wide rendering active", { exact: true })).toHaveCount(0);
+    }
+    if (fixture === "legacy-conflict") {
+      const legacy = page.locator('[data-service-backend="legacy-mactray"]');
+      await expect(legacy).toContainText("AppInit registry mode is active");
+    }
+    expect(await overflowingElements(page)).toEqual([]);
+    await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-execution-${fixture}-en.png`), fullPage: true });
+  });
+}
+
+for (const unstableState of ["start-pending", "stop-pending", "paused", "unknown"]) {
+  test(`new service mutations stay disabled while ${unstableState}`, async ({ page }) => {
+    await page.goto(`/?view=execution&gallery=1&lang=en&system-service=outdated&service-runtime=${unstableState}&legacy=migration-available`, { waitUntil: "networkidle" });
+
+    const mutationButtons = page.locator('[data-service-backend="open-source"] .system-injection-action, [data-service-backend="open-source"] .service-actions button, [data-service-backend="legacy-mactray"] .service-actions button');
+    await expect(mutationButtons).not.toHaveCount(0);
+    for (const button of await mutationButtons.all()) await expect(button).toBeDisabled();
+  });
+}
+
+test("only a stable stopped safe service offers profile activation", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available", { waitUntil: "networkidle" });
+  const openService = page.locator('[data-service-backend="open-source"]');
+  await expect(openService.getByRole("button", { name: "Apply current profile" })).toBeEnabled();
+
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=outdated&service-runtime=start-pending", { waitUntil: "networkidle" });
+  await expect(openService.getByRole("button", { name: "Apply current profile" })).toBeDisabled();
+  await expect(openService).toContainText("Service state is not ready for a primary action");
+  await expect(openService).toContainText("Wait for the current service transition to finish, then refresh. Control Center will not start another mutation from this state.");
+});
+
+test("the primary system action disables immediately while its mutation is busy", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available&service-delay=750", { waitUntil: "networkidle" });
+
+  const openService = page.locator('[data-service-backend="open-source"]');
+  const activate = openService.getByRole("button", { name: "Apply current profile" });
+  await expect(activate).toBeEnabled();
+  await activate.click();
+  await expect(openService.getByRole("button", { name: "Working…" })).toBeDisabled();
+  await expect(openService.getByRole("button", { name: "Stop applying to new processes" })).toBeEnabled();
+});
+
+test("service migration gallery remains usable at low window height", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Low-height desktop behavior is width-specific");
+  await page.setViewportSize({ width: 1280, height: 420 });
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy=migration-available", { waitUntil: "networkidle" });
+
+  expect(await page.evaluate(() => document.documentElement.scrollHeight > document.documentElement.clientHeight)).toBe(true);
+  expect(await overflowingElements(page)).toEqual([]);
+  const legacy = page.locator('[data-service-backend="legacy-mactray"]');
+  await legacy.scrollIntoViewIfNeeded();
+  await expect(legacy.getByRole("button", { name: "Migrate" })).toBeEnabled();
+  await page.screenshot({ path: path.join(galleryRoot, "desktop-execution-migration-low-height-en.png"), fullPage: true });
 });
 
 test("overview and diagnostic actions always produce visible results", async ({ page }) => {

@@ -3,157 +3,265 @@ param(
     [Parameter(Mandatory)]
     [string] $BaselineInstaller,
     [Parameter(Mandatory)]
+    [string] $FailingUpgradeInstaller,
+    [Parameter(Mandatory)]
     [string] $Installer
 )
 
 $ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $false
+. (Join-Path $PSScriptRoot 'lib\InstallerWindowsAssertions.ps1')
+
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $resolvedBaselineInstaller = (Resolve-Path -LiteralPath $BaselineInstaller).Path
+$resolvedFailingUpgradeInstaller = (Resolve-Path -LiteralPath $FailingUpgradeInstaller).Path
 $resolvedInstaller = (Resolve-Path -LiteralPath $Installer).Path
-$installRoot = Join-Path $env:TEMP ("mactype-independent-" + [Guid]::NewGuid().ToString('N'))
-$resolvedTempRoot = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\'
-$resolvedInstallRoot = [IO.Path]::GetFullPath($installRoot)
-if (-not $resolvedInstallRoot.StartsWith($resolvedTempRoot, [StringComparison]::OrdinalIgnoreCase) -or
-    -not [IO.Path]::GetFileName($resolvedInstallRoot).StartsWith('mactype-independent-', [StringComparison]::Ordinal)) {
-    throw "Refusing to use unsafe installer test directory: $resolvedInstallRoot"
+$applicationRoot = [IO.Path]::GetFullPath((Join-Path $env:ProgramFiles 'MacType Control Center')).TrimEnd('\')
+$serviceRoot = Join-Path $applicationRoot 'Service'
+$profileRoot = [IO.Path]::GetFullPath((Join-Path $env:ProgramData 'MacType\ControlCenter')).TrimEnd('\')
+$distributionDefaultProfilePath = Join-Path $root 'distribution\ini\Default.ini'
+$openServiceName = 'MacTypeControlCenter'
+$legacyServiceName = 'MacType'
+$commonDesktopShortcut = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonDesktopDirectory)) 'MacType Control Center.lnk'
+$invalidInstallRoot = Join-Path $env:RUNNER_TEMP ("mactype-forbidden-dir-" + [Guid]::NewGuid().ToString('N'))
+$userMarkerRoot = Join-Path $env:LOCALAPPDATA ("MacType\ControlCenter\installer-preservation-" + [Guid]::NewGuid().ToString('N'))
+$userMarkers = [ordered]@{
+    'theme.txt' = 'dark'
+    'locale.txt' = 'zh-TW'
+    'recent-profile.txt' = 'C:\Users\Example\Recent.ini'
+    'applied-profile.txt' = 'C:\Users\Example\Applied.ini'
+    'profiles\existing.ini' = "[General]`r`nGammaValue=1.4`r`n"
 }
-$installerArguments = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=$installRoot")
-$manualMarker = $null
-$desktopShortcut = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)) 'MacType Control Center.lnk'
-$userStateMarker = Join-Path $env:LOCALAPPDATA ("net.mactype.control-center\installer-state-" + [Guid]::NewGuid().ToString('N') + '.marker')
+$silentArguments = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-')
+$cleanHostedRunnerConfirmed = $false
+$openFixtureCreated = $false
+$legacyFixtureCreated = $false
+$installerTouchedMachine = $false
+$installerDiagnosticRoot = Join-Path $env:RUNNER_TEMP `
+    ("mactype-installer-logs-" + [Guid]::NewGuid().ToString('N'))
+$installerDiagnosticLogs = [Collections.Generic.List[string]]::new()
+$installerDiagnosticSequence = 0
 
-if (Test-Path -LiteralPath $desktopShortcut) {
-    throw "Refusing to replace an existing desktop shortcut during installer testing: $desktopShortcut"
+function New-InstallerDiagnosticLog {
+    param([Parameter(Mandatory)] [string] $Label)
+
+    $script:installerDiagnosticSequence += 1
+    $safeLabel = [regex]::Replace($Label.ToLowerInvariant(), '[^a-z0-9]+', '-').Trim('-')
+    $path = Join-Path $script:installerDiagnosticRoot `
+        ('{0:D2}-{1}.log' -f $script:installerDiagnosticSequence, $safeLabel)
+    [void] $script:installerDiagnosticLogs.Add($path)
+    return $path
 }
 
-function Invoke-Installer([string] $File, [string[]] $Arguments, [string] $Label) {
-    $process = Start-Process -FilePath $File -ArgumentList $Arguments -PassThru -Wait -WindowStyle Hidden
-    if ($process.ExitCode -ne 0) {
-        throw "$Label exited with code $($process.ExitCode)."
-    }
+function Invoke-InstallerExpectedSuccess {
+    param(
+        [Parameter(Mandatory)] [string] $File,
+        [Parameter(Mandatory)] [string[]] $Arguments,
+        [Parameter(Mandatory)] [string] $Label
+    )
+
+    Invoke-ExpectedSuccess -File $File -Arguments $Arguments -Label $Label `
+        -DiagnosticLogPath (New-InstallerDiagnosticLog -Label $Label)
+}
+
+function Invoke-InstallerExpectedFailure {
+    param(
+        [Parameter(Mandatory)] [string] $File,
+        [Parameter(Mandatory)] [string[]] $Arguments,
+        [Parameter(Mandatory)] [string] $Label
+    )
+
+    Invoke-ExpectedFailure -File $File -Arguments $Arguments -Label $Label `
+        -DiagnosticLogPath (New-InstallerDiagnosticLog -Label $Label)
 }
 
 try {
-    Invoke-Installer -File $resolvedBaselineInstaller -Arguments $installerArguments -Label 'Baseline installer'
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+    if ($env:GITHUB_ACTIONS -cne 'true' -or -not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        throw 'Installer integration tests require a clean elevated GitHub-hosted Windows runner.'
+    }
+    foreach ($path in @($applicationRoot, $profileRoot, $commonDesktopShortcut)) {
+        if (Test-Path -LiteralPath $path) { throw "Hosted runner is not clean at fixed test path: $path" }
+    }
+    foreach ($name in @($openServiceName, $legacyServiceName)) {
+        if (Get-FixedService -Name $name) { throw "Hosted runner already contains protected test service name: $name" }
+    }
+    $cleanHostedRunnerConfirmed = $true
+    New-Item -ItemType Directory -Path $installerDiagnosticRoot -Force | Out-Null
 
-    $expected = @(
-        'MacType Control Center.exe',
-        'mactype-preview32.exe',
-        'MacType.dll',
-        'MacType64.dll',
-        'MacType.Core.dll',
-        'MacType64.Core.dll',
-        'MacLoader.exe',
-        'MacLoader64.exe',
-        'MacType.ini',
-        'ini\Default.ini',
-        'languages\en.json',
-        'languages\ko.json',
-        'THIRD_PARTY_NOTICES.md',
-        'LICENSE.txt'
+    Initialize-UserMarkers -UserMarkerRoot $userMarkerRoot -UserMarkers $userMarkers
+    Assert-UserMarkers -UserMarkerRoot $userMarkerRoot -UserMarkers $userMarkers
+
+    Invoke-InstallerExpectedFailure -File $resolvedBaselineInstaller -Arguments ($silentArguments + "/DIR=$invalidInstallRoot") -Label 'Arbitrary-directory install'
+    if ((Test-Path -LiteralPath $invalidInstallRoot) -or (Test-Path -LiteralPath $applicationRoot) -or (Get-FixedService -Name $openServiceName)) {
+        throw 'Rejected /DIR attempt mutated files or SCM.'
+    }
+
+    $installerTouchedMachine = $true
+    Invoke-InstallerExpectedSuccess -File $resolvedBaselineInstaller -Arguments ($silentArguments + '/TASKS=desktopicon') -Label 'Protected baseline install'
+    Assert-RequiredApplicationFiles -ApplicationRoot $applicationRoot
+    $payload = Assert-ServicePayload -ApplicationRoot $applicationRoot
+    $baseline = Assert-ReadyOpenService `
+        -PayloadManifest $payload `
+        -OpenServiceName $openServiceName `
+        -ServiceRoot $serviceRoot `
+        -ProfileRoot $profileRoot `
+        -DistributionDefaultProfilePath $distributionDefaultProfilePath
+    $obsoleteRuntimePath = Join-Path $applicationRoot 'service-runtime\obsolete-from-prior-version.bin'
+    [IO.File]::WriteAllText(
+        $obsoleteRuntimePath,
+        'obsolete app-side runtime payload',
+        [Text.UTF8Encoding]::new($false)
     )
-    foreach ($relative in $expected) {
-        $path = Join-Path $installRoot $relative
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-            throw "Independent installer omitted required file: $relative"
-        }
-    }
+    $baselineApplicationSnapshot = Get-TreeSnapshot -Path $applicationRoot
+    $baselineServiceSnapshot = Get-ServiceSnapshot -Name $openServiceName
+    $baselineRuntimeSnapshot = Get-TreeSnapshot -Path (Join-Path $serviceRoot ("bin\" + $baseline.RuntimeVersion))
+    Assert-CommonDesktopShortcut -CommonDesktopShortcut $commonDesktopShortcut -ApplicationRoot $applicationRoot
+    Assert-UserMarkers -UserMarkerRoot $userMarkerRoot -UserMarkers $userMarkers
 
-    $forbidden = @('MacTray.exe', 'MacTuner.exe', 'MacWiz.exe', 'VisTuner.exe', 'EasyHK32.dll', 'EasyHK64.dll', 'updater.exe')
-    foreach ($name in $forbidden) {
-        if (Get-ChildItem -LiteralPath $installRoot -Recurse -File -Filter $name) {
-            throw "Independent installer contains forbidden legacy file: $name"
-        }
-    }
+    Invoke-InstallerExpectedFailure -File $resolvedFailingUpgradeInstaller -Arguments ($silentArguments + '/TASKS=desktopicon') -Label 'Deliberately failing protected upgrade'
+    Assert-BaselineRestoredAfterFailedUpgrade `
+        -Baseline $baseline `
+        -BaselineApplicationSnapshot $baselineApplicationSnapshot `
+        -BaselineServiceSnapshot $baselineServiceSnapshot `
+        -BaselineRuntimeSnapshot $baselineRuntimeSnapshot `
+        -ApplicationRoot $applicationRoot `
+        -OpenServiceName $openServiceName `
+        -ServiceRoot $serviceRoot `
+        -ProfileRoot $profileRoot
+    $brokerAfterFailure = Join-Path $applicationRoot 'service-runtime\mactype-service-setup.exe'
+    Invoke-ExpectedSuccess -File $brokerAfterFailure -Arguments @('start') -Label 'Protected broker after failed upgrade'
+    Assert-BaselineRestoredAfterFailedUpgrade `
+        -Baseline $baseline `
+        -BaselineApplicationSnapshot $baselineApplicationSnapshot `
+        -BaselineServiceSnapshot $baselineServiceSnapshot `
+        -BaselineRuntimeSnapshot $baselineRuntimeSnapshot `
+        -ApplicationRoot $applicationRoot `
+        -OpenServiceName $openServiceName `
+        -ServiceRoot $serviceRoot `
+        -ProfileRoot $profileRoot
+    Assert-CommonDesktopShortcut -CommonDesktopShortcut $commonDesktopShortcut -ApplicationRoot $applicationRoot
+    Assert-UserMarkers -UserMarkerRoot $userMarkerRoot -UserMarkers $userMarkers
 
-    $globalConfig = Get-Content -LiteralPath (Join-Path $installRoot 'MacType.ini') -Raw
-    if ($globalConfig -notmatch 'AlternativeFile=ini\\Default.ini') {
-        throw 'Independent MacType.ini does not select the new public default profile.'
+    Invoke-InstallerExpectedSuccess -File $resolvedInstaller -Arguments ($silentArguments + '/TASKS=desktopicon') -Label 'Protected upgrade install'
+    Assert-RequiredApplicationFiles -ApplicationRoot $applicationRoot
+    $payload = Assert-ServicePayload -ApplicationRoot $applicationRoot
+    if (Test-Path -LiteralPath $obsoleteRuntimePath) {
+        throw 'Successful upgrade retained an obsolete app-side service runtime file.'
     }
+    $upgrade = Assert-ReadyOpenService `
+        -PayloadManifest $payload `
+        -OpenServiceName $openServiceName `
+        -ServiceRoot $serviceRoot `
+        -ProfileRoot $profileRoot `
+        -DistributionDefaultProfilePath $distributionDefaultProfilePath
+    if ($upgrade.RuntimeVersion -ceq $baseline.RuntimeVersion) {
+        throw 'Upgrade reused an immutable runtime version instead of publishing a new generation.'
+    }
+    if ($upgrade.ActivePointerBytes -cne $baseline.ActivePointerBytes -or
+        $upgrade.ActiveGeneration -cne $baseline.ActiveGeneration -or
+        $upgrade.ProfileGenerationSnapshot -cne $baseline.ProfileGenerationSnapshot) {
+        throw 'Upgrade changed the protected active profile or its generation bytes.'
+    }
+    Assert-CommonDesktopShortcut -CommonDesktopShortcut $commonDesktopShortcut -ApplicationRoot $applicationRoot
+    Assert-UserMarkers -UserMarkerRoot $userMarkerRoot -UserMarkers $userMarkers
 
-    & (Join-Path $root 'scripts\ci\Test-TauriWindows.ps1') `
-        -Executable (Join-Path $installRoot 'MacType Control Center.exe') `
-        -PreviewHelper (Join-Path $installRoot 'mactype-preview32.exe') `
-        -InstallationRoot $installRoot
-
-    & (Join-Path $root 'scripts\ci\Test-TrayWindows.ps1') `
-        -Executable (Join-Path $installRoot 'MacType Control Center.exe')
-
-    $manualTarget = Join-Path $root 'build\preview-helper\Release\manual-launch-target.exe'
-    $manualMarker = Join-Path $env:TEMP ("mactype-manual-launch-" + [Guid]::NewGuid().ToString('N') + '.ready')
-    $loader = Start-Process -FilePath (Join-Path $installRoot 'MacLoader.exe') -ArgumentList @($manualTarget, $manualMarker) -PassThru -WindowStyle Hidden
-    if (-not $loader.WaitForExit(10000)) {
-        $loader.Kill($true)
-        throw 'Independent MacLoader did not exit after launching the x86 target.'
-    }
-    $deadline = [DateTime]::UtcNow.AddSeconds(10)
-    while (-not (Test-Path -LiteralPath $manualMarker) -and [DateTime]::UtcNow -lt $deadline) {
-        Start-Sleep -Milliseconds 100
-    }
-    if (-not (Test-Path -LiteralPath $manualMarker)) {
-        throw 'Independent MacLoader did not start the injected x86 target.'
-    }
-    $manualContent = (Get-Content -LiteralPath $manualMarker -Raw).Trim()
-    Remove-Item -LiteralPath $manualMarker -Force
-    if ($manualContent -ne 'mactype-manual-launch-ready') {
-        throw "Manual launch target wrote an invalid marker: $manualContent"
-    }
-
-    New-Item -ItemType Directory -Path (Split-Path -Parent $userStateMarker) -Force | Out-Null
-    Set-Content -LiteralPath $userStateMarker -Value 'preserve-user-settings' -NoNewline
-
-    Invoke-Installer -File $resolvedInstaller -Arguments ($installerArguments + '/TASKS=desktopicon') -Label 'Upgrade installer'
-    if (-not (Test-Path -LiteralPath (Join-Path $installRoot 'MacType Control Center.exe'))) {
-        throw 'Upgrade removed the installed application.'
-    }
-    if (-not (Test-Path -LiteralPath $desktopShortcut -PathType Leaf)) {
-        throw 'Upgrade did not create the requested desktop shortcut.'
-    }
-    $shortcutShell = New-Object -ComObject WScript.Shell
+    $uninstaller = Get-ChildItem -LiteralPath $applicationRoot -File -Filter 'unins*.exe' | Select-Object -First 1
+    if (-not $uninstaller) { throw 'Uninstaller was not created.' }
+    $broker = Join-Path $applicationRoot 'service-runtime\mactype-service-setup.exe'
+    $disabledBroker = "$broker.disabled-for-ci"
+    $serviceBeforeFailedUninstall = Get-ServiceSnapshot -Name $openServiceName
+    Move-Item -LiteralPath $broker -Destination $disabledBroker
     try {
-        $shortcut = $shortcutShell.CreateShortcut($desktopShortcut)
-        $expectedShortcutTarget = [IO.Path]::GetFullPath((Join-Path $installRoot 'MacType Control Center.exe'))
-        if (-not $expectedShortcutTarget.Equals([IO.Path]::GetFullPath($shortcut.TargetPath), [StringComparison]::OrdinalIgnoreCase)) {
-            throw "Desktop shortcut targets '$($shortcut.TargetPath)' instead of '$expectedShortcutTarget'."
-        }
+        Invoke-InstallerExpectedFailure -File $uninstaller.FullName -Arguments $silentArguments -Label 'Uninstall with missing protected broker'
     }
     finally {
-        [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shortcutShell)
+        if (Test-Path -LiteralPath $disabledBroker -PathType Leaf) {
+            Move-Item -LiteralPath $disabledBroker -Destination $broker
+        }
     }
-    if ((Get-Content -LiteralPath $userStateMarker -Raw) -ne 'preserve-user-settings') {
-        throw 'Upgrade changed application user settings.'
+    if ((Get-ServiceSnapshot -Name $openServiceName) -cne $serviceBeforeFailedUninstall -or
+        -not (Test-Path -LiteralPath $applicationRoot -PathType Container) -or
+        -not (Test-Path -LiteralPath $serviceRoot -PathType Container)) {
+        throw 'Failed uninstall hid or removed an owned service/runtime orphan.'
     }
 
-    $uninstaller = Get-ChildItem -LiteralPath $installRoot -File -Filter 'unins*.exe' | Select-Object -First 1
-    if (-not $uninstaller) { throw 'Uninstaller was not created.' }
-    Invoke-Installer -File $uninstaller.FullName -Arguments @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Label 'Uninstaller'
-    if (Test-Path -LiteralPath $installRoot) {
-        $remaining = Get-ChildItem -LiteralPath $installRoot -Force -ErrorAction SilentlyContinue
-        if ($remaining) { throw "Uninstall left files behind in $installRoot." }
+    Invoke-InstallerExpectedSuccess -File $uninstaller.FullName -Arguments $silentArguments -Label 'Owned uninstall'
+    if (Get-FixedService -Name $openServiceName) { throw 'Owned uninstall left the open service registered.' }
+    if (Test-Path -LiteralPath $applicationRoot) { throw 'Owned uninstall left Program Files application files behind.' }
+    if (Test-Path -LiteralPath $commonDesktopShortcut) { throw 'Owned uninstall left the common desktop shortcut behind.' }
+    if ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $profileRoot 'active.json'))) -cne $baseline.ActivePointerBytes -or
+        (Get-TreeSnapshot -Path $baseline.ProfileGenerationRoot) -cne $baseline.ProfileGenerationSnapshot) {
+        throw 'Owned uninstall removed or changed the protected ProgramData profile.'
     }
-    if (Test-Path -LiteralPath $desktopShortcut) {
-        throw 'Uninstall left the desktop shortcut behind.'
+    Assert-UserMarkers -UserMarkerRoot $userMarkerRoot -UserMarkers $userMarkers
+
+    New-ForeignService -Name $openServiceName -DisplayName 'CI foreign fixed-name service'
+    $openFixtureCreated = $true
+    $foreignSnapshot = Get-ServiceSnapshot -Name $openServiceName
+    Invoke-InstallerExpectedSuccess -File $resolvedInstaller -Arguments ($silentArguments + '/TASKS=!desktopicon') -Label 'Install with foreign fixed-name service'
+    if ((Get-ServiceSnapshot -Name $openServiceName) -cne $foreignSnapshot -or (Test-Path -LiteralPath $serviceRoot)) {
+        throw 'SkippedBlocked foreign-service install mutated the foreign service or runtime.'
     }
-    if ((Get-Content -LiteralPath $userStateMarker -Raw) -ne 'preserve-user-settings') {
-        throw 'Uninstall removed or changed application user settings.'
+    $foreignUninstaller = Get-ChildItem -LiteralPath $applicationRoot -File -Filter 'unins*.exe' | Select-Object -First 1
+    Invoke-InstallerExpectedSuccess -File $foreignUninstaller.FullName -Arguments $silentArguments -Label 'Uninstall beside foreign fixed-name service'
+    if ((Get-ServiceSnapshot -Name $openServiceName) -cne $foreignSnapshot) {
+        throw 'Uninstall changed or removed the foreign fixed-name service.'
     }
-    Write-Host 'PASS: independent install, settings-preserving upgrade, desktop shortcut, launch, and uninstall'
+    Remove-TestService -Name $openServiceName
+    $openFixtureCreated = $false
+
+    New-ForeignService -Name $legacyServiceName -DisplayName 'CI legacy MacTray service'
+    $legacyFixtureCreated = $true
+    $legacySnapshot = Get-ServiceSnapshot -Name $legacyServiceName
+    Invoke-InstallerExpectedSuccess -File $resolvedInstaller -Arguments ($silentArguments + '/TASKS=!desktopicon') -Label 'Install with legacy service conflict'
+    if ((Get-ServiceSnapshot -Name $legacyServiceName) -cne $legacySnapshot -or (Get-FixedService -Name $openServiceName) -or (Test-Path -LiteralPath $serviceRoot)) {
+        throw 'SkippedBlocked legacy-service install mutated legacy state or installed the open service.'
+    }
+    $legacyUninstaller = Get-ChildItem -LiteralPath $applicationRoot -File -Filter 'unins*.exe' | Select-Object -First 1
+    Invoke-InstallerExpectedSuccess -File $legacyUninstaller.FullName -Arguments $silentArguments -Label 'Uninstall beside legacy service'
+    if ((Get-ServiceSnapshot -Name $legacyServiceName) -cne $legacySnapshot) {
+        throw 'Uninstall changed or removed the legacy service.'
+    }
+    Remove-TestService -Name $legacyServiceName
+    $legacyFixtureCreated = $false
+    Assert-UserMarkers -UserMarkerRoot $userMarkerRoot -UserMarkers $userMarkers
+    Write-Host 'PASS: fixed Program Files install, strict Ready, profile-preserving upgrade, visible failure, exact-owned uninstall, and blocked conflict preservation'
+}
+catch {
+    $diagnostics = @(
+        foreach ($path in $installerDiagnosticLogs) {
+            "===== $path ====="
+            Read-InstallerDiagnosticLog -Path $path
+        }
+    ) -join "`n"
+    throw [InvalidOperationException]::new(
+        "$($_.Exception.Message)`nInstaller diagnostic logs:`n$diagnostics",
+        $_.Exception
+    )
 }
 finally {
-    if ($manualMarker -and (Test-Path -LiteralPath $manualMarker)) {
-        Remove-Item -LiteralPath $manualMarker -Force -ErrorAction SilentlyContinue
-    }
-    if (Test-Path -LiteralPath $installRoot) {
-        $uninstaller = Get-ChildItem -LiteralPath $installRoot -File -Filter 'unins*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($uninstaller) {
-            Start-Process -FilePath $uninstaller.FullName -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait -WindowStyle Hidden | Out-Null
+    if ($cleanHostedRunnerConfirmed) {
+        if ($openFixtureCreated) { Remove-TestService -Name $openServiceName }
+        if ($legacyFixtureCreated) { Remove-TestService -Name $legacyServiceName }
+        $installedOpenService = Get-FixedService -Name $openServiceName
+        $installedImage = if ($installedOpenService) { Get-ServiceExecutablePath -ImagePath $installedOpenService.PathName } else { '' }
+        if ($installedOpenService -and $installerTouchedMachine -and $installedImage.StartsWith($serviceRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            Remove-TestService -Name $openServiceName
         }
-        Remove-Item -LiteralPath $installRoot -Recurse -Force -ErrorAction SilentlyContinue
-    }
-    if (Test-Path -LiteralPath $desktopShortcut) {
-        Remove-Item -LiteralPath $desktopShortcut -Force -ErrorAction SilentlyContinue
-    }
-    if (Test-Path -LiteralPath $userStateMarker) {
-        Remove-Item -LiteralPath $userStateMarker -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $applicationRoot) {
+            $uninstaller = Get-ChildItem -LiteralPath $applicationRoot -File -Filter 'unins*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($uninstaller) { [void](Invoke-ProcessExit -File $uninstaller.FullName -Arguments $silentArguments) }
+        }
+        foreach ($path in @($applicationRoot, $profileRoot, $invalidInstallRoot, $userMarkerRoot)) {
+            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+        if (Test-Path -LiteralPath $commonDesktopShortcut) {
+            Remove-Item -LiteralPath $commonDesktopShortcut -Force -ErrorAction SilentlyContinue
+        }
+        if (Test-Path -LiteralPath $installerDiagnosticRoot) {
+            Remove-Item -LiteralPath $installerDiagnosticRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 }

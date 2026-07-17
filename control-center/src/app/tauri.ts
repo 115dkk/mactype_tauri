@@ -6,7 +6,7 @@ import type {
   IndividualSetting,
   InstallationStatus,
   LegacyProfileCandidate,
-  LegacyServiceStatus,
+  SystemServiceAction,
   LaunchContext,
   PreviewRequest,
   PreviewResult,
@@ -33,12 +33,12 @@ export async function pickExecutable(filterName: string): Promise<string | null>
   return getRuntimeAdapter().pickExecutable(filterName);
 }
 
-export async function manageLegacyService(action: "install" | "remove" | "start" | "stop"): Promise<LegacyServiceStatus> {
-  return getRuntimeAdapter().manageLegacyService(action);
+export async function manageSystemService(action: SystemServiceAction): Promise<ExecutionStatus> {
+  return getRuntimeAdapter().manageSystemService(action);
 }
 
-export async function activateSystemInjection(): Promise<ExecutionStatus> {
-  return getRuntimeAdapter().activateSystemInjection();
+export async function revealSystemService(): Promise<void> {
+  return getRuntimeAdapter().revealSystemService();
 }
 
 export async function pickIniProfile(filterName: string): Promise<string | null> {

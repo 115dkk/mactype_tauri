@@ -218,7 +218,18 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .service-controls > div:first-child { display: grid; min-width: 0; gap: var(--space-1); }
 .service-controls p { color: var(--color-muted); }
 .service-controls code { max-width: 680px; overflow: hidden; color: var(--color-muted); text-overflow: ellipsis; white-space: nowrap; }
+.service-path { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.service-path code { min-width: 0; }
+.service-path .button { flex: 0 0 auto; min-height: 40px; }
 .service-controls .warning-text { color: var(--color-warning); }
+.confirmation-backdrop { position: fixed; z-index: 100; display: grid; padding: var(--space-4); background: rgb(0 0 0 / 48%); inset: 0; place-items: center; }
+.migration-confirmation { display: grid; width: min(680px, 100%); max-height: calc(100dvh - (2 * var(--space-4))); gap: var(--space-4); padding: var(--space-5); overflow-y: auto; border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface); box-shadow: var(--shadow-window); }
+.migration-confirmation-heading { display: flex; align-items: flex-start; gap: var(--space-3); }
+.migration-confirmation-heading > svg { flex: 0 0 auto; color: var(--color-warning); }
+.migration-confirmation-heading p, .migration-confirmation li { color: var(--color-muted); }
+.migration-confirmation ol { display: grid; gap: var(--space-2); padding-inline-start: var(--space-6); }
+.migration-confirmation-note { padding: var(--space-3); border-inline-start: 3px solid var(--color-warning); background: var(--color-surface-subtle); }
+.migration-confirmation-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
 .service-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
 .system-injection-control { display: flex; align-items: center; justify-content: space-between; gap: var(--space-6); padding: var(--space-4); border-top: 1px solid var(--color-border); background: var(--color-surface-subtle); }
 .system-injection-state { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
@@ -327,6 +338,7 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
   .compact-details > div, [dir="rtl"] .compact-details > div { border-right: 0; border-left: 0; border-bottom: 1px solid var(--color-border); }
   .execution-option { align-items: flex-start; flex-direction: column; }
   .service-controls, .service-actions, .system-injection-control { align-items: stretch; flex-direction: column; }
+  .service-path { align-items: stretch; flex-direction: column; }
   .service-actions .button, .system-injection-action { width: 100%; }
   .manual-launcher { grid-template-columns: 1fr; }
   .target-selection { grid-template-columns: auto minmax(0, 1fr); }

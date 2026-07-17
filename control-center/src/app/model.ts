@@ -24,13 +24,15 @@ export interface ExecutionStatus {
   trayAvailable: boolean;
   autoStart: boolean;
   manualLauncherAvailable: boolean;
-  legacyService: LegacyServiceStatus;
+  systemService: SystemServiceStatus;
+  legacyMacTray: LegacyMacTrayStatus | null;
   registryModeDetected: boolean;
+  /** Backend-authoritative capability for publishing and applying a profile. */
   systemModesSupported: boolean;
   systemInjectionActive: boolean;
-  systemModeNote: string;
   injectionReady: boolean;
   activeProfile: string | null;
+  expectedProfileDigest: string | null;
   sessionTargets: ReadonlyArray<SessionTarget>;
 }
 
@@ -64,18 +66,41 @@ export interface ProfileEntry {
   path: string;
 }
 
-export interface LegacyServiceStatus {
-  presence: "absent" | "owned" | "compatible-unquoted" | "foreign" | "delete-pending" | "inaccessible";
-  state: "stopped" | "start-pending" | "stop-pending" | "running" | "continue-pending" | "pause-pending" | "paused" | "unknown";
+export type ServiceBackend = "open-source" | "legacy-mac-tray" | "foreign" | "none";
+export type InstallationState = "absent" | "current" | "outdated" | "invalid" | "inaccessible" | "delete-pending";
+export type ServiceRuntimeState = "stopped" | "start-pending" | "running" | "stop-pending" | "paused" | "unknown";
+export type ServiceHealthState = "unknown" | "initializing" | "ready" | "degraded" | "failed";
+
+export interface SystemServiceStatus {
+  backend: ServiceBackend;
+  installation: InstallationState;
+  runtime: ServiceRuntimeState;
+  health: ServiceHealthState;
   binaryPath: string | null;
   win32Error: number | null;
-  trustedBinaryAvailable: boolean;
-  registryConflict: boolean;
+  activeProfileDigest: string | null;
   canInstall: boolean;
   canRemove: boolean;
   canStart: boolean;
   canStop: boolean;
+  canRepair: boolean;
+  canUpgrade: boolean;
 }
+
+export interface LegacyMacTrayStatus {
+  presence: "absent" | "owned" | "compatible-unquoted" | "foreign" | "delete-pending" | "inaccessible";
+  state: ServiceRuntimeState | "continue-pending" | "pause-pending";
+  binaryPath: string | null;
+  win32Error: number | null;
+  trustedBinaryAvailable: boolean;
+  registryConflict: boolean;
+  canRemove: boolean;
+  canStop: boolean;
+  migrationAvailable: boolean;
+  migrationBackupAvailable: boolean;
+}
+
+export type SystemServiceAction = "install" | "upgrade" | "repair" | "remove" | "start" | "stop" | "publish-profile" | "migrate-from-legacy" | "remove-legacy";
 
 export interface LegacyProfileCandidate {
   name: string;

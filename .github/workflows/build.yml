@@ -15,26 +15,26 @@ permissions:
   contents: read
 
 jobs:
-  legacy-core:
-    name: Build MacType x86/x64 core
+  open-core:
+    name: Build MacType x86/x64 open core
     runs-on: windows-2022
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       - uses: microsoft/setup-msbuild@v3
-      - name: Build public dependencies and MacType core
+      - name: Build official dependencies, core, and fixed injectors
         shell: pwsh
-        run: .github/scripts/Build-LegacyCore.ps1
+        run: .github/scripts/Build-OpenCore.ps1
       - uses: actions/upload-artifact@v7
         with:
-          name: mactype-legacy-core
-          path: artifacts/legacy-core
+          name: mactype-open-core
+          path: artifacts/open-core
           if-no-files-found: error
           retention-days: 14
 
   control-center:
-    name: Build Windows application and installer
-    needs: legacy-core
+    name: Build Control Center, native service, and installer
+    needs: open-core
     runs-on: windows-2022
     timeout-minutes: 45
     env:
@@ -59,15 +59,24 @@ jobs:
       - uses: microsoft/setup-msbuild@v3
       - uses: actions/download-artifact@v8
         with:
-          name: mactype-legacy-core
-          path: artifacts/legacy-core
+          name: mactype-open-core
+          path: artifacts/open-core
       - name: Install frontend dependencies
         working-directory: control-center
         run: pnpm install --frozen-lockfile
-      - name: Build preview helper, frontend, and Tauri application
+      - name: Build Preview Helper, frontend, and Tauri application
         shell: pwsh
         run: .github/scripts/Build-ControlCenter.ps1 -Configuration Release -SkipInstall
-      - name: Build per-user installer
+      - name: Build immutable native service runtime and payload
+        shell: pwsh
+        run: |
+          $shortSha = '${{ github.sha }}'.Substring(0, 12).ToLowerInvariant()
+          $runtimeVersion = "0.2.0+manual.${{ github.run_id }}.$shortSha"
+          .github/scripts/Build-ServiceRuntime.ps1 `
+            -CoreRoot artifacts/open-core `
+            -OutputRoot artifacts/service-runtime `
+            -Version $runtimeVersion
+      - name: Build Inno Setup installer
         shell: pwsh
         run: |
           & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' `
@@ -76,7 +85,8 @@ jobs:
             /DOutputRoot="${{ github.workspace }}\artifacts\installer" `
             /DAppExe="${{ github.workspace }}\artifacts\application\MacType Control Center.exe" `
             /DPreviewExe="${{ github.workspace }}\build\preview-helper\Release\mactype-preview32.exe" `
-            /DCoreRoot="${{ github.workspace }}\artifacts\legacy-core" `
+            /DCoreRoot="${{ github.workspace }}\artifacts\open-core" `
+            /DServiceRuntimeRoot="${{ github.workspace }}\artifacts\service-runtime" `
             installer\mactype-control-center.iss
       - name: Write SHA-256 checksum
         shell: pwsh
@@ -90,9 +100,10 @@ jobs:
         with:
           name: mactype-control-center-${{ inputs.version }}
           path: |
-            artifacts/installer/*.exe
+            artifacts/installer/MacType Control Center.exe
             artifacts/installer/SHA256SUMS.txt
             artifacts/application/MacType Control Center.exe
+            artifacts/service-runtime/**
             build/preview-helper/Release/mactype-preview32.exe
           if-no-files-found: error
           retention-days: 14

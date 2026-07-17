@@ -27,11 +27,11 @@ Those paths define native behavior, IPC, packaging, or the MacType setting model
 | Profile editor shell, Wizard/Tuner mode, quick actions, and preview placement | `control-center/src/pages/ProfilesPage.tsx` | `WizardSettings.tsx`, `wizardModel.ts`, and `.wizard-*` selectors in `app.css` |
 | Basic, shape, and LCD setting rows | `control-center/src/pages/profiles/SchemaSettings.tsx` | Shared `.setting-row`, `.range-control`, and `.number-control` selectors |
 | Advanced, per-font, and list editors | `control-center/src/pages/profiles/AdvancedSettings.tsx`, `IndividualSettings.tsx`, and `ListsEditor.tsx` | Font picker and collection selectors in `app.css` |
-| Execution and service-control layout | `control-center/src/pages/ExecutionPage.tsx` | `.manual-*`, `.service-*`, `.system-injection-*`, and `.system-mode-*` selectors |
+| Execution and service-control layout | `control-center/src/pages/ExecutionPage.tsx` | `control-center/src/app/executionViewModel.ts` and the `.manual-*`, `.service-*`, `.system-injection-*`, and `.system-mode-*` selectors |
 | Diagnostics layout | `control-center/src/pages/DiagnosticsPage.tsx` | `.diagnostic-*` and `.log-view` selectors |
 | User-facing text | Every JSON catalog under `control-center/src/i18n/` | All ten catalogs must contain the same keys and placeholders |
 | Locale order, language detection, RTL selection | `control-center/src/i18n/i18n.ts` and `I18nProvider.tsx` | `tests/frontend-gallery/windows.ts` |
-| Browser-only sample data used during design work | `control-center/src/app/runtimeAdapters/browserGalleryAdapter.ts` | Keep the adapter result shapes equal to `runtimeAdapter.ts` |
+| Browser-only sample data used during design work | `control-center/src/app/runtimeAdapters/browserGalleryAdapter.ts` and `browserGalleryExecution.ts` | Keep fixture DTOs equal to `runtimeAdapter.ts`; do not duplicate UI mutation gates here |
 | In-app MacType logo | `control-center/public/mactype-icon.png` | Preserve the existing filename to avoid code changes |
 | Packaged EXE and installer icon | `control-center/src-tauri/icons/icon.ico` and `assets/mactype.ico` | These are assets; no Rust source change is required |
 
@@ -73,7 +73,9 @@ The native frame is disabled once in `control-center/src-tauri/tauri.conf.json`,
 
 The visible MacType on/off card is ordinary React and CSS. Change its markup and Lucide icons in `ExecutionPage.tsx`; change its spacing, colors, responsive stacking, and 40-pixel action target in the `.system-injection-*` rules in `app.css`; and change its copy in every locale catalog. Browser gallery mode supplies both the service status and the activation result, so these visual changes do not require Rust.
 
-Keep the existing adapter calls behind the buttons. `systemInjectionActive` is the native truth from the verified service state, while `systemModesSupported` decides whether activation is safe to offer. Renaming, recoloring, or rearranging the card must not duplicate those decisions in the component. A new service action or a different safety policy is native behavior and should be reviewed separately from the design change.
+`projectExecutionView` in `control-center/src/app/executionViewModel.ts` is the one pure projection for the entire Execution page. It receives only `ExecutionStatus` and the current busy operation, then derives the displayed state, copy keys, primary action, service upgrade/repair visibility, and every mutation gate. `ExecutionPage.tsx` consumes that projection in both the real Tauri application and browser gallery; the gallery adapters only supply representative status DTOs. This keeps screenshots and the installed application on the same UI decision path without introducing a frontend store.
+
+Keep the existing adapter calls behind the buttons. `systemInjectionActive` is native truth from the generation-bound verified service state, while `systemModesSupported` decides whether activation is safe to offer. Renaming, recoloring, or rearranging the card may change TSX, CSS, locale JSON, or the pure TypeScript projection, but must not recreate `canInstall`, `canStart`, `canRepair`, migration, or primary-action gates in the component or gallery fixtures. A new service action or a different safety policy is native behavior and should be reviewed separately from the design change.
 
 ### Change Settings, Wizard, or Tuner navigation
 
@@ -117,7 +119,7 @@ Interface icons come from `lucide-react` and are selected in TSX. Decorative ico
 
 ## Browser preview without Rust
 
-The browser gallery adapter supplies installation, profile, font, diagnostics, and service sample data. This makes visual work possible without compiling or launching Tauri.
+The browser gallery adapter supplies installation, profile, font, diagnostics, and service sample data. The real page then runs that data through the same `projectExecutionView` projection used under Tauri. This makes visual and interaction work possible without compiling or launching Rust while preserving the installed application's display and mutation rules.
 
 ```powershell
 cd control-center

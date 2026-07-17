@@ -1,43 +1,29 @@
-use crate::{installation_root, profile::ProfileState};
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use crate::{bounded_io::read_bounded_file, installation_root, profile::ProfileState};
+use serde::Serialize;
 use std::{
     env, fs,
-    io::Write,
     path::{Path, PathBuf},
-    process::Command,
     thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 use tauri::State;
 
-const RUNTIME_ARTIFACTS: [(&str, bool); 4] = [
-    ("MacLoader.exe", true),
-    ("MacType.dll", true),
-    ("MacLoader64.exe", false),
-    ("MacType64.dll", false),
-];
+mod autostart;
+mod runtime;
+mod session;
+mod storage;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ActiveRuntime {
-    runtime_root: PathBuf,
-    source_profile: PathBuf,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionTarget {
-    pub target: String,
-    pub arguments: Vec<String>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AppliedProfile {
-    pub source_profile: String,
-    pub runtime_root: String,
-}
+use autostart::autostart_value;
+#[cfg(test)]
+use runtime::prepare_runtime_at;
+pub(crate) use runtime::record_system_injection_choice;
+use runtime::{active_runtime, active_system_profile_payload, system_injection_paused};
+pub use runtime::{apply_profile, AppliedProfile};
+use session::{
+    launch_registered_targets_impl, launch_with_mactype_impl, register_session_target_impl,
+    remove_session_target_impl,
+};
+pub use session::{session_targets, SessionTarget};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,500 +31,137 @@ pub struct ExecutionStatus {
     pub tray_available: bool,
     pub auto_start: bool,
     pub manual_launcher_available: bool,
-    pub legacy_service: crate::legacy_service::LegacyServiceStatus,
+    pub system_service: crate::service_contract::SystemServiceStatus,
+    pub legacy_mac_tray: Option<crate::machine_integration::LegacyServiceStatus>,
     pub registry_mode_detected: bool,
     pub system_modes_supported: bool,
     pub system_injection_active: bool,
-    pub system_mode_note: String,
     pub injection_ready: bool,
     pub active_profile: Option<String>,
+    pub expected_profile_digest: Option<String>,
     pub session_targets: Vec<SessionTarget>,
 }
 
-fn data_root() -> Result<PathBuf, String> {
-    env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .map(|path| path.join("MacType").join("ControlCenter"))
-        .ok_or_else(|| "LOCALAPPDATA is not available".to_owned())
+enum LocalProfileObservation {
+    Missing,
+    Ready {
+        runtime: runtime::ActiveRuntime,
+        profile: Vec<u8>,
+    },
+    Invalid,
 }
 
-fn runtime_root() -> Result<PathBuf, String> {
-    Ok(data_root()?.join("runtime"))
+struct ProfileObservation {
+    local_runtime: Option<runtime::ActiveRuntime>,
+    expected_source: Option<PathBuf>,
+    expected_profile: Option<Vec<u8>>,
 }
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| "destination has no parent directory".to_owned())?;
-    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| error.to_string())?
-        .as_nanos();
-    let temporary = path.with_extension(format!("tmp-{}-{nonce}", std::process::id()));
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&temporary)
-        .map_err(|error| error.to_string())?;
-    file.write_all(bytes).map_err(|error| error.to_string())?;
-    file.sync_all().map_err(|error| error.to_string())?;
-    drop(file);
-    replace_file(&temporary, path).inspect_err(|_| {
-        let _ = fs::remove_file(&temporary);
-    })
-}
-
-#[cfg(windows)]
-fn replace_file(source: &Path, destination: &Path) -> Result<(), String> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::{
-        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
-    };
-
-    let source = source
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect::<Vec<_>>();
-    let destination = destination
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect::<Vec<_>>();
-    let result = unsafe {
-        MoveFileExW(
-            source.as_ptr(),
-            destination.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    };
-    if result == 0 {
-        Err(std::io::Error::last_os_error().to_string())
-    } else {
-        Ok(())
-    }
-}
-
-#[cfg(not(windows))]
-fn replace_file(source: &Path, destination: &Path) -> Result<(), String> {
-    if destination.exists() {
-        fs::remove_file(destination).map_err(|error| error.to_string())?;
-    }
-    fs::rename(source, destination).map_err(|error| error.to_string())
-}
-
-fn active_runtime_from(base: &Path) -> Result<ActiveRuntime, String> {
-    let bytes = fs::read(base.join("active.json")).map_err(|error| error.to_string())?;
-    let active: ActiveRuntime =
-        serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
-    let generations =
-        fs::canonicalize(base.join("generations")).map_err(|error| error.to_string())?;
-    let root = fs::canonicalize(&active.runtime_root).map_err(|error| error.to_string())?;
-    if !root.starts_with(&generations)
-        || !root.join("MacLoader.exe").is_file()
-        || !root.join("MacType.dll").is_file()
-        || !root.join("MacType.ini").is_file()
-        || !root.join("profile.ini").is_file()
-    {
-        return Err(
-            "active MacType runtime is incomplete or outside the managed directory".to_owned(),
-        );
-    }
-    Ok(ActiveRuntime {
-        runtime_root: root,
-        ..active
-    })
-}
-
-fn active_runtime() -> Result<ActiveRuntime, String> {
-    active_runtime_from(&runtime_root()?)
-}
-
-pub(crate) fn active_system_profile_paths() -> Result<(PathBuf, PathBuf), String> {
-    let active = active_runtime()?;
-    let profile = fs::canonicalize(active.runtime_root.join("profile.ini"))
-        .map_err(|error| error.to_string())?;
-    let length = fs::metadata(&profile)
-        .map_err(|error| error.to_string())?
-        .len();
-    if length == 0 || length > 4 * 1024 * 1024 {
-        return Err("active system profile must be between 1 byte and 4 MiB".to_owned());
-    }
-    Ok((active.source_profile, profile))
-}
-
-fn system_injection_pause_path() -> Result<PathBuf, String> {
-    Ok(data_root()?.join("system-injection-paused"))
-}
-
-pub(crate) fn record_system_injection_choice(enabled: bool) -> Result<(), String> {
-    let marker = system_injection_pause_path()?;
-    if enabled {
-        match fs::remove_file(marker) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error.to_string()),
-        }
-    } else {
-        atomic_write(&marker, b"paused\n")
-    }
-}
-
-fn system_injection_paused() -> bool {
-    system_injection_pause_path().is_ok_and(|path| path.is_file())
-}
-
-fn prepare_runtime_at(
-    base: &Path,
-    installation_root: &Path,
-    source_profile: &Path,
-    profile_bytes: &[u8],
-) -> Result<ActiveRuntime, String> {
-    let installation = fs::canonicalize(installation_root).map_err(|error| error.to_string())?;
-    let mut sources = Vec::new();
-    let mut fingerprint = Sha256::new();
-    fingerprint.update(profile_bytes);
-    for (name, required) in RUNTIME_ARTIFACTS {
-        let candidate = installation.join(name);
-        if !candidate.is_file() {
-            if required {
-                return Err(format!("{name} was not found in the selected installation"));
+fn project_profile_observation(
+    local: LocalProfileObservation,
+    bundled_default: Option<(PathBuf, Vec<u8>)>,
+) -> ProfileObservation {
+    match local {
+        LocalProfileObservation::Missing => {
+            let (expected_source, expected_profile) = bundled_default
+                .map(|(path, bytes)| (Some(path), Some(bytes)))
+                .unwrap_or_default();
+            ProfileObservation {
+                local_runtime: None,
+                expected_source,
+                expected_profile,
             }
-            continue;
         }
-        let source = fs::canonicalize(&candidate).map_err(|error| error.to_string())?;
-        if source.parent() != Some(installation.as_path()) {
-            return Err(format!("{name} resolves outside the selected installation"));
-        }
-        let bytes = fs::read(&source).map_err(|error| error.to_string())?;
-        fingerprint.update(name.as_bytes());
-        fingerprint.update(&bytes);
-        sources.push((name, source));
+        LocalProfileObservation::Ready { runtime, profile } => ProfileObservation {
+            expected_source: Some(runtime.source_profile.clone()),
+            expected_profile: Some(profile),
+            local_runtime: Some(runtime),
+        },
+        LocalProfileObservation::Invalid => ProfileObservation {
+            local_runtime: None,
+            expected_source: None,
+            expected_profile: None,
+        },
     }
-    let digest = fingerprint.finalize();
-    let id = digest[..12]
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    let generations = base.join("generations");
-    fs::create_dir_all(&generations).map_err(|error| error.to_string())?;
-    let generation = generations.join(&id);
-    if !generation.exists() {
-        let staging = generations.join(format!(".stage-{id}-{}", std::process::id()));
-        if staging.exists() {
-            fs::remove_dir_all(&staging).map_err(|error| error.to_string())?;
-        }
-        fs::create_dir(&staging).map_err(|error| error.to_string())?;
-        for (name, source) in &sources {
-            fs::copy(source, staging.join(name)).map_err(|error| error.to_string())?;
-        }
-        fs::write(staging.join("profile.ini"), profile_bytes).map_err(|error| error.to_string())?;
-        fs::write(
-            staging.join("MacType.ini"),
-            b"[General]\r\nAlternativeFile=profile.ini\r\n",
-        )
-        .map_err(|error| error.to_string())?;
-        match fs::rename(&staging, &generation) {
-            Ok(()) => {}
-            Err(_) if generation.is_dir() => {
-                fs::remove_dir_all(&staging).map_err(|error| error.to_string())?;
-            }
-            Err(error) => return Err(error.to_string()),
-        }
-    }
-    let active = ActiveRuntime {
-        runtime_root: generation,
-        source_profile: source_profile.to_path_buf(),
-    };
-    atomic_write(
-        &base.join("active.json"),
-        &serde_json::to_vec_pretty(&active).map_err(|error| error.to_string())?,
-    )?;
-    active_runtime_from(base)
 }
 
-pub fn apply_profile(
-    installation_root: &Path,
-    source_profile: &Path,
-    profile_bytes: &[u8],
-) -> Result<AppliedProfile, String> {
-    let active = prepare_runtime_at(
-        &runtime_root()?,
-        installation_root,
-        source_profile,
-        profile_bytes,
-    )?;
-    Ok(AppliedProfile {
-        source_profile: active.source_profile.to_string_lossy().into_owned(),
-        runtime_root: active.runtime_root.to_string_lossy().into_owned(),
-    })
+fn local_profile_observation_from(base: &Path) -> LocalProfileObservation {
+    match base.join("active.json").try_exists() {
+        Ok(false) => LocalProfileObservation::Missing,
+        Ok(true) => match runtime::active_runtime_from(base).and_then(|runtime| {
+            runtime::active_profile_payload_for(&runtime).map(|profile| (runtime, profile))
+        }) {
+            Ok((runtime, profile)) => LocalProfileObservation::Ready { runtime, profile },
+            Err(_) => LocalProfileObservation::Invalid,
+        },
+        Err(_) => LocalProfileObservation::Invalid,
+    }
+}
+
+fn observe_profile(installation: Option<&Path>) -> ProfileObservation {
+    let local = runtime::runtime_root()
+        .map(|base| local_profile_observation_from(&base))
+        .unwrap_or(LocalProfileObservation::Invalid);
+    let bundled_default = if matches!(local, LocalProfileObservation::Missing) {
+        installation
+            .and_then(|root| crate::profile::bundled_default_profile_at(root).ok())
+            .flatten()
+    } else {
+        None
+    };
+    project_profile_observation(local, bundled_default)
+}
+
+fn profile_publish_supported_for(
+    service: &crate::service_contract::SystemServiceStatus,
+    registry_mode_detected: bool,
+) -> bool {
+    !registry_mode_detected
+        && service.backend != crate::service_contract::ServiceBackend::Foreign
+        && matches!(
+            service.installation,
+            crate::service_contract::InstallationState::Absent
+                | crate::service_contract::InstallationState::Current
+                | crate::service_contract::InstallationState::Outdated
+        )
+        && matches!(
+            service.runtime,
+            crate::service_contract::RuntimeState::Running
+                | crate::service_contract::RuntimeState::Stopped
+        )
 }
 
 pub fn status(installation_root: Option<&Path>) -> ExecutionStatus {
-    let registry_mode_detected = registry_mode_detected();
-    let legacy_service = crate::legacy_service::status(registry_mode_detected);
-    let active = active_runtime().ok();
-    let service_owned = matches!(
-        legacy_service.presence,
-        crate::legacy_service::ServicePresence::Owned
-            | crate::legacy_service::ServicePresence::CompatibleUnquoted
-    );
-    let system_injection_active = service_owned
-        && legacy_service.state == crate::legacy_service::ServiceRuntimeState::Running;
-    let system_modes_supported = legacy_service.trusted_binary_available
-        && !legacy_service.registry_conflict
-        && matches!(
-            legacy_service.presence,
-            crate::legacy_service::ServicePresence::Absent
-                | crate::legacy_service::ServicePresence::Owned
-                | crate::legacy_service::ServicePresence::CompatibleUnquoted
-        );
+    let observation = observe_profile(installation_root);
+    let machine = crate::machine_integration::status(observation.expected_profile.as_deref());
+    let registry_mode_detected = machine.registry_conflict;
+    let system_service = machine.new_service;
+    let expected_profile_digest = machine.expected_profile_digest;
+    let system_injection_active = machine.system_injection_active;
+    let legacy_mac_tray = machine.legacy_service;
+    let system_modes_supported =
+        profile_publish_supported_for(&system_service, registry_mode_detected);
     ExecutionStatus {
         tray_available: true,
         auto_start: autostart_value().is_some(),
-        manual_launcher_available: installation_root.is_some() && active.is_some(),
-        legacy_service,
+        manual_launcher_available: installation_root.is_some()
+            && observation.local_runtime.is_some(),
+        system_service,
+        legacy_mac_tray,
         registry_mode_detected,
         system_modes_supported,
         system_injection_active,
-        system_mode_note: "검증된 Program Files MacTray 서비스를 통해 현재 프로필을 시스템 범위로 적용합니다. AppInit 레지스트리 모드는 읽기 전용입니다.".to_owned(),
-        injection_ready: active.is_some(),
-        active_profile: active.map(|runtime| runtime.source_profile.to_string_lossy().into_owned()),
+        injection_ready: observation.local_runtime.is_some(),
+        active_profile: observation
+            .expected_source
+            .map(|path| path.to_string_lossy().into_owned()),
+        expected_profile_digest,
         session_targets: session_targets().unwrap_or_default(),
     }
 }
 
 pub fn set_autostart(enabled: bool) -> Result<bool, String> {
-    set_autostart_impl(enabled)?;
-    Ok(autostart_value().is_some())
-}
-
-fn validate_launch(target: &str, arguments: &[String]) -> Result<PathBuf, String> {
-    if arguments.len() > 32 || arguments.iter().any(|argument| argument.len() > 4096) {
-        return Err(
-            "manual launch accepts at most 32 arguments of 4096 characters each".to_owned(),
-        );
-    }
-    let target = fs::canonicalize(target).map_err(|error| error.to_string())?;
-    if !target.is_file()
-        || !target
-            .extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
-    {
-        return Err("manual launch target must be an existing .exe file".to_owned());
-    }
-    Ok(target)
-}
-
-fn launch_with_mactype_impl(target: &str, arguments: &[String]) -> Result<u32, String> {
-    let target = validate_launch(target, arguments)?;
-    let active =
-        active_runtime().map_err(|_| "apply a profile before launching with MacType".to_owned())?;
-    let loader = active.runtime_root.join("MacLoader.exe");
-    Command::new(loader)
-        .arg(&target)
-        .args(arguments)
-        .current_dir(&active.runtime_root)
-        .spawn()
-        .map(|child| child.id())
-        .map_err(|error| error.to_string())
-}
-
-fn session_targets_path() -> Result<PathBuf, String> {
-    Ok(data_root()?.join("session-targets.json"))
-}
-
-pub fn session_targets() -> Result<Vec<SessionTarget>, String> {
-    let path = session_targets_path()?;
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    let bytes = fs::read(path).map_err(|error| error.to_string())?;
-    let targets: Vec<SessionTarget> =
-        serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
-    if targets.len() > 32 {
-        return Err("session target list exceeds 32 entries".to_owned());
-    }
-    Ok(targets)
-}
-
-fn register_session_target_impl(
-    target: &str,
-    arguments: &[String],
-) -> Result<Vec<SessionTarget>, String> {
-    let target = validate_launch(target, arguments)?
-        .to_string_lossy()
-        .into_owned();
-    let mut targets = session_targets()?;
-    if !targets
-        .iter()
-        .any(|entry| entry.target.eq_ignore_ascii_case(&target))
-    {
-        if targets.len() == 32 {
-            return Err("session target list already contains 32 entries".to_owned());
-        }
-        targets.push(SessionTarget {
-            target,
-            arguments: arguments.to_vec(),
-        });
-    }
-    atomic_write(
-        &session_targets_path()?,
-        &serde_json::to_vec_pretty(&targets).map_err(|error| error.to_string())?,
-    )?;
-    Ok(targets)
-}
-
-fn remove_session_target_impl(target: &str) -> Result<Vec<SessionTarget>, String> {
-    let mut targets = session_targets()?;
-    targets.retain(|entry| !entry.target.eq_ignore_ascii_case(target));
-    atomic_write(
-        &session_targets_path()?,
-        &serde_json::to_vec_pretty(&targets).map_err(|error| error.to_string())?,
-    )?;
-    Ok(targets)
-}
-
-fn launch_registered_targets_impl() -> Result<Vec<u32>, String> {
-    session_targets()?
-        .iter()
-        .map(|entry| launch_with_mactype_impl(&entry.target, &entry.arguments))
-        .collect()
-}
-
-#[cfg(windows)]
-fn wide(value: &str) -> Vec<u16> {
-    use std::os::windows::ffi::OsStrExt;
-    std::ffi::OsStr::new(value)
-        .encode_wide()
-        .chain(Some(0))
-        .collect()
-}
-
-#[cfg(windows)]
-fn read_registry_string(
-    root: windows_sys::Win32::System::Registry::HKEY,
-    subkey: &str,
-    value: &str,
-    flags: u32,
-) -> Option<String> {
-    use windows_sys::Win32::{Foundation::ERROR_SUCCESS, System::Registry::RegGetValueW};
-    let subkey = wide(subkey);
-    let value = wide(value);
-    let mut bytes = 0u32;
-    let result = unsafe {
-        RegGetValueW(
-            root,
-            subkey.as_ptr(),
-            value.as_ptr(),
-            flags,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            &mut bytes,
-        )
-    };
-    if result != ERROR_SUCCESS || bytes < 2 {
-        return None;
-    }
-    let mut buffer = vec![0u16; bytes as usize / 2];
-    let result = unsafe {
-        RegGetValueW(
-            root,
-            subkey.as_ptr(),
-            value.as_ptr(),
-            flags,
-            std::ptr::null_mut(),
-            buffer.as_mut_ptr().cast(),
-            &mut bytes,
-        )
-    };
-    if result != ERROR_SUCCESS {
-        return None;
-    }
-    let length = buffer
-        .iter()
-        .position(|unit| *unit == 0)
-        .unwrap_or(buffer.len());
-    Some(String::from_utf16_lossy(&buffer[..length]))
-}
-
-#[cfg(windows)]
-fn autostart_value() -> Option<String> {
-    use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_SZ};
-    read_registry_string(
-        HKEY_CURRENT_USER,
-        "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-        "MacTypeControlCenter",
-        RRF_RT_REG_SZ,
-    )
-}
-
-#[cfg(not(windows))]
-fn autostart_value() -> Option<String> {
-    None
-}
-
-#[cfg(windows)]
-fn set_autostart_impl(enabled: bool) -> Result<(), String> {
-    use windows_sys::Win32::{
-        Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS},
-        System::Registry::{RegDeleteKeyValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ},
-    };
-    let subkey = wide("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
-    let name = wide("MacTypeControlCenter");
-    let result = if enabled {
-        let executable = env::current_exe().map_err(|error| error.to_string())?;
-        let command = wide(&format!("\"{}\" --tray", executable.display()));
-        unsafe {
-            RegSetKeyValueW(
-                HKEY_CURRENT_USER,
-                subkey.as_ptr(),
-                name.as_ptr(),
-                REG_SZ,
-                command.as_ptr().cast(),
-                (command.len() * 2) as u32,
-            )
-        }
-    } else {
-        unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, subkey.as_ptr(), name.as_ptr()) }
-    };
-    if result == ERROR_SUCCESS || (!enabled && result == ERROR_FILE_NOT_FOUND) {
-        Ok(())
-    } else {
-        Err(format!(
-            "autostart registry update failed with Windows error {result}"
-        ))
-    }
-}
-
-#[cfg(not(windows))]
-fn set_autostart_impl(_enabled: bool) -> Result<(), String> {
-    Err("autostart is supported only on Windows".to_owned())
-}
-
-#[cfg(windows)]
-pub(crate) fn registry_mode_detected() -> bool {
-    use windows_sys::Win32::System::Registry::{
-        HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6432KEY, RRF_SUBKEY_WOW6464KEY,
-    };
-    let key = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Windows";
-    [RRF_SUBKEY_WOW6464KEY, RRF_SUBKEY_WOW6432KEY]
-        .into_iter()
-        .filter_map(|view| {
-            read_registry_string(
-                HKEY_LOCAL_MACHINE,
-                key,
-                "AppInit_DLLs",
-                RRF_RT_REG_SZ | view,
-            )
-        })
-        .any(|value| value.to_lowercase().contains("mactype"))
-}
-
-#[cfg(not(windows))]
-pub(crate) fn registry_mode_detected() -> bool {
-    false
+    autostart::set_autostart(enabled)
 }
 
 #[tauri::command]
@@ -556,21 +179,29 @@ pub(crate) fn launch_with_mactype(target: String, arguments: Vec<String>) -> Res
     launch_with_mactype_impl(&target, &arguments)
 }
 
+fn execute_machine_action(
+    action: crate::machine_integration::MachineAction,
+    profile: Option<&[u8]>,
+) -> Result<(), String> {
+    crate::machine_integration::execute(action, profile)?;
+    record_system_injection_choice(!matches!(
+        action,
+        crate::machine_integration::MachineAction::Stop
+            | crate::machine_integration::MachineAction::Remove
+    ))
+}
+
 #[tauri::command]
 pub(crate) fn apply_open_profile(state: State<'_, ProfileState>) -> Result<AppliedProfile, String> {
     let root =
         installation_root().ok_or_else(|| "MacType installation was not found".to_owned())?;
-    let guard = state
-        .0
-        .lock()
-        .map_err(|_| "profile lock is poisoned".to_owned())?;
-    let profile = guard
-        .as_ref()
-        .ok_or_else(|| "no profile is open".to_owned())?;
-    let applied = apply_profile(&root, profile.path(), &profile.encoded()?)?;
+    let (profile_path, profile_bytes) = state.active_payload()?;
+    let applied = apply_profile(&root, &profile_path, &profile_bytes)?;
     if env::var_os("MACTYPE_CI_SMOKE_FILE").is_none() {
-        crate::legacy_service::activate_active_profile()?;
-        record_system_injection_choice(true)?;
+        execute_machine_action(
+            crate::machine_integration::MachineAction::PublishProfile,
+            Some(&profile_bytes),
+        )?;
     }
     Ok(applied)
 }
@@ -586,31 +217,55 @@ fn ensure_active_runtime() -> Result<bool, String> {
     Ok(true)
 }
 
-pub(crate) fn ensure_system_injection_on_tray_start() -> Result<(), String> {
-    if system_injection_paused() || env::var_os("MACTYPE_CI_SMOKE_FILE").is_some() {
-        return Ok(());
+pub(crate) fn observe_machine_on_tray_login(
+) -> Result<crate::machine_integration::TrayLoginState, String> {
+    let root = installation_root();
+    let observation = observe_profile(root.as_deref());
+    Ok(crate::machine_integration::tray_login(
+        system_injection_paused(),
+        env::var_os("MACTYPE_CI_SMOKE_FILE").is_some(),
+        observation.expected_profile.as_deref(),
+    ))
+}
+
+pub(crate) fn apply_system_injection_from_tray_menu() -> Result<(), String> {
+    if system_injection_paused() {
+        return Err("system injection is paused".to_owned());
     }
-    let prepared_default = ensure_active_runtime()?;
-    let service = crate::legacy_service::status(registry_mode_detected());
-    if !prepared_default
-        && matches!(
-            service.presence,
-            crate::legacy_service::ServicePresence::Owned
-                | crate::legacy_service::ServicePresence::CompatibleUnquoted
-        )
-        && service.state == crate::legacy_service::ServiceRuntimeState::Running
-    {
-        return Ok(());
-    }
-    crate::legacy_service::activate_active_profile()?;
+    ensure_active_runtime()?;
+    let profile = active_system_profile_payload()?;
+    crate::machine_integration::tray_apply(false, &profile)?;
     record_system_injection_choice(true)
 }
 
 #[tauri::command]
 pub(crate) fn activate_system_injection() -> Result<ExecutionStatus, String> {
     ensure_active_runtime()?;
-    crate::legacy_service::activate_active_profile()?;
-    record_system_injection_choice(true)?;
+    let profile = active_system_profile_payload()?;
+    execute_machine_action(
+        crate::machine_integration::MachineAction::PublishProfile,
+        Some(&profile),
+    )?;
+    Ok(status(installation_root().as_deref()))
+}
+
+#[tauri::command]
+pub(crate) fn manage_system_service(
+    action: crate::machine_integration::PublicMachineAction,
+) -> Result<ExecutionStatus, String> {
+    let action = crate::machine_integration::MachineAction::from(action);
+    let profile = if matches!(
+        action,
+        crate::machine_integration::MachineAction::PublishProfile
+            | crate::machine_integration::MachineAction::MigrateFromLegacy
+            | crate::machine_integration::MachineAction::RemoveLegacy
+    ) {
+        ensure_active_runtime()?;
+        Some(active_system_profile_payload()?)
+    } else {
+        None
+    };
+    execute_machine_action(action, profile.as_deref())?;
     Ok(status(installation_root().as_deref()))
 }
 
@@ -658,7 +313,8 @@ pub(crate) fn ci_verify_injection_workflow() -> Result<(), String> {
     if !marker.is_file() {
         return Err("managed MacLoader did not start the registered injected target".to_owned());
     }
-    let content = fs::read_to_string(&marker).map_err(|error| error.to_string())?;
+    let content = String::from_utf8(read_bounded_file(&marker, 4096, "CI injection marker")?)
+        .map_err(|error| error.to_string())?;
     fs::remove_file(&marker).map_err(|error| error.to_string())?;
     if content.trim() != "mactype-manual-launch-ready" {
         return Err(format!(
@@ -673,6 +329,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn public_machine_action_rejects_internal_rollback() {
+        assert!(
+            serde_json::from_str::<crate::machine_integration::PublicMachineAction>(
+                r#""rollback""#,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn manual_launcher_rejects_non_executable_targets() {
         let error = launch_with_mactype_impl("Cargo.toml", &[]).unwrap_err();
         assert!(error.contains("existing .exe") || error.contains("cannot find"));
@@ -681,25 +347,189 @@ mod tests {
     #[test]
     fn system_injection_status_matches_the_verified_service() {
         let status = status(None);
-        let service = &status.legacy_service;
-        let safe_presence = matches!(
-            service.presence,
-            crate::legacy_service::ServicePresence::Absent
-                | crate::legacy_service::ServicePresence::Owned
-                | crate::legacy_service::ServicePresence::CompatibleUnquoted
-        );
+        let service = &status.system_service;
         assert_eq!(
             status.system_modes_supported,
-            service.trusted_binary_available && !service.registry_conflict && safe_presence
+            profile_publish_supported_for(service, status.registry_mode_detected)
         );
         assert_eq!(
             status.system_injection_active,
-            matches!(
-                service.presence,
-                crate::legacy_service::ServicePresence::Owned
-                    | crate::legacy_service::ServicePresence::CompatibleUnquoted
-            ) && service.state == crate::legacy_service::ServiceRuntimeState::Running
+            !status.registry_mode_detected
+                && service.system_injection_active(status.expected_profile_digest.as_deref())
         );
+    }
+
+    #[test]
+    fn missing_local_pointer_uses_bundled_default_for_ready_service_observation() {
+        let bundled_path = PathBuf::from("C:/Program Files/MacType Control Center/ini/Default.ini");
+        let bundled = b"[General]\r\nNormalWeight=2\r\n".to_vec();
+
+        let projection = project_profile_observation(
+            LocalProfileObservation::Missing,
+            Some((bundled_path.clone(), bundled.clone())),
+        );
+
+        assert!(projection.local_runtime.is_none());
+        assert_eq!(projection.expected_source, Some(bundled_path));
+        assert_eq!(
+            projection.expected_profile.as_deref(),
+            Some(bundled.as_slice())
+        );
+        let digest = mactype_service_contract::GenerationId::from_profile_bytes(&bundled)
+            .as_str()
+            .to_owned();
+        let service = crate::service_contract::SystemServiceStatus {
+            backend: crate::service_contract::ServiceBackend::OpenSource,
+            installation: crate::service_contract::InstallationState::Current,
+            runtime: crate::service_contract::RuntimeState::Running,
+            health: crate::service_contract::HealthState::Ready,
+            binary_path: None,
+            win32_error: None,
+            active_profile_digest: Some(digest.clone()),
+            can_install: false,
+            can_remove: true,
+            can_start: false,
+            can_stop: true,
+            can_repair: false,
+            can_upgrade: false,
+        };
+        assert!(service.system_injection_active(Some(&digest)));
+    }
+
+    #[test]
+    fn valid_local_runtime_always_wins_over_the_bundled_default() {
+        let local_path = PathBuf::from("C:/Users/Test/Local.ini");
+        let local = b"[General]\r\nNormalWeight=7\r\n".to_vec();
+        let projection = project_profile_observation(
+            LocalProfileObservation::Ready {
+                runtime: runtime::ActiveRuntime {
+                    runtime_root: PathBuf::from("C:/runtime/generations/local"),
+                    source_profile: local_path.clone(),
+                },
+                profile: local.clone(),
+            },
+            Some((
+                PathBuf::from("C:/Program Files/MacType Control Center/ini/Default.ini"),
+                b"[General]\r\nNormalWeight=2\r\n".to_vec(),
+            )),
+        );
+
+        assert!(projection.local_runtime.is_some());
+        assert_eq!(projection.expected_source, Some(local_path));
+        assert_eq!(
+            projection.expected_profile.as_deref(),
+            Some(local.as_slice())
+        );
+    }
+
+    #[test]
+    fn malformed_local_pointer_fails_closed_instead_of_using_default() {
+        let projection = project_profile_observation(
+            LocalProfileObservation::Invalid,
+            Some((
+                PathBuf::from("C:/Program Files/MacType Control Center/ini/Default.ini"),
+                b"[General]\r\nNormalWeight=2\r\n".to_vec(),
+            )),
+        );
+
+        assert!(projection.local_runtime.is_none());
+        assert!(projection.expected_source.is_none());
+        assert!(projection.expected_profile.is_none());
+    }
+
+    #[test]
+    fn existing_malformed_pointer_is_classified_as_invalid() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = env::temp_dir().join(format!("mactype-malformed-runtime-{unique}"));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("active.json"), b"not json").unwrap();
+
+        assert!(matches!(
+            local_profile_observation_from(&root),
+            LocalProfileObservation::Invalid
+        ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn protected_custom_profile_does_not_match_the_bundled_default() {
+        let bundled = b"[General]\r\nNormalWeight=2\r\n".to_vec();
+        let custom = b"[General]\r\nNormalWeight=7\r\n";
+        let projection = project_profile_observation(
+            LocalProfileObservation::Missing,
+            Some((PathBuf::from("C:/app/ini/Default.ini"), bundled.clone())),
+        );
+        let expected = mactype_service_contract::GenerationId::from_profile_bytes(&bundled)
+            .as_str()
+            .to_owned();
+        let custom_digest = mactype_service_contract::GenerationId::from_profile_bytes(custom)
+            .as_str()
+            .to_owned();
+        let service = crate::service_contract::SystemServiceStatus {
+            backend: crate::service_contract::ServiceBackend::OpenSource,
+            installation: crate::service_contract::InstallationState::Current,
+            runtime: crate::service_contract::RuntimeState::Running,
+            health: crate::service_contract::HealthState::Ready,
+            binary_path: None,
+            win32_error: None,
+            active_profile_digest: Some(custom_digest),
+            can_install: false,
+            can_remove: true,
+            can_start: false,
+            can_stop: true,
+            can_repair: false,
+            can_upgrade: false,
+        };
+
+        assert!(projection.expected_profile.is_some());
+        assert!(!service.system_injection_active(Some(&expected)));
+    }
+
+    #[test]
+    fn profile_publish_capability_requires_no_appinit_and_a_safe_stable_installation() {
+        let mut service = crate::service_contract::SystemServiceStatus {
+            backend: crate::service_contract::ServiceBackend::OpenSource,
+            installation: crate::service_contract::InstallationState::Current,
+            runtime: crate::service_contract::RuntimeState::Running,
+            health: crate::service_contract::HealthState::Ready,
+            binary_path: None,
+            win32_error: None,
+            active_profile_digest: None,
+            can_install: false,
+            can_remove: true,
+            can_start: false,
+            can_stop: true,
+            can_repair: true,
+            can_upgrade: false,
+        };
+        assert!(profile_publish_supported_for(&service, false));
+        assert!(!profile_publish_supported_for(&service, true));
+
+        for installation in [
+            crate::service_contract::InstallationState::Invalid,
+            crate::service_contract::InstallationState::Inaccessible,
+            crate::service_contract::InstallationState::DeletePending,
+        ] {
+            service.installation = installation;
+            assert!(!profile_publish_supported_for(&service, false));
+        }
+        service.installation = crate::service_contract::InstallationState::Current;
+        for runtime in [
+            crate::service_contract::RuntimeState::StartPending,
+            crate::service_contract::RuntimeState::StopPending,
+            crate::service_contract::RuntimeState::Paused,
+            crate::service_contract::RuntimeState::Unknown,
+        ] {
+            service.runtime = runtime;
+            assert!(!profile_publish_supported_for(&service, false));
+        }
+        service.runtime = crate::service_contract::RuntimeState::Stopped;
+        service.installation = crate::service_contract::InstallationState::Absent;
+        service.backend = crate::service_contract::ServiceBackend::None;
+        assert!(profile_publish_supported_for(&service, false));
     }
 
     #[test]
@@ -728,8 +558,135 @@ mod tests {
         );
         assert!(active.runtime_root.join("MacLoader.exe").is_file());
         assert!(active.runtime_root.join("MacType.dll").is_file());
-        let reopened = active_runtime_from(&runtime).unwrap();
+        let reopened = runtime::active_runtime_from(&runtime).unwrap();
         assert_eq!(reopened.source_profile, Path::new("C:/profiles/User.ini"));
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn active_runtime_rejects_an_oversized_pointer_before_json_parsing() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = env::temp_dir().join(format!("mactype-runtime-pointer-{unique}"));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("active.json"), vec![b' '; 512 * 1024 + 1]).unwrap();
+
+        let error = runtime::active_runtime_from(&root).unwrap_err();
+
+        assert!(error.contains("byte limit"), "unexpected error: {error}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn active_profile_payload_rejects_growth_beyond_the_profile_contract() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = env::temp_dir().join(format!("mactype-active-profile-{unique}.ini"));
+        fs::write(
+            &path,
+            vec![b';'; mactype_service_contract::MAX_PROFILE_BYTES + 1],
+        )
+        .unwrap();
+
+        let error = runtime::active_profile_payload_at(&path).unwrap_err();
+
+        assert!(error.contains("byte limit"), "unexpected error: {error}");
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn runtime_generation_rejects_an_oversized_installation_artifact() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = env::temp_dir().join(format!("mactype-runtime-artifact-{unique}"));
+        let installation = root.join("installation");
+        let runtime = root.join("runtime");
+        fs::create_dir_all(&installation).unwrap();
+        let loader = fs::File::create(installation.join("MacLoader.exe")).unwrap();
+        loader
+            .set_len(mactype_service_contract::MAX_RUNTIME_FILE_BYTES as u64 + 1)
+            .unwrap();
+        fs::write(installation.join("MacType.dll"), b"core").unwrap();
+
+        let error = prepare_runtime_at(
+            &runtime,
+            &installation,
+            Path::new("C:/profiles/User.ini"),
+            b"[General]\r\nNormalWeight=7\r\n",
+        )
+        .unwrap_err();
+
+        assert!(error.contains("byte limit"), "unexpected error: {error}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn runtime_generation_rejects_an_oversized_profile_payload() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = env::temp_dir().join(format!("mactype-runtime-profile-{unique}"));
+        let installation = root.join("installation");
+        let runtime = root.join("runtime");
+        fs::create_dir_all(&installation).unwrap();
+        fs::write(installation.join("MacLoader.exe"), b"loader").unwrap();
+        fs::write(installation.join("MacType.dll"), b"core").unwrap();
+        let profile = vec![b';'; mactype_service_contract::MAX_PROFILE_BYTES + 1];
+
+        let error = prepare_runtime_at(
+            &runtime,
+            &installation,
+            Path::new("C:/profiles/User.ini"),
+            &profile,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("profile") && error.contains("byte limit"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn session_targets_reject_an_oversized_json_file_before_parsing() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = env::temp_dir().join(format!("mactype-session-targets-{unique}.json"));
+        fs::write(&path, vec![b' '; 8 * 1024 * 1024 + 1]).unwrap();
+
+        let error = session::session_targets_from(&path).unwrap_err();
+
+        assert!(error.contains("byte limit"), "unexpected error: {error}");
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn session_target_writer_never_persists_state_it_cannot_read_back() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = env::temp_dir().join(format!("mactype-session-target-write-{unique}.json"));
+        fs::write(&path, b"preserved").unwrap();
+        let argument = "\u{0001}".repeat(4096);
+        let targets = (0..32)
+            .map(|index| SessionTarget {
+                target: format!("C:/target-{index}.exe"),
+                arguments: vec![argument.clone(); 32],
+            })
+            .collect::<Vec<_>>();
+
+        let error = session::write_session_targets_to(&path, &targets).unwrap_err();
+
+        assert!(error.contains("byte limit"), "unexpected error: {error}");
+        assert_eq!(fs::read(&path).unwrap(), b"preserved");
+        fs::remove_file(path).unwrap();
     }
 }

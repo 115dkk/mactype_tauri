@@ -2,7 +2,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::ptr;
 
-use windows_sys::Win32::Foundation::{LocalFree, ERROR_SUCCESS};
+use windows_sys::Win32::Foundation::{LocalFree, ERROR_SUCCESS, GENERIC_EXECUTE, GENERIC_READ};
 use windows_sys::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, ConvertStringSidToSidW,
     GetNamedSecurityInfoW, TreeSetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
@@ -10,7 +10,7 @@ use windows_sys::Win32::Security::Authorization::{
 };
 use windows_sys::Win32::Security::{
     AclSizeInformation, EqualSid, GetAce, GetAclInformation, GetSecurityDescriptorControl,
-    ACCESS_ALLOWED_ACE, ACL, ACL_SIZE_INFORMATION, DACL_SECURITY_INFORMATION,
+    ACCESS_ALLOWED_ACE, ACL, ACL_SIZE_INFORMATION, DACL_SECURITY_INFORMATION, INHERIT_ONLY_ACE,
     PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED,
 };
 use windows_sys::Win32::Storage::FileSystem::{
@@ -160,10 +160,12 @@ fn verify_protected_acl(path: &Path, sids: &ExpectedSids) -> Result<(), SetupErr
             }
             saw_administrators = true;
         } else if unsafe { EqualSid(sid, sids.users.0) } != 0 {
-            if saw_users || ace.Mask != FILE_GENERIC_READ | FILE_GENERIC_EXECUTE {
-                return Err(invalid_acl(path));
+            if !is_users_read_execute_mask(ace.Mask) {
+                return Err(invalid_acl_ace(path, "Users", ace));
             }
-            saw_users = true;
+            if ace_applies_to_current_object(ace.Header.AceFlags) {
+                saw_users = true;
+            }
         } else {
             return Err(SetupError::Runtime(format!(
                 "protected machine ACL contains an unapproved allow ACE: {}",
@@ -175,6 +177,25 @@ fn verify_protected_acl(path: &Path, sids: &ExpectedSids) -> Result<(), SetupErr
         return Err(invalid_acl(path));
     }
     Ok(())
+}
+
+fn is_users_read_execute_mask(mask: u32) -> bool {
+    mask == (GENERIC_READ | GENERIC_EXECUTE) || mask == (FILE_GENERIC_READ | FILE_GENERIC_EXECUTE)
+}
+
+fn ace_applies_to_current_object(flags: u8) -> bool {
+    flags & INHERIT_ONLY_ACE as u8 == 0
+}
+
+fn invalid_acl_ace(path: &Path, trustee: &str, ace: &ACCESS_ALLOWED_ACE) -> SetupError {
+    SetupError::Runtime(format!(
+        "protected machine ACL has invalid {trustee} rights (mask=0x{:08X}, flags=0x{:02X}, expected=0x{:08X} or 0x{:08X}): {}",
+        ace.Mask,
+        ace.Header.AceFlags,
+        GENERIC_READ | GENERIC_EXECUTE,
+        FILE_GENERIC_READ | FILE_GENERIC_EXECUTE,
+        path.display()
+    ))
 }
 
 fn invalid_acl(path: &Path) -> SetupError {
@@ -289,4 +310,91 @@ fn wide_path(path: &Path) -> Vec<u16> {
     use std::os::windows::ffi::OsStrExt;
 
     path.as_os_str().encode_wide().chain(Some(0)).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::{
+        ace_applies_to_current_object, harden_machine_directory, is_users_read_execute_mask,
+        verify_protected_acl, ExpectedSids, OwnedSecurityDescriptor, DACL_SECURITY_INFORMATION,
+        ERROR_SUCCESS, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, GENERIC_EXECUTE, GENERIC_READ,
+        INHERIT_ONLY_ACE, PROTECTED_DACL_SECURITY_INFORMATION, SE_FILE_OBJECT, TREE_SEC_INFO_RESET,
+    };
+
+    const BASE_ACL: &str = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)";
+
+    #[test]
+    fn hardening_accepts_the_generic_read_execute_ace_emitted_for_the_root() {
+        let directory = tempfile::tempdir().unwrap();
+
+        let result = harden_machine_directory(directory.path());
+
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
+    fn hosted_root_and_mapped_child_read_execute_masks_are_safe() {
+        assert!(is_users_read_execute_mask(0xA000_0000));
+        assert!(is_users_read_execute_mask(0x0012_00A9));
+        assert_eq!(GENERIC_READ | GENERIC_EXECUTE, 0xA000_0000);
+        assert_eq!(FILE_GENERIC_READ | FILE_GENERIC_EXECUTE, 0x0012_00A9);
+        assert!(!ace_applies_to_current_object(
+            INHERIT_ONLY_ACE as u8 | 0x03
+        ));
+        assert!(ace_applies_to_current_object(0x10));
+    }
+
+    #[test]
+    fn users_write_access_is_rejected() {
+        let error = verify_acl_fixture(&format!("{BASE_ACL}(A;OICI;GW;;;BU)"))
+            .expect_err("Users write access must fail closed");
+
+        assert!(error.to_string().contains("invalid Users rights"));
+    }
+
+    #[test]
+    fn everyone_write_access_is_rejected() {
+        let error = verify_acl_fixture(&format!("{BASE_ACL}(A;OICI;GW;;;WD)"))
+            .expect_err("Everyone write access must fail closed");
+
+        assert!(error.to_string().contains("unapproved allow ACE"));
+    }
+
+    #[test]
+    fn authenticated_users_write_access_is_rejected() {
+        let error = verify_acl_fixture(&format!("{BASE_ACL}(A;OICI;GW;;;AU)"))
+            .expect_err("Authenticated Users write access must fail closed");
+
+        assert!(error.to_string().contains("unapproved allow ACE"));
+    }
+
+    fn verify_acl_fixture(sddl: &str) -> Result<(), super::SetupError> {
+        let directory = tempfile::tempdir().unwrap();
+        apply_acl(directory.path(), sddl);
+        verify_protected_acl(directory.path(), &ExpectedSids::new().unwrap())
+    }
+
+    fn apply_acl(path: &Path, sddl: &str) {
+        let descriptor = OwnedSecurityDescriptor::from_sddl(sddl).unwrap();
+        let dacl = descriptor.dacl().unwrap();
+        let path_wide = super::wide_path(path);
+        let status = unsafe {
+            super::TreeSetNamedSecurityInfoW(
+                path_wide.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                dacl,
+                std::ptr::null_mut(),
+                TREE_SEC_INFO_RESET,
+                None,
+                0,
+                std::ptr::null(),
+            )
+        };
+        assert_eq!(status, ERROR_SUCCESS);
+    }
 }

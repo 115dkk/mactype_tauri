@@ -77,7 +77,7 @@ Source: "{#SourceRoot}\distribution\MacType.ini"; DestDir: "{app}"; Flags: ignor
 Source: "{#SourceRoot}\distribution\ini\*.ini"; DestDir: "{app}\ini"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourceRoot}\distribution\languages\*.json"; DestDir: "{app}\languages"; Flags: ignoreversion
 Source: "{#SourceRoot}\distribution\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SourceRoot}\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
+Source: "{#SourceRoot}\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion; AfterInstall: BootstrapMachineService
 
 [Icons]
 Name: "{autoprograms}\MacType Control Center"; Filename: "{app}\{#ControlCenterExeName}"; WorkingDir: "{app}"
@@ -111,10 +111,9 @@ begin
     RaiseException(Operation + ' failed with setup broker exit code ' + IntToStr(ResultCode) + '.');
 end;
 
-procedure CurStepChanged(CurStep: TSetupStep);
+procedure BootstrapMachineService;
 begin
-  if CurStep = ssPostInstall then
-    RunFixedBrokerOrFail('bootstrap-install', 'Machine service bootstrap');
+  RunFixedBrokerOrFail('bootstrap-install', 'Machine service bootstrap');
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

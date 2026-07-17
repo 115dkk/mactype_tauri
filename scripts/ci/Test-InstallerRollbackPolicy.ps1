@@ -5,6 +5,7 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $workflow = Get-Content -LiteralPath (Join-Path $root '.github\workflows\build.yml') -Raw
 $installerTest = Get-Content -LiteralPath (Join-Path $root 'scripts\ci\Test-InstallerWindows.ps1') -Raw
+$installerDefinitionPath = Join-Path $root 'installer\mactype-control-center.iss'
 $installerHelperPath = Join-Path $root 'scripts\ci\lib\InstallerWindowsAssertions.ps1'
 $fixturePath = Join-Path $root '.github\scripts\Build-FailingServiceRuntimeFixture.ps1'
 
@@ -22,6 +23,22 @@ foreach ($token in @(
 
 if (-not (Test-Path -LiteralPath $installerHelperPath -PathType Leaf)) {
     throw 'Installer E2E bounded-process helper is missing.'
+}
+
+$installerDefinition = Get-Content -LiteralPath $installerDefinitionPath -Raw
+$filesSection = [regex]::Match($installerDefinition, '(?ms)^\[Files\]\s*(?<body>.*?)(?=^\[[^]]+\])')
+$fileEntries = @($filesSection.Groups['body'].Value -split '\r?\n' | Where-Object { $_ -match '^Source:' })
+if (-not $filesSection.Success -or $fileEntries.Count -eq 0 -or
+    $fileEntries[-1] -notmatch 'Source:\s*"\{#SourceRoot\}\\LICENSE".*AfterInstall:\s*BootstrapMachineService\s*$') {
+    throw 'Installer must run machine-service bootstrap from the final Files entry while rollback is still available.'
+}
+if (-not $installerDefinition.Contains(
+    "RunFixedBrokerOrFail('bootstrap-install', 'Machine service bootstrap')"
+)) {
+    throw 'Installer machine-service bootstrap callback does not invoke the fixed protected broker.'
+}
+if ($installerDefinition -match '(?s)procedure\s+CurStepChanged\b.*?ssPostInstall.*?RunFixedBrokerOrFail') {
+    throw 'Installer must not defer mandatory machine-service bootstrap to non-rollback ssPostInstall.'
 }
 $installerHelper = Get-Content -LiteralPath $installerHelperPath -Raw
 foreach ($token in @(

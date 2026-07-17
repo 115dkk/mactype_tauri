@@ -334,8 +334,8 @@ jobs:
 
   release-main-snapshot:
     name: Publish installable main snapshot
-    needs: [windows-build, open-service-windows, release-quality-gate]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [windows-build, open-service-windows, release-quality-gate, release-gallery]
+    if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -344,6 +344,30 @@ jobs:
         with:
           name: mactype-control-center-windows
           path: release
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-frontend-window-gallery
+          path: gallery-artifact
+      - name: Select the bounded release gallery
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $assets = @(
+            'desktop-1280-overview-en.png',
+            'desktop-1280-execution-ready-en.png',
+            'desktop-1280-execution-migration-available-en.png',
+            'desktop-1280-profiles-zh-CN.png',
+            'mobile-390-overview-ar.png'
+          )
+          $destination = Join-Path $PWD 'release/gallery'
+          New-Item -ItemType Directory -Path $destination -Force | Out-Null
+          foreach ($asset in $assets) {
+            $source = Join-Path $PWD "gallery-artifact/$asset"
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+              throw "Validated gallery artifact is missing required release asset: $asset"
+            }
+            Copy-Item -LiteralPath $source -Destination (Join-Path $destination $asset)
+          }
       - name: Publish automatic pre-release
         uses: softprops/action-gh-release@v3
         with:
@@ -360,3 +384,8 @@ jobs:
           files: |
             release/artifacts/installer/MacType-Control-Center.zip
             release/artifacts/installer/SHA256SUMS.txt
+            release/gallery/desktop-1280-overview-en.png
+            release/gallery/desktop-1280-execution-ready-en.png
+            release/gallery/desktop-1280-execution-migration-available-en.png
+            release/gallery/desktop-1280-profiles-zh-CN.png
+            release/gallery/mobile-390-overview-ar.png

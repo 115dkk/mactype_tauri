@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  legacy-core:
+  open-core:
     runs-on: windows-2022
     timeout-minutes: 60
     steps:
@@ -19,15 +19,56 @@ jobs:
       - uses: microsoft/setup-msbuild@v3
       - name: Build official dependencies and MacType x86/x64 core
         shell: pwsh
-        run: .github/scripts/Build-LegacyCore.ps1
+        run: .github/scripts/Build-OpenCore.ps1
       - uses: actions/upload-artifact@v7
         with:
-          name: mactype-legacy-core
-          path: artifacts/legacy-core
+          name: mactype-open-core
+          path: artifacts/open-core
           if-no-files-found: error
 
+  open-service-windows:
+    name: Open service hosted Windows contract
+    needs: open-core
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: microsoft/setup-msbuild@v3
+      - uses: actions/download-artifact@v8
+        with:
+          name: mactype-open-core
+          path: artifacts/open-core
+      - name: Check standalone service formatting
+        run: cargo fmt --manifest-path service-runtime/Cargo.toml --all -- --check
+      - name: Lint standalone service without Tauri or WebView
+        run: cargo clippy --manifest-path service-runtime/Cargo.toml --workspace --all-targets --all-features -- -D warnings
+      - name: Test fixed service, manifest, and profile generation contracts
+        run: |
+          cargo test --manifest-path service-runtime/Cargo.toml --workspace --all-targets
+          cargo test --manifest-path service-runtime/Cargo.toml --workspace --all-targets --all-features
+      - name: Build isolated hosted-CI service binaries
+        run: cargo build --manifest-path service-runtime/Cargo.toml --release -p mactype-service-host -p mactype-service-setup --features mactype-service-host/ci-test-adapter,mactype-service-setup/ci-test-adapter
+      - name: Build and verify x86 marker targets
+        shell: pwsh
+        run: tools/service-probe/tests/Test-ProbeContract.ps1 -Architecture Win32 -BuildRoot build/service-probe
+      - name: Build and verify x64 marker targets
+        shell: pwsh
+        run: tools/service-probe/tests/Test-ProbeContract.ps1 -Architecture x64 -BuildRoot build/service-probe
+      - name: Install, start, hook x86/x64 markers, stop, and remove isolated service
+        shell: pwsh
+        run: |
+          scripts/ci/Test-OpenServiceWindows.ps1 `
+            -SetupExecutable service-runtime/target/release/mactype-service-setup.exe `
+            -ServiceExecutable service-runtime/target/release/mactype-service.exe `
+            -OpenCoreRoot artifacts/open-core `
+            -Marker32 build/service-probe/Win32/Release/probe-console32.exe `
+            -Marker64 build/service-probe/x64/Release/probe-console64.exe
+
   windows-build:
-    needs: legacy-core
+    needs: open-core
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
@@ -44,20 +85,31 @@ jobs:
       - uses: microsoft/setup-msbuild@v3
       - uses: actions/download-artifact@v8
         with:
-          name: mactype-legacy-core
-          path: artifacts/legacy-core
+          name: mactype-open-core
+          path: artifacts/open-core
       - name: Install frontend dependencies
         working-directory: control-center
         run: pnpm install --frozen-lockfile
       - name: Build preview helper, frontend, and Tauri program
         shell: pwsh
         run: .github/scripts/Build-ControlCenter.ps1 -Configuration Release -SkipInstall
+      - name: Build distinct immutable service payloads and a test-only failing upgrade
+        shell: pwsh
+        run: |
+          $shortSha = '${{ github.sha }}'.Substring(0, 12).ToLowerInvariant()
+          $runtimeVersionStem = "0.2.0+ci.${{ github.run_id }}.$shortSha"
+          $baselineRuntimeVersion = "$runtimeVersionStem.baseline"
+          $failingRuntimeVersion = "$runtimeVersionStem.failing"
+          $currentRuntimeVersion = "$runtimeVersionStem.current"
+          .github/scripts/Build-ServiceRuntime.ps1 -CoreRoot artifacts/open-core -OutputRoot artifacts/service-runtime-baseline -Version $baselineRuntimeVersion
+          .github/scripts/Build-ServiceRuntime.ps1 -CoreRoot artifacts/open-core -OutputRoot artifacts/service-runtime-current -Version $currentRuntimeVersion
+          .github/scripts/Build-FailingServiceRuntimeFixture.ps1 -SourceRoot artifacts/service-runtime-current -OutputRoot artifacts/service-runtime-failing-upgrade -Version $failingRuntimeVersion
       - name: Stress-test single-instance startup
         shell: pwsh
         run: scripts/ci/Test-SingleInstanceWindows.ps1 -Executable control-center/src-tauri/target/release/mactype-control-center.exe
       - name: Smoke-test every Tauri window state
         shell: pwsh
-        run: scripts/ci/Test-TauriWindows.ps1 -Executable control-center/src-tauri/target/release/mactype-control-center.exe -PreviewHelper build/preview-helper/Release/mactype-preview32.exe -InstallationRoot artifacts/legacy-core
+        run: scripts/ci/Test-TauriWindows.ps1 -Executable control-center/src-tauri/target/release/mactype-control-center.exe -PreviewHelper build/preview-helper/Release/mactype-preview32.exe -InstallationRoot artifacts/open-core
       - name: Smoke-test hidden tray startup
         shell: pwsh
         run: scripts/ci/Test-TrayWindows.ps1 -Executable control-center/src-tauri/target/release/mactype-control-center.exe
@@ -70,7 +122,17 @@ jobs:
             /DOutputRoot="${{ github.workspace }}\artifacts\installer-baseline" `
             /DAppExe="${{ github.workspace }}\artifacts\application\MacType Control Center.exe" `
             /DPreviewExe="${{ github.workspace }}\build\preview-helper\Release\mactype-preview32.exe" `
-            /DCoreRoot="${{ github.workspace }}\artifacts\legacy-core" `
+            /DCoreRoot="${{ github.workspace }}\artifacts\open-core" `
+            /DServiceRuntimeRoot="${{ github.workspace }}\artifacts\service-runtime-baseline" `
+            installer\mactype-control-center.iss
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' `
+            /DAppVersion=0.0.95 `
+            /DSourceRoot="${{ github.workspace }}" `
+            /DOutputRoot="${{ github.workspace }}\artifacts\installer-failing-upgrade" `
+            /DAppExe="${{ github.workspace }}\artifacts\application\MacType Control Center.exe" `
+            /DPreviewExe="${{ github.workspace }}\build\preview-helper\Release\mactype-preview32.exe" `
+            /DCoreRoot="${{ github.workspace }}\artifacts\open-core" `
+            /DServiceRuntimeRoot="${{ github.workspace }}\artifacts\service-runtime-failing-upgrade" `
             installer\mactype-control-center.iss
           & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' `
             /DAppVersion=0.1.0 `
@@ -78,11 +140,12 @@ jobs:
             /DOutputRoot="${{ github.workspace }}\artifacts\installer" `
             /DAppExe="${{ github.workspace }}\artifacts\application\MacType Control Center.exe" `
             /DPreviewExe="${{ github.workspace }}\build\preview-helper\Release\mactype-preview32.exe" `
-            /DCoreRoot="${{ github.workspace }}\artifacts\legacy-core" `
+            /DCoreRoot="${{ github.workspace }}\artifacts\open-core" `
+            /DServiceRuntimeRoot="${{ github.workspace }}\artifacts\service-runtime-current" `
             installer\mactype-control-center.iss
       - name: Verify install, upgrade, launch, and uninstall
         shell: pwsh
-        run: scripts/ci/Test-InstallerWindows.ps1 -BaselineInstaller (Get-ChildItem artifacts/installer-baseline/*.exe | Select-Object -First 1).FullName -Installer (Get-ChildItem artifacts/installer/*.exe | Select-Object -First 1).FullName
+        run: scripts/ci/Test-InstallerWindows.ps1 -BaselineInstaller (Get-ChildItem artifacts/installer-baseline/*.exe | Select-Object -First 1).FullName -FailingUpgradeInstaller (Get-ChildItem artifacts/installer-failing-upgrade/*.exe | Select-Object -First 1).FullName -Installer (Get-ChildItem artifacts/installer/*.exe | Select-Object -First 1).FullName
       - name: Write installer checksum
         shell: pwsh
         run: |
@@ -104,12 +167,174 @@ jobs:
             artifacts/installer/*.zip
             artifacts/installer/SHA256SUMS.txt
             artifacts/application/MacType Control Center.exe
+            artifacts/service-runtime-current/mactype-service-setup.exe
+            artifacts/service-runtime-current/payload/manifest.json
             build/preview-helper/Release/mactype-preview32.exe
           if-no-files-found: error
 
+  release-frontend-quality:
+    name: Release gate / frontend lint and contracts
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: control-center/pnpm-lock.yaml
+      - working-directory: control-center
+        run: pnpm install --frozen-lockfile
+      - working-directory: control-center
+        run: pnpm generate:settings
+      - working-directory: control-center
+        run: pnpm test:i18n
+      - working-directory: control-center
+        run: pnpm test:settings
+      - name: Verify generated settings sources are committed
+        run: git diff --exit-code -- control-center/src/generated/settings.ts control-center/src-tauri/src/generated_settings.rs preview-helper/include/generated_settings.h
+      - working-directory: control-center
+        run: pnpm lint
+      - working-directory: control-center
+        run: pnpm build
+
+  release-tauri-quality:
+    name: Release gate / Tauri Rust
+    runs-on: windows-2022
+    defaults:
+      run:
+        working-directory: control-center/src-tauri
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Verify target-scoped Rust advisory exceptions
+        shell: pwsh
+        run: '& ..\..\scripts\ci\Test-RustAdvisoryScope.ps1'
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test --all-targets
+
+  release-cpp-quality:
+    name: Release gate / preview helper C++
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v7
+      - uses: microsoft/setup-msbuild@v3
+      - name: Enforce style only on new public helper code
+        shell: pwsh
+        run: scripts/ci/Test-NewCppStyle.ps1
+      - name: Configure x86 helper
+        run: cmake -S preview-helper -B build/preview-helper -A Win32 -DBUILD_TESTING=ON
+      - name: Build with warnings as errors
+        run: cmake --build build/preview-helper --config Release --parallel
+      - name: Run protocol tests
+        run: ctest --test-dir build/preview-helper -C Release --output-on-failure
+
+  release-injector-quality:
+    name: Release gate / injector ${{ matrix.architecture }}
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x86
+            cmake_architecture: Win32
+            build_directory: build/service-injector-x86
+            analyze_directory: build/service-injector-x86-analyze
+            injector_target: mactype-injector32
+          - architecture: x64
+            cmake_architecture: x64
+            build_directory: build/service-injector-x64
+            analyze_directory: build/service-injector-x64-analyze
+            injector_target: mactype-injector64
+    steps:
+      - uses: actions/checkout@v7
+      - uses: microsoft/setup-msbuild@v3
+      - name: Configure ${{ matrix.architecture }} service injector
+        run: cmake -S service-injector -B ${{ matrix.build_directory }} -A ${{ matrix.cmake_architecture }} -DBUILD_TESTING=ON
+      - name: Build ${{ matrix.architecture }} service injector
+        run: cmake --build ${{ matrix.build_directory }} --config Release --parallel
+      - name: Test ${{ matrix.architecture }} service injector
+        run: ctest --test-dir ${{ matrix.build_directory }} -C Release --output-on-failure
+      - name: Configure ${{ matrix.architecture }} MSVC analysis
+        run: cmake -S service-injector -B ${{ matrix.analyze_directory }} -A ${{ matrix.cmake_architecture }} -DBUILD_TESTING=ON -DCMAKE_CXX_FLAGS=/analyze
+      - name: Analyze ${{ matrix.architecture }} service injector
+        run: cmake --build ${{ matrix.analyze_directory }} --config Release --parallel --target ${{ matrix.injector_target }} injector-inherited-handle-launcher injector-contract-tests
+
+  release-static-quality:
+    name: Release gate / static distribution policy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Enforce Node.js 24 GitHub Actions
+        shell: pwsh
+        run: scripts/ci/Test-GitHubActionsRuntimePolicy.ps1
+      - name: Test the closed GitHub Actions runtime policy
+        shell: pwsh
+        run: scripts/ci/Test-GitHubActionsRuntimePolicyContract.ps1
+      - name: Enforce open service static contracts
+        shell: pwsh
+        run: scripts/ci/Test-OpenServiceContract.ps1
+      - name: Verify independent distribution provenance and translations
+        shell: pwsh
+        run: scripts/ci/Test-DistributionPolicy.ps1
+      - name: Verify release publication dependency closure
+        shell: pwsh
+        run: scripts/ci/Test-ReleaseGatePolicy.ps1
+      - name: Verify immutable service payload versioning
+        shell: pwsh
+        run: scripts/ci/Test-ServicePayloadVersionPolicy.ps1
+      - name: Verify installer failed-upgrade rollback coverage
+        shell: pwsh
+        run: scripts/ci/Test-InstallerRollbackPolicy.ps1
+
+  release-gallery:
+    name: Release gate / frontend window gallery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: control-center/pnpm-lock.yaml
+      - name: Install frontend dependencies
+        working-directory: control-center
+        run: pnpm install --frozen-lockfile
+      - name: Install gallery browser
+        working-directory: control-center
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Build frontend
+        working-directory: control-center
+        run: pnpm build
+      - name: Render every window and fail on crash
+        working-directory: control-center
+        run: pnpm test:gallery
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-frontend-window-gallery
+          path: artifacts/frontend-gallery
+          if-no-files-found: error
+
+  release-quality-gate:
+    name: Release gate / required checks complete
+    needs: [release-frontend-quality, release-tauri-quality, release-cpp-quality, release-injector-quality, release-static-quality, release-gallery]
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "All release quality contracts are green."
+
   release-main-snapshot:
     name: Publish installable main snapshot
-    needs: windows-build
+    needs: [windows-build, open-service-windows, release-quality-gate]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     permissions:
@@ -128,7 +353,7 @@ jobs:
           body: |
             Automated installable snapshot from the fully validated `main` build at `${{ github.sha }}`.
 
-            The Windows installer passed core build, Tauri window smoke tests, tray startup, clean install, upgrade, launch, and uninstall checks before publication. Verify the download with `SHA256SUMS.txt`.
+            The Windows installer passed open-core and standalone-service builds, protected payload checks, x86/x64 marker injection, Tauri window smoke tests, tray startup, clean install, upgrade, launch, and uninstall checks before publication. Verify the download with `SHA256SUMS.txt`.
           prerelease: true
           generate_release_notes: false
           fail_on_unmatched_files: true

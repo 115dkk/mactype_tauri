@@ -1,92 +1,37 @@
-import { settingsSchema } from "../../generated/settings";
 import {
   fallbackStatus,
   type AppliedProfile,
   type ExecutionStatus,
   type InstallationStatus,
   type LegacyProfileCandidate,
-  type LegacyServiceStatus,
   type LaunchContext,
   type ProfileEntry,
+  type PreviewResult,
   type ProfileSnapshot,
   type SessionTarget,
 } from "../model";
 import type { ControlCenterRuntimeAdapter } from "../runtimeAdapter";
+import {
+  galleryExecutionStatus,
+  transitionGalleryExecutionStatus,
+} from "./browserGalleryExecution";
+import { createBrowserGalleryProfileState } from "./browserGalleryProfiles";
 
-const fallbackProfile: ProfileSnapshot = {
-  path: "C:\\Program Files\\MacType\\ini\\Default.ini",
-  encoding: "utf-8",
-  bom: "none",
-  lineEnding: "cr-lf",
-  originalHash: "browser-gallery",
-  values: Object.fromEntries(settingsSchema.map((setting) => [setting.id, setting.default])),
-  dirtyKeys: [],
-  canUndo: false,
-  canRedo: false,
-  individuals: [{ fontFace: "Segoe UI", values: [1, 2, null, null, null, 1] }],
-  lists: { excludeFonts: ["Raster Fonts"], includeFonts: [], excludeModules: ["fontview.exe"], includeModules: [], unloadDlls: [], excludeSubstitutionModules: [] },
-  advanced: { shadow: null, lcdFilterWeight: null, pixelLayout: null, displayAffinity: [], fontSubstitutes: [], infinalityGammaCorrection: [0, 100], infinalityFilterParams: [11, 22, 38, 22, 11] },
-};
-const recentGalleryProfile = { ...fallbackProfile, path: "C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\profiles\\Recent.ini" };
+const galleryProfiles = createBrowserGalleryProfileState();
+let galleryPreviewRequestId = 0;
 
-const cloneProfile = (profile: ProfileSnapshot): ProfileSnapshot => structuredClone(profile);
-let galleryProfile = cloneProfile(fallbackProfile);
-let savedGalleryProfile = cloneProfile(fallbackProfile);
-const galleryUndo: ProfileSnapshot[] = [];
-const galleryRedo: ProfileSnapshot[] = [];
-
-function openGalleryProfile(profile: ProfileSnapshot): ProfileSnapshot {
-  galleryProfile = { ...cloneProfile(profile), canUndo: false, canRedo: false };
-  savedGalleryProfile = cloneProfile(galleryProfile);
-  galleryUndo.length = 0;
-  galleryRedo.length = 0;
-  return cloneProfile(galleryProfile);
+function incrementGalleryCounter(key: string): void {
+  const current = Number(window.sessionStorage.getItem(key) ?? "0");
+  window.sessionStorage.setItem(key, String(current + 1));
 }
-
-function editGalleryProfile(update: (profile: ProfileSnapshot) => ProfileSnapshot, dirtyKey: string): ProfileSnapshot {
-  galleryUndo.push(cloneProfile(galleryProfile));
-  galleryRedo.length = 0;
-  const next = update(cloneProfile(galleryProfile));
-  galleryProfile = {
-    ...next,
-    dirtyKeys: [...new Set([...next.dirtyKeys, dirtyKey])],
-    canUndo: true,
-    canRedo: false,
-  };
-  return cloneProfile(galleryProfile);
-}
-
-function moveGalleryHistory(from: ProfileSnapshot[], to: ProfileSnapshot[]): ProfileSnapshot {
-  const destination = from.pop();
-  if (!destination) return cloneProfile(galleryProfile);
-  to.push(cloneProfile(galleryProfile));
-  galleryProfile = {
-    ...cloneProfile(destination),
-    canUndo: galleryUndo.length > 0,
-    canRedo: galleryRedo.length > 0,
-  };
-  return cloneProfile(galleryProfile);
-}
-
-const galleryService: LegacyServiceStatus = {
-  presence: "owned",
-  state: "running",
-  binaryPath: "C:\\Program Files\\MacType\\MacTray.exe -service",
-  win32Error: null,
-  trustedBinaryAvailable: true,
-  registryConflict: false,
-  canInstall: false,
-  canRemove: true,
-  canStart: false,
-  canStop: true,
-};
 
 export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
   loadLaunchContext(): Promise<LaunchContext> {
-    const requested = new URLSearchParams(window.location.search).get("view");
+    const query = new URLSearchParams(window.location.search);
+    const requested = query.get("view");
     return Promise.resolve<LaunchContext>({
       view: requested === "files" || requested === "profiles" || requested === "execution" || requested === "diagnostics" ? requested : "overview",
-      ciSmoke: false,
+      ciSmoke: query.has("ci-smoke"),
       trayStart: false,
     });
   },
@@ -96,27 +41,22 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
   },
 
   loadExecutionStatus(): Promise<ExecutionStatus> {
-    const activeProfile = new URLSearchParams(window.location.search).has("legacy-applied")
-      ? "C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\profiles\\Pretendard forever.ini"
-      : fallbackProfile.path;
-    return Promise.resolve<ExecutionStatus>({ trayAvailable: true, autoStart: false, manualLauncherAvailable: true, legacyService: galleryService, registryModeDetected: false, systemModesSupported: true, systemInjectionActive: true, systemModeNote: "검증된 레거시 서비스로 현재 프로필을 시스템 범위에 적용합니다.", injectionReady: true, activeProfile, sessionTargets: [] });
+    return Promise.resolve(galleryExecutionStatus(new URLSearchParams(window.location.search)));
   },
 
-  manageLegacyService(action): Promise<LegacyServiceStatus> {
-    const state = action === "stop" || action === "remove" ? "stopped" : "running";
-    return Promise.resolve({
-      ...galleryService,
-      presence: action === "remove" ? "absent" : "owned",
-      state,
-      canInstall: action === "remove",
-      canRemove: action !== "remove",
-      canStart: action === "stop",
-      canStop: action === "start" || action === "install",
-    });
+  manageSystemService(action): Promise<ExecutionStatus> {
+    const query = new URLSearchParams(window.location.search);
+    const current = galleryExecutionStatus(query);
+    const next = transitionGalleryExecutionStatus(current, action);
+    const delay = Number(query.get("service-delay"));
+    if (Number.isFinite(delay) && delay > 0) {
+      return new Promise((resolve) => window.setTimeout(() => resolve(next), delay));
+    }
+    return Promise.resolve(next);
   },
 
-  activateSystemInjection(): Promise<ExecutionStatus> {
-    return this.loadExecutionStatus();
+  revealSystemService(): Promise<void> {
+    return Promise.resolve();
   },
 
   pickExecutable(): Promise<string | null> {
@@ -148,7 +88,7 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
   },
 
   applyOpenProfile(): Promise<AppliedProfile> {
-    return Promise.resolve<AppliedProfile>({ sourceProfile: galleryProfile.path, runtimeRoot: "C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\runtime\\generations\\gallery" });
+    return Promise.resolve<AppliedProfile>({ sourceProfile: galleryProfiles.current().path, runtimeRoot: "C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\runtime\\generations\\gallery" });
   },
 
   registerSessionTarget(target: string, arguments_: ReadonlyArray<string>): Promise<ReadonlyArray<SessionTarget>> {
@@ -192,12 +132,12 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
   },
 
   openDefaultProfile(): Promise<ProfileSnapshot | null> {
-    return Promise.resolve(openGalleryProfile(fallbackProfile));
+    return Promise.resolve(galleryProfiles.openDefault());
   },
 
   currentProfile(): Promise<ProfileSnapshot | null> {
     if (new URLSearchParams(window.location.search).has("fresh")) return Promise.resolve(null);
-    return Promise.resolve(cloneProfile(galleryProfile));
+    return Promise.resolve(galleryProfiles.current());
   },
 
   discoverLegacyProfile(): Promise<LegacyProfileCandidate | null> {
@@ -205,50 +145,50 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
   },
 
   importProfile(path: string): Promise<ProfileSnapshot> {
-    return Promise.resolve(openGalleryProfile({ ...fallbackProfile, path: `C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\profiles\\${path.split(/[\\/]/).pop() ?? "Imported.ini"}` }));
+    return Promise.resolve(galleryProfiles.import(path));
   },
 
   listProfiles(): Promise<ReadonlyArray<ProfileEntry>> {
-    return Promise.resolve([
-      { name: "Default", path: fallbackProfile.path },
-      { name: "Recent", path: recentGalleryProfile.path },
-    ]);
+    return Promise.resolve(galleryProfiles.list());
   },
 
   openProfile(path: string): Promise<ProfileSnapshot> {
-    return Promise.resolve(openGalleryProfile({ ...fallbackProfile, path }));
+    return Promise.resolve(galleryProfiles.open(path));
   },
 
   duplicateProfile(name: string): Promise<ProfileSnapshot> {
-    return Promise.resolve(openGalleryProfile({ ...galleryProfile, path: `C:\\Program Files\\MacType\\ini\\${name}.ini` }));
+    return Promise.resolve(galleryProfiles.duplicate(name));
   },
 
   updateProfileSetting(settingId, value): Promise<ProfileSnapshot | null> {
-    return Promise.resolve(editGalleryProfile((profile) => ({ ...profile, values: { ...profile.values, [settingId]: value } }), settingId));
+    if (new URLSearchParams(window.location.search).get("profile-fail-setting") === settingId) {
+      return Promise.reject(new Error("Gallery profile mutation failed."));
+    }
+    return Promise.resolve(galleryProfiles.updateSetting(settingId, value));
   },
 
   updateProfileIndividuals(entries): Promise<ProfileSnapshot | null> {
-    return Promise.resolve(editGalleryProfile((profile) => ({ ...profile, individuals: structuredClone(entries) }), "section:Individual"));
+    return Promise.resolve(galleryProfiles.updateIndividuals(entries));
   },
 
   updateProfileList(kind, entries): Promise<ProfileSnapshot | null> {
-    return Promise.resolve(editGalleryProfile((profile) => ({ ...profile, lists: { ...profile.lists, [kind]: [...entries] } }), `section:${kind}`));
+    return Promise.resolve(galleryProfiles.updateList(kind, entries));
   },
 
   updateProfileAdvanced(advanced): Promise<ProfileSnapshot | null> {
-    return Promise.resolve(editGalleryProfile((profile) => ({ ...profile, advanced: structuredClone(advanced) }), "advanced"));
+    return Promise.resolve(galleryProfiles.updateAdvanced(advanced));
   },
 
   undoProfile(): Promise<ProfileSnapshot> {
-    return Promise.resolve(moveGalleryHistory(galleryUndo, galleryRedo));
+    return Promise.resolve(galleryProfiles.undo());
   },
 
   redoProfile(): Promise<ProfileSnapshot> {
-    return Promise.resolve(moveGalleryHistory(galleryRedo, galleryUndo));
+    return Promise.resolve(galleryProfiles.redo());
   },
 
   discardProfileChanges(): Promise<ProfileSnapshot> {
-    return Promise.resolve(openGalleryProfile(savedGalleryProfile));
+    return Promise.resolve(galleryProfiles.discard());
   },
 
   exportProfile(path: string): Promise<string> {
@@ -256,19 +196,27 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
   },
 
   revealProfileFile(): Promise<string> {
-    return Promise.resolve(galleryProfile.path);
+    return Promise.resolve(galleryProfiles.current().path);
   },
 
   saveProfile(): Promise<ProfileSnapshot | null> {
-    galleryProfile = { ...galleryProfile, dirtyKeys: [], canUndo: false, canRedo: false };
-    savedGalleryProfile = cloneProfile(galleryProfile);
-    galleryUndo.length = 0;
-    galleryRedo.length = 0;
-    return Promise.resolve(cloneProfile(galleryProfile));
+    return Promise.resolve(galleryProfiles.save());
   },
 
-  renderProfilePreview(): Promise<null> {
-    return Promise.resolve(null);
+  renderProfilePreview(request): Promise<PreviewResult | null> {
+    const delay = Number(new URLSearchParams(window.location.search).get("preview-delay"));
+    if (!Number.isFinite(delay) || delay <= 0) return Promise.resolve(null);
+    incrementGalleryCounter("gallery-preview-started");
+    const result: PreviewResult = {
+      requestId: ++galleryPreviewRequestId,
+      imagePath: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==",
+      width: request.sample.widthPx,
+      height: request.sample.heightPx,
+      dpi: request.sample.dpi,
+      elapsedMs: delay,
+      coreVersion: 0,
+    };
+    return new Promise((resolve) => window.setTimeout(() => resolve(result), delay));
   },
 
   setNativePreview(visible: boolean): Promise<boolean> {
@@ -283,10 +231,16 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
     return Promise.resolve([]);
   },
 
-  forcePreviewCrashForCi: () => Promise.resolve(),
+  forcePreviewCrashForCi: () => {
+    incrementGalleryCounter("gallery-preview-crashes");
+    return Promise.resolve();
+  },
   verifyProfileWorkflowForCi: () => Promise.resolve(),
   verifyInjectionWorkflowForCi: () => Promise.resolve(),
   verifyTrayModeForCi: () => Promise.resolve(),
-  reportFrontendReady: () => Promise.resolve(),
+  reportFrontendReady: (view) => {
+    if (view === "profiles") incrementGalleryCounter("gallery-profile-ready");
+    return Promise.resolve();
+  },
   reportFrontendFailure: () => Promise.resolve(),
 };

@@ -22,8 +22,10 @@ New-Item -ItemType Directory -Force -Path $markerRoot | Out-Null
 
 $resolvedInstallerScript = (Resolve-Path -LiteralPath $InstallerScript).Path
 $installerSource = Get-Content -LiteralPath $resolvedInstallerScript -Raw
-if ($installerSource -notmatch '(?m)^\s*PrivilegesRequired=lowest\s*$') {
-    throw 'The installer must remain per-user with PrivilegesRequired=lowest.'
+if ($installerSource -notmatch '(?m)^\s*PrivilegesRequired=admin\s*$' -or
+    $installerSource -notmatch '(?m)^\s*DefaultDirName=\{autopf\}\\MacType Control Center\s*$' -or
+    $installerSource -notmatch '(?m)^\s*UsePreviousAppDir=no\s*$') {
+    throw 'The installer must use the fixed protected Program Files/admin contract.'
 }
 
 $manifestTool = Get-Command mt.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source

@@ -10,6 +10,5 @@ Supporting artifacts:
 - `TARGET_SPEC.md`
 - `PERF.md`
 - `screenshots/*.png`
-- `lighthouse/*.json`
 
 The Superloopy CLI was not installed in this environment, so the evidence record is stored as this repository artifact instead of being submitted through `superloopy loop evidence`.

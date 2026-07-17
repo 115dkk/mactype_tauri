@@ -8,7 +8,7 @@ import type {
   IndividualSetting,
   InstallationStatus,
   LegacyProfileCandidate,
-  LegacyServiceStatus,
+  SystemServiceAction,
   LaunchContext,
   PreviewRequest,
   PreviewResult,
@@ -27,8 +27,8 @@ export const tauriRuntimeAdapter: ControlCenterRuntimeAdapter = {
   },
 
   loadExecutionStatus: () => invoke<ExecutionStatus>("execution_status"),
-  manageLegacyService: (action) => invoke<LegacyServiceStatus>("manage_legacy_service", { action }),
-  activateSystemInjection: () => invoke<ExecutionStatus>("activate_system_injection"),
+  manageSystemService: (action: SystemServiceAction) => invoke<ExecutionStatus>("manage_system_service", { action }),
+  revealSystemService: () => invoke<void>("reveal_system_service"),
 
   async pickExecutable(filterName: string): Promise<string | null> {
     const selected = await open({

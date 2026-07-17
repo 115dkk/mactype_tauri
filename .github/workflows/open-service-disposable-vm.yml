@@ -1,0 +1,80 @@
+name: Open service disposable VM verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: Select one documented disposable-VM phase
+        required: true
+        type: choice
+        options:
+          - lifecycle
+          - prepare-reboot
+          - verify-after-reboot
+          - verify-appinit-conflict
+          - verify-migration
+          - verify-multi-session
+          - cleanup
+      confirmation:
+        description: Type I_UNDERSTAND_DISPOSABLE_VM
+        required: true
+        type: string
+      session_evidence_path:
+        description: Optional absolute path to the two-session marker JSON on the runner
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: open-service-disposable-vm
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: [self-hosted, Windows, X64, mactype-disposable-vm]
+    timeout-minutes: 120
+    env:
+      MACTYPE_DISPOSABLE_VM_CONFIRM: ${{ inputs.confirmation }}
+      MACTYPE_DISPOSABLE_VM_SCENARIO: ${{ inputs.scenario }}
+      MACTYPE_DISPOSABLE_VM_SESSION_EVIDENCE: ${{ inputs.session_evidence_path }}
+    steps:
+      - name: Reject invalid confirmation
+        shell: pwsh
+        run: |
+          if ($env:MACTYPE_DISPOSABLE_VM_CONFIRM -cne 'I_UNDERSTAND_DISPOSABLE_VM') {
+            throw 'Disposable VM confirmation must exactly match I_UNDERSTAND_DISPOSABLE_VM.'
+          }
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: microsoft/setup-msbuild@v3
+      - name: Build fixed open core and service injectors
+        shell: pwsh
+        run: .github/scripts/Build-OpenCore.ps1
+      - name: Build isolated service and setup adapters
+        run: cargo build --manifest-path service-runtime/Cargo.toml --release -p mactype-service-host -p mactype-service-setup --features mactype-service-host/ci-test-adapter,mactype-service-setup/ci-test-adapter
+      - name: Build x86 marker
+        shell: pwsh
+        run: tools/service-probe/tests/Test-ProbeContract.ps1 -Architecture Win32 -BuildRoot build/service-probe
+      - name: Build x64 marker
+        shell: pwsh
+        run: tools/service-probe/tests/Test-ProbeContract.ps1 -Architecture x64 -BuildRoot build/service-probe
+      - name: Run selected disposable-VM phase
+        shell: pwsh
+        run: |
+          scripts/ci/Test-OpenServiceDisposableVm.ps1 `
+            -Scenario $env:MACTYPE_DISPOSABLE_VM_SCENARIO `
+            -SetupExecutable service-runtime/target/release/mactype-service-setup.exe `
+            -ServiceExecutable service-runtime/target/release/mactype-service.exe `
+            -OpenCoreRoot artifacts/open-core `
+            -Marker32 build/service-probe/Win32/Release/probe-console32.exe `
+            -Marker64 build/service-probe/x64/Release/probe-console64.exe `
+            -SessionEvidencePath $env:MACTYPE_DISPOSABLE_VM_SESSION_EVIDENCE `
+            -EvidenceDirectory "$env:RUNNER_TEMP/open-service-disposable-evidence"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: open-service-disposable-vm-${{ inputs.scenario }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/open-service-disposable-evidence
+          if-no-files-found: warn

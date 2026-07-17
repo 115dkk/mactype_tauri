@@ -50,6 +50,12 @@ jobs:
       - name: Verify target-scoped Rust advisory exceptions
         shell: pwsh
         run: '& ..\..\scripts\ci\Test-RustAdvisoryScope.ps1'
+      - name: Test bounded open-service CI process and health readers
+        shell: pwsh
+        run: '& ..\..\scripts\ci\Test-OpenServiceTestSupport.ps1'
+      - name: Test open-service responsibility-scoped policy modules
+        shell: pwsh
+        run: '& ..\..\scripts\ci\Test-OpenServicePolicyModules.ps1'
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets --all-features -- -D warnings
       - run: cargo test --all-targets
@@ -69,10 +75,49 @@ jobs:
       - name: Run protocol tests
         run: ctest --test-dir build/preview-helper -C Release --output-on-failure
 
-  legacy-core-policy:
+  service-injector:
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x86
+            cmake_architecture: Win32
+            build_directory: build/service-injector-x86
+            analyze_directory: build/service-injector-x86-analyze
+            injector_target: mactype-injector32
+          - architecture: x64
+            cmake_architecture: x64
+            build_directory: build/service-injector-x64
+            analyze_directory: build/service-injector-x64-analyze
+            injector_target: mactype-injector64
+    steps:
+      - uses: actions/checkout@v7
+      - uses: microsoft/setup-msbuild@v3
+      - name: Configure ${{ matrix.architecture }} service injector
+        run: cmake -S service-injector -B ${{ matrix.build_directory }} -A ${{ matrix.cmake_architecture }} -DBUILD_TESTING=ON
+      - name: Build ${{ matrix.architecture }} service injector in Release
+        run: cmake --build ${{ matrix.build_directory }} --config Release --parallel
+      - name: Test ${{ matrix.architecture }} service injector
+        run: ctest --test-dir ${{ matrix.build_directory }} -C Release --output-on-failure
+      - name: Configure ${{ matrix.architecture }} MSVC analysis
+        run: cmake -S service-injector -B ${{ matrix.analyze_directory }} -A ${{ matrix.cmake_architecture }} -DBUILD_TESTING=ON -DCMAKE_CXX_FLAGS=/analyze
+      - name: Analyze ${{ matrix.architecture }} service injector
+        run: cmake --build ${{ matrix.analyze_directory }} --config Release --parallel --target ${{ matrix.injector_target }} injector-inherited-handle-launcher injector-contract-tests
+
+  open-core-policy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Enforce Node.js 24 GitHub Actions
+        shell: pwsh
+        run: scripts/ci/Test-GitHubActionsRuntimePolicy.ps1
+      - name: Test the closed GitHub Actions runtime policy
+        shell: pwsh
+        run: scripts/ci/Test-GitHubActionsRuntimePolicyContract.ps1
+      - name: Enforce open service static contracts
+        shell: pwsh
+        run: scripts/ci/Test-OpenServiceContract.ps1
       - name: Verify lint exception boundary
         shell: bash
         run: |
@@ -81,3 +126,12 @@ jobs:
       - name: Verify independent distribution provenance and translations
         shell: pwsh
         run: scripts/ci/Test-DistributionPolicy.ps1
+      - name: Verify release publication waits for every required quality gate
+        shell: pwsh
+        run: scripts/ci/Test-ReleaseGatePolicy.ps1
+      - name: Verify service payload generations are unique and immutable
+        shell: pwsh
+        run: scripts/ci/Test-ServicePayloadVersionPolicy.ps1
+      - name: Verify installer failed-upgrade rollback coverage
+        shell: pwsh
+        run: scripts/ci/Test-InstallerRollbackPolicy.ps1

@@ -6,7 +6,7 @@ import type {
   IndividualSetting,
   InstallationStatus,
   LegacyProfileCandidate,
-  LegacyServiceStatus,
+  SystemServiceAction,
   LaunchContext,
   PreviewRequest,
   PreviewResult,
@@ -22,8 +22,8 @@ export interface ControlCenterRuntimeAdapter {
   loadLaunchContext(): Promise<LaunchContext>;
   setApplicationLocale(locale: Locale): Promise<void>;
   loadExecutionStatus(): Promise<ExecutionStatus>;
-  manageLegacyService(action: "install" | "remove" | "start" | "stop"): Promise<LegacyServiceStatus>;
-  activateSystemInjection(): Promise<ExecutionStatus>;
+  manageSystemService(action: SystemServiceAction): Promise<ExecutionStatus>;
+  revealSystemService(): Promise<void>;
   pickExecutable(filterName: string): Promise<string | null>;
   pickIniProfile(filterName: string): Promise<string | null>;
   pickIniExportPath(filterName: string, defaultName: string): Promise<string | null>;

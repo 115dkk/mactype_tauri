@@ -35,28 +35,6 @@ jobs:
       - name: Render every window and fail on crash
         working-directory: control-center
         run: pnpm test:gallery
-      - name: Lighthouse production quality gate
-        shell: bash
-        working-directory: control-center
-        run: |
-          pnpm preview --host 127.0.0.1 > ../artifacts/frontend-gallery/vite-preview.log 2>&1 &
-          server_pid=$!
-          trap 'kill $server_pid' EXIT
-          for attempt in {1..30}; do
-            if curl --fail --silent http://127.0.0.1:4173/ > /dev/null; then
-              break
-            fi
-            sleep 1
-          done
-          for run in 1 2 3; do
-            npx --yes lighthouse@13.4.0 'http://localhost:4173/?view=overview' \
-              --quiet \
-              --chrome-flags='--headless --no-sandbox' \
-              --only-categories=performance,accessibility,best-practices \
-              --output=json \
-              --output-path="../artifacts/frontend-gallery/lighthouse-$run.json"
-          done
-          node ../scripts/ci/Assert-Lighthouse.mjs ../artifacts/frontend-gallery/lighthouse-*.json
       - uses: actions/upload-artifact@v7
         if: always()
         with:

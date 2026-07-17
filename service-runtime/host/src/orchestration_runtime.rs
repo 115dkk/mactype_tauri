@@ -1,0 +1,133 @@
+use std::time::Duration;
+
+use mactype_service_contract::{
+    ComponentReadiness, HealthState, ReadinessReport, StructuredServiceError,
+};
+
+use crate::{
+    subscribe_process_creation, InitializedRuntime, InjectionBroker, ProcessArchitecture,
+    ProcessEventSource, ProcessInspector, RuntimeDriver, RuntimeHealthReporter, StopSignal,
+};
+
+pub fn initialize_process_orchestration(
+    active_profile_digest: Option<String>,
+    service_pid: u32,
+    generation_id: impl Into<String>,
+    mut source: Box<dyn ProcessEventSource>,
+    inspector: Box<dyn ProcessInspector>,
+    broker: Box<dyn InjectionBroker>,
+) -> Result<InitializedRuntime, StructuredServiceError> {
+    let profile_digest = active_profile_digest
+        .clone()
+        .ok_or_else(|| StructuredServiceError {
+            code: "active-profile-unavailable".to_owned(),
+            message: "process orchestration requires an active protected profile".to_owned(),
+            win32_error: None,
+        })?;
+    broker.verify_ready(ProcessArchitecture::X86)?;
+    broker.verify_ready(ProcessArchitecture::X64)?;
+    subscribe_process_creation(source.as_mut())?;
+
+    Ok(InitializedRuntime::driven(
+        active_profile_digest,
+        ReadinessReport::ready(),
+        Box::new(ProcessOrchestrationDriver {
+            service_pid,
+            generation_id: generation_id.into(),
+            profile_digest,
+            source,
+            inspector,
+            broker,
+        }),
+    ))
+}
+
+struct ProcessOrchestrationDriver {
+    service_pid: u32,
+    generation_id: String,
+    profile_digest: String,
+    source: Box<dyn ProcessEventSource>,
+    inspector: Box<dyn ProcessInspector>,
+    broker: Box<dyn InjectionBroker>,
+}
+
+impl RuntimeDriver for ProcessOrchestrationDriver {
+    fn run(
+        &mut self,
+        stop: &dyn StopSignal,
+        health: &dyn RuntimeHealthReporter,
+    ) -> Result<(), StructuredServiceError> {
+        let scheduler = StopRetryScheduler(stop);
+        let mut orchestrator = crate::InjectionOrchestrator::with_runtime_context(
+            self.service_pid,
+            &self.generation_id,
+            &self.profile_digest,
+            self.inspector.as_ref(),
+            self.broker.as_ref(),
+            crate::RetryPolicy::default(),
+            &scheduler,
+        );
+        loop {
+            if stop.wait_timeout(Duration::ZERO)? {
+                return Ok(());
+            }
+            while let Some(change) = stop.take_session_change() {
+                orchestrator.handle_session_change(change);
+            }
+            let pid = match self.source.next_pid(Duration::from_millis(250)) {
+                Ok(Some(pid)) => pid,
+                Ok(None) => continue,
+                Err(error) => {
+                    health.report(
+                        HealthState::Failed,
+                        ReadinessReport {
+                            observer: ComponentReadiness::Failed,
+                            ..ReadinessReport::ready()
+                        },
+                        orchestrator.injection_telemetry(),
+                        Some(error.clone()),
+                    )?;
+                    return Err(error);
+                }
+            };
+            match orchestrator.handle_pid(pid) {
+                Ok(crate::ProcessOutcome::Injected) => {
+                    health.report(
+                        HealthState::Ready,
+                        ReadinessReport::ready(),
+                        orchestrator.injection_telemetry(),
+                        None,
+                    )?;
+                }
+                Ok(crate::ProcessOutcome::Rejected | crate::ProcessOutcome::RetryExhausted) => {
+                    if let Some(error) = orchestrator.generation_health_error() {
+                        health.report(
+                            HealthState::Degraded,
+                            ReadinessReport::ready(),
+                            orchestrator.injection_telemetry(),
+                            Some(error),
+                        )?;
+                    }
+                }
+                Ok(crate::ProcessOutcome::Cancelled) => return Ok(()),
+                Ok(_) => {}
+                Err(error) => {
+                    health.report(
+                        HealthState::Degraded,
+                        ReadinessReport::ready(),
+                        orchestrator.injection_telemetry(),
+                        Some(error),
+                    )?;
+                }
+            }
+        }
+    }
+}
+
+struct StopRetryScheduler<'a>(&'a dyn StopSignal);
+
+impl crate::RetryScheduler for StopRetryScheduler<'_> {
+    fn wait(&self, delay: Duration) -> bool {
+        matches!(self.0.wait_timeout(delay), Ok(false))
+    }
+}

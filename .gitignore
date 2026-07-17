@@ -2,6 +2,8 @@
 .vscode/
 deps/
 lib/
+!scripts/ci/lib/
+!scripts/ci/lib/**
 Debug*/
 Rel*/
 x64/
@@ -10,6 +12,8 @@ x64/
 control-center/node_modules/
 control-center/dist/
 control-center/src-tauri/target/
+service-runtime/target/
+/target/
 build/
 artifacts/
 /detours.lib

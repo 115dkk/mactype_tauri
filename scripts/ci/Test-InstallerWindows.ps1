@@ -37,6 +37,43 @@ $cleanHostedRunnerConfirmed = $false
 $openFixtureCreated = $false
 $legacyFixtureCreated = $false
 $installerTouchedMachine = $false
+$installerDiagnosticRoot = Join-Path $env:RUNNER_TEMP `
+    ("mactype-installer-logs-" + [Guid]::NewGuid().ToString('N'))
+$installerDiagnosticLogs = [Collections.Generic.List[string]]::new()
+$installerDiagnosticSequence = 0
+
+function New-InstallerDiagnosticLog {
+    param([Parameter(Mandatory)] [string] $Label)
+
+    $script:installerDiagnosticSequence += 1
+    $safeLabel = [regex]::Replace($Label.ToLowerInvariant(), '[^a-z0-9]+', '-').Trim('-')
+    $path = Join-Path $script:installerDiagnosticRoot `
+        ('{0:D2}-{1}.log' -f $script:installerDiagnosticSequence, $safeLabel)
+    [void] $script:installerDiagnosticLogs.Add($path)
+    return $path
+}
+
+function Invoke-InstallerExpectedSuccess {
+    param(
+        [Parameter(Mandatory)] [string] $File,
+        [Parameter(Mandatory)] [string[]] $Arguments,
+        [Parameter(Mandatory)] [string] $Label
+    )
+
+    Invoke-ExpectedSuccess -File $File -Arguments $Arguments -Label $Label `
+        -DiagnosticLogPath (New-InstallerDiagnosticLog -Label $Label)
+}
+
+function Invoke-InstallerExpectedFailure {
+    param(
+        [Parameter(Mandatory)] [string] $File,
+        [Parameter(Mandatory)] [string[]] $Arguments,
+        [Parameter(Mandatory)] [string] $Label
+    )
+
+    Invoke-ExpectedFailure -File $File -Arguments $Arguments -Label $Label `
+        -DiagnosticLogPath (New-InstallerDiagnosticLog -Label $Label)
+}
 
 try {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -51,17 +88,18 @@ try {
         if (Get-FixedService -Name $name) { throw "Hosted runner already contains protected test service name: $name" }
     }
     $cleanHostedRunnerConfirmed = $true
+    New-Item -ItemType Directory -Path $installerDiagnosticRoot -Force | Out-Null
 
     Initialize-UserMarkers -UserMarkerRoot $userMarkerRoot -UserMarkers $userMarkers
     Assert-UserMarkers -UserMarkerRoot $userMarkerRoot -UserMarkers $userMarkers
 
-    Invoke-ExpectedFailure -File $resolvedBaselineInstaller -Arguments ($silentArguments + "/DIR=$invalidInstallRoot") -Label 'Arbitrary-directory install'
+    Invoke-InstallerExpectedFailure -File $resolvedBaselineInstaller -Arguments ($silentArguments + "/DIR=$invalidInstallRoot") -Label 'Arbitrary-directory install'
     if ((Test-Path -LiteralPath $invalidInstallRoot) -or (Test-Path -LiteralPath $applicationRoot) -or (Get-FixedService -Name $openServiceName)) {
         throw 'Rejected /DIR attempt mutated files or SCM.'
     }
 
     $installerTouchedMachine = $true
-    Invoke-ExpectedSuccess -File $resolvedBaselineInstaller -Arguments ($silentArguments + '/TASKS=desktopicon') -Label 'Protected baseline install'
+    Invoke-InstallerExpectedSuccess -File $resolvedBaselineInstaller -Arguments ($silentArguments + '/TASKS=desktopicon') -Label 'Protected baseline install'
     Assert-RequiredApplicationFiles -ApplicationRoot $applicationRoot
     $payload = Assert-ServicePayload -ApplicationRoot $applicationRoot
     $baseline = Assert-ReadyOpenService `
@@ -70,13 +108,19 @@ try {
         -ServiceRoot $serviceRoot `
         -ProfileRoot $profileRoot `
         -DistributionDefaultProfilePath $distributionDefaultProfilePath
-    $baselineApplicationSnapshot = Get-ApplicationUsabilitySnapshot -ApplicationRoot $applicationRoot
+    $obsoleteRuntimePath = Join-Path $applicationRoot 'service-runtime\obsolete-from-prior-version.bin'
+    [IO.File]::WriteAllText(
+        $obsoleteRuntimePath,
+        'obsolete app-side runtime payload',
+        [Text.UTF8Encoding]::new($false)
+    )
+    $baselineApplicationSnapshot = Get-TreeSnapshot -Path $applicationRoot
     $baselineServiceSnapshot = Get-ServiceSnapshot -Name $openServiceName
     $baselineRuntimeSnapshot = Get-TreeSnapshot -Path (Join-Path $serviceRoot ("bin\" + $baseline.RuntimeVersion))
     Assert-CommonDesktopShortcut -CommonDesktopShortcut $commonDesktopShortcut -ApplicationRoot $applicationRoot
     Assert-UserMarkers -UserMarkerRoot $userMarkerRoot -UserMarkers $userMarkers
 
-    Invoke-ExpectedFailure -File $resolvedFailingUpgradeInstaller -Arguments ($silentArguments + '/TASKS=desktopicon') -Label 'Deliberately failing protected upgrade'
+    Invoke-InstallerExpectedFailure -File $resolvedFailingUpgradeInstaller -Arguments ($silentArguments + '/TASKS=desktopicon') -Label 'Deliberately failing protected upgrade'
     Assert-BaselineRestoredAfterFailedUpgrade `
         -Baseline $baseline `
         -BaselineApplicationSnapshot $baselineApplicationSnapshot `
@@ -100,9 +144,12 @@ try {
     Assert-CommonDesktopShortcut -CommonDesktopShortcut $commonDesktopShortcut -ApplicationRoot $applicationRoot
     Assert-UserMarkers -UserMarkerRoot $userMarkerRoot -UserMarkers $userMarkers
 
-    Invoke-ExpectedSuccess -File $resolvedInstaller -Arguments ($silentArguments + '/TASKS=desktopicon') -Label 'Protected upgrade install'
+    Invoke-InstallerExpectedSuccess -File $resolvedInstaller -Arguments ($silentArguments + '/TASKS=desktopicon') -Label 'Protected upgrade install'
     Assert-RequiredApplicationFiles -ApplicationRoot $applicationRoot
     $payload = Assert-ServicePayload -ApplicationRoot $applicationRoot
+    if (Test-Path -LiteralPath $obsoleteRuntimePath) {
+        throw 'Successful upgrade retained an obsolete app-side service runtime file.'
+    }
     $upgrade = Assert-ReadyOpenService `
         -PayloadManifest $payload `
         -OpenServiceName $openServiceName `
@@ -127,7 +174,7 @@ try {
     $serviceBeforeFailedUninstall = Get-ServiceSnapshot -Name $openServiceName
     Move-Item -LiteralPath $broker -Destination $disabledBroker
     try {
-        Invoke-ExpectedFailure -File $uninstaller.FullName -Arguments $silentArguments -Label 'Uninstall with missing protected broker'
+        Invoke-InstallerExpectedFailure -File $uninstaller.FullName -Arguments $silentArguments -Label 'Uninstall with missing protected broker'
     }
     finally {
         if (Test-Path -LiteralPath $disabledBroker -PathType Leaf) {
@@ -140,7 +187,7 @@ try {
         throw 'Failed uninstall hid or removed an owned service/runtime orphan.'
     }
 
-    Invoke-ExpectedSuccess -File $uninstaller.FullName -Arguments $silentArguments -Label 'Owned uninstall'
+    Invoke-InstallerExpectedSuccess -File $uninstaller.FullName -Arguments $silentArguments -Label 'Owned uninstall'
     if (Get-FixedService -Name $openServiceName) { throw 'Owned uninstall left the open service registered.' }
     if (Test-Path -LiteralPath $applicationRoot) { throw 'Owned uninstall left Program Files application files behind.' }
     if (Test-Path -LiteralPath $commonDesktopShortcut) { throw 'Owned uninstall left the common desktop shortcut behind.' }
@@ -153,12 +200,12 @@ try {
     New-ForeignService -Name $openServiceName -DisplayName 'CI foreign fixed-name service'
     $openFixtureCreated = $true
     $foreignSnapshot = Get-ServiceSnapshot -Name $openServiceName
-    Invoke-ExpectedSuccess -File $resolvedInstaller -Arguments ($silentArguments + '/TASKS=!desktopicon') -Label 'Install with foreign fixed-name service'
+    Invoke-InstallerExpectedSuccess -File $resolvedInstaller -Arguments ($silentArguments + '/TASKS=!desktopicon') -Label 'Install with foreign fixed-name service'
     if ((Get-ServiceSnapshot -Name $openServiceName) -cne $foreignSnapshot -or (Test-Path -LiteralPath $serviceRoot)) {
         throw 'SkippedBlocked foreign-service install mutated the foreign service or runtime.'
     }
     $foreignUninstaller = Get-ChildItem -LiteralPath $applicationRoot -File -Filter 'unins*.exe' | Select-Object -First 1
-    Invoke-ExpectedSuccess -File $foreignUninstaller.FullName -Arguments $silentArguments -Label 'Uninstall beside foreign fixed-name service'
+    Invoke-InstallerExpectedSuccess -File $foreignUninstaller.FullName -Arguments $silentArguments -Label 'Uninstall beside foreign fixed-name service'
     if ((Get-ServiceSnapshot -Name $openServiceName) -cne $foreignSnapshot) {
         throw 'Uninstall changed or removed the foreign fixed-name service.'
     }
@@ -168,12 +215,12 @@ try {
     New-ForeignService -Name $legacyServiceName -DisplayName 'CI legacy MacTray service'
     $legacyFixtureCreated = $true
     $legacySnapshot = Get-ServiceSnapshot -Name $legacyServiceName
-    Invoke-ExpectedSuccess -File $resolvedInstaller -Arguments ($silentArguments + '/TASKS=!desktopicon') -Label 'Install with legacy service conflict'
+    Invoke-InstallerExpectedSuccess -File $resolvedInstaller -Arguments ($silentArguments + '/TASKS=!desktopicon') -Label 'Install with legacy service conflict'
     if ((Get-ServiceSnapshot -Name $legacyServiceName) -cne $legacySnapshot -or (Get-FixedService -Name $openServiceName) -or (Test-Path -LiteralPath $serviceRoot)) {
         throw 'SkippedBlocked legacy-service install mutated legacy state or installed the open service.'
     }
     $legacyUninstaller = Get-ChildItem -LiteralPath $applicationRoot -File -Filter 'unins*.exe' | Select-Object -First 1
-    Invoke-ExpectedSuccess -File $legacyUninstaller.FullName -Arguments $silentArguments -Label 'Uninstall beside legacy service'
+    Invoke-InstallerExpectedSuccess -File $legacyUninstaller.FullName -Arguments $silentArguments -Label 'Uninstall beside legacy service'
     if ((Get-ServiceSnapshot -Name $legacyServiceName) -cne $legacySnapshot) {
         throw 'Uninstall changed or removed the legacy service.'
     }
@@ -181,6 +228,18 @@ try {
     $legacyFixtureCreated = $false
     Assert-UserMarkers -UserMarkerRoot $userMarkerRoot -UserMarkers $userMarkers
     Write-Host 'PASS: fixed Program Files install, strict Ready, profile-preserving upgrade, visible failure, exact-owned uninstall, and blocked conflict preservation'
+}
+catch {
+    $diagnostics = @(
+        foreach ($path in $installerDiagnosticLogs) {
+            "===== $path ====="
+            Read-InstallerDiagnosticLog -Path $path
+        }
+    ) -join "`n"
+    throw [InvalidOperationException]::new(
+        "$($_.Exception.Message)`nInstaller diagnostic logs:`n$diagnostics",
+        $_.Exception
+    )
 }
 finally {
     if ($cleanHostedRunnerConfirmed) {
@@ -200,6 +259,9 @@ finally {
         }
         if (Test-Path -LiteralPath $commonDesktopShortcut) {
             Remove-Item -LiteralPath $commonDesktopShortcut -Force -ErrorAction SilentlyContinue
+        }
+        if (Test-Path -LiteralPath $installerDiagnosticRoot) {
+            Remove-Item -LiteralPath $installerDiagnosticRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 }

@@ -6,6 +6,7 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $workflow = Get-Content -LiteralPath (Join-Path $root '.github\workflows\build.yml') -Raw
 $installerTest = Get-Content -LiteralPath (Join-Path $root 'scripts\ci\Test-InstallerWindows.ps1') -Raw
 $installerDefinitionPath = Join-Path $root 'installer\mactype-control-center.iss'
+$innoFailureContractPath = Join-Path $root 'scripts\ci\Test-InnoInstallerFailureContract.ps1'
 $installerHelperPath = Join-Path $root 'scripts\ci\lib\InstallerWindowsAssertions.ps1'
 $fixturePath = Join-Path $root '.github\scripts\Build-FailingServiceRuntimeFixture.ps1'
 
@@ -26,26 +27,63 @@ if (-not (Test-Path -LiteralPath $installerHelperPath -PathType Leaf)) {
 }
 
 $installerDefinition = Get-Content -LiteralPath $installerDefinitionPath -Raw
-$filesSection = [regex]::Match($installerDefinition, '(?ms)^\[Files\]\s*(?<body>.*?)(?=^\[[^]]+\])')
-$fileEntries = @($filesSection.Groups['body'].Value -split '\r?\n' | Where-Object { $_ -match '^Source:' })
-if (-not $filesSection.Success -or $fileEntries.Count -eq 0 -or
-    $fileEntries[-1] -notmatch 'Source:\s*"\{#SourceRoot\}\\LICENSE".*AfterInstall:\s*BootstrapMachineService\s*$') {
-    throw 'Installer must run machine-service bootstrap from the final Files entry while rollback is still available.'
-}
-if (-not $installerDefinition.Contains(
-    "RunFixedBrokerOrFail('bootstrap-install', 'Machine service bootstrap')"
+foreach ($token in @(
+    'ExecAndLogOutput',
+    'ExtractTemporaryFiles',
+    'ExtractedCount <> 7',
+    'BootstrapBeforeFileInstall',
+    'PrepareToInstall',
+    'service-runtime.setup-backup',
+    'RestoreApplicationBroker',
+    '"outcome":"applied"',
+    '"reason":"legacy-service"',
+    '"reason":"appinit"',
+    '"reason":"foreign-open-service"'
 )) {
-    throw 'Installer machine-service bootstrap callback does not invoke the fixed protected broker.'
+    if (-not $installerDefinition.Contains($token)) {
+        throw "Installer fatal-bootstrap classification/rollback contract is missing: $token"
+    }
 }
-if ($installerDefinition -match '(?s)procedure\s+CurStepChanged\b.*?ssPostInstall.*?RunFixedBrokerOrFail') {
-    throw 'Installer must not defer mandatory machine-service bootstrap to non-rollback ssPostInstall.'
+if ($installerDefinition -match 'AfterInstall:\s*BootstrapMachineService' -or
+    $installerDefinition -match '(?s)procedure\s+CurStepChanged\b.*?ssPostInstall.*?RunFixedBrokerOrFail') {
+    throw 'Installer must complete required bootstrap before the Files phase begins.'
+}
+$installDeleteSection = [regex]::Match(
+    $installerDefinition,
+    '(?ms)^\[InstallDelete\]\s*(?<body>.*?)(?=^\[[^]]+\])'
+)
+if (-not $installDeleteSection.Success -or
+    $installDeleteSection.Groups['body'].Value -notmatch '(?m)^Type:\s*filesandordirs;\s*Name:\s*"\{app\}\\service-runtime"\s*$') {
+    throw 'Installer must remove the prior app-side runtime only after PrepareToInstall succeeds.'
+}
+if (-not (Test-Path -LiteralPath $innoFailureContractPath -PathType Leaf) -or
+    -not $workflow.Contains('scripts/ci/Test-InnoInstallerFailureContract.ps1')) {
+    throw 'Hosted Windows CI does not execute the real Inno required-failure rollback contract.'
+}
+$innoFailureContract = Get-Content -LiteralPath $innoFailureContractPath -Raw
+foreach ($token in @(
+    'RaiseException',
+    'ExtractTemporaryFiles',
+    'service-runtime.setup-backup',
+    'staged broker exit code 23',
+    'Compile product Inno staging contract',
+    'Installation process succeeded.',
+    'PrepareToInstall failed:',
+    'ExitCode -ne 7',
+    'baseline-payload'
+)) {
+    if (-not $innoFailureContract.Contains($token)) {
+        throw "Real Inno regression fixture is missing required RED/GREEN evidence: $token"
+    }
 }
 $installerHelper = Get-Content -LiteralPath $installerHelperPath -Raw
 foreach ($token in @(
     'BoundedProcessRunner',
     'InstallerProcessTimeoutMilliseconds',
     'StandardOutput',
-    'StandardError'
+    'StandardError',
+    'DiagnosticLogPath',
+    'Read-InstallerDiagnosticLog'
 )) {
     if (-not $installerHelper.Contains($token)) {
         throw "Installer E2E process execution is not bounded with diagnostic capture: $token"
@@ -70,7 +108,11 @@ foreach ($token in @(
     'Deliberately failing protected upgrade',
     'Assert-BaselineRestoredAfterFailedUpgrade',
     '$baselineApplicationSnapshot',
-    '$baselineServiceSnapshot'
+    '$baselineServiceSnapshot',
+    'obsolete-from-prior-version.bin',
+    'Get-TreeSnapshot -Path $applicationRoot',
+    'Invoke-InstallerExpectedFailure',
+    'Installer diagnostic logs:'
 )) {
     if (-not $installerTest.Contains($token)) {
         throw "Installer E2E does not prove automatic rollback at the installer boundary: $token"

@@ -3,6 +3,42 @@ Import-Module (Join-Path $PSScriptRoot 'OpenServiceTestSupport.psm1')
 $script:InstallerProcessTimeoutMilliseconds = 10 * 60 * 1000
 $script:InstallerProcessMaximumOutputBytes = 64 * 1024
 $script:InstallerProcessTerminationTimeoutMilliseconds = 5000
+$script:InstallerDiagnosticMaximumBytes = 128 * 1024
+
+function Read-InstallerDiagnosticLog {
+    param([Parameter(Mandatory)] [string] $Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return "<missing installer log: $Path>"
+    }
+    $stream = [IO.FileStream]::new(
+        $Path,
+        [IO.FileMode]::Open,
+        [IO.FileAccess]::Read,
+        [IO.FileShare]::ReadWrite
+    )
+    try {
+        $length = $stream.Length
+        $start = [Math]::Max(0L, $length - $script:InstallerDiagnosticMaximumBytes)
+        if ($start -gt 0) { [void] $stream.Seek($start, [IO.SeekOrigin]::Begin) }
+        $bytes = [byte[]]::new([int] [Math]::Min(
+            $script:InstallerDiagnosticMaximumBytes,
+            $length - $start
+        ))
+        $total = 0
+        while ($total -lt $bytes.Length) {
+            $read = $stream.Read($bytes, $total, $bytes.Length - $total)
+            if ($read -eq 0) { break }
+            $total += $read
+        }
+        $text = [Text.Encoding]::UTF8.GetString($bytes, 0, $total)
+        if ($start -gt 0) { return "<truncated to final $($bytes.Length) bytes>`n$text" }
+        return $text
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
 
 function Get-FixedService {
     param([Parameter(Mandatory)] [string] $Name)
@@ -48,13 +84,22 @@ function Invoke-ExpectedSuccess {
     param(
         [Parameter(Mandatory)] [string] $File,
         [Parameter(Mandatory)] [string[]] $Arguments,
-        [Parameter(Mandatory)] [string] $Label
+        [Parameter(Mandatory)] [string] $Label,
+        [string] $DiagnosticLogPath
     )
 
-    $result = Invoke-ProcessExit -File $File -Arguments $Arguments
+    $effectiveArguments = if ($DiagnosticLogPath) {
+        @($Arguments) + "/LOG=$DiagnosticLogPath"
+    } else {
+        $Arguments
+    }
+    $result = Invoke-ProcessExit -File $File -Arguments $effectiveArguments
     if ($result.ExitCode -ne 0) {
+        $diagnostic = if ($DiagnosticLogPath) {
+            " installer-log=$(Read-InstallerDiagnosticLog -Path $DiagnosticLogPath)"
+        } else { '' }
         throw "$Label exited with code $($result.ExitCode). " +
-            "stdout=$($result.StandardOutput) stderr=$($result.StandardError)"
+            "stdout=$($result.StandardOutput) stderr=$($result.StandardError)$diagnostic"
     }
 }
 
@@ -62,13 +107,22 @@ function Invoke-ExpectedFailure {
     param(
         [Parameter(Mandatory)] [string] $File,
         [Parameter(Mandatory)] [string[]] $Arguments,
-        [Parameter(Mandatory)] [string] $Label
+        [Parameter(Mandatory)] [string] $Label,
+        [string] $DiagnosticLogPath
     )
 
-    $result = Invoke-ProcessExit -File $File -Arguments $Arguments
+    $effectiveArguments = if ($DiagnosticLogPath) {
+        @($Arguments) + "/LOG=$DiagnosticLogPath"
+    } else {
+        $Arguments
+    }
+    $result = Invoke-ProcessExit -File $File -Arguments $effectiveArguments
     if ($result.ExitCode -eq 0) {
+        $diagnostic = if ($DiagnosticLogPath) {
+            " installer-log=$(Read-InstallerDiagnosticLog -Path $DiagnosticLogPath)"
+        } else { '' }
         throw "$Label unexpectedly succeeded. " +
-            "stdout=$($result.StandardOutput) stderr=$($result.StandardError)"
+            "stdout=$($result.StandardOutput) stderr=$($result.StandardError)$diagnostic"
     }
 }
 
@@ -117,21 +171,6 @@ function Get-TreeSnapshot {
     ) -join "`n"
 }
 
-function Get-ApplicationUsabilitySnapshot {
-    param([Parameter(Mandatory)] [string] $ApplicationRoot)
-
-    @(
-        'MacType Control Center.exe',
-        'service-runtime\mactype-service-setup.exe'
-    ) | ForEach-Object {
-        $path = Join-Path $ApplicationRoot $_
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-            throw "Required application entry point is missing: $_"
-        }
-        "$_|$((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant())"
-    } | Sort-Object | Join-String -Separator "`n"
-}
-
 function Assert-ServicePayload {
     param([Parameter(Mandatory)] [string] $ApplicationRoot)
 
@@ -146,9 +185,18 @@ function Assert-ServicePayload {
     if (Compare-Object ($expectedNames | Sort-Object) ($manifest.files.Keys | Sort-Object)) {
         throw 'Installed open-service manifest contains a missing or unapproved payload filename.'
     }
-    $installedNames = @(Get-ChildItem -LiteralPath $payloadFiles -File | Select-Object -ExpandProperty Name)
-    if (Compare-Object ($expectedNames | Sort-Object) ($installedNames | Sort-Object)) {
-        throw 'Installed open-service payload directory contains a missing or unapproved file.'
+    $expectedRuntimeFiles = @(
+        'mactype-service-setup.exe',
+        'payload\manifest.json'
+        $expectedNames | ForEach-Object { "payload\files\$_" }
+    )
+    $installedRuntimeFiles = @(
+        Get-ChildItem -LiteralPath $runtimeRoot -Recurse -File | ForEach-Object {
+            [IO.Path]::GetRelativePath($runtimeRoot, $_.FullName)
+        }
+    )
+    if (Compare-Object ($expectedRuntimeFiles | Sort-Object) ($installedRuntimeFiles | Sort-Object)) {
+        throw 'Installed app-side service runtime contains a missing or obsolete file.'
     }
     foreach ($name in $expectedNames) {
         $hash = (Get-FileHash -LiteralPath (Join-Path $payloadFiles $name) -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -303,8 +351,8 @@ function Assert-BaselineRestoredAfterFailedUpgrade {
     )
 
     Assert-RequiredApplicationFiles -ApplicationRoot $ApplicationRoot
-    if ((Get-ApplicationUsabilitySnapshot -ApplicationRoot $ApplicationRoot) -cne $BaselineApplicationSnapshot) {
-        throw 'Failed upgrade did not preserve the existing app and protected broker entry points.'
+    if ((Get-TreeSnapshot -Path $ApplicationRoot) -cne $BaselineApplicationSnapshot) {
+        throw 'Failed upgrade did not preserve the exact existing application file tree.'
     }
     if ((Get-ServiceSnapshot -Name $OpenServiceName) -cne $BaselineServiceSnapshot) {
         throw 'Failed upgrade did not restore the exact baseline service configuration and state.'

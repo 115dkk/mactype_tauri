@@ -113,6 +113,9 @@ jobs:
       - name: Smoke-test hidden tray startup
         shell: pwsh
         run: scripts/ci/Test-TrayWindows.ps1 -Executable control-center/src-tauri/target/release/mactype-control-center.exe
+      - name: Verify required Inno failure propagation and rollback
+        shell: pwsh
+        run: scripts/ci/Test-InnoInstallerFailureContract.ps1
       - name: Build Inno Setup installer
         shell: pwsh
         run: |

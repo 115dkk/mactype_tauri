@@ -53,7 +53,7 @@ pub fn harden_machine_directory(path: &Path) -> Result<(), SetupError> {
 
     let sids = ExpectedSids::new()?;
     for entry in paths {
-        verify_protected_acl(&entry, &sids)?;
+        verify_protected_acl(&entry, &sids, entry == path)?;
     }
     Ok(())
 }
@@ -83,7 +83,11 @@ fn collect_protected_tree(root: &Path) -> Result<Vec<PathBuf>, SetupError> {
     Ok(result)
 }
 
-fn verify_protected_acl(path: &Path, sids: &ExpectedSids) -> Result<(), SetupError> {
+fn verify_protected_acl(
+    path: &Path,
+    sids: &ExpectedSids,
+    require_protected: bool,
+) -> Result<(), SetupError> {
     let path_wide = wide_path(path);
     let mut dacl = ptr::null_mut();
     let mut descriptor = ptr::null_mut();
@@ -111,9 +115,10 @@ fn verify_protected_acl(path: &Path, sids: &ExpectedSids) -> Result<(), SetupErr
 
     let mut control = 0u16;
     let mut revision = 0u32;
-    if unsafe { GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) } == 0
-        || control & SE_DACL_PROTECTED == 0
-    {
+    if unsafe { GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) } == 0 {
+        return Err(SetupError::Io(io::Error::last_os_error()));
+    }
+    if require_protected && control & SE_DACL_PROTECTED == 0 {
         return Err(SetupError::Runtime(format!(
             "protected machine ACL still permits inheritance: {}",
             path.display()
@@ -150,15 +155,25 @@ fn verify_protected_acl(path: &Path, sids: &ExpectedSids) -> Result<(), SetupErr
         }
         let sid = ptr::addr_of!(ace.SidStart) as PSID;
         if unsafe { EqualSid(sid, sids.system.0) } != 0 {
-            if saw_system || ace.Mask != FILE_ALL_ACCESS {
+            if ace.Mask != FILE_ALL_ACCESS {
                 return Err(invalid_acl(path));
             }
-            saw_system = true;
+            if ace_applies_to_current_object(ace.Header.AceFlags) {
+                if saw_system {
+                    return Err(invalid_acl(path));
+                }
+                saw_system = true;
+            }
         } else if unsafe { EqualSid(sid, sids.administrators.0) } != 0 {
-            if saw_administrators || ace.Mask != FILE_ALL_ACCESS {
+            if ace.Mask != FILE_ALL_ACCESS {
                 return Err(invalid_acl(path));
             }
-            saw_administrators = true;
+            if ace_applies_to_current_object(ace.Header.AceFlags) {
+                if saw_administrators {
+                    return Err(invalid_acl(path));
+                }
+                saw_administrators = true;
+            }
         } else if unsafe { EqualSid(sid, sids.users.0) } != 0 {
             if !is_users_read_execute_mask(ace.Mask) {
                 return Err(invalid_acl_ace(path, "Users", ace));
@@ -315,6 +330,7 @@ fn wide_path(path: &Path) -> Vec<u16> {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+    use windows_sys::Win32::Security::{CONTAINER_INHERIT_ACE, INHERITED_ACE, OBJECT_INHERIT_ACE};
 
     use super::{
         ace_applies_to_current_object, harden_machine_directory, is_users_read_execute_mask,
@@ -332,6 +348,122 @@ mod tests {
         let result = harden_machine_directory(directory.path());
 
         assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
+    fn hardening_verifies_nested_directories_and_regular_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let nested = directory.path().join("payload").join("generation-1");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("manifest.json"), b"{}").unwrap();
+
+        let result = harden_machine_directory(directory.path());
+
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(
+            acl_snapshot(&nested),
+            vec![
+                (
+                    "SYSTEM",
+                    super::FILE_ALL_ACCESS,
+                    (OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE | INHERITED_ACE) as u8,
+                ),
+                (
+                    "Administrators",
+                    super::FILE_ALL_ACCESS,
+                    (OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE | INHERITED_ACE) as u8,
+                ),
+                (
+                    "Users",
+                    FILE_GENERIC_READ | FILE_GENERIC_EXECUTE,
+                    INHERITED_ACE as u8,
+                ),
+                (
+                    "Users",
+                    GENERIC_READ | GENERIC_EXECUTE,
+                    (OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE | INHERIT_ONLY_ACE | INHERITED_ACE)
+                        as u8,
+                ),
+            ]
+        );
+        assert_eq!(
+            acl_snapshot(&nested.join("manifest.json")),
+            vec![
+                ("SYSTEM", super::FILE_ALL_ACCESS, INHERITED_ACE as u8),
+                (
+                    "Administrators",
+                    super::FILE_ALL_ACCESS,
+                    INHERITED_ACE as u8,
+                ),
+                (
+                    "Users",
+                    FILE_GENERIC_READ | FILE_GENERIC_EXECUTE,
+                    INHERITED_ACE as u8,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn machine_root_with_inheritable_dacl_is_rejected() {
+        let directory = tempfile::tempdir().unwrap();
+        apply_acl_with_security_information(
+            directory.path(),
+            "D:(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)",
+            DACL_SECURITY_INFORMATION,
+        );
+
+        let error = verify_protected_acl(directory.path(), &ExpectedSids::new().unwrap(), true)
+            .expect_err("machine root must block parent ACL inheritance");
+
+        assert!(error.to_string().contains("still permits inheritance"));
+    }
+
+    #[test]
+    fn descendant_users_write_access_is_rejected() {
+        let directory = tempfile::tempdir().unwrap();
+        let child = directory.path().join("runtime-receipts");
+        std::fs::create_dir(&child).unwrap();
+        apply_acl(directory.path(), &format!("{BASE_ACL}(A;OICI;GW;;;BU)"));
+
+        let error = verify_protected_acl(&child, &ExpectedSids::new().unwrap(), false)
+            .expect_err("descendant Users write access must fail closed");
+
+        assert!(error.to_string().contains("invalid Users rights"));
+    }
+
+    #[test]
+    fn descendant_unapproved_write_trustee_is_rejected() {
+        let directory = tempfile::tempdir().unwrap();
+        let child = directory.path().join("runtime-receipts");
+        std::fs::create_dir(&child).unwrap();
+        apply_acl(directory.path(), &format!("{BASE_ACL}(A;OICI;GW;;;WD)"));
+
+        let error = verify_protected_acl(&child, &ExpectedSids::new().unwrap(), false)
+            .expect_err("descendant unapproved write trustee must fail closed");
+
+        assert!(error.to_string().contains("unapproved allow ACE"));
+    }
+
+    #[test]
+    fn inherit_only_trusted_writer_aces_do_not_replace_current_object_access() {
+        for sddl in [
+            "D:P(A;OICIIO;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)",
+            "D:P(A;OICI;FA;;;SY)(A;OICIIO;FA;;;BA)(A;OICI;GRGX;;;BU)",
+        ] {
+            let error = verify_acl_fixture(sddl)
+                .expect_err("inherit-only trusted writer ACE must not satisfy root access");
+
+            assert!(error
+                .to_string()
+                .contains("does not match SYSTEM/Admin Full"));
+        }
+    }
+
+    #[test]
+    fn supplemental_inherit_only_trusted_writer_aces_are_allowed() {
+        verify_acl_fixture(&format!("{BASE_ACL}(A;OICIIO;FA;;;SY)(A;OICIIO;FA;;;BA)"))
+            .expect("inherit-only propagation ACEs may accompany current-object writer ACEs");
     }
 
     #[test]
@@ -373,10 +505,18 @@ mod tests {
     fn verify_acl_fixture(sddl: &str) -> Result<(), super::SetupError> {
         let directory = tempfile::tempdir().unwrap();
         apply_acl(directory.path(), sddl);
-        verify_protected_acl(directory.path(), &ExpectedSids::new().unwrap())
+        verify_protected_acl(directory.path(), &ExpectedSids::new().unwrap(), true)
     }
 
     fn apply_acl(path: &Path, sddl: &str) {
+        apply_acl_with_security_information(
+            path,
+            sddl,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+        );
+    }
+
+    fn apply_acl_with_security_information(path: &Path, sddl: &str, security_info: u32) {
         let descriptor = OwnedSecurityDescriptor::from_sddl(sddl).unwrap();
         let dacl = descriptor.dacl().unwrap();
         let path_wide = super::wide_path(path);
@@ -384,7 +524,7 @@ mod tests {
             super::TreeSetNamedSecurityInfoW(
                 path_wide.as_ptr(),
                 SE_FILE_OBJECT,
-                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                security_info,
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
                 dacl,
@@ -396,5 +536,59 @@ mod tests {
             )
         };
         assert_eq!(status, ERROR_SUCCESS);
+    }
+
+    fn acl_snapshot(path: &Path) -> Vec<(&'static str, u32, u8)> {
+        let path_wide = super::wide_path(path);
+        let mut dacl = std::ptr::null_mut();
+        let mut descriptor = std::ptr::null_mut();
+        let status = unsafe {
+            super::GetNamedSecurityInfoW(
+                path_wide.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut dacl,
+                std::ptr::null_mut(),
+                &mut descriptor,
+            )
+        };
+        assert_eq!(status, ERROR_SUCCESS);
+        assert!(!descriptor.is_null());
+        assert!(!dacl.is_null());
+        let _descriptor = super::OwnedLocalMemory(descriptor);
+
+        let mut size = super::ACL_SIZE_INFORMATION::default();
+        assert_ne!(
+            unsafe {
+                super::GetAclInformation(
+                    dacl,
+                    &mut size as *mut _ as *mut std::ffi::c_void,
+                    std::mem::size_of::<super::ACL_SIZE_INFORMATION>() as u32,
+                    super::AclSizeInformation,
+                )
+            },
+            0
+        );
+        let sids = ExpectedSids::new().unwrap();
+        (0..size.AceCount)
+            .map(|index| {
+                let mut raw_ace = std::ptr::null_mut();
+                assert_ne!(unsafe { super::GetAce(dacl, index, &mut raw_ace) }, 0);
+                let ace = unsafe { &*(raw_ace as *const super::ACCESS_ALLOWED_ACE) };
+                let sid = std::ptr::addr_of!(ace.SidStart) as super::PSID;
+                let trustee = if unsafe { super::EqualSid(sid, sids.system.0) } != 0 {
+                    "SYSTEM"
+                } else if unsafe { super::EqualSid(sid, sids.administrators.0) } != 0 {
+                    "Administrators"
+                } else if unsafe { super::EqualSid(sid, sids.users.0) } != 0 {
+                    "Users"
+                } else {
+                    "Unknown"
+                };
+                (trustee, ace.Mask, ace.Header.AceFlags)
+            })
+            .collect()
     }
 }

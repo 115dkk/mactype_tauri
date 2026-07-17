@@ -45,6 +45,22 @@ foreach ($token in @(
         throw "Installer fatal-bootstrap classification/rollback contract is missing: $token"
     }
 }
+$fixedBrokerCall = [regex]::Match(
+    $installerDefinition,
+    '(?ms)^procedure\s+RunFixedBrokerOrFail\b.*?^end;'
+)
+if (-not $fixedBrokerCall.Success) {
+    throw 'Installer fixed-broker failure propagation procedure is missing.'
+}
+foreach ($token in @(
+    'ExecAndLogOutput',
+    '@CaptureBrokerOutput',
+    'BrokerFailure'
+)) {
+    if (-not $fixedBrokerCall.Value.Contains($token)) {
+        throw "Owned uninstall broker failures omit bounded diagnostics: $token"
+    }
+}
 if ($installerDefinition -match 'AfterInstall:\s*BootstrapMachineService' -or
     $installerDefinition -match '(?s)procedure\s+CurStepChanged\b.*?ssPostInstall.*?RunFixedBrokerOrFail') {
     throw 'Installer must complete required bootstrap before the Files phase begins.'

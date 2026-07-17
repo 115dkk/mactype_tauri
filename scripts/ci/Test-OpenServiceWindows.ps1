@@ -93,12 +93,6 @@ function Get-LowerHexDigest([byte[]] $Bytes) {
 function Assert-ProtectedAcl([string] $Path) {
     if (-not (Test-Path -LiteralPath $Path)) { throw "Protected machine path is missing: $Path" }
     $lowPrivilegeSids = @('S-1-1-0', 'S-1-5-11', 'S-1-5-32-545')
-    $dangerous = [Security.AccessControl.FileSystemRights]::Write -bor
-        [Security.AccessControl.FileSystemRights]::Modify -bor
-        [Security.AccessControl.FileSystemRights]::FullControl -bor
-        [Security.AccessControl.FileSystemRights]::Delete -bor
-        [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
-        [Security.AccessControl.FileSystemRights]::TakeOwnership
 
     foreach ($rule in (Get-Acl -LiteralPath $Path).Access) {
         if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { continue }
@@ -107,7 +101,8 @@ function Assert-ProtectedAcl([string] $Path) {
         } catch {
             continue
         }
-        if ($sid -in $lowPrivilegeSids -and (($rule.FileSystemRights -band $dangerous) -ne 0)) {
+        if ($sid -in $lowPrivilegeSids -and
+            (Test-OpenServiceAclWriteCapability -Rights $rule.FileSystemRights)) {
             throw "$Path grants machine-runtime write rights to ${sid}: $($rule.FileSystemRights)"
         }
     }

@@ -11,12 +11,24 @@ if (-not ('MacType.ControlCenter.Ci.BoundedProcessRunner' -as [type])) {
 
 $script:UsersSid = 'S-1-5-32-545'
 $script:MaximumDiagnosticValueCharacters = 4096
-$script:DangerousFileRights = [Security.AccessControl.FileSystemRights]::Write -bor
-    [Security.AccessControl.FileSystemRights]::Modify -bor
-    [Security.AccessControl.FileSystemRights]::FullControl -bor
+$script:WriteCapabilityFileRights = [Security.AccessControl.FileSystemRights]::WriteData -bor
+    [Security.AccessControl.FileSystemRights]::AppendData -bor
+    [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
+    [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+    [Security.AccessControl.FileSystemRights]::WriteAttributes -bor
     [Security.AccessControl.FileSystemRights]::Delete -bor
     [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
     [Security.AccessControl.FileSystemRights]::TakeOwnership
+
+function Test-OpenServiceAclWriteCapability {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [Security.AccessControl.FileSystemRights] $Rights
+    )
+
+    return (($Rights -band $script:WriteCapabilityFileRights) -ne 0)
+}
 
 function ConvertTo-OpenServiceDiagnosticValue {
     param([AllowNull()] [object] $Value)
@@ -58,7 +70,7 @@ function Test-OpenServiceExplicitUsersModify {
     foreach ($rule in $acl.Access) {
         if ($rule.IsInherited -or
             $rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
-            (($rule.FileSystemRights -band $script:DangerousFileRights) -eq 0)) {
+            -not (Test-OpenServiceAclWriteCapability -Rights $rule.FileSystemRights)) {
             continue
         }
         try {
@@ -222,6 +234,7 @@ function Invoke-OpenServiceAclRepairFixture {
 }
 
 Export-ModuleMember -Function @(
+    'Test-OpenServiceAclWriteCapability',
     'Get-OpenServiceAclFixtureDiagnostic',
     'Invoke-OpenServiceAclRepairFixture'
 )

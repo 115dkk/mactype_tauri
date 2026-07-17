@@ -7,6 +7,20 @@ $modulePath = Join-Path $PSScriptRoot 'lib\OpenServiceAclFixture.psm1'
 Import-Module $supportModulePath -Force
 Import-Module $modulePath -Force
 
+$readOnlyRights = [Security.AccessControl.FileSystemRights]::ReadAndExecute -bor
+    [Security.AccessControl.FileSystemRights]::Synchronize
+if (Test-OpenServiceAclWriteCapability -Rights $readOnlyRights) {
+    throw 'ReadAndExecute with Synchronize was incorrectly classified as write-capable.'
+}
+foreach ($writeCapableRights in @(
+    [Security.AccessControl.FileSystemRights]::Modify,
+    [Security.AccessControl.FileSystemRights]::FullControl
+)) {
+    if (-not (Test-OpenServiceAclWriteCapability -Rights $writeCapableRights)) {
+        throw "$writeCapableRights was incorrectly classified as read-only."
+    }
+}
+
 $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
     "mactype-open-service-acl-$PID-$([guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Path $temporaryRoot | Out-Null

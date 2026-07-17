@@ -47,7 +47,7 @@ function Test-OpenServiceWorkflowPolicy {
         )
 
     $hostedLifecyclePath = Join-Path $Root 'scripts\ci\Test-OpenServiceWindows.ps1'
-    $null = Test-RequiredTokens -Failures $failures -Path $hostedLifecyclePath `
+    $hostedLifecycle = Test-RequiredTokens -Failures $failures -Path $hostedLifecyclePath `
         -MissingMessage 'scripts/ci/Test-OpenServiceWindows.ps1 is missing.' `
         -TokenMessage "hosted lifecycle verification is missing required contract token '{0}'." `
         -Tokens @(
@@ -55,8 +55,30 @@ function Test-OpenServiceWorkflowPolicy {
             'profileDigest', 'success.pid', 'success.sessionId',
             'x86 and x64 marker telemetry is not bound to the same runtime generation',
             'OpenServiceAclFixture.psm1', 'Invoke-OpenServiceAclRepairFixture',
-            '-RepairContext $stagedSetup', 'param($setupExecutable)'
+            '-RepairContext $stagedSetup', 'param($setupExecutable)',
+            "-Verb 'publish-profile' -InputBytes `$profileA",
+            "Assert-ActiveRuntimeProfile -ExpectedBytes `$profileA"
         )
+    if ($hostedLifecycle) {
+        $profilePublishToken = "-Verb 'publish-profile' -InputBytes `$profileA"
+        $profilePublishIndex = $hostedLifecycle.IndexOf($profilePublishToken)
+        $profileVerificationIndex = $hostedLifecycle.IndexOf(
+            "Assert-ActiveRuntimeProfile -ExpectedBytes `$profileA"
+        )
+        $aclRepairIndex = $hostedLifecycle.IndexOf('Invoke-OpenServiceAclRepairFixture')
+        if ([regex]::Matches(
+                $hostedLifecycle,
+                [regex]::Escape($profilePublishToken)
+            ).Count -ne 1) {
+            $failures.Add('hosted lifecycle must publish profile A exactly once.')
+        }
+        if ($profilePublishIndex -gt $aclRepairIndex -or
+            $profileVerificationIndex -gt $aclRepairIndex) {
+            $failures.Add(
+                'hosted lifecycle must publish and verify profile A before the exact ACL repair fixture.'
+            )
+        }
+    }
 
     $aclFixtureModulePath = Join-Path $Root 'scripts\ci\lib\OpenServiceAclFixture.psm1'
     $null = Test-RequiredTokens -Failures $failures -Path $aclFixtureModulePath `

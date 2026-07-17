@@ -240,6 +240,17 @@ try {
             throw "Protected machine runtime hash differs from the verified staging manifest: $name"
         }
     }
+    $profileA = [Text.UTF8Encoding]::new($false).GetBytes("[General]`r`nHintingMode=0`r`n")
+    $profileB = [Text.UTF8Encoding]::new($false).GetBytes("[General]`r`nHintingMode=1`r`n")
+    $digestA = Get-LowerHexDigest $profileA
+    $digestB = Get-LowerHexDigest $profileB
+    $null = Invoke-OpenServiceSetupLogged -SetupExecutable $stagedSetup `
+        -Verb 'publish-profile' -InputBytes $profileA
+    $generationA = Join-Path $profileRoot "generations\$digestA\profile.ini"
+    if (-not (Test-Path -LiteralPath $generationA -PathType Leaf)) { throw "First protected profile generation is missing: $generationA" }
+    Assert-ActiveRuntimeProfile -ExpectedBytes $profileA -ExpectedDigest $digestA -Phase 'publish A'
+    Assert-ProtectedTree $profileRoot
+
     $poisonedAclPath = Join-Path $installedRuntimeRoot 'mactype-service.exe'
     $null = Invoke-OpenServiceAclRepairFixture `
         -Path $poisonedAclPath `
@@ -256,17 +267,6 @@ try {
     $dependencies = @((Get-Service -Name $serviceName).ServicesDependedOn | Select-Object -ExpandProperty Name)
     if ($dependencies -contains 'winmgmt') { throw 'Open service copied the unproven legacy winmgmt dependency.' }
     Assert-ProtectedTree $machineRoot
-
-    $profileA = [Text.UTF8Encoding]::new($false).GetBytes("[General]`r`nHintingMode=0`r`n")
-    $profileB = [Text.UTF8Encoding]::new($false).GetBytes("[General]`r`nHintingMode=1`r`n")
-    $digestA = Get-LowerHexDigest $profileA
-    $digestB = Get-LowerHexDigest $profileB
-    $null = Invoke-OpenServiceSetupLogged -SetupExecutable $stagedSetup `
-        -Verb 'publish-profile' -InputBytes $profileA
-    $generationA = Join-Path $profileRoot "generations\$digestA\profile.ini"
-    if (-not (Test-Path -LiteralPath $generationA -PathType Leaf)) { throw "First protected profile generation is missing: $generationA" }
-    Assert-ActiveRuntimeProfile -ExpectedBytes $profileA -ExpectedDigest $digestA -Phase 'publish A'
-    Assert-ProtectedTree $profileRoot
 
     $null = Invoke-OpenServiceSetupLogged -SetupExecutable $stagedSetup -Verb 'start'
     if ((Get-Service -Name $serviceName).Status -ne 'Running') { throw "$serviceName did not reach SCM Running after its Ready handshake." }

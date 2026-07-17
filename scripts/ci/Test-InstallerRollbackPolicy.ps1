@@ -123,10 +123,19 @@ foreach ($token in @(
 if (-not (Test-Path -LiteralPath $snapshotContractPath -PathType Leaf)) {
     throw 'Installer immutable app-side snapshot contract test is missing.'
 }
-foreach ($token in @('-ExcludedRoot $ServiceRoot', 'Get-TreeSnapshotDifference')) {
+foreach ($token in @(
+    '-ExcludedRoot $ServiceRoot',
+    'Get-TreeSnapshotDifference',
+    'Get-BoundedTreeInventory',
+    'Wait-PathAbsent'
+)) {
     if (-not $installerHelper.Contains($token)) {
         throw "Installer app-side rollback diagnostics omit: $token"
     }
+}
+
+if (-not $installerTest.Contains('Wait-PathAbsent -Path $applicationRoot')) {
+    throw 'Installer E2E does not wait boundedly for the detached Inno uninstall phase.'
 }
 foreach ($token in @('DirectorySeparatorChar', 'AltDirectorySeparatorChar', 'GetRelativePath')) {
     if (-not $installerHelper.Contains($token)) {

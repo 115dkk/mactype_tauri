@@ -41,6 +41,60 @@ try {
         throw "App-side snapshot diagnostics omitted the exact path or hashes.`nExpected: $expectedDifference`nActual: $difference"
     }
 
+    $leftoverRoot = Join-Path $temporaryRoot 'leftover'
+    $emptyDirectory = Join-Path $leftoverRoot 'empty-directory'
+    $leftoverFile = Join-Path (Join-Path $leftoverRoot 'nested') 'leftover.bin'
+    New-Item -ItemType Directory -Path $emptyDirectory, (Split-Path -Parent $leftoverFile) -Force | Out-Null
+    [IO.File]::WriteAllText($leftoverFile, 'owned-leftover', [Text.UTF8Encoding]::new($false))
+    $leftoverHash = (Get-FileHash -LiteralPath $leftoverFile -Algorithm SHA256).Hash.ToLowerInvariant()
+    $inventory = Get-BoundedTreeInventory -Path $leftoverRoot -MaximumEntries 8
+    foreach ($expectedEntry in @(
+        'directory|.',
+        'directory|empty-directory',
+        'directory|nested',
+        "file|nested$([IO.Path]::DirectorySeparatorChar)leftover.bin|14|$leftoverHash"
+    )) {
+        if (($inventory -split "`n") -cnotcontains $expectedEntry) {
+            throw "Uninstall leftover inventory omitted: $expectedEntry`n$inventory"
+        }
+    }
+
+    $boundedInventory = Get-BoundedTreeInventory -Path $leftoverRoot -MaximumEntries 1
+    if ($boundedInventory -notmatch '(?m)^truncated\|maximum-entries=1$') {
+        throw "Uninstall leftover inventory is not bounded.`n$boundedInventory"
+    }
+
+    $delayedRoot = Join-Path $temporaryRoot 'delayed-delete'
+    New-Item -ItemType Directory -Path $delayedRoot -Force | Out-Null
+    $deleteJob = Start-Job -ScriptBlock {
+        param($Target)
+        Start-Sleep -Milliseconds 300
+        Remove-Item -LiteralPath $Target -Recurse -Force
+    } -ArgumentList $delayedRoot
+    try {
+        Wait-PathAbsent -Path $delayedRoot -TimeoutMilliseconds 5000
+        if (Test-Path -LiteralPath $delayedRoot) {
+            throw 'Bounded path wait returned before delayed deletion completed.'
+        }
+    }
+    finally {
+        Wait-Job -Job $deleteJob -Timeout 5 | Out-Null
+        Receive-Job -Job $deleteJob -ErrorAction SilentlyContinue | Out-Null
+        Remove-Job -Job $deleteJob -Force -ErrorAction SilentlyContinue
+    }
+
+    $persistentRoot = Join-Path $temporaryRoot 'persistent-leftover'
+    New-Item -ItemType Directory -Path (Join-Path $persistentRoot 'empty') -Force | Out-Null
+    try {
+        Wait-PathAbsent -Path $persistentRoot -TimeoutMilliseconds 100
+        throw 'Persistent uninstall residue was accepted.'
+    }
+    catch {
+        if ($_.Exception.Message -notmatch '(?s)did not disappear.*directory\|empty') {
+            throw "Persistent uninstall residue omitted its bounded inventory: $($_.Exception.Message)"
+        }
+    }
+
     Write-Host 'Installer immutable app-side snapshot contract passed.'
 }
 finally {

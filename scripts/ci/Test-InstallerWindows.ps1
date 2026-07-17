@@ -190,8 +190,12 @@ try {
     }
 
     Invoke-InstallerExpectedSuccess -File $uninstaller.FullName -Arguments $silentArguments -Label 'Owned uninstall'
+    Wait-PathAbsent -Path $applicationRoot -TimeoutMilliseconds 30000
     if (Get-FixedService -Name $openServiceName) { throw 'Owned uninstall left the open service registered.' }
-    if (Test-Path -LiteralPath $applicationRoot) { throw 'Owned uninstall left Program Files application files behind.' }
+    if (Test-Path -LiteralPath $applicationRoot) {
+        $remainingApplicationTree = Get-BoundedTreeInventory -Path $applicationRoot
+        throw "Owned uninstall left Program Files application files behind.`nRemaining tree:`n$remainingApplicationTree"
+    }
     if (Test-Path -LiteralPath $commonDesktopShortcut) { throw 'Owned uninstall left the common desktop shortcut behind.' }
     if ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $profileRoot 'active.json'))) -cne $baseline.ActivePointerBytes -or
         (Get-TreeSnapshot -Path $baseline.ProfileGenerationRoot) -cne $baseline.ProfileGenerationSnapshot) {

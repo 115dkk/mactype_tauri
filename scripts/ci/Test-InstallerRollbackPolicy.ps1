@@ -73,6 +73,17 @@ if (-not $installDeleteSection.Success -or
     $installDeleteSection.Groups['body'].Value -notmatch '(?m)^Type:\s*filesandordirs;\s*Name:\s*"\{app\}\\service-runtime"\s*$') {
     throw 'Installer must remove the prior app-side runtime only after PrepareToInstall succeeds.'
 }
+$uninstallDeleteSection = [regex]::Match(
+    $installerDefinition,
+    '(?ms)^\[UninstallDelete\]\s*(?<body>.*?)(?=^\[[^]]+\]|\z)'
+)
+if (-not $uninstallDeleteSection.Success -or
+    $uninstallDeleteSection.Groups['body'].Value -notmatch '(?m)^Type:\s*dirifempty;\s*Name:\s*"\{app\}"\s*$') {
+    throw 'Installer must remove the exact application root when the protected bootstrap made it pre-exist and uninstall leaves it empty.'
+}
+if ($uninstallDeleteSection.Groups['body'].Value -match '(?im)^Type:\s*filesandordirs;\s*Name:\s*"\{app\}(?:[\\/]|"|\*)') {
+    throw 'Installer must never recursively delete the application root or its descendants during final cleanup.'
+}
 if (-not (Test-Path -LiteralPath $innoFailureContractPath -PathType Leaf) -or
     -not $workflow.Contains('scripts/ci/Test-InnoInstallerFailureContract.ps1')) {
     throw 'Hosted Windows CI does not execute the real Inno required-failure rollback contract.'
@@ -87,7 +98,11 @@ foreach ($token in @(
     'Installation process succeeded.',
     'PrepareToInstall failed:',
     'ExitCode -ne 7',
-    'baseline-payload'
+    'baseline-payload',
+    'MacTypeInnoEmptyRootCleanupContract',
+    'foreign-marker.txt',
+    'Empty-root cleanup fixture left its pre-existing application root behind.',
+    'Empty-root cleanup fixture recursively deleted a foreign application-root file.'
 )) {
     if (-not $innoFailureContract.Contains($token)) {
         throw "Real Inno regression fixture is missing required RED/GREEN evidence: $token"

@@ -91,7 +91,15 @@ foreach ($forbiddenInstallerToken in @(
         throw "Admin installer retains a user-writable/elevated broker hazard: $forbiddenInstallerToken"
     }
 }
-if ($installer -match '(?ims)^\[UninstallDelete\].*?\{app\}\\Service') {
+$uninstallDeleteSection = [regex]::Match(
+    $installer,
+    '(?ms)^\[UninstallDelete\]\s*(?<body>.*?)(?=^\[[^]]+\]|\z)'
+)
+if (-not $uninstallDeleteSection.Success -or
+    $uninstallDeleteSection.Groups['body'].Value -notmatch '(?m)^Type:\s*dirifempty;\s*Name:\s*"\{app\}"\s*$') {
+    throw 'Installer does not safely remove the exact application root when final cleanup leaves it empty.'
+}
+if ($uninstallDeleteSection.Groups['body'].Value -match '(?im)^Type:\s*filesandordirs;\s*Name:\s*"\{app\}\\Service(?:\\|"|\*)') {
     throw 'Installer must not recursively delete the protected Service tree without broker receipts.'
 }
 if ($installer -match '(?im)\bsc(?:\.exe)?\s+(?:create|config|start|stop|delete)\b') {

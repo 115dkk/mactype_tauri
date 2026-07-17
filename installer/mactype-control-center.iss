@@ -57,6 +57,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [InstallDelete]
 Type: filesandordirs; Name: "{app}\service-runtime"
 
+[UninstallDelete]
+Type: dirifempty; Name: "{app}"
+
 [Files]
 Source: "{#AppExe}"; DestDir: "{app}"; DestName: "{#ControlCenterExeName}"; Flags: ignoreversion
 Source: "{#PreviewExe}"; DestDir: "{app}"; DestName: "mactype-preview32.exe"; Flags: ignoreversion

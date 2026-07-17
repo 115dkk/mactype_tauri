@@ -2,7 +2,10 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::ptr;
 
-use windows_sys::Win32::Foundation::{LocalFree, ERROR_SUCCESS, GENERIC_EXECUTE, GENERIC_READ};
+use windows_sys::Win32::Foundation::{
+    LocalFree, ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, GENERIC_EXECUTE,
+    GENERIC_READ,
+};
 use windows_sys::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, ConvertStringSidToSidW,
     GetNamedSecurityInfoW, TreeSetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
@@ -28,7 +31,20 @@ const MAX_PROTECTED_TREE_ENTRIES: usize = 100_000;
 const ACCESS_ALLOWED_ACE_KIND: u8 = 0;
 
 pub fn harden_machine_directory(path: &Path) -> Result<(), SetupError> {
-    let paths = collect_protected_tree(path)
+    harden_machine_directory_observed(path, |_, _| {})
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HardeningObservation {
+    BeforeInspect,
+    BeforeVerify,
+}
+
+fn harden_machine_directory_observed(
+    path: &Path,
+    mut observe: impl FnMut(HardeningObservation, &Path),
+) -> Result<(), SetupError> {
+    let paths = collect_protected_tree(path, &mut observe)
         .map_err(|error| error.at_machine_path("enumerate protected ACL tree", path))?;
     let descriptor = OwnedSecurityDescriptor::from_sddl(MACHINE_TREE_SDDL)
         .map_err(|error| error.at_machine_path("build protected ACL descriptor", path))?;
@@ -59,22 +75,51 @@ pub fn harden_machine_directory(path: &Path) -> Result<(), SetupError> {
     let sids = ExpectedSids::new()
         .map_err(|error| error.at_machine_path("build protected ACL trustees", path))?;
     for entry in paths {
-        verify_protected_acl(&entry, &sids, entry == path)
-            .map_err(|error| error.at_machine_path("verify protected ACL entry", &entry))?;
+        observe(HardeningObservation::BeforeVerify, &entry);
+        if let Err(error) = verify_protected_acl(&entry, &sids, entry == path) {
+            if entry != path && setup_error_confirms_disappeared_child(&entry, &error) {
+                continue;
+            }
+            return Err(error.at_machine_path("verify protected ACL entry", &entry));
+        }
     }
     Ok(())
 }
 
-fn collect_protected_tree(root: &Path) -> Result<Vec<PathBuf>, SetupError> {
+fn collect_protected_tree(
+    root: &Path,
+    observe: &mut impl FnMut(HardeningObservation, &Path),
+) -> Result<Vec<PathBuf>, SetupError> {
     reject_reparse_ancestors(root)?;
     let mut pending = vec![root.to_owned()];
     let mut result = Vec::new();
     let mut discovered = 1usize;
     while let Some(path) = pending.pop() {
-        reject_reparse_ancestors(&path)?;
-        let metadata = std::fs::metadata(&path)?;
+        observe(HardeningObservation::BeforeInspect, &path);
+        if let Err(error) = reject_reparse_ancestors(&path) {
+            if path != root && setup_error_confirms_disappeared_child(&path, &error) {
+                continue;
+            }
+            return Err(error);
+        }
+        let metadata = match std::fs::metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if path != root && io_error_confirms_disappeared_child(&path, &error) => {
+                continue;
+            }
+            Err(error) => return Err(error.into()),
+        };
         if metadata.is_dir() {
-            for entry in std::fs::read_dir(&path)? {
+            let children = match std::fs::read_dir(&path) {
+                Ok(children) => children,
+                Err(error)
+                    if path != root && io_error_confirms_disappeared_child(&path, &error) =>
+                {
+                    continue;
+                }
+                Err(error) => return Err(error.into()),
+            };
+            for entry in children {
                 if discovered == MAX_PROTECTED_TREE_ENTRIES {
                     return Err(SetupError::Runtime(
                         "protected machine tree exceeds the fixed ACL verification bound"
@@ -88,6 +133,27 @@ fn collect_protected_tree(root: &Path) -> Result<Vec<PathBuf>, SetupError> {
         result.push(path);
     }
     Ok(result)
+}
+
+fn setup_error_confirms_disappeared_child(path: &Path, error: &SetupError) -> bool {
+    match error {
+        SetupError::Io(error) => io_error_confirms_disappeared_child(path, error),
+        _ => false,
+    }
+}
+
+fn io_error_confirms_disappeared_child(path: &Path, error: &io::Error) -> bool {
+    is_windows_not_found(error)
+        && std::fs::symlink_metadata(path)
+            .is_err_and(|probe_error| is_windows_not_found(&probe_error))
+}
+
+fn is_windows_not_found(error: &io::Error) -> bool {
+    matches!(
+        error.raw_os_error(),
+        Some(code)
+            if code == ERROR_FILE_NOT_FOUND as i32 || code == ERROR_PATH_NOT_FOUND as i32
+    )
 }
 
 fn verify_protected_acl(
@@ -350,10 +416,11 @@ mod tests {
     use crate::{FixedPayload, RuntimeInstaller};
 
     use super::{
-        ace_applies_to_current_object, harden_machine_directory, is_users_read_execute_mask,
-        verify_protected_acl, ExpectedSids, OwnedSecurityDescriptor, DACL_SECURITY_INFORMATION,
-        ERROR_SUCCESS, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, GENERIC_EXECUTE, GENERIC_READ,
-        INHERIT_ONLY_ACE, PROTECTED_DACL_SECURITY_INFORMATION, SE_FILE_OBJECT, TREE_SEC_INFO_RESET,
+        ace_applies_to_current_object, harden_machine_directory, harden_machine_directory_observed,
+        is_users_read_execute_mask, verify_protected_acl, ExpectedSids, HardeningObservation,
+        OwnedSecurityDescriptor, DACL_SECURITY_INFORMATION, ERROR_SUCCESS, FILE_GENERIC_EXECUTE,
+        FILE_GENERIC_READ, GENERIC_EXECUTE, GENERIC_READ, INHERIT_ONLY_ACE,
+        PROTECTED_DACL_SECURITY_INFORMATION, SE_FILE_OBJECT, TREE_SEC_INFO_RESET,
     };
     #[cfg(feature = "ci-test-adapter")]
     use super::{OwnedSid, ADMINISTRATORS_SID};
@@ -385,6 +452,46 @@ mod tests {
             message.contains(&missing.display().to_string()),
             "{message}"
         );
+    }
+
+    #[test]
+    fn hardening_tolerates_a_discovered_child_that_disappears_before_inspection() {
+        let directory = tempfile::tempdir().unwrap();
+        let transient = directory.path().join("profile.ini.tmp");
+        std::fs::write(&transient, b"temporary profile").unwrap();
+        let mut removed = false;
+
+        let result = harden_machine_directory_observed(directory.path(), |observation, path| {
+            if observation == HardeningObservation::BeforeInspect && path == transient {
+                std::fs::remove_file(path).unwrap();
+                removed = true;
+            }
+        });
+
+        assert!(removed, "the fixture must reproduce the metadata race");
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
+    fn hardening_tolerates_a_collected_child_that_disappears_before_acl_verification() {
+        let directory = tempfile::tempdir().unwrap();
+        let transient = directory.path().join("health.json.tmp");
+        std::fs::write(&transient, b"temporary health snapshot").unwrap();
+        let mut removed = false;
+
+        let result = harden_machine_directory_observed(directory.path(), |observation, path| {
+            if observation == HardeningObservation::BeforeVerify && path == transient {
+                apply_acl(path, "D:P(A;;FA;;;WD)");
+                std::fs::remove_file(path).unwrap();
+                removed = true;
+            }
+        });
+
+        assert!(
+            removed,
+            "the fixture must reproduce the ACL verification race"
+        );
+        assert!(result.is_ok(), "{result:?}");
     }
 
     #[test]

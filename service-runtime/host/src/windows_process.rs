@@ -40,14 +40,14 @@ impl ProcessInspector for WindowsProcessInspector {
         let session_id = process.session_id(pid)?;
         let architecture = process.architecture()?;
         let protected = process.is_protected();
-        let critical = pid == self.service_pid || process.is_critical_or_important();
+        let excluded_from_injection = pid == self.service_pid || process.must_skip_injection();
         Ok(ProcessIdentity {
             pid,
             creation_time,
             session_id,
             architecture,
             protected,
-            critical,
+            critical: excluded_from_injection,
         })
     }
 }
@@ -121,14 +121,14 @@ impl OwnedHandle {
         information.ProtectionLevel != PROTECTION_LEVEL_NONE
     }
 
-    fn is_critical_or_important(&self) -> bool {
+    fn must_skip_injection(&self) -> bool {
         let mut critical = 0;
         if unsafe { IsProcessCritical(self.0, &mut critical) } == 0 || critical != 0 {
             return true;
         }
-        self.image_name()
-            .as_deref()
-            .map_or(true, is_important_windows_process)
+        self.image_name().as_deref().map_or(true, |name| {
+            is_important_windows_process(name) || is_installer_control_process(name)
+        })
     }
 
     fn image_name(&self) -> Option<String> {
@@ -187,6 +187,22 @@ fn is_important_windows_process(name: &str) -> bool {
     )
 }
 
+fn is_installer_control_process(name: &str) -> bool {
+    name == "mactype-service-setup.exe" || is_inno_uninstaller(name)
+}
+
+fn is_inno_uninstaller(name: &str) -> bool {
+    let Some((stem, extension)) = name.rsplit_once('.') else {
+        return false;
+    };
+    if !matches!(extension, "exe" | "tmp") {
+        return false;
+    }
+    let stem = stem.strip_prefix('_').unwrap_or(stem);
+    stem.strip_prefix("unins")
+        .is_some_and(|sequence| sequence.bytes().all(|character| character.is_ascii_digit()))
+}
+
 fn last_error(code: &str, message: &str) -> StructuredServiceError {
     service_error(
         code,
@@ -219,5 +235,40 @@ mod tests {
             classify_process_architecture(IMAGE_FILE_MACHINE_UNKNOWN, IMAGE_FILE_MACHINE_ARM64)
                 .expect_err("native ARM64 has no fixed compatible helper");
         assert_eq!(error.code, "process-architecture-unsupported");
+    }
+
+    #[test]
+    fn installer_control_processes_are_never_injection_targets() {
+        for name in [
+            "mactype-service-setup.exe",
+            "unins000.exe",
+            "unins000.tmp",
+            "_unins.tmp",
+            "_unins001.exe",
+            "_unins001.tmp",
+        ] {
+            assert!(
+                is_installer_control_process(name),
+                "installer control process was eligible for injection: {name}"
+            );
+            assert!(
+                !is_important_windows_process(name),
+                "installer control process leaked into the Windows system-process predicate: {name}"
+            );
+        }
+
+        for name in [
+            "mactype-service-setup.exe.disabled",
+            "uninstall-helper.exe",
+            "unison.exe",
+        ] {
+            assert!(
+                !is_installer_control_process(name),
+                "unrelated process was excluded by an over-broad name rule: {name}"
+            );
+        }
+
+        assert!(is_important_windows_process("services.exe"));
+        assert!(!is_installer_control_process("services.exe"));
     }
 }

@@ -120,6 +120,44 @@ fn legacy_east_asian_profile_bytes_remain_opaque_when_ini_structure_is_valid() {
 }
 
 #[test]
+fn mactype_list_sections_accept_bare_entries_without_weakening_other_sections() {
+    for section in [
+        "Exclude",
+        "Include",
+        "ExcludeModule",
+        "IncludeModule",
+        "UnloadDLL",
+        "ExcludeSub",
+    ] {
+        let profile = format!("[General]\r\nGammaValue=1.0\r\n[{section}]\r\nfontview.exe\r\n");
+        let mut catalog = ProfileCatalog::new();
+        catalog
+            .publish_machine_profile(profile.as_bytes(), metadata(section))
+            .unwrap();
+    }
+
+    for profile in [
+        b"[General]\r\nGammaValue=1.0\r\nfontview.exe\r\n".as_slice(),
+        b"[General]\r\nGammaValue=1.0\r\n[Unknown]\r\nfontview.exe\r\n".as_slice(),
+    ] {
+        let mut catalog = ProfileCatalog::new();
+        assert_eq!(
+            catalog.publish_machine_profile(profile, metadata("invalid bare entry")),
+            Err(ProfileError::InvalidIni)
+        );
+    }
+}
+
+#[test]
+fn bundled_default_profile_satisfies_the_service_profile_contract() {
+    let profile = include_bytes!("../../../distribution/ini/Default.ini");
+    let mut catalog = ProfileCatalog::new();
+    catalog
+        .publish_machine_profile(profile, metadata("bundled default"))
+        .unwrap();
+}
+
+#[test]
 fn utf8_bom_is_ignored_for_structure_but_preserved_in_generation_bytes() {
     let plain = profile("1.25");
     let mut with_bom = vec![0xef, 0xbb, 0xbf];

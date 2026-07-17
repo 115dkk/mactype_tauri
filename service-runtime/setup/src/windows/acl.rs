@@ -329,8 +329,11 @@ fn wide_path(path: &Path) -> Vec<u16> {
 
 #[cfg(test)]
 mod tests {
+    use mactype_service_contract::BrokerCommand;
     use std::path::Path;
     use windows_sys::Win32::Security::{CONTAINER_INHERIT_ACE, INHERITED_ACE, OBJECT_INHERIT_ACE};
+
+    use crate::windows::broker::prepare_machine_storage_for_command;
 
     use super::{
         ace_applies_to_current_object, harden_machine_directory, is_users_read_execute_mask,
@@ -402,6 +405,25 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn repair_preflight_removes_users_modify_from_a_runtime_file_before_recovery() {
+        let directory = tempfile::tempdir().unwrap();
+        let runtime = directory.path().join("bin").join("0.2.0");
+        std::fs::create_dir_all(&runtime).unwrap();
+        let service = runtime.join("mactype-service.exe");
+        std::fs::write(&service, b"service").unwrap();
+        harden_machine_directory(directory.path()).unwrap();
+        apply_acl(&service, "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x001301BF;;;BU)");
+        let sids = ExpectedSids::new().unwrap();
+        verify_protected_acl(&service, &sids, false)
+            .expect_err("the regression fixture must grant Users Modify");
+
+        prepare_machine_storage_for_command(BrokerCommand::Repair, directory.path()).unwrap();
+
+        verify_protected_acl(directory.path(), &sids, true).unwrap();
+        verify_protected_acl(&service, &sids, false).unwrap();
     }
 
     #[test]

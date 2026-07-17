@@ -17,6 +17,7 @@ pub(super) fn run(
 ) -> Result<String, SetupError> {
     let _setup_lock = machine_lock::MachineSetupLock::acquire()?;
     let paths = known_folders::machine_paths()?;
+    prepare_machine_storage_for_command(command, paths.service_root())?;
     let manager = scm::ServiceManager::connect(paths.service_root().to_owned())?;
     RuntimeInstaller::new(paths.clone()).recover_interrupted_activation()?;
     ProfileStore::new(paths.clone()).recover_interrupted_activation()?;
@@ -36,6 +37,16 @@ pub(super) fn run(
             "legacy migration requires the separately verified migration workflow".to_owned(),
         )),
     }
+}
+
+pub(super) fn prepare_machine_storage_for_command(
+    command: BrokerCommand,
+    service_root: &std::path::Path,
+) -> Result<(), SetupError> {
+    if command == BrokerCommand::Repair {
+        super::acl::harden_machine_directory(service_root)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

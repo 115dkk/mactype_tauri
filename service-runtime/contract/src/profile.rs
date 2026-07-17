@@ -220,6 +220,7 @@ fn validate_profile(bytes: &[u8]) -> Result<(), ProfileError> {
 fn validate_ini_structure(bytes: &[u8]) -> Result<(), ProfileError> {
     let mut saw_section = false;
     let mut saw_assignment = false;
+    let mut accepts_bare_entries = false;
 
     for raw_line in bytes.split(|byte| *byte == b'\n') {
         let line = trim_ascii(raw_line);
@@ -228,9 +229,13 @@ fn validate_ini_structure(bytes: &[u8]) -> Result<(), ProfileError> {
         }
         if line.len() >= 3 && line[0] == b'[' && line[line.len() - 1] == b']' {
             saw_section = true;
+            accepts_bare_entries = is_mactype_list_section(line);
             continue;
         }
         let Some(separator) = line.iter().position(|byte| *byte == b'=') else {
+            if saw_section && accepts_bare_entries {
+                continue;
+            }
             return Err(ProfileError::InvalidIni);
         };
         if !saw_section || trim_ascii(&line[..separator]).is_empty() {
@@ -244,6 +249,20 @@ fn validate_ini_structure(bytes: &[u8]) -> Result<(), ProfileError> {
     } else {
         Err(ProfileError::InvalidIni)
     }
+}
+
+fn is_mactype_list_section(line: &[u8]) -> bool {
+    let name = &line[1..line.len() - 1];
+    [
+        b"Exclude".as_slice(),
+        b"Include".as_slice(),
+        b"ExcludeModule".as_slice(),
+        b"IncludeModule".as_slice(),
+        b"UnloadDLL".as_slice(),
+        b"ExcludeSub".as_slice(),
+    ]
+    .iter()
+    .any(|candidate| name.eq_ignore_ascii_case(candidate))
 }
 
 fn trim_ascii(mut bytes: &[u8]) -> &[u8] {

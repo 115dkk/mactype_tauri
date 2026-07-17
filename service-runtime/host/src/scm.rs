@@ -16,6 +16,7 @@ use mactype_service_contract::{
 use windows_sys::Win32::System::Services::{StartServiceCtrlDispatcherW, SERVICE_TABLE_ENTRYW};
 
 use crate::named_pipe::NamedPipeHealthPublisher;
+use crate::service_version::service_runtime_version;
 use crate::{
     CompositeHealthPublisher, FileHealthPublisher, HealthPublisher, HostError, ServiceRuntime,
     ServiceStatus, StatusReporter, WindowsOpenServiceInitializer,
@@ -94,7 +95,7 @@ fn run_registered_service(
             }
         })?;
     let composite = CompositeHealthPublisher::new(&health, persisted);
-    ServiceRuntime::new(env!("CARGO_PKG_VERSION"))
+    ServiceRuntime::new(service_runtime_version())
         .run(&reporter, &composite, &initializer, &stop)
         .map_err(structured_host_error)
 }
@@ -130,7 +131,7 @@ fn report_terminal_failure(
 fn failed_health_report(code: &str, message: &str, win32_error: Option<u32>) -> HealthReport {
     HealthReport {
         protocol_version: HEALTH_PROTOCOL_VERSION,
-        service_version: env!("CARGO_PKG_VERSION").to_owned(),
+        service_version: service_runtime_version().to_owned(),
         health: HealthState::Failed,
         active_profile_digest: None,
         readiness: ReadinessReport::initializing(),

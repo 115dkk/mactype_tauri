@@ -24,6 +24,8 @@ use crate::storage::read_bounded_regular_file;
 use crate::SetupError;
 
 const MAX_PERSISTED_HEALTH_BYTES: u64 = 16 * 1024;
+const RECONFIGURE_ACCESS: u32 =
+    SERVICE_CHANGE_CONFIG | SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG | SERVICE_START;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AbsenceObservation {
@@ -98,7 +100,7 @@ impl ServiceManager {
     pub fn reconfigure(&self, service_binary: &Path) -> Result<(), SetupError> {
         validate_service_binary(&self.protected_root, service_binary)?;
         let service = self
-            .open_service(SERVICE_CHANGE_CONFIG | SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG)?
+            .open_service(RECONFIGURE_ACCESS)?
             .ok_or_else(|| SetupError::Runtime("the open service is not installed".to_owned()))?;
         self.ensure_owned(&service)?;
         let image_path = wide(&quoted_image_path(service_binary)?);
@@ -121,7 +123,9 @@ impl ServiceManager {
         {
             return Err(SetupError::Io(io::Error::last_os_error()));
         }
-        configure_metadata(service.0)
+        configure_metadata(service.0).map_err(|error| {
+            error.at_machine_path("configure service recovery metadata", service_binary)
+        })
     }
 
     pub fn start_and_wait_ready(&self) -> Result<(), SetupError> {
@@ -327,13 +331,22 @@ mod tests {
         HEALTH_PROTOCOL_VERSION,
     };
     use windows_sys::Win32::System::Services::{
-        SERVICE_RUNNING, SERVICE_STATUS_PROCESS, SERVICE_STOPPED,
+        SERVICE_RUNNING, SERVICE_START, SERVICE_STATUS_PROCESS, SERVICE_STOPPED,
     };
 
     use super::{
         absence_poll_action, stopped_before_expected_state_error, AbsenceObservation,
-        AbsencePollAction,
+        AbsencePollAction, RECONFIGURE_ACCESS,
     };
+
+    #[test]
+    fn service_reconfiguration_can_apply_restart_recovery_metadata() {
+        assert_ne!(
+            RECONFIGURE_ACCESS & SERVICE_START,
+            0,
+            "SC_ACTION_RESTART metadata requires a service handle with SERVICE_START"
+        );
+    }
 
     #[test]
     fn service_removal_waits_through_delete_pending_and_times_out_explicitly() {

@@ -4,6 +4,8 @@ param()
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $builder = Get-Content -LiteralPath (Join-Path $root '.github\scripts\Build-ServiceRuntime.ps1') -Raw
+$hostBuilder = Get-Content -LiteralPath (Join-Path $root 'service-runtime\host\build.rs') -Raw
+$hostScm = Get-Content -LiteralPath (Join-Path $root 'service-runtime\host\src\scm.rs') -Raw
 $workflow = Get-Content -LiteralPath (Join-Path $root '.github\workflows\build.yml') -Raw
 
 foreach ($token in @(
@@ -15,6 +17,32 @@ foreach ($token in @(
     if (-not $builder.Contains($token)) {
         throw "Service runtime builder does not preserve immutable SemVer generations safely: $token"
     }
+}
+
+foreach ($token in @(
+    'MACTYPE_SERVICE_RUNTIME_VERSION',
+    '$env:MACTYPE_SERVICE_RUNTIME_VERSION = $Version',
+    'finally'
+)) {
+    if (-not $builder.Contains($token)) {
+        throw "Service runtime builder does not bind the host binary to the payload generation: $token"
+    }
+}
+
+foreach ($token in @(
+    'cargo:rerun-if-env-changed=MACTYPE_SERVICE_RUNTIME_VERSION',
+    'MACTYPE_COMPILED_SERVICE_RUNTIME_VERSION',
+    'CARGO_PKG_VERSION',
+    '!matches!(version, "." | "..")'
+)) {
+    if (-not $hostBuilder.Contains($token)) {
+        throw "Service host build contract does not preserve the requested generation or development fallback: $token"
+    }
+}
+
+if (($hostScm | Select-String -Pattern 'env!\("CARGO_PKG_VERSION"\)' -AllMatches).Matches.Count -ne 0 -or
+    ($hostScm | Select-String -Pattern 'service_runtime_version\(\)' -AllMatches).Matches.Count -lt 2) {
+    throw 'Service health does not consistently report the compiled payload generation.'
 }
 
 foreach ($token in @(

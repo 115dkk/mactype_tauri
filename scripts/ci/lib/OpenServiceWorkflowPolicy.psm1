@@ -49,12 +49,30 @@ function Test-OpenServiceWorkflowPolicy {
     $hostedLifecyclePath = Join-Path $Root 'scripts\ci\Test-OpenServiceWindows.ps1'
     $null = Test-RequiredTokens -Failures $failures -Path $hostedLifecyclePath `
         -MissingMessage 'scripts/ci/Test-OpenServiceWindows.ps1 is missing.' `
-        -TokenMessage "hosted lifecycle verification is missing telemetry-binding token '{0}'." `
+        -TokenMessage "hosted lifecycle verification is missing required contract token '{0}'." `
         -Tokens @(
             'Assert-GenerationBoundMarkerTelemetry', 'runtimeGenerationId',
             'profileDigest', 'success.pid', 'success.sessionId',
-            'x86 and x64 marker telemetry is not bound to the same runtime generation'
+            'x86 and x64 marker telemetry is not bound to the same runtime generation',
+            'OpenServiceAclFixture.psm1', 'Invoke-OpenServiceAclRepairFixture',
+            '-RepairContext $stagedSetup', 'param($setupExecutable)'
         )
+
+    $aclFixtureModulePath = Join-Path $Root 'scripts\ci\lib\OpenServiceAclFixture.psm1'
+    $null = Test-RequiredTokens -Failures $failures -Path $aclFixtureModulePath `
+        -MissingMessage 'scripts/ci/lib/OpenServiceAclFixture.psm1 is missing.' `
+        -TokenMessage "exact ACL repair diagnostics are missing required token '{0}'." `
+        -Tokens @(
+            'S-1-5-32-545', 'exact-users-modify-repair',
+            'post-repair-verification', 'targetAclSddl', 'innerError',
+            'scQueryex', 'scQfailure', "-Name 'icacls'", 'RepairContext'
+        )
+
+    $supportTestPath = Join-Path $Root 'scripts\ci\Test-OpenServiceTestSupport.ps1'
+    $null = Test-RequiredTokens -Failures $failures -Path $supportTestPath `
+        -MissingMessage 'scripts/ci/Test-OpenServiceTestSupport.ps1 is missing.' `
+        -TokenMessage "open-service CI support tests do not execute required test '{0}'." `
+        -Tokens @('Test-OpenServiceAclFixture.ps1')
 
     $lintWorkflowPath = Join-Path $Root '.github\workflows\lint.yml'
     $null = Test-RequiredTokens -Failures $failures -Path $lintWorkflowPath `

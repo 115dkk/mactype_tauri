@@ -20,6 +20,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\OpenServiceTestSupport.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'lib\OpenServiceAclFixture.psm1') -Force
 
 $serviceName = 'MacTypeControlCenterTest'
 $productionServiceName = 'MacTypeControlCenter'
@@ -240,10 +241,18 @@ try {
         }
     }
     $poisonedAclPath = Join-Path $installedRuntimeRoot 'mactype-service.exe'
-    & "$env:SystemRoot\System32\icacls.exe" $poisonedAclPath '/grant' '*S-1-5-32-545:(M)' | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Could not create the explicit Users:M ACL regression fixture.' }
-    $null = Invoke-OpenServiceSetupLogged -SetupExecutable $stagedSetup -Verb 'repair'
+    $null = Invoke-OpenServiceAclRepairFixture `
+        -Path $poisonedAclPath `
+        -ServiceName $serviceName `
+        -RepairContext $stagedSetup `
+        -RepairAction {
+            param($setupExecutable)
+
+            $null = Invoke-OpenServiceSetupLogged `
+                -SetupExecutable $setupExecutable -Verb 'repair'
+        }
     Assert-ProtectedTree $machineRoot
+    Write-Host 'Exact Users:M ACL poison-to-repair regression passed.'
     $dependencies = @((Get-Service -Name $serviceName).ServicesDependedOn | Select-Object -ExpandProperty Name)
     if ($dependencies -contains 'winmgmt') { throw 'Open service copied the unproven legacy winmgmt dependency.' }
     Assert-ProtectedTree $machineRoot

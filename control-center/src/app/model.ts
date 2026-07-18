@@ -27,6 +27,8 @@ export interface ExecutionStatus {
   systemService: SystemServiceStatus;
   legacyMacTray: LegacyMacTrayStatus | null;
   registryModeDetected: boolean;
+  /** A legacy MacTray tray-mode process is running in an interactive session. */
+  legacyTrayDetected: boolean;
   /** Backend-authoritative capability for publishing and applying a profile. */
   systemModesSupported: boolean;
   systemInjectionActive: boolean;

@@ -23,6 +23,10 @@ impl crate::machine_integration::MachineBackend for OpenServicePublishBackend {
         Ok(crate::machine_integration::registry_conflict_detected())
     }
 
+    fn legacy_tray_conflict(&mut self) -> Result<bool, String> {
+        Ok(crate::machine_integration::legacy_tray::legacy_tray_conflict_detected())
+    }
+
     fn execute(
         &mut self,
         action: crate::machine_integration::MachineAction,
@@ -35,6 +39,12 @@ impl crate::machine_integration::MachineBackend for OpenServicePublishBackend {
 pub(super) fn publish_and_activate(profile: &[u8]) -> Result<(), String> {
     if crate::machine_integration::registry_conflict_detected() {
         return Err("AppInit conflicts block machine integration changes".to_owned());
+    }
+    if crate::machine_integration::legacy_tray::legacy_tray_conflict_detected() {
+        return Err(
+            "the legacy MacTray tray mode is running and blocks machine integration changes"
+                .to_owned(),
+        );
     }
     crate::machine_integration::publish_profile_transaction_with(
         &mut OpenServicePublishBackend,

@@ -16,6 +16,7 @@ export interface SystemInjectionPrimaryAction {
 export interface ExecutionViewModel {
   status: ExecutionStatus | null;
   profileMatches: boolean;
+  legacyTrayBlocked: boolean;
   serviceNeedsUpgrade: boolean;
   serviceNeedsRepair: boolean;
   serviceBinaryPath: string | null;
@@ -120,6 +121,7 @@ export function projectExecutionView(
   const service = status?.systemService;
   const legacy = status?.legacyMacTray;
   const idle = serviceBusy === null;
+  const legacyTrayBlocked = Boolean(status?.legacyTrayDetected);
   const profileMatches = Boolean(
     status?.expectedProfileDigest
       && service?.activeProfileDigest === status.expectedProfileDigest,
@@ -128,6 +130,7 @@ export function projectExecutionView(
   return {
     status,
     profileMatches,
+    legacyTrayBlocked,
     serviceNeedsUpgrade: service?.installation === "outdated",
     serviceNeedsRepair: service?.installation === "current"
       && (service.health === "degraded" || service.health === "failed"),
@@ -138,7 +141,7 @@ export function projectExecutionView(
     canUpgrade: Boolean(idle && service?.canUpgrade),
     canRepair: Boolean(idle && service?.canRepair),
     canRemove: Boolean(idle && service?.canRemove),
-    canMigrateLegacy: Boolean(idle && legacy?.migrationAvailable),
-    canRemoveLegacy: Boolean(idle && legacy?.canRemove),
+    canMigrateLegacy: Boolean(idle && legacy?.migrationAvailable && !legacyTrayBlocked),
+    canRemoveLegacy: Boolean(idle && legacy?.canRemove && !legacyTrayBlocked),
   };
 }

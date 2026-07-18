@@ -151,37 +151,7 @@ pub(super) fn observe() -> LegacyTrayStartupState {
         recorded_at,
     };
     let mut observations = Vec::new();
-    let registry_sources = [
-        RegistrySource {
-            root: HKEY_CURRENT_USER,
-            hive: "HKCU",
-            view: 32,
-            access_view: KEY_WOW64_32KEY,
-            source: LegacyTrayStartupSource::CurrentUserRun32,
-        },
-        RegistrySource {
-            root: HKEY_CURRENT_USER,
-            hive: "HKCU",
-            view: 64,
-            access_view: KEY_WOW64_64KEY,
-            source: LegacyTrayStartupSource::CurrentUserRun64,
-        },
-        RegistrySource {
-            root: HKEY_LOCAL_MACHINE,
-            hive: "HKLM",
-            view: 32,
-            access_view: KEY_WOW64_32KEY,
-            source: LegacyTrayStartupSource::LocalMachineRun32,
-        },
-        RegistrySource {
-            root: HKEY_LOCAL_MACHINE,
-            hive: "HKLM",
-            view: 64,
-            access_view: KEY_WOW64_64KEY,
-            source: LegacyTrayStartupSource::LocalMachineRun64,
-        },
-    ];
-    for source in registry_sources {
+    for source in registry_sources_for_observation() {
         match observe_registry_source(&source, &registry_context) {
             Ok(found) => observations.extend(found),
             Err(error) => observations.push(LegacyTrayStartupObservation::Unknown(error)),
@@ -248,40 +218,51 @@ pub(super) fn observe_owned(
     Ok(owned)
 }
 
-fn registry_sources(scope: LegacyTrayStartupScope) -> [RegistrySource; 2] {
+// `HKEY_CURRENT_USER\...\CurrentVersion\Run` is not subject to WOW64 registry
+// redirection (only `HKCU\Software\Classes` is), so its 32-bit and 64-bit views
+// alias to one physical key. Probing both would observe the same value twice and
+// then break exact removal — the second delete finds the value already gone.
+// `HKEY_LOCAL_MACHINE\...\Run` IS redirected, so its two views are distinct
+// physical keys and both must be probed.
+fn current_user_run_source() -> RegistrySource {
+    RegistrySource {
+        root: HKEY_CURRENT_USER,
+        hive: "HKCU",
+        view: 64,
+        access_view: KEY_WOW64_64KEY,
+        source: LegacyTrayStartupSource::CurrentUserRun64,
+    }
+}
+
+fn local_machine_run_sources() -> [RegistrySource; 2] {
+    [
+        RegistrySource {
+            root: HKEY_LOCAL_MACHINE,
+            hive: "HKLM",
+            view: 32,
+            access_view: KEY_WOW64_32KEY,
+            source: LegacyTrayStartupSource::LocalMachineRun32,
+        },
+        RegistrySource {
+            root: HKEY_LOCAL_MACHINE,
+            hive: "HKLM",
+            view: 64,
+            access_view: KEY_WOW64_64KEY,
+            source: LegacyTrayStartupSource::LocalMachineRun64,
+        },
+    ]
+}
+
+fn registry_sources_for_observation() -> Vec<RegistrySource> {
+    let mut sources = vec![current_user_run_source()];
+    sources.extend(local_machine_run_sources());
+    sources
+}
+
+fn registry_sources(scope: LegacyTrayStartupScope) -> Vec<RegistrySource> {
     match scope {
-        LegacyTrayStartupScope::CurrentUser => [
-            RegistrySource {
-                root: HKEY_CURRENT_USER,
-                hive: "HKCU",
-                view: 32,
-                access_view: KEY_WOW64_32KEY,
-                source: LegacyTrayStartupSource::CurrentUserRun32,
-            },
-            RegistrySource {
-                root: HKEY_CURRENT_USER,
-                hive: "HKCU",
-                view: 64,
-                access_view: KEY_WOW64_64KEY,
-                source: LegacyTrayStartupSource::CurrentUserRun64,
-            },
-        ],
-        LegacyTrayStartupScope::LocalMachine => [
-            RegistrySource {
-                root: HKEY_LOCAL_MACHINE,
-                hive: "HKLM",
-                view: 32,
-                access_view: KEY_WOW64_32KEY,
-                source: LegacyTrayStartupSource::LocalMachineRun32,
-            },
-            RegistrySource {
-                root: HKEY_LOCAL_MACHINE,
-                hive: "HKLM",
-                view: 64,
-                access_view: KEY_WOW64_64KEY,
-                source: LegacyTrayStartupSource::LocalMachineRun64,
-            },
-        ],
+        LegacyTrayStartupScope::CurrentUser => vec![current_user_run_source()],
+        LegacyTrayStartupScope::LocalMachine => local_machine_run_sources().into_iter().collect(),
     }
 }
 

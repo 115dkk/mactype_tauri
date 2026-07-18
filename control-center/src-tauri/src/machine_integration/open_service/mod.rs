@@ -3,6 +3,7 @@ mod identity;
 mod legacy_status;
 mod request;
 mod runtime;
+mod startup_lifecycle;
 
 #[cfg(test)]
 use broker::setup_path_for_trusted_layout;
@@ -29,6 +30,7 @@ use runtime::{
     bundled_service_binary, parse_bundled_runtime_manifest, BundledRuntimeManifest,
     MAX_BUNDLED_MANIFEST_BYTES,
 };
+use startup_lifecycle::{finish_action_with_startup_receipts, StartupReceiptRestorer};
 
 use crate::service_contract::{
     HealthState, InstallationState, RuntimeState, ServiceBackend, SystemServiceStatus,
@@ -54,14 +56,38 @@ pub(crate) fn run_action(
     {
         return Err("the service action has an invalid profile payload".to_owned());
     }
-    #[cfg(windows)]
-    {
-        windows::run_elevated(action, profile)
+    let result = {
+        #[cfg(windows)]
+        {
+            windows::run_elevated(action, profile)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = profile;
+            Err("system service control is available only on Windows".to_owned())
+        }
+    };
+    finish_action_with_startup_receipts(&mut SystemStartupReceiptRestorer, action, result)
+}
+
+struct SystemStartupReceiptRestorer;
+
+impl StartupReceiptRestorer for SystemStartupReceiptRestorer {
+    fn restore_local_machine(&mut self) -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            windows::run_elevated(SystemServiceAction::RestoreLegacyTrayAutostart, None)
+        }
+        #[cfg(not(windows))]
+        {
+            Err("local-machine startup restoration is available only on Windows".to_owned())
+        }
     }
-    #[cfg(not(windows))]
-    {
-        let _ = (action, profile);
-        Err("system service control is available only on Windows".to_owned())
+
+    fn restore_current_user(&mut self) -> Result<(), String> {
+        super::legacy_migration::restore_startup_scope(
+            super::legacy_migration::StartupReceiptScope::CurrentUser,
+        )
     }
 }
 

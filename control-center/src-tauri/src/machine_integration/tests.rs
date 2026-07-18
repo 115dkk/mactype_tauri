@@ -8,6 +8,7 @@ use std::collections::VecDeque;
 struct FakeMachineBackend {
     calls: Vec<&'static str>,
     status: Option<SystemServiceStatus>,
+    legacy_tray: Option<LegacyTrayStatus>,
     executed: Option<(MachineAction, Vec<u8>)>,
     appinit_conflict: bool,
     appinit_error: Option<String>,
@@ -32,6 +33,13 @@ impl MachineBackend for FakeMachineBackend {
             None => Ok(self.appinit_conflict),
         }
     }
+
+    fn legacy_tray_status(&mut self) -> LegacyTrayStatus {
+        self.calls.push("legacy-tray");
+        self.legacy_tray
+            .clone()
+            .unwrap_or_else(LegacyTrayStatus::clear)
+    }
 }
 
 fn ready_auto_service() -> SystemServiceStatus {
@@ -50,6 +58,27 @@ fn ready_auto_service() -> SystemServiceStatus {
         can_repair: true,
         can_upgrade: false,
     }
+}
+
+#[test]
+fn trusted_current_session_legacy_tray_blocks_a_machine_change_before_dispatch() {
+    let mut backend = FakeMachineBackend {
+        status: Some(ready_auto_service()),
+        legacy_tray: Some(LegacyTrayStatus::from_states(
+            LegacyTrayProcessState::TrustedCurrentSession {
+                pid: 4242,
+                creation_time: 101,
+                path: std::path::PathBuf::from(r"C:\Program Files\MacType\MacTray.exe"),
+            },
+            LegacyTrayStartupState::Absent,
+        )),
+        ..Default::default()
+    };
+
+    let error = execute_machine_action_with(&mut backend, MachineAction::Repair, None).unwrap_err();
+
+    assert!(error.contains("legacy MacTray tray mode"), "{error}");
+    assert!(backend.executed.is_none());
 }
 
 #[test]
@@ -83,7 +112,10 @@ fn explicit_tray_apply_is_the_only_tray_path_that_publishes_profile_bytes() {
 
     tray_apply_with(&mut backend, false, profile).unwrap();
 
-    assert_eq!(backend.calls, ["appinit", "status", "execute"]);
+    assert_eq!(
+        backend.calls,
+        ["legacy-tray", "appinit", "status", "execute"]
+    );
     assert_eq!(
         backend.executed,
         Some((MachineAction::PublishProfile, profile.to_vec()))
@@ -121,7 +153,7 @@ fn unsafe_machine_state_is_rejected_before_dispatch_without_retry() {
         error.contains("foreign") || error.contains("unsafe"),
         "{error}"
     );
-    assert_eq!(foreign.calls, ["appinit", "status"]);
+    assert_eq!(foreign.calls, ["legacy-tray", "appinit", "status"]);
 
     let mut appinit = FakeMachineBackend {
         status: Some(ready_auto_service()),
@@ -222,13 +254,17 @@ fn verified_stop_does_not_depend_on_reading_appinit_registry_state() {
     let error = execute_machine_action_with(&mut start, MachineAction::Start, None).unwrap_err();
 
     assert!(error.contains("registry unavailable"), "{error}");
-    assert_eq!(start.calls, ["appinit"]);
+    assert_eq!(start.calls, ["legacy-tray", "appinit"]);
     assert!(start.executed.is_none());
 }
 
 #[test]
 fn appinit_status_projects_only_the_verified_stop_capability() {
-    let projected = project_new_service_capabilities(ready_auto_service(), true);
+    let projected = project_new_service_capabilities(
+        ready_auto_service(),
+        true,
+        LegacyTrayConflictState::Clear,
+    );
 
     assert!(!projected.can_install);
     assert!(!projected.can_remove);
@@ -239,12 +275,13 @@ fn appinit_status_projects_only_the_verified_stop_capability() {
 
     let mut foreign = ready_auto_service();
     foreign.backend = ServiceBackend::Foreign;
-    let projected = project_new_service_capabilities(foreign, true);
+    let projected = project_new_service_capabilities(foreign, true, LegacyTrayConflictState::Clear);
     assert!(!projected.can_stop);
 
     let mut not_authorized = ready_auto_service();
     not_authorized.can_stop = false;
-    let projected = project_new_service_capabilities(not_authorized, true);
+    let projected =
+        project_new_service_capabilities(not_authorized, true, LegacyTrayConflictState::Clear);
     assert!(!projected.can_stop);
 }
 
@@ -255,14 +292,42 @@ fn registry_conflict_never_claims_verified_system_injection() {
     assert!(project_system_injection_active(
         &service,
         false,
+        LegacyTrayConflictState::Clear,
         Some("sha256:active")
     ));
     assert!(!project_system_injection_active(
         &service,
         true,
+        LegacyTrayConflictState::Clear,
         Some("sha256:active")
     ));
-    assert!(project_new_service_capabilities(service, true).can_stop);
+    assert!(
+        project_new_service_capabilities(service, true, LegacyTrayConflictState::Clear,).can_stop
+    );
+}
+
+#[test]
+fn legacy_tray_detected_or_unknown_projects_only_verified_stop_and_never_active() {
+    for conflict in [
+        LegacyTrayConflictState::Detected,
+        LegacyTrayConflictState::Unknown,
+    ] {
+        let service = ready_auto_service();
+        let projected = project_new_service_capabilities(service.clone(), false, conflict);
+
+        assert!(!projected.can_install);
+        assert!(!projected.can_remove);
+        assert!(!projected.can_start);
+        assert!(projected.can_stop);
+        assert!(!projected.can_repair);
+        assert!(!projected.can_upgrade);
+        assert!(!project_system_injection_active(
+            &service,
+            false,
+            conflict,
+            Some("sha256:active"),
+        ));
+    }
 }
 
 #[test]
@@ -290,6 +355,10 @@ fn publish_profile_orders_running_stopped_and_absent_service_activation() {
     impl MachineBackend for PublishBackend {
         fn new_service_status(&mut self) -> SystemServiceStatus {
             self.states.pop_front().expect("test service state")
+        }
+
+        fn legacy_tray_status(&mut self) -> LegacyTrayStatus {
+            LegacyTrayStatus::clear()
         }
 
         fn appinit_conflict(&mut self) -> Result<bool, String> {
@@ -373,6 +442,10 @@ impl MachineBackend for FailingPublishBackend {
         self.states.pop_front().expect("test service state")
     }
 
+    fn legacy_tray_status(&mut self) -> LegacyTrayStatus {
+        LegacyTrayStatus::clear()
+    }
+
     fn appinit_conflict(&mut self) -> Result<bool, String> {
         Ok(false)
     }
@@ -447,4 +520,160 @@ fn activation_failure_reports_every_failed_rollback_step() {
             MachineAction::Start,
         ]
     );
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StartupCoordinationEvent {
+    Observe,
+    DisableCurrentUser,
+    DisableLocalMachine,
+    RestoreLocalMachine,
+    RestoreCurrentUser,
+}
+
+struct RecordingStartupCoordinator {
+    statuses: std::collections::VecDeque<LegacyTrayStatus>,
+    events: Vec<StartupCoordinationEvent>,
+    machine_disable_error: Option<String>,
+}
+
+impl LegacyTrayStartupCoordinator for RecordingStartupCoordinator {
+    fn observe_status(&mut self) -> LegacyTrayStatus {
+        self.events.push(StartupCoordinationEvent::Observe);
+        self.statuses
+            .pop_front()
+            .expect("the startup coordinator observed too many times")
+    }
+
+    fn disable_current_user(&mut self) -> Result<(), String> {
+        self.events
+            .push(StartupCoordinationEvent::DisableCurrentUser);
+        Ok(())
+    }
+
+    fn disable_local_machine(&mut self) -> Result<(), String> {
+        self.events
+            .push(StartupCoordinationEvent::DisableLocalMachine);
+        self.machine_disable_error.take().map_or(Ok(()), Err)
+    }
+
+    fn restore_local_machine(&mut self) -> Result<(), String> {
+        self.events
+            .push(StartupCoordinationEvent::RestoreLocalMachine);
+        Ok(())
+    }
+
+    fn restore_current_user(&mut self) -> Result<(), String> {
+        self.events
+            .push(StartupCoordinationEvent::RestoreCurrentUser);
+        Ok(())
+    }
+}
+
+fn detected_startup_status() -> LegacyTrayStatus {
+    LegacyTrayStatus::from_states(
+        LegacyTrayProcessState::Absent,
+        LegacyTrayStartupState::Detected {
+            entries: vec![crate::machine_integration::legacy_mactray::LegacyTrayStartupEntry {
+                source_kind:
+                    crate::machine_integration::legacy_mactray::LegacyTrayStartupSource::CurrentUserRun64,
+                display_name: "MacTray".to_owned(),
+                target_path: std::path::PathBuf::from(
+                    r"C:\Program Files\MacType\MacTray.exe",
+                ),
+            }],
+        },
+    )
+}
+
+#[test]
+fn consented_startup_disable_rechecks_the_whole_state_after_both_jurisdictions() {
+    let mut backend = RecordingStartupCoordinator {
+        statuses: [detected_startup_status(), LegacyTrayStatus::clear()].into(),
+        events: Vec::new(),
+        machine_disable_error: None,
+    };
+
+    disable_legacy_tray_startup_with(&mut backend).unwrap();
+    assert_eq!(
+        backend.events,
+        [
+            StartupCoordinationEvent::Observe,
+            StartupCoordinationEvent::DisableCurrentUser,
+            StartupCoordinationEvent::DisableLocalMachine,
+            StartupCoordinationEvent::Observe,
+        ]
+    );
+}
+
+#[test]
+fn machine_startup_disable_failure_restores_the_current_user_receipt() {
+    let mut backend = RecordingStartupCoordinator {
+        statuses: [detected_startup_status()].into(),
+        events: Vec::new(),
+        machine_disable_error: Some("simulated machine failure".to_owned()),
+    };
+
+    assert!(disable_legacy_tray_startup_with(&mut backend).is_err());
+    assert_eq!(
+        backend.events,
+        [
+            StartupCoordinationEvent::Observe,
+            StartupCoordinationEvent::DisableCurrentUser,
+            StartupCoordinationEvent::DisableLocalMachine,
+            StartupCoordinationEvent::RestoreCurrentUser,
+        ]
+    );
+}
+
+#[test]
+fn failed_final_recheck_restores_machine_then_user_autostart() {
+    let unknown = LegacyTrayStatus::from_states(
+        LegacyTrayProcessState::Absent,
+        LegacyTrayStartupState::Unknown {
+            error: mactype_service_contract::StructuredServiceError {
+                code: "query-failed".to_owned(),
+                message: "simulated".to_owned(),
+                win32_error: Some(5),
+            },
+        },
+    );
+    let mut backend = RecordingStartupCoordinator {
+        statuses: [detected_startup_status(), unknown].into(),
+        events: Vec::new(),
+        machine_disable_error: None,
+    };
+
+    assert!(disable_legacy_tray_startup_with(&mut backend).is_err());
+    assert_eq!(
+        backend.events,
+        [
+            StartupCoordinationEvent::Observe,
+            StartupCoordinationEvent::DisableCurrentUser,
+            StartupCoordinationEvent::DisableLocalMachine,
+            StartupCoordinationEvent::Observe,
+            StartupCoordinationEvent::RestoreLocalMachine,
+            StartupCoordinationEvent::RestoreCurrentUser,
+        ]
+    );
+}
+
+#[test]
+fn startup_disable_never_mutates_when_a_tray_process_is_running() {
+    let mut backend = RecordingStartupCoordinator {
+        statuses: [LegacyTrayStatus::from_states(
+            LegacyTrayProcessState::TrustedCurrentSession {
+                pid: 42,
+                creation_time: 99,
+                path: std::path::PathBuf::from(r"C:\Program Files\MacType\MacTray.exe"),
+            },
+            LegacyTrayStartupState::Absent,
+        )]
+        .into(),
+        events: Vec::new(),
+        machine_disable_error: None,
+    };
+
+    assert!(disable_legacy_tray_startup_with(&mut backend).is_err());
+    assert_eq!(backend.events, [StartupCoordinationEvent::Observe]);
 }

@@ -5,6 +5,7 @@ mod model;
 mod open_service;
 mod orchestrator;
 mod publish;
+mod startup_coordination;
 mod status;
 mod system_backend;
 
@@ -12,6 +13,11 @@ mod system_backend;
 use appinit::appinit_view_conflict;
 
 pub(crate) use appinit::registry_conflict_detected;
+#[cfg(test)]
+use legacy_mactray::{disable_legacy_tray_startup_with, LegacyTrayStartupCoordinator};
+pub(crate) use legacy_mactray::{LegacyTrayConflictState, LegacyTrayExitRequest, LegacyTrayStatus};
+#[cfg(test)]
+pub(crate) use legacy_mactray::{LegacyTrayProcessState, LegacyTrayStartupState};
 pub(crate) use model::{
     MachineAction, MachineBackend, MachineStatus, PublicMachineAction, TrayLoginState,
 };
@@ -49,8 +55,17 @@ pub(crate) fn tray_apply(paused: bool, profile: &[u8]) -> Result<(), String> {
     tray_apply_with(&mut SystemMachineBackend, paused, profile)
 }
 
+pub(crate) fn request_legacy_tray_exit(expected: &LegacyTrayExitRequest) -> Result<(), String> {
+    legacy_mactray::request_tray_exit(expected)
+}
+
+pub(crate) fn disable_legacy_tray_startup() -> Result<(), String> {
+    startup_coordination::disable()
+}
+
 pub(crate) fn dispatch_privileged_command() -> Option<i32> {
-    open_service::dispatch_privileged_command()
+    legacy_migration::dispatch_current_user_restore_command()
+        .or_else(open_service::dispatch_privileged_command)
 }
 
 #[tauri::command]

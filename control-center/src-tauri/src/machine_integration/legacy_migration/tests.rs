@@ -377,6 +377,7 @@ enum RollbackEvent {
     Stop,
     Profiles,
     Service,
+    Startup,
     RunningState,
 }
 
@@ -409,9 +410,33 @@ impl RollbackBackend for RecordingRollback {
         self.record(RollbackEvent::Service)
     }
 
+    fn restore_legacy_tray_startup(&mut self) -> Result<(), String> {
+        self.record(RollbackEvent::Startup)
+    }
+
     fn restore_running_state(&mut self) -> Result<(), String> {
         self.record(RollbackEvent::RunningState)
     }
+}
+
+#[test]
+fn rollback_restores_autostart_before_the_legacy_service_can_run_again() {
+    let mut backend = RecordingRollback {
+        events: Vec::new(),
+        fail_at: None,
+    };
+
+    perform_rollback(&mut backend).unwrap();
+    assert_eq!(
+        backend.events,
+        [
+            RollbackEvent::Stop,
+            RollbackEvent::Profiles,
+            RollbackEvent::Service,
+            RollbackEvent::Startup,
+            RollbackEvent::RunningState,
+        ]
+    );
 }
 
 #[test]
@@ -430,4 +455,291 @@ fn rollback_restores_profiles_before_service_and_never_starts_after_failure() {
             RollbackEvent::Service,
         ]
     );
+}
+
+fn receipted_startup_artifact(
+    source_kind: crate::machine_integration::legacy_mactray::LegacyTrayStartupSource,
+    name: &str,
+) -> crate::machine_integration::legacy_mactray::LegacyTrayStartupArtifact {
+    use crate::machine_integration::legacy_mactray::{
+        LegacyTrayStartupArtifact, LegacyTrayStartupEntry, LegacyTrayStartupLocator,
+    };
+    LegacyTrayStartupArtifact {
+        entry: LegacyTrayStartupEntry {
+            source_kind,
+            display_name: name.to_owned(),
+            target_path: PathBuf::from(r"C:\Program Files\MacType\MacTray.exe"),
+        },
+        locator: LegacyTrayStartupLocator::Registry {
+            hive: if matches!(
+                source_kind,
+                crate::machine_integration::legacy_mactray::LegacyTrayStartupSource::LocalMachineRun32
+                    | crate::machine_integration::legacy_mactray::LegacyTrayStartupSource::LocalMachineRun64
+            ) {
+                "HKLM".to_owned()
+            } else {
+                "HKCU".to_owned()
+            },
+            view: if matches!(
+                source_kind,
+                crate::machine_integration::legacy_mactray::LegacyTrayStartupSource::CurrentUserRun32
+                    | crate::machine_integration::legacy_mactray::LegacyTrayStartupSource::LocalMachineRun32
+            ) {
+                32
+            } else {
+                64
+            },
+            subkey: r"Software\Microsoft\Windows\CurrentVersion\Run".to_owned(),
+            value_name: name.to_owned(),
+            value_type: 1,
+        },
+        raw_bytes: vec![0xff, 0xfe, 0x41, 0x00, 0x00, 0x00],
+        normalized_target_path: PathBuf::from(r"C:\Program Files\MacType\MacTray.exe"),
+        user_sid: "S-1-5-21-1000".to_owned(),
+        recorded_at: 1234,
+    }
+}
+
+#[test]
+fn startup_receipt_is_versioned_scoped_and_preserves_every_original_byte() {
+    use crate::machine_integration::legacy_mactray::LegacyTrayStartupSource;
+    let artifact =
+        receipted_startup_artifact(LegacyTrayStartupSource::CurrentUserRun64, "MacTypeTray");
+    let receipt = build_startup_receipt(
+        StartupReceiptScope::CurrentUser,
+        "S-1-5-21-1000",
+        vec![artifact.clone()],
+        5678,
+    )
+    .unwrap();
+    assert_eq!(receipt.restoration_state, StartupRestorationState::Pending);
+
+    let encoded = serde_json::to_vec(&receipt).unwrap();
+    let decoded: LegacyTrayStartupReceipt = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(decoded, receipt);
+    assert_eq!(decoded.entries[0].raw_bytes, artifact.raw_bytes);
+    assert_eq!(decoded.entries[0].user_sid, "S-1-5-21-1000");
+}
+
+#[test]
+fn startup_receipt_rejects_unknown_fields_at_every_nested_boundary() {
+    use crate::machine_integration::legacy_mactray::LegacyTrayStartupSource;
+    let receipt = build_startup_receipt(
+        StartupReceiptScope::CurrentUser,
+        "S-1-5-21-1000",
+        vec![receipted_startup_artifact(
+            LegacyTrayStartupSource::CurrentUserRun64,
+            "MacTypeTray",
+        )],
+        5678,
+    )
+    .unwrap();
+    let original = serde_json::to_value(receipt).unwrap();
+
+    for path in ["artifact", "entry", "locator"] {
+        let mut tampered = original.clone();
+        let object = match path {
+            "artifact" => tampered["entries"][0].as_object_mut().unwrap(),
+            "entry" => tampered["entries"][0]["entry"].as_object_mut().unwrap(),
+            "locator" => tampered["entries"][0]["locator"].as_object_mut().unwrap(),
+            _ => unreachable!(),
+        };
+        object.insert("unexpected".to_owned(), serde_json::json!(true));
+
+        assert!(
+            serde_json::from_value::<LegacyTrayStartupReceipt>(tampered).is_err(),
+            "unknown {path} field must be rejected"
+        );
+    }
+}
+
+#[test]
+fn startup_receipt_rejects_scope_mixing_duplicate_locators_and_sid_mismatch() {
+    use crate::machine_integration::legacy_mactray::LegacyTrayStartupSource;
+    let current =
+        receipted_startup_artifact(LegacyTrayStartupSource::CurrentUserRun64, "MacTypeTray");
+    let machine =
+        receipted_startup_artifact(LegacyTrayStartupSource::LocalMachineRun64, "MacTypeTray");
+    assert!(build_startup_receipt(
+        StartupReceiptScope::CurrentUser,
+        "S-1-5-21-1000",
+        vec![machine],
+        5678,
+    )
+    .is_err());
+    assert!(build_startup_receipt(
+        StartupReceiptScope::CurrentUser,
+        "S-1-5-21-1000",
+        vec![current.clone(), current.clone()],
+        5678,
+    )
+    .is_err());
+    let mut wrong_sid = current;
+    wrong_sid.user_sid = "S-1-5-21-2000".to_owned();
+    assert!(build_startup_receipt(
+        StartupReceiptScope::CurrentUser,
+        "S-1-5-21-1000",
+        vec![wrong_sid],
+        5678,
+    )
+    .is_err());
+}
+
+#[test]
+fn pending_startup_receipt_is_never_overwritten_by_a_different_observation() {
+    use crate::machine_integration::legacy_mactray::LegacyTrayStartupSource;
+    let original = build_startup_receipt(
+        StartupReceiptScope::CurrentUser,
+        "S-1-5-21-1000",
+        vec![receipted_startup_artifact(
+            LegacyTrayStartupSource::CurrentUserRun64,
+            "MacTypeTrayA",
+        )],
+        5678,
+    )
+    .unwrap();
+    let replacement = build_startup_receipt(
+        StartupReceiptScope::CurrentUser,
+        "S-1-5-21-1000",
+        vec![receipted_startup_artifact(
+            LegacyTrayStartupSource::CurrentUserRun64,
+            "MacTypeTrayB",
+        )],
+        6789,
+    )
+    .unwrap();
+
+    assert!(select_startup_receipt_for_disable(Some(&original), replacement).is_err());
+}
+
+#[test]
+fn identical_recapture_reuses_the_pending_receipt_without_timestamp_replacement() {
+    use crate::machine_integration::legacy_mactray::LegacyTrayStartupSource;
+    let original = build_startup_receipt(
+        StartupReceiptScope::CurrentUser,
+        "S-1-5-21-1000",
+        vec![receipted_startup_artifact(
+            LegacyTrayStartupSource::CurrentUserRun64,
+            "MacTypeTray",
+        )],
+        5678,
+    )
+    .unwrap();
+    let mut recaptured_artifact = original.entries[0].clone();
+    recaptured_artifact.recorded_at += 100;
+    let proposed = build_startup_receipt(
+        StartupReceiptScope::CurrentUser,
+        "S-1-5-21-1000",
+        vec![recaptured_artifact],
+        6789,
+    )
+    .unwrap();
+
+    let selected = select_startup_receipt_for_disable(Some(&original), proposed).unwrap();
+    assert_eq!(selected, original);
+}
+
+#[test]
+fn current_user_restore_cli_accepts_one_fixed_switch_and_no_arguments() {
+    use std::ffi::OsString;
+    assert!(user_restore_requested_from_arguments([
+        OsString::from("control-center.exe"),
+        OsString::from("--restore-current-user-legacy-tray-autostart"),
+    ])
+    .unwrap());
+    assert!(!user_restore_requested_from_arguments([
+        OsString::from("control-center.exe"),
+        OsString::from("--ordinary-launch"),
+    ])
+    .unwrap());
+    assert!(user_restore_requested_from_arguments([
+        OsString::from("control-center.exe"),
+        OsString::from("--restore-current-user-legacy-tray-autostart"),
+        OsString::from(r"HKCU\arbitrary"),
+    ])
+    .is_err());
+}
+
+#[derive(Default)]
+struct RecordingStartupRestore {
+    current: std::collections::BTreeMap<String, Option<Vec<u8>>>,
+    restored: Vec<String>,
+    marked: Option<StartupRestorationState>,
+}
+
+impl StartupRestoreBackend for RecordingStartupRestore {
+    fn current_bytes(
+        &mut self,
+        artifact: &crate::machine_integration::legacy_mactray::LegacyTrayStartupArtifact,
+    ) -> Result<Option<Vec<u8>>, String> {
+        Ok(self
+            .current
+            .get(&artifact.entry.display_name)
+            .cloned()
+            .flatten())
+    }
+
+    fn restore_original(
+        &mut self,
+        artifact: &crate::machine_integration::legacy_mactray::LegacyTrayStartupArtifact,
+    ) -> Result<(), String> {
+        self.restored.push(artifact.entry.display_name.clone());
+        Ok(())
+    }
+
+    fn mark_restoration(&mut self, state: StartupRestorationState) -> Result<(), String> {
+        self.marked = Some(state);
+        Ok(())
+    }
+}
+
+#[test]
+fn startup_restore_preflights_every_entry_and_never_overwrites_a_user_change() {
+    use crate::machine_integration::legacy_mactray::LegacyTrayStartupSource;
+    let first =
+        receipted_startup_artifact(LegacyTrayStartupSource::CurrentUserRun64, "MacTypeTrayA");
+    let second =
+        receipted_startup_artifact(LegacyTrayStartupSource::CurrentUserRun32, "MacTypeTrayB");
+    let receipt = build_startup_receipt(
+        StartupReceiptScope::CurrentUser,
+        "S-1-5-21-1000",
+        vec![first, second],
+        5678,
+    )
+    .unwrap();
+    let mut backend = RecordingStartupRestore::default();
+    backend.current.insert("MacTypeTrayA".to_owned(), None);
+    backend
+        .current
+        .insert("MacTypeTrayB".to_owned(), Some(vec![1, 2, 3]));
+
+    assert!(restore_startup_with(&mut backend, &receipt).is_err());
+    assert!(backend.restored.is_empty());
+    assert_eq!(
+        backend.marked,
+        Some(StartupRestorationState::ManualRequired)
+    );
+}
+
+#[test]
+fn startup_restore_recreates_only_receipted_absent_entries_then_marks_restored() {
+    use crate::machine_integration::legacy_mactray::LegacyTrayStartupSource;
+    let receipt = build_startup_receipt(
+        StartupReceiptScope::CurrentUser,
+        "S-1-5-21-1000",
+        vec![
+            receipted_startup_artifact(LegacyTrayStartupSource::CurrentUserRun64, "MacTypeTrayA"),
+            receipted_startup_artifact(LegacyTrayStartupSource::CurrentUserRun32, "MacTypeTrayB"),
+        ],
+        5678,
+    )
+    .unwrap();
+    let mut backend = RecordingStartupRestore::default();
+    backend.current.insert("MacTypeTrayA".to_owned(), None);
+    backend.current.insert("MacTypeTrayB".to_owned(), None);
+
+    restore_startup_with(&mut backend, &receipt).unwrap();
+
+    assert_eq!(backend.restored, ["MacTypeTrayA", "MacTypeTrayB"]);
+    assert_eq!(backend.marked, Some(StartupRestorationState::Restored));
 }

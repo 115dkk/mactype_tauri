@@ -113,13 +113,15 @@ int wmain(int count, wchar_t** values) {
     bool loaded = false;
     bool inventory_available = true;
     while (std::chrono::steady_clock::now() < deadline) {
-        const auto inventory_result = mactype::injector::fixed_module_is_loaded(
+        const auto inventory_result = mactype::injector::fixed_module_state(
             GetCurrentProcess(), options->expected_module);
-        if (!inventory_result) {
+        if (inventory_result ==
+            mactype::injector::FixedModuleState::InventoryUnavailable) {
             inventory_available = false;
             break;
         }
-        if (*inventory_result) {
+        if (inventory_result ==
+            mactype::injector::FixedModuleState::ExpectedModuleLoaded) {
             loaded = true;
             break;
         }

@@ -174,6 +174,7 @@ pub(super) trait RollbackBackend {
     fn stop_before_restore(&mut self) -> Result<(), String>;
     fn restore_profiles(&mut self) -> Result<(), String>;
     fn restore_service_configuration(&mut self) -> Result<(), String>;
+    fn restore_legacy_tray_startup(&mut self) -> Result<(), String>;
     fn restore_running_state(&mut self) -> Result<(), String>;
 }
 
@@ -181,6 +182,7 @@ pub(super) fn perform_rollback(backend: &mut impl RollbackBackend) -> Result<(),
     backend.stop_before_restore()?;
     backend.restore_profiles()?;
     backend.restore_service_configuration()?;
+    backend.restore_legacy_tray_startup()?;
     backend.restore_running_state()
 }
 
@@ -255,6 +257,10 @@ impl RollbackBackend for SystemRollback<'_> {
 
     fn restore_service_configuration(&mut self) -> Result<(), String> {
         legacy_mactray::restore_configuration_after_migration(&self.receipt.service)
+    }
+
+    fn restore_legacy_tray_startup(&mut self) -> Result<(), String> {
+        super::restore_startup_scope(super::StartupReceiptScope::LocalMachine)
     }
 
     fn restore_running_state(&mut self) -> Result<(), String> {

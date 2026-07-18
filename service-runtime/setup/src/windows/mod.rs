@@ -3,6 +3,7 @@ mod appinit;
 mod broker;
 mod installer;
 mod known_folders;
+mod legacy_tray;
 mod machine_lock;
 mod runtime_recovery;
 pub(crate) mod scm;

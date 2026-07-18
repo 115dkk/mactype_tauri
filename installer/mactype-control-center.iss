@@ -99,6 +99,7 @@ const
 var
   BrokerApplied: Boolean;
   BrokerAllowedBlocked: Boolean;
+  BrokerFatalLegacyTrayBlocked: Boolean;
   BrokerOutputError: Boolean;
   BrokerDiagnostic: String;
 
@@ -126,6 +127,9 @@ begin
   if (Pos('"ok":true', S) > 0) and (Pos('"outcome":"applied"', S) > 0) then
     BrokerApplied := True;
   if (Pos('"ok":true', S) > 0) and (Pos('"outcome":"skipped-blocked"', S) > 0) and
+     (Pos('"reason":"legacy-tray-mode"', S) > 0) then
+    BrokerFatalLegacyTrayBlocked := True;
+  if (Pos('"ok":true', S) > 0) and (Pos('"outcome":"skipped-blocked"', S) > 0) and
      ((Pos('"reason":"legacy-service"', S) > 0) or
       (Pos('"reason":"appinit"', S) > 0) or
       (Pos('"reason":"foreign-open-service"', S) > 0)) then
@@ -143,6 +147,7 @@ procedure ResetBrokerCapture;
 begin
   BrokerApplied := False;
   BrokerAllowedBlocked := False;
+  BrokerFatalLegacyTrayBlocked := False;
   BrokerOutputError := False;
   BrokerDiagnostic := '';
 end;
@@ -200,6 +205,13 @@ begin
   if BrokerOutputError then
   begin
     Result := BrokerFailure('Machine service bootstrap diagnostics could not be read safely.');
+    Exit;
+  end;
+  if BrokerFatalLegacyTrayBlocked then
+  begin
+    Result := BrokerFailure(
+      'Machine service bootstrap is blocked because MacTray tray mode is still active or configured for startup.'
+    );
     Exit;
   end;
   if BrokerApplied then
@@ -358,7 +370,64 @@ begin
     Result := OperationError;
 end;
 
+function RestoreLegacyTrayStartupAfterBootstrapFailure: String;
+var
+  ControlCenter: String;
+  ResultCode: Integer;
+  MachineError: String;
+  UserError: String;
+begin
+  Result := '';
+  MachineError := '';
+  UserError := '';
+  ControlCenter := AddBackslash(ExpandConstant('{app}')) + '{#ControlCenterExeName}';
+  if not FileExists(ControlCenter) then
+  begin
+    Log('No existing Control Center is available for startup receipt restoration.');
+    Exit;
+  end;
+
+  ResultCode := -1;
+  if not Exec(
+    ControlCenter,
+    '--control-center-service-broker restore-legacy-tray-autostart',
+    ExtractFileDir(ControlCenter),
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode
+  ) then
+    MachineError := 'could not start local-machine MacTray startup restoration'
+  else if ResultCode <> 0 then
+    MachineError := 'local-machine MacTray startup restoration failed with exit code ' +
+      IntToStr(ResultCode);
+
+  ResultCode := -1;
+  if not ExecAsOriginalUser(
+    ControlCenter,
+    '--restore-current-user-legacy-tray-autostart',
+    ExtractFileDir(ControlCenter),
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode
+  ) then
+    UserError := 'could not start current-user MacTray startup restoration'
+  else if ResultCode <> 0 then
+    UserError := 'current-user MacTray startup restoration failed with exit code ' +
+      IntToStr(ResultCode);
+
+  if MachineError <> '' then
+    Result := MachineError;
+  if UserError <> '' then
+  begin
+    if Result <> '' then
+      Result := Result + #13#10;
+    Result := Result + UserError;
+  end;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  RestoreError: String;
 begin
   { Required bootstrap must finish here using temporary app-side staging and restoration:
     AfterInstall exceptions may report success, and cancellation cannot restore overwritten upgrade files. }
@@ -369,7 +438,13 @@ begin
   end;
   Result := BootstrapBeforeFileInstall;
   if Result <> '' then
+  begin
     Log('Fatal machine service bootstrap failure: ' + Result);
+    RestoreError := RestoreLegacyTrayStartupAfterBootstrapFailure;
+    if RestoreError <> '' then
+      Result := Result + #13#10 +
+        'MacTray startup receipt restoration failed: ' + RestoreError;
+  end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

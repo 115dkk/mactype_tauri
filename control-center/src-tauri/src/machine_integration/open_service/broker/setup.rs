@@ -19,6 +19,10 @@ impl crate::machine_integration::MachineBackend for OpenServicePublishBackend {
         query()
     }
 
+    fn legacy_tray_status(&mut self) -> crate::machine_integration::LegacyTrayStatus {
+        crate::machine_integration::legacy_mactray::tray_status()
+    }
+
     fn appinit_conflict(&mut self) -> Result<bool, String> {
         Ok(crate::machine_integration::registry_conflict_detected())
     }

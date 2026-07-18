@@ -196,7 +196,9 @@ impl<'a> InjectionOrchestrator<'a> {
 
     pub fn generation_health_error(&self) -> Option<StructuredServiceError> {
         let record = self.most_recent_result()?;
-        let code = if record.code.ends_with("-cleanup-unknown") {
+        let code = if record.code == "conflicting-mactype-module-loaded" {
+            "conflicting-mactype-module-loaded"
+        } else if record.code.ends_with("-cleanup-unknown") {
             "injection-cleanup-unknown"
         } else if matches!(
             record.code.as_str(),

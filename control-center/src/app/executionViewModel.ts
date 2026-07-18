@@ -1,7 +1,24 @@
-import type { ExecutionStatus } from "./model";
+import type { ExecutionStatus, LegacyTrayStatus } from "./model";
 import type { MessageKey } from "../i18n/i18n";
 
-type SystemInjectionState = "loading" | "active" | "running-unverified" | "running-profile-mismatch" | "running-appinit-conflict" | "inactive" | "unavailable";
+type SystemInjectionState = "loading" | "active" | "running-unverified" | "running-profile-mismatch" | "running-appinit-conflict" | "running-legacy-tray-conflict" | "inactive" | "unavailable";
+
+export type LegacyTrayResolutionKind =
+  | "exit-current-process"
+  | "other-session"
+  | "untrusted-process"
+  | "unknown-process"
+  | "disable-autostart"
+  | "untrusted-autostart"
+  | "unknown-autostart";
+
+export interface LegacyTrayResolution {
+  kind: LegacyTrayResolutionKind;
+  titleKey: MessageKey;
+  descriptionKey: MessageKey;
+  canRequestExit: boolean;
+  canDisableStartup: boolean;
+}
 
 export interface SystemInjectionPrimaryAction {
   intent: "activate" | "stop";
@@ -20,6 +37,7 @@ export interface ExecutionViewModel {
   serviceNeedsRepair: boolean;
   serviceBinaryPath: string | null;
   systemInjectionAction: SystemInjectionPrimaryAction;
+  legacyTrayResolution: LegacyTrayResolution | null;
   canInstall: boolean;
   canStart: boolean;
   canUpgrade: boolean;
@@ -50,6 +68,10 @@ const systemInjectionCopy: Record<SystemInjectionState, { titleKey: MessageKey; 
     titleKey: "execution.systemAppInitConflictTitle",
     descriptionKey: "execution.systemAppInitConflictDescription",
   },
+  "running-legacy-tray-conflict": {
+    titleKey: "execution.systemLegacyTrayConflictTitle",
+    descriptionKey: "execution.systemLegacyTrayConflictDescription",
+  },
   inactive: {
     titleKey: "execution.systemInactiveTitle",
     descriptionKey: "execution.systemInactiveDescription",
@@ -59,6 +81,76 @@ const systemInjectionCopy: Record<SystemInjectionState, { titleKey: MessageKey; 
     descriptionKey: "execution.systemUnavailableDescription",
   },
 };
+
+function projectLegacyTrayResolution(status: LegacyTrayStatus | undefined): LegacyTrayResolution | null {
+  if (!status || status.conflict === "clear") return null;
+
+  switch (status.process.state) {
+    case "trusted-current-session":
+      return {
+        kind: "exit-current-process",
+        titleKey: "execution.legacyTrayRunningTitle",
+        descriptionKey: "execution.legacyTrayRunningDescription",
+        canRequestExit: status.canRequestExit,
+        canDisableStartup: false,
+      };
+    case "trusted-other-session":
+      return {
+        kind: "other-session",
+        titleKey: "execution.legacyTrayOtherSessionTitle",
+        descriptionKey: "execution.legacyTrayOtherSessionDescription",
+        canRequestExit: false,
+        canDisableStartup: false,
+      };
+    case "untrusted-same-name":
+      return {
+        kind: "untrusted-process",
+        titleKey: "execution.legacyTrayUntrustedTitle",
+        descriptionKey: "execution.legacyTrayUntrustedDescription",
+        canRequestExit: false,
+        canDisableStartup: false,
+      };
+    case "unknown":
+      return {
+        kind: "unknown-process",
+        titleKey: "execution.legacyTrayUnknownTitle",
+        descriptionKey: "execution.legacyTrayUnknownDescription",
+        canRequestExit: false,
+        canDisableStartup: false,
+      };
+    case "absent":
+      break;
+  }
+
+  switch (status.startup.state) {
+    case "detected":
+      return {
+        kind: "disable-autostart",
+        titleKey: "execution.legacyTrayAutostartTitle",
+        descriptionKey: "execution.legacyTrayAutostartDescription",
+        canRequestExit: false,
+        canDisableStartup: status.canDisableStartup,
+      };
+    case "untrusted":
+      return {
+        kind: "untrusted-autostart",
+        titleKey: "execution.legacyTrayAutostartUntrustedTitle",
+        descriptionKey: "execution.legacyTrayAutostartUntrustedDescription",
+        canRequestExit: false,
+        canDisableStartup: false,
+      };
+    case "unknown":
+      return {
+        kind: "unknown-autostart",
+        titleKey: "execution.legacyTrayAutostartUnknownTitle",
+        descriptionKey: "execution.legacyTrayAutostartUnknownDescription",
+        canRequestExit: false,
+        canDisableStartup: false,
+      };
+    case "absent":
+      return null;
+  }
+}
 
 function projectSystemInjectionAction(
   status: ExecutionStatus | null,
@@ -72,16 +164,19 @@ function projectSystemInjectionAction(
       && service?.activeProfileDigest
       && service.activeProfileDigest !== status.expectedProfileDigest,
   );
+  const legacyTrayConflict = Boolean(status && status.legacyTray.conflict !== "clear");
   const verifiedActive = Boolean(
     status?.systemInjectionActive
       && running
       && service?.health === "ready"
       && profileMatches
-      && !status.registryModeDetected,
+      && !status.registryModeDetected
+      && !legacyTrayConflict,
   );
 
   let state: SystemInjectionState;
   if (!status) state = "loading";
+  else if (running && legacyTrayConflict) state = "running-legacy-tray-conflict";
   else if (running && status.registryModeDetected) state = "running-appinit-conflict";
   else if (verifiedActive) state = "active";
   else if (running && profileMismatch) state = "running-profile-mismatch";
@@ -96,7 +191,9 @@ function projectSystemInjectionAction(
       && status
       && (intent === "stop"
         ? service?.canStop
-        : service?.runtime === "stopped" && status.systemModesSupported),
+        : service?.runtime === "stopped"
+          && status.systemModesSupported
+          && status.legacyTray.conflict === "clear"),
   );
 
   return {
@@ -120,6 +217,7 @@ export function projectExecutionView(
   const service = status?.systemService;
   const legacy = status?.legacyMacTray;
   const idle = serviceBusy === null;
+  const legacyTrayConflict = Boolean(status && status.legacyTray.conflict !== "clear");
   const profileMatches = Boolean(
     status?.expectedProfileDigest
       && service?.activeProfileDigest === status.expectedProfileDigest,
@@ -133,12 +231,13 @@ export function projectExecutionView(
       && (service.health === "degraded" || service.health === "failed"),
     serviceBinaryPath: service?.installation === "absent" ? null : service?.binaryPath ?? null,
     systemInjectionAction: projectSystemInjectionAction(status, serviceBusy, profileMatches),
-    canInstall: Boolean(idle && service?.canInstall),
-    canStart: Boolean(idle && service?.canStart),
-    canUpgrade: Boolean(idle && service?.canUpgrade),
-    canRepair: Boolean(idle && service?.canRepair),
-    canRemove: Boolean(idle && service?.canRemove),
-    canMigrateLegacy: Boolean(idle && legacy?.migrationAvailable),
-    canRemoveLegacy: Boolean(idle && legacy?.canRemove),
+    legacyTrayResolution: projectLegacyTrayResolution(status?.legacyTray),
+    canInstall: Boolean(idle && !legacyTrayConflict && service?.canInstall),
+    canStart: Boolean(idle && !legacyTrayConflict && service?.canStart),
+    canUpgrade: Boolean(idle && !legacyTrayConflict && service?.canUpgrade),
+    canRepair: Boolean(idle && !legacyTrayConflict && service?.canRepair),
+    canRemove: Boolean(idle && !legacyTrayConflict && service?.canRemove),
+    canMigrateLegacy: Boolean(idle && !legacyTrayConflict && legacy?.migrationAvailable),
+    canRemoveLegacy: Boolean(idle && !legacyTrayConflict && legacy?.canRemove),
   };
 }

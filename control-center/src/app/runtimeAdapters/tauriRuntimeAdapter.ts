@@ -5,6 +5,7 @@ import type {
   AdvancedProfile,
   AppliedProfile,
   ExecutionStatus,
+  ExpectedLegacyTrayIdentity,
   IndividualSetting,
   InstallationStatus,
   LegacyProfileCandidate,
@@ -27,6 +28,8 @@ export const tauriRuntimeAdapter: ControlCenterRuntimeAdapter = {
   },
 
   loadExecutionStatus: () => invoke<ExecutionStatus>("execution_status"),
+  requestLegacyTrayExit: (expectedIdentity: ExpectedLegacyTrayIdentity) => invoke<ExecutionStatus>("request_legacy_tray_exit", { expectedIdentity }),
+  disableLegacyTrayAutostart: () => invoke<ExecutionStatus>("disable_legacy_tray_autostart"),
   manageSystemService: (action: SystemServiceAction) => invoke<ExecutionStatus>("manage_system_service", { action }),
   revealSystemService: () => invoke<void>("reveal_system_service"),
 

@@ -21,6 +21,7 @@ impl FakeBackend {
                 protected_profile: ProtectedProfileObservation::Absent,
                 protected_runtime: ProtectedRuntimeObservation::Absent,
                 legacy_service: ConflictObservation::Clear,
+                legacy_tray: ConflictObservation::Clear,
                 appinit: ConflictObservation::Clear,
             },
             applied: Vec::new(),
@@ -74,6 +75,7 @@ fn upgrade_preserves_the_exact_protected_active_profile() {
             protected_profile: ProtectedProfileObservation::Active(generation.to_owned()),
             protected_runtime: ProtectedRuntimeObservation::Active,
             legacy_service: ConflictObservation::Clear,
+            legacy_tray: ConflictObservation::Clear,
             appinit: ConflictObservation::Clear,
         },
         applied: Vec::new(),
@@ -106,6 +108,7 @@ fn preserved_profile_bootstrap_rejects_a_mismatched_ready_digest() {
             protected_profile: ProtectedProfileObservation::Active(generation.to_owned()),
             protected_runtime: ProtectedRuntimeObservation::Active,
             legacy_service: ConflictObservation::Clear,
+            legacy_tray: ConflictObservation::Clear,
             appinit: ConflictObservation::Clear,
         },
         applied: Vec::new(),
@@ -131,6 +134,22 @@ fn detected_legacy_service_is_a_non_mutating_blocked_skip() {
         outcome,
         BootstrapOutcome::SkippedBlocked {
             reason: BootstrapBlocker::LegacyService,
+        }
+    );
+}
+
+#[test]
+fn detected_legacy_tray_mode_is_a_non_mutating_blocked_install() {
+    let mut backend = FakeBackend::safe_fresh();
+    backend.preflight.legacy_tray = ConflictObservation::Detected;
+
+    let outcome = run_install_bootstrap_with(&mut backend).unwrap();
+
+    assert!(backend.applied.is_empty());
+    assert_eq!(
+        outcome,
+        BootstrapOutcome::SkippedBlocked {
+            reason: BootstrapBlocker::LegacyTrayMode,
         }
     );
 }
@@ -184,6 +203,10 @@ fn every_unknown_preflight_observation_fails_closed_without_mutation() {
         },
         BootstrapPreflight {
             legacy_service: ConflictObservation::Unknown,
+            ..FakeBackend::safe_fresh().preflight
+        },
+        BootstrapPreflight {
+            legacy_tray: ConflictObservation::Unknown,
             ..FakeBackend::safe_fresh().preflight
         },
         BootstrapPreflight {

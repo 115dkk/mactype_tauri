@@ -1,4 +1,7 @@
-use super::{appinit::appinit_conflict, open_service, MachineAction, MachineBackend};
+use super::{
+    appinit::appinit_conflict, legacy_mactray, open_service, LegacyTrayStatus, MachineAction,
+    MachineBackend,
+};
 use crate::service_contract::SystemServiceStatus;
 
 pub(super) struct SystemMachineBackend;
@@ -6,6 +9,10 @@ pub(super) struct SystemMachineBackend;
 impl MachineBackend for SystemMachineBackend {
     fn new_service_status(&mut self) -> SystemServiceStatus {
         open_service::status()
+    }
+
+    fn legacy_tray_status(&mut self) -> LegacyTrayStatus {
+        legacy_mactray::tray_status()
     }
 
     fn appinit_conflict(&mut self) -> Result<bool, String> {

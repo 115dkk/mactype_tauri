@@ -1,4 +1,150 @@
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase",
+    tag = "state"
+)]
+pub(crate) enum LegacyTrayProcessState {
+    Absent,
+    TrustedCurrentSession {
+        pid: u32,
+        #[serde(serialize_with = "decimal_u64::serialize")]
+        creation_time: u64,
+        path: PathBuf,
+    },
+    TrustedOtherSession {
+        session_id: u32,
+        path: PathBuf,
+    },
+    UntrustedSameName {
+        session_id: Option<u32>,
+        path: Option<PathBuf>,
+    },
+    Unknown {
+        error: mactype_service_contract::StructuredServiceError,
+    },
+}
+
+pub(super) mod decimal_u64 {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub(crate) fn serialize<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&value.to_string())
+    }
+
+    pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<u64, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        value.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase",
+    tag = "state"
+)]
+pub(crate) enum LegacyTrayStartupState {
+    Absent,
+    Detected {
+        entries: Vec<LegacyTrayStartupEntry>,
+    },
+    Untrusted {
+        entries: Vec<LegacyTrayStartupEntry>,
+    },
+    Unknown {
+        error: mactype_service_contract::StructuredServiceError,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum LegacyTrayStartupSource {
+    CurrentUserRun32,
+    CurrentUserRun64,
+    LocalMachineRun32,
+    LocalMachineRun64,
+    CurrentUserStartup,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub(crate) struct LegacyTrayStartupEntry {
+    pub(crate) source_kind: LegacyTrayStartupSource,
+    pub(crate) display_name: String,
+    pub(crate) target_path: PathBuf,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum LegacyTrayConflictState {
+    Clear,
+    Detected,
+    Unknown,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LegacyTrayStatus {
+    pub(crate) process: LegacyTrayProcessState,
+    pub(crate) startup: LegacyTrayStartupState,
+    pub(crate) conflict: LegacyTrayConflictState,
+    pub(crate) can_request_exit: bool,
+    pub(crate) can_disable_startup: bool,
+}
+
+impl LegacyTrayStatus {
+    #[cfg(test)]
+    pub(crate) fn clear() -> Self {
+        Self::from_states(
+            LegacyTrayProcessState::Absent,
+            LegacyTrayStartupState::Absent,
+        )
+    }
+
+    pub(crate) fn from_states(
+        process: LegacyTrayProcessState,
+        startup: LegacyTrayStartupState,
+    ) -> Self {
+        let can_request_exit = matches!(
+            process,
+            LegacyTrayProcessState::TrustedCurrentSession { .. }
+        );
+        let conflict = match (&process, &startup) {
+            (LegacyTrayProcessState::Unknown { .. }, _)
+            | (_, LegacyTrayStartupState::Unknown { .. }) => LegacyTrayConflictState::Unknown,
+            (LegacyTrayProcessState::Absent, LegacyTrayStartupState::Absent) => {
+                LegacyTrayConflictState::Clear
+            }
+            _ => LegacyTrayConflictState::Detected,
+        };
+        let can_disable_startup = matches!(
+            &startup,
+            LegacyTrayStartupState::Detected { entries } if !entries.is_empty()
+        );
+        Self {
+            process,
+            startup,
+            conflict,
+            can_request_exit,
+            can_disable_startup,
+        }
+    }
+
+    pub(crate) fn blocks_machine_change(&self) -> bool {
+        self.conflict != LegacyTrayConflictState::Clear
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ServicePresence {

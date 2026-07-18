@@ -50,6 +50,15 @@ pub(super) fn execute_machine_action_with(
         return Err("the machine action has an invalid profile payload".to_owned());
     }
 
+    if !matches!(action, MachineAction::Rollback | MachineAction::Stop) {
+        let legacy_tray = backend.legacy_tray_status();
+        if legacy_tray.blocks_machine_change() {
+            return Err(
+                "the legacy MacTray tray mode blocks this machine integration change".to_owned(),
+            );
+        }
+    }
+
     let appinit_conflict = if matches!(action, MachineAction::Rollback | MachineAction::Stop) {
         false
     } else {

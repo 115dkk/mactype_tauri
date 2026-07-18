@@ -1,10 +1,15 @@
 mod model;
 mod receipt;
+mod startup_receipt;
 mod storage;
 mod transaction;
 
 pub(crate) use model::RemovalVerification;
 pub(crate) use receipt::backup_is_valid;
+pub(crate) use startup_receipt::{
+    disable_startup_scope, dispatch_current_user_restore_command, restore_startup_scope,
+    StartupReceiptScope,
+};
 pub(crate) use transaction::{prepare_backup, remove_after_verified, rollback, stop_legacy};
 
 #[cfg(test)]
@@ -18,6 +23,12 @@ use model::{
     BackupFileReceipt, BackupRole, ProfileBackupReceipt, RegistryExportReceipt,
     CONFIGURATION_BACKUP, CURRENT_FILE, MAX_RECEIPT_BYTES, MAX_REGISTRY_EXPORT_BYTES, RECEIPT_FILE,
     SERVICE_REGISTRY_EXPORT,
+};
+#[cfg(test)]
+use startup_receipt::{
+    build_startup_receipt, restore_startup_with, select_startup_receipt_for_disable,
+    user_restore_requested_from_arguments, LegacyTrayStartupReceipt, StartupRestorationState,
+    StartupRestoreBackend,
 };
 #[cfg(test)]
 use std::{

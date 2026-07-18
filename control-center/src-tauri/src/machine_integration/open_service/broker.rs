@@ -35,7 +35,19 @@ pub(super) fn run_privileged(
         let profile = receive_required_profile_bounded(profile_transfer)?;
         run_profile_action(action, &profile)
     } else {
-        run_setup(action, None)
+        match action {
+            SystemServiceAction::DisableLegacyTrayAutostart => {
+                crate::machine_integration::legacy_migration::disable_startup_scope(
+                    crate::machine_integration::legacy_migration::StartupReceiptScope::LocalMachine,
+                )
+            }
+            SystemServiceAction::RestoreLegacyTrayAutostart => {
+                crate::machine_integration::legacy_migration::restore_startup_scope(
+                    crate::machine_integration::legacy_migration::StartupReceiptScope::LocalMachine,
+                )
+            }
+            _ => run_setup(action, None),
+        }
     }
 }
 

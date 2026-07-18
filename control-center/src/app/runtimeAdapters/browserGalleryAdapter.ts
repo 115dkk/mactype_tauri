@@ -13,12 +13,31 @@ import {
 import type { ControlCenterRuntimeAdapter } from "../runtimeAdapter";
 import {
   galleryExecutionStatus,
+  transitionGalleryLegacyTrayAutostartDisable,
+  transitionGalleryLegacyTrayExit,
   transitionGalleryExecutionStatus,
 } from "./browserGalleryExecution";
 import { createBrowserGalleryProfileState } from "./browserGalleryProfiles";
 
 const galleryProfiles = createBrowserGalleryProfileState();
 let galleryPreviewRequestId = 0;
+let galleryExecutionState: { location: string; status: ExecutionStatus } | null = null;
+
+function currentGalleryExecutionStatus(): ExecutionStatus {
+  const location = window.location.href;
+  if (!galleryExecutionState || galleryExecutionState.location !== location) {
+    galleryExecutionState = {
+      location,
+      status: galleryExecutionStatus(new URLSearchParams(window.location.search)),
+    };
+  }
+  return galleryExecutionState.status;
+}
+
+function updateGalleryExecutionStatus(status: ExecutionStatus): ExecutionStatus {
+  galleryExecutionState = { location: window.location.href, status };
+  return status;
+}
 
 function incrementGalleryCounter(key: string): void {
   const current = Number(window.sessionStorage.getItem(key) ?? "0");
@@ -41,18 +60,30 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
   },
 
   loadExecutionStatus(): Promise<ExecutionStatus> {
-    return Promise.resolve(galleryExecutionStatus(new URLSearchParams(window.location.search)));
+    return Promise.resolve(currentGalleryExecutionStatus());
+  },
+
+  requestLegacyTrayExit(expectedIdentity): Promise<ExecutionStatus> {
+    return Promise.resolve(updateGalleryExecutionStatus(
+      transitionGalleryLegacyTrayExit(currentGalleryExecutionStatus(), expectedIdentity),
+    ));
+  },
+
+  disableLegacyTrayAutostart(): Promise<ExecutionStatus> {
+    return Promise.resolve(updateGalleryExecutionStatus(
+      transitionGalleryLegacyTrayAutostartDisable(currentGalleryExecutionStatus()),
+    ));
   },
 
   manageSystemService(action): Promise<ExecutionStatus> {
     const query = new URLSearchParams(window.location.search);
-    const current = galleryExecutionStatus(query);
+    const current = currentGalleryExecutionStatus();
     const next = transitionGalleryExecutionStatus(current, action);
     const delay = Number(query.get("service-delay"));
     if (Number.isFinite(delay) && delay > 0) {
-      return new Promise((resolve) => window.setTimeout(() => resolve(next), delay));
+      return new Promise((resolve) => window.setTimeout(() => resolve(updateGalleryExecutionStatus(next)), delay));
     }
-    return Promise.resolve(next);
+    return Promise.resolve(updateGalleryExecutionStatus(next));
   },
 
   revealSystemService(): Promise<void> {

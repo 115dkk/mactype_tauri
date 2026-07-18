@@ -70,20 +70,26 @@ function Start-Marker([string] $Name, [string] $PreloadModule = '') {
 function Invoke-Broker(
     [string] $Executable,
     $Identity,
-    [int] $HandlePid = 0,
+    [UInt32] $HandlePid = 0,
     [string[]] $ExtraArguments = @()
 ) {
-    if ($HandlePid -eq 0) { $HandlePid = [int]$Identity.pid }
+    if ($HandlePid -eq 0) { $HandlePid = [UInt32]$Identity.pid }
+    if ($HandlePid -eq 0) { throw 'Inherited-handle launcher requires a nonzero target PID.' }
+    $handlePidText = $HandlePid.ToString([Globalization.CultureInfo]::InvariantCulture)
     $arguments = @(
-        $Executable, [string]$HandlePid,
+        $Executable, $handlePidText,
         '--pid', [string]$Identity.pid,
         '--creation-time', [string]$Identity.creationTime,
         '--session-id', [string]$Identity.sessionId,
         '--generation-id', $generation
     ) + $ExtraArguments
     $json = & $InheritedHandleLauncher $arguments
+    $exitCode = $LASTEXITCODE
+    if ([string]::IsNullOrWhiteSpace([string]$json)) {
+        throw "Inherited-handle launcher returned no JSON for PID $handlePidText (exit $exitCode)."
+    }
     return [pscustomobject]@{
-        ExitCode = $LASTEXITCODE
+        ExitCode = $exitCode
         Json = [string]$json
         Response = ([string]$json | ConvertFrom-Json)
     }
@@ -137,10 +143,22 @@ try {
         }
     }
     $decoyResponse = Invoke-Broker -Executable $Injector -Identity $decoy.Identity
-    Assert-Response $decoyResponse 0 'injected' 'module-loaded'
-    $decoy.Process.WaitForExit(5000)
-    if (-not $decoy.Process.HasExited -or $decoy.Process.ExitCode -ne 0) {
-        throw 'Marker target was not healthy after the same-basename decoy test.'
+    Assert-Response $decoyResponse 2 'rejected' 'conflicting-mactype-module-loaded'
+    $decoy.Process.Refresh()
+    if ($decoy.Process.HasExited) {
+        throw 'Injector damaged the target after detecting a same-basename conflict.'
+    }
+    $decoy.Process.WaitForExit(7000)
+    if (-not $decoy.Process.HasExited -or $decoy.Process.ExitCode -ne 7) {
+        throw 'Conflict target did not remain healthy with the expected module absent.'
+    }
+
+    $afterConflict = Start-Marker -Name 'after-same-basename-conflict'
+    $afterConflictResponse = Invoke-Broker -Executable $Injector -Identity $afterConflict.Identity
+    Assert-Response $afterConflictResponse 0 'injected' 'module-loaded'
+    $afterConflict.Process.WaitForExit(5000)
+    if (-not $afterConflict.Process.HasExited -or $afterConflict.Process.ExitCode -ne 0) {
+        throw 'A clean process did not recover to normal injection after a conflict.'
     }
 
     $wrongCreation = Start-Marker -Name 'wrong-creation'

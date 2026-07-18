@@ -51,6 +51,12 @@ foreach ($workflow in Get-ChildItem -LiteralPath $workflowRoot -File | Where-Obj
         if (-not $cppRunner.Success -or $cppRunner.Groups['os'].Value -ne 'windows-2022') {
             $failures.Add("$relative CodeQL C/C++ must run on windows-2022 so the ATL toolchain is available.")
         }
+
+        $usesOpenCoreBuilder = $text -match '(?m)^\s*run:\s*\.github/scripts/Build-OpenCore\.ps1\s*$'
+        $bypassesOpenCoreBuilder = $text -match '(?i)msbuild\s+gdipp\.sln|service-injector-codeql-'
+        if (-not $usesOpenCoreBuilder -or $bypassesOpenCoreBuilder) {
+            $failures.Add("$relative CodeQL C/C++ must use .github/scripts/Build-OpenCore.ps1 so pinned dependencies and both injectors are analyzed.")
+        }
     }
 
     foreach ($match in [regex]::Matches($text, '(?m)^\s*-?\s*uses:\s*([^\s#]+)')) {

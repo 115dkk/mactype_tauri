@@ -114,6 +114,47 @@ function Assert-PolicyRejectsCodeqlLatestRunner {
     throw 'Policy accepted windows-latest for the ATL-dependent CodeQL C++ build.'
 }
 
+function Set-CodeqlDirectCoreBuildFixture {
+    $workflow = @"
+name: CodeQL
+on: workflow_dispatch
+jobs:
+  analyze:
+    strategy:
+      matrix:
+        include:
+          - language: c-cpp
+            os: windows-2022
+            build-mode: manual
+    runs-on: `${{ matrix.os }}
+    steps:
+      - uses: microsoft/setup-msbuild@v3
+      - shell: cmd
+        run: msbuild gdipp.sln
+"@
+    [System.IO.File]::WriteAllText(
+        (Join-Path $fixtureRoot 'codeql.yml'),
+        $workflow,
+        [System.Text.UTF8Encoding]::new($false)
+    )
+}
+
+function Assert-PolicyRejectsDirectCodeqlCoreBuild {
+    Set-CodeqlDirectCoreBuildFixture
+    $messages = @()
+    try {
+        $messages = @(& $policy -WorkflowRoot $fixtureRoot *>&1)
+    } catch {
+        $messages += $_
+        $combined = ($messages | Out-String) + $_.Exception.Message
+        if ($combined -match 'CodeQL C/C\+\+ must use .github/scripts/Build-OpenCore.ps1') {
+            return
+        }
+        throw "Policy rejected the direct CodeQL core build for the wrong reason: $combined"
+    }
+    throw 'Policy accepted a CodeQL core build without pinned dependencies.'
+}
+
 try {
     New-Item -ItemType Directory -Path $fixtureRoot | Out-Null
     Assert-PolicyRejects -Uses 'example/old-node-action@v1' -ExpectedMessage 'closed allowlist'
@@ -121,6 +162,7 @@ try {
     Set-WorkflowFixture -Uses 'dtolnay/rust-toolchain@stable'
     Assert-PolicyRejectsHardcodedCodeqlToolchain
     Assert-PolicyRejectsCodeqlLatestRunner
+    Assert-PolicyRejectsDirectCodeqlCoreBuild
     Remove-Item -LiteralPath (Join-Path $fixtureRoot 'codeql.yml') -Force
 
     & $policy -WorkflowRoot $fixtureRoot

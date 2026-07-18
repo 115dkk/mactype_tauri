@@ -110,11 +110,8 @@ function Test-OpenServiceWorkflowPolicy {
     $codeqlWorkflowPath = Join-Path $Root '.github\workflows\codeql.yml'
     $null = Test-RequiredTokens -Failures $failures -Path $codeqlWorkflowPath `
         -MissingMessage '.github/workflows/codeql.yml is missing.' `
-        -TokenMessage "codeql.yml does not compile the service-injector analysis target '{0}'." `
-        -Tokens @(
-            'service-injector-codeql-x86', 'service-injector-codeql-x64',
-            'mactype-injector32', 'mactype-injector64'
-        )
+        -TokenMessage "codeql.yml does not use the verified open-core analysis build '{0}'." `
+        -Tokens @('.github/scripts/Build-OpenCore.ps1')
 
     $disposableWorkflowPath = Join-Path $Root '.github\workflows\open-service-disposable-vm.yml'
     $disposableScriptPath = Join-Path $Root 'scripts\ci\Test-OpenServiceDisposableVm.ps1'

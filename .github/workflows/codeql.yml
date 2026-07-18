@@ -41,19 +41,9 @@ jobs:
         uses: microsoft/setup-msbuild@v3
 
       - if: matrix.build-mode == 'manual'
-        name: Build C++ (MSVC)
-        shell: cmd
-        run: |
-          msbuild gdipp.sln /p:Configuration=Release /p:Platform=x64
-
-      - if: matrix.language == 'c-cpp'
-        name: Build service injector x86/x64 for CodeQL
+        name: Build open core and service injectors
         shell: pwsh
-        run: |
-          cmake -S service-injector -B build/service-injector-codeql-x86 -A Win32 -DBUILD_TESTING=OFF
-          cmake --build build/service-injector-codeql-x86 --config Release --target mactype-injector32
-          cmake -S service-injector -B build/service-injector-codeql-x64 -A x64 -DBUILD_TESTING=OFF
-          cmake --build build/service-injector-codeql-x64 --config Release --target mactype-injector64
+        run: .github/scripts/Build-OpenCore.ps1
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4

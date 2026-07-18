@@ -140,8 +140,7 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
     ? "C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\profiles\\Pretendard forever.ini"
     : fallbackGalleryProfilePath;
   const legacyRequested = query.get("legacy") === "migration-available"
-    || fixture === "legacy-conflict"
-    || fixture === "migration-available";
+    || fixture === "legacy-conflict";
   const requestedLegacyState = query.get("legacy-state");
   const legacyState = legacyRuntimeValues.find((state) => state === requestedLegacyState) ?? "running";
   const legacyStable = legacyState === "running" || legacyState === "stopped";

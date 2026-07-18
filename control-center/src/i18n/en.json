@@ -213,6 +213,8 @@
   "execution.systemAppInitConflictDescription": "The new service is running, but AppInit registry mode prevents a verified system state. Stop remains available; other mutations stay blocked.",
   "execution.systemLegacyTrayConflictTitle": "Service running while MacTray conflicts",
   "execution.systemLegacyTrayConflictDescription": "The new service is running while the existing MacTray tray mode is also detected. Stop remains available, but Control Center will not claim active application or allow other system changes until the conflict is resolved.",
+  "execution.systemLegacyServiceMigrateTitle": "Legacy MacTray service must be migrated first",
+  "execution.systemLegacyServiceMigrateDescription": "A verified legacy MacTray service is installed. Install, start, and profile activation stay blocked so the two services never inject together. Use Migrate below: it stops the legacy service before starting the new one.",
   "execution.legacyTrayRunningTitle": "Existing MacTray is running",
   "execution.legacyTrayRunningDescription": "The verified MacTray in this user session must exit normally before the new service can be used safely. The MacTray file will not be deleted.",
   "execution.legacyTrayOtherSessionTitle": "MacTray is running in another user session",

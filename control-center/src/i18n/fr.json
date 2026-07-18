@@ -213,6 +213,8 @@
   "execution.systemAppInitConflictDescription": "Le nouveau service fonctionne, mais le mode de registre AppInit empêche de vérifier l’état système. L’arrêt reste disponible et les autres modifications sont bloquées.",
   "execution.systemLegacyTrayConflictTitle": "Service actif malgré un conflit avec MacTray",
   "execution.systemLegacyTrayConflictDescription": "Le nouveau service fonctionne alors que l’ancien mode de zone de notification MacTray est également détecté. L’arrêt reste disponible, mais Control Center ne déclarera pas l’application active et n’autorisera aucune autre modification système avant la résolution du conflit.",
+  "execution.systemLegacyServiceMigrateTitle": "L’ancien service MacTray doit d’abord être migré",
+  "execution.systemLegacyServiceMigrateDescription": "Un ancien service MacTray vérifié est installé. L’installation, le démarrage et l’activation du profil restent bloqués afin que les deux services n’injectent jamais en même temps. Utilisez la migration ci-dessous : elle arrête d’abord l’ancien service, puis démarre le nouveau.",
   "execution.legacyTrayRunningTitle": "L’ancien MacTray est en cours d’exécution",
   "execution.legacyTrayRunningDescription": "Le MacTray vérifié de cette session utilisateur doit se fermer normalement avant que le nouveau service puisse être utilisé en toute sécurité. Le fichier MacTray ne sera pas supprimé.",
   "execution.legacyTrayOtherSessionTitle": "MacTray fonctionne dans une autre session utilisateur",

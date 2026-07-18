@@ -114,6 +114,7 @@ jobs:
           Get-CimInstance Win32_Process -Filter "Name='MacTray.exe'" |
             Select-Object ProcessId, SessionId, CommandLine | Out-String | Add-Content $out
           Get-Content $out
+          exit 0
 
       - name: 'Proof 1/6 — guard reports clear before any legacy artifacts'
         id: p1
@@ -358,6 +359,7 @@ jobs:
           Get-CimInstance Win32_Process -Filter "Name='MacTray.exe'" |
             ForEach-Object { Stop-Process -Id $_.ProcessId -Force -Confirm:$false -ErrorAction SilentlyContinue }
           'cleanup complete'
+          exit 0
 
       - name: Final desktop screenshot
         if: always()

@@ -342,28 +342,56 @@ test("execution and new system service controls remain interactive", async ({ pa
   expect(failures, failures.join("\n")).toEqual([]);
 });
 
-test("open service health and legacy migration are separate user flows", async ({ page }) => {
+test("a running legacy service is never claimed as verified system application", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=ko&system-service=ready&legacy=migration-available", { waitUntil: "networkidle" });
 
   const openService = page.locator('[data-service-backend="open-source"]');
   await expect(openService).toBeVisible();
   await expect(openService).toContainText("MacType Control Center 서비스");
   await expect(openService).toContainText("준비 완료");
-  await expect(openService).toContainText("프로필 일치");
-  await expect(page.getByText("MacType 시스템 적용 중", { exact: true })).toBeVisible();
+  await expect(page.getByText("MacType 시스템 적용 중", { exact: true })).toHaveCount(0);
+  await expect(openService.locator('[data-state="running-unverified"]')).toBeVisible();
 
   const legacy = page.locator('[data-service-backend="legacy-mactray"]');
   await expect(legacy).toBeVisible();
   await expect(legacy).toContainText("레거시 MacTray");
-  await expect(legacy.getByRole("button", { name: "마이그레이션" })).toBeVisible();
+  await expect(legacy.getByRole("button", { name: "마이그레이션" })).toBeEnabled();
   await expect(legacy.getByRole("button", { name: "레거시 서비스 제거" })).toBeDisabled();
 
   await page.getByRole("button", { name: "새 프로세스 적용 중지" }).click();
-  await expect(page.getByText("MacType 시스템 적용 꺼짐", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "현재 프로필 적용" }).click();
-  await expect(page.getByText("MacType 시스템 적용 중", { exact: true })).toBeVisible();
+  await expect(openService.locator('[data-state="legacy-service-migrate"]')).toBeVisible();
+  await expect(openService).toContainText("레거시 MacTray 서비스를 먼저 마이그레이션해야 합니다");
+  await expect(page.getByRole("button", { name: "현재 프로필 적용" })).toBeDisabled();
+  await expect(legacy.getByRole("button", { name: "마이그레이션" })).toBeEnabled();
 
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
+});
+
+test("a verified legacy service funnels activation through Migrate until it is removed", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy=migration-available", { waitUntil: "networkidle" });
+
+  const openService = page.locator('[data-service-backend="open-source"]');
+  await expect(openService.locator('[data-state="legacy-service-migrate"]')).toBeVisible();
+  await expect(openService).toContainText("Legacy MacTray service must be migrated first");
+  await expect(openService.getByRole("button", { name: "Apply current profile" })).toBeDisabled();
+  await expect(openService.getByRole("button", { name: "Install service" })).toBeDisabled();
+  await expect(openService.getByRole("button", { name: "Start service" })).toBeDisabled();
+
+  const legacy = page.locator('[data-service-backend="legacy-mactray"]');
+  await expect(legacy).toContainText("Verified MacTray service");
+  await expect(legacy.getByRole("button", { name: "Migrate" })).toBeEnabled();
+
+  await legacy.getByRole("button", { name: "Migrate" }).click();
+  await page.getByRole("dialog", { name: "Migrate legacy MacTray?" }).getByRole("button", { name: "Continue migration" }).click();
+  await expect(page.getByText("Migration to the new service passed verification.", { exact: true })).toBeVisible();
+
+  await expect(legacy).toContainText("Stopped");
+  await expect(openService.getByRole("button", { name: "Stop applying to new processes" })).toBeEnabled();
+  await expect(openService.getByRole("button", { name: "Install service" })).toBeDisabled();
+
+  await legacy.getByRole("button", { name: "Remove legacy service" }).click();
+  await expect(page.getByText("The legacy service was removed.", { exact: true })).toBeVisible();
+  await expect(page.locator('[data-service-backend="legacy-mactray"]')).toHaveCount(0);
 });
 
 test("legacy migration explains the verified transaction before it can continue", async ({ page }) => {

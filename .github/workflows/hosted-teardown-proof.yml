@@ -86,7 +86,9 @@ jobs:
         continue-on-error: true
         working-directory: control-center/src-tauri
         run: |
-          cargo build --bin mactype-control-center 2>&1 | Tee-Object "$env:EVIDENCE_DIR\07-appbuild.txt" | Select-Object -Last 6
+          # tauri/custom-protocol makes the debug exe serve the embedded dist
+          # (without it the app tries the dev server and shows a blank error page)
+          cargo build --bin mactype-control-center --features tauri/custom-protocol 2>&1 | Tee-Object "$env:EVIDENCE_DIR\07-appbuild.txt" | Select-Object -Last 6
           $exe = "$env:GITHUB_WORKSPACE\control-center\src-tauri\target\debug\mactype-control-center.exe"
           if (Test-Path $exe) { "app exe built: $exe" | Add-Content "$env:EVIDENCE_DIR\07-appbuild.txt" }
           else { throw 'the control center app exe was not produced' }

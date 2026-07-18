@@ -36,11 +36,14 @@ jobs:
           build-mode: ${{ matrix.build-mode }}
           queries: security-extended
 
+      - if: matrix.language == 'c-cpp'
+        name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v3
+
       - if: matrix.build-mode == 'manual'
         name: Build C++ (MSVC)
         shell: cmd
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
           msbuild gdipp.sln /p:Configuration=Release /p:Platform=x64
 
       - if: matrix.language == 'c-cpp'

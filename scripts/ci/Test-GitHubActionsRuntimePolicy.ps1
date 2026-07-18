@@ -37,6 +37,14 @@ foreach ($workflow in Get-ChildItem -LiteralPath $workflowRoot -File | Where-Obj
     $text = Get-Content -LiteralPath $workflow.FullName -Raw
     $relative = [System.IO.Path]::GetRelativePath($root, $workflow.FullName)
 
+    if ($workflow.Name -ieq 'codeql.yml') {
+        $usesSetupMsbuild = $text -match '(?m)^\s*-?\s*uses:\s*microsoft/setup-msbuild@v3\s*$'
+        $hardcodesVisualStudio = $text -match '(?i)vcvarsall\.bat|Visual Studio[\\/]\d{4}[\\/]'
+        if (-not $usesSetupMsbuild -or $hardcodesVisualStudio) {
+            $failures.Add("$relative must discover MSBuild through microsoft/setup-msbuild@v3 and must not hardcode a Visual Studio installation path.")
+        }
+    }
+
     foreach ($match in [regex]::Matches($text, '(?m)^\s*-?\s*uses:\s*([^\s#]+)')) {
         $reference = $match.Groups[1].Value.Trim('"', "'")
         if ($reference.StartsWith('./')) { continue }

@@ -3,7 +3,10 @@
 # OFFICIAL MacType installer from the upstream release, verifies its pinned
 # SHA-256, installs it, stages tray mode / autostart / service mode, and
 # drives the production guard code through detection, graceful exit,
-# autostart removal, and the SCM migration roundtrip. Evidence logs are
+# autostart removal, the SCM migration roundtrip, and the legacy-service
+# retirement transaction. Before each mutation it also opens the real control
+# center on the Execution view (observationally, pressing nothing) and
+# screenshots the action the user would see. Evidence logs and photos are
 # uploaded as artifacts; MacType binaries are never uploaded and the VM is
 # discarded after the job. This file lives only on
 # codex/hosted-teardown-proof and must not be merged onward.
@@ -78,6 +81,16 @@ jobs:
         working-directory: control-center/src-tauri
         run: cargo test --lib --no-run
 
+      - name: Build the real control center app for observational screenshots
+        id: appbuild
+        continue-on-error: true
+        working-directory: control-center/src-tauri
+        run: |
+          cargo build --bin mactype-control-center 2>&1 | Tee-Object "$env:EVIDENCE_DIR\07-appbuild.txt" | Select-Object -Last 6
+          $exe = "$env:GITHUB_WORKSPACE\control-center\src-tauri\target\debug\mactype-control-center.exe"
+          if (Test-Path $exe) { "app exe built: $exe" | Add-Content "$env:EVIDENCE_DIR\07-appbuild.txt" }
+          else { throw 'the control center app exe was not produced' }
+
       - name: Download the official MacType installer and verify its pinned hash
         run: |
           $installer = "$env:RUNNER_TEMP\MacTypeInstaller_2025.6.9.exe"
@@ -116,7 +129,7 @@ jobs:
           Get-Content $out
           exit 0
 
-      - name: 'Proof 1/6 — guard reports clear before any legacy artifacts'
+      - name: 'Proof 1/7 — guard reports clear before any legacy artifacts'
         id: p1
         continue-on-error: true
         working-directory: control-center/src-tauri
@@ -198,7 +211,7 @@ jobs:
             'screenshot saved'
           } catch { "screenshot failed: $_" | Tee-Object "$env:EVIDENCE_DIR\06-desktop-tray-error.txt" }
 
-      - name: 'Proof 2/6 — guard detects the real tray-mode conflict'
+      - name: 'Proof 2/7 — guard detects the real tray-mode conflict'
         id: p2
         continue-on-error: true
         working-directory: control-center/src-tauri
@@ -207,7 +220,36 @@ jobs:
           RUST_BACKTRACE: '1'
         run: cargo test --lib machine_integration::live_teardown::guard_detects_real_tray_mode_conflict -- --ignored --exact --nocapture 2>&1 | Tee-Object "$env:EVIDENCE_DIR\11-proof2-conflict.txt"
 
-      - name: 'Proof 3/6 — production graceful exit stops the real MacTray'
+      - name: 'Photo — trusted interactive MacTray, before graceful exit'
+        continue-on-error: true
+        run: |
+          # Observational only: open the real control center on the Execution
+          # view against the production backend and screenshot the window that
+          # the user would see. Presses no buttons; the tray stays running.
+          Remove-Item Env:MACTYPE_CI_SMOKE_FILE -ErrorAction SilentlyContinue
+          $exe = "$env:GITHUB_WORKSPACE\control-center\src-tauri\target\debug\mactype-control-center.exe"
+          $label = '24-ui-before-graceful-exit'
+          if (-not (Test-Path $exe)) { "photo $label skipped: app exe missing" | Tee-Object "$env:EVIDENCE_DIR\$label.txt"; exit 0 }
+          $proc = Start-Process -FilePath $exe -ArgumentList '--ci-view', 'execution' -PassThru
+          $deadline = (Get-Date).AddSeconds(30)
+          do { Start-Sleep -Milliseconds 500; $proc.Refresh() } until ($proc.MainWindowHandle -ne [IntPtr]::Zero -or $proc.HasExited -or (Get-Date) -gt $deadline)
+          Start-Sleep -Seconds 9
+          try { (New-Object -ComObject WScript.Shell).AppActivate($proc.Id) | Out-Null; Start-Sleep -Milliseconds 800 } catch {}
+          try {
+            Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+            $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+            $bmp.Save("$env:EVIDENCE_DIR\$label.png"); $g.Dispose(); $bmp.Dispose()
+            "captured $label (hwnd=$($proc.MainWindowHandle) exited=$($proc.HasExited))" | Tee-Object "$env:EVIDENCE_DIR\$label.txt"
+          } catch { "photo $label failed: $_" | Tee-Object "$env:EVIDENCE_DIR\$label.txt" }
+          if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+          Get-Process -Name mactype-control-center -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 1
+          exit 0
+
+      - name: 'Proof 3/7 — production graceful exit stops the real MacTray'
         id: p3
         continue-on-error: true
         working-directory: control-center/src-tauri
@@ -289,7 +331,35 @@ jobs:
           }
           Get-Content $out
 
-      - name: 'Proof 4/6 — production autostart disable removes both scopes'
+      - name: 'Photo — real Run-entry autostart state, before disable'
+        continue-on-error: true
+        run: |
+          # Observational only: the staged Run entries are present and no tray
+          # is running; capture the action the user would see (disable autostart).
+          Remove-Item Env:MACTYPE_CI_SMOKE_FILE -ErrorAction SilentlyContinue
+          $exe = "$env:GITHUB_WORKSPACE\control-center\src-tauri\target\debug\mactype-control-center.exe"
+          $label = '25-ui-before-autostart-disable'
+          if (-not (Test-Path $exe)) { "photo $label skipped: app exe missing" | Tee-Object "$env:EVIDENCE_DIR\$label.txt"; exit 0 }
+          $proc = Start-Process -FilePath $exe -ArgumentList '--ci-view', 'execution' -PassThru
+          $deadline = (Get-Date).AddSeconds(30)
+          do { Start-Sleep -Milliseconds 500; $proc.Refresh() } until ($proc.MainWindowHandle -ne [IntPtr]::Zero -or $proc.HasExited -or (Get-Date) -gt $deadline)
+          Start-Sleep -Seconds 9
+          try { (New-Object -ComObject WScript.Shell).AppActivate($proc.Id) | Out-Null; Start-Sleep -Milliseconds 800 } catch {}
+          try {
+            Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+            $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+            $bmp.Save("$env:EVIDENCE_DIR\$label.png"); $g.Dispose(); $bmp.Dispose()
+            "captured $label (hwnd=$($proc.MainWindowHandle) exited=$($proc.HasExited))" | Tee-Object "$env:EVIDENCE_DIR\$label.txt"
+          } catch { "photo $label failed: $_" | Tee-Object "$env:EVIDENCE_DIR\$label.txt" }
+          if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+          Get-Process -Name mactype-control-center -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 1
+          exit 0
+
+      - name: 'Proof 4/7 — production autostart disable removes both scopes'
         id: p4
         continue-on-error: true
         working-directory: control-center/src-tauri
@@ -333,7 +403,35 @@ jobs:
           Get-Content $out
           if (-not $service) { throw 'the session-zero service MacTray did not appear within 15 seconds' }
 
-      - name: 'Proof 5/6 — service mode stays exempt from the tray guard'
+      - name: 'Photo — owned running legacy service, before its funeral'
+        continue-on-error: true
+        run: |
+          # Observational only: the legacy MacType service is owned and running;
+          # capture the legacy-service card and its retirement action.
+          Remove-Item Env:MACTYPE_CI_SMOKE_FILE -ErrorAction SilentlyContinue
+          $exe = "$env:GITHUB_WORKSPACE\control-center\src-tauri\target\debug\mactype-control-center.exe"
+          $label = '26-ui-before-legacy-funeral'
+          if (-not (Test-Path $exe)) { "photo $label skipped: app exe missing" | Tee-Object "$env:EVIDENCE_DIR\$label.txt"; exit 0 }
+          $proc = Start-Process -FilePath $exe -ArgumentList '--ci-view', 'execution' -PassThru
+          $deadline = (Get-Date).AddSeconds(30)
+          do { Start-Sleep -Milliseconds 500; $proc.Refresh() } until ($proc.MainWindowHandle -ne [IntPtr]::Zero -or $proc.HasExited -or (Get-Date) -gt $deadline)
+          Start-Sleep -Seconds 9
+          try { (New-Object -ComObject WScript.Shell).AppActivate($proc.Id) | Out-Null; Start-Sleep -Milliseconds 800 } catch {}
+          try {
+            Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+            $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+            $bmp.Save("$env:EVIDENCE_DIR\$label.png"); $g.Dispose(); $bmp.Dispose()
+            "captured $label (hwnd=$($proc.MainWindowHandle) exited=$($proc.HasExited))" | Tee-Object "$env:EVIDENCE_DIR\$label.txt"
+          } catch { "photo $label failed: $_" | Tee-Object "$env:EVIDENCE_DIR\$label.txt" }
+          if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+          Get-Process -Name mactype-control-center -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 1
+          exit 0
+
+      - name: 'Proof 5/7 — service mode stays exempt from the tray guard'
         id: p5
         continue-on-error: true
         working-directory: control-center/src-tauri
@@ -416,14 +514,27 @@ jobs:
             'proof 5 service-mode exemption'    = '${{ steps.p5.outcome }}'
             'proof 6 SCM migration roundtrip'   = '${{ steps.p6.outcome }}'
             'proof 7 legacy service funeral'    = '${{ steps.p7.outcome }}'
+            'app build for proof photos'        = '${{ steps.appbuild.outcome }}'
           }
           $lines = $results.GetEnumerator() | ForEach-Object { '{0}: {1}' -f $_.Key, $_.Value }
+          # The three observational proof photos must each exist and be non-empty.
+          $photos = '24-ui-before-graceful-exit.png', '25-ui-before-autostart-disable.png', '26-ui-before-legacy-funeral.png'
+          $missingPhotos = @()
+          foreach ($photo in $photos) {
+            $path = "$env:EVIDENCE_DIR\$photo"
+            $ok = (Test-Path $path) -and ((Get-Item $path).Length -gt 0)
+            $lines += "photo ${photo}: $(if ($ok) { 'present' } else { 'MISSING' })"
+            if (-not $ok) { $missingPhotos += $photo }
+          }
           $lines | Tee-Object "$env:EVIDENCE_DIR\99-verdict.txt"
           $failed = @($results.GetEnumerator() | Where-Object { $_.Value -ne 'success' })
           if ($failed) {
             throw "failed proofs: $(($failed | ForEach-Object Key) -join '; ')"
           }
-          'PROOF COMPLETE: detection, graceful exit, autostart removal, service exemption, SCM migration, and legacy-service retirement all verified against the real MacType'
+          if ($missingPhotos) {
+            throw "missing proof photos: $($missingPhotos -join '; ')"
+          }
+          'PROOF COMPLETE: detection, graceful exit, autostart removal, service exemption, SCM migration, legacy-service retirement, plus observational Execution-page photos of each state — all against the real MacType'
 
       - name: Upload evidence (never MacType binaries)
         if: always()

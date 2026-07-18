@@ -3,34 +3,106 @@ use super::{
     common::{open_for, query_configuration, wide, wide_multi, ServiceHandle},
     control::{create_service_configuration, query, stop},
     snapshot::{
-        query_extended_configuration, MAX_FAILURE_ACTIONS, MAX_REQUIRED_PRIVILEGES,
-        MAX_SECURITY_DESCRIPTOR_BYTES, SERVICE_READ_CONTROL,
+        query_extended_configuration, service_has_triggers, MAX_FAILURE_ACTIONS,
+        MAX_REQUIRED_PRIVILEGES, MAX_SECURITY_DESCRIPTOR_BYTES, SERVICE_READ_CONTROL,
     },
 };
 use windows_sys::Win32::{
-    Foundation::GetLastError,
+    Foundation::{CloseHandle, GetLastError, ERROR_NOT_ALL_ASSIGNED, HANDLE, LUID},
     Security::{
-        GetSecurityDescriptorControl, GetSecurityDescriptorLength, IsValidSecurityDescriptor,
-        DACL_SECURITY_INFORMATION, GROUP_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
-        PROTECTED_DACL_SECURITY_INFORMATION, SE_DACL_PROTECTED, SE_SELF_RELATIVE,
+        AdjustTokenPrivileges, GetSecurityDescriptorControl, GetSecurityDescriptorLength,
+        IsValidSecurityDescriptor, LookupPrivilegeValueW, DACL_SECURITY_INFORMATION,
+        GROUP_SECURITY_INFORMATION, LUID_AND_ATTRIBUTES, OWNER_SECURITY_INFORMATION,
+        PROTECTED_DACL_SECURITY_INFORMATION, SE_DACL_PROTECTED, SE_PRIVILEGE_ENABLED,
+        SE_SELF_RELATIVE, TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES, TOKEN_QUERY,
         UNPROTECTED_DACL_SECURITY_INFORMATION,
     },
-    System::Services::{
-        ChangeServiceConfig2W, ChangeServiceConfigW, SetServiceObjectSecurity, SC_ACTION,
-        SC_ACTION_NONE, SC_ACTION_OWN_RESTART, SC_ACTION_REBOOT, SC_ACTION_RESTART,
-        SC_ACTION_RUN_COMMAND, SERVICE_CHANGE_CONFIG, SERVICE_CONFIG_DELAYED_AUTO_START_INFO,
-        SERVICE_CONFIG_DESCRIPTION, SERVICE_CONFIG_FAILURE_ACTIONS,
-        SERVICE_CONFIG_FAILURE_ACTIONS_FLAG, SERVICE_CONFIG_PRESHUTDOWN_INFO,
-        SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO, SERVICE_CONFIG_SERVICE_SID_INFO,
-        SERVICE_CONFIG_TRIGGER_INFO, SERVICE_DELAYED_AUTO_START_INFO, SERVICE_DESCRIPTIONW,
-        SERVICE_FAILURE_ACTIONSW, SERVICE_FAILURE_ACTIONS_FLAG, SERVICE_PRESHUTDOWN_INFO,
-        SERVICE_QUERY_CONFIG, SERVICE_REQUIRED_PRIVILEGES_INFOW, SERVICE_SID_INFO,
-        SERVICE_TRIGGER_INFO,
+    System::{
+        Services::{
+            ChangeServiceConfig2W, ChangeServiceConfigW, SetServiceObjectSecurity, SC_ACTION,
+            SC_ACTION_NONE, SC_ACTION_OWN_RESTART, SC_ACTION_REBOOT, SC_ACTION_RESTART,
+            SC_ACTION_RUN_COMMAND, SERVICE_CHANGE_CONFIG, SERVICE_CONFIG_DELAYED_AUTO_START_INFO,
+            SERVICE_CONFIG_DESCRIPTION, SERVICE_CONFIG_FAILURE_ACTIONS,
+            SERVICE_CONFIG_FAILURE_ACTIONS_FLAG, SERVICE_CONFIG_PRESHUTDOWN_INFO,
+            SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO, SERVICE_CONFIG_SERVICE_SID_INFO,
+            SERVICE_CONFIG_TRIGGER_INFO, SERVICE_DELAYED_AUTO_START_INFO, SERVICE_DESCRIPTIONW,
+            SERVICE_FAILURE_ACTIONSW, SERVICE_FAILURE_ACTIONS_FLAG, SERVICE_PRESHUTDOWN_INFO,
+            SERVICE_QUERY_CONFIG, SERVICE_REQUIRED_PRIVILEGES_INFOW, SERVICE_SID_INFO,
+            SERVICE_TRIGGER_INFO,
+        },
+        Threading::{GetCurrentProcess, OpenProcessToken},
     },
 };
 
 const SERVICE_WRITE_DAC: u32 = 0x0004_0000;
 const SERVICE_WRITE_OWNER: u32 = 0x0008_0000;
+
+struct TokenHandle(HANDLE);
+
+impl Drop for TokenHandle {
+    fn drop(&mut self) {
+        unsafe { CloseHandle(self.0) };
+    }
+}
+
+// Restoring the saved service owner (typically LocalSystem for a legacy MacType
+// service) requires SeRestorePrivilege; without it SetServiceObjectSecurity
+// fails with ERROR_INVALID_OWNER (1307). The privilege is held but disabled by
+// default on an elevated token, so enable it narrowly around the security write.
+fn set_process_privilege(name: &str, enable: bool) -> Result<(), String> {
+    let mut raw_token: HANDLE = std::ptr::null_mut();
+    if unsafe {
+        OpenProcessToken(
+            GetCurrentProcess(),
+            TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+            &mut raw_token,
+        )
+    } == 0
+    {
+        return Err(format!("OpenProcessToken failed with {}", unsafe {
+            GetLastError()
+        }));
+    }
+    let token = TokenHandle(raw_token);
+    let wide_name = wide(name);
+    let mut luid = LUID {
+        LowPart: 0,
+        HighPart: 0,
+    };
+    if unsafe { LookupPrivilegeValueW(std::ptr::null(), wide_name.as_ptr(), &mut luid) } == 0 {
+        return Err(format!(
+            "LookupPrivilegeValueW({name}) failed with {}",
+            unsafe { GetLastError() }
+        ));
+    }
+    let privileges = TOKEN_PRIVILEGES {
+        PrivilegeCount: 1,
+        Privileges: [LUID_AND_ATTRIBUTES {
+            Luid: luid,
+            Attributes: if enable { SE_PRIVILEGE_ENABLED } else { 0 },
+        }],
+    };
+    if unsafe {
+        AdjustTokenPrivileges(
+            token.0,
+            0,
+            &privileges,
+            0,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    } == 0
+    {
+        return Err(format!(
+            "AdjustTokenPrivileges({name}) failed with {}",
+            unsafe { GetLastError() }
+        ));
+    }
+    if enable && unsafe { GetLastError() } == ERROR_NOT_ALL_ASSIGNED {
+        return Err(format!("the current token does not hold {name}"));
+    }
+    Ok(())
+}
 
 fn validate_snapshot_string(name: &str, value: &str) -> Result<(), String> {
     if value.contains('\0') || value.encode_utf16().count() > 32_767 {
@@ -283,8 +355,16 @@ impl ServiceConfigurationRestorer for WindowsServiceConfigurationRestorer<'_> {
                 change_config2(self.service, SERVICE_CONFIG_PRESHUTDOWN_INFO, &information)
             }
             ServiceRestoreStep::Triggers => {
-                let information = SERVICE_TRIGGER_INFO::default();
-                change_config2(self.service, SERVICE_CONFIG_TRIGGER_INFO, &information)
+                // Clearing triggers on a service that has none returns
+                // ERROR_INVALID_PARAMETER (87) on Windows Server builds. The
+                // snapshot model only ever represents "no triggers", so only
+                // issue the clear when the live service actually has some.
+                if service_has_triggers(self.service)? {
+                    let information = SERVICE_TRIGGER_INFO::default();
+                    change_config2(self.service, SERVICE_CONFIG_TRIGGER_INFO, &information)
+                } else {
+                    Ok(())
+                }
             }
             ServiceRestoreStep::SecurityDescriptor => {
                 validate_security_descriptor_snapshot(&extended.security_descriptor)?;
@@ -313,13 +393,17 @@ impl ServiceConfigurationRestorer for WindowsServiceConfigurationRestorer<'_> {
                     | GROUP_SECURITY_INFORMATION
                     | DACL_SECURITY_INFORMATION
                     | protection;
-                if unsafe {
+                // Best-effort: if the owner is already a held SID the write
+                // succeeds without the privilege, and the real error still
+                // surfaces below when it is genuinely needed but unavailable.
+                let _ = set_process_privilege("SeRestorePrivilege", true);
+                let applied = unsafe {
                     SetServiceObjectSecurity(self.service.0, security_information, descriptor)
-                } == 0
-                {
-                    Err(format!("SetServiceObjectSecurity failed with {}", unsafe {
-                        GetLastError()
-                    }))
+                };
+                let last_error = unsafe { GetLastError() };
+                let _ = set_process_privilege("SeRestorePrivilege", false);
+                if applied == 0 {
+                    Err(format!("SetServiceObjectSecurity failed with {last_error}"))
                 } else {
                     Ok(())
                 }

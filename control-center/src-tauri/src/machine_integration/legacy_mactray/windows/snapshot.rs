@@ -228,6 +228,16 @@ fn query_security_descriptor(
     Ok(SecurityDescriptorSnapshot { self_relative })
 }
 
+pub(super) fn service_has_triggers(service: &ServiceHandle) -> Result<bool, String> {
+    let buffer = query_config2_buffer(
+        service,
+        SERVICE_CONFIG_TRIGGER_INFO,
+        std::mem::size_of::<SERVICE_TRIGGER_INFO>(),
+    )?;
+    let trigger = buffer.read::<SERVICE_TRIGGER_INFO>()?;
+    Ok(trigger.cTriggers != 0 || !trigger.pTriggers.is_null() || !trigger.pReserved.is_null())
+}
+
 pub(super) fn query_extended_configuration(
     service: &ServiceHandle,
 ) -> Result<ServiceExtendedConfiguration, String> {

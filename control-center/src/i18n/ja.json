@@ -213,6 +213,8 @@
   "execution.systemAppInitConflictDescription": "新しいサービスは実行中ですが、AppInit レジストリモードによりシステム状態を検証できません。適用の停止は使用でき、その他の変更はブロックされます。",
   "execution.systemLegacyTrayConflictTitle": "MacTray と競合した状態でサービスを実行中",
   "execution.systemLegacyTrayConflictDescription": "新しいサービスの実行中に既存の MacTray トレイモードも検出されました。停止はできますが、競合を解消するまで Control Center は適用中とは表示せず、その他のシステム変更も許可しません。",
+  "execution.systemLegacyServiceMigrateTitle": "先にレガシー MacTray サービスを移行してください",
+  "execution.systemLegacyServiceMigrateDescription": "検証済みのレガシー MacTray サービスがインストールされています。2 つのサービスが同時に注入しないよう、インストール・開始・プロファイル適用はブロックされます。下の移行を使用すると、レガシー サービスを先に停止してから新しいサービスを開始します。",
   "execution.legacyTrayRunningTitle": "既存の MacTray が実行中です",
   "execution.legacyTrayRunningDescription": "新しいサービスを安全に使用するには、このユーザーセッションで検証済みの MacTray を正常終了する必要があります。MacTray のファイルは削除しません。",
   "execution.legacyTrayOtherSessionTitle": "別のユーザーセッションで MacTray が実行中です",

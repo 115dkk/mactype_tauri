@@ -1,0 +1,402 @@
+# Hosted-runner proof that the production legacy MacTray teardown works
+# against a real MacType installation. The disposable VM downloads the
+# OFFICIAL MacType installer from the upstream release, verifies its pinned
+# SHA-256, installs it, stages tray mode / autostart / service mode, and
+# drives the production guard code through detection, graceful exit,
+# autostart removal, and the SCM migration roundtrip. Evidence logs are
+# uploaded as artifacts; MacType binaries are never uploaded and the VM is
+# discarded after the job. This file lives only on
+# codex/hosted-teardown-proof and must not be merged onward.
+name: Hosted MacTray teardown proof
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/hosted-teardown-proof]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-teardown-proof
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      MACTYPE_INSTALLER_URL: https://github.com/snowie2000/mactype/releases/download/v1.2025.6.9/MacTypeInstaller_2025.6.9.exe
+      MACTYPE_INSTALLER_SHA256: 66678f5535c2e2aa24d20d538612cf340acf9113b63579f722404e4ece9dd0de
+      MACTRAY_PATH: C:\Program Files\MacType\MacTray.exe
+      EVIDENCE_DIR: ${{ github.workspace }}\evidence-hosted-proof
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Runner session and privilege recon
+        run: |
+          New-Item -ItemType Directory -Force $env:EVIDENCE_DIR | Out-Null
+          $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+          $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+          $elevated = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+          $session = (Get-Process -Id $PID).SessionId
+          $lines = @(
+            "user=$($identity.Name)",
+            "elevated=$elevated",
+            "session=$session",
+            "os=$([Environment]::OSVersion.VersionString)"
+          )
+          $lines | Tee-Object "$env:EVIDENCE_DIR\00-runner-context.txt"
+          if (-not $elevated) { throw 'the hosted runner is not elevated; the proof needs administrator rights' }
+          if ($session -eq 0) { throw 'the runner session is zero; tray-mode classification needs an interactive session' }
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: control-center/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: control-center/src-tauri
+
+      - name: Install frontend dependencies
+        working-directory: control-center
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend bundle for the Tauri context
+        working-directory: control-center
+        run: pnpm build
+
+      - name: Precompile the live proof tests before MacType exists
+        working-directory: control-center/src-tauri
+        run: cargo test --lib --no-run
+
+      - name: Download the official MacType installer and verify its pinned hash
+        run: |
+          $installer = "$env:RUNNER_TEMP\MacTypeInstaller_2025.6.9.exe"
+          Invoke-WebRequest -Uri $env:MACTYPE_INSTALLER_URL -OutFile $installer
+          $hash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          "official installer sha256=$hash" | Tee-Object "$env:EVIDENCE_DIR\01-installer-hash.txt"
+          if ($hash -ne $env:MACTYPE_INSTALLER_SHA256) { throw "installer hash mismatch: $hash" }
+
+      - name: Install MacType silently from the official installer
+        run: |
+          $installer = "$env:RUNNER_TEMP\MacTypeInstaller_2025.6.9.exe"
+          $arguments = '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/DIR="C:\Program Files\MacType"'
+          $process = Start-Process $installer -ArgumentList $arguments -Wait -PassThru
+          "installer exit code=$($process.ExitCode)" | Tee-Object "$env:EVIDENCE_DIR\02-install.txt"
+          if ($process.ExitCode -ne 0) { throw "silent install failed with exit code $($process.ExitCode)" }
+          if (-not (Test-Path $env:MACTRAY_PATH)) { throw 'MacTray.exe is missing after the install' }
+          Get-ChildItem 'C:\Program Files\MacType' -Recurse |
+            Select-Object FullName, Length |
+            Out-String |
+            Add-Content "$env:EVIDENCE_DIR\02-install.txt"
+
+      - name: Post-install state recon
+        run: |
+          $out = "$env:EVIDENCE_DIR\03-postinstall-recon.txt"
+          foreach ($key in 'HKLM\SOFTWARE\MacType', 'HKLM\SOFTWARE\WOW6432Node\MacType', 'HKCU\Software\MacType',
+                           'HKCU\Software\Microsoft\Windows\CurrentVersion\Run',
+                           'HKLM\Software\Microsoft\Windows\CurrentVersion\Run') {
+            "=== reg query $key ===" | Add-Content $out
+            reg.exe query $key /s 2>&1 | Add-Content $out
+          }
+          '=== sc query MacType ===' | Add-Content $out
+          sc.exe query MacType 2>&1 | Add-Content $out
+          '=== MacTray processes ===' | Add-Content $out
+          Get-CimInstance Win32_Process -Filter "Name='MacTray.exe'" |
+            Select-Object ProcessId, SessionId, CommandLine | Out-String | Add-Content $out
+          Get-Content $out
+
+      - name: 'Proof 1/6 — guard reports clear before any legacy artifacts'
+        id: p1
+        continue-on-error: true
+        working-directory: control-center/src-tauri
+        env:
+          MACTYPE_HOSTED_TEARDOWN_PROOF: '1'
+          RUST_BACKTRACE: '1'
+        run: cargo test --lib machine_integration::live_teardown::guard_reports_clear_before_any_legacy_artifacts -- --ignored --exact --nocapture 2>&1 | Tee-Object "$env:EVIDENCE_DIR\10-proof1-clear.txt"
+
+      - name: Launch the real MacTray in tray mode
+        run: |
+          Start-Process $env:MACTRAY_PATH
+          $deadline = (Get-Date).AddSeconds(15)
+          do {
+            Start-Sleep -Milliseconds 250
+            $tray = @(Get-CimInstance Win32_Process -Filter "Name='MacTray.exe'" | Where-Object { $_.SessionId -ne 0 })
+          } until ($tray -or (Get-Date) -gt $deadline)
+          if (-not $tray) { throw 'the tray-mode MacTray did not appear within 15 seconds' }
+          Start-Sleep -Seconds 3
+          Get-CimInstance Win32_Process -Filter "Name='MacTray.exe'" |
+            Select-Object ProcessId, SessionId, CommandLine |
+            Tee-Object "$env:EVIDENCE_DIR\04-tray-launch.txt"
+
+      - name: Window inventory of the running MacTray
+        run: |
+          $tray = Get-CimInstance Win32_Process -Filter "Name='MacTray.exe'" |
+            Where-Object { $_.SessionId -ne 0 } | Select-Object -First 1
+          if (-not $tray) { throw 'no interactive MacTray to inventory' }
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Collections.Generic;
+          using System.Runtime.InteropServices;
+          using System.Text;
+          public static class TrayWindows {
+              delegate bool EnumProc(IntPtr hwnd, IntPtr lparam);
+              [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc callback, IntPtr lparam);
+              [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+              [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr hwnd, StringBuilder buffer, int capacity);
+              [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hwnd, StringBuilder buffer, int capacity);
+              [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
+              [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindow(string className, string windowName);
+              [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string className, string windowName);
+              public static List<string> Dump(uint pid) {
+                  var lines = new List<string>();
+                  EnumWindows((hwnd, lparam) => {
+                      uint owner;
+                      GetWindowThreadProcessId(hwnd, out owner);
+                      if (owner == pid) {
+                          var cls = new StringBuilder(256);
+                          GetClassName(hwnd, cls, 256);
+                          var title = new StringBuilder(256);
+                          GetWindowText(hwnd, title, 256);
+                          lines.Add(string.Format("hwnd=0x{0:X} class={1} title={2} visible={3}", hwnd.ToInt64(), cls, title, IsWindowVisible(hwnd)));
+                      }
+                      return true;
+                  }, IntPtr.Zero);
+                  return lines;
+              }
+          }
+          '@
+          $hwndMessage = New-Object System.IntPtr(-3)
+          $lines = @("tray pid=$($tray.ProcessId) session=$($tray.SessionId)")
+          $lines += [TrayWindows]::Dump([uint32]$tray.ProcessId) | ForEach-Object { "toplevel: $_" }
+          $lines += "findwindow class=MacTypeMSGWnd -> $([TrayWindows]::FindWindow('MacTypeMSGWnd', $null))"
+          $lines += "findwindow title=MacTypeMSGWnd -> $([TrayWindows]::FindWindow($null, 'MacTypeMSGWnd'))"
+          $lines += "message-only class=MacTypeMSGWnd -> $([TrayWindows]::FindWindowEx($hwndMessage, [IntPtr]::Zero, 'MacTypeMSGWnd', $null))"
+          $lines += "message-only title=MacTypeMSGWnd -> $([TrayWindows]::FindWindowEx($hwndMessage, [IntPtr]::Zero, $null, 'MacTypeMSGWnd'))"
+          $lines | Tee-Object "$env:EVIDENCE_DIR\05-window-inventory.txt"
+
+      - name: Screenshot of the staged tray-mode desktop
+        run: |
+          try {
+            Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+            $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+            $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+            $bitmap.Save("$env:EVIDENCE_DIR\06-desktop-tray.png")
+            $graphics.Dispose(); $bitmap.Dispose()
+            'screenshot saved'
+          } catch { "screenshot failed: $_" | Tee-Object "$env:EVIDENCE_DIR\06-desktop-tray-error.txt" }
+
+      - name: 'Proof 2/6 — guard detects the real tray-mode conflict'
+        id: p2
+        continue-on-error: true
+        working-directory: control-center/src-tauri
+        env:
+          MACTYPE_HOSTED_TEARDOWN_PROOF: '1'
+          RUST_BACKTRACE: '1'
+        run: cargo test --lib machine_integration::live_teardown::guard_detects_real_tray_mode_conflict -- --ignored --exact --nocapture 2>&1 | Tee-Object "$env:EVIDENCE_DIR\11-proof2-conflict.txt"
+
+      - name: 'Proof 3/6 — production graceful exit stops the real MacTray'
+        id: p3
+        continue-on-error: true
+        working-directory: control-center/src-tauri
+        env:
+          MACTYPE_HOSTED_TEARDOWN_PROOF: '1'
+          RUST_BACKTRACE: '1'
+        run: cargo test --lib machine_integration::live_teardown::graceful_exit_stops_real_tray_mode -- --ignored --exact --nocapture 2>&1 | Tee-Object "$env:EVIDENCE_DIR\12-proof3-graceful-exit.txt"
+
+      - name: Exit-protocol diagnostic (runs only when the graceful exit failed)
+        if: steps.p3.outcome == 'failure'
+        run: |
+          $out = "$env:EVIDENCE_DIR\13-exit-diagnostic.txt"
+          $tray = Get-CimInstance Win32_Process -Filter "Name='MacTray.exe'" |
+            Where-Object { $_.SessionId -ne 0 } | Select-Object -First 1
+          if (-not $tray) {
+            'no interactive MacTray found; nothing to diagnose (unexpected after a failed graceful exit)' | Tee-Object $out
+            exit 0
+          }
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class ExitProbe {
+              [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindow(string className, string windowName);
+              [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string className, string windowName);
+              [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern uint RegisterWindowMessage(string name);
+              [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wparam, IntPtr lparam);
+              [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+          }
+          '@
+          $hwndMessage = New-Object System.IntPtr(-3)
+          $window = [ExitProbe]::FindWindow('MacTypeMSGWnd', $null)
+          $how = 'toplevel class'
+          if ($window -eq [IntPtr]::Zero) { $window = [ExitProbe]::FindWindow($null, 'MacTypeMSGWnd'); $how = 'toplevel title' }
+          if ($window -eq [IntPtr]::Zero) { $window = [ExitProbe]::FindWindowEx($hwndMessage, [IntPtr]::Zero, 'MacTypeMSGWnd', $null); $how = 'message-only class' }
+          if ($window -eq [IntPtr]::Zero) { $window = [ExitProbe]::FindWindowEx($hwndMessage, [IntPtr]::Zero, $null, 'MacTypeMSGWnd'); $how = 'message-only title' }
+          $lines = @("diagnosing tray pid=$($tray.ProcessId)", "MacTypeMSGWnd handle=$window (found via: $how)")
+          if ($window -ne [IntPtr]::Zero) {
+            $owner = [uint32]0
+            [ExitProbe]::GetWindowThreadProcessId($window, [ref]$owner) | Out-Null
+            $lines += "MacTypeMSGWnd owner pid=$owner"
+            $signal = [ExitProbe]::RegisterWindowMessage('MacType-SIG-STOP')
+            $posted = [ExitProbe]::PostMessage($window, $signal, [IntPtr]::Zero, [IntPtr]::Zero)
+            $lines += "posted MacType-SIG-STOP (message=$signal) -> $posted"
+            $deadline = (Get-Date).AddSeconds(10)
+            do {
+              Start-Sleep -Milliseconds 250
+              $alive = Get-Process -Id $tray.ProcessId -ErrorAction SilentlyContinue
+            } while ($alive -and (Get-Date) -lt $deadline)
+            $lines += if ($alive) { 'RESULT: MacTray is still alive after MacType-SIG-STOP' }
+                      else { 'RESULT: MacTray exited after MacType-SIG-STOP to MacTypeMSGWnd' }
+          } else {
+            $lines += 'RESULT: no MacTypeMSGWnd window exists in this session'
+          }
+          $lines += '=== MacTray processes after diagnostic ==='
+          $lines += @(Get-CimInstance Win32_Process -Filter "Name='MacTray.exe'" |
+            Select-Object ProcessId, SessionId | Out-String)
+          $lines | Tee-Object $out
+
+      - name: Ensure no interactive MacTray remains before the autostart phase
+        run: |
+          $survivors = @(Get-CimInstance Win32_Process -Filter "Name='MacTray.exe'" | Where-Object { $_.SessionId -ne 0 })
+          if ($survivors) {
+            "force-killing $($survivors.Count) surviving interactive MacTray process(es)" | Tee-Object "$env:EVIDENCE_DIR\14-force-kill.txt"
+            $survivors | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -Confirm:$false }
+            Start-Sleep -Seconds 2
+          } else {
+            'no interactive MacTray survivors; the graceful exit left the machine clean' | Tee-Object "$env:EVIDENCE_DIR\14-force-kill.txt"
+          }
+
+      - name: Stage legacy autostart entries in both scopes
+        run: |
+          $target = '"C:\Program Files\MacType\MacTray.exe"'
+          Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name MacTray -Value $target
+          Set-ItemProperty -Path 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run' -Name MacTray -Value $target
+          $out = "$env:EVIDENCE_DIR\15-staged-autostart.txt"
+          foreach ($key in 'HKCU\Software\Microsoft\Windows\CurrentVersion\Run', 'HKLM\Software\Microsoft\Windows\CurrentVersion\Run') {
+            "=== reg query $key ===" | Add-Content $out
+            reg.exe query $key 2>&1 | Add-Content $out
+          }
+          Get-Content $out
+
+      - name: 'Proof 4/6 — production autostart disable removes both scopes'
+        id: p4
+        continue-on-error: true
+        working-directory: control-center/src-tauri
+        env:
+          MACTYPE_HOSTED_TEARDOWN_PROOF: '1'
+          RUST_BACKTRACE: '1'
+        run: cargo test --lib machine_integration::live_teardown::autostart_disable_removes_staged_entries -- --ignored --exact --nocapture 2>&1 | Tee-Object "$env:EVIDENCE_DIR\16-proof4-autostart.txt"
+
+      - name: Independent registry verification after the disable
+        run: |
+          $lines = @()
+          $stale = $false
+          foreach ($path in 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run') {
+            $value = (Get-ItemProperty -Path $path -Name MacTray -ErrorAction SilentlyContinue).MacTray
+            if ($null -ne $value) { $stale = $true; $lines += "$path still has MacTray = $value" }
+            else { $lines += "$path : MacTray value absent" }
+          }
+          $lines | Tee-Object "$env:EVIDENCE_DIR\17-registry-verify.txt"
+          if ('${{ steps.p4.outcome }}' -eq 'success' -and $stale) {
+            throw 'the production disable reported success but registry entries remain'
+          }
+
+      - name: Register and start the legacy MacType service (real installation shape)
+        id: svc
+        continue-on-error: true
+        run: |
+          New-Service -Name MacType -DisplayName MacType `
+            -BinaryPathName '"C:\Program Files\MacType\MacTray.exe" -service' `
+            -StartupType Automatic -DependsOn winmgmt | Out-Null
+          $out = "$env:EVIDENCE_DIR\18-service-staged.txt"
+          sc.exe qc MacType 2>&1 | Add-Content $out
+          Start-Service MacType
+          $deadline = (Get-Date).AddSeconds(15)
+          do {
+            Start-Sleep -Milliseconds 250
+            $service = @(Get-CimInstance Win32_Process -Filter "Name='MacTray.exe'" | Where-Object { $_.SessionId -eq 0 })
+          } until ($service -or (Get-Date) -gt $deadline)
+          sc.exe query MacType 2>&1 | Add-Content $out
+          Get-CimInstance Win32_Process -Filter "Name='MacTray.exe'" |
+            Select-Object ProcessId, SessionId, CommandLine | Out-String | Add-Content $out
+          Get-Content $out
+          if (-not $service) { throw 'the session-zero service MacTray did not appear within 15 seconds' }
+
+      - name: 'Proof 5/6 — service mode stays exempt from the tray guard'
+        id: p5
+        continue-on-error: true
+        working-directory: control-center/src-tauri
+        env:
+          MACTYPE_HOSTED_TEARDOWN_PROOF: '1'
+          RUST_BACKTRACE: '1'
+        run: cargo test --lib machine_integration::live_teardown::service_mode_is_exempt_from_tray_conflict -- --ignored --exact --nocapture 2>&1 | Tee-Object "$env:EVIDENCE_DIR\19-proof5-service-exempt.txt"
+
+      - name: 'Proof 6/6 — SCM migration stop, remove, and restore roundtrip'
+        id: p6
+        continue-on-error: true
+        working-directory: control-center/src-tauri
+        env:
+          MACTYPE_HOSTED_TEARDOWN_PROOF: '1'
+          RUST_BACKTRACE: '1'
+        run: cargo test --lib machine_integration::live_teardown::service_migration_stop_remove_restore_roundtrip -- --ignored --exact --nocapture 2>&1 | Tee-Object "$env:EVIDENCE_DIR\20-proof6-migration.txt"
+
+      - name: Cleanup — stop and delete the service, kill every MacTray
+        if: always()
+        run: |
+          try { Stop-Service MacType -Force -ErrorAction Stop } catch {}
+          sc.exe delete MacType 2>&1 | Out-Null
+          Get-CimInstance Win32_Process -Filter "Name='MacTray.exe'" |
+            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -Confirm:$false -ErrorAction SilentlyContinue }
+          'cleanup complete'
+
+      - name: Final desktop screenshot
+        if: always()
+        run: |
+          try {
+            Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+            $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+            $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+            $bitmap.Save("$env:EVIDENCE_DIR\21-desktop-final.png")
+            $graphics.Dispose(); $bitmap.Dispose()
+            'screenshot saved'
+          } catch { "screenshot failed: $_" | Tee-Object "$env:EVIDENCE_DIR\21-desktop-final-error.txt" }
+
+      - name: Verdict
+        if: always()
+        run: |
+          $results = [ordered]@{
+            'proof 1 guard clear baseline'      = '${{ steps.p1.outcome }}'
+            'proof 2 tray conflict detected'    = '${{ steps.p2.outcome }}'
+            'proof 3 graceful exit'             = '${{ steps.p3.outcome }}'
+            'proof 4 autostart disable'         = '${{ steps.p4.outcome }}'
+            'service staging'                   = '${{ steps.svc.outcome }}'
+            'proof 5 service-mode exemption'    = '${{ steps.p5.outcome }}'
+            'proof 6 SCM migration roundtrip'   = '${{ steps.p6.outcome }}'
+          }
+          $lines = $results.GetEnumerator() | ForEach-Object { '{0}: {1}' -f $_.Key, $_.Value }
+          $lines | Tee-Object "$env:EVIDENCE_DIR\99-verdict.txt"
+          $failed = @($results.GetEnumerator() | Where-Object { $_.Value -ne 'success' })
+          if ($failed) {
+            throw "failed proofs: $(($failed | ForEach-Object Key) -join '; ')"
+          }
+          'PROOF COMPLETE: detection, graceful exit, autostart removal, service exemption, and SCM migration all verified against the real MacType'
+
+      - name: Upload evidence (never MacType binaries)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hosted-teardown-proof-evidence
+          path: evidence-hosted-proof
+          if-no-files-found: error

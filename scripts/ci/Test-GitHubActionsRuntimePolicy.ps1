@@ -43,6 +43,14 @@ foreach ($workflow in Get-ChildItem -LiteralPath $workflowRoot -File | Where-Obj
         if (-not $usesSetupMsbuild -or $hardcodesVisualStudio) {
             $failures.Add("$relative must discover MSBuild through microsoft/setup-msbuild@v3 and must not hardcode a Visual Studio installation path.")
         }
+
+        $cppRunner = [regex]::Match(
+            $text,
+            '(?ms)^\s*-\s+language:\s*c-cpp\s*$.*?^\s+os:\s*(?<os>[^\s#]+)\s*$'
+        )
+        if (-not $cppRunner.Success -or $cppRunner.Groups['os'].Value -ne 'windows-2022') {
+            $failures.Add("$relative CodeQL C/C++ must run on windows-2022 so the ATL toolchain is available.")
+        }
     }
 
     foreach ($match in [regex]::Matches($text, '(?m)^\s*-?\s*uses:\s*([^\s#]+)')) {

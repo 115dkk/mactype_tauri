@@ -46,6 +46,7 @@ impl WindowsInstallerBackend {
             protected_profile,
             protected_runtime,
             legacy_service: self.manager.observe_legacy_service(),
+            legacy_tray: super::super::legacy_tray::observe_conflict(),
             appinit: super::super::appinit::observe_conflict(),
         }
     }

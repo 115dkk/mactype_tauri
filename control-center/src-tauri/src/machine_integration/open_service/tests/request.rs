@@ -97,3 +97,37 @@ fn elevated_broker_accepts_transfer_metadata_only_for_profile_actions() {
     ])
     .is_err());
 }
+
+#[test]
+fn legacy_tray_autostart_broker_accepts_only_two_fixed_argument_free_verbs() {
+    let executable = OsString::from("control-center.exe");
+    for (verb, action) in [
+        (
+            "disable-legacy-tray-autostart",
+            SystemServiceAction::DisableLegacyTrayAutostart,
+        ),
+        (
+            "restore-legacy-tray-autostart",
+            SystemServiceAction::RestoreLegacyTrayAutostart,
+        ),
+    ] {
+        assert_eq!(action.setup_verb(), None);
+        assert!(!action.needs_profile_input());
+        let request = privileged_request_from_arguments([
+            executable.clone(),
+            OsString::from(BROKER_SWITCH),
+            OsString::from(verb),
+        ])
+        .unwrap()
+        .unwrap();
+        assert_eq!(request.action, action);
+        assert!(request.profile_transfer.is_none());
+        assert!(privileged_request_from_arguments([
+            executable.clone(),
+            OsString::from(BROKER_SWITCH),
+            OsString::from(verb),
+            OsString::from(r"HKLM\arbitrary"),
+        ])
+        .is_err());
+    }
+}

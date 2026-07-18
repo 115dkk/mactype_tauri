@@ -356,6 +356,54 @@ fn cleanup_unknown_degrades_its_generation_then_next_success_recovers_ready() {
 }
 
 #[test]
+fn conflicting_mactype_module_degrades_its_generation_then_next_process_recovers_ready() {
+    let recorder = Recorder::default();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+
+    ServiceRuntime::new("0.2.0")
+        .run(
+            &recorder,
+            &recorder,
+            &RecoveringInitializer {
+                requests: requests.clone(),
+                first_code: "conflicting-mactype-module-loaded",
+                first_win32_error: None,
+            },
+            &StopAfterTwoProcesses {
+                polls: AtomicUsize::new(0),
+            },
+        )
+        .unwrap();
+
+    let reports = recorder.reports.lock().unwrap();
+    let degraded = reports
+        .iter()
+        .find(|report| report.health == HealthState::Degraded)
+        .expect("a conflicting MacType module must degrade the active generation");
+    let error = degraded.last_error.as_ref().unwrap();
+    assert_eq!(error.code, "conflicting-mactype-module-loaded");
+    assert!(error.message.contains("pid=42"));
+    assert!(error
+        .message
+        .contains(&format!("generation={RUNTIME_GENERATION}")));
+
+    let latest = reports.last().unwrap();
+    assert_eq!(latest.health, HealthState::Ready);
+    assert!(latest.last_error.is_none());
+    assert_eq!(latest.injection.x64.success_count, 1);
+    assert_eq!(latest.injection.x64.last_success.as_ref().unwrap().pid, 43);
+    assert_eq!(
+        requests
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|request| request.identity.pid)
+            .collect::<Vec<_>>(),
+        [42, 43]
+    );
+}
+
+#[test]
 fn invalid_helper_response_degrades_its_generation_then_next_success_recovers_ready() {
     let recorder = Recorder::default();
     let requests = Arc::new(Mutex::new(Vec::new()));

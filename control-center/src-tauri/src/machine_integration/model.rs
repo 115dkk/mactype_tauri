@@ -1,4 +1,5 @@
 use super::open_service;
+use super::LegacyTrayStatus;
 use crate::service_contract::SystemServiceStatus;
 use serde::{Deserialize, Serialize};
 
@@ -58,6 +59,7 @@ pub(crate) enum TrayLoginState {
 pub(crate) struct MachineStatus {
     pub new_service: SystemServiceStatus,
     pub legacy_service: Option<open_service::LegacyMacTrayStatus>,
+    pub legacy_tray: LegacyTrayStatus,
     pub registry_conflict: bool,
     pub system_injection_active: bool,
     pub expected_profile_digest: Option<String>,
@@ -65,6 +67,7 @@ pub(crate) struct MachineStatus {
 
 pub(crate) trait MachineBackend {
     fn new_service_status(&mut self) -> SystemServiceStatus;
+    fn legacy_tray_status(&mut self) -> LegacyTrayStatus;
     fn appinit_conflict(&mut self) -> Result<bool, String>;
     fn execute(&mut self, action: MachineAction, profile: Option<&[u8]>) -> Result<(), String>;
 }

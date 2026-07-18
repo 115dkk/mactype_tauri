@@ -158,14 +158,20 @@ Result inject_fixed_adjacent_module(const BrokerRequest& request) noexcept {
                            kFixedModuleNameUtf8,
                            static_cast<std::uint32_t>(module_error.value()));
     }
-    const auto loaded = fixed_module_is_loaded(process.get(), *module_path);
-    if (!loaded) {
-        return make_result(request, ResultStatus::failed, "module-inventory-unavailable",
-                           kFixedModuleNameUtf8, GetLastError());
-    }
-    if (*loaded) {
-        return make_result(request, ResultStatus::skipped, "module-already-loaded",
-                           kFixedModuleNameUtf8);
+    switch (fixed_module_state(process.get(), *module_path)) {
+        case FixedModuleState::Absent:
+            break;
+        case FixedModuleState::ExpectedModuleLoaded:
+            return make_result(request, ResultStatus::skipped, "module-already-loaded",
+                               kFixedModuleNameUtf8);
+        case FixedModuleState::SameBasenameDifferentPath:
+            return make_result(request, ResultStatus::rejected,
+                               "conflicting-mactype-module-loaded",
+                               kFixedModuleNameUtf8);
+        case FixedModuleState::InventoryUnavailable:
+            return make_result(request, ResultStatus::failed,
+                               "module-inventory-unavailable", kFixedModuleNameUtf8,
+                               GetLastError());
     }
     const auto verified_creation_time = process_creation_time(process.get());
     if (!verified_creation_time || *verified_creation_time != request.expected_creation_time) {

@@ -85,6 +85,7 @@ pub struct BootstrapPreflight {
     pub protected_profile: ProtectedProfileObservation,
     pub protected_runtime: ProtectedRuntimeObservation,
     pub legacy_service: ConflictObservation,
+    pub legacy_tray: ConflictObservation,
     pub appinit: ConflictObservation,
 }
 
@@ -97,6 +98,7 @@ pub enum BootstrapMode {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BootstrapBlocker {
     LegacyService,
+    LegacyTrayMode,
     AppInit,
     ForeignOpenService,
     UnknownMachineState,
@@ -176,6 +178,11 @@ where
             reason: BootstrapBlocker::LegacyService,
         });
     }
+    if preflight.legacy_tray == ConflictObservation::Detected {
+        return Ok(BootstrapOutcome::SkippedBlocked {
+            reason: BootstrapBlocker::LegacyTrayMode,
+        });
+    }
     if preflight.appinit == ConflictObservation::Detected {
         return Ok(BootstrapOutcome::SkippedBlocked {
             reason: BootstrapBlocker::AppInit,
@@ -190,6 +197,7 @@ where
         || preflight.protected_profile == ProtectedProfileObservation::Unknown
         || preflight.protected_runtime == ProtectedRuntimeObservation::Unknown
         || preflight.legacy_service == ConflictObservation::Unknown
+        || preflight.legacy_tray == ConflictObservation::Unknown
         || preflight.appinit == ConflictObservation::Unknown
     {
         return Ok(BootstrapOutcome::SkippedBlocked {

@@ -3,6 +3,7 @@ import type {
   AdvancedProfile,
   AppliedProfile,
   ExecutionStatus,
+  ExpectedLegacyTrayIdentity,
   IndividualSetting,
   InstallationStatus,
   LegacyProfileCandidate,
@@ -22,6 +23,8 @@ export interface ControlCenterRuntimeAdapter {
   loadLaunchContext(): Promise<LaunchContext>;
   setApplicationLocale(locale: Locale): Promise<void>;
   loadExecutionStatus(): Promise<ExecutionStatus>;
+  requestLegacyTrayExit(expectedIdentity: ExpectedLegacyTrayIdentity): Promise<ExecutionStatus>;
+  disableLegacyTrayAutostart(): Promise<ExecutionStatus>;
   manageSystemService(action: SystemServiceAction): Promise<ExecutionStatus>;
   revealSystemService(): Promise<void>;
   pickExecutable(filterName: string): Promise<string | null>;

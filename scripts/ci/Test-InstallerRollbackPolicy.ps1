@@ -36,6 +36,11 @@ foreach ($token in @(
     'PrepareToInstall',
     'service-runtime.setup-backup',
     'RestoreApplicationBroker',
+    'RestoreLegacyTrayStartupAfterBootstrapFailure',
+    'BrokerFatalLegacyTrayBlocked',
+    'ExecAsOriginalUser',
+    '--restore-current-user-legacy-tray-autostart',
+    '--control-center-service-broker restore-legacy-tray-autostart',
     '"outcome":"applied"',
     '"reason":"legacy-service"',
     '"reason":"appinit"',
@@ -44,6 +49,23 @@ foreach ($token in @(
     if (-not $installerDefinition.Contains($token)) {
         throw "Installer fatal-bootstrap classification/rollback contract is missing: $token"
     }
+}
+$bootstrapCapture = [regex]::Match(
+    $installerDefinition,
+    '(?ms)^procedure\s+CaptureBrokerOutput\b.*?^end;'
+)
+if (-not $bootstrapCapture.Success -or
+    $bootstrapCapture.Value -notmatch '(?s)"reason":"legacy-tray-mode".*BrokerFatalLegacyTrayBlocked\s*:=\s*True') {
+    throw 'Installer does not classify a legacy tray-mode bootstrap blocker as fatal.'
+}
+$stagedBootstrap = [regex]::Match(
+    $installerDefinition,
+    '(?ms)^function\s+RunStagedBootstrap\b.*?^end;'
+)
+if (-not $stagedBootstrap.Success -or
+    $stagedBootstrap.Value -notmatch 'if\s+BrokerFatalLegacyTrayBlocked\s+then' -or
+    $stagedBootstrap.Value -notmatch 'MacTray tray mode') {
+    throw 'Installer does not propagate the legacy tray-mode blocker as an installation failure.'
 }
 $fixedBrokerCall = [regex]::Match(
     $installerDefinition,

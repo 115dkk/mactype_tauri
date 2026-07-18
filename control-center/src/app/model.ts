@@ -26,6 +26,7 @@ export interface ExecutionStatus {
   manualLauncherAvailable: boolean;
   systemService: SystemServiceStatus;
   legacyMacTray: LegacyMacTrayStatus | null;
+  legacyTray: LegacyTrayStatus;
   registryModeDetected: boolean;
   /** Backend-authoritative capability for publishing and applying a profile. */
   systemModesSupported: boolean;
@@ -34,6 +35,54 @@ export interface ExecutionStatus {
   activeProfile: string | null;
   expectedProfileDigest: string | null;
   sessionTargets: ReadonlyArray<SessionTarget>;
+}
+
+export interface StructuredServiceError {
+  code: string;
+  message: string;
+  win32_error: number | null;
+}
+
+export type LegacyTrayProcessState =
+  | { state: "absent" }
+  | { state: "trusted-current-session"; pid: number; creationTime: string; path: string }
+  | { state: "trusted-other-session"; sessionId: number; path: string }
+  | { state: "untrusted-same-name"; sessionId: number | null; path: string | null }
+  | { state: "unknown"; error: StructuredServiceError };
+
+export type LegacyTrayStartupSource =
+  | "current-user-run32"
+  | "current-user-run64"
+  | "local-machine-run32"
+  | "local-machine-run64"
+  | "current-user-startup";
+
+export interface LegacyTrayStartupEntry {
+  sourceKind: LegacyTrayStartupSource;
+  displayName: string;
+  targetPath: string;
+}
+
+export type LegacyTrayStartupState =
+  | { state: "absent" }
+  | { state: "detected"; entries: ReadonlyArray<LegacyTrayStartupEntry> }
+  | { state: "untrusted"; entries: ReadonlyArray<LegacyTrayStartupEntry> }
+  | { state: "unknown"; error: StructuredServiceError };
+
+export type LegacyTrayConflictState = "clear" | "detected" | "unknown";
+
+export interface LegacyTrayStatus {
+  process: LegacyTrayProcessState;
+  startup: LegacyTrayStartupState;
+  conflict: LegacyTrayConflictState;
+  canRequestExit: boolean;
+  canDisableStartup: boolean;
+}
+
+export interface ExpectedLegacyTrayIdentity {
+  pid: number;
+  creationTime: string;
+  path: string;
 }
 
 export interface SessionTarget {

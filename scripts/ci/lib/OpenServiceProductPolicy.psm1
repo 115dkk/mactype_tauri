@@ -73,7 +73,12 @@ function Test-OpenServiceProductPolicy {
         }
     }
 
-    $explicitLegacyPath = '(?i)(?:^|[\\/])(?:legacy_mactray|legacy_migration|legacy_fallback|mactray_migration|mactray_fallback)(?:[\\/]|\.(?:rs|ts|tsx)$)'
+    $explicitLegacyPath = '(?i)(?:' +
+        '(?:^|[\\/])(?:legacy_mactray|legacy_migration|legacy_fallback|mactray_migration|mactray_fallback)(?:[\\/]|\.(?:rs|ts|tsx)$)' +
+        '|^control-center[\\/]src-tauri[\\/]src[\\/]machine_integration[\\/]tests\.rs$' +
+        '|^control-center[\\/]src[\\/]app[\\/]runtimeAdapters[\\/]browserGalleryExecution\.ts$' +
+        '|^control-center[\\/]src[\\/]i18n[\\/][^\\/]+\.json$' +
+        ')'
     $productFiles = Get-OpenServiceRepositoryTextFiles -Root $Root `
         -RelativeRoots @('control-center\src-tauri\src', 'control-center\src', 'installer') |
         Where-Object { $_.Extension -in @('.rs', '.ts', '.tsx', '.js', '.mjs', '.json', '.iss') }
@@ -151,6 +156,8 @@ function Test-OpenServiceProductPolicy {
             'PrivilegedAction',
             'privileged_action_from_arguments',
             'privileged_mutate',
+            'TerminateProcess',
+            'PROCESS_TERMINATE',
             'run_elevated',
             'activate_active_profile',
             'manage_legacy_service',

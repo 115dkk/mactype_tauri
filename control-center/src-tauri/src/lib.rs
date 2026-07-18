@@ -53,6 +53,8 @@ pub fn run() {
             diagnostics::copy_diagnostics,
             diagnostics::open_log_folder,
             execution::execution_status,
+            execution::request_legacy_tray_exit,
+            execution::disable_legacy_tray_autostart,
             execution::manage_system_service,
             machine_integration::reveal_system_service,
             execution::set_session_autostart,

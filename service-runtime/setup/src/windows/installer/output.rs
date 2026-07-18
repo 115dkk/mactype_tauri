@@ -39,6 +39,7 @@ impl crate::BootstrapBlocker {
     fn code(&self) -> &'static str {
         match self {
             Self::LegacyService => "legacy-service",
+            Self::LegacyTrayMode => "legacy-tray-mode",
             Self::AppInit => "appinit",
             Self::ForeignOpenService => "foreign-open-service",
             Self::UnknownMachineState => "unknown-machine-state",

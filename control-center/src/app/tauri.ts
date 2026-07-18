@@ -3,6 +3,7 @@ import type {
   AdvancedProfile,
   AppliedProfile,
   ExecutionStatus,
+  ExpectedLegacyTrayIdentity,
   IndividualSetting,
   InstallationStatus,
   LegacyProfileCandidate,
@@ -27,6 +28,14 @@ export async function setApplicationLocale(locale: Locale): Promise<void> {
 
 export async function loadExecutionStatus(): Promise<ExecutionStatus> {
   return getRuntimeAdapter().loadExecutionStatus();
+}
+
+export async function requestLegacyTrayExit(expectedIdentity: ExpectedLegacyTrayIdentity): Promise<ExecutionStatus> {
+  return getRuntimeAdapter().requestLegacyTrayExit(expectedIdentity);
+}
+
+export async function disableLegacyTrayAutostart(): Promise<ExecutionStatus> {
+  return getRuntimeAdapter().disableLegacyTrayAutostart();
 }
 
 export async function pickExecutable(filterName: string): Promise<string | null> {

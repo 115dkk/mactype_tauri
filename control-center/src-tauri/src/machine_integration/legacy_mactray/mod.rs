@@ -1,6 +1,10 @@
 mod model;
 mod ownership;
 mod restore_contract;
+mod startup_coordinator;
+mod tray_exit;
+mod tray_process;
+mod tray_startup;
 
 #[cfg(test)]
 use model::ServiceTriggerConfiguration;
@@ -10,6 +14,10 @@ pub(crate) use model::{
     ServiceConfiguration, ServiceExtendedConfiguration,
 };
 pub use model::{LegacyServiceStatus, ServicePresence, ServiceRuntimeState};
+pub(crate) use model::{
+    LegacyTrayConflictState, LegacyTrayProcessState, LegacyTrayStartupEntry,
+    LegacyTrayStartupSource, LegacyTrayStartupState, LegacyTrayStatus,
+};
 #[cfg(test)]
 use ownership::{classify_configuration, owned_service_configuration};
 use ownership::{is_trusted_mactray_layout, status_from_configuration, with_capabilities};
@@ -22,6 +30,38 @@ use restore_contract::{
 #[cfg(test)]
 use std::path::Path;
 use std::path::PathBuf;
+#[cfg(test)]
+use tray_exit::{request_tray_exit_with, LegacyTrayExitBackend, LegacyTrayExitOutcome};
+pub(crate) use tray_process::observe_tray_process;
+#[cfg(test)]
+use tray_process::{
+    classify_tray_process_inventory, LegacyTrayProcessIdentity, LegacyTrayProcessObservation,
+};
+
+pub(crate) fn tray_status() -> LegacyTrayStatus {
+    let mut status =
+        LegacyTrayStatus::from_states(observe_tray_process(), tray_startup::observe_tray_startup());
+    status.can_request_exit &= tray_exit::official_exit_available(&status.process);
+    status
+}
+
+pub(crate) use startup_coordinator::{
+    disable_legacy_tray_startup_with, LegacyTrayStartupCoordinator,
+};
+pub(crate) use tray_exit::{request_tray_exit, LegacyTrayExitRequest};
+#[cfg(test)]
+use tray_startup::{
+    classify_startup_command, classify_startup_inventory, disable_startup_with,
+    is_legacy_tray_startup_candidate, startup_source_requires_current_user_sid,
+    LegacyTrayStartupObservation, StartupDisableBackend, StartupMutationEvent,
+    StartupTargetClassification,
+};
+pub(crate) use tray_startup::{
+    observe_owned_tray_startup, plan_startup_restore, read_tray_startup_artifact_bytes,
+    remove_tray_startup_artifact_exact, restore_tray_startup_artifact_if_absent, same_windows_path,
+    LegacyTrayStartupArtifact, LegacyTrayStartupLocator, LegacyTrayStartupScope,
+    StartupRestoreAction,
+};
 
 #[cfg(windows)]
 mod windows;

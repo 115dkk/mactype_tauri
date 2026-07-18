@@ -33,6 +33,7 @@ pub struct ExecutionStatus {
     pub manual_launcher_available: bool,
     pub system_service: crate::service_contract::SystemServiceStatus,
     pub legacy_mac_tray: Option<crate::machine_integration::LegacyServiceStatus>,
+    pub legacy_tray: crate::machine_integration::LegacyTrayStatus,
     pub registry_mode_detected: bool,
     pub system_modes_supported: bool,
     pub system_injection_active: bool,
@@ -139,6 +140,7 @@ pub fn status(installation_root: Option<&Path>) -> ExecutionStatus {
     let expected_profile_digest = machine.expected_profile_digest;
     let system_injection_active = machine.system_injection_active;
     let legacy_mac_tray = machine.legacy_service;
+    let legacy_tray = machine.legacy_tray;
     let system_modes_supported =
         profile_publish_supported_for(&system_service, registry_mode_detected);
     ExecutionStatus {
@@ -148,6 +150,7 @@ pub fn status(installation_root: Option<&Path>) -> ExecutionStatus {
             && observation.local_runtime.is_some(),
         system_service,
         legacy_mac_tray,
+        legacy_tray,
         registry_mode_detected,
         system_modes_supported,
         system_injection_active,
@@ -167,6 +170,20 @@ pub fn set_autostart(enabled: bool) -> Result<bool, String> {
 #[tauri::command]
 pub(crate) fn execution_status() -> ExecutionStatus {
     status(installation_root().as_deref())
+}
+
+#[tauri::command]
+pub(crate) fn request_legacy_tray_exit(
+    expected_identity: crate::machine_integration::LegacyTrayExitRequest,
+) -> Result<ExecutionStatus, String> {
+    crate::machine_integration::request_legacy_tray_exit(&expected_identity)?;
+    Ok(status(installation_root().as_deref()))
+}
+
+#[tauri::command]
+pub(crate) fn disable_legacy_tray_autostart() -> Result<ExecutionStatus, String> {
+    crate::machine_integration::disable_legacy_tray_startup()?;
+    Ok(status(installation_root().as_deref()))
 }
 
 #[tauri::command]

@@ -14,6 +14,8 @@ pub(crate) enum SystemServiceAction {
     MigrateFromLegacy,
     Rollback,
     RemoveLegacy,
+    DisableLegacyTrayAutostart,
+    RestoreLegacyTrayAutostart,
 }
 
 impl SystemServiceAction {
@@ -27,7 +29,10 @@ impl SystemServiceAction {
             Self::Stop => Some("stop"),
             Self::PublishProfile => Some("publish-profile"),
             Self::Rollback => Some("rollback"),
-            Self::MigrateFromLegacy | Self::RemoveLegacy => None,
+            Self::MigrateFromLegacy
+            | Self::RemoveLegacy
+            | Self::DisableLegacyTrayAutostart
+            | Self::RestoreLegacyTrayAutostart => None,
         }
     }
 
@@ -43,6 +48,8 @@ impl SystemServiceAction {
             Self::MigrateFromLegacy => "migrate-from-legacy",
             Self::Rollback => "rollback",
             Self::RemoveLegacy => "remove-legacy",
+            Self::DisableLegacyTrayAutostart => "disable-legacy-tray-autostart",
+            Self::RestoreLegacyTrayAutostart => "restore-legacy-tray-autostart",
         }
     }
 
@@ -58,6 +65,8 @@ impl SystemServiceAction {
             "migrate-from-legacy" => Self::MigrateFromLegacy,
             "rollback" => Self::Rollback,
             "remove-legacy" => Self::RemoveLegacy,
+            "disable-legacy-tray-autostart" => Self::DisableLegacyTrayAutostart,
+            "restore-legacy-tray-autostart" => Self::RestoreLegacyTrayAutostart,
             _ => return None,
         })
     }

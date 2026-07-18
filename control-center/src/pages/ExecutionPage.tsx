@@ -1,8 +1,8 @@
-import { AlertTriangle, Check, FileCode2, FolderOpen, Play, Power, PowerOff, RefreshCw, ShieldAlert, Trash2, UserPlus } from "lucide-react";
+import { AlertTriangle, Check, FileCode2, FolderOpen, LogOut, Play, Power, PowerOff, RefreshCw, ShieldAlert, Trash2, UserPlus } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { ExecutionStatus, SystemServiceAction } from "../app/model";
 import { projectExecutionView } from "../app/executionViewModel";
-import { launchRegisteredTargets, launchTargetWithMactype, loadExecutionStatus, manageSystemService, pickExecutable, registerSessionTarget, removeSessionTarget, reportFrontendFailure, revealSystemService, setSessionAutostart, verifyInjectionWorkflowForCi } from "../app/tauri";
+import { disableLegacyTrayAutostart, launchRegisteredTargets, launchTargetWithMactype, loadExecutionStatus, manageSystemService, pickExecutable, registerSessionTarget, removeSessionTarget, reportFrontendFailure, requestLegacyTrayExit, revealSystemService, setSessionAutostart, verifyInjectionWorkflowForCi } from "../app/tauri";
 import { useI18n } from "../i18n/i18n";
 
 export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean; onReady?: () => void }) {
@@ -13,6 +13,7 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [serviceBusy, setServiceBusy] = useState<string | null>(null);
+  const [legacyTrayBusy, setLegacyTrayBusy] = useState<"exit" | "disable-autostart" | null>(null);
   const [migrationConfirmationOpen, setMigrationConfirmationOpen] = useState(false);
   const migrationTriggerRef = useRef<HTMLButtonElement>(null);
   const migrationCancelRef = useRef<HTMLButtonElement>(null);
@@ -146,6 +147,42 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
     }
   };
 
+  const exitLegacyTray = async () => {
+    const process = status?.legacyTray.process;
+    if (!process || process.state !== "trusted-current-session") return;
+    setLegacyTrayBusy("exit");
+    try {
+      const nextStatus = await requestLegacyTrayExit({
+        pid: process.pid,
+        creationTime: process.creationTime,
+        path: process.path,
+      });
+      setStatus(nextStatus);
+      setMessage(t("execution.legacyTrayExited"));
+      setError(null);
+    } catch (caught: unknown) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+      setMessage(null);
+    } finally {
+      setLegacyTrayBusy(null);
+    }
+  };
+
+  const disableLegacyTrayStartup = async () => {
+    setLegacyTrayBusy("disable-autostart");
+    try {
+      const nextStatus = await disableLegacyTrayAutostart();
+      setStatus(nextStatus);
+      setMessage(t("execution.legacyTrayAutostartDisabled"));
+      setError(null);
+    } catch (caught: unknown) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+      setMessage(null);
+    } finally {
+      setLegacyTrayBusy(null);
+    }
+  };
+
   const restoreMigrationTriggerFocus = () => {
     window.requestAnimationFrame(() => migrationTriggerRef.current?.focus());
   };
@@ -185,6 +222,7 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
   const systemInjectionAction = executionView.systemInjectionAction;
   const service = executionView.status?.systemService;
   const legacyService = executionView.status?.legacyMacTray;
+  const legacyTrayResolution = executionView.legacyTrayResolution;
 
   return (
     <section className="page view-enter" aria-labelledby="execution-title">
@@ -229,6 +267,32 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
 
       <section className="section-block" aria-labelledby="system-title">
         <div className="section-heading"><div><h2 id="system-title">{t("execution.systemTitle")}</h2><p>{t("execution.systemDescription")}</p></div></div>
+        {legacyTrayResolution && (
+          <div className="legacy-tray-conflict" data-kind={legacyTrayResolution.kind} data-legacy-tray-conflict>
+            <div className="legacy-tray-conflict-copy">
+              <span className="legacy-tray-conflict-icon"><ShieldAlert aria-hidden="true" size={20} /></span>
+              <div>
+                <strong>{t(legacyTrayResolution.titleKey)}</strong>
+                <p>{t(legacyTrayResolution.descriptionKey)}</p>
+              </div>
+            </div>
+            <div className="legacy-tray-conflict-actions">
+              <button className="button secondary" disabled={legacyTrayBusy !== null} onClick={() => void refresh()} type="button">
+                <RefreshCw aria-hidden="true" size={16} /> {t("execution.legacyTrayCheckAgain")}
+              </button>
+              {legacyTrayResolution.canRequestExit && (
+                <button className="button primary" disabled={legacyTrayBusy !== null} onClick={() => void exitLegacyTray()} type="button">
+                  <LogOut aria-hidden="true" size={16} /> {t("execution.legacyTrayExit")}
+                </button>
+              )}
+              {legacyTrayResolution.canDisableStartup && (
+                <button className="button primary" disabled={legacyTrayBusy !== null} onClick={() => void disableLegacyTrayStartup()} type="button">
+                  <PowerOff aria-hidden="true" size={16} /> {t("execution.legacyTrayDisableAutostart")}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         <div className="open-service-card" data-service-backend="open-source">
         <div className="system-injection-control" data-active={systemInjectionAction.state === "active"} data-state={systemInjectionAction.state}>
           <div className="system-injection-state">

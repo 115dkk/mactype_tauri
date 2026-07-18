@@ -60,13 +60,20 @@ private:
 }
 
 [[nodiscard]] ModuleInventoryEvidence inventory_evidence(
-    HANDLE process, const std::filesystem::path& expected_path, DWORD& error) noexcept {
-    const auto loaded = fixed_module_is_loaded(process, expected_path);
-    if (!loaded) {
-        error = GetLastError();
-        return ModuleInventoryEvidence::unavailable;
+    const FixedModuleState state, DWORD& error) noexcept {
+    switch (state) {
+        case FixedModuleState::Absent:
+            return ModuleInventoryEvidence::not_loaded;
+        case FixedModuleState::ExpectedModuleLoaded:
+            return ModuleInventoryEvidence::loaded;
+        case FixedModuleState::SameBasenameDifferentPath:
+            return ModuleInventoryEvidence::unavailable;
+        case FixedModuleState::InventoryUnavailable:
+            error = GetLastError();
+            return ModuleInventoryEvidence::unavailable;
     }
-    return *loaded ? ModuleInventoryEvidence::loaded : ModuleInventoryEvidence::not_loaded;
+    error = ERROR_INVALID_DATA;
+    return ModuleInventoryEvidence::unavailable;
 }
 
 }  // namespace
@@ -138,11 +145,18 @@ Result inject_module(HANDLE process, const BrokerRequest& request,
     if (!memory_released && evidence_error == 0U) {
         evidence_error = GetLastError();
     }
-    const auto inventory = inventory_evidence(process, module_path, evidence_error);
+    const auto inventory_state = fixed_module_state(process, module_path);
+    const auto inventory = inventory_evidence(inventory_state, evidence_error);
     const auto thread_result = !result_available
                                    ? ThreadResultEvidence::unavailable
                                    : load_result == 0U ? ThreadResultEvidence::not_loaded
                                                        : ThreadResultEvidence::loaded;
+    if (inventory_state == FixedModuleState::SameBasenameDifferentPath &&
+        memory_released) {
+        return make_result(request, ResultStatus::rejected,
+                           "conflicting-mactype-module-loaded", kFixedModuleNameUtf8,
+                           evidence_error, true);
+    }
     return make_verdict_result(
         request,
         {completion, thread_result, inventory, memory_released},

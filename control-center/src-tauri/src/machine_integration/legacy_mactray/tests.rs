@@ -476,3 +476,556 @@ fn trusted_binary_must_resolve_to_the_exact_program_files_layout() {
         &Path::new("other-root").join("MacType").join("MacTray.exe")
     ));
 }
+
+#[test]
+fn unknown_tray_process_state_fails_closed_without_offering_exit() {
+    let status = LegacyTrayStatus::from_states(
+        LegacyTrayProcessState::Unknown {
+            error: mactype_service_contract::StructuredServiceError {
+                code: "legacy-tray-process-query-failed".to_owned(),
+                message: "process inventory unavailable".to_owned(),
+                win32_error: Some(5),
+            },
+        },
+        LegacyTrayStartupState::Absent,
+    );
+
+    assert_eq!(status.conflict, LegacyTrayConflictState::Unknown);
+    assert!(status.blocks_machine_change());
+    assert!(!status.can_request_exit);
+}
+
+#[test]
+fn other_session_and_untrusted_mactray_processes_block_without_offering_exit() {
+    let processes = [
+        LegacyTrayProcessState::TrustedOtherSession {
+            session_id: 7,
+            path: PathBuf::from(r"C:\Program Files\MacType\MacTray.exe"),
+        },
+        LegacyTrayProcessState::UntrustedSameName {
+            session_id: Some(1),
+            path: Some(PathBuf::from(r"C:\Temp\MacTray.exe")),
+        },
+    ];
+
+    for process in processes {
+        let status = LegacyTrayStatus::from_states(process, LegacyTrayStartupState::Absent);
+        assert_eq!(status.conflict, LegacyTrayConflictState::Detected);
+        assert!(status.blocks_machine_change());
+        assert!(!status.can_request_exit);
+    }
+}
+
+#[test]
+fn verified_and_unknown_startup_states_project_distinct_resolution_capabilities() {
+    let detected = LegacyTrayStatus::from_states(
+        LegacyTrayProcessState::Absent,
+        LegacyTrayStartupState::Detected {
+            entries: vec![LegacyTrayStartupEntry {
+                source_kind: LegacyTrayStartupSource::CurrentUserRun64,
+                display_name: "MacTypeTray".to_owned(),
+                target_path: PathBuf::from(r"C:\Program Files\MacType\MacTray.exe"),
+            }],
+        },
+    );
+    assert_eq!(detected.conflict, LegacyTrayConflictState::Detected);
+    assert!(detected.can_disable_startup);
+
+    let unknown = LegacyTrayStatus::from_states(
+        LegacyTrayProcessState::Absent,
+        LegacyTrayStartupState::Unknown {
+            error: mactype_service_contract::StructuredServiceError {
+                code: "legacy-tray-startup-query-failed".to_owned(),
+                message: "startup inventory unavailable".to_owned(),
+                win32_error: Some(5),
+            },
+        },
+    );
+    assert_eq!(unknown.conflict, LegacyTrayConflictState::Unknown);
+    assert!(!unknown.can_disable_startup);
+}
+
+#[test]
+fn process_inventory_ignores_non_mactray_images_and_the_session_zero_service_host() {
+    let ignored_error = mactype_service_contract::StructuredServiceError {
+        code: "must-not-inspect".to_owned(),
+        message: "ignored candidates must not affect tray mode".to_owned(),
+        win32_error: None,
+    };
+    let state = classify_tray_process_inventory(
+        1,
+        vec![
+            LegacyTrayProcessObservation {
+                image_name: "mactype-service.exe".to_owned(),
+                pid: 100,
+                session_id: 1,
+                identity: Err(ignored_error.clone()),
+            },
+            LegacyTrayProcessObservation {
+                image_name: "MacTray.exe".to_owned(),
+                pid: 101,
+                session_id: 0,
+                identity: Err(ignored_error),
+            },
+        ],
+    );
+
+    assert_eq!(state, LegacyTrayProcessState::Absent);
+}
+
+#[test]
+fn process_inventory_preserves_a_trusted_current_session_identity() {
+    let path = PathBuf::from(r"C:\Program Files\MacType\MacTray.exe");
+    let state = classify_tray_process_inventory(
+        3,
+        vec![LegacyTrayProcessObservation {
+            image_name: "mactray.EXE".to_owned(),
+            pid: 4242,
+            session_id: 3,
+            identity: Ok(LegacyTrayProcessIdentity {
+                creation_time: 987,
+                session_id: 3,
+                path: path.clone(),
+                trusted_path: true,
+            }),
+        }],
+    );
+
+    assert_eq!(
+        state,
+        LegacyTrayProcessState::TrustedCurrentSession {
+            pid: 4242,
+            creation_time: 987,
+            path,
+        }
+    );
+}
+
+#[test]
+fn multiple_interactive_mactray_processes_fail_closed() {
+    let observations = [1_u32, 2_u32]
+        .into_iter()
+        .map(|pid| LegacyTrayProcessObservation {
+            image_name: "MacTray.exe".to_owned(),
+            pid,
+            session_id: 3,
+            identity: Ok(LegacyTrayProcessIdentity {
+                creation_time: u64::from(pid),
+                session_id: 3,
+                path: PathBuf::from(r"C:\Program Files\MacType\MacTray.exe"),
+                trusted_path: true,
+            }),
+        })
+        .collect();
+
+    let state = classify_tray_process_inventory(3, observations);
+    let LegacyTrayProcessState::Unknown { error } = state else {
+        panic!("multiple interactive MacTray processes must be unknown");
+    };
+    assert_eq!(error.code, "legacy-tray-process-multiple");
+}
+
+struct FakeTrayExitBackend {
+    observations: std::collections::VecDeque<LegacyTrayProcessState>,
+    outcome: LegacyTrayExitOutcome,
+    official_exit_requests: usize,
+}
+
+impl LegacyTrayExitBackend for FakeTrayExitBackend {
+    fn observe_process(&mut self) -> LegacyTrayProcessState {
+        self.observations
+            .pop_front()
+            .expect("the exit contract observed the process too many times")
+    }
+
+    fn request_official_exit(
+        &mut self,
+        _expected: &LegacyTrayExitRequest,
+    ) -> Result<LegacyTrayExitOutcome, String> {
+        self.official_exit_requests += 1;
+        Ok(self.outcome)
+    }
+}
+
+fn trusted_tray_process(pid: u32, creation_time: u64, path: &str) -> LegacyTrayProcessState {
+    LegacyTrayProcessState::TrustedCurrentSession {
+        pid,
+        creation_time,
+        path: PathBuf::from(path),
+    }
+}
+
+#[test]
+fn graceful_exit_revalidates_the_exact_observed_identity_and_confirms_absence() {
+    let request = LegacyTrayExitRequest {
+        pid: 4242,
+        creation_time: 987,
+        path: PathBuf::from(r"C:\Program Files\MacType\MacTray.exe"),
+    };
+    let mut backend = FakeTrayExitBackend {
+        observations: [
+            trusted_tray_process(4242, 987, r"C:\Program Files\MacType\MacTray.exe"),
+            trusted_tray_process(4242, 987, r"C:\Program Files\MacType\MacTray.exe"),
+            LegacyTrayProcessState::Absent,
+        ]
+        .into(),
+        outcome: LegacyTrayExitOutcome::Exited,
+        official_exit_requests: 0,
+    };
+
+    request_tray_exit_with(&mut backend, &request).unwrap();
+
+    assert_eq!(backend.official_exit_requests, 1);
+    assert!(backend.observations.is_empty());
+}
+
+#[test]
+fn pid_reuse_or_identity_change_never_reaches_the_exit_protocol() {
+    let request = LegacyTrayExitRequest {
+        pid: 4242,
+        creation_time: 987,
+        path: PathBuf::from(r"C:\Program Files\MacType\MacTray.exe"),
+    };
+    for changed in [
+        trusted_tray_process(4242, 988, r"C:\Program Files\MacType\MacTray.exe"),
+        trusted_tray_process(4243, 987, r"C:\Program Files\MacType\MacTray.exe"),
+        trusted_tray_process(4242, 987, r"C:\Program Files\MacType-old\MacTray.exe"),
+        LegacyTrayProcessState::TrustedOtherSession {
+            session_id: 7,
+            path: PathBuf::from(r"C:\Program Files\MacType\MacTray.exe"),
+        },
+    ] {
+        let mut backend = FakeTrayExitBackend {
+            observations: [
+                trusted_tray_process(4242, 987, r"C:\Program Files\MacType\MacTray.exe"),
+                changed,
+            ]
+            .into(),
+            outcome: LegacyTrayExitOutcome::Exited,
+            official_exit_requests: 0,
+        };
+
+        assert!(request_tray_exit_with(&mut backend, &request).is_err());
+        assert_eq!(backend.official_exit_requests, 0);
+    }
+}
+
+#[test]
+fn graceful_exit_timeout_is_terminal_and_has_no_force_or_retry_path() {
+    let request = LegacyTrayExitRequest {
+        pid: 4242,
+        creation_time: 987,
+        path: PathBuf::from(r"C:\Program Files\MacType\MacTray.exe"),
+    };
+    let mut backend = FakeTrayExitBackend {
+        observations: [
+            trusted_tray_process(4242, 987, r"C:\Program Files\MacType\MacTray.exe"),
+            trusted_tray_process(4242, 987, r"C:\Program Files\MacType\MacTray.exe"),
+        ]
+        .into(),
+        outcome: LegacyTrayExitOutcome::TimedOut,
+        official_exit_requests: 0,
+    };
+
+    let error = request_tray_exit_with(&mut backend, &request).unwrap_err();
+
+    assert!(error.contains("timed out"));
+    assert_eq!(backend.official_exit_requests, 1);
+    assert!(backend.observations.is_empty());
+}
+
+#[test]
+fn unavailable_official_exit_protocol_is_terminal_without_retry() {
+    let request = LegacyTrayExitRequest {
+        pid: 4242,
+        creation_time: 987,
+        path: PathBuf::from(r"C:\Program Files\MacType\MacTray.exe"),
+    };
+    let mut backend = FakeTrayExitBackend {
+        observations: [
+            trusted_tray_process(4242, 987, r"C:\Program Files\MacType\MacTray.exe"),
+            trusted_tray_process(4242, 987, r"C:\Program Files\MacType\MacTray.exe"),
+        ]
+        .into(),
+        outcome: LegacyTrayExitOutcome::ProtocolUnavailable,
+        official_exit_requests: 0,
+    };
+
+    let error = request_tray_exit_with(&mut backend, &request).unwrap_err();
+
+    assert!(error.contains("protocol is unavailable"), "{error}");
+    assert_eq!(backend.official_exit_requests, 1);
+    assert!(backend.observations.is_empty());
+}
+
+#[test]
+fn process_creation_time_uses_an_exact_decimal_string_across_the_webview_boundary() {
+    let creation_time = 133_967_890_123_456_789_u64;
+    let serialized = serde_json::to_value(trusted_tray_process(
+        4242,
+        creation_time,
+        r"C:\Program Files\MacType\MacTray.exe",
+    ))
+    .unwrap();
+    assert_eq!(
+        serialized
+            .get("creationTime")
+            .and_then(serde_json::Value::as_str),
+        Some("133967890123456789")
+    );
+
+    let request: LegacyTrayExitRequest = serde_json::from_value(serde_json::json!({
+        "pid": 4242,
+        "creationTime": "133967890123456789",
+        "path": r"C:\Program Files\MacType\MacTray.exe"
+    }))
+    .unwrap();
+    assert_eq!(request.creation_time, creation_time);
+}
+
+#[test]
+fn startup_command_ownership_requires_an_unambiguous_exact_tray_target() {
+    let expected = Path::new(r"C:\Program Files\MacType\MacTray.exe");
+    assert_eq!(
+        classify_startup_command(r#""C:\Program Files\MacType\MacTray.exe""#, expected,),
+        StartupTargetClassification::Owned(expected.to_path_buf())
+    );
+    for command in [
+        r"C:\Program Files\MacType\MacTray.exe",
+        r#""C:\Program Files\MacType\MacTray.exe" -service"#,
+        r#""C:\Program Files\MacType\MacTray.exe" unexpected"#,
+        r#""C:\Temp\MacTray.exe""#,
+        r"MacTray.exe",
+    ] {
+        assert_eq!(
+            classify_startup_command(command, expected),
+            StartupTargetClassification::Untrusted
+        );
+    }
+}
+
+#[test]
+fn startup_candidate_filter_does_not_confuse_control_center_autostart_with_mactray() {
+    assert!(!is_legacy_tray_startup_candidate(
+        "MacTypeControlCenter",
+        r#""C:\Program Files\MacType Control Center\MacType Control Center.exe""#,
+    ));
+    assert!(is_legacy_tray_startup_candidate(
+        "MacType",
+        r#""C:\Program Files\MacType\MacTray.exe""#,
+    ));
+    assert!(is_legacy_tray_startup_candidate(
+        "MacTray",
+        r#""C:\Temp\renamed.exe""#,
+    ));
+}
+
+#[test]
+fn only_current_user_startup_sources_are_bound_to_the_invoking_user_sid() {
+    for source in [
+        LegacyTrayStartupSource::CurrentUserRun32,
+        LegacyTrayStartupSource::CurrentUserRun64,
+        LegacyTrayStartupSource::CurrentUserStartup,
+    ] {
+        assert!(startup_source_requires_current_user_sid(source));
+    }
+    for source in [
+        LegacyTrayStartupSource::LocalMachineRun32,
+        LegacyTrayStartupSource::LocalMachineRun64,
+    ] {
+        assert!(!startup_source_requires_current_user_sid(source));
+    }
+}
+
+fn startup_artifact(source_kind: LegacyTrayStartupSource) -> LegacyTrayStartupArtifact {
+    LegacyTrayStartupArtifact {
+        entry: LegacyTrayStartupEntry {
+            source_kind,
+            display_name: "MacTypeTray".to_owned(),
+            target_path: PathBuf::from(r"C:\Program Files\MacType\MacTray.exe"),
+        },
+        locator: LegacyTrayStartupLocator::Registry {
+            hive: if matches!(
+                source_kind,
+                LegacyTrayStartupSource::LocalMachineRun32
+                    | LegacyTrayStartupSource::LocalMachineRun64
+            ) {
+                "HKLM".to_owned()
+            } else {
+                "HKCU".to_owned()
+            },
+            view: if matches!(
+                source_kind,
+                LegacyTrayStartupSource::CurrentUserRun32
+                    | LegacyTrayStartupSource::LocalMachineRun32
+            ) {
+                32
+            } else {
+                64
+            },
+            subkey: r"Software\Microsoft\Windows\CurrentVersion\Run".to_owned(),
+            value_name: "MacTypeTray".to_owned(),
+            value_type: 1,
+        },
+        raw_bytes: vec![0xff, 0xfe, 0x41, 0x00, 0x00, 0x00],
+        normalized_target_path: PathBuf::from(r"C:\Program Files\MacType\MacTray.exe"),
+        user_sid: "S-1-5-21-1000".to_owned(),
+        recorded_at: 1234,
+    }
+}
+
+#[test]
+fn startup_inventory_preserves_all_fixed_sources_and_distinguishes_unknown_from_untrusted() {
+    let sources = [
+        LegacyTrayStartupSource::CurrentUserRun32,
+        LegacyTrayStartupSource::CurrentUserRun64,
+        LegacyTrayStartupSource::LocalMachineRun32,
+        LegacyTrayStartupSource::LocalMachineRun64,
+        LegacyTrayStartupSource::CurrentUserStartup,
+    ];
+    let detected = classify_startup_inventory(
+        sources
+            .into_iter()
+            .map(|source| LegacyTrayStartupObservation::Owned(startup_artifact(source)))
+            .collect(),
+    );
+    let LegacyTrayStartupState::Detected { entries } = detected else {
+        panic!("owned fixed-source inventory must be detected");
+    };
+    assert_eq!(entries.len(), sources.len());
+    for source in sources {
+        assert!(entries.iter().any(|entry| entry.source_kind == source));
+    }
+
+    let untrusted = classify_startup_inventory(vec![LegacyTrayStartupObservation::Untrusted(
+        LegacyTrayStartupEntry {
+            source_kind: LegacyTrayStartupSource::CurrentUserRun64,
+            display_name: "MacTypeTray".to_owned(),
+            target_path: PathBuf::from(r"C:\Temp\MacTray.exe"),
+        },
+    )]);
+    assert!(matches!(
+        untrusted,
+        LegacyTrayStartupState::Untrusted { .. }
+    ));
+
+    let unknown = classify_startup_inventory(vec![LegacyTrayStartupObservation::Unknown(
+        mactype_service_contract::StructuredServiceError {
+            code: "legacy-tray-startup-query-failed".to_owned(),
+            message: "registry view is inaccessible".to_owned(),
+            win32_error: Some(5),
+        },
+    )]);
+    assert!(matches!(unknown, LegacyTrayStartupState::Unknown { .. }));
+}
+
+#[derive(Default)]
+struct RecordingStartupDisable {
+    events: Vec<StartupMutationEvent>,
+    artifact: Option<LegacyTrayStartupArtifact>,
+}
+
+impl StartupDisableBackend for RecordingStartupDisable {
+    fn observe_owned(&mut self) -> Result<Vec<LegacyTrayStartupArtifact>, String> {
+        self.events.push(StartupMutationEvent::Observe);
+        Ok(self.artifact.clone().into_iter().collect())
+    }
+
+    fn write_receipt(&mut self, _entries: &[LegacyTrayStartupArtifact]) -> Result<(), String> {
+        self.events.push(StartupMutationEvent::WriteReceipt);
+        Ok(())
+    }
+
+    fn read_verified_receipt(&mut self) -> Result<Vec<LegacyTrayStartupArtifact>, String> {
+        self.events.push(StartupMutationEvent::ReadReceipt);
+        Ok(self.artifact.clone().into_iter().collect())
+    }
+
+    fn remove_exact(&mut self, _entries: &[LegacyTrayStartupArtifact]) -> Result<(), String> {
+        self.events.push(StartupMutationEvent::Remove);
+        self.artifact = None;
+        Ok(())
+    }
+}
+
+#[test]
+fn startup_disable_rechecks_and_verifies_the_receipt_before_removal() {
+    let mut backend = RecordingStartupDisable {
+        events: Vec::new(),
+        artifact: Some(startup_artifact(LegacyTrayStartupSource::CurrentUserRun64)),
+    };
+
+    disable_startup_with(&mut backend).unwrap();
+
+    assert_eq!(
+        backend.events,
+        [
+            StartupMutationEvent::Observe,
+            StartupMutationEvent::WriteReceipt,
+            StartupMutationEvent::ReadReceipt,
+            StartupMutationEvent::Observe,
+            StartupMutationEvent::Remove,
+            StartupMutationEvent::Observe,
+        ]
+    );
+}
+
+struct TimestampChangingStartupDisable {
+    observations: std::collections::VecDeque<Vec<LegacyTrayStartupArtifact>>,
+    receipt: Option<Vec<LegacyTrayStartupArtifact>>,
+}
+
+impl StartupDisableBackend for TimestampChangingStartupDisable {
+    fn observe_owned(&mut self) -> Result<Vec<LegacyTrayStartupArtifact>, String> {
+        self.observations
+            .pop_front()
+            .ok_or_else(|| "unexpected observation".to_owned())
+    }
+
+    fn write_receipt(&mut self, entries: &[LegacyTrayStartupArtifact]) -> Result<(), String> {
+        self.receipt = Some(entries.to_vec());
+        Ok(())
+    }
+
+    fn read_verified_receipt(&mut self) -> Result<Vec<LegacyTrayStartupArtifact>, String> {
+        self.receipt
+            .clone()
+            .ok_or_else(|| "missing receipt".to_owned())
+    }
+
+    fn remove_exact(&mut self, _entries: &[LegacyTrayStartupArtifact]) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+#[test]
+fn startup_disable_compares_artifact_content_without_capture_timestamp_noise() {
+    let original = startup_artifact(LegacyTrayStartupSource::CurrentUserRun64);
+    let mut recaptured = original.clone();
+    recaptured.recorded_at += 1;
+    let mut backend = TimestampChangingStartupDisable {
+        observations: [vec![original], vec![recaptured], Vec::new()].into(),
+        receipt: None,
+    };
+
+    disable_startup_with(&mut backend).unwrap();
+}
+
+#[test]
+fn startup_receipt_round_trips_raw_bytes_and_preserves_user_midflight_changes() {
+    let artifact = startup_artifact(LegacyTrayStartupSource::CurrentUserRun64);
+    let encoded = serde_json::to_vec(&artifact).unwrap();
+    let decoded: LegacyTrayStartupArtifact = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(decoded, artifact);
+
+    assert_eq!(
+        plan_startup_restore(&artifact.raw_bytes, Some(&artifact.raw_bytes)).unwrap(),
+        StartupRestoreAction::Noop
+    );
+    assert_eq!(
+        plan_startup_restore(&artifact.raw_bytes, None).unwrap(),
+        StartupRestoreAction::Restore
+    );
+    let changed = vec![1, 2, 3, 4];
+    assert!(plan_startup_restore(&artifact.raw_bytes, Some(&changed)).is_err());
+}

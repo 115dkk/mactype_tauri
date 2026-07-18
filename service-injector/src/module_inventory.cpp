@@ -113,27 +113,51 @@ bool module_paths_equal(const std::wstring_view left,
            _wcsicmp(normalized_left->c_str(), normalized_right->c_str()) == 0;
 }
 
-std::optional<bool> fixed_module_is_loaded(
+FixedModuleState fixed_module_state(
     HANDLE process, const std::filesystem::path& expected_path) noexcept {
+    const auto normalized_expected = normalized_module_path(expected_path.native());
+    if (!normalized_expected) {
+        return FixedModuleState::InventoryUnavailable;
+    }
     const auto inventory = enumerate_modules(process);
     if (!inventory) {
-        return std::nullopt;
+        return FixedModuleState::InventoryUnavailable;
     }
     try {
+        const std::filesystem::path expected{*normalized_expected};
+        if (expected.filename().empty()) {
+            return FixedModuleState::InventoryUnavailable;
+        }
+        bool expected_module_loaded = false;
+        bool conflicting_module_loaded = false;
         std::vector<wchar_t> path(kMaxModulePathCharacters);
         for (const HMODULE module : *inventory) {
             const auto current_path = module_path(process, module, path);
             if (!current_path) {
-                return std::nullopt;
+                return FixedModuleState::InventoryUnavailable;
             }
-            if (module_paths_equal(*current_path, expected_path.native())) {
-                return true;
+            const auto normalized_current = normalized_module_path(*current_path);
+            if (!normalized_current) {
+                return FixedModuleState::InventoryUnavailable;
+            }
+            const std::filesystem::path current{*normalized_current};
+            if (_wcsicmp(current.filename().c_str(), expected.filename().c_str()) != 0) {
+                continue;
+            }
+            if (_wcsicmp(normalized_current->c_str(), normalized_expected->c_str()) == 0) {
+                expected_module_loaded = true;
+            } else {
+                conflicting_module_loaded = true;
             }
         }
+        if (conflicting_module_loaded) {
+            return FixedModuleState::SameBasenameDifferentPath;
+        }
+        return expected_module_loaded ? FixedModuleState::ExpectedModuleLoaded
+                                      : FixedModuleState::Absent;
     } catch (...) {
-        return std::nullopt;
+        return FixedModuleState::InventoryUnavailable;
     }
-    return false;
 }
 
 std::optional<LPTHREAD_START_ROUTINE> remote_load_library(HANDLE process) noexcept {

@@ -814,6 +814,50 @@ fn post_resume_service_stop_is_terminal_and_degrades_its_generation() {
     assert_eq!(health_error.win32_error, Some(1223));
 }
 
+#[test]
+fn conflicting_mactype_module_is_terminal_deduplicated_and_degrades_the_generation() {
+    let inspector = FixedInspector {
+        identity: ProcessIdentity {
+            pid: 42,
+            creation_time: 100,
+            session_id: 2,
+            architecture: ProcessArchitecture::X64,
+            protected: false,
+            critical: false,
+        },
+    };
+    let broker = SequenceBroker {
+        results: Mutex::new(VecDeque::from([BrokerResult {
+            disposition: BrokerDisposition::Rejected,
+            code: "conflicting-mactype-module-loaded".to_owned(),
+            win32_error: None,
+        }])),
+        requests: Mutex::new(Vec::new()),
+    };
+    let mut orchestrator = ProcessOrchestrator::new(
+        900,
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        &inspector,
+        &broker,
+    );
+
+    assert_eq!(
+        orchestrator.handle_pid(42).unwrap(),
+        ProcessOutcome::Rejected
+    );
+    assert_eq!(
+        orchestrator.handle_pid(42).unwrap(),
+        ProcessOutcome::Duplicate
+    );
+    assert_eq!(broker.requests.lock().unwrap().len(), 1);
+    let record = orchestrator.last_result(42, 100).unwrap();
+    assert_eq!(record.attempts, 1);
+    assert_eq!(record.code, "conflicting-mactype-module-loaded");
+    let health_error = orchestrator.generation_health_error().unwrap();
+    assert_eq!(health_error.code, "conflicting-mactype-module-loaded");
+    assert!(health_error.message.contains("pid=42"));
+}
+
 struct SharedEventSource {
     query: Arc<Mutex<Option<String>>>,
 }

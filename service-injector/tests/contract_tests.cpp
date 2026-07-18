@@ -252,10 +252,10 @@ bool unverifiable_post_injection_state_fails_closed() {
 }
 
 bool fixed_module_identity_is_an_exact_normalized_full_path() {
-    using InventoryFunction = std::optional<bool> (*)(
+    using InventoryFunction = mactype::injector::FixedModuleState (*)(
         HANDLE, const std::filesystem::path&) noexcept;
     static_assert(std::is_same_v<
-                  decltype(&mactype::injector::fixed_module_is_loaded),
+                  decltype(&mactype::injector::fixed_module_state),
                   InventoryFunction>);
     using mactype::injector::module_paths_equal;
     return module_paths_equal(LR"(C:\Program Files\MacType\MacType64.dll)",

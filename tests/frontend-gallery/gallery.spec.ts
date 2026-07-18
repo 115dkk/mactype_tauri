@@ -490,6 +490,57 @@ test("AppInit conflict preserves the backend-authorized recovery stop", async ({
   await expect(legacy.getByRole("button", { name: "Remove legacy service" })).toBeDisabled();
 });
 
+test("trusted MacTray and autostart conflicts are resolved in the required order", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy-tray=trusted-current&legacy-startup=hkcu-run", { waitUntil: "networkidle" });
+
+  const conflict = page.locator("[data-legacy-tray-conflict]");
+  await expect(conflict).toContainText("Existing MacTray is running");
+  await expect(conflict.getByRole("button", { name: "Exit MacTray" })).toBeEnabled();
+  await expect(conflict.getByRole("button", { name: "Check again" })).toBeEnabled();
+  await expect(conflict.getByRole("button", { name: "Disable MacTray autostart" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Install service" })).toBeDisabled();
+
+  await conflict.getByRole("button", { name: "Exit MacTray" }).click();
+  await expect(conflict).toContainText("MacTray autostart must be disabled");
+  await expect(conflict.getByRole("button", { name: "Exit MacTray" })).toHaveCount(0);
+  await expect(conflict.getByRole("button", { name: "Disable MacTray autostart" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Install service" })).toBeDisabled();
+
+  await conflict.getByRole("button", { name: "Disable MacTray autostart" }).click();
+  await expect(page.locator("[data-legacy-tray-conflict]")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Install service" })).toBeEnabled();
+});
+
+for (const fixture of [
+  ["trusted-other", "MacTray is running in another user session"],
+  ["untrusted", "A same-named process could not be trusted"],
+  ["unknown", "MacTray tray mode status is unavailable"],
+] as const) {
+  test(`${fixture[0]} MacTray state remains fail-closed without an exit action`, async ({ page }) => {
+    await page.goto(`/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy-tray=${fixture[0]}`, { waitUntil: "networkidle" });
+
+    const conflict = page.locator("[data-legacy-tray-conflict]");
+    await expect(conflict).toContainText(fixture[1]);
+    await expect(conflict.getByRole("button", { name: "Exit MacTray" })).toHaveCount(0);
+    await expect(conflict.getByRole("button", { name: "Check again" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Install service" })).toBeDisabled();
+  });
+}
+
+test("a running new service with a legacy tray conflict offers only the verified stop", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=ready&legacy-tray=trusted-current", { waitUntil: "networkidle" });
+
+  const openService = page.locator('[data-service-backend="open-source"]');
+  await expect(openService.locator('[data-state="running-legacy-tray-conflict"]')).toBeVisible();
+  await expect(openService).toContainText("Service running while MacTray conflicts");
+  await expect(openService).not.toContainText("MacType system-wide rendering active");
+  await expect(openService.getByRole("button", { name: "Stop applying to new processes" })).toBeEnabled();
+  for (const name of ["Install service", "Start service", "Repair service", "Upgrade service", "Remove service"]) {
+    const button = openService.getByRole("button", { name });
+    if (await button.count()) await expect(button).toBeDisabled();
+  }
+});
+
 for (const legacyState of ["running", "stopped", "start-pending", "stop-pending", "paused", "unknown", "continue-pending", "pause-pending"] as const) {
   test(`legacy migration requires a stable ${legacyState} service`, async ({ page }) => {
     await page.goto(`/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy=migration-available&legacy-state=${legacyState}`, { waitUntil: "networkidle" });

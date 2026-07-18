@@ -95,6 +95,20 @@ mod tests {
         assert!(!tray_mode_image("MacType Control Center.exe"));
     }
 
+    /// Driven by the machine-scoped demo workflow in
+    /// `.github/workflows/live-tray-probe.yml`; it asserts the live probe
+    /// against the phase the workflow has staged on the real machine.
+    #[test]
+    #[ignore = "live probe for the machine-scoped demo workflow"]
+    fn live_probe_matches_expectation() {
+        let expected = match std::env::var("MACTYPE_LIVE_TRAY_EXPECT").as_deref() {
+            Ok("conflict") => true,
+            Ok("clear") => false,
+            other => panic!("MACTYPE_LIVE_TRAY_EXPECT must be conflict or clear, got {other:?}"),
+        };
+        assert_eq!(legacy_tray_conflict(), Ok(expected));
+    }
+
     #[test]
     fn only_a_verified_service_session_escapes_the_tray_mode_conflict() {
         assert!(!tray_mode_session(Some(0)));

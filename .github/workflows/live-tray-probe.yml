@@ -29,7 +29,18 @@ jobs:
       # the Tauri stack would dominate the run time.
       CARGO_TARGET_DIR: E:\mactype_tauri\control-center\src-tauri\target
     steps:
-      - uses: actions/checkout@v7
+      # actions/checkout's temp-directory cleanup hits EBUSY on this machine
+      # (system-wide MacType injection holds the handle), so check out by hand.
+      - name: Checkout
+        run: |
+          if (-not (Test-Path .git)) {
+            git init .
+            git remote add origin "https://github.com/$env:GITHUB_REPOSITORY.git"
+          }
+          git fetch origin $env:GITHUB_SHA
+          git checkout --force $env:GITHUB_SHA
+          git clean -fdx -e node_modules
+          git log -1 --oneline
 
       - name: Demo precondition — MacType is installed on this machine
         run: |

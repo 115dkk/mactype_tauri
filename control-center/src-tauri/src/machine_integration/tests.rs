@@ -11,8 +11,6 @@ struct FakeMachineBackend {
     executed: Option<(MachineAction, Vec<u8>)>,
     appinit_conflict: bool,
     appinit_error: Option<String>,
-    tray_conflict: bool,
-    tray_error: Option<String>,
 }
 
 impl MachineBackend for FakeMachineBackend {
@@ -32,14 +30,6 @@ impl MachineBackend for FakeMachineBackend {
         match self.appinit_error.take() {
             Some(error) => Err(error),
             None => Ok(self.appinit_conflict),
-        }
-    }
-
-    fn legacy_tray_conflict(&mut self) -> Result<bool, String> {
-        self.calls.push("tray");
-        match self.tray_error.take() {
-            Some(error) => Err(error),
-            None => Ok(self.tray_conflict),
         }
     }
 }
@@ -93,7 +83,7 @@ fn explicit_tray_apply_is_the_only_tray_path_that_publishes_profile_bytes() {
 
     tray_apply_with(&mut backend, false, profile).unwrap();
 
-    assert_eq!(backend.calls, ["appinit", "tray", "status", "execute"]);
+    assert_eq!(backend.calls, ["appinit", "status", "execute"]);
     assert_eq!(
         backend.executed,
         Some((MachineAction::PublishProfile, profile.to_vec()))
@@ -131,7 +121,7 @@ fn unsafe_machine_state_is_rejected_before_dispatch_without_retry() {
         error.contains("foreign") || error.contains("unsafe"),
         "{error}"
     );
-    assert_eq!(foreign.calls, ["appinit", "tray", "status"]);
+    assert_eq!(foreign.calls, ["appinit", "status"]);
 
     let mut appinit = FakeMachineBackend {
         status: Some(ready_auto_service()),
@@ -238,7 +228,7 @@ fn verified_stop_does_not_depend_on_reading_appinit_registry_state() {
 
 #[test]
 fn appinit_status_projects_only_the_verified_stop_capability() {
-    let projected = project_new_service_capabilities(ready_auto_service(), true, false);
+    let projected = project_new_service_capabilities(ready_auto_service(), true);
 
     assert!(!projected.can_install);
     assert!(!projected.can_remove);
@@ -249,84 +239,13 @@ fn appinit_status_projects_only_the_verified_stop_capability() {
 
     let mut foreign = ready_auto_service();
     foreign.backend = ServiceBackend::Foreign;
-    let projected = project_new_service_capabilities(foreign, true, false);
+    let projected = project_new_service_capabilities(foreign, true);
     assert!(!projected.can_stop);
 
     let mut not_authorized = ready_auto_service();
     not_authorized.can_stop = false;
-    let projected = project_new_service_capabilities(not_authorized, true, false);
+    let projected = project_new_service_capabilities(not_authorized, true);
     assert!(!projected.can_stop);
-}
-
-#[test]
-fn tray_mode_conflict_status_projects_only_the_verified_stop_capability() {
-    let projected = project_new_service_capabilities(ready_auto_service(), false, true);
-
-    assert!(!projected.can_install);
-    assert!(!projected.can_remove);
-    assert!(!projected.can_start);
-    assert!(projected.can_stop);
-    assert!(!projected.can_repair);
-    assert!(!projected.can_upgrade);
-
-    let mut stopped = ready_auto_service();
-    stopped.runtime = RuntimeState::Stopped;
-    let projected = project_new_service_capabilities(stopped, false, true);
-    assert!(!projected.can_stop);
-}
-
-#[test]
-fn tray_mode_conflict_blocks_everything_except_stop() {
-    let mut start_status = ready_auto_service();
-    start_status.can_start = true;
-    let mut start = FakeMachineBackend {
-        status: Some(start_status),
-        tray_conflict: true,
-        ..Default::default()
-    };
-    let error = execute_machine_action_with(&mut start, MachineAction::Start, None).unwrap_err();
-    assert!(error.contains("MacTray tray mode"), "{error}");
-    assert!(start.executed.is_none());
-
-    let mut publish = FakeMachineBackend {
-        status: Some(ready_auto_service()),
-        tray_conflict: true,
-        ..Default::default()
-    };
-    let error = execute_machine_action_with(
-        &mut publish,
-        MachineAction::PublishProfile,
-        Some(b"[General]\r\nGammaValue=1.3\r\n"),
-    )
-    .unwrap_err();
-    assert!(error.contains("MacTray tray mode"), "{error}");
-    assert!(publish.executed.is_none());
-
-    let mut stop = FakeMachineBackend {
-        status: Some(ready_auto_service()),
-        tray_conflict: true,
-        tray_error: Some("probe unavailable".to_owned()),
-        ..Default::default()
-    };
-    execute_machine_action_with(&mut stop, MachineAction::Stop, None).unwrap();
-    assert_eq!(stop.calls, ["status", "execute"]);
-}
-
-#[test]
-fn tray_mode_probe_failure_blocks_mutations() {
-    let mut start_status = ready_auto_service();
-    start_status.can_start = true;
-    let mut start = FakeMachineBackend {
-        status: Some(start_status),
-        tray_error: Some("snapshot unavailable".to_owned()),
-        ..Default::default()
-    };
-
-    let error = execute_machine_action_with(&mut start, MachineAction::Start, None).unwrap_err();
-
-    assert!(error.contains("snapshot unavailable"), "{error}");
-    assert_eq!(start.calls, ["appinit", "tray"]);
-    assert!(start.executed.is_none());
 }
 
 #[test]
@@ -343,7 +262,7 @@ fn registry_conflict_never_claims_verified_system_injection() {
         true,
         Some("sha256:active")
     ));
-    assert!(project_new_service_capabilities(service, true, false).can_stop);
+    assert!(project_new_service_capabilities(service, true).can_stop);
 }
 
 #[test]
@@ -374,10 +293,6 @@ fn publish_profile_orders_running_stopped_and_absent_service_activation() {
         }
 
         fn appinit_conflict(&mut self) -> Result<bool, String> {
-            Ok(false)
-        }
-
-        fn legacy_tray_conflict(&mut self) -> Result<bool, String> {
             Ok(false)
         }
 
@@ -459,10 +374,6 @@ impl MachineBackend for FailingPublishBackend {
     }
 
     fn appinit_conflict(&mut self) -> Result<bool, String> {
-        Ok(false)
-    }
-
-    fn legacy_tray_conflict(&mut self) -> Result<bool, String> {
         Ok(false)
     }
 

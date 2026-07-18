@@ -34,7 +34,6 @@ pub struct ExecutionStatus {
     pub system_service: crate::service_contract::SystemServiceStatus,
     pub legacy_mac_tray: Option<crate::machine_integration::LegacyServiceStatus>,
     pub registry_mode_detected: bool,
-    pub legacy_tray_detected: bool,
     pub system_modes_supported: bool,
     pub system_injection_active: bool,
     pub injection_ready: bool,
@@ -116,10 +115,8 @@ fn observe_profile(installation: Option<&Path>) -> ProfileObservation {
 fn profile_publish_supported_for(
     service: &crate::service_contract::SystemServiceStatus,
     registry_mode_detected: bool,
-    legacy_tray_detected: bool,
 ) -> bool {
     !registry_mode_detected
-        && !legacy_tray_detected
         && service.backend != crate::service_contract::ServiceBackend::Foreign
         && matches!(
             service.installation,
@@ -138,16 +135,12 @@ pub fn status(installation_root: Option<&Path>) -> ExecutionStatus {
     let observation = observe_profile(installation_root);
     let machine = crate::machine_integration::status(observation.expected_profile.as_deref());
     let registry_mode_detected = machine.registry_conflict;
-    let legacy_tray_detected = machine.legacy_tray_conflict;
     let system_service = machine.new_service;
     let expected_profile_digest = machine.expected_profile_digest;
     let system_injection_active = machine.system_injection_active;
     let legacy_mac_tray = machine.legacy_service;
-    let system_modes_supported = profile_publish_supported_for(
-        &system_service,
-        registry_mode_detected,
-        legacy_tray_detected,
-    );
+    let system_modes_supported =
+        profile_publish_supported_for(&system_service, registry_mode_detected);
     ExecutionStatus {
         tray_available: true,
         auto_start: autostart_value().is_some(),
@@ -156,7 +149,6 @@ pub fn status(installation_root: Option<&Path>) -> ExecutionStatus {
         system_service,
         legacy_mac_tray,
         registry_mode_detected,
-        legacy_tray_detected,
         system_modes_supported,
         system_injection_active,
         injection_ready: observation.local_runtime.is_some(),
@@ -358,11 +350,7 @@ mod tests {
         let service = &status.system_service;
         assert_eq!(
             status.system_modes_supported,
-            profile_publish_supported_for(
-                service,
-                status.registry_mode_detected,
-                status.legacy_tray_detected,
-            )
+            profile_publish_supported_for(service, status.registry_mode_detected)
         );
         assert_eq!(
             status.system_injection_active,
@@ -517,9 +505,8 @@ mod tests {
             can_repair: true,
             can_upgrade: false,
         };
-        assert!(profile_publish_supported_for(&service, false, false));
-        assert!(!profile_publish_supported_for(&service, true, false));
-        assert!(!profile_publish_supported_for(&service, false, true));
+        assert!(profile_publish_supported_for(&service, false));
+        assert!(!profile_publish_supported_for(&service, true));
 
         for installation in [
             crate::service_contract::InstallationState::Invalid,
@@ -527,7 +514,7 @@ mod tests {
             crate::service_contract::InstallationState::DeletePending,
         ] {
             service.installation = installation;
-            assert!(!profile_publish_supported_for(&service, false, false));
+            assert!(!profile_publish_supported_for(&service, false));
         }
         service.installation = crate::service_contract::InstallationState::Current;
         for runtime in [
@@ -537,12 +524,12 @@ mod tests {
             crate::service_contract::RuntimeState::Unknown,
         ] {
             service.runtime = runtime;
-            assert!(!profile_publish_supported_for(&service, false, false));
+            assert!(!profile_publish_supported_for(&service, false));
         }
         service.runtime = crate::service_contract::RuntimeState::Stopped;
         service.installation = crate::service_contract::InstallationState::Absent;
         service.backend = crate::service_contract::ServiceBackend::None;
-        assert!(profile_publish_supported_for(&service, false, false));
+        assert!(profile_publish_supported_for(&service, false));
     }
 
     #[test]

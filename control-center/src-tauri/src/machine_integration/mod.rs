@@ -1,7 +1,6 @@
 mod appinit;
 mod legacy_mactray;
 mod legacy_migration;
-mod legacy_tray;
 mod model;
 mod open_service;
 mod orchestrator;

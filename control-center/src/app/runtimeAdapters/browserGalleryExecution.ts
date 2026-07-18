@@ -47,7 +47,6 @@ const legacyRuntimeValues: ReadonlyArray<LegacyMacTrayStatus["state"]> = [
 export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
   const fixture = query.get("system-service") ?? "ready";
   const appInitConflict = fixture === "legacy-conflict";
-  const legacyTrayDetected = query.get("legacy-tray") === "running";
   const profileMismatch = fixture === "profile-mismatch";
   const ready = fixture === "ready" || appInitConflict;
   const requestedServiceRuntime = query.get("service-runtime") ?? fixture;
@@ -65,7 +64,7 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
       : fixture === "outdated"
         ? "outdated"
         : "current";
-  const generalMutationAllowed = serviceBackend === "open-source" && serviceStable && !appInitConflict && !legacyTrayDetected;
+  const generalMutationAllowed = serviceBackend === "open-source" && serviceStable && !appInitConflict;
   const systemModesSupported = generalMutationAllowed
     && (serviceInstallation === "absent" || serviceInstallation === "current" || serviceInstallation === "outdated");
   const activeProfile = query.has("legacy-applied")
@@ -114,7 +113,6 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
       migrationAvailable: systemModesSupported && legacyStable,
     } : null,
     registryModeDetected: appInitConflict,
-    legacyTrayDetected,
     systemModesSupported,
     systemInjectionActive: query.has("raw-active") ? true : ready && !appInitConflict,
     injectionReady: true,

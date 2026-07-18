@@ -55,11 +55,6 @@ pub(super) fn execute_machine_action_with(
     } else {
         backend.appinit_conflict()?
     };
-    let legacy_tray_conflict = if matches!(action, MachineAction::Rollback | MachineAction::Stop) {
-        false
-    } else {
-        backend.legacy_tray_conflict()?
-    };
     let status = backend.new_service_status();
     if action == MachineAction::Rollback {
         return backend.execute(action, profile);
@@ -73,22 +68,10 @@ pub(super) fn execute_machine_action_with(
         if appinit_conflict && action != MachineAction::Stop {
             return Err("AppInit conflicts block this machine integration change".to_owned());
         }
-        if legacy_tray_conflict && action != MachineAction::Stop {
-            return Err(
-                "the legacy MacTray tray mode is running and blocks this machine integration change"
-                    .to_owned(),
-            );
-        }
         return backend.execute(action, profile);
     }
     if appinit_conflict {
         return Err("AppInit conflicts block this machine integration change".to_owned());
-    }
-    if legacy_tray_conflict {
-        return Err(
-            "the legacy MacTray tray mode is running and blocks this machine integration change"
-                .to_owned(),
-        );
     }
     if status.backend == crate::service_contract::ServiceBackend::Foreign
         || !matches!(

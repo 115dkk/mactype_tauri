@@ -1,4 +1,4 @@
-use super::{appinit::appinit_conflict, legacy_tray, open_service, MachineAction, MachineBackend};
+use super::{appinit::appinit_conflict, open_service, MachineAction, MachineBackend};
 use crate::service_contract::SystemServiceStatus;
 
 pub(super) struct SystemMachineBackend;
@@ -10,10 +10,6 @@ impl MachineBackend for SystemMachineBackend {
 
     fn appinit_conflict(&mut self) -> Result<bool, String> {
         appinit_conflict()
-    }
-
-    fn legacy_tray_conflict(&mut self) -> Result<bool, String> {
-        legacy_tray::legacy_tray_conflict()
     }
 
     fn execute(&mut self, action: MachineAction, profile: Option<&[u8]>) -> Result<(), String> {

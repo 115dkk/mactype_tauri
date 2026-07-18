@@ -13,7 +13,6 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [serviceBusy, setServiceBusy] = useState<string | null>(null);
-  const [trayRecheckBusy, setTrayRecheckBusy] = useState(false);
   const [migrationConfirmationOpen, setMigrationConfirmationOpen] = useState(false);
   const migrationTriggerRef = useRef<HTMLButtonElement>(null);
   const migrationCancelRef = useRef<HTMLButtonElement>(null);
@@ -147,15 +146,6 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
     }
   };
 
-  const recheckTrayMode = async () => {
-    setTrayRecheckBusy(true);
-    try {
-      await refresh();
-    } finally {
-      setTrayRecheckBusy(false);
-    }
-  };
-
   const restoreMigrationTriggerFocus = () => {
     window.requestAnimationFrame(() => migrationTriggerRef.current?.focus());
   };
@@ -239,18 +229,6 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
 
       <section className="section-block" aria-labelledby="system-title">
         <div className="section-heading"><div><h2 id="system-title">{t("execution.systemTitle")}</h2><p>{t("execution.systemDescription")}</p></div></div>
-        {status?.legacyTrayDetected && (
-          <div className="tray-conflict-banner" data-legacy-tray-conflict role="alert">
-            <ShieldAlert aria-hidden="true" size={20} />
-            <div>
-              <strong>{t("execution.trayConflictTitle")}</strong>
-              <p>{t("execution.trayConflictDescription")}</p>
-            </div>
-            <button className="button secondary" disabled={trayRecheckBusy} onClick={() => void recheckTrayMode()} type="button">
-              <RefreshCw aria-hidden="true" size={16} /> {trayRecheckBusy ? t("execution.trayConflictRechecking") : t("execution.trayConflictRecheck")}
-            </button>
-          </div>
-        )}
         <div className="open-service-card" data-service-backend="open-source">
         <div className="system-injection-control" data-active={systemInjectionAction.state === "active"} data-state={systemInjectionAction.state}>
           <div className="system-injection-state">

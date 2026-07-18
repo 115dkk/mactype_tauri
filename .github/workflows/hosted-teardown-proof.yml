@@ -342,7 +342,7 @@ jobs:
           RUST_BACKTRACE: '1'
         run: cargo test --lib machine_integration::live_teardown::service_mode_is_exempt_from_tray_conflict -- --ignored --exact --nocapture 2>&1 | Tee-Object "$env:EVIDENCE_DIR\19-proof5-service-exempt.txt"
 
-      - name: 'Proof 6/6 — SCM migration stop, remove, and restore roundtrip'
+      - name: 'Proof 6/7 — SCM migration stop, remove, and restore roundtrip'
         id: p6
         continue-on-error: true
         working-directory: control-center/src-tauri
@@ -350,6 +350,35 @@ jobs:
           MACTYPE_HOSTED_TEARDOWN_PROOF: '1'
           RUST_BACKTRACE: '1'
         run: cargo test --lib machine_integration::live_teardown::service_migration_stop_remove_restore_roundtrip -- --ignored --exact --nocapture 2>&1 | Tee-Object "$env:EVIDENCE_DIR\20-proof6-migration.txt"
+
+      - name: 'Proof 7/7 — legacy service funeral through the product backup-receipt transaction'
+        id: p7
+        continue-on-error: true
+        working-directory: control-center/src-tauri
+        env:
+          MACTYPE_HOSTED_TEARDOWN_PROOF: '1'
+          RUST_BACKTRACE: '1'
+        run: cargo test --lib machine_integration::live_teardown::legacy_service_funeral_through_backup_receipt_transaction -- --ignored --exact --nocapture 2>&1 | Tee-Object "$env:EVIDENCE_DIR\22-proof7-funeral.txt"
+
+      - name: Independent verification of the funeral transaction receipt and rollback
+        if: always()
+        run: |
+          $out = "$env:EVIDENCE_DIR\23-funeral-verify.txt"
+          $lines = @()
+          $storage = "$env:ProgramData\MacType\ControlCenter\legacy-migration"
+          if (Test-Path $storage) {
+            $lines += "migration storage tree present: $storage"
+            $receipt = Get-ChildItem -Path $storage -Recurse -Filter receipt.json -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($receipt) {
+              $stages = (Get-Content $receipt.FullName -Raw | ConvertFrom-Json).completedStages
+              $lines += "receipt stages: $($stages -join ' -> ')"
+            } else { $lines += 'no receipt.json found' }
+          } else { $lines += 'no migration storage tree' }
+          $svc = Get-Service MacType -ErrorAction SilentlyContinue
+          $lines += if ($svc) { "service after funeral+rollback: status=$($svc.Status)" }
+                    else { 'service is absent after the funeral (rollback did not restore it)' }
+          $lines | Tee-Object $out
+          exit 0
 
       - name: Cleanup — stop and delete the service, kill every MacTray
         if: always()
@@ -386,6 +415,7 @@ jobs:
             'service staging'                   = '${{ steps.svc.outcome }}'
             'proof 5 service-mode exemption'    = '${{ steps.p5.outcome }}'
             'proof 6 SCM migration roundtrip'   = '${{ steps.p6.outcome }}'
+            'proof 7 legacy service funeral'    = '${{ steps.p7.outcome }}'
           }
           $lines = $results.GetEnumerator() | ForEach-Object { '{0}: {1}' -f $_.Key, $_.Value }
           $lines | Tee-Object "$env:EVIDENCE_DIR\99-verdict.txt"
@@ -393,7 +423,7 @@ jobs:
           if ($failed) {
             throw "failed proofs: $(($failed | ForEach-Object Key) -join '; ')"
           }
-          'PROOF COMPLETE: detection, graceful exit, autostart removal, service exemption, and SCM migration all verified against the real MacType'
+          'PROOF COMPLETE: detection, graceful exit, autostart removal, service exemption, SCM migration, and legacy-service retirement all verified against the real MacType'
 
       - name: Upload evidence (never MacType binaries)
         if: always()

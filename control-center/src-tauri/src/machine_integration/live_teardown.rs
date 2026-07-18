@@ -10,7 +10,10 @@ use super::legacy_mactray::{
     LegacyTrayStartupCoordinator, LegacyTrayStartupState, LegacyTrayStatus, ServicePresence,
     ServiceRuntimeState,
 };
-use super::legacy_migration::{disable_startup_scope, restore_startup_scope, StartupReceiptScope};
+use super::legacy_migration::{
+    disable_startup_scope, prepare_backup, remove_after_verified, restore_startup_scope, rollback,
+    stop_legacy, RemovalVerification, StartupReceiptScope,
+};
 
 fn require_proof_environment() {
     if std::env::var("MACTYPE_HOSTED_TEARDOWN_PROOF").as_deref() != Ok("1") {
@@ -205,4 +208,89 @@ fn service_migration_stop_remove_restore_roundtrip() {
         );
     }
     println!("SCM migration roundtrip verified: stop -> remove -> restore");
+}
+
+#[test]
+#[ignore = "live proof; only meaningful inside the hosted-teardown-proof workflow"]
+fn legacy_service_funeral_through_backup_receipt_transaction() {
+    require_proof_environment();
+
+    // The legacy service is itself a retirement target. This exercises the
+    // product's real retirement transaction — the same backup receipt, stop,
+    // verified removal, and rollback the control center drives — against the
+    // staged real-shape MacType service. The RemovalVerification is the
+    // caller's certification that the replacement is healthy; the upstream
+    // computation of that certification is covered by the open-service CI, so
+    // here we prove the transaction honours the gate and is fully reversible.
+    let before = legacy_mactray::status(false);
+    println!("legacy service before funeral: {before:?}");
+    assert!(
+        matches!(before.presence, ServicePresence::Owned),
+        "the staged legacy service must be owned before its funeral"
+    );
+    assert!(
+        matches!(before.state, ServiceRuntimeState::Running),
+        "the staged legacy service must be running before its funeral"
+    );
+
+    // 1. Back up the legacy service (SCM snapshot + profiles + registry export).
+    prepare_backup().expect("the legacy migration backup must be preparable");
+
+    // 2. Stop it as the first irreversible-looking step of the transaction.
+    stop_legacy().expect("the legacy service must stop under the transaction");
+    let stopped = legacy_mactray::status(false);
+    println!("legacy service after transaction stop: {stopped:?}");
+    assert!(matches!(stopped.presence, ServicePresence::Owned));
+    assert!(matches!(stopped.state, ServiceRuntimeState::Stopped));
+
+    // 3. The removal gate must REFUSE an incomplete verification, and the
+    //    service must survive the refusal untouched.
+    let incomplete = RemovalVerification {
+        new_service_ready: false,
+        active_digest_match: true,
+        backup_valid: true,
+    };
+    let refused = remove_after_verified(incomplete);
+    println!("removal refused without a ready replacement: {refused:?}");
+    assert!(
+        refused.is_err(),
+        "verified removal must refuse an incomplete verification"
+    );
+    assert!(
+        matches!(
+            legacy_mactray::status(false).presence,
+            ServicePresence::Owned
+        ),
+        "a refused removal must leave the legacy service intact"
+    );
+
+    // 4. With the full caller certification, the removal executes.
+    let authorized = RemovalVerification {
+        new_service_ready: true,
+        active_digest_match: true,
+        backup_valid: true,
+    };
+    remove_after_verified(authorized).expect("verified legacy removal must succeed");
+    let removed = legacy_mactray::status(false);
+    println!("legacy service after verified removal: {removed:?}");
+    assert!(
+        matches!(removed.presence, ServicePresence::Absent),
+        "the legacy service must be gone after verified removal"
+    );
+
+    // 5. Safety net: the receipt-based rollback resurrects the exact service.
+    rollback().expect("the receipt-based rollback must restore the legacy service");
+    let restored = legacy_mactray::status(false);
+    println!("legacy service after rollback: {restored:?}");
+    assert!(
+        matches!(restored.presence, ServicePresence::Owned),
+        "rollback must restore the legacy service"
+    );
+    assert!(
+        matches!(restored.state, ServiceRuntimeState::Running),
+        "rollback must return the legacy service to running"
+    );
+    println!(
+        "legacy service funeral verified: backup -> stop -> gated removal -> rollback restores it"
+    );
 }

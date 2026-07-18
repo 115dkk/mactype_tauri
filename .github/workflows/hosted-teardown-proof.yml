@@ -236,7 +236,28 @@ jobs:
           $deadline = (Get-Date).AddSeconds(30)
           do { Start-Sleep -Milliseconds 500; $proc.Refresh() } until ($proc.MainWindowHandle -ne [IntPtr]::Zero -or $proc.HasExited -or (Get-Date) -gt $deadline)
           Start-Sleep -Seconds 9
-          try { (New-Object -ComObject WScript.Shell).AppActivate($proc.Id) | Out-Null; Start-Sleep -Milliseconds 800 } catch {}
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class Ui {
+            [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+            [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+            [DllImport("user32.dll")] public static extern void mouse_event(uint f, int dx, int dy, int d, IntPtr e);
+          }
+          '@
+          # The legacy actions live in the System section below the fold on the
+          # 1024x768 runner, so maximize and wheel-scroll the content into view.
+          try {
+            [Ui]::ShowWindow($proc.MainWindowHandle, 3) | Out-Null
+            Start-Sleep -Milliseconds 700
+            [Ui]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null
+            (New-Object -ComObject WScript.Shell).AppActivate($proc.Id) | Out-Null
+            Start-Sleep -Milliseconds 500
+            [Ui]::SetCursorPos(640, 380) | Out-Null
+            for ($i = 0; $i -lt 22; $i++) { [Ui]::mouse_event(0x0800, 0, 0, -120, [IntPtr]::Zero); Start-Sleep -Milliseconds 45 }
+            Start-Sleep -Milliseconds 900
+          } catch { "scroll $label failed: $_" | Add-Content "$env:EVIDENCE_DIR\$label.txt" }
           try {
             Add-Type -AssemblyName System.Windows.Forms, System.Drawing
             $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
@@ -346,7 +367,28 @@ jobs:
           $deadline = (Get-Date).AddSeconds(30)
           do { Start-Sleep -Milliseconds 500; $proc.Refresh() } until ($proc.MainWindowHandle -ne [IntPtr]::Zero -or $proc.HasExited -or (Get-Date) -gt $deadline)
           Start-Sleep -Seconds 9
-          try { (New-Object -ComObject WScript.Shell).AppActivate($proc.Id) | Out-Null; Start-Sleep -Milliseconds 800 } catch {}
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class Ui {
+            [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+            [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+            [DllImport("user32.dll")] public static extern void mouse_event(uint f, int dx, int dy, int d, IntPtr e);
+          }
+          '@
+          # The legacy actions live in the System section below the fold on the
+          # 1024x768 runner, so maximize and wheel-scroll the content into view.
+          try {
+            [Ui]::ShowWindow($proc.MainWindowHandle, 3) | Out-Null
+            Start-Sleep -Milliseconds 700
+            [Ui]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null
+            (New-Object -ComObject WScript.Shell).AppActivate($proc.Id) | Out-Null
+            Start-Sleep -Milliseconds 500
+            [Ui]::SetCursorPos(640, 380) | Out-Null
+            for ($i = 0; $i -lt 22; $i++) { [Ui]::mouse_event(0x0800, 0, 0, -120, [IntPtr]::Zero); Start-Sleep -Milliseconds 45 }
+            Start-Sleep -Milliseconds 900
+          } catch { "scroll $label failed: $_" | Add-Content "$env:EVIDENCE_DIR\$label.txt" }
           try {
             Add-Type -AssemblyName System.Windows.Forms, System.Drawing
             $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
@@ -418,7 +460,28 @@ jobs:
           $deadline = (Get-Date).AddSeconds(30)
           do { Start-Sleep -Milliseconds 500; $proc.Refresh() } until ($proc.MainWindowHandle -ne [IntPtr]::Zero -or $proc.HasExited -or (Get-Date) -gt $deadline)
           Start-Sleep -Seconds 9
-          try { (New-Object -ComObject WScript.Shell).AppActivate($proc.Id) | Out-Null; Start-Sleep -Milliseconds 800 } catch {}
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class Ui {
+            [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+            [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+            [DllImport("user32.dll")] public static extern void mouse_event(uint f, int dx, int dy, int d, IntPtr e);
+          }
+          '@
+          # The legacy actions live in the System section below the fold on the
+          # 1024x768 runner, so maximize and wheel-scroll the content into view.
+          try {
+            [Ui]::ShowWindow($proc.MainWindowHandle, 3) | Out-Null
+            Start-Sleep -Milliseconds 700
+            [Ui]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null
+            (New-Object -ComObject WScript.Shell).AppActivate($proc.Id) | Out-Null
+            Start-Sleep -Milliseconds 500
+            [Ui]::SetCursorPos(640, 380) | Out-Null
+            for ($i = 0; $i -lt 22; $i++) { [Ui]::mouse_event(0x0800, 0, 0, -120, [IntPtr]::Zero); Start-Sleep -Milliseconds 45 }
+            Start-Sleep -Milliseconds 900
+          } catch { "scroll $label failed: $_" | Add-Content "$env:EVIDENCE_DIR\$label.txt" }
           try {
             Add-Type -AssemblyName System.Windows.Forms, System.Drawing
             $b = [System.Windows.Forms.SystemInformation]::VirtualScreen

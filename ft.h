@@ -165,7 +165,7 @@ public:
 	}
 	~ControlIder()
 	{
-		delete unicode;
+		delete[] unicode;
 	}
 	void setcntrlAttribute(WCHAR wch, int cnType)
 	{
@@ -199,8 +199,15 @@ struct FREETYPE_PARAMS
 	wstring strFamilyName, strFullName;
 
 	FREETYPE_PARAMS()
+		: etoOptions(0)
+		, ftOptions(0)
+		, charExtra(0)
+		, color(0)
+		, alpha(0)
+		, alphatuner(0)
+		, lplf(NULL)
+		, otm(NULL)
 	{
-		ZeroMemory(this, sizeof(*this));
 	}
 
 	//FreeTypeTextOut用 (サイズ計算＋文字描画)
@@ -342,8 +349,8 @@ struct FreeTypeDrawInfo
 	}
 	~FreeTypeDrawInfo()
 	{
-		delete Dx;
-		delete Dy;
+		delete[] Dx;
+		delete[] Dy;
 		delete[] AAModes;
 	}
 

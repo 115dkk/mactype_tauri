@@ -36,7 +36,11 @@ int _StrToInt(LPCTSTR pStr, int nDefault)
 	pStart = pStr;
 	ret = 0;
 	for (; isdigit(*pStr); pStr++) {
-		ret = 10 * ret + (*pStr - _T('0'));
+		int digit = *pStr - _T('0');
+		if (ret > (INT_MAX - digit) / 10) {
+			return neg ? INT_MIN : INT_MAX;
+		}
+		ret = 10 * ret + digit;
 	}
 
 	if (pStr == pStart) {
@@ -49,7 +53,7 @@ int _StrToInt(LPCTSTR pStr, int nDefault)
 }
 
 wstring LowerCase(wstring str) {
-	transform(str.begin(), str.end(), str.begin(), ::tolower);
+	transform(str.begin(), str.end(), str.begin(), ::towlower);
 	return str;
 }
 

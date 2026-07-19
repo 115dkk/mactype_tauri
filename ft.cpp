@@ -2263,8 +2263,8 @@ gdiexit:
 	if (!bGlyphIndex && bWindowsLink)
 	{
 		for (int i = 0; i < LinkNum; i++)
-			delete lpfontlink[i];
-		delete lpfontlink;
+			delete[] lpfontlink[i];
+		delete[] lpfontlink;
 	}
 	return nRet;
 }
@@ -2668,8 +2668,8 @@ gdiexit:
 	if (!bGlyphIndex && bWindowsLink)
 	{
 		for (int i = 0; i < LinkNum; i++)
-			delete lpfontlink[i];
-		delete lpfontlink;
+			delete[] lpfontlink[i];
+		delete[] lpfontlink;
 	}
 	return nRet;
 }

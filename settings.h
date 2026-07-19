@@ -1089,7 +1089,7 @@ public:
 				if (data->cbData && data->lpData) {	// ignore invalid request.
 					string json;
 					json.resize(data->cbData);
-					memcpy((void*)json.c_str(), data->lpData, data->cbData);
+					memcpy(&json[0], data->lpData, data->cbData);
 					// now parse the json string
 					auto jsonobj = json::parse(json.begin(), json.end());
 					string command = jsonobj["command"].get<std::string>();

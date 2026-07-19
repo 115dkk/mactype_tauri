@@ -118,6 +118,9 @@ jobs:
       - name: Enforce open service static contracts
         shell: pwsh
         run: scripts/ci/Test-OpenServiceContract.ps1
+      - name: Enforce renderer memory-safety contracts
+        shell: pwsh
+        run: scripts/ci/Test-RendererMemorySafety.ps1
       - name: Verify lint exception boundary
         shell: bash
         run: |

@@ -23,6 +23,10 @@ function Reject-Pattern([string] $text, [string] $pattern, [string] $message) {
 $ftHeader = Read-Source 'ft.h'
 $ftSource = Read-Source 'ft.cpp'
 $commonSource = Read-Source 'common.cpp'
+$commonHeader = Read-Source 'common.h'
+$engineSource = Read-Source 'fteng.cpp'
+$exportSource = Read-Source 'expfunc.cpp'
+$hookSource = Read-Source 'hook.cpp'
 $settingsSource = Read-Source 'settings.cpp'
 
 Reject-Pattern $ftHeader 'ZeroMemory\s*\(\s*this\s*,\s*sizeof\s*\(\s*\*this\s*\)\s*\)' `
@@ -43,5 +47,42 @@ Reject-Pattern $commonSource 'transform\s*\([^;]*::tolower\s*\)' `
     'Wide-character case conversion must not call narrow tolower.'
 Require-Pattern $settingsSource 'ret\s*>\s*\(\s*INT_MAX\s*-\s*digit\s*\)\s*/\s*10' `
     'INI integer parsing must reject signed overflow before multiplication.'
+
+Require-Pattern $commonHeader 'BOOL\s+ChangeFileName\s*\(\s*LPWSTR\s+lpSrc\s*,\s*size_t\s+cchSrc' `
+    'ChangeFileName must receive the destination capacity, not the current path length.'
+Reject-Pattern $exportSource 'wcscat\s*\(\s*lpSrc\s*,' `
+    'Renderer bootstrap paths must not use unbounded wcscat.'
+Reject-Pattern $exportSource 'new\s+char\s*\[\s*len\s*\]' `
+    'Wide-to-multibyte conversion must reserve space for the terminator.'
+Require-Pattern $settingsSource 'namesz\s*=\s*nNameCapacity\s*;' `
+    'RegEnumValue name capacity must be expressed in WCHARs.'
+Reject-Pattern $settingsSource 'namesz\s*=\s*nBufSize\s*;' `
+    'RegEnumValue must not receive a byte count for its character-count parameter.'
+Require-Pattern $engineSource 'if\s*\(\s*offset\s*>\s*pThis->m_dwSize\s*\)' `
+    'Mapped font reads must reject offsets beyond the mapped buffer.'
+Require-Pattern $settingsSource 'GetModuleFileName\s*\(\s*NULL\s*,\s*name\s*,\s*countof\s*\(\s*name\s*\)\s*\)' `
+    'GetAppDir must pass the actual module-name buffer capacity.'
+Reject-Pattern $hookSource 'wcscat\s*\(\s*dllPath\s*,' `
+    'EasyHook bootstrap path construction must be bounded.'
+Require-Pattern $ftHeader 'new\s+char\s*\[\s*0x10000\s*\]' `
+    'ControlIder must cover every possible WCHAR value, including 0xffff.'
+Require-Pattern $ftSource 'if\s*\(\s*size\s*>\s*sizeof\s+m_localbuf\s*\)' `
+    'Temporary glyph storage must use the heap when the request exceeds the local buffer.'
+Reject-Pattern $ftSource 'LPTTPOLYGONHEADER\s+ttphpend' `
+    'Native outline parsing must use byte bounds instead of scaled typed-pointer bounds.'
+Require-Pattern $ftSource 'polygonRemaining\s*<\s*sizeof\s*\(\s*TTPOLYGONHEADER\s*\)' `
+    'Native outline parsing must validate a complete polygon header before reading it.'
+Require-Pattern $ftSource 'ttphp->cb\s*<\s*sizeof\s*\(\s*TTPOLYGONHEADER\s*\).*?ttphp->cb\s*>\s*polygonRemaining' `
+    'Native outline parsing must reject undersized and out-of-buffer polygon lengths.'
+Require-Pattern $ftSource '(?s)curvePrefixSize.*?curveRemaining\s*<\s*curvePrefixSize' `
+    'Native outline parsing must validate the fixed curve prefix before reading cpfx.'
+Require-Pattern $ftSource 'ttpcp->cpfx\s*>\s*\(\s*curveRemaining\s*-\s*curvePrefixSize\s*\)\s*/\s*sizeof\s*\(\s*POINTFX\s*\)' `
+    'Native outline parsing must bound every POINTFX array by the containing polygon.'
+Require-Pattern $ftSource 'pointCount\s*>\s*0x7fff\s*-\s*ttpcp->cpfx' `
+    'Native outline parsing must reject point counts that overflow FT_Outline fields.'
+Reject-Pattern $ftHeader 'int\s+LastPos\s*=\s*0\s*,\s*LPCurPos\s*=\s*0' `
+    'Advance accumulation must not overflow a signed int before coordinate scaling.'
+Require-Pattern $ftHeader 'double\s+fLPCurPos\s*=\s*0' `
+    'Advance accumulation must widen each input before addition and scaling.'
 
 Write-Host 'Renderer memory-safety source contracts passed.'

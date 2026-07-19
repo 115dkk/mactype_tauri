@@ -642,6 +642,6 @@ float _StrToFloat(LPCTSTR pStr, float fDefault)
 void HookD2DDll();
 bool HookD2D1();
 void HookGdiplus();
-void ChangeFileName(LPWSTR lpSrc, int nSize, LPCWSTR lpNewFileName);
+BOOL ChangeFileName(LPWSTR lpSrc, size_t cchSrc, LPCWSTR lpNewFileName);
 std::wstring MakeUniqueFontName(const std::wstring strFullName, const std::wstring strFamilyName, const std::wstring strStyleName);
 std::string WstringToString(const std::wstring str);

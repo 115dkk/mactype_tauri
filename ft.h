@@ -122,13 +122,19 @@ public:
 	}
 	void TransformlpDx(const int* lpDx, int* outlpDx, int szDx)
 	{
-		int LastPos = 0, LPCurPos = 0;
+		double fLPCurPos = 0;
 		double fDPLastPos = 0, fDPCurPos = 0;
 		for (;szDx>0;--szDx)
 		{
-			LPCurPos += *lpDx++;						// the logical position the letter belongs to
-			fDPCurPos = LPCurPos*fXZoomFactor;			// the device position the letter belongs to
-			*outlpDx = ROUND(fDPCurPos-fDPLastPos);		// the device coord
+			fLPCurPos += (double)*lpDx++;					// the logical position the letter belongs to
+			fDPCurPos = fLPCurPos*(double)fXZoomFactor;	// the device position the letter belongs to
+			double delta = fDPCurPos-fDPLastPos;
+			if (delta >= INT_MAX)
+				*outlpDx = INT_MAX;
+			else if (delta <= INT_MIN)
+				*outlpDx = INT_MIN;
+			else
+				*outlpDx = ROUND(delta);						// the device coord
 			fDPLastPos += *outlpDx++;					// the coord after this letter is painted. In order to calculate the pos of the next letter.
 		}
 	}
@@ -145,8 +151,8 @@ private:
 public:
 	ControlIder()
 	{
-		unicode = new char[0xffff];
-		memset(unicode, 0, sizeof(char)*0xffff);	// non-control char by default
+		unicode = new char[0x10000];
+		memset(unicode, 0, sizeof(char)*0x10000);	// non-control char by default
 		//memset(unicode, 2, sizeof(char)*32);
 		for (int i=0;i<0x3000;i++)
 			unicode[i]=!!iswcntrl(i);

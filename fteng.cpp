@@ -1028,6 +1028,9 @@ unsigned long FreeTypeSysFontData::IoFunc(
 
 	DWORD result = 0;
 	if (pThis->m_pMapping) {
+		if (offset > pThis->m_dwSize) {
+			return 0;
+		}
 		result = Min(pThis->m_dwSize - offset, count);
 		memcpy(buffer, (const BYTE*)pThis->m_pMapping + offset, result);
 	} else {

@@ -174,24 +174,40 @@ EXTERN_C void SafeUnload()
 	FreeLibraryAndExitThread(g_dllInstance, 0);
 }
 
-void ChangeFileName(LPWSTR lpSrc, int nSize, LPCWSTR lpNewFileName) {
-	for (int i = nSize; i > 0; --i){
-		if (lpSrc[i] == L'\\') {
-			lpSrc[i + 1] = L'\0';
-			break;
-		}
+BOOL ChangeFileName(LPWSTR lpSrc, size_t cchSrc, LPCWSTR lpNewFileName) {
+	size_t pathLength = 0;
+	if (!lpSrc || !lpNewFileName || !cchSrc ||
+		FAILED(StringCchLengthW(lpSrc, cchSrc, &pathLength))) {
+		return FALSE;
 	}
-	wcscat(lpSrc, lpNewFileName);
+	while (pathLength && lpSrc[pathLength - 1] != L'\\' && lpSrc[pathLength - 1] != L'/') {
+		--pathLength;
+	}
+	if (!pathLength) {
+		return FALSE;
+	}
+	return SUCCEEDED(StringCchCopyW(lpSrc + pathLength, cchSrc - pathLength, lpNewFileName));
 }
 
 std::string WstringToString(const std::wstring str)
 {// wstringתstring
-	unsigned len = str.size() * 4;
 	setlocale(LC_CTYPE, "");
-	char *p = new char[len];
-	wcstombs(p, str.c_str(), len);
-	std::string str1(p);
-	delete[] p;
+	size_t len = wcstombs(NULL, str.c_str(), 0);
+	if (len == (size_t)-1) {
+		return std::string();
+	}
+	char *p = (char*)malloc(len + 1);
+	if (!p) {
+		return std::string();
+	}
+	size_t converted = wcstombs(p, str.c_str(), len + 1);
+	if (converted == (size_t)-1) {
+		free(p);
+		return std::string();
+	}
+	p[converted] = '\0';
+	std::string str1(p, converted);
+	free(p);
 	return str1;
 }
 
@@ -255,8 +271,11 @@ FARPROC K32GetProcAddress(LPCSTR lpProcName)
 
 	//kernel32のベースアドレス取得
 	WCHAR sysdir[MAX_PATH];
-	GetWindowsDirectory(sysdir, MAX_PATH);
-	wcscat(sysdir, L"\\SysWow64\\kernel32.dll");	// ¼ÓÔØkernel32.dll
+	UINT sysdirLength = GetWindowsDirectory(sysdir, countof(sysdir));
+	if (!sysdirLength || sysdirLength >= countof(sysdir) ||
+		FAILED(StringCchCatW(sysdir, countof(sysdir), L"\\SysWow64\\kernel32.dll"))) {
+		return NULL;
+	}
 	HANDLE hFile = CreateFile(sysdir, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, NULL, NULL);
 	if (hFile == INVALID_HANDLE_VALUE)
 		return NULL;
@@ -597,11 +616,9 @@ emit_db(0xC3);
 		emit_dd(orgEIP - (LONG)remoteaddr - (p - code) - sizeof(LONG));
 
 		// gdi++.dllのパス
-		int nSize = GetModuleFileNameW(GetDLLInstance(), dllpath, MAX_PATH);
-		if (nSize) {
-			ChangeFileName(dllpath, nSize, L"MTBootStrap.dll");
-		}
-		return !!nSize;
+		int nSize = GetModuleFileNameW(GetDLLInstance(), dllpath, countof(dllpath));
+		return nSize > 0 && nSize < countof(dllpath) &&
+			ChangeFileName(dllpath, countof(dllpath), L"MTBootStrap.dll");
 	}
 	bool init32(LPDWORD remoteaddr, LONG orgEIP)	//32位程序初始化
 	{
@@ -645,11 +662,9 @@ emit_dw(0xD0FF);	//call eax
 		emit_dd(orgEIP - (LONG)remoteaddr - (p - code) - sizeof(LONG));
 
 		// gdi++.dllのパス
-		int nSize = GetModuleFileNameW(GetDLLInstance(), dllpath, MAX_PATH);
-		if (nSize) {
-			ChangeFileName(dllpath, nSize, L"MTBootStrap.dll");
-		}
-		return !!nSize;
+		int nSize = GetModuleFileNameW(GetDLLInstance(), dllpath, countof(dllpath));
+		return nSize > 0 && nSize < countof(dllpath) &&
+			ChangeFileName(dllpath, countof(dllpath), L"MTBootStrap.dll");
 	}
 	bool init64From32(DWORD64 remoteaddr, DWORD64 orgEIP)
 	{
@@ -701,22 +716,18 @@ emit_dw(0xD0FF);	//call eax
 
 		// gdi++.dllのパス
 
-		int nSize = GetModuleFileNameW(GetDLLInstance(), dllpath, MAX_PATH);
-		if (nSize) {
-			ChangeFileName(dllpath, nSize, L"MTBootStrap64.dll");
-		}
-		return !!nSize;
+		int nSize = GetModuleFileNameW(GetDLLInstance(), dllpath, countof(dllpath));
+		return nSize > 0 && nSize < countof(dllpath) &&
+			ChangeFileName(dllpath, countof(dllpath), L"MTBootStrap64.dll");
 	}
 
 	bool init64From32(DWORD64 remoteaddr, DWORD64 orgEIP, DWORD dwLoaderOffset)
 	{
 		C_ASSERT((offsetof(opcode_data, dllpath) & 1) == 0);
 
-		int nSize = GetModuleFileNameW(GetDLLInstance(), dllpath, MAX_PATH);
-		if (nSize) {
-			ChangeFileName(dllpath, nSize, L"MTBootStrap64.dll");
-		}
-		if (!nSize)
+		int nSize = GetModuleFileNameW(GetDLLInstance(), dllpath, countof(dllpath));
+		if (!nSize || nSize >= countof(dllpath) ||
+			!ChangeFileName(dllpath, countof(dllpath), L"MTBootStrap64.dll"))
 			return false;
 		uniDllPath.Length = wcslen(dllpath)*sizeof(WCHAR);
 		uniDllPath.MaximumLength = uniDllPath.Length+2;
@@ -1220,11 +1231,9 @@ emit_db(0xC1);
 		emit_db(0xE6);
 
 		// gdi++.dllのパス
-		int nSize = GetModuleFileNameW(GetDLLInstance(), dllpath, MAX_PATH);
-		if (nSize) {
-			ChangeFileName(dllpath, nSize, L"MTBootStrap64.dll");
-		}
-		return !!nSize;
+		int nSize = GetModuleFileNameW(GetDLLInstance(), dllpath, countof(dllpath));
+		return nSize > 0 && nSize < countof(dllpath) &&
+			ChangeFileName(dllpath, countof(dllpath), L"MTBootStrap64.dll");
 	}
 
 };

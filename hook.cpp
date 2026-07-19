@@ -468,18 +468,22 @@ void EZHookMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved) {
 	switch (reason) {
 	case DLL_PROCESS_ATTACH:
 	{
-		LPWSTR dllPath = new WCHAR[MAX_PATH + 1];
-		int nSize = GetModuleFileName(g_dllInstance, dllPath, MAX_PATH + 1);
-		WCHAR* p = &dllPath[nSize];
-		while (*--p != L'\\');
-		*p = L'\0';
+		WCHAR dllPath[MAX_PATH + 1] = { 0 };
+		DWORD nSize = GetModuleFileName(g_dllInstance, dllPath, countof(dllPath));
+		if (!nSize || nSize >= countof(dllPath)) {
+			DebugOut(L"Failed to locate EasyHook, exiting");
+			return;
+		}
 #ifdef _WIN64
-		wcscat(dllPath, L"\\easyhk64.dll");
+		LPCWSTR easyHookName = L"easyhk64.dll";
 #else
-		wcscat(dllPath, L"\\easyhk32.dll");
+		LPCWSTR easyHookName = L"easyhk32.dll";
 #endif
+		if (!ChangeFileName(dllPath, countof(dllPath), easyHookName)) {
+			DebugOut(L"Failed to construct EasyHook path, exiting");
+			return;
+		}
 		HMODULE hEasyhk = LoadLibrary(dllPath);
-		delete[]dllPath;
 		if (!hEasyhk) {
 			DebugOut(L"Failed to load Easyhook, exiting");
 			return;

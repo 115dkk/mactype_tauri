@@ -1197,28 +1197,64 @@ CGGOOutlineGlyph::init(DWORD bufsize, PVOID bufp, const GLYPHMETRICS& gm)
 	outline.n_points = 0;
 	outline.flags = 0; //FT_OUTLINE_HIGH_PRECISION;
 
-	LPTTPOLYGONHEADER ttphp = (LPTTPOLYGONHEADER)bufp;
-	LPTTPOLYGONHEADER ttphpend = (LPTTPOLYGONHEADER)((PBYTE)ttphp + bufsize);
-
-	while (ttphp < ttphpend) {
-		LPTTPOLYCURVE ttpcp = (LPTTPOLYCURVE)(ttphp + 1);
-		LPTTPOLYCURVE ttpcpend = (LPTTPOLYCURVE)((PBYTE)ttphp + ttphp->cb);
-		if ((PVOID)ttpcpend > (PVOID)ttphpend) {
-			break;
-		}
-		++outline.n_points;
-		++outline.n_contours;
-		while (ttpcp < ttpcpend) {
-			LPPOINTFX pfxp = &ttpcp->apfx[0];
-			outline.n_points += ttpcp->cpfx;
-			ttpcp = (LPTTPOLYCURVE)(pfxp + ttpcp->cpfx);
-		}
-		ttphp = (LPTTPOLYGONHEADER)ttpcp;
-	}
-
-	if (ttphp != ttphpend) {
+	if (!bufp || bufsize < sizeof(TTPOLYGONHEADER)) {
+		done();
 		return false;
 	}
+	PBYTE glyphBegin = (PBYTE)bufp;
+	PBYTE glyphEnd = glyphBegin + bufsize;
+	PBYTE polygonp = glyphBegin;
+	DWORD pointCount = 0;
+	DWORD contourCount = 0;
+	const size_t curvePrefixSize = FIELD_OFFSET(TTPOLYCURVE, apfx);
+
+	while (polygonp < glyphEnd) {
+		size_t polygonRemaining = glyphEnd - polygonp;
+		if (polygonRemaining < sizeof(TTPOLYGONHEADER)) {
+			done();
+			return false;
+		}
+		LPTTPOLYGONHEADER ttphp = (LPTTPOLYGONHEADER)polygonp;
+		if (ttphp->cb < sizeof(TTPOLYGONHEADER) || (size_t)ttphp->cb > polygonRemaining) {
+			done();
+			return false;
+		}
+
+		PBYTE polygonEnd = polygonp + ttphp->cb;
+		PBYTE curvep = polygonp + sizeof(TTPOLYGONHEADER);
+		bool hasCurve = false;
+		if (pointCount == 0x7fff || contourCount == 0x7fff) {
+			done();
+			return false;
+		}
+		++pointCount;
+		++contourCount;
+		while (curvep < polygonEnd) {
+			size_t curveRemaining = polygonEnd - curvep;
+			if (curveRemaining < curvePrefixSize) {
+				done();
+				return false;
+			}
+			LPTTPOLYCURVE ttpcp = (LPTTPOLYCURVE)curvep;
+			if (!ttpcp->cpfx ||
+				ttpcp->cpfx > (curveRemaining - curvePrefixSize) / sizeof(POINTFX) ||
+				pointCount > 0x7fff - ttpcp->cpfx) {
+				done();
+				return false;
+			}
+			pointCount += ttpcp->cpfx;
+			curvep += curvePrefixSize + ttpcp->cpfx * sizeof(POINTFX);
+			hasCurve = true;
+		}
+		if (curvep != polygonEnd || !hasCurve) {
+			done();
+			return false;
+		}
+		polygonp = polygonEnd;
+	}
+
+	outline.n_points = (short)pointCount;
+	outline.n_contours = (short)contourCount;
 	outline.points = (FT_Vector*)calloc(outline.n_points, sizeof * outline.points);
 	outline.tags = (unsigned char*)calloc(outline.n_points, sizeof * outline.tags);
 	outline.contours = (unsigned short*)calloc(outline.n_contours, sizeof * outline.contours);
@@ -1228,20 +1264,21 @@ CGGOOutlineGlyph::init(DWORD bufsize, PVOID bufp, const GLYPHMETRICS& gm)
 	}
 
 	unsigned short* cp = outline.contours;
-	short ppos = 0;
+	int ppos = 0;
 
-	ttphp = (LPTTPOLYGONHEADER)bufp;
-	while (ttphp < ttphpend) {
-		LPTTPOLYCURVE ttpcp = (LPTTPOLYCURVE)(ttphp + 1);
-		LPTTPOLYCURVE ttpcpend = (LPTTPOLYCURVE)((PBYTE)ttphp + ttphp->cb);
+	polygonp = glyphBegin;
+	while (polygonp < glyphEnd) {
+		LPTTPOLYGONHEADER ttphp = (LPTTPOLYGONHEADER)polygonp;
+		PBYTE polygonEnd = polygonp + ttphp->cb;
+		PBYTE curvep = polygonp + sizeof(TTPOLYGONHEADER);
 
-		LPPOINTFX pfxp0 = &ttpcp->apfx[0];
-		while (ttpcp < ttpcpend) {
-			LPPOINTFX pfxp = &ttpcp->apfx[0];
-			pfxp0 = pfxp + (ttpcp->cpfx - 1);
-			ttpcp = (LPTTPOLYCURVE)(pfxp + ttpcp->cpfx);
+		LPPOINTFX pfxp0 = NULL;
+		while (curvep < polygonEnd) {
+			LPTTPOLYCURVE ttpcp = (LPTTPOLYCURVE)curvep;
+			pfxp0 = &ttpcp->apfx[ttpcp->cpfx - 1];
+			curvep += curvePrefixSize + ttpcp->cpfx * sizeof(POINTFX);
 		}
-		ttpcp = (LPTTPOLYCURVE)(ttphp + 1);
+		curvep = polygonp + sizeof(TTPOLYGONHEADER);
 
 		if (pfxp0->x.value != ttphp->pfxStart.x.value || pfxp0->x.fract != ttphp->pfxStart.x.fract ||
 			pfxp0->y.value != ttphp->pfxStart.y.value || pfxp0->y.fract != ttphp->pfxStart.y.fract) {
@@ -1250,7 +1287,8 @@ CGGOOutlineGlyph::init(DWORD bufsize, PVOID bufp, const GLYPHMETRICS& gm)
 			outline.tags[ppos] = getTag(FT_CURVE_TAG_ON, outline.points[ppos]);
 			++ppos;
 		}
-		while (ttpcp < ttpcpend) {
+		while (curvep < polygonEnd) {
+			LPTTPOLYCURVE ttpcp = (LPTTPOLYCURVE)curvep;
 			char tag;
 			switch (ttpcp->wType) {
 			case TT_PRIM_LINE:
@@ -1275,10 +1313,10 @@ CGGOOutlineGlyph::init(DWORD bufsize, PVOID bufp, const GLYPHMETRICS& gm)
 				++pfxp;
 			}
 			outline.tags[ppos - 1] = getTag(FT_CURVE_TAG_ON, outline.points[ppos - 1]);
-			ttpcp = (LPTTPOLYCURVE)pfxp;
+			curvep += curvePrefixSize + ttpcp->cpfx * sizeof(POINTFX);
 		}
 		*cp++ = ppos - 1;
-		ttphp = (LPTTPOLYGONHEADER)ttpcp;
+		polygonp = polygonEnd;
 	}
 	outline.n_points = ppos;
 	return true;
@@ -1299,9 +1337,12 @@ public:
 	}
 	T init(DWORD size) {
 		done();
-		if (m_size > size) {
+		if (size > sizeof m_localbuf) {
 			m_size = size;
 			m_ptr = (T)malloc(m_size);
+		}
+		else {
+			m_size = size;
 		}
 		return m_ptr;
 	}

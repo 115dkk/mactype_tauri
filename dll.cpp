@@ -370,13 +370,15 @@ int CDllHelper::StringLengthA(char* str) {
 * Return: wchar_t string
 */
 wchar_t* CDllHelper::CharToWChar_T(char* str) {
-	int length = StringLengthA(str);
-
 	if (str == nullptr) {
 		return nullptr;
 	}
+	int length = StringLengthA(str);
 
-	wchar_t* wstr_t = (wchar_t*)malloc(sizeof(wchar_t) * length + 2);
+	wchar_t* wstr_t = (wchar_t*)malloc(sizeof(wchar_t) * (length + 1));
+	if (!wstr_t) {
+		return nullptr;
+	}
 
 	for (int i = 0; i < length; i++) {
 		wstr_t[i] = str[i];

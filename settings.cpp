@@ -80,7 +80,10 @@ const wstring GetAppDir() {
 	}
 	WCHAR name[MAX_PATH] = { 0 };
 
-	int nSize = GetModuleFileName(NULL, name, MAX_PATH + 1);
+	DWORD nSize = GetModuleFileName(NULL, name, countof(name));
+	if (!nSize || nSize >= countof(name)) {
+		return L"";
+	}
 	PathRemoveFileSpec(name);
 	AppDir = wstring(name) + L"\\"; // path should always end with a "\"
 	AppDir = LowerCase(AppDir);
@@ -312,12 +315,12 @@ void CGdippSettings::DelayedInit()
 bool CGdippSettings::LoadSettings(HINSTANCE hModule)
 {
 	CCriticalSectionLock __lock(CCriticalSectionLock::CS_SETTING);
-	int nSize = ::GetModuleFileName(hModule, m_szFileName, MAX_PATH - sizeof(".ini") + 1); 
-	if (!nSize) {
+	DWORD nSize = ::GetModuleFileName(hModule, m_szFileName, countof(m_szFileName));
+	if (!nSize || nSize >= countof(m_szFileName) ||
+		!ChangeFileName(m_szFileName, countof(m_szFileName), L"MacType.ini")) {
 		return false;
 	}
-	ChangeFileName(m_szFileName, nSize, L"MacType.ini");
-	
+
 	return LoadAppSettings(m_szFileName);
 }
 
@@ -1333,31 +1336,39 @@ void CFontLinkInfo::init()
 	//GetVersionEx(&sOsVinfo);	//获得操作系统版本号
 	//const CGdippSettings* pSettings = CGdippSettings::GetInstance();
 
-	WCHAR* name = new WCHAR[0x2000];
+	const DWORD nNameCapacity = 0x2000;
+	const DWORD nValueCapacity = 0x2000;
+	WCHAR* name = new WCHAR[nNameCapacity];
 	DWORD namesz;
 	DWORD valuesz;
-	WCHAR* value = new WCHAR[0x2000];
-	WCHAR* buf = new WCHAR[0x2000];
-	const DWORD nBufSize = 0x2000 * sizeof(WCHAR);
+	WCHAR* value = new WCHAR[nValueCapacity];
+	WCHAR* buf = new WCHAR[nNameCapacity];
+	const DWORD nBufSize = nValueCapacity * sizeof(WCHAR);
 	LONG rc;
 	DWORD regtype;
 
 	for (int k = 0; ; ++k) {	//获得字体柄蛐的所有字虂E
-		namesz = nBufSize;
+		ZeroMemory(name, nNameCapacity * sizeof(WCHAR));
+		ZeroMemory(value, nValueCapacity * sizeof(WCHAR));
+		namesz = nNameCapacity;
 		valuesz = nBufSize;
 		rc = RegEnumValue(h2, k, name, &namesz, 0, &regtype, (LPBYTE)value, &valuesz);		//从字体柄蛐寻找
 		if (rc == ERROR_NO_MORE_ITEMS) break;
 		if (rc != ERROR_SUCCESS) break;
+		name[nNameCapacity - 1] = 0;
+		value[nValueCapacity - 1] = 0;
 		if (regtype != REG_SZ) continue;
-		StringCchCopy(buf, nBufSize / sizeof(buf[0]), name);
-		if (buf[wcslen(buf) - 1] == L')') {				//去掉括号
+		StringCchCopy(buf, nNameCapacity, name);
+		size_t bufLength = wcslen(buf);
+		if (bufLength && buf[bufLength - 1] == L')') {				//去掉括号
 			LPWSTR p;
 			if ((p = wcsrchr(buf, L'(')) != NULL) {
 				*p = 0;
 			}
 		}
-		while (buf[wcslen(buf)-1] == L' ')
-			buf[wcslen(buf)-1] = 0;
+		bufLength = wcslen(buf);
+		while (bufLength && buf[bufLength - 1] == L' ')
+			buf[--bufLength] = 0;
 		//获得的对应的字体脕E
 		FontNameCache.Add(value, buf);
 	}
@@ -1368,11 +1379,16 @@ void CFontLinkInfo::init()
 	for (int i = 0; row < INFOMAX; ++i) {
 		int col = 0;
 
-		namesz = nBufSize;
+		ZeroMemory(name, nNameCapacity * sizeof(WCHAR));
+		ZeroMemory(value, nValueCapacity * sizeof(WCHAR));
+		namesz = nNameCapacity;
 		valuesz = nBufSize;
 		rc = RegEnumValue(h1, i, name, &namesz, 0, &regtype, (LPBYTE)value, &valuesz);	//获得一个字体的字体链接
 		if (rc == ERROR_NO_MORE_ITEMS) break;
 		if (rc != ERROR_SUCCESS) break;
+		name[nNameCapacity - 1] = 0;
+		value[nValueCapacity - 1] = 0;
+		value[nValueCapacity - 2] = 0;
 		if (regtype != REG_MULTI_SZ) continue;		//有效的字体链接
 		//获得字体的真实名字
 		
@@ -1382,13 +1398,18 @@ void CFontLinkInfo::init()
 		info[row][col] = _wcsdup(buff);		//第一消戟字体脕E
 		++col;
 
-		for (LPCWSTR linep = value; col < FONTMAX && *linep; linep += wcslen(linep) + 1) {
+		LPCWSTR valueEnd = value + nValueCapacity;
+		for (LPCWSTR linep = value; col < FONTMAX && linep < valueEnd && *linep; ) {
+			size_t lineLength = 0;
+			if (FAILED(StringCchLengthW(linep, valueEnd - linep, &lineLength))) {
+				break;
+			}
 			LPCWSTR valp = NULL;
-			for (LPCWSTR p = linep; *p; ++p) {
+			for (LPCWSTR p = linep; p < linep + lineLength; ++p) {
 				if (*p == L',' && ((char)*(p+1)<0x30 || (char)*(p+1)>0x39))		//尝试寻找字体链接中“，”后提供的字体名称
 					{
 						LPWSTR lp;
-						StringCchCopy(buf, nBufSize / sizeof(buf[0]), p + 1);
+						StringCchCopy(buf, nNameCapacity, p + 1);
 						if (lp=wcschr(buf, L','))
 							*lp = 0;
 						valp = buf;
@@ -1418,7 +1439,7 @@ void CFontLinkInfo::init()
 					break;
 				}*/
 				LPWSTR lp;
-				StringCchCopy(buf, nBufSize / sizeof(buf[0]), linep);
+				StringCchCopy(buf, nNameCapacity, linep);
 				if (lp=wcschr(buf, L','))
 					*lp = 0;
 
@@ -1431,6 +1452,7 @@ void CFontLinkInfo::init()
 				info[row][col] = _wcsdup(buff);//truefont.lfFaceName);			//复制到链接柄蛐
 				++col;
 			}
+			linep += lineLength + 1;
 		}
 		if (col == 1) {			//只有一消楷即没有链接，删掉。
 			free(info[row][0]);
@@ -1508,18 +1530,25 @@ void CFontLinkInfo::init()
 
 	for (int i=0; i<0xff; ++i)
 	{
-		namesz = nBufSize;
+		ZeroMemory(name, nNameCapacity * sizeof(WCHAR));
+		ZeroMemory(value, nValueCapacity * sizeof(WCHAR));
+		namesz = nNameCapacity;
 		valuesz = nBufSize;
 		rc = RegEnumValue(h4, i, name, &namesz, 0, &regtype, (LPBYTE)value, &valuesz);	//获得一个charset的值
 		if (rc == ERROR_NO_MORE_ITEMS) break;
 		if (rc != ERROR_SUCCESS) break;
+		name[nNameCapacity - 1] = 0;
+		value[nValueCapacity - 1] = 0;
 		if (regtype != REG_SZ) continue;
 		if (_tcsicmp(value, _T("YES")))
 		{
-			TCHAR* p = name;
-			while (*p!=_T('(') && p-name<(int)namesz) ++p;
-			++p;
-			AllowDefaultLink[_tcstol(p,NULL,16)]=false;
+			TCHAR* p = _tcschr(name, _T('('));
+			if (p) {
+				long charset = _tcstol(p + 1, NULL, 16);
+				if (charset >= 0 && charset < countof(AllowDefaultLink)) {
+					AllowDefaultLink[charset] = false;
+				}
+			}
 		}
 	}
 	RegCloseKey(h4);

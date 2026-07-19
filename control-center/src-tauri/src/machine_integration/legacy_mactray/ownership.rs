@@ -3,6 +3,11 @@ use std::path::Path;
 
 const MACTYPE_SERVICE_TYPE: u32 = 0x10;
 const MACTYPE_SERVICE_START: u32 = 2;
+// The migration parks the owned service disabled between the stop and the funeral
+// so a reboot cannot auto-start it. Start type is a runtime setting, not an
+// identity signal (the binary path, account, type, and dependencies pin
+// identity), so a disabled service with the owned shape is still ours.
+const MACTYPE_SERVICE_START_DISABLED: u32 = 4;
 const MACTYPE_SERVICE_ERROR: u32 = 1;
 
 pub(super) fn service_command_path(path: &Path) -> String {
@@ -32,7 +37,10 @@ pub(super) fn classify_configuration(
     trusted: &Path,
 ) -> ServicePresence {
     if configuration.service_type != MACTYPE_SERVICE_TYPE
-        || configuration.start_type != MACTYPE_SERVICE_START
+        || !matches!(
+            configuration.start_type,
+            MACTYPE_SERVICE_START | MACTYPE_SERVICE_START_DISABLED
+        )
         || configuration.error_control != MACTYPE_SERVICE_ERROR
         || configuration.display_name != "MacType"
         || configuration.load_order_group.is_some()

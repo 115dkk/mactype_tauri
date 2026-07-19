@@ -40,7 +40,7 @@ fn outdated_migration_activation_upgrades_then_explicitly_starts() {
 }
 
 #[test]
-fn elevated_broker_accepts_transfer_metadata_only_for_profile_actions() {
+fn elevated_broker_requires_one_transfer_token_for_every_action() {
     let executable = OsString::from("control-center.exe");
     assert_eq!(
         privileged_request_from_arguments([executable.clone()]).unwrap(),
@@ -56,14 +56,14 @@ fn elevated_broker_accepts_transfer_metadata_only_for_profile_actions() {
         executable.clone(),
         OsString::from(BROKER_SWITCH),
         OsString::from("publish-profile"),
-        OsString::from("--profile-transfer-v1"),
+        OsString::from("--broker-transfer-v1"),
         OsString::from("4242"),
         OsString::from("00112233445566778899aabbccddeeff"),
     ])
     .unwrap()
     .unwrap();
     assert_eq!(request.action, SystemServiceAction::PublishProfile);
-    let transfer = request.profile_transfer.unwrap();
+    let transfer = request.transfer;
     assert_eq!(transfer.server_pid, 4242);
     assert_eq!(
         transfer.nonce,
@@ -72,15 +72,18 @@ fn elevated_broker_accepts_transfer_metadata_only_for_profile_actions() {
             0xee, 0xff,
         ]
     );
-    assert!(privileged_request_from_arguments([
+    let start = privileged_request_from_arguments([
         executable.clone(),
         OsString::from(BROKER_SWITCH),
         OsString::from("start"),
-        OsString::from("--profile-transfer-v1"),
+        OsString::from("--broker-transfer-v1"),
         OsString::from("4242"),
         OsString::from("00112233445566778899aabbccddeeff"),
     ])
-    .is_err());
+    .unwrap()
+    .unwrap();
+    assert_eq!(start.action, SystemServiceAction::Start);
+    assert_eq!(start.transfer.server_pid, 4242);
     assert!(privileged_request_from_arguments([
         executable.clone(),
         OsString::from(BROKER_SWITCH),
@@ -91,7 +94,7 @@ fn elevated_broker_accepts_transfer_metadata_only_for_profile_actions() {
         executable,
         OsString::from(BROKER_SWITCH),
         OsString::from("publish-profile"),
-        OsString::from("--profile-transfer-v1"),
+        OsString::from("--broker-transfer-v1"),
         OsString::from("0"),
         OsString::from("00112233445566778899AABBCCDDEEFF"),
     ])
@@ -99,7 +102,7 @@ fn elevated_broker_accepts_transfer_metadata_only_for_profile_actions() {
 }
 
 #[test]
-fn legacy_tray_autostart_broker_accepts_only_two_fixed_argument_free_verbs() {
+fn legacy_tray_autostart_broker_accepts_only_two_fixed_verbs_with_a_transfer_token() {
     let executable = OsString::from("control-center.exe");
     for (verb, action) in [
         (
@@ -117,11 +120,14 @@ fn legacy_tray_autostart_broker_accepts_only_two_fixed_argument_free_verbs() {
             executable.clone(),
             OsString::from(BROKER_SWITCH),
             OsString::from(verb),
+            OsString::from("--broker-transfer-v1"),
+            OsString::from("4242"),
+            OsString::from("00112233445566778899aabbccddeeff"),
         ])
         .unwrap()
         .unwrap();
         assert_eq!(request.action, action);
-        assert!(request.profile_transfer.is_none());
+        assert_eq!(request.transfer.server_pid, 4242);
         assert!(privileged_request_from_arguments([
             executable.clone(),
             OsString::from(BROKER_SWITCH),

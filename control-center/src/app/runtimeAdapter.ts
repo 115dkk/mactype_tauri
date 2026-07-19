@@ -41,6 +41,7 @@ export interface ControlCenterRuntimeAdapter {
   rediscoverInstallation(): Promise<InstallationStatus>;
   reconnectPreview(): Promise<InstallationStatus>;
   loadDiagnosticReport(): Promise<string>;
+  loadDiagnosticLogs(): Promise<ReadonlyArray<string>>;
   exportDiagnostics(): Promise<string>;
   copyDiagnostics(): Promise<void>;
   openLogFolder(): Promise<string>;

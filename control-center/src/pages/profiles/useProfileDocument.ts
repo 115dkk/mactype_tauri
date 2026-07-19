@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AdvancedProfile, IndividualSetting, ProfileSnapshot } from "../../app/model";
+import { operationErrorMessage } from "../../app/operationError";
 import { openPreferredProfile, rememberProfile } from "../../app/profilePreference";
 import {
   applyOpenProfile,
@@ -182,7 +183,7 @@ export function useProfileDocument(t: I18nValue["t"]) {
       setMessage(t("profiles.applied", { name }));
       setError(null);
     } catch (caught: unknown) {
-      setError(errorMessage(caught));
+      setError(operationErrorMessage(caught, t));
       setMessage(null);
     } finally {
       setCommand(null);

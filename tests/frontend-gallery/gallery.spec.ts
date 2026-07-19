@@ -367,6 +367,53 @@ test("a running legacy service is never claimed as verified system application",
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
 });
 
+test("a verified migration cannot be started again while the retired legacy service is stopped", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=ko&system-service=ready&legacy=migration-available&legacy-state=stopped&legacy-retired=1", { waitUntil: "networkidle" });
+
+  const openService = page.locator('[data-service-backend="open-source"]');
+  await expect(openService.locator('[data-state="active"]')).toBeVisible();
+  await expect(openService).toContainText("MacType 시스템 적용 중");
+
+  const legacy = page.locator('[data-service-backend="legacy-mactray"]');
+  await expect(legacy).toContainText("중지됨");
+  await expect(legacy.getByRole("button", { name: "마이그레이션" })).toBeDisabled();
+});
+
+test("a retired stopped legacy service leaves new-service recovery available", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=ko&system-service=migration-available&legacy=migration-available&legacy-state=stopped&legacy-retired=1", { waitUntil: "networkidle" });
+
+  const openService = page.locator('[data-service-backend="open-source"]');
+  await expect(openService.getByRole("button", { name: "서비스 설치" })).toBeEnabled();
+  await expect(openService).not.toContainText("레거시 MacTray 서비스를 먼저 정리해야 합니다");
+
+  const legacy = page.locator('[data-service-backend="legacy-mactray"]');
+  await expect(legacy.getByRole("button", { name: "마이그레이션" })).toBeDisabled();
+});
+
+test("applying from Settings files and Execution converges on the same verified state", async ({ page }) => {
+  await page.goto("/?view=files&gallery=1&lang=en&system-service=migration-available", { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "Apply to MacType" }).click();
+  await expect(page.getByText(/Applied .* as the system-wide MacType profile/)).toBeVisible();
+
+  await page.getByRole("button", { name: "Execution" }).click();
+  const openService = page.locator('[data-service-backend="open-source"]');
+  await expect(openService.locator('[data-state="active"]')).toBeVisible();
+  await expect(openService).toContainText("MacType system-wide rendering active");
+});
+
+for (const entry of [
+  { view: "files", button: "Apply to MacType" },
+  { view: "profiles", button: "Apply now" },
+] as const) {
+  test(`${entry.view} hides internal profile-application details behind the diagnostics message`, async ({ page }) => {
+    await page.goto(`/?view=${entry.view}&gallery=1&lang=en&service-fail=publish-profile`, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: entry.button }).first().click();
+
+    await expect(page.getByText("The operation failed. Check the diagnostics log for details.", { exact: true })).toBeVisible();
+    await expect(page.getByText(/control-center-internal-operation-failed/)).toHaveCount(0);
+  });
+}
+
 test("a foreign legacy MacType service blocks activation and offers no migration", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy=foreign", { waitUntil: "networkidle" });
 
@@ -410,6 +457,20 @@ test("a verified legacy service funnels activation through Migrate until it is r
   await expect(page.locator('[data-service-backend="legacy-mactray"]')).toHaveCount(0);
 });
 
+test("internal migration failures show only the localized diagnostics instruction", async ({ page }) => {
+  for (const locale of [
+    { lang: "en", title: "Migrate legacy MacTray?", continue: "Continue migration", message: "Migration failed. Check the diagnostics log for details." },
+    { lang: "ko", title: "레거시 MacTray를 마이그레이션할까요?", continue: "마이그레이션 계속", message: "마이그레이션에 실패했습니다. 자세한 내용은 진단 로그를 확인하세요." },
+  ]) {
+    await page.goto(`/?view=execution&gallery=1&lang=${locale.lang}&system-service=migration-available&legacy=migration-available&service-fail=migrate-from-legacy`, { waitUntil: "networkidle" });
+    const legacy = page.locator('[data-service-backend="legacy-mactray"]');
+    await legacy.getByRole("button", { name: locale.lang === "ko" ? "마이그레이션" : "Migrate" }).click();
+    await page.getByRole("dialog", { name: locale.title }).getByRole("button", { name: locale.continue }).click();
+    await expect(page.getByText(locale.message, { exact: true })).toBeVisible();
+    await expect(page.getByText(/control-center-internal-operation-failed|broker exit code|strict Ready/)).toHaveCount(0);
+  }
+});
+
 test("legacy migration explains the verified transaction before it can continue", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy=migration-available", { waitUntil: "networkidle" });
 
@@ -447,7 +508,7 @@ test("legacy migration explains the verified transaction before it can continue"
   await migrationTrigger.click();
   await continueMigration.click();
   await expect(page.getByText("Migration to the new service passed verification.", { exact: true })).toBeVisible();
-  await expect(migrationTrigger).toBeFocused();
+  await expect(migrationTrigger).toBeDisabled();
 });
 
 test("system service path is read-only and can reveal its installed location", async ({ page }) => {
@@ -665,6 +726,8 @@ test("overview and diagnostic actions always produce visible results", async ({ 
   await expect(page.locator('[data-operation="reconnect"]')).toBeVisible();
 
   await page.getByRole("button", { name: "진단" }).click();
+  await expect(page.getByRole("log")).toContainText("operation=migrate-from-legacy");
+  await expect(page.getByRole("log")).toContainText("rollback=completed");
   await page.getByRole("button", { name: "진단 파일 내보내기" }).click();
   await expect(page.locator('[data-operation="export"]')).toContainText("diagnostics-gallery.txt");
   await page.getByRole("button", { name: "진단 정보 복사" }).click();

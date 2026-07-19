@@ -84,6 +84,35 @@ fn a_disabled_start_type_is_still_the_owned_service_but_other_start_types_are_fo
 }
 
 #[test]
+fn only_a_stopped_owned_disabled_legacy_service_is_retired_for_new_activation() {
+    assert!(retired_owned_service(
+        ServicePresence::Owned,
+        ServiceRuntimeState::Stopped,
+        4,
+    ));
+    assert!(retired_owned_service(
+        ServicePresence::CompatibleUnquoted,
+        ServiceRuntimeState::Stopped,
+        4,
+    ));
+    assert!(!retired_owned_service(
+        ServicePresence::Owned,
+        ServiceRuntimeState::Running,
+        4,
+    ));
+    assert!(!retired_owned_service(
+        ServicePresence::Owned,
+        ServiceRuntimeState::Stopped,
+        2,
+    ));
+    assert!(!retired_owned_service(
+        ServicePresence::Foreign,
+        ServiceRuntimeState::Stopped,
+        4,
+    ));
+}
+
+#[test]
 fn load_order_group_and_tag_are_part_of_strict_service_ownership() {
     let path = Path::new(r"C:\Program Files\MacType\MacTray.exe");
 

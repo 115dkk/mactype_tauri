@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::VecDeque, time::Duration};
 
 use mactype_service_contract::{
     ComponentReadiness, HealthState, ReadinessReport, StructuredServiceError,
@@ -27,6 +27,7 @@ pub fn initialize_process_orchestration(
     broker.verify_ready(ProcessArchitecture::X86)?;
     broker.verify_ready(ProcessArchitecture::X64)?;
     subscribe_process_creation(source.as_mut())?;
+    let snapshot_pids = source.snapshot_pids()?.into();
 
     Ok(InitializedRuntime::driven(
         active_profile_digest,
@@ -35,6 +36,7 @@ pub fn initialize_process_orchestration(
             service_pid,
             generation_id: generation_id.into(),
             profile_digest,
+            snapshot_pids,
             source,
             inspector,
             broker,
@@ -46,6 +48,7 @@ struct ProcessOrchestrationDriver {
     service_pid: u32,
     generation_id: String,
     profile_digest: String,
+    snapshot_pids: VecDeque<u32>,
     source: Box<dyn ProcessEventSource>,
     inspector: Box<dyn ProcessInspector>,
     broker: Box<dyn InjectionBroker>,
@@ -74,9 +77,17 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
             while let Some(change) = stop.take_session_change() {
                 orchestrator.handle_session_change(change);
             }
-            let pid = match self.source.next_pid(Duration::from_millis(250)) {
+            let event_wait = if self.snapshot_pids.is_empty() {
+                Duration::from_millis(250)
+            } else {
+                Duration::ZERO
+            };
+            let pid = match self.source.next_pid(event_wait) {
                 Ok(Some(pid)) => pid,
-                Ok(None) => continue,
+                Ok(None) => match self.snapshot_pids.pop_front() {
+                    Some(pid) => pid,
+                    None => continue,
+                },
                 Err(error) => {
                     health.report(
                         HealthState::Failed,

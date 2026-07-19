@@ -1,6 +1,58 @@
 use super::super::*;
 
 #[test]
+fn broker_result_frame_preserves_a_multistage_failure_chain() {
+    let nonce = [0x2a; PROFILE_TRANSFER_NONCE_BYTES];
+    let result = BrokerResultMessage::failure(
+        "migrate-from-legacy",
+        "activate open service",
+        "setup broker start failed: CreateServiceW failed with Win32 5 (Access is denied); legacy service restore completed",
+    );
+
+    let frame = encode_broker_result_frame(&result, &nonce).unwrap();
+    let decoded = decode_broker_result_frame(&frame, &nonce).unwrap();
+
+    assert_eq!(decoded, result);
+    assert_eq!(decoded.disposition, BrokerResultDisposition::Failure);
+    assert!(decoded.error_chain.contains("CreateServiceW"));
+    assert!(decoded
+        .error_chain
+        .contains("legacy service restore completed"));
+}
+
+#[cfg(windows)]
+#[test]
+fn broker_result_pipe_returns_the_child_failure_to_the_parent() {
+    let nonce = [0x39; PROFILE_TRANSFER_NONCE_BYTES];
+    let server = windows::BrokerResultPipeServer::create_with_nonce(nonce).unwrap();
+    let token = server.token().clone();
+    let child = std::thread::spawn(move || {
+        let writer =
+            windows::BrokerResultPipeWriter::connect(&token, std::time::Duration::from_secs(2))
+                .unwrap();
+        writer
+            .send(
+                &BrokerResultMessage::failure(
+                    "migrate-from-legacy",
+                    "activate open service",
+                    "setup broker start failed with Win32 5 (Access is denied)",
+                ),
+                std::time::Duration::from_secs(2),
+            )
+            .unwrap();
+    });
+
+    let result = server
+        .receive_from(std::process::id(), None, std::time::Duration::from_secs(2))
+        .unwrap();
+    child.join().unwrap();
+
+    assert_eq!(result.disposition, BrokerResultDisposition::Failure);
+    assert_eq!(result.stage, "activate open service");
+    assert!(result.error_chain.contains("Win32 5"));
+}
+
+#[test]
 fn profile_transfer_frame_is_versioned_bounded_nonce_bound_and_hashed() {
     let nonce = [0x5a; PROFILE_TRANSFER_NONCE_BYTES];
     let payload = b"[General]\r\nGammaValue=1.2\r\n";

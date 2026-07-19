@@ -91,6 +91,7 @@ const galleryLegacyService: LegacyMacTrayStatus = {
   canStop: true,
   migrationAvailable: true,
   migrationBackupAvailable: false,
+  blocksActivation: true,
 };
 
 const serviceRuntimeValues: ReadonlyArray<ServiceRuntimeState> = [
@@ -147,6 +148,7 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
   const requestedLegacyState = query.get("legacy-state");
   const legacyState = legacyRuntimeValues.find((state) => state === requestedLegacyState) ?? "running";
   const legacyStable = legacyState === "running" || legacyState === "stopped";
+  const legacyRetired = query.get("legacy-retired") === "1";
   const legacyTray = galleryLegacyTrayStatus(query);
   const legacyTrayClear = legacyTray.conflict === "clear";
   const conflictFreeMutationAllowed = generalMutationAllowed && legacyTrayClear;
@@ -187,7 +189,8 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
       trustedBinaryAvailable: !legacyForeign,
       canRemove: false,
       canStop: !legacyForeign && !appInitConflict && legacyState === "running",
-      migrationAvailable: !legacyForeign && conflictFreeSystemModesSupported && legacyStable,
+      migrationAvailable: !legacyRetired && !legacyForeign && conflictFreeSystemModesSupported && legacyStable,
+      blocksActivation: !legacyRetired,
     } : null,
     legacyTray,
     registryModeDetected: appInitConflict,
@@ -240,6 +243,7 @@ function withGalleryLegacyTrayPolicy(
       ? {
           ...current.legacyMacTray,
           migrationAvailable: current.legacyMacTray.presence !== "foreign"
+            && current.legacyMacTray.blocksActivation
             && systemModesSupported
             && legacyStable,
           canRemove: legacyTray.conflict === "clear" && current.legacyMacTray.canRemove,
@@ -341,6 +345,7 @@ export function transitionGalleryExecutionStatus(
           canStop: false,
           canRemove: true,
           migrationBackupAvailable: true,
+          blocksActivation: false,
         }
       : current.legacyMacTray,
   }, current.legacyTray);

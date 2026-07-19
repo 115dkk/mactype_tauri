@@ -95,8 +95,37 @@ pub(super) fn system_injection_smoke(expected_digest: &str) -> Result<bool, Stri
             return Ok(false);
         }
     }
-    Ok(read_health_for_scm_process(service_process_id)?
-        .verified_for_migration(&runtime_generation_id, expected_digest))
+    read_verified_health_with(
+        40,
+        || read_health_for_scm_process(service_process_id),
+        || thread::sleep(Duration::from_millis(25)),
+        |report| report.verified_for_migration(&runtime_generation_id, expected_digest),
+    )
+}
+
+fn read_verified_health_with(
+    maximum_attempts: usize,
+    mut read: impl FnMut() -> Result<HealthReport, String>,
+    mut wait: impl FnMut(),
+    verify: impl Fn(&HealthReport) -> bool,
+) -> Result<bool, String> {
+    if maximum_attempts == 0 {
+        return Err("final injection smoke has no health-read retry budget".to_owned());
+    }
+    let mut last_transport_error = None;
+    for attempt in 0..maximum_attempts {
+        match read() {
+            Ok(report) => return Ok(verify(&report)),
+            Err(error) => last_transport_error = Some(error),
+        }
+        if attempt + 1 < maximum_attempts {
+            wait();
+        }
+    }
+    Err(format!(
+        "final injection smoke could not read bounded live health after {maximum_attempts} attempts: {}",
+        last_transport_error.unwrap_or_else(|| "unknown transport failure".to_owned())
+    ))
 }
 
 fn fixed_marker_executables() -> Result<[(InjectionArchitecture, PathBuf); 2], String> {
@@ -192,7 +221,59 @@ fn wait_for_marker_injection(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn final_smoke_retries_only_transport_errors_and_accepts_verified_health() {
+        let mut observations = VecDeque::from([
+            Err("all pipe instances are busy (os error 231)".to_owned()),
+            Err("all pipe instances are busy (os error 231)".to_owned()),
+            Ok(HealthReport::ready(
+                "0.2.0",
+                Some("sha256:expected".to_owned()),
+            )),
+        ]);
+        let mut waits = 0;
+
+        let verified = read_verified_health_with(
+            4,
+            || observations.pop_front().unwrap(),
+            || waits += 1,
+            |report| report.active_profile_digest.as_deref() == Some("sha256:expected"),
+        )
+        .unwrap();
+
+        assert!(verified);
+        assert_eq!(waits, 2);
+    }
+
+    #[test]
+    fn final_smoke_fails_closed_without_retrying_a_mismatched_report() {
+        let mut observations = VecDeque::from([
+            Ok(HealthReport::ready(
+                "0.2.0",
+                Some("sha256:wrong".to_owned()),
+            )),
+            Ok(HealthReport::ready(
+                "0.2.0",
+                Some("sha256:expected".to_owned()),
+            )),
+        ]);
+        let mut waits = 0;
+
+        let verified = read_verified_health_with(
+            3,
+            || observations.pop_front().unwrap(),
+            || waits += 1,
+            |report| report.active_profile_digest.as_deref() == Some("sha256:expected"),
+        )
+        .unwrap();
+
+        assert!(!verified);
+        assert_eq!(waits, 0);
+        assert_eq!(observations.len(), 1);
+    }
 
     #[test]
     fn oversized_protected_runtime_component_is_rejected_before_generation() {

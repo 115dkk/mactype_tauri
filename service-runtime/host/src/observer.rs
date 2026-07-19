@@ -7,6 +7,10 @@ pub const PROCESS_CREATION_QUERY: &str =
 pub trait ProcessEventSource {
     fn subscribe(&mut self, query: &str) -> Result<(), StructuredServiceError>;
 
+    fn snapshot_pids(&mut self) -> Result<Vec<u32>, StructuredServiceError> {
+        Ok(Vec::new())
+    }
+
     fn next_pid(&mut self, timeout: Duration) -> Result<Option<u32>, StructuredServiceError>;
 }
 

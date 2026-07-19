@@ -5,7 +5,7 @@ mod storage;
 mod transaction;
 
 pub(crate) use model::RemovalVerification;
-pub(crate) use receipt::backup_is_valid;
+pub(crate) use receipt::{backup_is_valid, current_stage_name};
 pub(crate) use startup_receipt::{
     disable_startup_scope, dispatch_current_user_restore_command, restore_startup_scope,
     StartupReceiptScope,

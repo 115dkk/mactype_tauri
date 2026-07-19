@@ -33,6 +33,8 @@ pub(super) use super::profile_transfer::{
 pub(super) use super::profile_transfer::{
     profile_transfer_nonce_text, random_profile_transfer_nonce,
 };
+#[cfg(test)]
+pub(super) use super::profile_transfer::{BrokerResultPipeServer, BrokerResultPipeWriter};
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

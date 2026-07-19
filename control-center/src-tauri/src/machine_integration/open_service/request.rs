@@ -80,7 +80,7 @@ impl SystemServiceAction {
 }
 
 pub(super) const BROKER_SWITCH: &str = "--control-center-service-broker";
-pub(super) const PROFILE_TRANSFER_SWITCH: &str = "--profile-transfer-v1";
+pub(super) const BROKER_TRANSFER_SWITCH: &str = "--broker-transfer-v1";
 pub(super) const PROFILE_TRANSFER_NONCE_BYTES: usize = 16;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -92,7 +92,7 @@ pub(super) struct ProfileTransferToken {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct PrivilegedRequest {
     pub(super) action: SystemServiceAction,
-    pub(super) profile_transfer: Option<ProfileTransferToken>,
+    pub(super) transfer: ProfileTransferToken,
 }
 
 pub(super) fn parse_profile_transfer_nonce(
@@ -202,33 +202,23 @@ where
     let action = SystemServiceAction::from_broker_verb(&verb)
         .ok_or_else(|| "unsupported elevated service broker verb".to_owned())?;
     let remaining = arguments.collect::<Vec<_>>();
-    let profile_transfer = if action.needs_profile_input() {
-        if remaining.len() != 3 || remaining[0] != OsStr::new(PROFILE_TRANSFER_SWITCH) {
-            return Err("profile service actions require one versioned transfer token".to_owned());
-        }
-        let pid_text = remaining[1]
-            .to_str()
-            .ok_or_else(|| "the profile transfer PID is not Unicode".to_owned())?;
-        let server_pid = pid_text
-            .parse::<u32>()
-            .ok()
-            .filter(|pid| *pid != 0 && pid.to_string() == pid_text)
-            .ok_or_else(|| "the profile transfer PID is not canonical".to_owned())?;
-        let nonce_text = remaining[2]
-            .to_str()
-            .ok_or_else(|| "the profile transfer nonce is not Unicode".to_owned())?;
-        Some(ProfileTransferToken {
-            server_pid,
-            nonce: parse_profile_transfer_nonce(nonce_text)?,
-        })
-    } else {
-        if !remaining.is_empty() {
-            return Err("the elevated service broker rejects additional arguments".to_owned());
-        }
-        None
+    if remaining.len() != 3 || remaining[0] != OsStr::new(BROKER_TRANSFER_SWITCH) {
+        return Err("service broker actions require one versioned transfer token".to_owned());
+    }
+    let pid_text = remaining[1]
+        .to_str()
+        .ok_or_else(|| "the broker transfer PID is not Unicode".to_owned())?;
+    let server_pid = pid_text
+        .parse::<u32>()
+        .ok()
+        .filter(|pid| *pid != 0 && pid.to_string() == pid_text)
+        .ok_or_else(|| "the broker transfer PID is not canonical".to_owned())?;
+    let nonce_text = remaining[2]
+        .to_str()
+        .ok_or_else(|| "the broker transfer nonce is not Unicode".to_owned())?;
+    let transfer = ProfileTransferToken {
+        server_pid,
+        nonce: parse_profile_transfer_nonce(nonce_text)?,
     };
-    Ok(Some(PrivilegedRequest {
-        action,
-        profile_transfer,
-    }))
+    Ok(Some(PrivilegedRequest { action, transfer }))
 }

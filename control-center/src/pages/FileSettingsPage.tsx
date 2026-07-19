@@ -1,6 +1,7 @@
 import { AlertTriangle, Check, FileInput, FileOutput, FolderOpen, Play, Save, SaveAll } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { LegacyProfileCandidate, ProfileEntry, ProfileSnapshot } from "../app/model";
+import { operationErrorMessage } from "../app/operationError";
 import {
   applyOpenProfile,
   currentProfile,
@@ -61,7 +62,7 @@ export function FileSettingsPage() {
       setMessage(success(opened));
       setError(null);
     } catch (caught: unknown) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      setError(operationErrorMessage(caught, t));
       setMessage(null);
     } finally {
       setBusy(null);
@@ -97,7 +98,7 @@ export function FileSettingsPage() {
       setMessage(t("files.applied", { name: fileName(applied.sourceProfile) }));
       setError(null);
     } catch (caught: unknown) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      setError(operationErrorMessage(caught, t));
       setMessage(null);
     } finally {
       setBusy(null);

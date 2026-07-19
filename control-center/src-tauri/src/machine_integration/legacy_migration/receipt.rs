@@ -26,6 +26,16 @@ pub(crate) fn backup_is_valid() -> bool {
     current_receipt().is_ok()
 }
 
+pub(crate) fn current_stage_name() -> Result<&'static str, String> {
+    match current_receipt()?.1.current_stage() {
+        Some(MigrationStage::BackupPrepared) => Ok("backup-prepared"),
+        Some(MigrationStage::LegacyStopped) => Ok("legacy-stopped"),
+        Some(MigrationStage::LegacyRemoved) => Ok("legacy-removed"),
+        Some(MigrationStage::RollbackCompleted) => Ok("rollback-completed"),
+        None => Err("legacy migration receipt has no completed stage".to_owned()),
+    }
+}
+
 pub(super) fn validate_receipt(
     generation_root: &Path,
     receipt: &MigrationReceipt,

@@ -1,4 +1,8 @@
+mod operation_log;
+
 use crate::preview::{PreviewDiagnosticSnapshot, PreviewState};
+use operation_log::read_recent_operation_logs;
+pub(crate) use operation_log::{record_operation_failure, OperationFailure};
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -134,7 +138,28 @@ fn diagnostic_report_text(snapshot: PreviewDiagnosticSnapshot) -> String {
 
 #[tauri::command]
 pub(crate) fn diagnostic_report(state: State<'_, PreviewState>) -> Result<String, String> {
-    Ok(diagnostic_report_text(state.diagnostic_snapshot()?))
+    let mut report = diagnostic_report_text(state.diagnostic_snapshot()?);
+    append_operation_logs(&mut report, &read_recent_operation_logs(50)?);
+    Ok(report)
+}
+
+fn append_operation_logs(report: &mut String, entries: &[operation_log::OperationLogEntry]) {
+    report.push_str(&format!("operationLogEntries={}\n", entries.len()));
+    for entry in entries {
+        report.push_str("operationLog=");
+        report.push_str(&entry.render());
+        report.push('\n');
+    }
+}
+
+#[tauri::command]
+pub(crate) fn diagnostic_recent_logs() -> Result<Vec<String>, String> {
+    read_recent_operation_logs(50).map(|entries| {
+        entries
+            .iter()
+            .map(operation_log::OperationLogEntry::render)
+            .collect()
+    })
 }
 
 #[tauri::command]
@@ -163,6 +188,101 @@ mod tests {
             "MacType diagnostics\n코어=2022.7.12\n"
         );
         assert!(!root.join(".diagnostics-7.tmp").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn operation_failures_survive_restart_without_profile_or_nonce_leaks() {
+        let root = env::temp_dir().join(format!(
+            "mactype-operation-log-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let profile = "[General]\r\nSecretFont=private\r\n";
+        let nonce = "00112233445566778899aabbccddeeff";
+        let long_error = format!(
+            "setup broker start failed with Win32 5 (Access is denied): {profile}; token={nonce}; {}",
+            "x".repeat(40 * 1024)
+        );
+
+        operation_log::record_operation_failure_at(
+            &root,
+            &OperationFailure {
+                operation: "migrate-from-legacy".to_owned(),
+                stage: "activate open service".to_owned(),
+                error_chain: long_error,
+                broker_exit_code: Some(21),
+                channel_failure: None,
+                rollback: "completed".to_owned(),
+                final_state: "legacy=running/auto; modern=absent".to_owned(),
+            },
+            &[profile],
+        )
+        .unwrap();
+
+        let entries = operation_log::read_recent_operation_logs_at(&root, 20).unwrap();
+        assert_eq!(entries.len(), 1);
+        let entry = &entries[0];
+        assert_eq!(entry.operation, "migrate-from-legacy");
+        assert_eq!(entry.win32_code, Some(5));
+        assert!(entry.error_chain.contains("[truncated]"));
+        let disk = fs::read_to_string(root.join("control-center.log")).unwrap();
+        assert!(!disk.contains(profile), "{disk}");
+        assert!(!disk.contains(nonce), "{disk}");
+        assert!(disk.len() < 40 * 1024);
+        let mut report = String::new();
+        append_operation_logs(&mut report, &entries);
+        assert!(report.contains("operationLogEntries=1"));
+        assert!(report.contains("setup broker start failed"));
+        assert!(!report.contains(profile));
+        assert!(!report.contains(nonce));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn operation_log_rotation_is_bounded_and_retains_recent_failures() {
+        let root = env::temp_dir().join(format!(
+            "mactype-operation-log-rotation-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        for index in 0..120 {
+            operation_log::record_operation_failure_at(
+                &root,
+                &OperationFailure {
+                    operation: "install".to_owned(),
+                    stage: format!("fixture-{index}"),
+                    error_chain: format!("failure-{index}: {}", "x".repeat(24 * 1024)),
+                    broker_exit_code: Some(21),
+                    channel_failure: None,
+                    rollback: "not-applicable".to_owned(),
+                    final_state: "legacy=absent; modern=absent".to_owned(),
+                },
+                &[],
+            )
+            .unwrap();
+        }
+
+        let files = fs::read_dir(&root)
+            .unwrap()
+            .map(|entry| entry.unwrap())
+            .collect::<Vec<_>>();
+        assert!(
+            files.len() <= 5,
+            "rotation created too many files: {files:?}"
+        );
+        assert!(files
+            .iter()
+            .all(|entry| entry.metadata().unwrap().len() <= 512 * 1024));
+        let recent = operation_log::read_recent_operation_logs_at(&root, 1).unwrap();
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].stage, "fixture-119");
         fs::remove_dir_all(root).unwrap();
     }
 }

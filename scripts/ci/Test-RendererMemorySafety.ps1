@@ -27,6 +27,7 @@ $commonHeader = Read-Source 'common.h'
 $engineSource = Read-Source 'fteng.cpp'
 $exportSource = Read-Source 'expfunc.cpp'
 $hookSource = Read-Source 'hook.cpp'
+$settingsHeader = Read-Source 'settings.h'
 $settingsSource = Read-Source 'settings.cpp'
 
 Reject-Pattern $ftHeader 'ZeroMemory\s*\(\s*this\s*,\s*sizeof\s*\(\s*\*this\s*\)\s*\)' `
@@ -39,7 +40,7 @@ Require-Pattern $ftHeader 'delete\[\]\s+Dy\s*;' `
     'FreeTypeDrawInfo must release Dy with delete[].'
 Reject-Pattern $ftSource '(?m)^\s*delete\s+lpfontlink(?:\[i\])?\s*;' `
     'Font-link arrays must not be released with scalar delete.'
-Reject-Pattern $settingsSource 'memcpy\s*\(\s*\(void\s*\*\)\s*json\.c_str\s*\(\s*\)' `
+Reject-Pattern $settingsHeader 'memcpy\s*\(\s*\(void\s*\*\)\s*json\.c_str\s*\(\s*\)' `
     'WM_COPYDATA must not write through std::string::c_str().'
 Reject-Pattern $settingsSource 'transform\s*\([^;]*::tolower\s*\)' `
     'Wide-character case conversion must not call narrow tolower.'
@@ -84,5 +85,14 @@ Reject-Pattern $ftHeader 'int\s+LastPos\s*=\s*0\s*,\s*LPCurPos\s*=\s*0' `
     'Advance accumulation must not overflow a signed int before coordinate scaling.'
 Require-Pattern $ftHeader 'double\s+fLPCurPos\s*=\s*0' `
     'Advance accumulation must widen each input before addition and scaling.'
+
+Reject-Pattern $settingsHeader '\.detach\s*\(\s*\)' `
+    'The control-center message thread must not outlive its owning object.'
+Require-Pattern $settingsHeader 'HANDLE\s+m_msgThread\s*;' `
+    'The control-center message thread must have an owned join handle.'
+Require-Pattern $settingsHeader '~CControlCenter\s*\(\s*\)\s*\{\s*DestroyMessageWnd\s*\(\s*\)' `
+    'CControlCenter destruction must stop and join the message thread.'
+Require-Pattern $settingsHeader 'WaitForSingleObject\s*\(\s*m_msgThread\s*,\s*INFINITE\s*\)' `
+    'Message-window teardown must wait for the thread before releasing CControlCenter.'
 
 Write-Host 'Renderer memory-safety source contracts passed.'

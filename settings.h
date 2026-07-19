@@ -566,6 +566,9 @@ private:
 	int m_nRefCount;
 	bool m_bDirty;
 	HWND m_msgwnd;
+	HANDLE m_msgThread;
+	DWORD m_msgThreadId;
+	HANDLE m_msgReadyEvent;
 	enum eMTSettings{
 		ATTR_HINTINGMODE,
 		ATTR_ANTIALIASMODE,
@@ -1008,10 +1011,12 @@ public:
 		RefreshAlphaTable();
 		RefreshSetting();
 	}
-	CControlCenter():m_nRefCount(1), m_bDirty(false), m_msgwnd(NULL) {
+	CControlCenter():m_nRefCount(1), m_bDirty(false), m_msgwnd(NULL),
+		m_msgThread(NULL), m_msgThreadId(0), m_msgReadyEvent(NULL) {
 		g_ControlCenter = this;
 	};
 	~CControlCenter(){
+		DestroyMessageWnd();
 		g_ControlCenter = NULL;
 	};
 	static void WINAPI ReloadConfig()
@@ -1030,43 +1035,63 @@ public:
 		if (g_pFTEngine)
 			g_pFTEngine->ReloadAll();
 	}
+	static LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
+		if (message == WM_CLOSE) {
+			DestroyWindow(hwnd);
+			return 0;
+		}
+		if (message == WM_DESTROY) {
+			PostQuitMessage(0);
+			return 0;
+		}
+		return g_ControlCenter ? g_ControlCenter->MsgProc(hwnd, message, wParam, lParam) :
+			DefWindowProc(hwnd, message, wParam, lParam);
+	}
+
+	static DWORD WINAPI MessageWndThreadProc(LPVOID parameter) {
+		CControlCenter* self = (CControlCenter*)parameter;
+		WNDCLASS wndclass = { 0 };
+		wndclass.lpfnWndProc = MessageWndProc;
+		wndclass.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+		wndclass.hCursor = LoadCursor(NULL, IDC_ARROW);
+		wndclass.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH);
+		wndclass.lpszClassName = L"MT_CMSGWND";
+		RegisterClass(&wndclass);
+		self->m_msgwnd = CreateWindow(L"MT_CMSGWND", NULL, 0, 0, 0, 0, 0,
+			HWND_MESSAGE, 0, 0, NULL);
+		SetEvent(self->m_msgReadyEvent);
+		if (!self->m_msgwnd) {
+			return 0;
+		}
+
+		MSG msg;
+		while (GetMessage(&msg, NULL, 0, 0) > 0) {
+			TranslateMessage(&msg);
+			DispatchMessage(&msg);
+		}
+		return 0;
+	}
+
 	HWND WINAPI CreateMessageWnd() {
-		HANDLE event = CreateEvent(NULL, true, false, NULL);
-
-		auto run = [&]() -> void {
-			if (this->m_msgwnd) {
-				SendMessage(this->m_msgwnd, WM_CLOSE, 0, 0);
-			}
-			WNDCLASS wndclass;
-			wndclass.style = 0;
-			wndclass.lpfnWndProc = [](HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) -> LRESULT {
-				return g_ControlCenter ? g_ControlCenter->MsgProc(hwnd, message, wParam, lParam) : DefWindowProc(hwnd, message, wParam, lParam);
-			};
-			wndclass.cbClsExtra = 0;
-			wndclass.cbWndExtra = 0;
-			wndclass.hInstance = 0;
-			wndclass.hIcon = LoadIcon(NULL, IDI_APPLICATION);
-			wndclass.hCursor = LoadCursor(NULL, IDC_ARROW);
-			wndclass.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH);
-			wndclass.lpszMenuName = NULL;
-			wndclass.lpszClassName = L"MT_CMSGWND";
-			RegisterClass(&wndclass);
-			this->m_msgwnd = CreateWindow(L"MT_CMSGWND", NULL, 0, 0, 0, 0, 0, HWND_MESSAGE, 0, 0, NULL);
-			SetEvent(event);
-
-			MSG msg;
-			while (GetMessage(&msg, NULL, 0, 0)) //消息循环
-			{
-				TranslateMessage(&msg);
-				DispatchMessage(&msg);
-			}
-			DestroyWindow(this->m_msgwnd);
-		};
-		auto wndThread = thread(run);
-		wndThread.detach();
-		WaitForSingleObject(event, 10000);
-		CloseHandle(event);
-		return this->m_msgwnd;
+		DestroyMessageWnd();
+		m_msgReadyEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+		if (!m_msgReadyEvent) {
+			return NULL;
+		}
+		m_msgThread = CreateThread(NULL, 0, MessageWndThreadProc, this, 0, &m_msgThreadId);
+		if (!m_msgThread) {
+			CloseHandle(m_msgReadyEvent);
+			m_msgReadyEvent = NULL;
+			m_msgThreadId = 0;
+			return NULL;
+		}
+		WaitForSingleObject(m_msgReadyEvent, INFINITE);
+		CloseHandle(m_msgReadyEvent);
+		m_msgReadyEvent = NULL;
+		if (!m_msgwnd) {
+			DestroyMessageWnd();
+		}
+		return m_msgwnd;
 	}
 
 	void RedrawCurrentApp() {
@@ -1118,9 +1143,33 @@ public:
 	}
 
 	void WINAPI DestroyMessageWnd() {
-		if (m_msgwnd) {
-			DestroyWindow(m_msgwnd);
+		if (!m_msgThread) {
 			m_msgwnd = NULL;
+			return;
 		}
+
+		if (GetCurrentThreadId() == m_msgThreadId) {
+			HWND hwnd = m_msgwnd;
+			m_msgwnd = NULL;
+			if (hwnd) {
+				DestroyWindow(hwnd);
+			}
+			else {
+				PostQuitMessage(0);
+			}
+			CloseHandle(m_msgThread);
+			m_msgThread = NULL;
+			m_msgThreadId = 0;
+			return;
+		}
+
+		if (!m_msgwnd || !PostMessage(m_msgwnd, WM_CLOSE, 0, 0)) {
+			PostThreadMessage(m_msgThreadId, WM_QUIT, 0, 0);
+		}
+		WaitForSingleObject(m_msgThread, INFINITE);
+		CloseHandle(m_msgThread);
+		m_msgThread = NULL;
+		m_msgThreadId = 0;
+		m_msgwnd = NULL;
 	}
 };

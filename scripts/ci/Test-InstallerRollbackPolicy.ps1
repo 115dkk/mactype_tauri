@@ -187,8 +187,15 @@ foreach ($token in @(
     }
 }
 
-if (-not $installerTest.Contains('Wait-PathAbsent -Path $applicationRoot')) {
-    throw 'Installer E2E does not wait boundedly for the detached Inno uninstall phase.'
+foreach ($token in @(
+    "-Label 'Owned uninstall'",
+    'PendingFileRenameOperations',
+    'Owned uninstall left non-runtime application files behind',
+    'bounded reboot cleanup registrations'
+)) {
+    if (-not $installerTest.Contains($token)) {
+        throw "Installer E2E does not prove bounded immediate-or-reboot cleanup after the detached Inno uninstall phase: $token"
+    }
 }
 foreach ($token in @('DirectorySeparatorChar', 'AltDirectorySeparatorChar', 'GetRelativePath')) {
     if (-not $installerHelper.Contains($token)) {

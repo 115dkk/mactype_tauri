@@ -102,6 +102,7 @@ var
   BrokerFatalLegacyTrayBlocked: Boolean;
   BrokerOutputError: Boolean;
   BrokerDiagnostic: String;
+  DeferredRuntimeCleanup: Boolean;
 
 procedure CaptureBrokerOutput(const S: String; const Error, FirstLine: Boolean);
 var
@@ -450,5 +451,15 @@ end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usUninstall then
+  begin
     RunFixedBrokerOrFail('uninstall-owned', 'Owned machine service removal');
+    DeferredRuntimeCleanup := DirExists(ExpandConstant('{app}\Service'));
+    if DeferredRuntimeCleanup then
+      Log('Verified runtime files are still loaded; cleanup is scheduled for reboot.');
+  end;
+end;
+
+function UninstallNeedRestart(): Boolean;
+begin
+  Result := DeferredRuntimeCleanup;
 end;

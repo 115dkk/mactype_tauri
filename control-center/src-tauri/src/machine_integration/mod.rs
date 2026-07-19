@@ -1,6 +1,8 @@
 mod appinit;
 mod legacy_mactray;
 mod legacy_migration;
+#[cfg(all(test, windows))]
+mod live_teardown;
 mod model;
 mod open_service;
 mod orchestrator;

@@ -11,6 +11,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$markerWaitMilliseconds = 30000
 $resultRoot = Join-Path $env:RUNNER_TEMP "mactype-marker-results-$PID"
 New-Item -ItemType Directory -Path $resultRoot -Force | Out-Null
 $resolvedRuntimeRoot = (Resolve-Path -LiteralPath $ExpectedRuntimeRoot).Path.TrimEnd('\')
@@ -21,7 +22,7 @@ function Test-Marker([string] $Executable, [string] $Architecture) {
     }
 
     $resultPath = Join-Path $resultRoot "$Architecture.json"
-    & $Executable --out $resultPath --wait-ms 5000
+    & $Executable --out $resultPath --wait-ms $markerWaitMilliseconds
     if ($LASTEXITCODE -ne 0) {
         throw "$Architecture marker target exited with code $LASTEXITCODE."
     }

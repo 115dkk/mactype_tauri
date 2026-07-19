@@ -13,9 +13,10 @@ use windows_sys::Win32::{
         ERROR_SERVICE_NOT_ACTIVE,
     },
     System::Services::{
-        ControlService, CreateServiceW, DeleteService, OpenSCManagerW, OpenServiceW, StartServiceW,
-        SC_MANAGER_CONNECT, SC_MANAGER_CREATE_SERVICE, SERVICE_CONTROL_STOP, SERVICE_QUERY_CONFIG,
-        SERVICE_QUERY_STATUS, SERVICE_START, SERVICE_STATUS, SERVICE_STOP,
+        ChangeServiceConfigW, ControlService, CreateServiceW, DeleteService, OpenSCManagerW,
+        OpenServiceW, StartServiceW, SC_MANAGER_CONNECT, SC_MANAGER_CREATE_SERVICE,
+        SERVICE_CHANGE_CONFIG, SERVICE_CONTROL_STOP, SERVICE_DISABLED, SERVICE_NO_CHANGE,
+        SERVICE_QUERY_CONFIG, SERVICE_QUERY_STATUS, SERVICE_START, SERVICE_STATUS, SERVICE_STOP,
     },
 };
 
@@ -234,6 +235,36 @@ fn delete_owned_service() -> Result<(), String> {
     wait_until_absent()
 }
 
+// Change only the start type of the owned legacy service, leaving every other
+// field untouched (SERVICE_NO_CHANGE). Used to park the legacy service disabled
+// between migration and its funeral, and to re-enable it on restore.
+fn set_start_type(start_type: u32) -> Result<(), String> {
+    let service = open_for(SERVICE_CHANGE_CONFIG | SERVICE_QUERY_STATUS)
+        .map_err(|code| format!("OpenServiceW for start-type change failed with {code}"))?;
+    if unsafe {
+        ChangeServiceConfigW(
+            service.0,
+            SERVICE_NO_CHANGE,
+            start_type,
+            SERVICE_NO_CHANGE,
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null(),
+        )
+    } == 0
+    {
+        return Err(format!(
+            "ChangeServiceConfigW(start type {start_type}) failed with {}",
+            unsafe { GetLastError() }
+        ));
+    }
+    Ok(())
+}
+
 pub(super) fn migration_stop() -> Result<(), String> {
     let status = query(false);
     if !matches!(
@@ -243,11 +274,14 @@ pub(super) fn migration_stop() -> Result<(), String> {
         return Err("only an owned legacy service can be stopped for migration".to_owned());
     }
     require_stable_migration_state(status.state)?;
-    match status.state {
-        ServiceRuntimeState::Stopped => Ok(()),
-        ServiceRuntimeState::Running => stop(),
-        _ => unreachable!(),
+    if status.state == ServiceRuntimeState::Running {
+        stop()?;
     }
+    // Park the legacy service disabled so a reboot between the migration and the
+    // funeral cannot auto-start it alongside the new service (double injection).
+    // The original start type is preserved in the migration backup receipt and
+    // is put back by restore_service_configuration and migration_restore_running_state.
+    set_start_type(SERVICE_DISABLED)
 }
 
 pub(super) fn migration_remove() -> Result<(), String> {
@@ -272,9 +306,13 @@ pub(super) fn migration_restore_running_state(snapshot: &LegacyScmSnapshot) -> R
         return Err("only an owned legacy service can have its runtime state restored".to_owned());
     }
     require_stable_migration_state(current.state)?;
+    // Undo migration_stop's disable before touching the runtime state; a disabled
+    // service cannot be started. This is a no-op when the full configuration
+    // restore already put the original start type back.
+    set_start_type(snapshot.configuration.start_type)?;
     match (snapshot.state, current.state) {
         (ServiceRuntimeState::Running, ServiceRuntimeState::Stopped) => start(),
-        (ServiceRuntimeState::Stopped, ServiceRuntimeState::Running) => migration_stop(),
+        (ServiceRuntimeState::Stopped, ServiceRuntimeState::Running) => stop(),
         (ServiceRuntimeState::Running, ServiceRuntimeState::Running)
         | (ServiceRuntimeState::Stopped, ServiceRuntimeState::Stopped) => Ok(()),
         _ => unreachable!(),

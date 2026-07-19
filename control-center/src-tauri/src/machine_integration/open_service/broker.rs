@@ -46,9 +46,36 @@ pub(super) fn run_privileged(
                     crate::machine_integration::legacy_migration::StartupReceiptScope::LocalMachine,
                 )
             }
+            SystemServiceAction::Install | SystemServiceAction::Start => {
+                refuse_conflicting_environment_for_activation()?;
+                run_setup(action, None)
+            }
             _ => run_setup(action, None),
         }
     }
+}
+
+// The unelevated caller already gated these actions, but the UAC consent window
+// is an arbitrary interval during which an AppInit entry, a legacy tray process,
+// or a legacy SCM service can appear (TOCTOU). Re-validate the conflicting-
+// environment gates inside the elevated broker before activating the new service.
+// The migration path drives its own run_setup steps directly and never reaches
+// this arm, so it is unaffected.
+fn refuse_conflicting_environment_for_activation() -> Result<(), String> {
+    use crate::machine_integration::{legacy_mactray, registry_conflict_detected};
+    if registry_conflict_detected() {
+        return Err("AppInit conflicts block this service change".to_owned());
+    }
+    if legacy_mactray::tray_status().blocks_machine_change() {
+        return Err("the legacy MacTray tray mode blocks this service change".to_owned());
+    }
+    if legacy_mactray::legacy_service_present()? {
+        return Err(
+            "a legacy MacType service is still installed; migrate it before starting the new service"
+                .to_owned(),
+        );
+    }
+    Ok(())
 }
 
 fn receive_required_profile_bounded(

@@ -12,6 +12,8 @@ struct FakeMachineBackend {
     executed: Option<(MachineAction, Vec<u8>)>,
     appinit_conflict: bool,
     appinit_error: Option<String>,
+    legacy_service_present: bool,
+    legacy_service_error: Option<String>,
 }
 
 impl MachineBackend for FakeMachineBackend {
@@ -31,6 +33,14 @@ impl MachineBackend for FakeMachineBackend {
         match self.appinit_error.take() {
             Some(error) => Err(error),
             None => Ok(self.appinit_conflict),
+        }
+    }
+
+    fn legacy_service_present(&mut self) -> Result<bool, String> {
+        self.calls.push("legacy-service");
+        match self.legacy_service_error.take() {
+            Some(error) => Err(error),
+            None => Ok(self.legacy_service_present),
         }
     }
 
@@ -114,7 +124,13 @@ fn explicit_tray_apply_is_the_only_tray_path_that_publishes_profile_bytes() {
 
     assert_eq!(
         backend.calls,
-        ["legacy-tray", "appinit", "status", "execute"]
+        [
+            "legacy-tray",
+            "appinit",
+            "status",
+            "legacy-service",
+            "execute"
+        ]
     );
     assert_eq!(
         backend.executed,
@@ -212,6 +228,63 @@ fn native_actions_require_the_matching_backend_capability_before_dispatch() {
         execute_machine_action_with(&mut allowed, action, None).unwrap();
         assert_eq!(allowed.executed, Some((action, Vec::new())));
     }
+}
+
+#[test]
+fn a_present_legacy_service_blocks_generic_activation_but_not_reduction() {
+    let profile = b"[General]\r\nGammaValue=1.3\r\n";
+    // Install / Start / apply-profile must refuse while a legacy MacType service
+    // is installed; retirement goes through Migrate, which stops it first.
+    for action in [
+        MachineAction::Install,
+        MachineAction::Start,
+        MachineAction::PublishProfile,
+    ] {
+        let mut status = ready_auto_service();
+        status.installation = InstallationState::Current;
+        status.runtime = RuntimeState::Stopped;
+        status.can_install = true;
+        status.can_start = true;
+        let payload: Option<&[u8]> =
+            (action == MachineAction::PublishProfile).then_some(profile.as_slice());
+        let mut backend = FakeMachineBackend {
+            status: Some(status),
+            legacy_service_present: true,
+            ..Default::default()
+        };
+        let error = execute_machine_action_with(&mut backend, action, payload).unwrap_err();
+        assert!(
+            error.contains("legacy MacType service"),
+            "{action:?}: {error}"
+        );
+        assert!(backend.executed.is_none(), "{action:?} reached the broker");
+    }
+
+    // An inaccessible legacy service is fail-closed: the error propagates.
+    let mut inaccessible = FakeMachineBackend {
+        status: Some(ready_auto_service()),
+        legacy_service_error: Some("legacy service inaccessible".to_owned()),
+        ..Default::default()
+    };
+    let mut start_status = ready_auto_service();
+    start_status.runtime = RuntimeState::Stopped;
+    start_status.can_start = true;
+    inaccessible.status = Some(start_status);
+    let error =
+        execute_machine_action_with(&mut inaccessible, MachineAction::Start, None).unwrap_err();
+    assert!(error.contains("inaccessible"), "{error}");
+    assert!(inaccessible.executed.is_none());
+
+    // Reductive actions (Stop) are never blocked by a present legacy service and
+    // never even consult it.
+    let mut stop = FakeMachineBackend {
+        status: Some(ready_auto_service()),
+        legacy_service_present: true,
+        ..Default::default()
+    };
+    execute_machine_action_with(&mut stop, MachineAction::Stop, None).unwrap();
+    assert_eq!(stop.executed, Some((MachineAction::Stop, Vec::new())));
+    assert!(!stop.calls.contains(&"legacy-service"));
 }
 
 #[test]
@@ -365,6 +438,10 @@ fn publish_profile_orders_running_stopped_and_absent_service_activation() {
             Ok(false)
         }
 
+        fn legacy_service_present(&mut self) -> Result<bool, String> {
+            Ok(false)
+        }
+
         fn execute(
             &mut self,
             action: MachineAction,
@@ -447,6 +524,10 @@ impl MachineBackend for FailingPublishBackend {
     }
 
     fn appinit_conflict(&mut self) -> Result<bool, String> {
+        Ok(false)
+    }
+
+    fn legacy_service_present(&mut self) -> Result<bool, String> {
         Ok(false)
     }
 

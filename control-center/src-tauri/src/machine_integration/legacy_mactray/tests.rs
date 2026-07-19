@@ -59,6 +59,31 @@ fn direct_scm_registration_matches_the_owned_service_policy() {
 }
 
 #[test]
+fn a_disabled_start_type_is_still_the_owned_service_but_other_start_types_are_foreign() {
+    let path = Path::new(r"C:\Program Files\MacType\MacTray.exe");
+
+    // The migration parks the owned service disabled between the stop and the
+    // funeral; it must still classify as owned so removal and rollback work.
+    let mut disabled = owned_service_configuration(path);
+    disabled.start_type = 4;
+    assert_eq!(
+        classify_configuration(&disabled, path),
+        ServicePresence::Owned
+    );
+
+    // Any other start type (manual, boot, system) is not a shape we ever set.
+    for start_type in [0u32, 1, 3] {
+        let mut other = owned_service_configuration(path);
+        other.start_type = start_type;
+        assert_eq!(
+            classify_configuration(&other, path),
+            ServicePresence::Foreign,
+            "start type {start_type} must not classify as owned"
+        );
+    }
+}
+
+#[test]
 fn load_order_group_and_tag_are_part_of_strict_service_ownership() {
     let path = Path::new(r"C:\Program Files\MacType\MacTray.exe");
 

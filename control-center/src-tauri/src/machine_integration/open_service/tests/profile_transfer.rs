@@ -28,9 +28,12 @@ fn profile_transfer_frame_is_versioned_bounded_nonce_bound_and_hashed() {
 #[test]
 fn profile_pipe_is_first_instance_peer_bound_and_bounded_by_time() {
     let payload = b"[General]\r\nGammaValue=1.3\r\n";
+    // No Authenticated-Users ACE: only the elevated broker (SY/BA) and the pipe
+    // owner (OW) may read, so a local process cannot first-connect and DoS the
+    // single pipe instance during the UAC window.
     assert_eq!(
         windows::PROFILE_PIPE_SDDL,
-        "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;OW)(A;;GR;;;AU)"
+        "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;OW)"
     );
     let first_nonce = [0x3c; PROFILE_TRANSFER_NONCE_BYTES];
     let first = windows::ProfilePipeServer::create_with_nonce(payload, first_nonce).unwrap();

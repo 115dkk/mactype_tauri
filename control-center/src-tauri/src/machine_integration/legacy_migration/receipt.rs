@@ -167,7 +167,15 @@ pub(super) fn snapshot_matches(receipt: &MigrationReceipt) -> Result<LegacyScmSn
     let snapshot = legacy_mactray::migration_snapshot(
         crate::machine_integration::registry_conflict_detected(),
     )?;
-    if snapshot.configuration != receipt.service.configuration
+    // The migration deliberately disables the legacy start type between the stop
+    // and the funeral, so treat start type as a runtime setting rather than an
+    // identity field: the binary path, account, type, and dependencies still pin
+    // identity, and a foreign swap would change one of those, not just the start
+    // type. Normalize it before the equality check so the parked service still
+    // matches the backup receipt.
+    let mut live_configuration = snapshot.configuration.clone();
+    live_configuration.start_type = receipt.service.configuration.start_type;
+    if live_configuration != receipt.service.configuration
         || snapshot.extended != receipt.service.extended
     {
         return Err("legacy SCM configuration changed after backup".to_owned());

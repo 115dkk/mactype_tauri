@@ -23,8 +23,13 @@ pub(in crate::machine_integration::open_service) const PROFILE_PIPE_TIMEOUT: Dur
     Duration::from_secs(60);
 pub(super) const PROFILE_PIPE_POLL: Duration = Duration::from_millis(10);
 pub(super) const PROFILE_PIPE_BUFFER_BYTES: u32 = 64 * 1024;
+// Only the elevated broker (LocalSystem or Administrators) and the pipe owner
+// (the unelevated Control Center that created it) ever read this pipe. Granting
+// Authenticated Users read let any local process first-connect the single pipe
+// instance during the UAC window and deterministically DoS every publish/
+// migrate/remove-legacy operation, so that ACE is intentionally absent.
 pub(in crate::machine_integration::open_service) const PROFILE_PIPE_SDDL: &str =
-    "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;OW)(A;;GR;;;AU)";
+    "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;OW)";
 
 #[cfg(test)]
 thread_local! {

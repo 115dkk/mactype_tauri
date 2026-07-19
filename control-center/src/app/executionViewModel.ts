@@ -156,12 +156,14 @@ function projectLegacyTrayResolution(status: LegacyTrayStatus | undefined): Lega
   }
 }
 
-// A verified-shape legacy MacType service must be retired through the explicit
-// Migrate transaction (which stops it before starting the new service); generic
-// install/start/activate paths never arbitrate against it and could leave both
-// services injecting at once.
-function verifiedLegacyServicePresent(legacy: LegacyMacTrayStatus | null | undefined): boolean {
-  return legacy?.presence === "owned" || legacy?.presence === "compatible-unquoted";
+// legacyMacTray is null only when no legacy MacType service exists, so any
+// non-null value means one is present — owned, compatible, foreign, delete-
+// pending, or inaccessible. Generic install/start/activate must be blocked for
+// all of them (a foreign or mid-deletion service can inject just the same);
+// retirement goes through Migrate for an owned service, or manual removal for a
+// foreign one.
+function legacyServicePresent(legacy: LegacyMacTrayStatus | null | undefined): boolean {
+  return Boolean(legacy);
 }
 
 function projectSystemInjectionAction(
@@ -177,8 +179,8 @@ function projectSystemInjectionAction(
       && service.activeProfileDigest !== status.expectedProfileDigest,
   );
   const legacyTrayConflict = Boolean(status && status.legacyTray.conflict !== "clear");
-  const legacyServicePresent = verifiedLegacyServicePresent(status?.legacyMacTray);
-  const legacyServiceContends = legacyServicePresent && status?.legacyMacTray?.state !== "stopped";
+  const legacyPresent = legacyServicePresent(status?.legacyMacTray);
+  const legacyServiceContends = legacyPresent && status?.legacyMacTray?.state !== "stopped";
   const verifiedActive = Boolean(
     status?.systemInjectionActive
       && running
@@ -196,7 +198,7 @@ function projectSystemInjectionAction(
   else if (verifiedActive) state = "active";
   else if (running && profileMismatch) state = "running-profile-mismatch";
   else if (running) state = "running-unverified";
-  else if (legacyServicePresent) state = "legacy-service-migrate";
+  else if (legacyPresent) state = "legacy-service-migrate";
   else if (service?.runtime === "stopped") state = "inactive";
   else state = "unavailable";
 
@@ -210,7 +212,7 @@ function projectSystemInjectionAction(
         : service?.runtime === "stopped"
           && status.systemModesSupported
           && status.legacyTray.conflict === "clear"
-          && !legacyServicePresent),
+          && !legacyPresent),
   );
 
   return {
@@ -235,7 +237,7 @@ export function projectExecutionView(
   const legacy = status?.legacyMacTray;
   const idle = serviceBusy === null;
   const legacyTrayConflict = Boolean(status && status.legacyTray.conflict !== "clear");
-  const legacyServicePresent = verifiedLegacyServicePresent(legacy);
+  const legacyPresent = legacyServicePresent(legacy);
   const profileMatches = Boolean(
     status?.expectedProfileDigest
       && service?.activeProfileDigest === status.expectedProfileDigest,
@@ -250,8 +252,8 @@ export function projectExecutionView(
     serviceBinaryPath: service?.installation === "absent" ? null : service?.binaryPath ?? null,
     systemInjectionAction: projectSystemInjectionAction(status, serviceBusy, profileMatches),
     legacyTrayResolution: projectLegacyTrayResolution(status?.legacyTray),
-    canInstall: Boolean(idle && !legacyTrayConflict && !legacyServicePresent && service?.canInstall),
-    canStart: Boolean(idle && !legacyTrayConflict && !legacyServicePresent && service?.canStart),
+    canInstall: Boolean(idle && !legacyTrayConflict && !legacyPresent && service?.canInstall),
+    canStart: Boolean(idle && !legacyTrayConflict && !legacyPresent && service?.canStart),
     canUpgrade: Boolean(idle && !legacyTrayConflict && service?.canUpgrade),
     canRepair: Boolean(idle && !legacyTrayConflict && service?.canRepair),
     canRemove: Boolean(idle && !legacyTrayConflict && service?.canRemove),

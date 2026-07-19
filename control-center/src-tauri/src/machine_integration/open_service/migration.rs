@@ -187,12 +187,14 @@ pub(super) fn remove_legacy_after_verification(
         );
     }
     if let Err(error) = backend.remove_legacy() {
-        let restore = backend.restore_legacy().err();
-        let mut result = format!("remove legacy service: {error}");
-        if let Some(restore) = restore {
-            result.push_str(&format!("; legacy service restore failed: {restore}"));
-        }
-        return Err(result);
+        // Do not restore (restart) the legacy service on a removal failure. By the
+        // time removal runs, the new service is already the verified live injector,
+        // so restarting the legacy service would double-inject. The legacy service
+        // is stopped and disabled, so leaving it in place is safe; the caller can
+        // retry removal or roll back explicitly.
+        return Err(format!(
+            "remove legacy service: {error}; the legacy service remains stopped and disabled"
+        ));
     }
     Ok(())
 }

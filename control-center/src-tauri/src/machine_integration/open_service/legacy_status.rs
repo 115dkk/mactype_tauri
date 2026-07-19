@@ -57,7 +57,13 @@ pub(crate) fn legacy_status(
         win32_error: status.win32_error,
         trusted_binary_available: status.trusted_binary_available,
         registry_conflict: status.registry_conflict,
-        can_remove: owned && backup_available && migration_verified,
+        // Removal also requires the legacy service currently Stopped: the backend
+        // deletes only a stopped service, so a resumed/auto-restarted legacy must
+        // not offer an enabled "Remove" the command would reject.
+        can_remove: owned
+            && matches!(status.state, legacy_mactray::ServiceRuntimeState::Stopped)
+            && backup_available
+            && migration_verified,
         can_stop: status.can_stop,
         migration_available,
         migration_backup_available: backup_available,

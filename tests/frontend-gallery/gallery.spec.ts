@@ -360,11 +360,27 @@ test("a running legacy service is never claimed as verified system application",
 
   await page.getByRole("button", { name: "새 프로세스 적용 중지" }).click();
   await expect(openService.locator('[data-state="legacy-service-migrate"]')).toBeVisible();
-  await expect(openService).toContainText("레거시 MacTray 서비스를 먼저 마이그레이션해야 합니다");
+  await expect(openService).toContainText("레거시 MacTray 서비스를 먼저 정리해야 합니다");
   await expect(page.getByRole("button", { name: "현재 프로필 적용" })).toBeDisabled();
   await expect(legacy.getByRole("button", { name: "마이그레이션" })).toBeEnabled();
 
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
+});
+
+test("a foreign legacy MacType service blocks activation and offers no migration", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy=foreign", { waitUntil: "networkidle" });
+
+  const openService = page.locator('[data-service-backend="open-source"]');
+  await expect(openService.locator('[data-state="legacy-service-migrate"]')).toBeVisible();
+  await expect(openService).toContainText("A legacy MacTray service must be resolved first");
+  await expect(openService.getByRole("button", { name: "Apply current profile" })).toBeDisabled();
+  await expect(openService.getByRole("button", { name: "Install service" })).toBeDisabled();
+  await expect(openService.getByRole("button", { name: "Start service" })).toBeDisabled();
+
+  const legacy = page.locator('[data-service-backend="legacy-mactray"]');
+  await expect(legacy).toBeVisible();
+  await expect(legacy.getByRole("button", { name: "Migrate" })).toBeDisabled();
+  await expect(legacy.getByRole("button", { name: "Remove legacy service" })).toBeDisabled();
 });
 
 test("a verified legacy service funnels activation through Migrate until it is removed", async ({ page }) => {
@@ -372,7 +388,7 @@ test("a verified legacy service funnels activation through Migrate until it is r
 
   const openService = page.locator('[data-service-backend="open-source"]');
   await expect(openService.locator('[data-state="legacy-service-migrate"]')).toBeVisible();
-  await expect(openService).toContainText("Legacy MacTray service must be migrated first");
+  await expect(openService).toContainText("A legacy MacTray service must be resolved first");
   await expect(openService.getByRole("button", { name: "Apply current profile" })).toBeDisabled();
   await expect(openService.getByRole("button", { name: "Install service" })).toBeDisabled();
   await expect(openService.getByRole("button", { name: "Start service" })).toBeDisabled();

@@ -27,6 +27,10 @@ impl crate::machine_integration::MachineBackend for OpenServicePublishBackend {
         Ok(crate::machine_integration::registry_conflict_detected())
     }
 
+    fn legacy_service_present(&mut self) -> Result<bool, String> {
+        crate::machine_integration::legacy_mactray::legacy_service_present()
+    }
+
     fn execute(
         &mut self,
         action: crate::machine_integration::MachineAction,
@@ -37,8 +41,17 @@ impl crate::machine_integration::MachineBackend for OpenServicePublishBackend {
 }
 
 pub(super) fn publish_and_activate(profile: &[u8]) -> Result<(), String> {
+    // Re-validate the conflicting-environment gates inside the elevated broker,
+    // not only in the unelevated caller: the UAC consent window is an arbitrary
+    // interval during which a conflict can appear (TOCTOU).
     if crate::machine_integration::registry_conflict_detected() {
         return Err("AppInit conflicts block machine integration changes".to_owned());
+    }
+    if crate::machine_integration::legacy_mactray::legacy_service_present()? {
+        return Err(
+            "a legacy MacType service is still installed; migrate it before applying the profile"
+                .to_owned(),
+        );
     }
     crate::machine_integration::publish_profile_transaction_with(
         &mut OpenServicePublishBackend,

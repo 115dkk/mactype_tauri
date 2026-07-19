@@ -196,7 +196,10 @@ fn legacy_removal_revalidates_backup_health_digest_and_telemetry() {
 }
 
 #[test]
-fn failed_legacy_removal_restores_the_validated_receipt() {
+fn failed_legacy_removal_leaves_the_legacy_service_stopped_without_restarting_it() {
+    // Restarting the legacy service on a removal failure would double-inject
+    // against the already-live new service, so removal failure must leave the
+    // legacy service stopped and disabled rather than restore (restart) it.
     let mut backend = FakeMigrationBackend {
         fail_at: Some("remove-legacy"),
         legacy_stopped: true,
@@ -206,16 +209,15 @@ fn failed_legacy_removal_restores_the_validated_receipt() {
     let error = remove_legacy_after_verification(&mut backend, b"profile").unwrap_err();
 
     assert!(error.contains("remove legacy service"));
+    assert!(error.contains("stopped and disabled"));
     assert_eq!(
         backend.operations,
-        [
-            "validate-backup",
-            "verify-removal",
-            "remove-legacy",
-            "restore-legacy",
-        ]
+        ["validate-backup", "verify-removal", "remove-legacy"]
     );
-    assert!(!backend.legacy_stopped);
+    assert!(
+        backend.legacy_stopped,
+        "the legacy service must stay stopped, never restarted, on removal failure"
+    );
     assert!(!backend.legacy_removed);
 }
 

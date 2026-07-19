@@ -145,13 +145,13 @@ pub(crate) fn remove_after_verified(
         return Err("legacy service resumed after migration stop".to_owned());
     }
     if let Err(error) = legacy_mactray::remove_for_migration() {
-        let rollback_error = rollback().err();
-        return Err(match rollback_error {
-            None => format!("legacy removal failed and was rolled back: {error}"),
-            Some(rollback) => format!(
-                "legacy removal failed ({error}); automatic rollback also failed ({rollback})"
-            ),
-        });
+        // Do not roll back on a removal failure: rollback restarts the legacy
+        // service, but the new service is already the verified live injector by
+        // now, so a restart would double-inject. The legacy service stays stopped
+        // and disabled (migration_stop), which is safe; the caller can retry.
+        return Err(format!(
+            "legacy removal failed; the legacy service remains stopped and disabled: {error}"
+        ));
     }
     if let Err(error) = append_stage(
         &generation_root,
@@ -159,13 +159,11 @@ pub(crate) fn remove_after_verified(
         MigrationStage::LegacyStopped,
         MigrationStage::LegacyRemoved,
     ) {
-        let rollback_error = rollback().err();
-        return Err(match rollback_error {
-            None => format!("legacy removal receipt failed and was rolled back: {error}"),
-            Some(rollback) => format!(
-                "legacy removal receipt failed ({error}); rollback also failed ({rollback})"
-            ),
-        });
+        // The destructive delete already succeeded; do not recreate the service
+        // the user just removed. Only the receipt bookkeeping failed to advance.
+        return Err(format!(
+            "legacy service was removed but recording the removal receipt failed: {error}"
+        ));
     }
     Ok(receipt)
 }

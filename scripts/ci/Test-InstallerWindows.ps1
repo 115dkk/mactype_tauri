@@ -98,6 +98,36 @@ try {
         throw 'Rejected /DIR attempt mutated files or SCM.'
     }
 
+    New-ForeignService -Name $openServiceName -DisplayName 'CI foreign fixed-name service'
+    $openFixtureCreated = $true
+    $foreignSnapshot = Get-ServiceSnapshot -Name $openServiceName
+    Invoke-InstallerExpectedSuccess -File $resolvedInstaller -Arguments ($silentArguments + '/TASKS=!desktopicon') -Label 'Install with foreign fixed-name service'
+    if ((Get-ServiceSnapshot -Name $openServiceName) -cne $foreignSnapshot -or (Test-Path -LiteralPath $serviceRoot)) {
+        throw 'SkippedBlocked foreign-service install mutated the foreign service or runtime.'
+    }
+    $foreignUninstaller = Get-ChildItem -LiteralPath $applicationRoot -File -Filter 'unins*.exe' | Select-Object -First 1
+    Invoke-InstallerExpectedSuccess -File $foreignUninstaller.FullName -Arguments $silentArguments -Label 'Uninstall beside foreign fixed-name service'
+    if ((Get-ServiceSnapshot -Name $openServiceName) -cne $foreignSnapshot) {
+        throw 'Uninstall changed or removed the foreign fixed-name service.'
+    }
+    Remove-TestService -Name $openServiceName
+    $openFixtureCreated = $false
+
+    New-ForeignService -Name $legacyServiceName -DisplayName 'CI legacy MacTray service'
+    $legacyFixtureCreated = $true
+    $legacySnapshot = Get-ServiceSnapshot -Name $legacyServiceName
+    Invoke-InstallerExpectedSuccess -File $resolvedInstaller -Arguments ($silentArguments + '/TASKS=!desktopicon') -Label 'Install with legacy service conflict'
+    if ((Get-ServiceSnapshot -Name $legacyServiceName) -cne $legacySnapshot -or (Get-FixedService -Name $openServiceName) -or (Test-Path -LiteralPath $serviceRoot)) {
+        throw 'SkippedBlocked legacy-service install mutated legacy state or installed the open service.'
+    }
+    $legacyUninstaller = Get-ChildItem -LiteralPath $applicationRoot -File -Filter 'unins*.exe' | Select-Object -First 1
+    Invoke-InstallerExpectedSuccess -File $legacyUninstaller.FullName -Arguments $silentArguments -Label 'Uninstall beside legacy service'
+    if ((Get-ServiceSnapshot -Name $legacyServiceName) -cne $legacySnapshot) {
+        throw 'Uninstall changed or removed the legacy service.'
+    }
+    Remove-TestService -Name $legacyServiceName
+    $legacyFixtureCreated = $false
+
     $installerTouchedMachine = $true
     Invoke-InstallerExpectedSuccess -File $resolvedBaselineInstaller -Arguments ($silentArguments + '/TASKS=desktopicon') -Label 'Protected baseline install'
     Assert-RequiredApplicationFiles -ApplicationRoot $applicationRoot
@@ -190,11 +220,27 @@ try {
     }
 
     Invoke-InstallerExpectedSuccess -File $uninstaller.FullName -Arguments $silentArguments -Label 'Owned uninstall'
-    Wait-PathAbsent -Path $applicationRoot -TimeoutMilliseconds 30000
     if (Get-FixedService -Name $openServiceName) { throw 'Owned uninstall left the open service registered.' }
     if (Test-Path -LiteralPath $applicationRoot) {
-        $remainingApplicationTree = Get-BoundedTreeInventory -Path $applicationRoot
-        throw "Owned uninstall left Program Files application files behind.`nRemaining tree:`n$remainingApplicationTree"
+        $unexpectedApplicationEntries = @(
+            Get-ChildItem -LiteralPath $applicationRoot -Force |
+                Where-Object { $_.FullName -cne $serviceRoot }
+        )
+        if ($unexpectedApplicationEntries.Count -ne 0) {
+            $remainingApplicationTree = Get-BoundedTreeInventory -Path $applicationRoot
+            throw "Owned uninstall left non-runtime application files behind.`nRemaining tree:`n$remainingApplicationTree"
+        }
+        $pendingDeletes = @(
+            (Get-ItemProperty `
+                -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' `
+                -Name PendingFileRenameOperations `
+                -ErrorAction SilentlyContinue).PendingFileRenameOperations
+        ) -join "`n"
+        if ($pendingDeletes -notmatch [regex]::Escape($serviceRoot) -or
+            $pendingDeletes -notmatch [regex]::Escape($applicationRoot)) {
+            $remainingApplicationTree = Get-BoundedTreeInventory -Path $applicationRoot
+            throw "Owned uninstall left a runtime tree without bounded reboot cleanup registrations.`nRemaining tree:`n$remainingApplicationTree"
+        }
     }
     if (Test-Path -LiteralPath $commonDesktopShortcut) { throw 'Owned uninstall left the common desktop shortcut behind.' }
     if ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $profileRoot 'active.json'))) -cne $baseline.ActivePointerBytes -or
@@ -203,37 +249,8 @@ try {
     }
     Assert-UserMarkers -UserMarkerRoot $userMarkerRoot -UserMarkers $userMarkers
 
-    New-ForeignService -Name $openServiceName -DisplayName 'CI foreign fixed-name service'
-    $openFixtureCreated = $true
-    $foreignSnapshot = Get-ServiceSnapshot -Name $openServiceName
-    Invoke-InstallerExpectedSuccess -File $resolvedInstaller -Arguments ($silentArguments + '/TASKS=!desktopicon') -Label 'Install with foreign fixed-name service'
-    if ((Get-ServiceSnapshot -Name $openServiceName) -cne $foreignSnapshot -or (Test-Path -LiteralPath $serviceRoot)) {
-        throw 'SkippedBlocked foreign-service install mutated the foreign service or runtime.'
-    }
-    $foreignUninstaller = Get-ChildItem -LiteralPath $applicationRoot -File -Filter 'unins*.exe' | Select-Object -First 1
-    Invoke-InstallerExpectedSuccess -File $foreignUninstaller.FullName -Arguments $silentArguments -Label 'Uninstall beside foreign fixed-name service'
-    if ((Get-ServiceSnapshot -Name $openServiceName) -cne $foreignSnapshot) {
-        throw 'Uninstall changed or removed the foreign fixed-name service.'
-    }
-    Remove-TestService -Name $openServiceName
-    $openFixtureCreated = $false
-
-    New-ForeignService -Name $legacyServiceName -DisplayName 'CI legacy MacTray service'
-    $legacyFixtureCreated = $true
-    $legacySnapshot = Get-ServiceSnapshot -Name $legacyServiceName
-    Invoke-InstallerExpectedSuccess -File $resolvedInstaller -Arguments ($silentArguments + '/TASKS=!desktopicon') -Label 'Install with legacy service conflict'
-    if ((Get-ServiceSnapshot -Name $legacyServiceName) -cne $legacySnapshot -or (Get-FixedService -Name $openServiceName) -or (Test-Path -LiteralPath $serviceRoot)) {
-        throw 'SkippedBlocked legacy-service install mutated legacy state or installed the open service.'
-    }
-    $legacyUninstaller = Get-ChildItem -LiteralPath $applicationRoot -File -Filter 'unins*.exe' | Select-Object -First 1
-    Invoke-InstallerExpectedSuccess -File $legacyUninstaller.FullName -Arguments $silentArguments -Label 'Uninstall beside legacy service'
-    if ((Get-ServiceSnapshot -Name $legacyServiceName) -cne $legacySnapshot) {
-        throw 'Uninstall changed or removed the legacy service.'
-    }
-    Remove-TestService -Name $legacyServiceName
-    $legacyFixtureCreated = $false
     Assert-UserMarkers -UserMarkerRoot $userMarkerRoot -UserMarkers $userMarkers
-    Write-Host 'PASS: fixed Program Files install, strict Ready, profile-preserving upgrade, visible failure, exact-owned uninstall, and blocked conflict preservation'
+    Write-Host 'PASS: fixed Program Files install, strict Ready, profile-preserving upgrade, visible failure, exact-owned or reboot-deferred uninstall, and blocked conflict preservation'
 }
 catch {
     $diagnostics = @(

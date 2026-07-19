@@ -70,6 +70,8 @@ foreach ($protectedInstallerToken in @(
     'UsePreviousAppDir=no',
     'bootstrap-install',
     'uninstall-owned',
+    'UninstallNeedRestart',
+    'DeferredRuntimeCleanup',
     'PrepareToInstall',
     'ewWaitUntilTerminated',
     'runasoriginaluser',

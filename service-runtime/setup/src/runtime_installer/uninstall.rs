@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use mactype_service_contract::{HealthReport, MAX_PINNED_RUNTIMES};
 
+use super::deferred_delete::{defer_directory, remove_directory_or_defer, remove_file_or_defer};
 use super::journal::{safe_version_component, validate_runtime_pointer, MAX_POINTER_BYTES};
 use super::RuntimeInstaller;
 use crate::storage::{
@@ -246,22 +247,31 @@ impl RuntimeInstaller {
             return Ok(false);
         }
         for version in &plan.versions {
-            self.remove_manifest_verified_generation(
+            self.remove_manifest_verified_generation_for_uninstall(
                 version,
                 &self.paths.runtime_versions().join(version),
             )?;
         }
         if plan.remove_versions_root {
-            fs::remove_dir(self.paths.runtime_versions())?;
+            remove_directory_or_defer(
+                self.paths.runtime_versions(),
+                "remove verified runtime versions directory",
+            )?;
         }
         if plan.remove_receipts_root {
-            fs::remove_dir(self.runtime_receipts_root())?;
+            remove_directory_or_defer(
+                &self.runtime_receipts_root(),
+                "remove verified runtime receipts directory",
+            )?;
         }
         for pin in plan.migration_pins {
-            fs::remove_file(pin)?;
+            remove_file_or_defer(&pin, "remove verified migration runtime pin")?;
         }
         if plan.remove_migration_pins_root {
-            fs::remove_dir(self.migration_runtime_pins_root())?;
+            remove_directory_or_defer(
+                &self.migration_runtime_pins_root(),
+                "remove verified migration runtime pins directory",
+            )?;
         }
         for (remove, path) in [
             (plan.remove_current, self.paths.runtime_pointer().to_owned()),
@@ -272,10 +282,24 @@ impl RuntimeInstaller {
             ),
         ] {
             if remove {
-                fs::remove_file(path)?;
+                remove_file_or_defer(&path, "remove verified runtime state file")?;
             }
         }
-        fs::remove_dir(self.paths.service_root())?;
+        remove_directory_or_defer(
+            self.paths.service_root(),
+            "remove verified service runtime directory",
+        )?;
+        if self.paths.service_root().exists() {
+            let application_root = self.paths.service_root().parent().ok_or_else(|| {
+                SetupError::CleanupUnknown(
+                    "fixed service runtime directory has no application parent".to_owned(),
+                )
+            })?;
+            defer_directory(
+                application_root,
+                "defer empty application directory cleanup until reboot",
+            )?;
+        }
         Ok(true)
     }
 }

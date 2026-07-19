@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use mactype_service_contract::{IMMUTABLE_RUNTIME_FILES, MAX_PINNED_RUNTIMES};
 
+use super::deferred_delete::{remove_directory_or_defer, remove_file_or_defer};
 use super::journal::{
     safe_version_component, validate_runtime_pointer, RuntimePointer, MAX_POINTER_BYTES,
 };
@@ -82,6 +83,23 @@ impl RuntimeInstaller {
         version: &str,
         directory: &Path,
     ) -> Result<(), SetupError> {
+        self.remove_manifest_verified_generation_with_policy(version, directory, false)
+    }
+
+    pub(super) fn remove_manifest_verified_generation_for_uninstall(
+        &self,
+        version: &str,
+        directory: &Path,
+    ) -> Result<(), SetupError> {
+        self.remove_manifest_verified_generation_with_policy(version, directory, true)
+    }
+
+    fn remove_manifest_verified_generation_with_policy(
+        &self,
+        version: &str,
+        directory: &Path,
+        defer_locked_files: bool,
+    ) -> Result<(), SetupError> {
         self.verify_runtime_generation_receipt(version, directory)?;
         let removable = read_bounded_directory(
             directory,
@@ -116,10 +134,29 @@ impl RuntimeInstaller {
             ));
         }
         for path in paths {
-            fs::remove_file(path)?;
+            if defer_locked_files {
+                remove_file_or_defer(&path, "remove verified runtime file")?;
+            } else {
+                fs::remove_file(&path).map_err(|error| {
+                    SetupError::Io(error).at_machine_path("remove stale runtime file", &path)
+                })?;
+            }
         }
-        fs::remove_dir(directory)?;
-        fs::remove_file(self.runtime_receipt_path(version))?;
+        if defer_locked_files {
+            remove_directory_or_defer(directory, "remove verified runtime generation")?;
+        } else {
+            fs::remove_dir(directory).map_err(|error| {
+                SetupError::Io(error).at_machine_path("remove stale runtime generation", directory)
+            })?;
+        }
+        let receipt = self.runtime_receipt_path(version);
+        if defer_locked_files {
+            remove_file_or_defer(&receipt, "remove verified runtime receipt")?;
+        } else {
+            fs::remove_file(&receipt).map_err(|error| {
+                SetupError::Io(error).at_machine_path("remove stale runtime receipt", &receipt)
+            })?;
+        }
         Ok(())
     }
 

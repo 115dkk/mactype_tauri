@@ -1,3 +1,4 @@
+mod deferred_delete;
 mod deployment;
 mod journal;
 mod retention;

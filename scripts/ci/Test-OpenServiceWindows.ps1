@@ -273,9 +273,25 @@ try {
     if ($upgradedPointer.Count -ne 2 -or $upgradedPointer.schema -ne 1 -or $upgradedPointer.version -ne '0.3.0') {
         throw 'Upgrade did not activate the bundled 0.3.0 runtime generation.'
     }
-    $upgradedService = Get-CimInstance Win32_Service -Filter "Name='$serviceName'"
-    if ($upgradedService.State -ne 'Running' -or $upgradedService.PathName -notmatch '(?i)\\bin\\0\.3\.0\\mactype-service\.exe"?(?:\s+--service)?$') {
-        throw 'Upgrade did not reconfigure, start, and reach Ready on the bundled runtime.'
+    $upgradedService = $null
+    $upgradedServiceDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $candidate = Get-CimInstance Win32_Service -Filter "Name='$serviceName'"
+        if ($candidate -and
+            $candidate.State -eq 'Running' -and
+            $candidate.PathName -match '(?i)\\bin\\0\.3\.0\\mactype-service\.exe"?(?:\s+--service)?$') {
+            $upgradedService = $candidate
+            break
+        }
+        $upgradedService = $candidate
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $upgradedServiceDeadline)
+    if (-not $upgradedService -or
+        $upgradedService.State -ne 'Running' -or
+        $upgradedService.PathName -notmatch '(?i)\\bin\\0\.3\.0\\mactype-service\.exe"?(?:\s+--service)?$') {
+        $observedState = if ($upgradedService) { $upgradedService.State } else { '<absent>' }
+        $observedPath = if ($upgradedService) { $upgradedService.PathName } else { '<absent>' }
+        throw "Upgrade did not reconfigure, start, and reach Ready on the bundled runtime. Observed state='$observedState' path='$observedPath'."
     }
     Assert-ActiveRuntimeProfile -ExpectedBytes $profileA -ExpectedDigest $digestA -Phase 'upgrade to bundled 0.3.0'
     Assert-PersistedReadyHealth -ExpectedDigest $digestA -Phase 'upgrade to bundled 0.3.0'

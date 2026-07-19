@@ -116,7 +116,7 @@ fn refuse_activation_with_legacy_service(
     if matches!(
         action,
         MachineAction::Install | MachineAction::Start | MachineAction::PublishProfile
-    ) && backend.legacy_service_present()?
+    ) && backend.legacy_service_blocks_activation()?
     {
         return Err(
             "a legacy MacType service is still installed; migrate it before starting the new service"

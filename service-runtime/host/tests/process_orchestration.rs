@@ -815,7 +815,7 @@ fn post_resume_service_stop_is_terminal_and_degrades_its_generation() {
 }
 
 #[test]
-fn conflicting_mactype_module_is_terminal_deduplicated_and_degrades_the_generation() {
+fn conflicting_mactype_module_is_terminal_deduplicated_and_process_local() {
     let inspector = FixedInspector {
         identity: ProcessIdentity {
             pid: 42,
@@ -853,9 +853,7 @@ fn conflicting_mactype_module_is_terminal_deduplicated_and_degrades_the_generati
     let record = orchestrator.last_result(42, 100).unwrap();
     assert_eq!(record.attempts, 1);
     assert_eq!(record.code, "conflicting-mactype-module-loaded");
-    let health_error = orchestrator.generation_health_error().unwrap();
-    assert_eq!(health_error.code, "conflicting-mactype-module-loaded");
-    assert!(health_error.message.contains("pid=42"));
+    assert!(orchestrator.generation_health_error().is_none());
 }
 
 struct SharedEventSource {

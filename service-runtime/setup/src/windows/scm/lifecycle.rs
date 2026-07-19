@@ -20,7 +20,9 @@ use windows_sys::Win32::System::Services::{
 };
 use windows_sys::Win32::System::Threading::{OpenProcess, WaitForSingleObject};
 
-use super::configuration::{configure_metadata, quoted_image_path, validate_service_binary};
+use super::configuration::{
+    configure_metadata, query_config, quoted_image_path, validate_service_binary, ServiceConfig,
+};
 use super::health::wait_for_ready_health;
 use super::{wide, ServiceHandle, ServiceManager, DISPLAY_NAME, HEALTH_TIMEOUT, STATE_TIMEOUT};
 use crate::storage::read_bounded_regular_file;
@@ -373,27 +375,39 @@ impl ServiceManager {
     }
 
     pub fn remove(&self) -> Result<(), SetupError> {
+        let expected = {
+            let Some(service) = self.open_service(SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG)?
+            else {
+                return Ok(());
+            };
+            self.ensure_owned(&service)?;
+            query_config(service.0)?
+        };
         self.stop()?;
         let Some(service) =
             self.open_service(0x0001_0000 | SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG)?
         else {
             return Ok(());
         };
-        self.ensure_owned(&service)?;
+        ensure_captured_configuration_unchanged(&expected, &query_config(service.0)?)?;
         if unsafe { DeleteService(service.0) } == 0 {
             return Err(SetupError::Io(io::Error::last_os_error()));
         }
         drop(service);
-        self.wait_until_absent(STATE_TIMEOUT)
+        self.wait_until_absent(STATE_TIMEOUT, &expected)
     }
 
-    fn wait_until_absent(&self, timeout: Duration) -> Result<(), SetupError> {
+    fn wait_until_absent(
+        &self,
+        timeout: Duration,
+        expected: &ServiceConfig,
+    ) -> Result<(), SetupError> {
         let deadline = Instant::now() + timeout;
         loop {
             let observation = match self.open_service(SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG) {
                 Ok(None) => AbsenceObservation::Absent,
                 Ok(Some(service)) => {
-                    self.ensure_owned(&service)?;
+                    ensure_captured_configuration_unchanged(expected, &query_config(service.0)?)?;
                     AbsenceObservation::Present
                 }
                 Err(error)
@@ -409,6 +423,18 @@ impl ServiceManager {
             }
         }
     }
+}
+
+fn ensure_captured_configuration_unchanged(
+    expected: &ServiceConfig,
+    actual: &ServiceConfig,
+) -> Result<(), SetupError> {
+    if actual != expected {
+        return Err(SetupError::Runtime(
+            "the fixed service configuration changed after ownership was verified".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn query_status(service: SC_HANDLE) -> Result<SERVICE_STATUS_PROCESS, SetupError> {
@@ -506,13 +532,41 @@ mod tests {
     };
 
     use super::{
-        absence_poll_action, observe_process_identity, process_capture_target,
-        stopped_before_expected_state_error, stopping_process_is_complete, wait_for_process_exit,
-        AbsenceObservation, AbsencePollAction, ProcessExitHandle, ProcessIdentityObservation,
-        RECONFIGURE_ACCESS,
+        absence_poll_action, ensure_captured_configuration_unchanged, observe_process_identity,
+        process_capture_target, stopped_before_expected_state_error, stopping_process_is_complete,
+        wait_for_process_exit, AbsenceObservation, AbsencePollAction, ProcessExitHandle,
+        ProcessIdentityObservation, RECONFIGURE_ACCESS,
     };
+    use crate::windows::scm::configuration::ServiceConfig;
 
     const PROCESS_EXIT_CHILD_ENV: &str = "MACTYPE_SETUP_PROCESS_EXIT_CHILD";
+
+    fn owned_configuration(image_path: &str) -> ServiceConfig {
+        ServiceConfig {
+            service_type: windows_sys::Win32::System::Services::SERVICE_WIN32_OWN_PROCESS,
+            start_type: windows_sys::Win32::System::Services::SERVICE_AUTO_START,
+            error_control: windows_sys::Win32::System::Services::SERVICE_ERROR_NORMAL,
+            image_path: image_path.to_owned(),
+            account: "LocalSystem".to_owned(),
+            display_name: "MacType Control Center Service".to_owned(),
+            load_order_group: String::new(),
+            tag_id: 0,
+            dependencies: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn removal_uses_the_captured_scm_identity_after_the_service_stops() {
+        let captured = owned_configuration(
+            r#""C:\Program Files\MacType Control Center\Service\bin\0.2.0\mactype-service.exe" --service"#,
+        );
+        let unchanged = captured.clone();
+        assert!(ensure_captured_configuration_unchanged(&captured, &unchanged).is_ok());
+
+        let mut changed = unchanged;
+        changed.image_path = r#""C:\foreign\mactype-service.exe" --service"#.to_owned();
+        assert!(ensure_captured_configuration_unchanged(&captured, &changed).is_err());
+    }
 
     #[test]
     fn process_exit_wait_child() {

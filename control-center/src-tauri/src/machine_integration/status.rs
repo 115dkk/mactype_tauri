@@ -48,10 +48,13 @@ pub(crate) fn status(active_profile: Option<&[u8]>) -> MachineStatus {
         legacy_tray.conflict,
         expected_profile_digest.as_deref(),
     );
+    let legacy_blocks_activation =
+        legacy_mactray::legacy_service_blocks_activation().unwrap_or(true);
     let legacy_service = open_service::legacy_status(
         registry_conflict,
         system_injection_active,
         expected_profile_digest.as_deref(),
+        legacy_blocks_activation,
     );
     let new_service =
         project_new_service_capabilities(raw_new_service, registry_conflict, legacy_tray.conflict);

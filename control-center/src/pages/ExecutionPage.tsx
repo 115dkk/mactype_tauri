@@ -2,6 +2,7 @@ import { AlertTriangle, Check, FileCode2, FolderOpen, LogOut, Play, Power, Power
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { ExecutionStatus, SystemServiceAction } from "../app/model";
 import { projectExecutionView } from "../app/executionViewModel";
+import { operationErrorMessage } from "../app/operationError";
 import { disableLegacyTrayAutostart, launchRegisteredTargets, launchTargetWithMactype, loadExecutionStatus, manageSystemService, pickExecutable, registerSessionTarget, removeSessionTarget, reportFrontendFailure, requestLegacyTrayExit, revealSystemService, setSessionAutostart, verifyInjectionWorkflowForCi } from "../app/tauri";
 import { useI18n } from "../i18n/i18n";
 
@@ -129,7 +130,11 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
       );
       setError(null);
     } catch (caught: unknown) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      setError(operationErrorMessage(
+        caught,
+        t,
+        action === "migrate-from-legacy" ? "execution.migrationFailed" : "execution.operationFailed",
+      ));
       setMessage(null);
     } finally {
       setServiceBusy(null);

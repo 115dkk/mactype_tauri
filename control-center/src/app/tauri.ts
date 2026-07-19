@@ -102,6 +102,10 @@ export async function loadDiagnosticReport(): Promise<string> {
   return getRuntimeAdapter().loadDiagnosticReport();
 }
 
+export async function loadDiagnosticLogs(): Promise<ReadonlyArray<string>> {
+  return getRuntimeAdapter().loadDiagnosticLogs();
+}
+
 export async function exportDiagnostics(): Promise<string> {
   return getRuntimeAdapter().exportDiagnostics();
 }

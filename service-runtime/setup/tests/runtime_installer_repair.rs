@@ -282,6 +282,44 @@ fn interrupted_repair_after_new_rename_keeps_new_and_cleans_old() {
 }
 
 #[test]
+fn verified_repair_recovers_after_cleanup_was_interrupted_mid_directory() {
+    let (base, paths) = test_paths();
+    let installer = RuntimeInstaller::new(paths.clone());
+    installer
+        .deploy_with_health_check(&payload(base.path(), "0.2.0", b"service-old"), |_| Ok(()))
+        .unwrap();
+    let destination = paths.runtime_versions().join("0.2.0");
+    let staging_name = ".repair-new-0.2.0-test";
+    let backup_name = ".repair-old-0.2.0-test";
+    let backup = paths.runtime_versions().join(backup_name);
+    fs::rename(&destination, &backup).unwrap();
+    for entry in fs::read_dir(&backup).unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_name() != "MacType64.dll" {
+            fs::remove_file(entry.path()).unwrap();
+        }
+    }
+    write_runtime_files(&destination, b"service-new");
+    write_repair_journal(
+        &paths,
+        staging_name,
+        backup_name,
+        "new-verified",
+        b"service-old",
+        b"service-new",
+    );
+
+    installer.recover_interrupted_activation().unwrap();
+
+    assert_eq!(
+        fs::read(destination.join("mactype-service.exe")).unwrap(),
+        b"service-new"
+    );
+    assert!(!backup.exists());
+    assert!(!paths.service_root().join("runtime-repair.json").exists());
+}
+
+#[test]
 fn repair_cleanup_failure_preserves_the_new_active_runtime_and_pending_journal() {
     let (base, paths) = test_paths();
     let installer = RuntimeInstaller::new(paths.clone());

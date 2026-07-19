@@ -15,6 +15,7 @@ pub(crate) struct LegacyMacTrayStatus {
     pub can_stop: bool,
     pub migration_available: bool,
     pub migration_backup_available: bool,
+    pub blocks_activation: bool,
 }
 
 pub(super) fn legacy_migration_available(status: &legacy_mactray::LegacyServiceStatus) -> bool {
@@ -36,6 +37,7 @@ pub(crate) fn legacy_status(
     registry_conflict: bool,
     system_service_active: bool,
     expected_profile_digest: Option<&str>,
+    blocks_activation: bool,
 ) -> Option<LegacyMacTrayStatus> {
     let status = legacy_mactray::status(registry_conflict);
     if status.presence == legacy_mactray::ServicePresence::Absent {
@@ -49,7 +51,7 @@ pub(crate) fn legacy_status(
     let backup_available = legacy_migration::backup_is_valid();
     let migration_verified =
         system_service_active && expected_profile_digest.is_some_and(migration_removal_verified);
-    let migration_available = legacy_migration_available(&status);
+    let migration_available = blocks_activation && legacy_migration_available(&status);
     Some(LegacyMacTrayStatus {
         presence: status.presence,
         state: status.state,
@@ -67,6 +69,7 @@ pub(crate) fn legacy_status(
         can_stop: status.can_stop,
         migration_available,
         migration_backup_available: backup_available,
+        blocks_activation,
     })
 }
 

@@ -10,6 +10,10 @@ fn local_system_compatible_wmi_source_accepts_the_observed_temporary_query() {
     let mut source = WmiProcessEventSource::connect().unwrap();
 
     subscribe_process_creation(&mut source).unwrap();
+    assert!(source
+        .snapshot_pids()
+        .unwrap()
+        .contains(&std::process::id()));
 }
 
 #[test]

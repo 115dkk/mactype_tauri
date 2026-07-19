@@ -17,6 +17,8 @@ use windows::Win32::System::Wmi::{
 
 use crate::ProcessEventSource;
 
+const PROCESS_SNAPSHOT_QUERY: &str = "SELECT ProcessID FROM Win32_Process";
+
 pub struct WmiProcessEventSource {
     enumerator: Option<IEnumWbemClassObject>,
     services: IWbemServices,
@@ -100,6 +102,55 @@ impl ProcessEventSource for WmiProcessEventSource {
         Ok(())
     }
 
+    fn snapshot_pids(&mut self) -> Result<Vec<u32>, StructuredServiceError> {
+        let flags = WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY;
+        let enumerator = unsafe {
+            self.services.ExecQuery(
+                &BSTR::from("WQL"),
+                &BSTR::from(PROCESS_SNAPSHOT_QUERY),
+                flags,
+                None,
+            )
+        }
+        .map_err(|error| {
+            com_error(
+                "wmi-snapshot-failed",
+                "the initial Win32_Process snapshot could not be opened",
+                error,
+            )
+        })?;
+        let mut pids = Vec::new();
+        loop {
+            let mut objects = [None];
+            let mut returned = 0;
+            let result = unsafe { enumerator.Next(5_000, &mut objects, &mut returned) };
+            if returned == 0 {
+                break;
+            }
+            result.ok().map_err(|error| {
+                com_error(
+                    "wmi-snapshot-failed",
+                    "the initial Win32_Process snapshot could not be read",
+                    error,
+                )
+            })?;
+            let process = objects[0].take().ok_or_else(|| {
+                service_error(
+                    "wmi-snapshot-invalid",
+                    "WMI returned an empty Win32_Process snapshot row",
+                    None,
+                )
+            })?;
+            let pid = extract_process_id_property(&process)?;
+            if pid != 0 {
+                pids.push(pid);
+            }
+        }
+        pids.sort_unstable();
+        pids.dedup();
+        Ok(pids)
+    }
+
     fn next_pid(&mut self, timeout: Duration) -> Result<Option<u32>, StructuredServiceError> {
         let enumerator = self.enumerator.as_ref().ok_or_else(|| {
             service_error(
@@ -165,12 +216,24 @@ fn extract_process_id(event: &IWbemClassObject) -> Result<u32, StructuredService
             error,
         )
     })?;
+    let pid = extract_process_id_property(&target)?;
+    if pid == 0 {
+        return Err(service_error(
+            "wmi-event-invalid",
+            "the WMI process event ProcessID is zero",
+            None,
+        ));
+    }
+    Ok(pid)
+}
+
+fn extract_process_id_property(target: &IWbemClassObject) -> Result<u32, StructuredServiceError> {
     let mut pid = VARIANT::default();
     unsafe { target.Get(windows::core::w!("ProcessID"), 0, &mut pid, None, None) }.map_err(
         |error| {
             com_error(
-                "wmi-event-invalid",
-                "the WMI process event has no ProcessID",
+                "wmi-process-id-invalid",
+                "the WMI process object has no ProcessID",
                 error,
             )
         },
@@ -182,13 +245,6 @@ fn extract_process_id(event: &IWbemClassObject) -> Result<u32, StructuredService
             error,
         )
     })?;
-    if pid == 0 {
-        return Err(service_error(
-            "wmi-event-invalid",
-            "the WMI process event ProcessID is zero",
-            None,
-        ));
-    }
     Ok(pid)
 }
 

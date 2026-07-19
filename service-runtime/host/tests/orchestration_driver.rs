@@ -17,12 +17,17 @@ const PROFILE_DIGEST: &str =
 const RUNTIME_GENERATION: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 struct QueueSource {
+    snapshot: Vec<u32>,
     pids: VecDeque<Option<u32>>,
 }
 
 impl ProcessEventSource for QueueSource {
     fn subscribe(&mut self, _query: &str) -> Result<(), StructuredServiceError> {
         Ok(())
+    }
+
+    fn snapshot_pids(&mut self) -> Result<Vec<u32>, StructuredServiceError> {
+        Ok(self.snapshot.clone())
     }
 
     fn next_pid(&mut self, _timeout: Duration) -> Result<Option<u32>, StructuredServiceError> {
@@ -81,6 +86,7 @@ impl RuntimeInitializer for TestInitializer {
             900,
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             Box::new(QueueSource {
+                snapshot: vec![40, 41],
                 pids: VecDeque::from([Some(42)]),
             }),
             Box::new(FixedInspector),
@@ -114,6 +120,21 @@ struct StopAfterOnePoll {
     polls: AtomicUsize,
 }
 
+#[derive(Default)]
+struct StopAfterThreePolls {
+    polls: AtomicUsize,
+}
+
+impl StopSignal for StopAfterThreePolls {
+    fn wait(&self) -> Result<(), StructuredServiceError> {
+        Ok(())
+    }
+
+    fn wait_timeout(&self, _timeout: Duration) -> Result<bool, StructuredServiceError> {
+        Ok(self.polls.fetch_add(1, Ordering::AcqRel) > 2)
+    }
+}
+
 impl StopSignal for StopAfterOnePoll {
     fn wait(&self) -> Result<(), StructuredServiceError> {
         Ok(())
@@ -140,14 +161,22 @@ fn ready_driver_consumes_process_events_until_stop() {
             &TestInitializer {
                 requests: requests.clone(),
             },
-            &StopAfterOnePoll::default(),
+            &StopAfterThreePolls::default(),
         )
         .unwrap();
 
-    assert_eq!(requests.lock().unwrap().len(), 1);
+    assert_eq!(
+        requests
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|request| request.identity.pid)
+            .collect::<Vec<_>>(),
+        [42, 40, 41]
+    );
     let reports = recorder.reports.lock().unwrap();
     let latest = reports.last().unwrap();
-    assert_eq!(latest.injection.x64.success_count, 1);
+    assert_eq!(latest.injection.x64.success_count, 3);
     assert_eq!(latest.injection.x86.success_count, 0);
     assert_eq!(
         latest
@@ -197,6 +226,7 @@ impl RuntimeInitializer for TerminalInitializer {
             900,
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             Box::new(QueueSource {
+                snapshot: Vec::new(),
                 pids: VecDeque::from([Some(42)]),
             }),
             Box::new(FixedInspector),
@@ -276,6 +306,7 @@ impl RuntimeInitializer for RecoveringInitializer {
             900,
             RUNTIME_GENERATION,
             Box::new(QueueSource {
+                snapshot: Vec::new(),
                 pids: VecDeque::from([Some(42), Some(43)]),
             }),
             Box::new(FixedInspector),
@@ -356,7 +387,7 @@ fn cleanup_unknown_degrades_its_generation_then_next_success_recovers_ready() {
 }
 
 #[test]
-fn conflicting_mactype_module_degrades_its_generation_then_next_process_recovers_ready() {
+fn conflicting_mactype_module_stays_process_local_and_global_ready() {
     let recorder = Recorder::default();
     let requests = Arc::new(Mutex::new(Vec::new()));
 
@@ -376,17 +407,9 @@ fn conflicting_mactype_module_degrades_its_generation_then_next_process_recovers
         .unwrap();
 
     let reports = recorder.reports.lock().unwrap();
-    let degraded = reports
+    assert!(reports
         .iter()
-        .find(|report| report.health == HealthState::Degraded)
-        .expect("a conflicting MacType module must degrade the active generation");
-    let error = degraded.last_error.as_ref().unwrap();
-    assert_eq!(error.code, "conflicting-mactype-module-loaded");
-    assert!(error.message.contains("pid=42"));
-    assert!(error
-        .message
-        .contains(&format!("generation={RUNTIME_GENERATION}")));
-
+        .all(|report| report.health != HealthState::Degraded));
     let latest = reports.last().unwrap();
     assert_eq!(latest.health, HealthState::Ready);
     assert!(latest.last_error.is_none());
@@ -489,6 +512,7 @@ impl RuntimeInitializer for TargetInspectionRaceInitializer {
             900,
             RUNTIME_GENERATION,
             Box::new(QueueSource {
+                snapshot: Vec::new(),
                 pids: VecDeque::from([
                     Some(10),
                     Some(11),

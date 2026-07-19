@@ -30,11 +30,13 @@ use windows_sys::Win32::{
 
 pub(in crate::machine_integration::open_service) struct ProfilePipeServer {
     handle: OwnedKernelHandle,
+    #[cfg(test)]
     token: ProfileTransferToken,
     frame: Vec<u8>,
 }
 
 impl ProfilePipeServer {
+    #[cfg(test)]
     pub(in crate::machine_integration::open_service) fn create(
         profile: &[u8],
     ) -> Result<Self, String> {
@@ -93,11 +95,13 @@ impl ProfilePipeServer {
         }
         Ok(Self {
             handle: OwnedKernelHandle(handle),
+            #[cfg(test)]
             token,
             frame,
         })
     }
 
+    #[cfg(test)]
     pub(in crate::machine_integration::open_service) fn token(&self) -> &ProfileTransferToken {
         &self.token
     }

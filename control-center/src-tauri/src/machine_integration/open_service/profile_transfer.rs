@@ -1,10 +1,12 @@
 mod client;
 mod handle;
+mod result;
 mod server;
 mod shared;
 
 pub(super) use client::receive_profile_from_pipe_bounded;
 pub(super) use handle::{KillOnCloseJob, OwnedKernelHandle};
+pub(super) use result::{BrokerResultPipeServer, BrokerResultPipeWriter};
 pub(super) use server::ProfilePipeServer;
 #[cfg(test)]
 pub(super) use shared::{

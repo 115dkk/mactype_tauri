@@ -19,8 +19,8 @@ impl MachineBackend for SystemMachineBackend {
         appinit_conflict()
     }
 
-    fn legacy_service_present(&mut self) -> Result<bool, String> {
-        legacy_mactray::legacy_service_present()
+    fn legacy_service_blocks_activation(&mut self) -> Result<bool, String> {
+        legacy_mactray::legacy_service_blocks_activation()
     }
 
     fn execute(&mut self, action: MachineAction, profile: Option<&[u8]>) -> Result<(), String> {

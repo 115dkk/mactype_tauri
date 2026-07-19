@@ -155,6 +155,7 @@ pub(crate) fn restore_running_state_after_migration(
 /// owned, compatible, foreign, or mid-deletion — must not coexist with a freshly
 /// started new service (double injection); an inaccessible one is fail-closed.
 /// Only a definitively Absent service allows generic new-service activation.
+#[cfg(all(test, windows))]
 pub(crate) fn legacy_service_present() -> Result<bool, String> {
     match status(false).presence {
         ServicePresence::Absent => Ok(false),
@@ -167,6 +168,50 @@ pub(crate) fn legacy_service_present() -> Result<bool, String> {
              changing the new service"
                 .to_owned(),
         ),
+    }
+}
+
+const SERVICE_DISABLED_START_TYPE: u32 = 4;
+
+fn retired_owned_service(
+    presence: ServicePresence,
+    state: ServiceRuntimeState,
+    start_type: u32,
+) -> bool {
+    matches!(
+        presence,
+        ServicePresence::Owned | ServicePresence::CompatibleUnquoted
+    ) && state == ServiceRuntimeState::Stopped
+        && start_type == SERVICE_DISABLED_START_TYPE
+}
+
+/// Whether the legacy SCM service can still contend with the new injector.
+/// A successfully migrated service remains installed for explicit verified
+/// removal, but Stopped + Disabled means it cannot inject or auto-start.
+pub(crate) fn legacy_service_blocks_activation() -> Result<bool, String> {
+    let observed = status(false);
+    match observed.presence {
+        ServicePresence::Absent => Ok(false),
+        ServicePresence::Inaccessible => Err(
+            "a legacy MacType service is present but its state is inaccessible; resolve it before changing the new service"
+                .to_owned(),
+        ),
+        ServicePresence::Owned | ServicePresence::CompatibleUnquoted
+            if observed.state == ServiceRuntimeState::Stopped =>
+        {
+            let snapshot = migration_snapshot(false).map_err(|error| {
+                format!("could not verify the stopped legacy service retirement state: {error}")
+            })?;
+            Ok(!retired_owned_service(
+                snapshot.presence,
+                snapshot.state,
+                snapshot.configuration.start_type,
+            ))
+        }
+        ServicePresence::Owned
+        | ServicePresence::CompatibleUnquoted
+        | ServicePresence::Foreign
+        | ServicePresence::DeletePending => Ok(true),
     }
 }
 

@@ -62,7 +62,9 @@ impl MigrationBackend for SystemMigrationBackend {
     }
 
     fn strict_ready(&mut self, expected_digest: &str) -> Result<bool, String> {
-        Ok(query().system_injection_active(Some(expected_digest)))
+        wait_for_strict_ready_with(expected_digest, 200, query, || {
+            std::thread::sleep(std::time::Duration::from_millis(50))
+        })
     }
 
     fn verify_injection_smoke(&mut self, expected_digest: &str) -> Result<bool, String> {
@@ -110,5 +112,91 @@ impl MigrationBackend for SystemMigrationBackend {
             backup_valid: legacy_migration::backup_is_valid(),
         })
         .map(|_| ())
+    }
+}
+
+fn wait_for_strict_ready_with(
+    expected_digest: &str,
+    maximum_attempts: usize,
+    mut observe: impl FnMut() -> SystemServiceStatus,
+    mut wait: impl FnMut(),
+) -> Result<bool, String> {
+    if maximum_attempts == 0 {
+        return Err("strict Ready verification has no polling budget".to_owned());
+    }
+    let mut last = None;
+    for attempt in 0..maximum_attempts {
+        let status = observe();
+        if status.system_injection_active(Some(expected_digest)) {
+            return Ok(true);
+        }
+        last = Some(status);
+        if attempt + 1 < maximum_attempts {
+            wait();
+        }
+    }
+    let status = last.expect("at least one strict Ready observation");
+    Err(format!(
+        "strict Ready timed out: backend={:?}, installation={:?}, runtime={:?}, health={:?}, activeProfileDigest={}, expectedProfileDigest={expected_digest}, win32Error={}",
+        status.backend,
+        status.installation,
+        status.runtime,
+        status.health,
+        status.active_profile_digest.as_deref().unwrap_or("missing"),
+        status
+            .win32_error
+            .map_or_else(|| "none".to_owned(), |error| error.to_string())
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn running_ready(digest: Option<&str>) -> SystemServiceStatus {
+        SystemServiceStatus {
+            backend: ServiceBackend::OpenSource,
+            installation: InstallationState::Current,
+            runtime: RuntimeState::Running,
+            health: HealthState::Ready,
+            binary_path: Some("protected-service.exe".to_owned()),
+            win32_error: None,
+            active_profile_digest: digest.map(str::to_owned),
+            can_install: false,
+            can_remove: true,
+            can_start: false,
+            can_stop: true,
+            can_repair: false,
+            can_upgrade: false,
+        }
+    }
+
+    #[test]
+    fn strict_ready_waits_for_the_live_health_digest_after_persisted_ready() {
+        let expected = "sha256:expected";
+        let mut observations =
+            std::collections::VecDeque::from([running_ready(None), running_ready(Some(expected))]);
+        let mut sleeps = 0;
+
+        let result = wait_for_strict_ready_with(
+            expected,
+            3,
+            || observations.pop_front().unwrap(),
+            || sleeps += 1,
+        );
+
+        assert_eq!(result, Ok(true));
+        assert_eq!(sleeps, 1);
+    }
+
+    #[test]
+    fn strict_ready_timeout_reports_the_observed_status_without_the_profile() {
+        let error = wait_for_strict_ready_with("sha256:expected", 2, || running_ready(None), || {})
+            .unwrap_err();
+
+        assert!(error.contains("runtime=Running"), "{error}");
+        assert!(error.contains("health=Ready"), "{error}");
+        assert!(error.contains("activeProfileDigest=missing"), "{error}");
+        assert!(!error.contains("[General]"), "{error}");
     }
 }

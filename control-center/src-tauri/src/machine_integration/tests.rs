@@ -12,8 +12,8 @@ struct FakeMachineBackend {
     executed: Option<(MachineAction, Vec<u8>)>,
     appinit_conflict: bool,
     appinit_error: Option<String>,
-    legacy_service_present: bool,
-    legacy_service_error: Option<String>,
+    legacy_service_blocks_activation: bool,
+    legacy_service_observation_error: Option<String>,
 }
 
 impl MachineBackend for FakeMachineBackend {
@@ -36,11 +36,11 @@ impl MachineBackend for FakeMachineBackend {
         }
     }
 
-    fn legacy_service_present(&mut self) -> Result<bool, String> {
+    fn legacy_service_blocks_activation(&mut self) -> Result<bool, String> {
         self.calls.push("legacy-service");
-        match self.legacy_service_error.take() {
+        match self.legacy_service_observation_error.take() {
             Some(error) => Err(error),
-            None => Ok(self.legacy_service_present),
+            None => Ok(self.legacy_service_blocks_activation),
         }
     }
 
@@ -231,7 +231,7 @@ fn native_actions_require_the_matching_backend_capability_before_dispatch() {
 }
 
 #[test]
-fn a_present_legacy_service_blocks_generic_activation_but_not_reduction() {
+fn a_contending_legacy_service_blocks_generic_activation_but_not_reduction() {
     let profile = b"[General]\r\nGammaValue=1.3\r\n";
     // Install / Start / apply-profile must refuse while a legacy MacType service
     // is installed; retirement goes through Migrate, which stops it first.
@@ -249,7 +249,7 @@ fn a_present_legacy_service_blocks_generic_activation_but_not_reduction() {
             (action == MachineAction::PublishProfile).then_some(profile.as_slice());
         let mut backend = FakeMachineBackend {
             status: Some(status),
-            legacy_service_present: true,
+            legacy_service_blocks_activation: true,
             ..Default::default()
         };
         let error = execute_machine_action_with(&mut backend, action, payload).unwrap_err();
@@ -263,7 +263,7 @@ fn a_present_legacy_service_blocks_generic_activation_but_not_reduction() {
     // An inaccessible legacy service is fail-closed: the error propagates.
     let mut inaccessible = FakeMachineBackend {
         status: Some(ready_auto_service()),
-        legacy_service_error: Some("legacy service inaccessible".to_owned()),
+        legacy_service_observation_error: Some("legacy service inaccessible".to_owned()),
         ..Default::default()
     };
     let mut start_status = ready_auto_service();
@@ -279,7 +279,7 @@ fn a_present_legacy_service_blocks_generic_activation_but_not_reduction() {
     // never even consult it.
     let mut stop = FakeMachineBackend {
         status: Some(ready_auto_service()),
-        legacy_service_present: true,
+        legacy_service_blocks_activation: true,
         ..Default::default()
     };
     execute_machine_action_with(&mut stop, MachineAction::Stop, None).unwrap();
@@ -438,7 +438,7 @@ fn publish_profile_orders_running_stopped_and_absent_service_activation() {
             Ok(false)
         }
 
-        fn legacy_service_present(&mut self) -> Result<bool, String> {
+        fn legacy_service_blocks_activation(&mut self) -> Result<bool, String> {
             Ok(false)
         }
 
@@ -506,6 +506,35 @@ fn publish_profile_orders_running_stopped_and_absent_service_activation() {
         publish_profile_transaction_with(&mut backend, profile).unwrap();
         assert_eq!(backend.actions, expected);
     }
+
+    let initializing = SystemServiceStatus {
+        installation: InstallationState::Current,
+        runtime: RuntimeState::Running,
+        health: HealthState::Initializing,
+        active_profile_digest: Some(digest.clone()),
+        ..ready_auto_service()
+    };
+    let mut backend = PublishBackend {
+        states: VecDeque::from([
+            SystemServiceStatus {
+                active_profile_digest: Some(digest.clone()),
+                ..before(InstallationState::Current, RuntimeState::Running)
+            },
+            initializing,
+            ready(InstallationState::Current),
+        ]),
+        actions: Vec::new(),
+    };
+
+    publish_profile_transaction_with(&mut backend, profile).unwrap();
+    assert_eq!(
+        backend.actions,
+        [
+            MachineAction::Stop,
+            MachineAction::PublishProfile,
+            MachineAction::Start,
+        ]
+    );
 }
 
 struct FailingPublishBackend {
@@ -527,7 +556,7 @@ impl MachineBackend for FailingPublishBackend {
         Ok(false)
     }
 
-    fn legacy_service_present(&mut self) -> Result<bool, String> {
+    fn legacy_service_blocks_activation(&mut self) -> Result<bool, String> {
         Ok(false)
     }
 
@@ -598,6 +627,42 @@ fn activation_failure_reports_every_failed_rollback_step() {
             MachineAction::Start,
             MachineAction::Stop,
             MachineAction::Rollback,
+            MachineAction::Start,
+        ]
+    );
+}
+
+#[test]
+fn activation_failure_preserves_a_profile_that_was_already_active() {
+    let profile = b"[General]\r\nGammaValue=1.3\r\n";
+    let digest = mactype_service_contract::GenerationId::from_profile_bytes(profile)
+        .as_str()
+        .to_owned();
+    let mut backend = FailingPublishBackend {
+        states: VecDeque::from([SystemServiceStatus {
+            active_profile_digest: Some(digest),
+            ..ready_auto_service()
+        }]),
+        results: VecDeque::from([
+            Ok(()),
+            Ok(()),
+            Err("activation failed".to_owned()),
+            Ok(()),
+            Ok(()),
+        ]),
+        actions: Vec::new(),
+    };
+
+    let error = publish_profile_transaction_with(&mut backend, profile).unwrap_err();
+
+    assert!(error.contains("activation failed"), "{error}");
+    assert_eq!(
+        backend.actions,
+        [
+            MachineAction::Stop,
+            MachineAction::PublishProfile,
+            MachineAction::Start,
+            MachineAction::Stop,
             MachineAction::Start,
         ]
     );

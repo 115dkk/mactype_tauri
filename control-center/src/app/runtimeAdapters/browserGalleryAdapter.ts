@@ -77,6 +77,9 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
 
   manageSystemService(action): Promise<ExecutionStatus> {
     const query = new URLSearchParams(window.location.search);
+    if (query.get("service-fail") === action) {
+      return Promise.reject(new Error(`control-center-internal-operation-failed:${action}`));
+    }
     const current = currentGalleryExecutionStatus();
     const next = transitionGalleryExecutionStatus(current, action);
     const delay = Number(query.get("service-delay"));
@@ -119,6 +122,13 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
   },
 
   applyOpenProfile(): Promise<AppliedProfile> {
+    const query = new URLSearchParams(window.location.search);
+    if (query.get("service-fail") === "publish-profile") {
+      return Promise.reject(new Error("control-center-internal-operation-failed:publish-profile"));
+    }
+    updateGalleryExecutionStatus(
+      transitionGalleryExecutionStatus(currentGalleryExecutionStatus(), "publish-profile"),
+    );
     return Promise.resolve<AppliedProfile>({ sourceProfile: galleryProfiles.current().path, runtimeRoot: "C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\runtime\\generations\\gallery" });
   },
 
@@ -148,6 +158,12 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
 
   loadDiagnosticReport(): Promise<string> {
     return Promise.resolve(`MacType Control Center diagnostics\ncontrolCenterVersion=0.1.0\ncoreVersion=${fallbackStatus.coreVersion}\n`);
+  },
+
+  loadDiagnosticLogs(): Promise<ReadonlyArray<string>> {
+    return Promise.resolve([
+      "1784459527000 operation=migrate-from-legacy stage=verify open service readiness error=strict Ready timed out rollback=completed finalState=legacy=Running/Auto; modern=Absent",
+    ]);
   },
 
   exportDiagnostics(): Promise<string> {

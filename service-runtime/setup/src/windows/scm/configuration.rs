@@ -14,6 +14,7 @@ mod metadata;
 
 pub(super) use metadata::configure_metadata;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ServiceConfig {
     pub(super) service_type: u32,
     pub(super) start_type: u32,

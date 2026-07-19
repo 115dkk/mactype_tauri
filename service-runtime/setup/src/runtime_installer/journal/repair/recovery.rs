@@ -2,7 +2,8 @@ use std::fs;
 use std::path::Path;
 
 use super::receipt::{
-    remove_receipted_runtime_directory, runtime_directory_matches, verify_runtime_directory_receipt,
+    remove_receipted_runtime_directory, remove_verified_backup_directory,
+    runtime_directory_matches, verify_runtime_directory_receipt,
 };
 use super::RuntimeDirectoryReceipt;
 use crate::SetupError;
@@ -94,7 +95,7 @@ pub(super) fn recover_verified_repair(
     }
     verify_runtime_directory_receipt(destination, new_receipt)?;
     if backup.exists() {
-        remove_receipted_runtime_directory(backup, old_receipt)?;
+        remove_verified_backup_directory(backup, old_receipt)?;
     }
     Ok(())
 }

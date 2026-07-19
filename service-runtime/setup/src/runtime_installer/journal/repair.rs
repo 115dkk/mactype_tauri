@@ -16,8 +16,8 @@ use crate::storage::{
     temporary_nonce, SetupError,
 };
 use receipt::{
-    read_runtime_directory_receipt, remove_repair_directory, valid_runtime_directory_receipt,
-    verify_runtime_directory_receipt,
+    read_runtime_directory_receipt, remove_repair_directory, remove_verified_backup_directory,
+    valid_runtime_directory_receipt, verify_runtime_directory_receipt,
 };
 use recovery::{recover_prepared_repair, recover_unverified_repair, recover_verified_repair};
 
@@ -135,7 +135,7 @@ impl RuntimeInstaller {
             return self.fail_repair_and_recover(error);
         }
         verify_runtime_directory_receipt(&backup, &journal.old_receipt)?;
-        remove_repair_directory(&backup)?;
+        remove_verified_backup_directory(&backup, &journal.old_receipt)?;
         reject_reparse_ancestors(&repair_journal_path)?;
         fs::remove_file(repair_journal_path)?;
         Ok(())

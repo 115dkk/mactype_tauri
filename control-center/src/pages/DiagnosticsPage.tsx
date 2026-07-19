@@ -1,12 +1,12 @@
 import { AlertTriangle, Check, Copy, Download, ExternalLink, LoaderCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { InstallationStatus } from "../app/model";
-import { copyDiagnostics, exportDiagnostics, loadPreviewDiagnostics, openLogFolder } from "../app/tauri";
+import { copyDiagnostics, exportDiagnostics, loadDiagnosticLogs, openLogFolder } from "../app/tauri";
 import { useI18n } from "../i18n/i18n";
 
 export function DiagnosticsPage({ status }: { status: InstallationStatus }) {
   const { t } = useI18n();
-  const [helperLogs, setHelperLogs] = useState<ReadonlyArray<string>>([]);
+  const [operationLogs, setOperationLogs] = useState<ReadonlyArray<string>>([]);
   const [operation, setOperation] = useState<"export" | "copy" | "folder" | null>(null);
   const [completed, setCompleted] = useState<{ kind: "export" | "copy" | "folder"; detail: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -31,9 +31,13 @@ export function DiagnosticsPage({ status }: { status: InstallationStatus }) {
 
   useEffect(() => {
     let active = true;
-    void loadPreviewDiagnostics().then((entries) => {
-      if (active) setHelperLogs(entries);
-    });
+    void loadDiagnosticLogs()
+      .then((entries) => {
+        if (active) setOperationLogs(entries);
+      })
+      .catch((caught: unknown) => {
+        if (active) setError(caught instanceof Error ? caught.message : String(caught));
+      });
     return () => {
       active = false;
     };
@@ -57,12 +61,10 @@ export function DiagnosticsPage({ status }: { status: InstallationStatus }) {
       <section className="section-block" aria-labelledby="log-title">
         <div className="section-heading"><div><h2 id="log-title">{t("diagnostics.logs")}</h2><p>{t("diagnostics.logsDescription")}</p></div><button aria-busy={operation === "folder"} className="text-action" disabled={operation !== null} onClick={() => void run("folder")} type="button">{t("diagnostics.openFolder")} {operation === "folder" ? <LoaderCircle aria-hidden="true" className="spin" size={15} /> : <ExternalLink aria-hidden="true" size={15} />}</button></div>
         <div className="log-view" role="log" aria-label={t("diagnostics.logAria")}>
-          <div><time>12:18:04</time><span>{t("diagnostics.installScan")}</span><p>{t("diagnostics.installScanMessage")}</p></div>
-          <div><time>12:18:04</time><span>{t("diagnostics.fileCheck")}</span><p>{t("diagnostics.fileCheckMessage")}</p></div>
-          {helperLogs.length === 0 ? (
-            <div><time>{t("diagnostics.now")}</time><span>{t("diagnostics.preview")}</span><p>{t("diagnostics.noHelperError")}</p></div>
-          ) : helperLogs.slice(-20).map((entry, index) => (
-            <div data-severity="warning" key={`${index}-${entry}`}><time>{t("diagnostics.recent")}</time><span>{t("diagnostics.preview")}</span><p>{entry}</p></div>
+          {operationLogs.length === 0 ? (
+            <div><time>{t("diagnostics.now")}</time><span>{t("diagnostics.logs")}</span><p>{t("diagnostics.noOperationLogs")}</p></div>
+          ) : operationLogs.slice(-20).map((entry, index) => (
+            <div data-severity="warning" key={`${index}-${entry}`}><time>{t("diagnostics.recent")}</time><span>{t("diagnostics.logs")}</span><p>{entry}</p></div>
           ))}
         </div>
       </section>

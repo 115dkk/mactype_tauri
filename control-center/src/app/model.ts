@@ -147,6 +147,7 @@ export interface LegacyMacTrayStatus {
   canStop: boolean;
   migrationAvailable: boolean;
   migrationBackupAvailable: boolean;
+  blocksActivation: boolean;
 }
 
 export type SystemServiceAction = "install" | "upgrade" | "repair" | "remove" | "start" | "stop" | "publish-profile" | "migrate-from-legacy" | "remove-legacy";

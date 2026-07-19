@@ -156,14 +156,8 @@ function projectLegacyTrayResolution(status: LegacyTrayStatus | undefined): Lega
   }
 }
 
-// legacyMacTray is null only when no legacy MacType service exists, so any
-// non-null value means one is present — owned, compatible, foreign, delete-
-// pending, or inaccessible. Generic install/start/activate must be blocked for
-// all of them (a foreign or mid-deletion service can inject just the same);
-// retirement goes through Migrate for an owned service, or manual removal for a
-// foreign one.
-function legacyServicePresent(legacy: LegacyMacTrayStatus | null | undefined): boolean {
-  return Boolean(legacy);
+function legacyServiceBlocksActivation(legacy: LegacyMacTrayStatus | null | undefined): boolean {
+  return Boolean(legacy?.blocksActivation);
 }
 
 function projectSystemInjectionAction(
@@ -179,8 +173,7 @@ function projectSystemInjectionAction(
       && service.activeProfileDigest !== status.expectedProfileDigest,
   );
   const legacyTrayConflict = Boolean(status && status.legacyTray.conflict !== "clear");
-  const legacyPresent = legacyServicePresent(status?.legacyMacTray);
-  const legacyServiceContends = legacyPresent && status?.legacyMacTray?.state !== "stopped";
+  const legacyBlocksActivation = legacyServiceBlocksActivation(status?.legacyMacTray);
   const verifiedActive = Boolean(
     status?.systemInjectionActive
       && running
@@ -188,7 +181,7 @@ function projectSystemInjectionAction(
       && profileMatches
       && !status.registryModeDetected
       && !legacyTrayConflict
-      && !legacyServiceContends,
+      && !legacyBlocksActivation,
   );
 
   let state: SystemInjectionState;
@@ -198,7 +191,7 @@ function projectSystemInjectionAction(
   else if (verifiedActive) state = "active";
   else if (running && profileMismatch) state = "running-profile-mismatch";
   else if (running) state = "running-unverified";
-  else if (legacyPresent) state = "legacy-service-migrate";
+  else if (legacyBlocksActivation) state = "legacy-service-migrate";
   else if (service?.runtime === "stopped") state = "inactive";
   else state = "unavailable";
 
@@ -212,7 +205,7 @@ function projectSystemInjectionAction(
         : service?.runtime === "stopped"
           && status.systemModesSupported
           && status.legacyTray.conflict === "clear"
-          && !legacyPresent),
+          && !legacyBlocksActivation),
   );
 
   return {
@@ -237,10 +230,21 @@ export function projectExecutionView(
   const legacy = status?.legacyMacTray;
   const idle = serviceBusy === null;
   const legacyTrayConflict = Boolean(status && status.legacyTray.conflict !== "clear");
-  const legacyPresent = legacyServicePresent(legacy);
+  const legacyBlocksActivation = legacyServiceBlocksActivation(legacy);
   const profileMatches = Boolean(
     status?.expectedProfileDigest
       && service?.activeProfileDigest === status.expectedProfileDigest,
+  );
+  const legacyMigrationComplete = Boolean(
+    status?.systemInjectionActive
+      && service?.backend === "open-source"
+      && service.installation === "current"
+      && service.runtime === "running"
+      && service.health === "ready"
+      && profileMatches
+      && legacy?.state === "stopped"
+      && !status.registryModeDetected
+      && !legacyTrayConflict,
   );
 
   return {
@@ -252,12 +256,14 @@ export function projectExecutionView(
     serviceBinaryPath: service?.installation === "absent" ? null : service?.binaryPath ?? null,
     systemInjectionAction: projectSystemInjectionAction(status, serviceBusy, profileMatches),
     legacyTrayResolution: projectLegacyTrayResolution(status?.legacyTray),
-    canInstall: Boolean(idle && !legacyTrayConflict && !legacyPresent && service?.canInstall),
-    canStart: Boolean(idle && !legacyTrayConflict && !legacyPresent && service?.canStart),
+    canInstall: Boolean(idle && !legacyTrayConflict && !legacyBlocksActivation && service?.canInstall),
+    canStart: Boolean(idle && !legacyTrayConflict && !legacyBlocksActivation && service?.canStart),
     canUpgrade: Boolean(idle && !legacyTrayConflict && service?.canUpgrade),
     canRepair: Boolean(idle && !legacyTrayConflict && service?.canRepair),
     canRemove: Boolean(idle && !legacyTrayConflict && service?.canRemove),
-    canMigrateLegacy: Boolean(idle && !legacyTrayConflict && legacy?.migrationAvailable),
+    canMigrateLegacy: Boolean(
+      idle && !legacyTrayConflict && legacy?.migrationAvailable && !legacyMigrationComplete
+    ),
     canRemoveLegacy: Boolean(idle && !legacyTrayConflict && legacy?.canRemove),
   };
 }

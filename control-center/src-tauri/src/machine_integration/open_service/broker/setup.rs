@@ -6,9 +6,10 @@ use crate::service_contract::SystemServiceStatus;
 use std::{
     ffi::OsStr,
     fs,
-    io::Write,
+    io::{Read, Write},
     path::PathBuf,
     process::{Command, Stdio},
+    thread,
 };
 use windows_sys::Win32::UI::Shell::FOLDERID_ProgramFiles;
 
@@ -27,8 +28,8 @@ impl crate::machine_integration::MachineBackend for OpenServicePublishBackend {
         Ok(crate::machine_integration::registry_conflict_detected())
     }
 
-    fn legacy_service_present(&mut self) -> Result<bool, String> {
-        crate::machine_integration::legacy_mactray::legacy_service_present()
+    fn legacy_service_blocks_activation(&mut self) -> Result<bool, String> {
+        crate::machine_integration::legacy_mactray::legacy_service_blocks_activation()
     }
 
     fn execute(
@@ -47,7 +48,7 @@ pub(super) fn publish_and_activate(profile: &[u8]) -> Result<(), String> {
     if crate::machine_integration::registry_conflict_detected() {
         return Err("AppInit conflicts block machine integration changes".to_owned());
     }
-    if crate::machine_integration::legacy_mactray::legacy_service_present()? {
+    if crate::machine_integration::legacy_mactray::legacy_service_blocks_activation()? {
         return Err(
             "a legacy MacType service is still installed; migrate it before applying the profile"
                 .to_owned(),
@@ -82,14 +83,24 @@ fn run_setup_process(verb: &str, profile: Option<&[u8]>) -> Result<(), String> {
     let mut command = Command::new(setup);
     command
         .arg(verb)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .stdin(if profile.is_some() {
             Stdio::piped()
         } else {
             Stdio::null()
         });
     let mut child = command.spawn().map_err(|error| error.to_string())?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "setup broker stdout is unavailable".to_owned())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "setup broker stderr is unavailable".to_owned())?;
+    let stdout = capture_setup_output(stdout);
+    let stderr = capture_setup_output(stderr);
     if let Some(bytes) = profile {
         child
             .stdin
@@ -99,10 +110,62 @@ fn run_setup_process(verb: &str, profile: Option<&[u8]>) -> Result<(), String> {
             .map_err(|error| error.to_string())?;
     }
     let status = child.wait().map_err(|error| error.to_string())?;
+    let stdout = join_setup_output(stdout, "stdout");
+    let stderr = join_setup_output(stderr, "stderr");
     if status.success() {
         Ok(())
     } else {
-        Err(format!("setup broker {verb} failed with {status}"))
+        Err(setup_failure_message(verb, status.code(), &stderr, &stdout))
+    }
+}
+
+const MAX_SETUP_OUTPUT_BYTES: usize = 16 * 1024;
+
+fn capture_setup_output(
+    mut reader: impl Read + Send + 'static,
+) -> thread::JoinHandle<Result<String, String>> {
+    thread::spawn(move || {
+        let mut captured = Vec::with_capacity(MAX_SETUP_OUTPUT_BYTES);
+        let mut buffer = [0_u8; 4096];
+        let mut truncated = false;
+        loop {
+            let read = reader
+                .read(&mut buffer)
+                .map_err(|error| error.to_string())?;
+            if read == 0 {
+                break;
+            }
+            let available = MAX_SETUP_OUTPUT_BYTES.saturating_sub(captured.len());
+            let kept = read.min(available);
+            captured.extend_from_slice(&buffer[..kept]);
+            truncated |= kept < read;
+        }
+        let mut text = String::from_utf8_lossy(&captured).trim().to_owned();
+        if truncated {
+            text.push_str(" [truncated]");
+        }
+        Ok(text)
+    })
+}
+
+fn join_setup_output(capture: thread::JoinHandle<Result<String, String>>, stream: &str) -> String {
+    match capture.join() {
+        Ok(Ok(output)) => output,
+        Ok(Err(error)) => format!("<{stream} capture failed: {error}>"),
+        Err(_) => format!("<{stream} capture thread panicked>"),
+    }
+}
+
+fn setup_failure_message(verb: &str, exit_code: Option<i32>, stderr: &str, stdout: &str) -> String {
+    let status = exit_code.map_or_else(
+        || "without an exit code".to_owned(),
+        |code| format!("with exit code {code}"),
+    );
+    let detail = if !stderr.is_empty() { stderr } else { stdout };
+    if detail.is_empty() {
+        format!("setup broker {verb} failed {status} without diagnostic output")
+    } else {
+        format!("setup broker {verb} failed {status}: {detail}")
     }
 }
 
@@ -139,4 +202,23 @@ pub(in crate::machine_integration::open_service) fn setup_path_for_trusted_layou
     Ok(app_root
         .join("service-runtime")
         .join("mactype-service-setup.exe"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn setup_failure_preserves_the_bounded_child_error() {
+        let error = setup_failure_message(
+            "start",
+            Some(1),
+            "CreateServiceW failed with Win32 5 (Access is denied)",
+            "ignored status output",
+        );
+
+        assert!(error.contains("setup broker start failed with exit code 1"));
+        assert!(error.contains("CreateServiceW failed with Win32 5"));
+        assert!(!error.contains("ignored status output"));
+    }
 }

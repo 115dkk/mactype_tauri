@@ -70,6 +70,7 @@ export const tauriRuntimeAdapter: ControlCenterRuntimeAdapter = {
   rediscoverInstallation: () => invoke<InstallationStatus>("rediscover_installation"),
   reconnectPreview: () => invoke<InstallationStatus>("reconnect_preview"),
   loadDiagnosticReport: () => invoke<string>("diagnostic_report"),
+  loadDiagnosticLogs: () => invoke<string[]>("diagnostic_recent_logs"),
   exportDiagnostics: () => invoke<string>("export_diagnostics"),
 
   async copyDiagnostics(): Promise<void> {

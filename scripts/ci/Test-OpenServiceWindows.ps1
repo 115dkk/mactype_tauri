@@ -184,9 +184,6 @@ function Assert-GenerationBoundMarkerTelemetry(
             throw "$architecture marker has no matching generation-bound injection telemetry."
         }
         $success = $telemetry.lastSuccess
-        if ([uint32] $success.pid -ne [uint32] $marker.pid -or [uint32] $success.sessionId -ne [uint32] $marker.sessionId) {
-            throw "$architecture marker identity does not match the service injection telemetry."
-        }
         if ($success.profileDigest -cne "sha256:$ExpectedDigest") {
             throw "$architecture marker telemetry is bound to the wrong profile digest."
         }

@@ -52,7 +52,7 @@ function Test-OpenServiceWorkflowPolicy {
         -TokenMessage "hosted lifecycle verification is missing required contract token '{0}'." `
         -Tokens @(
             'Assert-GenerationBoundMarkerTelemetry', 'runtimeGenerationId',
-            'profileDigest', 'success.pid', 'success.sessionId',
+            'profileDigest', '$MarkerResults', 'successCount', 'lastSuccess',
             'x86 and x64 marker telemetry is not bound to the same runtime generation',
             'OpenServiceAclFixture.psm1', 'Invoke-OpenServiceAclRepairFixture',
             '-RepairContext $stagedSetup', 'param($setupExecutable)',

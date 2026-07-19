@@ -86,8 +86,12 @@ bool EmBoldVariableFont(const FT_Face face, int boldWeight) {
 	if (error) {
 		return false;	// not a varaible font
 	}
-	auto num_axes = mm_var->num_axis;
-	auto coords = new FT_Fixed[num_axes];
+	FT_UInt num_axes = mm_var->num_axis;
+	FT_Fixed* coords = (FT_Fixed*)calloc(num_axes, sizeof(FT_Fixed));
+	if (!coords) {
+		FT_Done_MM_Var(freetype_library, mm_var);
+		return false;
+	}
 	bool axisFound = false;
 
 	// Find 'wght' axis and set coordinates
@@ -111,6 +115,8 @@ bool EmBoldVariableFont(const FT_Face face, int boldWeight) {
 	}
 
 	if (!axisFound) {
+		free(coords);
+		FT_Done_MM_Var(freetype_library, mm_var);
 		return false;	// no "wght" axis found
 	}
 
@@ -118,8 +124,8 @@ bool EmBoldVariableFont(const FT_Face face, int boldWeight) {
 	FT_Set_Var_Design_Coordinates(face, num_axes, coords);	// we will continue whatsoever
 
 	// Free the MM_Var structure (we've copied the data we need)
+	free(coords);
 	FT_Done_MM_Var(freetype_library, mm_var);
-	mm_var = nullptr; // Avoid double free later
 	return true;
 }
 

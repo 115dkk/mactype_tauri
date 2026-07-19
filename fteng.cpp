@@ -216,12 +216,15 @@ void FreeTypeCharData::SetGlyph(FT_Render_Mode render_mode, FT_Referenced_Bitmap
 {
 	const bool bMono = (render_mode == FT_RENDER_MODE_MONO);
 	FT_Referenced_BitmapGlyph& gl = bMono ? m_glyphMono : m_glyph;
-	if (gl) 
+	int& size = bMono ? m_bmpMonoSize : m_bmpSize;
+	if (gl) {
 		FT_Done_Ref_Glyph((FT_Referenced_Glyph*)&gl);
+		g_pFTEngine->SubMemUsed(size);
+		size = 0;
+	}
 	{
 		FT_Glyph_Ref_Copy((FT_Referenced_Glyph)glyph, (FT_Referenced_Glyph*)&gl);
 		if (gl) {
-			int& size = bMono ? m_bmpMonoSize : m_bmpSize;
 			size  = FT_Bitmap_CalcSize(gl->ft_glyph);
 			size += sizeof(FT_BitmapGlyphRec);
 			g_pFTEngine->AddMemUsed(size);
@@ -1002,6 +1005,10 @@ bool FreeTypeSysFontData::Init(LPCTSTR name, int weight, bool italic)
 	return true;
 
 ERROR_Init:
+	if (m_ftFace) {
+		FT_Done_Face(m_ftFace);
+		m_ftFace = NULL;
+	}
 	m_locked = false;
 	if (hf) {
 		SelectFont(m_hdc, m_hOldFont);

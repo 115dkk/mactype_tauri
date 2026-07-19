@@ -1501,7 +1501,12 @@ void CFontLinkInfo::init()
 	memset(DefaultFontLink, 0, sizeof(TCHAR)*(FF_DECORATIVE+1)*(LF_FACESIZE+1));	//初始化为0
 	HKEY h3;
 	DWORD len;
-	if (ERROR_SUCCESS != RegOpenKeyEx(HKEY_LOCAL_MACHINE, REGKEY3, 0, KEY_QUERY_VALUE, &h3)) return;
+	if (ERROR_SUCCESS != RegOpenKeyEx(HKEY_LOCAL_MACHINE, REGKEY3, 0, KEY_QUERY_VALUE, &h3)) {
+		delete[] name;
+		delete[] value;
+		delete[] buf;
+		return;
+	}
 	len = (LF_FACESIZE+1)*sizeof(TCHAR);
 	RegQueryValueEx(h3, _T("FontPackage"), 0, &regtype, (LPBYTE)DefaultFontLink[1], &len);
 	len = (LF_FACESIZE+1)*sizeof(TCHAR);
@@ -1526,7 +1531,12 @@ void CFontLinkInfo::init()
 
 	//现在获取对应的CodePage是否需要进行fontlink。默认都需要进行链接。
 	HKEY h4;
-	if (ERROR_SUCCESS != RegOpenKeyEx(HKEY_LOCAL_MACHINE, REGKEY4, 0, KEY_QUERY_VALUE, &h4)) return;
+	if (ERROR_SUCCESS != RegOpenKeyEx(HKEY_LOCAL_MACHINE, REGKEY4, 0, KEY_QUERY_VALUE, &h4)) {
+		delete[] name;
+		delete[] value;
+		delete[] buf;
+		return;
+	}
 
 	for (int i=0; i<0xff; ++i)
 	{

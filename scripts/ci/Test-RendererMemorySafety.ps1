@@ -95,4 +95,17 @@ Require-Pattern $settingsHeader '~CControlCenter\s*\(\s*\)\s*\{\s*DestroyMessage
 Require-Pattern $settingsHeader 'WaitForSingleObject\s*\(\s*m_msgThread\s*,\s*INFINITE\s*\)' `
     'Message-window teardown must wait for the thread before releasing CControlCenter.'
 
+Require-Pattern $ftSource '(?s)if\s*\(\s*!axisFound\s*\)\s*\{.*?free\s*\(\s*coords\s*\).*?FT_Done_MM_Var\s*\(.*?mm_var\s*\).*?return false' `
+    'Variable-font rejection must release both coordinate and MM_Var allocations.'
+Require-Pattern $ftSource '(?s)FT_Set_Var_Design_Coordinates\s*\(.*?coords\s*\).*?free\s*\(\s*coords\s*\).*?FT_Done_MM_Var\s*\(.*?mm_var\s*\)' `
+    'Variable-font success must release both coordinate and MM_Var allocations.'
+Require-Pattern $engineSource '(?s)void FreeTypeCharData::SetGlyph.*?SubMemUsed\s*\(\s*size\s*\).*?size\s*=\s*0' `
+    'Replacing a cached glyph must remove its previous memory charge.'
+Require-Pattern $engineSource '(?s)ERROR_Init:\s*if\s*\(\s*m_ftFace\s*\).*?FT_Done_Face\s*\(\s*m_ftFace\s*\).*?m_ftFace\s*=\s*NULL' `
+    'Font initialization failure must release any face opened before the failure.'
+Require-Pattern $settingsSource '(?s)RegOpenKeyEx\(HKEY_LOCAL_MACHINE,\s*REGKEY3.*?\)\)\s*\{\s*delete\[\]\s*name;\s*delete\[\]\s*value;\s*delete\[\]\s*buf;\s*return;' `
+    'Font-link initialization must release temporary arrays when REGKEY3 cannot be opened.'
+Require-Pattern $settingsSource '(?s)RegOpenKeyEx\(HKEY_LOCAL_MACHINE,\s*REGKEY4.*?\)\)\s*\{\s*delete\[\]\s*name;\s*delete\[\]\s*value;\s*delete\[\]\s*buf;\s*return;' `
+    'Font-link initialization must release temporary arrays when REGKEY4 cannot be opened.'
+
 Write-Host 'Renderer memory-safety source contracts passed.'

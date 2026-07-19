@@ -139,7 +139,10 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
   const activeProfile = query.has("legacy-applied")
     ? "C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\profiles\\Pretendard forever.ini"
     : fallbackGalleryProfilePath;
-  const legacyRequested = query.get("legacy") === "migration-available"
+  const legacyRequest = query.get("legacy");
+  const legacyForeign = legacyRequest === "foreign";
+  const legacyRequested = legacyRequest === "migration-available"
+    || legacyForeign
     || fixture === "legacy-conflict";
   const requestedLegacyState = query.get("legacy-state");
   const legacyState = legacyRuntimeValues.find((state) => state === requestedLegacyState) ?? "running";
@@ -178,11 +181,13 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
     },
     legacyMacTray: legacyRequested ? {
       ...galleryLegacyService,
+      presence: legacyForeign ? "foreign" : galleryLegacyService.presence,
       state: legacyState,
       registryConflict: appInitConflict,
+      trustedBinaryAvailable: !legacyForeign,
       canRemove: false,
-      canStop: !appInitConflict && legacyState === "running",
-      migrationAvailable: conflictFreeSystemModesSupported && legacyStable,
+      canStop: !legacyForeign && !appInitConflict && legacyState === "running",
+      migrationAvailable: !legacyForeign && conflictFreeSystemModesSupported && legacyStable,
     } : null,
     legacyTray,
     registryModeDetected: appInitConflict,
@@ -234,7 +239,9 @@ function withGalleryLegacyTrayPolicy(
     legacyMacTray: current.legacyMacTray
       ? {
           ...current.legacyMacTray,
-          migrationAvailable: systemModesSupported && legacyStable,
+          migrationAvailable: current.legacyMacTray.presence !== "foreign"
+            && systemModesSupported
+            && legacyStable,
           canRemove: legacyTray.conflict === "clear" && current.legacyMacTray.canRemove,
         }
       : null,

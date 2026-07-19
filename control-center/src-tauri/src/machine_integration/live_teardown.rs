@@ -14,6 +14,13 @@ use super::legacy_migration::{
     disable_startup_scope, prepare_backup, remove_after_verified, restore_startup_scope, rollback,
     stop_legacy, RemovalVerification, StartupReceiptScope,
 };
+use super::{execute_machine_action_with, MachineAction, MachineBackend};
+use crate::service_contract::{
+    HealthState, InstallationState, RuntimeState, ServiceBackend, SystemServiceStatus,
+};
+
+// SERVICE_DISABLED: a service with this start type never auto-starts at boot.
+const SERVICE_DISABLED_START_TYPE: u32 = 4;
 
 fn require_proof_environment() {
     if std::env::var("MACTYPE_HOSTED_TEARDOWN_PROOF").as_deref() != Ok("1") {
@@ -190,6 +197,15 @@ fn service_migration_stop_remove_restore_roundtrip() {
     let stopped = legacy_mactray::status(false);
     println!("service after stop: {stopped:?}");
     assert!(matches!(stopped.state, ServiceRuntimeState::Stopped));
+    // R2: the stop must also disable the start type so a reboot between the
+    // migration and the funeral cannot auto-start the legacy service.
+    let after_stop = legacy_mactray::migration_snapshot(false)
+        .expect("a stopped legacy service must still be snapshot-capturable");
+    assert_eq!(
+        after_stop.configuration.start_type, SERVICE_DISABLED_START_TYPE,
+        "migration stop must leave the legacy service start type DISABLED (R2)"
+    );
+    println!("R2 verified: legacy service start type is DISABLED after migration stop");
     legacy_mactray::remove_for_migration().expect("the legacy service must be removable");
     let removed = legacy_mactray::status(false);
     println!("service after remove: {removed:?}");
@@ -201,13 +217,19 @@ fn service_migration_stop_remove_restore_roundtrip() {
     let restored = legacy_mactray::status(false);
     println!("service after restore: {restored:?}");
     assert!(matches!(restored.presence, ServicePresence::Owned));
+    let restored_snapshot = legacy_mactray::migration_snapshot(false)
+        .expect("the restored legacy service must be snapshot-capturable");
+    assert_eq!(
+        restored_snapshot.configuration.start_type, snapshot.configuration.start_type,
+        "restore must put the original legacy service start type back (undo the R2 disable)"
+    );
     if initially_running {
         assert!(
             matches!(restored.state, ServiceRuntimeState::Running),
             "the service must run again after the roundtrip"
         );
     }
-    println!("SCM migration roundtrip verified: stop -> remove -> restore");
+    println!("SCM migration roundtrip verified: stop -> remove -> restore (start type restored)");
 }
 
 #[test]
@@ -292,5 +314,89 @@ fn legacy_service_funeral_through_backup_receipt_transaction() {
     );
     println!(
         "legacy service funeral verified: backup -> stop -> gated removal -> rollback restores it"
+    );
+}
+
+// A machine backend that reports a stopped, installable new service but delegates
+// the legacy-service observation to the real production primitive, so the
+// orchestrator gate is exercised against the actual staged legacy service. Its
+// execute() must never run: a refusal has to happen before any mutation.
+struct RealLegacyProbeBackend;
+
+impl MachineBackend for RealLegacyProbeBackend {
+    fn new_service_status(&mut self) -> SystemServiceStatus {
+        SystemServiceStatus {
+            backend: ServiceBackend::OpenSource,
+            installation: InstallationState::Absent,
+            runtime: RuntimeState::Stopped,
+            health: HealthState::Unknown,
+            binary_path: None,
+            win32_error: None,
+            active_profile_digest: None,
+            can_install: true,
+            can_remove: false,
+            can_start: true,
+            can_stop: false,
+            can_repair: false,
+            can_upgrade: false,
+        }
+    }
+
+    fn legacy_tray_status(&mut self) -> LegacyTrayStatus {
+        LegacyTrayStatus::clear()
+    }
+
+    fn appinit_conflict(&mut self) -> Result<bool, String> {
+        Ok(false)
+    }
+
+    fn legacy_service_present(&mut self) -> Result<bool, String> {
+        legacy_mactray::legacy_service_present()
+    }
+
+    fn execute(&mut self, action: MachineAction, _profile: Option<&[u8]>) -> Result<(), String> {
+        panic!(
+            "the new service must never be mutated while a legacy service is present: {action:?}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "live proof; only meaningful inside the hosted-teardown-proof workflow"]
+fn generic_activation_refuses_against_a_live_legacy_service() {
+    require_proof_environment();
+
+    // R1: while a real legacy MacType service is installed, install / start /
+    // apply-profile must all refuse before any mutation, so the new injector is
+    // never started alongside the legacy one. Retirement must go through Migrate.
+    let service = legacy_mactray::status(false);
+    println!("legacy service before the activation-refusal proof: {service:?}");
+    assert!(
+        matches!(service.presence, ServicePresence::Owned),
+        "the real legacy service must be present for the R1 activation-refusal proof"
+    );
+    assert!(
+        legacy_mactray::legacy_service_present().expect("legacy presence must be observable"),
+        "the guard's presence primitive must observe the real legacy service"
+    );
+
+    let mut backend = RealLegacyProbeBackend;
+    for action in [MachineAction::Install, MachineAction::Start] {
+        let error = execute_machine_action_with(&mut backend, action, None)
+            .expect_err("activation must refuse while the legacy service is present");
+        println!("{action:?} refused: {error}");
+        assert!(
+            error.contains("legacy MacType service"),
+            "{action:?}: {error}"
+        );
+    }
+    let profile = b"[General]\r\nGammaValue=1.3\r\n";
+    let error =
+        execute_machine_action_with(&mut backend, MachineAction::PublishProfile, Some(profile))
+            .expect_err("apply profile must refuse while the legacy service is present");
+    println!("PublishProfile refused: {error}");
+    assert!(error.contains("legacy MacType service"), "{error}");
+    println!(
+        "R1 verified: install/start/apply all refuse while the real legacy service is present"
     );
 }

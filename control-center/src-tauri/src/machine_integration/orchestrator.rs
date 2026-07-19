@@ -77,6 +77,7 @@ pub(super) fn execute_machine_action_with(
         if appinit_conflict && action != MachineAction::Stop {
             return Err("AppInit conflicts block this machine integration change".to_owned());
         }
+        refuse_activation_with_legacy_service(backend, action)?;
         return backend.execute(action, profile);
     }
     if appinit_conflict {
@@ -99,7 +100,30 @@ pub(super) fn execute_machine_action_with(
             "the machine integration state is foreign, transitioning, or unsafe".to_owned(),
         );
     }
+    refuse_activation_with_legacy_service(backend, action)?;
     backend.execute(action, profile)
+}
+
+// Fail-fast (before the UAC prompt) when a legacy MacType service is still
+// installed: install/start/publish would run the new injector alongside it.
+// Retirement must go through Migrate, which stops the legacy service first.
+// The elevated broker re-checks this authoritatively to close the UAC-window
+// TOCTOU (see open_service::broker::refuse_conflicting_environment_for_activation).
+fn refuse_activation_with_legacy_service(
+    backend: &mut impl MachineBackend,
+    action: MachineAction,
+) -> Result<(), String> {
+    if matches!(
+        action,
+        MachineAction::Install | MachineAction::Start | MachineAction::PublishProfile
+    ) && backend.legacy_service_present()?
+    {
+        return Err(
+            "a legacy MacType service is still installed; migrate it before starting the new service"
+                .to_owned(),
+        );
+    }
+    Ok(())
 }
 
 pub(super) fn native_action_authorized(

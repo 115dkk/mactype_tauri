@@ -523,6 +523,17 @@ jobs:
           RUST_BACKTRACE: '1'
         run: cargo test --lib machine_integration::live_teardown::legacy_service_funeral_through_backup_receipt_transaction -- --ignored --exact --nocapture 2>&1 | Tee-Object "$env:EVIDENCE_DIR\22-proof7-funeral.txt"
 
+      - name: 'Proof 8/8 — generic activation refuses while the live legacy service is present'
+        id: p8
+        continue-on-error: true
+        working-directory: control-center/src-tauri
+        env:
+          MACTYPE_HOSTED_TEARDOWN_PROOF: '1'
+          RUST_BACKTRACE: '1'
+        # Runs after the funeral rollback has restored the real legacy service to
+        # Owned+Running, so the orchestrator gate is exercised against a live one.
+        run: cargo test --lib machine_integration::live_teardown::generic_activation_refuses_against_a_live_legacy_service -- --ignored --exact --nocapture 2>&1 | Tee-Object "$env:EVIDENCE_DIR\27-proof8-activation-refused.txt"
+
       - name: Independent verification of the funeral transaction receipt and rollback
         if: always()
         run: |
@@ -579,6 +590,7 @@ jobs:
             'proof 5 service-mode exemption'    = '${{ steps.p5.outcome }}'
             'proof 6 SCM migration roundtrip'   = '${{ steps.p6.outcome }}'
             'proof 7 legacy service funeral'    = '${{ steps.p7.outcome }}'
+            'proof 8 activation refused (R1)'   = '${{ steps.p8.outcome }}'
             'app build for proof photos'        = '${{ steps.appbuild.outcome }}'
           }
           $lines = $results.GetEnumerator() | ForEach-Object { '{0}: {1}' -f $_.Key, $_.Value }
@@ -599,7 +611,7 @@ jobs:
           if ($missingPhotos) {
             throw "missing proof photos: $($missingPhotos -join '; ')"
           }
-          'PROOF COMPLETE: detection, graceful exit, autostart removal, service exemption, SCM migration, legacy-service retirement, plus observational Execution-page photos of each state — all against the real MacType'
+          'PROOF COMPLETE: detection, graceful exit, autostart removal, service exemption, SCM migration (with the reboot-safe start-type disable), legacy-service retirement, refusal of generic activation while a live legacy service is present, plus observational Execution-page photos of each state — all against the real MacType'
 
       - name: Upload evidence (never MacType binaries)
         if: always()

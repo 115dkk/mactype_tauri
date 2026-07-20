@@ -155,68 +155,13 @@ function RoutingSettings({
   advanced,
   fontFamilies,
   fontOptionLabel,
-  onChange,
   onCommit,
   t,
 }: AdvancedSectionProps & Pick<AdvancedSettingsProps, "fontFamilies" | "fontOptionLabel">) {
   return (
     <fieldset className="advanced-text-fields">
-      <legend>{t("advanced.routing")}</legend>
-      <label>
-        <span>{t("advanced.displayAffinity")}</span>
-        <small>{t("advanced.displayAffinityHelp")}</small>
-        <input
-          onBlur={() => onCommit(advanced)}
-          onChange={(event) => onChange({
-            ...advanced,
-            displayAffinity: event.target.value.split(",").map((part) => Number(part.trim())).filter(Number.isInteger),
-          })}
-          type="text"
-          value={advanced.displayAffinity.join(", ")}
-        />
-      </label>
+      <legend>{t("advanced.fontSubstitutes")}</legend>
       <FontSubstitutionEditor advanced={advanced} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} onCommit={onCommit} t={t} />
-    </fieldset>
-  );
-}
-
-function InfinalitySettings({ advanced, onChange, onCommit, t }: AdvancedSectionProps) {
-  return (
-    <fieldset>
-      <legend>Infinality</legend>
-      <p>{t("advanced.infinalityVectorsHelp")}</p>
-      <div className="vector-grid">
-        {advanced.infinalityGammaCorrection.map((value, index) => (
-          <label key={`gamma-${index}`}>
-            <span>{t("advanced.gammaCorrection")} {index + 1}</span>
-            <input
-              onBlur={() => onCommit(advanced)}
-              onChange={(event) => onChange({
-                ...advanced,
-                infinalityGammaCorrection: updateVector(advanced.infinalityGammaCorrection, index, Number(event.target.value)),
-              })}
-              type="number"
-              value={value}
-            />
-          </label>
-        ))}
-        {advanced.infinalityFilterParams.map((value, index) => (
-          <label key={`filter-${index}`}>
-            <span>{t("advanced.filterParams")} {index + 1}</span>
-            <input
-              max={255}
-              min={0}
-              onBlur={() => onCommit(advanced)}
-              onChange={(event) => onChange({
-                ...advanced,
-                infinalityFilterParams: updateVector(advanced.infinalityFilterParams, index, Number(event.target.value)),
-              })}
-              type="number"
-              value={value}
-            />
-          </label>
-        ))}
-      </div>
     </fieldset>
   );
 }
@@ -243,7 +188,6 @@ export function AdvancedSettings({
         <LcdFilterSettings {...sectionProps} />
         <PixelLayoutSettings {...sectionProps} />
         <RoutingSettings {...sectionProps} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} />
-        <InfinalitySettings {...sectionProps} />
       </div>
     </>
   );

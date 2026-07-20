@@ -463,7 +463,7 @@ fn import_rejects_a_profile_larger_than_the_service_contract() {
 }
 
 #[test]
-fn advanced_profile_and_freetype_precedence_round_trip() {
+fn supported_advanced_edits_preserve_unsupported_profile_entries() {
     let source = b"[FreeType]\r\nNormalWeight=3\r\nLcdFilterWeight=8,77,86,77,8\r\nPixelLayout=-21,0,0,0,21,0\r\n[General]\r\nNormalWeight=2\r\nShadow=1,2,4,112233,5,AABBCC\r\nDisplayAffinity=0,2\r\n[FontSubstitutes]\r\nArial=Segoe UI\r\n[Infinality]\r\nINFINALITY_FT_GAMMA_CORRECTION=0 100\r\nINFINALITY_FT_FILTER_PARAMS=11 22 38 22 11\r\n";
     let path = temp_profile(source);
     let mut document = ProfileDocument::open(&path).unwrap();
@@ -477,13 +477,7 @@ fn advanced_profile_and_freetype_precedence_round_trip() {
         snapshot.advanced.pixel_layout,
         Some(vec![-21, 0, 0, 0, 21, 0])
     );
-    assert_eq!(snapshot.advanced.display_affinity, vec![0, 2]);
     assert_eq!(snapshot.advanced.font_substitutes, vec!["Arial=Segoe UI"]);
-    assert_eq!(snapshot.advanced.infinality_gamma_correction, vec![0, 100]);
-    assert_eq!(
-        snapshot.advanced.infinality_filter_params,
-        vec![11, 22, 38, 22, 11]
-    );
     document.set_value("normal_weight", 7.0).unwrap();
     document
         .set_advanced(AdvancedProfile {
@@ -497,10 +491,7 @@ fn advanced_profile_and_freetype_precedence_round_trip() {
             }),
             lcd_filter_weight: Some(vec![1, 2, 3, 4, 5]),
             pixel_layout: Some(vec![-20, 0, 0, 0, 20, 0]),
-            display_affinity: vec![1, 3],
             font_substitutes: vec!["Tahoma=Segoe UI".to_owned()],
-            infinality_gamma_correction: vec![5, 95],
-            infinality_filter_params: vec![10, 20, 40, 20, 10],
         })
         .unwrap();
     document
@@ -515,10 +506,10 @@ fn advanced_profile_and_freetype_precedence_round_trip() {
     assert!(rendered.contains("Shadow=-2,3,6,010203,7,A0B0C0"));
     assert!(rendered.contains("LcdFilterWeight=1,2,3,4,5"));
     assert!(rendered.contains("PixelLayout=-20,0,0,0,20,0"));
-    assert!(rendered.contains("DisplayAffinity=1,3"));
+    assert!(rendered.contains("DisplayAffinity=0,2"));
     assert!(rendered.contains("Tahoma=Segoe UI"));
-    assert!(rendered.contains("INFINALITY_FT_GAMMA_CORRECTION=5 95"));
-    assert!(rendered.contains("INFINALITY_FT_FILTER_PARAMS=10 20 40 20 10"));
+    assert!(rendered.contains("INFINALITY_FT_GAMMA_CORRECTION=0 100"));
+    assert!(rendered.contains("INFINALITY_FT_FILTER_PARAMS=11 22 38 22 11"));
     assert!(rendered.contains("[UnloadDLL]\r\nexample.dll"));
     assert!(rendered.contains("[ExcludeSub]\r\nlegacy.exe"));
     let _ = fs::remove_file(path);

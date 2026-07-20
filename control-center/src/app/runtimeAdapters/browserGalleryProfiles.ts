@@ -31,10 +31,7 @@ const fallbackGalleryProfile: ProfileSnapshot = {
     shadow: null,
     lcdFilterWeight: null,
     pixelLayout: null,
-    displayAffinity: [],
     fontSubstitutes: [],
-    infinalityGammaCorrection: [0, 100],
-    infinalityFilterParams: [11, 22, 38, 22, 11],
   },
 };
 

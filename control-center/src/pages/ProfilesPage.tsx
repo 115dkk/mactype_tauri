@@ -77,7 +77,6 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
   } = useProfileDocument(t);
   const [activeGroup, setActiveGroup] = useState<GroupId>("basic");
   const [activeWizardStep, setActiveWizardStep] = useState<WizardStepId>("rendering");
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [installedFonts, setInstalledFonts] = useState<ReadonlyArray<string>>([]);
   const [fontFace, setFontFace] = useState("Segoe UI");
   const [query, setQuery] = useState("");
@@ -123,11 +122,10 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
     const needle = query.trim().toLocaleLowerCase();
     return settingsSchema.filter((setting) => {
       if (!needle && setting.group !== activeGroup) return false;
-      if (!needle && setting.advanced && !showAdvanced) return false;
       const localized = `${t(settingMessageKey(setting.id, "label"))} ${t(settingMessageKey(setting.id, "description"))} ${setting.key}`;
       return !needle || localized.toLocaleLowerCase().includes(needle);
     });
-  }, [activeGroup, query, showAdvanced, t]);
+  }, [activeGroup, query, t]);
 
   const showPreview = () => {
     previewPanelRef.current?.show();
@@ -157,7 +155,6 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
         <aside className="settings-index" aria-label={mode === "quick" ? t("wizard.progress") : t("profiles.sections")}>
           {mode === "advanced" && <label className="search-field"><Search aria-hidden="true" size={16} /><span className="sr-only">{t("profiles.search")}</span><input onChange={(event) => setQuery(event.target.value)} placeholder={t("profiles.search")} type="search" value={query} /></label>}
           <ul>{mode === "quick" ? wizardStepIds.map((step, index) => <li key={step}><button data-selected={activeWizardStep === step} onClick={() => setActiveWizardStep(step)} type="button"><span className="settings-step" aria-hidden="true">{index + 1}</span><span>{t(`wizard.${step}`)}</span></button></li>) : groups.map((group) => <li key={group.id}><button data-selected={!query && activeGroup === group.id} onClick={() => { setActiveGroup(group.id); setQuery(""); }} type="button"><span>{group.label}</span></button></li>)}</ul>
-          {mode === "advanced" && <label className="checkbox-row"><input checked={showAdvanced} onChange={(event) => setShowAdvanced(event.target.checked)} type="checkbox" /> {t("profiles.showAdvanced")}</label>}
         </aside>
 
         <div className="settings-workspace">

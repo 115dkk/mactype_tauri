@@ -200,25 +200,7 @@ impl ProfileDocument {
             rendered.pixel_layout,
             "advanced:pixelLayout",
         );
-        self.set_raw_value(
-            "General",
-            "DisplayAffinity",
-            rendered.display_affinity,
-            "advanced:displayAffinity",
-        );
         self.replace_list_section("FontSubstitutes", rendered.font_substitutes);
-        self.set_raw_value(
-            "Infinality",
-            "INFINALITY_FT_GAMMA_CORRECTION",
-            Some(rendered.infinality_gamma_correction),
-            "advanced:infinalityGammaCorrection",
-        );
-        self.set_raw_value(
-            "Infinality",
-            "INFINALITY_FT_FILTER_PARAMS",
-            Some(rendered.infinality_filter_params),
-            "advanced:infinalityFilterParams",
-        );
         Ok(())
     }
 

@@ -216,30 +216,11 @@ impl ProfileDocument {
     }
 
     fn advanced(&self) -> AdvancedProfile {
-        let parse_or = |key: &str, length: usize, default: &[i32]| {
-            self.parse_vector("Infinality", key, length)
-                .unwrap_or_else(|| default.to_vec())
-        };
         AdvancedProfile {
             shadow: self.shadow(),
             lcd_filter_weight: self.parse_vector("General", "LcdFilterWeight", 5),
             pixel_layout: self.parse_vector("General", "PixelLayout", 6),
-            display_affinity: self
-                .raw_value("General", "DisplayAffinity")
-                .map(|value| {
-                    value
-                        .split(',')
-                        .filter_map(|part| part.trim().parse().ok())
-                        .collect()
-                })
-                .unwrap_or_default(),
             font_substitutes: self.list_entries("FontSubstitutes"),
-            infinality_gamma_correction: parse_or("INFINALITY_FT_GAMMA_CORRECTION", 2, &[0, 100]),
-            infinality_filter_params: parse_or(
-                "INFINALITY_FT_FILTER_PARAMS",
-                5,
-                &[11, 22, 38, 22, 11],
-            ),
         }
     }
 

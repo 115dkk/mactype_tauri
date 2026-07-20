@@ -582,6 +582,9 @@ test("small degraded states stay in Details while failed configuration is action
 
 test("outdated services upgrade while only failed current services repair", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=outdated", { waitUntil: "networkidle" });
+  const summary = page.locator("[data-service-summary]");
+  await expect(summary).toContainText("Update required");
+  await expect(summary.getByRole("button", { name: "Upgrade service" })).toBeEnabled();
   await openServiceDetails(page);
   const outdated = page.locator('[data-service-backend="open-source"]');
   await expect(outdated.getByRole("button", { name: "Upgrade service" })).toBeEnabled();
@@ -615,6 +618,10 @@ test("a running unverified service remains stoppable without claiming it is inac
 
 test("a running profile mismatch remains stoppable and identifies the mismatched generation", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=profile-mismatch", { waitUntil: "networkidle" });
+  const summary = page.locator("[data-service-summary]");
+  await expect(summary).toContainText("Service running with a different profile");
+  await expect(summary).toContainText("The running generation does not match the profile expected by Control Center.");
+  await expect(summary.getByRole("button", { name: "Stop" })).toBeEnabled();
   await openServiceDetails(page);
 
   const openService = page.locator('[data-service-backend="open-source"]');
@@ -626,6 +633,10 @@ test("a running profile mismatch remains stoppable and identifies the mismatched
 
 test("AppInit conflict preserves the backend-authorized recovery stop", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=legacy-conflict&legacy=migration-available&raw-active=1", { waitUntil: "networkidle" });
+  const summary = page.locator("[data-service-summary]");
+  await expect(summary).toContainText("Service running while AppInit conflicts");
+  await expect(summary).toContainText("AppInit registry mode prevents a verified system state");
+  await expect(summary.getByRole("button", { name: "Stop" })).toBeEnabled();
   await openServiceDetails(page);
 
   const openService = page.locator('[data-service-backend="open-source"]');
@@ -644,9 +655,17 @@ test("AppInit conflict preserves the backend-authorized recovery stop", async ({
   await expect(legacy.getByRole("button", { name: "Remove legacy service" })).toBeDisabled();
 });
 
+test("AppInit remains prominent when there is no safe automatic recovery action", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=legacy-conflict&service-runtime=stopped", { waitUntil: "networkidle" });
+
+  const summary = page.locator("[data-service-summary]");
+  await expect(summary).toContainText("AppInit registry mode is active, so service installation and startup are blocked.");
+  await expect(summary.locator("[data-prominent-exception]")).toHaveAttribute("data-kind", "appinit-conflict");
+  await expect(summary.getByRole("button")).toHaveCount(0);
+});
+
 test("trusted MacTray and autostart conflicts are resolved in the required order", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy-tray=trusted-current&legacy-startup=hkcu-run", { waitUntil: "networkidle" });
-  await openServiceDetails(page);
 
   const conflict = page.locator("[data-legacy-tray-conflict]");
   const summaryInstall = page.locator("[data-service-summary]").getByRole("button", { name: "Install service" });
@@ -654,13 +673,13 @@ test("trusted MacTray and autostart conflicts are resolved in the required order
   await expect(conflict.getByRole("button", { name: "Exit MacTray" })).toBeEnabled();
   await expect(conflict.getByRole("button", { name: "Check again" })).toBeEnabled();
   await expect(conflict.getByRole("button", { name: "Disable MacTray autostart" })).toHaveCount(0);
-  await expect(summaryInstall).toBeDisabled();
+  await expect(summaryInstall).toHaveCount(0);
 
   await conflict.getByRole("button", { name: "Exit MacTray" }).click();
   await expect(conflict).toContainText("MacTray autostart must be disabled");
   await expect(conflict.getByRole("button", { name: "Exit MacTray" })).toHaveCount(0);
   await expect(conflict.getByRole("button", { name: "Disable MacTray autostart" })).toBeEnabled();
-  await expect(summaryInstall).toBeDisabled();
+  await expect(summaryInstall).toHaveCount(0);
 
   await conflict.getByRole("button", { name: "Disable MacTray autostart" }).click();
   await expect(page.locator("[data-legacy-tray-conflict]")).toHaveCount(0);
@@ -674,19 +693,43 @@ for (const fixture of [
 ] as const) {
   test(`${fixture[0]} MacTray state remains fail-closed without an exit action`, async ({ page }) => {
     await page.goto(`/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy-tray=${fixture[0]}`, { waitUntil: "networkidle" });
-    await openServiceDetails(page);
 
     const conflict = page.locator("[data-legacy-tray-conflict]");
     const summaryInstall = page.locator("[data-service-summary]").getByRole("button", { name: "Install service" });
     await expect(conflict).toContainText(fixture[1]);
     await expect(conflict.getByRole("button", { name: "Exit MacTray" })).toHaveCount(0);
     await expect(conflict.getByRole("button", { name: "Check again" })).toBeEnabled();
-    await expect(summaryInstall).toBeDisabled();
+    await expect(summaryInstall).toHaveCount(0);
+  });
+}
+
+for (const fixture of [
+  ["hkcu-run", "MacTray autostart must be disabled", "Disable MacTray autostart"],
+  ["untrusted", "A MacTray autostart entry could not be trusted", null],
+  ["unknown", "MacTray autostart status is unavailable", null],
+] as const) {
+  test(`${fixture[0]} MacTray autostart state is prominent and fail-closed`, async ({ page }) => {
+    await page.goto(`/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy-startup=${fixture[0]}`, { waitUntil: "networkidle" });
+
+    const summary = page.locator("[data-service-summary]");
+    const conflict = summary.locator("[data-legacy-tray-conflict]");
+    await expect(conflict).toContainText(fixture[1]);
+    await expect(conflict.getByRole("button", { name: "Check again" })).toBeEnabled();
+    await expect(conflict.getByRole("button", { name: "Exit MacTray" })).toHaveCount(0);
+    if (fixture[2]) await expect(conflict.getByRole("button", { name: fixture[2] })).toBeEnabled();
+    else await expect(conflict.getByRole("button", { name: "Disable MacTray autostart" })).toHaveCount(0);
+    await expect(summary.getByRole("button", { name: "Install service" })).toHaveCount(0);
   });
 }
 
 test("a running new service with a legacy tray conflict offers only the verified stop", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=ready&legacy-tray=trusted-current", { waitUntil: "networkidle" });
+  const summary = page.locator("[data-service-summary]");
+  const conflict = summary.locator("[data-legacy-tray-conflict]");
+  await expect(conflict).toContainText("Existing MacTray is running");
+  await expect(conflict.getByRole("button", { name: "Check again" })).toBeEnabled();
+  await expect(conflict.getByRole("button", { name: "Exit MacTray" })).toBeEnabled();
+  await expect(summary.getByRole("button", { name: "Stop" })).toHaveCount(0);
   await openServiceDetails(page);
 
   const openService = page.locator('[data-service-backend="open-source"]');
@@ -703,6 +746,14 @@ test("a running new service with a legacy tray conflict offers only the verified
 for (const legacyState of ["running", "stopped", "start-pending", "stop-pending", "paused", "unknown", "continue-pending", "pause-pending"] as const) {
   test(`legacy migration requires a stable ${legacyState} service`, async ({ page }) => {
     await page.goto(`/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy=migration-available&legacy-state=${legacyState}`, { waitUntil: "networkidle" });
+    const summary = page.locator("[data-service-summary]");
+    if (legacyState === "running" || legacyState === "stopped") {
+      await expect(summary).toContainText("Legacy MacTray was detected.");
+      await expect(summary.getByRole("button", { name: "Migrate" })).toBeEnabled();
+    } else {
+      await expect(summary).toContainText("A legacy MacTray service must be resolved first");
+      await expect(summary.getByRole("button")).toHaveCount(0);
+    }
     await openServiceDetails(page);
 
     const migrate = page.locator('[data-service-backend="legacy-mactray"]').getByRole("button", { name: "Migrate" });
@@ -710,6 +761,30 @@ for (const legacyState of ["running", "stopped", "start-pending", "stop-pending"
     else await expect(migrate).toBeDisabled();
   });
 }
+
+test("a foreign same-name service is prominent without exposing an unsafe action", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=foreign-service", { waitUntil: "networkidle" });
+
+  const summary = page.locator("[data-service-summary]");
+  await expect(summary).toContainText("A service with the same name has an unexpected configuration");
+  await expect(summary.locator("[data-prominent-exception]")).toHaveAttribute("data-kind", "foreign-service");
+  await expect(summary.getByRole("button")).toHaveCount(0);
+  await expect(page.getByText("Manage the new service", { exact: true })).toBeHidden();
+});
+
+test("a foreign legacy service and pending removal cannot hide in Details", async ({ page }) => {
+  const summary = page.locator("[data-service-summary]");
+
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy=foreign", { waitUntil: "networkidle" });
+  await expect(summary).toContainText("A service with the same name has an unexpected configuration");
+  await expect(summary.locator("[data-prominent-exception]")).toHaveAttribute("data-kind", "legacy-service");
+  await expect(summary.getByRole("button")).toHaveCount(0);
+
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=delete-pending", { waitUntil: "networkidle" });
+  await expect(summary).toContainText("Removal pending");
+  await expect(summary.locator("[data-prominent-exception]")).toHaveAttribute("data-kind", "removal-pending");
+  await expect(summary.getByRole("button")).toHaveCount(0);
+});
 
 for (const fixture of ["ready", "degraded", "profile-mismatch", "legacy-conflict", "migration-available", "foreign-service"]) {
   test(`open service gallery renders ${fixture} without claiming SCM running is ready`, async ({ page }, testInfo) => {

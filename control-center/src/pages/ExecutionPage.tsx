@@ -254,26 +254,58 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
             <dd>{serviceSummary.tone === "normal" ? <Check className="success" aria-hidden="true" size={18} /> : <AlertTriangle className="warning" aria-hidden="true" size={18} />}{t(serviceSummary.statusKey)}</dd>
           </div>
         </dl>
-        {executionView.canMigrateLegacy && (
-          <div className="service-summary-notice" data-kind="migration"><ShieldAlert aria-hidden="true" size={19} /><span>{t("execution.legacyDetected")}</span></div>
+        {legacyTrayResolution ? (
+          <div className="legacy-tray-conflict" data-kind={legacyTrayResolution.kind} data-legacy-tray-conflict data-prominent-exception>
+            <div className="legacy-tray-conflict-copy">
+              <span className="legacy-tray-conflict-icon"><ShieldAlert aria-hidden="true" size={20} /></span>
+              <div>
+                <strong>{t(legacyTrayResolution.titleKey)}</strong>
+                <p>{t(legacyTrayResolution.descriptionKey)}</p>
+              </div>
+            </div>
+            <div className="legacy-tray-conflict-actions">
+              <button className="button secondary" disabled={legacyTrayBusy !== null} onClick={() => void refresh()} type="button">
+                <RefreshCw aria-hidden="true" size={16} /> {t("execution.legacyTrayCheckAgain")}
+              </button>
+              {legacyTrayResolution.canRequestExit && (
+                <button className="button primary" disabled={legacyTrayBusy !== null} onClick={() => void exitLegacyTray()} type="button">
+                  <LogOut aria-hidden="true" size={16} /> {t("execution.legacyTrayExit")}
+                </button>
+              )}
+              {legacyTrayResolution.canDisableStartup && (
+                <button className="button primary" disabled={legacyTrayBusy !== null} onClick={() => void disableLegacyTrayStartup()} type="button">
+                  <PowerOff aria-hidden="true" size={16} /> {t("execution.legacyTrayDisableAutostart")}
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <>
+            {serviceSummary.notice && (
+              <div className="service-summary-notice" data-kind={serviceSummary.notice.kind} data-prominent-exception>
+                {serviceSummary.notice.kind === "repair" ? <Wrench aria-hidden="true" size={19} /> : <ShieldAlert aria-hidden="true" size={19} />}
+                <div className="service-summary-notice-copy">
+                  <strong>{t(serviceSummary.notice.titleKey)}</strong>
+                  {serviceSummary.notice.descriptionKey && <p>{t(serviceSummary.notice.descriptionKey)}</p>}
+                </div>
+              </div>
+            )}
+            <div className="service-summary-actions">
+              {serviceSummary.actions.map((action) => (
+                <button
+                  className={`button ${action.tone === "primary" ? "primary" : "secondary"}${action.tone === "danger" ? " danger" : ""}`}
+                  disabled={!action.enabled}
+                  key={action.command}
+                  onClick={() => runSummaryAction(action.command)}
+                  ref={action.command === "migrate-from-legacy" ? migrationTriggerRef : undefined}
+                  type="button"
+                >
+                  {serviceBusy === action.command ? t("execution.serviceWorking") : t(action.labelKey)}
+                </button>
+              ))}
+            </div>
+          </>
         )}
-        {executionView.serviceNeedsRepair && (
-          <div className="service-summary-notice" data-kind="repair"><Wrench aria-hidden="true" size={19} /><span>{t("execution.repairRequired")}</span></div>
-        )}
-        <div className="service-summary-actions">
-          {serviceSummary.actions.map((action) => (
-            <button
-              className={`button ${action.tone === "primary" ? "primary" : "secondary"}${action.tone === "danger" ? " danger" : ""}`}
-              disabled={!action.enabled}
-              key={action.command}
-              onClick={() => runSummaryAction(action.command)}
-              ref={action.command === "migrate-from-legacy" ? migrationTriggerRef : undefined}
-              type="button"
-            >
-              {serviceBusy === action.command ? t("execution.serviceWorking") : t(action.labelKey)}
-            </button>
-          ))}
-        </div>
       </section>
 
       <details className="service-details">
@@ -317,32 +349,6 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
 
       <section className="section-block" aria-labelledby="system-title">
         <div className="section-heading"><div><h2 id="system-title">{t("execution.systemTitle")}</h2><p>{t("execution.systemDescription")}</p></div></div>
-        {legacyTrayResolution && (
-          <div className="legacy-tray-conflict" data-kind={legacyTrayResolution.kind} data-legacy-tray-conflict>
-            <div className="legacy-tray-conflict-copy">
-              <span className="legacy-tray-conflict-icon"><ShieldAlert aria-hidden="true" size={20} /></span>
-              <div>
-                <strong>{t(legacyTrayResolution.titleKey)}</strong>
-                <p>{t(legacyTrayResolution.descriptionKey)}</p>
-              </div>
-            </div>
-            <div className="legacy-tray-conflict-actions">
-              <button className="button secondary" disabled={legacyTrayBusy !== null} onClick={() => void refresh()} type="button">
-                <RefreshCw aria-hidden="true" size={16} /> {t("execution.legacyTrayCheckAgain")}
-              </button>
-              {legacyTrayResolution.canRequestExit && (
-                <button className="button primary" disabled={legacyTrayBusy !== null} onClick={() => void exitLegacyTray()} type="button">
-                  <LogOut aria-hidden="true" size={16} /> {t("execution.legacyTrayExit")}
-                </button>
-              )}
-              {legacyTrayResolution.canDisableStartup && (
-                <button className="button primary" disabled={legacyTrayBusy !== null} onClick={() => void disableLegacyTrayStartup()} type="button">
-                  <PowerOff aria-hidden="true" size={16} /> {t("execution.legacyTrayDisableAutostart")}
-                </button>
-              )}
-            </div>
-          </div>
-        )}
         <div className="open-service-card" data-service-backend="open-source">
         <div className="system-injection-control" data-active={systemInjectionAction.state === "active"} data-state={systemInjectionAction.state}>
           <div className="system-injection-state">

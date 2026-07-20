@@ -98,9 +98,8 @@ function projectServiceSummary(
       && service?.activeProfileDigest
       && service.activeProfileDigest !== status.expectedProfileDigest,
   );
-  const foreignOrInaccessibleService = service?.backend === "foreign"
-    || service?.installation === "invalid"
-    || service?.installation === "inaccessible";
+  const foreignService = service?.backend === "foreign" || service?.installation === "invalid";
+  const inaccessibleService = service?.installation === "inaccessible";
   const serviceRemovalPending = service?.installation === "delete-pending";
   const modeKey: MessageKey = status?.registryModeDetected
     ? "execution.modeAppInit"
@@ -120,7 +119,8 @@ function projectServiceSummary(
     || legacyTrayConflict
     || legacyBlocksActivation
     || profileMismatch
-    || foreignOrInaccessibleService
+    || foreignService
+    || inaccessibleService
     || serviceRemovalPending
     || service?.installation === "outdated"
   ) {
@@ -162,10 +162,10 @@ function projectServiceSummary(
             : "execution.systemLegacyServiceMigrateTitle",
           descriptionKey: "execution.systemLegacyServiceMigrateDescription",
         };
-  } else if (!legacyTrayConflict && foreignOrInaccessibleService) {
+  } else if (!legacyTrayConflict && (foreignService || inaccessibleService)) {
     notice = {
       kind: "foreign-service",
-      titleKey: "execution.serviceForeign",
+      titleKey: inaccessibleService ? "execution.installation.inaccessible" : "execution.serviceForeign",
     };
   } else if (!legacyTrayConflict && serviceRemovalPending) {
     notice = {
@@ -198,7 +198,7 @@ function projectServiceSummary(
   ): ServiceSummaryAction => ({ command, enabled: idle && actionEnabled, labelKey, tone: actionTone });
 
   let actions: ReadonlyArray<ServiceSummaryAction> = [];
-  if (legacyTrayConflict || foreignOrInaccessibleService || serviceRemovalPending) {
+  if (legacyTrayConflict || foreignService || inaccessibleService || serviceRemovalPending) {
     actions = [];
   } else if (canMigrateLegacy) {
     actions = [action("migrate-from-legacy", "execution.migrateLegacy", true)];

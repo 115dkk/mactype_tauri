@@ -139,15 +139,25 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
   const profileMismatch = fixture === "profile-mismatch";
   const ready = fixture === "ready" || appInitConflict;
   const requestedServiceRuntime = query.get("service-runtime") ?? fixture;
-  const defaultServiceRuntime: ServiceRuntimeState = ready || fixture === "degraded" || profileMismatch
+  const defaultServiceRuntime: ServiceRuntimeState = ready
+    || fixture === "degraded"
+    || fixture === "initializing"
+    || fixture === "unknown-health"
+    || profileMismatch
     ? "running"
     : "stopped";
   const serviceRuntime = serviceRuntimeValues.find((runtime) => runtime === requestedServiceRuntime)
     ?? defaultServiceRuntime;
   const serviceStable = serviceRuntime === "running" || serviceRuntime === "stopped";
-  const serviceBackend = fixture === "foreign-service" ? "foreign" : "open-source";
+  const serviceBackend = fixture === "foreign-service"
+    ? "foreign"
+    : fixture === "inaccessible-service"
+      ? "none"
+      : "open-source";
   const serviceInstallation = fixture === "foreign-service"
     ? "invalid"
+    : fixture === "inaccessible-service"
+      ? "inaccessible"
     : fixture === "delete-pending"
       ? "delete-pending"
     : fixture === "migration-available"
@@ -183,8 +193,16 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
       backend: serviceBackend,
       installation: serviceInstallation,
       runtime: serviceRuntime,
-      health: ready ? "ready" : fixture === "degraded" ? "degraded" : fixture === "failed" ? "failed" : "unknown",
-      binaryPath: fixture === "migration-available"
+      health: ready
+        ? "ready"
+        : fixture === "degraded"
+          ? "degraded"
+          : fixture === "initializing"
+            ? "initializing"
+            : fixture === "failed"
+              ? "failed"
+              : "unknown",
+      binaryPath: fixture === "migration-available" || fixture === "inaccessible-service"
         ? null
         : fixture === "foreign-service"
           ? "C:\\Program Files\\Unknown\\service.exe"

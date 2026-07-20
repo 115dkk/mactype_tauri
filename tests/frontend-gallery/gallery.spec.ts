@@ -31,6 +31,54 @@ async function openServiceDetails(page: import("@playwright/test").Page) {
   }
 }
 
+const executionStateGallery = [
+  { id: "ready", query: "system-service=ready", expected: "Ready" },
+  { id: "degraded", query: "system-service=degraded", expected: "Running" },
+  { id: "initializing", query: "system-service=initializing", expected: "Running" },
+  { id: "health-unknown", query: "system-service=unknown-health", expected: "Running" },
+  { id: "stopped", query: "system-service=ready&service-runtime=stopped", expected: "Stopped" },
+  { id: "starting", query: "system-service=ready&service-runtime=start-pending", expected: "Starting" },
+  { id: "stopping", query: "system-service=ready&service-runtime=stop-pending", expected: "Stopping" },
+  { id: "paused", query: "system-service=ready&service-runtime=paused", expected: "Paused" },
+  { id: "runtime-unknown", query: "system-service=ready&service-runtime=unknown", expected: "Unknown state" },
+  { id: "failed", query: "system-service=failed", expected: "Service configuration needs repair." },
+  { id: "outdated", query: "system-service=outdated", expected: "Update required" },
+  { id: "profile-mismatch", query: "system-service=profile-mismatch", expected: "Service running with a different profile" },
+  { id: "not-installed", query: "system-service=migration-available", expected: "Install service" },
+  { id: "foreign-service", query: "system-service=foreign-service", expected: "unexpected configuration" },
+  { id: "inaccessible-service", query: "system-service=inaccessible-service", expected: "Inaccessible" },
+  { id: "removal-pending", query: "system-service=delete-pending", expected: "Removal pending" },
+  { id: "appinit-running", query: "system-service=legacy-conflict&legacy=migration-available&raw-active=1", expected: "Service running while AppInit conflicts" },
+  { id: "appinit-stopped", query: "system-service=legacy-conflict&service-runtime=stopped", expected: "AppInit registry mode is active" },
+  { id: "legacy-migration-running", query: "system-service=migration-available&legacy=migration-available&legacy-state=running", expected: "Legacy MacTray was detected." },
+  { id: "legacy-migration-stopped", query: "system-service=migration-available&legacy=migration-available&legacy-state=stopped", expected: "Legacy MacTray was detected." },
+  { id: "legacy-transition", query: "system-service=migration-available&legacy=migration-available&legacy-state=start-pending", expected: "A legacy MacTray service must be resolved first" },
+  { id: "legacy-foreign", query: "system-service=migration-available&legacy=foreign", expected: "unexpected configuration" },
+  { id: "mactray-current-session", query: "system-service=migration-available&legacy-tray=trusted-current", expected: "Existing MacTray is running" },
+  { id: "mactray-other-session", query: "system-service=migration-available&legacy-tray=trusted-other", expected: "MacTray is running in another user session" },
+  { id: "mactray-untrusted-process", query: "system-service=migration-available&legacy-tray=untrusted", expected: "A same-named process could not be trusted" },
+  { id: "mactray-process-unknown", query: "system-service=migration-available&legacy-tray=unknown", expected: "MacTray tray mode status is unavailable" },
+  { id: "mactray-autostart", query: "system-service=migration-available&legacy-startup=hkcu-run", expected: "MacTray autostart must be disabled" },
+  { id: "mactray-autostart-untrusted", query: "system-service=migration-available&legacy-startup=untrusted", expected: "A MacTray autostart entry could not be trusted" },
+  { id: "mactray-autostart-unknown", query: "system-service=migration-available&legacy-startup=unknown", expected: "MacTray autostart status is unavailable" },
+  { id: "native-running-with-mactray", query: "system-service=ready&legacy-tray=trusted-current", expected: "Existing MacTray is running" },
+] as const;
+
+for (const state of executionStateGallery) {
+  test(`execution state gallery captures ${state.id}`, async ({ page }, testInfo) => {
+    await page.goto(`/?view=execution&gallery=1&lang=en&${state.query}`, { waitUntil: "networkidle" });
+
+    const summary = page.locator("[data-service-summary]");
+    await expect(summary).toContainText(state.expected);
+    await expect(page.locator(".service-details")).not.toHaveAttribute("open", "");
+    expect(await overflowingElements(page)).toEqual([]);
+    await page.screenshot({
+      path: path.join(galleryRoot, `${testInfo.project.name}-execution-state-${state.id}-en.png`),
+      fullPage: true,
+    });
+  });
+}
+
 for (const view of galleryViews) {
   for (const locale of galleryLocales) {
     test(`${view.id} renders fully in ${locale.id}`, async ({ page }, testInfo) => {
@@ -744,7 +792,7 @@ test("a running new service with a legacy tray conflict offers only the verified
 });
 
 for (const legacyState of ["running", "stopped", "start-pending", "stop-pending", "paused", "unknown", "continue-pending", "pause-pending"] as const) {
-  test(`legacy migration requires a stable ${legacyState} service`, async ({ page }) => {
+  test(`legacy migration requires a stable ${legacyState} service`, async ({ page }, testInfo) => {
     await page.goto(`/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy=migration-available&legacy-state=${legacyState}`, { waitUntil: "networkidle" });
     const summary = page.locator("[data-service-summary]");
     if (legacyState === "running" || legacyState === "stopped") {
@@ -759,6 +807,7 @@ for (const legacyState of ["running", "stopped", "start-pending", "stop-pending"
     const migrate = page.locator('[data-service-backend="legacy-mactray"]').getByRole("button", { name: "Migrate" });
     if (legacyState === "running" || legacyState === "stopped") await expect(migrate).toBeEnabled();
     else await expect(migrate).toBeDisabled();
+    await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-execution-detail-legacy-${legacyState}-en.png`), fullPage: true });
   });
 }
 
@@ -786,7 +835,20 @@ test("a foreign legacy service and pending removal cannot hide in Details", asyn
   await expect(summary.getByRole("button")).toHaveCount(0);
 });
 
-for (const fixture of ["ready", "degraded", "profile-mismatch", "legacy-conflict", "migration-available", "foreign-service"]) {
+for (const fixture of [
+  "ready",
+  "degraded",
+  "initializing",
+  "unknown-health",
+  "failed",
+  "outdated",
+  "profile-mismatch",
+  "legacy-conflict",
+  "migration-available",
+  "foreign-service",
+  "inaccessible-service",
+  "delete-pending",
+]) {
   test(`open service gallery renders ${fixture} without claiming SCM running is ready`, async ({ page }, testInfo) => {
     await page.goto(`/?view=execution&gallery=1&lang=en&system-service=${fixture}`, { waitUntil: "networkidle" });
     await openServiceDetails(page);
@@ -805,13 +867,14 @@ for (const fixture of ["ready", "degraded", "profile-mismatch", "legacy-conflict
 }
 
 for (const unstableState of ["start-pending", "stop-pending", "paused", "unknown"]) {
-  test(`new service mutations stay disabled while ${unstableState}`, async ({ page }) => {
-    await page.goto(`/?view=execution&gallery=1&lang=en&system-service=outdated&service-runtime=${unstableState}&legacy=migration-available`, { waitUntil: "networkidle" });
+  test(`new service mutations stay disabled while ${unstableState}`, async ({ page }, testInfo) => {
+    await page.goto(`/?view=execution&gallery=1&lang=en&system-service=ready&service-runtime=${unstableState}`, { waitUntil: "networkidle" });
     await openServiceDetails(page);
 
-    const mutationButtons = page.locator('[data-service-backend="open-source"] .system-injection-action, [data-service-backend="open-source"] .service-actions button, [data-service-backend="legacy-mactray"] .service-actions button');
+    const mutationButtons = page.locator('[data-service-backend="open-source"] .system-injection-action, [data-service-backend="open-source"] .service-actions button');
     await expect(mutationButtons).not.toHaveCount(0);
     for (const button of await mutationButtons.all()) await expect(button).toBeDisabled();
+    await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-execution-detail-runtime-${unstableState}-en.png`), fullPage: true });
   });
 }
 

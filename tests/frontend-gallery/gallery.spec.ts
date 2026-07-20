@@ -649,21 +649,22 @@ test("trusted MacTray and autostart conflicts are resolved in the required order
   await openServiceDetails(page);
 
   const conflict = page.locator("[data-legacy-tray-conflict]");
+  const summaryInstall = page.locator("[data-service-summary]").getByRole("button", { name: "Install service" });
   await expect(conflict).toContainText("Existing MacTray is running");
   await expect(conflict.getByRole("button", { name: "Exit MacTray" })).toBeEnabled();
   await expect(conflict.getByRole("button", { name: "Check again" })).toBeEnabled();
   await expect(conflict.getByRole("button", { name: "Disable MacTray autostart" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Install service" })).toBeDisabled();
+  await expect(summaryInstall).toBeDisabled();
 
   await conflict.getByRole("button", { name: "Exit MacTray" }).click();
   await expect(conflict).toContainText("MacTray autostart must be disabled");
   await expect(conflict.getByRole("button", { name: "Exit MacTray" })).toHaveCount(0);
   await expect(conflict.getByRole("button", { name: "Disable MacTray autostart" })).toBeEnabled();
-  await expect(page.getByRole("button", { name: "Install service" })).toBeDisabled();
+  await expect(summaryInstall).toBeDisabled();
 
   await conflict.getByRole("button", { name: "Disable MacTray autostart" }).click();
   await expect(page.locator("[data-legacy-tray-conflict]")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Install service" })).toBeEnabled();
+  await expect(summaryInstall).toBeEnabled();
 });
 
 for (const fixture of [
@@ -676,10 +677,11 @@ for (const fixture of [
     await openServiceDetails(page);
 
     const conflict = page.locator("[data-legacy-tray-conflict]");
+    const summaryInstall = page.locator("[data-service-summary]").getByRole("button", { name: "Install service" });
     await expect(conflict).toContainText(fixture[1]);
     await expect(conflict.getByRole("button", { name: "Exit MacTray" })).toHaveCount(0);
     await expect(conflict.getByRole("button", { name: "Check again" })).toBeEnabled();
-    await expect(page.getByRole("button", { name: "Install service" })).toBeDisabled();
+    await expect(summaryInstall).toBeDisabled();
   });
 }
 

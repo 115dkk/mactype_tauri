@@ -173,8 +173,10 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
     : fallbackGalleryProfilePath;
   const legacyRequest = query.get("legacy");
   const legacyForeign = legacyRequest === "foreign";
+  const legacyUncertain = legacyRequest === "inaccessible";
   const legacyRequested = legacyRequest === "migration-available"
     || legacyForeign
+    || legacyUncertain
     || fixture === "legacy-conflict";
   const requestedLegacyState = query.get("legacy-state");
   const legacyState = legacyRuntimeValues.find((state) => state === requestedLegacyState) ?? "running";
@@ -222,13 +224,22 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
     },
     legacyMacTray: legacyRequested ? {
       ...galleryLegacyService,
-      presence: legacyForeign ? "foreign" : galleryLegacyService.presence,
-      state: legacyState,
+      presence: legacyForeign
+        ? "foreign"
+        : legacyUncertain
+          ? "inaccessible"
+          : galleryLegacyService.presence,
+      state: legacyUncertain ? "unknown" : legacyState,
+      win32Error: legacyUncertain ? 5 : null,
       registryConflict: appInitConflict,
-      trustedBinaryAvailable: !legacyForeign,
+      trustedBinaryAvailable: !legacyForeign && !legacyUncertain,
       canRemove: false,
-      canStop: !legacyForeign && !appInitConflict && legacyState === "running",
-      migrationAvailable: !legacyRetired && !legacyForeign && conflictFreeSystemModesSupported && legacyStable,
+      canStop: !legacyForeign && !legacyUncertain && !appInitConflict && legacyState === "running",
+      migrationAvailable: !legacyRetired
+        && !legacyForeign
+        && !legacyUncertain
+        && conflictFreeSystemModesSupported
+        && legacyStable,
       blocksActivation: !legacyRetired,
     } : null,
     legacyTray,

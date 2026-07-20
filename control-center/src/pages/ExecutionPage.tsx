@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, FileCode2, FolderOpen, LogOut, Play, Power, PowerOff, RefreshCw, ShieldAlert, Trash2, UserPlus } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, FileCode2, FolderOpen, LogOut, Play, Power, PowerOff, RefreshCw, ShieldAlert, Trash2, UserPlus, Wrench } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { ExecutionStatus, SystemServiceAction } from "../app/model";
 import { projectExecutionView } from "../app/executionViewModel";
@@ -228,13 +228,58 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
   const service = executionView.status?.systemService;
   const legacyService = executionView.status?.legacyMacTray;
   const legacyTrayResolution = executionView.legacyTrayResolution;
+  const serviceSummary = executionView.serviceSummary;
+  const activeProfileName = status?.activeProfile?.split(/[\\/]/).pop() ?? t("execution.profileNotApplied");
+
+  const runSummaryAction = (command: SystemServiceAction) => {
+    if (command === "migrate-from-legacy") {
+      setMigrationConfirmationOpen(true);
+      return;
+    }
+    void manageService(command);
+  };
 
   return (
     <section className="page view-enter" aria-labelledby="execution-title">
       <header className="page-header">
         <div><h1 id="execution-title">{t("nav.execution")}</h1><p>{t("execution.subtitle")}</p></div>
-        <button className="button secondary" onClick={() => void refresh()} type="button"><RefreshCw aria-hidden="true" size={16} /> {t("execution.refresh")}</button>
       </header>
+
+      <section className="service-summary" data-state={serviceSummary.tone} data-service-summary>
+        <dl className="service-summary-grid">
+          <div><dt>{t("execution.summaryProfile")}</dt><dd><code title={status?.activeProfile ?? undefined}>{activeProfileName}</code></dd></div>
+          <div><dt>{t("execution.summaryMode")}</dt><dd>{t(serviceSummary.modeKey)}</dd></div>
+          <div>
+            <dt>{t("execution.summaryStatus")}</dt>
+            <dd>{serviceSummary.tone === "normal" ? <Check className="success" aria-hidden="true" size={18} /> : <AlertTriangle className="warning" aria-hidden="true" size={18} />}{t(serviceSummary.statusKey)}</dd>
+          </div>
+        </dl>
+        {executionView.canMigrateLegacy && (
+          <div className="service-summary-notice" data-kind="migration"><ShieldAlert aria-hidden="true" size={19} /><span>{t("execution.legacyDetected")}</span></div>
+        )}
+        {executionView.serviceNeedsRepair && (
+          <div className="service-summary-notice" data-kind="repair"><Wrench aria-hidden="true" size={19} /><span>{t("execution.repairRequired")}</span></div>
+        )}
+        <div className="service-summary-actions">
+          {serviceSummary.actions.map((action) => (
+            <button
+              className={`button ${action.tone === "primary" ? "primary" : "secondary"}${action.tone === "danger" ? " danger" : ""}`}
+              disabled={!action.enabled}
+              key={action.command}
+              onClick={() => runSummaryAction(action.command)}
+              ref={action.command === "migrate-from-legacy" ? migrationTriggerRef : undefined}
+              type="button"
+            >
+              {serviceBusy === action.command ? t("execution.serviceWorking") : t(action.labelKey)}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <details className="service-details">
+        <summary><ChevronDown aria-hidden="true" size={18} /><span>{t("execution.details")}</span></summary>
+        <div className="service-details-content">
+      <div className="service-details-toolbar"><button className="button secondary" onClick={() => void refresh()} type="button"><RefreshCw aria-hidden="true" size={16} /> {t("execution.refresh")}</button></div>
 
       <section className="section-block" aria-labelledby="tray-title">
         <div className="section-heading"><div><h2 id="tray-title">{t("execution.trayTitle")}</h2><p>{t("execution.trayDescription")}</p></div></div>
@@ -355,13 +400,16 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
               {legacyService.presence === "foreign" && <p className="warning-text">{t("execution.serviceForeign")}</p>}
             </div>
             <div className="service-actions">
-              <button className="button secondary" disabled={!executionView.canMigrateLegacy} onClick={() => setMigrationConfirmationOpen(true)} ref={migrationTriggerRef} type="button">{serviceBusy === "migrate-from-legacy" ? t("execution.serviceWorking") : t("execution.migrateLegacy")}</button>
+              <button className="button secondary" disabled={!executionView.canMigrateLegacy} onClick={() => setMigrationConfirmationOpen(true)} type="button">{serviceBusy === "migrate-from-legacy" ? t("execution.serviceWorking") : t("execution.migrateLegacy")}</button>
               <button className="button secondary danger" disabled={!executionView.canRemoveLegacy} onClick={() => void manageService("remove-legacy")} type="button">{serviceBusy === "remove-legacy" ? t("execution.serviceWorking") : t("execution.removeLegacy")}</button>
             </div>
           </div>
         )}
         <div className="system-mode-note"><ShieldAlert aria-hidden="true" size={19} /><p>{status ? t("execution.systemNote") : t("execution.checking")}</p></div>
       </section>
+
+        </div>
+      </details>
 
       {message && <p className="success-message">{message}</p>}
       {error && <p className="inline-error"><AlertTriangle aria-hidden="true" size={15} /> {error}</p>}

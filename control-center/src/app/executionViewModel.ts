@@ -1,4 +1,4 @@
-import type { ExecutionStatus, LegacyMacTrayStatus, LegacyTrayStatus } from "./model";
+import type { ExecutionStatus, LegacyMacTrayStatus, LegacyTrayStatus, SystemServiceAction } from "./model";
 import type { MessageKey } from "../i18n/i18n";
 
 type SystemInjectionState = "loading" | "active" | "running-unverified" | "running-profile-mismatch" | "running-appinit-conflict" | "running-legacy-tray-conflict" | "legacy-service-migrate" | "inactive" | "unavailable";
@@ -30,12 +30,27 @@ export interface SystemInjectionPrimaryAction {
   labelKey: MessageKey;
 }
 
+export interface ServiceSummaryAction {
+  command: SystemServiceAction;
+  enabled: boolean;
+  labelKey: MessageKey;
+  tone: "primary" | "secondary" | "danger";
+}
+
+export interface ServiceSummary {
+  modeKey: MessageKey;
+  statusKey: MessageKey;
+  tone: "normal" | "attention" | "critical";
+  actions: ReadonlyArray<ServiceSummaryAction>;
+}
+
 export interface ExecutionViewModel {
   status: ExecutionStatus | null;
   profileMatches: boolean;
   serviceNeedsUpgrade: boolean;
   serviceNeedsRepair: boolean;
   serviceBinaryPath: string | null;
+  serviceSummary: ServiceSummary;
   systemInjectionAction: SystemInjectionPrimaryAction;
   legacyTrayResolution: LegacyTrayResolution | null;
   canInstall: boolean;
@@ -45,6 +60,74 @@ export interface ExecutionViewModel {
   canRemove: boolean;
   canMigrateLegacy: boolean;
   canRemoveLegacy: boolean;
+}
+
+function projectServiceSummary(
+  status: ExecutionStatus | null,
+  serviceBusy: string | null,
+  canInstall: boolean,
+  canStart: boolean,
+  canUpgrade: boolean,
+  canRepair: boolean,
+  canRemove: boolean,
+  canMigrateLegacy: boolean,
+): ServiceSummary {
+  const service = status?.systemService;
+  const idle = serviceBusy === null;
+  const modeKey: MessageKey = status?.registryModeDetected
+    ? "execution.modeAppInit"
+    : status?.legacyMacTray?.blocksActivation
+      ? "execution.modeLegacy"
+      : service?.backend === "open-source" && service.installation !== "absent"
+        ? "execution.modeNative"
+        : "execution.modeNone";
+
+  let statusKey: MessageKey = "execution.checking";
+  let tone: ServiceSummary["tone"] = "normal";
+  if (service?.health === "failed") {
+    statusKey = "execution.statusRepair";
+    tone = "critical";
+  } else if (status?.registryModeDetected || status?.legacyTray.conflict !== "clear") {
+    statusKey = "execution.statusAttention";
+    tone = "attention";
+  } else if (service?.runtime === "running") {
+    // A degraded report can be caused by one or two process-local misses. Keep
+    // that diagnostic in Details instead of turning the page summary into an alarm.
+    statusKey = status.systemInjectionActive ? "execution.statusReady" : "execution.statusRunning";
+  } else if (service?.runtime === "stopped") {
+    statusKey = "execution.serviceState.stopped";
+  } else if (service) {
+    statusKey = `execution.serviceState.${service.runtime}` as MessageKey;
+  }
+
+  const action = (
+    command: SystemServiceAction,
+    labelKey: MessageKey,
+    actionEnabled: boolean,
+    actionTone: ServiceSummaryAction["tone"] = "primary",
+  ): ServiceSummaryAction => ({ command, enabled: idle && actionEnabled, labelKey, tone: actionTone });
+
+  let actions: ReadonlyArray<ServiceSummaryAction> = [];
+  if (canMigrateLegacy) {
+    actions = [action("migrate-from-legacy", "execution.migrateLegacy", true)];
+  } else if (service?.health === "failed" && canRepair) {
+    actions = [action("repair", "execution.serviceRepair", true)];
+  } else if (service?.installation === "outdated") {
+    actions = [action("upgrade", "execution.serviceUpgrade", canUpgrade)];
+  } else if (service?.runtime === "running") {
+    actions = [action("stop", "execution.serviceStop", service.canStop, "secondary")];
+  } else if (service?.runtime === "stopped" && service.installation === "current") {
+    // With no alternative service to fall back to, stopping is a genuine fork:
+    // resume the service or remove it. Both choices belong at the same level.
+    actions = [
+      action("start", "execution.serviceStart", canStart),
+      action("remove", "execution.serviceRemove", canRemove, "danger"),
+    ];
+  } else if (service?.installation === "absent") {
+    actions = [action("install", "execution.serviceInstall", canInstall)];
+  }
+
+  return { modeKey, statusKey, tone, actions };
 }
 
 const systemInjectionCopy: Record<SystemInjectionState, { titleKey: MessageKey; descriptionKey: MessageKey }> = {
@@ -247,23 +330,39 @@ export function projectExecutionView(
       && !legacyTrayConflict,
   );
 
+  const canInstall = Boolean(idle && !legacyTrayConflict && !legacyBlocksActivation && service?.canInstall);
+  const canStart = Boolean(idle && !legacyTrayConflict && !legacyBlocksActivation && service?.canStart);
+  const canUpgrade = Boolean(idle && !legacyTrayConflict && service?.canUpgrade);
+  const canRepair = Boolean(idle && !legacyTrayConflict && service?.canRepair);
+  const canRemove = Boolean(idle && !legacyTrayConflict && service?.canRemove);
+  const canMigrateLegacy = Boolean(
+    idle && !legacyTrayConflict && legacy?.migrationAvailable && !legacyMigrationComplete
+  );
+
   return {
     status,
     profileMatches,
     serviceNeedsUpgrade: service?.installation === "outdated",
-    serviceNeedsRepair: service?.installation === "current"
-      && (service.health === "degraded" || service.health === "failed"),
+    serviceNeedsRepair: service?.installation === "current" && service.health === "failed",
     serviceBinaryPath: service?.installation === "absent" ? null : service?.binaryPath ?? null,
+    serviceSummary: projectServiceSummary(
+      status,
+      serviceBusy,
+      canInstall,
+      canStart,
+      canUpgrade,
+      canRepair,
+      canRemove,
+      canMigrateLegacy,
+    ),
     systemInjectionAction: projectSystemInjectionAction(status, serviceBusy, profileMatches),
     legacyTrayResolution: projectLegacyTrayResolution(status?.legacyTray),
-    canInstall: Boolean(idle && !legacyTrayConflict && !legacyBlocksActivation && service?.canInstall),
-    canStart: Boolean(idle && !legacyTrayConflict && !legacyBlocksActivation && service?.canStart),
-    canUpgrade: Boolean(idle && !legacyTrayConflict && service?.canUpgrade),
-    canRepair: Boolean(idle && !legacyTrayConflict && service?.canRepair),
-    canRemove: Boolean(idle && !legacyTrayConflict && service?.canRemove),
-    canMigrateLegacy: Boolean(
-      idle && !legacyTrayConflict && legacy?.migrationAvailable && !legacyMigrationComplete
-    ),
+    canInstall,
+    canStart,
+    canUpgrade,
+    canRepair,
+    canRemove,
+    canMigrateLegacy,
     canRemoveLegacy: Boolean(idle && !legacyTrayConflict && legacy?.canRemove),
   };
 }

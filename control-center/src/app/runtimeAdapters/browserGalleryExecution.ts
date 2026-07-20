@@ -67,7 +67,8 @@ function galleryLegacyTrayStatus(query: GalleryQuery): LegacyTrayStatus {
               },
             }
           : absentLegacyTrayProcess;
-  const startup: LegacyTrayStartupState = query.get("legacy-startup") === "hkcu-run"
+  const startupFixture = query.get("legacy-startup");
+  const startup: LegacyTrayStartupState = startupFixture === "hkcu-run"
     ? {
         state: "detected",
         entries: [{
@@ -76,7 +77,25 @@ function galleryLegacyTrayStatus(query: GalleryQuery): LegacyTrayStatus {
           targetPath: "C:\\Program Files\\MacType\\MacTray.exe",
         }],
       }
-    : absentLegacyTrayStartup;
+    : startupFixture === "untrusted"
+      ? {
+          state: "untrusted",
+          entries: [{
+            sourceKind: "current-user-run64",
+            displayName: "MacType",
+            targetPath: "C:\\Users\\Gallery\\Downloads\\MacTray.exe",
+          }],
+        }
+      : startupFixture === "unknown"
+        ? {
+            state: "unknown",
+            error: {
+              code: "legacy-tray-startup-unavailable",
+              message: "The MacTray autostart configuration could not be verified.",
+              win32_error: 5,
+            },
+          }
+        : absentLegacyTrayStartup;
   return createLegacyTrayStatus(process, startup);
 }
 
@@ -129,6 +148,8 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
   const serviceBackend = fixture === "foreign-service" ? "foreign" : "open-source";
   const serviceInstallation = fixture === "foreign-service"
     ? "invalid"
+    : fixture === "delete-pending"
+      ? "delete-pending"
     : fixture === "migration-available"
       ? "absent"
       : fixture === "outdated"

@@ -37,10 +37,27 @@ export interface ServiceSummaryAction {
   tone: "primary" | "secondary" | "danger";
 }
 
+export type ServiceSummaryNoticeKind =
+  | "appinit-conflict"
+  | "foreign-service"
+  | "legacy-service"
+  | "migration"
+  | "profile-mismatch"
+  | "repair"
+  | "removal-pending"
+  | "upgrade";
+
+export interface ServiceSummaryNotice {
+  kind: ServiceSummaryNoticeKind;
+  titleKey: MessageKey;
+  descriptionKey?: MessageKey;
+}
+
 export interface ServiceSummary {
   modeKey: MessageKey;
   statusKey: MessageKey;
   tone: "normal" | "attention" | "critical";
+  notice: ServiceSummaryNotice | null;
   actions: ReadonlyArray<ServiceSummaryAction>;
 }
 
@@ -74,9 +91,20 @@ function projectServiceSummary(
 ): ServiceSummary {
   const service = status?.systemService;
   const idle = serviceBusy === null;
+  const legacyTrayConflict = Boolean(status && status.legacyTray.conflict !== "clear");
+  const legacyBlocksActivation = legacyServiceBlocksActivation(status?.legacyMacTray);
+  const profileMismatch = Boolean(
+    status?.expectedProfileDigest
+      && service?.activeProfileDigest
+      && service.activeProfileDigest !== status.expectedProfileDigest,
+  );
+  const foreignOrInaccessibleService = service?.backend === "foreign"
+    || service?.installation === "invalid"
+    || service?.installation === "inaccessible";
+  const serviceRemovalPending = service?.installation === "delete-pending";
   const modeKey: MessageKey = status?.registryModeDetected
     ? "execution.modeAppInit"
-    : status?.legacyMacTray?.blocksActivation
+    : legacyBlocksActivation
       ? "execution.modeLegacy"
       : service?.backend === "open-source" && service.installation !== "absent"
         ? "execution.modeNative"
@@ -87,17 +115,79 @@ function projectServiceSummary(
   if (service?.health === "failed") {
     statusKey = "execution.statusRepair";
     tone = "critical";
-  } else if (status?.registryModeDetected || status?.legacyTray.conflict !== "clear") {
+  } else if (
+    status?.registryModeDetected
+    || legacyTrayConflict
+    || legacyBlocksActivation
+    || profileMismatch
+    || foreignOrInaccessibleService
+    || serviceRemovalPending
+    || service?.installation === "outdated"
+  ) {
     statusKey = "execution.statusAttention";
     tone = "attention";
   } else if (service?.runtime === "running") {
     // A degraded report can be caused by one or two process-local misses. Keep
     // that diagnostic in Details instead of turning the page summary into an alarm.
-    statusKey = status.systemInjectionActive ? "execution.statusReady" : "execution.statusRunning";
+    statusKey = status?.systemInjectionActive ? "execution.statusReady" : "execution.statusRunning";
   } else if (service?.runtime === "stopped") {
     statusKey = "execution.serviceState.stopped";
   } else if (service) {
     statusKey = `execution.serviceState.${service.runtime}` as MessageKey;
+  }
+
+  let notice: ServiceSummaryNotice | null = null;
+  if (!legacyTrayConflict && status?.registryModeDetected) {
+    notice = service?.runtime === "running"
+      ? {
+          kind: "appinit-conflict",
+          titleKey: "execution.systemAppInitConflictTitle",
+          descriptionKey: "execution.systemAppInitConflictDescription",
+        }
+      : {
+          kind: "appinit-conflict",
+          titleKey: "execution.serviceRegistryConflict",
+        };
+  } else if (!legacyTrayConflict && legacyBlocksActivation) {
+    notice = canMigrateLegacy
+      ? {
+          kind: "migration",
+          titleKey: "execution.legacyDetected",
+          descriptionKey: "execution.systemLegacyServiceMigrateDescription",
+        }
+      : {
+          kind: "legacy-service",
+          titleKey: status?.legacyMacTray?.presence === "foreign"
+            ? "execution.serviceForeign"
+            : "execution.systemLegacyServiceMigrateTitle",
+          descriptionKey: "execution.systemLegacyServiceMigrateDescription",
+        };
+  } else if (!legacyTrayConflict && foreignOrInaccessibleService) {
+    notice = {
+      kind: "foreign-service",
+      titleKey: "execution.serviceForeign",
+    };
+  } else if (!legacyTrayConflict && serviceRemovalPending) {
+    notice = {
+      kind: "removal-pending",
+      titleKey: "execution.installation.delete-pending",
+    };
+  } else if (!legacyTrayConflict && service?.health === "failed") {
+    notice = {
+      kind: "repair",
+      titleKey: "execution.repairRequired",
+    };
+  } else if (!legacyTrayConflict && profileMismatch) {
+    notice = {
+      kind: "profile-mismatch",
+      titleKey: "execution.systemProfileMismatchTitle",
+      descriptionKey: "execution.systemProfileMismatchDescription",
+    };
+  } else if (!legacyTrayConflict && service?.installation === "outdated") {
+    notice = {
+      kind: "upgrade",
+      titleKey: "execution.installation.outdated",
+    };
   }
 
   const action = (
@@ -108,10 +198,16 @@ function projectServiceSummary(
   ): ServiceSummaryAction => ({ command, enabled: idle && actionEnabled, labelKey, tone: actionTone });
 
   let actions: ReadonlyArray<ServiceSummaryAction> = [];
-  if (canMigrateLegacy) {
+  if (legacyTrayConflict || foreignOrInaccessibleService || serviceRemovalPending) {
+    actions = [];
+  } else if (canMigrateLegacy) {
     actions = [action("migrate-from-legacy", "execution.migrateLegacy", true)];
-  } else if (service?.health === "failed" && canRepair) {
-    actions = [action("repair", "execution.serviceRepair", true)];
+  } else if (status?.registryModeDetected || legacyBlocksActivation) {
+    if (service?.runtime === "running") {
+      actions = [action("stop", "execution.serviceStop", service.canStop, "secondary")];
+    }
+  } else if (service?.health === "failed") {
+    if (canRepair) actions = [action("repair", "execution.serviceRepair", true)];
   } else if (service?.installation === "outdated") {
     actions = [action("upgrade", "execution.serviceUpgrade", canUpgrade)];
   } else if (service?.runtime === "running") {
@@ -127,7 +223,7 @@ function projectServiceSummary(
     actions = [action("install", "execution.serviceInstall", canInstall)];
   }
 
-  return { modeKey, statusKey, tone, actions };
+  return { modeKey, statusKey, tone, notice, actions };
 }
 
 const systemInjectionCopy: Record<SystemInjectionState, { titleKey: MessageKey; descriptionKey: MessageKey }> = {

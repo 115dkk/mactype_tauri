@@ -93,7 +93,6 @@ test("profile editor categories and collections remain interactive", async ({ pa
 
   await page.getByRole("button", { name: "LCD·픽셀 배열" }).click();
   await expect(page.getByRole("heading", { name: "LCD·픽셀 배열" })).toBeVisible();
-  await page.getByRole("checkbox", { name: "고급 설정 표시" }).check();
   await expect(page.getByText("빨강 채널 튜닝", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "고급·실험" }).click();
@@ -167,7 +166,7 @@ test("settings navigation separates Wizard and Tuner without duplicating the edi
   await expect(page.getByRole("heading", { level: 1, name: "고급 조정" })).toBeVisible();
   await expect(page.locator(".settings-index button")).toHaveCount(6);
   expect(await settingsForm.evaluate((element) => element.scrollWidth > element.clientWidth), "Tuner settings must not have internal horizontal scrolling").toBe(false);
-  await expect(page.getByRole("checkbox", { name: "고급 설정 표시" })).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: "고급 설정 표시" })).toHaveCount(0);
 
   await settingsToggle.click();
   await expect(settingsToggle).toHaveAttribute("aria-expanded", "false");
@@ -225,7 +224,6 @@ test("slider drags and exact number edits create one undo revision per interacti
   await expect(exactWeight).toHaveValue(draggedValue);
 
   await page.getByRole("button", { name: "고급·실험", exact: true }).click();
-  await page.getByRole("checkbox", { name: "고급 설정 표시" }).check();
   const cacheRow = page.locator(".setting-row").filter({ hasText: "CacheMaxFaces" });
   const cacheValue = cacheRow.locator('input[type="number"]');
   await expect(cacheRow.locator('input[type="range"]')).toHaveCount(0);

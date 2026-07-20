@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useReducer } from "react";
-import { Activity, ChevronDown, FileCog, Home, Moon, PlayCircle, Settings2, SlidersHorizontal, Sparkles, Sun } from "lucide-react";
+import { Activity, ChevronDown, FileCog, Home, Moon, ServerCog, Settings2, SlidersHorizontal, Sparkles, Sun } from "lucide-react";
 import { DiagnosticsPage } from "../pages/DiagnosticsPage";
 import { OverviewPage } from "../pages/OverviewPage";
 import { ProfilesPage } from "../pages/ProfilesPage";
@@ -54,7 +54,7 @@ function reducer(state: State, action: Action): State {
 
 const primaryNavigation = [
   { view: "overview", icon: Home },
-  { view: "execution", icon: PlayCircle },
+  { view: "execution", icon: ServerCog },
   { view: "diagnostics", icon: Activity },
 ] as const;
 

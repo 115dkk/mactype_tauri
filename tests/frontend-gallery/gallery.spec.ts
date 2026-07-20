@@ -24,6 +24,13 @@ async function overflowingElements(page: import("@playwright/test").Page) {
   });
 }
 
+async function openServiceDetails(page: import("@playwright/test").Page) {
+  const details = page.locator(".service-details");
+  if (!await details.evaluate((element) => (element as HTMLDetailsElement).open)) {
+    await details.locator("summary").click();
+  }
+}
+
 for (const view of galleryViews) {
   for (const locale of galleryLocales) {
     test(`${view.id} renders fully in ${locale.id}`, async ({ page }, testInfo) => {
@@ -310,6 +317,7 @@ test("execution and new system service controls remain interactive", async ({ pa
   page.on("pageerror", (error) => failures.push(`pageerror: ${error.message}`));
 
   await page.goto("/?view=execution&gallery=1&lang=ko", { waitUntil: "networkidle" });
+  await openServiceDetails(page);
   const autostart = page.getByRole("checkbox");
   await autostart.check();
   await expect(page.getByText("로그인할 때 트레이로 시작합니다.")).toBeVisible();
@@ -342,6 +350,7 @@ test("execution and new system service controls remain interactive", async ({ pa
 
 test("a running legacy service is never claimed as verified system application", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=ko&system-service=ready&legacy=migration-available", { waitUntil: "networkidle" });
+  await openServiceDetails(page);
 
   const openService = page.locator('[data-service-backend="open-source"]');
   await expect(openService).toBeVisible();
@@ -367,6 +376,7 @@ test("a running legacy service is never claimed as verified system application",
 
 test("a verified migration cannot be started again while the retired legacy service is stopped", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=ko&system-service=ready&legacy=migration-available&legacy-state=stopped&legacy-retired=1", { waitUntil: "networkidle" });
+  await openServiceDetails(page);
 
   const openService = page.locator('[data-service-backend="open-source"]');
   await expect(openService.locator('[data-state="active"]')).toBeVisible();
@@ -379,6 +389,7 @@ test("a verified migration cannot be started again while the retired legacy serv
 
 test("a retired stopped legacy service leaves new-service recovery available", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=ko&system-service=migration-available&legacy=migration-available&legacy-state=stopped&legacy-retired=1", { waitUntil: "networkidle" });
+  await openServiceDetails(page);
 
   const openService = page.locator('[data-service-backend="open-source"]');
   await expect(openService.getByRole("button", { name: "서비스 설치" })).toBeEnabled();
@@ -393,7 +404,8 @@ test("applying from Settings files and Execution converges on the same verified 
   await page.getByRole("button", { name: "Apply to MacType" }).click();
   await expect(page.getByText(/Applied .* as the system-wide MacType profile/)).toBeVisible();
 
-  await page.getByRole("button", { name: "Execution" }).click();
+  await page.getByRole("button", { name: "Service" }).click();
+  await openServiceDetails(page);
   const openService = page.locator('[data-service-backend="open-source"]');
   await expect(openService.locator('[data-state="active"]')).toBeVisible();
   await expect(openService).toContainText("MacType system-wide rendering active");
@@ -414,6 +426,7 @@ for (const entry of [
 
 test("a foreign legacy MacType service blocks activation and offers no migration", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy=foreign", { waitUntil: "networkidle" });
+  await openServiceDetails(page);
 
   const openService = page.locator('[data-service-backend="open-source"]');
   await expect(openService.locator('[data-state="legacy-service-migrate"]')).toBeVisible();
@@ -430,6 +443,7 @@ test("a foreign legacy MacType service blocks activation and offers no migration
 
 test("a verified legacy service funnels activation through Migrate until it is removed", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy=migration-available", { waitUntil: "networkidle" });
+  await openServiceDetails(page);
 
   const openService = page.locator('[data-service-backend="open-source"]');
   await expect(openService.locator('[data-state="legacy-service-migrate"]')).toBeVisible();
@@ -461,6 +475,7 @@ test("internal migration failures show only the localized diagnostics instructio
     { lang: "ko", title: "레거시 MacTray를 마이그레이션할까요?", continue: "마이그레이션 계속", message: "마이그레이션에 실패했습니다. 자세한 내용은 진단 로그를 확인하세요." },
   ]) {
     await page.goto(`/?view=execution&gallery=1&lang=${locale.lang}&system-service=migration-available&legacy=migration-available&service-fail=migrate-from-legacy`, { waitUntil: "networkidle" });
+    await openServiceDetails(page);
     const legacy = page.locator('[data-service-backend="legacy-mactray"]');
     await legacy.getByRole("button", { name: locale.lang === "ko" ? "마이그레이션" : "Migrate" }).click();
     await page.getByRole("dialog", { name: locale.title }).getByRole("button", { name: locale.continue }).click();
@@ -472,8 +487,7 @@ test("internal migration failures show only the localized diagnostics instructio
 test("legacy migration explains the verified transaction before it can continue", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy=migration-available", { waitUntil: "networkidle" });
 
-  const legacy = page.locator('[data-service-backend="legacy-mactray"]');
-  const migrationTrigger = legacy.getByRole("button", { name: "Migrate" });
+  const migrationTrigger = page.locator("[data-service-summary]").getByRole("button", { name: "Migrate" });
   await migrationTrigger.click();
 
   const dialog = page.getByRole("dialog", { name: "Migrate legacy MacTray?" });
@@ -506,11 +520,12 @@ test("legacy migration explains the verified transaction before it can continue"
   await migrationTrigger.click();
   await continueMigration.click();
   await expect(page.getByText("Migration to the new service passed verification.", { exact: true })).toBeVisible();
-  await expect(migrationTrigger).toBeDisabled();
+  await expect(migrationTrigger).toHaveCount(0);
 });
 
 test("system service path is read-only and can reveal its installed location", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=ko&system-service=ready", { waitUntil: "networkidle" });
+  await openServiceDetails(page);
 
   const openService = page.locator('[data-service-backend="open-source"]');
   const servicePath = "C:\\Program Files\\MacType Control Center\\Service\\mactype-service.exe";
@@ -528,6 +543,7 @@ test("system service path is read-only and can reveal its installed location", a
 
 test("an absent service never exposes a binary path or location action", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available", { waitUntil: "networkidle" });
+  await openServiceDetails(page);
 
   const openService = page.locator('[data-service-backend="open-source"]');
   await expect(openService).toContainText("Not installed");
@@ -535,18 +551,50 @@ test("an absent service never exposes a binary path or location action", async (
   await expect(openService.getByRole("button", { name: "Open service location" })).toHaveCount(0);
 });
 
-test("outdated services upgrade while current unhealthy services repair", async ({ page }) => {
+test("the service page keeps its normal state to one summary and one action", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=ready", { waitUntil: "networkidle" });
+
+  const summary = page.locator("[data-service-summary]");
+  await expect(summary).toContainText("Profile");
+  await expect(summary).toContainText("Default.ini");
+  await expect(summary).toContainText("Native service");
+  await expect(summary).toContainText("Ready");
+  await expect(summary.getByRole("button", { name: "Stop" })).toBeEnabled();
+  await expect(summary.getByRole("button")).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: "System-wide modes" })).toBeHidden();
+  await expect(page.locator(".service-details")).not.toHaveAttribute("open", "");
+});
+
+test("small degraded states stay in Details while failed configuration is actionable", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=degraded", { waitUntil: "networkidle" });
+  const summary = page.locator("[data-service-summary]");
+  await expect(summary).toContainText("Running");
+  await expect(summary).not.toContainText("Degraded");
+  await expect(summary.getByRole("button", { name: "Repair service" })).toHaveCount(0);
+  await expect(page.getByText("Service running without verified system application", { exact: true })).toBeHidden();
+  await openServiceDetails(page);
+  await expect(page.locator('[data-service-backend="open-source"]')).toContainText("Degraded");
+
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=failed", { waitUntil: "networkidle" });
+  await expect(summary).toContainText("Service configuration needs repair.");
+  await expect(summary.getByRole("button", { name: "Repair service" })).toBeEnabled();
+});
+
+test("outdated services upgrade while only failed current services repair", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=outdated", { waitUntil: "networkidle" });
+  await openServiceDetails(page);
   const outdated = page.locator('[data-service-backend="open-source"]');
   await expect(outdated.getByRole("button", { name: "Upgrade service" })).toBeEnabled();
   await expect(outdated.getByRole("button", { name: "Repair service" })).toHaveCount(0);
 
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=degraded", { waitUntil: "networkidle" });
+  await openServiceDetails(page);
   const degraded = page.locator('[data-service-backend="open-source"]');
-  await expect(degraded.getByRole("button", { name: "Repair service" })).toBeEnabled();
+  await expect(degraded.getByRole("button", { name: "Repair service" })).toHaveCount(0);
   await expect(degraded.getByRole("button", { name: "Upgrade service" })).toHaveCount(0);
 
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=failed", { waitUntil: "networkidle" });
+  await openServiceDetails(page);
   const failed = page.locator('[data-service-backend="open-source"]');
   await expect(failed.getByRole("button", { name: "Repair service" })).toBeEnabled();
   await expect(failed.getByRole("button", { name: "Upgrade service" })).toHaveCount(0);
@@ -554,6 +602,7 @@ test("outdated services upgrade while current unhealthy services repair", async 
 
 test("a running unverified service remains stoppable without claiming it is inactive", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=degraded", { waitUntil: "networkidle" });
+  await openServiceDetails(page);
 
   const openService = page.locator('[data-service-backend="open-source"]');
   await expect(openService.getByRole("button", { name: "Stop applying to new processes" })).toBeEnabled();
@@ -566,6 +615,7 @@ test("a running unverified service remains stoppable without claiming it is inac
 
 test("a running profile mismatch remains stoppable and identifies the mismatched generation", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=profile-mismatch", { waitUntil: "networkidle" });
+  await openServiceDetails(page);
 
   const openService = page.locator('[data-service-backend="open-source"]');
   await expect(openService.getByRole("button", { name: "Stop applying to new processes" })).toBeEnabled();
@@ -576,6 +626,7 @@ test("a running profile mismatch remains stoppable and identifies the mismatched
 
 test("AppInit conflict preserves the backend-authorized recovery stop", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=legacy-conflict&legacy=migration-available&raw-active=1", { waitUntil: "networkidle" });
+  await openServiceDetails(page);
 
   const openService = page.locator('[data-service-backend="open-source"]');
   await expect(openService.getByRole("button", { name: "Stop applying to new processes" })).toBeEnabled();
@@ -595,6 +646,7 @@ test("AppInit conflict preserves the backend-authorized recovery stop", async ({
 
 test("trusted MacTray and autostart conflicts are resolved in the required order", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy-tray=trusted-current&legacy-startup=hkcu-run", { waitUntil: "networkidle" });
+  await openServiceDetails(page);
 
   const conflict = page.locator("[data-legacy-tray-conflict]");
   await expect(conflict).toContainText("Existing MacTray is running");
@@ -621,6 +673,7 @@ for (const fixture of [
 ] as const) {
   test(`${fixture[0]} MacTray state remains fail-closed without an exit action`, async ({ page }) => {
     await page.goto(`/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy-tray=${fixture[0]}`, { waitUntil: "networkidle" });
+    await openServiceDetails(page);
 
     const conflict = page.locator("[data-legacy-tray-conflict]");
     await expect(conflict).toContainText(fixture[1]);
@@ -632,6 +685,7 @@ for (const fixture of [
 
 test("a running new service with a legacy tray conflict offers only the verified stop", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=ready&legacy-tray=trusted-current", { waitUntil: "networkidle" });
+  await openServiceDetails(page);
 
   const openService = page.locator('[data-service-backend="open-source"]');
   await expect(openService.locator('[data-state="running-legacy-tray-conflict"]')).toBeVisible();
@@ -647,6 +701,7 @@ test("a running new service with a legacy tray conflict offers only the verified
 for (const legacyState of ["running", "stopped", "start-pending", "stop-pending", "paused", "unknown", "continue-pending", "pause-pending"] as const) {
   test(`legacy migration requires a stable ${legacyState} service`, async ({ page }) => {
     await page.goto(`/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy=migration-available&legacy-state=${legacyState}`, { waitUntil: "networkidle" });
+    await openServiceDetails(page);
 
     const migrate = page.locator('[data-service-backend="legacy-mactray"]').getByRole("button", { name: "Migrate" });
     if (legacyState === "running" || legacyState === "stopped") await expect(migrate).toBeEnabled();
@@ -657,6 +712,7 @@ for (const legacyState of ["running", "stopped", "start-pending", "stop-pending"
 for (const fixture of ["ready", "degraded", "profile-mismatch", "legacy-conflict", "migration-available", "foreign-service"]) {
   test(`open service gallery renders ${fixture} without claiming SCM running is ready`, async ({ page }, testInfo) => {
     await page.goto(`/?view=execution&gallery=1&lang=en&system-service=${fixture}`, { waitUntil: "networkidle" });
+    await openServiceDetails(page);
     const openService = page.locator('[data-service-backend="open-source"]');
     await expect(openService).toBeVisible();
     if (fixture !== "ready" && fixture !== "legacy-conflict") {
@@ -674,6 +730,7 @@ for (const fixture of ["ready", "degraded", "profile-mismatch", "legacy-conflict
 for (const unstableState of ["start-pending", "stop-pending", "paused", "unknown"]) {
   test(`new service mutations stay disabled while ${unstableState}`, async ({ page }) => {
     await page.goto(`/?view=execution&gallery=1&lang=en&system-service=outdated&service-runtime=${unstableState}&legacy=migration-available`, { waitUntil: "networkidle" });
+    await openServiceDetails(page);
 
     const mutationButtons = page.locator('[data-service-backend="open-source"] .system-injection-action, [data-service-backend="open-source"] .service-actions button, [data-service-backend="legacy-mactray"] .service-actions button');
     await expect(mutationButtons).not.toHaveCount(0);
@@ -681,32 +738,31 @@ for (const unstableState of ["start-pending", "stop-pending", "paused", "unknown
   });
 }
 
-test("only a stable stopped safe service offers profile activation", async ({ page }) => {
-  await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available", { waitUntil: "networkidle" });
-  const openService = page.locator('[data-service-backend="open-source"]');
-  await expect(openService.getByRole("button", { name: "Apply current profile" })).toBeEnabled();
-
-  await page.goto("/?view=execution&gallery=1&lang=en&system-service=outdated&service-runtime=start-pending", { waitUntil: "networkidle" });
-  await expect(openService.getByRole("button", { name: "Apply current profile" })).toBeDisabled();
-  await expect(openService).toContainText("Service state is not ready for a primary action");
-  await expect(openService).toContainText("Wait for the current service transition to finish, then refresh. Control Center will not start another mutation from this state.");
+test("a stopped new service with no alternative offers Start and Remove", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=ready&service-runtime=stopped", { waitUntil: "networkidle" });
+  const summary = page.locator("[data-service-summary]");
+  await expect(summary).toContainText("Stopped");
+  await expect(summary.getByRole("button", { name: "Start service" })).toBeEnabled();
+  await expect(summary.getByRole("button", { name: "Remove service" })).toBeEnabled();
+  await expect(summary.getByRole("button")).toHaveCount(2);
 });
 
-test("the primary system action disables immediately while its mutation is busy", async ({ page }) => {
-  await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available&service-delay=750", { waitUntil: "networkidle" });
+test("the primary service action disables immediately while its mutation is busy", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=ready&service-runtime=stopped&service-delay=750", { waitUntil: "networkidle" });
 
-  const openService = page.locator('[data-service-backend="open-source"]');
-  const activate = openService.getByRole("button", { name: "Apply current profile" });
-  await expect(activate).toBeEnabled();
-  await activate.click();
-  await expect(openService.getByRole("button", { name: "Working…" })).toBeDisabled();
-  await expect(openService.getByRole("button", { name: "Stop applying to new processes" })).toBeEnabled();
+  const summary = page.locator("[data-service-summary]");
+  const start = summary.getByRole("button", { name: "Start service" });
+  await expect(start).toBeEnabled();
+  await start.click();
+  await expect(summary.getByRole("button", { name: "Working…" })).toBeDisabled();
+  await expect(summary.getByRole("button", { name: "Stop" })).toBeEnabled();
 });
 
 test("service migration gallery remains usable at low window height", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1280", "Low-height desktop behavior is width-specific");
   await page.setViewportSize({ width: 1280, height: 420 });
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy=migration-available", { waitUntil: "networkidle" });
+  await openServiceDetails(page);
 
   expect(await page.evaluate(() => document.documentElement.scrollHeight > document.documentElement.clientHeight)).toBe(true);
   expect(await overflowingElements(page)).toEqual([]);

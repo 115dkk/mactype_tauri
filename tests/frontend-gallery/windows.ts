@@ -13,7 +13,7 @@ export const galleryViews = [
   },
   {
     id: "execution",
-    title: { ko: "실행", en: "Execution", "zh-CN": "运行", "zh-TW": "執行", ja: "実行", fr: "Exécution", de: "Ausführung", es: "Ejecución", pt: "Execução", ar: "التشغيل" },
+    title: { ko: "서비스", en: "Service", "zh-CN": "服务", "zh-TW": "服務", ja: "サービス", fr: "Service", de: "Dienst", es: "Servicio", pt: "Serviço", ar: "الخدمة" },
   },
   {
     id: "diagnostics",

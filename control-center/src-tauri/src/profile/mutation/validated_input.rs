@@ -12,10 +12,7 @@ pub(super) struct RenderedAdvancedProfile {
     pub(super) shadow: Option<String>,
     pub(super) lcd_filter_weight: Option<String>,
     pub(super) pixel_layout: Option<String>,
-    pub(super) display_affinity: Option<String>,
     pub(super) font_substitutes: Vec<String>,
-    pub(super) infinality_gamma_correction: String,
-    pub(super) infinality_filter_params: String,
 }
 
 pub(super) fn render_setting_value(
@@ -51,10 +48,7 @@ pub(super) fn render_advanced_profile(
         shadow,
         lcd_filter_weight,
         pixel_layout,
-        display_affinity,
         font_substitutes,
-        infinality_gamma_correction,
-        infinality_filter_params,
     } = profile;
     let shadow = shadow.map(render_shadow).transpose()?;
     let lcd_filter_weight = lcd_filter_weight
@@ -65,33 +59,13 @@ pub(super) fn render_advanced_profile(
         .as_deref()
         .map(|values| render_vector(values, 6, -128, 127, "pixel layout", ","))
         .transpose()?;
-    let display_affinity = render_display_affinity(&display_affinity)?;
     let font_substitutes = normalize_list_entries(font_substitutes)?;
     validate_font_substitutions(&font_substitutes)?;
-    let infinality_gamma_correction = render_vector(
-        &infinality_gamma_correction,
-        2,
-        -1000,
-        1000,
-        "Infinality gamma correction",
-        " ",
-    )?;
-    let infinality_filter_params = render_vector(
-        &infinality_filter_params,
-        5,
-        0,
-        255,
-        "Infinality filter parameters",
-        " ",
-    )?;
     Ok(RenderedAdvancedProfile {
         shadow,
         lcd_filter_weight,
         pixel_layout,
-        display_affinity,
         font_substitutes,
-        infinality_gamma_correction,
-        infinality_filter_params,
     })
 }
 
@@ -197,19 +171,6 @@ fn render_shadow(value: ShadowSetting) -> Result<String, String> {
         value.light_alpha,
         value.light_color
     ))
-}
-
-fn render_display_affinity(values: &[i32]) -> Result<Option<String>, String> {
-    if values.iter().any(|value| !(0..=255).contains(value)) {
-        return Err("display affinity IDs must be between 0 and 255".to_owned());
-    }
-    Ok((!values.is_empty()).then(|| {
-        values
-            .iter()
-            .map(i32::to_string)
-            .collect::<Vec<_>>()
-            .join(",")
-    }))
 }
 
 fn validate_font_substitutions(entries: &[String]) -> Result<(), String> {

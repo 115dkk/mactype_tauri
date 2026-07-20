@@ -25,10 +25,7 @@ const emptyAdvancedProfile: AdvancedProfile = {
   shadow: null,
   lcdFilterWeight: null,
   pixelLayout: null,
-  displayAffinity: [],
   fontSubstitutes: [],
-  infinalityGammaCorrection: [0, 100],
-  infinalityFilterParams: [11, 22, 38, 22, 11],
 };
 
 function errorMessage(error: unknown): string {
@@ -41,10 +38,7 @@ function cloneAdvancedProfile(advanced: AdvancedProfile): AdvancedProfile {
     shadow: advanced.shadow ? { ...advanced.shadow } : null,
     lcdFilterWeight: advanced.lcdFilterWeight ? [...advanced.lcdFilterWeight] : null,
     pixelLayout: advanced.pixelLayout ? [...advanced.pixelLayout] : null,
-    displayAffinity: [...advanced.displayAffinity],
     fontSubstitutes: [...advanced.fontSubstitutes],
-    infinalityGammaCorrection: [...advanced.infinalityGammaCorrection],
-    infinalityFilterParams: [...advanced.infinalityFilterParams],
   };
 }
 

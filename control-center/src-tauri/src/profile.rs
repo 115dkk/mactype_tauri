@@ -190,10 +190,7 @@ pub struct AdvancedProfile {
     pub shadow: Option<ShadowSetting>,
     pub lcd_filter_weight: Option<Vec<i32>>,
     pub pixel_layout: Option<Vec<i32>>,
-    pub display_affinity: Vec<i32>,
     pub font_substitutes: Vec<String>,
-    pub infinality_gamma_correction: Vec<i32>,
-    pub infinality_filter_params: Vec<i32>,
 }
 
 #[tauri::command]

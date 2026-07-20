@@ -185,10 +185,7 @@ export interface AdvancedProfile {
   shadow: ShadowSetting | null;
   lcdFilterWeight: ReadonlyArray<number> | null;
   pixelLayout: ReadonlyArray<number> | null;
-  displayAffinity: ReadonlyArray<number>;
   fontSubstitutes: ReadonlyArray<string>;
-  infinalityGammaCorrection: ReadonlyArray<number>;
-  infinalityFilterParams: ReadonlyArray<number>;
 }
 
 export interface PreviewSample {

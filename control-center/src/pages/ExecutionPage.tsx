@@ -403,7 +403,8 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
               <p>{t("execution.legacyServiceDescription")}</p>
               <span>{`${t(`execution.servicePresence.${legacyService.presence}`)} · ${t(`execution.serviceState.${legacyService.state}`)}`}</span>
               {legacyService.registryConflict && <p className="warning-text">{t("execution.serviceRegistryConflict")}</p>}
-              {legacyService.presence === "foreign" && <p className="warning-text">{t("execution.serviceForeign")}</p>}
+              {legacyService.presence === "foreign" && <p className="warning-text">{t("execution.legacyServiceForeignDescription")}</p>}
+              {legacyService.presence === "inaccessible" && <p className="warning-text">{t("execution.legacyServiceUncertainDescription")}</p>}
             </div>
             <div className="service-actions">
               <button className="button secondary" disabled={!executionView.canMigrateLegacy} onClick={() => setMigrationConfirmationOpen(true)} type="button">{serviceBusy === "migrate-from-legacy" ? t("execution.serviceWorking") : t("execution.migrateLegacy")}</button>

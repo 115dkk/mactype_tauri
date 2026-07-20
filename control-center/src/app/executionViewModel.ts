@@ -41,6 +41,8 @@ export type ServiceSummaryNoticeKind =
   | "appinit-conflict"
   | "foreign-service"
   | "legacy-service"
+  | "legacy-service-foreign"
+  | "legacy-service-uncertain"
   | "migration"
   | "profile-mismatch"
   | "repair"
@@ -149,19 +151,32 @@ function projectServiceSummary(
           titleKey: "execution.serviceRegistryConflict",
         };
   } else if (!legacyTrayConflict && legacyBlocksActivation) {
-    notice = canMigrateLegacy
-      ? {
-          kind: "migration",
-          titleKey: "execution.legacyDetected",
-          descriptionKey: "execution.systemLegacyServiceMigrateDescription",
-        }
-      : {
-          kind: "legacy-service",
-          titleKey: status?.legacyMacTray?.presence === "foreign"
-            ? "execution.serviceForeign"
-            : "execution.systemLegacyServiceMigrateTitle",
-          descriptionKey: "execution.systemLegacyServiceMigrateDescription",
-        };
+    const legacy = status?.legacyMacTray;
+    if (legacy?.presence === "foreign") {
+      notice = {
+        kind: "legacy-service-foreign",
+        titleKey: "execution.legacyServiceForeignTitle",
+        descriptionKey: "execution.legacyServiceForeignDescription",
+      };
+    } else if (legacy?.presence === "inaccessible") {
+      notice = {
+        kind: "legacy-service-uncertain",
+        titleKey: "execution.legacyServiceUncertainTitle",
+        descriptionKey: "execution.legacyServiceUncertainDescription",
+      };
+    } else {
+      notice = canMigrateLegacy
+        ? {
+            kind: "migration",
+            titleKey: "execution.legacyDetected",
+            descriptionKey: "execution.systemLegacyServiceMigrateDescription",
+          }
+        : {
+            kind: "legacy-service",
+            titleKey: "execution.systemLegacyServiceMigrateTitle",
+            descriptionKey: "execution.systemLegacyServiceMigrateDescription",
+          };
+    }
   } else if (!legacyTrayConflict && (foreignService || inaccessibleService)) {
     notice = {
       kind: "foreign-service",
@@ -264,6 +279,24 @@ const systemInjectionCopy: Record<SystemInjectionState, { titleKey: MessageKey; 
     descriptionKey: "execution.systemUnavailableDescription",
   },
 };
+
+function legacyServiceCopy(
+  legacy: LegacyMacTrayStatus | null | undefined,
+): { titleKey: MessageKey; descriptionKey: MessageKey } {
+  if (legacy?.presence === "foreign") {
+    return {
+      titleKey: "execution.legacyServiceForeignTitle",
+      descriptionKey: "execution.legacyServiceForeignDescription",
+    };
+  }
+  if (legacy?.presence === "inaccessible") {
+    return {
+      titleKey: "execution.legacyServiceUncertainTitle",
+      descriptionKey: "execution.legacyServiceUncertainDescription",
+    };
+  }
+  return systemInjectionCopy["legacy-service-migrate"];
+}
 
 function projectLegacyTrayResolution(status: LegacyTrayStatus | undefined): LegacyTrayResolution | null {
   if (!status || status.conflict === "clear") return null;
@@ -387,12 +420,16 @@ function projectSystemInjectionAction(
           && !legacyBlocksActivation),
   );
 
+  const copy = state === "legacy-service-migrate"
+    ? legacyServiceCopy(status?.legacyMacTray)
+    : systemInjectionCopy[state];
+
   return {
     intent,
     command: intent === "stop" ? "stop" : "publish-profile",
     enabled,
     state,
-    ...systemInjectionCopy[state],
+    ...copy,
     labelKey: serviceBusy
       ? "execution.serviceWorking"
       : intent === "stop"

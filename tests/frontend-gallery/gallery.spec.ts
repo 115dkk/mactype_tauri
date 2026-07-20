@@ -53,7 +53,8 @@ const executionStateGallery = [
   { id: "legacy-migration-running", query: "system-service=migration-available&legacy=migration-available&legacy-state=running", expected: "Legacy MacTray was detected." },
   { id: "legacy-migration-stopped", query: "system-service=migration-available&legacy=migration-available&legacy-state=stopped", expected: "Legacy MacTray was detected." },
   { id: "legacy-transition", query: "system-service=migration-available&legacy=migration-available&legacy-state=start-pending", expected: "A legacy MacTray service must be resolved first" },
-  { id: "legacy-foreign", query: "system-service=migration-available&legacy=foreign", expected: "unexpected configuration" },
+  { id: "legacy-foreign", query: "system-service=migration-available&legacy=foreign", expected: "A foreign legacy MacTray service was detected" },
+  { id: "legacy-uncertain", query: "system-service=migration-available&legacy=inaccessible", expected: "Legacy MacTray service status could not be verified" },
   { id: "mactray-current-session", query: "system-service=migration-available&legacy-tray=trusted-current", expected: "Existing MacTray is running" },
   { id: "mactray-other-session", query: "system-service=migration-available&legacy-tray=trusted-other", expected: "MacTray is running in another user session" },
   { id: "mactray-untrusted-process", query: "system-service=migration-available&legacy-tray=untrusted", expected: "A same-named process could not be trusted" },
@@ -478,7 +479,9 @@ test("a foreign legacy MacType service blocks activation and offers no migration
 
   const openService = page.locator('[data-service-backend="open-source"]');
   await expect(openService.locator('[data-state="legacy-service-migrate"]')).toBeVisible();
-  await expect(openService).toContainText("A legacy MacTray service must be resolved first");
+  await expect(openService).toContainText("A foreign legacy MacTray service was detected");
+  await expect(openService).toContainText("does not match the verified MacTray service");
+  await expect(openService).not.toContainText("Use Migrate below");
   await expect(openService.getByRole("button", { name: "Apply current profile" })).toBeDisabled();
   await expect(openService.getByRole("button", { name: "Install service" })).toBeDisabled();
   await expect(openService.getByRole("button", { name: "Start service" })).toBeDisabled();
@@ -496,6 +499,9 @@ test("a verified legacy service funnels activation through Migrate until it is r
   const openService = page.locator('[data-service-backend="open-source"]');
   await expect(openService.locator('[data-state="legacy-service-migrate"]')).toBeVisible();
   await expect(openService).toContainText("A legacy MacTray service must be resolved first");
+  await expect(openService).toContainText("A verified legacy MacTray service is installed");
+  await expect(openService).not.toContainText("foreign legacy MacTray service");
+  await expect(openService).not.toContainText("status could not be verified");
   await expect(openService.getByRole("button", { name: "Apply current profile" })).toBeDisabled();
   await expect(openService.getByRole("button", { name: "Install service" })).toBeDisabled();
   await expect(openService.getByRole("button", { name: "Start service" })).toBeDisabled();
@@ -825,8 +831,8 @@ test("a foreign legacy service and pending removal cannot hide in Details", asyn
   const summary = page.locator("[data-service-summary]");
 
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy=foreign", { waitUntil: "networkidle" });
-  await expect(summary).toContainText("A service with the same name has an unexpected configuration");
-  await expect(summary.locator("[data-prominent-exception]")).toHaveAttribute("data-kind", "legacy-service");
+  await expect(summary).toContainText("A foreign legacy MacTray service was detected");
+  await expect(summary.locator("[data-prominent-exception]")).toHaveAttribute("data-kind", "legacy-service-foreign");
   await expect(summary.getByRole("button")).toHaveCount(0);
 
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=delete-pending", { waitUntil: "networkidle" });
@@ -834,6 +840,63 @@ test("a foreign legacy service and pending removal cannot hide in Details", asyn
   await expect(summary.locator("[data-prominent-exception]")).toHaveAttribute("data-kind", "removal-pending");
   await expect(summary.getByRole("button")).toHaveCount(0);
 });
+
+const legacyServiceIdentityCases = [
+  {
+    id: "owned",
+    query: "legacy=migration-available",
+    kind: "migration",
+    title: "Legacy MacTray was detected.",
+    description: "A verified legacy MacTray service is installed.",
+    detailWarning: null,
+  },
+  {
+    id: "foreign",
+    query: "legacy=foreign",
+    kind: "legacy-service-foreign",
+    title: "A foreign legacy MacTray service was detected",
+    description: "does not match the verified MacTray service",
+    detailWarning: "does not match the verified MacTray service",
+  },
+  {
+    id: "uncertain",
+    query: "legacy=inaccessible",
+    kind: "legacy-service-uncertain",
+    title: "Legacy MacTray service status could not be verified",
+    description: "could not read enough service information",
+    detailWarning: "could not read enough service information",
+  },
+] as const;
+
+for (const identity of legacyServiceIdentityCases) {
+  test(`legacy service ${identity.id} identity has distinct copy`, async ({ page }, testInfo) => {
+    await page.goto(`/?view=execution&gallery=1&lang=en&system-service=migration-available&${identity.query}`, { waitUntil: "networkidle" });
+
+    const summary = page.locator("[data-service-summary]");
+    await expect(summary).toContainText(identity.title);
+    await expect(summary).toContainText(identity.description);
+    await expect(summary.locator("[data-prominent-exception]")).toHaveAttribute("data-kind", identity.kind);
+    for (const other of legacyServiceIdentityCases.filter((candidate) => candidate.id !== identity.id)) {
+      await expect(summary).not.toContainText(other.title);
+    }
+
+    await openServiceDetails(page);
+    const openService = page.locator('[data-service-backend="open-source"]');
+    await expect(openService).toContainText(identity.id === "owned" ? "A legacy MacTray service must be resolved first" : identity.title);
+    await expect(openService).toContainText(identity.description);
+
+    const legacy = page.locator('[data-service-backend="legacy-mactray"]');
+    if (identity.detailWarning) await expect(legacy).toContainText(identity.detailWarning);
+    else {
+      await expect(legacy).not.toContainText("does not match the verified MacTray service");
+      await expect(legacy).not.toContainText("could not read enough service information");
+    }
+    await page.screenshot({
+      path: path.join(galleryRoot, `${testInfo.project.name}-execution-detail-legacy-identity-${identity.id}-en.png`),
+      fullPage: true,
+    });
+  });
+}
 
 for (const fixture of [
   "ready",

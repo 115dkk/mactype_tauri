@@ -90,11 +90,23 @@ function Get-LowerHexDigest([byte[]] $Bytes) {
     return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
 }
 
-function Assert-ProtectedAcl([string] $Path) {
-    if (-not (Test-Path -LiteralPath $Path)) { throw "Protected machine path is missing: $Path" }
+function Assert-ProtectedAcl([string] $Path, [switch] $AllowMissing) {
+    try {
+        $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+    } catch {
+        # health.json and other service-owned files are replaced atomically. A
+        # recursive enumeration can legitimately retain the old temporary name
+        # after the rename has completed; that vanished entry is not an ACL
+        # failure. Persistent entries and the tree root still fail closed.
+        if ($AllowMissing -and -not (Test-Path -LiteralPath $Path)) { return }
+        if (-not (Test-Path -LiteralPath $Path)) {
+            throw "Protected machine path is missing: $Path"
+        }
+        throw
+    }
     $lowPrivilegeSids = @('S-1-1-0', 'S-1-5-11', 'S-1-5-32-545')
 
-    foreach ($rule in (Get-Acl -LiteralPath $Path).Access) {
+    foreach ($rule in $acl.Access) {
         if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { continue }
         try {
             $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
@@ -114,7 +126,7 @@ function Assert-ProtectedTree([string] $Path) {
         if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
             throw "Protected machine tree contains a reparse point: $($item.FullName)"
         }
-        Assert-ProtectedAcl $item.FullName
+        Assert-ProtectedAcl $item.FullName -AllowMissing
     }
 }
 
@@ -162,11 +174,29 @@ function Assert-ActiveRuntimeProfile([byte[]] $ExpectedBytes, [string] $Expected
 
 function Assert-PersistedReadyHealth([string] $ExpectedDigest, [string] $Phase) {
     $path = Join-Path $machineRoot 'health.json'
-    $report = Read-OpenServiceHealthSnapshot -Path $path `
-        -Context "$Phase persisted health snapshot"
-    if ($report.health -ne 'ready' -or $report.activeProfileDigest -cne "sha256:$ExpectedDigest" -or $report.lastError) {
-        throw "$Phase persisted health snapshot is not strict Ready for the expected profile."
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    $report = $null
+    $lastReadError = $null
+    do {
+        try {
+            $report = Read-OpenServiceHealthSnapshot -Path $path `
+                -Context "$Phase persisted health snapshot"
+            $lastReadError = $null
+            if ($report.health -eq 'ready' -and
+                $report.activeProfileDigest -ceq "sha256:$ExpectedDigest" -and
+                -not $report.lastError) {
+                return
+            }
+        } catch {
+            $lastReadError = $_.Exception.Message
+        }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    if ($lastReadError) {
+        throw "$Phase persisted health snapshot could not be read after the Ready deadline: $lastReadError"
     }
+    throw "$Phase persisted health snapshot did not converge to strict Ready for the expected profile (health=$($report.health), digest=$($report.activeProfileDigest), lastError=$($report.lastError))."
 }
 
 function Assert-GenerationBoundMarkerTelemetry(

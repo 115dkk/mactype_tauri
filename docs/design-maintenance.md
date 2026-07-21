@@ -22,13 +22,13 @@ Those paths define native behavior, IPC, packaging, or the MacType setting model
 | Application shell, navigation order, expandable Settings group, navigation icons, theme switch | `control-center/src/app/App.tsx` | `.nav-group`, `.nav-submenu`, and `.nav-subitem` in `app.css` |
 | Custom title bar layout, icon, and window-control icons | `control-center/src/components/WindowTitleBar.tsx` | `.window-titlebar`, `.window-title`, and `.window-controls` in `app.css` |
 | Language picker layout, option order, and scrollable menu | `control-center/src/components/LanguagePicker.tsx` and `control-center/src/i18n/i18n.ts` | `.language-*` selectors in `app.css`, including dark and mobile states |
-| Overview layout | `control-center/src/pages/OverviewPage.tsx` | Overview interaction assertions in `tests/frontend-gallery/gallery.spec.ts` |
+| Overview status summary and recent-activity disclosure | `control-center/src/pages/OverviewPage.tsx` | `.overview-service-*`, `.recent-activity`, and `.disclosure-actions` in `app.css`; Overview interaction assertions in `tests/frontend-gallery/gallery.spec.ts` |
 | Settings-file and migration layout | `control-center/src/pages/FileSettingsPage.tsx` | `.legacy-import-*` and `.file-*` selectors in `app.css` |
 | Profile editor shell, Wizard/Tuner mode, quick actions, and preview placement | `control-center/src/pages/ProfilesPage.tsx` | `WizardSettings.tsx`, `wizardModel.ts`, and `.wizard-*` selectors in `app.css` |
 | Basic, shape, and LCD setting rows | `control-center/src/pages/profiles/SchemaSettings.tsx` | Shared `.setting-row`, `.range-control`, and `.number-control` selectors |
 | Advanced, per-font, and list editors | `control-center/src/pages/profiles/AdvancedSettings.tsx`, `IndividualSettings.tsx`, and `ListsEditor.tsx` | Font picker and collection selectors in `app.css` |
 | Execution and service-control layout | `control-center/src/pages/ExecutionPage.tsx` | `control-center/src/app/executionViewModel.ts` and the `.manual-*`, `.service-*`, `.system-injection-*`, and `.system-mode-*` selectors |
-| Diagnostics layout | `control-center/src/pages/DiagnosticsPage.tsx` | `.diagnostic-*` and `.log-view` selectors |
+| Diagnostics installation details and recent-log disclosure | `control-center/src/pages/DiagnosticsPage.tsx` | `.installation-heading`, `.diagnostic-*`, `.log-view`, and `.disclosure-actions` selectors |
 | User-facing text | Every JSON catalog under `control-center/src/i18n/` | All ten catalogs must contain the same keys and placeholders |
 | Locale order, language detection, RTL selection | `control-center/src/i18n/i18n.ts` and `I18nProvider.tsx` | `tests/frontend-gallery/windows.ts` |
 | Browser-only sample data used during design work | `control-center/src/app/runtimeAdapters/browserGalleryAdapter.ts` and `browserGalleryExecution.ts` | Keep fixture DTOs equal to `runtimeAdapter.ts`; do not duplicate UI mutation gates here |
@@ -76,6 +76,16 @@ The visible MacType on/off card is ordinary React and CSS. Change its markup and
 `projectExecutionView` in `control-center/src/app/executionViewModel.ts` is the one pure projection for the entire Execution page. It receives only `ExecutionStatus` and the current busy operation, then derives the displayed state, copy keys, primary action, service upgrade/repair visibility, and every mutation gate. `ExecutionPage.tsx` consumes that projection in both the real Tauri application and browser gallery; the gallery adapters only supply representative status DTOs. This keeps screenshots and the installed application on the same UI decision path without introducing a frontend store.
 
 Keep the existing adapter calls behind the buttons. `systemInjectionActive` is native truth from the generation-bound verified service state, while `systemModesSupported` decides whether activation is safe to offer. Renaming, recoloring, or rearranging the card may change TSX, CSS, locale JSON, or the pure TypeScript projection, but must not recreate `canInstall`, `canStart`, `canRepair`, migration, or primary-action gates in the component or gallery fixtures. A new service action or a different safety policy is native behavior and should be reviewed separately from the design change.
+
+### Change the Overview or Diagnostics disclosures
+
+`OverviewPage.tsx` intentionally shows current MacType state and recent successful activity rather than installation inventory. Its status card, four-column detail list, conditional Service shortcut, and activity disclosure are ordinary React and CSS. Change their composition in `OverviewPage.tsx`, their responsive layout in the `.overview-service-*`, `.recent-activity`, and `.disclosure-actions` rules, and their copy in the locale catalogs.
+
+Keep the Service shortcut conditional: healthy running state has no action, while inactive or problem states offer the route to service controls. The recent-activity list is collapsed by default, contains at most five successful events, and leaves errors to Diagnostics. Those are interaction and information-hierarchy invariants covered by the browser gallery.
+
+Installation inventory and diagnostic logs live in `DiagnosticsPage.tsx`. Change the installation card and its relocate/reconnect actions there. The recent-log viewer is also collapsed by default; keep Log folder on the left and Expand/Collapse on the right through the shared `.disclosure-actions` layout. Its visual presentation can be redesigned without Rust.
+
+The data itself crosses the native boundary: `runtimeAdapter.ts` exposes execution state, recent activity, and diagnostic log entries, while browser fixtures live under `runtimeAdapters/`. Do not edit Rust merely to rearrange, rename, recolor, or collapse these sections. A new persisted activity type, different retention policy, or new installation fact is native behavior and belongs in a separate change.
 
 ### Change Settings, Wizard, or Tuner navigation
 

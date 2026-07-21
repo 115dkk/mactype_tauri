@@ -405,6 +405,7 @@ test("read-only profiles require Save as before apply", async ({ page }, testInf
 
   await expect(page.getByRole("button", { name: "Save now", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Apply now", exact: true })).toBeDisabled();
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-profile-read-only-save-as-required-en.png`), fullPage: true });
   await page.getByRole("button", { name: "Save as", exact: true }).click();
   await page.getByRole("textbox", { name: "New profile name" }).fill("Review copy");
   await page.locator(".profile-save-as").getByRole("button", { name: "Save as", exact: true }).click();
@@ -428,7 +429,9 @@ test("external legacy-selected profiles require an explicit import", async ({ pa
   const banner = page.locator(".legacy-import-banner");
   await expect(banner).toContainText("Existing MacType settings found");
   await expect(banner).toContainText("C:\\Users\\Gallery\\Downloads\\External.ini");
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-profile-external-import-required-en.png`), fullPage: true });
   await banner.getByRole("button", { name: "Import these settings" }).click();
+  await expect(banner).toHaveCount(0);
   await expect(page.locator(".selected-file-summary code")).toHaveText("Profiles\\External.ini");
   await expect(page.locator('[data-operation="file-settings"]')).toContainText("Imported External.ini");
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-profile-external-import-en.png`), fullPage: true });

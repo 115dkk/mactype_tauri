@@ -114,7 +114,10 @@ export function FileSettingsPage() {
   };
 
   const importFrom = async (path: string) => {
-    await run("import", () => importProfile(path), (opened) => t("files.imported", { name: fileName(opened.path) }));
+    await run("import", () => importProfile(path), (opened) => {
+      setLegacy(null);
+      return t("files.imported", { name: fileName(opened.path) });
+    });
   };
 
   const chooseImport = async () => {

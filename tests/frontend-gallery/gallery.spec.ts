@@ -1102,16 +1102,51 @@ test("service migration gallery remains usable at low window height", async ({ p
   await page.screenshot({ path: path.join(galleryRoot, "desktop-execution-migration-low-height-en.png"), fullPage: true });
 });
 
-test("overview and diagnostic actions always produce visible results", async ({ page }) => {
-  await page.goto("/?view=overview&gallery=1&lang=ko", { waitUntil: "networkidle" });
+test("overview summarizes the active service and discloses at most five successful activities", async ({ page }) => {
+  await page.goto("/?view=overview&gallery=1&lang=ko&system-service=ready", { waitUntil: "networkidle" });
+  await expect(page.getByRole("heading", { name: "MacType가 실행 중입니다" })).toBeVisible();
+  const summary = page.locator("[data-overview-service]");
+  await expect(summary).toContainText("ini\\Default.ini");
+  await expect(summary).toContainText("새 서비스");
+  await expect(summary).toContainText("정상");
+  await expect(summary.getByRole("button", { name: "서비스" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "설치 구성" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "다음 작업" })).toHaveCount(0);
+
+  const activity = page.locator("[data-recent-activity]");
+  await expect(activity).toContainText("프로필 Default.ini 적용을 마쳤습니다.");
+  await expect(activity.locator("ol")).toHaveCount(0);
+  await activity.getByRole("button", { name: "펼치기" }).click();
+  await expect(activity.locator("ol li")).toHaveCount(3);
+  await expect(activity).not.toContainText("migrate-from-legacy");
+  await activity.getByRole("button", { name: "접기" }).click();
+  await expect(activity.locator("ol")).toHaveCount(0);
+});
+
+test("overview offers a Service shortcut only when the service needs attention", async ({ page }) => {
+  await page.goto("/?view=overview&gallery=1&lang=en&system-service=ready&service-runtime=stopped", { waitUntil: "networkidle" });
+  await expect(page.locator("[data-overview-service]").getByRole("button", { name: "Service" })).toBeVisible();
+  await page.goto("/?view=overview&gallery=1&lang=en&system-service=failed", { waitUntil: "networkidle" });
+  await expect(page.locator("[data-overview-service]").getByRole("button", { name: "Service" })).toBeVisible();
+});
+
+test("diagnostics owns installation controls and keeps recent logs collapsed by default", async ({ page }) => {
+  await page.goto("/?view=diagnostics&gallery=1&lang=ko", { waitUntil: "networkidle" });
+  await expect(page.getByRole("heading", { name: "설치 구성" })).toBeVisible();
   await page.getByRole("button", { name: "설치 위치 다시 찾기" }).click();
   await expect(page.locator('[data-operation="relocate"]')).toBeVisible();
   await page.getByRole("button", { name: "다시 연결" }).click();
   await expect(page.locator('[data-operation="reconnect"]')).toBeVisible();
-
-  await page.getByRole("button", { name: "진단" }).click();
+  await expect(page.getByRole("log")).toHaveCount(0);
+  const actions = page.locator("[data-log-disclosure-actions]");
+  const positions = await actions.getByRole("button").evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().x));
+  expect(positions[0]).toBeLessThan(positions[1]);
+  await actions.getByRole("button", { name: "펼치기" }).click();
   await expect(page.getByRole("log")).toContainText("operation=migrate-from-legacy");
   await expect(page.getByRole("log")).toContainText("rollback=completed");
+  await actions.getByRole("button", { name: "접기" }).click();
+  await expect(page.getByRole("log")).toHaveCount(0);
+
   await page.getByRole("button", { name: "진단 파일 내보내기" }).click();
   await expect(page.locator('[data-operation="export"]')).toContainText("diagnostics-gallery.txt");
   await page.getByRole("button", { name: "진단 정보 복사" }).click();

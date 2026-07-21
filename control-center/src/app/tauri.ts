@@ -13,6 +13,7 @@ import type {
   PreviewResult,
   ProfileEntry,
   ProfileSnapshot,
+  RecentActivity,
   SessionTarget,
   ViewId,
 } from "./model";
@@ -104,6 +105,10 @@ export async function loadDiagnosticReport(): Promise<string> {
 
 export async function loadDiagnosticLogs(): Promise<ReadonlyArray<string>> {
   return getRuntimeAdapter().loadDiagnosticLogs();
+}
+
+export async function loadRecentActivity(): Promise<ReadonlyArray<RecentActivity>> {
+  return getRuntimeAdapter().loadRecentActivity();
 }
 
 export async function exportDiagnostics(): Promise<string> {

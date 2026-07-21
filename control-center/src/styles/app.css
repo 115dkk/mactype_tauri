@@ -88,6 +88,26 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .detail-list > div:last-child { border-bottom: 0; }
 .detail-list dt { color: var(--color-muted); }
 .detail-list dd { display: flex; align-items: center; gap: var(--space-2); margin: 0; }
+.overview-service-heading { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); padding: var(--space-5) var(--space-4); border-bottom: 1px solid var(--color-border); }
+.overview-service-heading > svg { color: var(--color-muted); }
+.overview-service-card[data-state="normal"] .overview-service-heading > svg { color: var(--color-success); }
+.overview-service-card[data-state="problem"] .overview-service-heading > svg { color: var(--color-warning); }
+.overview-service-details { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; }
+.overview-service-details > div { min-width: 0; padding: var(--space-4); border-inline-end: 1px solid var(--color-border); }
+.overview-service-details > div:last-child { border-inline-end: 0; }
+.overview-service-details dt { margin-bottom: var(--space-1); color: var(--color-muted); }
+.overview-service-details dd { min-width: 0; margin: 0; font-weight: 600; }
+.overview-service-details code { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activity-latest { min-height: 54px; padding: var(--space-4); }
+.activity-latest p { color: var(--color-foreground); }
+.activity-latest time { color: var(--color-muted); }
+.recent-activity ol { margin: 0; padding: 0; border-top: 1px solid var(--color-border); list-style: none; }
+.recent-activity li { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-4); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-border); }
+.recent-activity li time { color: var(--color-muted); font-variant-numeric: tabular-nums; }
+.disclosure-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-2) var(--space-3); border-top: 1px solid var(--color-border); }
+.activity-folder-message { padding: 0 var(--space-4) var(--space-3); color: var(--color-muted); overflow-wrap: anywhere; }
+.installation-heading > div:first-child { min-width: 0; }
+.installation-heading code { display: block; margin-top: var(--space-1); overflow-wrap: anywhere; }
 .success { color: var(--color-success); }
 .neutral-status { color: var(--color-muted); }
 .warning { color: var(--color-warning); }
@@ -347,6 +367,12 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
   .status-band { grid-template-columns: auto minmax(0, 1fr); }
   .status-band .button { grid-column: 1 / -1; }
   .detail-list > div, .setting-row { grid-template-columns: 1fr; gap: var(--space-2); }
+  .overview-service-heading { grid-template-columns: auto minmax(0, 1fr); }
+  .overview-service-heading .button { grid-column: 1 / -1; }
+  .overview-service-details { grid-template-columns: 1fr 1fr; }
+  .overview-service-details > div:nth-child(2) { border-inline-end: 0; }
+  .overview-service-details > div:nth-child(-n+2) { border-bottom: 1px solid var(--color-border); }
+  .installation-heading { align-items: stretch; flex-direction: column; }
   .profile-layout { display: block; }
   .profile-page { height: auto; overflow: visible; }
   .settings-workspace { display: block; overflow: visible; }

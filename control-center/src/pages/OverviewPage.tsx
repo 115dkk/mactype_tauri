@@ -1,96 +1,94 @@
-import { AlertTriangle, ArrowRight, Check, FolderSearch, LoaderCircle } from "lucide-react";
-import { useState } from "react";
-import type { InstallationStatus } from "../app/model";
-import { useI18n } from "../i18n/i18n";
+import { AlertTriangle, Check, ChevronDown, ChevronUp, ExternalLink, Power, ServerCog } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { projectExecutionView } from "../app/executionViewModel";
+import type { RecentActivity } from "../app/model";
+import { loadExecutionStatus, loadRecentActivity, openLogFolder } from "../app/tauri";
+import { useI18n, type MessageKey } from "../i18n/i18n";
 
 interface OverviewPageProps {
-  status: InstallationStatus;
-  onOpenProfiles: () => void;
-  onReconnect: () => Promise<InstallationStatus>;
-  onRelocate: () => Promise<InstallationStatus>;
+  onOpenService: () => void;
 }
 
-export function OverviewPage({ status, onOpenProfiles, onReconnect, onRelocate }: OverviewPageProps) {
-  const { t } = useI18n();
-  const [operation, setOperation] = useState<"relocate" | "reconnect" | null>(null);
-  const [completed, setCompleted] = useState<"relocate" | "reconnect" | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const run = async (kind: "relocate" | "reconnect", action: () => Promise<InstallationStatus>) => {
-    setOperation(kind);
-    setCompleted(null);
-    setError(null);
+function timeText(timestamp: number, locale: string): string {
+  return new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit" }).format(new Date(timestamp));
+}
+
+export function OverviewPage({ onOpenService }: OverviewPageProps) {
+  const { locale, t } = useI18n();
+  const [execution, setExecution] = useState<Awaited<ReturnType<typeof loadExecutionStatus>> | null>(null);
+  const [activities, setActivities] = useState<ReadonlyArray<RecentActivity>>([]);
+  const [expanded, setExpanded] = useState(false);
+  const [folderMessage, setFolderMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void loadExecutionStatus().then((nextExecution) => {
+      if (active) setExecution(nextExecution);
+    }).catch(() => undefined);
+    void loadRecentActivity().then((nextActivities) => {
+      if (active) setActivities(nextActivities.slice(-5));
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+
+  const view = useMemo(() => projectExecutionView(execution, null), [execution]);
+  const state = view.systemInjectionAction.state === "active"
+    ? "normal"
+    : execution?.systemService.runtime === "stopped"
+      ? "inactive"
+      : "problem";
+  const newestFirst = [...activities].reverse();
+  const latestApplied = newestFirst.find((entry) => entry.activity === "profile-applied");
+  const activityMessage = (entry: RecentActivity) => t(
+    `overview.activity.${entry.activity}` as MessageKey,
+    { profile: entry.profile ?? t("overview.unknownProfile") },
+  );
+  const openFolder = async () => {
+    setFolderMessage(null);
     try {
-      await action();
-      setCompleted(kind);
-    } catch (caught: unknown) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setOperation(null);
+      setFolderMessage(await openLogFolder());
+    } catch {
+      setFolderMessage(t("overview.logFolderFailed"));
     }
   };
-  const findingLabel = (label: string, value: string) => {
-    if (value === "MacType.dll") return t("finding.core32");
-    if (value === "MacType64.dll") return t("finding.core64");
-    if (value === "MacLoader.exe") return t("finding.loader");
-    if (label === "preview") return t("finding.preview");
-    return label;
-  };
+
   return (
     <section className="page view-enter" aria-labelledby="overview-title">
-      <header className="page-header">
-        <div>
-          <h1 id="overview-title">{t("nav.overview")}</h1>
-          <p>{t("overview.subtitle")}</p>
-        </div>
-        <button aria-busy={operation === "relocate"} className="button secondary" disabled={operation !== null} onClick={() => void run("relocate", onRelocate)} type="button">
-          {operation === "relocate" ? <LoaderCircle aria-hidden="true" className="spin" size={17} /> : <FolderSearch aria-hidden="true" size={17} />}
-          {t("overview.relocate")}
-        </button>
+      <header className="page-header compact">
+        <div><h1 id="overview-title">{t("nav.overview")}</h1><p>{t("overview.subtitle")}</p></div>
       </header>
 
-      <div className="status-band" data-state={status.state}>
-        {status.state === "ready" ? <Check aria-hidden="true" size={20} /> : <AlertTriangle aria-hidden="true" size={20} />}
-        <div>
-          <strong>{status.state === "ready" ? `${t("overview.checked")} · MacType ${status.coreVersion ?? ""}` : t("overview.previewNeeded")}</strong>
-          <span>{status.state === "ready" ? status.root : t("overview.previewNeededDescription")}</span>
+      <section className="overview-service-card section-block" data-overview-service data-state={state} aria-labelledby="overview-service-title">
+        <div className="overview-service-heading">
+          {state === "normal" ? <Check aria-hidden="true" size={22} /> : state === "inactive" ? <Power aria-hidden="true" size={22} /> : <AlertTriangle aria-hidden="true" size={22} />}
+          <h2 id="overview-service-title">{t(`overview.${state}Title` as MessageKey)}</h2>
+          {state !== "normal" && <button className="button secondary" onClick={onOpenService} type="button"><ServerCog aria-hidden="true" size={17} />{t("nav.execution")}</button>}
         </div>
-        <button aria-busy={operation === "reconnect"} className="button primary" disabled={operation !== null} onClick={() => void run("reconnect", onReconnect)} type="button">
-          {operation === "reconnect" && <LoaderCircle aria-hidden="true" className="spin" size={17} />}
-          {t("overview.reconnect")}
-        </button>
-      </div>
-
-      <div aria-live="polite">
-        {completed && <p className="success-message" data-operation={completed}><Check aria-hidden="true" size={16} /> {completed === "relocate" ? t("overview.relocate") : t("overview.reconnect")}</p>}
-        {error && <p className="inline-error"><AlertTriangle aria-hidden="true" size={15} /> {error}</p>}
-      </div>
-
-      <section className="section-block" aria-labelledby="installation-title">
-        <div className="section-heading">
-          <h2 id="installation-title">{t("overview.installation")}</h2>
-          <code>{status.root ?? t("overview.noRoot")}</code>
-        </div>
-        <dl className="detail-list">
-          {status.findings.map((finding) => (
-            <div key={finding.label}>
-              <dt>{findingLabel(finding.label, finding.value)}</dt>
-              <dd>
-                {finding.ok ? <Check className="success" aria-label={t("overview.checked")} size={17} /> : <AlertTriangle className="warning" aria-label={t("overview.attention")} size={17} />}
-                <span>{finding.value === "waiting" ? t("finding.waiting") : finding.value === "connected" ? t("overview.checked") : finding.value}</span>
-              </dd>
-            </div>
-          ))}
+        <dl className="overview-service-details">
+          <div><dt>{t("overview.activeProfile")}</dt><dd><code>{execution?.activeProfile ?? t("overview.unknownProfile")}</code></dd></div>
+          <div><dt>{t("overview.executionMode")}</dt><dd>{t(view.serviceSummary.modeKey)}</dd></div>
+          <div><dt>{t("overview.status")}</dt><dd>{t(`overview.${state}` as MessageKey)}</dd></div>
+          <div><dt>{t("overview.lastApplied")}</dt><dd>{latestApplied ? t("overview.todayAt", { time: timeText(latestApplied.timestampUnixMs, locale) }) : t("overview.noLastApplied")}</dd></div>
         </dl>
       </section>
 
-      <section className="split-section" aria-labelledby="next-title">
-        <div>
-          <h2 id="next-title">{t("overview.next")}</h2>
-          <p>{t("overview.nextDescription")}</p>
+      <section className="section-block recent-activity" data-recent-activity aria-labelledby="recent-activity-title">
+        <div className="section-heading"><h2 id="recent-activity-title">{t("overview.recentActivity")}</h2></div>
+        <div className="activity-latest">
+          {newestFirst[0]
+            ? <p>{activityMessage(newestFirst[0])}<span aria-hidden="true"> · </span><time dateTime={new Date(newestFirst[0].timestampUnixMs).toISOString()}>{timeText(newestFirst[0].timestampUnixMs, locale)}</time></p>
+            : <p>{t("overview.noActivity")}</p>}
         </div>
-        <button className="text-action" onClick={onOpenProfiles} type="button">
-          {t("overview.openProfiles")} <ArrowRight aria-hidden="true" size={17} />
-        </button>
+        {expanded && newestFirst.length > 0 && (
+          <ol id="overview-activity-list">
+            {newestFirst.map((entry, index) => <li key={`${entry.timestampUnixMs}-${index}`}><time dateTime={new Date(entry.timestampUnixMs).toISOString()}>{timeText(entry.timestampUnixMs, locale)}</time><span>{activityMessage(entry)}</span></li>)}
+          </ol>
+        )}
+        <div className="disclosure-actions">
+          <button className="text-action" onClick={() => void openFolder()} type="button"><ExternalLink aria-hidden="true" size={15} />{t("diagnostics.openFolder")}</button>
+          <button aria-controls="overview-activity-list" aria-expanded={expanded} className="text-action" onClick={() => setExpanded((value) => !value)} type="button">{expanded ? t("common.collapse") : t("common.expand")}{expanded ? <ChevronUp aria-hidden="true" size={15} /> : <ChevronDown aria-hidden="true" size={15} />}</button>
+        </div>
+        {folderMessage && <p className="activity-folder-message" aria-live="polite">{folderMessage}</p>}
       </section>
     </section>
   );

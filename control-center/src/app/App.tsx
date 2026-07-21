@@ -109,10 +109,8 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
     if (state.view === "files") return <FileSettingsPage />;
     if (state.view === "profiles") return <ProfilesPage ciSmoke={state.ciSmoke} mode={state.profileMode} onModeChange={(profileMode) => dispatch({ type: "navigate", view: "profiles", profileMode })} onPreviewReady={() => void reportFrontendReady("profiles")} />;
     if (state.view === "execution") return <ExecutionPage ciSmoke={state.ciSmoke} onReady={() => void reportFrontendReady("execution")} />;
-    if (state.view === "diagnostics") return <DiagnosticsPage status={state.status} />;
-    return <OverviewPage
+    if (state.view === "diagnostics") return <DiagnosticsPage
       status={state.status}
-      onOpenProfiles={() => dispatch({ type: "navigate", view: "files" })}
       onReconnect={async () => {
         const status = await reconnectPreview();
         dispatch({ type: "status", status });
@@ -124,6 +122,7 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
         return status;
       }}
     />;
+    return <OverviewPage onOpenService={() => dispatch({ type: "navigate", view: "execution" })} />;
   }, [state.ciSmoke, state.profileMode, state.status, state.view]);
 
   const settingsSelected = state.view === "files" || state.view === "profiles";

@@ -132,7 +132,10 @@ fn profile_apply_rejects_unsaved_edits() {
 
     let error = state.active_payload().unwrap_err();
 
-    assert!(error.contains("save profile changes"), "unexpected error: {error}");
+    assert!(
+        error.contains("save profile changes"),
+        "unexpected error: {error}"
+    );
     let _ = fs::remove_file(path);
 }
 
@@ -145,8 +148,14 @@ fn external_profile_save_requires_import_or_save_as() {
 
     let error = commands::save_profile(&state).unwrap_err();
 
-    assert!(error.contains("imported or saved as"), "unexpected error: {error}");
-    assert_eq!(fs::read_to_string(&path).unwrap(), "[General]\nNormalWeight=0\n");
+    assert!(
+        error.contains("imported or saved as"),
+        "unexpected error: {error}"
+    );
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "[General]\nNormalWeight=0\n"
+    );
     let _ = fs::remove_file(path);
 }
 

@@ -1,7 +1,8 @@
 use super::{
     codec::{decode, detect_line_ending, original_legacy_lines, split_lines},
-    identity::identify_profile, AdvancedProfile, IndividualSetting, IniNode, LineEnding,
-    ProfileDocument, ProfileLists, ProfileSnapshot, ShadowSetting,
+    identity::identify_profile,
+    AdvancedProfile, IndividualSetting, IniNode, LineEnding, ProfileDocument, ProfileLists,
+    ProfileSnapshot, ShadowSetting,
 };
 use crate::{
     bounded_io::read_bounded_file,

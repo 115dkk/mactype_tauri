@@ -1,10 +1,10 @@
 use super::{
+    identity::identify_profile,
     legacy::{
         discover_legacy_profile_at, find_default_profile, import_profile_to, user_profile_root,
     },
-    identity::identify_profile, AdvancedProfile, IndividualSetting, LegacyProfileCandidate,
-    ProfileDocument, ProfileEntry, ProfileLocation, ProfileSnapshot, ProfileState,
-    MAX_PROFILE_DIRECTORY_ENTRIES,
+    AdvancedProfile, IndividualSetting, LegacyProfileCandidate, ProfileDocument, ProfileEntry,
+    ProfileLocation, ProfileSnapshot, ProfileState, MAX_PROFILE_DIRECTORY_ENTRIES,
 };
 use crate::{bounded_io::read_bounded_file, execution, installation_root};
 use std::{env, fs, path::Path, path::PathBuf};
@@ -247,10 +247,13 @@ pub(super) fn ci_verify_profile_workflow(state: &ProfileState) -> Result<(), Str
     let duplicated = duplicate_profile(name.clone(), state)?;
     let path = PathBuf::from(&duplicated.path);
     update_profile_setting("normal_weight".to_owned(), 7.0, state)?;
-    update_profile_individuals(vec![IndividualSetting {
-        font_face: "CI Test Font".to_owned(),
-        values: vec![Some(1), Some(2), None, Some(3), None, Some(1)],
-    }], state)?;
+    update_profile_individuals(
+        vec![IndividualSetting {
+            font_face: "CI Test Font".to_owned(),
+            values: vec![Some(1), Some(2), None, Some(3), None, Some(1)],
+        }],
+        state,
+    )?;
     update_profile_list(
         "excludeModules".to_owned(),
         vec!["ci-test.exe".to_owned()],

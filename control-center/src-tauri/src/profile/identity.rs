@@ -68,9 +68,9 @@ fn relative_to(path: &Path, root: &Path) -> Option<PathBuf> {
         .strip_prefix(&resolved_root)
         .ok()
         .filter(|relative| {
-            relative.components().all(|component| {
-                matches!(component, Component::Normal(_) | Component::CurDir)
-            })
+            relative
+                .components()
+                .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
         })
         .map(Path::to_path_buf)
 }

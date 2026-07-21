@@ -132,6 +132,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::permissions_set_readonly_false)] // Clearing a Windows read-only test file does not widen Unix modes.
     fn external_and_read_only_profiles_require_an_explicit_copy() {
         let root = test_root("profile-copy-required");
         let installation = root.join("MacType");

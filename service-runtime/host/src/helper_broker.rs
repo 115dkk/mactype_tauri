@@ -178,9 +178,9 @@ where
             }
             Err(error) => BrokerResult {
                 disposition: BrokerDisposition::Rejected,
-                code: if error.stage() == HelperLaunchStage::AfterResume
-                    && error.kind() == io::ErrorKind::Interrupted
-                {
+                code: if error.stage() == HelperLaunchStage::BeforeResume {
+                    "helper-launch-failed-before-resume"
+                } else if error.kind() == io::ErrorKind::Interrupted {
                     "helper-service-stop-cleanup-unknown"
                 } else if error.kind() == io::ErrorKind::TimedOut {
                     "helper-absolute-timeout-cleanup-unknown"

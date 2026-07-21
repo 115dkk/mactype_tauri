@@ -150,6 +150,33 @@ fn interrupted_helper_is_a_service_stop_cancellation() {
 }
 
 #[test]
+fn before_resume_launch_failure_never_claims_unknown_target_cleanup() {
+    let (_base, assets) = assets();
+    let broker = FixedHelperBroker::new(
+        &assets,
+        ErrorLauncher {
+            kind: std::io::ErrorKind::InvalidInput,
+            stage: HelperLaunchStage::BeforeResume,
+        },
+    );
+    let result = broker.inject(&InjectionRequest {
+        identity: ProcessIdentity {
+            pid: 42,
+            creation_time: 100,
+            session_id: 2,
+            architecture: ProcessArchitecture::X64,
+            protected: false,
+            critical: false,
+        },
+        generation_id: assets.generation_id().to_owned(),
+    });
+
+    assert_eq!(result.disposition, BrokerDisposition::Rejected);
+    assert_eq!(result.code, "helper-launch-failed-before-resume");
+    assert!(!result.code.ends_with("-cleanup-unknown"));
+}
+
+#[test]
 fn post_resume_service_stop_is_terminal_cleanup_unknown() {
     let (_base, assets) = assets();
     let broker = FixedHelperBroker::new(

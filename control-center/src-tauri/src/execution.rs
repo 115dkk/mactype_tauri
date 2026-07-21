@@ -212,6 +212,35 @@ fn execute_machine_action(
     ))
 }
 
+fn record_successful_activity(
+    action: crate::machine_integration::MachineAction,
+    before_running: bool,
+    current: &ExecutionStatus,
+) {
+    use crate::diagnostics::ActivityKind;
+
+    if !before_running
+        && current.system_service.runtime == crate::service_contract::RuntimeState::Running
+    {
+        let _ = crate::diagnostics::record_activity(ActivityKind::ServiceStarted, None);
+    }
+    match action {
+        crate::machine_integration::MachineAction::Install => {
+            let _ = crate::diagnostics::record_activity(ActivityKind::ServiceInstalled, None);
+        }
+        crate::machine_integration::MachineAction::Stop => {
+            let _ = crate::diagnostics::record_activity(ActivityKind::ServiceStopped, None);
+        }
+        crate::machine_integration::MachineAction::PublishProfile
+        | crate::machine_integration::MachineAction::MigrateFromLegacy => {
+            let profile = current.active_profile.as_deref();
+            let _ = crate::diagnostics::record_activity(ActivityKind::ProfileVerified, profile);
+            let _ = crate::diagnostics::record_activity(ActivityKind::ProfileApplied, profile);
+        }
+        _ => {}
+    }
+}
+
 #[tauri::command]
 pub(crate) fn apply_open_profile(state: State<'_, ProfileState>) -> Result<AppliedProfile, String> {
     let root =
@@ -219,10 +248,17 @@ pub(crate) fn apply_open_profile(state: State<'_, ProfileState>) -> Result<Appli
     let (profile_path, profile_bytes) = state.active_payload()?;
     let applied = apply_profile(&root, &profile_path, &profile_bytes)?;
     if env::var_os("MACTYPE_CI_SMOKE_FILE").is_none() {
+        let before = status(Some(&root));
         execute_machine_action(
             crate::machine_integration::MachineAction::PublishProfile,
             Some(&profile_bytes),
         )?;
+        let current = status(Some(&root));
+        record_successful_activity(
+            crate::machine_integration::MachineAction::PublishProfile,
+            before.system_service.runtime == crate::service_contract::RuntimeState::Running,
+            &current,
+        );
     }
     Ok(applied)
 }
@@ -255,19 +291,34 @@ pub(crate) fn apply_system_injection_from_tray_menu() -> Result<(), String> {
     }
     ensure_active_runtime()?;
     let profile = active_system_profile_payload()?;
+    let before = status(installation_root().as_deref());
     crate::machine_integration::tray_apply(false, &profile)?;
-    record_system_injection_choice(true)
+    record_system_injection_choice(true)?;
+    let current = status(installation_root().as_deref());
+    record_successful_activity(
+        crate::machine_integration::MachineAction::PublishProfile,
+        before.system_service.runtime == crate::service_contract::RuntimeState::Running,
+        &current,
+    );
+    Ok(())
 }
 
 #[tauri::command]
 pub(crate) fn activate_system_injection() -> Result<ExecutionStatus, String> {
     ensure_active_runtime()?;
     let profile = active_system_profile_payload()?;
+    let before = status(installation_root().as_deref());
     execute_machine_action(
         crate::machine_integration::MachineAction::PublishProfile,
         Some(&profile),
     )?;
-    Ok(status(installation_root().as_deref()))
+    let current = status(installation_root().as_deref());
+    record_successful_activity(
+        crate::machine_integration::MachineAction::PublishProfile,
+        before.system_service.runtime == crate::service_contract::RuntimeState::Running,
+        &current,
+    );
+    Ok(current)
 }
 
 #[tauri::command]
@@ -275,6 +326,7 @@ pub(crate) fn manage_system_service(
     action: crate::machine_integration::PublicMachineAction,
 ) -> Result<ExecutionStatus, String> {
     let action = crate::machine_integration::MachineAction::from(action);
+    let before = status(installation_root().as_deref());
     let profile = if matches!(
         action,
         crate::machine_integration::MachineAction::PublishProfile
@@ -287,7 +339,13 @@ pub(crate) fn manage_system_service(
         None
     };
     execute_machine_action(action, profile.as_deref())?;
-    Ok(status(installation_root().as_deref()))
+    let current = status(installation_root().as_deref());
+    record_successful_activity(
+        action,
+        before.system_service.runtime == crate::service_contract::RuntimeState::Running,
+        &current,
+    );
+    Ok(current)
 }
 
 #[tauri::command]

@@ -15,6 +15,7 @@ import type {
   PreviewResult,
   ProfileEntry,
   ProfileSnapshot,
+  RecentActivity,
   SessionTarget,
   ViewId,
 } from "../model";
@@ -71,6 +72,7 @@ export const tauriRuntimeAdapter: ControlCenterRuntimeAdapter = {
   reconnectPreview: () => invoke<InstallationStatus>("reconnect_preview"),
   loadDiagnosticReport: () => invoke<string>("diagnostic_report"),
   loadDiagnosticLogs: () => invoke<string[]>("diagnostic_recent_logs"),
+  loadRecentActivity: () => invoke<RecentActivity[]>("recent_activity"),
   exportDiagnostics: () => invoke<string>("export_diagnostics"),
 
   async copyDiagnostics(): Promise<void> {

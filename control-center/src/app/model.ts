@@ -20,6 +20,14 @@ export interface DiagnosticEntry {
   severity: "info" | "warning" | "error";
 }
 
+export type ActivityKind = "profile-applied" | "profile-verified" | "service-started" | "service-installed" | "service-stopped";
+
+export interface RecentActivity {
+  timestampUnixMs: number;
+  activity: ActivityKind;
+  profile: string | null;
+}
+
 export interface ExecutionStatus {
   trayAvailable: boolean;
   autoStart: boolean;

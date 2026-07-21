@@ -1,8 +1,12 @@
 mod operation_log;
 
 use crate::preview::{PreviewDiagnosticSnapshot, PreviewState};
-use operation_log::read_recent_operation_logs;
-pub(crate) use operation_log::{record_operation_failure, OperationFailure};
+use operation_log::{
+    read_recent_activity, read_recent_diagnostic_logs, read_recent_operation_logs,
+};
+pub(crate) use operation_log::{
+    record_activity, record_operation_failure, ActivityKind, OperationFailure,
+};
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -140,6 +144,7 @@ fn diagnostic_report_text(snapshot: PreviewDiagnosticSnapshot) -> String {
 pub(crate) fn diagnostic_report(state: State<'_, PreviewState>) -> Result<String, String> {
     let mut report = diagnostic_report_text(state.diagnostic_snapshot()?);
     append_operation_logs(&mut report, &read_recent_operation_logs(50)?);
+    append_activity_logs(&mut report, &read_recent_activity(50)?);
     Ok(report)
 }
 
@@ -152,14 +157,23 @@ fn append_operation_logs(report: &mut String, entries: &[operation_log::Operatio
     }
 }
 
+fn append_activity_logs(report: &mut String, entries: &[operation_log::ActivityLogEntry]) {
+    report.push_str(&format!("activityLogEntries={}\n", entries.len()));
+    for entry in entries {
+        report.push_str("activityLog=");
+        report.push_str(&serde_json::to_string(entry).unwrap_or_else(|_| "{}".to_owned()));
+        report.push('\n');
+    }
+}
+
 #[tauri::command]
 pub(crate) fn diagnostic_recent_logs() -> Result<Vec<String>, String> {
-    read_recent_operation_logs(50).map(|entries| {
-        entries
-            .iter()
-            .map(operation_log::OperationLogEntry::render)
-            .collect()
-    })
+    read_recent_diagnostic_logs(50)
+}
+
+#[tauri::command]
+pub(crate) fn recent_activity() -> Result<Vec<operation_log::ActivityLogEntry>, String> {
+    read_recent_activity(5)
 }
 
 #[tauri::command]
@@ -283,6 +297,60 @@ mod tests {
         let recent = operation_log::read_recent_operation_logs_at(&root, 1).unwrap();
         assert_eq!(recent.len(), 1);
         assert_eq!(recent[0].stage, "fixture-119");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn successful_activity_shares_the_bounded_log_and_excludes_failures() {
+        let root = env::temp_dir().join(format!(
+            "mactype-activity-log-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        operation_log::record_operation_failure_at(
+            &root,
+            &OperationFailure {
+                operation: "publish-profile".to_owned(),
+                stage: "fixture failure".to_owned(),
+                error_chain: "must stay in diagnostics only".to_owned(),
+                broker_exit_code: None,
+                channel_failure: None,
+                rollback: "not-applicable".to_owned(),
+                final_state: "unchanged".to_owned(),
+            },
+            &[],
+        )
+        .unwrap();
+        for index in 0..6 {
+            operation_log::record_activity_at(
+                &root,
+                operation_log::ActivityKind::ProfileApplied,
+                Some(&format!(r"C:\Users\Secret\Profiles\Profile-{index}.ini")),
+            )
+            .unwrap();
+        }
+
+        let activity = operation_log::read_recent_activity_at(&root, 5).unwrap();
+        assert_eq!(activity.len(), 5);
+        assert_eq!(activity[0].profile.as_deref(), Some("Profile-1.ini"));
+        assert_eq!(activity[4].profile.as_deref(), Some("Profile-5.ini"));
+        assert!(activity
+            .iter()
+            .all(|entry| !entry.profile.as_deref().unwrap().contains("Secret")));
+
+        let diagnostics = operation_log::read_recent_diagnostic_logs_at(&root, 20).unwrap();
+        assert_eq!(diagnostics.len(), 7);
+        assert!(diagnostics
+            .iter()
+            .any(|entry| entry.contains("must stay in diagnostics only")));
+        assert!(diagnostics
+            .iter()
+            .any(|entry| entry.contains("Profile-5.ini")));
+        let disk = fs::read_to_string(root.join("control-center.log")).unwrap();
+        assert!(!disk.contains(r"C:\Users\Secret"));
         fs::remove_dir_all(root).unwrap();
     }
 }

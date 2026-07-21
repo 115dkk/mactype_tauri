@@ -15,6 +15,43 @@ const MAX_ERROR_BYTES: usize = 24 * 1024;
 const MAX_CHANNEL_ERROR_BYTES: usize = 2 * 1024;
 const MAX_ROLLBACK_BYTES: usize = 512;
 const MAX_FINAL_STATE_BYTES: usize = 2 * 1024;
+const MAX_PROFILE_NAME_BYTES: usize = 260;
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum ActivityKind {
+    ProfileApplied,
+    ProfileVerified,
+    ServiceStarted,
+    ServiceInstalled,
+    ServiceStopped,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ActivityLogEntry {
+    pub(crate) timestamp_unix_ms: u64,
+    pub(crate) activity: ActivityKind,
+    pub(crate) profile: Option<String>,
+}
+
+impl ActivityLogEntry {
+    fn render(&self) -> String {
+        let activity = match self.activity {
+            ActivityKind::ProfileApplied => "profile-applied",
+            ActivityKind::ProfileVerified => "profile-verified",
+            ActivityKind::ServiceStarted => "service-started",
+            ActivityKind::ServiceInstalled => "service-installed",
+            ActivityKind::ServiceStopped => "service-stopped",
+        };
+        let mut value = format!("{} activity={activity}", self.timestamp_unix_ms);
+        if let Some(profile) = &self.profile {
+            value.push_str(" profile=");
+            value.push_str(profile);
+        }
+        value
+    }
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct OperationFailure {
@@ -94,7 +131,32 @@ pub(super) fn record_operation_failure_at(
         final_state: sanitize(&failure.final_state, &[], MAX_FINAL_STATE_BYTES),
         error_chain,
     };
-    let mut line = serde_json::to_vec(&entry).map_err(|error| error.to_string())?;
+    append_entry(root, &entry)
+}
+
+pub(crate) fn record_activity(
+    activity: ActivityKind,
+    profile: Option<&str>,
+) -> Result<PathBuf, String> {
+    record_activity_at(&super::log_root()?, activity, profile)
+}
+
+pub(super) fn record_activity_at(
+    root: &Path,
+    activity: ActivityKind,
+    profile: Option<&str>,
+) -> Result<PathBuf, String> {
+    let entry = ActivityLogEntry {
+        timestamp_unix_ms: timestamp_unix_ms()?,
+        activity,
+        profile: profile.map(profile_file_name),
+    };
+    append_entry(root, &entry)
+}
+
+fn append_entry<T: Serialize>(root: &Path, entry: &T) -> Result<PathBuf, String> {
+    fs::create_dir_all(root).map_err(|error| error.to_string())?;
+    let mut line = serde_json::to_vec(entry).map_err(|error| error.to_string())?;
     line.push(b'\n');
     let path = root.join(LOG_FILE_NAME);
     rotate_if_needed(root, line.len() as u64)?;
@@ -142,6 +204,72 @@ pub(super) fn read_recent_operation_logs_at(
     }
     let start = entries.len().saturating_sub(limit);
     Ok(entries.split_off(start))
+}
+
+pub(crate) fn read_recent_activity(limit: usize) -> Result<Vec<ActivityLogEntry>, String> {
+    read_recent_activity_at(&super::log_root()?, limit)
+}
+
+pub(super) fn read_recent_activity_at(
+    root: &Path,
+    limit: usize,
+) -> Result<Vec<ActivityLogEntry>, String> {
+    read_recent_entries_at(root, limit, |line| {
+        serde_json::from_str::<ActivityLogEntry>(line).ok()
+    })
+}
+
+pub(crate) fn read_recent_diagnostic_logs(limit: usize) -> Result<Vec<String>, String> {
+    read_recent_diagnostic_logs_at(&super::log_root()?, limit)
+}
+
+pub(super) fn read_recent_diagnostic_logs_at(
+    root: &Path,
+    limit: usize,
+) -> Result<Vec<String>, String> {
+    read_recent_entries_at(root, limit, |line| {
+        serde_json::from_str::<OperationLogEntry>(line)
+            .map(|entry| entry.render())
+            .or_else(|_| serde_json::from_str::<ActivityLogEntry>(line).map(|entry| entry.render()))
+            .ok()
+    })
+}
+
+fn read_recent_entries_at<T, F>(root: &Path, limit: usize, mut parse: F) -> Result<Vec<T>, String>
+where
+    F: FnMut(&str) -> Option<T>,
+{
+    if limit == 0 || !root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut paths = (1..=LOG_BACKUPS)
+        .rev()
+        .map(|index| root.join(format!("{LOG_FILE_NAME}.{index}")))
+        .collect::<Vec<_>>();
+    paths.push(root.join(LOG_FILE_NAME));
+    let mut entries = Vec::new();
+    for path in paths {
+        let bytes = match fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.to_string()),
+        };
+        if bytes.len() as u64 > MAX_LOG_BYTES {
+            continue;
+        }
+        for line in String::from_utf8_lossy(&bytes).lines() {
+            if let Some(entry) = parse(line) {
+                entries.push(entry);
+            }
+        }
+    }
+    let start = entries.len().saturating_sub(limit);
+    Ok(entries.split_off(start))
+}
+
+fn profile_file_name(value: &str) -> String {
+    let name = value.rsplit(['\\', '/']).next().unwrap_or(value);
+    sanitize(name, &[], MAX_PROFILE_NAME_BYTES)
 }
 
 fn rotate_if_needed(root: &Path, incoming: u64) -> Result<(), String> {

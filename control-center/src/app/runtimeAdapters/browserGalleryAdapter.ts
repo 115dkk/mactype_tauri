@@ -8,6 +8,7 @@ import {
   type ProfileEntry,
   type PreviewResult,
   type ProfileSnapshot,
+  type RecentActivity,
   type SessionTarget,
 } from "../model";
 import type { ControlCenterRuntimeAdapter } from "../runtimeAdapter";
@@ -163,6 +164,15 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
   loadDiagnosticLogs(): Promise<ReadonlyArray<string>> {
     return Promise.resolve([
       "1784459527000 operation=migrate-from-legacy stage=verify open service readiness error=strict Ready timed out rollback=completed finalState=legacy=Running/Auto; modern=Absent",
+    ]);
+  },
+
+  loadRecentActivity(): Promise<ReadonlyArray<RecentActivity>> {
+    const now = Date.now();
+    return Promise.resolve([
+      { timestampUnixMs: now - 60_000, activity: "profile-verified", profile: "Default.ini" },
+      { timestampUnixMs: now - 45_000, activity: "service-started", profile: null },
+      { timestampUnixMs: now - 15_000, activity: "profile-applied", profile: "Default.ini" },
     ]);
   },
 

@@ -13,6 +13,7 @@ import type {
   PreviewResult,
   ProfileEntry,
   ProfileSnapshot,
+  RecentActivity,
   SessionTarget,
   ViewId,
 } from "./model";
@@ -42,6 +43,7 @@ export interface ControlCenterRuntimeAdapter {
   reconnectPreview(): Promise<InstallationStatus>;
   loadDiagnosticReport(): Promise<string>;
   loadDiagnosticLogs(): Promise<ReadonlyArray<string>>;
+  loadRecentActivity(): Promise<ReadonlyArray<RecentActivity>>;
   exportDiagnostics(): Promise<string>;
   copyDiagnostics(): Promise<void>;
   openLogFolder(): Promise<string>;

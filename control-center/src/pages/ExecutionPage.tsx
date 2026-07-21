@@ -251,7 +251,7 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
           <div><dt>{t("execution.summaryMode")}</dt><dd>{t(serviceSummary.modeKey)}</dd></div>
           <div>
             <dt>{t("execution.summaryStatus")}</dt>
-            <dd>{serviceSummary.tone === "normal" ? <Check className="success" aria-hidden="true" size={18} /> : <AlertTriangle className="warning" aria-hidden="true" size={18} />}{t(serviceSummary.statusKey)}</dd>
+            <dd>{serviceSummary.tone === "normal" ? <Check className="success" aria-hidden="true" size={18} /> : serviceSummary.tone === "neutral" ? <PowerOff className="neutral-status" aria-hidden="true" size={18} /> : <AlertTriangle className="warning" aria-hidden="true" size={18} />}{t(serviceSummary.statusKey)}</dd>
           </div>
         </dl>
         {legacyTrayResolution ? (

@@ -54,8 +54,6 @@ export function DiagnosticsPage({ status }: { status: InstallationStatus }) {
         <dl className="detail-list diagnostic-list">
           <div><dt>Control Center</dt><dd><Check className="success" size={17} /><code>0.1.0</code></dd></div>
           <div><dt>{t("diagnostics.core")}</dt><dd><Check className="success" size={17} /><code>{status.coreVersion ?? t("diagnostics.unknown")}</code></dd></div>
-          <div><dt>Preview Helper</dt><dd><Check className="success" size={17} /><span>{t("diagnostics.helperState")}</span></dd></div>
-          <div><dt>{t("diagnostics.protocol")}</dt><dd><code>MTPC v1</code></dd></div>
         </dl>
       </section>
       <section className="section-block" aria-labelledby="log-title">

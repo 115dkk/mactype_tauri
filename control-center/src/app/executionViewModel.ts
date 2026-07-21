@@ -58,7 +58,7 @@ export interface ServiceSummaryNotice {
 export interface ServiceSummary {
   modeKey: MessageKey;
   statusKey: MessageKey;
-  tone: "normal" | "attention" | "critical";
+  tone: "normal" | "neutral" | "attention" | "critical";
   notice: ServiceSummaryNotice | null;
   actions: ReadonlyArray<ServiceSummaryAction>;
 }
@@ -131,9 +131,10 @@ function projectServiceSummary(
   } else if (service?.runtime === "running") {
     // A degraded report can be caused by one or two process-local misses. Keep
     // that diagnostic in Details instead of turning the page summary into an alarm.
-    statusKey = status?.systemInjectionActive ? "execution.statusReady" : "execution.statusRunning";
+    statusKey = "execution.statusRunning";
   } else if (service?.runtime === "stopped") {
     statusKey = "execution.serviceState.stopped";
+    tone = "neutral";
   } else if (service) {
     statusKey = `execution.serviceState.${service.runtime}` as MessageKey;
   }

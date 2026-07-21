@@ -129,7 +129,7 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
     updateGalleryExecutionStatus(
       transitionGalleryExecutionStatus(currentGalleryExecutionStatus(), "publish-profile"),
     );
-    return Promise.resolve<AppliedProfile>({ sourceProfile: galleryProfiles.current().path, runtimeRoot: "C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\runtime\\generations\\gallery" });
+    return Promise.resolve<AppliedProfile>({ sourceProfile: galleryProfiles.current().displayPath, runtimeRoot: "C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\runtime\\generations\\gallery" });
   },
 
   registerSessionTarget(target: string, arguments_: ReadonlyArray<string>): Promise<ReadonlyArray<SessionTarget>> {
@@ -184,10 +184,14 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
 
   currentProfile(): Promise<ProfileSnapshot | null> {
     if (new URLSearchParams(window.location.search).has("fresh")) return Promise.resolve(null);
+    galleryProfiles.setCanSave(!new URLSearchParams(window.location.search).has("profile-read-only"));
     return Promise.resolve(galleryProfiles.current());
   },
 
   discoverLegacyProfile(): Promise<LegacyProfileCandidate | null> {
+    if (new URLSearchParams(window.location.search).get("legacy-profile") === "external") {
+      return Promise.resolve({ name: "External", path: "C:\\Users\\Gallery\\Downloads\\External.ini", source: "alternative-file" });
+    }
     return Promise.resolve({ name: "Pretendard forever", path: "C:\\Program Files\\MacType\\ini\\pretendard forever.ini", source: "alternative-file" });
   },
 

@@ -130,12 +130,17 @@ test("profile editor categories and collections remain interactive", async ({ pa
   await undo.click();
   await expect(redo).toBeEnabled();
   await redo.click();
+  await expect(page.getByRole("button", { name: "지금 적용" })).toBeDisabled();
+  await page.getByRole("button", { name: "지금 저장" }).click();
+  await expect(page.locator(".profile-message")).toContainText("지금 저장했습니다");
+  await expect(page.getByRole("button", { name: "지금 적용" })).toBeEnabled();
   await page.getByRole("button", { name: "지금 적용" }).click();
   await expect(page.locator(".profile-message")).toContainText("실제 MacType 시스템 범위에 적용했습니다");
+  await firstSelect.selectOption(initialOption);
   await expect(discard).toBeEnabled();
   await discard.click();
   await expect(discard).toBeDisabled();
-  await firstSelect.selectOption(nextOption);
+  await firstSelect.selectOption(initialOption);
   await page.getByRole("button", { name: "지금 저장" }).click();
   await expect(page.locator(".profile-message")).toContainText("지금 저장했습니다");
   await expect(discard).toBeDisabled();
@@ -336,10 +341,9 @@ test("settings files support import, save as, export, reveal, and apply without 
   page.on("pageerror", (error) => failures.push(`pageerror: ${error.message}`));
 
   await page.goto("/?view=files&gallery=1&lang=ko", { waitUntil: "networkidle" });
-  await expect(page.getByRole("heading", { name: "기존 MacType 설정을 찾았습니다" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "기존 MacType 설정을 찾았습니다" })).toHaveCount(0);
+  await expect(page.locator(".selected-file-summary")).toContainText("ini\\Default.ini");
   await expect(page.getByRole("textbox", { name: /경로|path/i })).toHaveCount(0);
-  await page.getByRole("button", { name: "이 설정 가져오기" }).click();
-  await expect(page.locator('[data-operation="file-settings"]')).toContainText("개인 프로필로 가져왔습니다");
 
   await page.getByRole("button", { name: "INI 파일 선택" }).click();
   await expect(page.locator('[data-operation="file-settings"]')).toContainText("Community.ini");
@@ -356,6 +360,78 @@ test("settings files support import, save as, export, reveal, and apply without 
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   expect(horizontalOverflow, "settings-file controls must not have horizontal scrolling").toBe(false);
   expect(failures, failures.join("\n")).toEqual([]);
+});
+
+test("writable profiles save to the original and apply by portable identity", async ({ page }, testInfo) => {
+  await page.goto("/?view=profiles&gallery=1&lang=en", { waitUntil: "networkidle" });
+  await expect(page.locator(".profile-editing")).toContainText("Editing:");
+  await expect(page.locator(".profile-editing code")).toHaveText("ini\\Default.ini");
+
+  const setting = page.locator(".setting-row select").first();
+  const initial = await setting.inputValue();
+  const alternate = await setting.locator("option").evaluateAll(
+    (options, current) => options.map((option) => (option as HTMLOptionElement).value).find((value) => value !== current),
+    initial,
+  );
+  if (!alternate) throw new Error("A writable profile setting needs an alternate gallery value");
+  await setting.selectOption(alternate);
+
+  const save = page.getByRole("button", { name: "Save now", exact: true });
+  const apply = page.getByRole("button", { name: "Apply now", exact: true });
+  await expect(save).toBeEnabled();
+  await expect(apply).toBeDisabled();
+  await save.click();
+  await expect(page.locator(".profile-message")).toContainText("Saved Default.ini");
+  await expect(apply).toBeEnabled();
+  await apply.click();
+  await expect(page.locator(".profile-message")).toContainText("Applied Default.ini");
+
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-profile-direct-save-apply-en.png`), fullPage: true });
+});
+
+test("read-only profiles require Save as before apply", async ({ page }, testInfo) => {
+  await page.goto("/?view=profiles&gallery=1&lang=en&profile-read-only=1", { waitUntil: "networkidle" });
+  await expect(page.locator(".profile-editing code")).toHaveText("ini\\Default.ini");
+  await expect(page.getByText("The original file cannot be written.", { exact: false })).toBeVisible();
+
+  const setting = page.locator(".setting-row select").first();
+  const initial = await setting.inputValue();
+  const alternate = await setting.locator("option").evaluateAll(
+    (options, current) => options.map((option) => (option as HTMLOptionElement).value).find((value) => value !== current),
+    initial,
+  );
+  if (!alternate) throw new Error("A read-only profile setting needs an alternate gallery value");
+  await setting.selectOption(alternate);
+
+  await expect(page.getByRole("button", { name: "Save now", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Apply now", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "Save as", exact: true }).click();
+  await page.getByRole("textbox", { name: "New profile name" }).fill("Review copy");
+  await page.locator(".profile-save-as").getByRole("button", { name: "Save as", exact: true }).click();
+
+  await expect(page.locator(".profile-editing code")).toHaveText("Profiles\\Review copy.ini");
+  await expect(page.locator(".profile-message")).toContainText("Saved as Profiles\\Review copy.ini");
+  await expect(page.getByRole("button", { name: "Apply now", exact: true })).toBeEnabled();
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-profile-read-only-save-as-en.png`), fullPage: true });
+});
+
+test("known legacy-selected profiles open directly without an import detour", async ({ page }, testInfo) => {
+  await page.goto("/?view=files&gallery=1&lang=en&fresh=1&profile-runtime-missing=1", { waitUntil: "networkidle" });
+  await expect(page.locator(".legacy-import-banner")).toHaveCount(0);
+  await expect(page.locator(".selected-file-summary strong")).toHaveText("Editing");
+  await expect(page.locator(".selected-file-summary code")).toHaveText("ini\\pretendard forever.ini");
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-profile-direct-open-en.png`), fullPage: true });
+});
+
+test("external legacy-selected profiles require an explicit import", async ({ page }, testInfo) => {
+  await page.goto("/?view=files&gallery=1&lang=en&legacy-profile=external", { waitUntil: "networkidle" });
+  const banner = page.locator(".legacy-import-banner");
+  await expect(banner).toContainText("Existing MacType settings found");
+  await expect(banner).toContainText("C:\\Users\\Gallery\\Downloads\\External.ini");
+  await banner.getByRole("button", { name: "Import these settings" }).click();
+  await expect(page.locator(".selected-file-summary code")).toHaveText("Profiles\\External.ini");
+  await expect(page.locator('[data-operation="file-settings"]')).toContainText("Imported External.ini");
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-profile-external-import-en.png`), fullPage: true });
 });
 
 test("execution and new system service controls remain interactive", async ({ page }) => {

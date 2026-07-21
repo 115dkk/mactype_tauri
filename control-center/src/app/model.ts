@@ -97,6 +97,9 @@ export interface AppliedProfile {
 
 export interface ProfileSnapshot {
   path: string;
+  displayPath: string;
+  location: "installation" | "personal" | "external";
+  canSave: boolean;
   encoding: string;
   bom: string;
   lineEnding: string;
@@ -113,6 +116,7 @@ export interface ProfileSnapshot {
 export interface ProfileEntry {
   name: string;
   path: string;
+  displayPath: string;
 }
 
 export type ServiceBackend = "open-source" | "legacy-mac-tray" | "foreign" | "none";

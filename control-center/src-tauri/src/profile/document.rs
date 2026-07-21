@@ -1,7 +1,7 @@
 use super::{
     codec::{decode, detect_line_ending, original_legacy_lines, split_lines},
-    AdvancedProfile, IndividualSetting, IniNode, LineEnding, ProfileDocument, ProfileLists,
-    ProfileSnapshot, ShadowSetting,
+    identity::identify_profile, AdvancedProfile, IndividualSetting, IniNode, LineEnding,
+    ProfileDocument, ProfileLists, ProfileSnapshot, ShadowSetting,
 };
 use crate::{
     bounded_io::read_bounded_file,
@@ -117,6 +117,7 @@ impl ProfileDocument {
     }
 
     pub(super) fn snapshot(&self) -> ProfileSnapshot {
+        let identity = identify_profile(&self.path);
         let values = SETTINGS
             .iter()
             .map(|setting| {
@@ -130,6 +131,9 @@ impl ProfileDocument {
 
         ProfileSnapshot {
             path: self.path.to_string_lossy().into_owned(),
+            display_path: identity.display_path,
+            location: identity.location,
+            can_save: identity.can_save,
             encoding: self.encoding,
             bom: self.bom,
             line_ending: self.line_ending,
@@ -153,6 +157,10 @@ impl ProfileDocument {
             },
             advanced: self.advanced(),
         }
+    }
+
+    pub(super) fn is_dirty(&self) -> bool {
+        !self.dirty_keys.is_empty()
     }
 
     pub(super) fn raw_value(&self, section_name: &str, key_name: &str) -> Option<&str> {

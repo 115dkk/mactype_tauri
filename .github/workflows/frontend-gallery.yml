@@ -41,3 +41,20 @@ jobs:
           name: frontend-window-gallery
           path: artifacts/frontend-gallery
           if-no-files-found: error
+      - name: Collect profile workflow review evidence
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts/profile-workflow-review-evidence
+          find artifacts/frontend-gallery -maxdepth 1 -type f \
+            \( -name '*-profile-direct-save-apply-en.png' \
+            -o -name '*-profile-read-only-save-as-en.png' \
+            -o -name '*-profile-direct-open-en.png' \
+            -o -name '*-profile-external-import-en.png' \) \
+            -exec cp {} artifacts/profile-workflow-review-evidence/ \;
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: profile-workflow-review-evidence
+          path: artifacts/profile-workflow-review-evidence
+          if-no-files-found: error

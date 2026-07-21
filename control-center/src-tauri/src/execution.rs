@@ -155,9 +155,13 @@ pub fn status(installation_root: Option<&Path>) -> ExecutionStatus {
         system_modes_supported,
         system_injection_active,
         injection_ready: observation.local_runtime.is_some(),
-        active_profile: observation
-            .expected_source
-            .map(|path| path.to_string_lossy().into_owned()),
+        active_profile: observation.expected_source.map(|path| {
+            installation_root
+                .map(|root| crate::profile::source_profile_reference(root, &path))
+                .unwrap_or(path)
+                .to_string_lossy()
+                .into_owned()
+        }),
         expected_profile_digest,
         session_targets: session_targets().unwrap_or_default(),
     }
@@ -550,7 +554,7 @@ mod tests {
     }
 
     #[test]
-    fn applied_profile_builds_a_self_contained_loader_generation() {
+    fn applied_installed_profile_keeps_a_relative_source_reference() {
         let root = env::temp_dir().join(format!("mactype-runtime-test-{}", std::process::id()));
         let installation = root.join("installation");
         let runtime = root.join("runtime");
@@ -561,7 +565,7 @@ mod tests {
         let active = prepare_runtime_at(
             &runtime,
             &installation,
-            Path::new("C:/profiles/User.ini"),
+            &installation.join("ini").join("User.ini"),
             profile,
         )
         .unwrap();
@@ -576,7 +580,7 @@ mod tests {
         assert!(active.runtime_root.join("MacLoader.exe").is_file());
         assert!(active.runtime_root.join("MacType.dll").is_file());
         let reopened = runtime::active_runtime_from(&runtime).unwrap();
-        assert_eq!(reopened.source_profile, Path::new("C:/profiles/User.ini"));
+        assert_eq!(reopened.source_profile, Path::new(r"ini\User.ini"));
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -6,6 +6,7 @@ import {
   applyOpenProfile,
   currentProfile,
   discardProfileChanges,
+  duplicateProfile,
   listProfiles,
   loadExecutionStatus,
   redoProfile,
@@ -19,7 +20,7 @@ import {
 import { settingsSchema } from "../../generated/settings";
 import type { I18nValue } from "../../i18n/i18n";
 
-type ProfileCommand = "undo" | "redo" | "discard" | "save" | "apply";
+type ProfileCommand = "undo" | "redo" | "discard" | "save" | "save-as" | "apply";
 
 const emptyAdvancedProfile: AdvancedProfile = {
   shadow: null,
@@ -168,7 +169,7 @@ export function useProfileDocument(t: I18nValue["t"]) {
   };
 
   const applyProfile = async () => {
-    if (recoveryRequired) return;
+    if (recoveryRequired || (profile?.dirtyKeys.length ?? 0) > 0) return;
     setCommand("apply");
     try {
       await mutationQueue.current;
@@ -179,6 +180,25 @@ export function useProfileDocument(t: I18nValue["t"]) {
     } catch (caught: unknown) {
       setError(operationErrorMessage(caught, t));
       setMessage(null);
+    } finally {
+      setCommand(null);
+    }
+  };
+
+  const saveProfileAs = async (name: string) => {
+    if (recoveryRequired || !name.trim()) return false;
+    setCommand("save-as");
+    try {
+      await mutationQueue.current;
+      const saved = await duplicateProfile(name.trim());
+      applySnapshot(saved);
+      setMessage(t("profiles.savedAs", { path: saved.displayPath }));
+      setError(null);
+      return true;
+    } catch (caught: unknown) {
+      setError(errorMessage(caught));
+      setMessage(null);
+      return false;
     } finally {
       setCommand(null);
     }
@@ -238,6 +258,7 @@ export function useProfileDocument(t: I18nValue["t"]) {
     recoveryRequired,
     redo: () => runHistoryCommand("redo"),
     saveCurrentProfile,
+    saveProfileAs,
     setAdvanced,
     setError,
     undo: () => runHistoryCommand("undo"),

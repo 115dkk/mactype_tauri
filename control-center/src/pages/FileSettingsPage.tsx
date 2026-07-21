@@ -38,11 +38,19 @@ export function FileSettingsPage() {
     let active = true;
     void Promise.all([currentProfile(), listProfiles(), discoverLegacyProfile(), loadExecutionStatus()])
       .then(async ([opened, available, detected, execution]) => {
-        const selected = await openPreferredProfile(opened, available, execution.activeProfile);
+        const managedDetected = detected ? managedProfileFor(detected, available) : null;
+        const preferredProfile = execution.injectionReady
+          ? execution.activeProfile
+          : managedDetected?.displayPath ?? execution.activeProfile;
+        const selected = await openPreferredProfile(
+          opened,
+          available,
+          preferredProfile,
+        );
         if (!active) return;
         setProfile(selected);
         setProfiles(available);
-        setLegacy(detected && sameProfileIdentity(detected, execution.activeProfile) ? null : detected);
+        setLegacy(detected && !managedDetected && !sameProfileIdentity(detected, execution.activeProfile) ? detected : null);
       })
       .catch((caught: unknown) => {
         if (active) setError(caught instanceof Error ? caught.message : String(caught));
@@ -179,23 +187,24 @@ export function FileSettingsPage() {
           <label>
             <span>{t("profiles.select")}</span>
             <select disabled={!profiles.length || busy !== null} onChange={(event) => void chooseProfile(event.target.value)} value={profile?.path ?? ""}>
-              {profiles.map((entry) => <option key={entry.path} value={entry.path}>{entry.name}</option>)}
+              {profiles.map((entry) => <option key={entry.path} value={entry.path}>{entry.name} — {entry.displayPath}</option>)}
             </select>
           </label>
           <div className="selected-file-summary" data-empty={!profile}>
             <FolderOpen aria-hidden="true" size={22} />
-            <div><strong>{profile ? fileName(profile.path) : t("profiles.none")}</strong>{profile && <div className="selected-file-path"><code title={profile.path}>{profile.path}</code><button aria-label={t("files.reveal")} className="icon-button" disabled={busy !== null} onClick={() => void revealCurrentProfile()} title={t("files.reveal")} type="button"><FolderOpen aria-hidden="true" size={15} /></button></div>}</div>
+            <div><strong>{profile ? t("files.editing") : t("profiles.none")}</strong>{profile && <div className="selected-file-path"><code title={profile.path}>{profile.displayPath}</code><button aria-label={t("files.reveal")} className="icon-button" disabled={busy !== null} onClick={() => void revealCurrentProfile()} title={t("files.reveal")} type="button"><FolderOpen aria-hidden="true" size={15} /></button></div>}</div>
           </div>
         </div>
+        {profile && !profile.canSave && <p className="file-save-warning">{t("files.readOnly")}</p>}
         <dl className="detail-list compact-details">
           <div><dt>{t("files.encoding")}</dt><dd>{profile?.encoding ?? "—"}</dd></div>
           <div><dt>{t("files.lineEnding")}</dt><dd>{profile?.lineEnding ?? "—"}</dd></div>
           <div><dt>{t("files.unsaved")}</dt><dd>{dirtyCount ? t("files.unsavedCount", { count: dirtyCount }) : t("files.noUnsaved")}</dd></div>
         </dl>
         <div className="file-primary-actions">
-          <button className="button secondary" disabled={!profile || dirtyCount === 0 || busy !== null} onClick={() => void save()} type="button"><Save aria-hidden="true" size={17} /> {busy === "save" ? t("profiles.saving") : t("profiles.save")}</button>
+          <button className="button secondary" disabled={!profile || !profile.canSave || dirtyCount === 0 || busy !== null} onClick={() => void save()} type="button"><Save aria-hidden="true" size={17} /> {busy === "save" ? t("profiles.saving") : t("profiles.save")}</button>
           <div className="file-save-as"><input aria-label={t("profiles.copyName")} disabled={!profile || busy !== null} onChange={(event) => setCopyName(event.target.value)} placeholder={t("files.saveAsName")} value={copyName} /><button className="button secondary" disabled={!profile || !copyName.trim() || busy !== null} onClick={() => void duplicate()} type="button"><SaveAll aria-hidden="true" size={16} /> {t("files.saveAs")}</button></div>
-          <button className="button primary" disabled={!profile || busy !== null} onClick={() => void apply()} type="button"><Play aria-hidden="true" size={17} /> {busy === "apply" ? t("profiles.applying") : t("profiles.apply")}</button>
+          <button className="button primary" disabled={!profile || dirtyCount > 0 || busy !== null} onClick={() => void apply()} title={dirtyCount > 0 ? t("profiles.saveBeforeApply") : undefined} type="button"><Play aria-hidden="true" size={17} /> {busy === "apply" ? t("profiles.applying") : t("profiles.apply")}</button>
         </div>
       </section>
 
@@ -224,4 +233,9 @@ function sameProfileIdentity(candidate: LegacyProfileCandidate, activeProfile: s
   if (!activeProfile) return false;
   const stem = (path: string) => fileName(path).replace(/\.ini$/i, "").toLocaleLowerCase();
   return candidate.name.toLocaleLowerCase() === stem(activeProfile) || stem(candidate.path) === stem(activeProfile);
+}
+
+function managedProfileFor(candidate: LegacyProfileCandidate, profiles: ReadonlyArray<ProfileEntry>): ProfileEntry | null {
+  const candidatePath = candidate.path.toLocaleLowerCase();
+  return profiles.find((profile) => profile.path.toLocaleLowerCase() === candidatePath) ?? null;
 }

@@ -192,7 +192,7 @@ pub(super) fn prepare_runtime_at(
     }
     let active = ActiveRuntime {
         runtime_root: generation,
-        source_profile: source_profile.to_path_buf(),
+        source_profile: crate::profile::source_profile_reference(installation_root, source_profile),
     };
     atomic_write(
         &base.join("active.json"),

@@ -2,8 +2,9 @@ use super::{
     legacy::{
         discover_legacy_profile_at, find_default_profile, import_profile_to, user_profile_root,
     },
-    AdvancedProfile, IndividualSetting, LegacyProfileCandidate, ProfileDocument, ProfileEntry,
-    ProfileSnapshot, ProfileState, MAX_PROFILE_DIRECTORY_ENTRIES,
+    identity::identify_profile, AdvancedProfile, IndividualSetting, LegacyProfileCandidate,
+    ProfileDocument, ProfileEntry, ProfileLocation, ProfileSnapshot, ProfileState,
+    MAX_PROFILE_DIRECTORY_ENTRIES,
 };
 use crate::{bounded_io::read_bounded_file, execution, installation_root};
 use std::{env, fs, path::Path, path::PathBuf};
@@ -20,6 +21,7 @@ pub(super) fn list_profiles() -> Result<Vec<ProfileEntry>, String> {
                 .is_some_and(|extension| extension.eq_ignore_ascii_case("ini"))
         })
         .map(|path| ProfileEntry {
+            display_path: identify_profile(&path).display_path,
             name: path
                 .file_stem()
                 .map(|name| name.to_string_lossy().into_owned())
@@ -167,6 +169,19 @@ pub(super) fn duplicate_profile(
 
 pub(super) fn save_profile(state: &ProfileState) -> Result<ProfileSnapshot, String> {
     state.edit(|document| {
+        let identity = identify_profile(document.path());
+        if !identity.can_save {
+            return Err(match identity.location {
+                ProfileLocation::External => {
+                    "external profiles must be imported or saved as a managed profile before saving"
+                        .to_owned()
+                }
+                ProfileLocation::Installation | ProfileLocation::Personal => {
+                    "the original profile is read-only; use Save As before saving changes"
+                        .to_owned()
+                }
+            });
+        }
         document.save()?;
         Ok(document.snapshot())
     })
@@ -222,23 +237,29 @@ fn reveal_file(_path: &Path) -> Result<(), String> {
 }
 
 pub(super) fn ci_verify_profile_workflow(state: &ProfileState) -> Result<(), String> {
-    let marker = env::var_os("MACTYPE_CI_SMOKE_FILE").ok_or_else(|| {
-        "profile workflow verification is available only during CI smoke tests".to_owned()
-    })?;
-    let directory = PathBuf::from(marker)
-        .parent()
-        .ok_or_else(|| "CI marker has no parent directory".to_owned())?
-        .join("profile-workflow");
+    if env::var_os("MACTYPE_CI_SMOKE_FILE").is_none() {
+        return Err(
+            "profile workflow verification is available only during CI smoke tests".to_owned(),
+        );
+    }
     let name = format!("phase3-{}", std::process::id());
-    let mut copy = state.read(|current| current.duplicate_in(&directory, &name))?;
-    copy.set_value("normal_weight", 7.0)?;
-    copy.set_individuals(vec![IndividualSetting {
+    let original_path = state.read(|current| Ok(current.path().to_path_buf()))?;
+    let duplicated = duplicate_profile(name.clone(), state)?;
+    let path = PathBuf::from(&duplicated.path);
+    update_profile_setting("normal_weight".to_owned(), 7.0, state)?;
+    update_profile_individuals(vec![IndividualSetting {
         font_face: "CI Test Font".to_owned(),
         values: vec![Some(1), Some(2), None, Some(3), None, Some(1)],
-    }])?;
-    copy.set_list("excludeModules", vec!["ci-test.exe".to_owned()])?;
-    copy.save()?;
-    let path = directory.join(format!("{name}.ini"));
+    }], state)?;
+    update_profile_list(
+        "excludeModules".to_owned(),
+        vec!["ci-test.exe".to_owned()],
+        state,
+    )?;
+    let saved = save_profile(state)?;
+    if saved.path != duplicated.path || saved.display_path != format!(r"Profiles\{name}.ini") {
+        return Err("direct save did not preserve the personal profile identity".to_owned());
+    }
     let reopened_document = ProfileDocument::open(&path)?;
     let reopened = reopened_document.snapshot();
     if reopened.values.get("normal_weight") != Some(&7.0)
@@ -249,8 +270,8 @@ pub(super) fn ci_verify_profile_workflow(state: &ProfileState) -> Result<(), Str
     }
     let installation =
         installation_root().ok_or_else(|| "MacType installation was not found".to_owned())?;
-    let encoded = reopened_document.encoded()?;
-    let applied = execution::apply_profile(&installation, &path, &encoded)?;
+    let (source_path, encoded) = state.active_payload()?;
+    let applied = execution::apply_profile(&installation, &source_path, &encoded)?;
     let applied_root = PathBuf::from(&applied.runtime_root);
     let applied_profile = read_bounded_file(
         &applied_root.join("profile.ini"),
@@ -271,5 +292,14 @@ pub(super) fn ci_verify_profile_workflow(state: &ProfileState) -> Result<(), Str
             "applied profile runtime is incomplete or does not preserve the profile".to_owned(),
         );
     }
-    fs::remove_dir_all(directory).map_err(|error| error.to_string())
+    if applied.source_profile != format!(r"Profiles\{name}.ini") {
+        return Err("applied profile did not retain its portable profile identity".to_owned());
+    }
+    open_profile(original_path.to_string_lossy().into_owned(), state)?;
+    fs::remove_file(&path).map_err(|error| error.to_string())?;
+    let backup = path.with_extension("ini.bak");
+    if backup.exists() {
+        fs::remove_file(backup).map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }

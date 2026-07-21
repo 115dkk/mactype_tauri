@@ -9,8 +9,6 @@ import type {
   SystemServiceAction,
   SystemServiceStatus,
 } from "../model";
-import { fallbackGalleryProfilePath } from "./browserGalleryProfiles";
-
 export const expectedGalleryDigest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 type GalleryQuery = Pick<URLSearchParams, "get" | "has">;
@@ -169,8 +167,8 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
   const systemModesSupported = generalMutationAllowed
     && (serviceInstallation === "absent" || serviceInstallation === "current" || serviceInstallation === "outdated");
   const activeProfile = query.has("legacy-applied")
-    ? "C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\profiles\\Pretendard forever.ini"
-    : fallbackGalleryProfilePath;
+    ? "Profiles\\Pretendard forever.ini"
+    : "ini\\Default.ini";
   const legacyRequest = query.get("legacy");
   const legacyForeign = legacyRequest === "foreign";
   const legacyUncertain = legacyRequest === "inaccessible";
@@ -246,7 +244,7 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
     registryModeDetected: appInitConflict,
     systemModesSupported: conflictFreeSystemModesSupported,
     systemInjectionActive: legacyTrayClear && (query.has("raw-active") ? true : ready && !appInitConflict),
-    injectionReady: true,
+    injectionReady: !query.has("profile-runtime-missing"),
     activeProfile,
     expectedProfileDigest: expectedGalleryDigest,
     sessionTargets: [],

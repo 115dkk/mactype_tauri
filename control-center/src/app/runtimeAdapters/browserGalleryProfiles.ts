@@ -10,6 +10,9 @@ export const fallbackGalleryProfilePath = "C:\\Program Files\\MacType\\ini\\Defa
 
 const fallbackGalleryProfile: ProfileSnapshot = {
   path: fallbackGalleryProfilePath,
+  displayPath: "ini\\Default.ini",
+  location: "installation",
+  canSave: true,
   encoding: "utf-8",
   bom: "none",
   lineEnding: "cr-lf",
@@ -38,6 +41,8 @@ const fallbackGalleryProfile: ProfileSnapshot = {
 const recentGalleryProfile: ProfileSnapshot = {
   ...fallbackGalleryProfile,
   path: "C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\profiles\\Recent.ini",
+  displayPath: "Profiles\\Recent.ini",
+  location: "personal",
 };
 
 const cloneProfile = (profile: ProfileSnapshot): ProfileSnapshot => structuredClone(profile);
@@ -52,6 +57,7 @@ interface BrowserGalleryProfileState {
   openDefault(): ProfileSnapshot;
   redo(): ProfileSnapshot;
   save(): ProfileSnapshot;
+  setCanSave(canSave: boolean): ProfileSnapshot;
   undo(): ProfileSnapshot;
   updateAdvanced(advanced: AdvancedProfile): ProfileSnapshot;
   updateIndividuals(entries: ReadonlyArray<IndividualSetting>): ProfileSnapshot;
@@ -98,22 +104,44 @@ export function createBrowserGalleryProfileState(): BrowserGalleryProfileState {
     return cloneProfile(profile);
   }
 
+  function profileForPath(path: string): ProfileSnapshot {
+    const fileName = path.split(/[\\/]/).pop() ?? path;
+    const normalized = path.toLocaleLowerCase();
+    if (normalized.includes("\\mactype\\controlcenter\\profiles\\")) {
+      return { ...fallbackGalleryProfile, path, displayPath: `Profiles\\${fileName}`, location: "personal" };
+    }
+    if (normalized.includes("\\mactype\\ini\\")) {
+      return { ...fallbackGalleryProfile, path, displayPath: `ini\\${fileName}`, location: "installation" };
+    }
+    return { ...fallbackGalleryProfile, path, displayPath: path, location: "external", canSave: false };
+  }
+
   return {
     current: () => cloneProfile(profile),
     discard: () => open(savedProfile),
-    duplicate: (name) => open({ ...profile, path: `C:\\Program Files\\MacType\\ini\\${name}.ini` }),
+    duplicate: (name) => open({
+      ...profile,
+      path: `C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\profiles\\${name}.ini`,
+      displayPath: `Profiles\\${name}.ini`,
+      location: "personal",
+      canSave: true,
+    }),
     import: (path) => {
       const fileName = path.split(/[\\/]/).pop() ?? "Imported.ini";
       return open({
         ...fallbackGalleryProfile,
         path: `C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\profiles\\${fileName}`,
+        displayPath: `Profiles\\${fileName}`,
+        location: "personal",
+        canSave: true,
       });
     },
     list: () => [
-      { name: "Default", path: fallbackGalleryProfile.path },
-      { name: "Recent", path: recentGalleryProfile.path },
+      { name: "Default", path: fallbackGalleryProfile.path, displayPath: fallbackGalleryProfile.displayPath },
+      { name: "Pretendard forever", path: "C:\\Program Files\\MacType\\ini\\pretendard forever.ini", displayPath: "ini\\pretendard forever.ini" },
+      { name: "Recent", path: recentGalleryProfile.path, displayPath: recentGalleryProfile.displayPath },
     ],
-    open: (path) => open({ ...fallbackGalleryProfile, path }),
+    open: (path) => open(profileForPath(path)),
     openDefault: () => open(fallbackGalleryProfile),
     redo: () => moveHistory(redoHistory, undoHistory),
     save: () => {
@@ -121,6 +149,11 @@ export function createBrowserGalleryProfileState(): BrowserGalleryProfileState {
       savedProfile = cloneProfile(profile);
       undoHistory.length = 0;
       redoHistory.length = 0;
+      return cloneProfile(profile);
+    },
+    setCanSave: (canSave) => {
+      profile = { ...profile, canSave };
+      savedProfile = { ...savedProfile, canSave };
       return cloneProfile(profile);
     },
     undo: () => moveHistory(undoHistory, redoHistory),

@@ -146,7 +146,10 @@ fn external_profile_save_requires_import_or_save_as() {
     state.set(ProfileDocument::open(&path).unwrap()).unwrap();
     commands::update_profile_setting("normal_weight".to_owned(), 3.0, &state).unwrap();
 
-    let error = commands::save_profile(&state).unwrap_err();
+    let error = match commands::save_profile(&state) {
+        Ok(_) => panic!("an external profile must not be saved in place"),
+        Err(error) => error,
+    };
 
     assert!(
         error.contains("imported or saved as"),

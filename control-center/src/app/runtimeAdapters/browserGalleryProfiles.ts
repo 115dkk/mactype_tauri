@@ -125,6 +125,7 @@ export function createBrowserGalleryProfileState(): BrowserGalleryProfileState {
       displayPath: `Profiles\\${name}.ini`,
       location: "personal",
       canSave: true,
+      dirtyKeys: [],
     }),
     import: (path) => {
       const fileName = path.split(/[\\/]/).pop() ?? "Imported.ini";

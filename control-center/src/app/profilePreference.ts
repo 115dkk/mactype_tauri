@@ -21,7 +21,11 @@ function rememberedProfile(): string | null {
 
 function availablePath(profiles: ReadonlyArray<ProfileEntry>, candidate: string | null): string | null {
   if (!candidate) return null;
-  return profiles.find((profile) => profile.path.toLocaleLowerCase() === candidate.toLocaleLowerCase())?.path ?? null;
+  const normalized = candidate.toLocaleLowerCase();
+  return profiles.find((profile) =>
+    profile.path.toLocaleLowerCase() === normalized
+    || profile.displayPath.toLocaleLowerCase() === normalized
+  )?.path ?? null;
 }
 
 export async function openPreferredProfile(

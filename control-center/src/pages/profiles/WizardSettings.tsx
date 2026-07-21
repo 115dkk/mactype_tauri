@@ -10,6 +10,7 @@ interface WizardSettingsProps {
   activeStep: WizardStepId;
   advanced: AdvancedProfile;
   busy: boolean;
+  canSave: boolean;
   dirtyCount: number;
   dirtyKeys: ReadonlyArray<string>;
   fontFamilies: ReadonlyArray<string>;
@@ -30,6 +31,7 @@ export function WizardSettings({
   activeStep,
   advanced,
   busy,
+  canSave,
   dirtyCount,
   dirtyKeys,
   fontFamilies,
@@ -64,8 +66,8 @@ export function WizardSettings({
             <p data-dirty={dirtyCount > 0}>{dirtyCount > 0 ? t("wizard.unsavedWarning") : t("wizard.savedState")}</p>
             <div>
               <button className="button secondary" onClick={onPreview} type="button"><Eye aria-hidden="true" size={16} /> {t("profiles.preview")}</button>
-              <button className="button secondary" disabled={busy || dirtyCount === 0} onClick={onSave} type="button"><Save aria-hidden="true" size={16} /> {t("wizard.saveProfile")}</button>
-              <button className="button primary" disabled={busy} onClick={onApply} type="button"><Play aria-hidden="true" size={16} /> {t("wizard.applyMacType")}</button>
+              <button className="button secondary" disabled={busy || dirtyCount === 0 || !canSave} onClick={onSave} type="button"><Save aria-hidden="true" size={16} /> {t("wizard.saveProfile")}</button>
+              <button className="button primary" disabled={busy || dirtyCount > 0} onClick={onApply} title={dirtyCount > 0 ? t("profiles.saveBeforeApply") : undefined} type="button"><Play aria-hidden="true" size={16} /> {t("wizard.applyMacType")}</button>
             </div>
           </section>
         )}

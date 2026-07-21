@@ -10,6 +10,7 @@ use tauri::State;
 mod codec;
 mod commands;
 mod document;
+mod identity;
 mod legacy;
 mod mutation;
 mod state;
@@ -22,6 +23,7 @@ mod tests;
 #[cfg(test)]
 mod upstream_corpus_tests;
 
+pub(crate) use identity::source_profile_reference;
 pub(crate) use legacy::{
     bundled_default_profile_at, default_profile_payload, legacy_alternative_file_bytes,
 };
@@ -128,6 +130,15 @@ pub(crate) struct ProfileState(Mutex<Option<ProfileDocument>>);
 pub(crate) struct ProfileEntry {
     name: String,
     path: String,
+    display_path: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProfileLocation {
+    Installation,
+    Personal,
+    External,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -142,6 +153,9 @@ pub(crate) struct LegacyProfileCandidate {
 #[serde(rename_all = "camelCase")]
 pub struct ProfileSnapshot {
     pub path: String,
+    pub display_path: String,
+    pub location: ProfileLocation,
+    pub can_save: bool,
     pub encoding: TextEncoding,
     pub bom: BomKind,
     pub line_ending: LineEnding,

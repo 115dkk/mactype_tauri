@@ -3,7 +3,12 @@ use std::path::PathBuf;
 
 impl ProfileState {
     pub(crate) fn active_payload(&self) -> Result<(PathBuf, Vec<u8>), String> {
-        self.read(|document| Ok((document.path().to_path_buf(), document.encoded()?)))
+        self.read(|document| {
+            if document.is_dirty() {
+                return Err("save profile changes before applying them to MacType".to_owned());
+            }
+            Ok((document.path().to_path_buf(), document.encoded()?))
+        })
     }
 
     pub(super) fn set(&self, document: ProfileDocument) -> Result<(), String> {

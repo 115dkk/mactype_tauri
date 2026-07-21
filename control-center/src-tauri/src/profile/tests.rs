@@ -124,6 +124,45 @@ fn detects_external_change_before_save() {
 }
 
 #[test]
+fn profile_apply_rejects_unsaved_edits() {
+    let path = temp_profile(b"[General]\nNormalWeight=0\n");
+    let state = ProfileState::default();
+    state.set(ProfileDocument::open(&path).unwrap()).unwrap();
+    commands::update_profile_setting("normal_weight".to_owned(), 3.0, &state).unwrap();
+
+    let error = state.active_payload().unwrap_err();
+
+    assert!(
+        error.contains("save profile changes"),
+        "unexpected error: {error}"
+    );
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn external_profile_save_requires_import_or_save_as() {
+    let path = temp_profile(b"[General]\nNormalWeight=0\n");
+    let state = ProfileState::default();
+    state.set(ProfileDocument::open(&path).unwrap()).unwrap();
+    commands::update_profile_setting("normal_weight".to_owned(), 3.0, &state).unwrap();
+
+    let error = match commands::save_profile(&state) {
+        Ok(_) => panic!("an external profile must not be saved in place"),
+        Err(error) => error,
+    };
+
+    assert!(
+        error.contains("imported or saved as"),
+        "unexpected error: {error}"
+    );
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "[General]\nNormalWeight=0\n"
+    );
+    let _ = fs::remove_file(path);
+}
+
+#[test]
 fn save_rejects_an_oversized_external_replacement_before_hashing_it() {
     let path = temp_profile(b"[General]\nNormalWeight=0\n");
     let mut document = ProfileDocument::open(&path).unwrap();

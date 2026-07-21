@@ -32,7 +32,7 @@ async function openServiceDetails(page: import("@playwright/test").Page) {
 }
 
 const executionStateGallery = [
-  { id: "ready", query: "system-service=ready", expected: "Ready" },
+  { id: "ready", query: "system-service=ready", expected: "Running" },
   { id: "degraded", query: "system-service=degraded", expected: "Running" },
   { id: "initializing", query: "system-service=initializing", expected: "Running" },
   { id: "health-unknown", query: "system-service=unknown-health", expected: "Running" },
@@ -77,6 +77,19 @@ for (const state of executionStateGallery) {
       path: path.join(galleryRoot, `${testInfo.project.name}-execution-state-${state.id}-en.png`),
       fullPage: true,
     });
+  });
+}
+
+for (const wording of [
+  { locale: "ko", expected: "새 서비스", forbidden: "신식 서비스" },
+  { locale: "zh-CN", expected: "新服务", forbidden: "新式服务" },
+  { locale: "zh-TW", expected: "新服務", forbidden: "新式服務" },
+] as const) {
+  test(`service terminology is natural in ${wording.locale}`, async ({ page }) => {
+    await page.goto(`/?view=execution&gallery=1&lang=${wording.locale}&system-service=ready`, { waitUntil: "networkidle" });
+    const main = page.locator("main");
+    await expect(main).toContainText(wording.expected);
+    await expect(main).not.toContainText(wording.forbidden);
   });
 }
 
@@ -360,6 +373,38 @@ test("settings files support import, save as, export, reveal, and apply without 
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   expect(horizontalOverflow, "settings-file controls must not have horizontal scrolling").toBe(false);
   expect(failures, failures.join("\n")).toEqual([]);
+});
+
+test("settings files use available width for profile paths", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Desktop width proves the selector can use available space.");
+
+  await page.goto("/?view=files&gallery=1&lang=en", { waitUntil: "networkidle" });
+  const selector = page.locator(".file-selection-grid select");
+  const pretendardOption = selector.locator("option").filter({ hasText: "Pretendard forever" });
+  const pretendardPath = await pretendardOption.getAttribute("value");
+  if (!pretendardPath) throw new Error("The gallery needs a Pretendard profile option");
+  await selector.selectOption(pretendardPath);
+
+  const selectorMetrics = await selector.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(selectorMetrics.scrollWidth).toBeLessThanOrEqual(selectorMetrics.clientWidth);
+
+  const displayedPath = page.locator(".selected-file-path code");
+  const pathMetrics = await displayedPath.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(pathMetrics.scrollWidth).toBeLessThanOrEqual(pathMetrics.clientWidth);
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-settings-files-responsive-path-en.png`), fullPage: true });
+});
+
+test("diagnostics omit internal preview protocol details", async ({ page }) => {
+  await page.goto("/?view=diagnostics&gallery=1&lang=en", { waitUntil: "networkidle" });
+  await expect(page.getByText("Preview Helper", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("IPC protocol", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("MTPC v1", { exact: true })).toHaveCount(0);
 });
 
 test("writable profiles save to the original and apply by portable identity", async ({ page }, testInfo) => {
@@ -691,7 +736,7 @@ test("the service page keeps its normal state to one summary and one action", as
   await expect(summary).toContainText("Profile");
   await expect(summary).toContainText("Default.ini");
   await expect(summary).toContainText("Native service");
-  await expect(summary).toContainText("Ready");
+  await expect(summary).toContainText("Running");
   await expect(summary.getByRole("button", { name: "Stop" })).toBeEnabled();
   await expect(summary.getByRole("button")).toHaveCount(1);
   await expect(page.getByRole("heading", { name: "System-wide modes" })).toBeHidden();
@@ -1027,6 +1072,9 @@ test("a stopped new service with no alternative offers Start and Remove", async 
   await expect(summary.getByRole("button", { name: "Start service" })).toBeEnabled();
   await expect(summary.getByRole("button", { name: "Remove service" })).toBeEnabled();
   await expect(summary.getByRole("button")).toHaveCount(2);
+  await expect(summary.locator(".success")).toHaveCount(0);
+  await expect(summary.locator(".warning")).toHaveCount(0);
+  await expect(summary.locator(".neutral-status")).toHaveCount(1);
 });
 
 test("the primary service action disables immediately while its mutation is busy", async ({ page }) => {

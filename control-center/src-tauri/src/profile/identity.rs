@@ -62,10 +62,15 @@ fn profile_reference_at(
 }
 
 fn relative_to(path: &Path, root: &Path) -> Option<PathBuf> {
-    let resolved_path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let resolved_root = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    resolved_path
-        .strip_prefix(&resolved_root)
+    relative_suffix(path, root).or_else(|| {
+        let resolved_path = fs::canonicalize(path).ok()?;
+        let resolved_root = fs::canonicalize(root).ok()?;
+        relative_suffix(&resolved_path, &resolved_root)
+    })
+}
+
+fn relative_suffix(path: &Path, root: &Path) -> Option<PathBuf> {
+    path.strip_prefix(root)
         .ok()
         .filter(|relative| {
             relative

@@ -79,6 +79,7 @@ pub fn run() {
             profile::undo_profile,
             profile::redo_profile,
             profile::discard_profile_changes,
+            profile::reset_profile_defaults,
             profile::export_profile,
             profile::reveal_profile_file,
             profile::duplicate_profile,

@@ -18,6 +18,7 @@ const fallbackGalleryProfile: ProfileSnapshot = {
   lineEnding: "cr-lf",
   originalHash: "browser-gallery",
   values: Object.fromEntries(settingsSchema.map((setting) => [setting.id, setting.default])),
+  savedValues: Object.fromEntries(settingsSchema.map((setting) => [setting.id, setting.default])),
   dirtyKeys: [],
   canUndo: false,
   canRedo: false,
@@ -50,6 +51,7 @@ const cloneProfile = (profile: ProfileSnapshot): ProfileSnapshot => structuredCl
 interface BrowserGalleryProfileState {
   current(): ProfileSnapshot;
   discard(): ProfileSnapshot;
+  resetDefaults(): ProfileSnapshot;
   duplicate(name: string): ProfileSnapshot;
   import(path: string): ProfileSnapshot;
   list(): ReadonlyArray<ProfileEntry>;
@@ -71,12 +73,16 @@ export function createBrowserGalleryProfileState(): BrowserGalleryProfileState {
   const undoHistory: ProfileSnapshot[] = [];
   const redoHistory: ProfileSnapshot[] = [];
 
+  function snapshot(): ProfileSnapshot {
+    return { ...cloneProfile(profile), savedValues: structuredClone(savedProfile.values) };
+  }
+
   function open(next: ProfileSnapshot): ProfileSnapshot {
     profile = { ...cloneProfile(next), canUndo: false, canRedo: false };
     savedProfile = cloneProfile(profile);
     undoHistory.length = 0;
     redoHistory.length = 0;
-    return cloneProfile(profile);
+    return snapshot();
   }
 
   function edit(update: (current: ProfileSnapshot) => ProfileSnapshot, dirtyKey: string): ProfileSnapshot {
@@ -89,19 +95,19 @@ export function createBrowserGalleryProfileState(): BrowserGalleryProfileState {
       canUndo: true,
       canRedo: false,
     };
-    return cloneProfile(profile);
+    return snapshot();
   }
 
   function moveHistory(from: ProfileSnapshot[], to: ProfileSnapshot[]): ProfileSnapshot {
     const destination = from.pop();
-    if (!destination) return cloneProfile(profile);
+    if (!destination) return snapshot();
     to.push(cloneProfile(profile));
     profile = {
       ...cloneProfile(destination),
       canUndo: undoHistory.length > 0,
       canRedo: redoHistory.length > 0,
     };
-    return cloneProfile(profile);
+    return snapshot();
   }
 
   function profileForPath(path: string): ProfileSnapshot {
@@ -117,8 +123,24 @@ export function createBrowserGalleryProfileState(): BrowserGalleryProfileState {
   }
 
   return {
-    current: () => cloneProfile(profile),
+    current: () => snapshot(),
     discard: () => open(savedProfile),
+    resetDefaults: () => {
+      const changed = settingsSchema
+        .filter((setting) => profile.values[setting.id] !== setting.factory)
+        .map((setting) => setting.id);
+      if (changed.length === 0) return snapshot();
+      undoHistory.push(cloneProfile(profile));
+      redoHistory.length = 0;
+      profile = {
+        ...cloneProfile(profile),
+        values: Object.fromEntries(settingsSchema.map((setting) => [setting.id, setting.factory])),
+        dirtyKeys: [...new Set([...profile.dirtyKeys, ...changed])],
+        canUndo: true,
+        canRedo: false,
+      };
+      return snapshot();
+    },
     duplicate: (name) => open({
       ...profile,
       path: `C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\profiles\\${name}.ini`,
@@ -150,12 +172,12 @@ export function createBrowserGalleryProfileState(): BrowserGalleryProfileState {
       savedProfile = cloneProfile(profile);
       undoHistory.length = 0;
       redoHistory.length = 0;
-      return cloneProfile(profile);
+      return snapshot();
     },
     setCanSave: (canSave) => {
       profile = { ...profile, canSave };
       savedProfile = { ...savedProfile, canSave };
-      return cloneProfile(profile);
+      return snapshot();
     },
     undo: () => moveHistory(undoHistory, redoHistory),
     updateAdvanced: (advanced) => edit(

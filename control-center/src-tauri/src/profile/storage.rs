@@ -109,6 +109,7 @@ impl ProfileDocument {
         self.original_hash = hash(&bytes);
         let text = self.nodes.iter().map(IniNode::raw).collect::<String>();
         self.original_legacy_lines = original_legacy_lines(&bytes, &text, self.encoding);
+        self.saved_values = self.setting_values();
         self.dirty_keys.clear();
         self.undo_history.clear();
         self.redo_history.clear();

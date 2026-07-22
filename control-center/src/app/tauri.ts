@@ -175,6 +175,10 @@ export async function redoProfile(): Promise<ProfileSnapshot> {
   return getRuntimeAdapter().redoProfile();
 }
 
+export async function resetProfileDefaults(): Promise<ProfileSnapshot> {
+  return getRuntimeAdapter().resetProfileDefaults();
+}
+
 export async function discardProfileChanges(): Promise<ProfileSnapshot> {
   return getRuntimeAdapter().discardProfileChanges();
 }

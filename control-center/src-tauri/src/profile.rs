@@ -117,6 +117,7 @@ struct ProfileDocument {
     nodes: Vec<IniNode>,
     original_hash: [u8; 32],
     original_legacy_lines: Option<OriginalLegacyLines>,
+    saved_values: BTreeMap<String, f64>,
     dirty_keys: BTreeSet<String>,
     undo_history: VecDeque<ProfileRevision>,
     redo_history: VecDeque<ProfileRevision>,
@@ -161,6 +162,7 @@ pub struct ProfileSnapshot {
     pub line_ending: LineEnding,
     pub original_hash: String,
     pub values: BTreeMap<String, f64>,
+    pub saved_values: BTreeMap<String, f64>,
     pub dirty_keys: Vec<String>,
     pub can_undo: bool,
     pub can_redo: bool,
@@ -309,6 +311,13 @@ pub(crate) fn discard_profile_changes(
     state: State<'_, ProfileState>,
 ) -> Result<ProfileSnapshot, String> {
     commands::discard_profile_changes(state.inner())
+}
+
+#[tauri::command]
+pub(crate) fn reset_profile_defaults(
+    state: State<'_, ProfileState>,
+) -> Result<ProfileSnapshot, String> {
+    commands::reset_profile_defaults(state.inner())
 }
 
 #[tauri::command]

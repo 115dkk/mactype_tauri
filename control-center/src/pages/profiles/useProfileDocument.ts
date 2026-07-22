@@ -10,6 +10,7 @@ import {
   listProfiles,
   loadExecutionStatus,
   redoProfile,
+  resetProfileDefaults,
   saveProfile,
   undoProfile,
   updateProfileAdvanced,
@@ -147,6 +148,11 @@ export function useProfileDocument(t: I18nValue["t"]) {
     queueMutation(() => updateProfileAdvanced(next));
   };
 
+  const resetDefaults = () => {
+    setValues(Object.fromEntries(settingsSchema.map((setting) => [setting.id, setting.factory])));
+    queueMutation(() => resetProfileDefaults());
+  };
+
   const updateFontList = (kind: "excludeFonts" | "includeFonts", entries: ReadonlyArray<string>) => {
     updateListDraft(kind, entries.join("\n"));
     queueMutation(() => updateProfileList(kind, entries));
@@ -257,6 +263,8 @@ export function useProfileDocument(t: I18nValue["t"]) {
     profile,
     recoveryRequired,
     redo: () => runHistoryCommand("redo"),
+    resetDefaults,
+    savedValues: profile?.savedValues,
     saveCurrentProfile,
     saveProfileAs,
     setAdvanced,

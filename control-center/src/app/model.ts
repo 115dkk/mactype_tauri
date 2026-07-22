@@ -113,6 +113,7 @@ export interface ProfileSnapshot {
   lineEnding: string;
   originalHash: string;
   values: Record<string, number>;
+  savedValues: Record<string, number>;
   dirtyKeys: ReadonlyArray<string>;
   canUndo: boolean;
   canRedo: boolean;

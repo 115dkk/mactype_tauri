@@ -1,4 +1,4 @@
-import { RotateCcw } from "lucide-react";
+import { RotateCcw, Undo2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { Hint } from "../../components/Hint";
 import type { SettingDefinition } from "../../generated/settings";
@@ -11,6 +11,7 @@ import {
 interface SchemaSettingsProps {
   settings: ReadonlyArray<SettingDefinition>;
   values: Readonly<Record<string, number>>;
+  savedValues?: Readonly<Record<string, number>>;
   dirtyKeys: ReadonlyArray<string>;
   onChange: (settingId: string, value: number) => void;
   onPreviewChange: (settingId: string, value: number) => void;
@@ -22,6 +23,7 @@ interface SettingControlProps {
   settingLabel: string;
   hintId: string;
   value: number;
+  savedValue: number;
   onCommit: (value: number) => void;
   onPreview: (value: number) => void;
   t: I18nValue["t"];
@@ -29,7 +31,7 @@ interface SettingControlProps {
 
 const rangeAdjustmentKeys = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"]);
 
-function SettingControl({ setting, settingLabel, hintId, value, onCommit, onPreview, t }: SettingControlProps) {
+function SettingControl({ setting, settingLabel, hintId, value, savedValue, onCommit, onPreview, t }: SettingControlProps) {
   const rangeStart = useRef<number | null>(null);
   const numberStart = useRef<number | null>(null);
   const [numberDraft, setNumberDraft] = useState<string | null>(null);
@@ -150,16 +152,22 @@ function SettingControl({ setting, settingLabel, hintId, value, onCommit, onPrev
         />
       )}
       {setting.control === "range" && exactValueInput}
-      <button className="icon-button" aria-label={t("profiles.reset", { setting: settingLabel })} onClick={() => onCommit(setting.default)} type="button">
-        <RotateCcw aria-hidden="true" size={15} />
-      </button>
+      <div className="setting-actions">
+        <button className="icon-button" aria-label={t("profiles.revertSetting", { setting: settingLabel })} disabled={value === savedValue} onClick={() => onCommit(savedValue)} title={t("profiles.revertSetting", { setting: settingLabel })} type="button">
+          <Undo2 aria-hidden="true" size={14} />
+        </button>
+        <button className="icon-button" aria-label={t("profiles.restoreDefault", { setting: settingLabel })} disabled={value === setting.factory} onClick={() => onCommit(setting.factory)} title={t("profiles.restoreDefault", { setting: settingLabel })} type="button">
+          <RotateCcw aria-hidden="true" size={14} />
+        </button>
+      </div>
     </div>
   );
 }
 
-function SchemaSettings({ settings, values, dirtyKeys, onChange, onPreviewChange, t }: SchemaSettingsProps) {
+function SchemaSettings({ settings, values, savedValues, dirtyKeys, onChange, onPreviewChange, t }: SchemaSettingsProps) {
   return settings.map((setting) => {
     const value = values[setting.id] ?? setting.default;
+    const savedValue = savedValues?.[setting.id] ?? value;
     const dirty = dirtyKeys.includes(setting.id);
     const settingLabel = t(settingMessageKey(setting.id, "label"));
     const settingDescription = t(settingMessageKey(setting.id, "description"));
@@ -171,7 +179,7 @@ function SchemaSettings({ settings, values, dirtyKeys, onChange, onPreviewChange
             content={<>
               {settingDescription}
               <span className="hint-meta">
-                {t("profiles.settingMeta", { default: setting.default, min: setting.min, max: setting.max })}
+                {t("profiles.settingMeta", { default: setting.factory, min: setting.min, max: setting.max })}
                 {setting.apply === "restart_required" ? ` · ${t("profiles.restartRequired")}` : ""}
               </span>
             </>}
@@ -181,7 +189,7 @@ function SchemaSettings({ settings, values, dirtyKeys, onChange, onPreviewChange
           </Hint>
           {dirty && <span className="dirty-mark">{t("profiles.changed")}</span>}
         </div>
-        <SettingControl hintId={hintId} setting={setting} settingLabel={settingLabel} t={t} value={value} onCommit={(nextValue) => onChange(setting.id, nextValue)} onPreview={(nextValue) => onPreviewChange(setting.id, nextValue)} />
+        <SettingControl hintId={hintId} savedValue={savedValue} setting={setting} settingLabel={settingLabel} t={t} value={value} onCommit={(nextValue) => onChange(setting.id, nextValue)} onPreview={(nextValue) => onPreviewChange(setting.id, nextValue)} />
       </div>
     );
   });

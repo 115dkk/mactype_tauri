@@ -130,9 +130,9 @@ test("profile editor categories and collections remain interactive", async ({ pa
   page.on("pageerror", (error) => failures.push(`pageerror: ${error.message}`));
 
   await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
-  const undo = page.getByRole("button", { name: "되돌리기" });
-  const redo = page.getByRole("button", { name: "다시 하기" });
-  const discard = page.getByRole("button", { name: "초기화", exact: true });
+  const undo = page.getByRole("button", { name: "되돌리기", exact: true });
+  const redo = page.getByRole("button", { name: "다시 하기", exact: true });
+  const discard = page.getByRole("button", { name: "변경 취소", exact: true });
   await expect(undo).toBeDisabled();
   const firstSelect = page.locator(".setting-row select").first();
   const initialOption = await firstSelect.inputValue();
@@ -218,8 +218,8 @@ test("settings navigation separates Wizard and Tuner without duplicating the edi
   await expect(page.locator(".settings-step")).toHaveCount(7);
   await expect(page.locator(".settings-index").getByRole("button", { name: "고급·실험" })).toHaveCount(0);
   const quickActions = page.getByRole("toolbar", { name: "프로필 편집 작업" });
-  await expect(quickActions.getByRole("button")).toHaveCount(5);
-  expect(await quickActions.getByRole("button").evaluateAll((buttons) => buttons.map((button) => button.textContent?.trim()))).toEqual(["되돌리기", "다시 하기", "초기화", "지금 저장", "지금 적용"]);
+  await expect(quickActions.getByRole("button")).toHaveCount(6);
+  expect(await quickActions.getByRole("button").evaluateAll((buttons) => buttons.map((button) => button.textContent?.trim()))).toEqual(["되돌리기", "다시 하기", "변경 취소", "기본값 초기화", "지금 저장", "지금 적용"]);
   await expect(page.locator(".wizard-quick-actions")).toHaveCount(0);
   const settingsForm = page.locator(".settings-form");
   expect(await settingsForm.evaluate((element) => element.scrollWidth > element.clientWidth), "Wizard settings must not have internal horizontal scrolling").toBe(false);
@@ -262,7 +262,7 @@ test("slider drags and exact number edits create one undo revision per interacti
   await expect(exactWeight).toHaveValue("0");
   const shapeLayout = await page.locator(".settings-form").evaluate((element) => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }));
   expect(shapeLayout.scrollWidth, "slider rows must fit without hidden horizontal overflow").toBeLessThanOrEqual(shapeLayout.clientWidth);
-  const resetBounds = await weightRow.getByRole("button").boundingBox();
+  const resetBounds = await weightRow.getByRole("button", { name: /기본값 복원/ }).boundingBox();
   const formBounds = await page.locator(".settings-form").boundingBox();
   if (!resetBounds || !formBounds) throw new Error("Slider reset button and settings form must be visible");
   expect(resetBounds.x + resetBounds.width, "slider reset button must remain inside the visible settings form").toBeLessThanOrEqual(formBounds.x + formBounds.width + 1);
@@ -309,6 +309,56 @@ test("slider drags and exact number edits create one undo revision per interacti
   await expect(cacheValue).toHaveValue("64");
 });
 
+test("field revert restores the saved value while default restore and profile-wide reset use core defaults", async ({ page }) => {
+  await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "글자 모양", exact: true }).click();
+
+  const weightRow = page.locator(".setting-row").filter({ hasText: "일반 글자 굵기" });
+  const exactWeight = weightRow.locator('input[type="number"]');
+  const revert = weightRow.getByRole("button", { name: /저장된 값으로 되돌리기/ });
+  const restoreDefault = weightRow.getByRole("button", { name: /기본값 복원/ });
+
+  // Clean profile: nothing to revert; the factory weight (16) differs from the
+  // engine-default 0 the gallery profile starts from, so restore is available.
+  await expect(revert).toBeDisabled();
+  await expect(restoreDefault).toBeEnabled();
+
+  await exactWeight.fill("12");
+  await exactWeight.press("Enter");
+  await page.getByRole("button", { name: "지금 저장", exact: true }).click();
+  await expect(page.locator(".profile-message")).toContainText("지금 저장했습니다");
+  await expect(revert).toBeDisabled();
+  await expect(restoreDefault).toBeEnabled();
+
+  await exactWeight.fill("30");
+  await exactWeight.press("Enter");
+  await expect(revert).toBeEnabled();
+  await revert.click();
+  await expect(exactWeight).toHaveValue("12");
+  await expect(revert).toBeDisabled();
+
+  await restoreDefault.click();
+  await expect(exactWeight).toHaveValue("16");
+  await expect(restoreDefault).toBeDisabled();
+  await page.getByRole("button", { name: "되돌리기", exact: true }).click();
+  await expect(exactWeight).toHaveValue("12");
+
+  const gammaRow = page.locator(".setting-row").filter({ hasText: "감마 방식" });
+  const gammaSelect = gammaRow.locator("select");
+  await expect(gammaSelect).toHaveValue("-1");
+  await gammaSelect.selectOption("2");
+  await page.getByRole("button", { name: "기본값 초기화", exact: true }).click();
+  await expect(exactWeight).toHaveValue("16");
+  await expect(gammaSelect).toHaveValue("0");
+  await page.getByRole("button", { name: "되돌리기", exact: true }).click();
+  await expect(exactWeight).toHaveValue("12");
+  await expect(gammaSelect).toHaveValue("2");
+
+  await page.getByRole("button", { name: "변경 취소", exact: true }).click();
+  await expect(exactWeight).toHaveValue("12");
+  await expect(gammaSelect).toHaveValue("-1");
+});
+
 test("a rejected profile mutation requires an explicit snapshot recovery before save or apply", async ({ page }) => {
   await page.goto("/?view=profiles&gallery=1&lang=en&profile-fail-setting=normal_weight", { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Glyph shape", exact: true }).click();
@@ -329,7 +379,7 @@ test("a rejected profile mutation requires an explicit snapshot recovery before 
   await expect(save).toBeDisabled();
   await expect(apply).toBeDisabled();
 
-  await page.getByRole("button", { name: "Reset", exact: true }).click();
+  await page.getByRole("button", { name: "Discard changes", exact: true }).click();
   await expect(normalWeight).toHaveValue("0");
   await expect(boldWeight).toHaveValue("0");
   await expect(apply).toBeEnabled();

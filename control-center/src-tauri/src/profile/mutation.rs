@@ -4,6 +4,7 @@ use self::validated_input::{
     normalize_list_entries, render_advanced_profile, render_setting_value, validate_individuals,
 };
 use super::{AdvancedProfile, IndividualSetting, IniNode, ProfileDocument, ProfileRevision};
+use crate::generated_settings::SETTINGS;
 
 impl ProfileDocument {
     fn revision(&self) -> ProfileRevision {
@@ -53,6 +54,35 @@ impl ProfileDocument {
 
     pub(super) fn update_advanced(&mut self, advanced: AdvancedProfile) -> Result<(), String> {
         self.record_edit(|document| document.set_advanced(advanced))
+    }
+
+    /// Writes the factory value (the official Default.ini profile, falling back
+    /// to the engine default where that profile ships no key) for every scalar
+    /// setting, as one undoable revision. Lists, per-font entries, and the
+    /// structured advanced settings are intentionally left untouched.
+    pub(super) fn reset_settings_to_defaults(&mut self) -> Result<(), String> {
+        self.record_edit(|document| {
+            for setting in SETTINGS {
+                let rendered = render_setting_value(setting.id, setting.factory)?;
+                let unchanged = {
+                    let current = document.raw_value(rendered.section, rendered.key);
+                    match current {
+                        Some(value) => value == rendered.value,
+                        None => setting.factory == setting.default,
+                    }
+                };
+                if unchanged {
+                    continue;
+                }
+                document.set_raw_value(
+                    rendered.section,
+                    rendered.key,
+                    Some(rendered.value),
+                    setting.id,
+                );
+            }
+            Ok(())
+        })
     }
 
     pub(super) fn undo(&mut self) -> bool {

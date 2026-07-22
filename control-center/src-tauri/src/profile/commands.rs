@@ -201,6 +201,13 @@ pub(super) fn redo_profile(state: &ProfileState) -> Result<ProfileSnapshot, Stri
     })
 }
 
+pub(super) fn reset_profile_defaults(state: &ProfileState) -> Result<ProfileSnapshot, String> {
+    state.edit(|document| {
+        document.reset_settings_to_defaults()?;
+        Ok(document.snapshot())
+    })
+}
+
 pub(super) fn discard_profile_changes(state: &ProfileState) -> Result<ProfileSnapshot, String> {
     state.replace_from(|current| {
         let document = ProfileDocument::open(current.path())?;

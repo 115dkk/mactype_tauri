@@ -127,14 +127,14 @@ export function createBrowserGalleryProfileState(): BrowserGalleryProfileState {
     discard: () => open(savedProfile),
     resetDefaults: () => {
       const changed = settingsSchema
-        .filter((setting) => profile.values[setting.id] !== setting.default)
+        .filter((setting) => profile.values[setting.id] !== setting.factory)
         .map((setting) => setting.id);
       if (changed.length === 0) return snapshot();
       undoHistory.push(cloneProfile(profile));
       redoHistory.length = 0;
       profile = {
         ...cloneProfile(profile),
-        values: Object.fromEntries(settingsSchema.map((setting) => [setting.id, setting.default])),
+        values: Object.fromEntries(settingsSchema.map((setting) => [setting.id, setting.factory])),
         dirtyKeys: [...new Set([...profile.dirtyKeys, ...changed])],
         canUndo: true,
         canRedo: false,

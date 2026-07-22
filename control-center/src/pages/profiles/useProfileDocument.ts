@@ -149,7 +149,7 @@ export function useProfileDocument(t: I18nValue["t"]) {
   };
 
   const resetDefaults = () => {
-    setValues(Object.fromEntries(settingsSchema.map((setting) => [setting.id, setting.default])));
+    setValues(Object.fromEntries(settingsSchema.map((setting) => [setting.id, setting.factory])));
     queueMutation(() => resetProfileDefaults());
   };
 

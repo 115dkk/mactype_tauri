@@ -56,15 +56,30 @@ impl ProfileDocument {
         self.record_edit(|document| document.set_advanced(advanced))
     }
 
-    /// Removes every scalar setting key so the profile falls back to the core
-    /// defaults, as one undoable revision. Lists, per-font entries, and the
+    /// Writes the factory value (the official Default.ini profile, falling back
+    /// to the engine default where that profile ships no key) for every scalar
+    /// setting, as one undoable revision. Lists, per-font entries, and the
     /// structured advanced settings are intentionally left untouched.
     pub(super) fn reset_settings_to_defaults(&mut self) -> Result<(), String> {
         self.record_edit(|document| {
             for setting in SETTINGS {
-                if document.raw_value(setting.section, setting.key).is_some() {
-                    document.set_raw_value(setting.section, setting.key, None, setting.id);
+                let rendered = render_setting_value(setting.id, setting.factory)?;
+                let unchanged = {
+                    let current = document.raw_value(rendered.section, rendered.key);
+                    match current {
+                        Some(value) => value == rendered.value,
+                        None => setting.factory == setting.default,
+                    }
+                };
+                if unchanged {
+                    continue;
                 }
+                document.set_raw_value(
+                    rendered.section,
+                    rendered.key,
+                    Some(rendered.value),
+                    setting.id,
+                );
             }
             Ok(())
         })

@@ -156,7 +156,7 @@ function SettingControl({ setting, settingLabel, hintId, value, savedValue, onCo
         <button className="icon-button" aria-label={t("profiles.revertSetting", { setting: settingLabel })} disabled={value === savedValue} onClick={() => onCommit(savedValue)} title={t("profiles.revertSetting", { setting: settingLabel })} type="button">
           <Undo2 aria-hidden="true" size={14} />
         </button>
-        <button className="icon-button" aria-label={t("profiles.restoreDefault", { setting: settingLabel })} disabled={value === setting.default} onClick={() => onCommit(setting.default)} title={t("profiles.restoreDefault", { setting: settingLabel })} type="button">
+        <button className="icon-button" aria-label={t("profiles.restoreDefault", { setting: settingLabel })} disabled={value === setting.factory} onClick={() => onCommit(setting.factory)} title={t("profiles.restoreDefault", { setting: settingLabel })} type="button">
           <RotateCcw aria-hidden="true" size={14} />
         </button>
       </div>
@@ -179,7 +179,7 @@ function SchemaSettings({ settings, values, savedValues, dirtyKeys, onChange, on
             content={<>
               {settingDescription}
               <span className="hint-meta">
-                {t("profiles.settingMeta", { default: setting.default, min: setting.min, max: setting.max })}
+                {t("profiles.settingMeta", { default: setting.factory, min: setting.min, max: setting.max })}
                 {setting.apply === "restart_required" ? ` · ${t("profiles.restartRequired")}` : ""}
               </span>
             </>}

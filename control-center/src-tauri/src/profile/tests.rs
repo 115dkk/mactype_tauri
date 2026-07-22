@@ -287,34 +287,40 @@ fn snapshot_reports_saved_values_until_save_refreshes_them() {
 }
 
 #[test]
-fn reset_settings_to_defaults_is_one_undoable_revision() {
-    let path = temp_profile(b"[General]\n; note\nNormalWeight=3\nGammaMode=0\nGammaValue=1.0\n");
+fn reset_settings_to_defaults_writes_factory_values_as_one_undoable_revision() {
+    let path = temp_profile(b"[General]\n; note\nNormalWeight=3\nGammaMode=-1\nItalicSlant=7\n");
     let mut document = ProfileDocument::open(&path).unwrap();
     document.reset_settings_to_defaults().unwrap();
 
     let rendered = String::from_utf8(document.encoded().unwrap()).unwrap();
-    assert!(!rendered.contains("NormalWeight"));
-    assert!(!rendered.contains("GammaMode"));
     assert!(rendered.contains("; note"));
+    assert!(rendered.contains("NormalWeight=16"));
+    assert!(rendered.contains("GammaMode=0"));
+    assert!(rendered.contains("GammaValue=1.5"));
+    assert!(rendered.contains("HintingMode=1"));
+    assert!(rendered.contains("ItalicSlant=0"));
     let snapshot = document.snapshot();
-    assert_eq!(snapshot.values["gamma_mode"], -1.0);
-    assert_eq!(snapshot.values["normal_weight"], 0.0);
+    assert_eq!(snapshot.values["normal_weight"], 16.0);
+    assert_eq!(snapshot.values["gamma_mode"], 0.0);
+    assert_eq!(snapshot.values["contrast"], 1.7);
     assert!(snapshot.dirty_keys.contains(&"normal_weight".to_owned()));
 
     assert!(document.undo());
-    assert!(String::from_utf8(document.encoded().unwrap())
-        .unwrap()
-        .contains("NormalWeight=3"));
+    let reverted = String::from_utf8(document.encoded().unwrap()).unwrap();
+    assert!(reverted.contains("NormalWeight=3"));
+    assert!(!reverted.contains("HintingMode"));
     assert!(!document.undo());
     let _ = fs::remove_file(path);
 }
 
 #[test]
-fn reset_settings_to_defaults_without_scalar_keys_is_a_no_op() {
+fn reset_settings_to_defaults_twice_is_a_no_op_the_second_time() {
     let path = temp_profile(b"[Exclude]\nTahoma\n");
     let mut document = ProfileDocument::open(&path).unwrap();
     document.reset_settings_to_defaults().unwrap();
-    assert!(document.snapshot().dirty_keys.is_empty());
+    document.reset_settings_to_defaults().unwrap();
+    assert_eq!(document.snapshot().values["hinting_mode"], 1.0);
+    assert!(document.undo());
     assert!(!document.undo());
     let _ = fs::remove_file(path);
 }

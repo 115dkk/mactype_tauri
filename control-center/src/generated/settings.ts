@@ -24,6 +24,7 @@ export const settingsSchema = [
     "min": 0,
     "max": 2,
     "default": 0,
+    "factory": 1,
     "unit": null,
     "advanced": false,
     "previewable": true,
@@ -50,7 +51,8 @@ export const settingsSchema = [
     "legacy_control_center_ordinal": 5,
     "supported": true,
     "label": "커닝",
-    "description": "글자 쌍 간격 정보를 적용합니다."
+    "description": "글자 쌍 간격 정보를 적용합니다.",
+    "factory": 0
   },
   {
     "id": "font_loader",
@@ -79,7 +81,8 @@ export const settingsSchema = [
     "legacy_control_center_ordinal": 21,
     "supported": true,
     "label": "글꼴 로더",
-    "description": "글꼴 윤곽을 불러올 엔진을 선택합니다."
+    "description": "글꼴 윤곽을 불러올 엔진을 선택합니다.",
+    "factory": 0
   },
   {
     "id": "font_link",
@@ -105,6 +108,7 @@ export const settingsSchema = [
     "min": 0,
     "max": 2,
     "default": 0,
+    "factory": 2,
     "unit": null,
     "advanced": true,
     "previewable": true,
@@ -124,6 +128,7 @@ export const settingsSchema = [
     "min": 0,
     "max": 1,
     "default": 0,
+    "factory": 1,
     "unit": null,
     "advanced": true,
     "previewable": false,
@@ -143,6 +148,7 @@ export const settingsSchema = [
     "min": 0,
     "max": 1,
     "default": 0,
+    "factory": 1,
     "unit": null,
     "advanced": true,
     "previewable": false,
@@ -162,6 +168,7 @@ export const settingsSchema = [
     "min": -64,
     "max": 64,
     "default": 0,
+    "factory": 16,
     "unit": null,
     "advanced": false,
     "previewable": true,
@@ -181,6 +188,7 @@ export const settingsSchema = [
     "min": -32,
     "max": 32,
     "default": 0,
+    "factory": 2,
     "unit": null,
     "advanced": false,
     "previewable": true,
@@ -207,7 +215,8 @@ export const settingsSchema = [
     "legacy_control_center_ordinal": 4,
     "supported": true,
     "label": "기울임 정도",
-    "description": "이탤릭 글꼴의 기울기를 조정합니다."
+    "description": "이탤릭 글꼴의 기울기를 조정합니다.",
+    "factory": 0
   },
   {
     "id": "bolder_mode",
@@ -240,7 +249,8 @@ export const settingsSchema = [
     "legacy_control_center_ordinal": 8,
     "supported": true,
     "label": "굵게 처리 방식",
-    "description": "획을 굵게 만드는 방향을 선택합니다."
+    "description": "획을 굵게 만드는 방향을 선택합니다.",
+    "factory": 0
   },
   {
     "id": "gamma_mode",
@@ -270,6 +280,7 @@ export const settingsSchema = [
     "min": -1,
     "max": 2,
     "default": -1,
+    "factory": 0,
     "unit": null,
     "advanced": true,
     "previewable": true,
@@ -289,6 +300,7 @@ export const settingsSchema = [
     "min": 0.0625,
     "max": 20,
     "default": 1,
+    "factory": 1.5,
     "unit": "gamma",
     "advanced": false,
     "previewable": true,
@@ -308,6 +320,7 @@ export const settingsSchema = [
     "min": 0.0625,
     "max": 10,
     "default": 1,
+    "factory": 1.7,
     "unit": null,
     "advanced": false,
     "previewable": true,
@@ -327,6 +340,7 @@ export const settingsSchema = [
     "min": 0.0625,
     "max": 10,
     "default": 1,
+    "factory": 1.4,
     "unit": null,
     "advanced": false,
     "previewable": true,
@@ -380,6 +394,7 @@ export const settingsSchema = [
     "min": -1,
     "max": 6,
     "default": 0,
+    "factory": 4,
     "unit": null,
     "advanced": false,
     "previewable": true,
@@ -417,6 +432,7 @@ export const settingsSchema = [
     "min": 0,
     "max": 16,
     "default": 0,
+    "factory": 2,
     "unit": null,
     "advanced": false,
     "previewable": true,
@@ -443,7 +459,8 @@ export const settingsSchema = [
     "legacy_control_center_ordinal": 9,
     "supported": true,
     "label": "회색조 튜닝",
-    "description": "회색조 렌더링의 문자 경계를 조정합니다."
+    "description": "회색조 렌더링의 문자 경계를 조정합니다.",
+    "factory": 0
   },
   {
     "id": "text_tuning_r",
@@ -455,6 +472,7 @@ export const settingsSchema = [
     "min": -12,
     "max": 12,
     "default": 0,
+    "factory": 4,
     "unit": null,
     "advanced": true,
     "previewable": true,
@@ -474,6 +492,7 @@ export const settingsSchema = [
     "min": -12,
     "max": 12,
     "default": 0,
+    "factory": 4,
     "unit": null,
     "advanced": true,
     "previewable": true,
@@ -493,6 +512,7 @@ export const settingsSchema = [
     "min": -12,
     "max": 12,
     "default": 0,
+    "factory": 4,
     "unit": null,
     "advanced": true,
     "previewable": true,
@@ -519,7 +539,8 @@ export const settingsSchema = [
     "legacy_control_center_ordinal": 27,
     "supported": true,
     "label": "작은 글꼴 힌팅",
-    "description": "작은 크기의 글꼴에 별도 힌팅 경로를 사용합니다."
+    "description": "작은 크기의 글꼴에 별도 힌팅 경로를 사용합니다.",
+    "factory": 0
   },
   {
     "id": "max_bitmap",
@@ -538,7 +559,8 @@ export const settingsSchema = [
     "legacy_control_center_ordinal": 25,
     "supported": true,
     "label": "비트맵 글꼴 최대 크기",
-    "description": "이 크기까지 포함된 비트맵 글리프를 허용합니다. 0은 제한 없음입니다."
+    "description": "이 크기까지 포함된 비트맵 글리프를 허용합니다. 0은 제한 없음입니다.",
+    "factory": 0
   },
   {
     "id": "max_height",
@@ -557,7 +579,8 @@ export const settingsSchema = [
     "legacy_control_center_ordinal": -1,
     "supported": true,
     "label": "렌더링 최대 높이",
-    "description": "FreeType가 처리할 최대 글꼴 높이입니다. 0은 제한 없음입니다."
+    "description": "FreeType가 처리할 최대 글꼴 높이입니다. 0은 제한 없음입니다.",
+    "factory": 0
   },
   {
     "id": "min_height",
@@ -576,7 +599,8 @@ export const settingsSchema = [
     "legacy_control_center_ordinal": -1,
     "supported": true,
     "label": "렌더링 최소 높이",
-    "description": "FreeType가 처리할 최소 글꼴 높이입니다."
+    "description": "FreeType가 처리할 최소 글꼴 높이입니다.",
+    "factory": 0
   },
   {
     "id": "hook_child_processes",
@@ -588,6 +612,7 @@ export const settingsSchema = [
     "min": 0,
     "max": 1,
     "default": 0,
+    "factory": 1,
     "unit": null,
     "advanced": false,
     "previewable": false,
@@ -614,7 +639,8 @@ export const settingsSchema = [
     "legacy_control_center_ordinal": -1,
     "supported": true,
     "label": "UseMapping",
-    "description": "General / UseMapping"
+    "description": "General / UseMapping",
+    "factory": 0
   },
   {
     "id": "use_include",
@@ -633,7 +659,8 @@ export const settingsSchema = [
     "legacy_control_center_ordinal": -1,
     "supported": true,
     "label": "UseInclude",
-    "description": "General / UseInclude"
+    "description": "General / UseInclude",
+    "factory": 0
   },
   {
     "id": "font_substitutes",
@@ -666,7 +693,8 @@ export const settingsSchema = [
     "legacy_control_center_ordinal": 22,
     "supported": true,
     "label": "FontSubstitutes",
-    "description": "General / FontSubstitutes"
+    "description": "General / FontSubstitutes",
+    "factory": 0
   },
   {
     "id": "cache_max_faces",
@@ -678,6 +706,7 @@ export const settingsSchema = [
     "min": 64,
     "max": 4096,
     "default": 64,
+    "factory": 256,
     "unit": null,
     "advanced": true,
     "previewable": false,
@@ -697,6 +726,7 @@ export const settingsSchema = [
     "min": 1,
     "max": 100000,
     "default": 1200,
+    "factory": 6140,
     "unit": null,
     "advanced": true,
     "previewable": false,
@@ -716,6 +746,7 @@ export const settingsSchema = [
     "min": 1048576,
     "max": 1073741824,
     "default": 10485760,
+    "factory": 20485760,
     "unit": null,
     "advanced": true,
     "previewable": false,
@@ -735,6 +766,7 @@ export const settingsSchema = [
     "min": 0,
     "max": 20,
     "default": 0.7,
+    "factory": 1.5,
     "unit": null,
     "advanced": true,
     "previewable": false,
@@ -761,7 +793,8 @@ export const settingsSchema = [
     "legacy_control_center_ordinal": -1,
     "supported": true,
     "label": "Contrast",
-    "description": "DirectWrite / Contrast"
+    "description": "DirectWrite / Contrast",
+    "factory": 1
   },
   {
     "id": "dw_rendering_mode",
@@ -803,6 +836,7 @@ export const settingsSchema = [
     "min": 0,
     "max": 6,
     "default": 5,
+    "factory": 6,
     "unit": null,
     "advanced": true,
     "previewable": false,
@@ -829,7 +863,8 @@ export const settingsSchema = [
     "legacy_control_center_ordinal": -1,
     "supported": true,
     "label": "ClearTypeLevel",
-    "description": "DirectWrite / ClearTypeLevel"
+    "description": "DirectWrite / ClearTypeLevel",
+    "factory": 1
   },
   {
     "id": "experimental_clip_box_fix",
@@ -848,7 +883,8 @@ export const settingsSchema = [
     "legacy_control_center_ordinal": -1,
     "supported": true,
     "label": "ClipBoxFix",
-    "description": "Experimental / ClipBoxFix"
+    "description": "Experimental / ClipBoxFix",
+    "factory": 1
   },
   {
     "id": "experimental_color_font",
@@ -867,7 +903,8 @@ export const settingsSchema = [
     "legacy_control_center_ordinal": -1,
     "supported": true,
     "label": "ColorFont",
-    "description": "Experimental / ColorFont"
+    "description": "Experimental / ColorFont",
+    "factory": 0
   },
   {
     "id": "experimental_invert_color",
@@ -886,7 +923,8 @@ export const settingsSchema = [
     "legacy_control_center_ordinal": -1,
     "supported": true,
     "label": "InvertColor",
-    "description": "Experimental / InvertColor"
+    "description": "Experimental / InvertColor",
+    "factory": 0
   }
 ] as const;
 

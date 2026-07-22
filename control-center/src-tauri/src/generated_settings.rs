@@ -137,7 +137,7 @@ pub const SETTINGS: &[SettingDefinition] = &[
         value_type: SettingValueType::Integer,
         min: -1.0,
         max: 2.0,
-        default: 0.0,
+        default: -1.0,
         previewable: true,
         ordinal: 6,
     },

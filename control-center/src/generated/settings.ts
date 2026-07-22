@@ -269,7 +269,7 @@ export const settingsSchema = [
     ],
     "min": -1,
     "max": 2,
-    "default": 0,
+    "default": -1,
     "unit": null,
     "advanced": true,
     "previewable": true,

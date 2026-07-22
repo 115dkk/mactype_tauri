@@ -318,8 +318,10 @@ test("field revert restores the saved value while default restore and profile-wi
   const revert = weightRow.getByRole("button", { name: /저장된 값으로 되돌리기/ });
   const restoreDefault = weightRow.getByRole("button", { name: /기본값 복원/ });
 
+  // Clean profile: nothing to revert; the factory weight (16) differs from the
+  // engine-default 0 the gallery profile starts from, so restore is available.
   await expect(revert).toBeDisabled();
-  await expect(restoreDefault).toBeDisabled();
+  await expect(restoreDefault).toBeEnabled();
 
   await exactWeight.fill("12");
   await exactWeight.press("Enter");
@@ -336,7 +338,8 @@ test("field revert restores the saved value while default restore and profile-wi
   await expect(revert).toBeDisabled();
 
   await restoreDefault.click();
-  await expect(exactWeight).toHaveValue("0");
+  await expect(exactWeight).toHaveValue("16");
+  await expect(restoreDefault).toBeDisabled();
   await page.getByRole("button", { name: "되돌리기", exact: true }).click();
   await expect(exactWeight).toHaveValue("12");
 
@@ -345,8 +348,8 @@ test("field revert restores the saved value while default restore and profile-wi
   await expect(gammaSelect).toHaveValue("-1");
   await gammaSelect.selectOption("2");
   await page.getByRole("button", { name: "기본값 초기화", exact: true }).click();
-  await expect(exactWeight).toHaveValue("0");
-  await expect(gammaSelect).toHaveValue("-1");
+  await expect(exactWeight).toHaveValue("16");
+  await expect(gammaSelect).toHaveValue("0");
   await page.getByRole("button", { name: "되돌리기", exact: true }).click();
   await expect(exactWeight).toHaveValue("12");
   await expect(gammaSelect).toHaveValue("2");

@@ -1,5 +1,15 @@
+@font-face {
+  /* Korean UI subset of Pretendard Variable (SIL OFL 1.1). Regenerate with
+     scripts/generate-ko-font-subset.py; ko-glyphs.txt lists the covered characters. */
+  font-family: "Pretendard KO UI";
+  src: url("../assets/fonts/pretendard-ko-ui.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
-  /* Latin-only primaries: each :lang() override below must name a real CJK family,
+  /* Latin-only primaries: the :lang() overrides below supply the CJK families,
      or font-synthesis: none silently cancels bold for every fallback glyph. */
   font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
   color: var(--color-foreground);
@@ -41,15 +51,16 @@
   --shadow-window: 0 8px 24px rgba(15, 23, 31, 0.14);
 }
 
-/* Chromium's DirectWrite matcher hands back the Regular cut of these CJK families even
-   for an explicit weight-700 request (verified via CSS.getPlatformFontsForNode), so bold
-   CJK text only exists through weight synthesis. Allow synthesis for weight alone —
-   synthetic italic and small-caps stay forbidden, and Latin glyphs keep their real
-   Segoe UI Variable weights because synthesis never fires when a true face matches. */
-:root:lang(ko) { font-family: "Segoe UI Variable Text", "Segoe UI", "Malgun Gothic", sans-serif; font-synthesis: weight; }
-:root:lang(ja) { font-family: "Segoe UI Variable Text", "Segoe UI", "Yu Gothic UI", "Meiryo UI", sans-serif; font-synthesis: weight; }
-:root:lang(zh-CN) { font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", sans-serif; font-synthesis: weight; }
-:root:lang(zh-TW) { font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft JhengHei UI", sans-serif; font-synthesis: weight; }
+/* Chromium and WebView2 never select Malgun Gothic's Bold cut — explicit stack entry or
+   system fallback, weight 600 or 700, CSS.getPlatformFontsForNode always reports the
+   Regular face — and synthetic bold stays forbidden, so bold Hangul comes from the bundled
+   Pretendard subset with real variable weights. Yu Gothic UI, Microsoft YaHei UI, and
+   Microsoft JhengHei UI resolve 600/700 to their true SemiBold/Bold cuts, so naming them
+   explicitly is enough for ja/zh. Glyphs outside the subset fall through to Malgun Gothic. */
+:root:lang(ko) { font-family: "Segoe UI Variable Text", "Segoe UI", "Pretendard KO UI", "Malgun Gothic", sans-serif; }
+:root:lang(ja) { font-family: "Segoe UI Variable Text", "Segoe UI", "Yu Gothic UI", "Meiryo UI", sans-serif; }
+:root:lang(zh-CN) { font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", sans-serif; }
+:root:lang(zh-TW) { font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft JhengHei UI", sans-serif; }
 
 :root[data-theme="dark"] {
   color-scheme: dark;

@@ -33,8 +33,6 @@ export function FontSubstitutionEditor({ advanced, fontFamilies, fontOptionLabel
 
   return (
     <div className="font-substitution-editor">
-      <strong>{t("advanced.fontSubstitutes")}</strong>
-      <small>{t("advanced.fontSubstitutesHelp")}</small>
       <div className="font-substitution-list">
         {advanced.fontSubstitutes.map((mapping, index) => {
           const pair = splitSubstitution(mapping);

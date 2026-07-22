@@ -1,5 +1,6 @@
 import { RotateCcw } from "lucide-react";
 import { useRef, useState } from "react";
+import { Hint } from "../../components/Hint";
 import type { SettingDefinition } from "../../generated/settings";
 import {
   settingMessageKey,
@@ -19,6 +20,7 @@ interface SchemaSettingsProps {
 interface SettingControlProps {
   setting: SettingDefinition;
   settingLabel: string;
+  hintId: string;
   value: number;
   onCommit: (value: number) => void;
   onPreview: (value: number) => void;
@@ -27,7 +29,7 @@ interface SettingControlProps {
 
 const rangeAdjustmentKeys = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"]);
 
-function SettingControl({ setting, settingLabel, value, onCommit, onPreview, t }: SettingControlProps) {
+function SettingControl({ setting, settingLabel, hintId, value, onCommit, onPreview, t }: SettingControlProps) {
   const rangeStart = useRef<number | null>(null);
   const numberStart = useRef<number | null>(null);
   const [numberDraft, setNumberDraft] = useState<string | null>(null);
@@ -81,6 +83,7 @@ function SettingControl({ setting, settingLabel, value, onCommit, onPreview, t }
   };
   const exactValueInput = (
     <input
+      aria-describedby={hintId}
       aria-label={settingLabel}
       id={setting.control === "number" ? setting.id : `${setting.id}-value`}
       inputMode="decimal"
@@ -112,7 +115,7 @@ function SettingControl({ setting, settingLabel, value, onCommit, onPreview, t }
   return (
     <div className={controlClass}>
       {setting.control === "select" && "options" in setting ? (
-        <select id={setting.id} onChange={(event) => onCommit(Number(event.target.value))} value={value}>
+        <select aria-describedby={hintId} id={setting.id} onChange={(event) => onCommit(Number(event.target.value))} value={value}>
           {setting.options.map((option) => (
             <option key={option.value} value={option.value}>
               {t(settingOptionMessageKey(setting.id, option.value))}
@@ -121,11 +124,12 @@ function SettingControl({ setting, settingLabel, value, onCommit, onPreview, t }
         </select>
       ) : setting.control === "boolean" ? (
         <label className="switch-control">
-          <input checked={value === 1} id={setting.id} onChange={(event) => onCommit(event.target.checked ? 1 : 0)} type="checkbox" />
+          <input aria-describedby={hintId} checked={value === 1} id={setting.id} onChange={(event) => onCommit(event.target.checked ? 1 : 0)} type="checkbox" />
           <span>{value === 1 ? t("profiles.enabled") : t("profiles.disabled")}</span>
         </label>
       ) : setting.control === "number" ? exactValueInput : (
         <input
+          aria-describedby={hintId}
           id={setting.id}
           max={setting.max}
           min={setting.min}
@@ -159,18 +163,25 @@ function SchemaSettings({ settings, values, dirtyKeys, onChange, onPreviewChange
     const dirty = dirtyKeys.includes(setting.id);
     const settingLabel = t(settingMessageKey(setting.id, "label"));
     const settingDescription = t(settingMessageKey(setting.id, "description"));
+    const hintId = `${setting.id}-hint`;
     return (
       <div className="setting-row" key={setting.id}>
-        <div>
-          <label htmlFor={setting.id}>
-            {settingLabel} {dirty && <span className="dirty-mark">{t("profiles.changed")}</span>}
-          </label>
-          <p>
-            {settingDescription} {t("profiles.settingMeta", { default: setting.default, min: setting.min, max: setting.max })}
-            {setting.apply === "restart_required" ? ` · ${t("profiles.restartRequired")}` : ""}
-          </p>
+        <div className="setting-label">
+          <Hint
+            content={<>
+              {settingDescription}
+              <span className="hint-meta">
+                {t("profiles.settingMeta", { default: setting.default, min: setting.min, max: setting.max })}
+                {setting.apply === "restart_required" ? ` · ${t("profiles.restartRequired")}` : ""}
+              </span>
+            </>}
+            contentId={hintId}
+          >
+            <label htmlFor={setting.id}>{settingLabel}</label>
+          </Hint>
+          {dirty && <span className="dirty-mark">{t("profiles.changed")}</span>}
         </div>
-        <SettingControl setting={setting} settingLabel={settingLabel} t={t} value={value} onCommit={(nextValue) => onChange(setting.id, nextValue)} onPreview={(nextValue) => onPreviewChange(setting.id, nextValue)} />
+        <SettingControl hintId={hintId} setting={setting} settingLabel={settingLabel} t={t} value={value} onCommit={(nextValue) => onChange(setting.id, nextValue)} onPreview={(nextValue) => onPreviewChange(setting.id, nextValue)} />
       </div>
     );
   });

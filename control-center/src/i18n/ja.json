@@ -173,7 +173,7 @@
   "profiles.sampleAria": "プレビュー用サンプルテキスト",
   "profiles.previewAria": "現在の設定による文字描画プレビュー",
   "profiles.previewImageAlt": "MacType Helper で描画された文字プレビュー",
-  "profiles.sampleText": "MacType プレビュー 123 ABC\n素早い茶色の狐が怠け者の犬を飛び越える。",
+  "profiles.sampleText": "MacType プレビュー 123 ABC\nいろはにほへと ちりぬるを わかよたれそ つねならむ\nThe quick brown fox jumps over the lazy dog.",
   "profiles.helperWaiting": "Helper を待機中",
   "profiles.previewRequest": "リクエスト {request}・{dpi} DPI・{elapsed} ms",
   "profiles.previewReady": "プレビューを準備中",

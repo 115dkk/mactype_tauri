@@ -159,9 +159,9 @@ test("profile editor categories and collections remain interactive", async ({ pa
   await expect(discard).toBeDisabled();
 
   const previewResizer = page.getByRole("separator", { name: "프리뷰 영역 높이 조절" });
-  await expect(previewResizer).toHaveAttribute("aria-valuenow", "320");
+  await expect(previewResizer).toHaveAttribute("aria-valuenow", "380");
   await previewResizer.press("ArrowDown");
-  await expect(previewResizer).toHaveAttribute("aria-valuenow", "304");
+  await expect(previewResizer).toHaveAttribute("aria-valuenow", "364");
   await previewResizer.press("Home");
   await expect(previewResizer).toHaveAttribute("aria-valuenow", "128");
 

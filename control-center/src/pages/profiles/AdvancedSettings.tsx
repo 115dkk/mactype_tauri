@@ -1,4 +1,5 @@
 import type { AdvancedProfile } from "../../app/model";
+import { Hint } from "../../components/Hint";
 import type { SettingDefinition } from "../../generated/settings";
 import type { I18nValue } from "../../i18n/i18n";
 import { FontSubstitutionEditor } from "./FontSubstitutionEditor";
@@ -37,8 +38,7 @@ function ShadowSettings({ advanced, onChange, onCommit, t }: AdvancedSectionProp
 
   return (
     <fieldset>
-      <legend>{t("advanced.shadow")}</legend>
-      <p>{t("advanced.shadowHelp")}</p>
+      <legend><Hint content={t("advanced.shadowHelp")}>{t("advanced.shadow")}</Hint></legend>
       <label className="checkbox-row">
         <input
           checked={shadow !== null}
@@ -86,8 +86,7 @@ function LcdFilterSettings({ advanced, onChange, onCommit, t }: AdvancedSectionP
   const weights = advanced.lcdFilterWeight;
   return (
     <fieldset>
-      <legend>{t("advanced.lcdWeight")}</legend>
-      <p>{t("advanced.lcdWeightHelp")}</p>
+      <legend><Hint content={t("advanced.lcdWeightHelp")}>{t("advanced.lcdWeight")}</Hint></legend>
       <label className="checkbox-row">
         <input
           checked={weights !== null}
@@ -121,8 +120,7 @@ function PixelLayoutSettings({ advanced, onChange, onCommit, t }: AdvancedSectio
   const labels = ["R x", "R y", "G x", "G y", "B x", "B y"];
   return (
     <fieldset>
-      <legend>{t("advanced.pixelLayout")}</legend>
-      <p>{t("advanced.pixelLayoutHelp")}</p>
+      <legend><Hint content={t("advanced.pixelLayoutHelp")}>{t("advanced.pixelLayout")}</Hint></legend>
       <label className="checkbox-row">
         <input
           checked={pixelLayout !== null}
@@ -160,7 +158,7 @@ function RoutingSettings({
 }: AdvancedSectionProps & Pick<AdvancedSettingsProps, "fontFamilies" | "fontOptionLabel">) {
   return (
     <fieldset className="advanced-text-fields">
-      <legend>{t("advanced.fontSubstitutes")}</legend>
+      <legend><Hint content={t("advanced.fontSubstitutesHelp")}>{t("advanced.fontSubstitutes")}</Hint></legend>
       <FontSubstitutionEditor advanced={advanced} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} onCommit={onCommit} t={t} />
     </fieldset>
   );

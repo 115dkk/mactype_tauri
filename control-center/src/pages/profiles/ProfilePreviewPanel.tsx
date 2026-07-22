@@ -20,11 +20,11 @@ import {
 } from "../../app/tauri";
 import type { I18nValue } from "../../i18n/i18n";
 
-const DEFAULT_PREVIEW_HEIGHT = 320;
-const QUICK_PREVIEW_HEIGHT = 240;
-const MIN_PREVIEW_HEIGHT = DEFAULT_PREVIEW_HEIGHT * 2 / 5;
-const MAX_PREVIEW_HEIGHT = 520;
-const MIN_SETTINGS_HEIGHT = 220;
+const DEFAULT_PREVIEW_HEIGHT = 380;
+const QUICK_PREVIEW_HEIGHT = 320;
+const MIN_PREVIEW_HEIGHT = 128;
+const MAX_PREVIEW_HEIGHT = 640;
+const MIN_SETTINGS_HEIGHT = 160;
 
 export interface ProfilePreviewHandle {
   show: () => void;
@@ -104,6 +104,13 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
   useEffect(() => {
     if (mode === "quick") setPreviewHeight((current) => Math.min(current, QUICK_PREVIEW_HEIGHT));
   }, [mode]);
+
+  useEffect(() => {
+    const available = previewPanelRef.current?.parentElement?.clientHeight;
+    if (!available) return;
+    const largest = Math.max(MIN_PREVIEW_HEIGHT, Math.min(MAX_PREVIEW_HEIGHT, available - MIN_SETTINGS_HEIGHT));
+    setPreviewHeight((current) => Math.min(current, largest));
+  }, []);
 
   useEffect(() => {
     const nextDefault = t("profiles.sampleText");

@@ -1,5 +1,6 @@
 import { Play, Redo2, RotateCcw, Save, SaveAll, Search, Undo2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Hint } from "../components/Hint";
 import { settingsSchema } from "../generated/settings";
 import { settingMessageKey, useI18n } from "../i18n/i18n";
 import { loadInstalledFontFamilies } from "../app/tauri";
@@ -140,8 +141,7 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
     <section className="page profile-page view-enter" aria-labelledby="profiles-title" data-mode={mode}>
       <header className="page-header compact profile-header">
         <div>
-          <div className="profile-mode-title"><h1 id="profiles-title">{t(mode === "quick" ? "nav.quickSetup" : "nav.advancedTuning")}</h1><span>{mode === "quick" ? "Wizard" : "Tuner"}</span></div>
-          <p>{t(mode === "quick" ? "profiles.quickDescription" : "profiles.advancedDescription")}</p>
+          <div className="profile-mode-title"><h1 id="profiles-title"><Hint content={t(mode === "quick" ? "profiles.quickDescription" : "profiles.advancedDescription")}>{t(mode === "quick" ? "nav.quickSetup" : "nav.advancedTuning")}</Hint></h1><span>{mode === "quick" ? "Wizard" : "Tuner"}</span></div>
           {loading
             ? <p>{t("profiles.searching")}</p>
             : <p className="profile-editing"><span>{t("profiles.editing")}</span> <code title={profile?.path}>{profile?.displayPath ?? t("profiles.none")}</code><span> · {t("profiles.unsavedSummary", { count: dirtyCount })}</span></p>}
@@ -149,12 +149,12 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
           {profileMessage && <p aria-live="polite" className="profile-message">{profileMessage}</p>}
         </div>
         <div aria-label={t("profiles.editActions")} className="profile-history-actions" role="toolbar">
-          <button className="button secondary compact-action" disabled={!profile?.canUndo || busy} onClick={() => void undo()} type="button"><Undo2 aria-hidden="true" size={16} /> {t("profiles.undo")}</button>
-          <button className="button secondary compact-action" disabled={!profile?.canRedo || busy} onClick={() => void redo()} type="button"><Redo2 aria-hidden="true" size={16} /> {t("profiles.redo")}</button>
-          <button className="button secondary compact-action" disabled={!profile || dirtyCount === 0 || busy} onClick={() => void discard()} title={t("profiles.discardDescription")} type="button"><RotateCcw aria-hidden="true" size={16} /> {t("profiles.discard")}</button>
-          <button className="button secondary compact-action" disabled={!profile || !profile.canSave || dirtyCount === 0 || busy || recoveryRequired} onClick={() => void saveCurrentProfile()} type="button"><Save aria-hidden="true" size={16} /> {profileCommand === "save" ? t("profiles.saving") : t("profiles.saveNow")}</button>
-          {profile && !profile.canSave && <button className="button secondary compact-action" disabled={busy || recoveryRequired} onClick={() => setSaveAsOpen(true)} type="button"><SaveAll aria-hidden="true" size={16} /> {t("files.saveAs")}</button>}
-          <button className="button primary compact-action" disabled={!profile || dirtyCount > 0 || busy || recoveryRequired} onClick={() => void applyProfile()} title={dirtyCount > 0 ? t("profiles.saveBeforeApply") : undefined} type="button"><Play aria-hidden="true" size={16} /> {profileCommand === "apply" ? t("profiles.applying") : t("profiles.applyNow")}</button>
+          <button className="button secondary compact-action" disabled={!profile?.canUndo || busy} onClick={() => void undo()} type="button"><Undo2 aria-hidden="true" size={14} /> {t("profiles.undo")}</button>
+          <button className="button secondary compact-action" disabled={!profile?.canRedo || busy} onClick={() => void redo()} type="button"><Redo2 aria-hidden="true" size={14} /> {t("profiles.redo")}</button>
+          <button className="button secondary compact-action" disabled={!profile || dirtyCount === 0 || busy} onClick={() => void discard()} title={t("profiles.discardDescription")} type="button"><RotateCcw aria-hidden="true" size={14} /> {t("profiles.discard")}</button>
+          <button className="button secondary compact-action" disabled={!profile || !profile.canSave || dirtyCount === 0 || busy || recoveryRequired} onClick={() => void saveCurrentProfile()} type="button"><Save aria-hidden="true" size={14} /> {profileCommand === "save" ? t("profiles.saving") : t("profiles.saveNow")}</button>
+          {profile && !profile.canSave && <button className="button secondary compact-action" disabled={busy || recoveryRequired} onClick={() => setSaveAsOpen(true)} type="button"><SaveAll aria-hidden="true" size={14} /> {t("files.saveAs")}</button>}
+          <button className="button primary compact-action" disabled={!profile || dirtyCount > 0 || busy || recoveryRequired} onClick={() => void applyProfile()} title={dirtyCount > 0 ? t("profiles.saveBeforeApply") : undefined} type="button"><Play aria-hidden="true" size={14} /> {profileCommand === "apply" ? t("profiles.applying") : t("profiles.applyNow")}</button>
         </div>
       </header>
 
@@ -182,7 +182,7 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
 
         <div className="settings-workspace">
           <div className="settings-form">
-            <div className="section-heading"><div><h2>{mode === "quick" ? activeWizardLabel : query ? t("profiles.searchResults") : activeDefinition.label}</h2><p>{mode === "quick" ? t("wizard.guidance") : query ? t("profiles.searchDescription", { query }) : activeDefinition.description}</p></div></div>
+            <div className="section-heading"><h2><Hint content={mode === "quick" ? t("wizard.guidance") : query ? t("profiles.searchDescription", { query }) : activeDefinition.description}>{mode === "quick" ? activeWizardLabel : query ? t("profiles.searchResults") : activeDefinition.label}</Hint></h2></div>
 
             {mode === "quick" && <WizardSettings activeStep={activeWizardStep} advanced={advanced} busy={!profile || busy || recoveryRequired} canSave={profile?.canSave ?? false} dirtyCount={dirtyCount} dirtyKeys={dirtyKeys} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} onAdvancedCommit={(next) => void commitAdvanced(next)} onApply={() => void applyProfile()} onPreview={showPreview} onSave={() => void saveCurrentProfile()} onSettingChange={changeSetting} onSettingPreview={previewSetting} onStepChange={setActiveWizardStep} settings={settingsSchema} t={t} values={values} />}
 

@@ -251,6 +251,9 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
   discardProfileChanges(): Promise<ProfileSnapshot> {
     return Promise.resolve(galleryProfiles.discard());
   },
+  resetProfileDefaults(): Promise<ProfileSnapshot> {
+    return Promise.resolve(galleryProfiles.resetDefaults());
+  },
 
   exportProfile(path: string): Promise<string> {
     return Promise.resolve(path);

@@ -94,6 +94,7 @@ export const tauriRuntimeAdapter: ControlCenterRuntimeAdapter = {
   undoProfile: () => invoke<ProfileSnapshot>("undo_profile"),
   redoProfile: () => invoke<ProfileSnapshot>("redo_profile"),
   discardProfileChanges: () => invoke<ProfileSnapshot>("discard_profile_changes"),
+  resetProfileDefaults: () => invoke<ProfileSnapshot>("reset_profile_defaults"),
   exportProfile: (path: string) => invoke<string>("export_profile", { path }),
   revealProfileFile: () => invoke<string>("reveal_profile_file"),
   saveProfile: () => invoke<ProfileSnapshot>("save_profile"),

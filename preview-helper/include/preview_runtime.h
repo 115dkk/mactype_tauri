@@ -38,7 +38,7 @@ class PreviewRuntime {
   IControlCenter* control_center_{};
   HWND hidden_window_{};
   HWND native_window_{};
-  std::wstring sample_text_{L"MacType preview 123 ABC\n가나다라마바사 아자차카타파하"};
+  std::wstring sample_text_{L"MacType preview 123 ABC\nThe quick brown fox jumps over the lazy dog."};
   std::wstring font_face_{L"Segoe UI"};
   float font_size_pt_{14.0F};
   COLORREF foreground_{RGB(24, 29, 35)};

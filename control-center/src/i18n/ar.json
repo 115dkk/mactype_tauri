@@ -173,7 +173,7 @@
   "profiles.sampleAria": "نص عينة المعاينة",
   "profiles.previewAria": "معاينة عرض النص بالإعدادات الحالية",
   "profiles.previewImageAlt": "معاينة نص معروضة بواسطة MacType Helper",
-  "profiles.sampleText": "معاينة MacType ‏123 ABC\nنص عربي واضح لاختبار جودة عرض الحروف والأرقام.",
+  "profiles.sampleText": "معاينة MacType ‏123 ABC\nنص حكيم له سر قاطع وذو شأن عظيم مكتوب على ثوب أخضر ومغلف بجلد أزرق\nThe quick brown fox jumps over the lazy dog.",
   "profiles.helperWaiting": "في انتظار Helper",
   "profiles.previewRequest": "الطلب {request} · ‏{dpi} نقطة/بوصة · ‏{elapsed} مللي ثانية",
   "profiles.previewReady": "جارٍ إعداد المعاينة",

@@ -173,7 +173,7 @@
   "profiles.sampleAria": "预览示例文本",
   "profiles.previewAria": "使用当前设置的文字渲染预览",
   "profiles.previewImageAlt": "由 MacType Helper 渲染的文字预览",
-  "profiles.sampleText": "MacType 预览 123 ABC\n汉字显示效果：春风又绿江南岸。",
+  "profiles.sampleText": "MacType 预览 123 ABC\n天地玄黄 宇宙洪荒 日月盈昃 辰宿列张\nThe quick brown fox jumps over the lazy dog.",
   "profiles.helperWaiting": "正在等待 Helper",
   "profiles.previewRequest": "请求 {request} · {dpi} DPI · {elapsed} 毫秒",
   "profiles.previewReady": "正在准备预览",

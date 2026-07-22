@@ -254,7 +254,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
           <button className="text-action" onClick={() => setDarkPreview((current) => !current)} type="button">{darkPreview ? t("profiles.lightBackground") : t("profiles.darkBackground")}</button>
         </div>
       </div>
-      <textarea className="sample-input" aria-label={t("profiles.sampleAria")} onChange={(event) => setSampleText(event.target.value)} rows={2} value={sampleText} />
+      <textarea className="sample-input" aria-label={t("profiles.sampleAria")} onChange={(event) => setSampleText(event.target.value)} rows={3} value={sampleText} />
       <div className="preview-canvas" data-dark={darkPreview} ref={canvasRef} role="img" aria-label={t("profiles.previewAria")}>
         {preview ? (
           <img
@@ -279,7 +279,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
             src={previewImageUrl(preview.imagePath)}
             width={preview.width / displayScale}
           />
-        ) : <><p>{fallbackSample[0]}</p><p>{fallbackSample[1]}</p><span>{t("profiles.helperWaiting")}</span></>}
+        ) : <>{fallbackSample.map((line) => <p key={line}>{line}</p>)}<span>{t("profiles.helperWaiting")}</span></>}
       </div>
       {error && <p className="inline-error"><AlertTriangle aria-hidden="true" size={15} /> {error}</p>}
       <div className="preview-footer">

@@ -270,6 +270,56 @@ fn new_section_is_inserted_before_its_first_key() {
 }
 
 #[test]
+fn snapshot_reports_saved_values_until_save_refreshes_them() {
+    let path = temp_profile(b"[General]\nNormalWeight=3\n");
+    let mut document = ProfileDocument::open(&path).unwrap();
+    document.update_value("normal_weight", 7.0).unwrap();
+
+    let snapshot = document.snapshot();
+    assert_eq!(snapshot.values["normal_weight"], 7.0);
+    assert_eq!(snapshot.saved_values["normal_weight"], 3.0);
+
+    document.save().unwrap();
+    let snapshot = document.snapshot();
+    assert_eq!(snapshot.saved_values["normal_weight"], 7.0);
+    let _ = fs::remove_file(path.with_extension("ini.bak"));
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn reset_settings_to_defaults_is_one_undoable_revision() {
+    let path = temp_profile(b"[General]\n; note\nNormalWeight=3\nGammaMode=0\nGammaValue=1.0\n");
+    let mut document = ProfileDocument::open(&path).unwrap();
+    document.reset_settings_to_defaults().unwrap();
+
+    let rendered = String::from_utf8(document.encoded().unwrap()).unwrap();
+    assert!(!rendered.contains("NormalWeight"));
+    assert!(!rendered.contains("GammaMode"));
+    assert!(rendered.contains("; note"));
+    let snapshot = document.snapshot();
+    assert_eq!(snapshot.values["gamma_mode"], -1.0);
+    assert_eq!(snapshot.values["normal_weight"], 0.0);
+    assert!(snapshot.dirty_keys.contains(&"normal_weight".to_owned()));
+
+    assert!(document.undo());
+    assert!(String::from_utf8(document.encoded().unwrap())
+        .unwrap()
+        .contains("NormalWeight=3"));
+    assert!(!document.undo());
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn reset_settings_to_defaults_without_scalar_keys_is_a_no_op() {
+    let path = temp_profile(b"[Exclude]\nTahoma\n");
+    let mut document = ProfileDocument::open(&path).unwrap();
+    document.reset_settings_to_defaults().unwrap();
+    assert!(document.snapshot().dirty_keys.is_empty());
+    assert!(!document.undo());
+    let _ = fs::remove_file(path);
+}
+
+#[test]
 fn edits_individual_fonts_and_lists_without_dropping_comments() {
     let path =
         temp_profile(b"[Individual]\n; keep\nSegoe UI=1,2,3,4,5,1\n[Exclude]\n; fonts\nTahoma\n");

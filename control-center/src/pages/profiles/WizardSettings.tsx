@@ -22,6 +22,7 @@ interface WizardSettingsProps {
   onSettingChange: (settingId: string, value: number) => void;
   onSettingPreview: (settingId: string, value: number) => void;
   onStepChange: (step: WizardStepId) => void;
+  savedValues?: Readonly<Record<string, number>>;
   settings: ReadonlyArray<SettingDefinition>;
   t: I18nValue["t"];
   values: Readonly<Record<string, number>>;
@@ -43,6 +44,7 @@ export function WizardSettings({
   onSettingChange,
   onSettingPreview,
   onStepChange,
+  savedValues,
   settings,
   t,
   values,
@@ -55,7 +57,7 @@ export function WizardSettings({
   return (
     <div className="wizard-layout">
       <div className="wizard-step-content">
-        {activeStep !== "apply" && <SchemaSettings dirtyKeys={dirtyKeys} onChange={onSettingChange} onPreviewChange={onSettingPreview} settings={currentSettings} t={t} values={values} />}
+        {activeStep !== "apply" && <SchemaSettings dirtyKeys={dirtyKeys} onChange={onSettingChange} onPreviewChange={onSettingPreview} savedValues={savedValues} settings={currentSettings} t={t} values={values} />}
         {activeStep === "substitution" && (
           <div className="advanced-editor wizard-substitution">
             <fieldset><FontSubstitutionEditor advanced={advanced} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} onCommit={onAdvancedCommit} t={t} /></fieldset>

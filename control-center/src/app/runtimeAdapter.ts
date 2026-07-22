@@ -61,6 +61,7 @@ export interface ControlCenterRuntimeAdapter {
   undoProfile(): Promise<ProfileSnapshot>;
   redoProfile(): Promise<ProfileSnapshot>;
   discardProfileChanges(): Promise<ProfileSnapshot>;
+  resetProfileDefaults(): Promise<ProfileSnapshot>;
   exportProfile(path: string): Promise<string>;
   revealProfileFile(): Promise<string>;
   saveProfile(): Promise<ProfileSnapshot | null>;

@@ -8,6 +8,7 @@ import { SchemaSettings } from "./SchemaSettings";
 interface AdvancedSettingsProps {
   settings: ReadonlyArray<SettingDefinition>;
   values: Readonly<Record<string, number>>;
+  savedValues?: Readonly<Record<string, number>>;
   dirtyKeys: ReadonlyArray<string>;
   advanced: AdvancedProfile;
   fontFamilies: ReadonlyArray<string>;
@@ -167,6 +168,7 @@ function RoutingSettings({
 export function AdvancedSettings({
   settings,
   values,
+  savedValues,
   dirtyKeys,
   advanced,
   fontFamilies,
@@ -180,7 +182,7 @@ export function AdvancedSettings({
   const sectionProps = { advanced, onChange: onAdvancedChange, onCommit: onAdvancedCommit, t };
   return (
     <>
-      <SchemaSettings dirtyKeys={dirtyKeys} onChange={onSettingChange} onPreviewChange={onSettingPreview} settings={settings} t={t} values={values} />
+      <SchemaSettings dirtyKeys={dirtyKeys} onChange={onSettingChange} onPreviewChange={onSettingPreview} savedValues={savedValues} settings={settings} t={t} values={values} />
       <div className="advanced-editor">
         <ShadowSettings {...sectionProps} />
         <LcdFilterSettings {...sectionProps} />

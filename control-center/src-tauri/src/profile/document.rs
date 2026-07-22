@@ -99,7 +99,7 @@ impl ProfileDocument {
     pub(super) fn from_bytes(path: PathBuf, bytes: &[u8]) -> Result<Self, String> {
         let original_hash = hash(bytes);
         let (text, encoding, bom) = decode(bytes)?;
-        Ok(Self {
+        let mut document = Self {
             path,
             encoding,
             bom,
@@ -107,19 +107,21 @@ impl ProfileDocument {
             nodes: parse_nodes(&text),
             original_hash,
             original_legacy_lines: original_legacy_lines(bytes, &text, encoding),
+            saved_values: Default::default(),
             dirty_keys: Default::default(),
             undo_history: Default::default(),
             redo_history: Default::default(),
-        })
+        };
+        document.saved_values = document.setting_values();
+        Ok(document)
     }
 
     pub(super) fn path(&self) -> &Path {
         &self.path
     }
 
-    pub(super) fn snapshot(&self) -> ProfileSnapshot {
-        let identity = identify_profile(&self.path);
-        let values = SETTINGS
+    pub(super) fn setting_values(&self) -> BTreeMap<String, f64> {
+        SETTINGS
             .iter()
             .map(|setting| {
                 let value = self
@@ -128,7 +130,12 @@ impl ProfileDocument {
                     .unwrap_or(setting.default);
                 (setting.id.to_owned(), value)
             })
-            .collect::<BTreeMap<_, _>>();
+            .collect()
+    }
+
+    pub(super) fn snapshot(&self) -> ProfileSnapshot {
+        let identity = identify_profile(&self.path);
+        let values = self.setting_values();
 
         ProfileSnapshot {
             path: self.path.to_string_lossy().into_owned(),
@@ -144,6 +151,7 @@ impl ProfileDocument {
                 .map(|byte| format!("{byte:02x}"))
                 .collect(),
             values,
+            saved_values: self.saved_values.clone(),
             dirty_keys: self.dirty_keys.iter().cloned().collect(),
             can_undo: !self.undo_history.is_empty(),
             can_redo: !self.redo_history.is_empty(),

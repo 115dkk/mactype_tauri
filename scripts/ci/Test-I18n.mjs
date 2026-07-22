@@ -66,4 +66,15 @@ for (const locale of ["fr", "de", "es", "pt"]) {
   if (identical.length > 30) throw new Error(`Too many untranslated ${locale} messages: ${identical.length}`);
 }
 
+const koFontGlyphs = new Set(fs.readFileSync(path.join(root, "control-center/src/assets/fonts/ko-glyphs.txt"), "utf8"));
+const missingGlyphs = new Set();
+for (const message of Object.values(ko)) {
+  for (const character of message) {
+    if (character.codePointAt(0) > 0x7e && !/\s/u.test(character) && !koFontGlyphs.has(character)) missingGlyphs.add(character);
+  }
+}
+if (missingGlyphs.size > 0) {
+  throw new Error(`Korean UI font subset is stale; regenerate with scripts/generate-ko-font-subset.py. Missing glyphs: ${[...missingGlyphs].join("")}`);
+}
+
 console.log(`i18n catalog gate passed for ${locales.length} locales, ${koKeys.length} messages, and ${schema.length} settings.`);

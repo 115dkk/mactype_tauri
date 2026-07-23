@@ -16,6 +16,8 @@ interface SchemaSettingsProps {
   onChange: (settingId: string, value: number) => void;
   onPreviewChange: (settingId: string, value: number) => void;
   t: I18nValue["t"];
+  variant?: "compact" | "guided";
+  endpointWords?: (settingId: string) => { low: string; high: string } | null;
 }
 
 interface SettingControlProps {
@@ -27,11 +29,13 @@ interface SettingControlProps {
   onCommit: (value: number) => void;
   onPreview: (value: number) => void;
   t: I18nValue["t"];
+  guided?: boolean;
+  endpoints?: { low: string; high: string } | null;
 }
 
 const rangeAdjustmentKeys = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"]);
 
-function SettingControl({ setting, settingLabel, hintId, value, savedValue, onCommit, onPreview, t }: SettingControlProps) {
+function SettingControl({ setting, settingLabel, hintId, value, savedValue, onCommit, onPreview, t, guided = false, endpoints = null }: SettingControlProps) {
   const rangeStart = useRef<number | null>(null);
   const numberStart = useRef<number | null>(null);
   const [numberDraft, setNumberDraft] = useState<string | null>(null);
@@ -116,7 +120,17 @@ function SettingControl({ setting, settingLabel, hintId, value, savedValue, onCo
 
   return (
     <div className={controlClass}>
-      {setting.control === "select" && "options" in setting ? (
+      {setting.control === "select" && "options" in setting && guided ? (
+        <fieldset aria-describedby={hintId} className="guided-choice">
+          <legend className="sr-only">{settingLabel}</legend>
+          {setting.options.map((option) => (
+            <label className="guided-choice-option" data-selected={value === option.value} key={option.value}>
+              <input checked={value === option.value} name={setting.id} onChange={() => onCommit(option.value)} type="radio" value={option.value} />
+              <span>{t(settingOptionMessageKey(setting.id, option.value))}</span>
+            </label>
+          ))}
+        </fieldset>
+      ) : setting.control === "select" && "options" in setting ? (
         <select aria-describedby={hintId} id={setting.id} onChange={(event) => onCommit(Number(event.target.value))} value={value}>
           {setting.options.map((option) => (
             <option key={option.value} value={option.value}>
@@ -152,19 +166,25 @@ function SettingControl({ setting, settingLabel, hintId, value, savedValue, onCo
         />
       )}
       {setting.control === "range" && exactValueInput}
-      <div className="setting-actions">
-        <button className="icon-button" aria-label={t("profiles.revertSetting", { setting: settingLabel })} disabled={value === savedValue} onClick={() => onCommit(savedValue)} title={t("profiles.revertSetting", { setting: settingLabel })} type="button">
-          <Undo2 aria-hidden="true" size={14} />
-        </button>
-        <button className="icon-button" aria-label={t("profiles.restoreDefault", { setting: settingLabel })} disabled={value === setting.factory} onClick={() => onCommit(setting.factory)} title={t("profiles.restoreDefault", { setting: settingLabel })} type="button">
-          <RotateCcw aria-hidden="true" size={14} />
-        </button>
-      </div>
+      {guided && setting.control === "range" && endpoints && (
+        <div aria-hidden="true" className="guided-scale-words"><span>{endpoints.low}</span><span>{endpoints.high}</span></div>
+      )}
+      {!guided && (
+        <div className="setting-actions">
+          <button className="icon-button" aria-label={t("profiles.revertSetting", { setting: settingLabel })} disabled={value === savedValue} onClick={() => onCommit(savedValue)} title={t("profiles.revertSetting", { setting: settingLabel })} type="button">
+            <Undo2 aria-hidden="true" size={14} />
+          </button>
+          <button className="icon-button" aria-label={t("profiles.restoreDefault", { setting: settingLabel })} disabled={value === setting.factory} onClick={() => onCommit(setting.factory)} title={t("profiles.restoreDefault", { setting: settingLabel })} type="button">
+            <RotateCcw aria-hidden="true" size={14} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
-function SchemaSettings({ settings, values, savedValues, dirtyKeys, onChange, onPreviewChange, t }: SchemaSettingsProps) {
+function SchemaSettings({ settings, values, savedValues, dirtyKeys, onChange, onPreviewChange, t, variant = "compact", endpointWords }: SchemaSettingsProps) {
+  const guided = variant === "guided";
   return settings.map((setting) => {
     const value = values[setting.id] ?? setting.default;
     const savedValue = savedValues?.[setting.id] ?? value;
@@ -172,6 +192,18 @@ function SchemaSettings({ settings, values, savedValues, dirtyKeys, onChange, on
     const settingLabel = t(settingMessageKey(setting.id, "label"));
     const settingDescription = t(settingMessageKey(setting.id, "description"));
     const hintId = `${setting.id}-hint`;
+    if (guided) {
+      return (
+        <div className="setting-row guided-row" data-control={setting.control} key={setting.id}>
+          <div className="setting-label guided-label">
+            <label htmlFor={setting.id}>{settingLabel}</label>
+            {dirty && <span className="dirty-mark">{t("profiles.changed")}</span>}
+            <p id={hintId}>{settingDescription}</p>
+          </div>
+          <SettingControl endpoints={endpointWords?.(setting.id) ?? null} guided hintId={hintId} savedValue={savedValue} setting={setting} settingLabel={settingLabel} t={t} value={value} onCommit={(nextValue) => onChange(setting.id, nextValue)} onPreview={(nextValue) => onPreviewChange(setting.id, nextValue)} />
+        </div>
+      );
+    }
     return (
       <div className="setting-row" key={setting.id}>
         <div className="setting-label">

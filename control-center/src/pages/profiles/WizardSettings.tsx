@@ -1,10 +1,10 @@
-import { ArrowLeft, ArrowRight, Eye, Play, Save } from "lucide-react";
+import { ArrowLeft, ArrowRight, Eye, ListRestart, Play, Save } from "lucide-react";
 import type { AdvancedProfile } from "../../app/model";
 import type { SettingDefinition } from "../../generated/settings";
-import type { I18nValue } from "../../i18n/i18n";
+import type { I18nValue, MessageKey } from "../../i18n/i18n";
 import { FontSubstitutionEditor } from "./FontSubstitutionEditor";
 import { SchemaSettings } from "./SchemaSettings";
-import { wizardSettingIdsByStep, wizardStepIds, type WizardStepId } from "./wizardModel";
+import { wizardScaleBySettingId, wizardSettingIdsByStep, wizardStepIds, type WizardStepId } from "./wizardModel";
 
 interface WizardSettingsProps {
   activeStep: WizardStepId;
@@ -13,15 +13,19 @@ interface WizardSettingsProps {
   canSave: boolean;
   dirtyCount: number;
   dirtyKeys: ReadonlyArray<string>;
+  fontFace: string;
   fontFamilies: ReadonlyArray<string>;
   fontOptionLabel: (font: string) => string;
   onAdvancedCommit: (profile: AdvancedProfile) => void;
   onApply: () => void;
+  onFontFaceChange: (font: string) => void;
   onPreview: () => void;
   onSave: () => void;
   onSettingChange: (settingId: string, value: number) => void;
   onSettingPreview: (settingId: string, value: number) => void;
   onStepChange: (step: WizardStepId) => void;
+  profileName: string | null;
+  profilePath: string | null;
   savedValues?: Readonly<Record<string, number>>;
   settings: ReadonlyArray<SettingDefinition>;
   t: I18nValue["t"];
@@ -35,15 +39,19 @@ export function WizardSettings({
   canSave,
   dirtyCount,
   dirtyKeys,
+  fontFace,
   fontFamilies,
   fontOptionLabel,
   onAdvancedCommit,
   onApply,
+  onFontFaceChange,
   onPreview,
   onSave,
   onSettingChange,
   onSettingPreview,
   onStepChange,
+  profileName,
+  profilePath,
   savedValues,
   settings,
   t,
@@ -53,11 +61,45 @@ export function WizardSettings({
   const currentSettings = settings.filter((setting) => wizardSettingIdsByStep[activeStep].includes(setting.id));
   const previousStep = wizardStepIds[stepIndex - 1];
   const nextStep = wizardStepIds[stepIndex + 1];
+  const stepAtFactory = currentSettings.every((setting) => (values[setting.id] ?? setting.default) === setting.factory);
+  const endpointWords = (settingId: string) => {
+    const scale = wizardScaleBySettingId[settingId];
+    if (!scale) return null;
+    return { low: t(`wizard.scale.${scale}.low` as MessageKey), high: t(`wizard.scale.${scale}.high` as MessageKey) };
+  };
+  const resetStepToFactory = () => {
+    for (const setting of currentSettings) {
+      if ((values[setting.id] ?? setting.default) !== setting.factory) onSettingChange(setting.id, setting.factory);
+    }
+  };
 
   return (
     <div className="wizard-layout">
       <div className="wizard-step-content">
-        {activeStep !== "apply" && <SchemaSettings dirtyKeys={dirtyKeys} onChange={onSettingChange} onPreviewChange={onSettingPreview} savedValues={savedValues} settings={currentSettings} t={t} values={values} />}
+        {activeStep === "start" && (
+          <section className="wizard-start-card" aria-label={t("wizard.start")}>
+            <p className="wizard-start-intro">{t("wizard.startIntro")}</p>
+            <div className="wizard-start-profile">
+              <span>{t("wizard.startProfile")}</span>
+              <code title={profilePath ?? undefined}>{profileName ?? t("profiles.none")}</code>
+            </div>
+            <label className="wizard-start-font">
+              <span>{t("profiles.previewFont")}</span>
+              <select disabled={busy} onChange={(event) => onFontFaceChange(event.target.value)} value={fontFace}>
+                {fontFamilies.map((font) => <option key={font} value={font}>{fontOptionLabel(font)}</option>)}
+              </select>
+            </label>
+            <p className="wizard-start-hint">{t("wizard.startSwitchHint")}</p>
+          </section>
+        )}
+        {currentSettings.length > 0 && (
+          <div className="wizard-step-tools">
+            <button className="text-action" disabled={busy || stepAtFactory} onClick={resetStepToFactory} type="button">
+              <ListRestart aria-hidden="true" size={14} /> {t("wizard.resetStep")}
+            </button>
+          </div>
+        )}
+        {activeStep !== "start" && activeStep !== "apply" && <SchemaSettings dirtyKeys={dirtyKeys} endpointWords={endpointWords} onChange={onSettingChange} onPreviewChange={onSettingPreview} savedValues={savedValues} settings={currentSettings} t={t} values={values} variant="guided" />}
         {activeStep === "substitution" && (
           <div className="advanced-editor wizard-substitution">
             <fieldset><FontSubstitutionEditor advanced={advanced} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} onCommit={onAdvancedCommit} t={t} /></fieldset>

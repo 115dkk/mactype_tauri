@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useReducer } from "react";
-import { Activity, ChevronDown, FileCog, Home, Moon, ServerCog, Settings2, SlidersHorizontal, Sparkles, Sun } from "lucide-react";
+import { Activity, FileCog, Home, Moon, ServerCog, SlidersHorizontal, Sparkles, Sun } from "lucide-react";
 import { DiagnosticsPage } from "../pages/DiagnosticsPage";
 import { OverviewPage } from "../pages/OverviewPage";
 import { ProfilesPage } from "../pages/ProfilesPage";
@@ -15,7 +15,6 @@ import { applyThemePreference, loadThemePreference, type ThemePreference } from 
 interface State {
   view: ViewId;
   profileMode: ProfileMode;
-  settingsExpanded: boolean;
   theme: ThemePreference;
   status: InstallationStatus;
   ready: boolean;
@@ -27,7 +26,6 @@ type ProfileMode = "quick" | "advanced";
 
 type Action =
   | { type: "navigate"; view: ViewId; profileMode?: ProfileMode }
-  | { type: "toggle-settings" }
   | { type: "toggle-theme" }
   | { type: "launched"; view: ViewId; ciSmoke: boolean; trayStart: boolean }
   | { type: "status"; status: InstallationStatus };
@@ -39,10 +37,7 @@ function reducer(state: State, action: Action): State {
         ...state,
         view: action.view,
         profileMode: action.profileMode ?? state.profileMode,
-        settingsExpanded: action.view === "files" || action.view === "profiles" ? true : state.settingsExpanded,
       };
-    case "toggle-settings":
-      return { ...state, settingsExpanded: !state.settingsExpanded };
     case "toggle-theme":
       return { ...state, theme: state.theme === "light" ? "dark" : "light" };
     case "launched":
@@ -51,12 +46,6 @@ function reducer(state: State, action: Action): State {
       return { ...state, status: action.status };
   }
 }
-
-const primaryNavigation = [
-  { view: "overview", icon: Home },
-  { view: "execution", icon: ServerCog },
-  { view: "diagnostics", icon: Activity },
-] as const;
 
 interface AppProps {
   initialTheme?: ThemePreference;
@@ -67,7 +56,6 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
   const [state, dispatch] = useReducer(reducer, {
     view: "overview",
     profileMode: "advanced",
-    settingsExpanded: true,
     theme: initialTheme,
     status: fallbackStatus,
     ready: false,
@@ -125,8 +113,6 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
     return <OverviewPage onOpenService={() => dispatch({ type: "navigate", view: "execution" })} />;
   }, [state.ciSmoke, state.profileMode, state.status, state.view]);
 
-  const settingsSelected = state.view === "files" || state.view === "profiles";
-
   return (
     <>
       <WindowTitleBar />
@@ -140,51 +126,40 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
           </div>
         </div>
         <nav>
-          {primaryNavigation.map(({ view, icon: Icon }, index) => (
-            <span className="primary-nav-slot" key={view}>
-              {index === 1 && (
-                <div className="nav-group">
-                  <button
-                    aria-controls="settings-navigation"
-                    aria-expanded={state.settingsExpanded}
-                    className="nav-item nav-group-toggle"
-                    data-selected={settingsSelected}
-                    onClick={() => dispatch({ type: "toggle-settings" })}
-                    type="button"
-                  >
-                    <Settings2 aria-hidden="true" size={18} strokeWidth={1.8} />
-                    <span>{t("nav.settings")}</span>
-                    <ChevronDown aria-hidden="true" className="nav-group-chevron" size={16} />
-                  </button>
-                  {state.settingsExpanded && (
-                    <div className="nav-submenu" id="settings-navigation">
-                      <button className="nav-item nav-subitem" data-selected={state.view === "files"} onClick={() => dispatch({ type: "navigate", view: "files" })} type="button">
-                        <FileCog aria-hidden="true" size={17} strokeWidth={1.8} />
-                        <span>{t("nav.files")}</span>
-                      </button>
-                      <button aria-label={`${t("nav.quickSetup")} (Wizard)`} className="nav-item nav-subitem" data-selected={state.view === "profiles" && state.profileMode === "quick"} onClick={() => dispatch({ type: "navigate", view: "profiles", profileMode: "quick" })} type="button">
-                        <Sparkles aria-hidden="true" size={17} strokeWidth={1.8} />
-                        <span>{t("nav.quickSetup")}<small>Wizard</small></span>
-                      </button>
-                      <button aria-label={`${t("nav.advancedTuning")} (Tuner)`} className="nav-item nav-subitem" data-selected={state.view === "profiles" && state.profileMode === "advanced"} onClick={() => dispatch({ type: "navigate", view: "profiles", profileMode: "advanced" })} type="button">
-                        <SlidersHorizontal aria-hidden="true" size={17} strokeWidth={1.8} />
-                        <span>{t("nav.advancedTuning")}<small>Tuner</small></span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-              <button
-                className="nav-item"
-                data-selected={state.view === view}
-                onClick={() => dispatch({ type: "navigate", view })}
-                type="button"
-              >
-                <Icon aria-hidden="true" size={18} strokeWidth={1.8} />
-                <span>{t(`nav.${view}`)}</span>
+          <button className="nav-item" data-selected={state.view === "overview"} onClick={() => dispatch({ type: "navigate", view: "overview" })} type="button">
+            <Home aria-hidden="true" size={18} strokeWidth={1.8} />
+            <span>{t("nav.overview")}</span>
+          </button>
+          <div aria-labelledby="nav-group-wizard" className="nav-group" role="group">
+            <span className="nav-group-label" id="nav-group-wizard">{t("nav.wizardGroup")}</span>
+            <div className="nav-group-items">
+              <button className="nav-item nav-subitem" data-selected={state.view === "files"} onClick={() => dispatch({ type: "navigate", view: "files" })} type="button">
+                <FileCog aria-hidden="true" size={17} strokeWidth={1.8} />
+                <span>{t("nav.profiles")}</span>
               </button>
-            </span>
-          ))}
+              <button className="nav-item nav-subitem" data-selected={state.view === "execution"} onClick={() => dispatch({ type: "navigate", view: "execution" })} type="button">
+                <ServerCog aria-hidden="true" size={17} strokeWidth={1.8} />
+                <span>{t("nav.execution")}</span>
+              </button>
+            </div>
+          </div>
+          <div aria-labelledby="nav-group-tuner" className="nav-group" role="group">
+            <span className="nav-group-label" id="nav-group-tuner">{t("nav.tunerGroup")}</span>
+            <div className="nav-group-items">
+              <button className="nav-item nav-subitem" data-selected={state.view === "profiles" && state.profileMode === "quick"} onClick={() => dispatch({ type: "navigate", view: "profiles", profileMode: "quick" })} type="button">
+                <Sparkles aria-hidden="true" size={17} strokeWidth={1.8} />
+                <span>{t("nav.guidedSetup")}</span>
+              </button>
+              <button className="nav-item nav-subitem" data-selected={state.view === "profiles" && state.profileMode === "advanced"} onClick={() => dispatch({ type: "navigate", view: "profiles", profileMode: "advanced" })} type="button">
+                <SlidersHorizontal aria-hidden="true" size={17} strokeWidth={1.8} />
+                <span>{t("nav.allSettings")}</span>
+              </button>
+            </div>
+          </div>
+          <button className="nav-item" data-selected={state.view === "diagnostics"} onClick={() => dispatch({ type: "navigate", view: "diagnostics" })} type="button">
+            <Activity aria-hidden="true" size={18} strokeWidth={1.8} />
+            <span>{t("nav.diagnostics")}</span>
+          </button>
         </nav>
         <div className="navigation-preferences">
           <LanguagePicker />

@@ -202,18 +202,23 @@ test("profile editor categories and collections remain interactive", async ({ pa
   expect(failures, failures.join("\n")).toEqual([]);
 });
 
-test("settings navigation separates Wizard and Tuner without duplicating the editor", async ({ page }, testInfo) => {
+test("settings navigation restores the legacy Wizard and Tuner hierarchy", async ({ page }, testInfo) => {
   await page.goto("/?view=overview&gallery=1&lang=ko", { waitUntil: "networkidle" });
 
-  const settingsToggle = page.getByRole("button", { name: "설정", exact: true });
-  await expect(settingsToggle).toHaveAttribute("aria-expanded", "true");
-  await expect(page.getByRole("button", { name: /설정 파일/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /빠른 설정.*Wizard/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /고급 조정.*Tuner/ })).toBeVisible();
+  const wizardGroup = page.locator(".navigation").getByRole("group", { name: "위자드" });
+  const tunerGroup = page.locator(".navigation").getByRole("group", { name: "튜너" });
+  await expect(wizardGroup.getByRole("button", { name: "프로필" })).toBeVisible();
+  await expect(wizardGroup.getByRole("button", { name: "서비스" })).toBeVisible();
+  await expect(tunerGroup.getByRole("button", { name: "단계별 설정" })).toBeVisible();
+  await expect(tunerGroup.getByRole("button", { name: "전체 설정" })).toBeVisible();
+  await expect(page.locator(".navigation").getByRole("button", { name: "위자드", exact: true })).toHaveCount(0);
+  await expect(page.locator(".navigation").getByRole("button", { name: "튜너", exact: true })).toHaveCount(0);
 
-  await page.getByRole("button", { name: /빠른 설정.*Wizard/ }).click();
+  await tunerGroup.getByRole("button", { name: "단계별 설정" }).click();
   await expect(page.locator(".profile-page")).toHaveAttribute("data-mode", "quick");
-  await expect(page.getByRole("heading", { level: 1, name: "빠른 설정" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "단계별 설정" })).toBeVisible();
+  await expect(page.locator(".profile-mode-title > span")).toHaveText("Tuner");
+  expect(await page.locator(".profile-page").innerText()).not.toContain("마법사");
   await expect(page.locator(".settings-index button")).toHaveCount(7);
   await expect(page.locator(".settings-step")).toHaveCount(7);
   await expect(page.locator(".settings-index").getByRole("button", { name: "고급·실험" })).toHaveCount(0);
@@ -222,8 +227,8 @@ test("settings navigation separates Wizard and Tuner without duplicating the edi
   expect(await quickActions.getByRole("button").evaluateAll((buttons) => buttons.map((button) => button.textContent?.trim()))).toEqual(["되돌리기", "다시 하기", "변경 취소", "기본값 초기화", "지금 저장", "지금 적용"]);
   await expect(page.locator(".wizard-quick-actions")).toHaveCount(0);
   const settingsForm = page.locator(".settings-form");
-  expect(await settingsForm.evaluate((element) => element.scrollWidth > element.clientWidth), "Wizard settings must not have internal horizontal scrolling").toBe(false);
-  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-wizard-rendering-ko.png`), fullPage: true });
+  expect(await settingsForm.evaluate((element) => element.scrollWidth > element.clientWidth), "Guided settings must not have internal horizontal scrolling").toBe(false);
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-guided-rendering-ko.png`), fullPage: true });
   await expect(page.getByRole("button", { name: "이전" })).toHaveCount(0);
   await page.getByRole("button", { name: "진행" }).click();
   await expect(page.getByRole("heading", { level: 2, name: "글꼴 품질" })).toBeVisible();
@@ -233,20 +238,20 @@ test("settings navigation separates Wizard and Tuner without duplicating the edi
   await page.locator(".settings-index").getByRole("button", { name: "적용 및 미리보기" }).click();
   await expect(page.getByRole("button", { name: "진행" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "MacType에 적용" })).toBeVisible();
-  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-wizard-apply-ko.png`), fullPage: true });
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-guided-apply-ko.png`), fullPage: true });
 
-  await page.getByRole("button", { name: /고급 조정.*Tuner/ }).click();
+  await tunerGroup.getByRole("button", { name: "전체 설정" }).click();
   await expect(page.locator(".profile-page")).toHaveAttribute("data-mode", "advanced");
-  await expect(page.getByRole("heading", { level: 1, name: "고급 조정" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "전체 설정" })).toBeVisible();
   await expect(page.locator(".settings-index button")).toHaveCount(6);
   expect(await settingsForm.evaluate((element) => element.scrollWidth > element.clientWidth), "Tuner settings must not have internal horizontal scrolling").toBe(false);
   await expect(page.getByRole("checkbox", { name: "고급 설정 표시" })).toHaveCount(0);
 
-  await settingsToggle.click();
-  await expect(settingsToggle).toHaveAttribute("aria-expanded", "false");
-  await expect(page.locator("#settings-navigation")).toHaveCount(0);
-  await settingsToggle.click();
-  await expect(page.locator("#settings-navigation")).toBeVisible();
+  await wizardGroup.getByRole("button", { name: "프로필" }).click();
+  await expect(page.locator("body")).toHaveAttribute("data-view", "files");
+  await expect(page.getByRole("heading", { level: 1, name: "프로필" })).toBeVisible();
+  await wizardGroup.getByRole("button", { name: "서비스" }).click();
+  await expect(page.locator("body")).toHaveAttribute("data-view", "execution");
 });
 
 test("slider drags and exact number edits create one undo revision per interaction", async ({ page }, testInfo) => {

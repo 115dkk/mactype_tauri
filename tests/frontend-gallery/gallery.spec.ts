@@ -25,9 +25,12 @@ async function overflowingElements(page: import("@playwright/test").Page) {
 }
 
 async function openServiceDetails(page: import("@playwright/test").Page) {
-  const details = page.locator(".service-details");
-  if (!await details.evaluate((element) => (element as HTMLDetailsElement).open)) {
-    await details.locator("summary").click();
+  const rows = page.locator("details.service-row");
+  for (let index = 0; index < await rows.count(); index += 1) {
+    const row = rows.nth(index);
+    if (!await row.evaluate((element) => (element as HTMLDetailsElement).open)) {
+      await row.locator("summary").click();
+    }
   }
 }
 
@@ -71,7 +74,7 @@ for (const state of executionStateGallery) {
 
     const summary = page.locator("[data-service-summary]");
     await expect(summary).toContainText(state.expected);
-    await expect(page.locator(".service-details")).not.toHaveAttribute("open", "");
+    await expect(page.locator("details.service-row[open]")).toHaveCount(0);
     expect(await overflowingElements(page)).toEqual([]);
     await page.screenshot({
       path: path.join(galleryRoot, `${testInfo.project.name}-execution-state-${state.id}-en.png`),
@@ -794,8 +797,10 @@ test("the service page keeps its normal state to one summary and one action", as
   await expect(summary).toContainText("Running");
   await expect(summary.getByRole("button", { name: "Stop" })).toBeEnabled();
   await expect(summary.getByRole("button")).toHaveCount(1);
-  await expect(page.getByRole("heading", { name: "System-wide modes" })).toBeHidden();
-  await expect(page.locator(".service-details")).not.toHaveAttribute("open", "");
+  await expect(page.getByRole("heading", { name: "System-wide modes" })).toBeVisible();
+  await expect(page.locator('details.service-row[data-kind="system"]')).toContainText("Current installation · Running · Ready");
+  await expect(page.getByRole("button", { name: "Remove service" })).toBeHidden();
+  await expect(page.locator("details.service-row[open]")).toHaveCount(0);
 });
 
 test("small degraded states stay in Details while failed configuration is actionable", async ({ page }) => {

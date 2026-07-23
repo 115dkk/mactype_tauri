@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, ChevronDown, FileCode2, FolderOpen, LogOut, Play, Power, PowerOff, RefreshCw, ShieldAlert, Trash2, UserPlus, Wrench } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, FileCode2, FolderOpen, ListChecks, LogOut, Play, Power, PowerOff, RefreshCw, ServerCog, ShieldAlert, Trash2, UserPlus, Wrench } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { ExecutionStatus, SystemServiceAction } from "../app/model";
 import { projectExecutionView } from "../app/executionViewModel";
@@ -243,6 +243,9 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
     <section className="page view-enter" aria-labelledby="execution-title">
       <header className="page-header">
         <div><h1 id="execution-title">{t("nav.execution")}</h1><p>{t("execution.subtitle")}</p></div>
+        <div className="header-actions">
+          <button className="button secondary" onClick={() => void refresh()} type="button"><RefreshCw aria-hidden="true" size={16} /> {t("execution.refresh")}</button>
+        </div>
       </header>
 
       <section className="service-summary" data-state={serviceSummary.tone} data-service-summary>
@@ -308,47 +311,16 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
         )}
       </section>
 
-      <details className="service-details">
-        <summary><ChevronDown aria-hidden="true" size={18} /><span>{t("execution.details")}</span></summary>
-        <div className="service-details-content">
-      <div className="service-details-toolbar"><button className="button secondary" onClick={() => void refresh()} type="button"><RefreshCw aria-hidden="true" size={16} /> {t("execution.refresh")}</button></div>
+      <div className="service-rows">
 
-      <section className="section-block" aria-labelledby="tray-title">
-        <div className="section-heading"><div><h2 id="tray-title">{t("execution.trayTitle")}</h2><p>{t("execution.trayDescription")}</p></div></div>
-        <div className="execution-option">
-          <div>{status?.trayAvailable ? <Check className="success" aria-hidden="true" size={18} /> : <AlertTriangle className="warning" aria-hidden="true" size={18} />}<div><strong>{t("execution.autostartTitle")}</strong><p>{t("execution.autostartDescription")}</p></div></div>
-          <label className="switch-control"><input checked={status?.autoStart ?? false} disabled={!status} onChange={(event) => void toggleAutostart(event.target.checked)} type="checkbox" /><span>{status?.autoStart ? t("profiles.enabled") : t("profiles.disabled")}</span></label>
-        </div>
-        <dl className="detail-list">
-          <div><dt>{t("execution.activeProfile")}</dt><dd>{status?.injectionReady ? <Check className="success" size={17} /> : <AlertTriangle className="warning" size={17} />}<code>{status?.activeProfile ?? t("execution.profileNotApplied")}</code></dd></div>
-        </dl>
-        <div className="registered-launchers">
-          <div className="registered-heading"><div><strong>{t("execution.registeredTitle")}</strong><p>{t("execution.registeredDescription")}</p></div><button className="button secondary" disabled={!status?.injectionReady || !status.sessionTargets.length} onClick={() => void launchAll()} type="button"><Play aria-hidden="true" size={16} /> {t("execution.launchRegistered")}</button></div>
-          {status?.sessionTargets.length ? <ul>{status.sessionTargets.map((entry) => <li key={entry.target}><code>{entry.target}</code><button aria-label={t("execution.removeTarget", { name: entry.target })} className="icon-button" onClick={() => void remove(entry.target)} type="button"><Trash2 aria-hidden="true" size={16} /></button></li>)}</ul> : <p className="empty-state">{t("execution.noRegistered")}</p>}
-        </div>
-      </section>
-
-      <section className="section-block" aria-labelledby="manual-title">
-        <div className="section-heading"><div><h2 id="manual-title">{t("execution.manualTitle")}</h2><p>{t("execution.manualDescription")}</p></div></div>
-        <div className="manual-launcher">
-          <div className="target-picker">
-            <span>{t("execution.path")}</span>
-            <div className="target-selection" data-empty={!target}>
-              <FileCode2 aria-hidden="true" size={22} />
-              <div>
-                <strong>{target.split(/[\\/]/).pop() || t("execution.noExecutableSelected")}</strong>
-                {target && <code title={target}>{target}</code>}
-              </div>
-              <button className="button secondary" onClick={() => void chooseTarget()} type="button"><FolderOpen aria-hidden="true" size={17} /> {target ? t("execution.changeExecutable") : t("execution.chooseExecutable")}</button>
-            </div>
-          </div>
-          <label><span>{t("execution.arguments")}</span><textarea onChange={(event) => setArgumentsText(event.target.value)} placeholder={t("execution.argumentsPlaceholder")} rows={3} value={argumentsText} /></label>
-          <div className="manual-actions"><button className="button secondary" disabled={!status?.injectionReady || !target.trim()} onClick={() => void register()} type="button"><UserPlus aria-hidden="true" size={17} /> {t("execution.register")}</button><button className="button primary" disabled={!status?.manualLauncherAvailable || !target.trim()} onClick={() => void launch()} type="button"><Play aria-hidden="true" size={17} /> {t("execution.launch")}</button></div>
-        </div>
-      </section>
-
-      <section className="section-block" aria-labelledby="system-title">
-        <div className="section-heading"><div><h2 id="system-title">{t("execution.systemTitle")}</h2><p>{t("execution.systemDescription")}</p></div></div>
+      <details className="service-row" data-kind="system">
+        <summary>
+          <span className="service-row-icon"><ServerCog aria-hidden="true" size={19} /></span>
+          <span className="service-row-copy"><h2>{t("execution.systemTitle")}</h2><p>{t("execution.systemDescription")}</p></span>
+          <span className="service-row-state" data-tone={serviceSummary.tone}>{service ? `${t(`execution.installation.${service.installation}`)} · ${t(`execution.serviceState.${service.runtime}`)} · ${t(`execution.health.${service.health}`)}` : t("execution.checking")}</span>
+          <ChevronDown aria-hidden="true" className="service-row-chevron" size={17} />
+        </summary>
+        <div className="service-row-body">
         <div className="open-service-card" data-service-backend="open-source">
         <div className="system-injection-control" data-active={systemInjectionAction.state === "active"} data-state={systemInjectionAction.state}>
           <div className="system-injection-state">
@@ -413,10 +385,59 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
           </div>
         )}
         <div className="system-mode-note"><ShieldAlert aria-hidden="true" size={19} /><p>{status ? t("execution.systemNote") : t("execution.checking")}</p></div>
-      </section>
-
         </div>
       </details>
+
+      <div className="service-row service-row-static" data-kind="autostart">
+        <div className="service-row-head execution-option">
+          <span className="service-row-icon"><Power aria-hidden="true" size={19} /></span>
+          <span className="service-row-copy"><h2>{t("execution.autostartTitle")}</h2><p>{t("execution.autostartDescription")}</p></span>
+          <label className="switch-control"><input checked={status?.autoStart ?? false} disabled={!status} onChange={(event) => void toggleAutostart(event.target.checked)} type="checkbox" /><span>{status?.autoStart ? t("profiles.enabled") : t("profiles.disabled")}</span></label>
+        </div>
+      </div>
+
+      <details className="service-row" data-kind="registered">
+        <summary>
+          <span className="service-row-icon"><ListChecks aria-hidden="true" size={19} /></span>
+          <span className="service-row-copy"><h2>{t("execution.registeredTitle")}</h2><p>{t("execution.registeredDescription")}</p></span>
+          <span className="service-row-state" data-tone={status?.sessionTargets.length ? "normal" : "neutral"}>{t("execution.registeredCount", { count: status?.sessionTargets.length ?? 0 })}</span>
+          <ChevronDown aria-hidden="true" className="service-row-chevron" size={17} />
+        </summary>
+        <div className="service-row-body">
+          <div className="registered-launchers">
+            <div className="registered-heading"><button className="button secondary" disabled={!status?.injectionReady || !status.sessionTargets.length} onClick={() => void launchAll()} type="button"><Play aria-hidden="true" size={16} /> {t("execution.launchRegistered")}</button></div>
+            {status?.sessionTargets.length ? <ul>{status.sessionTargets.map((entry) => <li key={entry.target}><code>{entry.target}</code><button aria-label={t("execution.removeTarget", { name: entry.target })} className="icon-button" onClick={() => void remove(entry.target)} type="button"><Trash2 aria-hidden="true" size={16} /></button></li>)}</ul> : <p className="empty-state">{t("execution.noRegistered")}</p>}
+          </div>
+        </div>
+      </details>
+
+      <details className="service-row" data-kind="manual">
+        <summary>
+          <span className="service-row-icon"><FileCode2 aria-hidden="true" size={19} /></span>
+          <span className="service-row-copy"><h2>{t("execution.manualTitle")}</h2><p>{t("execution.manualDescription")}</p></span>
+          <span className="service-row-state" data-tone="neutral">{target ? target.split(/[\\/]/).pop() : t("execution.noExecutableSelected")}</span>
+          <ChevronDown aria-hidden="true" className="service-row-chevron" size={17} />
+        </summary>
+        <div className="service-row-body">
+          <div className="manual-launcher">
+            <div className="target-picker">
+              <span>{t("execution.path")}</span>
+              <div className="target-selection" data-empty={!target}>
+                <FileCode2 aria-hidden="true" size={22} />
+                <div>
+                  <strong>{target.split(/[\\/]/).pop() || t("execution.noExecutableSelected")}</strong>
+                  {target && <code title={target}>{target}</code>}
+                </div>
+                <button className="button secondary" onClick={() => void chooseTarget()} type="button"><FolderOpen aria-hidden="true" size={17} /> {target ? t("execution.changeExecutable") : t("execution.chooseExecutable")}</button>
+              </div>
+            </div>
+            <label><span>{t("execution.arguments")}</span><textarea onChange={(event) => setArgumentsText(event.target.value)} placeholder={t("execution.argumentsPlaceholder")} rows={3} value={argumentsText} /></label>
+            <div className="manual-actions"><button className="button secondary" disabled={!status?.injectionReady || !target.trim()} onClick={() => void register()} type="button"><UserPlus aria-hidden="true" size={17} /> {t("execution.register")}</button><button className="button primary" disabled={!status?.manualLauncherAvailable || !target.trim()} onClick={() => void launch()} type="button"><Play aria-hidden="true" size={17} /> {t("execution.launch")}</button></div>
+          </div>
+        </div>
+      </details>
+
+      </div>
 
       {message && <p className="success-message">{message}</p>}
       {error && <p className="inline-error"><AlertTriangle aria-hidden="true" size={15} /> {error}</p>}

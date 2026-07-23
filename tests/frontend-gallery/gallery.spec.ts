@@ -222,20 +222,31 @@ test("settings navigation restores the legacy Wizard and Tuner hierarchy", async
   await expect(page.getByRole("heading", { level: 1, name: "단계별 설정" })).toBeVisible();
   await expect(page.locator(".profile-mode-title > span")).toHaveText("Tuner");
   expect(await page.locator(".profile-page").innerText()).not.toContain("마법사");
-  await expect(page.locator(".settings-index button")).toHaveCount(7);
-  await expect(page.locator(".settings-step")).toHaveCount(7);
+  await expect(page.locator(".settings-index button")).toHaveCount(8);
+  await expect(page.locator(".settings-step")).toHaveCount(8);
   await expect(page.locator(".settings-index").getByRole("button", { name: "고급·실험" })).toHaveCount(0);
-  const quickActions = page.getByRole("toolbar", { name: "프로필 편집 작업" });
-  await expect(quickActions.getByRole("button")).toHaveCount(6);
-  expect(await quickActions.getByRole("button").evaluateAll((buttons) => buttons.map((button) => button.textContent?.trim()))).toEqual(["되돌리기", "다시 하기", "변경 취소", "기본값 초기화", "지금 저장", "지금 적용"]);
-  await expect(page.locator(".wizard-quick-actions")).toHaveCount(0);
+  await expect(page.getByRole("toolbar", { name: "프로필 편집 작업" })).toHaveCount(0);
   const settingsForm = page.locator(".settings-form");
+
+  await expect(page.getByRole("heading", { level: 2, name: "시작" })).toBeVisible();
+  await expect(page.locator(".wizard-start-card")).toBeVisible();
+  await expect(page.locator(".wizard-start-profile code")).toBeVisible();
+  await expect(page.locator(".wizard-start-font select")).toBeVisible();
+  await expect(page.getByRole("button", { name: "이전" })).toHaveCount(0);
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-guided-start-ko.png`), fullPage: true });
+
+  await page.getByRole("button", { name: "진행" }).click();
+  await expect(page.getByRole("heading", { level: 2, name: "기본 렌더링" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "이전" })).toBeVisible();
+  expect(await page.locator(".guided-choice").getByRole("radio").count()).toBeGreaterThanOrEqual(3);
+  await expect(page.locator(".setting-actions")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "단계 기본값 복원" })).toBeVisible();
   expect(await settingsForm.evaluate((element) => element.scrollWidth > element.clientWidth), "Guided settings must not have internal horizontal scrolling").toBe(false);
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-guided-rendering-ko.png`), fullPage: true });
-  await expect(page.getByRole("button", { name: "이전" })).toHaveCount(0);
+
   await page.getByRole("button", { name: "진행" }).click();
   await expect(page.getByRole("heading", { level: 2, name: "글꼴 품질" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "이전" })).toBeVisible();
+  await expect(page.locator(".guided-scale-words").first()).toContainText("가늘게");
   await page.locator(".settings-index").getByRole("button", { name: "힌팅" }).click();
   await expect(page.getByRole("heading", { level: 2, name: "힌팅" })).toBeVisible();
   await page.locator(".settings-index").getByRole("button", { name: "적용 및 미리보기" }).click();

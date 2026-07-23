@@ -143,6 +143,28 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .profile-page[data-mode="quick"] .settings-form { display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
 .wizard-layout { display: grid; min-height: 0; grid-template-rows: minmax(0, 1fr) auto; }
 .wizard-step-content { min-height: 0; overflow-y: auto; }
+.wizard-step-tools { display: flex; justify-content: flex-end; padding: var(--space-2) 0; }
+.wizard-step-tools .text-action { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 32px; }
+.wizard-start-card { display: grid; gap: var(--space-4); margin-top: var(--space-4); padding: var(--space-5); border: 1px solid var(--color-border); background: var(--color-surface-subtle); }
+.wizard-start-intro { margin: 0; }
+.wizard-start-profile { display: grid; gap: var(--space-1); }
+.wizard-start-profile > span, .wizard-start-font > span { color: var(--color-muted); font-size: 12px; }
+.wizard-start-profile code { overflow: hidden; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); background: var(--color-surface); text-overflow: ellipsis; white-space: nowrap; }
+.wizard-start-font { display: grid; max-width: 360px; gap: var(--space-1); }
+.wizard-start-font select { min-height: var(--control-height); padding-inline: var(--space-2); }
+.wizard-start-hint { margin: 0; color: var(--color-muted); }
+.guided-row { grid-template-columns: minmax(0, 1fr); align-items: start; gap: var(--space-2); padding: var(--space-3) 0; }
+.guided-label p { margin: var(--space-1) 0 0; color: var(--color-muted); font-size: 12px; }
+.guided-choice { display: grid; gap: var(--space-1); margin: 0; padding: 0; border: 0; }
+.guided-choice-option { display: flex; position: relative; align-items: center; gap: var(--space-3); min-height: 40px; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface); transition: background-color var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard); }
+.guided-choice-option:hover { background: var(--color-surface-subtle); }
+.guided-choice-option[data-selected="true"] { border-color: var(--color-primary); background: var(--color-surface-subtle); font-weight: 600; }
+.guided-choice-option[data-selected="true"]::before { position: absolute; inset-block: var(--space-2); inset-inline-start: 0; width: 3px; border-radius: var(--radius-control); background: var(--color-primary); content: ""; }
+.guided-choice-option input { flex: 0 0 auto; }
+.guided-row .range-control { grid-template-columns: minmax(0, 1fr) 64px; grid-template-rows: auto auto; }
+.guided-row .range-control input[type="range"] { grid-column: 1; grid-row: 1; }
+.guided-row .range-control input[type="number"] { grid-column: 2; grid-row: 1; }
+.guided-scale-words { display: flex; grid-column: 1; grid-row: 2; justify-content: space-between; color: var(--color-muted); font-size: 12px; }
 .wizard-apply-card { display: grid; gap: var(--space-3); margin-top: var(--space-4); padding: var(--space-4); border: 1px solid var(--color-border); background: var(--color-surface-subtle); }
 .wizard-apply-card > p { padding: var(--space-3); border-inline-start: 3px solid var(--color-success); background: var(--color-surface); }
 .wizard-apply-card > p[data-dirty="true"] { border-inline-start-color: var(--color-warning); color: var(--color-warning); }

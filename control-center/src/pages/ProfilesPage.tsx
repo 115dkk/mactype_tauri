@@ -143,7 +143,7 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
     <section className="page profile-page view-enter" aria-labelledby="profiles-title" data-mode={mode}>
       <header className="page-header compact profile-header">
         <div>
-          <div className="profile-mode-title"><h1 id="profiles-title"><Hint content={t(mode === "quick" ? "profiles.quickDescription" : "profiles.advancedDescription")}>{t(mode === "quick" ? "nav.quickSetup" : "nav.advancedTuning")}</Hint></h1><span>{mode === "quick" ? "Wizard" : "Tuner"}</span></div>
+          <div className="profile-mode-title"><h1 id="profiles-title"><Hint content={t(mode === "quick" ? "profiles.quickDescription" : "profiles.advancedDescription")}>{t(mode === "quick" ? "nav.guidedSetup" : "nav.allSettings")}</Hint></h1><span>Tuner</span></div>
           {loading
             ? <p>{t("profiles.searching")}</p>
             : <p className="profile-editing"><span>{t("profiles.editing")}</span> <code title={profile?.path}>{profile?.displayPath ?? t("profiles.none")}</code><span> · {t("profiles.unsavedSummary", { count: dirtyCount })}</span></p>}

@@ -167,7 +167,7 @@ export function FileSettingsPage() {
   return (
     <section className="page view-enter" aria-labelledby="files-title">
       <header className="page-header">
-        <div><h1 id="files-title">{t("nav.files")}</h1><p>{t("files.subtitle")}</p></div>
+        <div><h1 id="files-title">{t("nav.profiles")}</h1><p>{t("files.subtitle")}</p></div>
       </header>
 
       {legacy && (

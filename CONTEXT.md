@@ -28,6 +28,18 @@ This file fixes the domain language used by code, tests, CI, and architecture do
 **ExecutionViewModel**
 : The frontend-facing model derived from MachineIntegration state. It chooses user-visible actions and explanations without teaching React about SCM flags, registry layouts, helper processes, or migration receipt internals.
 
+**Wizard 영역**
+: The navigation area that answers "what runs, and how": profile selection and apply (view id `files`) plus 구동 방식 and service control (view id `execution`). It inherits the role of the legacy MacWizard. The Korean product term is always **위자드**; never write 마법사. View ids are frozen interface — labels may differ from ids.
+
+**Tuner 영역**
+: The navigation area that answers "how the profile content is shaped": profile editing (view id `profiles`, modes guided/all). It inherits the role of the legacy MacTuner. The Korean product term is always **튜너**.
+
+**Guided setup (단계별 설정)**
+: The guided editing mode inside the Tuner 영역 (internal `profileMode: "quick"`). It curates a fixed subset of settings by quiet omission and never uses wizard/마법사 vocabulary, which belongs exclusively to the Wizard 영역.
+
+**All settings (전체 설정)**
+: The full editing mode inside the Tuner 영역 (internal `profileMode: "advanced"`): every setting group, search, and the revert/restore-default/reset toolbar.
+
 ## Responsibility map
 
 - React and `ExecutionViewModel` own presentation and user intent.

@@ -109,6 +109,14 @@ std::optional<double> json_number(const std::string& json, const std::string& ke
   return value;
 }
 
+std::optional<bool> json_bool(const std::string& json, const std::string& key) {
+  const auto start = json_value_start(json, key);
+  if (!start) return std::nullopt;
+  if (json.compare(*start, 4, "true") == 0) return true;
+  if (json.compare(*start, 5, "false") == 0) return false;
+  return std::nullopt;
+}
+
 COLORREF parse_color(const std::string& value, COLORREF fallback) {
   if (value.size() != 7 || value[0] != '#') return fallback;
   unsigned int color{};
@@ -130,15 +138,16 @@ mtpc::Frame error_frame(std::uint64_t request_id, const char* code, const std::s
 }
 
 void draw_sample(HDC dc, const RECT& area, const std::wstring& text, const std::wstring& face,
-                 float point_size, std::uint32_t dpi, COLORREF foreground, COLORREF background) {
+                 float point_size, std::uint32_t dpi, COLORREF foreground, COLORREF background,
+                 bool bold, bool italic) {
   HBRUSH brush = CreateSolidBrush(background);
   FillRect(dc, &area, brush);
   DeleteObject(brush);
   const int height = -MulDiv(static_cast<int>(std::lround(point_size * 100.0F)),
                              static_cast<int>(dpi), 7200);
-  HFONT font = CreateFontW(height, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-                           OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                           DEFAULT_PITCH | FF_DONTCARE, face.c_str());
+  HFONT font = CreateFontW(height, 0, 0, 0, bold ? FW_BOLD : FW_NORMAL, italic ? TRUE : FALSE,
+                           FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                           CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, face.c_str());
   HGDIOBJ previous_font = SelectObject(dc, font);
   SetTextColor(dc, foreground);
   SetBkMode(dc, TRANSPARENT);
@@ -330,6 +339,8 @@ bool PreviewRuntime::apply_request(const std::string& json, std::string& error) 
   if (const auto value = json_number(json, "dpi")) dpi_ = static_cast<std::uint32_t>(*value);
   if (const auto value = json_string(json, "foreground")) foreground_ = parse_color(*value, foreground_);
   if (const auto value = json_string(json, "background")) background_ = parse_color(*value, background_);
+  if (const auto value = json_bool(json, "bold")) sample_bold_ = *value;
+  if (const auto value = json_bool(json, "italic")) sample_italic_ = *value;
   return true;
 }
 
@@ -363,7 +374,8 @@ std::vector<std::uint8_t> PreviewRuntime::render_png(const std::string& json, st
   }
   HGDIOBJ previous = SelectObject(memory, dib);
   const RECT area{0, 0, static_cast<LONG>(width), static_cast<LONG>(height)};
-  draw_sample(memory, area, sample_text_, font_face_, font_size_pt_, dpi, foreground_, background_);
+  draw_sample(memory, area, sample_text_, font_face_, font_size_pt_, dpi, foreground_, background_,
+              sample_bold_, sample_italic_);
   auto* pixels = static_cast<std::uint8_t*>(bits);
   for (std::size_t index = 3; index < static_cast<std::size_t>(width) * height * 4U; index += 4) {
     pixels[index] = 0xFF;
@@ -428,7 +440,7 @@ void PreviewRuntime::paint_native(HWND window) {
   RECT area{};
   GetClientRect(window, &area);
   draw_sample(dc, area, sample_text_, font_face_, font_size_pt_, GetDpiForWindow(window), foreground_,
-              background_);
+              background_, sample_bold_, sample_italic_);
   EndPaint(window, &paint);
 }
 

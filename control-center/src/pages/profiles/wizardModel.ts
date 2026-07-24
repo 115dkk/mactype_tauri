@@ -1,14 +1,18 @@
-export type WizardStepId = "start" | "rendering" | "quality" | "hinting" | "gamma" | "lcd" | "substitution" | "apply";
+export type WizardStepId = "start" | "rendering" | "quality" | "boldItalic" | "hinting" | "gamma" | "lcd" | "substitution" | "apply";
 
-export const wizardStepIds: ReadonlyArray<WizardStepId> = ["start", "rendering", "quality", "hinting", "gamma", "lcd", "substitution", "apply"];
+export const wizardStepIds: ReadonlyArray<WizardStepId> = ["start", "rendering", "quality", "boldItalic", "hinting", "gamma", "lcd", "substitution", "apply"];
 
+/* Step contents follow the legacy MacType Tuner screens: bold and italic share
+   one screen, contrast lives next to the gamma slider, and the RGB text tuning
+   joins the LCD layout screen. Ids are listed in on-screen order. */
 export const wizardSettingIdsByStep: Readonly<Record<WizardStepId, ReadonlyArray<string>>> = {
   start: [],
   rendering: ["anti_alias_mode"],
-  quality: ["normal_weight", "bold_weight", "contrast", "render_weight", "enable_kerning"],
+  quality: ["normal_weight", "render_weight", "enable_kerning"],
+  boldItalic: ["bold_weight", "bolder_mode", "italic_slant"],
   hinting: ["hinting_mode", "hint_small_font"],
-  gamma: ["gamma_mode", "gamma_value"],
-  lcd: ["lcd_filter", "text_tuning"],
+  gamma: ["contrast", "gamma_value", "gamma_mode"],
+  lcd: ["lcd_filter", "text_tuning", "text_tuning_r", "text_tuning_g", "text_tuning_b"],
   substitution: ["font_substitutes"],
   apply: [],
 };

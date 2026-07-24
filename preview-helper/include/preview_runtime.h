@@ -41,6 +41,8 @@ class PreviewRuntime {
   std::wstring sample_text_{L"MacType preview 123 ABC\nThe quick brown fox jumps over the lazy dog."};
   std::wstring font_face_{L"Segoe UI"};
   float font_size_pt_{14.0F};
+  bool sample_bold_{false};
+  bool sample_italic_{false};
   COLORREF foreground_{RGB(24, 29, 35)};
   COLORREF background_{RGB(238, 241, 244)};
   std::uint32_t dpi_{96};

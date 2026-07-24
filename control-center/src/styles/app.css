@@ -241,13 +241,16 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .individual-row input { width: 100%; min-width: 0; padding-inline: var(--space-2); }
 .empty-state { padding: var(--space-5); color: var(--color-muted); text-align: center; }
 .list-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); padding-block: var(--space-3); }
-.list-grid label { display: grid; gap: var(--space-1); }
-.list-grid textarea { width: 100%; padding: var(--space-2); resize: vertical; font-family: Consolas, monospace; font-size: 12px; }
-.font-list-editor { display: grid; align-content: start; gap: var(--space-1); }
-.font-list-editor ul { display: grid; gap: var(--space-1); min-height: 48px; margin: var(--space-1) 0; padding: var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface-subtle); list-style: none; }
-.font-list-editor li { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: var(--space-2); padding-inline-start: var(--space-2); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-control); }
-.font-list-editor li > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.font-list-editor select { width: 100%; padding-inline: var(--space-2); }
+.list-editor { display: grid; align-content: start; gap: var(--space-1); }
+.list-editor ul { display: grid; gap: var(--space-1); min-height: 48px; margin: var(--space-1) 0; padding: var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface-subtle); list-style: none; }
+.list-editor li { display: flex; min-width: 0; min-height: var(--control-height); align-items: center; justify-content: space-between; gap: var(--space-2); padding-inline-start: var(--space-2); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-control); }
+.list-editor li > code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list-editor select { width: 100%; padding-inline: var(--space-2); }
+.list-editor-empty { display: grid; min-height: 48px; margin: var(--space-1) 0; padding: var(--space-2); place-items: center; border: 1px dashed var(--color-border-strong); border-radius: var(--radius-control); color: var(--color-muted); font-size: 12px; }
+.list-editor .inline-error { margin-top: 0; }
+.list-add-row { display: flex; gap: var(--space-2); }
+.list-add-row input { flex: 1; min-width: 0; padding-inline: var(--space-2); font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
+.list-add-row .button { flex: 0 0 auto; white-space: nowrap; }
 .preview-footer { justify-content: flex-end; color: var(--color-muted); font-size: 12px; }
 .hint { cursor: help; }
 .hint-term { text-decoration-line: underline; text-decoration-style: dotted; text-decoration-color: var(--color-border-strong); text-decoration-thickness: 1px; text-underline-offset: 3px; }

@@ -194,7 +194,7 @@ test("profile editor categories and collections remain interactive", async ({ pa
 
   await page.getByRole("button", { name: "포함·제외" }).click();
   await page.getByRole("combobox", { name: "제외 글꼴 · 목록에 글꼴 추가" }).selectOption("Calibri");
-  await expect(page.locator(".font-list-editor li > span").filter({ hasText: "Calibri" })).toBeVisible();
+  await expect(page.locator(".list-editor li > code").filter({ hasText: "Calibri" })).toBeVisible();
   await expect(page.getByText("제외 프로그램", { exact: true })).toBeVisible();
   await expect(page.getByText("주입 해제 DLL", { exact: true })).toBeVisible();
   await expect(page.getByText("글꼴 대체 제외 모듈", { exact: true })).toBeVisible();
@@ -203,6 +203,38 @@ test("profile editor categories and collections remain interactive", async ({ pa
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   expect(horizontalOverflow, "interactive profile editor must not have horizontal scrolling").toBe(false);
   expect(failures, failures.join("\n")).toEqual([]);
+});
+
+test("structured list editors add typed entries, reject duplicates, and suggest running processes", async ({ page }, testInfo) => {
+  await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "포함·제외" }).click();
+
+  const excludePrograms = page.locator(".list-editor").filter({ hasText: "제외 프로그램" });
+  const entryInput = excludePrograms.getByRole("combobox", { name: "제외 프로그램 · 추가" });
+  await expect(excludePrograms.locator("li > code").filter({ hasText: "fontview.exe" })).toBeVisible();
+
+  await entryInput.fill("notepad.exe");
+  await entryInput.press("Enter");
+  await expect(excludePrograms.locator("li > code").filter({ hasText: "notepad.exe" })).toBeVisible();
+  await expect(entryInput).toHaveValue("");
+
+  await entryInput.fill("NOTEPAD.EXE");
+  await excludePrograms.getByRole("button", { name: "제외 프로그램 · 추가" }).click();
+  await expect(excludePrograms.getByText("NOTEPAD.EXE은(는) 이미 목록에 있습니다.", { exact: true })).toBeVisible();
+  await expect(excludePrograms.locator("li")).toHaveCount(2);
+
+  await excludePrograms.getByRole("button", { name: "notepad.exe 제거" }).click();
+  await expect(excludePrograms.locator("li")).toHaveCount(1);
+  await expect(excludePrograms.getByText("이미 목록에 있습니다", { exact: false })).toHaveCount(0);
+
+  await expect(entryInput).toHaveAttribute("list", "list-process-suggestions");
+  await expect(page.locator("#list-process-suggestions option[value='code.exe']")).toHaveCount(1);
+
+  const unloadDlls = page.locator(".list-editor").filter({ hasText: "주입 해제 DLL" });
+  await expect(unloadDlls.getByText("아직 항목이 없습니다.", { exact: true })).toBeVisible();
+
+  expect(await overflowingElements(page)).toEqual([]);
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-profile-list-editors-ko.png`), fullPage: true });
 });
 
 test("profile preview docks as a full-height right column at wide widths", async ({ page }, testInfo) => {

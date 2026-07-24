@@ -44,14 +44,14 @@ function cloneAdvancedProfile(advanced: AdvancedProfile): AdvancedProfile {
   };
 }
 
-function profileListDrafts(profile: ProfileSnapshot): Record<string, string> {
+function profileLists(profile: ProfileSnapshot): Record<string, ReadonlyArray<string>> {
   return {
-    excludeFonts: profile.lists.excludeFonts.join("\n"),
-    includeFonts: profile.lists.includeFonts.join("\n"),
-    excludeModules: profile.lists.excludeModules.join("\n"),
-    includeModules: profile.lists.includeModules.join("\n"),
-    unloadDlls: profile.lists.unloadDlls.join("\n"),
-    excludeSubstitutionModules: profile.lists.excludeSubstitutionModules.join("\n"),
+    excludeFonts: [...profile.lists.excludeFonts],
+    includeFonts: [...profile.lists.includeFonts],
+    excludeModules: [...profile.lists.excludeModules],
+    includeModules: [...profile.lists.includeModules],
+    unloadDlls: [...profile.lists.unloadDlls],
+    excludeSubstitutionModules: [...profile.lists.excludeSubstitutionModules],
   };
 }
 
@@ -61,7 +61,7 @@ export function useProfileDocument(t: I18nValue["t"]) {
     Object.fromEntries(settingsSchema.map((setting) => [setting.id, setting.default])),
   );
   const [individuals, setIndividuals] = useState<IndividualSetting[]>([]);
-  const [listDrafts, setListDrafts] = useState<Record<string, string>>({});
+  const [lists, setLists] = useState<Record<string, ReadonlyArray<string>>>({});
   const [advanced, setAdvanced] = useState<AdvancedProfile>(emptyAdvancedProfile);
   const [loading, setLoading] = useState(true);
   const [pendingEdits, setPendingEdits] = useState(0);
@@ -76,7 +76,7 @@ export function useProfileDocument(t: I18nValue["t"]) {
     setProfile(opened);
     setValues(opened.values);
     setIndividuals(opened.individuals.map((entry) => ({ ...entry, values: [...entry.values] })));
-    setListDrafts(profileListDrafts(opened));
+    setLists(profileLists(opened));
     setAdvanced(cloneAdvancedProfile(opened.advanced));
   }, []);
 
@@ -134,13 +134,10 @@ export function useProfileDocument(t: I18nValue["t"]) {
     commitIndividuals([...individuals, { fontFace: normalized, values: [null, null, null, null, null, null] }]);
   };
 
-  const updateListDraft = (kind: string, value: string) => {
-    setListDrafts((current) => ({ ...current, [kind]: value }));
-  };
-
-  const commitList = (kind: string) => {
-    const entries = (listDrafts[kind] ?? "").split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean);
-    queueMutation(() => updateProfileList(kind, entries));
+  const updateList = (kind: string, entries: ReadonlyArray<string>) => {
+    const normalized = entries.map((entry) => entry.trim()).filter(Boolean);
+    setLists((current) => ({ ...current, [kind]: normalized }));
+    queueMutation(() => updateProfileList(kind, normalized));
   };
 
   const commitAdvanced = (next: AdvancedProfile) => {
@@ -151,11 +148,6 @@ export function useProfileDocument(t: I18nValue["t"]) {
   const resetDefaults = () => {
     setValues(Object.fromEntries(settingsSchema.map((setting) => [setting.id, setting.factory])));
     queueMutation(() => resetProfileDefaults());
-  };
-
-  const updateFontList = (kind: "excludeFonts" | "includeFonts", entries: ReadonlyArray<string>) => {
-    updateListDraft(kind, entries.join("\n"));
-    queueMutation(() => updateProfileList(kind, entries));
   };
 
   const runHistoryCommand = async (nextCommand: "undo" | "redo" | "discard") => {
@@ -250,13 +242,12 @@ export function useProfileDocument(t: I18nValue["t"]) {
     command,
     commitAdvanced,
     commitIndividuals,
-    commitList,
     dirtyCount,
     dirtyKeys,
     discard: () => runHistoryCommand("discard"),
     error,
     individuals,
-    listDrafts,
+    lists,
     loading,
     message,
     previewSetting,
@@ -270,8 +261,7 @@ export function useProfileDocument(t: I18nValue["t"]) {
     setAdvanced,
     setError,
     undo: () => runHistoryCommand("undo"),
-    updateFontList,
-    updateListDraft,
+    updateList,
     values,
   };
 }

@@ -180,6 +180,10 @@
   "profiles.sourceFont": "Fuente original",
   "profiles.replacementFont": "Fuente de sustitución",
   "profiles.addFontToList": "Añadir una fuente a esta lista",
+  "profiles.addListEntry": "Añadir",
+  "profiles.listEntryPlaceholder": "Escriba un nombre y pulse Enter",
+  "profiles.duplicateListEntry": "{name} ya está en esta lista.",
+  "profiles.emptyList": "Aún no hay entradas.",
   "profiles.inherit": "Heredar",
   "profiles.remove": "Quitar {name}",
   "profiles.emptyIndividuals": "No hay ajustes específicos de fuentes. Los valores vacíos heredan los valores predeterminados del perfil.",
@@ -535,7 +539,7 @@
   "advanced.fontSubstitutes": "Mapas de sustitución de fuentes",
   "advanced.fontSubstitutesHelp": "Seleccione las fuentes original y de sustitución entre las instaladas.",
   "list.unloadDlls.label": "DLL excluidas de la inyección",
-  "list.unloadDlls.help": "Una DLL excluida por línea.",
+  "list.unloadDlls.help": "Añada las DLL excluidas de la inyección.",
   "list.excludeSubstitutionModules.label": "Módulos sin sustitución de fuentes",
-  "list.excludeSubstitutionModules.help": "Un módulo que desactive la sustitución por línea."
+  "list.excludeSubstitutionModules.help": "Añada los módulos que desactivan la sustitución."
 }

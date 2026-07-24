@@ -180,6 +180,10 @@
   "profiles.sourceFont": "Quellschriftart",
   "profiles.replacementFont": "Ersatzschriftart",
   "profiles.addFontToList": "Schriftart zu dieser Liste hinzufügen",
+  "profiles.addListEntry": "Hinzufügen",
+  "profiles.listEntryPlaceholder": "Namen eingeben und Enter drücken",
+  "profiles.duplicateListEntry": "{name} ist bereits in dieser Liste.",
+  "profiles.emptyList": "Noch keine Einträge.",
   "profiles.inherit": "Übernehmen",
   "profiles.remove": "{name} entfernen",
   "profiles.emptyIndividuals": "Es sind keine schriftartspezifischen Einstellungen vorhanden. Leere Werte übernehmen die Profilstandards.",
@@ -535,7 +539,7 @@
   "advanced.fontSubstitutes": "Schriftersetzungen",
   "advanced.fontSubstitutesHelp": "Quell- und Ersatzschriftart aus den installierten Schriftarten auswählen.",
   "list.unloadDlls.label": "Von Injektion ausgeschlossene DLLs",
-  "list.unloadDlls.help": "Eine auszuschließende DLL pro Zeile.",
+  "list.unloadDlls.help": "Von der Injektion auszuschließende DLLs hinzufügen.",
   "list.excludeSubstitutionModules.label": "Schriftersetzung ausgeschlossene Module",
-  "list.excludeSubstitutionModules.help": "Ein Modul pro Zeile, das Schriftersetzung deaktiviert."
+  "list.excludeSubstitutionModules.help": "Module hinzufügen, die Schriftersetzung deaktivieren."
 }

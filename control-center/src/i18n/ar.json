@@ -180,6 +180,10 @@
   "profiles.sourceFont": "الخط الأصلي",
   "profiles.replacementFont": "الخط البديل",
   "profiles.addFontToList": "إضافة خط إلى هذه القائمة",
+  "profiles.addListEntry": "إضافة",
+  "profiles.listEntryPlaceholder": "اكتب اسمًا ثم اضغط Enter",
+  "profiles.duplicateListEntry": "{name} موجود بالفعل في هذه القائمة.",
+  "profiles.emptyList": "لا توجد إدخالات بعد.",
   "profiles.inherit": "توريث",
   "profiles.remove": "إزالة {name}",
   "profiles.emptyIndividuals": "لا توجد إعدادات خاصة بخط معين. ترث القيم الفارغة الإعدادات الافتراضية لملف التعريف.",
@@ -535,7 +539,7 @@
   "advanced.fontSubstitutes": "خرائط استبدال الخطوط",
   "advanced.fontSubstitutesHelp": "اختر الخط الأصلي والخط البديل من الخطوط المثبّتة.",
   "list.unloadDlls.label": "ملفات DLL المستبعدة من الحقن",
-  "list.unloadDlls.help": "أدخل ملف DLL مستبعدًا واحدًا في كل سطر.",
+  "list.unloadDlls.help": "أضف ملفات DLL المستبعدة من الحقن.",
   "list.excludeSubstitutionModules.label": "وحدات مستبعدة من استبدال الخطوط",
-  "list.excludeSubstitutionModules.help": "أدخل وحدة تعطّل استبدال الخطوط في كل سطر."
+  "list.excludeSubstitutionModules.help": "أضف الوحدات التي تعطّل استبدال الخطوط."
 }

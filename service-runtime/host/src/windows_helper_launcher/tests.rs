@@ -57,7 +57,9 @@ fn helper_job_enforces_single_process_and_kill_on_close() {
 
 #[test]
 fn in_flight_helper_is_cancelled_without_waiting_for_its_twenty_second_timeout() {
-    let _guard = HELPER_TEST_LOCK.lock().unwrap();
+    let _guard = HELPER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     STOP_DURING_HELPER.store(false, Ordering::Release);
     LAST_TEST_CHILD_PID.store(0, Ordering::Release);
     let launcher = WindowsHelperLauncher::new(stop_during_helper);
@@ -102,7 +104,9 @@ fn in_flight_helper_is_cancelled_without_waiting_for_its_twenty_second_timeout()
 
 #[test]
 fn absolute_timeout_terminates_the_helper_job_without_an_orphan() {
-    let _guard = HELPER_TEST_LOCK.lock().unwrap();
+    let _guard = HELPER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     STOP_DURING_HELPER.store(false, Ordering::Release);
     LAST_TEST_CHILD_PID.store(0, Ordering::Release);
     let launcher = WindowsHelperLauncher::new(stop_during_helper);
@@ -125,8 +129,12 @@ fn absolute_timeout_terminates_the_helper_job_without_an_orphan() {
         .unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::TimedOut);
     assert_eq!(error.stage(), HelperLaunchStage::AfterResume);
+    // The lower bound proves the launcher waited for the absolute timeout
+    // instead of failing outright. The upper bound only has to exclude the
+    // child's own five second sleep; holding it to 750 ms measured the host
+    // scheduler, and a busy machine lost that margin.
     assert!(started.elapsed() >= Duration::from_millis(400));
-    assert!(started.elapsed() < Duration::from_millis(750));
+    assert!(started.elapsed() < Duration::from_secs(4));
 
     let pid = LAST_TEST_CHILD_PID.load(Ordering::Acquire);
     assert_ne!(pid, 0);

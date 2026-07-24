@@ -9,6 +9,7 @@ import type {
   LegacyProfileCandidate,
   SystemServiceAction,
   LaunchContext,
+  ManualLaunchCandidate,
   PreviewRequest,
   PreviewResult,
   ProfileEntry,
@@ -89,6 +90,10 @@ export async function removeSessionTarget(target: string): Promise<ReadonlyArray
 
 export async function launchRegisteredTargets(): Promise<ReadonlyArray<number>> {
   return getRuntimeAdapter().launchRegisteredTargets();
+}
+
+export async function listManualLaunchCandidates(): Promise<ReadonlyArray<ManualLaunchCandidate>> {
+  return getRuntimeAdapter().listManualLaunchCandidates();
 }
 
 export async function rediscoverInstallation(): Promise<InstallationStatus> {

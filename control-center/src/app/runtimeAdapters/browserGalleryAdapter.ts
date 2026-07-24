@@ -5,6 +5,7 @@ import {
   type InstallationStatus,
   type LegacyProfileCandidate,
   type LaunchContext,
+  type ManualLaunchCandidate,
   type ProfileEntry,
   type PreviewResult,
   type ProfileSnapshot,
@@ -143,6 +144,16 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
 
   launchRegisteredTargets(): Promise<ReadonlyArray<number>> {
     return Promise.resolve([4242]);
+  },
+
+  listManualLaunchCandidates(): Promise<ReadonlyArray<ManualLaunchCandidate>> {
+    return Promise.resolve<ReadonlyArray<ManualLaunchCandidate>>([
+      { pid: 5678, name: "code.exe", path: "C:\\Tools\\VSCode\\code.exe", windowTitle: "Visual Studio Code" },
+      { pid: 4242, name: "notepad.exe", path: "C:\\Tools\\notepad.exe", windowTitle: "제목 없음 - 메모장" },
+      { pid: 6110, name: "agent.exe", path: "C:\\Tools\\Agent\\agent.exe", windowTitle: null },
+      { pid: 7130, name: "syncworker.exe", path: "C:\\Tools\\Sync\\syncworker.exe", windowTitle: null },
+      { pid: 7240, name: "updater.exe", path: "C:\\Tools\\Updater\\updater.exe", windowTitle: null },
+    ]);
   },
 
   rediscoverInstallation(): Promise<InstallationStatus> {

@@ -590,6 +590,35 @@ test("execution and new system service controls remain interactive", async ({ pa
   expect(failures, failures.join("\n")).toEqual([]);
 });
 
+test("manual launch offers running processes first and file browsing second", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=ko&system-service=ready", { waitUntil: "networkidle" });
+  const manualRow = page.locator('details.service-row[data-kind="manual"]');
+  await manualRow.locator("summary").click();
+
+  await expect(manualRow.getByText("실행 중인 프로세스", { exact: true })).toBeVisible();
+  const rows = manualRow.locator(".process-picker-row");
+  await expect(rows).toHaveCount(5);
+  await expect(rows.nth(0)).toContainText("code.exe");
+  await expect(rows.nth(0)).toContainText("Visual Studio Code");
+  await expect(rows.nth(0)).toContainText("PID 5678");
+  await expect(rows.nth(1)).toContainText("제목 없음 - 메모장");
+  await expect(manualRow.getByText("목록에 없는 실행 파일 찾아보기", { exact: true })).toBeVisible();
+
+  const register = manualRow.getByRole("button", { name: "트레이에 등록" });
+  await expect(register).toBeDisabled();
+
+  await manualRow.getByLabel("프로세스 필터").fill("note");
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText("notepad.exe");
+
+  await manualRow.getByRole("radio", { name: /notepad\.exe/ }).check();
+  await expect(manualRow.locator(".target-selection strong")).toHaveText("notepad.exe");
+  await expect(manualRow.locator(".target-selection code")).toHaveText("C:\\Tools\\notepad.exe");
+  await expect(register).toBeEnabled();
+
+  expect(await overflowingElements(page)).toEqual([]);
+});
+
 test("a running legacy service is never claimed as verified system application", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=ko&system-service=ready&legacy=migration-available", { waitUntil: "networkidle" });
   await openServiceDetails(page);

@@ -230,6 +230,24 @@ test("profile preview docks as a full-height right column at wide widths", async
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-preview-docked-ko.png`), fullPage: true });
 });
 
+test("native preview display mode dropdown drives the runtime adapter", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "The preview footer is hidden on compact layouts");
+  await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
+
+  const modeSelect = page.getByRole("combobox", { name: "표시 방식" });
+  await expect(modeSelect).toBeVisible();
+  await expect(modeSelect.locator("option")).toHaveText(["기본 표시", "나열 표시"]);
+
+  const nativePreviewState = () => page.evaluate(() => window.sessionStorage.getItem("gallery-native-preview"));
+  await page.getByRole("button", { name: "실제 창에서 보기" }).click();
+  await expect.poll(nativePreviewState).toBe("default");
+  await modeSelect.selectOption("listing");
+  await expect.poll(nativePreviewState).toBe("listing");
+  await page.getByRole("button", { name: "실제 창 닫기" }).click();
+  await expect.poll(nativePreviewState).toBe("hidden");
+  expect(await overflowingElements(page)).toEqual([]);
+});
+
 test("settings navigation restores the legacy Wizard and Tuner hierarchy", async ({ page }, testInfo) => {
   await page.goto("/?view=overview&gallery=1&lang=ko", { waitUntil: "networkidle" });
 

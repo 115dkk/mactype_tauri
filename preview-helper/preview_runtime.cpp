@@ -166,6 +166,59 @@ void draw_sample(HDC dc, const RECT& area, const std::wstring& text, const std::
   DeleteObject(font);
 }
 
+/* Legacy-tuner listing: the pangram repeated in black/red/green/blue at a
+   small and a large point size; the normal group renders above the bold one. */
+constexpr float kListingSmallPt = 9.0F;
+constexpr float kListingLargePt = 14.0F;
+constexpr COLORREF kListingColors[] = {RGB(0x00, 0x00, 0x00), RGB(0xC8, 0x00, 0x00),
+                                       RGB(0x00, 0x8A, 0x00), RGB(0x00, 0x00, 0xC8)};
+
+int point_size_px(float point_size, std::uint32_t dpi) {
+  return MulDiv(static_cast<int>(std::lround(point_size * 100.0F)), static_cast<int>(dpi), 7200);
+}
+
+int listing_line_advance(float point_size, std::uint32_t dpi) {
+  return std::max(12, point_size_px(point_size, dpi) * 3 / 2);
+}
+
+int listing_content_height(std::uint32_t dpi) {
+  const int margin = MulDiv(12, static_cast<int>(dpi), 96);
+  const int size_gap = MulDiv(6, static_cast<int>(dpi), 96);
+  const int group_gap = MulDiv(14, static_cast<int>(dpi), 96);
+  const int group = 4 * listing_line_advance(kListingSmallPt, dpi) + size_gap +
+                    4 * listing_line_advance(kListingLargePt, dpi);
+  return 2 * margin + 2 * group + group_gap;
+}
+
+void draw_listing(HDC dc, const RECT& area, const std::wstring& text, const std::wstring& face,
+                  std::uint32_t dpi) {
+  HBRUSH brush = CreateSolidBrush(RGB(0xFF, 0xFF, 0xFF));
+  FillRect(dc, &area, brush);
+  DeleteObject(brush);
+  SetBkMode(dc, TRANSPARENT);
+  const int size_gap = MulDiv(6, static_cast<int>(dpi), 96);
+  const int group_gap = MulDiv(14, static_cast<int>(dpi), 96);
+  int y = area.top + MulDiv(12, static_cast<int>(dpi), 96);
+  for (const int weight : {FW_NORMAL, FW_BOLD}) {
+    for (const float point_size : {kListingSmallPt, kListingLargePt}) {
+      HFONT font = CreateFontW(-point_size_px(point_size, dpi), 0, 0, 0, weight, FALSE, FALSE,
+                               FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                               CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, face.c_str());
+      HGDIOBJ previous_font = SelectObject(dc, font);
+      for (const COLORREF color : kListingColors) {
+        SetTextColor(dc, color);
+        ExtTextOutW(dc, area.left + 18, y, ETO_CLIPPED, &area, text.c_str(),
+                    static_cast<UINT>(text.size()), nullptr);
+        y += listing_line_advance(point_size, dpi);
+      }
+      SelectObject(dc, previous_font);
+      DeleteObject(font);
+      y += size_gap;
+    }
+    y += group_gap - size_gap;
+  }
+}
+
 std::vector<std::uint8_t> encode_png(const std::uint8_t* pixels, std::uint32_t width,
                                      std::uint32_t height, std::string& error) {
   IWICImagingFactory* factory{};
@@ -422,7 +475,17 @@ mtpc::Frame PreviewRuntime::load_profile(const mtpc::Frame& request) {
 
 mtpc::Frame PreviewRuntime::show_native_preview(const mtpc::Frame& request, bool visible) {
   if (visible) {
+    /* Optional fields keep older callers that send an empty body working. */
+    if (const auto mode = json_string(request.json, "displayMode")) {
+      native_listing_ = *mode == "listing";
+    }
+    if (const auto text = json_string(request.json, "listingText")) {
+      const std::wstring wide = utf8_to_wide(*text);
+      if (!wide.empty()) listing_text_ = wide;
+    }
+    if (native_listing_) grow_native_window_for_listing();
     ShowWindow(native_window_, SW_SHOWNORMAL);
+    InvalidateRect(native_window_, nullptr, TRUE);
     UpdateWindow(native_window_);
   } else {
     ShowWindow(native_window_, SW_HIDE);
@@ -430,8 +493,22 @@ mtpc::Frame PreviewRuntime::show_native_preview(const mtpc::Frame& request, bool
   mtpc::Frame response;
   response.kind = mtpc::MessageKind::native_preview_state;
   response.request_id = request.request_id;
-  response.json = visible ? R"({"visible":true})" : R"({"visible":false})";
+  response.json = std::string{"{\"visible\":"} + (visible ? "true" : "false") +
+                  ",\"displayMode\":\"" + (native_listing_ ? "listing" : "default") + "\"}";
   return response;
+}
+
+void PreviewRuntime::grow_native_window_for_listing() {
+  RECT window_rect{};
+  RECT client_rect{};
+  if (!GetWindowRect(native_window_, &window_rect) || !GetClientRect(native_window_, &client_rect)) {
+    return;
+  }
+  const int chrome = (window_rect.bottom - window_rect.top) - (client_rect.bottom - client_rect.top);
+  const int desired = listing_content_height(GetDpiForWindow(native_window_)) + chrome;
+  if (window_rect.bottom - window_rect.top >= desired) return;
+  SetWindowPos(native_window_, nullptr, 0, 0, window_rect.right - window_rect.left, desired,
+               SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 void PreviewRuntime::paint_native(HWND window) {
@@ -439,8 +516,12 @@ void PreviewRuntime::paint_native(HWND window) {
   HDC dc = BeginPaint(window, &paint);
   RECT area{};
   GetClientRect(window, &area);
-  draw_sample(dc, area, sample_text_, font_face_, font_size_pt_, GetDpiForWindow(window), foreground_,
-              background_, sample_bold_, sample_italic_);
+  if (native_listing_) {
+    draw_listing(dc, area, listing_text_, font_face_, GetDpiForWindow(window));
+  } else {
+    draw_sample(dc, area, sample_text_, font_face_, font_size_pt_, GetDpiForWindow(window),
+                foreground_, background_, sample_bold_, sample_italic_);
+  }
   EndPaint(window, &paint);
 }
 

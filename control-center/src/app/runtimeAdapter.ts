@@ -10,6 +10,7 @@ import type {
   SystemServiceAction,
   LaunchContext,
   ManualLaunchCandidate,
+  NativePreviewMode,
   PreviewRequest,
   PreviewResult,
   ProfileEntry,
@@ -68,7 +69,7 @@ export interface ControlCenterRuntimeAdapter {
   revealProfileFile(): Promise<string>;
   saveProfile(): Promise<ProfileSnapshot | null>;
   renderProfilePreview(request: PreviewRequest): Promise<PreviewResult | null>;
-  setNativePreview(visible: boolean): Promise<boolean>;
+  setNativePreview(visible: boolean, mode?: NativePreviewMode, listingText?: string): Promise<boolean>;
   previewImageUrl(path: string): string;
   loadPreviewDiagnostics(): Promise<ReadonlyArray<string>>;
   forcePreviewCrashForCi(): Promise<void>;

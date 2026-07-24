@@ -99,17 +99,38 @@ pub(super) fn render_preview(
     })
 }
 
+/// Show-request body; older helpers ignore unknown fields, so this stays
+/// backward compatible with helpers that predate the display mode.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NativePreviewRequest<'a> {
+    display_mode: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    listing_text: Option<&'a str>,
+}
+
 pub(super) fn set_native_preview(
     manager: &mut PreviewManager,
     install_root: &Path,
     visible: bool,
+    display_mode: Option<&str>,
+    listing_text: Option<&str>,
 ) -> Result<bool, String> {
     let kind = if visible {
         SHOW_NATIVE_PREVIEW
     } else {
         HIDE_NATIVE_PREVIEW
     };
-    let response = manager.request(install_root, kind, Vec::new())?;
+    let body = if visible {
+        serde_json::to_vec(&NativePreviewRequest {
+            display_mode: display_mode.unwrap_or("default"),
+            listing_text,
+        })
+        .map_err(|error| error.to_string())?
+    } else {
+        Vec::new()
+    };
+    let response = manager.request(install_root, kind, body)?;
     if response.kind != NATIVE_PREVIEW_STATE {
         return Err("preview helper returned an invalid native-window response".to_owned());
     }

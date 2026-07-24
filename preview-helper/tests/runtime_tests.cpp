@@ -41,5 +41,26 @@ int wmain(int argc, wchar_t** argv) {
   if (runtime.show_native_preview(request, true).kind != mtpc::MessageKind::native_preview_state) return 6;
   runtime.pump_messages();
   if (runtime.show_native_preview(request, false).kind != mtpc::MessageKind::native_preview_state) return 7;
+
+  mtpc::Frame listing;
+  listing.kind = mtpc::MessageKind::show_native_preview;
+  listing.request_id = 44;
+  listing.json = R"({"displayMode":"listing","listingText":"The quick brown fox jumps over the lazy dog."})";
+  const mtpc::Frame listingResponse = runtime.show_native_preview(listing, true);
+  if (listingResponse.kind != mtpc::MessageKind::native_preview_state) return 10;
+  if (listingResponse.json.find("\"visible\":true") == std::string::npos) return 11;
+  if (listingResponse.json.find("\"displayMode\":\"listing\"") == std::string::npos) return 12;
+  runtime.pump_messages();
+
+  mtpc::Frame plain;
+  plain.kind = mtpc::MessageKind::show_native_preview;
+  plain.request_id = 45;
+  plain.json = R"({"displayMode":"default"})";
+  if (runtime.show_native_preview(plain, true).json.find("\"displayMode\":\"default\"") ==
+      std::string::npos) {
+    return 13;
+  }
+  runtime.pump_messages();
+  if (runtime.show_native_preview(plain, false).kind != mtpc::MessageKind::native_preview_state) return 14;
   return 0;
 }

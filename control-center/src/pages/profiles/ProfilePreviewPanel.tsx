@@ -9,7 +9,7 @@ import {
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import type { PreviewRequest, PreviewResult } from "../../app/model";
+import type { NativePreviewMode, PreviewRequest, PreviewResult } from "../../app/model";
 import {
   forcePreviewCrashForCi,
   previewImageUrl,
@@ -106,6 +106,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
   const [sampleText, setSampleText] = useState(() => t("profiles.sampleText"));
   const [previewStack, setPreviewStack] = useState<ReadonlyArray<PreviewLine>>([]);
   const [nativeVisible, setNativeVisible] = useState(false);
+  const [nativeMode, setNativeMode] = useState<NativePreviewMode>("default");
   const [previewHeight, setPreviewHeight] = useState(DEFAULT_PREVIEW_HEIGHT);
   const [sampleEditorOpen, setSampleEditorOpen] = useState(false);
   const previousDefaultSample = useRef(sampleText);
@@ -296,14 +297,22 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
-  const toggleNativePreview = async () => {
+  const applyNativePreview = useCallback(async (visible: boolean, mode: NativePreviewMode) => {
     const requestGeneration = generation.current;
     try {
-      const visible = await setNativePreview(!nativeVisible);
-      if (isCurrentGeneration(requestGeneration)) setNativeVisible(visible);
+      const nowVisible = await setNativePreview(visible, mode, t("profiles.samplePangram"));
+      if (isCurrentGeneration(requestGeneration)) setNativeVisible(nowVisible);
     } catch (caught: unknown) {
       if (isCurrentGeneration(requestGeneration)) onError(errorMessage(caught));
     }
+  }, [isCurrentGeneration, onError, t]);
+
+  const toggleNativePreview = () => applyNativePreview(!nativeVisible, nativeMode);
+
+  /* The legacy-listing choice repaints an already-open native window in place. */
+  const changeNativeMode = (mode: NativePreviewMode) => {
+    setNativeMode(mode);
+    if (nativeVisible) void applyNativePreview(true, mode);
   };
 
   const verifyCiWorkflow = (line: PreviewLine) => {
@@ -368,6 +377,10 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
       </div>
       {error && <p className="inline-error"><AlertTriangle aria-hidden="true" size={15} /> {error}</p>}
       <div className="preview-footer">
+        <select aria-label={t("profiles.nativeDisplayMode")} onChange={(event) => changeNativeMode(event.target.value === "listing" ? "listing" : "default")} value={nativeMode}>
+          <option value="default">{t("profiles.nativeDisplayDefault")}</option>
+          <option value="listing">{t("profiles.nativeDisplayListing")}</option>
+        </select>
         <button className="text-action" onClick={() => void toggleNativePreview()} type="button">{nativeVisible ? t("profiles.closeNative") : t("profiles.openNative")}</button>
       </div>
     </section>

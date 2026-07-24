@@ -8,7 +8,7 @@ use mactype_service_contract::{
 
 use crate::{
     BrokerDisposition, BrokerResult, InjectionBroker, InjectionRequest, ProcessIdentity,
-    ProcessInspector, ProcessTargetDecision, ProcessTargetValidator,
+    ProcessInspector, ProcessTargetDecision, ProcessTargetValidator, TargetLiveness,
 };
 
 pub use model::{
@@ -16,10 +16,15 @@ pub use model::{
     MAX_TRACKED_PROCESS_RESULTS,
 };
 
+/// The bounded target-result code recorded when an untrustworthy cleanup
+/// result was re-checked and the verified target provably no longer existed.
+pub const TARGET_VANISHED_RESULT_CODE: &str = "injection-target-vanished";
+
 pub struct InjectionOrchestrator<'a> {
     generation_id: String,
     profile_digest: Option<String>,
     target_validator: ProcessTargetValidator<'a>,
+    inspector: &'a dyn ProcessInspector,
     broker: &'a dyn InjectionBroker,
     processed: HashMap<(u32, u64), ProcessAttemptRecord>,
     process_order: VecDeque<(u32, u64)>,
@@ -97,6 +102,7 @@ impl<'a> InjectionOrchestrator<'a> {
             generation_id: generation_id.into(),
             profile_digest: None,
             target_validator: ProcessTargetValidator::new(service_pid, inspector),
+            inspector,
             broker,
             processed: HashMap::new(),
             process_order: VecDeque::new(),
@@ -136,6 +142,8 @@ impl<'a> InjectionOrchestrator<'a> {
                     self.last_injected_identity = Some(request.identity.clone());
                     self.record_injection_success(&request.identity);
                 }
+                let (outcome, result) =
+                    self.reclassify_vanished_target(&request.identity, outcome, result);
                 self.record_result(request.identity.clone(), outcome, attempt, result);
                 return Ok(outcome);
             }
@@ -221,6 +229,39 @@ impl<'a> InjectionOrchestrator<'a> {
             ),
             win32_error: record.win32_error,
         })
+    }
+
+    /// A `*-cleanup-unknown` result only says the helper could not verify the
+    /// post-injection state; when the target exits during that verification the
+    /// evidence (for example win32 error 299, `ERROR_PARTIAL_COPY`) is a
+    /// process vanish, not runtime damage. Re-checking the exact verified
+    /// identity turns a proven vanish into a normal target skip that must not
+    /// change global service health, while keeping a distinct bounded target
+    /// result for telemetry. An alive or undeterminable target keeps the
+    /// conservative untrustworthy classification.
+    fn reclassify_vanished_target(
+        &self,
+        identity: &ProcessIdentity,
+        outcome: ProcessOutcome,
+        result: BrokerResult,
+    ) -> (ProcessOutcome, BrokerResult) {
+        if !matches!(
+            outcome,
+            ProcessOutcome::Rejected | ProcessOutcome::RetryExhausted
+        ) || !result.code.ends_with("-cleanup-unknown")
+        {
+            return (outcome, result);
+        }
+        match self.inspector.probe_target_liveness(identity) {
+            TargetLiveness::Vanished => (
+                ProcessOutcome::Skipped,
+                BrokerResult {
+                    code: TARGET_VANISHED_RESULT_CODE.to_owned(),
+                    ..result
+                },
+            ),
+            TargetLiveness::Alive | TargetLiveness::Unknown => (outcome, result),
+        }
     }
 
     fn record_injection_success(&mut self, identity: &ProcessIdentity) {

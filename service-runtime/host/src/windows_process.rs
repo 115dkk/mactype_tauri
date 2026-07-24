@@ -3,18 +3,20 @@ use std::mem::size_of;
 use std::os::windows::ffi::OsStringExt;
 
 use mactype_service_contract::StructuredServiceError;
-use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, HANDLE};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, ERROR_INVALID_PARAMETER, FILETIME, HANDLE, STILL_ACTIVE,
+};
 use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows_sys::Win32::System::SystemInformation::{
     IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_I386, IMAGE_FILE_MACHINE_UNKNOWN,
 };
 use windows_sys::Win32::System::Threading::{
-    GetProcessInformation, GetProcessTimes, IsProcessCritical, IsWow64Process2, OpenProcess,
-    ProcessProtectionLevelInfo, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
+    GetExitCodeProcess, GetProcessInformation, GetProcessTimes, IsProcessCritical, IsWow64Process2,
+    OpenProcess, ProcessProtectionLevelInfo, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
     PROCESS_PROTECTION_LEVEL_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROTECTION_LEVEL_NONE,
 };
 
-use crate::{ProcessArchitecture, ProcessIdentity, ProcessInspector};
+use crate::{ProcessArchitecture, ProcessIdentity, ProcessInspector, TargetLiveness};
 
 pub struct WindowsProcessInspector {
     service_pid: u32,
@@ -49,6 +51,38 @@ impl ProcessInspector for WindowsProcessInspector {
             protected,
             critical: excluded_from_injection,
         })
+    }
+
+    fn probe_target_liveness(&self, identity: &ProcessIdentity) -> TargetLiveness {
+        probe_windows_target_liveness(identity)
+    }
+}
+
+fn probe_windows_target_liveness(identity: &ProcessIdentity) -> TargetLiveness {
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, identity.pid) };
+    if handle.is_null() {
+        // A PID that has left the process table fails to open with
+        // ERROR_INVALID_PARAMETER; every other failure (such as access
+        // denied) leaves liveness undetermined.
+        return if std::io::Error::last_os_error().raw_os_error()
+            == Some(ERROR_INVALID_PARAMETER as i32)
+        {
+            TargetLiveness::Vanished
+        } else {
+            TargetLiveness::Unknown
+        };
+    }
+    let process = OwnedHandle(handle);
+    match process.creation_time() {
+        // The PID was reused by a different process; the verified target is gone.
+        Ok(creation_time) if creation_time != identity.creation_time => TargetLiveness::Vanished,
+        Ok(_) => match process.has_exited() {
+            // An open handle can keep an exited process object observable.
+            Some(true) => TargetLiveness::Vanished,
+            Some(false) => TargetLiveness::Alive,
+            None => TargetLiveness::Unknown,
+        },
+        Err(_) => TargetLiveness::Unknown,
     }
 }
 
@@ -103,6 +137,14 @@ impl OwnedHandle {
             ));
         }
         classify_process_architecture(process_machine, native_machine)
+    }
+
+    fn has_exited(&self) -> Option<bool> {
+        let mut exit_code = 0_u32;
+        if unsafe { GetExitCodeProcess(self.0, &mut exit_code) } == 0 {
+            return None;
+        }
+        Some(exit_code != STILL_ACTIVE as u32)
     }
 
     fn is_protected(&self) -> bool {
@@ -235,6 +277,43 @@ mod tests {
             classify_process_architecture(IMAGE_FILE_MACHINE_UNKNOWN, IMAGE_FILE_MACHINE_ARM64)
                 .expect_err("native ARM64 has no fixed compatible helper");
         assert_eq!(error.code, "process-architecture-unsupported");
+    }
+
+    #[test]
+    fn liveness_probe_distinguishes_a_running_process_from_a_reused_pid() {
+        let inspector = WindowsProcessInspector::new(0);
+        let own_identity = inspector.inspect(std::process::id()).unwrap();
+        assert_eq!(
+            probe_windows_target_liveness(&own_identity),
+            TargetLiveness::Alive
+        );
+
+        let different_creation_time = ProcessIdentity {
+            creation_time: own_identity.creation_time.wrapping_add(1),
+            ..own_identity
+        };
+        assert_eq!(
+            probe_windows_target_liveness(&different_creation_time),
+            TargetLiveness::Vanished
+        );
+    }
+
+    #[test]
+    fn liveness_probe_reports_an_exited_child_as_vanished() {
+        let mut child = std::process::Command::new("cmd")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let identity = WindowsProcessInspector::new(0).inspect(child.id()).unwrap();
+        drop(child.stdin.take());
+        child.wait().unwrap();
+
+        assert_eq!(
+            probe_windows_target_liveness(&identity),
+            TargetLiveness::Vanished
+        );
     }
 
     #[test]

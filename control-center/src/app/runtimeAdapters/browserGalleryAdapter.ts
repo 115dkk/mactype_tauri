@@ -62,9 +62,10 @@ function galleryPreviewImage(request: PreviewRequest): string {
   const fontSizePx = Math.max(8, Math.round(sample.fontSizePt * (sample.dpi / 72)));
   const lineHeight = Math.round(fontSizePx * 1.5);
   const inset = Math.round(fontSizePx * 0.75);
+  const style = `${sample.bold ? ' font-weight="bold"' : ""}${sample.italic ? ' font-style="italic"' : ""}`;
   const text = sample.text
     .split("\n")
-    .map((line, index) => `<text x="${inset}" y="${inset + lineHeight * (index + 1) - Math.round(fontSizePx * 0.35)}" fill="${sample.foreground}" font-family="${escapeXml(sample.fontFace)}, sans-serif" font-size="${fontSizePx}">${escapeXml(line)}</text>`)
+    .map((line, index) => `<text x="${inset}" y="${inset + lineHeight * (index + 1) - Math.round(fontSizePx * 0.35)}" fill="${sample.foreground}" font-family="${escapeXml(sample.fontFace)}, sans-serif" font-size="${fontSizePx}"${style}>${escapeXml(line)}</text>`)
     .join("");
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${sample.widthPx}" height="${sample.heightPx}"><rect width="100%" height="100%" fill="${sample.background}"/>${text}</svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;

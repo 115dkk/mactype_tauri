@@ -20,11 +20,36 @@ import {
 } from "../../app/tauri";
 import type { I18nValue } from "../../i18n/i18n";
 
-const DEFAULT_PREVIEW_HEIGHT = 380;
-const QUICK_PREVIEW_HEIGHT = 320;
+const DEFAULT_PREVIEW_HEIGHT = 300;
+const QUICK_PREVIEW_HEIGHT = 280;
 const MIN_PREVIEW_HEIGHT = 128;
 const MAX_PREVIEW_HEIGHT = 640;
 const MIN_SETTINGS_HEIGHT = 160;
+/* The preview helper rejects bitmaps below 64 device pixels. */
+const MIN_STRIP_HEIGHT = 64;
+
+/** One rendered line of the preview stack (legacy Tuner shows sample groups). */
+export interface PreviewVariant {
+  key: string;
+  label: string | null;
+  bold?: boolean;
+  italic?: boolean;
+  foreground?: string;
+  /** Fixed sample text; falls back to the editable sample when omitted. */
+  text?: string;
+}
+
+interface PreviewLine {
+  key: string;
+  label: string | null;
+  result: PreviewResult;
+}
+
+interface PendingBatch {
+  generation: number;
+  batchId: number;
+  requests: ReadonlyArray<{ key: string; label: string | null; request: PreviewRequest }>;
+}
 
 export interface ProfilePreviewHandle {
   show: () => void;
@@ -44,10 +69,20 @@ interface ProfilePreviewPanelProps {
   profilePath: string | null;
   t: I18nValue["t"];
   values: Record<string, number>;
+  variants: ReadonlyArray<PreviewVariant>;
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/* The helper rejects bitmaps above 2048 device pixels; stay under it at 2x. */
+const MAX_STRIP_HEIGHT = 1000;
+
+function stripHeightFor(text: string, fontSize: number): number {
+  const lines = Math.max(1, text.split("\n").length);
+  const lineSpacing = Math.max(22, Math.round(fontSize * 2));
+  return Math.min(MAX_STRIP_HEIGHT, Math.max(MIN_STRIP_HEIGHT, lines * lineSpacing + Math.round(fontSize * 0.7) + 10));
 }
 
 export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePreviewPanelProps>(function ProfilePreviewPanel({
@@ -64,11 +99,12 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
   profilePath,
   t,
   values,
+  variants,
 }, ref) {
   const [fontSize, setFontSize] = useState(14);
   const [darkPreview, setDarkPreview] = useState(false);
   const [sampleText, setSampleText] = useState(() => t("profiles.sampleText"));
-  const [preview, setPreview] = useState<PreviewResult | null>(null);
+  const [previewStack, setPreviewStack] = useState<ReadonlyArray<PreviewLine>>([]);
   const [nativeVisible, setNativeVisible] = useState(false);
   const [previewHeight, setPreviewHeight] = useState(DEFAULT_PREVIEW_HEIGHT);
   const [sampleEditorOpen, setSampleEditorOpen] = useState(false);
@@ -76,11 +112,12 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
   const canvasRef = useRef<HTMLDivElement>(null);
   const previewPanelRef = useRef<HTMLElement>(null);
   const resizeStart = useRef<{ pointerId: number; y: number; height: number } | null>(null);
-  const pendingPreview = useRef<{ generation: number; request: PreviewRequest } | null>(null);
+  const pendingPreview = useRef<PendingBatch | null>(null);
   const previewRunning = useRef(false);
   const mounted = useRef(false);
   const generation = useRef(0);
-  const newestResponse = useRef(0);
+  const batchCounter = useRef(0);
+  const newestBatch = useRef(0);
   const restartVerified = useRef(false);
   const ciReadyRequestId = useRef<number | null>(null);
   const ciWorkflowVerified = useRef(false);
@@ -121,6 +158,28 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
     previousDefaultSample.current = nextDefault;
   }, [t]);
 
+  const maximumPreviewHeight = useCallback(() => Math.max(
+    MIN_PREVIEW_HEIGHT,
+    Math.min(MAX_PREVIEW_HEIGHT, (previewPanelRef.current?.parentElement?.clientHeight ?? MAX_PREVIEW_HEIGHT + MIN_SETTINGS_HEIGHT) - MIN_SETTINGS_HEIGHT),
+  ), []);
+  const clampPreviewHeight = useCallback((height: number) => Math.min(maximumPreviewHeight(), Math.max(MIN_PREVIEW_HEIGHT, height)), [maximumPreviewHeight]);
+
+  /* Step-aware stacks may need more room (four LCD lines); grow the panel by
+     the measured canvas overflow so the last line stays visible instead of
+     being clipped. A deliberate manual resize wins until the stack shape
+     changes again. */
+  const manualResize = useRef(false);
+  useEffect(() => {
+    manualResize.current = false;
+  }, [variants.length]);
+  useEffect(() => {
+    if (docked || manualResize.current) return;
+    const canvas = canvasRef.current;
+    if (!canvas || previewStack.length === 0) return;
+    const overflow = canvas.scrollHeight - canvas.clientHeight;
+    if (overflow > 0) setPreviewHeight((current) => clampPreviewHeight(current + overflow));
+  }, [clampPreviewHeight, docked, previewStack]);
+
   const drainPreviewQueue = useCallback(async () => {
     if (previewRunning.current) return;
     previewRunning.current = true;
@@ -128,26 +187,38 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
       while (pendingPreview.current) {
         const pending = pendingPreview.current;
         pendingPreview.current = null;
-        try {
-          const rendered = await renderProfilePreview(pending.request);
-          if (!isCurrentGeneration(pending.generation)) continue;
-          if (rendered && rendered.requestId > newestResponse.current) {
-            newestResponse.current = rendered.requestId;
-            setPreview(rendered);
-            onError(null);
-            if (ciSmoke && !restartVerified.current) {
-              restartVerified.current = true;
-              await forcePreviewCrashForCi();
-              if (!isCurrentGeneration(pending.generation)) continue;
-              pendingPreview.current = pending;
-              continue;
+        const lines: PreviewLine[] = [];
+        let aborted = false;
+        for (const entry of pending.requests) {
+          try {
+            const rendered = await renderProfilePreview(entry.request);
+            if (!isCurrentGeneration(pending.generation)) {
+              aborted = true;
+              break;
             }
-            if (ciSmoke) ciReadyRequestId.current = rendered.requestId;
-            else onPreviewReady?.();
+            if (!rendered) continue;
+            lines.push({ key: entry.key, label: entry.label, result: rendered });
+            if (pending.batchId >= newestBatch.current) {
+              newestBatch.current = pending.batchId;
+              setPreviewStack([...lines]);
+              onError(null);
+            }
+          } catch (caught: unknown) {
+            if (isCurrentGeneration(pending.generation)) onError(errorMessage(caught));
+            aborted = true;
+            break;
           }
-        } catch (caught: unknown) {
-          if (isCurrentGeneration(pending.generation)) onError(errorMessage(caught));
         }
+        if (aborted || lines.length !== pending.requests.length || pending.batchId < newestBatch.current) continue;
+        if (ciSmoke && !restartVerified.current) {
+          restartVerified.current = true;
+          await forcePreviewCrashForCi();
+          if (!isCurrentGeneration(pending.generation)) continue;
+          pendingPreview.current = pending;
+          continue;
+        }
+        if (ciSmoke) ciReadyRequestId.current = lines[lines.length - 1].result.requestId;
+        else onPreviewReady?.();
       }
     } finally {
       previewRunning.current = false;
@@ -155,44 +226,49 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
   }, [ciSmoke, isCurrentGeneration, onError, onPreviewReady]);
 
   useEffect(() => {
-    if (!profilePath) return undefined;
+    if (!profilePath || variants.length === 0) return undefined;
     const requestGeneration = generation.current;
     const timer = window.setTimeout(() => {
       if (!isCurrentGeneration(requestGeneration)) return;
       const displayScale = window.devicePixelRatio || 1;
       const width = Math.max(320, canvasRef.current?.clientWidth ?? 760);
-      const height = Math.max(72, canvasRef.current?.clientHeight ?? 180);
       pendingPreview.current = {
         generation: requestGeneration,
-        request: {
-          profilePath,
-          overrides: values,
-          displayScale,
-          sample: {
-            text: sampleText,
-            fontFace,
-            fontSizePt: fontSize,
-            widthPx: Math.round(width * displayScale),
-            heightPx: Math.round(height * displayScale),
-            dpi: Math.round(96 * displayScale),
-            foreground: darkPreview ? "#F1F3F5" : "#181D23",
-            background: darkPreview ? "#171A1F" : "#EEF1F4",
-          },
-        },
+        batchId: ++batchCounter.current,
+        requests: variants.map((variant) => {
+          const text = variant.text ?? sampleText;
+          return {
+            key: variant.key,
+            label: variant.label,
+            request: {
+              profilePath,
+              overrides: values,
+              displayScale,
+              sample: {
+                text,
+                fontFace,
+                fontSizePt: fontSize,
+                widthPx: Math.round(width * displayScale),
+                heightPx: Math.round(stripHeightFor(text, fontSize) * displayScale),
+                dpi: Math.round(96 * displayScale),
+                foreground: variant.foreground ?? (darkPreview ? "#F1F3F5" : "#181D23"),
+                background: darkPreview ? "#171A1F" : "#EEF1F4",
+                bold: variant.bold ?? false,
+                italic: variant.italic ?? false,
+              },
+            },
+          };
+        }),
       };
       void drainPreviewQueue();
     }, 40);
     return () => window.clearTimeout(timer);
-  }, [darkPreview, drainPreviewQueue, fontFace, fontSize, isCurrentGeneration, previewHeight, profilePath, sampleText, values]);
+  }, [darkPreview, drainPreviewQueue, fontFace, fontSize, isCurrentGeneration, profilePath, sampleText, values, variants]);
 
-  const maximumPreviewHeight = () => Math.max(
-    MIN_PREVIEW_HEIGHT,
-    Math.min(MAX_PREVIEW_HEIGHT, (previewPanelRef.current?.parentElement?.clientHeight ?? MAX_PREVIEW_HEIGHT + MIN_SETTINGS_HEIGHT) - MIN_SETTINGS_HEIGHT),
-  );
-  const clampPreviewHeight = (height: number) => Math.min(maximumPreviewHeight(), Math.max(MIN_PREVIEW_HEIGHT, height));
   const resizePreviewFromKeyboard = (event: KeyboardEvent<HTMLDivElement>) => {
     const increments: Partial<Record<string, number>> = { ArrowUp: 16, ArrowDown: -16, PageUp: 48, PageDown: -48 };
     const increment = increments[event.key];
+    if (event.key === "Home" || event.key === "End" || increment !== undefined) manualResize.current = true;
     if (event.key === "Home") {
       event.preventDefault();
       setPreviewHeight(MIN_PREVIEW_HEIGHT);
@@ -205,6 +281,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
     }
   };
   const startPreviewResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    manualResize.current = true;
     event.currentTarget.setPointerCapture(event.pointerId);
     resizeStart.current = { pointerId: event.pointerId, y: event.clientY, height: previewHeight };
   };
@@ -227,6 +304,22 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
     } catch (caught: unknown) {
       if (isCurrentGeneration(requestGeneration)) onError(errorMessage(caught));
     }
+  };
+
+  const verifyCiWorkflow = (line: PreviewLine) => {
+    if (!ciSmoke || ciReadyRequestId.current !== line.result.requestId || ciWorkflowVerified.current) return;
+    ciWorkflowVerified.current = true;
+    const requestGeneration = generation.current;
+    void verifyProfileWorkflowForCi()
+      .then(() => {
+        if (isCurrentGeneration(requestGeneration)) onPreviewReady?.();
+      })
+      .catch((caught: unknown) => {
+        if (!isCurrentGeneration(requestGeneration)) return;
+        const message = errorMessage(caught);
+        onError(message);
+        void reportFrontendFailure("profiles", message);
+      });
   };
 
   const displayScale = window.devicePixelRatio || 1;
@@ -259,31 +352,19 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
         </div>
       </div>
       {sampleEditorOpen && <textarea className="sample-input" aria-label={t("profiles.sampleAria")} onChange={(event) => setSampleText(event.target.value)} rows={2} value={sampleText} />}
-      <div className="preview-canvas" data-dark={darkPreview} ref={canvasRef} role="img" aria-label={t("profiles.previewAria")}>
-        {preview ? (
-          <img
-            alt={t("profiles.previewImageAlt")}
-            height={preview.height / displayScale}
-            onLoad={() => {
-              if (ciSmoke && ciReadyRequestId.current === preview.requestId && !ciWorkflowVerified.current) {
-                ciWorkflowVerified.current = true;
-                const requestGeneration = generation.current;
-                void verifyProfileWorkflowForCi()
-                  .then(() => {
-                    if (isCurrentGeneration(requestGeneration)) onPreviewReady?.();
-                  })
-                  .catch((caught: unknown) => {
-                    if (!isCurrentGeneration(requestGeneration)) return;
-                    const message = errorMessage(caught);
-                    onError(message);
-                    void reportFrontendFailure("profiles", message);
-                  });
-              }
-            }}
-            src={previewImageUrl(preview.imagePath)}
-            width={preview.width / displayScale}
-          />
-        ) : fallbackSample.map((line) => <p key={line}>{line}</p>)}
+      <div className="preview-canvas" data-dark={darkPreview} data-stack={previewStack.length > 0} ref={canvasRef} role="img" aria-label={t("profiles.previewAria")}>
+        {previewStack.length > 0 ? previewStack.map((line) => (
+          <figure className="preview-strip" data-variant={line.key} key={line.key}>
+            {line.label && <figcaption>{line.label}</figcaption>}
+            <img
+              alt={t("profiles.previewImageAlt")}
+              height={line.result.height / displayScale}
+              onLoad={() => verifyCiWorkflow(line)}
+              src={previewImageUrl(line.result.imagePath)}
+              width={line.result.width / displayScale}
+            />
+          </figure>
+        )) : fallbackSample.map((line) => <p key={line}>{line}</p>)}
       </div>
       {error && <p className="inline-error"><AlertTriangle aria-hidden="true" size={15} /> {error}</p>}
       <div className="preview-footer">

@@ -29,6 +29,13 @@ cherry-picked. Docs/CI edits get their own commits that simply are not picked.
 
 ## Communication rules
 
+- Korean replies in this project follow the `chegyejeog-chulonja-v4-style`
+  skill (`~/.claude/skills/chegyejeog-chulonja-v4-style/SKILL.md`): plain
+  Korean without translationese, no em-dashes, no emoji, prose for reasoning
+  and conclusions, lists only for genuinely parallel items. The skill's own
+  frontmatter says to wait for an explicit request; this project asks for it
+  by default, so read it at session start and keep applying it. English
+  artifacts (commit messages, PR bodies, code comments) are unaffected.
 - Never comment on the upstream repo or PR without an explicit user request.
 - Screenshots/galleries go to the FORK's issue #3 (images hosted on an orphan
   `gallery-*` branch in the fork; embed raw.githubusercontent URLs).

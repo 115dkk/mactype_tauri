@@ -11,8 +11,9 @@ import { BasicSettings, LcdSettings, SearchSettings, ShapeSettings } from "./pro
 import { splitSubstitution } from "./profiles/profileEditorUtils";
 import { ProfilePreviewPanel, type PreviewVariant, type ProfilePreviewHandle } from "./profiles/ProfilePreviewPanel";
 import { useProfileDocument } from "./profiles/useProfileDocument";
+import { useStepHistory } from "./profiles/useStepHistory";
 import { WizardSettings } from "./profiles/WizardSettings";
-import { wizardStepIds, type WizardStepId } from "./profiles/wizardModel";
+import { stepSupportsHistory, wizardStepIds, type WizardStepId } from "./profiles/wizardModel";
 
 type GroupId = "basic" | "shape" | "lcd" | "advanced" | "individual" | "lists";
 type ProfileMode = "quick" | "advanced";
@@ -81,6 +82,10 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
   } = useProfileDocument(t);
   const [activeGroup, setActiveGroup] = useState<GroupId>("basic");
   const [activeWizardStep, setActiveWizardStep] = useState<WizardStepId>("start");
+  /* Step-scoped guided history. Advanced mode can rewrite the document
+     through the global backend history, so the per-step record resets when
+     the mode or the open document changes. */
+  const stepHistory = useStepHistory(`${mode}::${profile?.path ?? ""}`);
   const [installedFonts, setInstalledFonts] = useState<ReadonlyArray<string>>([]);
   const [fontFace, setFontFace] = useState("Segoe UI");
   const [query, setQuery] = useState("");
@@ -100,6 +105,48 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
     observer.observe(workspace);
     return () => observer.disconnect();
   }, []);
+
+  const guidedBusy = !profile || busy || recoveryRequired;
+  const changeGuidedSetting = (settingId: string, value: number) => {
+    if (stepSupportsHistory(activeWizardStep)) {
+      stepHistory.record(activeWizardStep, settingId, value, profile?.values[settingId] ?? value);
+    }
+    changeSetting(settingId, value);
+  };
+  const undoStepEdit = () => {
+    const entry = stepHistory.undo(activeWizardStep);
+    if (entry) changeSetting(entry.settingId, entry.before);
+  };
+  const redoStepEdit = () => {
+    const entry = stepHistory.redo(activeWizardStep);
+    if (entry) changeSetting(entry.settingId, entry.after);
+  };
+
+  /* Ctrl+Z / Ctrl+Y inside guided mode drive the step-scoped history. Text
+     fields keep their native editing shortcuts, and the default is only
+     prevented when this step actually has something to undo or redo. */
+  useEffect(() => {
+    if (mode !== "quick") return undefined;
+    const listener = (event: KeyboardEvent) => {
+      if (!event.ctrlKey || event.altKey || event.metaKey) return;
+      const target = event.target;
+      if (target instanceof HTMLTextAreaElement) return;
+      if (target instanceof HTMLInputElement && target.type !== "range" && target.type !== "checkbox" && target.type !== "radio") return;
+      const key = event.key.toLocaleLowerCase();
+      const wantsUndo = key === "z" && !event.shiftKey;
+      const wantsRedo = key === "y" || (key === "z" && event.shiftKey);
+      if ((!wantsUndo && !wantsRedo) || guidedBusy) return;
+      if (wantsUndo && stepHistory.canUndo(activeWizardStep)) {
+        event.preventDefault();
+        undoStepEdit();
+      } else if (wantsRedo && stepHistory.canRedo(activeWizardStep)) {
+        event.preventDefault();
+        redoStepEdit();
+      }
+    };
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  });
 
   const fontFamilies = useMemo(() => {
     const referenced = [
@@ -228,7 +275,7 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
           <div className="settings-form">
             <div className="section-heading"><h2><Hint content={mode === "quick" ? t("wizard.guidance") : query ? t("profiles.searchDescription", { query }) : activeDefinition.description}>{mode === "quick" ? activeWizardLabel : query ? t("profiles.searchResults") : activeDefinition.label}</Hint></h2></div>
 
-            {mode === "quick" && <WizardSettings activeStep={activeWizardStep} advanced={advanced} busy={!profile || busy || recoveryRequired} canSave={profile?.canSave ?? false} dirtyCount={dirtyCount} dirtyKeys={dirtyKeys} fontFace={fontFace} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} onAdvancedCommit={(next) => void commitAdvanced(next)} onApply={() => void applyProfile()} onFontFaceChange={setFontFace} onPreview={showPreview} onSave={() => void saveCurrentProfile()} onSettingChange={changeSetting} onSettingPreview={previewSetting} onStepChange={setActiveWizardStep} profileName={profile?.displayPath ?? null} profilePath={profile?.path ?? null} savedValues={savedValues} settings={settingsSchema} t={t} values={values} />}
+            {mode === "quick" && <WizardSettings activeStep={activeWizardStep} advanced={advanced} busy={guidedBusy} canRedoStep={stepHistory.canRedo(activeWizardStep)} canSave={profile?.canSave ?? false} canUndoStep={stepHistory.canUndo(activeWizardStep)} dirtyCount={dirtyCount} dirtyKeys={dirtyKeys} fontFace={fontFace} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} onAdvancedCommit={(next) => void commitAdvanced(next)} onApply={() => void applyProfile()} onFontFaceChange={setFontFace} onPreview={showPreview} onRedoStep={redoStepEdit} onSave={() => void saveCurrentProfile()} onSettingChange={changeGuidedSetting} onSettingPreview={previewSetting} onStepChange={setActiveWizardStep} onUndoStep={undoStepEdit} profileName={profile?.displayPath ?? null} profilePath={profile?.path ?? null} savedValues={savedValues} settings={settingsSchema} t={t} values={values} />}
 
             {mode === "advanced" && query && <SearchSettings dirtyKeys={dirtyKeys} onChange={changeSetting} onPreviewChange={previewSetting} savedValues={savedValues} settings={filteredSettings} t={t} values={values} />}
             {mode === "advanced" && !query && activeGroup === "basic" && <BasicSettings dirtyKeys={dirtyKeys} onChange={changeSetting} onPreviewChange={previewSetting} savedValues={savedValues} settings={filteredSettings} t={t} values={values} />}

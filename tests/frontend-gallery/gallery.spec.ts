@@ -409,6 +409,71 @@ test("settings navigation restores the legacy Wizard and Tuner hierarchy", async
   await expect(page.locator("body")).toHaveAttribute("data-view", "execution");
 });
 
+test("guided step undo, redo, and discard stay scoped to the current step", async ({ page }) => {
+  await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
+  await page.locator(".navigation").getByRole("button", { name: "단계별 설정" }).click();
+  await expect(page.locator(".profile-page")).toHaveAttribute("data-mode", "quick");
+
+  const undoStep = page.getByRole("button", { name: "되돌리기", exact: true });
+  const redoStep = page.getByRole("button", { name: "다시 하기", exact: true });
+  const discardStep = page.getByRole("button", { name: "단계 변경 취소", exact: true });
+
+  // Steps without schema settings (start, substitution, apply) expose no step tools.
+  await expect(page.getByRole("toolbar", { name: "단계 편집 작업" })).toHaveCount(0);
+  await page.locator(".settings-index").getByRole("button", { name: "글꼴 대체" }).click();
+  await expect(page.getByRole("toolbar", { name: "단계 편집 작업" })).toHaveCount(0);
+
+  await page.locator(".settings-index").getByRole("button", { name: "글꼴 품질" }).click();
+  const weightValue = page.locator("#normal_weight-value");
+  await expect(undoStep).toBeDisabled();
+  await expect(redoStep).toBeDisabled();
+  await expect(discardStep).toBeDisabled();
+
+  await weightValue.fill("24");
+  await weightValue.press("Enter");
+  await expect(weightValue).toHaveValue("24");
+  await expect(discardStep).toBeEnabled();
+
+  await undoStep.click();
+  await expect(weightValue).toHaveValue("0");
+  await expect(undoStep).toBeDisabled();
+  await redoStep.click();
+  await expect(weightValue).toHaveValue("24");
+  await expect(redoStep).toBeDisabled();
+
+  // Ctrl+Z / Ctrl+Y drive the same step-scoped history from the keyboard.
+  await expect(undoStep).toBeEnabled();
+  await page.keyboard.press("Control+z");
+  await expect(weightValue).toHaveValue("0");
+  await expect(redoStep).toBeEnabled();
+  await page.keyboard.press("Control+y");
+  await expect(weightValue).toHaveValue("24");
+
+  // The gamma step starts with an empty history even though the quality step
+  // recorded edits, and its discard leaves the quality step untouched.
+  await page.locator(".settings-index").getByRole("button", { name: "감마" }).click();
+  const contrastValue = page.locator("#contrast-value");
+  await expect(undoStep).toBeDisabled();
+  await expect(redoStep).toBeDisabled();
+  await expect(discardStep).toBeDisabled();
+
+  await contrastValue.fill("2");
+  await contrastValue.press("Enter");
+  await expect(contrastValue).toHaveValue("2");
+  await discardStep.click();
+  await expect(contrastValue).toHaveValue("1");
+  await expect(discardStep).toBeDisabled();
+
+  // The step discard itself is one more undoable step edit.
+  await undoStep.click();
+  await expect(contrastValue).toHaveValue("2");
+
+  await page.locator(".settings-index").getByRole("button", { name: "글꼴 품질" }).click();
+  await expect(weightValue).toHaveValue("24");
+  await expect(undoStep).toBeEnabled();
+  await expect(discardStep).toBeEnabled();
+});
+
 test("slider drags and exact number edits create one undo revision per interaction", async ({ page }, testInfo) => {
   await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "글자 모양", exact: true }).click();

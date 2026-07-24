@@ -1,16 +1,18 @@
-import { ArrowLeft, ArrowRight, Eye, ListRestart, Play, Save } from "lucide-react";
+import { ArrowLeft, ArrowRight, Eye, ListRestart, Play, Redo2, RotateCcw, Save, Undo2 } from "lucide-react";
 import type { AdvancedProfile } from "../../app/model";
 import type { SettingDefinition } from "../../generated/settings";
 import type { I18nValue, MessageKey } from "../../i18n/i18n";
 import { FontSubstitutionEditor } from "./FontSubstitutionEditor";
 import { SchemaSettings } from "./SchemaSettings";
-import { wizardScaleBySettingId, wizardSettingIdsByStep, wizardStepIds, type WizardStepId } from "./wizardModel";
+import { stepSupportsHistory, wizardScaleBySettingId, wizardSettingIdsByStep, wizardStepIds, type WizardStepId } from "./wizardModel";
 
 interface WizardSettingsProps {
   activeStep: WizardStepId;
   advanced: AdvancedProfile;
   busy: boolean;
+  canRedoStep: boolean;
   canSave: boolean;
+  canUndoStep: boolean;
   dirtyCount: number;
   dirtyKeys: ReadonlyArray<string>;
   fontFace: string;
@@ -20,10 +22,12 @@ interface WizardSettingsProps {
   onApply: () => void;
   onFontFaceChange: (font: string) => void;
   onPreview: () => void;
+  onRedoStep: () => void;
   onSave: () => void;
   onSettingChange: (settingId: string, value: number) => void;
   onSettingPreview: (settingId: string, value: number) => void;
   onStepChange: (step: WizardStepId) => void;
+  onUndoStep: () => void;
   profileName: string | null;
   profilePath: string | null;
   savedValues?: Readonly<Record<string, number>>;
@@ -36,7 +40,9 @@ export function WizardSettings({
   activeStep,
   advanced,
   busy,
+  canRedoStep,
   canSave,
+  canUndoStep,
   dirtyCount,
   dirtyKeys,
   fontFace,
@@ -46,10 +52,12 @@ export function WizardSettings({
   onApply,
   onFontFaceChange,
   onPreview,
+  onRedoStep,
   onSave,
   onSettingChange,
   onSettingPreview,
   onStepChange,
+  onUndoStep,
   profileName,
   profilePath,
   savedValues,
@@ -75,6 +83,18 @@ export function WizardSettings({
       if ((values[setting.id] ?? setting.default) !== setting.factory) onSettingChange(setting.id, setting.factory);
     }
   };
+  /* Discard only this step's settings back to their saved values. */
+  const stepToolsAvailable = currentSettings.length > 0 && stepSupportsHistory(activeStep);
+  const stepAtSaved = currentSettings.every((setting) => {
+    const saved = savedValues?.[setting.id];
+    return saved === undefined || (values[setting.id] ?? setting.default) === saved;
+  });
+  const discardStepChanges = () => {
+    for (const setting of currentSettings) {
+      const saved = savedValues?.[setting.id];
+      if (saved !== undefined && (values[setting.id] ?? setting.default) !== saved) onSettingChange(setting.id, saved);
+    }
+  };
 
   return (
     <div className="wizard-layout">
@@ -95,8 +115,17 @@ export function WizardSettings({
             <p className="wizard-start-hint">{t("wizard.startSwitchHint")}</p>
           </section>
         )}
-        {currentSettings.length > 0 && (
-          <div className="wizard-step-tools">
+        {stepToolsAvailable && (
+          <div aria-label={t("wizard.stepTools")} className="wizard-step-tools" role="toolbar">
+            <button className="text-action" disabled={busy || !canUndoStep} onClick={onUndoStep} type="button">
+              <Undo2 aria-hidden="true" size={14} /> {t("profiles.undo")}
+            </button>
+            <button className="text-action" disabled={busy || !canRedoStep} onClick={onRedoStep} type="button">
+              <Redo2 aria-hidden="true" size={14} /> {t("profiles.redo")}
+            </button>
+            <button className="text-action" disabled={busy || stepAtSaved} onClick={discardStepChanges} title={t("wizard.discardStepDescription")} type="button">
+              <RotateCcw aria-hidden="true" size={14} /> {t("wizard.discardStep")}
+            </button>
             <button className="text-action" disabled={busy || stepAtFactory} onClick={resetStepToFactory} type="button">
               <ListRestart aria-hidden="true" size={14} /> {t("wizard.resetStep")}
             </button>

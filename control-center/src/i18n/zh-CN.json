@@ -180,6 +180,10 @@
   "profiles.sourceFont": "原字体",
   "profiles.replacementFont": "替换字体",
   "profiles.addFontToList": "向此列表添加字体",
+  "profiles.addListEntry": "添加",
+  "profiles.listEntryPlaceholder": "输入名称后按 Enter",
+  "profiles.duplicateListEntry": "{name} 已在此列表中。",
+  "profiles.emptyList": "暂无条目。",
   "profiles.inherit": "继承",
   "profiles.remove": "移除{name}",
   "profiles.emptyIndividuals": "尚无单独字体设置。留空的值将继承配置文件的默认设置。",
@@ -535,7 +539,7 @@
   "advanced.fontSubstitutes": "字体替换映射",
   "advanced.fontSubstitutesHelp": "从已安装字体中选择原字体和替代字体。",
   "list.unloadDlls.label": "不注入的 DLL",
-  "list.unloadDlls.help": "每行输入一个不进行注入的 DLL。",
+  "list.unloadDlls.help": "添加不进行注入的 DLL。",
   "list.excludeSubstitutionModules.label": "禁用字体替换的模块",
-  "list.excludeSubstitutionModules.help": "每行输入一个要禁用字体替换的模块。"
+  "list.excludeSubstitutionModules.help": "添加要禁用字体替换的模块。"
 }

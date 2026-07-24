@@ -57,13 +57,12 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
     command: profileCommand,
     commitAdvanced,
     commitIndividuals,
-    commitList,
     dirtyCount,
     dirtyKeys,
     discard,
     error: previewError,
     individuals,
-    listDrafts,
+    lists,
     loading,
     message: profileMessage,
     previewSetting,
@@ -77,8 +76,7 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
     setAdvanced,
     setError: setPreviewError,
     undo,
-    updateFontList,
-    updateListDraft,
+    updateList,
     values,
   } = useProfileDocument(t);
   const [activeGroup, setActiveGroup] = useState<GroupId>("basic");
@@ -111,13 +109,13 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
         const pair = splitSubstitution(mapping);
         return [pair.source, pair.replacement];
       }),
-      ...(listDrafts.excludeFonts ?? "").split(/\r?\n/),
-      ...(listDrafts.includeFonts ?? "").split(/\r?\n/),
+      ...(lists.excludeFonts ?? []),
+      ...(lists.includeFonts ?? []),
     ].map((font) => font.trim()).filter(Boolean);
     const collator = new Intl.Collator(locale, { sensitivity: "base", numeric: true });
     return [...new Set([...installedFonts, ...referenced])]
       .sort((left, right) => collator.compare(left, right));
-  }, [advanced.fontSubstitutes, fontFace, individuals, installedFonts, listDrafts.excludeFonts, listDrafts.includeFonts, locale]);
+  }, [advanced.fontSubstitutes, fontFace, individuals, installedFonts, lists.excludeFonts, lists.includeFonts, locale]);
   const installedFontKeys = useMemo(() => new Set(installedFonts.map((font) => font.toLocaleLowerCase())), [installedFonts]);
   const fontOptionLabel = (font: string) => installedFontKeys.has(font.toLocaleLowerCase())
     ? font
@@ -241,13 +239,11 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
             {mode === "advanced" && !query && activeGroup === "lists" && (
               <ListsEditor
                 definitions={listDefinitions}
-                drafts={listDrafts}
+                entries={lists}
                 fontFamilies={fontFamilies}
                 fontOptionLabel={fontOptionLabel}
                 installedFontKeys={installedFontKeys}
-                onCommit={(kind) => void commitList(kind)}
-                onDraftChange={updateListDraft}
-                onUpdateFontList={(kind, entries) => void updateFontList(kind, entries)}
+                onUpdateList={(kind, entries) => void updateList(kind, entries)}
                 t={t}
               />
             )}

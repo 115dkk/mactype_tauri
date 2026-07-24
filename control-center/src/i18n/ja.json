@@ -180,6 +180,10 @@
   "profiles.sourceFont": "置換元フォント",
   "profiles.replacementFont": "置換先フォント",
   "profiles.addFontToList": "このリストにフォントを追加",
+  "profiles.addListEntry": "追加",
+  "profiles.listEntryPlaceholder": "名前を入力して Enter",
+  "profiles.duplicateListEntry": "{name} は既にこのリストにあります。",
+  "profiles.emptyList": "項目はまだありません。",
   "profiles.inherit": "継承",
   "profiles.remove": "{name}を削除",
   "profiles.emptyIndividuals": "フォント固有の設定はありません。空の値はプロファイルの既定値を継承します。",
@@ -535,7 +539,7 @@
   "advanced.fontSubstitutes": "フォント置換マッピング",
   "advanced.fontSubstitutesHelp": "インストール済み一覧から置換元と置換先のフォントを選択します。",
   "list.unloadDlls.label": "注入対象外 DLL",
-  "list.unloadDlls.help": "注入から除外する DLL を 1 行ずつ入力します。",
+  "list.unloadDlls.help": "注入から除外する DLL を追加します。",
   "list.excludeSubstitutionModules.label": "フォント置換除外モジュール",
-  "list.excludeSubstitutionModules.help": "フォント置換を無効にするモジュールを 1 行ずつ入力します。"
+  "list.excludeSubstitutionModules.help": "フォント置換を無効にするモジュールを追加します。"
 }

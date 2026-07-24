@@ -180,6 +180,10 @@
   "profiles.sourceFont": "原始字型",
   "profiles.replacementFont": "替代字型",
   "profiles.addFontToList": "將字型加入此清單",
+  "profiles.addListEntry": "新增",
+  "profiles.listEntryPlaceholder": "輸入名稱後按 Enter",
+  "profiles.duplicateListEntry": "{name} 已在此清單中。",
+  "profiles.emptyList": "尚無項目。",
   "profiles.inherit": "繼承",
   "profiles.remove": "移除{name}",
   "profiles.emptyIndividuals": "尚無個別字型設定。留空的值將繼承設定檔的預設設定。",
@@ -535,7 +539,7 @@
   "advanced.fontSubstitutes": "字型替代對應",
   "advanced.fontSubstitutesHelp": "從已安裝字型中選擇原始字型和替代字型。",
   "list.unloadDlls.label": "不注入的 DLL",
-  "list.unloadDlls.help": "每行輸入一個排除注入的 DLL。",
+  "list.unloadDlls.help": "新增排除注入的 DLL。",
   "list.excludeSubstitutionModules.label": "停用字型替代的模組",
-  "list.excludeSubstitutionModules.help": "每行輸入一個停用字型替代的模組。"
+  "list.excludeSubstitutionModules.help": "新增停用字型替代的模組。"
 }

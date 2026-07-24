@@ -180,6 +180,10 @@
   "profiles.sourceFont": "원본 글꼴",
   "profiles.replacementFont": "대체 글꼴",
   "profiles.addFontToList": "목록에 글꼴 추가",
+  "profiles.addListEntry": "추가",
+  "profiles.listEntryPlaceholder": "이름 입력 후 Enter",
+  "profiles.duplicateListEntry": "{name}은(는) 이미 목록에 있습니다.",
+  "profiles.emptyList": "아직 항목이 없습니다.",
   "profiles.inherit": "상속",
   "profiles.remove": "{name} 제거",
   "profiles.emptyIndividuals": "글꼴별 설정이 없습니다. 비워 둔 값은 기본 설정을 상속합니다.",
@@ -535,7 +539,7 @@
   "advanced.fontSubstitutes": "글꼴 대체 매핑",
   "advanced.fontSubstitutesHelp": "설치된 글꼴 목록에서 원본과 대체 글꼴을 선택합니다.",
   "list.unloadDlls.label": "주입 해제 DLL",
-  "list.unloadDlls.help": "각 줄에 주입에서 제외할 DLL을 입력합니다.",
+  "list.unloadDlls.help": "주입에서 제외할 DLL을 추가합니다.",
   "list.excludeSubstitutionModules.label": "글꼴 대체 제외 모듈",
-  "list.excludeSubstitutionModules.help": "각 줄에 글꼴 대체를 비활성화할 모듈을 입력합니다."
+  "list.excludeSubstitutionModules.help": "글꼴 대체를 비활성화할 모듈을 추가합니다."
 }

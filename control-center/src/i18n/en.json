@@ -180,6 +180,10 @@
   "profiles.sourceFont": "Source font",
   "profiles.replacementFont": "Replacement font",
   "profiles.addFontToList": "Add a font to this list",
+  "profiles.addListEntry": "Add",
+  "profiles.listEntryPlaceholder": "Type a name and press Enter",
+  "profiles.duplicateListEntry": "{name} is already in this list.",
+  "profiles.emptyList": "No entries yet.",
   "profiles.inherit": "Inherit",
   "profiles.remove": "Remove {name}",
   "profiles.emptyIndividuals": "There are no font-specific settings. Empty values inherit the profile defaults.",
@@ -535,7 +539,7 @@
   "advanced.fontSubstitutes": "Font substitution mappings",
   "advanced.fontSubstitutesHelp": "Choose the source and replacement from installed fonts.",
   "list.unloadDlls.label": "Injection-excluded DLLs",
-  "list.unloadDlls.help": "Enter one DLL to exclude from injection per line.",
+  "list.unloadDlls.help": "Add DLLs to exclude from injection.",
   "list.excludeSubstitutionModules.label": "Font-substitution exclusions",
-  "list.excludeSubstitutionModules.help": "Enter one module that disables font substitution per line."
+  "list.excludeSubstitutionModules.help": "Add modules that disable font substitution."
 }

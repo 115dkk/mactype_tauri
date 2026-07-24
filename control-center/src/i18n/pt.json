@@ -180,6 +180,10 @@
   "profiles.sourceFont": "Tipo de letra de origem",
   "profiles.replacementFont": "Tipo de letra de substituição",
   "profiles.addFontToList": "Adicionar um tipo de letra a esta lista",
+  "profiles.addListEntry": "Adicionar",
+  "profiles.listEntryPlaceholder": "Escreva um nome e prima Enter",
+  "profiles.duplicateListEntry": "{name} já está nesta lista.",
+  "profiles.emptyList": "Ainda não há entradas.",
   "profiles.inherit": "Herdar",
   "profiles.remove": "Remover {name}",
   "profiles.emptyIndividuals": "Não existem definições específicas de tipos de letra. Os valores vazios herdam as predefinições do perfil.",
@@ -535,7 +539,7 @@
   "advanced.fontSubstitutes": "Mapeamentos de substituição de tipos de letra",
   "advanced.fontSubstitutesHelp": "Selecione os tipos de letra de origem e substituição entre os instalados.",
   "list.unloadDlls.label": "DLL excluídas da injeção",
-  "list.unloadDlls.help": "Uma DLL excluída por linha.",
+  "list.unloadDlls.help": "Adicione as DLL excluídas da injeção.",
   "list.excludeSubstitutionModules.label": "Módulos sem substituição de tipos de letra",
-  "list.excludeSubstitutionModules.help": "Um módulo que desative a substituição por linha."
+  "list.excludeSubstitutionModules.help": "Adicione os módulos que desativam a substituição."
 }

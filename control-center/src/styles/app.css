@@ -258,6 +258,7 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .font-list-editor li > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .font-list-editor select { width: 100%; padding-inline: var(--space-2); }
 .preview-footer { justify-content: flex-end; color: var(--color-muted); font-size: 12px; }
+.preview-footer select { min-width: 0; padding: 0 var(--space-2); }
 .hint { cursor: help; }
 .hint-term { text-decoration-line: underline; text-decoration-style: dotted; text-decoration-color: var(--color-border-strong); text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .hint:hover .hint-term { text-decoration-color: var(--color-primary); }

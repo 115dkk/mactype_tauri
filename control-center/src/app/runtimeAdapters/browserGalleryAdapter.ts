@@ -6,6 +6,7 @@ import {
   type LegacyProfileCandidate,
   type LaunchContext,
   type ManualLaunchCandidate,
+  type NativePreviewMode,
   type ProfileEntry,
   type PreviewRequest,
   type PreviewResult,
@@ -320,7 +321,8 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
     return new Promise((resolve) => window.setTimeout(() => resolve(result), delay));
   },
 
-  setNativePreview(visible: boolean): Promise<boolean> {
+  setNativePreview(visible: boolean, mode?: NativePreviewMode): Promise<boolean> {
+    window.sessionStorage.setItem("gallery-native-preview", visible ? mode ?? "default" : "hidden");
     return Promise.resolve(visible);
   },
 

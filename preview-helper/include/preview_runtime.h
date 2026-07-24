@@ -31,6 +31,7 @@ class PreviewRuntime {
   std::vector<std::uint8_t> render_png(const std::string& json, std::uint32_t& width,
                                       std::uint32_t& height, std::uint32_t& dpi, std::string& error);
   void paint_native(HWND window);
+  void grow_native_window_for_listing();
 
   std::wstring install_root_;
   std::wstring dll_path_;
@@ -43,6 +44,10 @@ class PreviewRuntime {
   float font_size_pt_{14.0F};
   bool sample_bold_{false};
   bool sample_italic_{false};
+  /// Legacy-tuner listing state for the native window: one pangram repeated in
+  /// black/red/green/blue at a small and a large size, normal then bold group.
+  bool native_listing_{false};
+  std::wstring listing_text_{L"The quick brown fox jumps over the lazy dog."};
   COLORREF foreground_{RGB(24, 29, 35)};
   COLORREF background_{RGB(238, 241, 244)};
   std::uint32_t dpi_{96};

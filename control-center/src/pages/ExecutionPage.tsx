@@ -1,9 +1,9 @@
 import { AlertTriangle, Check, ChevronDown, FileCode2, FolderOpen, ListChecks, LogOut, Play, Power, PowerOff, RefreshCw, ServerCog, ShieldAlert, Trash2, UserPlus, Wrench } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import type { ExecutionStatus, SystemServiceAction } from "../app/model";
+import type { ExecutionStatus, ManualLaunchCandidate, SystemServiceAction } from "../app/model";
 import { projectExecutionView } from "../app/executionViewModel";
 import { operationErrorMessage } from "../app/operationError";
-import { disableLegacyTrayAutostart, launchRegisteredTargets, launchTargetWithMactype, loadExecutionStatus, manageSystemService, pickExecutable, registerSessionTarget, removeSessionTarget, reportFrontendFailure, requestLegacyTrayExit, revealSystemService, setSessionAutostart, verifyInjectionWorkflowForCi } from "../app/tauri";
+import { disableLegacyTrayAutostart, launchRegisteredTargets, launchTargetWithMactype, listManualLaunchCandidates, loadExecutionStatus, manageSystemService, pickExecutable, registerSessionTarget, removeSessionTarget, reportFrontendFailure, requestLegacyTrayExit, revealSystemService, setSessionAutostart, verifyInjectionWorkflowForCi } from "../app/tauri";
 import { useI18n } from "../i18n/i18n";
 
 export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean; onReady?: () => void }) {
@@ -11,6 +11,8 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
   const [status, setStatus] = useState<ExecutionStatus | null>(null);
   const [target, setTarget] = useState("");
   const [argumentsText, setArgumentsText] = useState("");
+  const [candidates, setCandidates] = useState<ReadonlyArray<ManualLaunchCandidate> | null>(null);
+  const [candidateFilter, setCandidateFilter] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [serviceBusy, setServiceBusy] = useState<string | null>(null);
@@ -69,6 +71,15 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
   };
 
   const argumentsFromEditor = () => argumentsText.split(/\r?\n/).map((argument) => argument.trim()).filter(Boolean);
+
+  const loadCandidates = useCallback(async () => {
+    try {
+      setCandidates(await listManualLaunchCandidates());
+      setError(null);
+    } catch (caught: unknown) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }, []);
 
   const chooseTarget = async () => {
     try {
@@ -222,6 +233,12 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
       first.focus();
     }
   };
+
+  const candidateFilterText = candidateFilter.trim().toLowerCase();
+  const visibleCandidates = (candidates ?? []).filter((candidate) => !candidateFilterText
+    || candidate.name.toLowerCase().includes(candidateFilterText)
+    || candidate.path.toLowerCase().includes(candidateFilterText)
+    || (candidate.windowTitle?.toLowerCase().includes(candidateFilterText) ?? false));
 
   const executionView = projectExecutionView(status, serviceBusy);
   const systemInjectionAction = executionView.systemInjectionAction;
@@ -411,7 +428,7 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
         </div>
       </details>
 
-      <details className="service-row" data-kind="manual">
+      <details className="service-row" data-kind="manual" onToggle={(event) => { if (event.currentTarget.open && candidates === null) void loadCandidates(); }}>
         <summary>
           <span className="service-row-icon"><FileCode2 aria-hidden="true" size={19} /></span>
           <span className="service-row-copy"><h2>{t("execution.manualTitle")}</h2><p>{t("execution.manualDescription")}</p></span>
@@ -419,9 +436,34 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
           <ChevronDown aria-hidden="true" className="service-row-chevron" size={17} />
         </summary>
         <div className="service-row-body">
+          <div className="process-picker">
+            <div className="process-picker-heading">
+              <strong>{t("execution.processListTitle")}</strong>
+              <div className="process-picker-tools">
+                <input aria-label={t("execution.processListFilter")} className="process-picker-filter" onChange={(event) => setCandidateFilter(event.target.value)} placeholder={t("execution.processListFilter")} type="search" value={candidateFilter} />
+                <button className="button secondary" onClick={() => void loadCandidates()} type="button"><RefreshCw aria-hidden="true" size={16} /> {t("execution.processListRefresh")}</button>
+              </div>
+            </div>
+            {visibleCandidates.length ? (
+              <ul className="process-picker-list">
+                {visibleCandidates.map((candidate) => (
+                  <li key={candidate.pid}>
+                    <label className="process-picker-row">
+                      <input checked={target === candidate.path} name="manual-launch-candidate" onChange={() => setTarget(candidate.path)} type="radio" value={candidate.path} />
+                      <strong>{candidate.name}</strong>
+                      {candidate.windowTitle && <span className="process-picker-window">{candidate.windowTitle}</span>}
+                      <span className="process-picker-pid">{t("execution.processPid", { pid: candidate.pid })}</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="empty-state">{t("execution.processListEmpty")}</p>
+            )}
+          </div>
           <div className="manual-launcher">
             <div className="target-picker">
-              <span>{t("execution.path")}</span>
+              <span>{t("execution.browseFallback")}</span>
               <div className="target-selection" data-empty={!target}>
                 <FileCode2 aria-hidden="true" size={22} />
                 <div>

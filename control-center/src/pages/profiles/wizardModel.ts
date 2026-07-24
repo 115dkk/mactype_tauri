@@ -19,6 +19,14 @@ export const wizardSettingIdsByStep: Readonly<Record<WizardStepId, ReadonlyArray
 
 export const wizardSettingIds = [...new Set(Object.values(wizardSettingIdsByStep).flat())];
 
+/* The substitution step owns one schema setting, but its substance is the
+   mapping list, which carries no saved snapshot. Undo and discard there would
+   restore half the step, so it opts out of step history entirely — the tools
+   and the keyboard shortcuts stay inert together. */
+export function stepSupportsHistory(step: WizardStepId): boolean {
+  return wizardSettingIdsByStep[step].length > 0 && step !== "substitution";
+}
+
 export type WizardScaleId = "weight" | "contrast" | "gamma";
 
 /* Guided sliders speak in outcomes, not numbers, following the legacy

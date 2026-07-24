@@ -483,15 +483,33 @@ function Assert-ReadyOpenService {
         if ($entry.Value -cne "sha256:$hash") { throw "Installed runtime differs from receipt: $($entry.Key)" }
     }
 
-    $health = Get-Content -LiteralPath (Join-Path $ServiceRoot 'health.json') -Raw | ConvertFrom-Json
-    if ($health.protocolVersion -ne 1 -or $health.serviceVersion -cne $current.version -or $health.health -cne 'ready' -or $health.activeProfileDigest -cne $active.generation -or $null -ne $health.lastError) {
-        throw 'Installer returned before strict Ready health for the exact active profile.'
-    }
-    foreach ($component in @('profile', 'observer', 'injector32', 'injector64')) {
-        if ($health.readiness.$component -cne 'ready') {
-            throw "Required Ready component was not ready: $component"
+    $healthPath = Join-Path $ServiceRoot 'health.json'
+    $healthDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    $healthFailure = $null
+    do {
+        try {
+            $health = Get-Content -LiteralPath $healthPath -Raw | ConvertFrom-Json
+            if ($health.protocolVersion -ne 1 -or $health.serviceVersion -cne $current.version -or $health.health -cne 'ready' -or $health.activeProfileDigest -cne $active.generation -or $null -ne $health.lastError) {
+                $healthFailure = 'Installer returned before strict Ready health for the exact active profile ' +
+                    "(health=$($health.health), digest=$($health.activeProfileDigest), lastError=$($health.lastError))."
+            }
+            else {
+                $healthFailure = $null
+                foreach ($component in @('profile', 'observer', 'injector32', 'injector64')) {
+                    if ($health.readiness.$component -cne 'ready') {
+                        $healthFailure = "Required Ready component was not ready: $component"
+                        break
+                    }
+                }
+            }
         }
-    }
+        catch {
+            $healthFailure = "Persisted health snapshot could not be read: $($_.Exception.Message)"
+        }
+        if (-not $healthFailure) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $healthDeadline)
+    if ($healthFailure) { throw $healthFailure }
     [pscustomobject]@{
         ActivePointerBytes = [Convert]::ToBase64String($activeBytes)
         ActiveGeneration = $active.generation

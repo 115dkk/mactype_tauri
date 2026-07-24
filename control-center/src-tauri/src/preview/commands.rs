@@ -35,11 +35,21 @@ pub(super) fn render_profile_preview(
 
 pub(super) fn set_native_preview_visible(
     visible: bool,
+    mode: Option<String>,
+    listing_text: Option<String>,
     state: &PreviewState,
 ) -> Result<bool, String> {
     let root =
         installation_root().ok_or_else(|| "MacType installation was not found".to_owned())?;
-    state.with_manager(|manager| set_native_preview(manager, &root, visible))
+    state.with_manager(|manager| {
+        set_native_preview(
+            manager,
+            &root,
+            visible,
+            mode.as_deref(),
+            listing_text.as_deref(),
+        )
+    })
 }
 
 pub(super) fn preview_diagnostics(state: &PreviewState) -> Result<Vec<String>, String> {

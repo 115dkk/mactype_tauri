@@ -229,6 +229,9 @@ export interface PreviewRequest {
   displayScale: number;
 }
 
+/** How the helper-owned native preview window renders its content. */
+export type NativePreviewMode = "default" | "listing";
+
 export interface PreviewResult {
   requestId: number;
   imagePath: string;

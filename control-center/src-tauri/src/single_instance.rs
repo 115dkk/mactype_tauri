@@ -6,6 +6,12 @@ const EVENT_MARKER_ENV: &str = "MACTYPE_CI_SINGLE_INSTANCE_EVENTS";
 #[cfg(windows)]
 const STARTUP_GATE_NAME: &str = "Local\\MacTypeControlCenter.StartupGate";
 
+/// How long a launch waits for an instance that is already starting. A cold
+/// first run behind antivirus or a first-run WebView2 setup can hold the gate
+/// far longer than a warm one.
+#[cfg(windows)]
+const GATE_WAIT_MS: u32 = 120_000;
+
 pub(crate) struct StartupGate {
     #[cfg(windows)]
     handle: isize,
@@ -32,18 +38,24 @@ impl StartupGate {
             ));
         }
 
-        let wait_result = unsafe { WaitForSingleObject(handle, 30_000) };
+        let wait_result = unsafe { WaitForSingleObject(handle, GATE_WAIT_MS) };
+        if wait_result == WAIT_TIMEOUT {
+            // Another instance has been starting for the whole wait. That is
+            // the situation the single-instance plugin exists to resolve: this
+            // process hands its activation to the one already running and
+            // exits. Refusing to start instead turned a slow first launch into
+            // a crash dialog, because the caller can only panic here.
+            unsafe {
+                windows_sys::Win32::Foundation::CloseHandle(handle);
+            }
+            return Ok(Self { handle: 0 });
+        }
         if wait_result != WAIT_OBJECT_0 && wait_result != WAIT_ABANDONED {
             unsafe {
                 windows_sys::Win32::Foundation::CloseHandle(handle);
             }
-            let reason = if wait_result == WAIT_TIMEOUT {
-                "timed out after 30 seconds".to_owned()
-            } else {
-                format!("failed with wait result 0x{wait_result:08x}")
-            };
             return Err(format!(
-                "failed to acquire the single-instance startup gate: {reason}"
+                "failed to acquire the single-instance startup gate: failed with wait result 0x{wait_result:08x}"
             ));
         }
 
@@ -64,8 +76,13 @@ impl StartupGate {
             System::Threading::ReleaseMutex,
         };
 
-        let handle = self.handle as _;
+        let owned = self.handle;
         self.handle = 0;
+        if owned == 0 {
+            // Started without the gate because another instance held it.
+            return Ok(());
+        }
+        let handle = owned as _;
         let released = unsafe { ReleaseMutex(handle) };
         let release_error = if released == 0 {
             Some(unsafe { GetLastError() })

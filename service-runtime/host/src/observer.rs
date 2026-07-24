@@ -30,8 +30,30 @@ pub struct ProcessIdentity {
     pub critical: bool,
 }
 
+/// How a previously verified injection target looked when it was re-checked
+/// after an untrustworthy terminal result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetLiveness {
+    /// The exact verified identity (PID and creation time) is still running.
+    Alive,
+    /// The verified identity provably no longer exists: the PID is absent,
+    /// the PID was reused by a process with a different creation time, or the
+    /// process has exited.
+    Vanished,
+    /// Liveness could not be established either way.
+    Unknown,
+}
+
 pub trait ProcessInspector {
     fn inspect(&self, pid: u32) -> Result<ProcessIdentity, StructuredServiceError>;
+
+    /// Re-checks whether the exact verified identity still exists after a
+    /// terminal result that could not be trusted. The default cannot prove a
+    /// vanish, so callers keep their conservative classification.
+    fn probe_target_liveness(&self, identity: &ProcessIdentity) -> TargetLiveness {
+        let _ = identity;
+        TargetLiveness::Unknown
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

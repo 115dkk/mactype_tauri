@@ -192,7 +192,7 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .setting-actions .icon-button { width: 24px; min-height: 24px; }
 .switch-control { display: flex; align-items: center; gap: var(--space-2); font-weight: 400 !important; }
 .setting-row select { width: 100%; padding: 0 var(--space-2); }
-.preview-panel { display: grid; position: relative; grid-template-rows: 16px auto auto minmax(0, 1fr) auto; min-height: 0; margin-left: var(--space-5); }
+.preview-panel { display: flex; position: relative; flex-direction: column; min-height: 0; margin-left: var(--space-5); }
 .preview-panel:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 [dir="rtl"] .preview-panel { margin-right: var(--space-5); margin-left: 0; }
 .preview-resizer { display: grid; min-height: 16px; cursor: ns-resize; place-items: center; touch-action: none; }
@@ -201,15 +201,20 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .preview-toolbar, .preview-footer { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-2) 0; }
 .preview-toolbar > div, .preview-controls { display: flex; align-items: center; gap: var(--space-2); }
 .preview-controls select { padding: 0 var(--space-2); }
-.preview-canvas { display: grid; min-height: 0; align-content: center; padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-preview); overflow: hidden; }
+.preview-canvas { display: grid; flex: 1 1 0; min-height: 0; align-content: center; padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-preview); overflow: hidden; }
 .preview-canvas[data-dark="true"] { background: #171a1f; color: #f1f3f5; }
 .preview-canvas p { font-family: "Segoe UI", sans-serif; font-size: 20px; line-height: 1.65; }
-.preview-canvas span { margin-top: var(--space-4); color: var(--color-muted); font-size: 12px; }
 .preview-canvas img { display: block; max-width: 100%; max-height: 100%; height: auto; object-fit: contain; object-position: left center; }
 .sample-input { width: 100%; min-height: 40px; padding: var(--space-2); resize: none; }
 .preview-panel[data-compact="true"] .sample-input, .preview-panel[data-compact="true"] .preview-footer { display: none; }
 .preview-panel[data-compact="true"] .preview-toolbar { padding-block: var(--space-1); }
 .preview-panel[data-compact="true"] .preview-canvas { padding: var(--space-2); }
+.settings-workspace[data-preview-docked="true"] { grid-template-columns: minmax(0, 1fr) clamp(380px, 32%, 460px); grid-template-rows: minmax(0, 1fr); column-gap: var(--space-5); }
+.settings-workspace[data-preview-docked="true"] .preview-panel { min-width: 0; margin: 0; padding-inline-start: var(--space-5); border-inline-start: 1px solid var(--color-border); overflow-y: auto; }
+.settings-workspace[data-preview-docked="true"] .preview-toolbar { align-items: stretch; flex-direction: column; gap: var(--space-2); }
+.settings-workspace[data-preview-docked="true"] .preview-controls { width: 100%; flex-wrap: wrap; }
+.settings-workspace[data-preview-docked="true"] .preview-controls select { flex: 1 1 96px; min-width: 0; }
+.settings-workspace[data-preview-docked="true"] .preview-canvas { min-height: 240px; }
 .collection-editor { display: grid; gap: var(--space-3); padding-block: var(--space-3); }
 .advanced-editor { display: grid; gap: var(--space-3); padding-block: var(--space-3); }
 .advanced-editor fieldset { min-width: 0; margin: 0; padding: var(--space-3); border: 1px solid var(--color-border); }
@@ -243,7 +248,7 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .font-list-editor li { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: var(--space-2); padding-inline-start: var(--space-2); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-control); }
 .font-list-editor li > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .font-list-editor select { width: 100%; padding-inline: var(--space-2); }
-.preview-footer { color: var(--color-muted); font-size: 12px; }
+.preview-footer { justify-content: flex-end; color: var(--color-muted); font-size: 12px; }
 .hint { cursor: help; }
 .hint-term { text-decoration-line: underline; text-decoration-style: dotted; text-decoration-color: var(--color-border-strong); text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .hint:hover .hint-term { text-decoration-color: var(--color-primary); }

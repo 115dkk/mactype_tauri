@@ -205,6 +205,22 @@ test("profile editor categories and collections remain interactive", async ({ pa
   expect(failures, failures.join("\n")).toEqual([]);
 });
 
+test("profile preview docks as a full-height right column at wide widths", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Docked preview behavior is width-specific");
+  await page.setViewportSize({ width: 1680, height: 900 });
+  await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
+
+  await expect(page.locator('.settings-workspace[data-preview-docked="true"]')).toHaveCount(1);
+  await expect(page.locator(".preview-resizer")).toHaveCount(0);
+  const formBox = await page.locator(".settings-form").boundingBox();
+  const previewBox = await page.locator(".preview-panel").boundingBox();
+  expect(formBox).not.toBeNull();
+  expect(previewBox).not.toBeNull();
+  expect(previewBox!.x, "docked preview must sit right of the settings form").toBeGreaterThanOrEqual(formBox!.x + formBox!.width);
+  expect(await overflowingElements(page)).toEqual([]);
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-preview-docked-ko.png`), fullPage: true });
+});
+
 test("settings navigation restores the legacy Wizard and Tuner hierarchy", async ({ page }, testInfo) => {
   await page.goto("/?view=overview&gallery=1&lang=ko", { waitUntil: "networkidle" });
 

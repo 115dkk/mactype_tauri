@@ -17,6 +17,8 @@ import { wizardStepIds, type WizardStepId } from "./profiles/wizardModel";
 type GroupId = "basic" | "shape" | "lcd" | "advanced" | "individual" | "lists";
 type ProfileMode = "quick" | "advanced";
 
+const DOCKED_PREVIEW_MIN_WIDTH = 1080;
+
 interface ProfilesPageProps {
   ciSmoke?: boolean;
   mode?: ProfileMode;
@@ -86,7 +88,20 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
   const [query, setQuery] = useState("");
   const [saveAsOpen, setSaveAsOpen] = useState(false);
   const [saveAsName, setSaveAsName] = useState("");
+  const [previewDocked, setPreviewDocked] = useState(false);
   const previewPanelRef = useRef<ProfilePreviewHandle>(null);
+  const workspaceRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const workspace = workspaceRef.current;
+    if (!workspace) return undefined;
+    setPreviewDocked(workspace.clientWidth >= DOCKED_PREVIEW_MIN_WIDTH);
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) setPreviewDocked(entry.contentRect.width >= DOCKED_PREVIEW_MIN_WIDTH);
+    });
+    observer.observe(workspace);
+    return () => observer.disconnect();
+  }, []);
 
   const fontFamilies = useMemo(() => {
     const referenced = [
@@ -183,7 +198,7 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
           <ul>{mode === "quick" ? wizardStepIds.map((step, index) => <li key={step}><button data-selected={activeWizardStep === step} onClick={() => setActiveWizardStep(step)} type="button"><span className="settings-step" aria-hidden="true">{index + 1}</span><span>{t(`wizard.${step}`)}</span></button></li>) : groups.map((group) => <li key={group.id}><button data-selected={!query && activeGroup === group.id} onClick={() => { setActiveGroup(group.id); setQuery(""); }} type="button"><span>{group.label}</span></button></li>)}</ul>
         </aside>
 
-        <div className="settings-workspace">
+        <div className="settings-workspace" data-preview-docked={previewDocked} ref={workspaceRef}>
           <div className="settings-form">
             <div className="section-heading"><h2><Hint content={mode === "quick" ? t("wizard.guidance") : query ? t("profiles.searchDescription", { query }) : activeDefinition.description}>{mode === "quick" ? activeWizardLabel : query ? t("profiles.searchResults") : activeDefinition.label}</Hint></h2></div>
 
@@ -240,6 +255,7 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
 
           <ProfilePreviewPanel
             ciSmoke={ciSmoke}
+            docked={previewDocked}
             error={previewError}
             fontFace={fontFace}
             fontFamilies={fontFamilies}

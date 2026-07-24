@@ -7,6 +7,7 @@ import {
   type LaunchContext,
   type ManualLaunchCandidate,
   type ProfileEntry,
+  type PreviewRequest,
   type PreviewResult,
   type ProfileSnapshot,
   type RecentActivity,
@@ -44,6 +45,29 @@ function updateGalleryExecutionStatus(status: ExecutionStatus): ExecutionStatus 
 function incrementGalleryCounter(key: string): void {
   const current = Number(window.sessionStorage.getItem(key) ?? "0");
   window.sessionStorage.setItem(key, String(current + 1));
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+/** Deterministic SVG stand-in for the native preview renderer so gallery runs show stable thumbnails. */
+function galleryPreviewImage(request: PreviewRequest): string {
+  const { sample } = request;
+  const fontSizePx = Math.max(8, Math.round(sample.fontSizePt * (sample.dpi / 72)));
+  const lineHeight = Math.round(fontSizePx * 1.5);
+  const inset = Math.round(fontSizePx * 0.75);
+  const text = sample.text
+    .split("\n")
+    .map((line, index) => `<text x="${inset}" y="${inset + lineHeight * (index + 1) - Math.round(fontSizePx * 0.35)}" fill="${sample.foreground}" font-family="${escapeXml(sample.fontFace)}, sans-serif" font-size="${fontSizePx}">${escapeXml(line)}</text>`)
+    .join("");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${sample.widthPx}" height="${sample.heightPx}"><rect width="100%" height="100%" fill="${sample.background}"/>${text}</svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
 export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
@@ -280,17 +304,18 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
 
   renderProfilePreview(request): Promise<PreviewResult | null> {
     const delay = Number(new URLSearchParams(window.location.search).get("preview-delay"));
-    if (!Number.isFinite(delay) || delay <= 0) return Promise.resolve(null);
-    incrementGalleryCounter("gallery-preview-started");
+    const delayed = Number.isFinite(delay) && delay > 0;
     const result: PreviewResult = {
       requestId: ++galleryPreviewRequestId,
-      imagePath: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==",
+      imagePath: galleryPreviewImage(request),
       width: request.sample.widthPx,
       height: request.sample.heightPx,
       dpi: request.sample.dpi,
-      elapsedMs: delay,
+      elapsedMs: delayed ? delay : 0,
       coreVersion: 0,
     };
+    if (!delayed) return Promise.resolve(result);
+    incrementGalleryCounter("gallery-preview-started");
     return new Promise((resolve) => window.setTimeout(() => resolve(result), delay));
   },
 

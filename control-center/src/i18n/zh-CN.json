@@ -479,7 +479,7 @@
   "profiles.applying": "正在应用",
   "profiles.applied": "已将 {name} 应用到实际的 MacType 全系统路径。",
   "execution.profileNotApplied": "尚未应用配置文件",
-  "execution.registeredTitle": "托盘注入程序",
+  "execution.registeredTitle": "随 MacType 启动的程序",
   "execution.registeredCount": "已注册 {count} 个",
   "execution.registeredDescription": "登录或使用托盘命令时，将通过采用用户配置文件的 MacLoader 启动这些程序。",
   "execution.launchRegistered": "启动已登记程序",

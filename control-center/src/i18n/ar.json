@@ -479,7 +479,7 @@
   "profiles.applying": "جارٍ التطبيق",
   "profiles.applied": "تم تطبيق {name} على مسار MacType الفعلي على مستوى النظام.",
   "execution.profileNotApplied": "لم يُطبق أي ملف تعريف بعد",
-  "execution.registeredTitle": "تطبيقات حقن شريط النظام",
+  "execution.registeredTitle": "التطبيقات التي تبدأ مع MacType",
   "execution.registeredCount": "{count} مسجّل",
   "execution.registeredDescription": "عند تسجيل الدخول أو عبر أمر شريط النظام، تبدأ هذه التطبيقات من خلال MacLoader بملف التعريف المطبق.",
   "execution.launchRegistered": "تشغيل التطبيقات المسجلة",

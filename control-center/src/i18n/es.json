@@ -479,7 +479,7 @@
   "profiles.applying": "Aplicando",
   "profiles.applied": "Se aplicó {name} a la ruta activa de MacType en todo el sistema.",
   "execution.profileNotApplied": "Aún no se ha aplicado ningún perfil",
-  "execution.registeredTitle": "Aplicaciones de inyección de la bandeja",
+  "execution.registeredTitle": "Aplicaciones para iniciar con MacType",
   "execution.registeredCount": "{count} registrado(s)",
   "execution.registeredDescription": "Al iniciar sesión o desde la bandeja, estas aplicaciones se abren mediante MacLoader con el perfil aplicado.",
   "execution.launchRegistered": "Iniciar aplicaciones registradas",

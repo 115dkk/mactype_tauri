@@ -479,7 +479,7 @@
   "profiles.applying": "Wird angewendet",
   "profiles.applied": "{name} wurde auf den aktiven systemweiten MacType-Pfad angewendet.",
   "execution.profileNotApplied": "Noch kein Profil angewendet",
-  "execution.registeredTitle": "Tray-Injektions-Apps",
+  "execution.registeredTitle": "Mit MacType zu startende Apps",
   "execution.registeredCount": "{count} registriert",
   "execution.registeredDescription": "Bei der Anmeldung oder per Tray-Befehl starten diese Apps über MacLoader mit dem angewendeten Benutzerprofil.",
   "execution.launchRegistered": "Registrierte Apps starten",

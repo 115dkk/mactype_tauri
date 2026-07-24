@@ -479,7 +479,7 @@
   "profiles.applying": "Application",
   "profiles.applied": "Le profil {name} est appliqué au chemin MacType actif pour tout le système.",
   "execution.profileNotApplied": "Aucun profil n’est encore appliqué",
-  "execution.registeredTitle": "Applications injectées depuis la zone de notification",
+  "execution.registeredTitle": "Applications à lancer avec MacType",
   "execution.registeredCount": "{count} enregistré(s)",
   "execution.registeredDescription": "À la connexion ou via la commande de la zone de notification, ces applications démarrent avec MacLoader et le profil appliqué.",
   "execution.launchRegistered": "Lancer les applications inscrites",

@@ -479,7 +479,7 @@
   "profiles.applying": "正在套用",
   "profiles.applied": "已將 {name} 套用至實際的 MacType 全系統路徑。",
   "execution.profileNotApplied": "尚未套用設定檔",
-  "execution.registeredTitle": "系統匣注入程式",
+  "execution.registeredTitle": "隨 MacType 啟動的程式",
   "execution.registeredCount": "已註冊 {count} 個",
   "execution.registeredDescription": "登入或使用系統匣命令時，會透過套用使用者設定檔的 MacLoader 啟動這些程式。",
   "execution.launchRegistered": "啟動已登錄程式",

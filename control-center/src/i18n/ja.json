@@ -483,7 +483,7 @@
   "profiles.applying": "適用中",
   "profiles.applied": "{name} を実際のシステム全体の MacType 経路に適用しました。",
   "execution.profileNotApplied": "まだプロファイルが適用されていません",
-  "execution.registeredTitle": "トレイ注入アプリ",
+  "execution.registeredTitle": "MacType と一緒に起動するアプリ",
   "execution.registeredCount": "{count} 件登録済み",
   "execution.registeredDescription": "サインイン時またはトレイコマンドから、適用済みプロファイルの MacLoader でこれらのアプリを起動します。",
   "execution.launchRegistered": "登録アプリを起動",

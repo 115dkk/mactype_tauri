@@ -483,7 +483,7 @@
   "profiles.applying": "Applying",
   "profiles.applied": "Applied {name} to the live system-wide MacType path.",
   "execution.profileNotApplied": "No profile has been applied yet",
-  "execution.registeredTitle": "Tray injection apps",
+  "execution.registeredTitle": "Apps to launch with MacType",
   "execution.registeredCount": "{count} registered",
   "execution.registeredDescription": "At sign-in or from the tray command, these apps start through MacLoader with the applied user profile.",
   "execution.launchRegistered": "Launch registered apps",

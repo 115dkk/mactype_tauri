@@ -368,16 +368,17 @@ test("settings navigation restores the legacy Wizard and Tuner hierarchy", async
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-guided-bold-italic-ko.png`), fullPage: true });
 
   // Restored legacy Tuner screen: contrast then gamma sliders before the mode.
-  await page.locator(".settings-index").getByRole("button", { name: "감마" }).click();
-  await expect(page.getByRole("heading", { level: 2, name: "감마" })).toBeVisible();
+  // The step is titled by what it does, not by the core setting it carries.
+  await page.locator(".settings-index").getByRole("button", { name: "밝기와 대비" }).click();
+  await expect(page.getByRole("heading", { level: 2, name: "밝기와 대비" })).toBeVisible();
   await expect(guidedLabels.nth(0)).toHaveText("대비");
   await expect(guidedLabels.nth(1)).toHaveText("감마 값");
   await expect(guidedLabels.nth(2)).toHaveText("감마 방식");
 
   // LCD screen gains the RGB text tuning and compares the current method
   // against the red, green, and blue channels without clipping line four.
-  await page.locator(".settings-index").getByRole("button", { name: "LCD 배열" }).click();
-  await expect(page.getByRole("heading", { level: 2, name: "LCD 배열" })).toBeVisible();
+  await page.locator(".settings-index").getByRole("button", { name: "LCD 배열과 색조" }).click();
+  await expect(page.getByRole("heading", { level: 2, name: "LCD 배열과 색조" })).toBeVisible();
   await expect(guidedLabels.nth(2)).toHaveText("빨강 채널 튜닝");
   await expect(page.locator(".preview-strip")).toHaveCount(4);
   await expect(page.locator(".preview-strip figcaption")).toHaveText(["현재 방식", "R", "G", "B"]);
@@ -449,9 +450,9 @@ test("guided step undo, redo, and discard stay scoped to the current step", asyn
   await page.keyboard.press("Control+y");
   await expect(weightValue).toHaveValue("24");
 
-  // The gamma step starts with an empty history even though the quality step
-  // recorded edits, and its discard leaves the quality step untouched.
-  await page.locator(".settings-index").getByRole("button", { name: "감마" }).click();
+  // The brightness step starts with an empty history even though the quality
+  // step recorded edits, and its discard leaves the quality step untouched.
+  await page.locator(".settings-index").getByRole("button", { name: "밝기와 대비" }).click();
   const contrastValue = page.locator("#contrast-value");
   await expect(undoStep).toBeDisabled();
   await expect(redoStep).toBeDisabled();

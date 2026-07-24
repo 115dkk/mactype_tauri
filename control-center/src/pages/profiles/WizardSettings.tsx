@@ -58,7 +58,10 @@ export function WizardSettings({
   values,
 }: WizardSettingsProps) {
   const stepIndex = wizardStepIds.indexOf(activeStep);
-  const currentSettings = settings.filter((setting) => wizardSettingIdsByStep[activeStep].includes(setting.id));
+  /* Keep the step's own order (legacy Tuner screen order), not schema order. */
+  const currentSettings = wizardSettingIdsByStep[activeStep]
+    .map((settingId) => settings.find((setting) => setting.id === settingId))
+    .filter((setting): setting is SettingDefinition => setting !== undefined);
   const previousStep = wizardStepIds[stepIndex - 1];
   const nextStep = wizardStepIds[stepIndex + 1];
   const stepAtFactory = currentSettings.every((setting) => (values[setting.id] ?? setting.default) === setting.factory);

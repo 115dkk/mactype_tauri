@@ -9,7 +9,7 @@ import { IndividualSettings } from "./profiles/IndividualSettings";
 import { ListsEditor } from "./profiles/ListsEditor";
 import { BasicSettings, LcdSettings, SearchSettings, ShapeSettings } from "./profiles/SchemaSettings";
 import { splitSubstitution } from "./profiles/profileEditorUtils";
-import { ProfilePreviewPanel, type ProfilePreviewHandle } from "./profiles/ProfilePreviewPanel";
+import { ProfilePreviewPanel, type PreviewVariant, type ProfilePreviewHandle } from "./profiles/ProfilePreviewPanel";
 import { useProfileDocument } from "./profiles/useProfileDocument";
 import { WizardSettings } from "./profiles/WizardSettings";
 import { wizardStepIds, type WizardStepId } from "./profiles/wizardModel";
@@ -152,6 +152,34 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
     previewPanelRef.current?.show();
   };
 
+  /* Step-aware preview stacks, mirroring the legacy Tuner screens: the bold
+     and italic screen compares the three styles, the LCD screen compares the
+     current method against the red, green, and blue channels (channel-pure
+     foregrounds isolate each subpixel), and every other screen shows the
+     legacy normal group plus bold group. */
+  const previewVariants = useMemo<ReadonlyArray<PreviewVariant>>(() => {
+    const pangram = t("profiles.samplePangram");
+    if (mode === "quick" && activeWizardStep === "boldItalic") {
+      return [
+        { key: "bold", label: t("wizard.previewBold"), text: pangram, bold: true },
+        { key: "italic", label: t("wizard.previewItalic"), text: pangram, italic: true },
+        { key: "bold-italic", label: t("wizard.previewBoldItalic"), text: pangram, bold: true, italic: true },
+      ];
+    }
+    if (mode === "quick" && activeWizardStep === "lcd") {
+      return [
+        { key: "current", label: t("wizard.previewCurrent"), text: pangram },
+        { key: "channel-r", label: "R", text: pangram, foreground: "#C80000" },
+        { key: "channel-g", label: "G", text: pangram, foreground: "#008A00" },
+        { key: "channel-b", label: "B", text: pangram, foreground: "#0000C8" },
+      ];
+    }
+    return [
+      { key: "normal", label: t("wizard.previewNormal") },
+      { key: "bold", label: t("wizard.previewBold"), text: pangram, bold: true },
+    ];
+  }, [activeWizardStep, mode, t]);
+
   const activeDefinition = groups.find((group) => group.id === activeGroup) ?? groups[0];
   const activeWizardLabel = t(`wizard.${activeWizardStep}`);
   return (
@@ -268,6 +296,7 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
             ref={previewPanelRef}
             t={t}
             values={values}
+            variants={previewVariants}
           />
         </div>
       </div>

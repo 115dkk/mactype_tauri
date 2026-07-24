@@ -205,6 +205,13 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .preview-canvas[data-dark="true"] { background: #171a1f; color: #f1f3f5; }
 .preview-canvas p { font-family: "Segoe UI", sans-serif; font-size: 20px; line-height: 1.65; }
 .preview-canvas img { display: block; max-width: 100%; max-height: 100%; height: auto; object-fit: contain; object-position: left center; }
+/* Sample groups stack vertically (legacy Tuner: normal group + bold group);
+   strips keep their natural height and the canvas scrolls before it clips. */
+.preview-canvas[data-stack="true"] { display: flex; flex-direction: column; gap: var(--space-2); align-content: initial; overflow-y: auto; }
+.preview-canvas[data-stack="true"] img { max-height: none; flex: none; }
+.preview-strip { display: grid; flex: none; margin: 0; gap: 2px; }
+.preview-strip figcaption { color: var(--color-muted); font-size: 11px; font-weight: 600; letter-spacing: 0.02em; }
+.preview-canvas[data-dark="true"] .preview-strip figcaption { color: rgb(241 243 245 / 65%); }
 .sample-input { width: 100%; min-height: 40px; padding: var(--space-2); resize: none; }
 .preview-panel[data-compact="true"] .sample-input, .preview-panel[data-compact="true"] .preview-footer { display: none; }
 .preview-panel[data-compact="true"] .preview-toolbar { padding-block: var(--space-1); }
@@ -215,6 +222,8 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .settings-workspace[data-preview-docked="true"] .preview-controls { width: 100%; flex-wrap: wrap; }
 .settings-workspace[data-preview-docked="true"] .preview-controls select { flex: 1 1 96px; min-width: 0; }
 .settings-workspace[data-preview-docked="true"] .preview-canvas { min-height: 240px; }
+/* Docked stacks size to their content; the docked panel column scrolls. */
+.settings-workspace[data-preview-docked="true"] .preview-canvas[data-stack="true"] { flex: none; }
 .collection-editor { display: grid; gap: var(--space-3); padding-block: var(--space-3); }
 .advanced-editor { display: grid; gap: var(--space-3); padding-block: var(--space-3); }
 .advanced-editor fieldset { min-width: 0; margin: 0; padding: var(--space-3); border: 1px solid var(--color-border); }

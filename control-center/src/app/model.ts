@@ -217,6 +217,9 @@ export interface PreviewSample {
   dpi: number;
   foreground: string;
   background: string;
+  /** Optional GDI style flags; the preview helper defaults both to false. */
+  bold?: boolean;
+  italic?: boolean;
 }
 
 export interface PreviewRequest {

@@ -27,6 +27,17 @@ int wmain(int argc, wchar_t** argv) {
     return 5;
   }
 
+  mtpc::Frame styled;
+  styled.kind = mtpc::MessageKind::render_preview;
+  styled.request_id = 43;
+  styled.json = R"({"overrides":{},"sample":{"text":"MacType preview 123 ABC","fontFace":"Segoe UI","fontSizePt":14,"widthPx":640,"heightPx":96,"dpi":96,"foreground":"#181D23","background":"#EEF1F4","bold":true,"italic":true}})";
+  const mtpc::Frame styledResponse = runtime.render(styled);
+  if (styledResponse.kind != mtpc::MessageKind::preview_rendered || styledResponse.request_id != 43) return 8;
+  if (styledResponse.binary.size() <= signature.size() ||
+      !std::equal(signature.begin(), signature.end(), styledResponse.binary.begin())) {
+    return 9;
+  }
+
   if (runtime.show_native_preview(request, true).kind != mtpc::MessageKind::native_preview_state) return 6;
   runtime.pump_messages();
   if (runtime.show_native_preview(request, false).kind != mtpc::MessageKind::native_preview_state) return 7;

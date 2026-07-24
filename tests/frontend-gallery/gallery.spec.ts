@@ -125,7 +125,7 @@ for (const view of galleryViews) {
   }
 }
 
-test("profile editor categories and collections remain interactive", async ({ page }) => {
+test("profile editor categories and collections remain interactive", async ({ page }, testInfo) => {
   const failures: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") failures.push(`console: ${message.text()}`);
@@ -161,10 +161,19 @@ test("profile editor categories and collections remain interactive", async ({ pa
   await expect(page.locator(".profile-message")).toContainText("지금 저장했습니다");
   await expect(discard).toBeDisabled();
 
+  // The compressed panel auto-grows just enough for the stacked sample groups
+  // (legacy normal + bold) while keeping the native-window control visible.
+  await expect(page.locator(".preview-strip img")).toHaveCount(2);
+  await expect.poll(() => page.locator(".preview-canvas").evaluate((element) => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(0);
   const previewResizer = page.getByRole("separator", { name: "프리뷰 영역 높이 조절" });
-  await expect(previewResizer).toHaveAttribute("aria-valuenow", "380");
+  const settledHeight = Number(await previewResizer.getAttribute("aria-valuenow"));
+  expect(settledHeight, "footer control must stay visible").toBeGreaterThanOrEqual(220);
+  if (testInfo.project.name === "desktop-1280") {
+    // Narrow layouts stack the toolbar, so only the desktop layout proves the compression.
+    expect(settledHeight, "preview must be more compact than the legacy 380px").toBeLessThan(380);
+  }
   await previewResizer.press("ArrowDown");
-  await expect(previewResizer).toHaveAttribute("aria-valuenow", "364");
+  await expect(previewResizer).toHaveAttribute("aria-valuenow", String(settledHeight - 16));
   await previewResizer.press("Home");
   await expect(previewResizer).toHaveAttribute("aria-valuenow", "128");
 
@@ -238,8 +247,8 @@ test("settings navigation restores the legacy Wizard and Tuner hierarchy", async
   await expect(page.getByRole("heading", { level: 1, name: "단계별 설정" })).toBeVisible();
   await expect(page.locator(".profile-mode-title > span")).toHaveText("Tuner");
   expect(await page.locator(".profile-page").innerText()).not.toContain("마법사");
-  await expect(page.locator(".settings-index button")).toHaveCount(8);
-  await expect(page.locator(".settings-step")).toHaveCount(8);
+  await expect(page.locator(".settings-index button")).toHaveCount(9);
+  await expect(page.locator(".settings-step")).toHaveCount(9);
   await expect(page.locator(".settings-index").getByRole("button", { name: "고급·실험" })).toHaveCount(0);
   await expect(page.getByRole("toolbar", { name: "프로필 편집 작업" })).toHaveCount(0);
   const settingsForm = page.locator(".settings-form");
@@ -263,6 +272,40 @@ test("settings navigation restores the legacy Wizard and Tuner hierarchy", async
   await page.getByRole("button", { name: "진행" }).click();
   await expect(page.getByRole("heading", { level: 2, name: "글꼴 품질" })).toBeVisible();
   await expect(page.locator(".guided-scale-words").first()).toContainText("가늘게");
+
+  // Restored legacy Tuner screen: bold and italic together, previewed as
+  // bold, italic, and bold italic lines of the same pangram.
+  await page.getByRole("button", { name: "진행" }).click();
+  await expect(page.getByRole("heading", { level: 2, name: "굵게·기울임" })).toBeVisible();
+  const guidedLabels = page.locator(".guided-label label");
+  await expect(guidedLabels.nth(0)).toHaveText("굵은 글자 굵기");
+  await expect(guidedLabels.nth(1)).toHaveText("굵게 처리 방식");
+  await expect(guidedLabels.nth(2)).toHaveText("기울임 정도");
+  await expect(page.locator(".preview-strip")).toHaveCount(3);
+  await expect(page.locator(".preview-strip figcaption")).toHaveText(["굵게", "기울임", "굵은 기울임"]);
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-guided-bold-italic-ko.png`), fullPage: true });
+
+  // Restored legacy Tuner screen: contrast then gamma sliders before the mode.
+  await page.locator(".settings-index").getByRole("button", { name: "감마" }).click();
+  await expect(page.getByRole("heading", { level: 2, name: "감마" })).toBeVisible();
+  await expect(guidedLabels.nth(0)).toHaveText("대비");
+  await expect(guidedLabels.nth(1)).toHaveText("감마 값");
+  await expect(guidedLabels.nth(2)).toHaveText("감마 방식");
+
+  // LCD screen gains the RGB text tuning and compares the current method
+  // against the red, green, and blue channels without clipping line four.
+  await page.locator(".settings-index").getByRole("button", { name: "LCD 배열" }).click();
+  await expect(page.getByRole("heading", { level: 2, name: "LCD 배열" })).toBeVisible();
+  await expect(guidedLabels.nth(2)).toHaveText("빨강 채널 튜닝");
+  await expect(page.locator(".preview-strip")).toHaveCount(4);
+  await expect(page.locator(".preview-strip figcaption")).toHaveText(["현재 방식", "R", "G", "B"]);
+  await expect.poll(() => page.locator(".preview-canvas").evaluate((element) => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(0);
+  const canvasBox = await page.locator(".preview-canvas").boundingBox();
+  const lastStripBox = await page.locator(".preview-strip").last().boundingBox();
+  if (!canvasBox || !lastStripBox) throw new Error("The stacked LCD preview must be visible");
+  expect(lastStripBox.y + lastStripBox.height, "line four must not be clipped").toBeLessThanOrEqual(canvasBox.y + canvasBox.height + 1);
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-guided-lcd-channels-ko.png`), fullPage: true });
+
   await page.locator(".settings-index").getByRole("button", { name: "힌팅" }).click();
   await expect(page.getByRole("heading", { level: 2, name: "힌팅" })).toBeVisible();
   await page.locator(".settings-index").getByRole("button", { name: "적용 및 미리보기" }).click();

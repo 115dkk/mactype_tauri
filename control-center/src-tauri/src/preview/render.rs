@@ -20,6 +20,11 @@ pub(crate) struct PreviewSample {
     dpi: u32,
     foreground: String,
     background: String,
+    /// Optional GDI style flags; older callers omit them and render regular text.
+    #[serde(default)]
+    bold: bool,
+    #[serde(default)]
+    italic: bool,
 }
 
 #[derive(Serialize)]

@@ -464,17 +464,18 @@ test("settings files use available width for profile paths", async ({ page }, te
   test.skip(testInfo.project.name !== "desktop-1280", "Desktop width proves the selector can use available space.");
 
   await page.goto("/?view=files&gallery=1&lang=en", { waitUntil: "networkidle" });
-  const selector = page.locator(".file-selection-grid select");
-  const pretendardOption = selector.locator("option").filter({ hasText: "Pretendard forever" });
-  const pretendardPath = await pretendardOption.getAttribute("value");
-  if (!pretendardPath) throw new Error("The gallery needs a Pretendard profile option");
-  await selector.selectOption(pretendardPath);
+  const pretendardCard = page.locator(".profile-card").filter({ hasText: "Pretendard forever" });
+  await pretendardCard.locator(".profile-card-select").click();
+  await expect(pretendardCard).toHaveAttribute("data-selected", "true");
 
-  const selectorMetrics = await selector.evaluate((element) => ({
-    clientWidth: element.clientWidth,
-    scrollWidth: element.scrollWidth,
-  }));
-  expect(selectorMetrics.scrollWidth).toBeLessThanOrEqual(selectorMetrics.clientWidth);
+  const cardPaths = page.locator(".profile-card-select code");
+  for (let index = 0; index < await cardPaths.count(); index += 1) {
+    const cardMetrics = await cardPaths.nth(index).evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    }));
+    expect(cardMetrics.scrollWidth).toBeLessThanOrEqual(cardMetrics.clientWidth);
+  }
 
   const displayedPath = page.locator(".selected-file-path code");
   const pathMetrics = await displayedPath.evaluate((element) => ({
@@ -1372,16 +1373,57 @@ test("settings files prefer the most recently worked profile", async ({ page }) 
     value: recent,
   });
   await page.goto("/?view=files&gallery=1&lang=ko&fresh=1", { waitUntil: "networkidle" });
-  await expect(page.locator(".file-selection-grid select")).toHaveValue(recent);
+  await expect(page.locator('.profile-card[data-selected="true"] .profile-card-title strong')).toHaveText("Recent");
+  await expect(page.locator(".selected-file-summary code")).toHaveText("Profiles\\Recent.ini");
 });
 
 test("settings files fall back to the applied profile", async ({ page }) => {
-  const applied = "C:\\Program Files\\MacType\\ini\\Default.ini";
   await page.goto("/?view=files&gallery=1&lang=ko&fresh=1", { waitUntil: "networkidle" });
-  await expect(page.locator(".file-selection-grid select")).toHaveValue(applied);
+  await expect(page.locator('.profile-card[data-selected="true"] .profile-card-title strong')).toHaveText("Default");
+  await expect(page.locator(".selected-file-summary code")).toHaveText("ini\\Default.ini");
 });
 
 test("settings files do not claim the already applied legacy profile is different", async ({ page }) => {
   await page.goto("/?view=files&gallery=1&lang=ko&legacy-applied=1", { waitUntil: "networkidle" });
   await expect(page.locator(".legacy-import-banner")).toHaveCount(0);
+});
+
+test("settings files present profile cards with thumbnails, apply ownership, and a tuner hand-off", async ({ page }, testInfo) => {
+  await page.goto("/?view=files&gallery=1&lang=ko", { waitUntil: "networkidle" });
+
+  const cards = page.locator(".profile-card");
+  await expect(cards).toHaveCount(3);
+  await expect(page.locator(".profile-card-thumb img")).toHaveCount(3);
+
+  const appliedCard = page.locator('.profile-card[data-applied="true"]');
+  await expect(appliedCard).toHaveCount(1);
+  await expect(appliedCard.locator(".profile-card-title strong")).toHaveText("Default");
+  await expect(appliedCard.locator(".profile-card-badge")).toHaveText("적용 중");
+
+  const pretendardCard = cards.filter({ hasText: "Pretendard forever" });
+  await pretendardCard.locator(".profile-card-select").click();
+  await expect(pretendardCard).toHaveAttribute("data-selected", "true");
+  await expect(page.locator(".selected-file-summary code")).toHaveText("ini\\pretendard forever.ini");
+
+  const details = page.locator("details.file-details");
+  await expect(details.locator("summary")).toContainText("파일 상세");
+  await expect(details.locator("summary")).toContainText("UTF-8 · CRLF");
+  await expect(details.locator(".detail-list")).toBeHidden();
+  await details.locator("summary").click();
+  await expect(details.locator(".detail-list")).toBeVisible();
+  await expect(details).toContainText("문자 인코딩");
+
+  await page.getByRole("button", { name: "실제 적용" }).click();
+  await expect(page.locator('[data-operation="file-settings"]')).toContainText("시스템 프로필로 적용했습니다");
+  await expect(appliedCard).toHaveCount(1);
+  await expect(appliedCard.locator(".profile-card-title strong")).toHaveText("Pretendard forever");
+
+  expect(await overflowingElements(page)).toEqual([]);
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-profile-card-selector-ko.png`), fullPage: true });
+
+  const editInTuner = page.getByRole("button", { name: "튜너에서 편집" });
+  await expect(editInTuner).toHaveCount(3);
+  await editInTuner.first().click();
+  await expect(page.locator("body")).toHaveAttribute("data-view", "profiles");
+  await expect(page.locator("body")).toHaveAttribute("data-profile-mode", "advanced");
 });

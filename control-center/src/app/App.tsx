@@ -94,7 +94,7 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
   }, [state.ciSmoke, state.profileMode, state.ready, state.trayStart, state.view]);
 
   const page = useMemo(() => {
-    if (state.view === "files") return <FileSettingsPage />;
+    if (state.view === "files") return <FileSettingsPage onEditInTuner={() => dispatch({ type: "navigate", view: "profiles", profileMode: "advanced" })} />;
     if (state.view === "profiles") return <ProfilesPage ciSmoke={state.ciSmoke} mode={state.profileMode} onModeChange={(profileMode) => dispatch({ type: "navigate", view: "profiles", profileMode })} onPreviewReady={() => void reportFrontendReady("profiles")} />;
     if (state.view === "execution") return <ExecutionPage ciSmoke={state.ciSmoke} onReady={() => void reportFrontendReady("execution")} />;
     if (state.view === "diagnostics") return <DiagnosticsPage

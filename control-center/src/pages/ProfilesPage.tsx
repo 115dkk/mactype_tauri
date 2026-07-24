@@ -290,6 +290,7 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
             onPreviewReady={onPreviewReady}
             profilePath={profile?.path ?? null}
             ref={previewPanelRef}
+            savedValues={savedValues}
             t={t}
             values={values}
             variants={previewVariants}

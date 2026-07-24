@@ -39,14 +39,14 @@ pub use helper_broker::{
 };
 pub use injection_orchestrator::{
     InjectionOrchestrator, ProcessAttemptRecord, ProcessOutcome, RetryPolicy, RetryScheduler,
-    SessionChange, MAX_TRACKED_PROCESS_RESULTS,
+    SessionChange, MAX_TRACKED_PROCESS_RESULTS, TARGET_VANISHED_RESULT_CODE,
 };
 #[cfg(windows)]
 pub use named_pipe::{NamedPipeHealthPublisher, HEALTH_PIPE_SECURITY_SDDL};
 pub type ProcessOrchestrator<'a> = InjectionOrchestrator<'a>;
 pub use observer::{
     subscribe_process_creation, BrokerDisposition, BrokerResult, InjectionBroker, InjectionRequest,
-    ProcessArchitecture, ProcessEventSource, ProcessIdentity, ProcessInspector,
+    ProcessArchitecture, ProcessEventSource, ProcessIdentity, ProcessInspector, TargetLiveness,
     PROCESS_CREATION_QUERY,
 };
 pub use orchestration_runtime::initialize_process_orchestration;

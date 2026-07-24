@@ -8,7 +8,8 @@ use mactype_service_host::{
     initialize_process_orchestration, subscribe_process_creation, BrokerDisposition, BrokerResult,
     InjectionBroker, InjectionRequest, ProcessArchitecture, ProcessEventSource, ProcessIdentity,
     ProcessInspector, ProcessOrchestrator, ProcessOutcome, RetryPolicy, RetryScheduler,
-    SessionChange, MAX_TRACKED_PROCESS_RESULTS, PROCESS_CREATION_QUERY,
+    SessionChange, TargetLiveness, MAX_TRACKED_PROCESS_RESULTS, PROCESS_CREATION_QUERY,
+    TARGET_VANISHED_RESULT_CODE,
 };
 
 #[derive(Default)]
@@ -812,6 +813,181 @@ fn post_resume_service_stop_is_terminal_and_degrades_its_generation() {
     let health_error = orchestrator.generation_health_error().unwrap();
     assert_eq!(health_error.code, "injection-cleanup-unknown");
     assert_eq!(health_error.win32_error, Some(1223));
+}
+
+struct ProbingInspector {
+    identity: ProcessIdentity,
+    liveness: TargetLiveness,
+    probes: Mutex<Vec<ProcessIdentity>>,
+}
+
+impl ProbingInspector {
+    fn new(identity: ProcessIdentity, liveness: TargetLiveness) -> Self {
+        Self {
+            identity,
+            liveness,
+            probes: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl ProcessInspector for ProbingInspector {
+    fn inspect(&self, pid: u32) -> Result<ProcessIdentity, StructuredServiceError> {
+        assert_eq!(pid, self.identity.pid);
+        Ok(self.identity.clone())
+    }
+
+    fn probe_target_liveness(&self, identity: &ProcessIdentity) -> TargetLiveness {
+        self.probes.lock().unwrap().push(identity.clone());
+        self.liveness
+    }
+}
+
+fn cleanup_unknown_broker() -> SequenceBroker {
+    SequenceBroker {
+        results: Mutex::new(VecDeque::from([BrokerResult {
+            disposition: BrokerDisposition::Rejected,
+            code: "post-injection-state-cleanup-unknown".to_owned(),
+            win32_error: Some(299),
+        }])),
+        requests: Mutex::new(Vec::new()),
+    }
+}
+
+#[test]
+fn cleanup_unknown_for_a_vanished_target_is_a_trusted_skip_with_a_bounded_result() {
+    let identity = ProcessIdentity {
+        pid: 42,
+        creation_time: 100,
+        session_id: 2,
+        architecture: ProcessArchitecture::X64,
+        protected: false,
+        critical: false,
+    };
+    let inspector = ProbingInspector::new(identity.clone(), TargetLiveness::Vanished);
+    let broker = cleanup_unknown_broker();
+    let mut orchestrator = ProcessOrchestrator::new(
+        900,
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        &inspector,
+        &broker,
+    );
+
+    assert_eq!(
+        orchestrator.handle_pid(42).unwrap(),
+        ProcessOutcome::Skipped
+    );
+    assert_eq!(
+        *inspector.probes.lock().unwrap(),
+        std::slice::from_ref(&identity)
+    );
+    let record = orchestrator.last_result(42, 100).unwrap();
+    assert_eq!(record.outcome, ProcessOutcome::Skipped);
+    assert_eq!(record.code, TARGET_VANISHED_RESULT_CODE);
+    assert_eq!(record.win32_error, Some(299));
+    assert!(
+        orchestrator.generation_health_error().is_none(),
+        "a proven target vanish must not change global service health"
+    );
+    assert_eq!(
+        orchestrator.handle_pid(42).unwrap(),
+        ProcessOutcome::Duplicate
+    );
+    assert_eq!(broker.requests.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn cleanup_unknown_for_a_target_still_alive_keeps_the_degraded_classification() {
+    let identity = ProcessIdentity {
+        pid: 42,
+        creation_time: 100,
+        session_id: 2,
+        architecture: ProcessArchitecture::X64,
+        protected: false,
+        critical: false,
+    };
+    let inspector = ProbingInspector::new(identity, TargetLiveness::Alive);
+    let broker = cleanup_unknown_broker();
+    let mut orchestrator = ProcessOrchestrator::new(
+        900,
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        &inspector,
+        &broker,
+    );
+
+    assert_eq!(
+        orchestrator.handle_pid(42).unwrap(),
+        ProcessOutcome::Rejected
+    );
+    assert_eq!(inspector.probes.lock().unwrap().len(), 1);
+    let record = orchestrator.last_result(42, 100).unwrap();
+    assert_eq!(record.outcome, ProcessOutcome::Rejected);
+    assert_eq!(record.code, "post-injection-state-cleanup-unknown");
+    let health_error = orchestrator.generation_health_error().unwrap();
+    assert_eq!(health_error.code, "injection-cleanup-unknown");
+    assert_eq!(health_error.win32_error, Some(299));
+}
+
+#[test]
+fn undeterminable_liveness_after_cleanup_unknown_keeps_the_degraded_classification() {
+    let identity = ProcessIdentity {
+        pid: 42,
+        creation_time: 100,
+        session_id: 2,
+        architecture: ProcessArchitecture::X64,
+        protected: false,
+        critical: false,
+    };
+    let inspector = ProbingInspector::new(identity, TargetLiveness::Unknown);
+    let broker = cleanup_unknown_broker();
+    let mut orchestrator = ProcessOrchestrator::new(
+        900,
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        &inspector,
+        &broker,
+    );
+
+    assert_eq!(
+        orchestrator.handle_pid(42).unwrap(),
+        ProcessOutcome::Rejected
+    );
+    let health_error = orchestrator.generation_health_error().unwrap();
+    assert_eq!(health_error.code, "injection-cleanup-unknown");
+}
+
+#[test]
+fn terminal_results_without_cleanup_unknown_never_probe_target_liveness() {
+    let identity = ProcessIdentity {
+        pid: 42,
+        creation_time: 100,
+        session_id: 2,
+        architecture: ProcessArchitecture::X64,
+        protected: false,
+        critical: false,
+    };
+    let inspector = ProbingInspector::new(identity, TargetLiveness::Vanished);
+    let broker = SequenceBroker {
+        results: Mutex::new(VecDeque::from([BrokerResult {
+            disposition: BrokerDisposition::Rejected,
+            code: "module-load-failed".to_owned(),
+            win32_error: None,
+        }])),
+        requests: Mutex::new(Vec::new()),
+    };
+    let mut orchestrator = ProcessOrchestrator::new(
+        900,
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        &inspector,
+        &broker,
+    );
+
+    assert_eq!(
+        orchestrator.handle_pid(42).unwrap(),
+        ProcessOutcome::Rejected
+    );
+    assert!(inspector.probes.lock().unwrap().is_empty());
+    let record = orchestrator.last_result(42, 100).unwrap();
+    assert_eq!(record.code, "module-load-failed");
 }
 
 #[test]

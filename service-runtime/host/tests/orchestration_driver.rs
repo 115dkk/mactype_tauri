@@ -9,7 +9,7 @@ use mactype_service_host::{
     initialize_process_orchestration, BrokerDisposition, BrokerResult, HealthPublisher,
     InitializedRuntime, InjectionBroker, InjectionRequest, ProcessArchitecture, ProcessEventSource,
     ProcessIdentity, ProcessInspector, RuntimeInitializer, ServiceRuntime, ServiceStatus,
-    SessionChange, StatusReporter, StopSignal,
+    SessionChange, StatusReporter, StopSignal, TargetLiveness,
 };
 
 const PROFILE_DIGEST: &str =
@@ -370,6 +370,91 @@ fn cleanup_unknown_degrades_its_generation_then_next_success_recovers_ready() {
         assert!(error.message.contains(identity));
     }
     assert_eq!(error.win32_error, Some(109));
+    let latest = reports.last().unwrap();
+    assert_eq!(latest.health, HealthState::Ready);
+    assert!(latest.last_error.is_none());
+    assert_eq!(latest.injection.x64.success_count, 1);
+    assert_eq!(latest.injection.x64.last_success.as_ref().unwrap().pid, 43);
+    assert_eq!(
+        requests
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|request| request.identity.pid)
+            .collect::<Vec<_>>(),
+        [42, 43]
+    );
+}
+
+struct VanishedTargetInspector;
+
+impl ProcessInspector for VanishedTargetInspector {
+    fn inspect(&self, pid: u32) -> Result<ProcessIdentity, StructuredServiceError> {
+        Ok(ProcessIdentity {
+            pid,
+            creation_time: 100,
+            session_id: 2,
+            architecture: ProcessArchitecture::X64,
+            protected: false,
+            critical: false,
+        })
+    }
+
+    fn probe_target_liveness(&self, _identity: &ProcessIdentity) -> TargetLiveness {
+        TargetLiveness::Vanished
+    }
+}
+
+struct VanishedTargetInitializer {
+    requests: Arc<Mutex<Vec<InjectionRequest>>>,
+}
+
+impl RuntimeInitializer for VanishedTargetInitializer {
+    fn initialize(&self) -> Result<InitializedRuntime, StructuredServiceError> {
+        initialize_process_orchestration(
+            Some(PROFILE_DIGEST.to_owned()),
+            900,
+            RUNTIME_GENERATION,
+            Box::new(QueueSource {
+                snapshot: Vec::new(),
+                pids: VecDeque::from([Some(42), Some(43)]),
+            }),
+            Box::new(VanishedTargetInspector),
+            Box::new(RecoveringBroker {
+                attempts: AtomicUsize::new(0),
+                requests: self.requests.clone(),
+                first_code: "post-injection-state-cleanup-unknown",
+                first_win32_error: Some(299),
+            }),
+        )
+    }
+}
+
+#[test]
+fn cleanup_unknown_for_a_vanished_target_never_degrades_global_health() {
+    let recorder = Recorder::default();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+
+    ServiceRuntime::new("0.2.0")
+        .run(
+            &recorder,
+            &recorder,
+            &VanishedTargetInitializer {
+                requests: requests.clone(),
+            },
+            &StopAfterTwoProcesses {
+                polls: AtomicUsize::new(0),
+            },
+        )
+        .unwrap();
+
+    let reports = recorder.reports.lock().unwrap();
+    assert!(
+        reports
+            .iter()
+            .all(|report| report.health != HealthState::Degraded),
+        "a proven target vanish must never latch Degraded health"
+    );
     let latest = reports.last().unwrap();
     assert_eq!(latest.health, HealthState::Ready);
     assert!(latest.last_error.is_none());

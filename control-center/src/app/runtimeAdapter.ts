@@ -9,6 +9,7 @@ import type {
   LegacyProfileCandidate,
   SystemServiceAction,
   LaunchContext,
+  ManualLaunchCandidate,
   PreviewRequest,
   PreviewResult,
   ProfileEntry,
@@ -39,6 +40,7 @@ export interface ControlCenterRuntimeAdapter {
   registerSessionTarget(target: string, arguments_: ReadonlyArray<string>): Promise<ReadonlyArray<SessionTarget>>;
   removeSessionTarget(target: string): Promise<ReadonlyArray<SessionTarget>>;
   launchRegisteredTargets(): Promise<ReadonlyArray<number>>;
+  listManualLaunchCandidates(): Promise<ReadonlyArray<ManualLaunchCandidate>>;
   rediscoverInstallation(): Promise<InstallationStatus>;
   reconnectPreview(): Promise<InstallationStatus>;
   loadDiagnosticReport(): Promise<string>;

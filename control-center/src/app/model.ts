@@ -98,6 +98,13 @@ export interface SessionTarget {
   arguments: ReadonlyArray<string>;
 }
 
+export interface ManualLaunchCandidate {
+  pid: number;
+  name: string;
+  path: string;
+  windowTitle: string | null;
+}
+
 export interface AppliedProfile {
   sourceProfile: string;
   runtimeRoot: string;

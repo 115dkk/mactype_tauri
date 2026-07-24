@@ -9,11 +9,14 @@ use std::{
 use tauri::State;
 
 mod autostart;
+mod process_candidates;
 mod runtime;
 mod session;
 mod storage;
 
 use autostart::autostart_value;
+use process_candidates::list_manual_launch_candidates_impl;
+pub use process_candidates::ManualLaunchCandidate;
 #[cfg(test)]
 use runtime::prepare_runtime_at;
 pub(crate) use runtime::record_system_injection_choice;
@@ -198,6 +201,11 @@ pub(crate) fn set_session_autostart(enabled: bool) -> Result<bool, String> {
 #[tauri::command]
 pub(crate) fn launch_with_mactype(target: String, arguments: Vec<String>) -> Result<u32, String> {
     launch_with_mactype_impl(&target, &arguments)
+}
+
+#[tauri::command]
+pub(crate) fn list_manual_launch_candidates() -> Result<Vec<ManualLaunchCandidate>, String> {
+    list_manual_launch_candidates_impl()
 }
 
 fn execute_machine_action(

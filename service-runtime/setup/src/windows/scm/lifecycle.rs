@@ -394,22 +394,20 @@ impl ServiceManager {
             return Err(SetupError::Io(io::Error::last_os_error()));
         }
         drop(service);
-        self.wait_until_absent(STATE_TIMEOUT, &expected)
+        self.wait_until_absent(STATE_TIMEOUT)
     }
 
-    fn wait_until_absent(
-        &self,
-        timeout: Duration,
-        expected: &ServiceConfig,
-    ) -> Result<(), SetupError> {
+    /// Ownership and configuration are verified before `DeleteService` is
+    /// issued; once the delete succeeded the SCM record is delete-pending and
+    /// an external open handle can keep it observable with unstable
+    /// `QueryServiceConfigW` output, so this poll checks absence only instead
+    /// of re-comparing the captured configuration.
+    fn wait_until_absent(&self, timeout: Duration) -> Result<(), SetupError> {
         let deadline = Instant::now() + timeout;
         loop {
-            let observation = match self.open_service(SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG) {
+            let observation = match self.open_service(SERVICE_QUERY_STATUS) {
                 Ok(None) => AbsenceObservation::Absent,
-                Ok(Some(service)) => {
-                    ensure_captured_configuration_unchanged(expected, &query_config(service.0)?)?;
-                    AbsenceObservation::Present
-                }
+                Ok(Some(_)) => AbsenceObservation::Present,
                 Err(error)
                     if error.raw_os_error() == Some(ERROR_SERVICE_MARKED_FOR_DELETE as i32) =>
                 {
@@ -429,12 +427,74 @@ fn ensure_captured_configuration_unchanged(
     expected: &ServiceConfig,
     actual: &ServiceConfig,
 ) -> Result<(), SetupError> {
-    if actual != expected {
-        return Err(SetupError::Runtime(
-            "the fixed service configuration changed after ownership was verified".to_owned(),
-        ));
+    match describe_configuration_difference(expected, actual) {
+        None => Ok(()),
+        Some(difference) => Err(SetupError::Runtime(format!(
+            "the fixed service configuration changed after ownership was verified: {difference}"
+        ))),
     }
-    Ok(())
+}
+
+fn describe_configuration_difference(
+    expected: &ServiceConfig,
+    actual: &ServiceConfig,
+) -> Option<String> {
+    let mut differences = Vec::new();
+    let mut compare = |field: &str, expected: String, actual: String| {
+        if expected != actual {
+            differences.push(format!("{field} changed ({expected} -> {actual})"));
+        }
+    };
+    compare(
+        "service_type",
+        expected.service_type.to_string(),
+        actual.service_type.to_string(),
+    );
+    compare(
+        "start_type",
+        expected.start_type.to_string(),
+        actual.start_type.to_string(),
+    );
+    compare(
+        "error_control",
+        expected.error_control.to_string(),
+        actual.error_control.to_string(),
+    );
+    compare(
+        "image_path",
+        format!("[{}]", expected.image_path),
+        format!("[{}]", actual.image_path),
+    );
+    compare(
+        "account",
+        format!("[{}]", expected.account),
+        format!("[{}]", actual.account),
+    );
+    compare(
+        "display_name",
+        format!("[{}]", expected.display_name),
+        format!("[{}]", actual.display_name),
+    );
+    compare(
+        "load_order_group",
+        format!("[{}]", expected.load_order_group),
+        format!("[{}]", actual.load_order_group),
+    );
+    compare(
+        "tag_id",
+        expected.tag_id.to_string(),
+        actual.tag_id.to_string(),
+    );
+    compare(
+        "dependencies",
+        format!("{:?}", expected.dependencies),
+        format!("{:?}", actual.dependencies),
+    );
+    if differences.is_empty() {
+        None
+    } else {
+        Some(differences.join(", "))
+    }
 }
 
 pub(super) fn query_status(service: SC_HANDLE) -> Result<SERVICE_STATUS_PROCESS, SetupError> {
@@ -565,7 +625,36 @@ mod tests {
 
         let mut changed = unchanged;
         changed.image_path = r#""C:\foreign\mactype-service.exe" --service"#.to_owned();
-        assert!(ensure_captured_configuration_unchanged(&captured, &changed).is_err());
+        let error = ensure_captured_configuration_unchanged(&captured, &changed).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("image_path changed"));
+        assert!(message.contains(r#"bin\0.2.0\mactype-service.exe"#));
+        assert!(message.contains(r#"C:\foreign\mactype-service.exe"#));
+    }
+
+    #[test]
+    fn configuration_tamper_diagnostic_names_every_changed_field_with_old_and_new() {
+        let captured = owned_configuration(
+            r#""C:\Program Files\MacType Control Center\Service\bin\0.2.0\mactype-service.exe" --service"#,
+        );
+        let mut changed = captured.clone();
+        changed.display_name = "Foreign Service".to_owned();
+        changed.start_type = windows_sys::Win32::System::Services::SERVICE_DEMAND_START;
+
+        let error = ensure_captured_configuration_unchanged(&captured, &changed).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message
+            .contains("the fixed service configuration changed after ownership was verified"));
+        assert!(message.contains(&format!(
+            "start_type changed ({} -> {})",
+            windows_sys::Win32::System::Services::SERVICE_AUTO_START,
+            windows_sys::Win32::System::Services::SERVICE_DEMAND_START
+        )));
+        assert!(message.contains(
+            "display_name changed ([MacType Control Center Service] -> [Foreign Service])"
+        ));
+        assert!(!message.contains("image_path changed"));
     }
 
     #[test]

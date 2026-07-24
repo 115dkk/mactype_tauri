@@ -280,6 +280,38 @@ test("native preview display mode dropdown drives the runtime adapter", async ({
   expect(await overflowingElements(page)).toEqual([]);
 });
 
+test("preview comparison renders the saved and edited sides only while edits exist", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "The preview toolbar wraps on compact layouts");
+  await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
+
+  const compare = page.getByRole("button", { name: "비교", exact: true });
+  const strips = page.locator(".preview-strip");
+  await expect(compare).toBeDisabled();
+  const baseline = await strips.count();
+  expect(baseline).toBeGreaterThan(0);
+
+  const firstSelect = page.locator(".setting-row select").first();
+  const initialOption = await firstSelect.inputValue();
+  const nextOption = await firstSelect.locator("option").evaluateAll((options, current) => options.map((option) => (option as HTMLOptionElement).value).find((value) => value !== current), initialOption);
+  if (!nextOption) throw new Error("The first profile setting must expose an alternate option");
+  await firstSelect.selectOption(nextOption);
+  await expect(compare).toBeEnabled();
+
+  await compare.click();
+  await expect(compare).toHaveAttribute("aria-pressed", "true");
+  await expect(strips).toHaveCount(baseline * 2);
+  await expect(page.locator(".preview-strip figcaption").first()).toContainText("저장본");
+  await expect(page.locator(".preview-strip figcaption").nth(1)).toContainText("편집본");
+  expect(await overflowingElements(page)).toEqual([]);
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-preview-compare-ko.png`), fullPage: true });
+
+  // Saving makes both sides identical, so the comparison switches itself off.
+  await page.getByRole("button", { name: "지금 저장" }).click();
+  await expect(compare).toBeDisabled();
+  await expect(compare).toHaveAttribute("aria-pressed", "false");
+  await expect(strips).toHaveCount(baseline);
+});
+
 test("settings navigation restores the legacy Wizard and Tuner hierarchy", async ({ page }, testInfo) => {
   await page.goto("/?view=overview&gallery=1&lang=ko", { waitUntil: "networkidle" });
 

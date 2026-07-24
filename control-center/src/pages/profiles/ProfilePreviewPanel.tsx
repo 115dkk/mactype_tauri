@@ -1,4 +1,4 @@
-import { AlertTriangle, Pencil, SlidersHorizontal } from "lucide-react";
+import { AlertTriangle, Columns2, Pencil, SlidersHorizontal } from "lucide-react";
 import {
   forwardRef,
   useCallback,
@@ -39,16 +39,19 @@ export interface PreviewVariant {
   text?: string;
 }
 
+type CompareSide = "saved" | "edited";
+
 interface PreviewLine {
   key: string;
   label: string | null;
+  side: CompareSide | null;
   result: PreviewResult;
 }
 
 interface PendingBatch {
   generation: number;
   batchId: number;
-  requests: ReadonlyArray<{ key: string; label: string | null; request: PreviewRequest }>;
+  requests: ReadonlyArray<{ key: string; label: string | null; side: CompareSide | null; request: PreviewRequest }>;
 }
 
 export interface ProfilePreviewHandle {
@@ -67,6 +70,7 @@ interface ProfilePreviewPanelProps {
   onFontFaceChange: (font: string) => void;
   onPreviewReady?: () => void;
   profilePath: string | null;
+  savedValues?: Readonly<Record<string, number>>;
   t: I18nValue["t"];
   values: Record<string, number>;
   variants: ReadonlyArray<PreviewVariant>;
@@ -97,6 +101,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
   onFontFaceChange,
   onPreviewReady,
   profilePath,
+  savedValues,
   t,
   values,
   variants,
@@ -109,6 +114,18 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
   const [nativeMode, setNativeMode] = useState<NativePreviewMode>("default");
   const [previewHeight, setPreviewHeight] = useState(DEFAULT_PREVIEW_HEIGHT);
   const [sampleEditorOpen, setSampleEditorOpen] = useState(false);
+  const [comparing, setComparing] = useState(false);
+  const hasUnsavedEdits = savedValues !== undefined
+    && Object.keys(values).some((key) => values[key] !== savedValues[key]);
+  /* Only the comparing state pulls the saved snapshot into the render batch:
+     while comparison is off this stays undefined, so a fresh savedValues
+     object from the document cannot retrigger the preview round-trip. */
+  const compareOverrides = comparing ? savedValues : undefined;
+  /* Saving makes both sides identical, so comparison stops paying for the
+     extra render rather than showing the same strip twice. */
+  useEffect(() => {
+    if (!hasUnsavedEdits) setComparing(false);
+  }, [hasUnsavedEdits]);
   const previousDefaultSample = useRef(sampleText);
   const canvasRef = useRef<HTMLDivElement>(null);
   const previewPanelRef = useRef<HTMLElement>(null);
@@ -198,7 +215,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
               break;
             }
             if (!rendered) continue;
-            lines.push({ key: entry.key, label: entry.label, result: rendered });
+            lines.push({ key: entry.key, label: entry.label, side: entry.side, result: rendered });
             if (pending.batchId >= newestBatch.current) {
               newestBatch.current = pending.batchId;
               setPreviewStack([...lines]);
@@ -233,17 +250,26 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
       if (!isCurrentGeneration(requestGeneration)) return;
       const displayScale = window.devicePixelRatio || 1;
       const width = Math.max(320, canvasRef.current?.clientWidth ?? 760);
+      /* Comparing means rendering each variant twice, so the saved side is
+         only requested while the reader has comparison switched on. Captions
+         are resolved at render time; keeping them out of the batch means the
+         translator identity cannot retrigger a render round-trip. */
+      const sides: ReadonlyArray<{ suffix: string; overrides: Record<string, number>; side: CompareSide | null }> = compareOverrides
+        ? [{ suffix: ":saved", overrides: compareOverrides, side: "saved" },
+           { suffix: ":edited", overrides: values, side: "edited" }]
+        : [{ suffix: "", overrides: values, side: null }];
       pendingPreview.current = {
         generation: requestGeneration,
         batchId: ++batchCounter.current,
-        requests: variants.map((variant) => {
+        requests: variants.flatMap((variant) => {
           const text = variant.text ?? sampleText;
-          return {
-            key: variant.key,
+          return sides.map((side) => ({
+            key: `${variant.key}${side.suffix}`,
             label: variant.label,
+            side: side.side,
             request: {
               profilePath,
-              overrides: values,
+              overrides: side.overrides,
               displayScale,
               sample: {
                 text,
@@ -258,13 +284,13 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
                 italic: variant.italic ?? false,
               },
             },
-          };
+          }));
         }),
       };
       void drainPreviewQueue();
     }, 40);
     return () => window.clearTimeout(timer);
-  }, [darkPreview, drainPreviewQueue, fontFace, fontSize, isCurrentGeneration, profilePath, sampleText, values, variants]);
+  }, [compareOverrides, darkPreview, drainPreviewQueue, fontFace, fontSize, isCurrentGeneration, profilePath, sampleText, values, variants]);
 
   const resizePreviewFromKeyboard = (event: KeyboardEvent<HTMLDivElement>) => {
     const increments: Partial<Record<string, number>> = { ArrowUp: 16, ArrowDown: -16, PageUp: 48, PageDown: -48 };
@@ -364,7 +390,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
       <div className="preview-canvas" data-dark={darkPreview} data-stack={previewStack.length > 0} ref={canvasRef} role="img" aria-label={t("profiles.previewAria")}>
         {previewStack.length > 0 ? previewStack.map((line) => (
           <figure className="preview-strip" data-variant={line.key} key={line.key}>
-            {line.label && <figcaption>{line.label}</figcaption>}
+            {(line.label || line.side) && <figcaption>{[line.label, line.side && t(line.side === "saved" ? "profiles.compareSaved" : "profiles.compareEdited")].filter(Boolean).join(" · ")}</figcaption>}
             <img
               alt={t("profiles.previewImageAlt")}
               height={line.result.height / displayScale}
@@ -377,6 +403,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
       </div>
       {error && <p className="inline-error"><AlertTriangle aria-hidden="true" size={15} /> {error}</p>}
       <div className="preview-footer">
+        <button aria-pressed={comparing} className="text-action" disabled={!hasUnsavedEdits} onClick={() => setComparing((current) => !current)} title={hasUnsavedEdits ? undefined : t("profiles.compareUnavailable")} type="button"><Columns2 aria-hidden="true" size={14} /> {t("profiles.compareToggle")}</button>
         <select aria-label={t("profiles.nativeDisplayMode")} onChange={(event) => changeNativeMode(event.target.value === "listing" ? "listing" : "default")} value={nativeMode}>
           <option value="default">{t("profiles.nativeDisplayDefault")}</option>
           <option value="listing">{t("profiles.nativeDisplayListing")}</option>

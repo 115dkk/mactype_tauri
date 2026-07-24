@@ -1,4 +1,4 @@
-import { AlertTriangle, SlidersHorizontal } from "lucide-react";
+import { AlertTriangle, Pencil, SlidersHorizontal } from "lucide-react";
 import {
   forwardRef,
   useCallback,
@@ -32,6 +32,7 @@ export interface ProfilePreviewHandle {
 
 interface ProfilePreviewPanelProps {
   ciSmoke: boolean;
+  docked: boolean;
   error: string | null;
   fontFace: string;
   fontFamilies: ReadonlyArray<string>;
@@ -51,6 +52,7 @@ function errorMessage(error: unknown): string {
 
 export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePreviewPanelProps>(function ProfilePreviewPanel({
   ciSmoke,
+  docked,
   error,
   fontFace,
   fontFamilies,
@@ -69,6 +71,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [nativeVisible, setNativeVisible] = useState(false);
   const [previewHeight, setPreviewHeight] = useState(DEFAULT_PREVIEW_HEIGHT);
+  const [sampleEditorOpen, setSampleEditorOpen] = useState(false);
   const previousDefaultSample = useRef(sampleText);
   const canvasRef = useRef<HTMLDivElement>(null);
   const previewPanelRef = useRef<HTMLElement>(null);
@@ -230,8 +233,8 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
   const fallbackSample = t("profiles.sampleText").split("\n");
 
   return (
-    <section className="preview-panel" aria-labelledby="preview-title" data-compact={previewHeight < 220} ref={previewPanelRef} style={{ height: previewHeight }} tabIndex={-1}>
-      <div
+    <section className="preview-panel" aria-labelledby="preview-title" data-compact={!docked && previewHeight < 220} ref={previewPanelRef} style={docked ? undefined : { height: previewHeight }} tabIndex={-1}>
+      {!docked && <div
         aria-label={t("profiles.previewResize")}
         aria-orientation="horizontal"
         aria-valuemax={MAX_PREVIEW_HEIGHT}
@@ -245,16 +248,17 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
         onPointerUp={finishPreviewResize}
         role="separator"
         tabIndex={0}
-      ><span aria-hidden="true" /></div>
+      ><span aria-hidden="true" /></div>}
       <div className="preview-toolbar">
         <div><SlidersHorizontal aria-hidden="true" size={17} /><h2 id="preview-title">{t("profiles.preview")}</h2></div>
         <div className="preview-controls">
           <select aria-label={t("profiles.previewFont")} onChange={(event) => onFontFaceChange(event.target.value)} value={fontFace}>{fontFamilies.map((font) => <option key={font} value={font}>{fontOptionLabel(font)}</option>)}</select>
           <select aria-label={t("profiles.previewSize")} onChange={(event) => setFontSize(Number(event.target.value))} value={fontSize}><option value="12">12 pt</option><option value="14">14 pt</option><option value="18">18 pt</option></select>
+          <button aria-expanded={sampleEditorOpen} className="text-action" onClick={() => setSampleEditorOpen((current) => !current)} type="button"><Pencil aria-hidden="true" size={14} /> {t("profiles.editSample")}</button>
           <button className="text-action" onClick={() => setDarkPreview((current) => !current)} type="button">{darkPreview ? t("profiles.lightBackground") : t("profiles.darkBackground")}</button>
         </div>
       </div>
-      <textarea className="sample-input" aria-label={t("profiles.sampleAria")} onChange={(event) => setSampleText(event.target.value)} rows={3} value={sampleText} />
+      {sampleEditorOpen && <textarea className="sample-input" aria-label={t("profiles.sampleAria")} onChange={(event) => setSampleText(event.target.value)} rows={2} value={sampleText} />}
       <div className="preview-canvas" data-dark={darkPreview} ref={canvasRef} role="img" aria-label={t("profiles.previewAria")}>
         {preview ? (
           <img
@@ -279,11 +283,10 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
             src={previewImageUrl(preview.imagePath)}
             width={preview.width / displayScale}
           />
-        ) : <>{fallbackSample.map((line) => <p key={line}>{line}</p>)}<span>{t("profiles.helperWaiting")}</span></>}
+        ) : fallbackSample.map((line) => <p key={line}>{line}</p>)}
       </div>
       {error && <p className="inline-error"><AlertTriangle aria-hidden="true" size={15} /> {error}</p>}
       <div className="preview-footer">
-        <span>{preview ? t("profiles.previewRequest", { request: preview.requestId, dpi: preview.dpi, elapsed: preview.elapsedMs }) : t("profiles.previewReady")}</span>
         <button className="text-action" onClick={() => void toggleNativePreview()} type="button">{nativeVisible ? t("profiles.closeNative") : t("profiles.openNative")}</button>
       </div>
     </section>

@@ -476,7 +476,7 @@
   "profiles.applying": "적용 중",
   "profiles.applied": "{name} 프로필을 실제 MacType 시스템 범위에 적용했습니다.",
   "execution.profileNotApplied": "아직 적용된 프로필이 없습니다",
-  "execution.registeredTitle": "트레이 주입 프로그램",
+  "execution.registeredTitle": "MacType으로 시작할 프로그램",
   "execution.registeredCount": "{count}개 등록됨",
   "execution.registeredDescription": "로그인 또는 트레이 명령 시 이 프로그램들을 사용자 프로필이 적용된 MacLoader로 시작합니다.",
   "execution.launchRegistered": "등록 프로그램 실행",

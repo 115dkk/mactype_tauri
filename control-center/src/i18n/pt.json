@@ -476,7 +476,7 @@
   "profiles.applying": "A aplicar",
   "profiles.applied": "O perfil {name} foi aplicado ao caminho ativo do MacType em todo o sistema.",
   "execution.profileNotApplied": "Ainda não foi aplicado qualquer perfil",
-  "execution.registeredTitle": "Aplicações de injeção do tabuleiro",
+  "execution.registeredTitle": "Aplicações a iniciar com o MacType",
   "execution.registeredCount": "{count} registado(s)",
   "execution.registeredDescription": "Ao iniciar sessão ou pelo comando do tabuleiro, estas aplicações arrancam através do MacLoader com o perfil aplicado.",
   "execution.launchRegistered": "Iniciar aplicações registadas",

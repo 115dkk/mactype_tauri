@@ -6,7 +6,7 @@ import {
   type LegacyProfileCandidate,
   type LaunchContext,
   type ManualLaunchCandidate,
-  type NativePreviewMode,
+  type NativePreviewOptions,
   type ProfileEntry,
   type PreviewRequest,
   type PreviewResult,
@@ -321,8 +321,9 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
     return new Promise((resolve) => window.setTimeout(() => resolve(result), delay));
   },
 
-  setNativePreview(visible: boolean, mode?: NativePreviewMode): Promise<boolean> {
-    window.sessionStorage.setItem("gallery-native-preview", visible ? mode ?? "default" : "hidden");
+  setNativePreview(visible: boolean, options?: NativePreviewOptions): Promise<boolean> {
+    window.sessionStorage.setItem("gallery-native-preview", visible ? options?.mode ?? "default" : "hidden");
+    window.sessionStorage.setItem("gallery-native-preview-background", visible ? options?.background ?? "" : "hidden");
     return Promise.resolve(visible);
   },
 

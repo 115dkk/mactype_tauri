@@ -141,7 +141,6 @@
   "wizard.savedState": "目前的值已儲存在設定檔中。",
   "wizard.applyMacType": "套用至 MacType",
   "wizard.guidance": "閱讀各項說明並選擇數值。變更會立即顯示在預覽中。",
-  "wizard.previewNormal": "一般",
   "wizard.previewBold": "粗體",
   "wizard.previewItalic": "斜體",
   "wizard.previewBoldItalic": "粗斜體",

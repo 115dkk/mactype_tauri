@@ -21,10 +21,12 @@ import {
 import type { I18nValue } from "../../i18n/i18n";
 
 const DEFAULT_PREVIEW_HEIGHT = 300;
-const QUICK_PREVIEW_HEIGHT = 280;
+const QUICK_PREVIEW_HEIGHT = 240;
 const MIN_PREVIEW_HEIGHT = 128;
 const MAX_PREVIEW_HEIGHT = 640;
-const MIN_SETTINGS_HEIGHT = 160;
+/* The undocked preview is a bottom panel sharing its column with the settings
+   form, so it never grows past the room this leaves the form. */
+const MIN_SETTINGS_HEIGHT = 240;
 /* The preview helper rejects bitmaps below 64 device pixels. */
 const MIN_STRIP_HEIGHT = 64;
 
@@ -78,6 +80,14 @@ interface ProfilePreviewPanelProps {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/* One palette drives the rendered strips and the helper-owned native window,
+   so the background choice means the same thing in both places. */
+function previewPalette(dark: boolean): { foreground: string; background: string } {
+  return dark
+    ? { foreground: "#F1F3F5", background: "#171A1F" }
+    : { foreground: "#181D23", background: "#EEF1F4" };
 }
 
 /* The helper rejects bitmaps above 2048 device pixels; stay under it at 2x. */
@@ -182,22 +192,6 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
   ), []);
   const clampPreviewHeight = useCallback((height: number) => Math.min(maximumPreviewHeight(), Math.max(MIN_PREVIEW_HEIGHT, height)), [maximumPreviewHeight]);
 
-  /* Step-aware stacks may need more room (four LCD lines); grow the panel by
-     the measured canvas overflow so the last line stays visible instead of
-     being clipped. A deliberate manual resize wins until the stack shape
-     changes again. */
-  const manualResize = useRef(false);
-  useEffect(() => {
-    manualResize.current = false;
-  }, [variants.length]);
-  useEffect(() => {
-    if (docked || manualResize.current) return;
-    const canvas = canvasRef.current;
-    if (!canvas || previewStack.length === 0) return;
-    const overflow = canvas.scrollHeight - canvas.clientHeight;
-    if (overflow > 0) setPreviewHeight((current) => clampPreviewHeight(current + overflow));
-  }, [clampPreviewHeight, docked, previewStack]);
-
   const drainPreviewQueue = useCallback(async () => {
     if (previewRunning.current) return;
     previewRunning.current = true;
@@ -278,8 +272,8 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
                 widthPx: Math.round(width * displayScale),
                 heightPx: Math.round(stripHeightFor(text, fontSize) * displayScale),
                 dpi: Math.round(96 * displayScale),
-                foreground: variant.foreground ?? (darkPreview ? "#F1F3F5" : "#181D23"),
-                background: darkPreview ? "#171A1F" : "#EEF1F4",
+                foreground: variant.foreground ?? previewPalette(darkPreview).foreground,
+                background: previewPalette(darkPreview).background,
                 bold: variant.bold ?? false,
                 italic: variant.italic ?? false,
               },
@@ -295,7 +289,6 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
   const resizePreviewFromKeyboard = (event: KeyboardEvent<HTMLDivElement>) => {
     const increments: Partial<Record<string, number>> = { ArrowUp: 16, ArrowDown: -16, PageUp: 48, PageDown: -48 };
     const increment = increments[event.key];
-    if (event.key === "Home" || event.key === "End" || increment !== undefined) manualResize.current = true;
     if (event.key === "Home") {
       event.preventDefault();
       setPreviewHeight(MIN_PREVIEW_HEIGHT);
@@ -308,7 +301,6 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
     }
   };
   const startPreviewResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    manualResize.current = true;
     event.currentTarget.setPointerCapture(event.pointerId);
     resizeStart.current = { pointerId: event.pointerId, y: event.clientY, height: previewHeight };
   };
@@ -323,22 +315,36 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
-  const applyNativePreview = useCallback(async (visible: boolean, mode: NativePreviewMode) => {
+  /* The native window carries its own colours rather than inheriting them from
+     whichever strip the helper rendered last; otherwise the window silently
+     shows the final variant's style (bold, or a channel-pure colour). */
+  const applyNativePreview = useCallback(async (visible: boolean, mode: NativePreviewMode, dark: boolean) => {
     const requestGeneration = generation.current;
     try {
-      const nowVisible = await setNativePreview(visible, mode, t("profiles.samplePangram"));
+      const nowVisible = await setNativePreview(visible, {
+        mode,
+        listingText: t("profiles.samplePangram"),
+        ...previewPalette(dark),
+      });
       if (isCurrentGeneration(requestGeneration)) setNativeVisible(nowVisible);
     } catch (caught: unknown) {
       if (isCurrentGeneration(requestGeneration)) onError(errorMessage(caught));
     }
   }, [isCurrentGeneration, onError, t]);
 
-  const toggleNativePreview = () => applyNativePreview(!nativeVisible, nativeMode);
+  const toggleNativePreview = () => applyNativePreview(!nativeVisible, nativeMode, darkPreview);
 
   /* The legacy-listing choice repaints an already-open native window in place. */
   const changeNativeMode = (mode: NativePreviewMode) => {
     setNativeMode(mode);
-    if (nativeVisible) void applyNativePreview(true, mode);
+    if (nativeVisible) void applyNativePreview(true, mode, darkPreview);
+  };
+
+  /* An open native window follows the background choice without reopening. */
+  const toggleDarkPreview = () => {
+    const dark = !darkPreview;
+    setDarkPreview(dark);
+    if (nativeVisible) void applyNativePreview(true, nativeMode, dark);
   };
 
   const verifyCiWorkflow = (line: PreviewLine) => {
@@ -383,7 +389,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
           <select aria-label={t("profiles.previewFont")} onChange={(event) => onFontFaceChange(event.target.value)} value={fontFace}>{fontFamilies.map((font) => <option key={font} value={font}>{fontOptionLabel(font)}</option>)}</select>
           <select aria-label={t("profiles.previewSize")} onChange={(event) => setFontSize(Number(event.target.value))} value={fontSize}><option value="12">12 pt</option><option value="14">14 pt</option><option value="18">18 pt</option></select>
           <button aria-expanded={sampleEditorOpen} className="text-action" onClick={() => setSampleEditorOpen((current) => !current)} type="button"><Pencil aria-hidden="true" size={14} /> {t("profiles.editSample")}</button>
-          <button className="text-action" onClick={() => setDarkPreview((current) => !current)} type="button">{darkPreview ? t("profiles.lightBackground") : t("profiles.darkBackground")}</button>
+          <button className="text-action" onClick={toggleDarkPreview} type="button">{darkPreview ? t("profiles.lightBackground") : t("profiles.darkBackground")}</button>
         </div>
       </div>
       {sampleEditorOpen && <textarea className="sample-input" aria-label={t("profiles.sampleAria")} onChange={(event) => setSampleText(event.target.value)} rows={2} value={sampleText} />}

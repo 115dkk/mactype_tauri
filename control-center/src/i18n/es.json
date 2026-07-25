@@ -141,7 +141,6 @@
   "wizard.savedState": "Los valores actuales están guardados en el perfil.",
   "wizard.applyMacType": "Aplicar a MacType",
   "wizard.guidance": "Revisa cada explicación y elige un valor. Los cambios aparecen inmediatamente en la vista previa.",
-  "wizard.previewNormal": "Normal",
   "wizard.previewBold": "Negrita",
   "wizard.previewItalic": "Cursiva",
   "wizard.previewBoldItalic": "Negrita cursiva",

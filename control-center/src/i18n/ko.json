@@ -141,7 +141,6 @@
   "wizard.savedState": "현재 값이 프로필에 저장되어 있습니다.",
   "wizard.applyMacType": "MacType에 적용",
   "wizard.guidance": "각 설정의 설명을 확인하고 값을 선택하세요. 변경 내용은 즉시 미리보기에 반영됩니다.",
-  "wizard.previewNormal": "일반",
   "wizard.previewBold": "굵게",
   "wizard.previewItalic": "기울임",
   "wizard.previewBoldItalic": "굵은 기울임",

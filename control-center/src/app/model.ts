@@ -232,6 +232,14 @@ export interface PreviewRequest {
 /** How the helper-owned native preview window renders its content. */
 export type NativePreviewMode = "default" | "listing";
 
+/** Presentation for the native window, independent of the rendered strips. */
+export interface NativePreviewOptions {
+  mode?: NativePreviewMode;
+  listingText?: string;
+  foreground?: string;
+  background?: string;
+}
+
 export interface PreviewResult {
   requestId: number;
   imagePath: string;

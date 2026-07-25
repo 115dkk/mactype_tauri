@@ -141,7 +141,6 @@
   "wizard.savedState": "The current values are saved in the profile.",
   "wizard.applyMacType": "Apply to MacType",
   "wizard.guidance": "Review each explanation and choose a value. Changes appear in the preview immediately.",
-  "wizard.previewNormal": "Normal",
   "wizard.previewBold": "Bold",
   "wizard.previewItalic": "Italic",
   "wizard.previewBoldItalic": "Bold italic",

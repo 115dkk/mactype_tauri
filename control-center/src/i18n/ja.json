@@ -141,7 +141,6 @@
   "wizard.savedState": "現在の値はプロファイルに保存されています。",
   "wizard.applyMacType": "MacType に適用",
   "wizard.guidance": "各設定の説明を確認して値を選択してください。変更はすぐにプレビューへ反映されます。",
-  "wizard.previewNormal": "標準",
   "wizard.previewBold": "太字",
   "wizard.previewItalic": "斜体",
   "wizard.previewBoldItalic": "太字斜体",

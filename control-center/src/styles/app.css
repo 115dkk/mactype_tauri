@@ -68,7 +68,7 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .button.primary { border-color: var(--color-primary); background: var(--color-primary); color: var(--color-on-primary); }
 .button.danger { border-color: var(--color-danger); color: var(--color-danger); }
 .icon-button { display: inline-grid; width: var(--control-height); place-items: center; padding: 0; }
-.text-action { display: inline-flex; flex: 0 0 auto; min-height: var(--control-height); align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border: 0; background: transparent; color: var(--color-primary); font-weight: 600; white-space: nowrap; }
+.text-action { display: inline-flex; min-height: var(--control-height); align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border: 0; background: transparent; color: var(--color-primary); font-weight: 600; }
 .text-action:hover { text-decoration: underline; }
 .status-band { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-4); margin-top: var(--space-6); padding: var(--space-4); border: 1px solid var(--color-warning); border-radius: var(--radius-control); background: var(--color-surface); }
 .status-band > svg { color: var(--color-warning); }
@@ -202,6 +202,10 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .preview-resizer:hover span, .preview-resizer:focus-visible span { width: 64px; background: var(--color-primary); }
 .preview-toolbar, .preview-footer { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-2) 0; }
 .preview-toolbar > div, .preview-controls { display: flex; align-items: center; gap: var(--space-2); }
+/* The toolbar's selects absorb the shrinking; without this its actions are
+   squeezed until the label breaks a word per line. Kept local to the toolbar
+   because longer translations elsewhere still need to wrap. */
+.preview-controls .text-action { flex: 0 0 auto; white-space: nowrap; }
 .preview-controls select { padding: 0 var(--space-2); }
 .preview-canvas { display: grid; flex: 1 1 0; min-height: 0; align-content: center; padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-preview); overflow: hidden; }
 .preview-canvas[data-dark="true"] { background: #171a1f; color: #f1f3f5; }

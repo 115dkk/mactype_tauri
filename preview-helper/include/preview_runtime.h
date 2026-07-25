@@ -32,6 +32,7 @@ class PreviewRuntime {
                                       std::uint32_t& height, std::uint32_t& dpi, std::string& error);
   void paint_native(HWND window);
   void grow_native_window_for_listing();
+  void apply_native_colors(const std::string& json);
 
   std::wstring install_root_;
   std::wstring dll_path_;
@@ -50,6 +51,11 @@ class PreviewRuntime {
   std::wstring listing_text_{L"The quick brown fox jumps over the lazy dog."};
   COLORREF foreground_{RGB(24, 29, 35)};
   COLORREF background_{RGB(238, 241, 244)};
+  /// The native window carries its own colours. Deriving them from the last
+  /// rendered bitmap would let a stacked sample group decide what the window
+  /// shows, so the show request sets these instead.
+  COLORREF native_foreground_{RGB(24, 29, 35)};
+  COLORREF native_background_{RGB(238, 241, 244)};
   std::uint32_t dpi_{96};
   std::uint32_t core_version_{};
   bool has_dll_get_version_{};

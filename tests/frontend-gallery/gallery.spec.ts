@@ -161,21 +161,28 @@ test("profile editor categories and collections remain interactive", async ({ pa
   await expect(page.locator(".profile-message")).toContainText("지금 저장했습니다");
   await expect(discard).toBeDisabled();
 
-  // The compressed panel auto-grows just enough for the stacked sample groups
-  // (legacy normal + bold) while keeping the native-window control visible.
-  await expect(page.locator(".preview-strip img")).toHaveCount(2);
-  await expect.poll(() => page.locator(".preview-canvas").evaluate((element) => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(0);
+  // The default stack renders the sample once, because a second sample group
+  // would claim the height the settings form needs. Wide layouts dock the
+  // preview beside the form; narrower ones keep a bottom panel that no longer
+  // grows into the form.
+  await expect(page.locator(".preview-strip img")).toHaveCount(1);
   const previewResizer = page.getByRole("separator", { name: "프리뷰 영역 높이 조절" });
-  const settledHeight = Number(await previewResizer.getAttribute("aria-valuenow"));
-  expect(settledHeight, "footer control must stay visible").toBeGreaterThanOrEqual(220);
-  if (testInfo.project.name === "desktop-1280") {
-    // Narrow layouts stack the toolbar, so only the desktop layout proves the compression.
-    expect(settledHeight, "preview must be more compact than the legacy 380px").toBeLessThan(380);
+  const docked = await page.locator(".settings-workspace").getAttribute("data-preview-docked") === "true";
+  if (docked) {
+    await expect(previewResizer).toHaveCount(0);
+    const formBox = await page.locator(".settings-form").boundingBox();
+    const panelBox = await page.locator(".preview-panel").boundingBox();
+    if (!formBox || !panelBox) throw new Error("The docked layout must show both columns");
+    expect(panelBox.x, "the docked preview sits beside the form, not under it").toBeGreaterThanOrEqual(formBox.x + formBox.width - 1);
+  } else {
+    const settledHeight = Number(await previewResizer.getAttribute("aria-valuenow"));
+    expect(settledHeight, "footer control must stay visible").toBeGreaterThanOrEqual(220);
+    expect(settledHeight, "the panel must not grow past its default").toBeLessThanOrEqual(300);
+    await previewResizer.press("ArrowDown");
+    await expect(previewResizer).toHaveAttribute("aria-valuenow", String(settledHeight - 16));
+    await previewResizer.press("Home");
+    await expect(previewResizer).toHaveAttribute("aria-valuenow", "128");
   }
-  await previewResizer.press("ArrowDown");
-  await expect(previewResizer).toHaveAttribute("aria-valuenow", String(settledHeight - 16));
-  await previewResizer.press("Home");
-  await expect(previewResizer).toHaveAttribute("aria-valuenow", "128");
 
   await page.getByRole("button", { name: "LCD·픽셀 배열" }).click();
   await expect(page.getByRole("heading", { name: "LCD·픽셀 배열" })).toBeVisible();
@@ -271,10 +278,19 @@ test("native preview display mode dropdown drives the runtime adapter", async ({
   await expect(modeSelect.locator("option")).toHaveText(["기본 표시", "나열 표시"]);
 
   const nativePreviewState = () => page.evaluate(() => window.sessionStorage.getItem("gallery-native-preview"));
+  const nativePreviewBackground = () => page.evaluate(() => window.sessionStorage.getItem("gallery-native-preview-background"));
   await page.getByRole("button", { name: "실제 창에서 보기" }).click();
   await expect.poll(nativePreviewState).toBe("default");
+  await expect.poll(nativePreviewBackground).toBe("#EEF1F4");
+  // The background choice reaches the open window without reopening it, and it
+  // survives a display-mode change.
+  await page.getByRole("button", { name: "어두운 배경" }).click();
+  await expect.poll(nativePreviewBackground).toBe("#171A1F");
   await modeSelect.selectOption("listing");
   await expect.poll(nativePreviewState).toBe("listing");
+  await expect.poll(nativePreviewBackground).toBe("#171A1F");
+  await page.getByRole("button", { name: "밝은 배경" }).click();
+  await expect.poll(nativePreviewBackground).toBe("#EEF1F4");
   await page.getByRole("button", { name: "실제 창 닫기" }).click();
   await expect.poll(nativePreviewState).toBe("hidden");
   expect(await overflowingElements(page)).toEqual([]);
@@ -349,6 +365,18 @@ test("settings navigation restores the legacy Wizard and Tuner hierarchy", async
   await expect(page.locator(".setting-actions")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "단계 기본값 복원" })).toBeVisible();
   expect(await settingsForm.evaluate((element) => element.scrollWidth > element.clientWidth), "Guided settings must not have internal horizontal scrolling").toBe(false);
+  // The generic overflow gate skips anything inside an overflow-hidden
+  // ancestor, so the workspace column needs its own window-bounds check: a
+  // wide control in the preview toolbar used to inflate the column past the
+  // right edge, clipping the step body instead of scrolling.
+  for (const selector of [".settings-form", ".preview-panel", ".wizard-step-tools"]) {
+    const bounds = await page.locator(selector).first().evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return { left: Math.round(rect.left), right: Math.round(rect.right), viewport: document.documentElement.clientWidth };
+    });
+    expect(bounds.right, `${selector} must stay inside the window`).toBeLessThanOrEqual(bounds.viewport + 1);
+    expect(bounds.left, `${selector} must not start off the left edge`).toBeGreaterThanOrEqual(-1);
+  }
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-guided-rendering-ko.png`), fullPage: true });
 
   await page.getByRole("button", { name: "진행" }).click();
@@ -382,11 +410,18 @@ test("settings navigation restores the legacy Wizard and Tuner hierarchy", async
   await expect(guidedLabels.nth(2)).toHaveText("빨강 채널 튜닝");
   await expect(page.locator(".preview-strip")).toHaveCount(4);
   await expect(page.locator(".preview-strip figcaption")).toHaveText(["현재 방식", "R", "G", "B"]);
-  await expect.poll(() => page.locator(".preview-canvas").evaluate((element) => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(0);
-  const canvasBox = await page.locator(".preview-canvas").boundingBox();
-  const lastStripBox = await page.locator(".preview-strip").last().boundingBox();
-  if (!canvasBox || !lastStripBox) throw new Error("The stacked LCD preview must be visible");
-  expect(lastStripBox.y + lastStripBox.height, "line four must not be clipped").toBeLessThanOrEqual(canvasBox.y + canvasBox.height + 1);
+  // Four lines scroll inside the stack instead of stretching the panel into
+  // the step body, so line four is reachable and the step keeps its room. A
+  // desktop window docks the guided preview beside the step rather than under it.
+  await page.locator(".preview-strip").last().scrollIntoViewIfNeeded();
+  await expect(page.locator(".preview-strip").last()).toBeInViewport();
+  const stepBox = await page.locator(".wizard-step-content").boundingBox();
+  if (!stepBox) throw new Error("The guided step body must stay visible");
+  expect(stepBox.height, "the step body keeps its room beside the four-line stack").toBeGreaterThanOrEqual(240);
+  if (testInfo.project.name === "desktop-1280") {
+    await expect(page.locator(".settings-workspace")).toHaveAttribute("data-preview-docked", "true");
+    await expect(page.getByRole("separator", { name: "프리뷰 영역 높이 조절" })).toHaveCount(0);
+  }
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-guided-lcd-channels-ko.png`), fullPage: true });
 
   await page.locator(".settings-index").getByRole("button", { name: "힌팅" }).click();
@@ -1618,3 +1653,4 @@ test("settings files present profile cards with thumbnails, apply ownership, and
   await expect(page.locator("body")).toHaveAttribute("data-view", "profiles");
   await expect(page.locator("body")).toHaveAttribute("data-profile-mode", "advanced");
 });
+

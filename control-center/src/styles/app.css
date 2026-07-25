@@ -192,7 +192,9 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .setting-actions .icon-button { width: 24px; min-height: 24px; }
 .switch-control { display: flex; align-items: center; gap: var(--space-2); font-weight: 400 !important; }
 .setting-row select { width: 100%; padding: 0 var(--space-2); }
-.preview-panel { display: flex; position: relative; flex-direction: column; min-height: 0; margin-left: var(--space-5); }
+/* min-width: 0 keeps the toolbar's min-content width (a font-family select is
+   wide) from inflating the workspace column past the window. */
+.preview-panel { display: flex; position: relative; flex-direction: column; min-width: 0; min-height: 0; margin-left: var(--space-5); }
 .preview-panel:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 [dir="rtl"] .preview-panel { margin-right: var(--space-5); margin-left: 0; }
 .preview-resizer { display: grid; min-height: 16px; cursor: ns-resize; place-items: center; touch-action: none; }
@@ -200,13 +202,17 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .preview-resizer:hover span, .preview-resizer:focus-visible span { width: 64px; background: var(--color-primary); }
 .preview-toolbar, .preview-footer { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-2) 0; }
 .preview-toolbar > div, .preview-controls { display: flex; align-items: center; gap: var(--space-2); }
+/* The toolbar's selects absorb the shrinking; without this its actions are
+   squeezed until the label breaks a word per line. Kept local to the toolbar
+   because longer translations elsewhere still need to wrap. */
+.preview-controls .text-action { flex: 0 0 auto; white-space: nowrap; }
 .preview-controls select { padding: 0 var(--space-2); }
 .preview-canvas { display: grid; flex: 1 1 0; min-height: 0; align-content: center; padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-preview); overflow: hidden; }
 .preview-canvas[data-dark="true"] { background: #171a1f; color: #f1f3f5; }
 .preview-canvas p { font-family: "Segoe UI", sans-serif; font-size: 20px; line-height: 1.65; }
 .preview-canvas img { display: block; max-width: 100%; max-height: 100%; height: auto; object-fit: contain; object-position: left center; }
-/* Sample groups stack vertically (legacy Tuner: normal group + bold group);
-   strips keep their natural height and the canvas scrolls before it clips. */
+/* Step-aware sample groups stack vertically; strips keep their natural height
+   and the canvas scrolls rather than the panel growing into the settings. */
 .preview-canvas[data-stack="true"] { display: flex; flex-direction: column; gap: var(--space-2); align-content: initial; overflow-y: auto; }
 .preview-canvas[data-stack="true"] img { max-height: none; flex: none; }
 .preview-strip { display: grid; flex: none; margin: 0; gap: 2px; }
@@ -216,8 +222,8 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .preview-panel[data-compact="true"] .sample-input, .preview-panel[data-compact="true"] .preview-footer { display: none; }
 .preview-panel[data-compact="true"] .preview-toolbar { padding-block: var(--space-1); }
 .preview-panel[data-compact="true"] .preview-canvas { padding: var(--space-2); }
-.settings-workspace[data-preview-docked="true"] { grid-template-columns: minmax(0, 1fr) clamp(380px, 32%, 460px); grid-template-rows: minmax(0, 1fr); column-gap: var(--space-5); }
-.settings-workspace[data-preview-docked="true"] .preview-panel { min-width: 0; margin: 0; padding-inline-start: var(--space-5); border-inline-start: 1px solid var(--color-border); overflow-y: auto; }
+.settings-workspace[data-preview-docked="true"] { grid-template-columns: minmax(0, 1fr) clamp(340px, 30%, 440px); grid-template-rows: minmax(0, 1fr); column-gap: var(--space-5); }
+.settings-workspace[data-preview-docked="true"] .preview-panel { margin: 0; padding-inline-start: var(--space-5); border-inline-start: 1px solid var(--color-border); overflow-y: auto; }
 .settings-workspace[data-preview-docked="true"] .preview-toolbar { align-items: stretch; flex-direction: column; gap: var(--space-2); }
 .settings-workspace[data-preview-docked="true"] .preview-controls { width: 100%; flex-wrap: wrap; }
 .settings-workspace[data-preview-docked="true"] .preview-controls select { flex: 1 1 96px; min-width: 0; }
@@ -257,7 +263,7 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .list-editor select { width: 100%; padding-inline: var(--space-2); }
 .list-editor-empty { display: grid; min-height: 48px; margin: var(--space-1) 0; padding: var(--space-2); place-items: center; border: 1px dashed var(--color-border-strong); border-radius: var(--radius-control); color: var(--color-muted); font-size: 12px; }
 .list-editor .inline-error { margin-top: 0; }
-.list-add-row { display: flex; gap: var(--space-2); }
+.list-add-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .list-add-row input { flex: 1; min-width: 0; padding-inline: var(--space-2); font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .list-add-row .button { flex: 0 0 auto; white-space: nowrap; }
 .preview-footer { justify-content: flex-end; color: var(--color-muted); font-size: 12px; }
@@ -508,6 +514,15 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
   :root { --nav-width: 176px; --settings-index-width: 168px; --settings-control-width: 200px; }
   .page { padding: var(--space-6); }
   .manual-launcher { grid-template-columns: 1fr; }
+  /* The undocked panel is as narrow here as it is on a phone, so it takes the
+     same stacked toolbar rather than squeezing every control onto one row. */
+  .preview-toolbar { align-items: stretch; flex-direction: column; }
+  .preview-controls { width: 100%; flex-wrap: wrap; }
+  .preview-controls select { flex: 1 1 96px; min-width: 0; }
+  .wizard-step-tools { justify-content: flex-start; }
+  /* Two list columns leave too little room for an entry field beside its add
+     button once the workspace stops overflowing the window. */
+  .list-grid { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -107,6 +107,10 @@ struct NativePreviewRequest<'a> {
     display_mode: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     listing_text: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    foreground: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    background: Option<&'a str>,
 }
 
 pub(super) fn set_native_preview(
@@ -115,6 +119,8 @@ pub(super) fn set_native_preview(
     visible: bool,
     display_mode: Option<&str>,
     listing_text: Option<&str>,
+    foreground: Option<&str>,
+    background: Option<&str>,
 ) -> Result<bool, String> {
     let kind = if visible {
         SHOW_NATIVE_PREVIEW
@@ -125,6 +131,8 @@ pub(super) fn set_native_preview(
         serde_json::to_vec(&NativePreviewRequest {
             display_mode: display_mode.unwrap_or("default"),
             listing_text,
+            foreground,
+            background,
         })
         .map_err(|error| error.to_string())?
     } else {

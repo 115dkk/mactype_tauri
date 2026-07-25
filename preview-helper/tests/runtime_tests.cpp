@@ -62,5 +62,32 @@ int wmain(int argc, wchar_t** argv) {
   }
   runtime.pump_messages();
   if (runtime.show_native_preview(plain, false).kind != mtpc::MessageKind::native_preview_state) return 14;
+
+  /* The native window keeps its own colours: the show request sets them, and
+     an omitted field leaves the previous choice in place. */
+  mtpc::Frame dark;
+  dark.kind = mtpc::MessageKind::show_native_preview;
+  dark.request_id = 46;
+  dark.json = R"({"displayMode":"default","foreground":"#F1F3F5","background":"#171A1F"})";
+  if (runtime.show_native_preview(dark, true).json.find("\"background\":\"#171A1F\"") ==
+      std::string::npos) {
+    return 15;
+  }
+  runtime.pump_messages();
+  if (runtime.show_native_preview(plain, true).json.find("\"background\":\"#171A1F\"") ==
+      std::string::npos) {
+    return 16;
+  }
+  runtime.pump_messages();
+  mtpc::Frame light;
+  light.kind = mtpc::MessageKind::show_native_preview;
+  light.request_id = 47;
+  light.json = R"({"displayMode":"listing","background":"#EEF1F4"})";
+  if (runtime.show_native_preview(light, true).json.find("\"background\":\"#EEF1F4\"") ==
+      std::string::npos) {
+    return 17;
+  }
+  runtime.pump_messages();
+  if (runtime.show_native_preview(light, false).kind != mtpc::MessageKind::native_preview_state) return 18;
   return 0;
 }

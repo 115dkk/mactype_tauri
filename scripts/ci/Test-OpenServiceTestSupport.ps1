@@ -40,10 +40,18 @@ function Assert-ProcessExited {
 function Wait-TestPid {
     param([Parameter(Mandatory)] [string] $Path)
 
+    # The child creates the PID file before its contents land, so an existing
+    # file can still read back empty. PowerShell turns an empty string into 0,
+    # which names the idle process, and the caller would then wait five seconds
+    # for something that never exits. Keep polling until the file holds a
+    # process id rather than trusting its existence.
     $deadline = [DateTime]::UtcNow.AddSeconds(5)
     while ([DateTime]::UtcNow -lt $deadline) {
         if (Test-Path -LiteralPath $Path -PathType Leaf) {
-            return [int] ([System.IO.File]::ReadAllText($Path))
+            $published = ''
+            try { $published = [System.IO.File]::ReadAllText($Path).Trim() } catch { $published = '' }
+            $id = 0
+            if ([int]::TryParse($published, [ref] $id) -and $id -gt 0) { return $id }
         }
         Start-Sleep -Milliseconds 25
     }

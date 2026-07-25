@@ -141,7 +141,6 @@
   "wizard.savedState": "当前值已保存在配置文件中。",
   "wizard.applyMacType": "应用到 MacType",
   "wizard.guidance": "阅读每项说明并选择数值。更改会立即显示在预览中。",
-  "wizard.previewNormal": "常规",
   "wizard.previewBold": "粗体",
   "wizard.previewItalic": "斜体",
   "wizard.previewBoldItalic": "粗斜体",

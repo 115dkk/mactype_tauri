@@ -365,6 +365,18 @@ test("settings navigation restores the legacy Wizard and Tuner hierarchy", async
   await expect(page.locator(".setting-actions")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "단계 기본값 복원" })).toBeVisible();
   expect(await settingsForm.evaluate((element) => element.scrollWidth > element.clientWidth), "Guided settings must not have internal horizontal scrolling").toBe(false);
+  // The generic overflow gate skips anything inside an overflow-hidden
+  // ancestor, so the workspace column needs its own window-bounds check: a
+  // wide control in the preview toolbar used to inflate the column past the
+  // right edge, clipping the step body instead of scrolling.
+  for (const selector of [".settings-form", ".preview-panel", ".wizard-step-tools"]) {
+    const bounds = await page.locator(selector).first().evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return { left: Math.round(rect.left), right: Math.round(rect.right), viewport: document.documentElement.clientWidth };
+    });
+    expect(bounds.right, `${selector} must stay inside the window`).toBeLessThanOrEqual(bounds.viewport + 1);
+    expect(bounds.left, `${selector} must not start off the left edge`).toBeGreaterThanOrEqual(-1);
+  }
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-guided-rendering-ko.png`), fullPage: true });
 
   await page.getByRole("button", { name: "진행" }).click();
@@ -1640,3 +1652,4 @@ test("settings files present profile cards with thumbnails, apply ownership, and
   await expect(page.locator("body")).toHaveAttribute("data-view", "profiles");
   await expect(page.locator("body")).toHaveAttribute("data-profile-mode", "advanced");
 });
+

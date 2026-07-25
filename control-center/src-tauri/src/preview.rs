@@ -57,9 +57,18 @@ pub(crate) fn set_native_preview(
     visible: bool,
     mode: Option<String>,
     listing_text: Option<String>,
+    foreground: Option<String>,
+    background: Option<String>,
     state: State<'_, PreviewState>,
 ) -> Result<bool, String> {
-    commands::set_native_preview_visible(visible, mode, listing_text, state.inner())
+    commands::set_native_preview_visible(
+        visible,
+        mode,
+        listing_text,
+        foreground,
+        background,
+        state.inner(),
+    )
 }
 
 #[tauri::command]

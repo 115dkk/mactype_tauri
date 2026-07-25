@@ -12,7 +12,7 @@ import type {
   SystemServiceAction,
   LaunchContext,
   ManualLaunchCandidate,
-  NativePreviewMode,
+  NativePreviewOptions,
   PreviewRequest,
   PreviewResult,
   ProfileEntry,
@@ -106,7 +106,13 @@ export const tauriRuntimeAdapter: ControlCenterRuntimeAdapter = {
     overrides: request.overrides,
     sample: request.sample,
   }),
-  setNativePreview: (visible: boolean, mode?: NativePreviewMode, listingText?: string) => invoke<boolean>("set_native_preview", { visible, mode: mode ?? null, listingText: listingText ?? null }),
+  setNativePreview: (visible: boolean, options?: NativePreviewOptions) => invoke<boolean>("set_native_preview", {
+    visible,
+    mode: options?.mode ?? null,
+    listingText: options?.listingText ?? null,
+    foreground: options?.foreground ?? null,
+    background: options?.background ?? null,
+  }),
   previewImageUrl: (path: string) => convertFileSrc(path),
   loadPreviewDiagnostics: () => invoke<string[]>("preview_diagnostics"),
 

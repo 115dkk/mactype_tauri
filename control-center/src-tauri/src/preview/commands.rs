@@ -37,6 +37,8 @@ pub(super) fn set_native_preview_visible(
     visible: bool,
     mode: Option<String>,
     listing_text: Option<String>,
+    foreground: Option<String>,
+    background: Option<String>,
     state: &PreviewState,
 ) -> Result<bool, String> {
     let root =
@@ -48,6 +50,8 @@ pub(super) fn set_native_preview_visible(
             visible,
             mode.as_deref(),
             listing_text.as_deref(),
+            foreground.as_deref(),
+            background.as_deref(),
         )
     })
 }

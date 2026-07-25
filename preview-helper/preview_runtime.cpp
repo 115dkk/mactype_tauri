@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <iomanip>
@@ -126,6 +127,13 @@ COLORREF parse_color(const std::string& value, COLORREF fallback) {
   return RGB((color >> 16U) & 0xFFU, (color >> 8U) & 0xFFU, color & 0xFFU);
 }
 
+std::string color_to_hex(COLORREF color) {
+  char buffer[8]{};
+  std::snprintf(buffer, sizeof(buffer), "#%02X%02X%02X", GetRValue(color), GetGValue(color),
+                GetBValue(color));
+  return std::string{buffer};
+}
+
 mtpc::Frame error_frame(std::uint64_t request_id, const char* code, const std::string& message) {
   mtpc::Frame response;
   response.kind = mtpc::MessageKind::error;
@@ -166,12 +174,23 @@ void draw_sample(HDC dc, const RECT& area, const std::wstring& text, const std::
   DeleteObject(font);
 }
 
-/* Legacy-tuner listing: the pangram repeated in black/red/green/blue at a
-   small and a large point size; the normal group renders above the bold one. */
+/* Legacy-tuner listing: the pangram repeated in a neutral colour plus red,
+   green, and blue at a small and a large point size; the normal group renders
+   above the bold one. The channel colours come in a light-background and a
+   dark-background set so the listing follows the same background choice as
+   the rendered strips. */
 constexpr float kListingSmallPt = 9.0F;
 constexpr float kListingLargePt = 14.0F;
-constexpr COLORREF kListingColors[] = {RGB(0x00, 0x00, 0x00), RGB(0xC8, 0x00, 0x00),
-                                       RGB(0x00, 0x8A, 0x00), RGB(0x00, 0x00, 0xC8)};
+constexpr COLORREF kListingColorsOnLight[] = {RGB(0x00, 0x00, 0x00), RGB(0xC8, 0x00, 0x00),
+                                              RGB(0x00, 0x8A, 0x00), RGB(0x00, 0x00, 0xC8)};
+constexpr COLORREF kListingColorsOnDark[] = {RGB(0xF1, 0xF3, 0xF5), RGB(0xFF, 0x6B, 0x6B),
+                                             RGB(0x51, 0xCF, 0x66), RGB(0x74, 0xC0, 0xFC)};
+
+/* Rec. 601 luma, enough to pick a legible channel set for the listing. */
+bool is_dark(COLORREF color) {
+  const int luma = (299 * GetRValue(color) + 587 * GetGValue(color) + 114 * GetBValue(color)) / 1000;
+  return luma < 128;
+}
 
 int point_size_px(float point_size, std::uint32_t dpi) {
   return MulDiv(static_cast<int>(std::lround(point_size * 100.0F)), static_cast<int>(dpi), 7200);
@@ -191,11 +210,12 @@ int listing_content_height(std::uint32_t dpi) {
 }
 
 void draw_listing(HDC dc, const RECT& area, const std::wstring& text, const std::wstring& face,
-                  std::uint32_t dpi) {
-  HBRUSH brush = CreateSolidBrush(RGB(0xFF, 0xFF, 0xFF));
+                  std::uint32_t dpi, COLORREF background) {
+  HBRUSH brush = CreateSolidBrush(background);
   FillRect(dc, &area, brush);
   DeleteObject(brush);
   SetBkMode(dc, TRANSPARENT);
+  const COLORREF* colors = is_dark(background) ? kListingColorsOnDark : kListingColorsOnLight;
   const int size_gap = MulDiv(6, static_cast<int>(dpi), 96);
   const int group_gap = MulDiv(14, static_cast<int>(dpi), 96);
   int y = area.top + MulDiv(12, static_cast<int>(dpi), 96);
@@ -205,8 +225,8 @@ void draw_listing(HDC dc, const RECT& area, const std::wstring& text, const std:
                                FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, face.c_str());
       HGDIOBJ previous_font = SelectObject(dc, font);
-      for (const COLORREF color : kListingColors) {
-        SetTextColor(dc, color);
+      for (int index = 0; index < 4; ++index) {
+        SetTextColor(dc, colors[index]);
         ExtTextOutW(dc, area.left + 18, y, ETO_CLIPPED, &area, text.c_str(),
                     static_cast<UINT>(text.size()), nullptr);
         y += listing_line_advance(point_size, dpi);
@@ -473,6 +493,15 @@ mtpc::Frame PreviewRuntime::load_profile(const mtpc::Frame& request) {
   return response;
 }
 
+void PreviewRuntime::apply_native_colors(const std::string& json) {
+  if (const auto value = json_string(json, "foreground")) {
+    native_foreground_ = parse_color(*value, native_foreground_);
+  }
+  if (const auto value = json_string(json, "background")) {
+    native_background_ = parse_color(*value, native_background_);
+  }
+}
+
 mtpc::Frame PreviewRuntime::show_native_preview(const mtpc::Frame& request, bool visible) {
   if (visible) {
     /* Optional fields keep older callers that send an empty body working. */
@@ -483,6 +512,7 @@ mtpc::Frame PreviewRuntime::show_native_preview(const mtpc::Frame& request, bool
       const std::wstring wide = utf8_to_wide(*text);
       if (!wide.empty()) listing_text_ = wide;
     }
+    apply_native_colors(request.json);
     if (native_listing_) grow_native_window_for_listing();
     ShowWindow(native_window_, SW_SHOWNORMAL);
     InvalidateRect(native_window_, nullptr, TRUE);
@@ -494,7 +524,8 @@ mtpc::Frame PreviewRuntime::show_native_preview(const mtpc::Frame& request, bool
   response.kind = mtpc::MessageKind::native_preview_state;
   response.request_id = request.request_id;
   response.json = std::string{"{\"visible\":"} + (visible ? "true" : "false") +
-                  ",\"displayMode\":\"" + (native_listing_ ? "listing" : "default") + "\"}";
+                  ",\"displayMode\":\"" + (native_listing_ ? "listing" : "default") +
+                  "\",\"background\":\"" + color_to_hex(native_background_) + "\"}";
   return response;
 }
 
@@ -517,10 +548,12 @@ void PreviewRuntime::paint_native(HWND window) {
   RECT area{};
   GetClientRect(window, &area);
   if (native_listing_) {
-    draw_listing(dc, area, listing_text_, font_face_, GetDpiForWindow(window));
+    draw_listing(dc, area, listing_text_, font_face_, GetDpiForWindow(window), native_background_);
   } else {
+    /* Upright and normal weight: the window shows the sample itself, not
+       whichever styled variant the strip stack happened to render last. */
     draw_sample(dc, area, sample_text_, font_face_, font_size_pt_, GetDpiForWindow(window),
-                foreground_, background_, sample_bold_, sample_italic_);
+                native_foreground_, native_background_, false, false);
   }
   EndPaint(window, &paint);
 }

@@ -18,7 +18,12 @@ import { stepSupportsHistory, wizardStepIds, type WizardStepId } from "./profile
 type GroupId = "basic" | "shape" | "lcd" | "advanced" | "individual" | "lists";
 type ProfileMode = "quick" | "advanced";
 
-const DOCKED_PREVIEW_MIN_WIDTH = 1080;
+/* The guided step is a short column of choices and trades width for height
+   readily, so it docks the preview early. The settings table needs room for a
+   label beside its control column, so it docks only in a genuinely wide
+   window. Below the threshold the preview falls back to a capped bottom
+   panel. */
+const DOCKED_PREVIEW_MIN_WIDTH: Readonly<Record<ProfileMode, number>> = { quick: 780, advanced: 1000 };
 
 interface ProfilesPageProps {
   ciSmoke?: boolean;
@@ -95,16 +100,17 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
   const previewPanelRef = useRef<ProfilePreviewHandle>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
 
+  const dockedMinimumWidth = DOCKED_PREVIEW_MIN_WIDTH[mode];
   useEffect(() => {
     const workspace = workspaceRef.current;
     if (!workspace) return undefined;
-    setPreviewDocked(workspace.clientWidth >= DOCKED_PREVIEW_MIN_WIDTH);
+    setPreviewDocked(workspace.clientWidth >= dockedMinimumWidth);
     const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) setPreviewDocked(entry.contentRect.width >= DOCKED_PREVIEW_MIN_WIDTH);
+      for (const entry of entries) setPreviewDocked(entry.contentRect.width >= dockedMinimumWidth);
     });
     observer.observe(workspace);
     return () => observer.disconnect();
-  }, []);
+  }, [dockedMinimumWidth]);
 
   const guidedBusy = !profile || busy || recoveryRequired;
   const changeGuidedSetting = (settingId: string, value: number) => {
@@ -198,10 +204,11 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
   };
 
   /* Step-aware preview stacks, mirroring the legacy Tuner screens: the bold
-     and italic screen compares the three styles, the LCD screen compares the
-     current method against the red, green, and blue channels (channel-pure
-     foregrounds isolate each subpixel), and every other screen shows the
-     legacy normal group plus bold group. */
+     and italic screen compares the three styles and the LCD screen compares
+     the current method against the red, green, and blue channels
+     (channel-pure foregrounds isolate each subpixel). Every other screen
+     renders the sample once, because a second sample group would claim the
+     height the step body needs. */
   const previewVariants = useMemo<ReadonlyArray<PreviewVariant>>(() => {
     const pangram = t("profiles.samplePangram");
     if (mode === "quick" && activeWizardStep === "boldItalic") {
@@ -219,10 +226,7 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
         { key: "channel-b", label: "B", text: pangram, foreground: "#0000C8" },
       ];
     }
-    return [
-      { key: "normal", label: t("wizard.previewNormal") },
-      { key: "bold", label: t("wizard.previewBold"), text: pangram, bold: true },
-    ];
+    return [{ key: "normal", label: null }];
   }, [activeWizardStep, mode, t]);
 
   const activeDefinition = groups.find((group) => group.id === activeGroup) ?? groups[0];

@@ -205,8 +205,8 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .preview-canvas[data-dark="true"] { background: #171a1f; color: #f1f3f5; }
 .preview-canvas p { font-family: "Segoe UI", sans-serif; font-size: 20px; line-height: 1.65; }
 .preview-canvas img { display: block; max-width: 100%; max-height: 100%; height: auto; object-fit: contain; object-position: left center; }
-/* Sample groups stack vertically (legacy Tuner: normal group + bold group);
-   strips keep their natural height and the canvas scrolls before it clips. */
+/* Step-aware sample groups stack vertically; strips keep their natural height
+   and the canvas scrolls rather than the panel growing into the settings. */
 .preview-canvas[data-stack="true"] { display: flex; flex-direction: column; gap: var(--space-2); align-content: initial; overflow-y: auto; }
 .preview-canvas[data-stack="true"] img { max-height: none; flex: none; }
 .preview-strip { display: grid; flex: none; margin: 0; gap: 2px; }
@@ -216,7 +216,7 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .preview-panel[data-compact="true"] .sample-input, .preview-panel[data-compact="true"] .preview-footer { display: none; }
 .preview-panel[data-compact="true"] .preview-toolbar { padding-block: var(--space-1); }
 .preview-panel[data-compact="true"] .preview-canvas { padding: var(--space-2); }
-.settings-workspace[data-preview-docked="true"] { grid-template-columns: minmax(0, 1fr) clamp(380px, 32%, 460px); grid-template-rows: minmax(0, 1fr); column-gap: var(--space-5); }
+.settings-workspace[data-preview-docked="true"] { grid-template-columns: minmax(0, 1fr) clamp(340px, 30%, 440px); grid-template-rows: minmax(0, 1fr); column-gap: var(--space-5); }
 .settings-workspace[data-preview-docked="true"] .preview-panel { min-width: 0; margin: 0; padding-inline-start: var(--space-5); border-inline-start: 1px solid var(--color-border); overflow-y: auto; }
 .settings-workspace[data-preview-docked="true"] .preview-toolbar { align-items: stretch; flex-direction: column; gap: var(--space-2); }
 .settings-workspace[data-preview-docked="true"] .preview-controls { width: 100%; flex-wrap: wrap; }

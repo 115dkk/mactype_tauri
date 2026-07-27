@@ -7,7 +7,7 @@ mod runtime;
 mod startup_lifecycle;
 
 #[cfg(test)]
-use broker::setup_path_for_trusted_layout;
+use broker::{broker_executable_for_trusted_layout, setup_path_for_trusted_layout};
 
 use broker_result::{
     decode_broker_result_frame, encode_broker_result_frame, BrokerResultDisposition,

@@ -8,6 +8,7 @@ use super::{
     },
     path_guard::wide,
     process::{combine_broker_cleanup_error, terminate_broker_process},
+    setup::fixed_control_center_path,
 };
 
 const BROKER_TIMEOUT_MS: u32 = 5 * 60 * 1000;
@@ -41,7 +42,7 @@ fn launch_elevated_broker(
     if profile_transfer.is_some() != action.needs_profile_input() {
         return Err("the elevated broker has invalid profile transfer state".to_owned());
     }
-    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+    let executable = fixed_control_center_path()?;
     let executable = wide(executable.as_os_str());
     let verb = wide("runas");
     let parameter_text = format!(

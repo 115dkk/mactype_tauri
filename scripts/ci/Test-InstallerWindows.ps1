@@ -93,15 +93,54 @@ try {
     Initialize-UserMarkers -UserMarkerRoot $userMarkerRoot -UserMarkers $userMarkers
     Assert-UserMarkers -UserMarkerRoot $userMarkerRoot -UserMarkers $userMarkers
 
+    New-Item -ItemType Directory -Path (Join-Path $invalidInstallRoot 'existing\nested') -Force | Out-Null
+    [IO.File]::WriteAllText(
+        (Join-Path $invalidInstallRoot 'existing-root-file.txt'),
+        'must survive rejected /DIR install',
+        [Text.UTF8Encoding]::new($false)
+    )
+    [IO.File]::WriteAllText(
+        (Join-Path $invalidInstallRoot 'existing\nested\payload.bin'),
+        'nested data must also survive',
+        [Text.UTF8Encoding]::new($false)
+    )
+    $invalidInstallSnapshot = Get-TreeSnapshot -Path $invalidInstallRoot
     Invoke-InstallerExpectedFailure -File $resolvedBaselineInstaller -Arguments ($silentArguments + "/DIR=$invalidInstallRoot") -Label 'Arbitrary-directory install'
-    if ((Test-Path -LiteralPath $invalidInstallRoot) -or (Test-Path -LiteralPath $applicationRoot) -or (Get-FixedService -Name $openServiceName)) {
-        throw 'Rejected /DIR attempt mutated files or SCM.'
+    if ((Get-TreeSnapshot -Path $invalidInstallRoot) -cne $invalidInstallSnapshot -or
+        (Test-Path -LiteralPath $applicationRoot) -or
+        (Get-FixedService -Name $openServiceName)) {
+        throw 'Rejected /DIR attempt changed the existing target tree, fixed files, or SCM.'
+    }
+
+    $foreignApplicationPaths = @(
+        (Join-Path $applicationRoot 'foreign-root-marker.txt'),
+        (Join-Path $applicationRoot 'foreign\nested\payload.bin'),
+        (Join-Path $applicationRoot 'service-runtime\foreign-collision.bin'),
+        (Join-Path $applicationRoot 'service-runtime.setup-backup\foreign-collision.bin'),
+        (Join-Path $applicationRoot 'unins777.exe'),
+        (Join-Path $applicationRoot 'unins777.dat')
+    )
+    New-Item -ItemType Directory -Path (Split-Path -Parent $foreignApplicationPaths[1]) -Force | Out-Null
+    foreach ($path in $foreignApplicationPaths) {
+        if (-not (Test-Path -LiteralPath (Split-Path -Parent $path))) {
+            New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force | Out-Null
+        }
+        [IO.File]::WriteAllText(
+            $path,
+            "foreign application-root contents: $([IO.Path]::GetFileName($path))",
+            [Text.UTF8Encoding]::new($false)
+        )
     }
 
     New-ForeignService -Name $openServiceName -DisplayName 'CI foreign fixed-name service'
     $openFixtureCreated = $true
     $foreignSnapshot = Get-ServiceSnapshot -Name $openServiceName
     Invoke-InstallerExpectedSuccess -File $resolvedInstaller -Arguments ($silentArguments + '/TASKS=!desktopicon') -Label 'Install with foreign fixed-name service'
+    foreach ($path in $foreignApplicationPaths) {
+        if (Test-Path -LiteralPath $path) {
+            throw "Install retained foreign application-root contents: $path"
+        }
+    }
     if ((Get-ServiceSnapshot -Name $openServiceName) -cne $foreignSnapshot -or (Test-Path -LiteralPath $serviceRoot)) {
         throw 'SkippedBlocked foreign-service install mutated the foreign service or runtime.'
     }

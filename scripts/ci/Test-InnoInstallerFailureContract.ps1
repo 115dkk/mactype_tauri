@@ -82,8 +82,16 @@ $emptyRootInstallLogPath = Join-Path $temporaryRoot 'empty-root-install.log'
 $emptyRootUninstallLogPath = Join-Path $temporaryRoot 'empty-root-uninstall.log'
 $foreignRootInstallLogPath = Join-Path $temporaryRoot 'foreign-root-install.log'
 $foreignRootUninstallLogPath = Join-Path $temporaryRoot 'foreign-root-uninstall.log'
+$lockedRootInstallLogPath = Join-Path $temporaryRoot 'locked-root-install.log'
+$autoCloseRootInstallLogPath = Join-Path $temporaryRoot 'auto-close-root-install.log'
+$autoCloseRootUninstallLogPath = Join-Path $temporaryRoot 'auto-close-root-uninstall.log'
+$reparseRootInstallLogPath = Join-Path $temporaryRoot 'reparse-root-install.log'
 $emptyRootAppRoot = Join-Path $temporaryRoot 'pre-existing-empty-app'
 $foreignRootAppRoot = Join-Path $temporaryRoot 'pre-existing-foreign-app'
+$lockedRootAppRoot = Join-Path $temporaryRoot 'pre-existing-locked-app'
+$autoCloseRootAppRoot = Join-Path $temporaryRoot 'pre-existing-running-app'
+$reparseRootAppRoot = Join-Path $temporaryRoot 'reparse-app-root'
+$reparseRootTarget = Join-Path $temporaryRoot 'reparse-app-target'
 $commandProcessorPath = Join-Path $env:SystemRoot 'System32\cmd.exe'
 $sourceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 
@@ -309,8 +317,14 @@ Compression=none
 [Files]
 Source: "$payloadPath"; DestDir: "{app}"
 
+[InstallDelete]
+Type: files; Name: "{app}\.setup-root-cleanup-trigger"; BeforeInstall: PurgeApplicationRootBeforeInstall
+
 [UninstallDelete]
 $($rootCleanupEntry.Value)
+
+[Code]
+#include "$sourceRoot\installer\application-root-cleanup.iss"
 "@
     [IO.File]::WriteAllText(
         $emptyRootScriptPath,
@@ -352,6 +366,9 @@ $($rootCleanupEntry.Value)
         -Arguments ($silentArguments + "/DIR=$foreignRootAppRoot") `
         -Label 'Install beside foreign application-root file' `
         -DiagnosticLogPath $foreignRootInstallLogPath
+    if (Test-Path -LiteralPath $foreignMarkerPath) {
+        throw 'Application-root cleanup fixture left a foreign file beside the installed payload.'
+    }
     $foreignRootUninstaller = Get-ChildItem -LiteralPath $foreignRootAppRoot `
         -File -Filter 'unins*.exe' | Select-Object -First 1
     if (-not $foreignRootUninstaller) {
@@ -364,13 +381,111 @@ $($rootCleanupEntry.Value)
     Wait-PathAbsent -Path (Join-Path $foreignRootAppRoot 'payload.txt') `
         -TimeoutMilliseconds 15000
     Wait-PathAbsent -Path $foreignRootUninstaller.FullName -TimeoutMilliseconds 15000
-    $foreignRootEntries = @(Get-ChildItem -LiteralPath $foreignRootAppRoot -Force)
-    if (-not (Test-Path -LiteralPath $foreignMarkerPath -PathType Leaf) -or
-        [IO.File]::ReadAllText($foreignMarkerPath) -cne 'foreign-user-file' -or
-        $foreignRootEntries.Count -ne 1 -or
-        $foreignRootEntries[0].Name -cne 'foreign-marker.txt') {
+    if (Test-Path -LiteralPath $foreignRootAppRoot) {
         $remainingTree = Get-BoundedTreeInventory -Path $foreignRootAppRoot
-        throw "Empty-root cleanup fixture recursively deleted a foreign application-root file.`nRemaining tree:`n$remainingTree"
+        throw "Application-root cleanup fixture left the foreign application root behind.`nRemaining tree:`n$remainingTree"
+    }
+
+    New-Item -ItemType Directory -Path $reparseRootTarget -Force | Out-Null
+    $reparseTargetMarker = Join-Path $reparseRootTarget 'must-not-be-touched.txt'
+    [IO.File]::WriteAllText(
+        $reparseTargetMarker,
+        'reparse-target-baseline',
+        [Text.UTF8Encoding]::new($false)
+    )
+    $reparseTargetSnapshot = Get-FixtureTreeSnapshot -Path $reparseRootTarget
+    New-Item -ItemType Junction -Path $reparseRootAppRoot -Target $reparseRootTarget | Out-Null
+    Invoke-ExpectedFailure -File $emptyRootInstaller `
+        -Arguments ($silentArguments + "/DIR=$reparseRootAppRoot") `
+        -Label 'Reject a reparse-point application root before cleanup' `
+        -DiagnosticLogPath $reparseRootInstallLogPath
+    if ((Get-FixtureTreeSnapshot -Path $reparseRootTarget) -cne $reparseTargetSnapshot) {
+        throw 'Rejected reparse-point application root changed its target tree.'
+    }
+    if (-not (Test-Path -LiteralPath $reparseRootAppRoot -PathType Container)) {
+        throw 'Rejected reparse-point application root removed the junction itself.'
+    }
+
+    New-Item -ItemType Directory -Path $lockedRootAppRoot -Force | Out-Null
+    $lockedMarkerPath = Join-Path $lockedRootAppRoot 'locked-foreign-marker.txt'
+    $siblingMarkerPath = Join-Path $lockedRootAppRoot 'sibling-foreign-marker.txt'
+    [IO.File]::WriteAllText(
+        $lockedMarkerPath,
+        'locked-foreign-user-file',
+        [Text.UTF8Encoding]::new($false)
+    )
+    [IO.File]::WriteAllText(
+        $siblingMarkerPath,
+        'sibling-foreign-user-file',
+        [Text.UTF8Encoding]::new($false)
+    )
+    $lockedRootSnapshot = Get-FixtureTreeSnapshot -Path $lockedRootAppRoot
+    $lockedMarkerStream = [IO.File]::Open(
+        $lockedMarkerPath,
+        [IO.FileMode]::Open,
+        [IO.FileAccess]::ReadWrite,
+        [IO.FileShare]::None
+    )
+    try {
+        Invoke-ExpectedFailure -File $emptyRootInstaller `
+            -Arguments ($silentArguments + @('/NOCLOSEAPPLICATIONS', "/DIR=$lockedRootAppRoot")) `
+            -Label 'Reject cleanup when a foreign file remains in use' `
+            -DiagnosticLogPath $lockedRootInstallLogPath
+    }
+    finally {
+        $lockedMarkerStream.Dispose()
+    }
+    $lockedRootAfterFailure = Get-FixtureTreeSnapshot -Path $lockedRootAppRoot
+    if ($lockedRootAfterFailure -cne $lockedRootSnapshot) {
+        throw "Rejected application-root cleanup did not restore the exact prior tree.`nBefore:`n$lockedRootSnapshot`nAfter:`n$lockedRootAfterFailure"
+    }
+    if (Test-Path -LiteralPath (Join-Path $lockedRootAppRoot '.setup-root-rollback')) {
+        throw 'Rejected application-root cleanup left its rollback directory behind.'
+    }
+
+    New-Item -ItemType Directory -Path $autoCloseRootAppRoot -Force | Out-Null
+    $runningForeignExecutable = Join-Path $autoCloseRootAppRoot 'running-foreign-process.exe'
+    Copy-Item -LiteralPath $commandProcessorPath -Destination $runningForeignExecutable
+    $runningForeignStartInfo = [Diagnostics.ProcessStartInfo]::new()
+    $runningForeignStartInfo.FileName = $runningForeignExecutable
+    $runningForeignStartInfo.Arguments = '/d /c ping -n 120 127.0.0.1 >nul'
+    $runningForeignStartInfo.UseShellExecute = $false
+    $runningForeignStartInfo.CreateNoWindow = $true
+    $runningForeignProcess = [Diagnostics.Process]::Start($runningForeignStartInfo)
+    try {
+        if ($runningForeignProcess.WaitForExit(250)) {
+            throw 'Foreign process fixture exited before installer close-applications testing.'
+        }
+        Invoke-ExpectedSuccess -File $emptyRootInstaller `
+            -Arguments ($silentArguments + @('/FORCECLOSEAPPLICATIONS', "/DIR=$autoCloseRootAppRoot")) `
+            -Label 'Close a running foreign process before application-root cleanup' `
+            -DiagnosticLogPath $autoCloseRootInstallLogPath
+        if (-not $runningForeignProcess.WaitForExit(5000)) {
+            throw 'Installer cleanup did not close the running foreign process.'
+        }
+    }
+    finally {
+        if (-not $runningForeignProcess.HasExited) {
+            $runningForeignProcess.Kill($true)
+            [void] $runningForeignProcess.WaitForExit(5000)
+        }
+        $runningForeignProcess.Dispose()
+    }
+    if (Test-Path -LiteralPath $runningForeignExecutable) {
+        throw 'Installer cleanup left the previously running foreign executable behind.'
+    }
+    $autoCloseRootUninstaller = Get-ChildItem -LiteralPath $autoCloseRootAppRoot `
+        -File -Filter 'unins*.exe' | Select-Object -First 1
+    if (-not $autoCloseRootUninstaller) {
+        throw 'Auto-close cleanup fixture did not create an uninstaller.'
+    }
+    Invoke-ExpectedSuccess -File $autoCloseRootUninstaller.FullName `
+        -Arguments $silentArguments `
+        -Label 'Uninstall after closing a foreign process' `
+        -DiagnosticLogPath $autoCloseRootUninstallLogPath
+    Wait-PathAbsent -Path $autoCloseRootAppRoot -TimeoutMilliseconds 15000
+    if (Test-Path -LiteralPath $autoCloseRootAppRoot) {
+        throw 'Auto-close cleanup fixture left its application root behind.'
     }
 
     $productFixtureRoot = Join-Path $temporaryRoot 'product-fixture'

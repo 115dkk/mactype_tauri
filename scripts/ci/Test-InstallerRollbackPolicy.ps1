@@ -6,6 +6,7 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $workflow = Get-Content -LiteralPath (Join-Path $root '.github\workflows\build.yml') -Raw
 $installerTest = Get-Content -LiteralPath (Join-Path $root 'scripts\ci\Test-InstallerWindows.ps1') -Raw
 $installerDefinitionPath = Join-Path $root 'installer\mactype-control-center.iss'
+$rootCleanupPath = Join-Path $root 'installer\application-root-cleanup.iss'
 $innoFailureContractPath = Join-Path $root 'scripts\ci\Test-InnoInstallerFailureContract.ps1'
 $installerHelperPath = Join-Path $root 'scripts\ci\lib\InstallerWindowsAssertions.ps1'
 $snapshotContractPath = Join-Path $root 'scripts\ci\Test-InstallerSnapshotContract.ps1'
@@ -28,6 +29,7 @@ if (-not (Test-Path -LiteralPath $installerHelperPath -PathType Leaf)) {
 }
 
 $installerDefinition = Get-Content -LiteralPath $installerDefinitionPath -Raw
+$rootCleanup = Get-Content -LiteralPath $rootCleanupPath -Raw
 foreach ($token in @(
     'ExecAndLogOutput',
     'ExtractTemporaryFiles',
@@ -95,6 +97,46 @@ if (-not $installDeleteSection.Success -or
     $installDeleteSection.Groups['body'].Value -notmatch '(?m)^Type:\s*filesandordirs;\s*Name:\s*"\{app\}\\service-runtime"\s*$') {
     throw 'Installer must remove the prior app-side runtime only after PrepareToInstall succeeds.'
 }
+if ($installDeleteSection.Groups['body'].Value -notmatch
+    '(?m)^Type:\s*files;\s*Name:\s*"\{app\}\\\.setup-root-cleanup-trigger";\s*BeforeInstall:\s*BootstrapAndPurgeApplicationRootBeforeInstall\s*$') {
+    throw 'Installer must run protected bootstrap and root cleanup only after CloseApplications completes.'
+}
+$prepareToInstall = [regex]::Match(
+    $installerDefinition,
+    '(?ms)^function\s+PrepareToInstall\b.*?^end;'
+)
+if (-not $prepareToInstall.Success -or
+    -not $prepareToInstall.Value.Contains('ValidateApplicationRootCleanup') -or
+    $prepareToInstall.Value.Contains('BootstrapBeforeFileInstall')) {
+    throw 'PrepareToInstall must validate only; protected bootstrap runs after CloseApplications.'
+}
+$bootstrapCleanupTransaction = [regex]::Match(
+    $installerDefinition,
+    '(?ms)^procedure\s+BootstrapAndPurgeApplicationRootBeforeInstall\b.*?^end;'
+)
+if (-not $bootstrapCleanupTransaction.Success) {
+    throw 'Installer post-CloseApplications bootstrap/cleanup transaction is missing.'
+}
+$stageIndex = $bootstrapCleanupTransaction.Value.IndexOf('StageApplicationRootCleanup')
+$bootstrapIndex = $bootstrapCleanupTransaction.Value.IndexOf('BootstrapBeforeFileInstall')
+$commitIndex = $bootstrapCleanupTransaction.Value.IndexOf('CommitStagedRootCleanup')
+if ($stageIndex -lt 0 -or $bootstrapIndex -le $stageIndex -or $commitIndex -le $bootstrapIndex) {
+    throw 'Installer must stage rollback, bootstrap, then commit cleanup in that order.'
+}
+foreach ($token in @(
+    'RegisterExtraCloseApplicationsResource',
+    'RootCleanupProtectedDirectoryName',
+    'FILE_ATTRIBUTE_REPARSE_POINT',
+    'FileFlagOpenReparsePoint',
+    'RestoreStagedRootCleanup',
+    'SuppressibleMsgBox',
+    'ExitRootCleanupSetup(4)',
+    'Application-root cleanup refuses a reparse-point application root.'
+)) {
+    if (-not $rootCleanup.Contains($token)) {
+        throw "Application-root cleanup omits required close/rollback/path safety: $token"
+    }
+}
 $uninstallDeleteSection = [regex]::Match(
     $installerDefinition,
     '(?ms)^\[UninstallDelete\]\s*(?<body>.*?)(?=^\[[^]]+\]|\z)'
@@ -123,8 +165,14 @@ foreach ($token in @(
     'baseline-payload',
     'MacTypeInnoEmptyRootCleanupContract',
     'foreign-marker.txt',
+    '/NOCLOSEAPPLICATIONS',
+    '/FORCECLOSEAPPLICATIONS',
+    'New-Item -ItemType Junction',
+    'Rejected reparse-point application root changed its target tree.',
+    'Rejected application-root cleanup did not restore the exact prior tree.',
+    'Installer cleanup did not close the running foreign process.',
     'Empty-root cleanup fixture left its pre-existing application root behind.',
-    'Empty-root cleanup fixture recursively deleted a foreign application-root file.'
+    'Application-root cleanup fixture left the foreign application root behind.'
 )) {
     if (-not $innoFailureContract.Contains($token)) {
         throw "Real Inno regression fixture is missing required RED/GREEN evidence: $token"

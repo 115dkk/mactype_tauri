@@ -66,6 +66,7 @@ foreach ($machinePayloadToken in @(
 }
 foreach ($protectedInstallerToken in @(
     'DefaultDirName={autopf}\MacType Control Center',
+    'DisableDirPage=yes',
     'PrivilegesRequired=admin',
     'UsePreviousAppDir=no',
     'bootstrap-install',
@@ -80,6 +81,26 @@ foreach ($protectedInstallerToken in @(
 )) {
     if (-not $installer.Contains($protectedInstallerToken)) {
         throw "Installer does not enforce protected machine bootstrap token: $protectedInstallerToken"
+    }
+}
+foreach ($installerUpgradePromptToken in @(
+    'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{AF6B9697-3DF2-46C4-B203-79194967AE7A}_is1',
+    'RegQueryStringValue(HKLM64',
+    "'InstallLocation'",
+    "'DisplayVersion'",
+    "'UninstallString'",
+    'CreateOutputMsgPage',
+    'NextButton.Caption',
+    'korean.VerifiedUpdateTitle=MacType Control Center를 업데이트하시겠습니까?',
+    'korean.VerifiedUpdateMessage=기존 프로필과 설정을 유지한 채 새 버전으로 업데이트합니다.',
+    'korean.VerifiedUpdateButton=업데이트',
+    'korean.VerifiedReinstallTitle=MacType Control Center를 다시 설치하시겠습니까?',
+    'korean.VerifiedReinstallButton=다시 설치',
+    'korean.ForeignContentsTitle=설치 폴더의 기존 내용을 정리하시겠습니까?',
+    'korean.ForeignContentsButton=계속'
+)) {
+    if (-not $installer.Contains($installerUpgradePromptToken)) {
+        throw "Installer does not distinguish verified update/reinstall from foreign contents: $installerUpgradePromptToken"
     }
 }
 foreach ($forbiddenInstallerToken in @(
@@ -112,12 +133,16 @@ $installerTest = Get-Content -LiteralPath (Join-Path $root 'scripts\ci\Test-Inst
 foreach ($installerTestToken in @(
     'CommonDesktopDirectory',
     'Arbitrary-directory install',
+    'must survive rejected /DIR install',
+    'Rejected /DIR attempt changed the existing target tree',
     'Assert-ReadyOpenService',
     'Assert-BaselineRestoredAfterFailedUpgrade',
     'Deliberately failing protected upgrade',
     'Upgrade reused an immutable runtime version',
     'Uninstall with missing protected broker',
     'CI foreign fixed-name service',
+    'foreign application-root contents',
+    'Install retained foreign application-root contents',
     'CI legacy MacTray service',
     'Assert-UserMarkers'
 )) {

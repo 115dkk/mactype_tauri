@@ -135,6 +135,7 @@ var
   ExistingInstallState: Integer;
   ExistingInstallPage: TOutputMsgWizardPage;
   ExistingInstallNextCaption: String;
+  ExistingInstallClassified: Boolean;
   RootCleanupPreservedUninstaller: String;
 
 function CollectRootCleanupEntryNames(
@@ -289,6 +290,14 @@ begin
     ExistingInstallState := ExistingInstallForeignContents;
 end;
 
+procedure EnsureExistingInstallClassified;
+begin
+  if ExistingInstallClassified then
+    Exit;
+  ClassifyExistingInstall;
+  ExistingInstallClassified := True;
+end;
+
 function ExistingInstallPromptTitle: String;
 begin
   case ExistingInstallState of
@@ -333,6 +342,7 @@ end;
 
 procedure ActivateExistingInstallPage(Sender: TWizardPage);
 begin
+  EnsureExistingInstallClassified;
   ExistingInstallNextCaption := WizardForm.NextButton.Caption;
   WizardForm.NextButton.Caption := ExistingInstallPromptButton;
 end;
@@ -345,17 +355,20 @@ end;
 
 function SkipExistingInstallPage(Sender: TWizardPage): Boolean;
 begin
+  EnsureExistingInstallClassified;
+  ExistingInstallPage.Caption := ExistingInstallPromptTitle;
+  ExistingInstallPage.Description := '';
+  ExistingInstallPage.MsgLabel.Caption := ExistingInstallPromptMessage;
   Result := WizardSilent or (ExistingInstallState = ExistingInstallFresh);
 end;
 
 procedure InitializeWizard;
 begin
-  ClassifyExistingInstall;
   ExistingInstallPage := CreateOutputMsgPage(
     wpReady,
-    ExistingInstallPromptTitle,
     '',
-    ExistingInstallPromptMessage
+    '',
+    ''
   );
   ExistingInstallPage.OnActivate := @ActivateExistingInstallPage;
   ExistingInstallPage.OnNextButtonClick := @LeaveExistingInstallPage;

@@ -103,6 +103,23 @@ foreach ($installerUpgradePromptToken in @(
         throw "Installer does not distinguish verified update/reinstall from foreign contents: $installerUpgradePromptToken"
     }
 }
+$initializeWizard = [regex]::Match(
+    $installer,
+    '(?ms)^procedure\s+InitializeWizard\b.*?^end;'
+)
+if (-not $initializeWizard.Success -or
+    $initializeWizard.Value.Contains('ClassifyExistingInstall') -or
+    $initializeWizard.Value.Contains("ExpandConstant('{app}')")) {
+    throw 'InitializeWizard must not inspect {app} before Inno initializes the application directory.'
+}
+$skipExistingInstallPage = [regex]::Match(
+    $installer,
+    '(?ms)^function\s+SkipExistingInstallPage\b.*?^end;'
+)
+if (-not $skipExistingInstallPage.Success -or
+    -not $skipExistingInstallPage.Value.Contains('EnsureExistingInstallClassified')) {
+    throw 'Existing-install classification must run only when the post-Ready prompt is evaluated.'
+}
 foreach ($forbiddenInstallerToken in @(
     'PrivilegesRequired=lowest',
     '{localappdata}',

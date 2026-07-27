@@ -32,6 +32,18 @@ fn setup_broker_accepts_only_the_fixed_program_files_target() {
 }
 
 #[test]
+fn development_build_delegates_elevation_to_the_fixed_installed_control_center() {
+    let program_files = std::path::Path::new(r"C:\Program Files");
+    let development_executable =
+        std::path::Path::new(r"D:\src\mactype\artifacts\application\MacType Control Center.exe");
+
+    assert_eq!(
+        broker_executable_for_trusted_layout(program_files, development_executable),
+        program_files.join(r"MacType Control Center\MacType Control Center.exe")
+    );
+}
+
+#[test]
 fn outdated_migration_activation_upgrades_then_explicitly_starts() {
     assert_eq!(
         migration_activation_actions(InstallationState::Outdated).unwrap(),

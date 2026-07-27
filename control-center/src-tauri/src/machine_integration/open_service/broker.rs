@@ -12,7 +12,7 @@ pub(super) use process::{
 };
 use setup::publish_and_activate;
 #[cfg(test)]
-pub(super) use setup::setup_path_for_trusted_layout;
+pub(super) use setup::{broker_executable_for_trusted_layout, setup_path_for_trusted_layout};
 pub(super) use setup::{fixed_setup_path, run_restore_pinned_runtime, run_setup};
 
 use super::{

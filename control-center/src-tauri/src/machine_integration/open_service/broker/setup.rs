@@ -78,6 +78,38 @@ pub(in crate::machine_integration::open_service) fn run_restore_pinned_runtime(
     run_setup_process("restore-runtime", None)
 }
 
+pub(in crate::machine_integration::open_service) fn fixed_control_center_path(
+) -> Result<PathBuf, String> {
+    let program_files = known_folder(&FOLDERID_ProgramFiles)?;
+    let caller = std::env::current_exe().map_err(|error| error.to_string())?;
+    let expected = broker_executable_for_trusted_layout(&program_files, &caller);
+    reject_reparse_ancestors(&expected)?;
+    let canonical_program_files =
+        fs::canonicalize(&program_files).map_err(|error| error.to_string())?;
+    let canonical = fs::canonicalize(&expected).map_err(|error| error.to_string())?;
+    let canonical_expected =
+        broker_executable_for_trusted_layout(&canonical_program_files, &canonical);
+    if !same_path(&canonical, &canonical_expected) {
+        return Err("fixed Control Center resolves outside the Program Files layout".to_owned());
+    }
+    reject_reparse_ancestors(&canonical)?;
+    Ok(canonical)
+}
+
+pub(in crate::machine_integration::open_service) fn broker_executable_for_trusted_layout(
+    program_files: &std::path::Path,
+    caller: &std::path::Path,
+) -> PathBuf {
+    let expected = program_files
+        .join("MacType Control Center")
+        .join("MacType Control Center.exe");
+    if same_path(caller, &expected) {
+        caller.to_owned()
+    } else {
+        expected
+    }
+}
+
 fn run_setup_process(verb: &str, profile: Option<&[u8]>) -> Result<(), String> {
     let setup = fixed_setup_path()?;
     let mut command = Command::new(setup);
@@ -194,12 +226,12 @@ pub(in crate::machine_integration::open_service) fn setup_path_for_trusted_layou
     program_files: &std::path::Path,
     executable: &std::path::Path,
 ) -> Result<PathBuf, String> {
-    let app_root = program_files.join("MacType Control Center");
-    let expected_executable = app_root.join("MacType Control Center.exe");
+    let expected_executable = broker_executable_for_trusted_layout(program_files, executable);
     if !same_path(executable, &expected_executable) {
         return Err("Control Center is outside the fixed Program Files layout".to_owned());
     }
-    Ok(app_root
+    Ok(program_files
+        .join("MacType Control Center")
         .join("service-runtime")
         .join("mactype-service-setup.exe"))
 }

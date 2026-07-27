@@ -313,7 +313,10 @@ finally {
             Remove-TestService -Name $openServiceName
         }
         if (Test-Path -LiteralPath $applicationRoot) {
-            $uninstaller = Get-ChildItem -LiteralPath $applicationRoot -File -Filter 'unins*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+            $uninstaller = Get-ChildItem -LiteralPath $applicationRoot -File -Filter 'unins*.exe' `
+                -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -cne 'unins777.exe' } |
+                Select-Object -First 1
             if ($uninstaller) { [void](Invoke-ProcessExit -File $uninstaller.FullName -Arguments $silentArguments) }
         }
         foreach ($path in @($applicationRoot, $profileRoot, $invalidInstallRoot, $userMarkerRoot)) {

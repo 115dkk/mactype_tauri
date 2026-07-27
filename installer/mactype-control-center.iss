@@ -20,6 +20,7 @@
   #define OutputRoot "..\artifacts\installer"
 #endif
 #define ControlCenterExeName "MacType Control Center.exe"
+#define RootCleanupHostProvidesOwnerState
 
 [Setup]
 AppId={{AF6B9697-3DF2-46C4-B203-79194967AE7A}
@@ -28,6 +29,7 @@ AppVersion={#AppVersion}
 AppPublisher=MacType contributors
 AppPublisherURL=https://github.com/snowie2000/mactype
 DefaultDirName={autopf}\MacType Control Center
+DisableDirPage=yes
 DefaultGroupName=MacType Control Center
 PrivilegesRequired=admin
 UsePreviousAppDir=no
@@ -51,10 +53,31 @@ VersionInfoDescription=Open MacType Control Center and source-built core
 Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 
+[CustomMessages]
+english.VerifiedUpdateTitle=Update MacType Control Center?
+english.VerifiedUpdateMessage=Your existing profiles and settings will be preserved while the new version is installed.%n%nThe fixed application folder will be cleaned and its prior contents overwritten. Cancel if you do not accept this operation.
+english.VerifiedUpdateButton=Update
+english.VerifiedReinstallTitle=Reinstall MacType Control Center?
+english.VerifiedReinstallMessage=Setup will repair the current installation and reinstall the required files.%n%nYour existing profiles and settings will be preserved, but the fixed application folder will be cleaned and its prior contents overwritten. Cancel if you do not accept this operation.
+english.VerifiedReinstallButton=Reinstall
+english.ForeignContentsTitle=Clean the existing installation folder?
+english.ForeignContentsMessage=The fixed application folder contains data that is not owned by a verified MacType Control Center installation.%n%nAll prior files and subfolders in that folder will be removed and overwritten with the new installation. Cancel if you do not accept this operation.
+english.ForeignContentsButton=Continue
+korean.VerifiedUpdateTitle=MacType Control Center를 업데이트하시겠습니까?
+korean.VerifiedUpdateMessage=기존 프로필과 설정을 유지한 채 새 버전으로 업데이트합니다.%n%n고정 설치 폴더의 기존 내용은 정리한 뒤 새 파일로 덮어씁니다. 이 작업을 원하지 않으면 취소하십시오.
+korean.VerifiedUpdateButton=업데이트
+korean.VerifiedReinstallTitle=MacType Control Center를 다시 설치하시겠습니까?
+korean.VerifiedReinstallMessage=현재 설치를 복구하고 필요한 파일을 다시 설치합니다.%n%n기존 프로필과 설정은 유지하지만, 고정 설치 폴더의 기존 내용은 정리한 뒤 새 파일로 덮어씁니다. 이 작업을 원하지 않으면 취소하십시오.
+korean.VerifiedReinstallButton=다시 설치
+korean.ForeignContentsTitle=설치 폴더의 기존 내용을 정리하시겠습니까?
+korean.ForeignContentsMessage=고정 설치 폴더에 확인된 MacType Control Center 설치가 소유하지 않은 내용이 있습니다.%n%n이 폴더의 기존 파일과 하위 폴더를 모두 제거한 뒤 새 설치 파일로 덮어씁니다. 이 작업을 원하지 않으면 취소하십시오.
+korean.ForeignContentsButton=계속
+
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
 
 [InstallDelete]
+Type: files; Name: "{app}\.setup-root-cleanup-trigger"; BeforeInstall: BootstrapAndPurgeApplicationRootBeforeInstall
 Type: filesandordirs; Name: "{app}\service-runtime"
 
 [UninstallDelete]
@@ -95,6 +118,12 @@ const
   SetupBrokerRelativePath = 'service-runtime\mactype-service-setup.exe';
   SetupBrokerBackupRelativePath = 'service-runtime.setup-backup';
   MaximumBrokerDiagnosticCharacters = 4096;
+  UninstallRegistryKey =
+    'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{AF6B9697-3DF2-46C4-B203-79194967AE7A}_is1';
+  ExistingInstallFresh = 0;
+  ExistingInstallVerifiedUpdate = 1;
+  ExistingInstallVerifiedReinstall = 2;
+  ExistingInstallForeignContents = 3;
 
 var
   BrokerApplied: Boolean;
@@ -103,6 +132,236 @@ var
   BrokerOutputError: Boolean;
   BrokerDiagnostic: String;
   DeferredRuntimeCleanup: Boolean;
+  ExistingInstallState: Integer;
+  ExistingInstallPage: TOutputMsgWizardPage;
+  ExistingInstallNextCaption: String;
+  RootCleanupPreservedUninstaller: String;
+
+function CollectRootCleanupEntryNames(
+  const Directory: String;
+  const PreserveRootEntries: Boolean;
+  const Names: TStringList
+): String;
+forward;
+
+function ValidateApplicationRootCleanup: String;
+forward;
+
+function IsApplicationRootCleanupReparsePoint(const Path: String): Boolean;
+forward;
+
+function StageApplicationRootCleanup(
+  const ApplicationRoot, RollbackRoot: String
+): String;
+forward;
+
+function CommitStagedRootCleanup(
+  const ApplicationRoot, RollbackRoot: String
+): String;
+forward;
+
+function RestoreStagedRootCleanup(
+  const ApplicationRoot, RollbackRoot: String
+): String;
+forward;
+
+procedure FailApplicationRootCleanup(const MessageText: String);
+forward;
+
+function NormalizeApplicationDirectory(const Path: String): String;
+begin
+  Result := Path;
+  while (Length(Result) > 3) and
+        ((Result[Length(Result)] = '\') or (Result[Length(Result)] = '/')) do
+    Delete(Result, Length(Result), 1);
+end;
+
+function ExtractRegisteredUninstaller(const UninstallString: String): String;
+var
+  ClosingQuote: Integer;
+  Separator: Integer;
+begin
+  Result := Trim(UninstallString);
+  if Result = '' then
+    Exit;
+  if Result[1] = '"' then
+  begin
+    ClosingQuote := Pos('"', Copy(Result, 2, MaxInt));
+    if ClosingQuote = 0 then
+    begin
+      Result := '';
+      Exit;
+    end;
+    Result := Copy(Result, 2, ClosingQuote - 1);
+    Exit;
+  end;
+  Separator := Pos(' ', Result);
+  if Separator > 0 then
+    Result := Copy(Result, 1, Separator - 1);
+end;
+
+function IsRegularOwnedFile(const Path: String): Boolean;
+var
+  FindRec: TFindRec;
+begin
+  Result := False;
+  if not FindFirst(Path, FindRec) then
+    Exit;
+  try
+    Result :=
+      (FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY = 0) and
+      (FindRec.Attributes and FILE_ATTRIBUTE_REPARSE_POINT = 0);
+  finally
+    FindClose(FindRec);
+  end;
+end;
+
+function ClassifyVerifiedExistingInstall: Boolean;
+var
+  InstallLocation: String;
+  DisplayVersion: String;
+  UninstallString: String;
+  Uninstaller: String;
+  ExpectedRoot: String;
+begin
+  Result := False;
+  if not IsWin64 then
+    Exit;
+  if not RegQueryStringValue(HKLM64, UninstallRegistryKey, 'InstallLocation', InstallLocation) or
+     not RegQueryStringValue(HKLM64, UninstallRegistryKey, 'DisplayVersion', DisplayVersion) or
+     not RegQueryStringValue(HKLM64, UninstallRegistryKey, 'UninstallString', UninstallString) then
+    Exit;
+
+  ExpectedRoot := NormalizeApplicationDirectory(ExpandConstant(FixedApplicationDirectory));
+  if CompareText(NormalizeApplicationDirectory(InstallLocation), ExpectedRoot) <> 0 then
+    Exit;
+  Uninstaller := ExtractRegisteredUninstaller(UninstallString);
+  if (Uninstaller = '') or
+     (CompareText(NormalizeApplicationDirectory(ExtractFileDir(Uninstaller)), ExpectedRoot) <> 0) or
+     not IsRegularOwnedFile(Uninstaller) or
+     not IsRegularOwnedFile(ChangeFileExt(Uninstaller, '.dat')) or
+     not IsRegularOwnedFile(AddBackslash(ExpectedRoot) + '{#ControlCenterExeName}') then
+    Exit;
+
+  RootCleanupPreservedUninstaller := Uninstaller;
+  if CompareText(DisplayVersion, '{#AppVersion}') = 0 then
+    ExistingInstallState := ExistingInstallVerifiedReinstall
+  else
+    ExistingInstallState := ExistingInstallVerifiedUpdate;
+  Result := True;
+end;
+
+function ApplicationRootHasForeignContents: Boolean;
+var
+  ApplicationRoot: String;
+  Names: TStringList;
+begin
+  Result := False;
+  ApplicationRoot := ExpandConstant('{app}');
+  if not DirExists(ApplicationRoot) then
+    Exit;
+  Names := TStringList.Create;
+  try
+    if CollectRootCleanupEntryNames(ApplicationRoot, True, Names) <> '' then
+    begin
+      Result := True;
+      Exit;
+    end;
+    Result := Names.Count > 0;
+  finally
+    Names.Free;
+  end;
+end;
+
+procedure ClassifyExistingInstall;
+begin
+  ExistingInstallState := ExistingInstallFresh;
+  RootCleanupPreservedUninstaller := '';
+  if IsApplicationRootCleanupReparsePoint(ExpandConstant('{app}')) or
+     (FileExists(ExpandConstant('{app}')) and not DirExists(ExpandConstant('{app}'))) then
+  begin
+    ExistingInstallState := ExistingInstallForeignContents;
+    Exit;
+  end;
+  if ClassifyVerifiedExistingInstall then
+    Exit;
+  if ApplicationRootHasForeignContents then
+    ExistingInstallState := ExistingInstallForeignContents;
+end;
+
+function ExistingInstallPromptTitle: String;
+begin
+  case ExistingInstallState of
+    ExistingInstallVerifiedUpdate:
+      Result := CustomMessage('VerifiedUpdateTitle');
+    ExistingInstallVerifiedReinstall:
+      Result := CustomMessage('VerifiedReinstallTitle');
+    ExistingInstallForeignContents:
+      Result := CustomMessage('ForeignContentsTitle');
+  else
+    Result := '';
+  end;
+end;
+
+function ExistingInstallPromptMessage: String;
+begin
+  case ExistingInstallState of
+    ExistingInstallVerifiedUpdate:
+      Result := CustomMessage('VerifiedUpdateMessage');
+    ExistingInstallVerifiedReinstall:
+      Result := CustomMessage('VerifiedReinstallMessage');
+    ExistingInstallForeignContents:
+      Result := CustomMessage('ForeignContentsMessage');
+  else
+    Result := '';
+  end;
+end;
+
+function ExistingInstallPromptButton: String;
+begin
+  case ExistingInstallState of
+    ExistingInstallVerifiedUpdate:
+      Result := CustomMessage('VerifiedUpdateButton');
+    ExistingInstallVerifiedReinstall:
+      Result := CustomMessage('VerifiedReinstallButton');
+    ExistingInstallForeignContents:
+      Result := CustomMessage('ForeignContentsButton');
+  else
+    Result := WizardForm.NextButton.Caption;
+  end;
+end;
+
+procedure ActivateExistingInstallPage(Sender: TWizardPage);
+begin
+  ExistingInstallNextCaption := WizardForm.NextButton.Caption;
+  WizardForm.NextButton.Caption := ExistingInstallPromptButton;
+end;
+
+function LeaveExistingInstallPage(Sender: TWizardPage): Boolean;
+begin
+  WizardForm.NextButton.Caption := ExistingInstallNextCaption;
+  Result := True;
+end;
+
+function SkipExistingInstallPage(Sender: TWizardPage): Boolean;
+begin
+  Result := WizardSilent or (ExistingInstallState = ExistingInstallFresh);
+end;
+
+procedure InitializeWizard;
+begin
+  ClassifyExistingInstall;
+  ExistingInstallPage := CreateOutputMsgPage(
+    wpReady,
+    ExistingInstallPromptTitle,
+    '',
+    ExistingInstallPromptMessage
+  );
+  ExistingInstallPage.OnActivate := @ActivateExistingInstallPage;
+  ExistingInstallPage.OnNextButtonClick := @LeaveExistingInstallPage;
+  ExistingInstallPage.OnBackButtonClick := @LeaveExistingInstallPage;
+  ExistingInstallPage.OnShouldSkipPage := @SkipExistingInstallPage;
+end;
 
 procedure CaptureBrokerOutput(const S: String; const Error, FirstLine: Boolean);
 var
@@ -427,24 +686,59 @@ begin
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
-var
-  RestoreError: String;
 begin
-  { Required bootstrap must finish here using temporary app-side staging and restoration:
-    AfterInstall exceptions may report success, and cancellation cannot restore overwritten upgrade files. }
+  { Keep this phase mutation-free. CloseApplications must finish before the
+    rollback-staged bootstrap and root cleanup begin in the first InstallDelete entry. }
   if CompareText(ExpandConstant('{app}'), ExpandConstant(FixedApplicationDirectory)) <> 0 then
   begin
     Result := 'MacType Control Center must be installed in its protected Program Files directory.';
     Exit;
   end;
-  Result := BootstrapBeforeFileInstall;
-  if Result <> '' then
-  begin
-    Log('Fatal machine service bootstrap failure: ' + Result);
-    RestoreError := RestoreLegacyTrayStartupAfterBootstrapFailure;
-    if RestoreError <> '' then
-      Result := Result + #13#10 +
-        'MacTray startup receipt restoration failed: ' + RestoreError;
+  Result := ValidateApplicationRootCleanup;
+end;
+
+procedure BootstrapAndPurgeApplicationRootBeforeInstall;
+var
+  ApplicationRoot: String;
+  RollbackRoot: String;
+  OperationError: String;
+  RestoreError: String;
+  StartupRestoreError: String;
+begin
+  ApplicationRoot := ExpandConstant('{app}');
+  RollbackRoot := AddBackslash(ApplicationRoot) + '.setup-root-rollback';
+  try
+    OperationError := StageApplicationRootCleanup(ApplicationRoot, RollbackRoot);
+    if OperationError <> '' then
+      FailApplicationRootCleanup(OperationError);
+
+    OperationError := BootstrapBeforeFileInstall;
+    if OperationError <> '' then
+    begin
+      Log('Fatal machine service bootstrap failure: ' + OperationError);
+      RestoreError := RestoreStagedRootCleanup(ApplicationRoot, RollbackRoot);
+      if RestoreError <> '' then
+        OperationError := OperationError + #13#10 +
+          'Application-root restoration failed: ' + RestoreError
+      else
+      begin
+        StartupRestoreError := RestoreLegacyTrayStartupAfterBootstrapFailure;
+        if StartupRestoreError <> '' then
+          OperationError := OperationError + #13#10 +
+            'MacTray startup receipt restoration failed: ' + StartupRestoreError;
+      end;
+      FailApplicationRootCleanup(OperationError);
+    end;
+
+    OperationError := CommitStagedRootCleanup(ApplicationRoot, RollbackRoot);
+    if OperationError <> '' then
+      FailApplicationRootCleanup(OperationError);
+    Log('Application-root cleanup removed all non-protected prior contents.');
+  except
+    FailApplicationRootCleanup(
+      'Protected bootstrap and application-root cleanup failed unexpectedly: ' +
+      GetExceptionMessage
+    );
   end;
 end;
 
@@ -463,3 +757,5 @@ function UninstallNeedRestart(): Boolean;
 begin
   Result := DeferredRuntimeCleanup;
 end;
+
+#include "application-root-cleanup.iss"

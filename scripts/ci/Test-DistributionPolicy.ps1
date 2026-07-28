@@ -9,6 +9,7 @@ $required = @(
     'distribution\languages\en.json',
     'distribution\languages\ko.json',
     'distribution\THIRD_PARTY_NOTICES.md',
+    'distribution\INTEGRATION_DEVELOPER_README.md',
     'LICENSE'
 )
 foreach ($relative in $required) {
@@ -67,6 +68,8 @@ foreach ($machinePayloadToken in @(
 foreach ($protectedInstallerToken in @(
     'DefaultDirName={autopf}\MacType Control Center',
     'DisableDirPage=yes',
+    'OutputBaseFilename=MacType-Control-Center-Installer',
+    'Root: HKLM64; Subkey: "SOFTWARE\MacType\ControlCenter"; ValueType: string; ValueName: "InstallLocation"; ValueData: "{app}"',
     'PrivilegesRequired=admin',
     'UsePreviousAppDir=no',
     'bootstrap-install',
@@ -81,6 +84,36 @@ foreach ($protectedInstallerToken in @(
 )) {
     if (-not $installer.Contains($protectedInstallerToken)) {
         throw "Installer does not enforce protected machine bootstrap token: $protectedInstallerToken"
+    }
+}
+
+$buildWorkflow = Get-Content -LiteralPath (Join-Path $root '.github\workflows\build.yml') -Raw
+foreach ($installerArtifactToken in @(
+    'name: mactype-control-center-installer-windows',
+    'artifacts/installer/MacType-Control-Center-Installer.exe',
+    'artifacts/installer/SHA256SUMS.txt',
+    'name: mactype-control-center-integration-developer-bundle-windows',
+    '.github/scripts/Build-IntegrationDeveloperBundle.ps1',
+    'MacType-Control-Center-Integration-Developer-Bundle.zip',
+    'INTEGRATION_SHA256SUMS.txt'
+)) {
+    if (-not $buildWorkflow.Contains($installerArtifactToken)) {
+        throw "Windows workflow is missing a separated distribution contract token: $installerArtifactToken"
+    }
+}
+$bundleBuilder = Get-Content -LiteralPath (
+    Join-Path $root '.github\scripts\Build-IntegrationDeveloperBundle.ps1'
+) -Raw
+foreach ($bundleToken in @(
+    'installation-tree',
+    'MacType Control Center.exe',
+    'mactype-preview32.exe',
+    'service-runtime',
+    'manifest.json',
+    'INTEGRATION_DEVELOPER_README.md'
+)) {
+    if (-not $bundleBuilder.Contains($bundleToken)) {
+        throw "Integration/Developer bundle does not reproduce the installed tree: $bundleToken"
     }
 }
 foreach ($installerUpgradePromptToken in @(
@@ -144,6 +177,51 @@ if ($uninstallDeleteSection.Groups['body'].Value -match '(?im)^Type:\s*filesando
 }
 if ($installer -match '(?im)\bsc(?:\.exe)?\s+(?:create|config|start|stop|delete)\b') {
     throw 'Installer must mutate SCM only through the fixed protected setup broker.'
+}
+
+$installedPackage = Get-Content -LiteralPath (
+    Join-Path $root 'control-center\src-tauri\src\machine_integration\open_service\broker\installed_package.rs'
+) -Raw
+foreach ($installedPackageToken in @(
+    'HKEY_LOCAL_MACHINE',
+    'RRF_SUBKEY_WOW6464KEY',
+    'SOFTWARE\MacType\ControlCenter',
+    'InstallLocation',
+    'FOLDERID_ProgramFiles',
+    'reject_reparse_ancestors',
+    'service-runtime\mactype-service-setup.exe',
+    'service-runtime\payload\manifest.json',
+    'INSTALLATION_REQUIRED_PREFIX',
+    'INSTALLATION_INCOMPLETE_PREFIX',
+    'INSTALLATION_UNTRUSTED_PREFIX'
+)) {
+    if (-not $installedPackage.Contains($installedPackageToken)) {
+        throw "Installed-package preflight is missing trust contract token: $installedPackageToken"
+    }
+}
+if ($installedPackage.Contains('Program Files\MacType Control Center') -or
+    $installedPackage.Contains('join("MacType Control Center")')) {
+    throw 'Installed-package discovery hardcodes the product folder instead of trusting installer registration.'
+}
+
+$operationLog = Get-Content -LiteralPath (
+    Join-Path $root 'control-center\src-tauri\src\diagnostics\operation_log.rs'
+) -Raw
+foreach ($diagnosticToken in @(
+    'Expected installed Control Center:',
+    'Current executable:',
+    'Expected executable exists:',
+    'Installed Control Center:',
+    'Setup broker:',
+    'Runtime manifest:',
+    'Runtime payload:',
+    'Elevation attempted:',
+    'Machine state changed:',
+    'Rollback required:'
+)) {
+    if (-not $operationLog.Contains($diagnosticToken)) {
+        throw "Installation preflight diagnostics are missing field: $diagnosticToken"
+    }
 }
 
 $installerTest = Get-Content -LiteralPath (Join-Path $root 'scripts\ci\Test-InstallerWindows.ps1') -Raw

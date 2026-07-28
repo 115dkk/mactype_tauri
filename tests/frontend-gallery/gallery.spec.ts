@@ -1408,6 +1408,30 @@ for (const unstableState of ["start-pending", "stop-pending", "paused", "unknown
   });
 }
 
+for (const fixture of [
+  { state: "not-installed", message: "Install MacType Control Center first" },
+  { state: "incomplete", message: "The installation is incomplete" },
+  { state: "untrusted", message: "The installation location is not trusted" },
+] as const) {
+  test(`service management stays read-only when its installed package is ${fixture.state}`, async ({ page }, testInfo) => {
+    await page.goto(`/?view=execution&gallery=1&lang=en&system-service=ready&service-package=${fixture.state}`, { waitUntil: "networkidle" });
+    await openServiceDetails(page);
+
+    const openService = page.locator('[data-service-backend="open-source"]');
+    const notice = openService.locator(`[data-service-package="${fixture.state}"]`);
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText(fixture.message);
+    const mutationButtons = openService.locator(".system-injection-action, .service-actions button");
+    await expect(mutationButtons).not.toHaveCount(0);
+    for (const button of await mutationButtons.all()) await expect(button).toBeDisabled();
+    expect(await overflowingElements(page)).toEqual([]);
+    await page.screenshot({
+      path: path.join(galleryRoot, `${testInfo.project.name}-execution-service-package-${fixture.state}-en.png`),
+      fullPage: true,
+    });
+  });
+}
+
 test("a stopped new service with no alternative offers Start and Remove", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=ready&service-runtime=stopped", { waitUntil: "networkidle" });
   const summary = page.locator("[data-service-summary]");

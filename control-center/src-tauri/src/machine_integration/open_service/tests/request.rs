@@ -1,5 +1,37 @@
 use super::super::*;
 
+fn write_complete_installed_package(install_root: &std::path::Path) {
+    let payload_root = install_root.join("service-runtime/payload/files");
+    std::fs::create_dir_all(&payload_root).unwrap();
+    std::fs::write(
+        install_root.join("MacType Control Center.exe"),
+        b"control-center",
+    )
+    .unwrap();
+    std::fs::write(
+        install_root.join("service-runtime/mactype-service-setup.exe"),
+        b"setup",
+    )
+    .unwrap();
+    let files = mactype_service_contract::IMMUTABLE_RUNTIME_FILES
+        .iter()
+        .map(|name| (*name, format!("sha256:{}", "0".repeat(64))))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let manifest = serde_json::json!({
+        "schema": mactype_service_contract::RUNTIME_MANIFEST_SCHEMA,
+        "version": "0.1.0",
+        "files": files,
+    });
+    std::fs::write(
+        install_root.join("service-runtime/payload/manifest.json"),
+        serde_json::to_vec(&manifest).unwrap(),
+    )
+    .unwrap();
+    for name in mactype_service_contract::IMMUTABLE_RUNTIME_FILES {
+        std::fs::write(payload_root.join(name), format!("payload-{name}")).unwrap();
+    }
+}
+
 #[test]
 fn setup_boundary_accepts_only_fixed_verbs() {
     assert_eq!(SystemServiceAction::Install.setup_verb(), Some("install"));
@@ -12,35 +44,121 @@ fn setup_boundary_accepts_only_fixed_verbs() {
 }
 
 #[test]
-fn setup_broker_rejects_control_center_copies_outside_program_files_layout() {
+fn missing_registered_installation_requires_the_complete_installer_before_elevation() {
     let program_files = std::path::Path::new(r"C:\Program Files");
-    let copied_executable =
-        std::path::Path::new(r"C:\Users\Alice\Downloads\MacType Control Center.exe");
 
-    assert!(setup_path_for_trusted_layout(program_files, copied_executable).is_err());
-}
+    let error = resolve_installed_package_for_trusted_layout(program_files, None).unwrap_err();
 
-#[test]
-fn setup_broker_accepts_only_the_fixed_program_files_target() {
-    let program_files = std::path::Path::new(r"C:\Program Files");
-    let executable = program_files.join(r"MacType Control Center\MacType Control Center.exe");
-
-    assert_eq!(
-        setup_path_for_trusted_layout(program_files, &executable).unwrap(),
-        program_files.join(r"MacType Control Center\service-runtime\mactype-service-setup.exe")
+    assert!(
+        error.starts_with("control-center-installation-required:"),
+        "{error}"
     );
 }
 
 #[test]
-fn development_build_delegates_elevation_to_the_fixed_installed_control_center() {
-    let program_files = std::path::Path::new(r"C:\Program Files");
-    let development_executable =
-        std::path::Path::new(r"D:\src\mactype\artifacts\application\MacType Control Center.exe");
+fn installation_preflight_errors_project_distinct_read_only_states() {
+    use crate::service_contract::ServiceManagementPackageState;
 
     assert_eq!(
-        broker_executable_for_trusted_layout(program_files, development_executable),
-        program_files.join(r"MacType Control Center\MacType Control Center.exe")
+        management_package_state_from_error(
+            "control-center-installation-required: run the installer"
+        ),
+        ServiceManagementPackageState::NotInstalled
     );
+    assert_eq!(
+        management_package_state_from_error(
+            "control-center-installation-incomplete: runtime is missing"
+        ),
+        ServiceManagementPackageState::Incomplete
+    );
+    assert_eq!(
+        management_package_state_from_error(
+            "control-center-installation-untrusted: outside Program Files"
+        ),
+        ServiceManagementPackageState::Untrusted
+    );
+}
+
+#[test]
+fn registered_control_center_without_service_runtime_is_an_incomplete_installation() {
+    let fixture =
+        std::env::temp_dir().join(format!("mactype-incomplete-package-{}", std::process::id()));
+    let program_files = fixture.join("Program Files");
+    let install_root = program_files.join("MacType");
+    std::fs::create_dir_all(&install_root).unwrap();
+    std::fs::write(
+        install_root.join("MacType Control Center.exe"),
+        b"control-center",
+    )
+    .unwrap();
+
+    let error = resolve_installed_package_for_trusted_layout(&program_files, Some(&install_root))
+        .unwrap_err();
+
+    assert!(
+        error.starts_with("control-center-installation-incomplete:"),
+        "{error}"
+    );
+    std::fs::remove_dir_all(fixture).unwrap();
+}
+
+#[test]
+fn complete_registered_package_delegates_to_its_program_files_control_center() {
+    let fixture =
+        std::env::temp_dir().join(format!("mactype-complete-package-{}", std::process::id()));
+    let program_files = fixture.join("Program Files");
+    let install_root = program_files.join("MacType");
+    write_complete_installed_package(&install_root);
+
+    let resolved =
+        resolve_installed_package_for_trusted_layout(&program_files, Some(&install_root)).unwrap();
+
+    assert_eq!(
+        resolved,
+        std::fs::canonicalize(&install_root)
+            .unwrap()
+            .join("MacType Control Center.exe")
+    );
+    std::fs::remove_dir_all(fixture).unwrap();
+}
+
+#[test]
+fn registered_package_with_a_manifest_but_missing_payload_is_incomplete() {
+    let fixture =
+        std::env::temp_dir().join(format!("mactype-missing-payload-{}", std::process::id()));
+    let program_files = fixture.join("Program Files");
+    let install_root = program_files.join("MacType");
+    write_complete_installed_package(&install_root);
+    std::fs::remove_file(install_root.join("service-runtime/payload/files/mactype-injector64.exe"))
+        .unwrap();
+
+    let error = resolve_installed_package_for_trusted_layout(&program_files, Some(&install_root))
+        .unwrap_err();
+
+    assert!(
+        error.starts_with("control-center-installation-incomplete:"),
+        "{error}"
+    );
+    std::fs::remove_dir_all(fixture).unwrap();
+}
+
+#[test]
+fn complete_package_registered_outside_program_files_is_untrusted() {
+    let fixture =
+        std::env::temp_dir().join(format!("mactype-untrusted-package-{}", std::process::id()));
+    let program_files = fixture.join("Program Files");
+    let install_root = fixture.join("Downloads").join("MacType");
+    std::fs::create_dir_all(&program_files).unwrap();
+    write_complete_installed_package(&install_root);
+
+    let error = resolve_installed_package_for_trusted_layout(&program_files, Some(&install_root))
+        .unwrap_err();
+
+    assert!(
+        error.starts_with("control-center-installation-untrusted:"),
+        "{error}"
+    );
+    std::fs::remove_dir_all(fixture).unwrap();
 }
 
 #[test]

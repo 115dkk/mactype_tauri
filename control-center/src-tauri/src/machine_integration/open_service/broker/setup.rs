@@ -1,17 +1,14 @@
 use super::{
-    super::{platform::known_folder, same_path, windows::query, SystemServiceAction},
-    path_guard::reject_reparse_ancestors,
+    super::{windows::query, SystemServiceAction},
+    installed_package::installed_package,
 };
 use crate::service_contract::SystemServiceStatus;
 use std::{
-    ffi::OsStr,
-    fs,
     io::{Read, Write},
     path::PathBuf,
     process::{Command, Stdio},
     thread,
 };
-use windows_sys::Win32::UI::Shell::FOLDERID_ProgramFiles;
 
 struct OpenServicePublishBackend;
 
@@ -76,38 +73,6 @@ pub(in crate::machine_integration::open_service) fn run_setup(
 pub(in crate::machine_integration::open_service) fn run_restore_pinned_runtime(
 ) -> Result<(), String> {
     run_setup_process("restore-runtime", None)
-}
-
-pub(in crate::machine_integration::open_service) fn fixed_control_center_path(
-) -> Result<PathBuf, String> {
-    let program_files = known_folder(&FOLDERID_ProgramFiles)?;
-    let caller = std::env::current_exe().map_err(|error| error.to_string())?;
-    let expected = broker_executable_for_trusted_layout(&program_files, &caller);
-    reject_reparse_ancestors(&expected)?;
-    let canonical_program_files =
-        fs::canonicalize(&program_files).map_err(|error| error.to_string())?;
-    let canonical = fs::canonicalize(&expected).map_err(|error| error.to_string())?;
-    let canonical_expected =
-        broker_executable_for_trusted_layout(&canonical_program_files, &canonical);
-    if !same_path(&canonical, &canonical_expected) {
-        return Err("fixed Control Center resolves outside the Program Files layout".to_owned());
-    }
-    reject_reparse_ancestors(&canonical)?;
-    Ok(canonical)
-}
-
-pub(in crate::machine_integration::open_service) fn broker_executable_for_trusted_layout(
-    program_files: &std::path::Path,
-    caller: &std::path::Path,
-) -> PathBuf {
-    let expected = program_files
-        .join("MacType Control Center")
-        .join("MacType Control Center.exe");
-    if same_path(caller, &expected) {
-        caller.to_owned()
-    } else {
-        expected
-    }
 }
 
 fn run_setup_process(verb: &str, profile: Option<&[u8]>) -> Result<(), String> {
@@ -202,38 +167,9 @@ fn setup_failure_message(verb: &str, exit_code: Option<i32>, stderr: &str, stdou
 }
 
 pub(in crate::machine_integration::open_service) fn fixed_setup_path() -> Result<PathBuf, String> {
-    let program_files = known_folder(&FOLDERID_ProgramFiles)?;
-    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
-    reject_reparse_ancestors(&executable)?;
-    let canonical_program_files =
-        fs::canonicalize(&program_files).map_err(|error| error.to_string())?;
-    let canonical_executable = fs::canonicalize(&executable).map_err(|error| error.to_string())?;
-    let expected = setup_path_for_trusted_layout(&canonical_program_files, &canonical_executable)?;
-    reject_reparse_ancestors(&expected)?;
-    let canonical = fs::canonicalize(&expected).map_err(|error| error.to_string())?;
-    let runtime_root = expected
-        .parent()
-        .ok_or_else(|| "fixed setup broker has no runtime root".to_owned())?;
-    if canonical.file_name() != Some(OsStr::new("mactype-service-setup.exe"))
-        || canonical.parent() != fs::canonicalize(runtime_root).ok().as_deref()
-    {
-        return Err("setup broker resolves outside the fixed application layout".to_owned());
-    }
-    Ok(canonical)
-}
-
-pub(in crate::machine_integration::open_service) fn setup_path_for_trusted_layout(
-    program_files: &std::path::Path,
-    executable: &std::path::Path,
-) -> Result<PathBuf, String> {
-    let expected_executable = broker_executable_for_trusted_layout(program_files, executable);
-    if !same_path(executable, &expected_executable) {
-        return Err("Control Center is outside the fixed Program Files layout".to_owned());
-    }
-    Ok(program_files
-        .join("MacType Control Center")
-        .join("service-runtime")
-        .join("mactype-service-setup.exe"))
+    installed_package()
+        .map(|package| package.setup_broker)
+        .map_err(|failure| failure.error)
 }
 
 #[cfg(test)]

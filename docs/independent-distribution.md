@@ -4,7 +4,9 @@ The installer does not require an existing MacType installation. CI builds the r
 
 ## Installed manifest
 
-- `MacType Control Center.exe`
+- public installer: `MacType-Control-Center-Installer.exe`
+- Integration/Developer bundle: a README plus a complete `installation-tree` for upstream installer integration
+- installed application: `MacType Control Center.exe` (not a standalone installation)
 - `mactype-preview32.exe`
 - source-built `MacType.dll`, `MacType64.dll`, `MacType.Core.dll`, and `MacType64.Core.dll`
 - source-built `MacLoader.exe` and `MacLoader64.exe`
@@ -13,6 +15,8 @@ The installer does not require an existing MacType installation. CI builds the r
 - `MacType.ini` and `ini\Default.ini` authored in this repository
 - English and Korean distribution translation catalogs
 - GPL and third-party notices
+
+The final-user installer and the Integration/Developer bundle are separate public artifacts. The bundle preserves the raw application and every component needed by an upstream MacType installer, but it does not claim that `MacType Control Center.exe` is independently installed. An integrating installer must place the entire tree below Program Files and write the protected application root to `HKLM64\SOFTWARE\MacType\ControlCenter\InstallLocation`. Without that complete registered tree, the Control Center leaves service actions read-only and does not request UAC or attempt rollback.
 
 The `Rel+Detours` core DLL is copied under the public runtime names `MacType.dll` and `MacType64.dll`. This build has no external EasyHook runtime dependency, so `EasyHK32.dll` and `EasyHK64.dll` are not redistributed. Delphi GUI files, MacTray, legacy updater files, existing profiles, and existing language resources are forbidden by CI. The administrator-elevated installer writes only to the fixed Program Files application root, then synchronously invokes the fixed, argument-free `bootstrap-install` broker. The broker verifies the immutable payload, publishes or preserves the protected ProgramData profile, configures the exact-owned SCM service, and returns success only when it is Auto/LocalSystem/Running with strict Ready health.
 

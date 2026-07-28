@@ -78,7 +78,7 @@ pub(super) use super::broker::{
 use super::broker::{
     fixed_setup_path, reject_reparse_ancestors, run_restore_pinned_runtime, run_setup,
 };
-pub(super) use super::broker::{run_elevated, run_privileged};
+pub(super) use super::broker::{run_elevated, run_elevated_at, run_privileged};
 use super::platform::{
     known_folder, read_health_for_scm_process, running_service_process_id, safe_version, wide,
 };

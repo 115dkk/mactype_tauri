@@ -246,6 +246,22 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
   const legacyService = executionView.status?.legacyMacTray;
   const legacyTrayResolution = executionView.legacyTrayResolution;
   const serviceSummary = executionView.serviceSummary;
+  const servicePackageNotice = status?.serviceManagementPackage === "not-installed"
+    ? {
+        titleKey: "execution.servicePackageNotInstalledTitle" as const,
+        descriptionKey: "execution.servicePackageNotInstalledDescription" as const,
+      }
+    : status?.serviceManagementPackage === "incomplete"
+      ? {
+          titleKey: "execution.servicePackageIncompleteTitle" as const,
+          descriptionKey: "execution.servicePackageIncompleteDescription" as const,
+        }
+      : status?.serviceManagementPackage === "untrusted"
+        ? {
+            titleKey: "execution.servicePackageUntrustedTitle" as const,
+            descriptionKey: "execution.servicePackageUntrustedDescription" as const,
+          }
+        : null;
   const activeProfileName = status?.activeProfile?.split(/[\\/]/).pop() ?? t("execution.profileNotApplied");
 
   const runSummaryAction = (command: SystemServiceAction) => {
@@ -339,6 +355,15 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
         </summary>
         <div className="service-row-body">
         <div className="open-service-card" data-service-backend="open-source">
+        {servicePackageNotice && (
+          <div className="service-package-notice" role="status" data-service-package={status?.serviceManagementPackage} data-prominent-exception>
+            <span className="service-package-notice-icon"><ShieldAlert aria-hidden="true" size={20} /></span>
+            <div>
+              <strong>{t(servicePackageNotice.titleKey)}</strong>
+              <p>{t(servicePackageNotice.descriptionKey)}</p>
+            </div>
+          </div>
+        )}
         <div className="system-injection-control" data-active={systemInjectionAction.state === "active"} data-state={systemInjectionAction.state}>
           <div className="system-injection-state">
             <span className="system-injection-icon">{systemInjectionAction.intent === "stop" ? <Power aria-hidden="true" size={20} /> : <PowerOff aria-hidden="true" size={20} />}</span>

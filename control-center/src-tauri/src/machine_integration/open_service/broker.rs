@@ -1,9 +1,13 @@
 mod elevation;
+mod installed_package;
 mod path_guard;
 mod process;
 mod setup;
 
-pub(super) use elevation::run_elevated;
+pub(super) use elevation::{run_elevated, run_elevated_at};
+pub(super) use installed_package::installed_package;
+#[cfg(test)]
+pub(super) use installed_package::resolve_installed_package_for_trusted_layout;
 pub(super) use path_guard::reject_reparse_ancestors;
 #[cfg(test)]
 pub(super) use process::{
@@ -11,8 +15,6 @@ pub(super) use process::{
     BrokerTermination,
 };
 use setup::publish_and_activate;
-#[cfg(test)]
-pub(super) use setup::{broker_executable_for_trusted_layout, setup_path_for_trusted_layout};
 pub(super) use setup::{fixed_setup_path, run_restore_pinned_runtime, run_setup};
 
 use super::{

@@ -16,6 +16,7 @@ const MAX_CHANNEL_ERROR_BYTES: usize = 2 * 1024;
 const MAX_ROLLBACK_BYTES: usize = 512;
 const MAX_FINAL_STATE_BYTES: usize = 2 * 1024;
 const MAX_PROFILE_NAME_BYTES: usize = 260;
+const MAX_PREFLIGHT_PATH_BYTES: usize = 2 * 1024;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -62,6 +63,27 @@ pub(crate) struct OperationFailure {
     pub(crate) channel_failure: Option<String>,
     pub(crate) rollback: String,
     pub(crate) final_state: String,
+    pub(crate) installation_preflight: Option<InstallationPreflightDiagnostics>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InstallationPreflightDiagnostics {
+    pub(crate) expected_installed_control_center: Option<String>,
+    pub(crate) current_executable: Option<String>,
+    pub(crate) expected_executable_exists: Option<bool>,
+    pub(crate) installed_control_center: String,
+    pub(crate) setup_broker: String,
+    pub(crate) runtime_manifest: String,
+    #[serde(default = "not_checked")]
+    pub(crate) runtime_payload: String,
+    pub(crate) elevation_attempted: bool,
+    pub(crate) machine_state_changed: bool,
+    pub(crate) rollback_required: bool,
+}
+
+fn not_checked() -> String {
+    "not-checked".to_owned()
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -76,6 +98,8 @@ pub(crate) struct OperationLogEntry {
     pub(crate) channel_failure: Option<String>,
     pub(crate) rollback: String,
     pub(crate) final_state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) installation_preflight: Option<InstallationPreflightDiagnostics>,
 }
 
 impl OperationLogEntry {
@@ -97,6 +121,30 @@ impl OperationLogEntry {
             " rollback={} finalState={}",
             self.rollback, self.final_state
         ));
+        if let Some(preflight) = &self.installation_preflight {
+            let yes_no = |value| if value { "yes" } else { "no" };
+            value.push_str(&format!(
+                "\nExpected installed Control Center: {}\nCurrent executable: {}\nExpected executable exists: {:?} \
+                 \nInstalled Control Center: {}\nSetup broker: {}\nRuntime manifest: {}\nRuntime payload: {} \
+                 \nElevation attempted: {}\nMachine state changed: {}\nRollback required: {}",
+                preflight
+                    .expected_installed_control_center
+                    .as_deref()
+                    .unwrap_or("not registered"),
+                preflight
+                    .current_executable
+                    .as_deref()
+                    .unwrap_or("unavailable"),
+                preflight.expected_executable_exists,
+                preflight.installed_control_center,
+                preflight.setup_broker.replace('-', " "),
+                preflight.runtime_manifest.replace('-', " "),
+                preflight.runtime_payload.replace('-', " "),
+                yes_no(preflight.elevation_attempted),
+                yes_no(preflight.machine_state_changed),
+                yes_no(preflight.rollback_required),
+            ));
+        }
         value
     }
 }
@@ -129,9 +177,36 @@ pub(super) fn record_operation_failure_at(
             .map(|value| sanitize(value, redactions, MAX_CHANNEL_ERROR_BYTES)),
         rollback: sanitize(&failure.rollback, &[], MAX_ROLLBACK_BYTES),
         final_state: sanitize(&failure.final_state, &[], MAX_FINAL_STATE_BYTES),
+        installation_preflight: failure
+            .installation_preflight
+            .as_ref()
+            .map(sanitize_installation_preflight),
         error_chain,
     };
     append_entry(root, &entry)
+}
+
+fn sanitize_installation_preflight(
+    value: &InstallationPreflightDiagnostics,
+) -> InstallationPreflightDiagnostics {
+    InstallationPreflightDiagnostics {
+        expected_installed_control_center: value
+            .expected_installed_control_center
+            .as_deref()
+            .map(|path| sanitize(path, &[], MAX_PREFLIGHT_PATH_BYTES)),
+        current_executable: value
+            .current_executable
+            .as_deref()
+            .map(|path| sanitize(path, &[], MAX_PREFLIGHT_PATH_BYTES)),
+        expected_executable_exists: value.expected_executable_exists,
+        installed_control_center: sanitize(&value.installed_control_center, &[], 64),
+        setup_broker: sanitize(&value.setup_broker, &[], 64),
+        runtime_manifest: sanitize(&value.runtime_manifest, &[], 64),
+        runtime_payload: sanitize(&value.runtime_payload, &[], 64),
+        elevation_attempted: value.elevation_attempted,
+        machine_state_changed: value.machine_state_changed,
+        rollback_required: value.rollback_required,
+    }
 }
 
 pub(crate) fn record_activity(

@@ -32,6 +32,7 @@ export interface ExecutionStatus {
   trayAvailable: boolean;
   autoStart: boolean;
   manualLauncherAvailable: boolean;
+  serviceManagementPackage: ServiceManagementPackageState;
   systemService: SystemServiceStatus;
   legacyMacTray: LegacyMacTrayStatus | null;
   legacyTray: LegacyTrayStatus;
@@ -136,6 +137,7 @@ export interface ProfileEntry {
 }
 
 export type ServiceBackend = "open-source" | "legacy-mac-tray" | "foreign" | "none";
+export type ServiceManagementPackageState = "ready" | "not-installed" | "incomplete" | "untrusted";
 export type InstallationState = "absent" | "current" | "outdated" | "invalid" | "inaccessible" | "delete-pending";
 export type ServiceRuntimeState = "stopped" | "start-pending" | "running" | "stop-pending" | "paused" | "unknown";
 export type ServiceHealthState = "unknown" | "initializing" | "ready" | "degraded" | "failed";

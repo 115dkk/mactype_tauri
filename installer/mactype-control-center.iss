@@ -36,7 +36,7 @@ UsePreviousAppDir=no
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#OutputRoot}
-OutputBaseFilename=MacType Control Center
+OutputBaseFilename=MacType-Control-Center-Installer
 SetupIconFile={#SourceRoot}\assets\mactype.ico
 LicenseFile={#SourceRoot}\LICENSE
 UninstallDisplayIcon={app}\{#ControlCenterExeName}
@@ -52,6 +52,9 @@ VersionInfoDescription=Open MacType Control Center and source-built core
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
+
+[Registry]
+Root: HKLM64; Subkey: "SOFTWARE\MacType\ControlCenter"; ValueType: string; ValueName: "InstallLocation"; ValueData: "{app}"; Flags: uninsdeletevalue uninsdeletekeyifempty
 
 [CustomMessages]
 english.VerifiedUpdateTitle=Update MacType Control Center?

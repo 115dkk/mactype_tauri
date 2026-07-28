@@ -109,7 +109,7 @@ foreach ($bundleToken in @(
     'MacType Control Center.exe',
     'mactype-preview32.exe',
     'service-runtime',
-    'payload\manifest.json',
+    'manifest.json',
     'INTEGRATION_DEVELOPER_README.md'
 )) {
     if (-not $bundleBuilder.Contains($bundleToken)) {

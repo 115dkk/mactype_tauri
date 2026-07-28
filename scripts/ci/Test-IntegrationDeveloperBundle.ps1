@@ -3,8 +3,12 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$fixtureRoot = [IO.Path]::GetFullPath((Join-Path $root 'artifacts\integration-bundle-contract-fixture'))
-$artifactPrefix = [IO.Path]::GetFullPath((Join-Path $root 'artifacts')).TrimEnd('\') + '\'
+$artifactsRoot = [IO.Path]::GetFullPath((Join-Path $root 'artifacts'))
+$fixtureRoot = [IO.Path]::GetFullPath(
+    (Join-Path $artifactsRoot 'integration-bundle-contract-fixture')
+)
+$separators = [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+$artifactPrefix = $artifactsRoot.TrimEnd($separators) + [IO.Path]::DirectorySeparatorChar
 if (-not $fixtureRoot.StartsWith($artifactPrefix, [StringComparison]::OrdinalIgnoreCase)) {
     throw "Fixture root escaped the artifacts directory: $fixtureRoot"
 }
@@ -15,7 +19,9 @@ try {
     }
     $input = Join-Path $fixtureRoot 'input'
     $core = Join-Path $input 'core'
-    $runtimeFiles = Join-Path $input 'service-runtime\payload\files'
+    $runtime = Join-Path $input 'service-runtime'
+    $runtimePayload = Join-Path $runtime 'payload'
+    $runtimeFiles = Join-Path $runtimePayload 'files'
     New-Item -ItemType Directory -Path $core, $runtimeFiles -Force | Out-Null
 
     $app = Join-Path $input 'MacType Control Center.exe'
@@ -32,7 +38,6 @@ try {
     )) {
         Set-Content -LiteralPath (Join-Path $core $name) -Value "fixture $name"
     }
-    $runtime = Join-Path $input 'service-runtime'
     Set-Content -LiteralPath (Join-Path $runtime 'mactype-service-setup.exe') -Value 'fixture setup'
     $payloadNames = @(
         'mactype-service.exe',
@@ -50,9 +55,11 @@ try {
     }
     [ordered]@{ schema = 1; version = 'fixture'; files = $manifestFiles } |
         ConvertTo-Json -Depth 4 -Compress |
-        Set-Content -LiteralPath (Join-Path $runtime 'payload\manifest.json') -Encoding utf8NoBOM
+        Set-Content -LiteralPath (Join-Path $runtimePayload 'manifest.json') -Encoding utf8NoBOM
 
-    $outputRelative = 'artifacts\integration-bundle-contract-fixture\output'
+    $outputRelative = Join-Path (
+        Join-Path 'artifacts' 'integration-bundle-contract-fixture'
+    ) 'output'
     & (Join-Path $root '.github\scripts\Build-IntegrationDeveloperBundle.ps1') `
         -ApplicationExe $app `
         -PreviewHelper $preview `
@@ -84,7 +91,11 @@ try {
         'installation-tree\service-runtime\payload\files\MacType.dll',
         'installation-tree\service-runtime\payload\files\MacType64.dll'
     )) {
-        if (-not (Test-Path -LiteralPath (Join-Path $output $relative) -PathType Leaf)) {
+        $normalizedRelative = $relative.Replace(
+            '\',
+            [string][IO.Path]::DirectorySeparatorChar
+        )
+        if (-not (Test-Path -LiteralPath (Join-Path $output $normalizedRelative) -PathType Leaf)) {
             throw "Integration/Developer bundle fixture is missing: $relative"
         }
     }

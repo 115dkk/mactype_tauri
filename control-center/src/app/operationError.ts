@@ -1,6 +1,11 @@
 import type { I18nValue, MessageKey } from "../i18n/i18n";
 
 const INTERNAL_OPERATION_FAILURE_PREFIX = "control-center-internal-operation-failed:";
+const INSTALLATION_ERROR_MESSAGES = [
+  ["control-center-installation-required:", "execution.servicePackageNotInstalledDescription"],
+  ["control-center-installation-incomplete:", "execution.servicePackageIncompleteDescription"],
+  ["control-center-installation-untrusted:", "execution.servicePackageUntrustedDescription"],
+] as const satisfies ReadonlyArray<readonly [string, MessageKey]>;
 
 export function operationErrorMessage(
   caught: unknown,
@@ -8,5 +13,7 @@ export function operationErrorMessage(
   internalMessage: MessageKey = "execution.operationFailed",
 ): string {
   const detail = caught instanceof Error ? caught.message : String(caught);
+  const installationMessage = INSTALLATION_ERROR_MESSAGES.find(([prefix]) => detail.startsWith(prefix));
+  if (installationMessage) return t(installationMessage[1]);
   return detail.startsWith(INTERNAL_OPERATION_FAILURE_PREFIX) ? t(internalMessage) : detail;
 }

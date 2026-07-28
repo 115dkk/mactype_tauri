@@ -6,23 +6,46 @@ use super::{
         },
         BrokerResultDisposition, SystemServiceAction, BROKER_SWITCH, BROKER_TRANSFER_SWITCH,
     },
+    installed_package::installed_package,
     path_guard::wide,
     process::{combine_broker_cleanup_error, terminate_broker_process},
-    setup::fixed_control_center_path,
 };
 
 const BROKER_TIMEOUT_MS: u32 = 5 * 60 * 1000;
 const BROKER_TIMEOUT: std::time::Duration =
     std::time::Duration::from_millis(BROKER_TIMEOUT_MS as u64);
+use std::path::PathBuf;
 use windows_sys::Win32::{
     Foundation::{GetLastError, ERROR_CANCELLED, WAIT_OBJECT_0, WAIT_TIMEOUT},
     System::Threading::{GetExitCodeProcess, GetProcessId, WaitForSingleObject},
     UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW},
 };
 
+fn with_installed_package_before_elevation(
+    locate: impl FnOnce() -> Result<PathBuf, String>,
+    elevate: impl FnOnce(PathBuf) -> Result<(), String>,
+) -> Result<(), String> {
+    elevate(locate()?)
+}
+
 pub(in crate::machine_integration::open_service) fn run_elevated(
     action: SystemServiceAction,
     profile_input: Option<&[u8]>,
+) -> Result<(), String> {
+    with_installed_package_before_elevation(
+        || {
+            installed_package()
+                .map(|package| package.control_center)
+                .map_err(|failure| failure.error)
+        },
+        |executable| run_elevated_at(action, profile_input, executable),
+    )
+}
+
+pub(in crate::machine_integration::open_service) fn run_elevated_at(
+    action: SystemServiceAction,
+    profile_input: Option<&[u8]>,
+    executable: PathBuf,
 ) -> Result<(), String> {
     if profile_input.is_some() != action.needs_profile_input() {
         return Err("the elevated service action has an invalid profile payload".to_owned());
@@ -31,18 +54,18 @@ pub(in crate::machine_integration::open_service) fn run_elevated(
     let profile_transfer = profile_input
         .map(|profile| ProfilePipeServer::create_with_nonce(profile, result_transfer.token().nonce))
         .transpose()?;
-    launch_elevated_broker(action, result_transfer, profile_transfer)
+    launch_elevated_broker(action, executable, result_transfer, profile_transfer)
 }
 
 fn launch_elevated_broker(
     action: SystemServiceAction,
+    executable: PathBuf,
     result_transfer: BrokerResultPipeServer,
     profile_transfer: Option<ProfilePipeServer>,
 ) -> Result<(), String> {
     if profile_transfer.is_some() != action.needs_profile_input() {
         return Err("the elevated broker has invalid profile transfer state".to_owned());
     }
-    let executable = fixed_control_center_path()?;
     let executable = wide(executable.as_os_str());
     let verb = wide("runas");
     let parameter_text = format!(
@@ -163,7 +186,8 @@ fn broker_channel_failure(exit_code: Option<u32>, channel_error: &str) -> String
 
 #[cfg(test)]
 mod tests {
-    use super::broker_channel_failure;
+    use super::{broker_channel_failure, with_installed_package_before_elevation};
+    use std::{cell::Cell, path::PathBuf};
 
     #[test]
     fn missing_child_detail_preserves_exit_code_and_channel_failure() {
@@ -175,5 +199,21 @@ mod tests {
         assert!(error.contains("exit code 21"));
         assert!(error.contains("broker result channel failed"));
         assert!(error.contains("closed before sending a complete frame"));
+    }
+
+    #[test]
+    fn missing_installed_package_never_invokes_the_elevation_launcher() {
+        let launched = Cell::new(false);
+        let error = with_installed_package_before_elevation(
+            || Err("control-center-installation-required: run the installer".to_owned()),
+            |_executable: PathBuf| {
+                launched.set(true);
+                Ok(())
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.starts_with("control-center-installation-required:"));
+        assert!(!launched.get());
     }
 }

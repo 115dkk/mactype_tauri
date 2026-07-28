@@ -310,6 +310,13 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .service-row[open] > summary .service-row-chevron { transform: rotate(180deg); }
 .service-row-body { border-top: 1px solid var(--color-border); }
 .service-row-body > .open-service-card > :first-child { border-top: 0; }
+.service-package-notice { display: flex; align-items: flex-start; gap: var(--space-3); padding: var(--space-4); border-top: 1px solid var(--color-warning); background: color-mix(in srgb, var(--color-warning) 8%, var(--color-surface)); }
+.service-package-notice > div { display: grid; min-width: 0; gap: var(--space-1); }
+.service-package-notice strong { text-wrap: balance; }
+.service-package-notice p { color: var(--color-muted); text-wrap: pretty; }
+.service-package-notice-icon { display: grid; flex: 0 0 40px; width: 40px; height: 40px; place-items: center; border: 1px solid color-mix(in srgb, var(--color-warning) 48%, var(--color-border)); color: var(--color-warning); background: var(--color-surface); }
+.service-package-notice[data-service-package="untrusted"] { border-top-color: var(--color-destructive); background: color-mix(in srgb, var(--color-destructive) 8%, var(--color-surface)); }
+.service-package-notice[data-service-package="untrusted"] .service-package-notice-icon { border-color: color-mix(in srgb, var(--color-destructive) 48%, var(--color-border)); color: var(--color-destructive); }
 .service-row-body > .registered-launchers { border-top: 0; }
 .execution-option .switch-control { flex: 0 0 auto; }
 .manual-launcher { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(220px, 0.8fr) auto; align-items: end; gap: var(--space-4); padding: var(--space-4); }
@@ -421,6 +428,7 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .log-view > div { display: grid; grid-template-columns: 72px 112px minmax(0, 1fr); gap: var(--space-3); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-border); }
 .log-view > div:last-child { border-bottom: 0; }
 .log-view time, .log-view span { color: var(--color-muted); font-family: Consolas, monospace; font-size: 12px; }
+.log-view p { white-space: pre-wrap; }
 .log-view [data-severity="warning"] { box-shadow: inset 3px 0 var(--color-warning); }
 
 @media (max-width: 767px) {

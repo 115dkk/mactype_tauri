@@ -49,6 +49,20 @@ fn failed_initial_install_restores_machine_then_user_startup_receipts() {
 }
 
 #[test]
+fn failed_installation_preflight_does_not_run_startup_restoration() {
+    let mut backend = restorer();
+    let error = finish_action_with_startup_receipts(
+        &mut backend,
+        SystemServiceAction::Install,
+        Err("control-center-installation-required: run the complete installer first".to_owned()),
+    )
+    .unwrap_err();
+
+    assert!(error.starts_with("control-center-installation-required:"));
+    assert!(backend.events.is_empty());
+}
+
+#[test]
 fn failed_legacy_migration_restores_both_startup_jurisdictions() {
     let mut backend = restorer();
     assert!(finish_action_with_startup_receipts(

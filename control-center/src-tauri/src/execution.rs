@@ -34,6 +34,7 @@ pub struct ExecutionStatus {
     pub tray_available: bool,
     pub auto_start: bool,
     pub manual_launcher_available: bool,
+    pub service_management_package: crate::service_contract::ServiceManagementPackageState,
     pub system_service: crate::service_contract::SystemServiceStatus,
     pub legacy_mac_tray: Option<crate::machine_integration::LegacyServiceStatus>,
     pub legacy_tray: crate::machine_integration::LegacyTrayStatus,
@@ -139,18 +140,29 @@ pub fn status(installation_root: Option<&Path>) -> ExecutionStatus {
     let observation = observe_profile(installation_root);
     let machine = crate::machine_integration::status(observation.expected_profile.as_deref());
     let registry_mode_detected = machine.registry_conflict;
-    let system_service = machine.new_service;
+    let mut system_service = machine.new_service;
+    let service_management_package = crate::machine_integration::service_management_package_state();
+    if service_management_package != crate::service_contract::ServiceManagementPackageState::Ready {
+        system_service.can_install = false;
+        system_service.can_remove = false;
+        system_service.can_start = false;
+        system_service.can_stop = false;
+        system_service.can_repair = false;
+        system_service.can_upgrade = false;
+    }
     let expected_profile_digest = machine.expected_profile_digest;
     let system_injection_active = machine.system_injection_active;
     let legacy_mac_tray = machine.legacy_service;
     let legacy_tray = machine.legacy_tray;
-    let system_modes_supported =
-        profile_publish_supported_for(&system_service, registry_mode_detected);
+    let system_modes_supported = service_management_package
+        == crate::service_contract::ServiceManagementPackageState::Ready
+        && profile_publish_supported_for(&system_service, registry_mode_detected);
     ExecutionStatus {
         tray_available: true,
         auto_start: autostart_value().is_some(),
         manual_launcher_available: installation_root.is_some()
             && observation.local_runtime.is_some(),
+        service_management_package,
         system_service,
         legacy_mac_tray,
         legacy_tray,

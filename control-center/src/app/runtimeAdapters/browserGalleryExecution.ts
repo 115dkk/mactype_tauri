@@ -5,6 +5,7 @@ import type {
   LegacyTrayProcessState,
   LegacyTrayStartupState,
   LegacyTrayStatus,
+  ServiceManagementPackageState,
   ServiceRuntimeState,
   SystemServiceAction,
   SystemServiceStatus,
@@ -133,6 +134,14 @@ const legacyRuntimeValues: ReadonlyArray<LegacyMacTrayStatus["state"]> = [
 
 export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
   const fixture = query.get("system-service") ?? "ready";
+  const requestedPackage = query.get("service-package");
+  const serviceManagementPackage: ServiceManagementPackageState =
+    requestedPackage === "not-installed"
+      || requestedPackage === "incomplete"
+      || requestedPackage === "untrusted"
+      ? requestedPackage
+      : "ready";
+  const managementPackageReady = serviceManagementPackage === "ready";
   const appInitConflict = fixture === "legacy-conflict";
   const profileMismatch = fixture === "profile-mismatch";
   const ready = fixture === "ready" || appInitConflict;
@@ -163,7 +172,10 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
       : fixture === "outdated"
         ? "outdated"
         : "current";
-  const generalMutationAllowed = serviceBackend === "open-source" && serviceStable && !appInitConflict;
+  const generalMutationAllowed = managementPackageReady
+    && serviceBackend === "open-source"
+    && serviceStable
+    && !appInitConflict;
   const systemModesSupported = generalMutationAllowed
     && (serviceInstallation === "absent" || serviceInstallation === "current" || serviceInstallation === "outdated");
   const activeProfile = query.has("legacy-applied")
@@ -189,6 +201,7 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
     trayAvailable: true,
     autoStart: false,
     manualLauncherAvailable: true,
+    serviceManagementPackage,
     systemService: {
       backend: serviceBackend,
       installation: serviceInstallation,
@@ -216,7 +229,7 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
       canInstall: conflictFreeMutationAllowed && serviceInstallation === "absent",
       canRemove: conflictFreeMutationAllowed && (serviceInstallation === "current" || serviceInstallation === "outdated"),
       canStart: conflictFreeMutationAllowed && serviceInstallation === "current" && serviceRuntime === "stopped",
-      canStop: serviceBackend === "open-source" && serviceRuntime === "running",
+      canStop: managementPackageReady && serviceBackend === "open-source" && serviceRuntime === "running",
       canRepair: conflictFreeMutationAllowed && serviceInstallation === "current",
       canUpgrade: conflictFreeMutationAllowed && serviceInstallation === "outdated",
     },
@@ -258,6 +271,7 @@ function withGalleryLegacyTrayPolicy(
   const service = current.systemService;
   const serviceStable = service.runtime === "running" || service.runtime === "stopped";
   const mutationAllowed = legacyTray.conflict === "clear"
+    && current.serviceManagementPackage === "ready"
     && !current.registryModeDetected
     && service.backend === "open-source"
     && serviceStable;
@@ -283,7 +297,9 @@ function withGalleryLegacyTrayPolicy(
       canInstall: mutationAllowed && service.installation === "absent",
       canRemove: mutationAllowed && (service.installation === "current" || service.installation === "outdated"),
       canStart: mutationAllowed && service.installation === "current" && service.runtime === "stopped",
-      canStop: service.backend === "open-source" && service.runtime === "running",
+      canStop: current.serviceManagementPackage === "ready"
+        && service.backend === "open-source"
+        && service.runtime === "running",
       canRepair: mutationAllowed && service.installation === "current",
       canUpgrade: mutationAllowed && service.installation === "outdated",
     },

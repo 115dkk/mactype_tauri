@@ -444,12 +444,14 @@ mod tests {
     }
 
     #[test]
-    fn system_injection_status_matches_the_verified_service() {
+    fn system_mode_support_matches_the_verified_service_and_package() {
         let status = status(None);
         let service = &status.system_service;
         assert_eq!(
             status.system_modes_supported,
-            profile_publish_supported_for(service, status.registry_mode_detected)
+            status.service_management_package
+                == crate::service_contract::ServiceManagementPackageState::Ready
+                && profile_publish_supported_for(service, status.registry_mode_detected)
         );
         assert_eq!(
             status.system_injection_active,

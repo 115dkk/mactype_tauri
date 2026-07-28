@@ -1,4 +1,4 @@
-use super::SystemServiceAction;
+use super::{installation_preflight_failure, SystemServiceAction};
 
 pub(super) trait StartupReceiptRestorer {
     fn restore_local_machine(&mut self) -> Result<(), String>;
@@ -10,7 +10,9 @@ pub(super) fn finish_action_with_startup_receipts(
     action: SystemServiceAction,
     action_result: Result<(), String>,
 ) -> Result<(), String> {
-    let must_restore = action_result.is_err()
+    let must_restore = action_result
+        .as_ref()
+        .is_err_and(|error| !installation_preflight_failure(error))
         && matches!(
             action,
             SystemServiceAction::Install | SystemServiceAction::MigrateFromLegacy

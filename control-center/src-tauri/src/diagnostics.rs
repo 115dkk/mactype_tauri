@@ -5,7 +5,8 @@ use operation_log::{
     read_recent_activity, read_recent_diagnostic_logs, read_recent_operation_logs,
 };
 pub(crate) use operation_log::{
-    record_activity, record_operation_failure, ActivityKind, OperationFailure,
+    record_activity, record_operation_failure, ActivityKind, InstallationPreflightDiagnostics,
+    OperationFailure,
 };
 use std::{
     env, fs,
@@ -232,6 +233,7 @@ mod tests {
                 channel_failure: None,
                 rollback: "completed".to_owned(),
                 final_state: "legacy=running/auto; modern=absent".to_owned(),
+                installation_preflight: None,
             },
             &[profile],
         )
@@ -257,6 +259,78 @@ mod tests {
     }
 
     #[test]
+    fn installation_preflight_failure_records_paths_and_proves_no_elevation_or_rollback() {
+        let root = env::temp_dir().join(format!(
+            "mactype-installation-preflight-log-{}",
+            std::process::id()
+        ));
+        operation_log::record_operation_failure_at(
+            &root,
+            &OperationFailure {
+                operation: "install".to_owned(),
+                stage: "installation-preflight".to_owned(),
+                error_chain: "control-center-installation-required: run installer".to_owned(),
+                broker_exit_code: None,
+                channel_failure: None,
+                rollback: "not-applicable".to_owned(),
+                final_state: "legacy=absent; modern=absent".to_owned(),
+                installation_preflight: Some(InstallationPreflightDiagnostics {
+                    expected_installed_control_center: None,
+                    current_executable: Some(
+                        r"D:\src\mactype\MacType Control Center.exe".to_owned(),
+                    ),
+                    expected_executable_exists: None,
+                    installed_control_center: "missing".to_owned(),
+                    setup_broker: "not-checked".to_owned(),
+                    runtime_manifest: "not-checked".to_owned(),
+                    runtime_payload: "not-checked".to_owned(),
+                    elevation_attempted: false,
+                    machine_state_changed: false,
+                    rollback_required: false,
+                }),
+            },
+            &[],
+        )
+        .unwrap();
+
+        let entry = operation_log::read_recent_operation_logs_at(&root, 1)
+            .unwrap()
+            .pop()
+            .unwrap();
+        let preflight = entry.installation_preflight.unwrap();
+        assert_eq!(preflight.expected_installed_control_center, None);
+        assert_eq!(
+            preflight.current_executable.as_deref(),
+            Some(r"D:\src\mactype\MacType Control Center.exe")
+        );
+        assert_eq!(preflight.expected_executable_exists, None);
+        assert_eq!(preflight.installed_control_center, "missing");
+        assert_eq!(preflight.setup_broker, "not-checked");
+        assert_eq!(preflight.runtime_manifest, "not-checked");
+        assert_eq!(preflight.runtime_payload, "not-checked");
+        assert!(!preflight.elevation_attempted);
+        assert!(!preflight.machine_state_changed);
+        assert!(!preflight.rollback_required);
+        let rendered = operation_log::read_recent_diagnostic_logs_at(&root, 1)
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert!(rendered.contains("Expected installed Control Center: not registered"));
+        assert!(
+            rendered.contains("Current executable: D:\\src\\mactype\\MacType Control Center.exe")
+        );
+        assert!(rendered.contains("Expected executable exists: None"));
+        assert!(rendered.contains("Installed Control Center: missing"));
+        assert!(rendered.contains("Setup broker: not checked"));
+        assert!(rendered.contains("Runtime manifest: not checked"));
+        assert!(rendered.contains("Runtime payload: not checked"));
+        assert!(rendered.contains("Elevation attempted: no"));
+        assert!(rendered.contains("Machine state changed: no"));
+        assert!(rendered.contains("Rollback required: no"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn operation_log_rotation_is_bounded_and_retains_recent_failures() {
         let root = env::temp_dir().join(format!(
             "mactype-operation-log-rotation-{}-{}",
@@ -277,6 +351,7 @@ mod tests {
                     channel_failure: None,
                     rollback: "not-applicable".to_owned(),
                     final_state: "legacy=absent; modern=absent".to_owned(),
+                    installation_preflight: None,
                 },
                 &[],
             )
@@ -320,6 +395,7 @@ mod tests {
                 channel_failure: None,
                 rollback: "not-applicable".to_owned(),
                 final_state: "unchanged".to_owned(),
+                installation_preflight: None,
             },
             &[],
         )

@@ -41,6 +41,15 @@ pub(crate) enum HealthState {
     Failed,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum ServiceManagementPackageState {
+    Ready,
+    NotInstalled,
+    Incomplete,
+    Untrusted,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SystemServiceStatus {

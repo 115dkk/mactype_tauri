@@ -21,6 +21,7 @@ pub(crate) use legacy_mactray::{LegacyTrayProcessState, LegacyTrayStartupState};
 pub(crate) use model::{
     MachineAction, MachineBackend, MachineStatus, PublicMachineAction, TrayLoginState,
 };
+pub(crate) use open_service::management_package_state as service_management_package_state;
 pub(crate) use open_service::LegacyMacTrayStatus as LegacyServiceStatus;
 use orchestrator::{execute_machine_action_with, tray_apply_with, tray_login_with};
 pub(crate) use publish::publish_profile_transaction_with;

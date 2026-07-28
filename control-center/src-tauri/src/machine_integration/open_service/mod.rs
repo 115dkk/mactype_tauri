@@ -7,7 +7,7 @@ mod runtime;
 mod startup_lifecycle;
 
 #[cfg(test)]
-use broker::{broker_executable_for_trusted_layout, setup_path_for_trusted_layout};
+use broker::resolve_installed_package_for_trusted_layout;
 
 use broker_result::{
     decode_broker_result_frame, encode_broker_result_frame, BrokerResultDisposition,
@@ -38,6 +38,46 @@ use runtime::{
 };
 use startup_lifecycle::{finish_action_with_startup_receipts, StartupReceiptRestorer};
 
+const INSTALLATION_REQUIRED_PREFIX: &str = "control-center-installation-required:";
+const INSTALLATION_INCOMPLETE_PREFIX: &str = "control-center-installation-incomplete:";
+const INSTALLATION_UNTRUSTED_PREFIX: &str = "control-center-installation-untrusted:";
+
+fn installation_preflight_failure(error: &str) -> bool {
+    [
+        INSTALLATION_REQUIRED_PREFIX,
+        INSTALLATION_INCOMPLETE_PREFIX,
+        INSTALLATION_UNTRUSTED_PREFIX,
+    ]
+    .iter()
+    .any(|prefix| error.starts_with(prefix))
+}
+
+fn management_package_state_from_error(
+    error: &str,
+) -> crate::service_contract::ServiceManagementPackageState {
+    use crate::service_contract::ServiceManagementPackageState;
+    if error.starts_with(INSTALLATION_REQUIRED_PREFIX) {
+        ServiceManagementPackageState::NotInstalled
+    } else if error.starts_with(INSTALLATION_INCOMPLETE_PREFIX) {
+        ServiceManagementPackageState::Incomplete
+    } else {
+        ServiceManagementPackageState::Untrusted
+    }
+}
+
+pub(crate) fn management_package_state() -> crate::service_contract::ServiceManagementPackageState {
+    #[cfg(windows)]
+    {
+        broker::installed_package()
+            .map(|_| crate::service_contract::ServiceManagementPackageState::Ready)
+            .unwrap_or_else(|failure| management_package_state_from_error(&failure.error))
+    }
+    #[cfg(not(windows))]
+    {
+        crate::service_contract::ServiceManagementPackageState::NotInstalled
+    }
+}
+
 use crate::service_contract::{
     HealthState, InstallationState, RuntimeState, ServiceBackend, SystemServiceStatus,
 };
@@ -62,10 +102,19 @@ pub(crate) fn run_action(
     {
         return Err("the service action has an invalid profile payload".to_owned());
     }
+    #[cfg(windows)]
+    let installed_control_center = match broker::installed_package() {
+        Ok(package) => package.control_center,
+        Err(failure) => {
+            let error = failure.error;
+            record_action_failure(action, profile, &error, Some(*failure.diagnostics));
+            return Err(error);
+        }
+    };
     let result = {
         #[cfg(windows)]
         {
-            windows::run_elevated(action, profile)
+            windows::run_elevated_at(action, profile, installed_control_center)
         }
         #[cfg(not(windows))]
         {
@@ -79,22 +128,29 @@ pub(crate) fn run_action(
         Ok(()) => Ok(()),
         Err(error) if expected_action_blocker(&error) => Err(error),
         Err(error) => {
-            let profile_text = profile.map(|bytes| String::from_utf8_lossy(bytes).into_owned());
-            let failure = operation_failure(action, &error);
-            let redactions = profile_text.as_deref().into_iter().collect::<Vec<_>>();
-            if let Err(log_error) =
-                crate::diagnostics::record_operation_failure(&failure, &redactions)
-            {
-                eprintln!(
-                    "recording the bounded operation failure log failed: {}",
-                    log_error.replace(['\r', '\n'], " ")
-                );
-            }
+            record_action_failure(action, profile, &error, None);
             Err(format!(
                 "{INTERNAL_OPERATION_FAILURE_PREFIX}{}",
                 action.broker_verb()
             ))
         }
+    }
+}
+
+fn record_action_failure(
+    action: SystemServiceAction,
+    profile: Option<&[u8]>,
+    error: &str,
+    installation_preflight: Option<crate::diagnostics::InstallationPreflightDiagnostics>,
+) {
+    let profile_text = profile.map(|bytes| String::from_utf8_lossy(bytes).into_owned());
+    let failure = operation_failure(action, error, installation_preflight);
+    let redactions = profile_text.as_deref().into_iter().collect::<Vec<_>>();
+    if let Err(log_error) = crate::diagnostics::record_operation_failure(&failure, &redactions) {
+        eprintln!(
+            "recording the bounded operation failure log failed: {}",
+            log_error.replace(['\r', '\n'], " ")
+        );
     }
 }
 
@@ -111,16 +167,22 @@ fn expected_action_blocker(error: &str) -> bool {
     ]
     .iter()
     .any(|prefix| error.starts_with(prefix))
+        || installation_preflight_failure(error)
 }
 
 fn operation_failure(
     action: SystemServiceAction,
     error: &str,
+    installation_preflight: Option<crate::diagnostics::InstallationPreflightDiagnostics>,
 ) -> crate::diagnostics::OperationFailure {
-    let stage = error
-        .split_once(':')
-        .map(|(stage, _)| stage)
-        .unwrap_or(action.broker_verb());
+    let stage = if installation_preflight.is_some() {
+        "installation-preflight"
+    } else {
+        error
+            .split_once(':')
+            .map(|(stage, _)| stage)
+            .unwrap_or(action.broker_verb())
+    };
     let channel_failure = [
         "broker result channel failed:",
         "reporting the broker result failed:",
@@ -134,7 +196,9 @@ fn operation_failure(
     let modern = status();
     let legacy = super::legacy_mactray::status(super::registry_conflict_detected());
     let receipt = super::legacy_migration::current_stage_name().unwrap_or("unavailable");
-    let rollback = if error.contains("rollback failed") || error.contains("restoration failed") {
+    let rollback = if installation_preflight.is_some() {
+        "not-applicable"
+    } else if error.contains("rollback failed") || error.contains("restoration failed") {
         "failed"
     } else if receipt == "rollback-completed" {
         "completed"
@@ -160,6 +224,7 @@ fn operation_failure(
             modern.health,
             modern.win32_error,
         ),
+        installation_preflight,
     }
 }
 

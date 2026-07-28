@@ -15,11 +15,13 @@ param(
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $output = [IO.Path]::GetFullPath((Join-Path $repositoryRoot $OutputRoot))
-$repositoryPrefix = $repositoryRoot.TrimEnd('\') + '\'
+$separators = [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+$repositoryPrefix = $repositoryRoot.TrimEnd($separators) + [IO.Path]::DirectorySeparatorChar
 if (-not $output.StartsWith($repositoryPrefix, [StringComparison]::OrdinalIgnoreCase)) {
     throw "Integration bundle output must stay inside the repository: $output"
 }
 
+$distributionRoot = Join-Path $repositoryRoot 'distribution'
 foreach ($requiredFile in @(
     $ApplicationExe,
     $PreviewHelper,
@@ -30,8 +32,8 @@ foreach ($requiredFile in @(
     (Join-Path $CoreRoot 'MacLoader.exe'),
     (Join-Path $CoreRoot 'MacLoader64.exe'),
     (Join-Path $ServiceRuntimeRoot 'mactype-service-setup.exe'),
-    (Join-Path $ServiceRuntimeRoot 'payload\manifest.json'),
-    (Join-Path $repositoryRoot 'distribution\INTEGRATION_DEVELOPER_README.md')
+    (Join-Path (Join-Path $ServiceRuntimeRoot 'payload') 'manifest.json'),
+    (Join-Path $distributionRoot 'INTEGRATION_DEVELOPER_README.md')
 )) {
     if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
         throw "Integration bundle input is missing: $requiredFile"
@@ -53,22 +55,26 @@ $rootFiles = [ordered]@{
     (Join-Path $CoreRoot 'MacType64.Core.dll') = 'MacType64.Core.dll'
     (Join-Path $CoreRoot 'MacLoader.exe') = 'MacLoader.exe'
     (Join-Path $CoreRoot 'MacLoader64.exe') = 'MacLoader64.exe'
-    (Join-Path $repositoryRoot 'distribution\MacType.ini') = 'MacType.ini'
-    (Join-Path $repositoryRoot 'distribution\THIRD_PARTY_NOTICES.md') = 'THIRD_PARTY_NOTICES.md'
+    (Join-Path $distributionRoot 'MacType.ini') = 'MacType.ini'
+    (Join-Path $distributionRoot 'THIRD_PARTY_NOTICES.md') = 'THIRD_PARTY_NOTICES.md'
     (Join-Path $repositoryRoot 'LICENSE') = 'LICENSE.txt'
 }
 foreach ($entry in $rootFiles.GetEnumerator()) {
     Copy-Item -LiteralPath $entry.Key -Destination (Join-Path $tree $entry.Value)
 }
 
-Copy-Item -LiteralPath (Join-Path $repositoryRoot 'distribution\ini') -Destination (Join-Path $tree 'ini') -Recurse
-Copy-Item -LiteralPath (Join-Path $repositoryRoot 'distribution\languages') -Destination (Join-Path $tree 'languages') -Recurse
+Copy-Item -LiteralPath (Join-Path $distributionRoot 'ini') -Destination (Join-Path $tree 'ini') -Recurse
+Copy-Item -LiteralPath (Join-Path $distributionRoot 'languages') -Destination (Join-Path $tree 'languages') -Recurse
 Copy-Item -LiteralPath $ServiceRuntimeRoot -Destination (Join-Path $tree 'service-runtime') -Recurse
-Copy-Item -LiteralPath (Join-Path $repositoryRoot 'distribution\INTEGRATION_DEVELOPER_README.md') -Destination (Join-Path $output 'README.md')
+Copy-Item -LiteralPath (Join-Path $distributionRoot 'INTEGRATION_DEVELOPER_README.md') -Destination (Join-Path $output 'README.md')
 
-$manifest = Get-Content -LiteralPath (Join-Path $tree 'service-runtime\payload\manifest.json') -Raw | ConvertFrom-Json
+$installedServiceRuntime = Join-Path $tree 'service-runtime'
+$installedPayload = Join-Path (Join-Path $installedServiceRuntime 'payload') 'files'
+$manifest = Get-Content -LiteralPath (
+    Join-Path (Join-Path $installedServiceRuntime 'payload') 'manifest.json'
+) -Raw | ConvertFrom-Json
 foreach ($payloadName in $manifest.files.PSObject.Properties.Name) {
-    $payloadPath = Join-Path $tree "service-runtime\payload\files\$payloadName"
+    $payloadPath = Join-Path $installedPayload $payloadName
     if (-not (Test-Path -LiteralPath $payloadPath -PathType Leaf)) {
         throw "Integration bundle does not reproduce the manifest payload: $payloadName"
     }

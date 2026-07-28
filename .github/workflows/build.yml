@@ -300,6 +300,9 @@ jobs:
       - name: Verify independent distribution provenance and translations
         shell: pwsh
         run: scripts/ci/Test-DistributionPolicy.ps1
+      - name: Verify Integration/Developer bundle layout
+        shell: pwsh
+        run: scripts/ci/Test-IntegrationDeveloperBundle.ps1
       - name: Verify release publication dependency closure
         shell: pwsh
         run: scripts/ci/Test-ReleaseGatePolicy.ps1

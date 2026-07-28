@@ -17,13 +17,19 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: mactype-control-center-windows
-          path: release
+          name: mactype-control-center-installer-windows
+          path: release/installer
+      - uses: actions/download-artifact@v8
+        with:
+          name: mactype-control-center-integration-developer-bundle-windows
+          path: release/integration
       - uses: softprops/action-gh-release@v3
         with:
           files: |
-            release/artifacts/installer/MacType-Control-Center.zip
-            release/artifacts/installer/SHA256SUMS.txt
+            release/installer/MacType-Control-Center-Installer.exe
+            release/installer/SHA256SUMS.txt
+            release/integration/MacType-Control-Center-Integration-Developer-Bundle.zip
+            release/integration/INTEGRATION_SHA256SUMS.txt
           fail_on_unmatched_files: true
           generate_release_notes: true
           prerelease: true

@@ -526,7 +526,7 @@ $($rootCleanupEntry.Value)
         "/DServiceRuntimeRoot=$productServiceRoot",
         (Join-Path $sourceRoot 'installer\mactype-control-center.iss')
     ) -Label 'Compile product Inno staging contract'
-    if (-not (Test-Path -LiteralPath (Join-Path $productOutputRoot 'MacType Control Center.exe') -PathType Leaf)) {
+    if (-not (Test-Path -LiteralPath (Join-Path $productOutputRoot 'MacType-Control-Center-Installer.exe') -PathType Leaf)) {
         throw 'Product Inno staging contract did not produce an installer.'
     }
 

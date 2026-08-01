@@ -1409,11 +1409,11 @@ for (const unstableState of ["start-pending", "stop-pending", "paused", "unknown
 }
 
 for (const fixture of [
-  { state: "not-installed", message: "Install MacType Control Center first" },
-  { state: "incomplete", message: "The installation is incomplete" },
-  { state: "untrusted", message: "The installation location is not trusted" },
+  { state: "not-installed", message: "The service package is unavailable" },
+  { state: "incomplete", message: "The service package is incomplete" },
+  { state: "untrusted", message: "The service package failed verification" },
 ] as const) {
-  test(`service management stays read-only when its installed package is ${fixture.state}`, async ({ page }, testInfo) => {
+  test(`service management stays read-only when its service package is ${fixture.state}`, async ({ page }, testInfo) => {
     await page.goto(`/?view=execution&gallery=1&lang=en&system-service=ready&service-package=${fixture.state}`, { waitUntil: "networkidle" });
     await openServiceDetails(page);
 

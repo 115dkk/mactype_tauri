@@ -281,10 +281,13 @@ mod tests {
                     ),
                     expected_executable_exists: None,
                     installed_control_center: "missing".to_owned(),
+                    current_bundle: "incomplete".to_owned(),
+                    selected_service_package: "none".to_owned(),
                     setup_broker: "not-checked".to_owned(),
                     runtime_manifest: "not-checked".to_owned(),
                     runtime_payload: "not-checked".to_owned(),
                     elevation_attempted: false,
+                    elevated_revalidation: "not-attempted".to_owned(),
                     machine_state_changed: false,
                     rollback_required: false,
                 }),
@@ -305,10 +308,13 @@ mod tests {
         );
         assert_eq!(preflight.expected_executable_exists, None);
         assert_eq!(preflight.installed_control_center, "missing");
+        assert_eq!(preflight.current_bundle, "incomplete");
+        assert_eq!(preflight.selected_service_package, "none");
         assert_eq!(preflight.setup_broker, "not-checked");
         assert_eq!(preflight.runtime_manifest, "not-checked");
         assert_eq!(preflight.runtime_payload, "not-checked");
         assert!(!preflight.elevation_attempted);
+        assert_eq!(preflight.elevated_revalidation, "not-attempted");
         assert!(!preflight.machine_state_changed);
         assert!(!preflight.rollback_required);
         let rendered = operation_log::read_recent_diagnostic_logs_at(&root, 1)
@@ -321,10 +327,13 @@ mod tests {
         );
         assert!(rendered.contains("Expected executable exists: None"));
         assert!(rendered.contains("Installed Control Center: missing"));
+        assert!(rendered.contains("Current bundle: incomplete"));
+        assert!(rendered.contains("Selected service package: none"));
         assert!(rendered.contains("Setup broker: not checked"));
         assert!(rendered.contains("Runtime manifest: not checked"));
         assert!(rendered.contains("Runtime payload: not checked"));
         assert!(rendered.contains("Elevation attempted: no"));
+        assert!(rendered.contains("Elevated revalidation: not attempted"));
         assert!(rendered.contains("Machine state changed: no"));
         assert!(rendered.contains("Rollback required: no"));
         fs::remove_dir_all(root).unwrap();

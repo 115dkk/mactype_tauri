@@ -6,7 +6,7 @@ use super::{
         },
         BrokerResultDisposition, SystemServiceAction, BROKER_SWITCH, BROKER_TRANSFER_SWITCH,
     },
-    installed_package::installed_package,
+    installed_package::service_package,
     path_guard::wide,
     process::{combine_broker_cleanup_error, terminate_broker_process},
 };
@@ -21,7 +21,7 @@ use windows_sys::Win32::{
     UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW},
 };
 
-fn with_installed_package_before_elevation(
+fn with_service_package_before_elevation(
     locate: impl FnOnce() -> Result<PathBuf, String>,
     elevate: impl FnOnce(PathBuf) -> Result<(), String>,
 ) -> Result<(), String> {
@@ -32,9 +32,9 @@ pub(in crate::machine_integration::open_service) fn run_elevated(
     action: SystemServiceAction,
     profile_input: Option<&[u8]>,
 ) -> Result<(), String> {
-    with_installed_package_before_elevation(
+    with_service_package_before_elevation(
         || {
-            installed_package()
+            service_package()
                 .map(|package| package.control_center)
                 .map_err(|failure| failure.error)
         },
@@ -186,7 +186,7 @@ fn broker_channel_failure(exit_code: Option<u32>, channel_error: &str) -> String
 
 #[cfg(test)]
 mod tests {
-    use super::{broker_channel_failure, with_installed_package_before_elevation};
+    use super::{broker_channel_failure, with_service_package_before_elevation};
     use std::{cell::Cell, path::PathBuf};
 
     #[test]
@@ -202,9 +202,9 @@ mod tests {
     }
 
     #[test]
-    fn missing_installed_package_never_invokes_the_elevation_launcher() {
+    fn missing_service_package_never_invokes_the_elevation_launcher() {
         let launched = Cell::new(false);
-        let error = with_installed_package_before_elevation(
+        let error = with_service_package_before_elevation(
             || Err("control-center-installation-required: run the installer".to_owned()),
             |_executable: PathBuf| {
                 launched.set(true);

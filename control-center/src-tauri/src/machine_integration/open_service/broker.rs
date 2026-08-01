@@ -5,9 +5,13 @@ mod process;
 mod setup;
 
 pub(super) use elevation::{run_elevated, run_elevated_at};
-pub(super) use installed_package::installed_package;
+pub(super) use installed_package::service_package;
 #[cfg(test)]
-pub(super) use installed_package::resolve_installed_package_for_trusted_layout;
+pub(super) use installed_package::{
+    current_executable_path_gate_for_test, elevated_package_preflight_for_layout,
+    resolve_installed_package_for_trusted_layout, resolve_service_package_for_layouts,
+    service_package_preflight_for_layouts,
+};
 pub(super) use path_guard::reject_reparse_ancestors;
 #[cfg(test)]
 pub(super) use process::{
@@ -35,6 +39,11 @@ pub(super) fn run_privileged(
     let result_writer = BrokerResultPipeWriter::connect(transfer, PROFILE_PIPE_TIMEOUT)?;
     let result = (|| {
         KillOnCloseJob::new()?.arm_current_process()?;
+        if let Err(failure) = installed_package::current_service_package() {
+            let error = failure.error;
+            super::record_action_failure(action, None, &error, Some(*failure.diagnostics));
+            return Err(error);
+        }
         if action.needs_profile_input() {
             let profile = receive_required_profile_bounded(transfer)?;
             run_profile_action(action, &profile)

@@ -10,6 +10,7 @@ use super::{
 };
 use crate::diagnostics::InstallationPreflightDiagnostics;
 use std::{
+    collections::BTreeMap,
     ffi::OsString,
     fs,
     os::windows::ffi::OsStringExt,
@@ -29,8 +30,14 @@ const UNINSTALL_REGISTRY_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion
 const INSTALL_LOCATION_VALUE: &str = "InstallLocation";
 const MAX_INSTALL_LOCATION_BYTES: u32 = 64 * 1024;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ServicePackageSource {
+    Installed,
+    CurrentBundle,
+}
+
 #[derive(Clone, Debug)]
-pub(in crate::machine_integration::open_service) struct InstalledPackage {
+pub(in crate::machine_integration::open_service) struct ServicePackage {
     pub(in crate::machine_integration::open_service) control_center: PathBuf,
     pub(in crate::machine_integration::open_service) setup_broker: PathBuf,
 }
@@ -60,10 +67,13 @@ fn diagnostics(current_executable: Option<PathBuf>) -> InstallationPreflightDiag
         current_executable: current_executable.map(|path| path.to_string_lossy().into_owned()),
         expected_executable_exists: None,
         installed_control_center: "not-checked".to_owned(),
+        current_bundle: "not-checked".to_owned(),
+        selected_service_package: "none".to_owned(),
         setup_broker: "not-checked".to_owned(),
         runtime_manifest: "not-checked".to_owned(),
         runtime_payload: "not-checked".to_owned(),
         elevation_attempted: false,
+        elevated_revalidation: "not-attempted".to_owned(),
         machine_state_changed: false,
         rollback_required: false,
     }
@@ -83,8 +93,8 @@ fn failure(
 fn required(diagnostics: InstallationPreflightDiagnostics) -> InstallationPreflightFailure {
     failure(
         INSTALLATION_REQUIRED_PREFIX,
-        "MacType Control Center is not installed. Service installation and maintenance require \
-         the complete installed package. Please run the installer first.",
+        "No complete Control Center service package is available. Keep the complete \
+         Integration/Developer bundle together or run the installer.",
         diagnostics,
     )
 }
@@ -92,8 +102,8 @@ fn required(diagnostics: InstallationPreflightDiagnostics) -> InstallationPrefli
 fn incomplete(diagnostics: InstallationPreflightDiagnostics) -> InstallationPreflightFailure {
     failure(
         INSTALLATION_INCOMPLETE_PREFIX,
-        "The registered MacType Control Center installation is incomplete or damaged. Reinstall \
-         the complete package before managing the service.",
+        "The Control Center service package is incomplete or damaged. Restore the complete \
+         Integration/Developer bundle, or run the installer, before managing the service.",
         diagnostics,
     )
 }
@@ -104,7 +114,7 @@ fn untrusted(
 ) -> InstallationPreflightFailure {
     failure(
         INSTALLATION_UNTRUSTED_PREFIX,
-        &format!("The registered MacType Control Center installation is not trusted. {detail}"),
+        &format!("The Control Center service package did not pass verification. {detail}"),
         diagnostics,
     )
 }
@@ -122,11 +132,208 @@ fn inspect_regular_file(path: &Path) -> Result<bool, String> {
     Ok(true)
 }
 
+fn after_reparse_check<T>(
+    path: &Path,
+    reject: impl FnOnce(&Path) -> Result<(), String>,
+    inspect: impl FnOnce(&Path) -> T,
+) -> Result<T, String> {
+    reject(path)?;
+    Ok(inspect(path))
+}
+
+#[cfg(test)]
+pub(in crate::machine_integration::open_service) fn current_executable_path_gate_for_test(
+    path: &Path,
+    reject: impl FnOnce(&Path) -> Result<(), String>,
+    canonicalize: impl FnOnce(&Path) -> PathBuf,
+) -> Result<PathBuf, String> {
+    after_reparse_check(path, reject, canonicalize)
+}
+
+fn set_package_state(
+    observation: &mut InstallationPreflightDiagnostics,
+    source: ServicePackageSource,
+    state: &str,
+) {
+    match source {
+        ServicePackageSource::Installed => {
+            observation.installed_control_center = state.to_owned();
+        }
+        ServicePackageSource::CurrentBundle => {
+            observation.current_bundle = state.to_owned();
+        }
+    }
+}
+
+fn package_incomplete(
+    source: ServicePackageSource,
+    mut observation: InstallationPreflightDiagnostics,
+) -> InstallationPreflightFailure {
+    set_package_state(&mut observation, source, "incomplete");
+    incomplete(observation)
+}
+
+fn package_untrusted(
+    source: ServicePackageSource,
+    detail: impl std::fmt::Display,
+    mut observation: InstallationPreflightDiagnostics,
+) -> InstallationPreflightFailure {
+    set_package_state(&mut observation, source, "untrusted");
+    untrusted(detail, observation)
+}
+
+fn validate_complete_package(
+    root: &Path,
+    control_center: PathBuf,
+    source: ServicePackageSource,
+    mut observation: InstallationPreflightDiagnostics,
+) -> Result<ServicePackage, InstallationPreflightFailure> {
+    set_package_state(&mut observation, source, "checking");
+    let setup_broker = root.join(SETUP_BROKER_RELATIVE_PATH);
+    let runtime_manifest = root.join(RUNTIME_MANIFEST_RELATIVE_PATH);
+    let control_center_present = match inspect_regular_file(&control_center) {
+        Ok(present) => {
+            if source == ServicePackageSource::Installed {
+                observation.installed_control_center =
+                    if present { "present" } else { "missing" }.to_owned();
+            }
+            present
+        }
+        Err(error) => {
+            return Err(package_untrusted(source, error, observation));
+        }
+    };
+    let setup_present = match inspect_regular_file(&setup_broker) {
+        Ok(present) => {
+            observation.setup_broker = if present { "present" } else { "missing" }.to_owned();
+            present
+        }
+        Err(error) => {
+            observation.setup_broker = "untrusted".to_owned();
+            return Err(package_untrusted(source, error, observation));
+        }
+    };
+    let manifest_present = match inspect_regular_file(&runtime_manifest) {
+        Ok(present) => {
+            observation.runtime_manifest = if present { "present" } else { "missing" }.to_owned();
+            present
+        }
+        Err(error) => {
+            observation.runtime_manifest = "untrusted".to_owned();
+            return Err(package_untrusted(source, error, observation));
+        }
+    };
+    if !control_center_present || !setup_present || !manifest_present {
+        return Err(package_incomplete(source, observation));
+    }
+    let manifest = match read_bounded_regular_file(
+        &runtime_manifest,
+        MAX_BUNDLED_MANIFEST_BYTES,
+        "service package runtime manifest",
+    ) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            observation.runtime_manifest = "untrusted".to_owned();
+            return Err(package_untrusted(source, error, observation));
+        }
+    };
+    if parse_bundled_runtime_manifest(&manifest).is_err() {
+        observation.runtime_manifest = "invalid".to_owned();
+        return Err(package_incomplete(source, observation));
+    }
+    let payload_root = root.join("service-runtime").join("payload").join("files");
+    for name in mactype_service_contract::IMMUTABLE_RUNTIME_FILES {
+        match inspect_regular_file(&payload_root.join(name)) {
+            Ok(true) => {}
+            Ok(false) => {
+                observation.runtime_payload = "missing".to_owned();
+                return Err(package_incomplete(source, observation));
+            }
+            Err(error) => {
+                observation.runtime_payload = "untrusted".to_owned();
+                return Err(package_untrusted(source, error, observation));
+            }
+        }
+    }
+    let entries = match fs::read_dir(&payload_root) {
+        Ok(entries) => entries,
+        Err(error) => {
+            observation.runtime_payload = "untrusted".to_owned();
+            return Err(package_untrusted(source, error, observation));
+        }
+    };
+    let mut payload_names = Vec::new();
+    for entry in entries.take(mactype_service_contract::IMMUTABLE_RUNTIME_FILES.len() + 1) {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                observation.runtime_payload = "untrusted".to_owned();
+                return Err(package_untrusted(source, error, observation));
+            }
+        };
+        let name = match entry.file_name().into_string() {
+            Ok(name) => name,
+            Err(_) => {
+                observation.runtime_payload = "untrusted".to_owned();
+                return Err(package_untrusted(
+                    source,
+                    "The runtime payload contains a non-Unicode filename.",
+                    observation,
+                ));
+            }
+        };
+        payload_names.push(name);
+    }
+    if payload_names.len() != mactype_service_contract::IMMUTABLE_RUNTIME_FILES.len()
+        || payload_names
+            .iter()
+            .any(|name| !mactype_service_contract::IMMUTABLE_RUNTIME_FILES.contains(&name.as_str()))
+    {
+        observation.runtime_payload = "invalid".to_owned();
+        return Err(package_untrusted(
+            source,
+            "The runtime payload does not contain the exact manifest-declared file set.",
+            observation,
+        ));
+    }
+    let mut payload_files = BTreeMap::new();
+    for name in mactype_service_contract::IMMUTABLE_RUNTIME_FILES {
+        let bytes = match read_bounded_regular_file(
+            &payload_root.join(name),
+            mactype_service_contract::MAX_RUNTIME_FILE_BYTES as u64,
+            "service package runtime payload",
+        ) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                observation.runtime_payload = "untrusted".to_owned();
+                return Err(package_untrusted(source, error, observation));
+            }
+        };
+        payload_files.insert(name.to_owned(), bytes);
+    }
+    if let Err(error) = mactype_service_contract::verify_runtime_manifest(&manifest, &payload_files)
+    {
+        observation.runtime_payload = "invalid".to_owned();
+        return Err(package_untrusted(source, error, observation));
+    }
+    observation.runtime_payload = "present".to_owned();
+    set_package_state(&mut observation, source, "ready");
+    observation.selected_service_package = match source {
+        ServicePackageSource::Installed => "installed",
+        ServicePackageSource::CurrentBundle => "current-bundle",
+    }
+    .to_owned();
+    Ok(ServicePackage {
+        control_center,
+        setup_broker,
+    })
+}
+
 fn resolve_installed_package(
     program_files: &Path,
     install_location: Option<&Path>,
     current_executable: Option<PathBuf>,
-) -> Result<InstalledPackage, InstallationPreflightFailure> {
+) -> Result<ServicePackage, InstallationPreflightFailure> {
     let mut observation = diagnostics(current_executable);
     let Some(install_location) = install_location else {
         observation.installed_control_center = "missing".to_owned();
@@ -173,82 +380,73 @@ fn resolve_installed_package(
         ));
     }
 
-    let control_center = canonical_install_location.join(CONTROL_CENTER_FILE);
-    let setup_broker = canonical_install_location.join(SETUP_BROKER_RELATIVE_PATH);
-    let runtime_manifest = canonical_install_location.join(RUNTIME_MANIFEST_RELATIVE_PATH);
-    let control_center_present = match inspect_regular_file(&control_center) {
-        Ok(present) => {
-            observation.installed_control_center =
-                if present { "present" } else { "missing" }.to_owned();
-            present
-        }
-        Err(error) => {
-            observation.installed_control_center = "untrusted".to_owned();
-            return Err(untrusted(error, observation));
-        }
-    };
-    let setup_present = match inspect_regular_file(&setup_broker) {
-        Ok(present) => {
-            observation.setup_broker = if present { "present" } else { "missing" }.to_owned();
-            present
-        }
-        Err(error) => {
-            observation.setup_broker = "untrusted".to_owned();
-            return Err(untrusted(error, observation));
-        }
-    };
-    let manifest_present = match inspect_regular_file(&runtime_manifest) {
-        Ok(present) => {
-            observation.runtime_manifest = if present { "present" } else { "missing" }.to_owned();
-            present
-        }
-        Err(error) => {
-            observation.runtime_manifest = "untrusted".to_owned();
-            return Err(untrusted(error, observation));
-        }
-    };
-    if !control_center_present || !setup_present || !manifest_present {
-        return Err(incomplete(observation));
-    }
-    let manifest = match read_bounded_regular_file(
-        &runtime_manifest,
-        MAX_BUNDLED_MANIFEST_BYTES,
-        "installed runtime manifest",
-    ) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            observation.runtime_manifest = "untrusted".to_owned();
-            return Err(untrusted(error, observation));
-        }
-    };
-    if parse_bundled_runtime_manifest(&manifest).is_err() {
-        observation.runtime_manifest = "invalid".to_owned();
-        return Err(incomplete(observation));
-    }
-    let payload_root = canonical_install_location
-        .join("service-runtime")
-        .join("payload")
-        .join("files");
-    for name in mactype_service_contract::IMMUTABLE_RUNTIME_FILES {
-        let payload = payload_root.join(name);
-        match inspect_regular_file(&payload) {
-            Ok(true) => {}
-            Ok(false) => {
-                observation.runtime_payload = "missing".to_owned();
-                return Err(incomplete(observation));
-            }
-            Err(error) => {
-                observation.runtime_payload = "untrusted".to_owned();
-                return Err(untrusted(error, observation));
-            }
-        }
-    }
-    observation.runtime_payload = "present".to_owned();
+    validate_complete_package(
+        &canonical_install_location,
+        canonical_install_location.join(CONTROL_CENTER_FILE),
+        ServicePackageSource::Installed,
+        observation,
+    )
+}
 
-    Ok(InstalledPackage {
-        control_center,
-        setup_broker,
-    })
+fn resolve_current_package_with_diagnostics(
+    current_executable: &Path,
+    mut observation: InstallationPreflightDiagnostics,
+) -> Result<ServicePackage, InstallationPreflightFailure> {
+    observation.current_executable = Some(current_executable.to_string_lossy().into_owned());
+    let canonicalization =
+        match after_reparse_check(current_executable, reject_reparse_ancestors, |path| {
+            fs::canonicalize(path)
+        }) {
+            Ok(canonicalization) => canonicalization,
+            Err(error) => {
+                return Err(package_untrusted(
+                    ServicePackageSource::CurrentBundle,
+                    error,
+                    observation,
+                ));
+            }
+        };
+    let canonical_executable = match canonicalization {
+        Ok(executable) => executable,
+        Err(_) => {
+            observation.current_bundle = "incomplete".to_owned();
+            return Err(incomplete(observation));
+        }
+    };
+    if let Err(error) = inspect_regular_file(&canonical_executable) {
+        return Err(package_untrusted(
+            ServicePackageSource::CurrentBundle,
+            error,
+            observation,
+        ));
+    }
+    let root = canonical_executable
+        .parent()
+        .map(Path::to_owned)
+        .ok_or_else(|| {
+            untrusted(
+                "The current Control Center executable has no application root.",
+                observation.clone(),
+            )
+        })?;
+    validate_complete_package(
+        &root,
+        canonical_executable,
+        ServicePackageSource::CurrentBundle,
+        observation,
+    )
+}
+
+fn fallback_to_current_package(
+    installed: Result<ServicePackage, InstallationPreflightFailure>,
+    current_executable: &Path,
+) -> Result<ServicePackage, InstallationPreflightFailure> {
+    match installed {
+        Ok(package) => Ok(package),
+        Err(failure) => {
+            resolve_current_package_with_diagnostics(current_executable, *failure.diagnostics)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -261,21 +459,90 @@ pub(in crate::machine_integration::open_service) fn resolve_installed_package_fo
         .map_err(|failure| failure.error)
 }
 
-pub(in crate::machine_integration::open_service) fn installed_package(
-) -> Result<InstalledPackage, InstallationPreflightFailure> {
-    let current_executable = std::env::current_exe().ok();
-    let mut initial = diagnostics(current_executable.clone());
-    let program_files =
-        known_folder(&FOLDERID_ProgramFiles).map_err(|error| untrusted(error, initial.clone()))?;
-    let install_location = registered_install_location().map_err(|error| {
-        initial.installed_control_center = "unknown".to_owned();
-        untrusted(error, initial)
-    })?;
-    resolve_installed_package(
-        &program_files,
-        install_location.as_deref(),
+#[cfg(test)]
+pub(in crate::machine_integration::open_service) fn resolve_service_package_for_layouts(
+    program_files: &Path,
+    install_location: Option<&Path>,
+    current_executable: &Path,
+) -> Result<ServicePackage, String> {
+    fallback_to_current_package(
+        resolve_installed_package(
+            program_files,
+            install_location,
+            Some(current_executable.to_owned()),
+        ),
         current_executable,
     )
+    .map_err(|failure| failure.error)
+}
+
+#[cfg(test)]
+pub(in crate::machine_integration::open_service) fn service_package_preflight_for_layouts(
+    program_files: &Path,
+    install_location: Option<&Path>,
+    current_executable: &Path,
+) -> Result<ServicePackage, InstallationPreflightFailure> {
+    fallback_to_current_package(
+        resolve_installed_package(
+            program_files,
+            install_location,
+            Some(current_executable.to_owned()),
+        ),
+        current_executable,
+    )
+}
+
+pub(in crate::machine_integration::open_service) fn service_package(
+) -> Result<ServicePackage, InstallationPreflightFailure> {
+    let current_executable =
+        std::env::current_exe().map_err(|error| untrusted(error, diagnostics(None)))?;
+    let installed = (|| {
+        let mut initial = diagnostics(Some(current_executable.clone()));
+        let program_files = known_folder(&FOLDERID_ProgramFiles)
+            .map_err(|error| untrusted(error, initial.clone()))?;
+        let install_location = registered_install_location().map_err(|error| {
+            initial.installed_control_center = "unknown".to_owned();
+            untrusted(error, initial)
+        })?;
+        resolve_installed_package(
+            &program_files,
+            install_location.as_deref(),
+            Some(current_executable.clone()),
+        )
+    })();
+    fallback_to_current_package(installed, &current_executable)
+}
+
+pub(in crate::machine_integration::open_service) fn current_service_package(
+) -> Result<ServicePackage, InstallationPreflightFailure> {
+    let current_executable =
+        std::env::current_exe().map_err(|error| untrusted(error, diagnostics(None)))?;
+    resolve_elevated_current_package(&current_executable)
+}
+
+fn resolve_elevated_current_package(
+    current_executable: &Path,
+) -> Result<ServicePackage, InstallationPreflightFailure> {
+    let mut observation = diagnostics(Some(current_executable.to_owned()));
+    observation.elevation_attempted = true;
+    observation.elevated_revalidation = "checking".to_owned();
+    match resolve_current_package_with_diagnostics(current_executable, observation) {
+        Ok(package) => Ok(package),
+        Err(mut failure) => {
+            failure.diagnostics.elevation_attempted = true;
+            failure.diagnostics.elevated_revalidation = "failed".to_owned();
+            failure.diagnostics.machine_state_changed = false;
+            failure.diagnostics.rollback_required = false;
+            Err(failure)
+        }
+    }
+}
+
+#[cfg(test)]
+pub(in crate::machine_integration::open_service) fn elevated_package_preflight_for_layout(
+    current_executable: &Path,
+) -> Result<ServicePackage, InstallationPreflightFailure> {
+    resolve_elevated_current_package(current_executable)
 }
 
 fn registered_install_location() -> Result<Option<PathBuf>, String> {

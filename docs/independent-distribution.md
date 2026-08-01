@@ -6,7 +6,7 @@ The installer does not require an existing MacType installation. CI builds the r
 
 - public installer: `MacType-Control-Center-Installer.exe`
 - Integration/Developer bundle: a README plus a complete `installation-tree` for upstream installer integration
-- installed application: `MacType Control Center.exe` (not a standalone installation)
+- application executable: `MacType Control Center.exe` (the detached file is not a complete package)
 - `mactype-preview32.exe`
 - source-built `MacType.dll`, `MacType64.dll`, `MacType.Core.dll`, and `MacType64.Core.dll`
 - source-built `MacLoader.exe` and `MacLoader64.exe`
@@ -16,7 +16,7 @@ The installer does not require an existing MacType installation. CI builds the r
 - English and Korean distribution translation catalogs
 - GPL and third-party notices
 
-The final-user installer and the Integration/Developer bundle are separate public artifacts. The bundle preserves the raw application and every component needed by an upstream MacType installer, but it does not claim that `MacType Control Center.exe` is independently installed. An integrating installer must place the entire tree below Program Files and write the protected application root to `HKLM64\SOFTWARE\MacType\ControlCenter\InstallLocation`. Without that complete registered tree, the Control Center leaves service actions read-only and does not request UAC or attempt rollback.
+The final-user installer and the Integration/Developer bundle are separate public artifacts. The bundle preserves the raw application and every component needed by an upstream MacType installer. An intact extracted bundle may run all Control Center features directly, including explicit-UAC service management, without first registering a Control Center installation. The Control Center prefers a complete registered installation and otherwise validates the current executable's fixed adjacent service runtime, exact payload set, manifest hashes, bounded files, canonical paths, and reparse-point policy before and after elevation. A detached EXE or damaged bundle remains read-only and does not request UAC or attempt rollback. An integrating installer must still place the entire tree below Program Files and write the protected application root to `HKLM64\SOFTWARE\MacType\ControlCenter\InstallLocation`.
 
 The `Rel+Detours` core DLL is copied under the public runtime names `MacType.dll` and `MacType64.dll`. This build has no external EasyHook runtime dependency, so `EasyHK32.dll` and `EasyHK64.dll` are not redistributed. Delphi GUI files, MacTray, legacy updater files, existing profiles, and existing language resources are forbidden by CI. The administrator-elevated installer writes only to the fixed Program Files application root, then synchronously invokes the fixed, argument-free `bootstrap-install` broker. The broker verifies the immutable payload, publishes or preserves the protected ProgramData profile, configures the exact-owned SCM service, and returns success only when it is Auto/LocalSystem/Running with strict Ready health.
 

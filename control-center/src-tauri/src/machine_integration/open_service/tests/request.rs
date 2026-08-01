@@ -1,6 +1,6 @@
 use super::super::*;
 
-fn write_complete_installed_package(install_root: &std::path::Path) {
+fn write_complete_service_package(install_root: &std::path::Path) {
     let payload_root = install_root.join("service-runtime/payload/files");
     std::fs::create_dir_all(&payload_root).unwrap();
     std::fs::write(
@@ -13,9 +13,13 @@ fn write_complete_installed_package(install_root: &std::path::Path) {
         b"setup",
     )
     .unwrap();
-    let files = mactype_service_contract::IMMUTABLE_RUNTIME_FILES
+    let payloads = mactype_service_contract::IMMUTABLE_RUNTIME_FILES
         .iter()
-        .map(|name| (*name, format!("sha256:{}", "0".repeat(64))))
+        .map(|name| (*name, format!("payload-{name}").into_bytes()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let files = payloads
+        .iter()
+        .map(|(name, bytes)| (*name, mactype_service_contract::sha256_digest(bytes)))
         .collect::<std::collections::BTreeMap<_, _>>();
     let manifest = serde_json::json!({
         "schema": mactype_service_contract::RUNTIME_MANIFEST_SCHEMA,
@@ -27,8 +31,8 @@ fn write_complete_installed_package(install_root: &std::path::Path) {
         serde_json::to_vec(&manifest).unwrap(),
     )
     .unwrap();
-    for name in mactype_service_contract::IMMUTABLE_RUNTIME_FILES {
-        std::fs::write(payload_root.join(name), format!("payload-{name}")).unwrap();
+    for (name, bytes) in payloads {
+        std::fs::write(payload_root.join(name), bytes).unwrap();
     }
 }
 
@@ -108,7 +112,7 @@ fn complete_registered_package_delegates_to_its_program_files_control_center() {
         std::env::temp_dir().join(format!("mactype-complete-package-{}", std::process::id()));
     let program_files = fixture.join("Program Files");
     let install_root = program_files.join("MacType");
-    write_complete_installed_package(&install_root);
+    write_complete_service_package(&install_root);
 
     let resolved =
         resolve_installed_package_for_trusted_layout(&program_files, Some(&install_root)).unwrap();
@@ -123,12 +127,263 @@ fn complete_registered_package_delegates_to_its_program_files_control_center() {
 }
 
 #[test]
+fn complete_current_bundle_remains_service_capable_without_an_installed_control_center() {
+    let fixture =
+        std::env::temp_dir().join(format!("mactype-current-package-{}", std::process::id()));
+    let program_files = fixture.join("Program Files");
+    let bundle_root = fixture.join("developer-bundle");
+    std::fs::create_dir_all(&program_files).unwrap();
+    write_complete_service_package(&bundle_root);
+    std::fs::write(bundle_root.join("MacType.dll"), b"mactype-core").unwrap();
+    let current_executable = bundle_root.join("MacType Control Center.exe");
+
+    let selected =
+        resolve_service_package_for_layouts(&program_files, None, &current_executable).unwrap();
+
+    assert_eq!(
+        selected.control_center,
+        std::fs::canonicalize(current_executable).unwrap()
+    );
+    std::fs::remove_dir_all(fixture).unwrap();
+}
+
+#[test]
+fn complete_registered_package_is_preferred_over_a_complete_current_bundle() {
+    let fixture =
+        std::env::temp_dir().join(format!("mactype-package-preference-{}", std::process::id()));
+    let program_files = fixture.join("Program Files");
+    let install_root = program_files.join("MacType Control Center");
+    let bundle_root = fixture.join("developer-bundle");
+    write_complete_service_package(&install_root);
+    write_complete_service_package(&bundle_root);
+
+    let selected = resolve_service_package_for_layouts(
+        &program_files,
+        Some(&install_root),
+        &bundle_root.join("MacType Control Center.exe"),
+    )
+    .unwrap();
+
+    assert_eq!(
+        selected.control_center,
+        std::fs::canonicalize(install_root)
+            .unwrap()
+            .join("MacType Control Center.exe")
+    );
+    std::fs::remove_dir_all(fixture).unwrap();
+}
+
+#[test]
+fn incomplete_registered_package_falls_back_to_a_complete_current_bundle() {
+    let fixture =
+        std::env::temp_dir().join(format!("mactype-package-fallback-{}", std::process::id()));
+    let program_files = fixture.join("Program Files");
+    let install_root = program_files.join("MacType Control Center");
+    let bundle_root = fixture.join("developer-bundle");
+    std::fs::create_dir_all(&install_root).unwrap();
+    std::fs::write(
+        install_root.join("MacType Control Center.exe"),
+        b"incomplete-installed-control-center",
+    )
+    .unwrap();
+    write_complete_service_package(&bundle_root);
+    let current_executable = bundle_root.join("MacType Control Center.exe");
+
+    let selected = resolve_service_package_for_layouts(
+        &program_files,
+        Some(&install_root),
+        &current_executable,
+    )
+    .unwrap();
+
+    assert_eq!(
+        selected.control_center,
+        std::fs::canonicalize(current_executable).unwrap()
+    );
+    std::fs::remove_dir_all(fixture).unwrap();
+}
+
+#[test]
+fn incomplete_current_bundle_diagnostics_keep_installed_and_current_states_distinct() {
+    let fixture = std::env::temp_dir().join(format!(
+        "mactype-package-diagnostics-{}",
+        std::process::id()
+    ));
+    let program_files = fixture.join("Program Files");
+    let bundle_root = fixture.join("developer-bundle");
+    std::fs::create_dir_all(&program_files).unwrap();
+    std::fs::create_dir_all(&bundle_root).unwrap();
+    let current_executable = bundle_root.join("MacType Control Center.exe");
+    std::fs::write(&current_executable, b"control-center").unwrap();
+
+    let failure = service_package_preflight_for_layouts(&program_files, None, &current_executable)
+        .unwrap_err();
+
+    assert!(failure
+        .error
+        .contains("complete Integration/Developer bundle"));
+    assert!(!failure
+        .error
+        .contains("registered MacType Control Center installation"));
+    assert_eq!(failure.diagnostics.installed_control_center, "missing");
+    assert_eq!(failure.diagnostics.current_bundle, "incomplete");
+    assert_eq!(failure.diagnostics.selected_service_package, "none");
+    assert_eq!(failure.diagnostics.setup_broker, "missing");
+    assert_eq!(failure.diagnostics.runtime_manifest, "missing");
+    assert!(!failure.diagnostics.elevation_attempted);
+    assert_eq!(failure.diagnostics.elevated_revalidation, "not-attempted");
+    assert!(!failure.diagnostics.machine_state_changed);
+    assert!(!failure.diagnostics.rollback_required);
+    std::fs::remove_dir_all(fixture).unwrap();
+}
+
+#[test]
+fn diagnostics_derive_the_expected_executable_from_the_registered_install_root() {
+    let fixture = std::env::temp_dir().join(format!(
+        "mactype-derived-diagnostics-{}",
+        std::process::id()
+    ));
+    let program_files = fixture.join("Program Files");
+    let registered_root = program_files
+        .join("MacType")
+        .join("ControlCenterComponents");
+    let bundle_root = fixture.join("developer-bundle");
+    std::fs::create_dir_all(&program_files).unwrap();
+    std::fs::create_dir_all(&bundle_root).unwrap();
+    let current_executable = bundle_root.join("MacType Control Center.exe");
+    std::fs::write(&current_executable, b"control-center").unwrap();
+
+    let failure = service_package_preflight_for_layouts(
+        &program_files,
+        Some(&registered_root),
+        &current_executable,
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        failure.diagnostics.expected_installed_control_center,
+        Some(
+            registered_root
+                .join("MacType Control Center.exe")
+                .to_string_lossy()
+                .into_owned()
+        )
+    );
+    assert_eq!(
+        failure.diagnostics.current_executable,
+        Some(current_executable.to_string_lossy().into_owned())
+    );
+    assert_eq!(failure.diagnostics.expected_executable_exists, Some(false));
+    assert_eq!(failure.diagnostics.installed_control_center, "missing");
+    assert_eq!(failure.diagnostics.current_bundle, "incomplete");
+    assert_eq!(failure.diagnostics.selected_service_package, "none");
+    assert!(!failure.diagnostics.elevation_attempted);
+    assert!(!failure.diagnostics.machine_state_changed);
+    assert!(!failure.diagnostics.rollback_required);
+    std::fs::remove_dir_all(fixture).unwrap();
+}
+
+#[test]
+fn elevated_current_bundle_revalidation_failure_precedes_machine_changes_and_rollback() {
+    let fixture = std::env::temp_dir().join(format!(
+        "mactype-elevated-revalidation-{}",
+        std::process::id()
+    ));
+    let bundle_root = fixture.join("developer-bundle");
+    std::fs::create_dir_all(&bundle_root).unwrap();
+    let current_executable = bundle_root.join("MacType Control Center.exe");
+    std::fs::write(&current_executable, b"control-center").unwrap();
+
+    let failure = elevated_package_preflight_for_layout(&current_executable).unwrap_err();
+
+    assert!(failure.diagnostics.elevation_attempted);
+    assert_eq!(failure.diagnostics.elevated_revalidation, "failed");
+    assert_eq!(failure.diagnostics.current_bundle, "incomplete");
+    assert!(!failure.diagnostics.machine_state_changed);
+    assert!(!failure.diagnostics.rollback_required);
+    std::fs::remove_dir_all(fixture).unwrap();
+}
+
+#[test]
+fn current_bundle_with_a_payload_hash_mismatch_is_rejected_before_elevation() {
+    let fixture =
+        std::env::temp_dir().join(format!("mactype-tampered-package-{}", std::process::id()));
+    let program_files = fixture.join("Program Files");
+    let bundle_root = fixture.join("developer-bundle");
+    std::fs::create_dir_all(&program_files).unwrap();
+    write_complete_service_package(&bundle_root);
+    std::fs::write(
+        bundle_root.join("service-runtime/payload/files/MacType.dll"),
+        b"tampered-core",
+    )
+    .unwrap();
+
+    let error = resolve_service_package_for_layouts(
+        &program_files,
+        None,
+        &bundle_root.join("MacType Control Center.exe"),
+    )
+    .unwrap_err();
+
+    assert!(
+        error.starts_with("control-center-installation-untrusted:"),
+        "{error}"
+    );
+    std::fs::remove_dir_all(fixture).unwrap();
+}
+
+#[test]
+fn current_bundle_with_an_unlisted_payload_file_is_rejected_before_elevation() {
+    let fixture =
+        std::env::temp_dir().join(format!("mactype-unlisted-package-{}", std::process::id()));
+    let program_files = fixture.join("Program Files");
+    let bundle_root = fixture.join("developer-bundle");
+    std::fs::create_dir_all(&program_files).unwrap();
+    write_complete_service_package(&bundle_root);
+    std::fs::write(
+        bundle_root.join("service-runtime/payload/files/unlisted-helper.exe"),
+        b"unlisted-helper",
+    )
+    .unwrap();
+
+    let error = resolve_service_package_for_layouts(
+        &program_files,
+        None,
+        &bundle_root.join("MacType Control Center.exe"),
+    )
+    .unwrap_err();
+
+    assert!(
+        error.starts_with("control-center-installation-untrusted:"),
+        "{error}"
+    );
+    std::fs::remove_dir_all(fixture).unwrap();
+}
+
+#[test]
+fn current_bundle_rejects_a_reparse_executable_before_canonicalization() {
+    let canonicalization_attempted = std::cell::Cell::new(false);
+    let error = current_executable_path_gate_for_test(
+        std::path::Path::new(r"D:\developer-bundle\MacType Control Center.exe"),
+        |_| Err("the executable path contains a reparse point".to_owned()),
+        |path| {
+            canonicalization_attempted.set(true);
+            path.to_owned()
+        },
+    )
+    .unwrap_err();
+
+    assert_eq!(error, "the executable path contains a reparse point");
+    assert!(!canonicalization_attempted.get());
+}
+
+#[test]
 fn registered_package_with_a_manifest_but_missing_payload_is_incomplete() {
     let fixture =
         std::env::temp_dir().join(format!("mactype-missing-payload-{}", std::process::id()));
     let program_files = fixture.join("Program Files");
     let install_root = program_files.join("MacType");
-    write_complete_installed_package(&install_root);
+    write_complete_service_package(&install_root);
     std::fs::remove_file(install_root.join("service-runtime/payload/files/mactype-injector64.exe"))
         .unwrap();
 
@@ -149,7 +404,7 @@ fn complete_package_registered_outside_program_files_is_untrusted() {
     let program_files = fixture.join("Program Files");
     let install_root = fixture.join("Downloads").join("MacType");
     std::fs::create_dir_all(&program_files).unwrap();
-    write_complete_installed_package(&install_root);
+    write_complete_service_package(&install_root);
 
     let error = resolve_installed_package_for_trusted_layout(&program_files, Some(&install_root))
         .unwrap_err();

@@ -66,6 +66,19 @@ for (const locale of ["fr", "de", "es", "pt"]) {
   if (identical.length > 30) throw new Error(`Too many untranslated ${locale} messages: ${identical.length}`);
 }
 
+const servicePackageCopy = {
+  en: en["execution.servicePackageIncompleteDescription"],
+  ko: ko["execution.servicePackageIncompleteDescription"],
+};
+if (!servicePackageCopy.en.includes("complete Integration/Developer bundle")
+  || servicePackageCopy.en.includes("standalone development executable")) {
+  throw new Error("English service package guidance must allow the complete development bundle");
+}
+if (!servicePackageCopy.ko.includes("전체 개발용 파일")
+  || servicePackageCopy.ko.includes("단독 개발용 실행 파일에서 사용할 수 없습니다")) {
+  throw new Error("Korean service package guidance must allow the complete development bundle");
+}
+
 const koFontGlyphs = new Set(fs.readFileSync(path.join(root, "control-center/src/assets/fonts/ko-glyphs.txt"), "utf8"));
 const missingGlyphs = new Set();
 for (const message of Object.values(ko)) {

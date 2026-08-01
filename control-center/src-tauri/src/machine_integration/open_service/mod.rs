@@ -7,7 +7,11 @@ mod runtime;
 mod startup_lifecycle;
 
 #[cfg(test)]
-use broker::resolve_installed_package_for_trusted_layout;
+use broker::{
+    current_executable_path_gate_for_test, elevated_package_preflight_for_layout,
+    resolve_installed_package_for_trusted_layout, resolve_service_package_for_layouts,
+    service_package_preflight_for_layouts,
+};
 
 use broker_result::{
     decode_broker_result_frame, encode_broker_result_frame, BrokerResultDisposition,
@@ -68,7 +72,7 @@ fn management_package_state_from_error(
 pub(crate) fn management_package_state() -> crate::service_contract::ServiceManagementPackageState {
     #[cfg(windows)]
     {
-        broker::installed_package()
+        broker::service_package()
             .map(|_| crate::service_contract::ServiceManagementPackageState::Ready)
             .unwrap_or_else(|failure| management_package_state_from_error(&failure.error))
     }
@@ -103,7 +107,7 @@ pub(crate) fn run_action(
         return Err("the service action has an invalid profile payload".to_owned());
     }
     #[cfg(windows)]
-    let installed_control_center = match broker::installed_package() {
+    let service_control_center = match broker::service_package() {
         Ok(package) => package.control_center,
         Err(failure) => {
             let error = failure.error;
@@ -114,7 +118,7 @@ pub(crate) fn run_action(
     let result = {
         #[cfg(windows)]
         {
-            windows::run_elevated_at(action, profile, installed_control_center)
+            windows::run_elevated_at(action, profile, service_control_center)
         }
         #[cfg(not(windows))]
         {

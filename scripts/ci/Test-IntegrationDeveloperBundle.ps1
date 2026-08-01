@@ -101,13 +101,18 @@ try {
     }
     $readme = Get-Content -LiteralPath (Join-Path $output 'README.md') -Raw
     foreach ($token in @(
-        'not a portable or independently installed product',
-        'HKLM64\SOFTWARE\MacType\ControlCenter',
-        'does not request UAC or attempt rollback'
+        'can install and maintain the service directly',
+        'explicit UAC consent',
+        'does not accept arbitrary executable, DLL, service, or payload paths'
     )) {
         if (-not $readme.Contains($token)) {
-            throw "Integration/Developer README is missing its boundary warning: $token"
+            throw "Integration/Developer README is missing its execution boundary: $token"
         }
+    }
+    $releaseWorkflow = Get-Content -LiteralPath (Join-Path $root '.github\workflows\build.yml') -Raw
+    if ($releaseWorkflow.Contains('is not a portable installation') -or
+        -not $releaseWorkflow.Contains('is directly usable when its installation tree remains intact')) {
+        throw 'Release copy misrepresents the directly usable Integration/Developer bundle.'
     }
 
     Write-Host 'Integration/Developer bundle layout contract passed.'

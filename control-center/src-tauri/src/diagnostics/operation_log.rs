@@ -73,11 +73,17 @@ pub(crate) struct InstallationPreflightDiagnostics {
     pub(crate) current_executable: Option<String>,
     pub(crate) expected_executable_exists: Option<bool>,
     pub(crate) installed_control_center: String,
+    #[serde(default = "not_checked")]
+    pub(crate) current_bundle: String,
+    #[serde(default = "not_checked")]
+    pub(crate) selected_service_package: String,
     pub(crate) setup_broker: String,
     pub(crate) runtime_manifest: String,
     #[serde(default = "not_checked")]
     pub(crate) runtime_payload: String,
     pub(crate) elevation_attempted: bool,
+    #[serde(default = "not_checked")]
+    pub(crate) elevated_revalidation: String,
     pub(crate) machine_state_changed: bool,
     pub(crate) rollback_required: bool,
 }
@@ -125,8 +131,9 @@ impl OperationLogEntry {
             let yes_no = |value| if value { "yes" } else { "no" };
             value.push_str(&format!(
                 "\nExpected installed Control Center: {}\nCurrent executable: {}\nExpected executable exists: {:?} \
-                 \nInstalled Control Center: {}\nSetup broker: {}\nRuntime manifest: {}\nRuntime payload: {} \
-                 \nElevation attempted: {}\nMachine state changed: {}\nRollback required: {}",
+                 \nInstalled Control Center: {}\nCurrent bundle: {}\nSelected service package: {} \
+                 \nSetup broker: {}\nRuntime manifest: {}\nRuntime payload: {} \
+                 \nElevation attempted: {}\nElevated revalidation: {}\nMachine state changed: {}\nRollback required: {}",
                 preflight
                     .expected_installed_control_center
                     .as_deref()
@@ -137,10 +144,13 @@ impl OperationLogEntry {
                     .unwrap_or("unavailable"),
                 preflight.expected_executable_exists,
                 preflight.installed_control_center,
+                preflight.current_bundle.replace('-', " "),
+                preflight.selected_service_package.replace('-', " "),
                 preflight.setup_broker.replace('-', " "),
                 preflight.runtime_manifest.replace('-', " "),
                 preflight.runtime_payload.replace('-', " "),
                 yes_no(preflight.elevation_attempted),
+                preflight.elevated_revalidation.replace('-', " "),
                 yes_no(preflight.machine_state_changed),
                 yes_no(preflight.rollback_required),
             ));
@@ -200,10 +210,13 @@ fn sanitize_installation_preflight(
             .map(|path| sanitize(path, &[], MAX_PREFLIGHT_PATH_BYTES)),
         expected_executable_exists: value.expected_executable_exists,
         installed_control_center: sanitize(&value.installed_control_center, &[], 64),
+        current_bundle: sanitize(&value.current_bundle, &[], 64),
+        selected_service_package: sanitize(&value.selected_service_package, &[], 64),
         setup_broker: sanitize(&value.setup_broker, &[], 64),
         runtime_manifest: sanitize(&value.runtime_manifest, &[], 64),
         runtime_payload: sanitize(&value.runtime_payload, &[], 64),
         elevation_attempted: value.elevation_attempted,
+        elevated_revalidation: sanitize(&value.elevated_revalidation, &[], 64),
         machine_state_changed: value.machine_state_changed,
         rollback_required: value.rollback_required,
     }

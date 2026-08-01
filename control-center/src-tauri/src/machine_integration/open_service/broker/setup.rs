@@ -1,6 +1,6 @@
 use super::{
     super::{windows::query, SystemServiceAction},
-    installed_package::installed_package,
+    installed_package::current_service_package,
 };
 use crate::service_contract::SystemServiceStatus;
 use std::{
@@ -167,7 +167,7 @@ fn setup_failure_message(verb: &str, exit_code: Option<i32>, stderr: &str, stdou
 }
 
 pub(in crate::machine_integration::open_service) fn fixed_setup_path() -> Result<PathBuf, String> {
-    installed_package()
+    current_service_package()
         .map(|package| package.setup_broker)
         .map_err(|failure| failure.error)
 }

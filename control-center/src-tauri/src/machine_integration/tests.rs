@@ -186,6 +186,7 @@ fn unsafe_machine_state_is_rejected_before_dispatch_without_retry() {
 
 #[test]
 fn native_actions_require_the_matching_backend_capability_before_dispatch() {
+    let profile = b"[General]\r\nGammaValue=1.3\r\n";
     for action in [
         MachineAction::Install,
         MachineAction::Upgrade,
@@ -207,7 +208,8 @@ fn native_actions_require_the_matching_backend_capability_before_dispatch() {
             appinit_conflict: action == MachineAction::Stop,
             ..Default::default()
         };
-        let error = execute_machine_action_with(&mut denied, action, None).unwrap_err();
+        let payload = (action == MachineAction::Start).then_some(profile.as_slice());
+        let error = execute_machine_action_with(&mut denied, action, payload).unwrap_err();
         assert!(error.contains("authorize"), "{action:?}: {error}");
         assert!(denied.executed.is_none(), "{action:?} reached the broker");
 
@@ -225,9 +227,52 @@ fn native_actions_require_the_matching_backend_capability_before_dispatch() {
             appinit_conflict: action == MachineAction::Stop,
             ..Default::default()
         };
-        execute_machine_action_with(&mut allowed, action, None).unwrap();
-        assert_eq!(allowed.executed, Some((action, Vec::new())));
+        execute_machine_action_with(&mut allowed, action, payload).unwrap();
+        let expected = if action == MachineAction::Start {
+            (MachineAction::PublishProfile, profile.to_vec())
+        } else {
+            (action, Vec::new())
+        };
+        assert_eq!(allowed.executed, Some(expected));
     }
+}
+
+#[test]
+fn start_with_an_explicit_profile_uses_the_profile_publication_transaction() {
+    let profile = b"[General]\r\nGammaValue=1.3\r\n";
+    let mut status = ready_auto_service();
+    status.runtime = RuntimeState::Stopped;
+    status.health = HealthState::Unknown;
+    status.active_profile_digest = None;
+    status.can_start = true;
+    let mut backend = FakeMachineBackend {
+        status: Some(status),
+        ..Default::default()
+    };
+
+    execute_machine_action_with(&mut backend, MachineAction::Start, Some(profile)).unwrap();
+
+    assert_eq!(
+        backend.executed,
+        Some((MachineAction::PublishProfile, profile.to_vec()))
+    );
+}
+
+#[test]
+fn start_without_an_explicit_profile_is_rejected_before_machine_observation() {
+    let mut status = ready_auto_service();
+    status.runtime = RuntimeState::Stopped;
+    status.can_start = true;
+    let mut backend = FakeMachineBackend {
+        status: Some(status),
+        ..Default::default()
+    };
+
+    let error = execute_machine_action_with(&mut backend, MachineAction::Start, None).unwrap_err();
+
+    assert!(error.contains("invalid profile payload"), "{error}");
+    assert!(backend.calls.is_empty());
+    assert!(backend.executed.is_none());
 }
 
 #[test]
@@ -246,7 +291,8 @@ fn a_contending_legacy_service_blocks_generic_activation_but_not_reduction() {
         status.can_install = true;
         status.can_start = true;
         let payload: Option<&[u8]> =
-            (action == MachineAction::PublishProfile).then_some(profile.as_slice());
+            matches!(action, MachineAction::Start | MachineAction::PublishProfile)
+                .then_some(profile.as_slice());
         let mut backend = FakeMachineBackend {
             status: Some(status),
             legacy_service_blocks_activation: true,
@@ -270,8 +316,8 @@ fn a_contending_legacy_service_blocks_generic_activation_but_not_reduction() {
     start_status.runtime = RuntimeState::Stopped;
     start_status.can_start = true;
     inaccessible.status = Some(start_status);
-    let error =
-        execute_machine_action_with(&mut inaccessible, MachineAction::Start, None).unwrap_err();
+    let error = execute_machine_action_with(&mut inaccessible, MachineAction::Start, Some(profile))
+        .unwrap_err();
     assert!(error.contains("inaccessible"), "{error}");
     assert!(inaccessible.executed.is_none());
 
@@ -289,6 +335,7 @@ fn a_contending_legacy_service_blocks_generic_activation_but_not_reduction() {
 
 #[test]
 fn appinit_conflict_never_turns_an_unrelated_native_capability_into_stop() {
+    let profile = b"[General]\r\nGammaValue=1.3\r\n";
     let mut status = ready_auto_service();
     status.can_stop = false;
     status.can_start = true;
@@ -298,7 +345,8 @@ fn appinit_conflict_never_turns_an_unrelated_native_capability_into_stop() {
         ..Default::default()
     };
 
-    let error = execute_machine_action_with(&mut backend, MachineAction::Start, None).unwrap_err();
+    let error =
+        execute_machine_action_with(&mut backend, MachineAction::Start, Some(profile)).unwrap_err();
 
     assert!(error.contains("AppInit"), "{error}");
     assert!(backend.executed.is_none());
@@ -306,6 +354,7 @@ fn appinit_conflict_never_turns_an_unrelated_native_capability_into_stop() {
 
 #[test]
 fn verified_stop_does_not_depend_on_reading_appinit_registry_state() {
+    let profile = b"[General]\r\nGammaValue=1.3\r\n";
     let mut stop = FakeMachineBackend {
         status: Some(ready_auto_service()),
         appinit_error: Some("registry unavailable".to_owned()),
@@ -324,7 +373,8 @@ fn verified_stop_does_not_depend_on_reading_appinit_registry_state() {
         ..Default::default()
     };
 
-    let error = execute_machine_action_with(&mut start, MachineAction::Start, None).unwrap_err();
+    let error =
+        execute_machine_action_with(&mut start, MachineAction::Start, Some(profile)).unwrap_err();
 
     assert!(error.contains("registry unavailable"), "{error}");
     assert_eq!(start.calls, ["legacy-tray", "appinit"]);

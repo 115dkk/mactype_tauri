@@ -380,9 +380,11 @@ fn generic_activation_refuses_against_a_live_legacy_service() {
         "the guard's presence primitive must observe the real legacy service"
     );
 
+    let profile = b"[General]\r\nGammaValue=1.3\r\n";
     let mut backend = RealLegacyProbeBackend;
     for action in [MachineAction::Install, MachineAction::Start] {
-        let error = execute_machine_action_with(&mut backend, action, None)
+        let payload: Option<&[u8]> = (action == MachineAction::Start).then_some(profile.as_slice());
+        let error = execute_machine_action_with(&mut backend, action, payload)
             .expect_err("activation must refuse while the legacy service is present");
         println!("{action:?} refused: {error}");
         assert!(
@@ -390,7 +392,6 @@ fn generic_activation_refuses_against_a_live_legacy_service() {
             "{action:?}: {error}"
         );
     }
-    let profile = b"[General]\r\nGammaValue=1.3\r\n";
     let error =
         execute_machine_action_with(&mut backend, MachineAction::PublishProfile, Some(profile))
             .expect_err("apply profile must refuse while the legacy service is present");

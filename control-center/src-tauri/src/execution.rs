@@ -251,7 +251,8 @@ fn record_successful_activity(
         crate::machine_integration::MachineAction::Stop => {
             let _ = crate::diagnostics::record_activity(ActivityKind::ServiceStopped, None);
         }
-        crate::machine_integration::MachineAction::PublishProfile
+        crate::machine_integration::MachineAction::Start
+        | crate::machine_integration::MachineAction::PublishProfile
         | crate::machine_integration::MachineAction::MigrateFromLegacy => {
             let profile = current.active_profile.as_deref();
             let _ = crate::diagnostics::record_activity(ActivityKind::ProfileVerified, profile);
@@ -292,6 +293,29 @@ fn ensure_active_runtime() -> Result<bool, String> {
     let (path, bytes) = crate::profile::default_profile_payload()?;
     apply_profile(&root, &path, &bytes)?;
     Ok(true)
+}
+
+fn service_start_profile_at(
+    runtime_root: &Path,
+    installation_root: &Path,
+) -> Result<Vec<u8>, String> {
+    let active = match runtime::active_runtime_from(runtime_root) {
+        Ok(active) => active,
+        Err(_) => {
+            let (path, bytes) = crate::profile::bundled_default_profile_at(installation_root)
+                .map_err(|error| {
+                    format!(
+                        "no profile is applied and ini\\Default.ini could not be validated: {error}"
+                    )
+                })?
+                .ok_or_else(|| {
+                    "no profile is applied and ini\\Default.ini was not found; apply a profile before starting the service"
+                        .to_owned()
+                })?;
+            runtime::prepare_runtime_at(runtime_root, installation_root, &path, &bytes)?
+        }
+    };
+    runtime::active_profile_payload_for(&active)
 }
 
 pub(crate) fn observe_machine_on_tray_login(
@@ -346,20 +370,26 @@ pub(crate) fn manage_system_service(
     action: crate::machine_integration::PublicMachineAction,
 ) -> Result<ExecutionStatus, String> {
     let action = crate::machine_integration::MachineAction::from(action);
-    let before = status(installation_root().as_deref());
-    let profile = if matches!(
-        action,
+    let installation = installation_root();
+    let before = status(installation.as_deref());
+    let profile = match action {
+        crate::machine_integration::MachineAction::Start => {
+            let root = installation
+                .as_deref()
+                .ok_or_else(|| "MacType installation was not found".to_owned())?;
+            let runtime_root = runtime::runtime_root()?;
+            Some(service_start_profile_at(&runtime_root, root)?)
+        }
         crate::machine_integration::MachineAction::PublishProfile
-            | crate::machine_integration::MachineAction::MigrateFromLegacy
-            | crate::machine_integration::MachineAction::RemoveLegacy
-    ) {
-        ensure_active_runtime()?;
-        Some(active_system_profile_payload()?)
-    } else {
-        None
+        | crate::machine_integration::MachineAction::MigrateFromLegacy
+        | crate::machine_integration::MachineAction::RemoveLegacy => {
+            ensure_active_runtime()?;
+            Some(active_system_profile_payload()?)
+        }
+        _ => None,
     };
     execute_machine_action(action, profile.as_deref())?;
-    let current = status(installation_root().as_deref());
+    let current = status(installation.as_deref());
     record_successful_activity(
         action,
         before.system_service.runtime == crate::service_contract::RuntimeState::Running,
@@ -587,6 +617,103 @@ mod tests {
 
         assert!(projection.expected_profile.is_some());
         assert!(!service.system_injection_active(Some(&expected)));
+    }
+
+    #[test]
+    fn first_service_start_uses_only_the_bundled_default_profile() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = env::temp_dir().join(format!("mactype-first-service-start-{unique}"));
+        let installation = root.join("installation");
+        let runtime_root = root.join("runtime");
+        fs::create_dir_all(installation.join("ini")).unwrap();
+        fs::write(installation.join("MacLoader.exe"), b"loader").unwrap();
+        fs::write(installation.join("MacType.dll"), b"core").unwrap();
+        let default = b"[General]\r\nNormalWeight=2\r\n";
+        fs::write(installation.join("ini").join("Default.ini"), default).unwrap();
+        fs::write(
+            installation.join("ini").join("Another.ini"),
+            b"[General]\r\nNormalWeight=9\r\n",
+        )
+        .unwrap();
+        fs::write(
+            installation.join("MacType.ini"),
+            b"[General]\r\nAlternativeFile=ini\\Another.ini\r\n",
+        )
+        .unwrap();
+
+        let payload = service_start_profile_at(&runtime_root, &installation).unwrap();
+
+        assert_eq!(payload, default);
+        let active = runtime::active_runtime_from(&runtime_root).unwrap();
+        assert_eq!(active.source_profile, Path::new(r"ini\Default.ini"));
+        assert_eq!(
+            fs::read(active.runtime_root.join("profile.ini")).unwrap(),
+            default
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn first_service_start_without_default_profile_preserves_local_state() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = env::temp_dir().join(format!("mactype-missing-start-profile-{unique}"));
+        let installation = root.join("installation");
+        let runtime_root = root.join("runtime");
+        fs::create_dir_all(installation.join("ini")).unwrap();
+        fs::write(installation.join("MacLoader.exe"), b"loader").unwrap();
+        fs::write(installation.join("MacType.dll"), b"core").unwrap();
+        fs::write(
+            installation.join("ini").join("Another.ini"),
+            b"[General]\r\nNormalWeight=9\r\n",
+        )
+        .unwrap();
+        fs::write(
+            installation.join("MacType.ini"),
+            b"[General]\r\nAlternativeFile=ini\\Another.ini\r\n",
+        )
+        .unwrap();
+
+        let error = service_start_profile_at(&runtime_root, &installation).unwrap_err();
+
+        assert!(error.contains(r"ini\Default.ini"), "{error}");
+        assert!(!runtime_root.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn later_service_start_keeps_the_explicitly_applied_profile() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = env::temp_dir().join(format!("mactype-later-service-start-{unique}"));
+        let installation = root.join("installation");
+        let runtime_root = root.join("runtime");
+        fs::create_dir_all(installation.join("ini")).unwrap();
+        fs::write(installation.join("MacLoader.exe"), b"loader").unwrap();
+        fs::write(installation.join("MacType.dll"), b"core").unwrap();
+        fs::write(
+            installation.join("ini").join("Default.ini"),
+            b"[General]\r\nNormalWeight=2\r\n",
+        )
+        .unwrap();
+        let custom_path = installation.join("ini").join("Custom.ini");
+        let custom = b"[General]\r\nNormalWeight=8\r\n";
+        fs::write(&custom_path, custom).unwrap();
+        runtime::prepare_runtime_at(&runtime_root, &installation, &custom_path, custom).unwrap();
+
+        let payload = service_start_profile_at(&runtime_root, &installation).unwrap();
+
+        assert_eq!(payload, custom);
+        let active = runtime::active_runtime_from(&runtime_root).unwrap();
+        assert_eq!(active.source_profile, Path::new(r"ini\Custom.ini"));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -36,17 +36,16 @@ pub(super) fn execute_machine_action_with(
     action: MachineAction,
     profile: Option<&[u8]>,
 ) -> Result<(), String> {
-    let needs_profile = matches!(
-        action,
-        MachineAction::PublishProfile
-            | MachineAction::MigrateFromLegacy
-            | MachineAction::RemoveLegacy
-    );
-    if profile.is_some() != needs_profile
-        || profile.is_some_and(|bytes| {
-            bytes.is_empty() || bytes.len() > mactype_service_contract::MAX_PROFILE_BYTES
-        })
-    {
+    let profile_contract_is_valid = match action {
+        MachineAction::Start
+        | MachineAction::PublishProfile
+        | MachineAction::MigrateFromLegacy
+        | MachineAction::RemoveLegacy => profile.is_some(),
+        _ => profile.is_none(),
+    } && !profile.is_some_and(|bytes| {
+        bytes.is_empty() || bytes.len() > mactype_service_contract::MAX_PROFILE_BYTES
+    });
+    if !profile_contract_is_valid {
         return Err("the machine action has an invalid profile payload".to_owned());
     }
 
@@ -78,7 +77,12 @@ pub(super) fn execute_machine_action_with(
             return Err("AppInit conflicts block this machine integration change".to_owned());
         }
         refuse_activation_with_legacy_service(backend, action)?;
-        return backend.execute(action, profile);
+        let dispatched_action = if action == MachineAction::Start && profile.is_some() {
+            MachineAction::PublishProfile
+        } else {
+            action
+        };
+        return backend.execute(dispatched_action, profile);
     }
     if appinit_conflict {
         return Err("AppInit conflicts block this machine integration change".to_owned());

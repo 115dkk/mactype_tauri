@@ -241,6 +241,38 @@ HOOK_MANUALLY(HRESULT, DWriteFontFaceReference_CreateFontFaceWithSimulations, (
 			  __out IDWriteFontFace3** fontFace
 			  ), (self, fontFaceSimulationFlags, fontFace))
 
+HOOK_MANUALLY(HRESULT, CustomFont_CreateFontFace, (
+			  IDWriteFont3* self,
+			  __out IDWriteFontFace3** fontFace
+			  ), (self, fontFace))
+
+HOOK_MANUALLY(HRESULT, CustomFontFaceReference_CreateFontFace, (
+			  IDWriteFontFaceReference* self,
+			  __out IDWriteFontFace3** fontFace
+			  ), (self, fontFace))
+
+HOOK_MANUALLY(HRESULT, CustomFontFaceReference_CreateFontFaceWithSimulations, (
+			  IDWriteFontFaceReference* self,
+			  DWRITE_FONT_SIMULATIONS fontFaceSimulationFlags,
+			  __out IDWriteFontFace3** fontFace
+			  ), (self, fontFaceSimulationFlags, fontFace))
+
+HOOK_MANUALLY(HRESULT, FontSetFont_CreateFontFace, (
+			  IDWriteFont3* self,
+			  __out IDWriteFontFace3** fontFace
+			  ), (self, fontFace))
+
+HOOK_MANUALLY(HRESULT, FontSetFontFaceReference_CreateFontFace, (
+			  IDWriteFontFaceReference* self,
+			  __out IDWriteFontFace3** fontFace
+			  ), (self, fontFace))
+
+HOOK_MANUALLY(HRESULT, FontSetFontFaceReference_CreateFontFaceWithSimulations, (
+			  IDWriteFontFaceReference* self,
+			  DWRITE_FONT_SIMULATIONS fontFaceSimulationFlags,
+			  __out IDWriteFontFace3** fontFace
+			  ), (self, fontFaceSimulationFlags, fontFace))
+
 HOOK_MANUALLY(HRESULT, FontCollection_FindFamilyName, (
 			  IDWriteFontCollection* self,
 			  __in_z WCHAR const* familyName,

@@ -44,6 +44,24 @@ void SetPointerValue(Target& target, Source source) noexcept
 static void* g_systemFontCollectionFindFamilyName = nullptr;
 static void* g_customFontCollectionFindFamilyName = nullptr;
 static void* g_fontSetCollectionFindFamilyName = nullptr;
+static void* g_systemFontCreateFontFace = nullptr;
+static void* g_systemFontFaceReferenceCreateFontFace = nullptr;
+static void* g_systemFontFaceReferenceCreateFontFaceWithSimulations = nullptr;
+static void* g_customFontCreateFontFace = nullptr;
+static void* g_customFontFaceReferenceCreateFontFace = nullptr;
+static void* g_customFontFaceReferenceCreateFontFaceWithSimulations = nullptr;
+static void* g_fontSetFontCreateFontFace = nullptr;
+static void* g_fontSetFontFaceReferenceCreateFontFace = nullptr;
+static void* g_fontSetFontFaceReferenceCreateFontFaceWithSimulations = nullptr;
+
+enum class CollectionFontHookKind
+{
+	custom,
+	fontSet,
+};
+
+static void HookCollectionFontCreation(
+	IDWriteFontCollection* collection, CollectionFontHookKind kind);
 
 struct ComMethodHooker {
 	// The target function if it has been hooked
@@ -1410,12 +1428,18 @@ bool hookFontCreation(CComPtr<IDWriteFactory>& pDWriteFactory) {
 		HOOK(dfont, CreateFontFace, 13);
 	} else {
 		// IDWriteFont::CreateFontFace just wraps this
+		g_systemFontCreateFontFace =
+			(*reinterpret_cast<void***>(dfont3.p))[19];
 		HOOK(dfont3, CreateFontFace, 19);
 
 		CComPtr<IDWriteFontFaceReference> fontFaceReference;
 		if (SUCCEEDED(dfont3->GetFontFaceReference(&fontFaceReference)) && fontFaceReference) {
 			// Modern browser font managers create faces through references instead
 			// of CreateTextFormat. Both reference interfaces share these slots.
+			g_systemFontFaceReferenceCreateFontFace =
+				(*reinterpret_cast<void***>(fontFaceReference.p))[3];
+			g_systemFontFaceReferenceCreateFontFaceWithSimulations =
+				(*reinterpret_cast<void***>(fontFaceReference.p))[4];
 			HOOK(fontFaceReference, DWriteFontFaceReference_CreateFontFace, 3);
 			HOOK(fontFaceReference, DWriteFontFaceReference_CreateFontFaceWithSimulations, 4);
 		}
@@ -1797,6 +1821,145 @@ HRESULT WINAPI IMPL_DWriteFontFaceReference_CreateFontFaceWithSimulations(
 	return ret;
 }
 
+static void HookCollectionFontCreation(
+	IDWriteFontCollection* collection, CollectionFontHookKind kind)
+{
+	if (collection == nullptr)
+		return;
+	CCriticalSectionLock hookLock(CCriticalSectionLock::CS_DWRITE);
+	CComPtr<IDWriteFontFamily> family;
+	if (FAILED(collection->GetFontFamily(0, &family)) || family == nullptr)
+		return;
+	CComPtr<IDWriteFont> font;
+	if (FAILED(family->GetFont(0, &font)) || font == nullptr)
+		return;
+	CComPtr<IDWriteFont3> font3;
+	if (FAILED(font->QueryInterface(&font3)) || font3 == nullptr)
+		return;
+
+	void* const createFontFace = (*reinterpret_cast<void***>(font3.p))[19];
+	if (kind == CollectionFontHookKind::custom) {
+		if (!ISHOOKED(CustomFont_CreateFontFace) &&
+			createFontFace != g_systemFontCreateFontFace &&
+			createFontFace != g_fontSetFontCreateFontFace) {
+			g_customFontCreateFontFace = createFontFace;
+			HOOK(font3, CustomFont_CreateFontFace, 19);
+		}
+	} else if (!ISHOOKED(FontSetFont_CreateFontFace) &&
+		createFontFace != g_systemFontCreateFontFace &&
+		createFontFace != g_customFontCreateFontFace) {
+		g_fontSetFontCreateFontFace = createFontFace;
+		HOOK(font3, FontSetFont_CreateFontFace, 19);
+	}
+
+	CComPtr<IDWriteFontFaceReference> reference;
+	if (FAILED(font3->GetFontFaceReference(&reference)) || reference == nullptr)
+		return;
+	void* const createReferenceFace =
+		(*reinterpret_cast<void***>(reference.p))[3];
+	void* const createReferenceFaceWithSimulations =
+		(*reinterpret_cast<void***>(reference.p))[4];
+	if (kind == CollectionFontHookKind::custom) {
+		if (!ISHOOKED(CustomFontFaceReference_CreateFontFace) &&
+			createReferenceFace != g_systemFontFaceReferenceCreateFontFace &&
+			createReferenceFace != g_fontSetFontFaceReferenceCreateFontFace) {
+			g_customFontFaceReferenceCreateFontFace = createReferenceFace;
+			HOOK(reference, CustomFontFaceReference_CreateFontFace, 3);
+		}
+		if (!ISHOOKED(CustomFontFaceReference_CreateFontFaceWithSimulations) &&
+			createReferenceFaceWithSimulations !=
+				g_systemFontFaceReferenceCreateFontFaceWithSimulations &&
+			createReferenceFaceWithSimulations !=
+				g_fontSetFontFaceReferenceCreateFontFaceWithSimulations) {
+			g_customFontFaceReferenceCreateFontFaceWithSimulations =
+				createReferenceFaceWithSimulations;
+			HOOK(reference,
+				CustomFontFaceReference_CreateFontFaceWithSimulations, 4);
+		}
+	} else {
+		if (!ISHOOKED(FontSetFontFaceReference_CreateFontFace) &&
+			createReferenceFace != g_systemFontFaceReferenceCreateFontFace &&
+			createReferenceFace != g_customFontFaceReferenceCreateFontFace) {
+			g_fontSetFontFaceReferenceCreateFontFace = createReferenceFace;
+			HOOK(reference, FontSetFontFaceReference_CreateFontFace, 3);
+		}
+		if (!ISHOOKED(FontSetFontFaceReference_CreateFontFaceWithSimulations) &&
+			createReferenceFaceWithSimulations !=
+				g_systemFontFaceReferenceCreateFontFaceWithSimulations &&
+			createReferenceFaceWithSimulations !=
+				g_customFontFaceReferenceCreateFontFaceWithSimulations) {
+			g_fontSetFontFaceReferenceCreateFontFaceWithSimulations =
+				createReferenceFaceWithSimulations;
+			HOOK(reference,
+				FontSetFontFaceReference_CreateFontFaceWithSimulations, 4);
+		}
+	}
+}
+
+HRESULT WINAPI IMPL_CustomFont_CreateFontFace(
+	IDWriteFont3* self, IDWriteFontFace3** fontFace)
+{
+	HRESULT const result = ORIG_CustomFont_CreateFontFace(self, fontFace);
+	if (result == S_OK)
+		SubstituteDWriteFont3(fontFace);
+	return result;
+}
+
+HRESULT WINAPI IMPL_CustomFontFaceReference_CreateFontFace(
+	IDWriteFontFaceReference* self, IDWriteFontFace3** fontFace)
+{
+	HRESULT const result =
+		ORIG_CustomFontFaceReference_CreateFontFace(self, fontFace);
+	if (result == S_OK)
+		SubstituteDWriteFont3(fontFace);
+	return result;
+}
+
+HRESULT WINAPI IMPL_CustomFontFaceReference_CreateFontFaceWithSimulations(
+	IDWriteFontFaceReference* self,
+	DWRITE_FONT_SIMULATIONS fontFaceSimulationFlags,
+	IDWriteFontFace3** fontFace)
+{
+	HRESULT const result =
+		ORIG_CustomFontFaceReference_CreateFontFaceWithSimulations(
+			self, fontFaceSimulationFlags, fontFace);
+	if (result == S_OK)
+		SubstituteDWriteFont3(fontFace);
+	return result;
+}
+
+HRESULT WINAPI IMPL_FontSetFont_CreateFontFace(
+	IDWriteFont3* self, IDWriteFontFace3** fontFace)
+{
+	HRESULT const result = ORIG_FontSetFont_CreateFontFace(self, fontFace);
+	if (result == S_OK)
+		SubstituteDWriteFont3(fontFace);
+	return result;
+}
+
+HRESULT WINAPI IMPL_FontSetFontFaceReference_CreateFontFace(
+	IDWriteFontFaceReference* self, IDWriteFontFace3** fontFace)
+{
+	HRESULT const result =
+		ORIG_FontSetFontFaceReference_CreateFontFace(self, fontFace);
+	if (result == S_OK)
+		SubstituteDWriteFont3(fontFace);
+	return result;
+}
+
+HRESULT WINAPI IMPL_FontSetFontFaceReference_CreateFontFaceWithSimulations(
+	IDWriteFontFaceReference* self,
+	DWRITE_FONT_SIMULATIONS fontFaceSimulationFlags,
+	IDWriteFontFace3** fontFace)
+{
+	HRESULT const result =
+		ORIG_FontSetFontFaceReference_CreateFontFaceWithSimulations(
+			self, fontFaceSimulationFlags, fontFace);
+	if (result == S_OK)
+		SubstituteDWriteFont3(fontFace);
+	return result;
+}
+
 static WCHAR const* ResolveDWriteFamilyName(WCHAR const* familyName, LOGFONT& resolved)
 {
 	if (!familyName) return familyName;
@@ -1857,6 +2020,7 @@ HRESULT WINAPI IMPL_CreateCustomFontCollection(
 			g_customFontCollectionFindFamilyName = findFamilyName;
 			HOOK(collection, CustomFontCollection_FindFamilyName, 5);
 		}
+		HookCollectionFontCreation(collection, CollectionFontHookKind::custom);
 	}
 	return result;
 }
@@ -1878,6 +2042,7 @@ HRESULT WINAPI IMPL_CreateFontCollectionFromFontSet(
 			g_fontSetCollectionFindFamilyName = findFamilyName;
 			HOOK(collection, FontSetCollection_FindFamilyName, 5);
 		}
+		HookCollectionFontCreation(collection, CollectionFontHookKind::fontSet);
 	}
 	return result;
 }

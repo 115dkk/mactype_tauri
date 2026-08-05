@@ -27,24 +27,53 @@ struct Win32ResourceApi
 	static void FreeLocalMemory(HLOCAL value) noexcept { ::LocalFree(value); }
 	static void FreeGlobalMemory(HGLOBAL value) noexcept { ::GlobalFree(value); }
 	static void FreeSidMemory(PSID value) noexcept { ::FreeSid(value); }
-	static void FreeEnvironmentBlock(LPWSTR value) noexcept { ::FreeEnvironmentStringsW(value); }
-	static void UnmapView(void* value) noexcept { ::UnmapViewOfFile(value); }
-	static void FreeVirtualMemory(void* value) noexcept { ::VirtualFree(value, 0, MEM_RELEASE); }
-	static void FreeRemoteVirtualMemory(HANDLE process, void* value) noexcept
+	static void FreeEnvironmentBlock(LPWSTR value) noexcept
+	{
+		::FreeEnvironmentStringsW(value);
+	}
+	static void UnmapView(void *value) noexcept
+	{
+		::UnmapViewOfFile(value);
+	}
+	static void FreeVirtualMemory(void *value) noexcept
+	{
+		::VirtualFree(value, 0, MEM_RELEASE);
+	}
+	static void FreeRemoteVirtualMemory(HANDLE process, void *value) noexcept
 	{
 		::VirtualFreeEx(process, value, 0, MEM_RELEASE);
 	}
-	static void FreeHeapMemory(HANDLE heap, void* value) noexcept { ::HeapFree(heap, 0, value); }
-	static bool LockPages(void* value, SIZE_T size) noexcept { return ::VirtualLock(value, size) != FALSE; }
-	static void UnlockPages(void* value, SIZE_T size) noexcept { ::VirtualUnlock(value, size); }
-	static DWORD LastError() noexcept { return ::GetLastError(); }
+	static void FreeHeapMemory(HANDLE heap, void *value) noexcept
+	{
+		::HeapFree(heap, 0, value);
+	}
+	static bool LockPages(void *value, SIZE_T size) noexcept
+	{
+		return ::VirtualLock(value, size) != FALSE;
+	}
+	static void UnlockPages(void *value, SIZE_T size) noexcept
+	{
+		::VirtualUnlock(value, size);
+	}
+	static bool ProtectMemory(
+		void *value, SIZE_T size, DWORD protection, DWORD *previous) noexcept
+	{
+		return ::VirtualProtect(value, size, protection, previous) != FALSE;
+	}
+	static DWORD LastError() noexcept
+	{
+		return ::GetLastError();
+	}
 };
 
 template <typename Api>
 struct KernelHandleCloser
 {
 	using pointer = HANDLE;
-	void operator()(HANDLE value) const noexcept { Api::CloseKernelHandle(value); }
+	void operator()(HANDLE value) const noexcept
+	{
+		Api::CloseKernelHandle(value);
+	}
 };
 
 template <typename Api>
@@ -387,37 +416,152 @@ public:
 		}
 	}
 
-	bool locked() const noexcept { return address_ != nullptr; }
-	explicit operator bool() const noexcept { return locked(); }
-	void* data() const noexcept { return address_; }
-	SIZE_T size() const noexcept { return size_; }
-	DWORD error() const noexcept { return error_; }
+	bool locked() const noexcept
+	{
+		return address_ != nullptr;
+	}
+	explicit operator bool() const noexcept
+	{
+		return locked();
+	}
+	void *data() const noexcept
+	{
+		return address_;
+	}
+	SIZE_T size() const noexcept
+	{
+		return size_;
+	}
+	DWORD error() const noexcept
+	{
+		return error_;
+	}
 
-private:
-	void* address_;
+  private:
+	void *address_;
 	SIZE_T size_;
 	DWORD error_;
 };
 
 using PageLock = BasicPageLock<>;
 
+// VirtualProtect changes a page lease rather than transferring ownership.
+// Restore is explicit so callers can reject a mutation if the original page
+// protection cannot be reinstated; the destructor remains the backstop for
+// every early-return path.
+template <typename Api = detail::Win32ResourceApi>
+class BasicPageProtection
+{
+  public:
+	BasicPageProtection() noexcept
+		: address_(nullptr), size_(0), previous_(0), error_(ERROR_SUCCESS)
+	{
+	}
+
+	static BasicPageProtection TrySet(
+		void *address, SIZE_T size, DWORD protection) noexcept
+	{
+		BasicPageProtection result;
+		if (address == nullptr || size == 0)
+		{
+			result.error_ = ERROR_INVALID_PARAMETER;
+			return result;
+		}
+		DWORD previous = 0;
+		if (!Api::ProtectMemory(address, size, protection, &previous))
+		{
+			result.error_ = Api::LastError();
+			return result;
+		}
+		result.address_ = address;
+		result.size_ = size;
+		result.previous_ = previous;
+		return result;
+	}
+
+	BasicPageProtection(BasicPageProtection &&other) noexcept
+		: address_(other.address_), size_(other.size_), previous_(other.previous_),
+		  error_(other.error_)
+	{
+		other.release();
+	}
+
+	~BasicPageProtection() noexcept
+	{
+		restore();
+	}
+
+	BasicPageProtection(const BasicPageProtection &) = delete;
+	BasicPageProtection &operator=(const BasicPageProtection &) = delete;
+	BasicPageProtection &operator=(BasicPageProtection &&) = delete;
+
+	bool restore() noexcept
+	{
+		if (address_ == nullptr)
+			return true;
+		DWORD ignored = 0;
+		if (!Api::ProtectMemory(address_, size_, previous_, &ignored))
+		{
+			error_ = Api::LastError();
+			return false;
+		}
+		release();
+		return true;
+	}
+
+	bool active() const noexcept
+	{
+		return address_ != nullptr;
+	}
+	explicit operator bool() const noexcept
+	{
+		return active();
+	}
+	DWORD error() const noexcept
+	{
+		return error_;
+	}
+
+  private:
+	void release() noexcept
+	{
+		address_ = nullptr;
+		size_ = 0;
+		previous_ = 0;
+	}
+
+	void *address_;
+	SIZE_T size_;
+	DWORD previous_;
+	DWORD error_;
+};
+
+using PageProtection = BasicPageProtection<>;
+
 // Some DLL resources must be initialized and torn down at an explicit runtime
 // boundary.  This owner still provides a destructor backstop for partial init
 // and early-return paths while allowing a deliberate reset before unload.
 class CriticalSection
 {
-public:
-	CriticalSection() noexcept : initialized_(false) {}
-	~CriticalSection() noexcept { reset(); }
+  public:
+	CriticalSection() noexcept
+		: initialized_(false)
+	{
+	}
+	~CriticalSection() noexcept
+	{
+		reset();
+	}
 
-	CriticalSection(const CriticalSection&) = delete;
-	CriticalSection& operator=(const CriticalSection&) = delete;
-	CriticalSection(CriticalSection&&) = delete;
-	CriticalSection& operator=(CriticalSection&&) = delete;
+	CriticalSection(const CriticalSection &) = delete;
+	CriticalSection &operator=(const CriticalSection &) = delete;
+	CriticalSection(CriticalSection &&) = delete;
+	CriticalSection &operator=(CriticalSection &&) = delete;
 
 	void initialize()
 	{
-		if (!initialized_) {
+		if (!initialized_)
+		{
 			::InitializeCriticalSection(&value_);
 			initialized_ = true;
 		}

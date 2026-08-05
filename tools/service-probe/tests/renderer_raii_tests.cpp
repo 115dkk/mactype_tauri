@@ -1,5 +1,5 @@
-#include "../../../renderer_raii.h"
 #include "../../../detour_transaction.h"
+#include "../../../renderer_raii.h"
 
 #include <iostream>
 
@@ -24,37 +24,100 @@ int heap_free_calls = 0;
 int page_lock_calls = 0;
 int page_unlock_calls = 0;
 bool page_lock_succeeds = true;
+int page_protect_calls = 0;
+bool page_protect_succeeds = true;
+DWORD last_page_protection = 0;
 HGDIOBJ selected_previous = reinterpret_cast<HGDIOBJ>(static_cast<ULONG_PTR>(0x41));
 
 struct FakeResourceApi
 {
-    static void CloseKernelHandle(HANDLE) noexcept { ++close_handle_calls; }
-    static void CloseFindHandle(HANDLE) noexcept { ++close_find_calls; }
-    static void FreeLoadedModule(HMODULE) noexcept { ++free_module_calls; }
-    static void DeleteDeviceContext(HDC) noexcept { ++delete_dc_calls; }
-    static void ReleaseDeviceContext(HWND, HDC) noexcept { ++release_dc_calls; }
-    static void DeleteGdiObject(HGDIOBJ) noexcept { ++delete_object_calls; }
+    static void CloseKernelHandle(HANDLE) noexcept
+    {
+        ++close_handle_calls;
+    }
+    static void CloseFindHandle(HANDLE) noexcept
+    {
+        ++close_find_calls;
+    }
+    static void FreeLoadedModule(HMODULE) noexcept
+    {
+        ++free_module_calls;
+    }
+    static void DeleteDeviceContext(HDC) noexcept
+    {
+        ++delete_dc_calls;
+    }
+    static void ReleaseDeviceContext(HWND, HDC) noexcept
+    {
+        ++release_dc_calls;
+    }
+    static void DeleteGdiObject(HGDIOBJ) noexcept
+    {
+        ++delete_object_calls;
+    }
     static HGDIOBJ SelectGdiObject(HDC, HGDIOBJ) noexcept
     {
         ++select_object_calls;
         return selected_previous;
     }
-    static void CloseRegistryKey(HKEY) noexcept { ++close_key_calls; }
-    static void FreeLocalMemory(HLOCAL) noexcept { ++free_local_calls; }
-    static void FreeGlobalMemory(HGLOBAL) noexcept { ++free_global_calls; }
-    static void FreeSidMemory(PSID) noexcept { ++free_sid_calls; }
-    static void FreeEnvironmentBlock(LPWSTR) noexcept { ++free_environment_calls; }
-    static void UnmapView(void*) noexcept { ++unmap_calls; }
-    static void FreeVirtualMemory(void*) noexcept { ++virtual_free_calls; }
-    static void FreeRemoteVirtualMemory(HANDLE, void*) noexcept { ++remote_virtual_free_calls; }
-    static void FreeHeapMemory(HANDLE, void*) noexcept { ++heap_free_calls; }
-    static bool LockPages(void*, SIZE_T) noexcept
+    static void CloseRegistryKey(HKEY) noexcept
+    {
+        ++close_key_calls;
+    }
+    static void FreeLocalMemory(HLOCAL) noexcept
+    {
+        ++free_local_calls;
+    }
+    static void FreeGlobalMemory(HGLOBAL) noexcept
+    {
+        ++free_global_calls;
+    }
+    static void FreeSidMemory(PSID) noexcept
+    {
+        ++free_sid_calls;
+    }
+    static void FreeEnvironmentBlock(LPWSTR) noexcept
+    {
+        ++free_environment_calls;
+    }
+    static void UnmapView(void *) noexcept
+    {
+        ++unmap_calls;
+    }
+    static void FreeVirtualMemory(void *) noexcept
+    {
+        ++virtual_free_calls;
+    }
+    static void FreeRemoteVirtualMemory(HANDLE, void *) noexcept
+    {
+        ++remote_virtual_free_calls;
+    }
+    static void FreeHeapMemory(HANDLE, void *) noexcept
+    {
+        ++heap_free_calls;
+    }
+    static bool LockPages(void *, SIZE_T) noexcept
     {
         ++page_lock_calls;
         return page_lock_succeeds;
     }
-    static void UnlockPages(void*, SIZE_T) noexcept { ++page_unlock_calls; }
-    static DWORD LastError() noexcept { return ERROR_WORKING_SET_QUOTA; }
+    static void UnlockPages(void *, SIZE_T) noexcept
+    {
+        ++page_unlock_calls;
+    }
+    static bool ProtectMemory(void *, SIZE_T, DWORD protection, DWORD *previous) noexcept
+    {
+        ++page_protect_calls;
+        last_page_protection = protection;
+        if (!page_protect_succeeds)
+            return false;
+        *previous = PAGE_READONLY;
+        return true;
+    }
+    static DWORD LastError() noexcept
+    {
+        return ERROR_WORKING_SET_QUOTA;
+    }
 };
 
 int detour_begin_calls = 0;
@@ -171,49 +234,92 @@ bool TestContextualLeasesRestoreOnEveryExit()
     {
         auto selected = SelectObject<HFONT, FakeResourceApi>(
             FakePointer<HDC>(20), FakePointer<HFONT>(21));
-        if (!Expect(static_cast<bool>(selected), "selected GDI object did not retain the previous object")) {
+        if (!Expect(static_cast<bool>(selected), "selected GDI object did not retain the previous object"))
+        {
             return false;
         }
     }
-    if (!Expect(select_object_calls == 2, "selected GDI object was not restored")) {
+    if (!Expect(select_object_calls == 2, "selected GDI object was not restored"))
+    {
         return false;
     }
 
     page_lock_succeeds = false;
     {
-        auto failed = BasicPageLock<FakeResourceApi>::TryLock(FakePointer<void*>(30), 4096);
+        auto failed = BasicPageLock<FakeResourceApi>::TryLock(FakePointer<void *>(30), 4096);
         if (!Expect(!failed && failed.error() == ERROR_WORKING_SET_QUOTA,
-            "failed page lock did not preserve its error")) {
+                    "failed page lock did not preserve its error"))
+        {
             return false;
         }
     }
-    if (!Expect(page_unlock_calls == 0, "failed page lock attempted VirtualUnlock")) {
+    if (!Expect(page_unlock_calls == 0, "failed page lock attempted VirtualUnlock"))
+    {
         return false;
     }
 
     page_lock_succeeds = true;
     {
-        auto locked = BasicPageLock<FakeResourceApi>::TryLock(FakePointer<void*>(31), 8192);
+        auto locked = BasicPageLock<FakeResourceApi>::TryLock(FakePointer<void *>(31), 8192);
         auto moved = std::move(locked);
-        if (!Expect(!locked && moved && moved.size() == 8192, "page lock move lost its lease")) {
+        if (!Expect(!locked && moved && moved.size() == 8192, "page lock move lost its lease"))
+        {
             return false;
         }
     }
-    return Expect(page_lock_calls == 2, "VirtualLock call count changed") &&
-        Expect(page_unlock_calls == 1, "successful page lock was not released exactly once");
+    if (!Expect(page_lock_calls == 2, "VirtualLock call count changed") ||
+        !Expect(page_unlock_calls == 1, "successful page lock was not released exactly once"))
+    {
+        return false;
+    }
+
+    page_protect_succeeds = false;
+    {
+        auto failed = BasicPageProtection<FakeResourceApi>::TrySet(
+            FakePointer<void *>(32), sizeof(void *), PAGE_READWRITE);
+        if (!Expect(!failed && failed.error() == ERROR_WORKING_SET_QUOTA,
+                    "failed page protection did not preserve its error"))
+        {
+            return false;
+        }
+    }
+    if (!Expect(page_protect_calls == 1,
+                "failed page protection attempted an unexpected restore"))
+    {
+        return false;
+    }
+
+    page_protect_succeeds = true;
+    {
+        auto protection = BasicPageProtection<FakeResourceApi>::TrySet(
+            FakePointer<void *>(33), sizeof(void *), PAGE_READWRITE);
+        auto moved = std::move(protection);
+        if (!Expect(!protection && moved,
+                    "page protection move lost its restoration lease") ||
+            !Expect(moved.restore(), "page protection restore failed"))
+        {
+            return false;
+        }
+    }
+    return Expect(page_protect_calls == 3,
+                  "page protection was not acquired and restored exactly once") &&
+           Expect(last_page_protection == PAGE_READONLY,
+                  "page protection did not restore the original protection");
 }
 
 bool TestExplicitCriticalSectionOwnerIsIdempotent()
 {
     renderer_raii::CriticalSection criticalSection;
-    if (!Expect(!criticalSection.initialized(), "critical section started initialized")) {
+    if (!Expect(!criticalSection.initialized(), "critical section started initialized"))
+    {
         return false;
     }
     criticalSection.initialize();
     criticalSection.initialize();
     EnterCriticalSection(criticalSection.get());
     LeaveCriticalSection(criticalSection.get());
-    if (!Expect(criticalSection.initialized(), "critical section initialization was not retained")) {
+    if (!Expect(criticalSection.initialized(), "critical section initialization was not retained"))
+    {
         return false;
     }
     criticalSection.reset();

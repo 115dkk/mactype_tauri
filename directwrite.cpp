@@ -1,8 +1,9 @@
 #include "directwrite.h"
-#include "settings.h"
 #include "dynCodeHelper.h"
+#include "hookCounter.h"
+#include "settings.h"
 
-void MyDebug(const TCHAR * sz, ...)
+void MyDebug(const TCHAR *sz, ...)
 {
 #ifdef DEBUG
 	TCHAR szData[512] = { 0 };
@@ -32,23 +33,30 @@ void SetPointerValue(Target& target, Source source) noexcept
 #define ISHOOKED(name) (IsHooked_##name)
 #endif
 
-#define HOOK(obj, name, index) { \
-	if (!ISHOOKED(name)) {  \
-		AutoEnableDynamicCodeGen dynHelper(true);  \
-		SET_VAL(ORIG_##name, (*reinterpret_cast<void***>(obj.p))[index]);  \
-		hook_demand_##name(false);  \
-		if (!ISHOOKED(name)) { MyDebug(L"##name hook failed"); }  \
-	}  \
-};
+#define HOOK(obj, name, index)                                                 \
+	{                                                                          \
+		if (!ISHOOKED(name))                                                   \
+		{                                                                      \
+			AutoEnableDynamicCodeGen dynHelper(true);                          \
+			SET_VAL(ORIG_##name, (*reinterpret_cast<void ***>(obj.p))[index]); \
+			hook_demand_##name(false);                                         \
+			if (!ISHOOKED(name))                                               \
+			{                                                                  \
+				MyDebug(L"##name hook failed");                                \
+			}                                                                  \
+		}                                                                      \
+	};
 
-static void* g_systemFontCollectionFindFamilyName = nullptr;
-static void* g_customFontCollectionFindFamilyName = nullptr;
-static void* g_fontSetCollectionFindFamilyName = nullptr;
-static void* g_loaderFontCollectionFindFamilyName = nullptr;
-static void* g_factoryCreateCustomFontCollection = nullptr;
-static void* g_systemFontCreateFontFace = nullptr;
-static void* g_systemFontFaceReferenceCreateFontFace = nullptr;
-static void* g_systemFontFaceReferenceCreateFontFaceWithSimulations = nullptr;
+static void *g_systemFontCollectionFindFamilyName = nullptr;
+static void *g_customFontCollectionFindFamilyName = nullptr;
+static void *g_fontSetCollectionFindFamilyName = nullptr;
+static void *g_loaderFontCollectionFindFamilyName = nullptr;
+static void **g_loaderFontCollectionVtableSlot = nullptr;
+static void *g_loaderFontCollectionVtableOriginal = nullptr;
+static void *g_factoryCreateCustomFontCollection = nullptr;
+static void *g_systemFontCreateFontFace = nullptr;
+static void *g_systemFontFaceReferenceCreateFontFace = nullptr;
+static void *g_systemFontFaceReferenceCreateFontFaceWithSimulations = nullptr;
 static void* g_customFontCreateFontFace = nullptr;
 static void* g_customFontFaceReferenceCreateFontFace = nullptr;
 static void* g_customFontFaceReferenceCreateFontFaceWithSimulations = nullptr;
@@ -2009,57 +2017,125 @@ HRESULT WINAPI IMPL_CustomFontCollection_FindFamilyName(
 }
 
 HRESULT WINAPI IMPL_FontSetCollection_FindFamilyName(
-	IDWriteFontCollection* self,
-	WCHAR const* familyName,
-	UINT32* index,
-	BOOL* exists)
+	IDWriteFontCollection *self,
+	WCHAR const *familyName,
+	UINT32 *index,
+	BOOL *exists)
 {
-	LOGFONT resolved = { 0 };
+	LOGFONT resolved = {0};
 	return ORIG_FontSetCollection_FindFamilyName(
 		self, ResolveDWriteFamilyName(familyName, resolved), index, exists);
 }
 
 HRESULT WINAPI IMPL_LoaderFontCollection_FindFamilyName(
-	IDWriteFontCollection* self,
-	WCHAR const* familyName,
-	UINT32* index,
-	BOOL* exists)
+	IDWriteFontCollection *self,
+	WCHAR const *familyName,
+	UINT32 *index,
+	BOOL *exists)
 {
-	LOGFONT resolved = { 0 };
+	LOGFONT resolved = {0};
 	return ORIG_LoaderFontCollection_FindFamilyName(
 		self, ResolveDWriteFamilyName(familyName, resolved), index, exists);
 }
 
-static void HookCollectionLoader(IDWriteFontCollectionLoader* collectionLoader)
+static HRESULT WINAPI Vtable_LoaderFontCollection_FindFamilyName(
+	IDWriteFontCollection *self,
+	WCHAR const *familyName,
+	UINT32 *index,
+	BOOL *exists)
+{
+	HCounter call;
+	return IMPL_LoaderFontCollection_FindFamilyName(
+		self, familyName, index, exists);
+}
+
+static bool ReplaceVtableSlot(void **slot, void *replacement, void *&original)
+{
+	if (slot == nullptr || replacement == nullptr)
+		return false;
+	renderer_raii::PageProtection protection =
+		renderer_raii::PageProtection::TrySet(slot, sizeof(*slot), PAGE_READWRITE);
+	if (!protection)
+		return false;
+	original = *slot;
+	InterlockedExchangePointer(
+		reinterpret_cast<PVOID *>(slot), replacement);
+	if (protection.restore())
+		return true;
+	InterlockedExchangePointer(
+		reinterpret_cast<PVOID *>(slot), original);
+	protection.restore();
+	original = nullptr;
+	return false;
+}
+
+static void HookCollectionLoader(IDWriteFontCollectionLoader *collectionLoader)
 {
 	CComPtr<IDWriteFontCollection> loaderCollection;
 	if (collectionLoader != nullptr &&
 		SUCCEEDED(collectionLoader->QueryInterface(&loaderCollection)) &&
-		loaderCollection != nullptr) {
-		void* const findFamilyName =
-			(*reinterpret_cast<void***>(loaderCollection.p))[5];
+		loaderCollection != nullptr)
+	{
+		void *const findFamilyName =
+			(*reinterpret_cast<void ***>(loaderCollection.p))[5];
 		if (!ISHOOKED(LoaderFontCollection_FindFamilyName) &&
 			findFamilyName != g_systemFontCollectionFindFamilyName &&
 			findFamilyName != g_customFontCollectionFindFamilyName &&
-			findFamilyName != g_fontSetCollectionFindFamilyName) {
-			g_loaderFontCollectionFindFamilyName = findFamilyName;
-			HOOK(loaderCollection, LoaderFontCollection_FindFamilyName, 5);
+			findFamilyName != g_fontSetCollectionFindFamilyName)
+		{
+			CCriticalSectionLock hookLock(CCriticalSectionLock::CS_DWRITE);
+			void **const slot =
+				&(*reinterpret_cast<void ***>(loaderCollection.p))[5];
+			if (g_loaderFontCollectionVtableSlot == nullptr)
+			{
+				void *replacement = nullptr;
+				SET_VAL(replacement, &Vtable_LoaderFontCollection_FindFamilyName);
+				void *original = nullptr;
+				SET_VAL(ORIG_LoaderFontCollection_FindFamilyName, findFamilyName);
+				if (ReplaceVtableSlot(slot, replacement, original))
+				{
+					g_loaderFontCollectionFindFamilyName = original;
+					g_loaderFontCollectionVtableSlot = slot;
+					g_loaderFontCollectionVtableOriginal = original;
+					SET_VAL(ORIG_LoaderFontCollection_FindFamilyName, original);
+				}
+			}
 		}
+	}
+}
+
+void RestoreDirectWriteVtableHooks()
+{
+	CCriticalSectionLock hookLock(CCriticalSectionLock::CS_DWRITE);
+	if (g_loaderFontCollectionVtableSlot == nullptr ||
+		g_loaderFontCollectionVtableOriginal == nullptr)
+		return;
+	void *ignored = nullptr;
+	if (ReplaceVtableSlot(
+			g_loaderFontCollectionVtableSlot,
+			g_loaderFontCollectionVtableOriginal,
+			ignored))
+	{
+		g_loaderFontCollectionVtableSlot = nullptr;
+		g_loaderFontCollectionVtableOriginal = nullptr;
+		g_loaderFontCollectionFindFamilyName = nullptr;
 	}
 }
 
 static HRESULT HookCreatedCustomFontCollection(
 	HRESULT result,
-	IDWriteFontCollection** fontCollection)
+	IDWriteFontCollection **fontCollection)
 {
 	if (SUCCEEDED(result) && fontCollection != nullptr &&
-		*fontCollection != nullptr) {
+		*fontCollection != nullptr)
+	{
 		CComPtr<IDWriteFontCollection> collection = *fontCollection;
-		void* const findFamilyName =
-			(*reinterpret_cast<void***>(collection.p))[5];
+		void *const findFamilyName =
+			(*reinterpret_cast<void ***>(collection.p))[5];
 		if (findFamilyName != g_systemFontCollectionFindFamilyName &&
 			findFamilyName != g_fontSetCollectionFindFamilyName &&
-			findFamilyName != g_loaderFontCollectionFindFamilyName) {
+			findFamilyName != g_loaderFontCollectionFindFamilyName)
+		{
 			g_customFontCollectionFindFamilyName = findFamilyName;
 			HOOK(collection, CustomFontCollection_FindFamilyName, 5);
 		}

@@ -23,12 +23,14 @@
 #include "hookCounter.h"
 #include <vector>
 
-#ifdef STATIC_LIB
-	#include <aux_ulib.h>
-	#include <psapi.h>
+void RestoreDirectWriteVtableHooks();
 
-	#pragma comment(lib, "aux_ulib.lib")
-	#pragma comment(lib, "psapi.lib")
+#ifdef STATIC_LIB
+#include <aux_ulib.h>
+#include <psapi.h>
+
+#pragma comment(lib, "aux_ulib.lib")
+#pragma comment(lib, "psapi.lib")
 #endif
 
 #ifndef _WIN64
@@ -650,13 +652,15 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 			if (!bDllInited)
 				return true;
 			bDllInited = false;
-			if (InterlockedExchange(&g_bHookEnabled, FALSE) && lpReserved == nullptr) {	//如果是进程终止，则不需要释放
+			if (InterlockedExchange(&g_bHookEnabled, FALSE) && lpReserved == nullptr)
+			{ // 如果是进程终止，则不需要释放
+				RestoreDirectWriteVtableHooks();
 				hook_term();
-				//delete AACacheFull;
-				//delete AACache;
-	// 			for (int i=0;i<CACHE_SIZE;i++)
-	// 				delete g_AACache2[i];	//清除缓磥E
-				//free(g_charmapCache);
+				// delete AACacheFull;
+				// delete AACache;
+				// 			for (int i=0;i<CACHE_SIZE;i++)
+				// 				delete g_AACache2[i];	//清除缓磥E
+				// free(g_charmapCache);
 			}
 #ifndef DEBUG
 			if (lpReserved != nullptr) return true;

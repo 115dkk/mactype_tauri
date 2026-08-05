@@ -41,3 +41,4 @@
 #endif
 
 void ReleasePinnedRendererModules();
+void RestoreDirectWriteVtableHooks();

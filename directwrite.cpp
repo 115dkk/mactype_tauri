@@ -51,6 +51,8 @@ static void *g_systemFontCollectionFindFamilyName = nullptr;
 static void *g_customFontCollectionFindFamilyName = nullptr;
 static void *g_fontSetCollectionFindFamilyName = nullptr;
 static void *g_loaderFontCollectionFindFamilyName = nullptr;
+static void **g_systemFontCollectionVtableSlot = nullptr;
+static void *g_systemFontCollectionVtableOriginal = nullptr;
 static void **g_loaderFontCollectionVtableSlot = nullptr;
 static void *g_loaderFontCollectionVtableOriginal = nullptr;
 static void **g_sharedFactoryCreateCustomCollectionVtableSlot = nullptr;
@@ -75,6 +77,11 @@ enum class CollectionFontHookKind
 
 static void HookCollectionFontCreation(
 	IDWriteFontCollection* collection, CollectionFontHookKind kind);
+static HRESULT WINAPI Vtable_SystemFontCollection_FindFamilyName(
+	IDWriteFontCollection *self,
+	WCHAR const *familyName,
+	UINT32 *index,
+	BOOL *exists);
 static HRESULT WINAPI Vtable_CreateCustomFontCollection(
 	IDWriteFactory *self,
 	IDWriteFontCollectionLoader *collectionLoader,
@@ -89,6 +96,8 @@ static HRESULT WINAPI Vtable_IsolatedCreateCustomFontCollection(
 	IDWriteFontCollection **fontCollection);
 static void HookFactoryCustomFontCollection(
 	IDWriteFactory *factory, bool isolated);
+static void HookSystemFontCollection(
+	IDWriteFontCollection *fontCollection);
 
 struct ComMethodHooker {
 	// The target function if it has been hooked
@@ -1410,9 +1419,7 @@ bool hookFontCreation(CComPtr<IDWriteFactory>& pDWriteFactory) {
 	CComPtr<IDWriteFontCollection> fontcollection = nullptr;
 	CComPtr<IDWriteFontFamily> ffamily = nullptr;
 	if (FAILED(pDWriteFactory->GetSystemFontCollection(&fontcollection, false))) FAILEXIT;
-	g_systemFontCollectionFindFamilyName =
-		(*reinterpret_cast<void***>(fontcollection.p))[5];
-	HOOK(fontcollection, FontCollection_FindFamilyName, 5);
+	HookSystemFontCollection(fontcollection);
 	HookFactoryCustomFontCollection(pDWriteFactory, false);
 	CComPtr<IDWriteFontCollection1> fontCollection1;
 	if (SUCCEEDED(fontcollection->QueryInterface(&fontCollection1))) {
@@ -2017,6 +2024,17 @@ HRESULT WINAPI IMPL_FontCollection_FindFamilyName(
 		self, ResolveDWriteFamilyName(familyName, resolved), index, exists);
 }
 
+static HRESULT WINAPI Vtable_SystemFontCollection_FindFamilyName(
+	IDWriteFontCollection *self,
+	WCHAR const *familyName,
+	UINT32 *index,
+	BOOL *exists)
+{
+	HCounter call;
+	return IMPL_FontCollection_FindFamilyName(
+		self, familyName, index, exists);
+}
+
 HRESULT WINAPI IMPL_CustomFontCollection_FindFamilyName(
 	IDWriteFontCollection* self,
 	WCHAR const* familyName,
@@ -2079,6 +2097,27 @@ static bool ReplaceVtableSlot(void **slot, void *replacement, void *&original)
 	protection.restore();
 	original = nullptr;
 	return false;
+}
+
+static void HookSystemFontCollection(IDWriteFontCollection *fontCollection)
+{
+	if (fontCollection == nullptr)
+		return;
+	CCriticalSectionLock hookLock(CCriticalSectionLock::CS_DWRITE);
+	void **const slot = &(*reinterpret_cast<void ***>(fontCollection))[5];
+	void *replacement = nullptr;
+	SET_VAL(replacement, &Vtable_SystemFontCollection_FindFamilyName);
+	if (*slot == replacement)
+		return;
+
+	void *original = nullptr;
+	SET_VAL(ORIG_FontCollection_FindFamilyName, *slot);
+	if (!ReplaceVtableSlot(slot, replacement, original))
+		return;
+	g_systemFontCollectionFindFamilyName = original;
+	g_systemFontCollectionVtableSlot = slot;
+	g_systemFontCollectionVtableOriginal = original;
+	SET_VAL(ORIG_FontCollection_FindFamilyName, original);
 }
 
 static void HookFactoryCustomFontCollection(
@@ -2166,6 +2205,17 @@ void RestoreDirectWriteVtableHooks()
 		g_loaderFontCollectionVtableSlot = nullptr;
 		g_loaderFontCollectionVtableOriginal = nullptr;
 		g_loaderFontCollectionFindFamilyName = nullptr;
+	}
+	ignored = nullptr;
+	if (g_systemFontCollectionVtableSlot != nullptr &&
+		g_systemFontCollectionVtableOriginal != nullptr && ReplaceVtableSlot(
+			g_systemFontCollectionVtableSlot,
+			g_systemFontCollectionVtableOriginal,
+			ignored))
+	{
+		g_systemFontCollectionVtableSlot = nullptr;
+		g_systemFontCollectionVtableOriginal = nullptr;
+		g_systemFontCollectionFindFamilyName = nullptr;
 	}
 	ignored = nullptr;
 	if (g_isolatedFactoryCreateCustomCollectionVtableSlot != nullptr &&

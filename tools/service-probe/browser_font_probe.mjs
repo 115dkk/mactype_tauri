@@ -113,8 +113,9 @@ function collectDirectWriteDiagnostics(diagnosticNamespace) {
     (stage) => `Local\\MacType.${diagnosticNamespace}.${role}.${stage}`,
   ));
   const script = [
+    '$names = ConvertFrom-Json $env:MACTYPE_DIAGNOSTIC_EVENT_NAMES',
     '$result = @{}',
-    'foreach ($name in $args) {',
+    'foreach ($name in $names) {',
     '  try {',
     '    $event = [System.Threading.EventWaitHandle]::OpenExisting($name)',
     '    try { $result[$name] = $event.WaitOne(0) } finally { $event.Dispose() }',
@@ -128,8 +129,15 @@ function collectDirectWriteDiagnostics(diagnosticNamespace) {
   );
   const raw = JSON.parse(execFileSync(
     powershell,
-    ['-NoProfile', '-NonInteractive', '-Command', script, ...eventNames],
-    { encoding: 'utf8', windowsHide: true },
+    ['-NoProfile', '-NonInteractive', '-Command', script],
+    {
+      encoding: 'utf8',
+      windowsHide: true,
+      env: {
+        ...process.env,
+        MACTYPE_DIAGNOSTIC_EVENT_NAMES: JSON.stringify(eventNames),
+      },
+    },
   ));
   return Object.fromEntries(roles.map((role) => [
     role,

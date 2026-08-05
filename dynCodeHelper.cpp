@@ -16,7 +16,7 @@ _In_  SIZE_T                    dwLength
 AutoEnableDynamicCodeGen::PSET_THREAD_INFORMATION_PROC AutoEnableDynamicCodeGen::SetThreadInformationProc = nullptr;
 AutoEnableDynamicCodeGen::PGET_THREAD_INFORMATION_PROC AutoEnableDynamicCodeGen::GetThreadInformationProc = nullptr;
 PROCESS_MITIGATION_DYNAMIC_CODE_POLICY AutoEnableDynamicCodeGen::processPolicy;
-volatile bool AutoEnableDynamicCodeGen::processPolicyObtained = false;
+std::once_flag AutoEnableDynamicCodeGen::processPolicyOnce;
 
 AutoEnableDynamicCodeGen::AutoEnableDynamicCodeGen(bool enable) : enabled(false)
 {
@@ -31,32 +31,25 @@ AutoEnableDynamicCodeGen::AutoEnableDynamicCodeGen(bool enable) : enabled(false)
 	// to have been established upfront.
 	//
 
-	if (processPolicyObtained == false)
-	{
-		CCriticalSectionLock __lock(CCriticalSectionLock::CS_VIRTMEM);
-
-		if (processPolicyObtained == false)
+	std::call_once(processPolicyOnce, []
 		{
 			PGET_PROCESS_MITIGATION_POLICY_PROC GetProcessMitigationPolicyProc = nullptr;
 
 			HMODULE module = GetModuleHandleW(_T("api-ms-win-core-processthreads-l1-1-3.dll"));
 
 			if (module != nullptr)
-			{
-				GetProcessMitigationPolicyProc = (PGET_PROCESS_MITIGATION_POLICY_PROC)GetProcAddress(module, "GetProcessMitigationPolicy");
-				SetThreadInformationProc = (PSET_THREAD_INFORMATION_PROC)GetProcAddress(module, "SetThreadInformation");
-				GetThreadInformationProc = (PGET_THREAD_INFORMATION_PROC)GetProcAddress(module, "GetThreadInformation");
-			}
-
-			if ((GetProcessMitigationPolicyProc == nullptr) ||
-				(!GetProcessMitigationPolicyProc(GetCurrentProcess(), ProcessDynamicCodePolicy, (PPROCESS_MITIGATION_DYNAMIC_CODE_POLICY)&processPolicy, sizeof(processPolicy))))
-			{
-				processPolicy.ProhibitDynamicCode = 0;
-			}
-
-			processPolicyObtained = true;
+		{
+			GetProcessMitigationPolicyProc = reinterpret_cast<PGET_PROCESS_MITIGATION_POLICY_PROC>(GetProcAddress(module, "GetProcessMitigationPolicy"));
+			SetThreadInformationProc = reinterpret_cast<PSET_THREAD_INFORMATION_PROC>(GetProcAddress(module, "SetThreadInformation"));
+			GetThreadInformationProc = reinterpret_cast<PGET_THREAD_INFORMATION_PROC>(GetProcAddress(module, "GetThreadInformation"));
 		}
-	}
+
+		if ((GetProcessMitigationPolicyProc == nullptr) ||
+			(!GetProcessMitigationPolicyProc(GetCurrentProcess(), ProcessDynamicCodePolicy, &processPolicy, sizeof(processPolicy))))
+		{
+			processPolicy.ProhibitDynamicCode = 0;
+		}
+	});
 
 	//
 	// The process is not prohibiting dynamic code or does not allow threads
@@ -94,7 +87,7 @@ AutoEnableDynamicCodeGen::AutoEnableDynamicCodeGen(bool enable) : enabled(false)
 	BOOL result = SetThreadInformationProc(GetCurrentThread(), ThreadDynamicCodePolicy, &threadPolicy, sizeof(DWORD));
 	Assert(result);
 
-	enabled = true;
+	enabled = result != FALSE;
 }
 
 AutoEnableDynamicCodeGen::~AutoEnableDynamicCodeGen()

@@ -3,7 +3,7 @@ name: Lint gates
 on:
   pull_request:
   push:
-    branches: [directwrite, main]
+    branches: [directwrite, main, codex/alpha-plus-dll]
   workflow_dispatch:
 
 permissions:
@@ -123,6 +123,10 @@ jobs:
         run: |
           test -f docs/lint-policy.md
           ! grep -R "preview-helper\|control-center" docs/lint-policy.md | grep -q "excluded"
+      - name: Verify alpha rendering-core policy
+        if: github.ref == 'refs/heads/codex/alpha-plus-dll' || github.base_ref == 'codex/alpha-plus-dll'
+        shell: pwsh
+        run: scripts/ci/Test-AlphaBranchPolicy.ps1
       - name: Verify independent distribution provenance and translations
         shell: pwsh
         run: scripts/ci/Test-DistributionPolicy.ps1

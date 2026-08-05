@@ -3,7 +3,7 @@ name: Frontend window gallery
 on:
   pull_request:
   push:
-    branches: [directwrite, main]
+    branches: [directwrite, main, codex/alpha-plus-dll]
   workflow_dispatch:
 
 permissions:

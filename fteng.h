@@ -23,35 +23,6 @@ extern CTLSDCArray TLSDCArray;
 LOGFONTW* GetFontNameFromFile(LPCTSTR Filename);
 bool GetFontLocalName(TCHAR* pszFontName, __out TCHAR* pszNameOut);	//获得字体的本地化名称
 
-struct CFontSetCache
-{
-	const CFontSettings** fontsetlist;
-	int  fontsetsize;
-	CFontSetCache()
-		:fontsetsize(0)
-	{
-		fontsetsize=64;
-		fontsetlist = (const CFontSettings**)malloc(fontsetsize * sizeof(void*));
-	}
-	~CFontSetCache()
-	{
-		free(fontsetlist);
-	}
-	void Set(FTC_FaceID faceid, const CFontSettings& fset)
-	{
-		while ((INT_PTR)faceid>=fontsetsize)
-		{
-			fontsetsize+=64;
-			fontsetlist = (const CFontSettings**)realloc(fontsetlist, fontsetsize);
-		}
-		fontsetlist[(INT_PTR)faceid]=&fset;
-	}
-	const CFontSettings*& Get(FTC_FaceID faceid) const
-	{
-		return fontsetlist[(INT_PTR)faceid];
-	}
-};
-
 struct myfont
 {
 	wstring name;
@@ -292,7 +263,6 @@ public:
 
 
 // フォント名とFaceID(intを使うことにする)
-//extern CFontSetCache g_fsetcache;
 extern CHashedStringList FontNameCache;
 class FreeTypeFontInfo : public FreeTypeMruCounter, public FreeTypeGCCounter
 {
@@ -399,25 +369,30 @@ public:
 			else
 			//if (m_fullname.size()==0)	//构造函数中不提供，自己获取
 			{
-				LPOUTLINETEXTMETRIC otm = (LPOUTLINETEXTMETRIC)malloc(nSize);
-				memset(otm, 0, nSize);
+				std::vector<BYTE> metricBuffer(nSize, 0);
+				LPOUTLINETEXTMETRIC otm = reinterpret_cast<LPOUTLINETEXTMETRIC>(metricBuffer.data());
 				otm->otmSize = nSize;
-				GetOutlineTextMetrics(hdc, nSize, otm);
-				m_fullname = wstring((LPWSTR)((DWORD_PTR)otm + (DWORD_PTR)otm->otmpFullName));
-				TCHAR * localname = (LPWSTR)((DWORD_PTR)otm+(DWORD_PTR)otm->otmpFamilyName);
-				m_stylename = wstring((LPWSTR)((DWORD_PTR)otm + (DWORD_PTR)otm->otmpStyleName));
-				m_fullname = MakeUniqueFontName(m_fullname, localname, m_stylename);
+				if (GetOutlineTextMetrics(hdc, nSize, otm) == 0) {
+					m_fullname = L"";
+				} else {
+					auto metricText = [otm](const void* offset) {
+						return reinterpret_cast<LPWSTR>(reinterpret_cast<BYTE*>(otm) + reinterpret_cast<ULONG_PTR>(offset));
+					};
+					m_fullname = wstring(metricText(otm->otmpFullName));
+					TCHAR* localname = metricText(otm->otmpFamilyName);
+					m_stylename = wstring(metricText(otm->otmpStyleName));
+					m_fullname = MakeUniqueFontName(m_fullname, localname, m_stylename);
 
-				TCHAR buff[LF_FACESIZE+1];				
-				GetFontLocalName(localname, buff);
-				m_nFontFamily = otm->otmTextMetrics.tmPitchAndFamily & 0xF0;	//获取字体家族，家族对应使用什么默认链接字体
-				m_familyname = (wstring)buff;
-				m_set = pSettings->FindIndividual(m_familyname.c_str());
-				m_ftWeight = CalcBoldWeight(/*weight*/700);
-				m_hash = StringHashFont(name);
-				if (m_familyname.size()>0 && m_familyname.c_str()[0]==L'@')	//附加一个@
-					m_fullname = L'@'+m_fullname;
-				free(otm);
+					TCHAR buff[LF_FACESIZE+1];
+					GetFontLocalName(localname, buff);
+					m_nFontFamily = otm->otmTextMetrics.tmPitchAndFamily & 0xF0;	//获取字体家族，家族对应使用什么默认链接字体
+					m_familyname = wstring(buff);
+					m_set = pSettings->FindIndividual(m_familyname.c_str());
+					m_ftWeight = CalcBoldWeight(/*weight*/700);
+					m_hash = StringHashFont(name);
+					if (m_familyname.size()>0 && m_familyname.c_str()[0]==L'@')	//附加一个@
+						m_fullname = L'@'+m_fullname;
+				}
 			}
 			SelectFont(hdc, old);
 			DeleteDC(hdc);
@@ -426,7 +401,6 @@ public:
 //		g_EngineCreateFont = false;
 		face_id_link[0]=(FTC_FaceID)NULL;
 		ggo_link[0] = NULL;
-		//g_fsetcache.Set((FTC_FaceID)n, set);
 	}
 	~FreeTypeFontInfo()
 	{
@@ -538,33 +512,19 @@ private:
 	FontMap			m_mfontMap;
 	FullNameMap		m_mfullMap;
 	FontList		m_mfontList;
-	FT_Face*		m_arrFace;
-	int				m_nFaceCount;
 	void Compact();
-	int GrowFace()
-	{
-		FT_Face* a=(FT_Face*)malloc(m_nFaceCount*sizeof(FT_Face));
-		memcpy(a, m_arrFace, sizeof(FT_Face)*m_nFaceCount);
-		m_nFaceCount+=64;
-		m_arrFace = (FT_Face*)realloc(m_arrFace, sizeof(FT_Face) * m_nFaceCount);
-		memset(m_arrFace+m_nFaceCount-64, 0, sizeof(FT_Face)*64);
-		for (int i=0;i<m_nFaceCount-64;i++)
-			Assert(a[i]==m_arrFace[i]);
-		free(a);
-		return m_nFaceCount;
-	}
 
 public:
+	// Cppcheck 2.20 mistakes the overloaded AddFont/FindFont methods for data members.
+	// cppcheck-suppress uninitMemberVar
 	FreeTypeFontEngine()
-		: m_nMemUsed(0), m_nMaxFaces(0), m_bAddOnFind(false), m_nFaceCount(64)
+		: m_nMaxFaces(0), m_nMemUsed(0), m_bAddOnFind(false)
 	{
 		enum { FTC_MAX_FACES_DEFAULT = 2 };
 		const CGdippSettings* pSettings = CGdippSettings::GetInstanceNoInit();
 		m_nMaxFaces = pSettings->CacheMaxFaces();
 		if (m_nMaxFaces == 0)
 			m_nMaxFaces = FTC_MAX_FACES_DEFAULT;
-		//m_arrFace = (FT_Face*)malloc(m_nFaceCount*sizeof(FT_Face));
-		//memset(m_arrFace, 0, sizeof(FT_Face)*m_nFaceCount);
 	}
 	~FreeTypeFontEngine()
 	{
@@ -574,7 +534,6 @@ public:
 		FullNameMap::const_iterator iter=m_mfullMap.begin();
 		for (;iter!=m_mfullMap.end();++iter)
 			iter->second->Release();
-		//free(m_arrFace);
 	}
 	int CalcBoldWeight(int weight) const
 	{
@@ -661,6 +620,8 @@ private:
 	wstring m_name;
 	FT_StreamRec m_ftStream;
 
+	// Cppcheck 2.20 mistakes the private Init method for a data member.
+	// cppcheck-suppress uninitMemberVarPrivate
 	FreeTypeSysFontData()
 		: m_hdc(NULL)
 		, m_hOldFont(NULL)

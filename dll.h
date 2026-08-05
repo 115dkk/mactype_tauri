@@ -7,7 +7,7 @@ class CMemLoadDll
 public:
 	CMemLoadDll();
 	~CMemLoadDll();
-	BOOL    MemLoadLibrary( void* lpFileData , int DataLength, bool bInitDllMain, bool bFreeOnRavFail);  // Dll file data buffer
+	BOOL    MemLoadLibrary(void* lpFileData, int DataLength, bool bInitDllMain);  // Dll file data buffer
 	FARPROC MemGetProcAddress(LPCSTR lpProcName);
 	DWORD_PTR	GetImageBase() {return pImageBase;};
 private:
@@ -15,9 +15,7 @@ private:
 	BOOL CheckDataValide(void* lpFileData, int DataLength);
 	int  CalcTotalImageSize();
 	void CopyDllDatas(void* pDest, void* pSrc);
-	BOOL FillRavAddress(void* pBase);
-	void DoRelocation(void* pNewBase);
-	int  GetAlignedSize(int Origin, int Alignment);
+	static int GetAlignedSize(int Origin, int Alignment);
 private:
 	ProcDllMain pDllMain;
 
@@ -32,10 +30,10 @@ private:
 
 class CDllHelper {
 private:
-	static int StringLengthA(char* str);
-	static wchar_t* CharToWChar_T(char* str);
+	static int StringLengthA(const char* str);
+	static wchar_t* CharToWChar_T(const char* str);
 	static wchar_t ToLowerW(wchar_t ch);
-	static bool StringMatches(wchar_t* str1, wchar_t* str2);
+	static bool StringMatches(const wchar_t* str1, const wchar_t* str2);
 public:
-	static void* MyGetProcAddress(HMODULE dllBase, wchar_t* procName);
+	static const void* MyGetProcAddress(HMODULE dllBase, const wchar_t* procName);
 };

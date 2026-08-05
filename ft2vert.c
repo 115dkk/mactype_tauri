@@ -73,7 +73,6 @@ const int ivs_otft_count[] = {
 #define JP90_LOOKUP_INDEX 2
 #define JP04_LOOKUP_INDEX 3
 
-#define MALLOC(ptr, size) ptr = malloc(sizeof((ptr)[0]) * (size))
 #define BYTE2(p) ((p) += 2, (int)(p)[-2] << 8  | (p)[-1])
 #define BYTE4(p) ((p) += 4, (int)(p)[-4] << 24 | (int)(p)[-3] << 16 | \
                   (int)(p)[-2] << 8 | (p)[-1])
@@ -157,7 +156,7 @@ void hex_dump(const FT_Bytes top) {
 
 /**********  Lookup part ***************/
 
-void scan_Coverage(struct ft2vert_st *ret, const FT_Bytes top, const int l) {
+static int scan_Coverage(struct ft2vert_st *ret, const FT_Bytes top, const int l) {
     int i;
     FT_Bytes s = top;
     struct Coverage_st *t;
@@ -167,16 +166,16 @@ void scan_Coverage(struct ft2vert_st *ret, const FT_Bytes top, const int l) {
     switch (t->CoverageFormat) {
     case 1: 
         t->GlyphCount = BYTE2(s);
-        MALLOC(t->GlyphArray, t->GlyphCount);
-        memset(t->GlyphArray, 0, sizeof(t->GlyphArray[0]) * t->GlyphCount);
+        t->GlyphArray = calloc(t->GlyphCount, sizeof(t->GlyphArray[0]));
+        if (t->GlyphCount != 0 && t->GlyphArray == NULL) return 0;
         for (i = 0; i < t->GlyphCount; i++) {
             t->GlyphArray[i] = BYTE2(s);
         }
         break;
     case 2:
         t->RangeCount = BYTE2(s);
-        MALLOC(t->RangeRecord, t->RangeCount);
-        memset(t->RangeRecord, 0, sizeof(t->RangeRecord[0]) * t->RangeCount);
+        t->RangeRecord = calloc(t->RangeCount, sizeof(t->RangeRecord[0]));
+        if (t->RangeCount != 0 && t->RangeRecord == NULL) return 0;
         for (i = 0; i < t->RangeCount; i++) {
             t->RangeRecord[i].Start = BYTE2(s);
             t->RangeRecord[i].End   = BYTE2(s);
@@ -188,29 +187,38 @@ void scan_Coverage(struct ft2vert_st *ret, const FT_Bytes top, const int l) {
         fprintf(stderr, "scan_Coverage: unknown CoverageFormat (%d).",
                 t->CoverageFormat);
 #endif
-		return;
+		return 0;
     }
     ret->Lookup[l].SubTableCount++;
+    return 1;
 }
 
-void scan_SubTable(struct ft2vert_st *ret, const FT_Bytes top, const int l) {
+static int scan_SubTable(struct ft2vert_st *ret, const FT_Bytes top, const int l) {
     int i;
     FT_Bytes s = top;
     FT_Offset Coverage;
+    struct SubTable_st *subtable;
     struct SingleSubst_st *t;
 
-    t = &ret->Lookup[l].SubTable[ret->Lookup[l].SubTableCount].SingleSubst;
+    subtable = &ret->Lookup[l].SubTable[ret->Lookup[l].SubTableCount];
+    t = &subtable->SingleSubst;
     t->SubstFormat = BYTE2(s);
     Coverage       = BYTE2(s);
-    scan_Coverage(ret, top + Coverage, l);
+    if (!scan_Coverage(ret, top + Coverage, l)) return 0;
     switch (t->SubstFormat) {
     case 1: /* SingleSubstFormat1 */
         t->DeltaGlyphID = BYTE2(s);
         break;
     case 2: /* SingleSubstFormat2 */
         t->GlyphCount   = BYTE2(s);
-        MALLOC(t->Substitute, t->GlyphCount);
-        memset(t->Substitute, 0, sizeof(t->Substitute[0]) * t->GlyphCount);
+        t->Substitute = calloc(t->GlyphCount, sizeof(t->Substitute[0]));
+        if (t->GlyphCount != 0 && t->Substitute == NULL) {
+            free(subtable->Coverage.GlyphArray);
+            free(subtable->Coverage.RangeRecord);
+            memset(&subtable->Coverage, 0, sizeof(subtable->Coverage));
+            ret->Lookup[l].SubTableCount--;
+            return 0;
+        }
         for (i = 0; i < t->GlyphCount; i++) {
             t->Substitute[i] = BYTE2(s);
         }
@@ -223,25 +231,24 @@ void scan_SubTable(struct ft2vert_st *ret, const FT_Bytes top, const int l) {
 #endif
 		
     }
+    return 1;
 }
 
-void scan_Lookup(struct ft2vert_st *ret, const FT_Bytes top, const int l) {
+static void scan_Lookup(struct ft2vert_st *ret, const FT_Bytes top, const int l) {
     int i;
     FT_Bytes s = top;
-    FT_UShort LookupType;
-    FT_UShort LookupFlag;
     FT_UShort SubTableCount;
     FT_UShort SubTable;
 
-    LookupType    = BYTE2(s);
-    LookupFlag    = BYTE2(s);
+    (void)BYTE2(s); /* LookupType */
+    (void)BYTE2(s); /* LookupFlag */
     SubTableCount = BYTE2(s);
-    SubTable      = BYTE2(s);
 
-    MALLOC(ret->Lookup[l].SubTable, SubTableCount);
-    memset(ret->Lookup[l].SubTable, 0, sizeof(ret->Lookup[l].SubTable[0]) * SubTableCount);
+    ret->Lookup[l].SubTable = calloc(SubTableCount, sizeof(ret->Lookup[l].SubTable[0]));
+    if (SubTableCount != 0 && ret->Lookup[l].SubTable == NULL) return;
     for (i = 0; i < SubTableCount; i++) {
-        scan_SubTable(ret, top + SubTable, l);
+        SubTable = BYTE2(s);
+        (void)scan_SubTable(ret, top + SubTable, l);
     }
     if (ret->Lookup[l].SubTableCount != SubTableCount) {
 
@@ -254,7 +261,7 @@ void scan_Lookup(struct ft2vert_st *ret, const FT_Bytes top, const int l) {
 }
 
 
-void scan_LookupList(struct ft2vert_st *ret, const FT_Bytes top) {
+static void scan_LookupList(struct ft2vert_st *ret, const FT_Bytes top) {
     int i;
     FT_Bytes s = top;
     int LookupCount;
@@ -277,7 +284,7 @@ void scan_LookupList(struct ft2vert_st *ret, const FT_Bytes top) {
 
 /********** Feature part ****************/
 
-void scan_FeatureList(struct ft2vert_st *ret, const FT_Bytes top) {
+static void scan_FeatureList(struct ft2vert_st *ret, const FT_Bytes top) {
     int i;
     FT_Bytes s = top;
     int FeatureCount;
@@ -314,12 +321,12 @@ void scan_FeatureList(struct ft2vert_st *ret, const FT_Bytes top) {
 
 /********** Script part ****************/
 
-void scan_LangSys(struct ft2vert_st *ret, const FT_Bytes top, const FT_Tag ScriptTag) {
+static void scan_LangSys(struct ft2vert_st *ret, const FT_Bytes top, const FT_Tag ScriptTag) {
     if (ScriptTag == TAG_KANA && ret->kanaFeature == NULL) ret->kanaFeature = top + 4;
     if (ScriptTag == TAG_HANI && ret->haniFeature == NULL) ret->haniFeature = top + 4;
 }
 
-void scan_Script(struct ft2vert_st *ret, const FT_Bytes top, const FT_Tag ScriptTag) {
+static void scan_Script(struct ft2vert_st *ret, const FT_Bytes top, const FT_Tag ScriptTag) {
     int i;
     FT_Bytes s = top;
     FT_Offset DefaultLangSys;
@@ -340,7 +347,7 @@ void scan_Script(struct ft2vert_st *ret, const FT_Bytes top, const FT_Tag Script
     }
 }
 
-void scan_ScriptList(struct ft2vert_st *ret, const FT_Bytes top) {
+static void scan_ScriptList(struct ft2vert_st *ret, const FT_Bytes top) {
     int i;
     FT_Bytes s = top;
     int ScriptCount;
@@ -358,7 +365,7 @@ void scan_ScriptList(struct ft2vert_st *ret, const FT_Bytes top) {
 
 /********** header part *****************/
 
-void scan_GSUB_Header(struct ft2vert_st *ret, const FT_Bytes top) {
+static void scan_GSUB_Header(struct ft2vert_st *ret, const FT_Bytes top) {
     FT_Bytes s = top;
     FT_Fixed  Version;
     FT_Offset ScriptList;
@@ -395,8 +402,8 @@ struct ft2vert_st *ft2vert_init(FT_Face face) {
     FT_Bytes gpos = NULL;
     FT_Bytes jstf = NULL;
 
-    MALLOC(ret, 1);
-    memset(ret, 0, sizeof(ret[0]));
+    ret = calloc(1, sizeof(ret[0]));
+    if (ret == NULL) return NULL;
     for (i = 0; i < sizeof(ret->Lookup) / sizeof(ret->Lookup[0]); i++) {
         ret->Lookup[i].SubTableCount = 0;
     }
@@ -438,6 +445,7 @@ struct ft2vert_st *ft2vert_init(FT_Face face) {
 
 void ft2vert_final(FT_Face face, struct ft2vert_st *vert){
     int i, j;
+    if (vert == NULL) return;
     for (i = 0; i < sizeof(vert->Lookup) / sizeof(vert->Lookup[0]); i++) {
         for (j = 0; j < vert->Lookup[i].SubTableCount; j++) {
             free(vert->Lookup[i].SubTable[j].SingleSubst.Substitute);
@@ -460,7 +468,7 @@ void ft2vert_final(FT_Face face, struct ft2vert_st *vert){
 
 /********** converting part *****************/
 
-static FT_UInt get_vert_nth_gid(struct SubTable_st *t, FT_UInt gid, int n) {
+static FT_UInt get_vert_nth_gid(const struct SubTable_st *t, FT_UInt gid, int n) {
     switch (t->SingleSubst.SubstFormat) {
     case 1:
         return gid + t->SingleSubst.DeltaGlyphID;
@@ -479,7 +487,7 @@ FT_UInt ft2gsub_get_gid(const struct ft2vert_st *ft2vert, const FT_UInt gid, con
     int j = 0; /* StartCoverageIndex */
 
     for (k = 0; k < ft2vert->Lookup[l].SubTableCount; k++) {
-        struct SubTable_st *t = &ft2vert->Lookup[l].SubTable[k];
+        const struct SubTable_st *t = &ft2vert->Lookup[l].SubTable[k];
         switch (t->Coverage.CoverageFormat) {
         case 1:
             for (i = 0; i < t->Coverage.GlyphCount; i++) {
@@ -490,7 +498,7 @@ FT_UInt ft2gsub_get_gid(const struct ft2vert_st *ft2vert, const FT_UInt gid, con
             break;
         case 2:
             for (i = 0; i < t->Coverage.RangeCount; i++) {
-                struct RangeRecord_st *r = &t->Coverage.RangeRecord[i];
+                const struct RangeRecord_st *r = &t->Coverage.RangeRecord[i];
                 if (r->Start <= gid && gid <= r->End) {
                     return get_vert_nth_gid(t, gid, gid - r->Start + j);
                 }
@@ -527,7 +535,7 @@ FT_UInt ft2_subst_uvs(const FT_Face face, const FT_UInt gid, const FT_UInt vsind
 {
 	FT_UInt newglyph;
 	const struct ivs_otft_desc key = { baseChar }, *found;
-	struct ft2vert_st *ft2vert = (struct ft2vert_st *)face->generic.data;
+	const struct ft2vert_st *ft2vert = (const struct ft2vert_st *)face->generic.data;
 	if (!ft2vert)
 		return 0;
 

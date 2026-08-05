@@ -15,6 +15,12 @@ param(
     [Parameter(Mandatory)]
     [string] $Marker64,
 
+    [string] $FontSubstitutionProfile,
+
+    [string] $BrowserProbeScript,
+
+    [string] $BrowserEvidenceRoot,
+
     [switch] $LeaveInstalledForReboot
 )
 
@@ -41,6 +47,24 @@ foreach ($path in @($SetupExecutable, $ServiceExecutable, $Marker32, $Marker64))
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required CI executable is missing: $path" }
 }
 if (-not (Test-Path -LiteralPath $OpenCoreRoot -PathType Container)) { throw "Open core artifact root is missing: $OpenCoreRoot" }
+
+$browserProofInputs = @($FontSubstitutionProfile, $BrowserProbeScript, $BrowserEvidenceRoot)
+$browserProofInputCount = @($browserProofInputs | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
+if ($browserProofInputCount -ne 0 -and $browserProofInputCount -ne $browserProofInputs.Count) {
+    throw 'Font substitution profile, browser probe script, and browser evidence root must be supplied together.'
+}
+$runBrowserProof = $browserProofInputCount -eq $browserProofInputs.Count
+if ($runBrowserProof) {
+    foreach ($path in @($FontSubstitutionProfile, $BrowserProbeScript)) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Required browser font-substitution input is missing: $path"
+        }
+    }
+    if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+        throw 'Browser font-substitution proof requires Node.js on PATH.'
+    }
+    New-Item -ItemType Directory -Path $BrowserEvidenceRoot -Force | Out-Null
+}
 
 if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
     throw "The isolated hosted-CI service name already exists: $serviceName"
@@ -262,7 +286,11 @@ try {
             throw "Protected machine runtime hash differs from the verified staging manifest: $name"
         }
     }
-    $profileA = [Text.UTF8Encoding]::new($false).GetBytes("[General]`r`nHintingMode=0`r`n")
+    $profileA = if ($runBrowserProof) {
+        [IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $FontSubstitutionProfile).Path)
+    } else {
+        [Text.UTF8Encoding]::new($false).GetBytes("[General]`r`nHintingMode=0`r`n")
+    }
     $profileB = [Text.UTF8Encoding]::new($false).GetBytes("[General]`r`nHintingMode=1`r`n")
     $digestA = Get-LowerHexDigest $profileA
     $digestB = Get-LowerHexDigest $profileB
@@ -395,6 +423,25 @@ try {
         -ExpectedRuntimeRoot $activeRuntimeRoot)
     Assert-PersistedReadyHealth -ExpectedDigest $digestA -Phase 'x86/x64 marker injection'
     Assert-GenerationBoundMarkerTelemetry -MarkerResults $markerResults -ExpectedDigest $digestA
+
+    if ($runBrowserProof) {
+        foreach ($engine in @('chromium', 'firefox')) {
+            $resultPath = Join-Path $BrowserEvidenceRoot "open-service-$engine.json"
+            & node $BrowserProbeScript `
+                --engine $engine `
+                --output $resultPath `
+                --source 'Arial' `
+                --replacement 'Courier New' `
+                --expect 'substituted'
+            if ($LASTEXITCODE -ne 0) {
+                throw "$engine did not render the configured Arial to Courier New substitution under the open service."
+            }
+            $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+            if (-not $result.expectationMet -or -not $result.replacementObserved) {
+                throw "$engine browser evidence did not record the configured replacement."
+            }
+        }
+    }
 
     $null = Invoke-OpenServiceSetupLogged -SetupExecutable $stagedSetup -Verb 'stop'
     if ((Get-Service -Name $serviceName).Status -ne 'Stopped') { throw "$serviceName did not stop." }

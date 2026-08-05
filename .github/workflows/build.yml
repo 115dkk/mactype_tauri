@@ -4,7 +4,7 @@ on:
   workflow_call:
   pull_request:
   push:
-    branches: [directwrite, main]
+    branches: [directwrite, main, codex/alpha-plus-dll]
   workflow_dispatch:
 
 permissions:
@@ -26,6 +26,27 @@ jobs:
           path: artifacts/open-core
           if-no-files-found: error
 
+  open-core-cppcheck:
+    name: Alpha rendering core / Cppcheck x86+x64
+    if: github.ref == 'refs/heads/codex/alpha-plus-dll' || github.base_ref == 'codex/alpha-plus-dll'
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: microsoft/setup-msbuild@v3
+      - name: Build pinned Cppcheck from official source
+        shell: pwsh
+        run: .github/scripts/Build-Cppcheck.ps1
+      - name: Reject rendering-core memory, resource, and lifetime diagnostics
+        shell: pwsh
+        run: scripts/ci/Test-OpenCoreCppcheck.ps1
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: alpha-open-core-cppcheck
+          path: artifacts/cppcheck-open-core
+          if-no-files-found: warn
+
   open-service-windows:
     name: Open service hosted Windows contract
     needs: open-core
@@ -33,6 +54,14 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: control-center/pnpm-lock.yaml
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -51,6 +80,27 @@ jobs:
           cargo test --manifest-path service-runtime/Cargo.toml --workspace --all-targets --all-features
       - name: Build isolated hosted-CI service binaries
         run: cargo build --manifest-path service-runtime/Cargo.toml --release -p mactype-service-host -p mactype-service-setup --features mactype-service-host/ci-test-adapter,mactype-service-setup/ci-test-adapter
+      - name: Install browser font-proof dependencies
+        working-directory: control-center
+        run: pnpm install --frozen-lockfile
+      - name: Install pinned browser font-proof engines
+        working-directory: control-center
+        run: pnpm exec playwright install chromium firefox
+      - name: Prove stock Windows browser font controls
+        shell: pwsh
+        run: |
+          node tools/service-probe/browser_font_probe.mjs `
+            --engine chromium `
+            --output artifacts/font-substitution-browser/stock-chromium.json `
+            --source Arial `
+            --replacement 'Courier New' `
+            --expect stock
+          node tools/service-probe/browser_font_probe.mjs `
+            --engine firefox `
+            --output artifacts/font-substitution-browser/stock-firefox.json `
+            --source Arial `
+            --replacement 'Courier New' `
+            --expect stock
       - name: Build and verify x86 marker targets
         shell: pwsh
         run: tools/service-probe/tests/Test-ProbeContract.ps1 -Architecture Win32 -BuildRoot build/service-probe
@@ -65,7 +115,16 @@ jobs:
             -ServiceExecutable service-runtime/target/release/mactype-service.exe `
             -OpenCoreRoot artifacts/open-core `
             -Marker32 build/service-probe/Win32/Release/probe-console32.exe `
-            -Marker64 build/service-probe/x64/Release/probe-console64.exe
+            -Marker64 build/service-probe/x64/Release/probe-console64.exe `
+            -FontSubstitutionProfile tools/service-probe/tests/fixtures/font-substitution.ini `
+            -BrowserProbeScript tools/service-probe/browser_font_probe.mjs `
+            -BrowserEvidenceRoot artifacts/font-substitution-browser
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: font-substitution-browser-evidence
+          path: artifacts/font-substitution-browser
+          if-no-files-found: warn
 
   windows-build:
     needs: open-core
@@ -354,9 +413,9 @@ jobs:
       - run: echo "All release quality contracts are green."
 
   release-main-snapshot:
-    name: Publish installable main snapshot
+    name: Publish installable branch snapshot
     needs: [windows-build, open-service-windows, release-quality-gate, release-gallery]
-    if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: success() && github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/alpha-plus-dll')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -393,24 +452,58 @@ jobs:
             }
             Copy-Item -LiteralPath $source -Destination (Join-Path $destination $asset)
           }
+      - name: Select branch prerelease identity
+        id: snapshot
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $isAlpha = '${{ github.ref }}' -eq 'refs/heads/codex/alpha-plus-dll'
+          if ($isAlpha) {
+            $installer = 'release/installer/alpha-MacType-Control-Center-Installer.exe'
+            $installerChecksum = 'release/installer/alpha-SHA256SUMS.txt'
+            $integration = 'release/integration/alpha-MacType-Control-Center-Integration-Developer-Bundle.zip'
+            $integrationChecksum = 'release/integration/alpha-INTEGRATION_SHA256SUMS.txt'
+            Copy-Item -LiteralPath 'release/installer/MacType-Control-Center-Installer.exe' -Destination $installer
+            Copy-Item -LiteralPath 'release/integration/MacType-Control-Center-Integration-Developer-Bundle.zip' -Destination $integration
+            $installerHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer).Hash.ToLowerInvariant()
+            $integrationHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $integration).Hash.ToLowerInvariant()
+            "$installerHash  alpha-MacType-Control-Center-Installer.exe" | Set-Content -Encoding ascii $installerChecksum
+            "$integrationHash  alpha-MacType-Control-Center-Integration-Developer-Bundle.zip" | Set-Content -Encoding ascii $integrationChecksum
+            $tagName = 'alpha-control-center-ci-${{ github.run_number }}'
+            $releaseName = 'alpha-MacType Control Center CI #${{ github.run_number }}'
+          } else {
+            $installer = 'release/installer/MacType-Control-Center-Installer.exe'
+            $installerChecksum = 'release/installer/SHA256SUMS.txt'
+            $integration = 'release/integration/MacType-Control-Center-Integration-Developer-Bundle.zip'
+            $integrationChecksum = 'release/integration/INTEGRATION_SHA256SUMS.txt'
+            $tagName = 'control-center-ci-${{ github.run_number }}'
+            $releaseName = 'MacType Control Center CI #${{ github.run_number }}'
+          }
+          "installer=$installer" >> $env:GITHUB_OUTPUT
+          "installer_checksum=$installerChecksum" >> $env:GITHUB_OUTPUT
+          "integration=$integration" >> $env:GITHUB_OUTPUT
+          "integration_checksum=$integrationChecksum" >> $env:GITHUB_OUTPUT
+          "tag_name=$tagName" >> $env:GITHUB_OUTPUT
+          "release_name=$releaseName" >> $env:GITHUB_OUTPUT
+          "branch_name=${{ github.ref_name }}" >> $env:GITHUB_OUTPUT
       - name: Publish automatic pre-release
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: control-center-ci-${{ github.run_number }}
+          tag_name: ${{ steps.snapshot.outputs.tag_name }}
           target_commitish: ${{ github.sha }}
-          name: MacType Control Center CI #${{ github.run_number }}
+          name: ${{ steps.snapshot.outputs.release_name }}
           body: |
-            Automated installable snapshot from the fully validated `main` build at `${{ github.sha }}`.
+            Automated installable snapshot from the fully validated `${{ steps.snapshot.outputs.branch_name }}` build at `${{ github.sha }}`.
 
             The Windows installer passed open-core and standalone-service builds, protected payload checks, x86/x64 marker injection, Tauri window smoke tests, tray startup, clean install, upgrade, launch, and uninstall checks before publication. The separately named Integration/Developer bundle reproduces the installed application tree for upstream installer integration and is directly usable when its installation tree remains intact. Verify downloads with their checksum files.
           prerelease: true
           generate_release_notes: false
           fail_on_unmatched_files: true
           files: |
-            release/installer/MacType-Control-Center-Installer.exe
-            release/installer/SHA256SUMS.txt
-            release/integration/MacType-Control-Center-Integration-Developer-Bundle.zip
-            release/integration/INTEGRATION_SHA256SUMS.txt
+            ${{ steps.snapshot.outputs.installer }}
+            ${{ steps.snapshot.outputs.installer_checksum }}
+            ${{ steps.snapshot.outputs.integration }}
+            ${{ steps.snapshot.outputs.integration_checksum }}
             release/gallery/desktop-1280-overview-en.png
             release/gallery/desktop-1280-execution-ready-en.png
             release/gallery/desktop-1280-execution-migration-available-en.png

@@ -1,11 +1,9 @@
 #include "dll.h"
 
-CMemLoadDll::CMemLoadDll():m_bInitDllMain(true)
-{
- isLoadOk = FALSE;
- pImageBase = NULL;
- pDllMain = NULL;
-}
+CMemLoadDll::CMemLoadDll()
+	: isLoadOk(FALSE), pDllMain(nullptr), pImageBase(0), m_bInitDllMain(true),
+	  pDosHeader(nullptr), pNTHeader(nullptr), pSectionHeader(nullptr)
+{}
 CMemLoadDll::~CMemLoadDll()
 {
  if(isLoadOk)
@@ -14,8 +12,8 @@ CMemLoadDll::~CMemLoadDll()
   //ASSERT(pDllMain   != NULL);
   //脱钩，准备卸载dll
   if (m_bInitDllMain)
-	 pDllMain((HINSTANCE)pImageBase,DLL_PROCESS_DETACH,0);
-  VirtualFree((LPVOID)pImageBase, 0, MEM_RELEASE);
+	 pDllMain(reinterpret_cast<HINSTANCE>(pImageBase),DLL_PROCESS_DETACH,0);
+  VirtualFree(reinterpret_cast<LPVOID>(pImageBase), 0, MEM_RELEASE);
  }
 }
 
@@ -23,7 +21,7 @@ CMemLoadDll::~CMemLoadDll()
 //返回值： 成功返回TRUE , 失败返回FALSE
 //lpFileData: 存放dll文件数据的缓冲区
 //DataLength: 缓冲区中数据的总长度
-BOOL CMemLoadDll::MemLoadLibrary(void* lpFileData, int DataLength, bool bInitDllMain, bool bFreeOnRavFail)
+BOOL CMemLoadDll::MemLoadLibrary(void* lpFileData, int DataLength, bool bInitDllMain)
 {
  this->m_bInitDllMain = bInitDllMain;
  if(pImageBase != NULL)
@@ -37,45 +35,33 @@ BOOL CMemLoadDll::MemLoadLibrary(void* lpFileData, int DataLength, bool bInitDll
  if(ImageSize == 0) return FALSE;
 
  // 分配虚拟内存
- void *pMemoryAddress = VirtualAlloc((LPVOID)0, ImageSize,
+ void *pMemoryAddress = VirtualAlloc(nullptr, ImageSize,
      MEM_COMMIT|MEM_RESERVE, PAGE_EXECUTE_READWRITE);
  if(pMemoryAddress == NULL) return FALSE;
  else
  {
   CopyDllDatas(pMemoryAddress, lpFileData); //复制dll数据，并对齐每个段
-  //重定位信息
-  /*if(pNTHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress >0
-   && pNTHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size>0)
-  {
-   DoRelocation(pMemoryAddress);
-  }
-  //填充引入地址表
-  if(!FillRavAddress(pMemoryAddress) && bFreeOnRavFail) //修正引入地址表失败
-  {
-   VirtualFree(pMemoryAddress,0,MEM_RELEASE);
-   return FALSE;
-  }*/
   //修改页属性。应该根据每个页的属性单独设置其对应内存页的属性。这里简化一下。
   //统一设置成一个属性PAGE_EXECUTE_READWRITE
   unsigned long old;
   VirtualProtect(pMemoryAddress, ImageSize, PAGE_EXECUTE_READWRITE,&old);
  }
  //修正基地址
- pNTHeader->OptionalHeader.ImageBase = (DWORD)pMemoryAddress;
+ pNTHeader->OptionalHeader.ImageBase = static_cast<DWORD>(reinterpret_cast<DWORD_PTR>(pMemoryAddress));
 
  //接下来要调用一下dll的入口函数，做初始化工作。
- pDllMain = (ProcDllMain)(pNTHeader->OptionalHeader.AddressOfEntryPoint +(DWORD_PTR) pMemoryAddress);
- BOOL InitResult = !bInitDllMain || pDllMain((HINSTANCE)pMemoryAddress,DLL_PROCESS_ATTACH,0);
+ pDllMain = reinterpret_cast<ProcDllMain>(pNTHeader->OptionalHeader.AddressOfEntryPoint + reinterpret_cast<DWORD_PTR>(pMemoryAddress));
+ BOOL InitResult = !bInitDllMain || pDllMain(reinterpret_cast<HINSTANCE>(pMemoryAddress),DLL_PROCESS_ATTACH,0);
  if(!InitResult) //初始化失败
  {
-  pDllMain((HINSTANCE)pMemoryAddress,DLL_PROCESS_DETACH,0);
+  pDllMain(reinterpret_cast<HINSTANCE>(pMemoryAddress),DLL_PROCESS_DETACH,0);
   VirtualFree(pMemoryAddress,0,MEM_RELEASE);
   pDllMain = NULL;
   return FALSE;
  }
 
  isLoadOk = TRUE;
- pImageBase = (DWORD_PTR)pMemoryAddress;
+ pImageBase = reinterpret_cast<DWORD_PTR>(pMemoryAddress);
  return TRUE;
 }
 
@@ -92,27 +78,26 @@ FARPROC  CMemLoadDll::MemGetProcAddress(LPCSTR lpProcName)
  DWORD OffsetStart = pNTHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
  DWORD Size = pNTHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
 
- PIMAGE_EXPORT_DIRECTORY pExport = (PIMAGE_EXPORT_DIRECTORY)((DWORD_PTR)pImageBase + pNTHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress);
- DWORD iBase = pExport->Base;
- DWORD iNumberOfFunctions = pExport->NumberOfFunctions;
- DWORD iNumberOfNames = pExport->NumberOfNames; //<= iNumberOfFunctions
- LPDWORD pAddressOfFunctions = (LPDWORD)(pExport->AddressOfFunctions + pImageBase);
- LPWORD  pAddressOfOrdinals = (LPWORD)(pExport->AddressOfNameOrdinals + pImageBase);
- LPDWORD pAddressOfNames  = (LPDWORD)(pExport->AddressOfNames + pImageBase);
+ PIMAGE_EXPORT_DIRECTORY pExport = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(pImageBase + pNTHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress);
+ const DWORD iNumberOfFunctions = pExport->NumberOfFunctions;
+ const DWORD* pAddressOfFunctions = reinterpret_cast<const DWORD*>(pExport->AddressOfFunctions + pImageBase);
+ const WORD* pAddressOfOrdinals = reinterpret_cast<const WORD*>(pExport->AddressOfNameOrdinals + pImageBase);
+ const DWORD* pAddressOfNames = reinterpret_cast<const DWORD*>(pExport->AddressOfNames + pImageBase);
 
  int iOrdinal = -1;
 
- if(((DWORD)lpProcName & 0xFFFF0000) == 0) //IT IS A ORDINAL!
+ const DWORD_PTR procNameValue = reinterpret_cast<DWORD_PTR>(lpProcName);
+ if((procNameValue & 0xFFFF0000) == 0) //IT IS A ORDINAL!
  {
-  iOrdinal = (DWORD)lpProcName & 0x0000FFFF - iBase;
+  iOrdinal = static_cast<int>(procNameValue & 0x0000FFFF) - static_cast<int>(pExport->Base);
  }
  else  //use name
  {
   int iFound = -1;
 
-  for(int i=0;i<iNumberOfNames;i++)
+  for(DWORD i=0;i<pExport->NumberOfNames;i++)
   {
-   char* pName= (char* )(pAddressOfNames[i] + pImageBase);
+   const char* pName = reinterpret_cast<const char*>(pAddressOfNames[i] + pImageBase);
    if(strcmp(pName, lpProcName) == 0)
    {
     iFound = i; break;
@@ -120,133 +105,21 @@ FARPROC  CMemLoadDll::MemGetProcAddress(LPCSTR lpProcName)
   }
   if(iFound >= 0)
   {
-   iOrdinal = (DWORD)(pAddressOfOrdinals[iFound]);
+    iOrdinal = static_cast<int>(pAddressOfOrdinals[iFound]);
   }
  }
 
- if(iOrdinal < 0 || iOrdinal >= iNumberOfFunctions ) return NULL;
+ if(iOrdinal < 0 || static_cast<DWORD>(iOrdinal) >= iNumberOfFunctions) return NULL;
  else
  {
   DWORD pFunctionOffset = pAddressOfFunctions[iOrdinal];
   if(pFunctionOffset > OffsetStart && pFunctionOffset < (OffsetStart+Size))//maybe Export Forwarding
    return NULL;
-  else return (FARPROC)(pFunctionOffset + pImageBase);
+   else return reinterpret_cast<FARPROC>(pFunctionOffset + pImageBase);
  }
 
 }
 
-
-// 重定向PE用到的地址
-void CMemLoadDll::DoRelocation( void *NewBase)
-{
- /* 重定位表的结构：
- // DWORD sectionAddress, DWORD size (包括本节需要重定位的数据)
- // 例如 1000节需要修正5个重定位数据的话，重定位表的数据是
- // 00 10 00 00   14 00 00 00      xxxx xxxx xxxx xxxx xxxx 0000
- // -----------   -----------      ----
- // 给出节的偏移  总尺寸=8+6*2     需要修正的地址           用于对齐4字节
- // 重定位表是若干个相连，如果address 和 size都是0 表示结束
- // 需要修正的地址是12位的，高4位是形态字，intel cpu下是3
- */
- //假设NewBase是0x600000,而文件中设置的缺省ImageBase是0x400000,则修正偏移量就是0x200000
- DWORD Delta = (DWORD)NewBase - pNTHeader->OptionalHeader.ImageBase;
-
- //注意重定位表的位置可能和硬盘文件中的偏移地址不同，应该使用加载后的地址
- PIMAGE_BASE_RELOCATION pLoc = (PIMAGE_BASE_RELOCATION)((DWORD_PTR)NewBase
-  + pNTHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
- while((pLoc->VirtualAddress + pLoc->SizeOfBlock) != 0) //开始扫描重定位表
- {
-  WORD *pLocData = (WORD *)((DWORD_PTR)pLoc + sizeof(IMAGE_BASE_RELOCATION));
-  //计算本节需要修正的重定位项（地址）的数目
-  int NumberOfReloc = (pLoc->SizeOfBlock - sizeof(IMAGE_BASE_RELOCATION))/sizeof(WORD);
-  for( int i=0 ; i < NumberOfReloc; i++)
-  {
-   if( (DWORD)(pLocData[i] & 0xF000) == 0x00003000) //这是一个需要修正的地址
-   {
-    // 举例：
-    // pLoc->VirtualAddress = 0x1000;
-    // pLocData[i] = 0x313E; 表示本节偏移地址0x13E处需要修正
-    // 因此 pAddress = 基地址 + 0x113E
-    // 里面的内容是 A1 ( 0c d4 02 10)  汇编代码是： mov eax , [1002d40c]
-    // 需要修正1002d40c这个地址
-    DWORD * pAddress = (DWORD *)((DWORD_PTR)NewBase + pLoc->VirtualAddress + (pLocData[i] & 0x0FFF));
-    *pAddress += Delta;
-   }
-  }
-  //转移到下一个节进行处理
-  pLoc = (PIMAGE_BASE_RELOCATION)((DWORD)pLoc + pLoc->SizeOfBlock);
- }
-}
-
-//填充引入地址表
-BOOL CMemLoadDll::FillRavAddress(void *pImageBase)
-{
- // 引入表实际上是一个 IMAGE_IMPORT_DESCRIPTOR 结构数组，全部是0表示结束
- // 数组定义如下：
- //
-    // DWORD   OriginalFirstThunk;         // 0表示结束，否则指向未绑定的IAT结构数组
-    // DWORD   TimeDateStamp;
-    // DWORD   ForwarderChain;             // -1 if no forwarders
-    // DWORD   Name;                       // 给出dll的名字
-    // DWORD   FirstThunk;                 // 指向IAT结构数组的地址(绑定后，这些IAT里面就是实际的函数地址)
- unsigned long Offset = pNTHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress ;
- if(Offset == 0) return TRUE; //No Import Table
- PIMAGE_IMPORT_DESCRIPTOR pID = (PIMAGE_IMPORT_DESCRIPTOR)((DWORD_PTR) pImageBase + Offset);
- while(pID->Characteristics != 0 )
- {
-  PIMAGE_THUNK_DATA32 pRealIAT = (PIMAGE_THUNK_DATA32)((DWORD_PTR)pImageBase + pID->FirstThunk);
-  PIMAGE_THUNK_DATA32 pOriginalIAT = (PIMAGE_THUNK_DATA32)((DWORD_PTR)pImageBase + pID->OriginalFirstThunk);
-  //获取dll的名字
-  WCHAR buf[256]; //dll name;
-  BYTE* pName = (BYTE*)((DWORD_PTR)pImageBase + pID->Name);
-  int i;
-  for(i=0;i<256;i++)
-  {
-   if(pName[i] == 0)break;
-   buf[i] = pName[i];
-  }
-  if(i>=256) return FALSE;  // bad dll name
-  else buf[i] = 0;
-  HMODULE hDll = GetModuleHandle(buf);
-  if(hDll == NULL)return FALSE; //NOT FOUND DLL
-  //获取DLL中每个导出函数的地址，填入IAT
-  //每个IAT结构是 ：
-  // union { PBYTE  ForwarderString;
-        //   PDWORD Function;
-        //   DWORD Ordinal;
-        //   PIMAGE_IMPORT_BY_NAME  AddressOfData;
-  // } u1;
-  // 长度是一个DWORD ，正好容纳一个地址。
-  for(i=0; ;i++)
-  {
-   if(pOriginalIAT[i].u1.Function == 0)break;
-   FARPROC lpFunction = NULL;
-   if(pOriginalIAT[i].u1.Ordinal & IMAGE_ORDINAL_FLAG) //这里的值给出的是导出序号
-   {
-    lpFunction = GetProcAddress(hDll, (LPCSTR)(pOriginalIAT[i].u1.Ordinal & 0x0000FFFF));
-   }
-   else //按照名字导入
-   {
-    //获取此IAT项所描述的函数名称
-    PIMAGE_IMPORT_BY_NAME pByName = (PIMAGE_IMPORT_BY_NAME)
-     ((DWORD_PTR)pImageBase + (DWORD)(pOriginalIAT[i].u1.AddressOfData));
-//    if(pByName->Hint !=0)
-//     lpFunction = GetProcAddress(hDll, (LPCSTR)pByName->Hint);
-//    else
-     lpFunction = GetProcAddress(hDll, (char *)pByName->Name);
-   }
-   if(lpFunction != NULL)   //找到了！
-   {
-    pRealIAT[i].u1.Function = (DWORD) lpFunction;
-   }
-   else return FALSE;
-  }
-
-  //move to next
-  pID = (PIMAGE_IMPORT_DESCRIPTOR)((DWORD_PTR)pID + sizeof(IMAGE_IMPORT_DESCRIPTOR));
- }
- return TRUE;
-}
 
 //CheckDataValide函数用于检查缓冲区中的数据是否有效的dll文件
 //返回值： 是一个可执行的dll则返回TRUE，否则返回FALSE。
@@ -256,14 +129,14 @@ BOOL CMemLoadDll::CheckDataValide(void* lpFileData, int DataLength)
 {
  //检查长度
  if(DataLength < sizeof(IMAGE_DOS_HEADER)) return FALSE;
- pDosHeader = (PIMAGE_DOS_HEADER)lpFileData;  // DOSͷ
+ pDosHeader = static_cast<PIMAGE_DOS_HEADER>(lpFileData);  // DOSͷ
  //检查dos头的标记
  if(pDosHeader->e_magic != IMAGE_DOS_SIGNATURE) return FALSE;  //0x5A4D : MZ
 
  //检查长度
- if((DWORD)DataLength < (pDosHeader->e_lfanew + sizeof(IMAGE_NT_HEADERS32)) ) return FALSE;
+ if(static_cast<DWORD>(DataLength) < (pDosHeader->e_lfanew + sizeof(IMAGE_NT_HEADERS32)) ) return FALSE;
  //取得pe头
- pNTHeader = (PIMAGE_NT_HEADERS32)( (DWORD_PTR)lpFileData + (DWORD_PTR)pDosHeader->e_lfanew); // PEͷ
+ pNTHeader = reinterpret_cast<PIMAGE_NT_HEADERS32>(reinterpret_cast<DWORD_PTR>(lpFileData) + static_cast<DWORD_PTR>(pDosHeader->e_lfanew)); // PEͷ
  //检查pe头的合法性
  if(pNTHeader->Signature != IMAGE_NT_SIGNATURE) return FALSE;  //0x00004550 : PE00
  if((pNTHeader->FileHeader.Characteristics & IMAGE_FILE_DLL) == 0) //0x2000  : File is a DLL
@@ -274,11 +147,11 @@ BOOL CMemLoadDll::CheckDataValide(void* lpFileData, int DataLength)
 
  
  //取得节表（段表）
- pSectionHeader = (PIMAGE_SECTION_HEADER)((DWORD_PTR)pNTHeader + sizeof(IMAGE_NT_HEADERS32));
+ pSectionHeader = reinterpret_cast<PIMAGE_SECTION_HEADER>(reinterpret_cast<DWORD_PTR>(pNTHeader) + sizeof(IMAGE_NT_HEADERS32));
  //验证每个节表的空间
  for(int i=0; i< pNTHeader->FileHeader.NumberOfSections; i++)
  {
-  if((pSectionHeader[i].PointerToRawData + pSectionHeader[i].SizeOfRawData) > (DWORD)DataLength)return FALSE;
+  if((pSectionHeader[i].PointerToRawData + pSectionHeader[i].SizeOfRawData) > static_cast<DWORD>(DataLength))return FALSE;
  }
  return TRUE;
 }
@@ -328,20 +201,20 @@ void CMemLoadDll::CopyDllDatas(void* pDest, void* pSrc)
  {
   if(pSectionHeader[i].VirtualAddress == 0 || pSectionHeader[i].SizeOfRawData == 0)continue;
   // 定位该节在内存中的位置
-  void *pSectionAddress = (void *)((DWORD_PTR)pDest + pSectionHeader[i].VirtualAddress);
+  void *pSectionAddress = reinterpret_cast<void*>(reinterpret_cast<DWORD_PTR>(pDest) + pSectionHeader[i].VirtualAddress);
   // 复制段数据到虚拟内存
-  memmove((void *)pSectionAddress,
-       (void *)((DWORD_PTR)pSrc + pSectionHeader[i].PointerToRawData),
+  memmove(pSectionAddress,
+       reinterpret_cast<void*>(reinterpret_cast<DWORD_PTR>(pSrc) + pSectionHeader[i].PointerToRawData),
     pSectionHeader[i].SizeOfRawData);
  }
 
  //修正指针，指向新分配的内存
  //新的dos头
- pDosHeader = (PIMAGE_DOS_HEADER)pDest;
+ pDosHeader = static_cast<PIMAGE_DOS_HEADER>(pDest);
  //新的pe头地址
- pNTHeader = (PIMAGE_NT_HEADERS32)((DWORD_PTR)pDest + (DWORD_PTR)(pDosHeader->e_lfanew));
+ pNTHeader = reinterpret_cast<PIMAGE_NT_HEADERS32>(reinterpret_cast<DWORD_PTR>(pDest) + static_cast<DWORD_PTR>(pDosHeader->e_lfanew));
  //新的节表地址
- pSectionHeader = (PIMAGE_SECTION_HEADER)((DWORD_PTR)pNTHeader + sizeof(IMAGE_NT_HEADERS32));
+ pSectionHeader = reinterpret_cast<PIMAGE_SECTION_HEADER>(reinterpret_cast<DWORD_PTR>(pNTHeader) + sizeof(IMAGE_NT_HEADERS32));
  return ;
 }
 
@@ -356,7 +229,7 @@ void CMemLoadDll::CopyDllDatas(void* pDest, void* pSrc)
 * Parameters: char string
 * Return: Length of string
 */
-int CDllHelper::StringLengthA(char* str) {
+int CDllHelper::StringLengthA(const char* str) {
 	int length;
 
 	for (length = 0; str[length] != '\0'; length++) {}
@@ -369,14 +242,16 @@ int CDllHelper::StringLengthA(char* str) {
 * Parameters: char string
 * Return: wchar_t string
 */
-wchar_t* CDllHelper::CharToWChar_T(char* str) {
-	int length = StringLengthA(str);
-
+wchar_t* CDllHelper::CharToWChar_T(const char* str) {
 	if (str == nullptr) {
 		return nullptr;
 	}
 
-	wchar_t* wstr_t = (wchar_t*)malloc(sizeof(wchar_t) * length + 2);
+	const int length = StringLengthA(str);
+	wchar_t* wstr_t = static_cast<wchar_t*>(malloc(sizeof(wchar_t) * (length + 1)));
+	if (wstr_t == nullptr) {
+		return nullptr;
+	}
 
 	for (int i = 0; i < length; i++) {
 		wstr_t[i] = str[i];
@@ -404,7 +279,7 @@ wchar_t CDllHelper::ToLowerW(wchar_t ch) {
 * Parameters: two wchar_t strings
 * Return: Result of wchar_t equality
 */
-bool CDllHelper::StringMatches(wchar_t* str1, wchar_t* str2) {
+bool CDllHelper::StringMatches(const wchar_t* str1, const wchar_t* str2) {
 	if (str1 == nullptr || str2 == nullptr || wcslen(str1) != wcslen(str2)) {
 		return false;
 	}
@@ -424,38 +299,43 @@ bool CDllHelper::StringMatches(wchar_t* str1, wchar_t* str2) {
 * Parameters: wchar_t string with DLL Name, wchar_t string with Function Name
 * Return: void* to Function - nullptr if not found
 */
-void* CDllHelper::MyGetProcAddress(HMODULE dllBase, wchar_t* procName) {
-	void* procAddr = nullptr;
+const void* CDllHelper::MyGetProcAddress(HMODULE dllBase, const wchar_t* procName) {
+	const void* procAddr = nullptr;
 
 	//DllBase as unsigned long for arithmetic
-	unsigned long long dllBaseAddr = (unsigned long long)dllBase;
+	const DWORD_PTR dllBaseAddr = reinterpret_cast<DWORD_PTR>(dllBase);
 
 	//Cast DllBase to use struct
-	PIMAGE_DOS_HEADER dosHeader = (PIMAGE_DOS_HEADER)dllBaseAddr;
+	const PIMAGE_DOS_HEADER dosHeader = reinterpret_cast<PIMAGE_DOS_HEADER>(dllBaseAddr);
 
 	//Calculate NTHeader and Cast
-	PIMAGE_NT_HEADERS64 pNtHeader = (PIMAGE_NT_HEADERS64)(dllBaseAddr + dosHeader->e_lfanew);
+	const PIMAGE_NT_HEADERS64 pNtHeader = reinterpret_cast<PIMAGE_NT_HEADERS64>(dllBaseAddr + dosHeader->e_lfanew);
 
 	//Calculate ExportDir Address and Cast
-	PIMAGE_EXPORT_DIRECTORY pExportDir = (PIMAGE_EXPORT_DIRECTORY)(dllBaseAddr + pNtHeader->OptionalHeader.DataDirectory[0].VirtualAddress);
+	const PIMAGE_EXPORT_DIRECTORY pExportDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(dllBaseAddr + pNtHeader->OptionalHeader.DataDirectory[0].VirtualAddress);
 
 	//Calculate AddressOfNames Absolute and Cast
-	unsigned int* NameRVA = (unsigned int*)(dllBaseAddr + pExportDir->AddressOfNames);
+	const unsigned int* NameRVA = reinterpret_cast<const unsigned int*>(dllBaseAddr + pExportDir->AddressOfNames);
 
 	//Iterate over AddressOfNames
-	for (int i = 0; i < pExportDir->NumberOfNames; i++) {
+	for (DWORD i = 0; i < pExportDir->NumberOfNames; i++) {
 		//Calculate Absolute Address and cast
-		char* name = (char*)(dllBaseAddr + NameRVA[i]);
+		const char* name = reinterpret_cast<const char*>(dllBaseAddr + NameRVA[i]);
 		wchar_t* wname = CharToWChar_T(name);
-		if (StringMatches(wname, procName)) {
-			free(wname);
+		if (wname == nullptr) {
+			return nullptr;
+		}
+		const bool matches = StringMatches(wname, procName);
+		free(wname);
+		if (matches) {
 
 			//Lookup Ordinal
-			unsigned short NameOrdinal = ((unsigned short*)(dllBaseAddr + pExportDir->AddressOfNameOrdinals))[i];
+			const unsigned short NameOrdinal = reinterpret_cast<const unsigned short*>(dllBaseAddr + pExportDir->AddressOfNameOrdinals)[i];
 
 			//Use Ordinal to Lookup Function Address and Calculate Absolute
-			unsigned int addr = ((unsigned int*)(dllBaseAddr + pExportDir->AddressOfFunctions))[NameOrdinal];
-			void* paddr = &((unsigned int*)(dllBaseAddr + pExportDir->AddressOfFunctions))[NameOrdinal];
+			const unsigned int* functionAddresses = reinterpret_cast<const unsigned int*>(dllBaseAddr + pExportDir->AddressOfFunctions);
+			const unsigned int addr = functionAddresses[NameOrdinal];
+			const void* paddr = &functionAddresses[NameOrdinal];
 
 			//Function is forwarded
 			if (addr > pNtHeader->OptionalHeader.DataDirectory[0].VirtualAddress && addr < pNtHeader->OptionalHeader.DataDirectory[0].VirtualAddress + pNtHeader->OptionalHeader.DataDirectory[0].Size) {
@@ -477,15 +357,11 @@ void* CDllHelper::MyGetProcAddress(HMODULE dllBase, wchar_t* procName) {
 				free(str_arr);*/
 			}
 			else {
-				procAddr = (void*)(dllBaseAddr + addr);	// the real func addr, this is what we ought to use
 				// but in some cases, the IAT can be forged, meaning that the IAT we got here is not the real one in the file.
 				// hence, we only pass the offset of IAT to the shellcode, and let shellcode search for its IAT and caculate the function address there.
 				procAddr = paddr; // the offset to the func IAT, it's a DWORD, you get real address by (imgbase + *(dword*)(imgbase+paddr))
 			}
 			break;
-		}
-		if (wname != nullptr) {
-			free(wname);
 		}
 	}
 	return procAddr;

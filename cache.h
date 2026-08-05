@@ -120,10 +120,10 @@ public:
 	}
 
 	DWORD GetPixel(int X, int Y) {
-		if ((unsigned)X >= (unsigned)m_dibSize.cx || (unsigned)Y >= (unsigned)m_dibSize.cy) {
+		if (X < 0 || X >= m_dibSize.cx || Y < 0 || Y >= m_dibSize.cy) {
 			return CLR_INVALID;
 		}
-		DWORD* lpPixels = (DWORD*)m_lpPixels;
+		DWORD* lpPixels = reinterpret_cast<DWORD*>(m_lpPixels);
 		m_CurrentPixel = &lpPixels[Y * m_dibSize.cx + X];
 		DWORD dib = *m_CurrentPixel;
 		return DIB2RGB(dib);

@@ -2,7 +2,7 @@
 #include <cwctype>
 #include <algorithm>
 
-void CHashedStringList::Add(TCHAR * String, TCHAR * Value)
+void CHashedStringList::Add(const TCHAR* String, const TCHAR* Value)
 {
 	std::wstring buff = String;
 	if (!m_bCaseSense)
@@ -14,7 +14,7 @@ void CHashedStringList::Add(TCHAR * String, TCHAR * Value)
 	}
 }
 
-void CHashedStringList::Delete(TCHAR * String)
+void CHashedStringList::Delete(const TCHAR* String)
 {
 	std::wstring buff = String;
 	if (!m_bCaseSense)
@@ -22,13 +22,11 @@ void CHashedStringList::Delete(TCHAR * String)
 	stringmap.erase(buff);
 }
 
-TCHAR * CHashedStringList::Find(TCHAR * String)
+TCHAR* CHashedStringList::Find(const TCHAR* String)
 {
-	TCHAR* b = _wcsdup(String);
+	std::wstring buff = String;
 	if (!m_bCaseSense)
-		b = _wcslwr(b);
-	std::wstring buff = b;
-	free(b);
+		std::transform(buff.begin(), buff.end(), buff.begin(), ::towlower);
 	strmap::iterator it = stringmap.find(buff);
 	if (it != stringmap.end())
 		return it->second;

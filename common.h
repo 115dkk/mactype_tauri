@@ -133,7 +133,7 @@ public:
 		CS_DWRITE,
 		CS_DCRELATION,
 	};
-	CCriticalSectionLock(int index=CS_LIBRARY):
+	explicit CCriticalSectionLock(int index=CS_LIBRARY):
 	  m_index(index)
 	{
 		::EnterCriticalSection(&m_cs[index]);
@@ -167,6 +167,7 @@ static void _Trace(LPCTSTR pszFormat, ...)
 	//w(v)sprintfは1024文字以上返してこない
 	TCHAR szBuffer[10240];
 	wvsprintf(szBuffer, pszFormat, argptr);
+	va_end(argptr);
 
 	//デバッガをアタッチしてる時はデバッガにメッセージを出す
 	//if (IsDebuggerPresent()) {
@@ -284,7 +285,7 @@ public:
 	{
 		EnterOwnedCritialSection(&m_cs[m_index], FOwner);
 	}
-	COwnedCriticalSectionLock(WORD Owner, int index=OCS_FREETYPE):FOwner(Owner), m_index(index)
+	explicit COwnedCriticalSectionLock(WORD Owner, int index=OCS_FREETYPE):FOwner(Owner), m_index(index)
 	{
 		EnterOwnedCritialSection(&m_cs[m_index], Owner);
 	}
@@ -334,15 +335,15 @@ public:
 class CCriticalSectionLockTry
 {
 public:
-	BOOL TryEnter(int index=CCriticalSectionLock::CS_LIBRARY)
+	static BOOL TryEnter(int index=CCriticalSectionLock::CS_LIBRARY)
 	{
 		return ::TryEnterCriticalSection(&CCriticalSectionLock::m_cs[index]);
 	}
-	int CritalCount(int index=CCriticalSectionLock::CS_LIBRARY)
+	static int CritalCount(int index=CCriticalSectionLock::CS_LIBRARY)
 	{
 		return CCriticalSectionLock::m_cs[index].RecursionCount;
 	}
-	void Leave(int index=CCriticalSectionLock::CS_LIBRARY)
+	static void Leave(int index=CCriticalSectionLock::CS_LIBRARY)
 	{
 		::LeaveCriticalSection(&CCriticalSectionLock::m_cs[index]);
 	}
@@ -491,7 +492,7 @@ private:
 	__int64 m_ilClk;
 	LPCSTR m_pszName;
 public:
-	CDebugElapsedCounter(LPCSTR psz)
+	explicit CDebugElapsedCounter(LPCSTR psz)
 		: m_ilClk(GetClockCount())
 		, m_pszName(psz)
 	{
@@ -505,7 +506,7 @@ public:
 class CDebugElapsedCounter
 {
 public:
-	CDebugElapsedCounter(LPCSTR psz)
+	explicit CDebugElapsedCounter(LPCSTR psz)
 	{
 	}
 };
@@ -643,5 +644,5 @@ void HookD2DDll();
 bool HookD2D1();
 void HookGdiplus();
 void ChangeFileName(LPWSTR lpSrc, int nSize, LPCWSTR lpNewFileName);
-std::wstring MakeUniqueFontName(const std::wstring strFullName, const std::wstring strFamilyName, const std::wstring strStyleName);
-std::string WstringToString(const std::wstring str);
+std::wstring MakeUniqueFontName(const std::wstring& strFullName, const std::wstring& strFamilyName, const std::wstring& strStyleName);
+std::string WstringToString(const std::wstring& str);

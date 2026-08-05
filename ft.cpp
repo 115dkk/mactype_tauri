@@ -130,6 +130,7 @@ void Log(char* Msg)
 	return;
 #endif
 	FILE* f = fopen(".\\gdipp.log", "a");
+	if (!f) return;
 	fputs(Msg, f);
 	fclose(f);
 }
@@ -140,6 +141,7 @@ void Log(wchar_t* Msg)
 	return;
 #endif
 	FILE* f = _wfopen(L".\\gdipp.log", L"a,ccs=UNICODE");
+	if (!f) return;
 	fputws(Msg, f);
 	fclose(f);
 }
@@ -1055,7 +1057,7 @@ private:
 	BYTE bgtbl[0x41];
 	static int CALLBACK EnumFontFamProc(const LOGFONT* lplf, const TEXTMETRIC* lptm, DWORD FontType, LPARAM lParam);
 public:
-	CGGOGlyphLoader() : m_lib(NULL), m_clazz(NULL) {}
+	CGGOGlyphLoader() : m_lib(NULL), m_clazz(NULL), bgtbl{} {}
 	~CGGOGlyphLoader() {}
 	bool init(FT_Library freetype_library);
 	FT_Library getlib() { return m_lib; }
@@ -1292,25 +1294,27 @@ private:
 	DWORD m_size;
 	T m_ptr;
 public:
-	CTempMem() : m_size(sizeof m_localbuf), m_ptr((T)m_localbuf) {
+	CTempMem() : m_localbuf{}, m_size(sizeof m_localbuf), m_ptr(reinterpret_cast<T>(m_localbuf)) {
 	}
+	CTempMem(const CTempMem&) = delete;
+	CTempMem& operator=(const CTempMem&) = delete;
 	~CTempMem() {
 		done();
 	}
 	T init(DWORD size) {
 		done();
-		if (m_size > size) {
-			m_size = size;
-			m_ptr = (T)malloc(m_size);
+		if (size > m_size) {
+			m_ptr = static_cast<T>(malloc(size));
+			m_size = m_ptr ? size : 0;
 		}
 		return m_ptr;
 	}
 	void done() {
-		if (m_ptr != (T)m_localbuf) {
+		if (m_ptr != reinterpret_cast<T>(m_localbuf)) {
 			free(m_ptr);
 		}
 		m_size = sizeof m_localbuf;
-		m_ptr = (T)m_localbuf;
+		m_ptr = reinterpret_cast<T>(m_localbuf);
 	}
 	operator T () { return m_ptr; }
 	bool operator ! () { return !m_ptr; }
@@ -2132,7 +2136,11 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 						goto gdiexit;
 					}
 					glyph = New_FT_Ref_Glyph();
-					FT_Glyph_Copy(temp_glyph, &(glyph->ft_glyph));	//转换为ref_glyph
+					if (glyph == NULL || FT_Glyph_Copy(temp_glyph, &(glyph->ft_glyph))) {
+						FT_Done_Ref_Glyph(&glyph);
+						nRet = false;
+						goto gdiexit;
+					}
 				}
 
 				FTInfo.font_type.height = FTInfo.height;
@@ -2558,7 +2566,11 @@ BOOL ForEachGetGlyphGGO(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString
 					goto gdiexit;
 				}
 				glyph = New_FT_Ref_Glyph();
-				FT_Glyph_Copy((FT_Glyph)ggoog, &(glyph->ft_glyph));
+				if (glyph == NULL || FT_Glyph_Copy((FT_Glyph)ggoog, &(glyph->ft_glyph))) {
+					FT_Done_Ref_Glyph(&glyph);
+					nRet = false;
+					goto gdiexit;
+				}
 				//glyph = ggoog;
 			}
 			{

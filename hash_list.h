@@ -10,11 +10,11 @@ typedef std::map<std::wstring, LPTSTR> strmap;
 class CHashedStringList
 {
 public:
-	void Add(TCHAR * String, TCHAR * Value);
-	void Delete(TCHAR * String);
-	TCHAR * Find(TCHAR * String);
+	void Add(const TCHAR* String, const TCHAR* Value);
+	void Delete(const TCHAR* String);
+	TCHAR* Find(const TCHAR* String);
 	CHashedStringList() : m_bCaseSense(false){}
-	CHashedStringList(BOOL bCaseSensative) : m_bCaseSense(bCaseSensative){}
+	explicit CHashedStringList(BOOL bCaseSensative) : m_bCaseSense(bCaseSensative){}
 	~CHashedStringList(){
 		strmap::iterator it = stringmap.begin();
 		while (it != stringmap.end()) {

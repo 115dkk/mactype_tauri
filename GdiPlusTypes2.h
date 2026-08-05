@@ -130,12 +130,6 @@ public:
         Width = Height = 0.0f;
     }
 
-    SizeF(IN const SizeF& size)
-    {
-        Width = size.Width;
-        Height = size.Height;
-    }
-
     SizeF(IN REAL width,
           IN REAL height)
     {
@@ -181,12 +175,6 @@ public:
     Size()
     {
         Width = Height = 0;
-    }
-
-    Size(IN const Size& size)
-    {
-        Width = size.Width;
-        Height = size.Height;
     }
 
     Size(IN INT width,
@@ -236,13 +224,7 @@ public:
        X = Y = 0.0f;
    }
 
-   PointF(IN const PointF &point)
-   {
-       X = point.X;
-       Y = point.Y;
-   }
-
-   PointF(IN const SizeF &size)
+   explicit PointF(IN const SizeF &size)
    {
        X = size.Width;
        Y = size.Height;
@@ -290,13 +272,7 @@ public:
        X = Y = 0;
    }
 
-   Point(IN const Point &point)
-   {
-       X = point.X;
-       Y = point.Y;
-   }
-
-   Point(IN const Size &size)
+   explicit Point(IN const Size &size)
    {
        X = size.Width;
        Y = size.Height;
@@ -623,7 +599,7 @@ public:
         return Contains(pt.X, pt.Y);
     }
 
-    BOOL Contains(IN Rect& rect) const
+    BOOL Contains(IN const Rect& rect) const
     {
         return (X <= rect.X) && (rect.GetRight() <= GetRight()) &&
                (Y <= rect.Y) && (rect.GetBottom() <= GetBottom());

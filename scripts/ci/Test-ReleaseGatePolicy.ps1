@@ -78,8 +78,8 @@ foreach ($job in @('windows-build', 'open-service-windows', 'release-quality-gat
         throw "Main snapshot publication can run without $job."
     }
 }
-if ($releaseJob -notmatch "(?m)^\s+if:\s*success\(\) && github\.event_name == 'push' && github\.ref == 'refs/heads/main'") {
-    throw 'Main snapshot publication is not restricted to successful main pushes.'
+if ($releaseJob -notmatch "(?m)^\s+if:\s*success\(\) && github\.event_name == 'push' && \(github\.ref == 'refs/heads/main' \|\| github\.ref == 'refs/heads/codex/alpha-plus-dll'\)") {
+    throw 'Snapshot publication is not restricted to successful main or alpha-plus-dll pushes.'
 }
 
 $downloadSteps = [regex]::Matches(

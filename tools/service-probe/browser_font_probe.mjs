@@ -11,7 +11,15 @@ const require = createRequire(
 const { chromium, firefox } = require('@playwright/test');
 
 function parseArguments(argv) {
-  const result = { engine: 'chromium', executable: '', output: '', source: '', replacement: '' };
+  const result = {
+    engine: 'chromium',
+    executable: '',
+    output: '',
+    source: '',
+    replacement: '',
+    expect: 'substituted',
+    timeoutMs: 15000,
+  };
   for (let index = 0; index < argv.length; index += 2) {
     const key = argv[index];
     const value = argv[index + 1];
@@ -21,6 +29,8 @@ function parseArguments(argv) {
     else if (key === '--output') result.output = value;
     else if (key === '--source') result.source = value;
     else if (key === '--replacement') result.replacement = value;
+    else if (key === '--expect') result.expect = value;
+    else if (key === '--timeout-ms') result.timeoutMs = Number(value);
     else throw new Error(`Unknown argument: ${key}`);
   }
   if (!result.output || !result.source || !result.replacement) {
@@ -29,10 +39,16 @@ function parseArguments(argv) {
   if (!['chromium', 'firefox'].includes(result.engine)) {
     throw new Error(`Unsupported engine: ${result.engine}`);
   }
+  if (!['stock', 'substituted'].includes(result.expect)) {
+    throw new Error(`Unsupported expectation: ${result.expect}`);
+  }
+  if (!Number.isInteger(result.timeoutMs) || result.timeoutMs < 0 || result.timeoutMs > 60000) {
+    throw new Error(`Invalid timeout: ${result.timeoutMs}`);
+  }
   return result;
 }
 
-async function capture(browserType, options, disabled) {
+async function capture(browserType, options, disabled, waitForReplacement) {
   const environment = { ...process.env };
   if (disabled) environment.MACTYPE_FONTSUBSTITUTES_ENV = '1';
   else delete environment.MACTYPE_FONTSUBSTITUTES_ENV;
@@ -44,70 +60,106 @@ async function capture(browserType, options, disabled) {
   });
   try {
     const page = await browser.newPage({ viewport: { width: 900, height: 260 } });
-    const observation = await page.evaluate(async ({ source, replacement }) => {
-      const sample = 'MacType substitution 0123456789 WMWM iii 한글 中文 日本語';
-      const render = async (family) => {
-        const canvas = document.createElement('canvas');
-        canvas.width = 900;
-        canvas.height = 220;
-        const context = canvas.getContext('2d', { willReadFrequently: true });
-        context.fillStyle = '#fff';
-        context.fillRect(0, 0, canvas.width, canvas.height);
-        context.fillStyle = '#101820';
-        context.textBaseline = 'top';
-        context.font = `48px "${family.replaceAll('"', '\\"')}"`;
-        context.fillText(sample, 16, 24);
-        const metrics = context.measureText(sample);
-        return {
-          pngDataUrl: canvas.toDataURL('image/png'),
-          width: metrics.width,
-          font: context.font,
+    const startedAt = Date.now();
+    let attempts = 0;
+    let observation;
+    do {
+      attempts += 1;
+      observation = await page.evaluate(async ({ source, replacement }) => {
+        const sample = 'MacType substitution 0123456789 WMWM iii 한글 中文 日本語';
+        const render = async (family) => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 900;
+          canvas.height = 220;
+          const context = canvas.getContext('2d', { willReadFrequently: true });
+          context.fillStyle = '#fff';
+          context.fillRect(0, 0, canvas.width, canvas.height);
+          context.fillStyle = '#101820';
+          context.textBaseline = 'top';
+          context.font = `48px "${family.replaceAll('"', '\\"')}"`;
+          context.fillText(sample, 16, 24);
+          const metrics = context.measureText(sample);
+          return {
+            pngDataUrl: canvas.toDataURL('image/png'),
+            width: metrics.width,
+            font: context.font,
+          };
         };
-      };
-      return {
-        source: await render(source),
-        replacement: await render(replacement),
-        sourceAvailable: document.fonts.check(`48px "${source}"`),
-        replacementAvailable: document.fonts.check(`48px "${replacement}"`),
-        userAgent: navigator.userAgent,
-      };
-    }, { source: options.source, replacement: options.replacement });
-    for (const rendered of [observation.source, observation.replacement]) {
-      rendered.hash = `sha256:${createHash('sha256')
-        .update(rendered.pngDataUrl)
-        .digest('hex')}`;
-      delete rendered.pngDataUrl;
-    }
+        return {
+          source: await render(source),
+          replacement: await render(replacement),
+          sourceAvailable: document.fonts.check(`48px "${source}"`),
+          replacementAvailable: document.fonts.check(`48px "${replacement}"`),
+          userAgent: navigator.userAgent,
+        };
+      }, { source: options.source, replacement: options.replacement });
+      if (!waitForReplacement ||
+          observation.source.pngDataUrl === observation.replacement.pngDataUrl ||
+          Date.now() - startedAt >= options.timeoutMs) {
+        break;
+      }
+      await page.waitForTimeout(250);
+    } while (true);
+    observation.attempts = attempts;
+    observation.elapsedMs = Date.now() - startedAt;
     return observation;
   } finally {
     await browser.close();
   }
 }
 
+async function persistPngEvidence(observation, phase, outputPath) {
+  const outputDirectory = path.dirname(outputPath);
+  const outputStem = path.basename(outputPath, path.extname(outputPath));
+  for (const role of ['source', 'replacement']) {
+    const rendered = observation[role];
+    const prefix = 'data:image/png;base64,';
+    if (!rendered.pngDataUrl.startsWith(prefix)) {
+      throw new Error(`Browser returned an invalid PNG data URL for ${phase}-${role}`);
+    }
+    const png = Buffer.from(rendered.pngDataUrl.slice(prefix.length), 'base64');
+    const evidenceName = `${outputStem}.${phase}-${role}.png`;
+    await writeFile(path.join(outputDirectory, evidenceName), png);
+    rendered.hash = `sha256:${createHash('sha256').update(png).digest('hex')}`;
+    rendered.evidenceFile = evidenceName;
+    delete rendered.pngDataUrl;
+  }
+}
+
 const options = parseArguments(process.argv.slice(2));
 const browserType = options.engine === 'firefox' ? firefox : chromium;
-const disabled = await capture(browserType, options, true);
-const active = await capture(browserType, options, false);
+const disabled = await capture(browserType, options, true, false);
+const active = await capture(browserType, options, false, options.expect === 'substituted');
+const resolvedOutput = path.resolve(options.output);
+await mkdir(path.dirname(resolvedOutput), { recursive: true });
+await persistPngEvidence(disabled, 'disabled', resolvedOutput);
+await persistPngEvidence(active, 'active', resolvedOutput);
 const result = {
   schemaVersion: 1,
   engine: options.engine,
   executable: options.executable || null,
   sourceFamily: options.source,
   replacementFamily: options.replacement,
+  expectedState: options.expect,
+  timeoutMs: options.timeoutMs,
   disabled,
   active,
   controlsDistinct: disabled.source.hash !== disabled.replacement.hash,
   sourceChanged: active.source.hash !== disabled.source.hash,
   replacementObserved: active.source.hash === active.replacement.hash,
 };
+result.expectationMet = result.controlsDistinct && (
+  options.expect === 'stock'
+    ? !result.sourceChanged && !result.replacementObserved
+    : result.sourceChanged && result.replacementObserved
+);
 result.evidenceDigest = `sha256:${createHash('sha256')
   .update(JSON.stringify(result))
   .digest('hex')}`;
 
-await mkdir(path.dirname(path.resolve(options.output)), { recursive: true });
-await writeFile(options.output, `${JSON.stringify(result, null, 2)}\n`, 'utf8');
+await writeFile(resolvedOutput, `${JSON.stringify(result, null, 2)}\n`, 'utf8');
 process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 
-if (!result.controlsDistinct || !result.sourceChanged || !result.replacementObserved) {
+if (!result.expectationMet) {
   process.exitCode = 1;
 }

@@ -15,7 +15,7 @@ name: Hosted MacTray teardown proof
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, codex/alpha-plus-dll]
 
 permissions:
   contents: read

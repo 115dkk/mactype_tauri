@@ -20,15 +20,15 @@ bool InitGdiplusFuncs(){
 		HMODULE	hGdiplusDll = GetModuleHandle(_T("Gdiplus.dll"));
 		if (hGdiplusDll)
 		{
-			pfnGdipDrawString = (GdipDrawString)GetProcAddress(hGdiplusDll, "GdipDrawString");
-			pfnGdipGetBrushType = (GdipGetBrushType)GetProcAddress(hGdiplusDll, "GdipGetBrushType");
-			pfnGdipGetDC = (GdipGetDC)GetProcAddress(hGdiplusDll, "GdipGetDC");
-			pfnGdipGetLogFontW = (GdipGetLogFontW)GetProcAddress(hGdiplusDll, "GdipGetLogFontW");
-			pfnGdipGetSolidFillColor = (GdipGetSolidFillColor)GetProcAddress(hGdiplusDll, "GdipGetSolidFillColor");
-			pfnGdipGetStringFormatAlign = (GdipGetStringFormatAlign)GetProcAddress(hGdiplusDll, "GdipGetStringFormatAlign");
-			pfnGdipGetStringFormatHotkeyPrefix = (GdipGetStringFormatHotkeyPrefix)GetProcAddress(hGdiplusDll, "GdipGetStringFormatHotkeyPrefix");
-			pfnGdipGetStringFormatTrimming = (GdipGetStringFormatTrimming)GetProcAddress(hGdiplusDll, "GdipGetStringFormatTrimming");
-			pfnGdipReleaseDC = (GdipReleaseDC)GetProcAddress(hGdiplusDll, "GdipReleaseDC");
+			pfnGdipDrawString = reinterpret_cast<GdipDrawString>(GetProcAddress(hGdiplusDll, "GdipDrawString"));
+			pfnGdipGetBrushType = reinterpret_cast<GdipGetBrushType>(GetProcAddress(hGdiplusDll, "GdipGetBrushType"));
+			pfnGdipGetDC = reinterpret_cast<GdipGetDC>(GetProcAddress(hGdiplusDll, "GdipGetDC"));
+			pfnGdipGetLogFontW = reinterpret_cast<GdipGetLogFontW>(GetProcAddress(hGdiplusDll, "GdipGetLogFontW"));
+			pfnGdipGetSolidFillColor = reinterpret_cast<GdipGetSolidFillColor>(GetProcAddress(hGdiplusDll, "GdipGetSolidFillColor"));
+			pfnGdipGetStringFormatAlign = reinterpret_cast<GdipGetStringFormatAlign>(GetProcAddress(hGdiplusDll, "GdipGetStringFormatAlign"));
+			pfnGdipGetStringFormatHotkeyPrefix = reinterpret_cast<GdipGetStringFormatHotkeyPrefix>(GetProcAddress(hGdiplusDll, "GdipGetStringFormatHotkeyPrefix"));
+			pfnGdipGetStringFormatTrimming = reinterpret_cast<GdipGetStringFormatTrimming>(GetProcAddress(hGdiplusDll, "GdipGetStringFormatTrimming"));
+			pfnGdipReleaseDC = reinterpret_cast<GdipReleaseDC>(GetProcAddress(hGdiplusDll, "GdipReleaseDC"));
 			return true;
 		}
 		else

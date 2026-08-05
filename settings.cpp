@@ -446,7 +446,7 @@ DWORD CGdippSettings::FastGetProfileString(LPCTSTR lpszSection, LPCTSTR lpszKey,
 			return wcslen(lpszDefault);
 		}
 		else {
-			lpszRet = NULL;
+			if (lpszRet && cch) lpszRet[0] = _T('\0');
 			return 0;
 		}
 	}
@@ -1288,6 +1288,7 @@ CFontLinkInfo::CFontLinkInfo()
 {
 	memset(&info, 0, sizeof info);
 	memset(AllowDefaultLink, 1, sizeof(AllowDefaultLink));	//默认允喧笾体链接
+	memset(DefaultFontLink, 0, sizeof(DefaultFontLink));
 }
 
 CFontLinkInfo::~CFontLinkInfo()
@@ -1596,6 +1597,7 @@ bool CFontSubstituteData::initnocheck(LPCTSTR config) {
 bool CFontSubstituteData::init(LPCTSTR config)
 {
 	memset(this, 0, sizeof *this);
+	if (!config) return false;
 
 	TCHAR buf[LF_FACESIZE + 20];
 	StringCchCopy(buf, countof(buf), config);
@@ -1680,6 +1682,7 @@ CFontSubstitutesInfo::initini(const CFontSubstitutesIniArray& iniarray)
 	for (; it!=iniarray.end(); ++it) {
 		LPCTSTR inistr = it->c_str();
 		LPTSTR buf = _tcsdup(inistr);
+		if (!buf) continue;
 		for (LPTSTR vp = buf; *vp; ++vp) {
 			if (*vp == _T('=')) {
 				*vp++ = 0;

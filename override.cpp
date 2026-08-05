@@ -1291,7 +1291,10 @@ ETO_TRY();
 		ETO_THROW(ETOE_INVALIDHDC);
 	}	//耗时50-100ms
 
-	otm = (OUTLINETEXTMETRIC*)malloc(nSize);
+	otm = static_cast<OUTLINETEXTMETRIC*>(malloc(nSize));
+	if (!otm) {
+		ETO_THROW(ETOE_GENERAL);
+	}
 	memset(otm, 0, nSize);
 	otm->otmSize = nSize;
 	TEXTMETRIC& tm = otm->otmTextMetrics;

@@ -70,7 +70,6 @@ BOOL _CreateProcessAorW(const _TCHAR* lpApp, _TCHAR* lpCmd, LPSECURITY_ATTRIBUTE
 	si.cb=szpsi;
 	if (psi && psi->cb)
 		memcpy(&si, psi, psi->cb);
-	psi = &si;
 
 	GDIPP_CREATE_MAGIC gppcm;
 	if (runGdi && !si.cbReserved2) {
@@ -122,7 +121,6 @@ BOOL _CreateProcessAsUserAorW(HANDLE hToken, const _TCHAR* lpApp, _TCHAR* lpCmd,
 	si.cb=szpsi;
 	if (psi && psi->cb)
 		memcpy(&si, psi, psi->cb);
-	psi = &si;
 
 	GDIPP_CREATE_MAGIC gppcm;
 	if (runGdi && !si.cbReserved2) {

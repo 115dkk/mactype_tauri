@@ -2,7 +2,7 @@
 
 typedef struct _OWNED_CRITIAL_SECTION 
 {
-	int nOwner,	nRequests,	nRecursiveCount;
+	LONG nOwner, nRequests, nRecursiveCount;
 	HANDLE hEvent;
 	CRITICAL_SECTION threadLock;
 }OWNED_CRITIAL_SECTION, *POWNED_CRITIAL_SECTION;

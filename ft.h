@@ -165,8 +165,10 @@ public:
 	}
 	~ControlIder()
 	{
-		delete unicode;
+		delete[] unicode;
 	}
+	ControlIder(const ControlIder&) = delete;
+	ControlIder& operator=(const ControlIder&) = delete;
 	void setcntrlAttribute(WCHAR wch, int cnType)
 	{
 		unicode[wch] = cnType;
@@ -199,9 +201,9 @@ struct FREETYPE_PARAMS
 	wstring strFamilyName, strFullName;
 
 	FREETYPE_PARAMS()
-	{
-		ZeroMemory(this, sizeof(*this));
-	}
+		: etoOptions(0), ftOptions(0), charExtra(0), color(0), alpha(0),
+		  alphatuner(0), lplf(nullptr), otm(nullptr)
+	{}
 
 	//FreeTypeTextOut用 (サイズ計算＋文字描画)
 	FREETYPE_PARAMS(UINT eto, HDC hdc, LOGFONTW* p, OUTLINETEXTMETRIC* lpotm = NULL)
@@ -220,9 +222,12 @@ struct FREETYPE_PARAMS
 		}
 		if (otm)
 		{
-			strFamilyName = (LPWSTR)((DWORD_PTR)otm + (DWORD_PTR)otm->otmpFamilyName);
-			strFullName = wstring((LPWSTR)((DWORD_PTR)otm + (DWORD_PTR)otm->otmpFullName));
-			std::wstring strStyleName = wstring((LPWSTR)((DWORD_PTR)otm + (DWORD_PTR)otm->otmpStyleName));
+			auto metricText = [this](const void* offset) {
+				return reinterpret_cast<LPCWSTR>(reinterpret_cast<const BYTE*>(otm) + reinterpret_cast<ULONG_PTR>(offset));
+			};
+			strFamilyName = metricText(otm->otmpFamilyName);
+			strFullName = metricText(otm->otmpFullName);
+			std::wstring strStyleName = metricText(otm->otmpStyleName);
 
 			strFullName = MakeUniqueFontName(strFullName, strFamilyName, strStyleName);
 			if (strFamilyName.size() > 0 && strFamilyName.c_str()[0] == L'@')

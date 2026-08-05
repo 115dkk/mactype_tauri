@@ -2,8 +2,8 @@
 
 std::wstring to_utf16le(const std::wstring& input) {
 	std::wstring utf16_string;
-	int len = input.length();
-	char* content = (char*)input.c_str();
+	const size_t len = input.length();
+	const auto* content = reinterpret_cast<const unsigned char*>(input.data());
 	utf16_string.reserve(len);
 	for (size_t i = 0; i < len; i += 2) {
 		char16_t code_unit = (static_cast<char16_t>(content[i]) << 8) |

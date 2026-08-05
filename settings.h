@@ -563,7 +563,7 @@ extern CControlCenter* g_ControlCenter;
 class CControlCenter: public IControlCenter
 {
 private:
-	int m_nRefCount;
+	LONG m_nRefCount;
 	bool m_bDirty;
 	HWND m_msgwnd;
 	enum eMTSettings{
@@ -603,12 +603,15 @@ public:
 		/* [in] */ REFIID riid,
 		/* [iid_is][out] */ __RPC__deref_out void __RPC_FAR *__RPC_FAR *ppvObject)
 	{
-		ppvObject = (void**)this;
-		return 0;
+		UNREFERENCED_PARAMETER(riid);
+		if (ppvObject == nullptr) return E_POINTER;
+		*ppvObject = static_cast<IControlCenter*>(this);
+		AddRef();
+		return S_OK;
 	}
-	ULONG STDMETHODCALLTYPE AddRef( void) {return InterlockedIncrement((LONG*)&m_nRefCount);};
+	ULONG STDMETHODCALLTYPE AddRef( void) {return InterlockedIncrement(&m_nRefCount);};
 	ULONG STDMETHODCALLTYPE Release( void) { 
-		int result = InterlockedDecrement((LONG*)&m_nRefCount);
+		LONG result = InterlockedDecrement(&m_nRefCount);
 		if (!result)
 			delete this;
 		return result;
@@ -897,9 +900,13 @@ public:
 		case ATTR_DirectWrite:
 			return pSettings->m_bDirectWrite;
 		case ATTR_LcdFilterWeight:
-			return pSettings->m_bUseCustomLcdFilter? (int)pSettings->m_arrLcdFilterWeights:NULL;
+			return pSettings->m_bUseCustomLcdFilter
+				? static_cast<int>(reinterpret_cast<INT_PTR>(pSettings->m_arrLcdFilterWeights))
+				: 0;
 		case ATTR_PixelLayout:
-			return pSettings->m_bUseCustomPixelLayout? (int)pSettings->m_arrPixelLayout:NULL;
+			return pSettings->m_bUseCustomPixelLayout
+				? static_cast<int>(reinterpret_cast<INT_PTR>(pSettings->m_arrPixelLayout))
+				: 0;
 		default:
 			return 0;
 		}	

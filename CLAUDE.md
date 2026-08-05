@@ -3,6 +3,53 @@
 This file is for AI-assisted sessions working in the 115dkk/mactype_tauri fork.
 **This file must NEVER reach the upstream PR branch or snowie2000/mactype.**
 
+## `codex/alpha-plus-dll` branch charter (overrides the contribution funnel)
+
+These rules apply when the current branch is `codex/alpha-plus-dll` or when a
+short-lived child branch targets it. They override the contribution funnel
+below wherever the two conflict.
+
+- This is a long-lived personal-use distribution branch. It is not an
+  upstream contribution branch, and no commit from it may be placed in an
+  upstream pull request or cherry-picked onto `codex/upstream-pr-prep`.
+- Do not merge this branch wholesale into fork `main`. A generally useful
+  change may move to `main` only when the user explicitly chooses it, after it
+  has been isolated on a normal `codex/<name>` branch and reviewed under the
+  ordinary contribution funnel.
+- Run every applicable `main` CI gate and every core build/test gate. Add
+  branch-only browser, rendering, compatibility, stress, crash, leak, and
+  performance gates whenever they provide useful evidence. Passing upstream
+  CI is a floor, not the completion criterion for this branch.
+- The tracked x86 and x64 Release rendering translation units are a pinned
+  Cppcheck 2.20.0 target. New null-dereference, allocation/resource, leak,
+  lifetime, initialization, and output-parameter diagnostics fail CI. Do not
+  hide obsolete first-party source files behind lint exclusions: prove they
+  are used or delete them. Generated and required third-party code remains a
+  documented dependency boundary.
+- Aggressive core work is in scope: RAII conversion, hook-lifecycle redesign,
+  FreeType work, stronger font substitution, broader DirectWrite support, and
+  Windows 11 application compatibility. Upstream patch size and upstream
+  acceptance are not design constraints here.
+- Sanitized core binaries are test artifacts only. Run x86 and x64 MSVC ASan
+  variants through native, open-service, and browser injection proofs; never
+  publish them in an installer or integration bundle. Because MSVC ASan does
+  not provide LeakSanitizer, use a separate bounded Application Verifier and
+  UMDH lane for leaks, handles, locks, and module-unload cleanup.
+- Aggressive core work must not weaken the service, installer, elevation,
+  installed-root, ownership, or payload-integrity boundaries. Unsupported or
+  protected processes must fail explicitly; do not create a hidden bypass to
+  make injection appear successful.
+- At the start of each work session, fetch and inspect `origin/main`, compare
+  it with this branch, and review new service, Control Center, packaging,
+  security, and CI commits. Cherry-pick useful commits into this branch before
+  starting conflicting work, then rerun the affected branch gates.
+- Releases from this branch are prereleases only. Their tag, release title,
+  installer download, integration/developer bundle, and checksum download must
+  begin with `alpha-`. Never publish a stable release from this branch.
+- Work in `.worktrees/alpha-plus-dll` or a dedicated child worktree. Child
+  branches merge only into `codex/alpha-plus-dll`, unless the user explicitly
+  requests the normal `main` extraction process described above.
+
 ## Contribution funnel (mandatory order)
 
 1. Work in `.worktrees/<name>` on a `codex/<name>` branch.
@@ -29,13 +76,16 @@ cherry-picked. Docs/CI edits get their own commits that simply are not picked.
 
 ## Communication rules
 
-- Korean replies in this project follow the `chegyejeog-chulonja-v4-style`
+- Claude sessions only: Korean replies in this project follow the
+  `chegyejeog-chulonja-v4-style`
   skill (`~/.claude/skills/chegyejeog-chulonja-v4-style/SKILL.md`): plain
   Korean without translationese, no em-dashes, no emoji, prose for reasoning
   and conclusions, lists only for genuinely parallel items. The skill's own
   frontmatter says to wait for an explicit request; this project asks for it
   by default, so read it at session start and keep applying it. English
   artifacts (commit messages, PR bodies, code comments) are unaffected.
+- Non-Claude agents follow `AGENT.md`. The Claude-only Korean writing rule
+  above does not apply to them.
 - Never comment on the upstream repo or PR without an explicit user request.
 - Screenshots/galleries go to the FORK's issue #3 (images hosted on an orphan
   `gallery-*` branch in the fork; embed raw.githubusercontent URLs).

@@ -1508,6 +1508,9 @@ static void ScheduleExistingDirectWriteFactoryHook()
 		FreeLibrary(moduleReference);
 }
 
+static HMODULE g_pinnedD2D1Module = nullptr;
+static HMODULE g_pinnedDWriteModule = nullptr;
+
 void HookD2DDll()
 {
 	typedef HRESULT (WINAPI *PFN_DWriteCreateFactory)(
@@ -1530,9 +1533,15 @@ void HookD2DDll()
 	HMODULE dw = GetModuleHandle(_T("dwrite.dll"));
 
 	if (!d2d1)
-		d2d1 = LoadLibrary(_T("d2d1.dll"));
+	{
+		g_pinnedD2D1Module = LoadLibrary(_T("d2d1.dll"));
+		d2d1 = g_pinnedD2D1Module;
+	}
 	if (!dw)
-		dw = LoadLibrary(_T("dwrite.dll"));
+	{
+		g_pinnedDWriteModule = LoadLibrary(_T("dwrite.dll"));
+		dw = g_pinnedDWriteModule;
+	}
 	void* D2D1Factory = GetProcAddress(d2d1, "D2D1CreateFactory");
 	void* D2D1Device = GetProcAddress(d2d1, "D2D1CreateDevice");
 	void* D2D1Context = GetProcAddress(d2d1, "D2D1CreateDeviceContext");

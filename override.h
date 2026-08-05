@@ -69,7 +69,8 @@ private:
 
 public:
 	CThreadLocalInfo()
-		: m_bInExtTextOut(false), m_bInUniscribe(false), m_bInPath(false), m_bInUniTextOut(false)
+		: m_bInExtTextOut(false), m_bInUniscribe(false), m_bInUniTextOut(false),
+		  m_bPadding{ false, false }, m_bInPath(false)
 	{
 		TLSDCArray.insert(&m_bmpCache);
 	}

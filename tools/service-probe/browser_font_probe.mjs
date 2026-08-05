@@ -108,6 +108,16 @@ function collectDirectWriteDiagnostics(diagnosticNamespace) {
     'isolated-factory-hook-installed',
     'find-called',
     'substitution-resolved',
+    'face-called',
+    'face-resolved',
+    'face-created',
+    ...['cambria', 'impact', 'courier-new'].flatMap((family) => [
+      `find-${family}`,
+      `resolved-${family}`,
+      `face-${family}`,
+      `face-resolved-${family}`,
+      `face-created-${family}`,
+    ]),
   ];
   const eventNames = roles.flatMap((role) => stages.map(
     (stage) => `Local\\MacType.${diagnosticNamespace}.${role}.${stage}`,

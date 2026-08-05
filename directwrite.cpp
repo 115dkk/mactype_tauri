@@ -99,6 +99,8 @@ static void HookFactoryCustomFontCollection(
 static void HookSystemFontCollection(
 	IDWriteFontCollection *fontCollection);
 static void SignalDirectWriteDiagnostic(WCHAR const *stage);
+static void SignalDirectWriteFamilyDiagnostic(
+	WCHAR const *stagePrefix, WCHAR const *familyName);
 
 struct ComMethodHooker {
 	// The target function if it has been hooked
@@ -1722,6 +1724,27 @@ static void SignalDirectWriteDiagnostic(WCHAR const* stage)
 	GetRendererModulePins().diagnosticEvents.emplace_back(std::move(event));
 }
 
+static void SignalDirectWriteFamilyDiagnostic(
+	WCHAR const* stagePrefix, WCHAR const* familyName)
+{
+	if (stagePrefix == nullptr || familyName == nullptr)
+		return;
+	WCHAR const* familyTag = nullptr;
+	if (_wcsicmp(familyName, L"Cambria") == 0)
+		familyTag = L"cambria";
+	else if (_wcsicmp(familyName, L"Impact") == 0)
+		familyTag = L"impact";
+	else if (_wcsicmp(familyName, L"Courier New") == 0)
+		familyTag = L"courier-new";
+	if (familyTag == nullptr)
+		return;
+
+	WCHAR stage[80] = {};
+	if (SUCCEEDED(StringCchPrintfW(
+			stage, ARRAYSIZE(stage), L"%s-%s", stagePrefix, familyTag)))
+		SignalDirectWriteDiagnostic(stage);
+}
+
 void ReleasePinnedRendererModules()
 {
 	RendererModulePins& pins = GetRendererModulePins();
@@ -1881,15 +1904,28 @@ HRESULT WINAPI IMPL_CreateFontFace(IDWriteFont* self,
 		LOGFONT lf = { 0 };
 		if (FAILED(g_pGdiInterop->ConvertFontFaceToLOGFONT(*fontFace, &lf)))
 			return ret;
+		WCHAR originalFamily[LF_FACESIZE] = {};
+		StringCchCopy(originalFamily, ARRAYSIZE(originalFamily), lf.lfFaceName);
+		SignalDirectWriteDiagnostic(L"face-called");
+		SignalDirectWriteFamilyDiagnostic(L"face", originalFamily);
 		const CGdippSettings* pSettings = CGdippSettings::GetInstance();
 		if (pSettings->CopyForceFont(lf, lf))
 		{
+			SignalDirectWriteDiagnostic(L"face-resolved");
+			SignalDirectWriteFamilyDiagnostic(L"face-resolved", originalFamily);
 			IDWriteFont* writefont = nullptr;
 			if (FAILED(g_pGdiInterop->CreateFontFromLOGFONT(&lf, &writefont)))
 				return ret;
 			(*fontFace)->Release();
-			ORIG_CreateFontFace(writefont, fontFace);
+			HRESULT const replacementResult =
+				ORIG_CreateFontFace(writefont, fontFace);
 			writefont->Release();
+			if (SUCCEEDED(replacementResult))
+			{
+				SignalDirectWriteDiagnostic(L"face-created");
+				SignalDirectWriteFamilyDiagnostic(
+					L"face-created", originalFamily);
+			}
 		}
 	}
 	return ret;
@@ -1900,9 +1936,15 @@ bool SubstituteDWriteFont3(__out IDWriteFontFace3** fontFace3)
 	LOGFONT lf = { 0 };
 	if (FAILED(g_pGdiInterop->ConvertFontFaceToLOGFONT(*fontFace3, &lf)))
 		return false;
+	WCHAR originalFamily[LF_FACESIZE] = {};
+	StringCchCopy(originalFamily, ARRAYSIZE(originalFamily), lf.lfFaceName);
+	SignalDirectWriteDiagnostic(L"face-called");
+	SignalDirectWriteFamilyDiagnostic(L"face", originalFamily);
 	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
 	if (pSettings->CopyForceFont(lf, lf))
 	{
+		SignalDirectWriteDiagnostic(L"face-resolved");
+		SignalDirectWriteFamilyDiagnostic(L"face-resolved", originalFamily);
 		CComPtr<IDWriteFont> writefont;
 		if (FAILED(g_pGdiInterop->CreateFontFromLOGFONT(&lf, &writefont)))
 			return false;
@@ -1915,6 +1957,8 @@ bool SubstituteDWriteFont3(__out IDWriteFontFace3** fontFace3)
 
 		(*fontFace3)->Release();
 		*fontFace3 = fontFace3Out;
+		SignalDirectWriteDiagnostic(L"face-created");
+		SignalDirectWriteFamilyDiagnostic(L"face-created", originalFamily);
 	}
 	return true;
 }
@@ -2086,11 +2130,13 @@ static WCHAR const* ResolveDWriteFamilyName(WCHAR const* familyName, LOGFONT& re
 {
 	if (!familyName) return familyName;
 	SignalDirectWriteDiagnostic(L"find-called");
+	SignalDirectWriteFamilyDiagnostic(L"find", familyName);
 	StringCchCopy(resolved.lfFaceName, LF_FACESIZE, familyName);
 	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
 	if (pSettings->CopyForceFont(resolved, resolved))
 	{
 		SignalDirectWriteDiagnostic(L"substitution-resolved");
+		SignalDirectWriteFamilyDiagnostic(L"resolved", familyName);
 		return resolved.lfFaceName;
 	}
 	return familyName;

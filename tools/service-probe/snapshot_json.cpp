@@ -59,6 +59,13 @@ std::string BuildSnapshotJson(const ProbeOptions& options,
        << "  \"waitMilliseconds\": " << options.wait_milliseconds << ",\n"
        << "  \"directWriteFactoryPrecreated\": "
        << (options.precreate_directwrite_factory ? "true" : "false") << ",\n"
+       << "  \"directWriteFactoryType\": "
+       << (options.precreate_directwrite_factory
+               ? (options.precreate_isolated_directwrite_factory
+                      ? "\"isolated\""
+                      : "\"shared\"")
+               : "null")
+       << ",\n"
        << "  \"mactypeModuleLoaded\": "
        << (!observed.empty() ? "true" : "false") << ",\n"
        << "  \"mactypeModulePath\": "

@@ -18,6 +18,7 @@ struct ProbeOptions {
   std::wstring font_source = L"Arial";
   std::wstring font_replacement = L"Courier New";
   bool precreate_directwrite_factory = false;
+  bool precreate_isolated_directwrite_factory = false;
   std::uint32_t tree_level = 0;
   DWORD wait_milliseconds = 3000;
 };

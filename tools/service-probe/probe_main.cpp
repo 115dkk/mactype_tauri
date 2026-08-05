@@ -12,6 +12,7 @@ void PrintUsage() {
                 L"[--wait-ms <milliseconds>] [--role <name>] "
                 L"[--font-source <family> --font-replacement <family>] "
                 L"[--precreate-directwrite-factory] "
+                L"[--precreate-isolated-directwrite-factory] "
                 L"[--preload-mactype <dll>]\n";
 }
 

@@ -45,6 +45,7 @@ static void* g_systemFontCollectionFindFamilyName = nullptr;
 static void* g_customFontCollectionFindFamilyName = nullptr;
 static void* g_fontSetCollectionFindFamilyName = nullptr;
 static void* g_loaderFontCollectionFindFamilyName = nullptr;
+static void* g_factoryCreateCustomFontCollection = nullptr;
 static void* g_systemFontCreateFontFace = nullptr;
 static void* g_systemFontFaceReferenceCreateFontFace = nullptr;
 static void* g_systemFontFaceReferenceCreateFontFaceWithSimulations = nullptr;
@@ -1387,6 +1388,8 @@ bool hookFontCreation(CComPtr<IDWriteFactory>& pDWriteFactory) {
 	g_systemFontCollectionFindFamilyName =
 		(*reinterpret_cast<void***>(fontcollection.p))[5];
 	HOOK(fontcollection, FontCollection_FindFamilyName, 5);
+	g_factoryCreateCustomFontCollection =
+		(*reinterpret_cast<void***>(pDWriteFactory.p))[4];
 	HOOK(pDWriteFactory, CreateCustomFontCollection, 4);
 	CComPtr<IDWriteFontCollection1> fontCollection1;
 	if (SUCCEEDED(fontcollection->QueryInterface(&fontCollection1))) {
@@ -1568,6 +1571,20 @@ static DWORD WINAPI HookExistingDirectWriteFactory(LPVOID moduleReference)
 	{
 		IUnknown* rawFactory = factory;
 		hookDirectWrite(&rawFactory);
+	}
+	factory.Release();
+	if (ORIG_DWriteCreateFactory && SUCCEEDED(ORIG_DWriteCreateFactory(
+		DWRITE_FACTORY_TYPE_ISOLATED, __uuidof(IDWriteFactory), &factory)))
+	{
+		CComPtr<IDWriteFactory> isolatedFactory;
+		if (SUCCEEDED(factory->QueryInterface(&isolatedFactory))) {
+			void* const createCustomFontCollection =
+				(*reinterpret_cast<void***>(isolatedFactory.p))[4];
+			if (createCustomFontCollection != g_factoryCreateCustomFontCollection &&
+				!ISHOOKED(IsolatedCreateCustomFontCollection)) {
+				HOOK(isolatedFactory, IsolatedCreateCustomFontCollection, 4);
+			}
+		}
 	}
 	factory.Release();
 	HMODULE rawSelfReference = selfReference.release();
@@ -2013,12 +2030,7 @@ HRESULT WINAPI IMPL_LoaderFontCollection_FindFamilyName(
 		self, ResolveDWriteFamilyName(familyName, resolved), index, exists);
 }
 
-HRESULT WINAPI IMPL_CreateCustomFontCollection(
-	IDWriteFactory* self,
-	IDWriteFontCollectionLoader* collectionLoader,
-	void const* collectionKey,
-	UINT32 collectionKeySize,
-	IDWriteFontCollection** fontCollection)
+static void HookCollectionLoader(IDWriteFontCollectionLoader* collectionLoader)
 {
 	CComPtr<IDWriteFontCollection> loaderCollection;
 	if (collectionLoader != nullptr &&
@@ -2034,8 +2046,12 @@ HRESULT WINAPI IMPL_CreateCustomFontCollection(
 			HOOK(loaderCollection, LoaderFontCollection_FindFamilyName, 5);
 		}
 	}
-	HRESULT const result = ORIG_CreateCustomFontCollection(
-		self, collectionLoader, collectionKey, collectionKeySize, fontCollection);
+}
+
+static HRESULT HookCreatedCustomFontCollection(
+	HRESULT result,
+	IDWriteFontCollection** fontCollection)
+{
 	if (SUCCEEDED(result) && fontCollection != nullptr &&
 		*fontCollection != nullptr) {
 		CComPtr<IDWriteFontCollection> collection = *fontCollection;
@@ -2050,6 +2066,34 @@ HRESULT WINAPI IMPL_CreateCustomFontCollection(
 		HookCollectionFontCreation(collection, CollectionFontHookKind::custom);
 	}
 	return result;
+}
+
+HRESULT WINAPI IMPL_CreateCustomFontCollection(
+	IDWriteFactory* self,
+	IDWriteFontCollectionLoader* collectionLoader,
+	void const* collectionKey,
+	UINT32 collectionKeySize,
+	IDWriteFontCollection** fontCollection)
+{
+	HookCollectionLoader(collectionLoader);
+	return HookCreatedCustomFontCollection(
+		ORIG_CreateCustomFontCollection(
+			self, collectionLoader, collectionKey, collectionKeySize, fontCollection),
+		fontCollection);
+}
+
+HRESULT WINAPI IMPL_IsolatedCreateCustomFontCollection(
+	IDWriteFactory* self,
+	IDWriteFontCollectionLoader* collectionLoader,
+	void const* collectionKey,
+	UINT32 collectionKeySize,
+	IDWriteFontCollection** fontCollection)
+{
+	HookCollectionLoader(collectionLoader);
+	return HookCreatedCustomFontCollection(
+		ORIG_IsolatedCreateCustomFontCollection(
+			self, collectionLoader, collectionKey, collectionKeySize, fontCollection),
+		fontCollection);
 }
 
 HRESULT WINAPI IMPL_CreateFontCollectionFromFontSet(

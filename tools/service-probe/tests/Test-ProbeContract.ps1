@@ -151,8 +151,22 @@ Assert-Equal $LASTEXITCODE 0 'A stock precreated DirectWrite factory probe must 
 $precreatedFactoryResult = Get-Content -LiteralPath $precreatedFactoryResultPath -Raw | ConvertFrom-Json
 Assert-Equal $precreatedFactoryResult.directWriteFactoryPrecreated $true `
     'Probe did not preserve the browser-like precreated DirectWrite factory contract'
+Assert-Equal $precreatedFactoryResult.directWriteFactoryType 'shared' `
+    'Probe did not identify the precreated shared DirectWrite factory'
 Assert-Equal $precreatedFactoryResult.fontSubstitution.directWrite.activeSourceFamily 'Arial' `
     'A stock precreated DirectWrite factory unexpectedly substituted Arial'
+
+$isolatedFactoryResultPath = Join-Path $resultDirectory 'precreated-isolated-directwrite.json'
+& $probePath --out $isolatedFactoryResultPath --wait-ms 0 `
+    --precreate-isolated-directwrite-factory
+Assert-Equal $LASTEXITCODE 0 'A stock precreated isolated DirectWrite factory probe must run'
+$isolatedFactoryResult = Get-Content -LiteralPath $isolatedFactoryResultPath -Raw | ConvertFrom-Json
+Assert-Equal $isolatedFactoryResult.directWriteFactoryPrecreated $true `
+    'Probe did not preserve the Chromium-like isolated DirectWrite factory contract'
+Assert-Equal $isolatedFactoryResult.directWriteFactoryType 'isolated' `
+    'Probe did not identify the precreated isolated DirectWrite factory'
+Assert-Equal $isolatedFactoryResult.fontSubstitution.directWrite.activeSourceFamily 'Arial' `
+    'A stock precreated isolated DirectWrite factory unexpectedly substituted Arial'
 
 $missingPreloadResult = Join-Path $resultDirectory 'missing-preload.json'
 & $probePath --out $missingPreloadResult --wait-ms 0 `

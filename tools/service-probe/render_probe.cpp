@@ -281,10 +281,11 @@ std::wstring ResolveDirectWriteFamily(const std::wstring_view family,
 
 }  // namespace
 
-void* CreateDirectWriteFactory(std::wstring& error) {
+void* CreateDirectWriteFactory(const bool isolated, std::wstring& error) {
   IDWriteFactory* factory = nullptr;
   const HRESULT result = DWriteCreateFactory(
-      DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+      isolated ? DWRITE_FACTORY_TYPE_ISOLATED : DWRITE_FACTORY_TYPE_SHARED,
+      __uuidof(IDWriteFactory),
       reinterpret_cast<IUnknown**>(&factory));
   if (FAILED(result) || factory == nullptr) {
     error = L"DWriteCreateFactory failed before MacType preload";

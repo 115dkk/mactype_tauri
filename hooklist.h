@@ -309,6 +309,14 @@ HOOK_MANUALLY(HRESULT, CreateCustomFontCollection, (
 			  __out IDWriteFontCollection** fontCollection
 			  ), (self, collectionLoader, collectionKey, collectionKeySize, fontCollection))
 
+HOOK_MANUALLY(HRESULT, IsolatedCreateCustomFontCollection, (
+			  IDWriteFactory* self,
+			  IDWriteFontCollectionLoader* collectionLoader,
+			  void const* collectionKey,
+			  UINT32 collectionKeySize,
+			  __out IDWriteFontCollection** fontCollection
+			  ), (self, collectionLoader, collectionKey, collectionKeySize, fontCollection))
+
 HOOK_MANUALLY(HRESULT, CreateFontCollectionFromFontSet, (
 			  IDWriteFactory3* self,
 			  IDWriteFontSet* fontSet,

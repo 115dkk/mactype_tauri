@@ -76,6 +76,11 @@ bool ParseCommonArguments(const int argc, wchar_t** argv,
       result.options.precreate_directwrite_factory = true;
       continue;
     }
+    if (argument == L"--precreate-isolated-directwrite-factory") {
+      result.options.precreate_directwrite_factory = true;
+      result.options.precreate_isolated_directwrite_factory = true;
+      continue;
+    }
     if (argument == L"--tree-level" && index + 1 < argc) {
       DWORD level = 0;
       if (!ParseUnsigned(argv[++index], level)) {
@@ -105,7 +110,8 @@ int ObserveAndWrite(const ProbeOptions& options,
   std::unique_ptr<void, decltype(&internal::ReleaseDirectWriteFactory)>
       directwrite_factory(nullptr, &internal::ReleaseDirectWriteFactory);
   if (options.precreate_directwrite_factory) {
-    directwrite_factory.reset(internal::CreateDirectWriteFactory(error));
+    directwrite_factory.reset(internal::CreateDirectWriteFactory(
+        options.precreate_isolated_directwrite_factory, error));
     if (directwrite_factory == nullptr) {
       return 2;
     }

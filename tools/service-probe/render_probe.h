@@ -23,7 +23,7 @@ struct FontSubstitutionObservation final {
   DirectWriteSubstitutionObservation direct_write_custom_collection;
 };
 
-void* CreateDirectWriteFactory(std::wstring& error);
+void* CreateDirectWriteFactory(bool isolated, std::wstring& error);
 void ReleaseDirectWriteFactory(void* factory) noexcept;
 FontSubstitutionObservation ObserveFontSubstitution(
     std::wstring_view source_family, std::wstring_view replacement_family,

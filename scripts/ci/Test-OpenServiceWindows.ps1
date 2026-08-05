@@ -433,6 +433,7 @@ try {
             & node $BrowserProbeScript `
                 --engine $engine `
                 --output $resultPath `
+                --injection-health (Join-Path $machineRoot 'health.json') `
                 --source 'Arial' `
                 --replacement 'Courier New' `
                 --expect 'substituted' `

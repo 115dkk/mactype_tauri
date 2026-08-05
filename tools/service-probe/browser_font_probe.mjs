@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -15,6 +15,7 @@ function parseArguments(argv) {
     engine: 'chromium',
     executable: '',
     output: '',
+    injectionHealth: '',
     source: '',
     replacement: '',
     expect: 'substituted',
@@ -27,6 +28,7 @@ function parseArguments(argv) {
     if (key === '--engine') result.engine = value;
     else if (key === '--executable') result.executable = value;
     else if (key === '--output') result.output = value;
+    else if (key === '--injection-health') result.injectionHealth = value;
     else if (key === '--source') result.source = value;
     else if (key === '--replacement') result.replacement = value;
     else if (key === '--expect') result.expect = value;
@@ -48,18 +50,82 @@ function parseArguments(argv) {
   return result;
 }
 
+async function readX64InjectionTelemetry(healthPath) {
+  const health = JSON.parse(await readFile(healthPath, 'utf8'));
+  if (health.health !== 'ready' || !health.injection?.x64) {
+    throw new Error('Open-service health is not Ready with x64 injection telemetry');
+  }
+  return health.injection.x64;
+}
+
+async function waitForBrowserInjection(healthPath, browserPid, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let telemetry;
+  do {
+    telemetry = await readX64InjectionTelemetry(healthPath);
+    if (telemetry.lastSuccess?.pid === browserPid) return telemetry.successCount;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  } while (Date.now() < deadline);
+  throw new Error(
+    `Open service did not record injection into browser PID ${browserPid} ` +
+      `(last PID ${telemetry?.lastSuccess?.pid ?? 'none'})`,
+  );
+}
+
+async function waitForInjectionQuiescence(healthPath, initialCount, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let count = initialCount;
+  let unchangedSince = Date.now();
+  do {
+    const telemetry = await readX64InjectionTelemetry(healthPath);
+    if (telemetry.successCount !== count) {
+      count = telemetry.successCount;
+      unchangedSince = Date.now();
+    }
+    // The current observer uses a one-second WMI creation window. Waiting for
+    // two complete quiet windows ensures the browser's already-created helper
+    // and renderer processes have had an injection opportunity before the
+    // first font lookup can populate Chromium or Firefox caches.
+    if (Date.now() - unchangedSince >= 2000) return count;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  } while (Date.now() < deadline);
+  throw new Error('Open-service browser-process injection did not quiesce');
+}
+
 async function capture(browserType, options, disabled, waitForReplacement) {
   const environment = { ...process.env };
   if (disabled) environment.MACTYPE_FONTSUBSTITUTES_ENV = '1';
   else delete environment.MACTYPE_FONTSUBSTITUTES_ENV;
 
-  const browser = await browserType.launch({
+  const browserServer = await browserType.launchServer({
     executablePath: options.executable || undefined,
     headless: true,
     env: environment,
   });
   try {
+    const browserPid = browserServer.process().pid;
+    const browser = await browserType.connect(browserServer.wsEndpoint());
+    let injectionSuccessCount = null;
+    if (options.injectionHealth) {
+      injectionSuccessCount = await waitForBrowserInjection(
+        options.injectionHealth,
+        browserPid,
+        options.timeoutMs,
+      );
+      injectionSuccessCount = await waitForInjectionQuiescence(
+        options.injectionHealth,
+        injectionSuccessCount,
+        options.timeoutMs,
+      );
+    }
     const page = await browser.newPage({ viewport: { width: 900, height: 260 } });
+    if (options.injectionHealth) {
+      injectionSuccessCount = await waitForInjectionQuiescence(
+        options.injectionHealth,
+        injectionSuccessCount,
+        options.timeoutMs,
+      );
+    }
     const startedAt = Date.now();
     let attempts = 0;
     let observation;
@@ -102,9 +168,11 @@ async function capture(browserType, options, disabled, waitForReplacement) {
     } while (true);
     observation.attempts = attempts;
     observation.elapsedMs = Date.now() - startedAt;
+    observation.browserPid = browserPid;
+    observation.injectionSuccessCount = injectionSuccessCount;
     return observation;
   } finally {
-    await browser.close();
+    await browserServer.close();
   }
 }
 

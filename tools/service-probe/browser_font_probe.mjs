@@ -132,12 +132,12 @@ async function capture(browserType, options, disabled, waitForReplacement) {
         options.timeoutMs,
       );
     }
-    // Chromium prewarms its last-resort families before service injection.
-    // Resolve unmapped, non-last-resort sentinels so the lazy custom-collection
-    // path exposes DWriteFontCollectionProxy to the injected hook. Never warm
-    // the source or replacement: the proof must perform their first lookup
-    // only after the proxy hook is active.
-    const warmupFamilies = ['Webdings', 'Wingdings'].filter(
+    // Chromium calls DWriteFontCollectionProxy::FindFamilyName before its
+    // first CreateCustomFontCollection call exposes that same proxy through
+    // IDWriteFontCollectionLoader. Load a dedicated family first so the hook
+    // is installed before the source family's first lookup. Never warm the
+    // source or replacement: those remain the independent pixel proof.
+    const warmupFamilies = ['Impact'].filter(
       (family) => family !== options.source && family !== options.replacement,
     );
     await page.evaluate(async (families) => {

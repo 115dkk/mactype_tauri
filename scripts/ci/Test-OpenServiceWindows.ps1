@@ -427,12 +427,16 @@ try {
     if ($runBrowserProof) {
         foreach ($engine in @('chromium', 'firefox')) {
             $resultPath = Join-Path $BrowserEvidenceRoot "open-service-$engine.json"
+            # The service serializes process-creation events and each fixed helper
+            # has a 20-second absolute deadline. A browser process tree therefore
+            # needs a larger observation window than a single helper invocation.
             & node $BrowserProbeScript `
                 --engine $engine `
                 --output $resultPath `
                 --source 'Arial' `
                 --replacement 'Courier New' `
-                --expect 'substituted'
+                --expect 'substituted' `
+                --timeout-ms 60000
             if ($LASTEXITCODE -ne 0) {
                 throw "$engine did not render the configured Arial to Courier New substitution under the open service."
             }

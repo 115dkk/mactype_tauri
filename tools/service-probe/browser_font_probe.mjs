@@ -53,7 +53,7 @@ function parseArguments(argv) {
 async function readX64InjectionTelemetry(healthPath) {
   const health = JSON.parse(await readFile(healthPath, 'utf8'));
   if (health.health !== 'ready' || !health.injection?.x64) {
-    throw new Error('Open-service health is not Ready with x64 injection telemetry');
+    return null;
   }
   return health.injection.x64;
 }
@@ -63,7 +63,7 @@ async function waitForBrowserInjection(healthPath, browserPid, timeoutMs) {
   let telemetry;
   do {
     telemetry = await readX64InjectionTelemetry(healthPath);
-    if (telemetry.lastSuccess?.pid === browserPid) return telemetry.successCount;
+    if (telemetry?.lastSuccess?.pid === browserPid) return telemetry.successCount;
     await new Promise((resolve) => setTimeout(resolve, 10));
   } while (Date.now() < deadline);
   throw new Error(
@@ -78,6 +78,11 @@ async function waitForInjectionQuiescence(healthPath, initialCount, timeoutMs) {
   let unchangedSince = Date.now();
   do {
     const telemetry = await readX64InjectionTelemetry(healthPath);
+    if (telemetry === null) {
+      unchangedSince = Date.now();
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      continue;
+    }
     if (telemetry.successCount !== count) {
       count = telemetry.successCount;
       unchangedSince = Date.now();

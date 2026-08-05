@@ -168,6 +168,18 @@ void CGdippSettings::DelayedInit()
 	*/
 	m_bDelayedInit = true;
 
+	// Font-substitution rules are configuration data, not screen-DC state.
+	// Restricted renderer processes can deny GetDC while still supporting
+	// DirectWrite, so retain their exact configured family names before any
+	// GDI-dependent tuning is attempted.
+	CFontSubstitutesIniArray arrFontSubstitutes;
+	wstring names = _T("FontSubstitutes@") + wstring(m_szexeName);
+	if (_IsFreeTypeProfileSectionExists(names.c_str(), m_szFileName))
+		AddListFromSection(names.c_str(), m_szFileName, arrFontSubstitutes);
+	else
+		AddListFromSection(_T("FontSubstitutes"), m_szFileName, arrFontSubstitutes);
+	m_FontSubstitutesInfo.init(m_nFontSubstitutes, arrFontSubstitutes);
+
 	auto hdcScreen = renderer_raii::AdoptWindowDeviceContext(nullptr, GetDC(nullptr));
 	if (!hdcScreen) {
 		return;
@@ -196,15 +208,6 @@ void CGdippSettings::DelayedInit()
 	InitTuneTable(nTextTuningG, m_nTuneTableG);
 	InitTuneTable(nTextTuningB, m_nTuneTableB);
 	RefreshAlphaTable();
-
-	//FontSubstitutes
-	CFontSubstitutesIniArray arrFontSubstitutes;
-	wstring names = _T("FontSubstitutes@") + wstring(m_szexeName);
-	if (_IsFreeTypeProfileSectionExists(names.c_str(), m_szFileName))
-		AddListFromSection(names.c_str(), m_szFileName, arrFontSubstitutes);
-	else
-		AddListFromSection(_T("FontSubstitutes"), m_szFileName, arrFontSubstitutes);
-	m_FontSubstitutesInfo.init(m_nFontSubstitutes, arrFontSubstitutes);
 
 	names = _T("Individual@") + wstring(m_szexeName);
 	if (_IsFreeTypeProfileSectionExists(names.c_str(), nullptr))
@@ -1593,34 +1596,17 @@ bool CFontSubstituteData::initnocheck(LPCTSTR config) {
 
 bool CFontSubstituteData::init(LPCTSTR config)
 {
-	memset(this, 0, sizeof *this);
-	if (!config) return false;
+	if (!config || !initnocheck(config)) return false;
 
-	TCHAR buf[LF_FACESIZE + 20];
-	StringCchCopy(buf, countof(buf), config);
-
-	LOGFONT lf;
-	memset(&lf, 0, sizeof lf);
-
-	LPTSTR p;
-	for (p = buf + lstrlen(buf) - 1; p >= buf; --p ) {
-		if (*p == _T(',')) {
-			*p++ = 0;
-			break;
-		}
-	}
-	if (p >= buf) {
-		StringCchCopy(lf.lfFaceName, countof(lf.lfFaceName), buf);
-		lf.lfCharSet = static_cast<BYTE>(_StrToInt(p + 1, 0));
-		m_bCharSet = true;
-	} else {
-		StringCchCopy(lf.lfFaceName, LF_FACESIZE, buf);
-		lf.lfCharSet = DEFAULT_CHARSET;
-		m_bCharSet = false;
-	}
-
+	LOGFONT requested = m_lf;
 	auto hdc = renderer_raii::AdoptWindowDeviceContext(nullptr, GetDC(nullptr));
-	EnumFontFamiliesEx(hdc.get(), &lf, &CFontSubstituteData::EnumFontFamProc, reinterpret_cast<LPARAM>(this), 0);
+	if (hdc) {
+		// Prefer the installed family's canonical LOGFONT when GDI is available.
+		// If enumeration finds nothing, keep the exact configured name parsed by
+		// initnocheck so DirectWrite-only and restricted processes can resolve it.
+		EnumFontFamiliesEx(hdc.get(), &requested, &CFontSubstituteData::EnumFontFamProc,
+			reinterpret_cast<LPARAM>(this), 0);
+	}
 
 	return m_lf.lfFaceName[0] != 0;
 }

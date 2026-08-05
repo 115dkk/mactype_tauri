@@ -1479,6 +1479,35 @@ void TriggerHook(ID2D1Factory* d2d_factory) {
 // 			CreateGlyphRunAnalysis<N>
 // 				IDWriteGlyphRunAnalysis
 // 					GetAlphaBlendParams
+static DWORD WINAPI HookExistingDirectWriteFactory(LPVOID moduleReference)
+{
+	CComPtr<IUnknown> factory;
+	if (ORIG_DWriteCreateFactory && SUCCEEDED(ORIG_DWriteCreateFactory(
+		DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), &factory)))
+	{
+		IUnknown* rawFactory = factory;
+		hookDirectWrite(&rawFactory);
+	}
+	factory.Release();
+	FreeLibraryAndExitThread(static_cast<HMODULE>(moduleReference), 0);
+	return 0;
+}
+
+static void ScheduleExistingDirectWriteFactoryHook()
+{
+	HMODULE moduleReference = NULL;
+	if (!GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+		reinterpret_cast<LPCTSTR>(&HookExistingDirectWriteFactory),
+		&moduleReference))
+		return;
+	HANDLE thread = CreateThread(NULL, 0, HookExistingDirectWriteFactory,
+		moduleReference, 0, NULL);
+	if (thread)
+		CloseHandle(thread);
+	else
+		FreeLibrary(moduleReference);
+}
+
 void HookD2DDll()
 {
 	typedef HRESULT (WINAPI *PFN_DWriteCreateFactory)(
@@ -1514,6 +1543,9 @@ void HookD2DDll()
 	*(DWORD_PTR*)&ORIG_DWriteCreateFactory = (DWORD_PTR)DWFactory;
 	if (DWFactory) {
 		hook_demand_DWriteCreateFactory();
+		// Service injection can happen after a browser has created its shared
+		// factory. Hook that implementation once the loader lock is released.
+		ScheduleExistingDirectWriteFactoryHook();
 	}
 	if (D2D1Factory){
 		hook_demand_D2D1CreateFactory();

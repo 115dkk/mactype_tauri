@@ -230,6 +230,11 @@ HOOK_MANUALLY(HRESULT, CreateFontFace, (
 			  __out IDWriteFontFace** fontFace
 			  ), (self, fontFace))
 
+HOOK_MANUALLY(HRESULT, FontFace3_GetFamilyNames, (
+			  IDWriteFontFace3* self,
+			  __out IDWriteLocalizedStrings** names
+			  ), (self, names))
+
 HOOK_MANUALLY(HRESULT, DWriteFontFaceReference_CreateFontFace, (
 			  IDWriteFontFaceReference* self,
 			  __out IDWriteFontFace3** fontFace

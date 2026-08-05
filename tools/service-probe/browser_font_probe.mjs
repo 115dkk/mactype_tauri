@@ -123,12 +123,14 @@ function collectDirectWriteDiagnostics(diagnosticNamespace) {
     'face-called',
     'face-resolved',
     'face-created',
+    'alias-returned',
     ...['cambria', 'impact', 'courier-new'].flatMap((family) => [
       `find-${family}`,
       `resolved-${family}`,
       `face-${family}`,
       `face-resolved-${family}`,
       `face-created-${family}`,
+      `alias-${family}`,
     ]),
   ];
   const eventNames = roles.flatMap((role) => stages.map(

@@ -3,6 +3,9 @@
 #include "hookCounter.h"
 #include "settings.h"
 
+#include <array>
+#include <atomic>
+
 void MyDebug(const TCHAR *sz, ...)
 {
 #ifdef DEBUG
@@ -68,6 +71,163 @@ static void* g_customFontFaceReferenceCreateFontFaceWithSimulations = nullptr;
 static void* g_fontSetFontCreateFontFace = nullptr;
 static void* g_fontSetFontFaceReferenceCreateFontFace = nullptr;
 static void* g_fontSetFontFaceReferenceCreateFontFaceWithSimulations = nullptr;
+
+namespace {
+
+struct FontFaceAliasEntry {
+	IDWriteFontFace3* face = nullptr;
+	std::wstring family;
+};
+
+thread_local std::wstring g_pendingDWriteFamilyAlias;
+thread_local std::array<FontFaceAliasEntry, 8> g_fontFaceAliases;
+thread_local size_t g_nextFontFaceAlias = 0;
+
+class AliasedLocalizedStrings final : public IDWriteLocalizedStrings {
+public:
+	AliasedLocalizedStrings(
+		IDWriteLocalizedStrings* original, std::wstring family)
+		: original_(original), family_(std::move(family))
+	{
+	}
+
+	HRESULT STDMETHODCALLTYPE QueryInterface(
+		REFIID iid, void** object) override
+	{
+		if (object == nullptr)
+			return E_POINTER;
+		*object = nullptr;
+		if (iid != __uuidof(IUnknown) &&
+			iid != __uuidof(IDWriteLocalizedStrings))
+			return E_NOINTERFACE;
+		*object = static_cast<IDWriteLocalizedStrings*>(this);
+		AddRef();
+		return S_OK;
+	}
+
+	ULONG STDMETHODCALLTYPE AddRef() override
+	{
+		return ++referenceCount_;
+	}
+
+	ULONG STDMETHODCALLTYPE Release() override
+	{
+		ULONG const remaining = --referenceCount_;
+		if (remaining == 0)
+			delete this;
+		return remaining;
+	}
+
+	UINT32 STDMETHODCALLTYPE GetCount() override
+	{
+		return original_->GetCount();
+	}
+
+	HRESULT STDMETHODCALLTYPE FindLocaleName(
+		WCHAR const* localeName, UINT32* index, BOOL* exists) override
+	{
+		return original_->FindLocaleName(localeName, index, exists);
+	}
+
+	HRESULT STDMETHODCALLTYPE GetLocaleNameLength(
+		UINT32 index, UINT32* length) override
+	{
+		return original_->GetLocaleNameLength(index, length);
+	}
+
+	HRESULT STDMETHODCALLTYPE GetLocaleName(
+		UINT32 index, WCHAR* localeName, UINT32 size) override
+	{
+		return original_->GetLocaleName(index, localeName, size);
+	}
+
+	HRESULT STDMETHODCALLTYPE GetStringLength(
+		UINT32 index, UINT32* length) override
+	{
+		if (length == nullptr)
+			return E_POINTER;
+		UINT32 originalLength = 0;
+		HRESULT const result =
+			original_->GetStringLength(index, &originalLength);
+		if (FAILED(result))
+			return result;
+		*length = static_cast<UINT32>(family_.size());
+		return S_OK;
+	}
+
+	HRESULT STDMETHODCALLTYPE GetString(
+		UINT32 index, WCHAR* value, UINT32 size) override
+	{
+		UINT32 originalLength = 0;
+		HRESULT const result =
+			original_->GetStringLength(index, &originalLength);
+		if (FAILED(result))
+			return result;
+		if (value == nullptr)
+			return E_POINTER;
+		if (size <= family_.size())
+			return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+		return StringCchCopyW(value, size, family_.c_str());
+	}
+
+private:
+	std::atomic<ULONG> referenceCount_{1};
+	CComPtr<IDWriteLocalizedStrings> original_;
+	std::wstring family_;
+};
+
+static std::wstring TakePendingDWriteFamilyAlias()
+{
+	std::wstring alias = std::move(g_pendingDWriteFamilyAlias);
+	g_pendingDWriteFamilyAlias.clear();
+	return alias;
+}
+
+static void RememberFontFaceAlias(
+	IDWriteFontFace3* face, std::wstring alias)
+{
+	if (face == nullptr)
+		return;
+	for (auto& entry : g_fontFaceAliases)
+	{
+		if (entry.face == face)
+		{
+			entry.family = std::move(alias);
+			return;
+		}
+	}
+	FontFaceAliasEntry& entry = g_fontFaceAliases[g_nextFontFaceAlias];
+	entry.face = face;
+	entry.family = std::move(alias);
+	g_nextFontFaceAlias = (g_nextFontFaceAlias + 1) % g_fontFaceAliases.size();
+}
+
+static std::wstring const* FindFontFaceAlias(IDWriteFontFace3* face)
+{
+	for (auto const& entry : g_fontFaceAliases)
+	{
+		if (entry.face == face && !entry.family.empty())
+			return &entry.family;
+	}
+	return nullptr;
+}
+
+static void HookFontFaceFamilyNames(
+	IDWriteFontFace3* face, std::wstring alias)
+{
+	if (face == nullptr)
+		return;
+	RememberFontFaceAlias(face, std::move(alias));
+	if (ISHOOKED(FontFace3_GetFamilyNames))
+		return;
+	CCriticalSectionLock hookLock(CCriticalSectionLock::CS_DWRITE);
+	if (ISHOOKED(FontFace3_GetFamilyNames))
+		return;
+	CComPtr<IDWriteFontFace3> fontFace = face;
+	HOOK(fontFace, FontFace3_GetFamilyNames, 40);
+}
+
+} // namespace
 
 enum class CollectionFontHookKind
 {
@@ -1884,6 +2044,7 @@ HRESULT WINAPI IMPL_DWriteCreateFactory(__in DWRITE_FACTORY_TYPE factoryType,
 HRESULT WINAPI IMPL_CreateFontFace(IDWriteFont* self,
 	__out IDWriteFontFace** fontFace)
 {
+	std::wstring const requestedAlias = TakePendingDWriteFamilyAlias();
 	HRESULT ret = ORIG_CreateFontFace(self, fontFace);
 	if (ret == S_OK)
 	{
@@ -1927,8 +2088,37 @@ HRESULT WINAPI IMPL_CreateFontFace(IDWriteFont* self,
 					L"face-created", originalFamily);
 			}
 		}
+		CComPtr<IDWriteFontFace3> fontFace3;
+		if (SUCCEEDED((*fontFace)->QueryInterface(&fontFace3)))
+			HookFontFaceFamilyNames(fontFace3, requestedAlias);
 	}
 	return ret;
+}
+
+HRESULT WINAPI IMPL_FontFace3_GetFamilyNames(
+	IDWriteFontFace3* self, IDWriteLocalizedStrings** names)
+{
+	HRESULT const result = ORIG_FontFace3_GetFamilyNames(self, names);
+	if (FAILED(result) || names == nullptr || *names == nullptr)
+		return result;
+	std::wstring const* const alias = FindFontFaceAlias(self);
+	if (alias == nullptr)
+		return result;
+
+	CComPtr<IDWriteLocalizedStrings> original;
+	original.Attach(*names);
+	*names = nullptr;
+	std::unique_ptr<AliasedLocalizedStrings> wrapper(
+		new (std::nothrow) AliasedLocalizedStrings(original, *alias));
+	if (!wrapper)
+	{
+		*names = original.Detach();
+		return result;
+	}
+	*names = wrapper.release();
+	SignalDirectWriteDiagnostic(L"alias-returned");
+	SignalDirectWriteFamilyDiagnostic(L"alias", alias->c_str());
+	return result;
 }
 
 bool SubstituteDWriteFont3(__out IDWriteFontFace3** fontFace3)
@@ -1967,9 +2157,11 @@ HRESULT WINAPI IMPL_DWriteFontFaceReference_CreateFontFace(
 	IDWriteFontFaceReference* self,
 	__out IDWriteFontFace3** fontFace)
 {
+	std::wstring const requestedAlias = TakePendingDWriteFamilyAlias();
 	HRESULT ret = ORIG_DWriteFontFaceReference_CreateFontFace(self, fontFace);
 	if (ret == S_OK) {
 		SubstituteDWriteFont3(fontFace);
+		HookFontFaceFamilyNames(*fontFace, requestedAlias);
 	}
 	return ret;
 }
@@ -1979,10 +2171,12 @@ HRESULT WINAPI IMPL_DWriteFontFaceReference_CreateFontFaceWithSimulations(
 	DWRITE_FONT_SIMULATIONS fontFaceSimulationFlags,
 	__out IDWriteFontFace3** fontFace)
 {
+	std::wstring const requestedAlias = TakePendingDWriteFamilyAlias();
 	HRESULT ret = ORIG_DWriteFontFaceReference_CreateFontFaceWithSimulations(self,
 		fontFaceSimulationFlags, fontFace);
 	if (ret == S_OK) {
 		SubstituteDWriteFont3(fontFace);
+		HookFontFaceFamilyNames(*fontFace, requestedAlias);
 	}
 	return ret;
 }
@@ -2065,19 +2259,25 @@ static void HookCollectionFontCreation(
 HRESULT WINAPI IMPL_CustomFont_CreateFontFace(
 	IDWriteFont3* self, IDWriteFontFace3** fontFace)
 {
+	std::wstring const requestedAlias = TakePendingDWriteFamilyAlias();
 	HRESULT const result = ORIG_CustomFont_CreateFontFace(self, fontFace);
-	if (result == S_OK)
+	if (result == S_OK) {
 		SubstituteDWriteFont3(fontFace);
+		HookFontFaceFamilyNames(*fontFace, requestedAlias);
+	}
 	return result;
 }
 
 HRESULT WINAPI IMPL_CustomFontFaceReference_CreateFontFace(
 	IDWriteFontFaceReference* self, IDWriteFontFace3** fontFace)
 {
+	std::wstring const requestedAlias = TakePendingDWriteFamilyAlias();
 	HRESULT const result =
 		ORIG_CustomFontFaceReference_CreateFontFace(self, fontFace);
-	if (result == S_OK)
+	if (result == S_OK) {
 		SubstituteDWriteFont3(fontFace);
+		HookFontFaceFamilyNames(*fontFace, requestedAlias);
+	}
 	return result;
 }
 
@@ -2086,30 +2286,39 @@ HRESULT WINAPI IMPL_CustomFontFaceReference_CreateFontFaceWithSimulations(
 	DWRITE_FONT_SIMULATIONS fontFaceSimulationFlags,
 	IDWriteFontFace3** fontFace)
 {
+	std::wstring const requestedAlias = TakePendingDWriteFamilyAlias();
 	HRESULT const result =
 		ORIG_CustomFontFaceReference_CreateFontFaceWithSimulations(
 			self, fontFaceSimulationFlags, fontFace);
-	if (result == S_OK)
+	if (result == S_OK) {
 		SubstituteDWriteFont3(fontFace);
+		HookFontFaceFamilyNames(*fontFace, requestedAlias);
+	}
 	return result;
 }
 
 HRESULT WINAPI IMPL_FontSetFont_CreateFontFace(
 	IDWriteFont3* self, IDWriteFontFace3** fontFace)
 {
+	std::wstring const requestedAlias = TakePendingDWriteFamilyAlias();
 	HRESULT const result = ORIG_FontSetFont_CreateFontFace(self, fontFace);
-	if (result == S_OK)
+	if (result == S_OK) {
 		SubstituteDWriteFont3(fontFace);
+		HookFontFaceFamilyNames(*fontFace, requestedAlias);
+	}
 	return result;
 }
 
 HRESULT WINAPI IMPL_FontSetFontFaceReference_CreateFontFace(
 	IDWriteFontFaceReference* self, IDWriteFontFace3** fontFace)
 {
+	std::wstring const requestedAlias = TakePendingDWriteFamilyAlias();
 	HRESULT const result =
 		ORIG_FontSetFontFaceReference_CreateFontFace(self, fontFace);
-	if (result == S_OK)
+	if (result == S_OK) {
 		SubstituteDWriteFont3(fontFace);
+		HookFontFaceFamilyNames(*fontFace, requestedAlias);
+	}
 	return result;
 }
 
@@ -2118,16 +2327,20 @@ HRESULT WINAPI IMPL_FontSetFontFaceReference_CreateFontFaceWithSimulations(
 	DWRITE_FONT_SIMULATIONS fontFaceSimulationFlags,
 	IDWriteFontFace3** fontFace)
 {
+	std::wstring const requestedAlias = TakePendingDWriteFamilyAlias();
 	HRESULT const result =
 		ORIG_FontSetFontFaceReference_CreateFontFaceWithSimulations(
 			self, fontFaceSimulationFlags, fontFace);
-	if (result == S_OK)
+	if (result == S_OK) {
 		SubstituteDWriteFont3(fontFace);
+		HookFontFaceFamilyNames(*fontFace, requestedAlias);
+	}
 	return result;
 }
 
 static WCHAR const* ResolveDWriteFamilyName(WCHAR const* familyName, LOGFONT& resolved)
 {
+	g_pendingDWriteFamilyAlias.clear();
 	if (!familyName) return familyName;
 	SignalDirectWriteDiagnostic(L"find-called");
 	SignalDirectWriteFamilyDiagnostic(L"find", familyName);
@@ -2135,6 +2348,7 @@ static WCHAR const* ResolveDWriteFamilyName(WCHAR const* familyName, LOGFONT& re
 	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
 	if (pSettings->CopyForceFont(resolved, resolved))
 	{
+		g_pendingDWriteFamilyAlias = familyName;
 		SignalDirectWriteDiagnostic(L"substitution-resolved");
 		SignalDirectWriteFamilyDiagnostic(L"resolved", familyName);
 		return resolved.lfFaceName;

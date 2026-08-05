@@ -294,6 +294,13 @@ HOOK_MANUALLY(HRESULT, FontSetCollection_FindFamilyName, (
 			  __out BOOL* exists
 			  ), (self, familyName, index, exists))
 
+HOOK_MANUALLY(HRESULT, LoaderFontCollection_FindFamilyName, (
+			  IDWriteFontCollection* self,
+			  __in_z WCHAR const* familyName,
+			  __out UINT32* index,
+			  __out BOOL* exists
+			  ), (self, familyName, index, exists))
+
 HOOK_MANUALLY(HRESULT, CreateCustomFontCollection, (
 			  IDWriteFactory* self,
 			  IDWriteFontCollectionLoader* collectionLoader,

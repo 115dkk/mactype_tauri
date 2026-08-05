@@ -126,6 +126,17 @@ async function capture(browserType, options, disabled, waitForReplacement) {
         options.timeoutMs,
       );
     }
+    // Chromium exposes its renderer-side DWriteFontCollectionProxy to injected
+    // code lazily, as the collection loader for the first resolved family.
+    // Resolve the known replacement first so the proxy is hooked before the
+    // source family can enter Blink's font cache.
+    await page.evaluate(async (replacement) => {
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      context.font = `16px "${replacement.replaceAll('"', '\\"')}"`;
+      context.measureText('MacType font pipeline warmup');
+      await document.fonts.load(`16px "${replacement.replaceAll('"', '\\"')}"`);
+    }, options.replacement);
     const startedAt = Date.now();
     let attempts = 0;
     let observation;

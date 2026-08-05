@@ -44,6 +44,7 @@ void SetPointerValue(Target& target, Source source) noexcept
 static void* g_systemFontCollectionFindFamilyName = nullptr;
 static void* g_customFontCollectionFindFamilyName = nullptr;
 static void* g_fontSetCollectionFindFamilyName = nullptr;
+static void* g_loaderFontCollectionFindFamilyName = nullptr;
 static void* g_systemFontCreateFontFace = nullptr;
 static void* g_systemFontFaceReferenceCreateFontFace = nullptr;
 static void* g_systemFontFaceReferenceCreateFontFaceWithSimulations = nullptr;
@@ -2001,6 +2002,17 @@ HRESULT WINAPI IMPL_FontSetCollection_FindFamilyName(
 		self, ResolveDWriteFamilyName(familyName, resolved), index, exists);
 }
 
+HRESULT WINAPI IMPL_LoaderFontCollection_FindFamilyName(
+	IDWriteFontCollection* self,
+	WCHAR const* familyName,
+	UINT32* index,
+	BOOL* exists)
+{
+	LOGFONT resolved = { 0 };
+	return ORIG_LoaderFontCollection_FindFamilyName(
+		self, ResolveDWriteFamilyName(familyName, resolved), index, exists);
+}
+
 HRESULT WINAPI IMPL_CreateCustomFontCollection(
 	IDWriteFactory* self,
 	IDWriteFontCollectionLoader* collectionLoader,
@@ -2008,6 +2020,20 @@ HRESULT WINAPI IMPL_CreateCustomFontCollection(
 	UINT32 collectionKeySize,
 	IDWriteFontCollection** fontCollection)
 {
+	CComPtr<IDWriteFontCollection> loaderCollection;
+	if (collectionLoader != nullptr &&
+		SUCCEEDED(collectionLoader->QueryInterface(&loaderCollection)) &&
+		loaderCollection != nullptr) {
+		void* const findFamilyName =
+			(*reinterpret_cast<void***>(loaderCollection.p))[5];
+		if (!ISHOOKED(LoaderFontCollection_FindFamilyName) &&
+			findFamilyName != g_systemFontCollectionFindFamilyName &&
+			findFamilyName != g_customFontCollectionFindFamilyName &&
+			findFamilyName != g_fontSetCollectionFindFamilyName) {
+			g_loaderFontCollectionFindFamilyName = findFamilyName;
+			HOOK(loaderCollection, LoaderFontCollection_FindFamilyName, 5);
+		}
+	}
 	HRESULT const result = ORIG_CreateCustomFontCollection(
 		self, collectionLoader, collectionKey, collectionKeySize, fontCollection);
 	if (SUCCEEDED(result) && fontCollection != nullptr &&
@@ -2016,7 +2042,8 @@ HRESULT WINAPI IMPL_CreateCustomFontCollection(
 		void* const findFamilyName =
 			(*reinterpret_cast<void***>(collection.p))[5];
 		if (findFamilyName != g_systemFontCollectionFindFamilyName &&
-			findFamilyName != g_fontSetCollectionFindFamilyName) {
+			findFamilyName != g_fontSetCollectionFindFamilyName &&
+			findFamilyName != g_loaderFontCollectionFindFamilyName) {
 			g_customFontCollectionFindFamilyName = findFamilyName;
 			HOOK(collection, CustomFontCollection_FindFamilyName, 5);
 		}
@@ -2038,7 +2065,8 @@ HRESULT WINAPI IMPL_CreateFontCollectionFromFontSet(
 		void* const findFamilyName =
 			(*reinterpret_cast<void***>(collection.p))[5];
 		if (findFamilyName != g_systemFontCollectionFindFamilyName &&
-			findFamilyName != g_customFontCollectionFindFamilyName) {
+			findFamilyName != g_customFontCollectionFindFamilyName &&
+			findFamilyName != g_loaderFontCollectionFindFamilyName) {
 			g_fontSetCollectionFindFamilyName = findFamilyName;
 			HOOK(collection, FontSetCollection_FindFamilyName, 5);
 		}

@@ -2148,15 +2148,9 @@ HRESULT WINAPI IMPL_FontCollection_FindFamilyName(
 	UINT32* index,
 	BOOL* exists)
 {
-	// Keep the system collection's family identity stable. Modern Chromium
-	// sends the resulting typeface across FontDataService; returning the
-	// replacement family's index here makes that transfer fail and Chromium
-	// falls back to Times New Roman. The system CreateFontFace hooks below
-	// substitute the face while preserving the requested family and font.
-	SignalDirectWriteDiagnostic(L"find-called");
-	SignalDirectWriteFamilyDiagnostic(L"find", familyName);
+	LOGFONT resolved = { 0 };
 	return ORIG_FontCollection_FindFamilyName(
-		self, familyName, index, exists);
+		self, ResolveDWriteFamilyName(familyName, resolved), index, exists);
 }
 
 static HRESULT WINAPI Vtable_SystemFontCollection_FindFamilyName(

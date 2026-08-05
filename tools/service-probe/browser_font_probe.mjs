@@ -158,6 +158,24 @@ function collectDirectWriteDiagnostics(diagnosticNamespace) {
   ]));
 }
 
+async function collectChromiumFontDataHistograms(browser, engine) {
+  if (engine !== 'chromium') return null;
+  const session = await browser.newBrowserCDPSession();
+  try {
+    const result = await session.send('Browser.getHistograms', {
+      query: 'Chrome.FontDataService',
+      delta: false,
+    });
+    return result.histograms;
+  } catch (error) {
+    return {
+      unavailable: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    await session.detach();
+  }
+}
+
 async function capture(browserType, options, disabled, waitForReplacement) {
   const environment = { ...process.env };
   // GitHub's Windows runner launches its test tree with a service token. The
@@ -263,6 +281,8 @@ async function capture(browserType, options, disabled, waitForReplacement) {
     observation.directWriteDiagnostics = collectDirectWriteDiagnostics(
       diagnosticNamespace,
     );
+    observation.fontDataServiceHistograms =
+      await collectChromiumFontDataHistograms(browser, options.engine);
     return observation;
   } finally {
     await browserServer.close();

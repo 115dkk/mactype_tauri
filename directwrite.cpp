@@ -1361,6 +1361,23 @@ bool hookFontCreation(CComPtr<IDWriteFactory>& pDWriteFactory) {
 	CComPtr<IDWriteFontCollection> fontcollection = nullptr;
 	CComPtr<IDWriteFontFamily> ffamily = nullptr;
 	if (FAILED(pDWriteFactory->GetSystemFontCollection(&fontcollection, false))) FAILEXIT;
+	HOOK(fontcollection, FontCollection_FindFamilyName, 5);
+	CComPtr<IDWriteFontCollection1> fontCollection1;
+	if (SUCCEEDED(fontcollection->QueryInterface(&fontCollection1))) {
+		CComPtr<IDWriteFontSet> fontSet;
+		if (SUCCEEDED(fontCollection1->GetFontSet(&fontSet))) {
+			// IDWriteFontSet4 is guarded by a newer NTDDI macro than MacType's
+			// minimum target. Query it by its published IID while keeping the
+			// binary compatible with earlier Windows versions.
+			static const IID iidFontSet4 =
+				{ 0xeec175fc, 0xbea9, 0x4c86, { 0x8b, 0x53, 0xcc, 0xbd, 0xd7, 0xdf, 0x0c, 0x82 } };
+			CComPtr<IUnknown> fontSet4;
+			if (SUCCEEDED(fontSet->QueryInterface(iidFontSet4,
+				reinterpret_cast<void**>(&fontSet4)))) {
+				HOOK(fontSet4, FontSet4_GetMatchingFonts, 31);
+			}
+		}
+	}
 	if (FAILED(fontcollection->GetFontFamily(0, &ffamily))) FAILEXIT;
 	if (FAILED(ffamily->GetFont(0, &dfont))) FAILEXIT;
 
@@ -1757,6 +1774,39 @@ HRESULT WINAPI IMPL_DWriteFontFaceReference_CreateFontFaceWithSimulations(
 	return ret;
 }
 
+static WCHAR const* ResolveDWriteFamilyName(WCHAR const* familyName, LOGFONT& resolved)
+{
+	if (!familyName) return familyName;
+	StringCchCopy(resolved.lfFaceName, LF_FACESIZE, familyName);
+	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
+	return pSettings->CopyForceFont(resolved, resolved) ? resolved.lfFaceName : familyName;
+}
+
+HRESULT WINAPI IMPL_FontCollection_FindFamilyName(
+	IDWriteFontCollection* self,
+	WCHAR const* familyName,
+	UINT32* index,
+	BOOL* exists)
+{
+	LOGFONT resolved = { 0 };
+	return ORIG_FontCollection_FindFamilyName(
+		self, ResolveDWriteFamilyName(familyName, resolved), index, exists);
+}
+
+HRESULT WINAPI IMPL_FontSet4_GetMatchingFonts(
+	IUnknown* self,
+	WCHAR const* familyName,
+	void const* fontAxisValues,
+	UINT32 fontAxisValueCount,
+	DWRITE_FONT_SIMULATIONS allowedSimulations,
+	IUnknown** matchingFonts)
+{
+	LOGFONT resolved = { 0 };
+	return ORIG_FontSet4_GetMatchingFonts(
+		self, ResolveDWriteFamilyName(familyName, resolved), fontAxisValues,
+		fontAxisValueCount, allowedSimulations, matchingFonts);
+}
+
 HRESULT  WINAPI IMPL_CreateTextFormat(IDWriteFactory* self,
 	__in_z WCHAR const* fontFamilyName,
 	__maybenull IDWriteFontCollection* fontCollection,
@@ -1767,13 +1817,9 @@ HRESULT  WINAPI IMPL_CreateTextFormat(IDWriteFactory* self,
 	__in_z WCHAR const* localeName,
 	__out IDWriteTextFormat** textFormat)
 {
-	LOGFONT lf = { 0 };
-	StringCchCopy(lf.lfFaceName, LF_FACESIZE, fontFamilyName);
-	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
-	if (pSettings->CopyForceFont(lf, lf))
-		return ORIG_CreateTextFormat(self, lf.lfFaceName, fontCollection, fontWeight, fontStyle, fontStretch, fontSize, localeName, textFormat);
-	else
-		return ORIG_CreateTextFormat(self, fontFamilyName, fontCollection, fontWeight, fontStyle, fontStretch, fontSize, localeName, textFormat);
+	LOGFONT resolved = { 0 };
+	return ORIG_CreateTextFormat(self, ResolveDWriteFamilyName(fontFamilyName, resolved),
+		fontCollection, fontWeight, fontStyle, fontStretch, fontSize, localeName, textFormat);
 }
 
 void WINAPI IMPL_D2D1RenderTarget_DrawGlyphRun1(

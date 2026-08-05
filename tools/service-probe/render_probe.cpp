@@ -1,9 +1,13 @@
 #include "render_probe.h"
 
+#include <sdkddkver.h>
+#undef NTDDI_VERSION
+#define NTDDI_VERSION NTDDI_WIN10_NI
+
 #include "win32_support.h"
 
 #include <bcrypt.h>
-#include <dwrite.h>
+#include <dwrite_3.h>
 #include <windows.h>
 
 #include <array>
@@ -148,6 +152,56 @@ std::wstring ResolveDirectWriteFamily(const std::wstring_view family,
   if (FAILED(collection_result) || collection == nullptr) {
     error = L"IDWriteFactory::GetSystemFontCollection failed";
     return {};
+  }
+  IDWriteFontCollection1* raw_collection1 = nullptr;
+  collection->QueryInterface(&raw_collection1);
+  UniqueCom<IDWriteFontCollection1> collection1(raw_collection1);
+  if (collection1 != nullptr) {
+    IDWriteFontSet* raw_font_set = nullptr;
+    collection1->GetFontSet(&raw_font_set);
+    UniqueCom<IDWriteFontSet> font_set(raw_font_set);
+    IDWriteFontSet4* raw_font_set4 = nullptr;
+    if (font_set != nullptr) {
+      font_set->QueryInterface(&raw_font_set4);
+    }
+    UniqueCom<IDWriteFontSet4> font_set4(raw_font_set4);
+    if (font_set4 != nullptr) {
+      std::array<DWRITE_FONT_AXIS_VALUE, DWRITE_STANDARD_FONT_AXIS_COUNT> axes{};
+      const UINT32 axis_count =
+          font_set4->ConvertWeightStretchStyleToFontAxisValues(
+              nullptr, 0, DWRITE_FONT_WEIGHT_NORMAL,
+              DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, 24.0F,
+              axes.data());
+      IDWriteFontSet4* raw_matches = nullptr;
+      const HRESULT matches_result = font_set4->GetMatchingFonts(
+          family_name.c_str(), axes.data(), axis_count,
+          static_cast<DWRITE_FONT_SIMULATIONS>(DWRITE_FONT_SIMULATIONS_BOLD |
+                                               DWRITE_FONT_SIMULATIONS_OBLIQUE),
+          &raw_matches);
+      UniqueCom<IDWriteFontSet4> matches(raw_matches);
+      if (SUCCEEDED(matches_result) && matches != nullptr &&
+          matches->GetFontCount() != 0) {
+        BOOL family_exists = FALSE;
+        IDWriteLocalizedStrings* raw_family_names = nullptr;
+        const HRESULT names_result = matches->GetPropertyValues(
+            0, DWRITE_FONT_PROPERTY_ID_FAMILY_NAME, &family_exists,
+            &raw_family_names);
+        UniqueCom<IDWriteLocalizedStrings> family_names(raw_family_names);
+        if (SUCCEEDED(names_result) && family_exists != FALSE &&
+            family_names != nullptr && family_names->GetCount() != 0) {
+          UINT32 length = 0;
+          if (SUCCEEDED(family_names->GetStringLength(0, &length))) {
+            std::wstring resolved(static_cast<std::size_t>(length) + 1U,
+                                  L'\0');
+            if (SUCCEEDED(
+                    family_names->GetString(0, resolved.data(), length + 1U))) {
+              resolved.resize(length);
+              return resolved;
+            }
+          }
+        }
+      }
+    }
   }
   UINT32 family_index = 0;
   BOOL family_exists = FALSE;

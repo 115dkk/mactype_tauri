@@ -241,6 +241,22 @@ HOOK_MANUALLY(HRESULT, DWriteFontFaceReference_CreateFontFaceWithSimulations, (
 			  __out IDWriteFontFace3** fontFace
 			  ), (self, fontFaceSimulationFlags, fontFace))
 
+HOOK_MANUALLY(HRESULT, FontCollection_FindFamilyName, (
+			  IDWriteFontCollection* self,
+			  __in_z WCHAR const* familyName,
+			  __out UINT32* index,
+			  __out BOOL* exists
+			  ), (self, familyName, index, exists))
+
+HOOK_MANUALLY(HRESULT, FontSet4_GetMatchingFonts, (
+			  IUnknown* self,
+			  __in_z WCHAR const* familyName,
+			  __in_ecount(fontAxisValueCount) void const* fontAxisValues,
+			  UINT32 fontAxisValueCount,
+			  DWRITE_FONT_SIMULATIONS allowedSimulations,
+			  __out IUnknown** matchingFonts
+			  ), (self, familyName, fontAxisValues, fontAxisValueCount, allowedSimulations, matchingFonts))
+
 HOOK_MANUALLY(HRESULT, CreateBitmapRenderTarget, (
 			  IDWriteGdiInterop* This,
 			  HDC hdc,

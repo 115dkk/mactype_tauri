@@ -137,7 +137,7 @@ async function capture(browserType, options, disabled, waitForReplacement) {
     // path exposes DWriteFontCollectionProxy to the injected hook. Never warm
     // the source or replacement: the proof must perform their first lookup
     // only after the proxy hook is active.
-    const warmupFamilies = ['Consolas', 'Tahoma'].filter(
+    const warmupFamilies = ['Webdings', 'Wingdings'].filter(
       (family) => family !== options.source && family !== options.replacement,
     );
     await page.evaluate(async (families) => {

@@ -131,17 +131,20 @@ async function capture(browserType, options, disabled, waitForReplacement) {
         options.timeoutMs,
       );
     }
-    // Chromium exposes its renderer-side DWriteFontCollectionProxy to injected
-    // code lazily, as the collection loader for the first resolved family.
-    // Resolve the known replacement first so the proxy is hooked before the
-    // source family can enter Blink's font cache.
-    await page.evaluate(async (replacement) => {
+    // Chromium prewarms its last-resort families (including Arial and Courier
+    // New) before service injection. Resolve non-last-resort Windows families
+    // so the lazy custom-collection path exposes DWriteFontCollectionProxy to
+    // the injected hook before the source family enters Blink's font cache.
+    await page.evaluate(async (families) => {
       const canvas = document.createElement('canvas');
       const context = canvas.getContext('2d');
-      context.font = `16px "${replacement.replaceAll('"', '\\"')}"`;
-      context.measureText('MacType font pipeline warmup');
-      await document.fonts.load(`16px "${replacement.replaceAll('"', '\\"')}"`);
-    }, options.replacement);
+      for (const family of families) {
+        const escaped = family.replaceAll('"', '\\"');
+        context.font = `16px "${escaped}"`;
+        context.measureText('MacType font pipeline warmup');
+        await document.fonts.load(`16px "${escaped}"`);
+      }
+    }, ['Consolas', 'Tahoma', 'Verdana', 'Georgia', 'Cambria']);
     const startedAt = Date.now();
     let attempts = 0;
     let observation;

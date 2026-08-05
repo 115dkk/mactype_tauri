@@ -132,10 +132,14 @@ async function capture(browserType, options, disabled, waitForReplacement) {
         options.timeoutMs,
       );
     }
-    // Chromium prewarms its last-resort families (including Arial and Courier
-    // New) before service injection. Resolve non-last-resort Windows families
-    // so the lazy custom-collection path exposes DWriteFontCollectionProxy to
-    // the injected hook before the source family enters Blink's font cache.
+    // Chromium prewarms its last-resort families before service injection.
+    // Resolve unmapped, non-last-resort sentinels so the lazy custom-collection
+    // path exposes DWriteFontCollectionProxy to the injected hook. Never warm
+    // the source or replacement: the proof must perform their first lookup
+    // only after the proxy hook is active.
+    const warmupFamilies = ['Consolas', 'Tahoma'].filter(
+      (family) => family !== options.source && family !== options.replacement,
+    );
     await page.evaluate(async (families) => {
       const canvas = document.createElement('canvas');
       const context = canvas.getContext('2d');
@@ -145,7 +149,7 @@ async function capture(browserType, options, disabled, waitForReplacement) {
         context.measureText('MacType font pipeline warmup');
         await document.fonts.load(`16px "${escaped}"`);
       }
-    }, ['Consolas', 'Tahoma', 'Verdana', 'Georgia', 'Cambria']);
+    }, warmupFamilies);
     const startedAt = Date.now();
     let attempts = 0;
     let observation;

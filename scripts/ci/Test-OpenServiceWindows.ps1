@@ -444,6 +444,12 @@ try {
 
     if ($runBrowserProof) {
         foreach ($engine in @('chromium', 'firefox')) {
+            # Chromium resolves its last-resort families, including Arial and
+            # Courier New, before the open service can inject into a newly
+            # created renderer. Prove the post-injection proxy path with an
+            # uncached family while retaining the Arial mapping coverage in
+            # the x86/x64 GDI and DirectWrite marker contract above.
+            $sourceFamily = if ($engine -eq 'chromium') { 'Cambria' } else { 'Arial' }
             $resultPath = Join-Path $BrowserEvidenceRoot "open-service-$engine.json"
             # The service serializes process-creation events and each fixed helper
             # has a 20-second absolute deadline. A browser process tree therefore
@@ -452,12 +458,12 @@ try {
                 --engine $engine `
                 --output $resultPath `
                 --injection-health (Join-Path $machineRoot 'health.json') `
-                --source 'Arial' `
+                --source $sourceFamily `
                 --replacement 'Courier New' `
                 --expect 'substituted' `
                 --timeout-ms 60000
             if ($LASTEXITCODE -ne 0) {
-                throw "$engine did not render the configured Arial to Courier New substitution under the open service."
+                throw "$engine did not render the configured $sourceFamily to Courier New substitution under the open service."
             }
             $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
             if (-not $result.expectationMet -or -not $result.replacementObserved) {

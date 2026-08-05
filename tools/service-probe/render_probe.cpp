@@ -129,6 +129,7 @@ bool HashSha256(const std::byte* bytes, const std::size_t size,
 
 std::wstring ResolveDirectWriteFamily(const std::wstring_view family,
                                       void* directwrite_factory,
+                                      const bool use_custom_collection,
                                       std::wstring& error) {
   IDWriteFactory* factory = static_cast<IDWriteFactory*>(directwrite_factory);
   IDWriteFactory* raw_factory = nullptr;
@@ -153,10 +154,38 @@ std::wstring ResolveDirectWriteFamily(const std::wstring_view family,
     error = L"IDWriteFactory::GetSystemFontCollection failed";
     return {};
   }
+  if (use_custom_collection) {
+    IDWriteFactory3* raw_factory3 = nullptr;
+    factory->QueryInterface(&raw_factory3);
+    UniqueCom<IDWriteFactory3> factory3(raw_factory3);
+    IDWriteFontCollection1* raw_system_collection1 = nullptr;
+    collection->QueryInterface(&raw_system_collection1);
+    UniqueCom<IDWriteFontCollection1> system_collection1(
+        raw_system_collection1);
+    IDWriteFontSet* raw_font_set = nullptr;
+    if (system_collection1 != nullptr) {
+      system_collection1->GetFontSet(&raw_font_set);
+    }
+    UniqueCom<IDWriteFontSet> font_set(raw_font_set);
+    IDWriteFontCollection1* raw_custom_collection = nullptr;
+    const HRESULT custom_result =
+        factory3 == nullptr || font_set == nullptr
+            ? E_NOINTERFACE
+            : factory3->CreateFontCollectionFromFontSet(
+                  font_set.get(), &raw_custom_collection);
+    if (FAILED(custom_result) || raw_custom_collection == nullptr) {
+      if (raw_custom_collection != nullptr) {
+        raw_custom_collection->Release();
+      }
+      error = L"IDWriteFactory3::CreateFontCollectionFromFontSet failed";
+      return {};
+    }
+    collection.reset(raw_custom_collection);
+  }
   IDWriteFontCollection1* raw_collection1 = nullptr;
   collection->QueryInterface(&raw_collection1);
   UniqueCom<IDWriteFontCollection1> collection1(raw_collection1);
-  if (collection1 != nullptr) {
+  if (!use_custom_collection && collection1 != nullptr) {
     IDWriteFontSet* raw_font_set = nullptr;
     collection1->GetFontSet(&raw_font_set);
     UniqueCom<IDWriteFontSet> font_set(raw_font_set);
@@ -378,46 +407,57 @@ FontSubstitutionObservation ObserveFontSubstitution(
       result.active_source_fingerprint ==
           result.disabled_replacement_fingerprint;
 
-  std::wstring repeated_disabled_source_family;
-  std::wstring repeated_disabled_replacement_family;
-  {
-    FontSubstitutionSwitch disabled;
-    static_cast<void>(ResolveDirectWriteFamily(source_family,
-                                               directwrite_factory, error));
-    result.direct_write.disabled_source_family =
-        ResolveDirectWriteFamily(source_family, directwrite_factory, error);
-    result.direct_write.disabled_replacement_family =
-        ResolveDirectWriteFamily(replacement_family, directwrite_factory, error);
-    repeated_disabled_source_family =
-        ResolveDirectWriteFamily(source_family, directwrite_factory, error);
-    repeated_disabled_replacement_family =
-        ResolveDirectWriteFamily(replacement_family, directwrite_factory, error);
-  }
-  static_cast<void>(ResolveDirectWriteFamily(source_family,
-                                             directwrite_factory, error));
-  result.direct_write.active_source_family =
-      ResolveDirectWriteFamily(source_family, directwrite_factory, error);
-  const std::wstring repeated_active_source_family =
-      ResolveDirectWriteFamily(source_family, directwrite_factory, error);
-  if (result.direct_write.disabled_source_family.empty() ||
-      result.direct_write.disabled_replacement_family.empty() ||
-      result.direct_write.active_source_family.empty()) {
+  const auto observe_direct_write = [&](const bool use_custom_collection) {
+    DirectWriteSubstitutionObservation observation;
+    std::wstring repeated_disabled_source_family;
+    std::wstring repeated_disabled_replacement_family;
+    {
+      FontSubstitutionSwitch disabled;
+      static_cast<void>(ResolveDirectWriteFamily(
+          source_family, directwrite_factory, use_custom_collection, error));
+      observation.disabled_source_family = ResolveDirectWriteFamily(
+          source_family, directwrite_factory, use_custom_collection, error);
+      observation.disabled_replacement_family = ResolveDirectWriteFamily(
+          replacement_family, directwrite_factory, use_custom_collection,
+          error);
+      repeated_disabled_source_family = ResolveDirectWriteFamily(
+          source_family, directwrite_factory, use_custom_collection, error);
+      repeated_disabled_replacement_family = ResolveDirectWriteFamily(
+          replacement_family, directwrite_factory, use_custom_collection,
+          error);
+    }
+    static_cast<void>(ResolveDirectWriteFamily(
+        source_family, directwrite_factory, use_custom_collection, error));
+    observation.active_source_family = ResolveDirectWriteFamily(
+        source_family, directwrite_factory, use_custom_collection, error);
+    const std::wstring repeated_active_source_family = ResolveDirectWriteFamily(
+        source_family, directwrite_factory, use_custom_collection, error);
+    if (observation.disabled_source_family.empty() ||
+        observation.disabled_replacement_family.empty() ||
+        observation.active_source_family.empty()) {
+      return observation;
+    }
+    observation.controls_stable =
+        _wcsicmp(observation.disabled_source_family.c_str(),
+                 repeated_disabled_source_family.c_str()) == 0 &&
+        _wcsicmp(observation.disabled_replacement_family.c_str(),
+                 repeated_disabled_replacement_family.c_str()) == 0 &&
+        _wcsicmp(observation.active_source_family.c_str(),
+                 repeated_active_source_family.c_str()) == 0;
+    observation.replacement_observed =
+        observation.controls_stable &&
+        _wcsicmp(observation.disabled_source_family.c_str(),
+                 observation.disabled_replacement_family.c_str()) != 0 &&
+        _wcsicmp(observation.active_source_family.c_str(),
+                 observation.disabled_replacement_family.c_str()) == 0;
+    return observation;
+  };
+  result.direct_write = observe_direct_write(false);
+  result.direct_write_custom_collection = observe_direct_write(true);
+  if (result.direct_write.active_source_family.empty() ||
+      result.direct_write_custom_collection.active_source_family.empty()) {
     result.active_source_fingerprint.clear();
-    return result;
   }
-  result.direct_write.controls_stable =
-      _wcsicmp(result.direct_write.disabled_source_family.c_str(),
-               repeated_disabled_source_family.c_str()) == 0 &&
-      _wcsicmp(result.direct_write.disabled_replacement_family.c_str(),
-               repeated_disabled_replacement_family.c_str()) == 0 &&
-      _wcsicmp(result.direct_write.active_source_family.c_str(),
-               repeated_active_source_family.c_str()) == 0;
-  result.direct_write.replacement_observed =
-      result.direct_write.controls_stable &&
-      _wcsicmp(result.direct_write.disabled_source_family.c_str(),
-               result.direct_write.disabled_replacement_family.c_str()) != 0 &&
-      _wcsicmp(result.direct_write.active_source_family.c_str(),
-               result.direct_write.disabled_replacement_family.c_str()) == 0;
   return result;
 }
 

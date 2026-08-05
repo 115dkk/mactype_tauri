@@ -41,6 +41,10 @@ void SetPointerValue(Target& target, Source source) noexcept
 	}  \
 };
 
+static void* g_systemFontCollectionFindFamilyName = nullptr;
+static void* g_customFontCollectionFindFamilyName = nullptr;
+static void* g_fontSetCollectionFindFamilyName = nullptr;
+
 struct ComMethodHooker {
 	// The target function if it has been hooked
 	BOOL (*lpIsHooked)();
@@ -1361,7 +1365,10 @@ bool hookFontCreation(CComPtr<IDWriteFactory>& pDWriteFactory) {
 	CComPtr<IDWriteFontCollection> fontcollection = nullptr;
 	CComPtr<IDWriteFontFamily> ffamily = nullptr;
 	if (FAILED(pDWriteFactory->GetSystemFontCollection(&fontcollection, false))) FAILEXIT;
+	g_systemFontCollectionFindFamilyName =
+		(*reinterpret_cast<void***>(fontcollection.p))[5];
 	HOOK(fontcollection, FontCollection_FindFamilyName, 5);
+	HOOK(pDWriteFactory, CreateCustomFontCollection, 4);
 	CComPtr<IDWriteFontCollection1> fontCollection1;
 	if (SUCCEEDED(fontcollection->QueryInterface(&fontCollection1))) {
 		CComPtr<IDWriteFontSet> fontSet;
@@ -1375,6 +1382,22 @@ bool hookFontCreation(CComPtr<IDWriteFactory>& pDWriteFactory) {
 			if (SUCCEEDED(fontSet->QueryInterface(iidFontSet4,
 				reinterpret_cast<void**>(&fontSet4)))) {
 				HOOK(fontSet4, FontSet4_GetMatchingFonts, 31);
+			}
+
+			CComPtr<IDWriteFactory3> factory3;
+			if (SUCCEEDED(pDWriteFactory->QueryInterface(&factory3))) {
+				CComPtr<IDWriteFontCollection1> fontSetCollection;
+				if (SUCCEEDED(factory3->CreateFontCollectionFromFontSet(
+					fontSet, &fontSetCollection)) && fontSetCollection != nullptr) {
+					void* const fontSetFindFamilyName =
+						(*reinterpret_cast<void***>(fontSetCollection.p))[5];
+					if (fontSetFindFamilyName !=
+						g_systemFontCollectionFindFamilyName) {
+						g_fontSetCollectionFindFamilyName = fontSetFindFamilyName;
+						HOOK(fontSetCollection, FontSetCollection_FindFamilyName, 5);
+					}
+				}
+				HOOK(factory3, CreateFontCollectionFromFontSet, 37);
 			}
 		}
 	}
@@ -1791,6 +1814,72 @@ HRESULT WINAPI IMPL_FontCollection_FindFamilyName(
 	LOGFONT resolved = { 0 };
 	return ORIG_FontCollection_FindFamilyName(
 		self, ResolveDWriteFamilyName(familyName, resolved), index, exists);
+}
+
+HRESULT WINAPI IMPL_CustomFontCollection_FindFamilyName(
+	IDWriteFontCollection* self,
+	WCHAR const* familyName,
+	UINT32* index,
+	BOOL* exists)
+{
+	LOGFONT resolved = { 0 };
+	return ORIG_CustomFontCollection_FindFamilyName(
+		self, ResolveDWriteFamilyName(familyName, resolved), index, exists);
+}
+
+HRESULT WINAPI IMPL_FontSetCollection_FindFamilyName(
+	IDWriteFontCollection* self,
+	WCHAR const* familyName,
+	UINT32* index,
+	BOOL* exists)
+{
+	LOGFONT resolved = { 0 };
+	return ORIG_FontSetCollection_FindFamilyName(
+		self, ResolveDWriteFamilyName(familyName, resolved), index, exists);
+}
+
+HRESULT WINAPI IMPL_CreateCustomFontCollection(
+	IDWriteFactory* self,
+	IDWriteFontCollectionLoader* collectionLoader,
+	void const* collectionKey,
+	UINT32 collectionKeySize,
+	IDWriteFontCollection** fontCollection)
+{
+	HRESULT const result = ORIG_CreateCustomFontCollection(
+		self, collectionLoader, collectionKey, collectionKeySize, fontCollection);
+	if (SUCCEEDED(result) && fontCollection != nullptr &&
+		*fontCollection != nullptr) {
+		CComPtr<IDWriteFontCollection> collection = *fontCollection;
+		void* const findFamilyName =
+			(*reinterpret_cast<void***>(collection.p))[5];
+		if (findFamilyName != g_systemFontCollectionFindFamilyName &&
+			findFamilyName != g_fontSetCollectionFindFamilyName) {
+			g_customFontCollectionFindFamilyName = findFamilyName;
+			HOOK(collection, CustomFontCollection_FindFamilyName, 5);
+		}
+	}
+	return result;
+}
+
+HRESULT WINAPI IMPL_CreateFontCollectionFromFontSet(
+	IDWriteFactory3* self,
+	IDWriteFontSet* fontSet,
+	IDWriteFontCollection1** fontCollection)
+{
+	HRESULT const result = ORIG_CreateFontCollectionFromFontSet(
+		self, fontSet, fontCollection);
+	if (SUCCEEDED(result) && fontCollection != nullptr &&
+		*fontCollection != nullptr) {
+		CComPtr<IDWriteFontCollection1> collection = *fontCollection;
+		void* const findFamilyName =
+			(*reinterpret_cast<void***>(collection.p))[5];
+		if (findFamilyName != g_systemFontCollectionFindFamilyName &&
+			findFamilyName != g_customFontCollectionFindFamilyName) {
+			g_fontSetCollectionFindFamilyName = findFamilyName;
+			HOOK(collection, FontSetCollection_FindFamilyName, 5);
+		}
+	}
+	return result;
 }
 
 HRESULT WINAPI IMPL_FontSet4_GetMatchingFonts(

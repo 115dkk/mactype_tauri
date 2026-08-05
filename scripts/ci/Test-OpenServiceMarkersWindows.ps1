@@ -40,6 +40,9 @@ function Test-Marker([string] $Executable, [string] $Architecture) {
     if (-not $result.fontSubstitution.directWrite.replacementObserved) {
         throw "$Architecture marker loaded MacType but did not resolve the configured DirectWrite replacement face."
     }
+    if (-not $result.fontSubstitution.directWriteCustomCollection.replacementObserved) {
+        throw "$Architecture marker loaded MacType but did not substitute through a custom DirectWrite font-set collection."
+    }
     if (-not $result.modules -or $result.modules.Count -eq 0) { throw "$Architecture marker returned no module inventory." }
 
     $expectedModule = if ($Architecture -eq 'x86') { 'MacType.dll' } else { 'MacType64.dll' }

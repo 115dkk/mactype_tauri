@@ -20,6 +20,7 @@ struct FontSubstitutionObservation final {
   bool controls_stable = false;
   bool replacement_observed = false;
   DirectWriteSubstitutionObservation direct_write;
+  DirectWriteSubstitutionObservation direct_write_custom_collection;
 };
 
 void* CreateDirectWriteFactory(std::wstring& error);

@@ -248,6 +248,34 @@ HOOK_MANUALLY(HRESULT, FontCollection_FindFamilyName, (
 			  __out BOOL* exists
 			  ), (self, familyName, index, exists))
 
+HOOK_MANUALLY(HRESULT, CustomFontCollection_FindFamilyName, (
+			  IDWriteFontCollection* self,
+			  __in_z WCHAR const* familyName,
+			  __out UINT32* index,
+			  __out BOOL* exists
+			  ), (self, familyName, index, exists))
+
+HOOK_MANUALLY(HRESULT, FontSetCollection_FindFamilyName, (
+			  IDWriteFontCollection* self,
+			  __in_z WCHAR const* familyName,
+			  __out UINT32* index,
+			  __out BOOL* exists
+			  ), (self, familyName, index, exists))
+
+HOOK_MANUALLY(HRESULT, CreateCustomFontCollection, (
+			  IDWriteFactory* self,
+			  IDWriteFontCollectionLoader* collectionLoader,
+			  void const* collectionKey,
+			  UINT32 collectionKeySize,
+			  __out IDWriteFontCollection** fontCollection
+			  ), (self, collectionLoader, collectionKey, collectionKeySize, fontCollection))
+
+HOOK_MANUALLY(HRESULT, CreateFontCollectionFromFontSet, (
+			  IDWriteFactory3* self,
+			  IDWriteFontSet* fontSet,
+			  __out IDWriteFontCollection1** fontCollection
+			  ), (self, fontSet, fontCollection))
+
 HOOK_MANUALLY(HRESULT, FontSet4_GetMatchingFonts, (
 			  IUnknown* self,
 			  __in_z WCHAR const* familyName,

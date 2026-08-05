@@ -387,9 +387,27 @@ try {
 
     $beforeRunningRepair = Get-CimInstance Win32_Service -Filter "Name='$serviceName'"
     $null = Invoke-OpenServiceSetupLogged -SetupExecutable $stagedSetup -Verb 'repair'
-    $afterRunningRepair = Get-CimInstance Win32_Service -Filter "Name='$serviceName'"
-    if ($afterRunningRepair.State -ne 'Running' -or $afterRunningRepair.ProcessId -le 0 -or $afterRunningRepair.ProcessId -eq $beforeRunningRepair.ProcessId) {
-        throw 'Repair did not preserve Running via stop, protected repair, restart, and Ready.'
+    $afterRunningRepair = $null
+    $runningRepairDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $candidate = Get-CimInstance Win32_Service -Filter "Name='$serviceName'"
+        if ($candidate -and
+            $candidate.State -eq 'Running' -and
+            $candidate.ProcessId -gt 0 -and
+            $candidate.ProcessId -ne $beforeRunningRepair.ProcessId) {
+            $afterRunningRepair = $candidate
+            break
+        }
+        $afterRunningRepair = $candidate
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $runningRepairDeadline)
+    if (-not $afterRunningRepair -or
+        $afterRunningRepair.State -ne 'Running' -or
+        $afterRunningRepair.ProcessId -le 0 -or
+        $afterRunningRepair.ProcessId -eq $beforeRunningRepair.ProcessId) {
+        $observedState = if ($afterRunningRepair) { $afterRunningRepair.State } else { '<absent>' }
+        $observedPid = if ($afterRunningRepair) { $afterRunningRepair.ProcessId } else { 0 }
+        throw "Repair did not preserve Running via stop, protected repair, restart, and Ready. Observed state='$observedState' PID=$observedPid; previous PID=$($beforeRunningRepair.ProcessId)."
     }
     Assert-ActiveRuntimeProfile -ExpectedBytes $profileA -ExpectedDigest $digestA -Phase 'running repair'
     Assert-PersistedReadyHealth -ExpectedDigest $digestA -Phase 'running repair'

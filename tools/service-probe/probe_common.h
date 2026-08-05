@@ -12,8 +12,12 @@ namespace mactype::service_probe {
 
 struct ProbeOptions {
   std::filesystem::path output_path;
+  std::filesystem::path preload_mactype_path;
   std::wstring probe_kind = L"console";
   std::wstring role = L"standalone";
+  std::wstring font_source = L"Arial";
+  std::wstring font_replacement = L"Courier New";
+  bool precreate_directwrite_factory = false;
   std::uint32_t tree_level = 0;
   DWORD wait_milliseconds = 3000;
 };

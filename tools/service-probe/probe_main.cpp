@@ -9,7 +9,10 @@ namespace {
 
 void PrintUsage() {
   std::wcerr << L"Usage: probe-{console|window}{32|64}.exe --out <result.json> "
-                L"[--wait-ms <milliseconds>] [--role <name>]\n";
+                L"[--wait-ms <milliseconds>] [--role <name>] "
+                L"[--font-source <family> --font-replacement <family>] "
+                L"[--precreate-directwrite-factory] "
+                L"[--preload-mactype <dll>]\n";
 }
 
 #if defined(SERVICE_PROBE_WINDOW)

@@ -29,7 +29,7 @@ add_library(service-probe-common STATIC
 )
 target_compile_features(service-probe-common PUBLIC cxx_std_20)
 target_compile_definitions(service-probe-common PUBLIC UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
-target_link_libraries(service-probe-common PUBLIC advapi32 bcrypt gdi32 shell32 user32 version)
+target_link_libraries(service-probe-common PUBLIC advapi32 bcrypt dwrite gdi32 shell32 user32 version)
 
 add_executable(probe-console probe_main.cpp)
 target_link_libraries(probe-console PRIVATE service-probe-common)
@@ -54,5 +54,11 @@ set_target_properties(probe-timeout-fixture PROPERTIES OUTPUT_NAME "probe-timeou
 if(MSVC)
   foreach(target service-probe-common probe-console probe-window probe-spawn-tree probe-timeout-fixture)
     target_compile_options(${target} PRIVATE /W4 /WX /permissive- /utf-8 /sdl)
+  endforeach()
+  foreach(target probe-console probe-window probe-spawn-tree probe-timeout-fixture)
+    target_link_options(${target} PRIVATE
+      /MANIFEST:EMBED
+      "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/probe.manifest"
+    )
   endforeach()
 endif()

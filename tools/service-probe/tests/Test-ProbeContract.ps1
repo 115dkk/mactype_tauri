@@ -39,7 +39,8 @@ if ($LASTEXITCODE -ne 0) {
 New-Item -ItemType Directory -Force $resultDirectory | Out-Null
 $resultPath = Join-Path $resultDirectory 'console.json'
 $probePath = Join-Path $buildDirectory "Release\probe-console$suffix.exe"
-& $probePath --out $resultPath --wait-ms 25
+& $probePath --out $resultPath --wait-ms 25 `
+    --font-source 'Arial' --font-replacement 'Courier New'
 if ($LASTEXITCODE -ne 0) {
     throw "Console probe failed with exit code $LASTEXITCODE"
 }
@@ -48,6 +49,9 @@ $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
 Assert-Equal $result.schemaVersion 1 'Probe JSON schema version changed unexpectedly'
 Assert-Equal $result.probeKind 'console' 'Console probe reported the wrong kind'
 Assert-Equal $result.architecture $(if ($Architecture -eq 'x64') { 'x64' } else { 'x86' }) 'Probe reported the wrong architecture'
+if ($result.reportedWindowsMajorVersion -lt 10) {
+    throw "Probe compatibility manifest is missing or stale: GetVersionEx reported $($result.reportedWindowsMajorVersion).$($result.reportedWindowsMinorVersion)"
+}
 if ($result.sessionId -is [string] -or $null -eq $result.sessionId) {
     throw 'Session ID must be a machine-readable JSON number'
 }
@@ -58,6 +62,46 @@ if ($result.pid -le 0 -or $result.parentPid -le 0) {
 
 if ($result.renderFingerprint -notmatch '^sha256:[0-9a-f]{64}$') {
     throw "Render fingerprint is not a SHA-256 value: $($result.renderFingerprint)"
+}
+
+if ($result.fontSubstitution.sourceFamily -ne 'Arial' -or
+    $result.fontSubstitution.replacementFamily -ne 'Courier New') {
+    throw 'Probe did not preserve the requested font-substitution pair.'
+}
+foreach ($property in @(
+    'disabledSourceFingerprint', 'activeSourceFingerprint',
+    'disabledReplacementFingerprint'
+)) {
+    if ($result.fontSubstitution.gdi.$property -notmatch '^sha256:[0-9a-f]{64}$') {
+        throw "GDI font-substitution observation omitted $property."
+    }
+}
+if ($result.fontSubstitution.gdi.disabledSourceFingerprint -eq
+    $result.fontSubstitution.gdi.disabledReplacementFingerprint) {
+    throw 'The stock Arial and Courier New controls must render differently.'
+}
+if (-not $result.fontSubstitution.gdi.controlsStable) {
+    throw 'Repeated disabled GDI control renders must be byte-for-byte stable.'
+}
+if ($result.fontSubstitution.directWrite.disabledSourceFamily -ne 'Arial' -or
+    $result.fontSubstitution.directWrite.disabledReplacementFamily -ne 'Courier New') {
+    throw 'DirectWrite controls did not resolve the requested font families.'
+}
+if (-not $result.fontSubstitution.directWrite.controlsStable) {
+    throw 'Repeated DirectWrite family observations must be stable.'
+}
+if (-not $result.mactypeModuleLoaded) {
+    if ($result.fontSubstitution.gdi.activeSourceFingerprint -ne
+        $result.fontSubstitution.gdi.disabledSourceFingerprint) {
+        throw 'A stock Windows probe changed when only the MacType diagnostic environment switch changed.'
+    }
+    if ($result.fontSubstitution.gdi.replacementObserved) {
+        throw 'A stock Windows probe must not report a MacType font substitution.'
+    }
+    if ($result.fontSubstitution.directWrite.activeSourceFamily -ne 'Arial' -or
+        $result.fontSubstitution.directWrite.replacementObserved) {
+        throw 'A stock Windows probe must not report a DirectWrite font substitution.'
+    }
 }
 
 if ($null -eq $result.modules -or $result.modules.GetType().Name -ne 'Object[]') {
@@ -82,6 +126,24 @@ if ([string]::IsNullOrWhiteSpace($result.startedAt) -or [string]::IsNullOrWhiteS
 }
 
 Write-Host "Service probe contract passed for $Architecture."
+
+$precreatedFactoryResultPath = Join-Path $resultDirectory 'precreated-directwrite.json'
+& $probePath --out $precreatedFactoryResultPath --wait-ms 0 `
+    --precreate-directwrite-factory
+Assert-Equal $LASTEXITCODE 0 'A stock precreated DirectWrite factory probe must run'
+$precreatedFactoryResult = Get-Content -LiteralPath $precreatedFactoryResultPath -Raw | ConvertFrom-Json
+Assert-Equal $precreatedFactoryResult.directWriteFactoryPrecreated $true `
+    'Probe did not preserve the browser-like precreated DirectWrite factory contract'
+Assert-Equal $precreatedFactoryResult.fontSubstitution.directWrite.activeSourceFamily 'Arial' `
+    'A stock precreated DirectWrite factory unexpectedly substituted Arial'
+
+$missingPreloadResult = Join-Path $resultDirectory 'missing-preload.json'
+& $probePath --out $missingPreloadResult --wait-ms 0 `
+    --preload-mactype (Join-Path $resultDirectory 'missing-MacType.dll')
+Assert-Equal $LASTEXITCODE 4 'A missing explicit MacType preload must fail'
+if (Test-Path -LiteralPath $missingPreloadResult) {
+    throw 'A failed explicit MacType preload must not write a successful observation.'
+}
 
 $windowResultPath = Join-Path $resultDirectory 'window.json'
 $windowProbePath = Join-Path $buildDirectory "Release\probe-window$suffix.exe"

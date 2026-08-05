@@ -26,11 +26,16 @@ const ModuleObservation* SelectPrimaryModule(const ObservedModules& observed,
 
 std::string BuildSnapshotJson(const ProbeOptions& options,
                               const ObservedModules& observed,
-                              const std::string& render_fingerprint,
+                              const FontSubstitutionObservation& font_substitution,
                               const std::string& observed_at) {
   const ProcessObservation process = CaptureProcessObservation();
   const ModuleObservation* primary =
       SelectPrimaryModule(observed, process.architecture);
+  OSVERSIONINFOW reported_windows_version{};
+  reported_windows_version.dwOSVersionInfoSize =
+      sizeof(reported_windows_version);
+#pragma warning(suppress : 4996)
+  GetVersionExW(&reported_windows_version);
 
   std::ostringstream json;
   json << "{\n"
@@ -45,9 +50,15 @@ std::string BuildSnapshotJson(const ProbeOptions& options,
        << "  \"processMachine\": \"" << process.process_machine << "\",\n"
        << "  \"nativeMachine\": \"" << process.native_machine << "\",\n"
        << "  \"integrity\": \"" << EscapeJson(process.integrity) << "\",\n"
+       << "  \"reportedWindowsMajorVersion\": "
+       << reported_windows_version.dwMajorVersion << ",\n"
+       << "  \"reportedWindowsMinorVersion\": "
+       << reported_windows_version.dwMinorVersion << ",\n"
        << "  \"startedAt\": \"" << process.started_at << "\",\n"
        << "  \"observedAt\": \"" << observed_at << "\",\n"
        << "  \"waitMilliseconds\": " << options.wait_milliseconds << ",\n"
+       << "  \"directWriteFactoryPrecreated\": "
+       << (options.precreate_directwrite_factory ? "true" : "false") << ",\n"
        << "  \"mactypeModuleLoaded\": "
        << (!observed.empty() ? "true" : "false") << ",\n"
        << "  \"mactypeModulePath\": "
@@ -64,13 +75,51 @@ std::string BuildSnapshotJson(const ProbeOptions& options,
        << (primary == nullptr ? "null"
                               : "\"" + primary->first_observed_at + "\"")
        << ",\n"
-       << "  \"renderFingerprint\": \"" << render_fingerprint << "\",\n"
+       << "  \"renderFingerprint\": \""
+       << font_substitution.active_source_fingerprint << "\",\n"
        << "  \"render\": {\n"
        << "    \"width\": 320,\n"
        << "    \"height\": 96,\n"
        << "    \"pixelFormat\": \"BGRA8-top-down\",\n"
-       << "    \"font\": \"Segoe UI\",\n"
+       << "    \"font\": \"" << EscapeJson(options.font_source) << "\",\n"
        << "    \"text\": \"MacType probe 0123456789 Aa 中 あ\"\n"
+       << "  },\n"
+       << "  \"fontSubstitution\": {\n"
+       << "    \"sourceFamily\": \"" << EscapeJson(options.font_source)
+       << "\",\n"
+       << "    \"replacementFamily\": \""
+       << EscapeJson(options.font_replacement) << "\",\n"
+       << "    \"gdi\": {\n"
+       << "      \"disabledSourceFingerprint\": \""
+       << font_substitution.disabled_source_fingerprint << "\",\n"
+       << "      \"activeSourceFingerprint\": \""
+       << font_substitution.active_source_fingerprint << "\",\n"
+       << "      \"disabledReplacementFingerprint\": \""
+       << font_substitution.disabled_replacement_fingerprint << "\",\n"
+       << "      \"controlsStable\": "
+       << (font_substitution.controls_stable ? "true" : "false") << ",\n"
+       << "      \"replacementObserved\": "
+       << (font_substitution.replacement_observed ? "true" : "false") << "\n"
+       << "    },\n"
+       << "    \"directWrite\": {\n"
+       << "      \"disabledSourceFamily\": \""
+       << EscapeJson(font_substitution.direct_write.disabled_source_family)
+       << "\",\n"
+       << "      \"activeSourceFamily\": \""
+       << EscapeJson(font_substitution.direct_write.active_source_family)
+       << "\",\n"
+       << "      \"disabledReplacementFamily\": \""
+       << EscapeJson(
+              font_substitution.direct_write.disabled_replacement_family)
+       << "\",\n"
+       << "      \"controlsStable\": "
+       << (font_substitution.direct_write.controls_stable ? "true" : "false")
+       << ",\n"
+       << "      \"replacementObserved\": "
+       << (font_substitution.direct_write.replacement_observed ? "true"
+                                                               : "false")
+       << "\n"
+       << "    }\n"
        << "  },\n"
        << "  \"modules\": [";
 

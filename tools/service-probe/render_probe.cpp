@@ -3,6 +3,7 @@
 #include "win32_support.h"
 
 #include <bcrypt.h>
+#include <dwrite.h>
 #include <windows.h>
 
 #include <array>
@@ -10,6 +11,7 @@
 #include <iomanip>
 #include <memory>
 #include <sstream>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -35,6 +37,46 @@ struct DcDeleter {
 using UniqueGdiObject =
     std::unique_ptr<std::remove_pointer_t<HGDIOBJ>, GdiObjectDeleter>;
 using UniqueDc = std::unique_ptr<std::remove_pointer_t<HDC>, DcDeleter>;
+
+template <typename Interface>
+struct ComReleaser {
+  void operator()(Interface* value) const noexcept {
+    if (value != nullptr) {
+      value->Release();
+    }
+  }
+};
+
+template <typename Interface>
+using UniqueCom = std::unique_ptr<Interface, ComReleaser<Interface>>;
+
+class FontSubstitutionSwitch final {
+ public:
+  FontSubstitutionSwitch() {
+    SetLastError(ERROR_SUCCESS);
+    const DWORD required =
+        GetEnvironmentVariableW(name_, nullptr, 0);
+    existed_ = required != 0 || GetLastError() != ERROR_ENVVAR_NOT_FOUND;
+    if (required != 0) {
+      previous_.resize(required);
+      GetEnvironmentVariableW(name_, previous_.data(), required);
+    }
+    SetEnvironmentVariableW(name_, L"1");
+  }
+
+  ~FontSubstitutionSwitch() {
+    SetEnvironmentVariableW(name_,
+                            existed_ ? previous_.c_str() : nullptr);
+  }
+
+  FontSubstitutionSwitch(const FontSubstitutionSwitch&) = delete;
+  FontSubstitutionSwitch& operator=(const FontSubstitutionSwitch&) = delete;
+
+ private:
+  static constexpr wchar_t name_[] = L"MACTYPE_FONTSUBSTITUTES_ENV";
+  bool existed_ = false;
+  std::wstring previous_;
+};
 
 bool HashSha256(const std::byte* bytes, const std::size_t size,
                 std::string& result) {
@@ -81,9 +123,66 @@ bool HashSha256(const std::byte* bytes, const std::size_t size,
   return true;
 }
 
+std::wstring ResolveDirectWriteFamily(const std::wstring_view family,
+                                      void* directwrite_factory,
+                                      std::wstring& error) {
+  IDWriteFactory* factory = static_cast<IDWriteFactory*>(directwrite_factory);
+  IDWriteFactory* raw_factory = nullptr;
+  UniqueCom<IDWriteFactory> owned_factory;
+  if (factory == nullptr) {
+    const HRESULT factory_result = DWriteCreateFactory(
+        DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+        reinterpret_cast<IUnknown**>(&raw_factory));
+    owned_factory.reset(raw_factory);
+    if (FAILED(factory_result) || owned_factory == nullptr) {
+      error = L"DWriteCreateFactory failed";
+      return {};
+    }
+    factory = owned_factory.get();
+  }
+  const std::wstring family_name(family);
+  IDWriteTextFormat* raw_format = nullptr;
+  const HRESULT format_result = factory->CreateTextFormat(
+      family_name.c_str(), nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+      DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 24.0F, L"en-us",
+      &raw_format);
+  UniqueCom<IDWriteTextFormat> format(raw_format);
+  if (FAILED(format_result) || format == nullptr) {
+    error = L"IDWriteFactory::CreateTextFormat failed";
+    return {};
+  }
+  const UINT32 length = format->GetFontFamilyNameLength();
+  std::wstring resolved(static_cast<std::size_t>(length) + 1U, L'\0');
+  if (FAILED(format->GetFontFamilyName(resolved.data(), length + 1U))) {
+    error = L"IDWriteTextFormat::GetFontFamilyName failed";
+    return {};
+  }
+  resolved.resize(length);
+  return resolved;
+}
+
 }  // namespace
 
-std::string RenderFingerprint(std::wstring& error) {
+void* CreateDirectWriteFactory(std::wstring& error) {
+  IDWriteFactory* factory = nullptr;
+  const HRESULT result = DWriteCreateFactory(
+      DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+      reinterpret_cast<IUnknown**>(&factory));
+  if (FAILED(result) || factory == nullptr) {
+    error = L"DWriteCreateFactory failed before MacType preload";
+    return nullptr;
+  }
+  return factory;
+}
+
+void ReleaseDirectWriteFactory(void* factory) noexcept {
+  if (factory != nullptr) {
+    static_cast<IDWriteFactory*>(factory)->Release();
+  }
+}
+
+std::string RenderFingerprint(const std::wstring_view family,
+                              std::wstring& error) {
   constexpr int width = 320;
   constexpr int height = 96;
   constexpr std::wstring_view text = L"MacType probe 0123456789 Aa 中 あ";
@@ -117,10 +216,16 @@ std::string RenderFingerprint(std::wstring& error) {
   SetTextColor(dc.get(), RGB(16, 24, 32));
   SetBkColor(dc.get(), RGB(255, 255, 255));
   SetBkMode(dc.get(), OPAQUE);
+  const std::wstring family_name(family);
   UniqueGdiObject font(CreateFontW(
       -24, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
       OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-      DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI"));
+      DEFAULT_PITCH | FF_DONTCARE, family_name.c_str()));
+  if (font == nullptr) {
+    error = L"CreateFontW failed: " + Win32ErrorMessage(GetLastError());
+    SelectObject(dc.get(), old_bitmap);
+    return {};
+  }
   const HGDIOBJ old_font =
       font == nullptr ? nullptr : SelectObject(dc.get(), font.get());
   RECT text_rectangle{12, 12, width - 12, height - 12};
@@ -139,6 +244,92 @@ std::string RenderFingerprint(std::wstring& error) {
   }
   SelectObject(dc.get(), old_bitmap);
   return digest;
+}
+
+FontSubstitutionObservation ObserveFontSubstitution(
+    const std::wstring_view source_family,
+    const std::wstring_view replacement_family, void* directwrite_factory,
+    std::wstring& error) {
+  FontSubstitutionObservation result;
+  std::string repeated_disabled_source;
+  std::string repeated_disabled_replacement;
+  {
+    FontSubstitutionSwitch disabled;
+    if (RenderFingerprint(source_family, error).empty()) {
+      return result;
+    }
+    result.disabled_source_fingerprint =
+        RenderFingerprint(source_family, error);
+    if (result.disabled_source_fingerprint.empty()) {
+      return result;
+    }
+    result.disabled_replacement_fingerprint =
+        RenderFingerprint(replacement_family, error);
+    if (result.disabled_replacement_fingerprint.empty()) {
+      return result;
+    }
+    repeated_disabled_source = RenderFingerprint(source_family, error);
+    repeated_disabled_replacement =
+        RenderFingerprint(replacement_family, error);
+  }
+  if (RenderFingerprint(source_family, error).empty()) {
+    return result;
+  }
+  result.active_source_fingerprint = RenderFingerprint(source_family, error);
+  const std::string repeated_active_source =
+      RenderFingerprint(source_family, error);
+  result.controls_stable =
+      result.disabled_source_fingerprint == repeated_disabled_source &&
+      result.disabled_replacement_fingerprint ==
+          repeated_disabled_replacement &&
+      result.active_source_fingerprint == repeated_active_source;
+  result.replacement_observed =
+      result.controls_stable && result.disabled_source_fingerprint !=
+          result.disabled_replacement_fingerprint &&
+      result.active_source_fingerprint ==
+          result.disabled_replacement_fingerprint;
+
+  std::wstring repeated_disabled_source_family;
+  std::wstring repeated_disabled_replacement_family;
+  {
+    FontSubstitutionSwitch disabled;
+    static_cast<void>(ResolveDirectWriteFamily(source_family,
+                                               directwrite_factory, error));
+    result.direct_write.disabled_source_family =
+        ResolveDirectWriteFamily(source_family, directwrite_factory, error);
+    result.direct_write.disabled_replacement_family =
+        ResolveDirectWriteFamily(replacement_family, directwrite_factory, error);
+    repeated_disabled_source_family =
+        ResolveDirectWriteFamily(source_family, directwrite_factory, error);
+    repeated_disabled_replacement_family =
+        ResolveDirectWriteFamily(replacement_family, directwrite_factory, error);
+  }
+  static_cast<void>(ResolveDirectWriteFamily(source_family,
+                                             directwrite_factory, error));
+  result.direct_write.active_source_family =
+      ResolveDirectWriteFamily(source_family, directwrite_factory, error);
+  const std::wstring repeated_active_source_family =
+      ResolveDirectWriteFamily(source_family, directwrite_factory, error);
+  if (result.direct_write.disabled_source_family.empty() ||
+      result.direct_write.disabled_replacement_family.empty() ||
+      result.direct_write.active_source_family.empty()) {
+    result.active_source_fingerprint.clear();
+    return result;
+  }
+  result.direct_write.controls_stable =
+      _wcsicmp(result.direct_write.disabled_source_family.c_str(),
+               repeated_disabled_source_family.c_str()) == 0 &&
+      _wcsicmp(result.direct_write.disabled_replacement_family.c_str(),
+               repeated_disabled_replacement_family.c_str()) == 0 &&
+      _wcsicmp(result.direct_write.active_source_family.c_str(),
+               repeated_active_source_family.c_str()) == 0;
+  result.direct_write.replacement_observed =
+      result.direct_write.controls_stable &&
+      _wcsicmp(result.direct_write.disabled_source_family.c_str(),
+               result.direct_write.disabled_replacement_family.c_str()) != 0 &&
+      _wcsicmp(result.direct_write.active_source_family.c_str(),
+               result.direct_write.disabled_replacement_family.c_str()) == 0;
+  return result;
 }
 
 }  // namespace mactype::service_probe::internal

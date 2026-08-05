@@ -1,4 +1,5 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -98,12 +99,55 @@ async function waitForInjectionQuiescence(healthPath, initialCount, timeoutMs) {
   throw new Error('Open-service browser-process injection did not quiesce');
 }
 
+function collectDirectWriteDiagnostics(diagnosticNamespace) {
+  const roles = ['main', 'renderer', 'utility', 'gpu', 'other'];
+  const stages = [
+    'hook-entered',
+    'system-hook-installed',
+    'shared-factory-hook-installed',
+    'isolated-factory-hook-installed',
+    'find-called',
+    'substitution-resolved',
+  ];
+  const eventNames = roles.flatMap((role) => stages.map(
+    (stage) => `Local\\MacType.${diagnosticNamespace}.${role}.${stage}`,
+  ));
+  const script = [
+    '$result = @{}',
+    'foreach ($name in $args) {',
+    '  try {',
+    '    $event = [System.Threading.EventWaitHandle]::OpenExisting($name)',
+    '    try { $result[$name] = $event.WaitOne(0) } finally { $event.Dispose() }',
+    '  } catch { $result[$name] = $false }',
+    '}',
+    '$result | ConvertTo-Json -Compress',
+  ].join('; ');
+  const powershell = path.join(
+    process.env.SystemRoot || 'C:\\Windows',
+    'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe',
+  );
+  const raw = JSON.parse(execFileSync(
+    powershell,
+    ['-NoProfile', '-NonInteractive', '-Command', script, ...eventNames],
+    { encoding: 'utf8', windowsHide: true },
+  ));
+  return Object.fromEntries(roles.map((role) => [
+    role,
+    Object.fromEntries(stages.map((stage) => [
+      stage,
+      raw[`Local\\MacType.${diagnosticNamespace}.${role}.${stage}`] === true,
+    ])),
+  ]));
+}
+
 async function capture(browserType, options, disabled, waitForReplacement) {
   const environment = { ...process.env };
   // GitHub's Windows runner launches its test tree with a service token. The
   // existing explicit force-load contract makes the injected DLL initialize
   // its user-mode DirectWrite hooks without changing injector target policy.
   environment.MACTYPE_FORCE_LOAD = '1';
+  const diagnosticNamespace = `browser-${randomUUID()}`;
+  environment.MACTYPE_DIRECTWRITE_DIAGNOSTICS = diagnosticNamespace;
   if (disabled) environment.MACTYPE_FONTSUBSTITUTES_ENV = '1';
   else delete environment.MACTYPE_FONTSUBSTITUTES_ENV;
 
@@ -198,6 +242,9 @@ async function capture(browserType, options, disabled, waitForReplacement) {
     observation.elapsedMs = Date.now() - startedAt;
     observation.browserPid = browserPid;
     observation.injectionSuccessCount = injectionSuccessCount;
+    observation.directWriteDiagnostics = collectDirectWriteDiagnostics(
+      diagnosticNamespace,
+    );
     return observation;
   } finally {
     await browserServer.close();

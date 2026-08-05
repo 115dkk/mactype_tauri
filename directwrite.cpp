@@ -98,6 +98,7 @@ static void HookFactoryCustomFontCollection(
 	IDWriteFactory *factory, bool isolated);
 static void HookSystemFontCollection(
 	IDWriteFontCollection *fontCollection);
+static void SignalDirectWriteDiagnostic(WCHAR const *stage);
 
 struct ComMethodHooker {
 	// The target function if it has been hooked
@@ -1638,6 +1639,26 @@ struct RendererModulePins
 {
 	renderer_raii::UniqueModuleReference d2d1;
 	renderer_raii::UniqueModuleReference dwrite;
+	std::vector<renderer_raii::UniqueHandle> diagnosticEvents;
+};
+
+static SRWLOCK g_directWriteDiagnosticLock = SRWLOCK_INIT;
+
+class DirectWriteDiagnosticLock
+{
+public:
+	DirectWriteDiagnosticLock() noexcept
+	{
+		AcquireSRWLockExclusive(&g_directWriteDiagnosticLock);
+	}
+
+	~DirectWriteDiagnosticLock() noexcept
+	{
+		ReleaseSRWLockExclusive(&g_directWriteDiagnosticLock);
+	}
+
+	DirectWriteDiagnosticLock(const DirectWriteDiagnosticLock&) = delete;
+	DirectWriteDiagnosticLock& operator=(const DirectWriteDiagnosticLock&) = delete;
 };
 
 static RendererModulePins& GetRendererModulePins()
@@ -1650,15 +1671,71 @@ static RendererModulePins& GetRendererModulePins()
 	return *pins;
 }
 
+static WCHAR const* GetDirectWriteDiagnosticRole() noexcept
+{
+	WCHAR const* const commandLine = GetCommandLineW();
+	if (commandLine == nullptr || wcsstr(commandLine, L"--type=") == nullptr)
+		return L"main";
+	if (wcsstr(commandLine, L"--type=renderer") != nullptr)
+		return L"renderer";
+	if (wcsstr(commandLine, L"--type=utility") != nullptr)
+		return L"utility";
+	if (wcsstr(commandLine, L"--type=gpu-process") != nullptr)
+		return L"gpu";
+	return L"other";
+}
+
+static void SignalDirectWriteDiagnostic(WCHAR const* stage)
+{
+	DWORD const namespaceLength = GetEnvironmentVariableW(
+		L"MACTYPE_DIRECTWRITE_DIAGNOSTICS", nullptr, 0);
+	if (namespaceLength <= 1 || namespaceLength > 80 || stage == nullptr)
+		return;
+
+	std::vector<WCHAR> diagnosticNamespace(namespaceLength);
+	if (GetEnvironmentVariableW(
+			L"MACTYPE_DIRECTWRITE_DIAGNOSTICS",
+			diagnosticNamespace.data(), namespaceLength) != namespaceLength - 1)
+		return;
+	for (WCHAR& value : diagnosticNamespace)
+	{
+		if (value != L'\0' &&
+			!((value >= L'a' && value <= L'z') ||
+			  (value >= L'A' && value <= L'Z') ||
+			  (value >= L'0' && value <= L'9') || value == L'-'))
+			value = L'_';
+	}
+
+	WCHAR eventName[256] = {};
+	if (FAILED(StringCchPrintfW(
+			eventName, ARRAYSIZE(eventName), L"Local\\MacType.%s.%s.%s",
+			diagnosticNamespace.data(), GetDirectWriteDiagnosticRole(), stage)))
+		return;
+
+	renderer_raii::UniqueHandle event = renderer_raii::AdoptHandle(
+		CreateEventW(nullptr, TRUE, TRUE, eventName));
+	DWORD const createError = GetLastError();
+	if (!event || createError == ERROR_ALREADY_EXISTS)
+		return;
+
+	DirectWriteDiagnosticLock lock;
+	GetRendererModulePins().diagnosticEvents.emplace_back(std::move(event));
+}
+
 void ReleasePinnedRendererModules()
 {
 	RendererModulePins& pins = GetRendererModulePins();
+	{
+		DirectWriteDiagnosticLock lock;
+		pins.diagnosticEvents.clear();
+	}
 	pins.dwrite.reset();
 	pins.d2d1.reset();
 }
 
 void HookD2DDll()
 {
+	SignalDirectWriteDiagnostic(L"hook-entered");
 	typedef HRESULT (WINAPI *PFN_DWriteCreateFactory)(
 		_In_ DWRITE_FACTORY_TYPE factoryType,
 		_In_ REFIID iid,
@@ -2008,9 +2085,15 @@ HRESULT WINAPI IMPL_FontSetFontFaceReference_CreateFontFaceWithSimulations(
 static WCHAR const* ResolveDWriteFamilyName(WCHAR const* familyName, LOGFONT& resolved)
 {
 	if (!familyName) return familyName;
+	SignalDirectWriteDiagnostic(L"find-called");
 	StringCchCopy(resolved.lfFaceName, LF_FACESIZE, familyName);
 	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
-	return pSettings->CopyForceFont(resolved, resolved) ? resolved.lfFaceName : familyName;
+	if (pSettings->CopyForceFont(resolved, resolved))
+	{
+		SignalDirectWriteDiagnostic(L"substitution-resolved");
+		return resolved.lfFaceName;
+	}
+	return familyName;
 }
 
 HRESULT WINAPI IMPL_FontCollection_FindFamilyName(
@@ -2118,6 +2201,7 @@ static void HookSystemFontCollection(IDWriteFontCollection *fontCollection)
 	g_systemFontCollectionVtableSlot = slot;
 	g_systemFontCollectionVtableOriginal = original;
 	SET_VAL(ORIG_FontCollection_FindFamilyName, original);
+	SignalDirectWriteDiagnostic(L"system-hook-installed");
 }
 
 static void HookFactoryCustomFontCollection(
@@ -2155,6 +2239,9 @@ static void HookFactoryCustomFontCollection(
 		g_sharedFactoryCreateCustomCollectionVtableOriginal = original;
 		SET_VAL(ORIG_CreateCustomFontCollection, original);
 	}
+	SignalDirectWriteDiagnostic(
+		isolated ? L"isolated-factory-hook-installed" :
+			L"shared-factory-hook-installed");
 }
 
 static void HookCollectionLoader(IDWriteFontCollectionLoader *collectionLoader)

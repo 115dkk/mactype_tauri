@@ -53,7 +53,10 @@ static void *g_fontSetCollectionFindFamilyName = nullptr;
 static void *g_loaderFontCollectionFindFamilyName = nullptr;
 static void **g_loaderFontCollectionVtableSlot = nullptr;
 static void *g_loaderFontCollectionVtableOriginal = nullptr;
-static void *g_factoryCreateCustomFontCollection = nullptr;
+static void **g_sharedFactoryCreateCustomCollectionVtableSlot = nullptr;
+static void *g_sharedFactoryCreateCustomCollectionVtableOriginal = nullptr;
+static void **g_isolatedFactoryCreateCustomCollectionVtableSlot = nullptr;
+static void *g_isolatedFactoryCreateCustomCollectionVtableOriginal = nullptr;
 static void *g_systemFontCreateFontFace = nullptr;
 static void *g_systemFontFaceReferenceCreateFontFace = nullptr;
 static void *g_systemFontFaceReferenceCreateFontFaceWithSimulations = nullptr;
@@ -72,6 +75,20 @@ enum class CollectionFontHookKind
 
 static void HookCollectionFontCreation(
 	IDWriteFontCollection* collection, CollectionFontHookKind kind);
+static HRESULT WINAPI Vtable_CreateCustomFontCollection(
+	IDWriteFactory *self,
+	IDWriteFontCollectionLoader *collectionLoader,
+	void const *collectionKey,
+	UINT32 collectionKeySize,
+	IDWriteFontCollection **fontCollection);
+static HRESULT WINAPI Vtable_IsolatedCreateCustomFontCollection(
+	IDWriteFactory *self,
+	IDWriteFontCollectionLoader *collectionLoader,
+	void const *collectionKey,
+	UINT32 collectionKeySize,
+	IDWriteFontCollection **fontCollection);
+static void HookFactoryCustomFontCollection(
+	IDWriteFactory *factory, bool isolated);
 
 struct ComMethodHooker {
 	// The target function if it has been hooked
@@ -1396,9 +1413,7 @@ bool hookFontCreation(CComPtr<IDWriteFactory>& pDWriteFactory) {
 	g_systemFontCollectionFindFamilyName =
 		(*reinterpret_cast<void***>(fontcollection.p))[5];
 	HOOK(fontcollection, FontCollection_FindFamilyName, 5);
-	g_factoryCreateCustomFontCollection =
-		(*reinterpret_cast<void***>(pDWriteFactory.p))[4];
-	HOOK(pDWriteFactory, CreateCustomFontCollection, 4);
+	HookFactoryCustomFontCollection(pDWriteFactory, false);
 	CComPtr<IDWriteFontCollection1> fontCollection1;
 	if (SUCCEEDED(fontcollection->QueryInterface(&fontCollection1))) {
 		CComPtr<IDWriteFontSet> fontSet;
@@ -1579,20 +1594,17 @@ static DWORD WINAPI HookExistingDirectWriteFactory(LPVOID moduleReference)
 	{
 		IUnknown* rawFactory = factory;
 		hookDirectWrite(&rawFactory);
+		CComPtr<IDWriteFactory> sharedFactory;
+		if (SUCCEEDED(factory->QueryInterface(&sharedFactory)))
+			HookFactoryCustomFontCollection(sharedFactory, false);
 	}
 	factory.Release();
 	if (ORIG_DWriteCreateFactory && SUCCEEDED(ORIG_DWriteCreateFactory(
 		DWRITE_FACTORY_TYPE_ISOLATED, __uuidof(IDWriteFactory), &factory)))
 	{
 		CComPtr<IDWriteFactory> isolatedFactory;
-		if (SUCCEEDED(factory->QueryInterface(&isolatedFactory))) {
-			void* const createCustomFontCollection =
-				(*reinterpret_cast<void***>(isolatedFactory.p))[4];
-			if (createCustomFontCollection != g_factoryCreateCustomFontCollection &&
-				!ISHOOKED(IsolatedCreateCustomFontCollection)) {
-				HOOK(isolatedFactory, IsolatedCreateCustomFontCollection, 4);
-			}
-		}
+		if (SUCCEEDED(factory->QueryInterface(&isolatedFactory)))
+			HookFactoryCustomFontCollection(isolatedFactory, true);
 	}
 	factory.Release();
 	HMODULE rawSelfReference = selfReference.release();
@@ -2069,6 +2081,43 @@ static bool ReplaceVtableSlot(void **slot, void *replacement, void *&original)
 	return false;
 }
 
+static void HookFactoryCustomFontCollection(
+	IDWriteFactory *factory, bool isolated)
+{
+	if (factory == nullptr)
+		return;
+	CCriticalSectionLock hookLock(CCriticalSectionLock::CS_DWRITE);
+	void **const slot = &(*reinterpret_cast<void ***>(factory))[4];
+	void *sharedReplacement = nullptr;
+	void *isolatedReplacement = nullptr;
+	SET_VAL(sharedReplacement, &Vtable_CreateCustomFontCollection);
+	SET_VAL(isolatedReplacement, &Vtable_IsolatedCreateCustomFontCollection);
+	if (*slot == sharedReplacement || *slot == isolatedReplacement)
+		return;
+
+	void *replacement = isolated ? isolatedReplacement : sharedReplacement;
+	void *original = nullptr;
+	if (isolated)
+		SET_VAL(ORIG_IsolatedCreateCustomFontCollection, *slot);
+	else
+		SET_VAL(ORIG_CreateCustomFontCollection, *slot);
+	if (!ReplaceVtableSlot(slot, replacement, original))
+		return;
+
+	if (isolated)
+	{
+		g_isolatedFactoryCreateCustomCollectionVtableSlot = slot;
+		g_isolatedFactoryCreateCustomCollectionVtableOriginal = original;
+		SET_VAL(ORIG_IsolatedCreateCustomFontCollection, original);
+	}
+	else
+	{
+		g_sharedFactoryCreateCustomCollectionVtableSlot = slot;
+		g_sharedFactoryCreateCustomCollectionVtableOriginal = original;
+		SET_VAL(ORIG_CreateCustomFontCollection, original);
+	}
+}
+
 static void HookCollectionLoader(IDWriteFontCollectionLoader *collectionLoader)
 {
 	CComPtr<IDWriteFontCollection> loaderCollection;
@@ -2107,11 +2156,9 @@ static void HookCollectionLoader(IDWriteFontCollectionLoader *collectionLoader)
 void RestoreDirectWriteVtableHooks()
 {
 	CCriticalSectionLock hookLock(CCriticalSectionLock::CS_DWRITE);
-	if (g_loaderFontCollectionVtableSlot == nullptr ||
-		g_loaderFontCollectionVtableOriginal == nullptr)
-		return;
 	void *ignored = nullptr;
-	if (ReplaceVtableSlot(
+	if (g_loaderFontCollectionVtableSlot != nullptr &&
+		g_loaderFontCollectionVtableOriginal != nullptr && ReplaceVtableSlot(
 			g_loaderFontCollectionVtableSlot,
 			g_loaderFontCollectionVtableOriginal,
 			ignored))
@@ -2119,6 +2166,28 @@ void RestoreDirectWriteVtableHooks()
 		g_loaderFontCollectionVtableSlot = nullptr;
 		g_loaderFontCollectionVtableOriginal = nullptr;
 		g_loaderFontCollectionFindFamilyName = nullptr;
+	}
+	ignored = nullptr;
+	if (g_isolatedFactoryCreateCustomCollectionVtableSlot != nullptr &&
+		g_isolatedFactoryCreateCustomCollectionVtableOriginal != nullptr &&
+		ReplaceVtableSlot(
+			g_isolatedFactoryCreateCustomCollectionVtableSlot,
+			g_isolatedFactoryCreateCustomCollectionVtableOriginal,
+			ignored))
+	{
+		g_isolatedFactoryCreateCustomCollectionVtableSlot = nullptr;
+		g_isolatedFactoryCreateCustomCollectionVtableOriginal = nullptr;
+	}
+	ignored = nullptr;
+	if (g_sharedFactoryCreateCustomCollectionVtableSlot != nullptr &&
+		g_sharedFactoryCreateCustomCollectionVtableOriginal != nullptr &&
+		ReplaceVtableSlot(
+			g_sharedFactoryCreateCustomCollectionVtableSlot,
+			g_sharedFactoryCreateCustomCollectionVtableOriginal,
+			ignored))
+	{
+		g_sharedFactoryCreateCustomCollectionVtableSlot = nullptr;
+		g_sharedFactoryCreateCustomCollectionVtableOriginal = nullptr;
 	}
 }
 
@@ -2170,6 +2239,30 @@ HRESULT WINAPI IMPL_IsolatedCreateCustomFontCollection(
 		ORIG_IsolatedCreateCustomFontCollection(
 			self, collectionLoader, collectionKey, collectionKeySize, fontCollection),
 		fontCollection);
+}
+
+static HRESULT WINAPI Vtable_CreateCustomFontCollection(
+	IDWriteFactory *self,
+	IDWriteFontCollectionLoader *collectionLoader,
+	void const *collectionKey,
+	UINT32 collectionKeySize,
+	IDWriteFontCollection **fontCollection)
+{
+	HCounter call;
+	return IMPL_CreateCustomFontCollection(
+		self, collectionLoader, collectionKey, collectionKeySize, fontCollection);
+}
+
+static HRESULT WINAPI Vtable_IsolatedCreateCustomFontCollection(
+	IDWriteFactory *self,
+	IDWriteFontCollectionLoader *collectionLoader,
+	void const *collectionKey,
+	UINT32 collectionKeySize,
+	IDWriteFontCollection **fontCollection)
+{
+	HCounter call;
+	return IMPL_IsolatedCreateCustomFontCollection(
+		self, collectionLoader, collectionKey, collectionKeySize, fontCollection);
 }
 
 HRESULT WINAPI IMPL_CreateFontCollectionFromFontSet(

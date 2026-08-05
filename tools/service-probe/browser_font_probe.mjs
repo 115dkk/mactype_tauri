@@ -158,13 +158,13 @@ function collectDirectWriteDiagnostics(diagnosticNamespace) {
   ]));
 }
 
-async function collectChromiumFontDataHistograms(browser, engine) {
+async function collectChromiumFontDataHistograms(browser, engine, delta = false) {
   if (engine !== 'chromium') return null;
   const session = await browser.newBrowserCDPSession();
   try {
     const result = await session.send('Browser.getHistograms', {
       query: 'Chrome.FontDataService',
-      delta: false,
+      delta,
     });
     return result.histograms;
   } catch (error) {
@@ -234,6 +234,24 @@ async function capture(browserType, options, disabled, waitForReplacement) {
         await document.fonts.load(`16px "${escaped}"`);
       }
     }, warmupFamilies);
+    await collectChromiumFontDataHistograms(browser, options.engine, true);
+    const probeFamily = async (family) => {
+      await page.evaluate(async (name) => {
+        const escaped = name.replaceAll('"', '\\"');
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        context.font = `48px "${escaped}"`;
+        context.measureText('MacType FontDataService diagnostic');
+        await document.fonts.load(`48px "${escaped}"`);
+      }, family);
+      return collectChromiumFontDataHistograms(
+        browser, options.engine, true,
+      );
+    };
+    const fontDataServiceFamilyDeltas = {
+      source: await probeFamily(options.source),
+      replacement: await probeFamily(options.replacement),
+    };
     const startedAt = Date.now();
     let attempts = 0;
     let observation;
@@ -281,6 +299,7 @@ async function capture(browserType, options, disabled, waitForReplacement) {
     observation.directWriteDiagnostics = collectDirectWriteDiagnostics(
       diagnosticNamespace,
     );
+    observation.fontDataServiceFamilyDeltas = fontDataServiceFamilyDeltas;
     observation.fontDataServiceHistograms =
       await collectChromiumFontDataHistograms(browser, options.engine);
     return observation;

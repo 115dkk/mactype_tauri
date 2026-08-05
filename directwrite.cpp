@@ -1371,6 +1371,14 @@ bool hookFontCreation(CComPtr<IDWriteFactory>& pDWriteFactory) {
 	} else {
 		// IDWriteFont::CreateFontFace just wraps this
 		HOOK(dfont3, CreateFontFace, 19);
+
+		CComPtr<IDWriteFontFaceReference> fontFaceReference;
+		if (SUCCEEDED(dfont3->GetFontFaceReference(&fontFaceReference)) && fontFaceReference) {
+			// Modern browser font managers create faces through references instead
+			// of CreateTextFormat. Both reference interfaces share these slots.
+			HOOK(fontFaceReference, DWriteFontFaceReference_CreateFontFace, 3);
+			HOOK(fontFaceReference, DWriteFontFaceReference_CreateFontFaceWithSimulations, 4);
+		}
 	}
 	return true;
 }

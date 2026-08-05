@@ -141,24 +141,59 @@ std::wstring ResolveDirectWriteFamily(const std::wstring_view family,
     factory = owned_factory.get();
   }
   const std::wstring family_name(family);
-  IDWriteTextFormat* raw_format = nullptr;
-  const HRESULT format_result = factory->CreateTextFormat(
-      family_name.c_str(), nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-      DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 24.0F, L"en-us",
-      &raw_format);
-  UniqueCom<IDWriteTextFormat> format(raw_format);
-  if (FAILED(format_result) || format == nullptr) {
-    error = L"IDWriteFactory::CreateTextFormat failed";
+  IDWriteFontCollection* raw_collection = nullptr;
+  const HRESULT collection_result =
+      factory->GetSystemFontCollection(&raw_collection);
+  UniqueCom<IDWriteFontCollection> collection(raw_collection);
+  if (FAILED(collection_result) || collection == nullptr) {
+    error = L"IDWriteFactory::GetSystemFontCollection failed";
     return {};
   }
-  const UINT32 length = format->GetFontFamilyNameLength();
-  std::wstring resolved(static_cast<std::size_t>(length) + 1U, L'\0');
-  if (FAILED(format->GetFontFamilyName(resolved.data(), length + 1U))) {
-    error = L"IDWriteTextFormat::GetFontFamilyName failed";
+  UINT32 family_index = 0;
+  BOOL family_exists = FALSE;
+  if (FAILED(collection->FindFamilyName(family_name.c_str(), &family_index,
+                                        &family_exists)) ||
+      family_exists == FALSE) {
+    error = L"IDWriteFontCollection::FindFamilyName failed";
     return {};
   }
-  resolved.resize(length);
-  return resolved;
+  IDWriteFontFamily* raw_family = nullptr;
+  const HRESULT family_result =
+      collection->GetFontFamily(family_index, &raw_family);
+  UniqueCom<IDWriteFontFamily> font_family(raw_family);
+  if (FAILED(family_result) || font_family == nullptr) {
+    error = L"IDWriteFontCollection::GetFontFamily failed";
+    return {};
+  }
+  IDWriteFont* raw_font = nullptr;
+  const HRESULT font_result = font_family->GetFirstMatchingFont(
+          DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+          DWRITE_FONT_STYLE_NORMAL, &raw_font);
+  UniqueCom<IDWriteFont> font(raw_font);
+  if (FAILED(font_result) || font == nullptr) {
+    error = L"IDWriteFontFamily::GetFirstMatchingFont failed";
+    return {};
+  }
+  IDWriteFontFace* raw_face = nullptr;
+  const HRESULT face_result = font->CreateFontFace(&raw_face);
+  UniqueCom<IDWriteFontFace> face(raw_face);
+  if (FAILED(face_result) || face == nullptr) {
+    error = L"IDWriteFont::CreateFontFace failed";
+    return {};
+  }
+  IDWriteGdiInterop* raw_interop = nullptr;
+  const HRESULT interop_result = factory->GetGdiInterop(&raw_interop);
+  UniqueCom<IDWriteGdiInterop> interop(raw_interop);
+  if (FAILED(interop_result) || interop == nullptr) {
+    error = L"IDWriteFactory::GetGdiInterop failed";
+    return {};
+  }
+  LOGFONTW resolved{};
+  if (FAILED(interop->ConvertFontFaceToLOGFONT(face.get(), &resolved))) {
+    error = L"IDWriteGdiInterop::ConvertFontFaceToLOGFONT failed";
+    return {};
+  }
+  return resolved.lfFaceName;
 }
 
 }  // namespace

@@ -1259,8 +1259,10 @@ bool CGdippSettings::CopyForceFont(LOGFONT& lf, const LOGFONT& lfOrg) const
 {
 	_ASSERTE(m_bDelayedInit);
 	//__asm{ int 3 }
-	GetEnvironmentVariableW(L"MACTYPE_FONTSUBSTITUTES_ENV", nullptr, 0);
-	if (GetLastError()!=ERROR_ENVVAR_NOT_FOUND)
+	SetLastError(ERROR_SUCCESS);
+	const DWORD environmentLength =
+		GetEnvironmentVariableW(L"MACTYPE_FONTSUBSTITUTES_ENV", nullptr, 0);
+	if (environmentLength != 0 || GetLastError() != ERROR_ENVVAR_NOT_FOUND)
 		return false;
 	//&lf == &lfOrgも可
 	bool bForceFont = false;

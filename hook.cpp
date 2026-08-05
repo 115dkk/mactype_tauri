@@ -21,6 +21,7 @@
 #include <VersionHelpers.h>
 #include "EventLogging.h"
 #include "hookCounter.h"
+#include <vector>
 
 #ifdef STATIC_LIB
 	#include <aux_ulib.h>
@@ -40,6 +41,13 @@
 
 HINSTANCE g_dllInstance;
 
+template <typename Target, typename Source>
+void CopyHookPointer(Target& target, Source source) noexcept
+{
+	static_assert(sizeof(Target) == sizeof(Source), "hook pointer size mismatch");
+	memcpy(&target, &source, sizeof(target));
+}
+
 //PFNLdrGetProcedureAddress LdrGetProcedureAddress = (PFNLdrGetProcedureAddress)GetProcAddress(LoadLibrary(_T("ntdll.dll")),"LdrGetProcedureAddress");
 //PFNCreateProcessW nCreateProcessW = (PFNCreateProcessW)MyGetProcAddress(LoadLibrary(_T("kernel32.dll")),"CreateProcessW");
 //PFNCreateProcessA nCreateProcessA = (PFNCreateProcessA)MyGetProcAddress(LoadLibrary(_T("kernel32.dll")),"CreateProcessA");
@@ -50,6 +58,8 @@ HINSTANCE g_dllInstance;
 #ifdef USE_DETOURS
 
 #include "detours.h"
+#include "detour_transaction.h"
+
 #ifdef _M_IX86
 #pragma comment (lib, "detours.lib")
 #else
@@ -86,21 +96,27 @@ static void hook_initinternal()
 #define HOOK_MANUALLY(rettype, name, argtype, arglist) ;
 #define HOOK_DEFINE(rettype, name, argtype, arglist) \
 	if (&ORIG_##name && !IsHooked_##name) { \
-		if (DetourAttach(&(PVOID&)ORIG_##name, REF_##name) == NOERROR) IsHooked_##name = true; \
+		if (transaction.Attach(reinterpret_cast<PVOID*>(&ORIG_##name), reinterpret_cast<PVOID>(REF_##name)) == NOERROR) IsHooked_##name = true; \
 	}
 
 static LONG hook_init()
 {
 	DetourRestoreAfterWith();
 
-	DetourTransactionBegin();
-	DetourUpdateThread(GetCurrentThread());
+	renderer_raii::DetourTransaction transaction;
 
 #include "hooklist.h"
+#undef HOOK_DEFINE
+#undef HOOK_MANUALLY
 
-	LONG error = DetourTransactionCommit();
+	LONG error = transaction.Commit();
 
 	if (error != NOERROR) {
+		#define HOOK_MANUALLY HOOK_DEFINE
+		#define HOOK_DEFINE(rettype, name, argtype, arglist) IsHooked_##name = false;
+		#include "hooklist.h"
+		#undef HOOK_DEFINE
+		#undef HOOK_MANUALLY
 		TRACE(_T("hook_init error: %#x\n"), error);
 	}
 	return error;
@@ -112,10 +128,11 @@ static LONG hook_init()
 #define HOOK_MANUALLY(rettype, name, argtype, arglist) \
 	LONG hook_demand_##name(bool bForce = false){ \
 	DetourRestoreAfterWith(); \
-	DetourTransactionBegin(); \
-	DetourUpdateThread(GetCurrentThread()); \
-	if (&ORIG_##name && (bForce || !IsHooked_##name)) { DetourAttach(&(PVOID&)ORIG_##name, REF_##name); IsHooked_##name = true; } \
-	LONG error = DetourTransactionCommit(); \
+	renderer_raii::DetourTransaction transaction; \
+	const bool shouldAttach = &ORIG_##name && (bForce || !IsHooked_##name); \
+	if (shouldAttach) transaction.Attach(reinterpret_cast<PVOID*>(&ORIG_##name), reinterpret_cast<PVOID>(REF_##name)); \
+	LONG error = transaction.Commit(); \
+	if (error == NOERROR && shouldAttach) IsHooked_##name = true; \
 	if (error != NOERROR) { \
 	    TRACE(_T("hook_init error: %#x\n"), error); \
     } \
@@ -129,19 +146,25 @@ static LONG hook_init()
 //
 #define HOOK_MANUALLY HOOK_DEFINE
 #define HOOK_DEFINE(rettype, name, argtype, arglist) \
-	if (IsHooked_##name) DetourDetach(&(PVOID&)ORIG_##name, REF_##name); \
-	IsHooked_##name = false;
+	if (IsHooked_##name) transaction.Detach(reinterpret_cast<PVOID*>(&ORIG_##name), reinterpret_cast<PVOID>(REF_##name));
 static void hook_term()
 {
-	DetourTransactionBegin();
-	DetourUpdateThread(GetCurrentThread());
+	renderer_raii::DetourTransaction transaction;
 
 #include "hooklist.h"
+#undef HOOK_DEFINE
+#undef HOOK_MANUALLY
 
-	LONG error = DetourTransactionCommit();
+	LONG error = transaction.Commit();
 
 	if (error != NOERROR) {
 		TRACE(_T("hook_term error: %#x\n"), error);
+	} else {
+		#define HOOK_MANUALLY HOOK_DEFINE
+		#define HOOK_DEFINE(rettype, name, argtype, arglist) IsHooked_##name = false;
+		#include "hooklist.h"
+		#undef HOOK_DEFINE
+		#undef HOOK_MANUALLY
 	}
 	HCounter::wait(3000);
 }
@@ -190,8 +213,8 @@ static void hook_initinternal()
 
 #define HOOK_DEFINE(rettype, name, argtype, arglist) \
 	if (&ORIG_##name) { \
-	FORCE(LhInstallHook((PVOID&)ORIG_##name, IMPL_##name, (PVOID)0, &HOOK_##name)); \
-	*(void**)&ORIG_##name =  (void*)HOOK_##name.Link->OldProc; \
+	FORCE(LhInstallHook(reinterpret_cast<PVOID&>(ORIG_##name), reinterpret_cast<PVOID>(IMPL_##name), nullptr, &HOOK_##name)); \
+	CopyHookPointer(ORIG_##name, HOOK_##name.Link->OldProc); \
 	FORCE(LhSetExclusiveACL(ACLEntries, 0, &HOOK_##name)); }
 #define HOOK_MANUALLY(rettype, name, argtype, arglist) ;
 
@@ -219,11 +242,11 @@ ERROR_ABORT:
 	NTSTATUS NtStatus; \
 	ULONG ACLEntries[1] = { 0 }; \
 	if (bForce) {  \
-		memset((void*)&HOOK_##name, 0, sizeof(HOOK_TRACE_INFO));  \
+		memset(&HOOK_##name, 0, sizeof(HOOK_TRACE_INFO));  \
 	}  \
 	if (&ORIG_##name) {	\
-	FORCE(LhInstallHook((PVOID&)ORIG_##name, IMPL_##name, (PVOID)0, &HOOK_##name)); \
-	*(void**)&ORIG_##name =  (void*)HOOK_##name.Link->OldProc; \
+	FORCE(LhInstallHook(reinterpret_cast<PVOID&>(ORIG_##name), reinterpret_cast<PVOID>(IMPL_##name), nullptr, &HOOK_##name)); \
+	CopyHookPointer(ORIG_##name, HOOK_##name.Link->OldProc); \
 	FORCE(LhSetExclusiveACL(ACLEntries, 0, &HOOK_##name)); } \
 	return NOERROR; \
 	ERROR_ABORT: \
@@ -274,48 +297,48 @@ HANDLE						g_hfDbgText;
 
 typedef BOOL(WINAPI *TIsImmersiveProcess)(_In_ HANDLE hProcess);
 
-TIsImmersiveProcess IsUWP = (TIsImmersiveProcess)GetProcAddress(GetModuleHandle(L"user32.dll"), "IsImmersiveProcess");
+TIsImmersiveProcess IsUWP = reinterpret_cast<TIsImmersiveProcess>(GetProcAddress(GetModuleHandle(L"user32.dll"), "IsImmersiveProcess"));
 
 BOOL WINAPI IsRunAsUser(VOID)
 {
 	if (IsUWP && IsUWP(GetCurrentProcess())) return true;	// treat all UWP apps as user exe
-	HANDLE hProcessToken = NULL;
+	renderer_raii::UniqueHandle processToken;
 	DWORD groupLength = 50;
 
-	PTOKEN_GROUPS groupInfo = (PTOKEN_GROUPS)LocalAlloc(0,
-		groupLength);
+	renderer_raii::UniqueLocalMemory<TOKEN_GROUPS> groupInfo(
+		static_cast<PTOKEN_GROUPS>(LocalAlloc(0, groupLength)));
 
 	SID_IDENTIFIER_AUTHORITY siaNt = SECURITY_NT_AUTHORITY;
-	PSID InteractiveSid = NULL;
-	PSID ServiceSid = NULL;
+	renderer_raii::UniqueSid interactiveSid;
+	renderer_raii::UniqueSid serviceSid;
+	PSID rawInteractiveSid = nullptr;
+	PSID rawServiceSid = nullptr;
 	DWORD i;
 
 	// Start with assumption that process is an SERVICE, not a EXE;
 	BOOL fExe = FALSE;
 
 
-	if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY,
-		&hProcessToken))
+	HANDLE rawProcessToken = nullptr;
+	if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &rawProcessToken))
+		goto ret;
+	processToken = renderer_raii::AdoptHandle(rawProcessToken);
+
+	if (!groupInfo)
 		goto ret;
 
-	if (groupInfo == NULL)
-		goto ret;
-
-	if (!GetTokenInformation(hProcessToken, TokenGroups, groupInfo,
+	if (!GetTokenInformation(processToken.get(), TokenGroups, groupInfo.get(),
 		groupLength, &groupLength))
 	{
 		if (GetLastError() != ERROR_INSUFFICIENT_BUFFER)
 			goto ret;
 
-		LocalFree(groupInfo);
-		groupInfo = NULL;
+		groupInfo.reset(static_cast<PTOKEN_GROUPS>(LocalAlloc(0, groupLength)));
 
-		groupInfo = (PTOKEN_GROUPS)LocalAlloc(0, groupLength);
-
-		if (groupInfo == NULL)
+		if (!groupInfo)
 			goto ret;
 
-		if (!GetTokenInformation(hProcessToken, TokenGroups, groupInfo,
+		if (!GetTokenInformation(processToken.get(), TokenGroups, groupInfo.get(),
 			groupLength, &groupLength))
 		{
 			goto ret;
@@ -336,16 +359,18 @@ BOOL WINAPI IsRunAsUser(VOID)
 
 	if (!AllocateAndInitializeSid(&siaNt, 1, SECURITY_INTERACTIVE_RID, 0,
 		0,
-		0, 0, 0, 0, 0, &InteractiveSid))
+		0, 0, 0, 0, 0, &rawInteractiveSid))
 	{
 		goto ret;
 	}
+	interactiveSid.reset(rawInteractiveSid);
 
 	if (!AllocateAndInitializeSid(&siaNt, 1, SECURITY_SERVICE_RID, 0, 0, 0,
-		0, 0, 0, 0, &ServiceSid))
+		0, 0, 0, 0, &rawServiceSid))
 	{
 		goto ret;
 	}
+	serviceSid.reset(rawServiceSid);
 
 	for (i = 0; i < groupInfo->GroupCount; i += 1)
 	{
@@ -357,7 +382,7 @@ BOOL WINAPI IsRunAsUser(VOID)
 		//  the 2 groups we're interested in.
 		//
 
-		if (EqualSid(Sid, InteractiveSid))
+	if (EqualSid(Sid, interactiveSid.get()))
 		{
 			//
 			//  This process has the Interactive SID in its
@@ -367,7 +392,7 @@ BOOL WINAPI IsRunAsUser(VOID)
 			fExe = true;
 			goto ret;
 		}
-		else if (EqualSid(Sid, ServiceSid))
+		else if (EqualSid(Sid, serviceSid.get()))
 		{
 			//
 			//  This process has the Service SID in its
@@ -387,23 +412,10 @@ BOOL WINAPI IsRunAsUser(VOID)
 	fExe = FALSE;
 
 ret:
-
-	if (InteractiveSid)
-		FreeSid(InteractiveSid);
-
-	if (ServiceSid)
-		FreeSid(ServiceSid);
-
-	if (groupInfo)
-		LocalFree(groupInfo);
-
-	if (hProcessToken)
-		CloseHandle(hProcessToken);
-
 // 	EventLogging logger;
 // 	TCHAR s[100] = { 0 };
 // 	wsprintf(s, L"Loading processid %d, isUserProcess=%d", GetCurrentProcessId(), (int)fExe);
-// 	LPCTSTR lpStrings[] = {s}; 
+// 	LPCTSTR lpStrings[] = {s};
 // 	logger.LogIt(1, 1, lpStrings, 1);
 	return(fExe);
 }
@@ -417,17 +429,19 @@ BOOL AddEasyHookEnv()
 	*lpfilename = 0;
 	_tcscat(dir, _T(";"));
 	dirlen = _tcslen(dir);
-	int sz=GetEnvironmentVariable(_T("path"), NULL, 0);
-	LPTSTR lpPath = (LPTSTR)malloc((sz+dirlen+2)*sizeof(TCHAR));
-	GetEnvironmentVariable(_T("path"), lpPath, sz);
-	if (!_tcsstr(lpPath, dir))
-	{
-		if (lpPath[sz-2]!=_T(';'))
-			_tcscat(lpPath, _T(";"));
-		_tcscat(lpPath, dir);
-		SetEnvironmentVariable(_T("path"), lpPath);
+	const DWORD pathLength = GetEnvironmentVariable(_T("path"), nullptr, 0);
+	std::vector<TCHAR> path(static_cast<size_t>(pathLength) + dirlen + 2, _T('\0'));
+	if (pathLength != 0) {
+		GetEnvironmentVariable(_T("path"), path.data(), pathLength);
 	}
-	free(lpPath);
+	if (!_tcsstr(path.data(), dir))
+	{
+		const size_t currentLength = _tcslen(path.data());
+		if (currentLength != 0 && path[currentLength - 1] != _T(';'))
+			_tcscat(path.data(), _T(";"));
+		_tcscat(path.data(), dir);
+		SetEnvironmentVariable(_T("path"), path.data());
+	}
 	return true;
 }
 
@@ -442,8 +456,8 @@ void HookFontCreation() {
 		if (!CreateFontIndirectW) {
 			CreateFontIndirectW = GetProcAddress(gdi32, "CreateFontIndirectW");
 		}
-		*(DWORD_PTR*)&ORIG_CreateFontIndirectW = (DWORD_PTR)CreateFontIndirectW;
-		*(DWORD_PTR*)&ORIG_CreateFontIndirectExW = (DWORD_PTR)CreateFontIndirectExW;
+		CopyHookPointer(ORIG_CreateFontIndirectW, CreateFontIndirectW);
+		CopyHookPointer(ORIG_CreateFontIndirectExW, CreateFontIndirectExW);
 
 		hook_demand_CreateFontIndirectExW();
 		hook_demand_CreateFontIndirectW();
@@ -451,7 +465,7 @@ void HookFontCreation() {
 }
 
 extern FT_Int * g_charmapCache;
-extern BYTE* AACache, *AACacheFull;	
+extern BYTE* AACache, *AACacheFull;
 extern HFONT g_alterGUIFont;
 extern void DebugOut(const WCHAR* szFormat, ...);
 
@@ -468,18 +482,17 @@ void EZHookMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved) {
 	switch (reason) {
 	case DLL_PROCESS_ATTACH:
 	{
-		LPWSTR dllPath = new WCHAR[MAX_PATH + 1];
-		int nSize = GetModuleFileName(g_dllInstance, dllPath, MAX_PATH + 1);
+		std::vector<WCHAR> dllPath(MAX_PATH + 1, L'\0');
+		int nSize = GetModuleFileName(g_dllInstance, dllPath.data(), static_cast<DWORD>(dllPath.size()));
 		WCHAR* p = &dllPath[nSize];
 		while (*--p != L'\\');
 		*p = L'\0';
 #ifdef _WIN64
-		wcscat(dllPath, L"\\easyhk64.dll");
+		wcscat(dllPath.data(), L"\\easyhk64.dll");
 #else
-		wcscat(dllPath, L"\\easyhk32.dll");
+		wcscat(dllPath.data(), L"\\easyhk32.dll");
 #endif
-		HMODULE hEasyhk = LoadLibrary(dllPath);
-		delete[]dllPath;
+		HMODULE hEasyhk = LoadLibrary(dllPath.data());
 		if (!hEasyhk) {
 			DebugOut(L"Failed to load Easyhook, exiting");
 			return;
@@ -489,7 +502,7 @@ void EZHookMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved) {
 #endif
 }
 
-extern COLORCACHE* g_AACache2[MAX_CACHE_SIZE]; 
+extern COLORCACHE* g_AACache2[MAX_CACHE_SIZE];
 HANDLE hDelayHook = 0;
 BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 {
@@ -501,7 +514,7 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 		switch (reason) {
 		case DLL_PROCESS_ATTACH:
 #ifdef DEBUG
-			//MessageBox(0, L"Load", NULL, MB_OK);
+			//MessageBox(0, L"Load", nullptr, MB_OK);
 #endif
 			DebugOut(L"Begin core loading stage, pid %d", ::GetCurrentProcessId());
 			if (bDllInited)
@@ -528,7 +541,7 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 			//_CrtSetBreakAlloc(100);
 
 			//Operaよ止まれ～
-			//Assert(GetModuleHandleA("opera.exe") == NULL);
+			//Assert(GetModuleHandleA("opera.exe") == nullptr);
 
 			//setlocale(LC_ALL, "");
 			g_hinstDLL = instance;
@@ -551,7 +564,7 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 
 			//4
 			{
-#ifdef INFINALITY 
+#ifdef INFINALITY
 				// enable infinality exclusive features
 				FT_initEnv();
 #endif
@@ -574,8 +587,7 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 					DebugOut(L"FreeType failed to initialize, exiting");
 					return FALSE;
 				}
-				g_pFTEngine = new FreeTypeFontEngine;
-				if (!g_pFTEngine) {
+				if (!CreateFreeTypeFontEngine()) {
 					return FALSE;
 				}
 
@@ -606,17 +618,14 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 
 			if (IsUnload)
 			{
-				HANDLE mutex_offical = OpenMutex(MUTEX_ALL_ACCESS, false, _T("{46AD3688-30D0-411e-B2AA-CB177818F428}"));
-				HANDLE mutex_gditray2 = OpenMutex(MUTEX_ALL_ACCESS, false, _T("Global\\MacType"));
+				auto mutex_offical = renderer_raii::AdoptHandle(OpenMutex(MUTEX_ALL_ACCESS, false, _T("{46AD3688-30D0-411e-B2AA-CB177818F428}")));
+				auto mutex_gditray2 = renderer_raii::AdoptHandle(OpenMutex(MUTEX_ALL_ACCESS, false, _T("Global\\MacType")));
 				if (!mutex_gditray2)
-					mutex_gditray2 = OpenMutex(MUTEX_ALL_ACCESS, false, _T("MacType"));
-				HANDLE mutex_CompMode = OpenMutex(MUTEX_ALL_ACCESS, false, _T("Global\\MacTypeCompMode"));
+					mutex_gditray2 = renderer_raii::AdoptHandle(OpenMutex(MUTEX_ALL_ACCESS, false, _T("MacType")));
+				auto mutex_CompMode = renderer_raii::AdoptHandle(OpenMutex(MUTEX_ALL_ACCESS, false, _T("Global\\MacTypeCompMode")));
 				if (!mutex_CompMode)
-					mutex_CompMode = OpenMutex(MUTEX_ALL_ACCESS, false, _T("MacTypeCompMode"));
+					mutex_CompMode = renderer_raii::AdoptHandle(OpenMutex(MUTEX_ALL_ACCESS, false, _T("MacTypeCompMode")));
 				BOOL HookMode = (mutex_offical || (mutex_gditray2 && mutex_CompMode)) || (!mutex_offical && !mutex_gditray2);	//是否在兼容模式下
-				CloseHandle(mutex_CompMode);
-				CloseHandle(mutex_gditray2);
-				CloseHandle(mutex_offical);
 				if (!HookMode) {	//非兼容模式下，拒绝加载
 					DebugOut(L"Process is in unloaddll list, exiting");
 					return false;
@@ -641,7 +650,7 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 			if (!bDllInited)
 				return true;
 			bDllInited = false;
-			if (InterlockedExchange(&g_bHookEnabled, FALSE) && lpReserved == NULL) {	//如果是进程终止，则不需要释放
+			if (InterlockedExchange(&g_bHookEnabled, FALSE) && lpReserved == nullptr) {	//如果是进程终止，则不需要释放
 				hook_term();
 				//delete AACacheFull;
 				//delete AACache;
@@ -650,14 +659,12 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 				//free(g_charmapCache);
 			}
 #ifndef DEBUG
-			if (lpReserved != NULL) return true;
+			if (lpReserved != nullptr) return true;
 #endif
 
-			if (g_pFTEngine) {
-				delete g_pFTEngine;
-			}
+			DestroyFreeTypeFontEngine();
 
-#ifdef INFINALITY 
+#ifdef INFINALITY
 			// enable infinality exclusive features
 			FT_freeEnv();
 #endif

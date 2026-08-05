@@ -52,7 +52,7 @@ class crc32
 public:
 	static const unsigned int getCrc32(unsigned int crc, const void *buf, int size) {
 		const unsigned char *p;
-		p = (unsigned char *)buf;
+		p = static_cast<const unsigned char*>(buf);
 		crc = crc ^ ~0U;
 		while (size--) {
 			crc = crc32_tab[(crc ^ *p++) & 0xFF] ^ (crc >> 8);

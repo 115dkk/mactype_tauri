@@ -25,9 +25,58 @@ FTC_CMapCache  cmap_cache;
 FTC_ImageCache image_cache;
 CTLSDCArray TLSDCArray;
 
+namespace {
+
+struct FreeTypeFontEngineRuntime
+{
+	std::unique_ptr<FreeTypeFontEngine> engine;
+};
+
+FreeTypeFontEngineRuntime* GetFreeTypeFontEngineRuntime() noexcept
+{
+	// Explicit unload resets the engine. At process exit the tiny state is left
+	// to the OS so renderer teardown does not run under the loader lock.
+	static FreeTypeFontEngineRuntime* runtime = []() noexcept {
+		try {
+			return new FreeTypeFontEngineRuntime;
+		} catch (const std::bad_alloc&) {
+			return static_cast<FreeTypeFontEngineRuntime*>(nullptr);
+		}
+	}();
+	return runtime;
+}
+
+} // namespace
+
+bool CreateFreeTypeFontEngine() noexcept
+{
+	FreeTypeFontEngineRuntime* runtime = GetFreeTypeFontEngineRuntime();
+	if (runtime == nullptr) {
+		return false;
+	}
+	std::unique_ptr<FreeTypeFontEngine> engine;
+	try {
+		engine = std::make_unique<FreeTypeFontEngine>();
+	} catch (const std::bad_alloc&) {
+		return false;
+	}
+	runtime->engine = std::move(engine);
+	g_pFTEngine = runtime->engine.get();
+	return true;
+}
+
+void DestroyFreeTypeFontEngine() noexcept
+{
+	FreeTypeFontEngineRuntime* runtime = GetFreeTypeFontEngineRuntime();
+	if (runtime != nullptr) {
+		runtime->engine.reset();
+	}
+	g_pFTEngine = nullptr;
+}
+
 int CALLBACK EnumFontCallBack(const LOGFONT *lplf, const TEXTMETRIC *lptm, DWORD /*FontType*/, LPARAM lParam)
-{	
-	LOGFONT * lf=(LOGFONT *)lParam;
+{
+	LOGFONT* lf = reinterpret_cast<LOGFONT*>(lParam);
 	StringCchCopy(lf->lfFaceName, LF_FACESIZE, lplf->lfFaceName);
 	lf->lfQuality=0x2d;	//magic number
 	return 0;
@@ -40,16 +89,15 @@ bool GetFontLocalName(TCHAR* pszFontName, __out TCHAR* pszNameOut)	//获得字�
 	LOGFONT lf = {0};
 	TCHAR* ret;
 	lf.lfQuality = 0x2d;
-	if (!(ret = FontNameCache.Find((TCHAR*)pszFontName)))
+	if (!(ret = FontNameCache.Find(const_cast<TCHAR*>(pszFontName))))
 	{
 		StringCchCopy(lf.lfFaceName, LF_FACESIZE, pszFontName);
 		lf.lfCharSet=DEFAULT_CHARSET;
-		HDC dc=GetDC(NULL);
+		auto dc = renderer_raii::AdoptWindowDeviceContext(nullptr, GetDC(nullptr));
 		lf.lfQuality=0;
-		EnumFontFamiliesEx(dc, &lf, &EnumFontCallBack, (LPARAM)&lf, 0);
-		ReleaseDC(NULL, dc);
+		EnumFontFamiliesEx(dc.get(), &lf, &EnumFontCallBack, reinterpret_cast<LPARAM>(&lf), 0);
 		if (lf.lfQuality==0x2d)
-			FontNameCache.Add((TCHAR*)pszFontName, lf.lfFaceName);
+			FontNameCache.Add(const_cast<TCHAR*>(pszFontName), lf.lfFaceName);
 		ret=lf.lfFaceName;
 	}
 	StringCchCopy(pszNameOut, LF_FACESIZE, ret);
@@ -58,43 +106,36 @@ bool GetFontLocalName(TCHAR* pszFontName, __out TCHAR* pszNameOut)	//获得字�
 
 LOGFONTW* GetFontNameFromFile(LPCWSTR Filename)	//获得一个字体文件内包含的所有字体名称s
 {
-	LOGFONTW* logfonts = NULL;
 	DWORD bufsize=0;
-	if (GetFontResourceInfo(Filename, &bufsize, NULL, 2))
+	if (GetFontResourceInfo(Filename, &bufsize, nullptr, 2))
 	{
-		logfonts = (LOGFONTW*)malloc(bufsize+1);
-		if (GetFontResourceInfo(Filename, &bufsize, logfonts, 2))
+		renderer_raii::UniqueMallocMemory<LOGFONTW> logfonts(
+			static_cast<LOGFONTW*>(malloc(bufsize + 1)));
+		if (logfonts && GetFontResourceInfo(Filename, &bufsize, logfonts.get(), 2))
 		{
-			((char*)logfonts)[bufsize]=0;
-			return logfonts;
+			reinterpret_cast<char*>(logfonts.get())[bufsize]=0;
+			return logfonts.release();
 		}
-		else
-		{
-			free(logfonts);
-			return NULL;
-		}
+		return nullptr;
 	}
 	else
 	{
 		AddFontResourceW(Filename);
-		if (GetFontResourceInfo(Filename, &bufsize, NULL, 2))
+		if (GetFontResourceInfo(Filename, &bufsize, nullptr, 2))
 		{
-			logfonts = (LOGFONTW*)malloc(bufsize+1);
-			if (GetFontResourceInfo(Filename, &bufsize, logfonts, 2))
+			renderer_raii::UniqueMallocMemory<LOGFONTW> logfonts(
+				static_cast<LOGFONTW*>(malloc(bufsize + 1)));
+			if (logfonts && GetFontResourceInfo(Filename, &bufsize, logfonts.get(), 2))
 			{
-				((char*)logfonts)[bufsize]=0;
-				ORIG_RemoveFontResourceExW(Filename,0,NULL);
-				return logfonts;
+				reinterpret_cast<char*>(logfonts.get())[bufsize]=0;
+				ORIG_RemoveFontResourceExW(Filename,0,nullptr);
+				return logfonts.release();
 			}
-			else
-			{
-				free(logfonts);
-				ORIG_RemoveFontResourceExW(Filename,0,NULL);
-				return NULL;
-			}
+			ORIG_RemoveFontResourceExW(Filename,0,nullptr);
+			return nullptr;
 		}
-		ORIG_RemoveFontResourceExW(Filename,0,NULL);
-		return NULL;
+		ORIG_RemoveFontResourceExW(Filename,0,nullptr);
+		return nullptr;
 	}
 }
 
@@ -116,7 +157,7 @@ struct DeleteCharFunc : public std::unary_function<FreeTypeCharData*&, void>
 		if (!arg)
 			return;
 		delete arg;
-		arg = NULL;
+		arg = nullptr;
 	}
 };
 
@@ -149,13 +190,9 @@ void Compact(T** pp, int count, int reduce)
 	//T::m_mrucounterの降順に並ぶので
 	//reduceを超える部分を削除する
 
-	T** ppTemp = (T**)malloc(sizeof(T*) * count);
-	if (!ppTemp) {
-		return;
-	}
-	memcpy(ppTemp, pp, sizeof(T*) * count);
+	std::vector<T*> ppTemp(pp, pp + count);
 
-	std::sort(ppTemp, ppTemp + count, GCCounterSortFunc<T>());
+	std::sort(ppTemp.begin(), ppTemp.end(), GCCounterSortFunc<T>());
 	int i;
 	for (i=0; i<reduce; i++) {
 		if (!ppTemp[i])
@@ -171,13 +208,12 @@ void Compact(T** pp, int count, int reduce)
 		ppTemp[i]->Erase();
 	}
 	//GC_TRACE(_T("\n"));
-	free(ppTemp);
 }
 
 //FreeTypeCharData
 FreeTypeCharData::FreeTypeCharData(FreeTypeCharData** ppCh, FreeTypeCharData** ppGl, WCHAR wch, UINT glyphindex, int width, int mru, int gdiWidth, int AAMode)
 	: m_ppSelfGlyph(ppGl), m_glyphindex(glyphindex), m_width(width)
-	, m_glyph(NULL), m_glyphMono(NULL), m_bmpSize(0), m_bmpMonoSize(0)
+	, m_glyph(nullptr), m_glyphMono(nullptr), m_bmpSize(0), m_bmpMonoSize(0)
 	, FreeTypeMruCounter(mru), m_gdiWidth(gdiWidth), m_AAMode(AAMode)
 {
 	g_pFTEngine->AddMemUsedObj(this);
@@ -194,17 +230,17 @@ FreeTypeCharData::~FreeTypeCharData()
 	while (n--) {
 		FreeTypeCharData** pp = arr[n];
 		Assert(*pp == this);
-		*pp = NULL;
+		*pp = nullptr;
 	}
 	if(m_ppSelfGlyph) {
 		Assert(*m_ppSelfGlyph == this);
-		*m_ppSelfGlyph = NULL;
+		*m_ppSelfGlyph = nullptr;
 	}
 	if(m_glyph){
-		FT_Done_Ref_Glyph((FT_Referenced_Glyph*)&m_glyph);
+		FT_Done_Ref_Glyph(reinterpret_cast<FT_Referenced_Glyph*>(&m_glyph));
 	}
 	if(m_glyphMono){
-		FT_Done_Ref_Glyph((FT_Referenced_Glyph*)&m_glyphMono);
+		FT_Done_Ref_Glyph(reinterpret_cast<FT_Referenced_Glyph*>(&m_glyphMono));
 	}
 
 	g_pFTEngine->SubMemUsed(m_bmpSize);
@@ -216,10 +252,10 @@ void FreeTypeCharData::SetGlyph(FT_Render_Mode render_mode, FT_Referenced_Bitmap
 {
 	const bool bMono = (render_mode == FT_RENDER_MODE_MONO);
 	FT_Referenced_BitmapGlyph& gl = bMono ? m_glyphMono : m_glyph;
-	if (gl) 
-		FT_Done_Ref_Glyph((FT_Referenced_Glyph*)&gl);
+	if (gl)
+		FT_Done_Ref_Glyph(reinterpret_cast<FT_Referenced_Glyph*>(&gl));
 	{
-		FT_Glyph_Ref_Copy((FT_Referenced_Glyph)glyph, (FT_Referenced_Glyph*)&gl);
+		FT_Glyph_Ref_Copy(reinterpret_cast<FT_Referenced_Glyph>(glyph), reinterpret_cast<FT_Referenced_Glyph*>(&gl));
 		if (gl) {
 			int& size = bMono ? m_bmpMonoSize : m_bmpSize;
 			size  = FT_Bitmap_CalcSize(gl->ft_glyph);
@@ -304,19 +340,22 @@ void FreeTypeFontCache::AddCharData(WCHAR wch, UINT glyphindex, int width, int g
 			ppChar->SetWidth(width);
 			ppChar->SetGDIWidth(gdiWidth);
 			return;
-		}	
+		}
 	}
 #endif
-	FreeTypeCharData* p = new FreeTypeCharData(/*ppChar*/NULL, NULL, wch, glyphindex, width, MruIncrement(), gdiWidth, AAMode);
-	if (p == NULL) {
+	std::unique_ptr<FreeTypeCharData> charData;
+	try {
+		charData = std::make_unique<FreeTypeCharData>(
+			/*ppChar*/nullptr, nullptr, wch, glyphindex, width, MruIncrement(), gdiWidth, AAMode);
+	} catch (const std::bad_alloc&) {
 		return;
 	}
-	p->SetGlyph(render_mode, glyph);
+	charData->SetGlyph(render_mode, glyph);
 
 #ifdef _USE_ARRAY
-	*ppChar = p;
+	*ppChar = charData.release();
 #else
-	m_GlyphCache[wch]=p;
+	m_GlyphCache[wch] = charData.release();
 #endif
 
 }
@@ -340,7 +379,7 @@ void FreeTypeFontCache::AddGlyphData(UINT glyphindex, int width, int gdiWidth, F
 		return;
 	}
 #else
-	GlyphCache::iterator it=m_GlyphCache.find(-(int)glyphindex);
+	GlyphCache::iterator it=m_GlyphCache.find(-static_cast<int>(glyphindex));
 	if (it!=m_GlyphCache.end())	//找到了旧数据
 	{
 		FreeTypeCharData* ppChar  = it->second;
@@ -350,21 +389,24 @@ void FreeTypeFontCache::AddGlyphData(UINT glyphindex, int width, int gdiWidth, F
 			ppChar->SetWidth(width);
 			ppChar->SetGDIWidth(gdiWidth);
 			return;
-		}	
+		}
 	}
 #endif
 
 	//追加(glyphのみ)
-	FreeTypeCharData* p = new FreeTypeCharData(NULL, /*ppGlyph*/NULL, 0, glyphindex, width, MruIncrement(), gdiWidth, AAMode);
-	if (p == NULL) {
+	std::unique_ptr<FreeTypeCharData> charData;
+	try {
+		charData = std::make_unique<FreeTypeCharData>(
+			nullptr, /*ppGlyph*/nullptr, 0, glyphindex, width, MruIncrement(), gdiWidth, AAMode);
+	} catch (const std::bad_alloc&) {
 		return;
 	}
-	p->SetGlyph(render_mode, glyph);
+	charData->SetGlyph(render_mode, glyph);
 
 #ifdef _USE_ARRAY
-	*ppGlyph = p;
+	*ppGlyph = charData.release();
 #else
-	m_GlyphCache[-(int)glyphindex]=p;
+	m_GlyphCache[-static_cast<int>(glyphindex)] = charData.release();
 #endif
 }
 
@@ -385,8 +427,8 @@ void FreeTypeFontInfo::Createlink()
 	CFontFaceNamesEnumerator fn(m_hash.c_str(), m_nFontFamily);
 	std::set<int> linkset;	//链接字体集合，防止重复链接，降低效率
 	linkset.insert(m_id);
-	face_id_link[m_linknum] = (FTC_FaceID)m_id;
-	ggo_link[m_linknum++] = m_ggoFont;	//第一个链接一定是自己，不需要获取
+	face_id_link[m_linknum] = reinterpret_cast<FTC_FaceID>(m_id);
+	ggo_link[m_linknum++] = m_ggoFont.get();	//第一个链接一定是自己，不需要获取
 	LOGFONT lf;
 	BOOL IsSimSun = false;
 	memset(&lf, 0, sizeof(LOGFONT));
@@ -404,10 +446,10 @@ void FreeTypeFontInfo::Createlink()
 		FreeTypeFontInfo* pfitemp = g_pFTEngine->FindFont(lf.lfFaceName, /*m_weight*/0, /*m_italic*/false);
 		if (pfitemp && linkset.find(pfitemp->GetId())==linkset.end()) {
 			linkset.insert(pfitemp->GetId());
-			face_id_link[m_linknum] = (FTC_FaceID)pfitemp->GetId();
+			face_id_link[m_linknum] = reinterpret_cast<FTC_FaceID>(pfitemp->GetId());
 			ggo_link[m_linknum++] = pfitemp->GetGGOFont();
 		if (!m_SimSunID && IsSimSun)
-			m_SimSunID = (FTC_FaceID)pfitemp->GetId();
+			m_SimSunID = reinterpret_cast<FTC_FaceID>(pfitemp->GetId());
 		}
 	}
 }
@@ -419,17 +461,17 @@ bool FreeTypeFontInfo::EmbeddedBmpExist(int px)
 	if (m_ebmps[px]!=-1)
 		return !!m_ebmps[px];
 	CCriticalSectionLock __lock(CCriticalSectionLock::CS_MANAGER);
-	FTC_ImageTypeRec imgtype={(FTC_FaceID)m_id, px, px, FT_LOAD_DEFAULT};	//构造一个当前大小的imagetype
-	FT_Glyph temp_glyph=NULL;
-	FT_UInt gindex = FTC_CMapCache_Lookup(cmap_cache, (FTC_FaceID)m_id, -1, FT_UInt32(L'0'));	//获得0的索引值
-	FTC_ImageCache_Lookup(image_cache, &imgtype, gindex, &temp_glyph, NULL);
+	FTC_ImageTypeRec imgtype={reinterpret_cast<FTC_FaceID>(m_id), static_cast<FT_UInt>(px), static_cast<FT_UInt>(px), FT_LOAD_DEFAULT};	//构造一个当前大小的imagetype
+	FT_Glyph temp_glyph=nullptr;
+	FT_UInt gindex = FTC_CMapCache_Lookup(cmap_cache, reinterpret_cast<FTC_FaceID>(m_id), -1, static_cast<FT_UInt32>(L'0'));	//获得0的索引值
+	FTC_ImageCache_Lookup(image_cache, &imgtype, gindex, &temp_glyph, nullptr);
 	if (temp_glyph && temp_glyph->format==FT_GLYPH_FORMAT_BITMAP)	//如果可以读到0的点阵
 		m_ebmps[px]=1;	//则该字号存在点阵
 	else
 	{
-		gindex = FTC_CMapCache_Lookup(cmap_cache, (FTC_FaceID)m_id, -1, FT_UInt32(L'的'));	//获得"的"的索引值
+		gindex = FTC_CMapCache_Lookup(cmap_cache, reinterpret_cast<FTC_FaceID>(m_id), -1, static_cast<FT_UInt32>(L'的'));	//获得"的"的索引值
 		if (gindex)
-			FTC_ImageCache_Lookup(image_cache, &imgtype, gindex, &temp_glyph, NULL);	//读取“的”的点阵
+			FTC_ImageCache_Lookup(image_cache, &imgtype, gindex, &temp_glyph, nullptr);	//读取“的”的点阵
 		if (temp_glyph && temp_glyph->format==FT_GLYPH_FORMAT_BITMAP)	//如果可以读到0的点阵
 			m_ebmps[px]=1;	//则该字号存在点阵
 		else
@@ -449,28 +491,28 @@ FreeTypeFontCache* FreeTypeFontInfo::GetCache(FTC_ScalerRec& scaler, const LOGFO
 	weight = weight < FW_BOLD ? 0: 1/*FW_BOLD*/;
 	const bool italic = !!lf.lfItalic;
 	if (scaler.height>0xfff || scaler.width>0xfff/* || scaler.height<0 || scaler.width<0*/)	//超大字体不渲染
-		return NULL;
-	FreeTypeFontCache* p = NULL;
+		return nullptr;
+	FreeTypeFontCache* p = nullptr;
 	UINT hash=getCacheHash(scaler.height, weight, italic, lf.lfWidth ? scaler.width : 0);	//计算hash
 	CacheArray::iterator it=m_cache.find(hash); //寻找cache
 	if (it!=m_cache.end())//cache存在
 	{
 		p = it->second;
-		goto OK; //返回cache
 	}
-	
-	p = new FreeTypeFontCache(/*scaler.height, weight, italic,*/ MruIncrement());
-	if (!p) {
-		return NULL;
+	else
+	{
+		std::unique_ptr<FreeTypeFontCache> cache;
+		try {
+			cache = std::make_unique<FreeTypeFontCache>(
+				/*scaler.height, weight, italic,*/ MruIncrement());
+		} catch (const std::bad_alloc&) {
+			return nullptr;
+		}
+		m_cache[hash] = cache.release();
+		p = m_cache[hash];
 	}
-	if (m_cache[hash]=p) {
-		goto OK;
-	}
-	delete p;
-	return NULL;
 
-OK:
-	Assert(p != NULL);
+	Assert(p != nullptr);
 	if (p && p->Activate()) {
 		DecIncrement();	//重复使用则减计数值
 	}
@@ -542,20 +584,20 @@ BOOL FreeTypeFontEngine::RemoveThisFont(FreeTypeFontInfo* fontinfo, LOGFONT* lg)
 BOOL FreeTypeFontEngine::RemoveFont(LPCWSTR FontName)
 {
 	if (!FontName) return false;
-	LOGFONTW* fontarray = GetFontNameFromFile(FontName);
-	LOGFONTW* c_fontarray = fontarray;	//记录原始指针
+	renderer_raii::UniqueMallocMemory<LOGFONTW> fontarrayOwner(GetFontNameFromFile(FontName));
+	LOGFONTW* fontarray = fontarrayOwner.get();
 	if (!fontarray) return false;
-	FTC_FaceID fid = NULL;
+	FTC_FaceID fid = nullptr;
 	BOOL bIsFontLoaded, bIsFontFileLoaded = false;
 	COwnedCriticalSectionLock __lock2(2, COwnedCriticalSectionLock::OCS_DC);	//获取所有权，现在要处理DC，禁止所有绘图函数访问
 	CCriticalSectionLock __lock(CCriticalSectionLock::CS_MANAGER);
-	while (*(char*)fontarray)
+	while (*reinterpret_cast<char*>(fontarray))
 	{
 		bIsFontLoaded = false;
 		FreeTypeFontInfo* result = FindFont(fontarray->lfFaceName, fontarray->lfWeight, !!fontarray->lfItalic, false, &bIsFontLoaded);
 		if (result)
 		{
-			fid = (FTC_FaceID)result->GetId();
+			fid = reinterpret_cast<FTC_FaceID>(result->GetId());
 			if (bIsFontLoaded)	//该字体已经被使用过
 			{
 				RemoveFont(result);	//枚举字体信息全部删除
@@ -565,17 +607,16 @@ BOOL FreeTypeFontEngine::RemoveFont(LPCWSTR FontName)
 				RemoveThisFont(result, fontarray);
 			CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTENG);
 			FTC_Manager_RemoveFaceID(cache_man, fid);
-			m_mfontList[(int)fid-1]=NULL;
+			m_mfontList[static_cast<int>(reinterpret_cast<INT_PTR>(fid)) - 1] = nullptr;
 		}
 		fontarray++;
 	}
-	free(c_fontarray); //利用原始指针释放
 	if (bIsFontFileLoaded)	//若字体文件被使用过，则需要清楚所有DC
 	{
 		CTLSDCArray::iterator iter = TLSDCArray.begin();
 		while (iter!=TLSDCArray.end())
 		{
-			((CBitmapCache*)*iter)->~CBitmapCache();	//清除掉所有使用中的DC
+			(static_cast<CBitmapCache*>(*iter))->~CBitmapCache();	//清除掉所有使用中的DC
 			++iter;
 		}
 	}
@@ -585,33 +626,40 @@ BOOL FreeTypeFontEngine::RemoveFont(LPCWSTR FontName)
 static int FaceIDHolder = 0;
 int GetFaceID(void)
 {
-	return (int)InterlockedIncrement((LONG volatile*)&FaceIDHolder);
+	return static_cast<int>(InterlockedIncrement(reinterpret_cast<LONG volatile*>(&FaceIDHolder)));
 }
 
 void ReleaseFaceID(void)
 {
-	InterlockedDecrement((LONG volatile*)&FaceIDHolder);
+	InterlockedDecrement(reinterpret_cast<LONG volatile*>(&FaceIDHolder));
 }
 
 FreeTypeFontInfo* FreeTypeFontEngine::AddFont(void* lpparams)
 {
-	FREETYPE_PARAMS* params = (FREETYPE_PARAMS*)lpparams;
+	FREETYPE_PARAMS* params = static_cast<FREETYPE_PARAMS*>(lpparams);
 	CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTENG);
 	const LOGFONT& lplf = *params->lplf;
 	if(!*lplf.lfFaceName || _tcslen(lplf.lfFaceName) == 0)
-		return NULL;
+		return nullptr;
 
 	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
 	//const CFontSettings& fs = pSettings->FindIndividual(params->strFamilyName.c_str());
-	FreeTypeFontInfo* pfi = new FreeTypeFontInfo(/*m_mfullMap.size() + 1*/GetFaceID(), lplf.lfFaceName, lplf.lfWeight, !!lplf.lfItalic, MruIncrement(), params->strFullName, params->strFamilyName);
-	if (!pfi)
-		return NULL;
-	
+	const int faceId = GetFaceID();
+	std::unique_ptr<FreeTypeFontInfo> newFont;
+	try {
+		newFont = std::make_unique<FreeTypeFontInfo>(
+			/*m_mfullMap.size() + 1*/faceId, lplf.lfFaceName, lplf.lfWeight,
+			!!lplf.lfItalic, MruIncrement(), params->strFullName, params->strFamilyName);
+	} catch (const std::bad_alloc&) {
+		ReleaseFaceID();
+		return nullptr;
+	}
+	FreeTypeFontInfo* pfi = newFont.get();
+
 	if (pfi->GetFullName().size()==0)	//点阵字
 		{
-			delete pfi;
 			ReleaseFaceID();
-			return NULL;
+			return nullptr;
 		}
 /*
 	TCHAR buff[255]={0};
@@ -625,7 +673,6 @@ FreeTypeFontInfo* FreeTypeFontEngine::AddFont(void* lpparams)
 	FullNameMap::const_iterator it = m_mfullMap.find(pfi->GetFullName());
 	if (it!=m_mfullMap.end())	//是已经存在的字体了,原因是字体替换使两种名字指向一个字体
 	{
-		delete pfi;	//删除刚才创建的字体
 		ReleaseFaceID();
 		pfi = it->second;//指向原字体
 	}
@@ -633,6 +680,7 @@ FreeTypeFontInfo* FreeTypeFontEngine::AddFont(void* lpparams)
 	{
 		m_mfullMap[pfi->GetFullName()]=pfi;	//不存在，添加到map表
 		m_mfontList.push_back(pfi);
+		newFont.release();
 	}
 
 	if (pfi->GetFullName()!=params->strFullName)	//如果目标字体的真实名称和需要的名称不一样，说明是字体替换
@@ -640,7 +688,7 @@ FreeTypeFontInfo* FreeTypeFontEngine::AddFont(void* lpparams)
 		pfi->AddRef();	//增加引用计数
 		m_mfullMap[params->strFullName] = pfi;	//双重引用，指向同一个字体
 	}
-		
+
 	//bool ret = !!arr.Add(pfi);
 	//weight = weight < FW_BOLD ? 0: FW_BOLD;
 	myfont font(lplf.lfFaceName, lplf.lfWeight, !!params->otm->otmTextMetrics.tmItalic);
@@ -650,12 +698,12 @@ FreeTypeFontInfo* FreeTypeFontEngine::AddFont(void* lpparams)
 		{
 			it->second->Release();
 		}*/
-	
+
 	m_mfontMap[font]=pfi;
 	/*
 	if (!ret) {
 	delete pfi;
-	return NULL;
+	return nullptr;
 	}*/
 
 
@@ -672,8 +720,8 @@ FreeTypeFontInfo* FreeTypeFontEngine::AddFont(void* lpparams)
 FreeTypeFontInfo* FreeTypeFontEngine::AddFont(LPCTSTR lpFaceName, int weight, bool italic, BOOL* bIsFontLoaded)
 {
 	CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTENG);
-	if(lpFaceName == NULL || _tcslen(lpFaceName) == 0/* || FontExists(lpFaceName, weight, italic)*/)
-		return NULL;
+	if(lpFaceName == nullptr || _tcslen(lpFaceName) == 0/* || FontExists(lpFaceName, weight, italic)*/)
+		return nullptr;
 
 	//FontListArray& arr = m_arrFontList;
 
@@ -681,20 +729,25 @@ FreeTypeFontInfo* FreeTypeFontEngine::AddFont(LPCTSTR lpFaceName, int weight, bo
 	//const CFontSettings& fs = pSettings->FindIndividual(lpFaceName);
 	wstring dumy;
 	//dumy.clear();
-	FreeTypeFontInfo* pfi = new FreeTypeFontInfo(/*m_mfullMap.size() + 1*/GetFaceID(), lpFaceName, weight, italic, MruIncrement(), dumy, dumy);
-	if (!pfi)
-		return NULL;
+	const int faceId = GetFaceID();
+	std::unique_ptr<FreeTypeFontInfo> newFont;
+	try {
+		newFont = std::make_unique<FreeTypeFontInfo>(
+			/*m_mfullMap.size() + 1*/faceId, lpFaceName, weight, italic, MruIncrement(), dumy, dumy);
+	} catch (const std::bad_alloc&) {
+		ReleaseFaceID();
+		return nullptr;
+	}
+	FreeTypeFontInfo* pfi = newFont.get();
 	if (pfi->GetFullName().size()==0)	//点阵字
 	{
-		delete pfi;
 		ReleaseFaceID();
-		return NULL;
+		return nullptr;
 	}
 
 	FullNameMap::const_iterator it = m_mfullMap.find(pfi->GetFullName()); //是否在主map表中存在了
 	if (it!=m_mfullMap.end())	//已经存在
 	{
-		delete pfi;	//删除创建出来的字体
 		ReleaseFaceID();
 		pfi = it->second;	//指向已经存在的字体
 		if (bIsFontLoaded)
@@ -705,6 +758,7 @@ FreeTypeFontInfo* FreeTypeFontEngine::AddFont(LPCTSTR lpFaceName, int weight, bo
 	{
 		m_mfullMap[pfi->GetFullName()]=pfi;	//不存在，添加到map表
 		m_mfontList.push_back(pfi);
+		newFont.release();
 		if (bIsFontLoaded)
 			*bIsFontLoaded = false;
 	}
@@ -716,10 +770,10 @@ FreeTypeFontInfo* FreeTypeFontEngine::AddFont(LPCTSTR lpFaceName, int weight, bo
 /*
 	if (!ret) {
 		delete pfi;
-		return NULL;
+		return nullptr;
 	}*/
 
-	
+
 #ifdef _DEBUG
 	{
 		const CFontSettings& fs = pfi->GetFontSettings();
@@ -752,12 +806,12 @@ LPCTSTR FreeTypeFontEngine::GetFontById(int faceid, int& weight, bool& italic)
 			return p->GetName();
 		}
 	}
-	return NULL;
+	return nullptr;
 }
 */
 FreeTypeFontInfo* FreeTypeFontEngine::FindFont(void* lpparams)
 {
-	FREETYPE_PARAMS* params = (FREETYPE_PARAMS*)lpparams;
+	FREETYPE_PARAMS* params = static_cast<FREETYPE_PARAMS*>(lpparams);
 	CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTMAP);
 	FullNameMap::const_iterator iter=m_mfullMap.find(params->strFullName);
 	if (iter!=m_mfullMap.end())
@@ -775,10 +829,10 @@ FreeTypeFontInfo* FreeTypeFontEngine::FindFont(void* lpparams)
 FreeTypeFontInfo* FreeTypeFontEngine::FindFont(LPCTSTR lpFaceName, int weight, bool italic, bool AddOnFind, BOOL* bIsFontLoaded)
 {
 /*
-	if (m_bAddOnFind) 
+	if (m_bAddOnFind)
 	{
 		m_bAddOnFind = false;
-		return NULL;
+		return nullptr;
 	}*/
 
 	CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTMAP);
@@ -809,7 +863,7 @@ FreeTypeFontInfo* FreeTypeFontEngine::FindFont(int faceid)
 {
 	CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTMAP);
 	if (faceid>m_mfontList.size())
-		return NULL;
+		return nullptr;
 	else
 		return m_mfontList[faceid-1];	//存在bug！！！
 	/*
@@ -821,8 +875,8 @@ FreeTypeFontInfo* FreeTypeFontEngine::FindFont(int faceid)
 				return p;
 			}
 		}
-		return NULL;*/
-	
+		return nullptr;*/
+
 }
 
 
@@ -836,37 +890,35 @@ FreeTypeFontInfo* FreeTypeFontEngine::FindFont(int faceid)
 // Windowsに登録されているフォントのバイナリデータを名称から取得
 FreeTypeSysFontData* FreeTypeSysFontData::CreateInstance(LPCTSTR name, int weight, bool italic)
 {
-	FreeTypeSysFontData* pData = new FreeTypeSysFontData;
+	std::unique_ptr<FreeTypeSysFontData> pData(new FreeTypeSysFontData);
 	if (!pData) {
-		return NULL;
+		return nullptr;
 	}
 	if (!pData->Init(name, weight, italic)) {
-		delete pData;
-		return NULL;
+		return nullptr;
 	}
-	return pData;
+	return pData.release();
 }
 
 bool FreeTypeSysFontData::Init(LPCTSTR name, int weight, bool italic)
 {
 	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
-	void* pNameFromGDI		= NULL; // Windows から取得した name タグの内容
-	void* pNameFromFreeType	= NULL; // FreeType から取得した name タグの内容
-	HFONT hf = NULL;
+	renderer_raii::UniqueMallocMemory<unsigned char> pNameFromGDI;
+	renderer_raii::UniqueMallocMemory<unsigned char> pNameFromFreeType;
 	DWORD cbNameTable;
 	DWORD cbFontData;
 	int index;
 	DWORD buf;
 	FT_StreamRec& fsr = m_ftStream;
 	m_name.assign(name);
-	m_hdc = CreateCompatibleDC(NULL);
-	if(m_hdc == NULL) {
+	m_hdc.reset(CreateCompatibleDC(nullptr));
+	if(!m_hdc) {
 		return false;
 	}
 	// 名前以外適当
 	if (pSettings->FontSubstitutes() < SETTING_FONTSUBSTITUTE_ALL)
 	{
-		hf = CreateFont(
+		m_font.reset(CreateFont(
 					12, 0, 0, 0, weight,
 					italic, FALSE, FALSE,
 					DEFAULT_CHARSET,
@@ -874,10 +926,10 @@ bool FreeTypeSysFontData::Init(LPCTSTR name, int weight, bool italic)
 					FONT_MAGIC_NUMBER,
 					DEFAULT_QUALITY,
 					DEFAULT_PITCH | FF_DONTCARE,
-					name);
+					name));
 	}
 	else
-		hf = CreateFont(
+		m_font.reset(CreateFont(
 					12, 0, 0, 0, weight,
 					italic, FALSE, FALSE,
 					DEFAULT_CHARSET,
@@ -885,42 +937,45 @@ bool FreeTypeSysFontData::Init(LPCTSTR name, int weight, bool italic)
 					CLIP_DEFAULT_PRECIS,
 					DEFAULT_QUALITY,
 					DEFAULT_PITCH | FF_DONTCARE,
-					name);
+					name));
 
-	if(hf == NULL){
+	if(!m_font){
 		return false;
 	}
 
-	m_hOldFont = SelectFont(m_hdc, hf);
+	m_selectedFont = renderer_raii::SelectObject(m_hdc.get(), m_font.get());
+	if (!m_selectedFont) {
+		return false;
+	}
 	// フォントデータが得られそうかチェック
-	cbNameTable = ORIG_GetFontData(m_hdc, TVP_TT_TABLE_name, 0, NULL, 0);
+	cbNameTable = ORIG_GetFontData(m_hdc.get(), TVP_TT_TABLE_name, 0, nullptr, 0);
 	if(cbNameTable == GDI_ERROR){
 		goto ERROR_Init;
 	}
 
-	pNameFromGDI		= malloc(cbNameTable);
+	pNameFromGDI.reset(static_cast<unsigned char*>(malloc(cbNameTable)));
 	if (!pNameFromGDI) {
 		goto ERROR_Init;
 	}
-	pNameFromFreeType	= malloc(cbNameTable);
+	pNameFromFreeType.reset(static_cast<unsigned char*>(malloc(cbNameTable)));
 	if (!pNameFromFreeType) {
 		goto ERROR_Init;
 	}
 
 	//- name タグの内容をメモリに読み込む
-	if(ORIG_GetFontData(m_hdc, TVP_TT_TABLE_name, 0, pNameFromGDI, cbNameTable) == GDI_ERROR){
+	if(ORIG_GetFontData(m_hdc.get(), TVP_TT_TABLE_name, 0, pNameFromGDI.get(), cbNameTable) == GDI_ERROR){
 		goto ERROR_Init;
 	}
 
 	// フォントサイズ取得処理
-	cbFontData = ORIG_GetFontData(m_hdc, TVP_TT_TABLE_ttcf, 0, &buf, 1);
+	cbFontData = ORIG_GetFontData(m_hdc.get(), TVP_TT_TABLE_ttcf, 0, &buf, 1);
 	if(cbFontData == 1){
 		// TTC ファイルだと思われる
-		cbFontData = ORIG_GetFontData(m_hdc, TVP_TT_TABLE_ttcf, 0, NULL, 0);
+		cbFontData = ORIG_GetFontData(m_hdc.get(), TVP_TT_TABLE_ttcf, 0, nullptr, 0);
 		m_isTTC = true;
 	}
 	else{
-		cbFontData = ORIG_GetFontData(m_hdc, 0, 0, NULL, 0);
+		cbFontData = ORIG_GetFontData(m_hdc.get(), 0, 0, nullptr, 0);
 	}
 	if(cbFontData == GDI_ERROR){
 		// エラー; GetFontData では扱えなかった
@@ -928,16 +983,26 @@ bool FreeTypeSysFontData::Init(LPCTSTR name, int weight, bool italic)
 	}
 
 	if (pSettings->UseMapping()) {
-		HANDLE hmap = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE | SEC_COMMIT | SEC_NOCACHE, 0, cbFontData, NULL);
+		auto hmap = renderer_raii::AdoptHandle(CreateFileMapping(
+			INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE | SEC_COMMIT | SEC_NOCACHE,
+			0, cbFontData, nullptr));
 		if (!hmap) {
 			goto ERROR_Init;
 		}
-		m_pMapping = MapViewOfFile(hmap, FILE_MAP_ALL_ACCESS, 0, 0, cbFontData);
-		m_dwSize = cbFontData;
-		CloseHandle(hmap);
+		m_pMapping.reset(MapViewOfFile(hmap.get(), FILE_MAP_ALL_ACCESS, 0, 0, cbFontData));
 
 		if (m_pMapping) {
-			ORIG_GetFontData(m_hdc, m_isTTC ? TVP_TT_TABLE_ttcf : 0, 0, m_pMapping, cbFontData);
+			if (ORIG_GetFontData(m_hdc.get(), m_isTTC ? TVP_TT_TABLE_ttcf : 0,
+				0, m_pMapping.get(), cbFontData) != GDI_ERROR) {
+				m_mappingLock = renderer_raii::PageLock::TryLock(m_pMapping.get(), cbFontData);
+				if (m_mappingLock) {
+					m_dwSize = cbFontData;
+				} else {
+					m_pMapping.reset();
+				}
+			} else {
+				m_pMapping.reset();
+			}
 		}
 	}
 
@@ -946,7 +1011,7 @@ bool FreeTypeSysFontData::Init(LPCTSTR name, int weight, bool italic)
 	fsr.size				= cbFontData;
 	fsr.pos					= 0;
 	fsr.descriptor.pointer	= this;
-	fsr.pathname.pointer	= NULL;
+	fsr.pathname.pointer	= nullptr;
 	fsr.read				= IoFunc;
 	fsr.close				= CloseFunc;
 
@@ -959,7 +1024,7 @@ bool FreeTypeSysFontData::Init(LPCTSTR name, int weight, bool italic)
 	for(;;) {
 		// FreeType から、name タグのサイズを取得する
 		FT_ULong length = 0;
-		FT_Error err = FT_Load_Sfnt_Table(m_ftFace, TTAG_name, 0, NULL, &length);
+		FT_Error err = FT_Load_Sfnt_Table(m_ftFace.get(), TTAG_name, 0, nullptr, &length);
 		if(err){
 			goto ERROR_Init;
 		}
@@ -967,14 +1032,14 @@ bool FreeTypeSysFontData::Init(LPCTSTR name, int weight, bool italic)
 		// FreeType から得た name タグの長さを Windows から得た長さと比較
 		if(length == cbNameTable){
 			// FreeType から name タグを取得
-			err = FT_Load_Sfnt_Table(m_ftFace, TTAG_name, 0, (unsigned char*)pNameFromFreeType, &length);
+			err = FT_Load_Sfnt_Table(m_ftFace.get(), TTAG_name, 0, pNameFromFreeType.get(), &length);
 			if(err){
 				goto ERROR_Init;
 			}
 			// FreeType から読み込んだ name タグの内容と、Windows から読み込んだ
 			// name タグの内容を比較する。
 			// 一致していればその index のフォントを使う。
-			if(!memcmp(pNameFromGDI, pNameFromFreeType, cbNameTable)){
+			if(!memcmp(pNameFromGDI.get(), pNameFromFreeType.get(), cbNameTable)){
 				// 一致した
 				// face は開いたまま
 				break; // ループを抜ける
@@ -996,20 +1061,14 @@ bool FreeTypeSysFontData::Init(LPCTSTR name, int weight, bool italic)
 		}
 	}
 
-	free(pNameFromGDI);
-	free(pNameFromFreeType);
 	m_locked = false;
 	return true;
 
 ERROR_Init:
+	m_ftFace.reset();
+	m_selectedFont.reset();
+	m_font.reset();
 	m_locked = false;
-	if (hf) {
-		SelectFont(m_hdc, m_hOldFont);
-		DeleteFont(hf);
-		m_hOldFont = NULL;
-	}
-	free(pNameFromGDI);
-	free(pNameFromFreeType);
 	return false;
 }
 
@@ -1024,14 +1083,14 @@ unsigned long FreeTypeSysFontData::IoFunc(
 	}
 
 	FreeTypeSysFontData * pThis = reinterpret_cast<FreeTypeSysFontData*>(stream->descriptor.pointer);
-	Assert(pThis != NULL);
+	Assert(pThis != nullptr);
 
 	DWORD result = 0;
 	if (pThis->m_pMapping) {
 		result = Min(pThis->m_dwSize - offset, count);
-		memcpy(buffer, (const BYTE*)pThis->m_pMapping + offset, result);
+		memcpy(buffer, static_cast<const BYTE*>(pThis->m_pMapping.get()) + offset, result);
 	} else {
-		result = ::GetFontData(pThis->m_hdc, pThis->m_isTTC ? TVP_TT_TABLE_ttcf : 0, offset, buffer, count);
+		result = ::GetFontData(pThis->m_hdc.get(), pThis->m_isTTC ? TVP_TT_TABLE_ttcf : 0, offset, buffer, count);
 		if(result == GDI_ERROR) {
 			// エラー
 			return 0;
@@ -1043,7 +1102,7 @@ unsigned long FreeTypeSysFontData::IoFunc(
 void FreeTypeSysFontData::CloseFunc(FT_Stream stream)
 {
 	FreeTypeSysFontData * pThis = reinterpret_cast<FreeTypeSysFontData*>(stream->descriptor.pointer);
-	Assert(pThis != NULL);
+	Assert(pThis != nullptr);
 
 	if(!pThis->m_locked)
 		delete pThis;
@@ -1051,17 +1110,16 @@ void FreeTypeSysFontData::CloseFunc(FT_Stream stream)
 
 bool FreeTypeSysFontData::OpenFaceByIndex(int index)
 {
-	if(m_ftFace) {
-		FT_Done_Face(m_ftFace);
-		m_ftFace = NULL;
-	}
+	m_ftFace.reset();
 
 	FT_Open_Args args = { 0 };
 	args.flags		= FT_OPEN_STREAM;
 	args.stream		= &m_ftStream;
 
 	// FreeType で扱えるか？
-	FT_Error ftErrCode = FT_Open_Face(freetype_library, &args, index, &m_ftFace);
+	FT_Face face = nullptr;
+	FT_Error ftErrCode = FT_Open_Face(freetype_library, &args, index, &face);
+	m_ftFace.reset(face);
 #ifdef DEBUG
 	if (ftErrCode!=0)
 		TRACE(L"Open face failed, error = %d\n", ftErrCode);

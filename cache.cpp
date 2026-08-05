@@ -7,10 +7,10 @@
 HDC CBitmapCache::CreateDC(HDC dc)
 {
 	if(!m_hdc) {
-		m_hdc = CreateCompatibleDC(dc);
+		m_hdc.reset(CreateCompatibleDC(dc));
 		m_exthdc = dc;
 	}
-	return m_hdc;
+	return m_hdc.get();
 }
 
 HBITMAP CBitmapCache::CreateDIB(int width, int height, BYTE** lplpPixels)
@@ -21,14 +21,14 @@ HBITMAP CBitmapCache::CreateDIB(int width, int height, BYTE** lplpPixels)
 	if (dibSize.cx >= width && dibSize.cy >= height) {
 		if (++m_counter < BITMAP_REDUCE_COUNTER) {
 			*lplpPixels = m_lpPixels;
-			return m_hbmp;
+			return m_hbmp.get();
 		}
 		//カウンタ超過
 		//ただしサイズが全く同じなら再生成しない
 		if (dibSize.cx == width && dibSize.cy == height) {
 			m_counter   = 0;
 			*lplpPixels = m_lpPixels;
-			return m_hbmp;
+			return m_hbmp.get();
 		}
 	} else {
 		if (dibSize.cx > width) {
@@ -40,25 +40,23 @@ HBITMAP CBitmapCache::CreateDIB(int width, int height, BYTE** lplpPixels)
 	}
 
 	BITMAPINFOHEADER bmiHeader = { sizeof(BITMAPINFOHEADER), width, -height, 1, 32, BI_RGB };
-	HBITMAP hbmpNew = CreateDIBSection(CreateDC(m_exthdc), (BITMAPINFO*)&bmiHeader, DIB_RGB_COLORS, (LPVOID*)lplpPixels, NULL, 0);
+	renderer_raii::UniqueBitmap hbmpNew(CreateDIBSection(
+		CreateDC(m_exthdc), reinterpret_cast<BITMAPINFO*>(&bmiHeader), DIB_RGB_COLORS,
+		reinterpret_cast<LPVOID*>(lplpPixels), nullptr, 0));
 	if (!hbmpNew) {
-		return NULL;
+		return nullptr;
 	}
 	TRACE(_T("width=%d, height=%d\n"), width, height);
 
-	//メモリ不足等でhbmpNew==NULLの場合を想定し、
+	//メモリ不足等でhbmpNew==nullptrの場合を想定し、
 	//成功したときのみキャッシュを更新
-	if (m_hbmp) {
-		DeleteBitmap(m_hbmp);
-	}
-
-	m_hbmp		= hbmpNew;
+	m_hbmp		= std::move(hbmpNew);
 	dibSize.cx	= width;
 	dibSize.cy	= height;
 	//CreateDIBSectionは多分ページ境界かセグメント境界
 	m_lpPixels	= *lplpPixels;
 	m_counter	= 0;
-	return m_hbmp;
+	return m_hbmp.get();
 }
 
 void CBitmapCache::FillSolidRect(COLORREF rgb, const RECT* lprc)
@@ -66,12 +64,10 @@ void CBitmapCache::FillSolidRect(COLORREF rgb, const RECT* lprc)
 
 	if (!m_brush || rgb!=m_bkColor)
 	{
-		if (m_brush)
-			DeleteObject(m_brush);
-		m_brush = CreateSolidBrush(rgb);
+		m_brush.reset(CreateSolidBrush(rgb));
 		m_bkColor = rgb;
 	}
-	FillRect(m_hdc, lprc, m_brush);
+	FillRect(m_hdc.get(), lprc, m_brush.get());
 
 
 	//DrawHorizontalLine(lprc->left, lprc->top, lprc->right, rgb, lprc->bottom - lprc->top);
@@ -122,7 +118,7 @@ void CBitmapCache::DrawHorizontalLine(int X1, int Y1, int X2, COLORREF rgb, int 
 
 	rgb = RGB2DIB(rgb);
 
-	DWORD* lpPixels = (DWORD*)m_lpPixels + (Y1 * xSize + X1);
+	DWORD* lpPixels = reinterpret_cast<DWORD*>(m_lpPixels) + (Y1 * xSize + X1);
 	const int Xd = X2 - X1;
 	const int Yd = Y2 - Y1;
 /*	for (int yy=Y1; yy<Y2; yy++) {
@@ -160,7 +156,7 @@ L1:
 #else*/	//对于64位系统，使用C语言
 	for (int yy=Y1; yy<Y2; yy++) {
 		for (int xx=X1; xx<X2; xx++) {
-			*( (DWORD*)m_lpPixels + (yy * xSize + xx) ) = rgb;
+			*(reinterpret_cast<DWORD*>(m_lpPixels) + (yy * xSize + xx)) = rgb;
 		}
 	}
 //#endif

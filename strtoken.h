@@ -19,12 +19,12 @@ private:
 		m_nNumArgs = 0;
 		ZeroMemory(m_ppszArgv, sizeof(m_ppszArgv));
 		free(m_pszBuffer);
-		m_pszBuffer = NULL;
+		m_pszBuffer = nullptr;
 	}
 
 public:
 	CStringTokenizer()
-		: m_pszBuffer(NULL)
+		: m_pszBuffer(nullptr)
 	{
 		Clear();
 	}

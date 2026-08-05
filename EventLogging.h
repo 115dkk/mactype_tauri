@@ -9,15 +9,15 @@
 #pragma once
 #endif // _MSC_VER > 1000
 
-class EventLogging 
+class EventLogging
 {
 public:
 	EventLogging();
 	virtual ~EventLogging();
 
 	// Wrapper for ReportEvent that take care of Handle and EventType
-	virtual void LogIt(WORD CategoryID, DWORD EventID, LPCTSTR ArrayOfStrings[] = NULL,
-		UINT NumOfArrayStr = 0,LPVOID RawData = NULL,DWORD RawDataSize = 0);
+	virtual void LogIt(WORD CategoryID, DWORD EventID, LPCTSTR ArrayOfStrings[] = nullptr,
+		UINT NumOfArrayStr = 0,LPVOID RawData = nullptr,DWORD RawDataSize = 0);
 	// data member to contain handle to registry
 	HANDLE m_hEventLinker;
 

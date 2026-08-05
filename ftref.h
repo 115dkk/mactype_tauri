@@ -1,3 +1,5 @@
+#pragma once
+
 #include <freetype/ftglyph.h>
 #include <Windows.h>
 
@@ -5,13 +7,13 @@
 extern "C"{
 #endif
 
-typedef struct  
+typedef struct
 {
 	FT_Glyph ft_glyph;
 	LONG refcount;
 }FT_Referenced_GlyphRec, *FT_Referenced_Glyph;
 
-typedef struct  
+typedef struct
 {
 	FT_BitmapGlyph ft_glyph;
 	LONG refcount;

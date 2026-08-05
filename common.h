@@ -21,7 +21,10 @@
 #include <functional>
 //#include <iterator>
 #include <algorithm>
+#include <cstddef>
 #include <memory>
+#include <vector>
+#include "renderer_raii.h"
 #include "array.h"
 #include <set>
 #include "ownedcs.h"
@@ -70,7 +73,7 @@ using namespace std;
 #if (_MSC_VER >= 1210)
 #define NOP_FUNCTION	__noop
 #else
-#define NOP_FUNCTION	(void)0
+#define NOP_FUNCTION	static_cast<void>(0)
 #endif	//_MSC_VER
 #endif	//!NOP_FUNCTION
 #ifndef C_ASSERT
@@ -92,7 +95,7 @@ void Log(wchar_t* Msg);
 // convert string to wstring
 std::wstring to_wide_string(const std::string & input);
 
-// convert wstring to string 
+// convert wstring to string
 std::string to_byte_string(const std::wstring & input);
 
 // convert a utf-16be string back to utf-16le string
@@ -111,7 +114,7 @@ class CCriticalSectionLock
 {
 #define MAX_CRITICAL_COUNT 20
 private:
-	static CRITICAL_SECTION m_cs[MAX_CRITICAL_COUNT];
+	static renderer_raii::CriticalSection m_cs[MAX_CRITICAL_COUNT];
 	friend class CCriticalSectionLockTry;
 	int m_index;
 public:
@@ -136,21 +139,21 @@ public:
 	explicit CCriticalSectionLock(int index=CS_LIBRARY):
 	  m_index(index)
 	{
-		::EnterCriticalSection(&m_cs[index]);
+		::EnterCriticalSection(m_cs[index].get());
 	}
 	~CCriticalSectionLock()
 	{
-		::LeaveCriticalSection(&m_cs[m_index]);
+		::LeaveCriticalSection(m_cs[m_index].get());
 	}
 	static void Init()
 	{
 		for (int i=0;i<MAX_CRITICAL_COUNT;i++)
-			::InitializeCriticalSection(&m_cs[i]);
+			m_cs[i].initialize();
 	}
 	static void Term()
 	{
 		for (int i=0;i<MAX_CRITICAL_COUNT;i++)
-			::DeleteCriticalSection(&m_cs[i]);
+			m_cs[i].reset();
 	}
 };
 
@@ -188,19 +191,19 @@ static void _Trace(LPCTSTR pszFormat, ...)
 				memmove(p2 + 1, p1 + 1, (_tcslen(p1) + 1) * sizeof(TCHAR));
 		}
 		_tcscpy(szFileName + _tcslen(szFileName) - 4, L"_dbg.txt");
-		g_hfDbgText = hf = CreateFile(szFileName, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, 0, NULL);
+		g_hfDbgText = hf = CreateFile(szFileName, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, 0, nullptr);
 		if(hf != INVALID_HANDLE_VALUE) {
-			SetFilePointer(hf, 0, NULL, FILE_BEGIN);
+			SetFilePointer(hf, 0, nullptr, FILE_BEGIN);
 #ifdef _UNICODE
 			WORD w = 0xfeff;
 			DWORD cb;
-			WriteFile(hf, &w, sizeof(WORD), &cb, NULL);
+			WriteFile(hf, &w, sizeof(WORD), &cb, nullptr);
 #endif
 		}
 	}
 	if(hf != INVALID_HANDLE_VALUE) {
 		DWORD cb;
-		WriteFile(hf, szBuffer, _tcslen(szBuffer) * sizeof(TCHAR), &cb, NULL);
+		WriteFile(hf, szBuffer, _tcslen(szBuffer) * sizeof(TCHAR), &cb, nullptr);
 	}
 }
 #else	//!_DEBUG
@@ -210,7 +213,7 @@ static void _Trace(LPCTSTR pszFormat, ...)
 //#if (_MSC_VER >= 1210)
 //#define NOP_FUNCTION __noop
 //#else
-//#define NOP_FUNCTION (void)0
+//#define NOP_FUNCTION static_cast<void>(0)
 //#endif
 //#endif
 #endif	//_DEBUG
@@ -237,7 +240,7 @@ static void _Trace2(LPCTSTR pszFormat, ...)
 
 static void _Trace2_Bin(LPWSTR func, int line, LPVOID lpString, UINT cbString)
 {
-	const PBYTE srcp = (const PBYTE)lpString;
+	const BYTE* srcp = static_cast<const BYTE*>(lpString);
 	WCHAR buf[0x1000];
 	LPWSTR p = buf;
 	for (UINT i = 0; i < 32 && i < cbString; ++i) {
@@ -270,10 +273,44 @@ static void _Trace2_Str(LPWSTR func, int line, LPCWSTR lpString, UINT cbString)
 #endif	//USE_TRACE
 
 
+class OwnedCriticalSectionResource
+{
+public:
+	OwnedCriticalSectionResource() noexcept : initialized_(false) {}
+	~OwnedCriticalSectionResource() noexcept { reset(); }
+
+	OwnedCriticalSectionResource(const OwnedCriticalSectionResource&) = delete;
+	OwnedCriticalSectionResource& operator=(const OwnedCriticalSectionResource&) = delete;
+	OwnedCriticalSectionResource(OwnedCriticalSectionResource&&) = delete;
+	OwnedCriticalSectionResource& operator=(OwnedCriticalSectionResource&&) = delete;
+
+	void initialize()
+	{
+		if (!initialized_) {
+			InitializeOwnedCritialSection(&value_);
+			initialized_ = true;
+		}
+	}
+
+	void reset() noexcept
+	{
+		if (initialized_) {
+			DeleteOwnedCritialSection(&value_);
+			initialized_ = false;
+		}
+	}
+
+	POWNED_CRITIAL_SECTION get() noexcept { return &value_; }
+
+private:
+	OWNED_CRITIAL_SECTION value_{};
+	bool initialized_;
+};
+
 class COwnedCriticalSectionLock
 {
 private:
-	static OWNED_CRITIAL_SECTION m_cs[2];
+	static OwnedCriticalSectionResource m_cs[2];
 	WORD FOwner;
 	int m_index;
 public:
@@ -283,28 +320,28 @@ public:
 	};
 	COwnedCriticalSectionLock():FOwner(0), m_index(OCS_FREETYPE)
 	{
-		EnterOwnedCritialSection(&m_cs[m_index], FOwner);
+		EnterOwnedCritialSection(m_cs[m_index].get(), FOwner);
 	}
 	explicit COwnedCriticalSectionLock(WORD Owner, int index=OCS_FREETYPE):FOwner(Owner), m_index(index)
 	{
-		EnterOwnedCritialSection(&m_cs[m_index], Owner);
+		EnterOwnedCritialSection(m_cs[m_index].get(), Owner);
 	}
 	~COwnedCriticalSectionLock()
 	{
-		LeaveOwnedCritialSection(&m_cs[m_index], FOwner);
+		LeaveOwnedCritialSection(m_cs[m_index].get(), FOwner);
 	}
 	static void Init()
 	{
 		for (int i=0;i<2;i++)
 		{
-			InitializeOwnedCritialSection(&m_cs[i]);
+			m_cs[i].initialize();
 		}
 	}
 	static void Term()
 	{
 		for (int i=0;i<2;i++)
 		{
-			DeleteOwnedCritialSection(&m_cs[i]);
+			m_cs[i].reset();
 		}
 	}
 };
@@ -337,32 +374,29 @@ class CCriticalSectionLockTry
 public:
 	static BOOL TryEnter(int index=CCriticalSectionLock::CS_LIBRARY)
 	{
-		return ::TryEnterCriticalSection(&CCriticalSectionLock::m_cs[index]);
+		return ::TryEnterCriticalSection(CCriticalSectionLock::m_cs[index].get());
 	}
 	static int CritalCount(int index=CCriticalSectionLock::CS_LIBRARY)
 	{
-		return CCriticalSectionLock::m_cs[index].RecursionCount;
+		return CCriticalSectionLock::m_cs[index].get()->RecursionCount;
 	}
 	static void Leave(int index=CCriticalSectionLock::CS_LIBRARY)
 	{
-		::LeaveCriticalSection(&CCriticalSectionLock::m_cs[index]);
+		::LeaveCriticalSection(CCriticalSectionLock::m_cs[index].get());
 	}
 };
 
 // 使用後はfreeで開放する事
 LPWSTR _StrDupExAtoW(LPCSTR pszMB, int cchMB, LPWSTR pszStack, int cchStack, int* pcchWC, int nACP = CP_ACP);
-static inline LPWSTR _StrDupAtoW(LPCSTR pszMB, int cchMB = -1, int* pcchWC = NULL)
+static inline LPWSTR _StrDupAtoW(LPCSTR pszMB, int cchMB = -1, int* pcchWC = nullptr)
 {
-	return _StrDupExAtoW(pszMB, cchMB, NULL, 0, pcchWC);
+	return _StrDupExAtoW(pszMB, cchMB, nullptr, 0, pcchWC);
 }
 
 // useful macros
 #define NOCOPY(T)					T(const T&); T& operator=(const T&)
 #define countof(array)				(sizeof(array)/sizeof(array[0]))
-#define sizeof_struct(s, m)			(((int)((char*)(&((s*)0)->m) - ((char*)((s*)0)))) + sizeof(((s*)0)->m))
-#ifndef offsetof
-#define offsetof(s,m)				(size_t)&(((s*)0)->m)
-#endif
+#define sizeof_struct(s, m)			(static_cast<int>(offsetof(s, m)) + sizeof((static_cast<s*>(nullptr))->m))
 #ifdef _DEBUG
 #define Verify(expr)				_ASSERTE(expr)
 #else
@@ -391,15 +425,15 @@ template<typename T> FORCEINLINE int Sgn(T x, T y) { return (x > y) ? 1 : ((x < 
 #undef SelectBitmap
 
 #define _IsValidPen(hPen)		\
-	(hPen == NULL || ::GetObjectType(hPen) == OBJ_PEN || ::GetObjectType(hPen) == OBJ_EXTPEN)
+	(hPen == nullptr || ::GetObjectType(hPen) == OBJ_PEN || ::GetObjectType(hPen) == OBJ_EXTPEN)
 #define _IsValidBrush(hBrush)	\
-	(hBrush == NULL || ::GetObjectType(hBrush) == OBJ_BRUSH)
+	(hBrush == nullptr || ::GetObjectType(hBrush) == OBJ_BRUSH)
 #define _IsValidRgn(hRgn)		\
-	(hRgn == NULL || ::GetObjectType(hRgn) == OBJ_REGION)
+	(hRgn == nullptr || ::GetObjectType(hRgn) == OBJ_REGION)
 #define _IsValidFont(hFont)		\
-	(hFont == NULL || ::GetObjectType(hFont) == OBJ_FONT)
+	(hFont == nullptr || ::GetObjectType(hFont) == OBJ_FONT)
 #define _IsValidBitmap(hBitmap)	\
-	(hBitmap == NULL || ::GetObjectType(hBitmap) == OBJ_BITMAP)
+	(hBitmap == nullptr || ::GetObjectType(hBitmap) == OBJ_BITMAP)
 
 #define DEFINE_DELETE_FUNCTION(type, name) \
 	FORCEINLINE BOOL WINAPI Delete##name(type h##name) \
@@ -411,11 +445,11 @@ template<typename T> FORCEINLINE int Sgn(T x, T y) { return (x > y) ? 1 : ((x < 
 #define DEFINE_SELECT_FUNCTION(type, name) \
 	FORCEINLINE type WINAPI Select##name(HDC hDC, type h##name) \
 	{ \
-		_ASSERTE(hDC != NULL); \
+		_ASSERTE(hDC != nullptr); \
 		if (!_IsValid##name(h##name)) { \
-		TRACE(_T("Select object %x for DC %x"), (DWORD)h##name, (DWORD)hDC); \
+		TRACE(_T("Select object %x for DC %x"), static_cast<DWORD>(reinterpret_cast<ULONG_PTR>(h##name)), static_cast<DWORD>(reinterpret_cast<ULONG_PTR>(hDC))); \
 			}; \
-		return (type)::SelectObject(hDC, h##name); \
+		return reinterpret_cast<type>(::SelectObject(hDC, h##name)); \
 	}
 
 DEFINE_DELETE_FUNCTION(HPEN,	Pen)
@@ -456,11 +490,11 @@ DEFINE_SELECT_FUNCTION(HBITMAP,	Bitmap)
 #define DeleteFont			::DeleteObject
 #define DeleteBitmap		::DeleteObject
 
-#define SelectPen(d,o)		(HPEN)::SelectObject(d,o)
-#define SelectBrush(d,o)	(HBRUSH)::SelectObject(d,o)
-#define SelectRgn(d,o)		(HRGN)::SelectObject(d,o)
-#define SelectFont(d,o)		(HFONT)::SelectObject(d,o)
-#define SelectBitmap(d,o)	(HBITMAP)::SelectObject(d,o)
+#define SelectPen(d,o)		reinterpret_cast<HPEN>(::SelectObject(d,o))
+#define SelectBrush(d,o)	reinterpret_cast<HBRUSH>(::SelectObject(d,o))
+#define SelectRgn(d,o)		reinterpret_cast<HRGN>(::SelectObject(d,o))
+#define SelectFont(d,o)		reinterpret_cast<HFONT>(::SelectObject(d,o))
+#define SelectBitmap(d,o)	reinterpret_cast<HBITMAP>(::SelectObject(d,o))
 #endif	//!_INC_WINDOWSX
 #endif	//_DEBUG
 
@@ -499,7 +533,7 @@ public:
 	}
 	~CDebugElapsedCounter()
 	{
-		TRACE(_T("%hs: %u clocks\n"), m_pszName, (DWORD)(GetClockCount() - m_ilClk));
+		TRACE(_T("%hs: %u clocks\n"), m_pszName, static_cast<DWORD>(GetClockCount() - m_ilClk));
 	}
 };
 #else
@@ -519,7 +553,7 @@ public:
 int _StrToInt(LPCTSTR pStr, int nDefault)
 {
 #define isspace(ch)		(ch == _T('\t') || ch == _T(' '))
-#define isdigit(ch)		((_TUCHAR)(ch - _T('0')) <= 9)
+#define isdigit(ch)		(static_cast<_TUCHAR>(ch - _T('0')) <= 9)
 
 	int ret;
 	bool neg = false;
@@ -568,8 +602,10 @@ int _httoi(const TCHAR *value)
 		{'C', 12}, {'D', 13},
 		{'E', 14}, {'F', 15}
 	};
-	TCHAR *mstr = _tcsupr(_tcsdup(value));
-	TCHAR *s = mstr;
+	renderer_raii::UniqueMallocMemory<TCHAR> mstr(_tcsdup(value));
+	if (!mstr) return 0;
+	_tcsupr(mstr.get());
+	TCHAR *s = mstr.get();
 	int result = 0;
 	if (*s == '0' && *(s + 1) == 'X') s += 2;
 	bool firsttime = true;
@@ -590,7 +626,6 @@ int _httoi(const TCHAR *value)
 		s++;
 		firsttime = false;
 	}
-	free(mstr);
 	return result;
 }
 
@@ -598,7 +633,7 @@ int _httoi(const TCHAR *value)
 float _StrToFloat(LPCTSTR pStr, float fDefault)
 {
 #define isspace(ch)		(ch == _T('\t') || ch == _T(' '))
-#define isdigit(ch)		((_TUCHAR)(ch - _T('0')) <= 9)
+#define isdigit(ch)		(static_cast<_TUCHAR>(ch - _T('0')) <= 9)
 
 	int ret_i;
 	int ret_d;
@@ -629,7 +664,7 @@ float _StrToFloat(LPCTSTR pStr, float fDefault)
 			ret_d *= 10;
 		}
 	}
-	ret = (float)ret_i / (float)ret_d;
+	ret = static_cast<float>(ret_i) / static_cast<float>(ret_d);
 
 	if (pStr == pStart) {
 		return fDefault;

@@ -31,5 +31,5 @@ TCHAR* CHashedStringList::Find(const TCHAR* String)
 	if (it != stringmap.end())
 		return it->second;
 	else
-		return NULL;
+		return nullptr;
 }

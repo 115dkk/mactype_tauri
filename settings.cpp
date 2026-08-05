@@ -9,7 +9,7 @@
 #include <freetype/ftenv.h>
 #endif
 
-CControlCenter* g_ControlCenter = NULL;
+CControlCenter* g_ControlCenter = nullptr;
 
 inline BOOL IsFolder(LPCTSTR pszPath) {
 	return pszPath && *pszPath && *(pszPath + wcslen(pszPath) - 1) == '\\';
@@ -18,7 +18,7 @@ inline BOOL IsFolder(LPCTSTR pszPath) {
 int _StrToInt(LPCTSTR pStr, int nDefault)
 {
 #define isspace(ch)		(ch == _T('\t') || ch == _T(' '))
-#define isdigit(ch)		((_TUCHAR)(ch - _T('0')) <= 9)
+#define isdigit(ch)		(static_cast<_TUCHAR>(ch - _T('0')) <= 9)
 
 	int ret;
 	bool neg = false;
@@ -76,7 +76,7 @@ const wstring GetAppDir() {
 	}
 	WCHAR name[MAX_PATH] = { 0 };
 
-	int nSize = GetModuleFileName(NULL, name, MAX_PATH + 1);
+	int nSize = GetModuleFileName(nullptr, name, MAX_PATH + 1);
 	PathRemoveFileSpec(name);
 	AppDir = wstring(name) + L"\\"; // path should always end with a "\"
 	AppDir = LowerCase(AppDir);
@@ -112,8 +112,8 @@ CGdippSettings* CGdippSettings::CreateInstance()
 	CCriticalSectionLock __lock(CCriticalSectionLock::CS_SETTING);
 	CGdippSettings* pSettings = new CGdippSettings;
 	CGdippSettings* pOldSettings = reinterpret_cast<CGdippSettings*>(InterlockedExchangePointer(reinterpret_cast<void**>(&s_pInstance), pSettings));
-	_ASSERTE(pOldSettings == NULL);
-	int nSize = GetModuleFileName(NULL, pSettings->m_szexeName, MAX_PATH);
+	_ASSERTE(pOldSettings == nullptr);
+	int nSize = GetModuleFileName(nullptr, pSettings->m_szexeName, MAX_PATH);
 	for (int i = nSize; i > 0; --i) {
 		if (pSettings->m_szexeName[i] == _T('\\')) {
 			StringCchCopy(pSettings->m_szexeName, nSize - i, pSettings->m_szexeName + i + 1);
@@ -127,7 +127,7 @@ void CGdippSettings::DestroyInstance()
 {
 	CCriticalSectionLock __lock(CCriticalSectionLock::CS_SETTING);
 
-	CGdippSettings* pSettings = reinterpret_cast<CGdippSettings*>(InterlockedExchangePointer(reinterpret_cast<void**>(&s_pInstance), NULL));
+	CGdippSettings* pSettings = reinterpret_cast<CGdippSettings*>(InterlockedExchangePointer(reinterpret_cast<void**>(&s_pInstance), nullptr));
 	if (pSettings) {
 		delete pSettings;
 	}
@@ -137,7 +137,7 @@ CGdippSettings* CGdippSettings::GetInstance()
 {
 	CCriticalSectionLock __lock(CCriticalSectionLock::CS_SETTING);
 	CGdippSettings* pSettings = s_pInstance;
-	_ASSERTE(pSettings != NULL);
+	_ASSERTE(pSettings != nullptr);
 
 	if (!pSettings->m_bDelayedInit) {
 		pSettings->DelayedInit();
@@ -149,7 +149,7 @@ const CGdippSettings* CGdippSettings::GetInstanceNoInit()
 {
 	CCriticalSectionLock __lock(CCriticalSectionLock::CS_SETTING);
 	CGdippSettings* pSettings = s_pInstance;
-	_ASSERTE(pSettings != NULL);
+	_ASSERTE(pSettings != nullptr);
 	return pSettings;
 }
 
@@ -158,7 +158,7 @@ void CGdippSettings::DelayedInit()
 	if (!g_pFTEngine) {
 		return;
 	}
-	if (IsBadCodePtr((FARPROC)RegOpenKeyExW) || *(DWORD_PTR*)RegOpenKeyExW==0)
+	if (IsBadCodePtr(reinterpret_cast<FARPROC>(RegOpenKeyExW)) || *reinterpret_cast<const DWORD_PTR*>(RegOpenKeyExW) == 0)
 		return;
 	/*
 	In Windows 8, this call will fail in restricted environment
@@ -168,18 +168,17 @@ void CGdippSettings::DelayedInit()
 	*/
 	m_bDelayedInit = true;
 
-	HDC hdcScreen = GetDC(NULL);
+	auto hdcScreen = renderer_raii::AdoptWindowDeviceContext(nullptr, GetDC(nullptr));
 	if (!hdcScreen) {
-		return;	
-	}	
+		return;
+	}
 
 	//ForceChangeFont
 	//if (m_szForceChangeFont[0]) {
 	//	EnumFontFamilies(hdcScreen, m_szForceChangeFont, EnumFontFamProc, reinterpret_cast<LPARAM>(this));
 	//}
 	//fetch screen dpi
-	m_nScreenDpi = GetDeviceCaps(hdcScreen, LOGPIXELSX);
-	ReleaseDC(NULL, hdcScreen);
+	m_nScreenDpi = GetDeviceCaps(hdcScreen.get(), LOGPIXELSX);
 
 // 	//FontLink
 // 	if (FontLink()) {
@@ -187,10 +186,10 @@ void CGdippSettings::DelayedInit()
 // 	}
 
 
-	const int nTextTuning = _GetFreeTypeProfileInt(_T("TextTuning"), 0, NULL),
-		nTextTuningR = _GetFreeTypeProfileInt(_T("TextTuningR"), 0, NULL),
-		nTextTuningG = _GetFreeTypeProfileInt(_T("TextTuningG"), 0, NULL),
-		nTextTuningB = _GetFreeTypeProfileInt(_T("TextTuningB"), 0, NULL);
+	const int nTextTuning = _GetFreeTypeProfileInt(_T("TextTuning"), 0, nullptr),
+		nTextTuningR = _GetFreeTypeProfileInt(_T("TextTuningR"), 0, nullptr),
+		nTextTuningG = _GetFreeTypeProfileInt(_T("TextTuningG"), 0, nullptr),
+		nTextTuningB = _GetFreeTypeProfileInt(_T("TextTuningB"), 0, nullptr);
 	InitInitTuneTable();
 	InitTuneTable(nTextTuning,  m_nTuneTable);
 	InitTuneTable(nTextTuningR, m_nTuneTableR);
@@ -208,14 +207,14 @@ void CGdippSettings::DelayedInit()
 	m_FontSubstitutesInfo.init(m_nFontSubstitutes, arrFontSubstitutes);
 
 	names = _T("Individual@") + wstring(m_szexeName);
-	if (_IsFreeTypeProfileSectionExists(names.c_str(), NULL))
-		AddIndividualFromSection(names.c_str(), NULL, m_arrIndividual);
+	if (_IsFreeTypeProfileSectionExists(names.c_str(), nullptr))
+		AddIndividualFromSection(names.c_str(), nullptr, m_arrIndividual);
 	else
-		AddIndividualFromSection(_T("Individual"), NULL, m_arrIndividual);
+		AddIndividualFromSection(_T("Individual"), nullptr, m_arrIndividual);
 
-	AddExcludeListFromSection(_T("Exclude"), NULL, m_arrExcludeFont);
-	AddExcludeListFromSection(_T("Include"), NULL, m_arrIncludeFont);	//I know it's include not exclude, but they share the same logic.
-	//WritePrivateProfileString(NULL, NULL, NULL, m_szFileName);
+	AddExcludeListFromSection(_T("Exclude"), nullptr, m_arrExcludeFont);
+	AddExcludeListFromSection(_T("Include"), nullptr, m_arrIncludeFont);	//I know it's include not exclude, but they share the same logic.
+	//WritePrivateProfileString(nullptr, nullptr, nullptr, m_szFileName);
 
 	//m_bDelayedInit = true;
 
@@ -228,13 +227,13 @@ void CGdippSettings::DelayedInit()
 	FT_LCDMode_Set(freetype_library, this->HarmonyLCD() ? 1 : 0);
 
 	// Init LCD settings
-	// this->m_bHarmonyLCDRendering = FT_Library_SetLcdFilter(NULL, FT_LCD_FILTER_NONE) == FT_Err_Unimplemented_Feature; // official method of detecting freetype mode.
+	// this->m_bHarmonyLCDRendering = FT_Library_SetLcdFilter(nullptr, FT_LCD_FILTER_NONE) == FT_Err_Unimplemented_Feature; // official method of detecting freetype mode.
 	if (this->HarmonyLCD()) {
-		FT_Library_SetLcdFilter(NULL, FT_LCD_FILTER_NONE);
+		FT_Library_SetLcdFilter(nullptr, FT_LCD_FILTER_NONE);
 		// Harmony LCD rendering
 		if (m_bUseCustomPixelLayout) {
-			FT_Vector  sub[3] = { { m_arrPixelLayout[0], m_arrPixelLayout[1]}, 
-									{m_arrPixelLayout[2], m_arrPixelLayout[3]},	 
+			FT_Vector  sub[3] = { { m_arrPixelLayout[0], m_arrPixelLayout[1]},
+									{m_arrPixelLayout[2], m_arrPixelLayout[3]},
 									{m_arrPixelLayout[4], m_arrPixelLayout[5]}};	// custom layout
 			FT_Library_SetLcdGeometry(freetype_library, sub);
 		}
@@ -271,14 +270,14 @@ void CGdippSettings::DelayedInit()
 	}
 	else {
 		int nLcdFilter = LcdFilter();
-		if ((int)FT_LCD_FILTER_NONE <= nLcdFilter && nLcdFilter < (int)FT_LCD_FILTER_MAX) {
+	if (static_cast<int>(FT_LCD_FILTER_NONE) <= nLcdFilter && nLcdFilter < static_cast<int>(FT_LCD_FILTER_MAX)) {
 			switch (GetFontSettings().GetAntiAliasMode()) {
 			case 1:
 			case 4:
 			case 5:
 				nLcdFilter = FT_LCD_FILTER_LIGHT;	// now we apply a light filter to lcd based on AA mode automatically, unless a custom lcd filter is defined.
 			}
-			FT_Library_SetLcdFilter(freetype_library, (FT_LcdFilter)nLcdFilter);
+			FT_Library_SetLcdFilter(freetype_library, static_cast<FT_LcdFilter>(nLcdFilter));
 			if (UseCustomLcdFilter())
 			{
 				unsigned char buff[5];
@@ -298,7 +297,7 @@ void CGdippSettings::DelayedInit()
 
 /*	DWORD dwVersion = GetVersion();
 
-	if (m_bDirectWrite && (DWORD)(LOBYTE(LOWORD(dwVersion)))>5)	//vista or later
+	if (m_bDirectWrite && static_cast<DWORD>(LOBYTE(LOWORD(dwVersion))) > 5)	//vista or later
 	{
 		if (GetModuleHandle(_T("d2d1.dll")))	//directwrite support
 			HookD2D1();
@@ -308,18 +307,18 @@ void CGdippSettings::DelayedInit()
 bool CGdippSettings::LoadSettings(HINSTANCE hModule)
 {
 	CCriticalSectionLock __lock(CCriticalSectionLock::CS_SETTING);
-	int nSize = ::GetModuleFileName(hModule, m_szFileName, MAX_PATH - sizeof(".ini") + 1); 
+	int nSize = ::GetModuleFileName(hModule, m_szFileName, MAX_PATH - sizeof(".ini") + 1);
 	if (!nSize) {
 		return false;
 	}
 	ChangeFileName(m_szFileName, nSize, L"MacType.ini");
-	
+
 	return LoadAppSettings(m_szFileName);
 }
 
 int CGdippSettings::_GetFreeTypeProfileIntFromSection(LPCTSTR lpszSection, LPCTSTR lpszKey, int nDefault, LPCTSTR lpszFile)
 {
-	wstring names = wstring((LPTSTR)lpszSection) + _T("@") + wstring((LPTSTR)m_szexeName);
+	wstring names = wstring(lpszSection) + _T("@") + wstring(m_szexeName);
 	if (m_Config.IsPartExists(names.c_str()) && m_Config[names.c_str()].IsValueExists(lpszKey))
 		return m_Config[names.c_str()][lpszKey].ToInt();
 	else
@@ -331,7 +330,7 @@ int CGdippSettings::_GetFreeTypeProfileIntFromSection(LPCTSTR lpszSection, LPCTS
 
 bool CGdippSettings::_GetFreeTypeProfileBoolFromSection(LPCTSTR lpszSection, LPCTSTR lpszKey, bool nDefault, LPCTSTR lpszFile)
 {
-	wstring names = wstring((LPTSTR)lpszSection) + _T("@") + wstring((LPTSTR)m_szexeName);
+	wstring names = wstring(lpszSection) + _T("@") + wstring(m_szexeName);
 	if (m_Config.IsPartExists(names.c_str()) && m_Config[names.c_str()].IsValueExists(lpszKey))
 		return m_Config[names.c_str()][lpszKey].ToBool();
 	else
@@ -343,7 +342,7 @@ bool CGdippSettings::_GetFreeTypeProfileBoolFromSection(LPCTSTR lpszSection, LPC
 
 wstring CGdippSettings::_GetFreeTypeProfileStrFromSection(LPCTSTR lpszSection, LPCTSTR lpszKey, const TCHAR* nDefault, LPCTSTR lpszFile)
 {
-	wstring names = wstring((LPTSTR)lpszSection) + _T("@") + wstring((LPTSTR)m_szexeName);
+	wstring names = wstring(lpszSection) + _T("@") + wstring(m_szexeName);
 	if (m_Config.IsPartExists(names.c_str()) && m_Config[names.c_str()].IsValueExists(lpszKey))
 		return m_Config[names.c_str()][lpszKey].ToString();
 	else
@@ -375,7 +374,7 @@ bool CGdippSettings::_IsFreeTypeProfileSectionExists(LPCTSTR lpszKey, LPCTSTR lp
 
 float CGdippSettings::FastGetProfileFloat(LPCTSTR lpszSection, LPCTSTR lpszKey, float fDefault)
 {
-	wstring names = wstring((LPTSTR)lpszSection) + _T("@") + wstring((LPTSTR)m_szexeName);
+	wstring names = wstring(lpszSection) + _T("@") + wstring(m_szexeName);
 	if (m_Config.IsPartExists(names.c_str()) && m_Config[names.c_str()].IsValueExists(lpszKey))
 		return m_Config[names.c_str()][lpszKey].ToDouble();
 	else
@@ -387,7 +386,7 @@ float CGdippSettings::FastGetProfileFloat(LPCTSTR lpszSection, LPCTSTR lpszKey, 
 
 int CGdippSettings::FastGetProfileInt(LPCTSTR lpszSection, LPCTSTR lpszKey, int nDefault)
 {
-	wstring names = wstring((LPTSTR)lpszSection) + _T("@") + wstring((LPTSTR)m_szexeName);
+	wstring names = wstring(lpszSection) + _T("@") + wstring(m_szexeName);
 	if (m_Config.IsPartExists(names.c_str()) && m_Config[names.c_str()].IsValueExists(lpszKey))
 		return m_Config[names.c_str()][lpszKey].ToInt();
 	else
@@ -399,12 +398,12 @@ int CGdippSettings::FastGetProfileInt(LPCTSTR lpszSection, LPCTSTR lpszKey, int 
 
 float CGdippSettings::_GetFreeTypeProfileFloat(LPCTSTR lpszKey, float fDefault, LPCTSTR lpszFile)
 {
-	wstring names = wstring((LPTSTR)c_szFreeType) + _T("@") + wstring((LPTSTR)m_szexeName);
+	wstring names = wstring(c_szFreeType) + _T("@") + wstring(m_szexeName);
 	if (m_Config.IsPartExists(names.c_str()) && m_Config[names.c_str()].IsValueExists(lpszKey))
 		return m_Config[names.c_str()][lpszKey].ToInt();
 	else
 	{
-		names = wstring((LPTSTR)c_szGeneral) + _T("@") + wstring((LPTSTR)m_szexeName);
+		names = wstring(c_szGeneral) + _T("@") + wstring(m_szexeName);
 		if (m_Config.IsPartExists(names.c_str()) && m_Config[names.c_str()].IsValueExists(lpszKey))
 			return m_Config[names.c_str()][lpszKey].ToDouble();
 		else
@@ -425,7 +424,7 @@ float CGdippSettings::_GetFreeTypeProfileBoundFloat(LPCTSTR lpszKey, float fDefa
 
 DWORD CGdippSettings::FastGetProfileString(LPCTSTR lpszSection, LPCTSTR lpszKey, LPCTSTR lpszDefault, LPTSTR lpszRet, DWORD cch)
 {
-	wstring names = wstring((LPTSTR)lpszSection) + _T("@") + wstring((LPTSTR)m_szexeName);
+	wstring names = wstring(lpszSection) + _T("@") + wstring(m_szexeName);
 	if (m_Config.IsPartExists(names.c_str()) && m_Config[names.c_str()].IsValueExists(lpszKey))
 	{
 		LPCTSTR p = m_Config[names.c_str()][lpszKey];
@@ -455,7 +454,7 @@ DWORD CGdippSettings::FastGetProfileString(LPCTSTR lpszSection, LPCTSTR lpszKey,
 
 DWORD CGdippSettings::_GetFreeTypeProfileString(LPCTSTR lpszKey, LPCTSTR lpszDefault, LPTSTR lpszRet, DWORD cch, LPCTSTR lpszFile)
 {
-	wstring names = wstring((LPTSTR)c_szFreeType) + _T("@") + wstring((LPTSTR)m_szexeName);
+	wstring names = wstring(c_szFreeType) + _T("@") + wstring(m_szexeName);
 	if (m_Config.IsPartExists(names.c_str()) && m_Config[names.c_str()].IsValueExists(lpszKey))
 	{
 		LPCTSTR p = m_Config[names.c_str()][lpszKey];
@@ -464,7 +463,7 @@ DWORD CGdippSettings::_GetFreeTypeProfileString(LPCTSTR lpszKey, LPCTSTR lpszDef
 	}
 	else
 	{
-		names = wstring((LPTSTR)c_szGeneral) + _T("@") + wstring((LPTSTR)m_szexeName);
+		names = wstring(c_szGeneral) + _T("@") + wstring(m_szexeName);
 		if (m_Config.IsPartExists(names.c_str()) && m_Config[names.c_str()].IsValueExists(lpszKey))
 		{
 			LPCTSTR p = m_Config[names.c_str()][lpszKey];
@@ -532,7 +531,7 @@ bool CGdippSettings::LoadAppSettings(LPCTSTR lpszFile)
 	// [Individual]
 	// ＭＳ Ｐゴシック=0,1,2,3,4,5
 	GetOSVersion();
-	WritePrivateProfileString(NULL, NULL, NULL, lpszFile);
+	WritePrivateProfileString(nullptr, nullptr, nullptr, lpszFile);
 
 	m_Config.Clear();
 	m_Config.LoadFromFile(lpszFile);
@@ -546,7 +545,7 @@ bool CGdippSettings::LoadAppSettings(LPCTSTR lpszFile)
 			PathCombine(szAlternative, szDir, szAlternative);
 		}
 		StringCchCopy(szMainFile, MAX_PATH, lpszFile);	//把原始文件名保存下来
-		StringCchCopy(m_szFileName, MAX_PATH, szAlternative);	
+		StringCchCopy(m_szFileName, MAX_PATH, szAlternative);
 		lpszFile = m_szFileName;
 		m_Config.Clear();
 		m_Config.LoadFromFile(lpszFile);
@@ -615,7 +614,7 @@ SKIP:
 	// GammaValue検証用
 	//CHAR GammaValueTest[1025];
 	//sprintf(GammaValueTest, "GammaValue=%.6f\nContrast=%.6f\n", m_fGammaValue, m_fContrast);
-	//MessageBoxA(NULL, GammaValueTest, "GammaValueテスト", 0);
+	//MessageBoxA(nullptr, GammaValueTest, "GammaValueテスト", 0);
 #endif
 	m_bLoadOnDemand	= !!_GetFreeTypeProfileInt(_T("LoadOnDemand"), false, lpszFile);
 	m_bFontLink		= _GetFreeTypeProfileInt(_T("FontLink"), 0, lpszFile);
@@ -636,7 +635,7 @@ SKIP:
 													 SETTING_FONTSUBSTITUTE_ALL,
 													 lpszFile);
 	m_nWidthMode = SETTING_WIDTHMODE_GDI32;
-	
+
 
 	m_nFontLoader = _GetFreeTypeProfileBoundInt(_T("FontLoader"),
 												SETTING_FONTLOADER_FREETYPE,
@@ -674,7 +673,7 @@ SKIP:
 	sTemp = _GetFreeTypeProfileStrFromSection(_T("Infinality"), _T(y), def, lpszFile); \
 	FT_PutEnv(y, WstringToString(sTemp).c_str());
 
-	char* buff = (char*)malloc(256);
+	char buff[256] = {};
 	int nTemp; bool bTemp; wstring sTemp;
 
 	// INFINALITY settings:
@@ -705,7 +704,6 @@ SKIP:
 	INF_STR_ENV( "INFINALITY_FT_GAMMA_CORRECTION", _T("0 100"));
 	INF_STR_ENV( "INFINALITY_FT_FILTER_PARAMS", _T("11 22 38 22 11"));
 
-	free(buff);
 #endif
 
 	if (m_nFontLoader == SETTING_FONTLOADER_WIN32) {
@@ -724,7 +722,7 @@ SKIP:
 	// OSのバージョンがXP以降かどうか
 	//OSVERSIONINFO osvi = { sizeof(OSVERSIONINFO) };
 	//GetVersionEx(&osvi);
-	m_bIsWinXPorLater = IsWindowsXPOrGreater(); 
+	m_bIsWinXPorLater = IsWindowsXPOrGreater();
 
 	STARTUPINFO si = { sizeof(STARTUPINFO) };
 	GetStartupInfo(&si);
@@ -742,7 +740,7 @@ SKIP:
 	InitTuneTable(nTextTuningR, m_nTuneTableR);
 	InitTuneTable(nTextTuningG, m_nTuneTableG);
 	InitTuneTable(nTextTuningB, m_nTuneTableB);*/
-//	m_bIsHDBench = (GetModuleHandle(_T("HDBENCH.EXE")) == GetModuleHandle(NULL));
+//	m_bIsHDBench = (GetModuleHandle(_T("HDBENCH.EXE")) == GetModuleHandle(nullptr));
 
 	m_arrExcludeFont.clear();
 	m_arrIncludeFont.clear();
@@ -785,7 +783,7 @@ SKIP:
 		m_bUseCustomLcdFilter = AddLcdFilterFromSection(names.c_str(), lpszFile, m_arrLcdFilterWeights);
 	else
 		m_bUseCustomLcdFilter = AddLcdFilterFromSection(_T("LcdFilterWeight"), lpszFile, m_arrLcdFilterWeights);
-	
+
 	m_bUseCustomPixelLayout = AddPixelModeFromSection(_T("PixelLayout"), lpszFile, m_arrPixelLayout);
 
 	return true;
@@ -794,7 +792,7 @@ SKIP:
 bool CGdippSettings::AddExcludeListFromSection(LPCTSTR lpszSection, LPCTSTR lpszFile, set<wstring> & arr)
 {
 	LPTSTR  buffer = _GetPrivateProfileSection(lpszSection, lpszFile);
-	if (buffer == NULL) {
+	if (buffer == nullptr) {
 		SetLastError(ERROR_NOT_ENOUGH_MEMORY);
 		return false;
 	}
@@ -818,7 +816,7 @@ bool CGdippSettings::AddExcludeListFromSection(LPCTSTR lpszSection, LPCTSTR lpsz
 bool CGdippSettings::AddListFromSection(LPCTSTR lpszSection, LPCTSTR lpszFile, set<wstring> & arr)
 {
 	LPTSTR  buffer = _GetPrivateProfileSection(lpszSection, lpszFile);
-	if (buffer == NULL) {
+	if (buffer == nullptr) {
 		SetLastError(ERROR_NOT_ENOUGH_MEMORY);
 		return false;
 	}
@@ -876,7 +874,7 @@ bool CGdippSettings::AddPixelModeFromSection(LPCTSTR lpszKey, LPCTSTR lpszFile, 
 	for (int i = 0; i < 6; i++) {
 		LPCTSTR arg = token.GetArgument(i);
 		if (!arg)
-			return false;	
+			return false;
 		arr[i] = _StrToInt(arg, arr[i]);
 	}
 
@@ -886,7 +884,7 @@ bool CGdippSettings::AddPixelModeFromSection(LPCTSTR lpszKey, LPCTSTR lpszFile, 
 bool CGdippSettings::AddIndividualFromSection(LPCTSTR lpszSection, LPCTSTR lpszFile, IndividualArray& arr)
 {
 	LPTSTR  buffer = _GetPrivateProfileSection(lpszSection, lpszFile);
-	if (buffer == NULL) {
+	if (buffer == nullptr) {
 		SetLastError(ERROR_NOT_ENOUGH_MEMORY);
 		return false;
 	}
@@ -945,7 +943,7 @@ bool CGdippSettings::AddIndividualFromSection(LPCTSTR lpszSection, LPCTSTR lpszF
 
 LPTSTR CGdippSettings::_GetPrivateProfileSection(LPCTSTR lpszSection, LPCTSTR lpszFile)
 {
-	return const_cast<LPTSTR>((LPCTSTR)m_Config[lpszSection]);
+	return const_cast<LPTSTR>(static_cast<LPCTSTR>(m_Config[lpszSection]));
 }
 
 int CGdippSettings::_httoi(const TCHAR *value)
@@ -967,8 +965,10 @@ int CGdippSettings::_httoi(const TCHAR *value)
 		{'C', 12}, {'D', 13},
 		{'E', 14}, {'F', 15}
 	};
-	TCHAR *mstr = _tcsupr(_tcsdup(value));
-	TCHAR *s = mstr;
+	renderer_raii::UniqueMallocMemory<TCHAR> mstr(_tcsdup(value));
+	if (!mstr) return 0;
+	_tcsupr(mstr.get());
+	TCHAR *s = mstr.get();
 	int result = 0;
 	if (*s == '0' && *(s + 1) == 'X') s += 2;
 	bool firsttime = true;
@@ -989,7 +989,6 @@ int CGdippSettings::_httoi(const TCHAR *value)
 		s++;
 		firsttime = false;
 	}
-	free(mstr);
 	return result;
 }
 
@@ -997,7 +996,7 @@ int CGdippSettings::_httoi(const TCHAR *value)
 float CGdippSettings::_StrToFloat(LPCTSTR pStr, float fDefault)
 {
 #define isspace(ch)		(ch == _T('\t') || ch == _T(' '))
-#define isdigit(ch)		((_TUCHAR)(ch - _T('0')) <= 9)
+#define isdigit(ch)		(static_cast<_TUCHAR>(ch - _T('0')) <= 9)
 
 	int ret_i;
 	int ret_d;
@@ -1028,7 +1027,7 @@ float CGdippSettings::_StrToFloat(LPCTSTR pStr, float fDefault)
 			ret_d *= 10;
 		}
 	}
-	ret = (float)ret_i / (float)ret_d;
+	ret = static_cast<float>(ret_i) / static_cast<float>(ret_d);
 
 	if (pStr == pStart) {
 		return fDefault;
@@ -1042,14 +1041,14 @@ float CGdippSettings::_StrToFloat(LPCTSTR pStr, float fDefault)
 bool CGdippSettings::IsFontExcluded(LPCSTR lpFaceName) const
 {
 	WCHAR szStack[LF_FACESIZE];
-	LPWSTR lpUnicode = _StrDupExAtoW(lpFaceName, -1, szStack, LF_FACESIZE, NULL);
+	LPWSTR lpUnicode = _StrDupExAtoW(lpFaceName, -1, szStack, LF_FACESIZE, nullptr);
 	if (!lpUnicode) {
 		return false;
 	}
+	renderer_raii::UniqueMallocMemory<WCHAR> heapUnicode(
+		lpUnicode == szStack ? nullptr : lpUnicode);
 
 	bool b = IsFontExcluded(lpUnicode);
-	if (lpUnicode != szStack)
-		free(lpUnicode);
 	return b;
 }
 
@@ -1075,7 +1074,7 @@ bool CGdippSettings::IsProcessUnload() const
 	if (m_bRunFromGdiExe) {
 		return false;
 	}
-	GetEnvironmentVariableW(L"MACTYPE_FORCE_LOAD", NULL, 0);
+	GetEnvironmentVariableW(L"MACTYPE_FORCE_LOAD", nullptr, 0);
 	if (GetLastError()!=ERROR_ENVVAR_NOT_FOUND)
 		return false;
 	ModuleHashMap::const_iterator it = m_arrUnloadModule.begin();
@@ -1099,7 +1098,7 @@ bool CGdippSettings::IsExeUnload(LPCTSTR lpApp) const	//紒E槭欠裨诤诿�
 	if (m_bRunFromGdiExe) {
 		return false;
 	}
-	GetEnvironmentVariableW(L"MACTYPE_FORCE_LOAD", NULL, 0);
+	GetEnvironmentVariableW(L"MACTYPE_FORCE_LOAD", nullptr, 0);
 	if (GetLastError()!=ERROR_ENVVAR_NOT_FOUND)
 		return false;
 	ModuleHashMap::const_iterator it = m_arrUnloadModule.begin();
@@ -1116,7 +1115,7 @@ bool CGdippSettings::IsExeInclude(LPCTSTR lpApp) const	//紒E槭欠裨诎酌�
 	if (m_bRunFromGdiExe) {
 		return false;
 	}
-	GetEnvironmentVariableW(L"MACTYPE_FORCE_LOAD", NULL, 0);
+	GetEnvironmentVariableW(L"MACTYPE_FORCE_LOAD", nullptr, 0);
 	if (GetLastError()!=ERROR_ENVVAR_NOT_FOUND)
 		return false;
 	ModuleHashMap::const_iterator it = m_arrIncludeModule.begin();
@@ -1133,10 +1132,10 @@ bool CGdippSettings::IsProcessExcluded() const
 	if (m_bRunFromGdiExe) {
 		return false;
 	}
-	GetEnvironmentVariableW(L"MACTYPE_FORCE_EXCLUDE", NULL, 0);
+	GetEnvironmentVariableW(L"MACTYPE_FORCE_EXCLUDE", nullptr, 0);
 	if (GetLastError() != ERROR_ENVVAR_NOT_FOUND)
 		return true;
-	GetEnvironmentVariableW(L"MACTYPE_FORCE_LOAD", NULL, 0);
+	GetEnvironmentVariableW(L"MACTYPE_FORCE_LOAD", nullptr, 0);
 	if (GetLastError()!=ERROR_ENVVAR_NOT_FOUND)
 		return false;
 	ModuleHashMap::const_iterator it = m_arrExcludeModule.begin();
@@ -1160,7 +1159,7 @@ bool CGdippSettings::IsProcessIncluded() const
 	if (m_bRunFromGdiExe) {
 		return true;
 	}
-	GetEnvironmentVariableW(L"MACTYPE_FORCE_LOAD", NULL, 0);
+	GetEnvironmentVariableW(L"MACTYPE_FORCE_LOAD", nullptr, 0);
 	if (GetLastError()!=ERROR_ENVVAR_NOT_FOUND)
 		return true;
 	ModuleHashMap::const_iterator it = m_arrIncludeModule.begin();
@@ -1203,12 +1202,12 @@ void CGdippSettings::InitTuneTable(int v, int* table)
 		return;
 	}
 	v = Min(v, 12);
-	p = (double)v;
+	p = static_cast<double>(v);
 	p = 1 - (p / (p + 10.0));
 	for(i = 0;i < 256;i++){
-	    tmp = (double)i / 255.0;
+	    tmp = static_cast<double>(i) / 255.0;
         tmp = pow(tmp, p);
-	    col = 255 - (int)(tmp * 255.0 + 0.5);
+	    col = 255 - static_cast<int>(tmp * 255.0 + 0.5);
 		table[255 - i] = col;
 	}
 }
@@ -1237,12 +1236,12 @@ const CFontSettings& CGdippSettings::FindIndividual(LPCTSTR lpFaceName) const
 int CGdippSettings::_GetAlternativeProfileName(LPTSTR lpszName, LPCTSTR lpszFile)
 {
 	TCHAR szexe[MAX_PATH + 1];
-	TCHAR* pexe = szexe + GetModuleFileName(NULL, szexe, MAX_PATH);
+	TCHAR* pexe = szexe + GetModuleFileName(nullptr, szexe, MAX_PATH);
 	while (pexe >= szexe && *pexe != '\\')
 		pexe--;
 	pexe++;
-	wstring exename = _T("General@") + wstring((LPTSTR)pexe);
-	if (FastGetProfileString(exename.c_str(), _T("Alternative"), NULL, lpszName, MAX_PATH))
+	wstring exename = _T("General@") + wstring(pexe);
+	if (FastGetProfileString(exename.c_str(), _T("Alternative"), nullptr, lpszName, MAX_PATH))
 	{
 		return true;
 	}
@@ -1257,7 +1256,7 @@ bool CGdippSettings::CopyForceFont(LOGFONT& lf, const LOGFONT& lfOrg) const
 {
 	_ASSERTE(m_bDelayedInit);
 	//__asm{ int 3 }
-	GetEnvironmentVariableW(L"MACTYPE_FONTSUBSTITUTES_ENV", NULL, 0);
+	GetEnvironmentVariableW(L"MACTYPE_FONTSUBSTITUTES_ENV", nullptr, 0);
 	if (GetLastError()!=ERROR_ENVVAR_NOT_FOUND)
 		return false;
 	//&lf == &lfOrgも可
@@ -1298,17 +1297,17 @@ CFontLinkInfo::~CFontLinkInfo()
 
 /*
 static int CALLBACK EnumFontCallBack(const LOGFONT *lplf, const TEXTMETRIC *lptm, DWORD / *FontType* /, LPARAM lParam)
-{	
-	LOGFONT * lf=(LOGFONT *)lParam;
+{
+	LOGFONT* lf = reinterpret_cast<LOGFONT*>(lParam);
 	StringCchCopy(lf->lfFaceName, LF_FACESIZE, lplf->lfFaceName);
 	return 0;
 }
 
 static void GetFontLocalName(LOGFONT& lf)	//获得字体的本地化名称
 {
-	HDC dc=GetDC(NULL);
-	EnumFontFamiliesEx(dc, &lf, &EnumFontCallBack, (LPARAM)&lf, 0);
-	ReleaseDC(NULL, dc);
+	HDC dc=GetDC(nullptr);
+	EnumFontFamiliesEx(dc, &lf, &EnumFontCallBack, reinterpret_cast<LPARAM>(&lf), 0);
+	ReleaseDC(nullptr, dc);
 }*/
 
 
@@ -1319,44 +1318,47 @@ void CFontLinkInfo::init()
 	const TCHAR REGKEY3[] = _T("SYSTEM\\CurrentControlSet\\Control\\FontAssoc\\Associated DefaultFonts");
 	const TCHAR REGKEY4[] = _T("SYSTEM\\CurrentControlSet\\Control\\FontAssoc\\Associated Charset");
 
-	HKEY h1;
-	HKEY h2;
-	if (ERROR_SUCCESS != RegOpenKeyEx(HKEY_LOCAL_MACHINE, REGKEY1, 0, KEY_QUERY_VALUE, &h1)) return;
-	if (ERROR_SUCCESS != RegOpenKeyEx(HKEY_LOCAL_MACHINE, REGKEY2, 0, KEY_QUERY_VALUE, &h2)) {
-		RegCloseKey(h1);
+	HKEY rawKey = nullptr;
+	if (ERROR_SUCCESS != RegOpenKeyEx(HKEY_LOCAL_MACHINE, REGKEY1, 0, KEY_QUERY_VALUE, &rawKey)) return;
+	renderer_raii::UniqueRegistryKey h1(rawKey);
+	rawKey = nullptr;
+	if (ERROR_SUCCESS != RegOpenKeyEx(HKEY_LOCAL_MACHINE, REGKEY2, 0, KEY_QUERY_VALUE, &rawKey)) {
 		return;
 	}
+	renderer_raii::UniqueRegistryKey h2(rawKey);
 	//OSVERSIONINFO sOsVinfo={sizeof(OSVERSIONINFO),0,0,0,0,{0}};
 	//GetVersionEx(&sOsVinfo);	//获得操作系统版本号
 	//const CGdippSettings* pSettings = CGdippSettings::GetInstance();
 
-	WCHAR* name = new WCHAR[0x2000];
+	std::vector<WCHAR> name(0x2000);
 	DWORD namesz;
 	DWORD valuesz;
-	WCHAR* value = new WCHAR[0x2000];
-	WCHAR* buf = new WCHAR[0x2000];
+	std::vector<WCHAR> value(0x2000);
+	std::vector<WCHAR> buf(0x2000);
 	const DWORD nBufSize = 0x2000 * sizeof(WCHAR);
 	LONG rc;
 	DWORD regtype;
 
 	for (int k = 0; ; ++k) {	//获得字体柄蛐的所有字虂E
-		namesz = nBufSize;
+		namesz = static_cast<DWORD>(name.size());
 		valuesz = nBufSize;
-		rc = RegEnumValue(h2, k, name, &namesz, 0, &regtype, (LPBYTE)value, &valuesz);		//从字体柄蛐寻找
+		rc = RegEnumValue(h2.get(), k, name.data(), &namesz, 0, &regtype, reinterpret_cast<LPBYTE>(value.data()), &valuesz);		//从字体柄蛐寻找
 		if (rc == ERROR_NO_MORE_ITEMS) break;
 		if (rc != ERROR_SUCCESS) break;
 		if (regtype != REG_SZ) continue;
-		StringCchCopy(buf, nBufSize / sizeof(buf[0]), name);
-		if (buf[wcslen(buf) - 1] == L')') {				//去掉括号
+		StringCchCopy(buf.data(), buf.size(), name.data());
+		size_t displayNameLength = wcslen(buf.data());
+		if (displayNameLength != 0 && buf[displayNameLength - 1] == L')') {				//去掉括号
 			LPWSTR p;
-			if ((p = wcsrchr(buf, L'(')) != NULL) {
+			if ((p = wcsrchr(buf.data(), L'(')) != nullptr) {
 				*p = 0;
 			}
 		}
-		while (buf[wcslen(buf)-1] == L' ')
-			buf[wcslen(buf)-1] = 0;
+		displayNameLength = wcslen(buf.data());
+		while (displayNameLength != 0 && buf[displayNameLength - 1] == L' ')
+			buf[--displayNameLength] = 0;
 		//获得的对应的字体脕E
-		FontNameCache.Add(value, buf);
+		FontNameCache.Add(value.data(), buf.data());
 	}
 
 	int row = 0;
@@ -1365,30 +1367,30 @@ void CFontLinkInfo::init()
 	for (int i = 0; row < INFOMAX; ++i) {
 		int col = 0;
 
-		namesz = nBufSize;
+		namesz = static_cast<DWORD>(name.size());
 		valuesz = nBufSize;
-		rc = RegEnumValue(h1, i, name, &namesz, 0, &regtype, (LPBYTE)value, &valuesz);	//获得一个字体的字体链接
+		rc = RegEnumValue(h1.get(), i, name.data(), &namesz, 0, &regtype, reinterpret_cast<LPBYTE>(value.data()), &valuesz);	//获得一个字体的字体链接
 		if (rc == ERROR_NO_MORE_ITEMS) break;
 		if (rc != ERROR_SUCCESS) break;
 		if (regtype != REG_MULTI_SZ) continue;		//有效的字体链接
 		//获得字体的真实名字
-		
+
 		TCHAR buff[LF_FACESIZE];
-		GetFontLocalName(name, buff);
+		GetFontLocalName(name.data(), buff);
 
 		info[row][col] = _wcsdup(buff);		//第一消戟字体脕E
 		++col;
 
-		for (LPCWSTR linep = value; col < FONTMAX && *linep; linep += wcslen(linep) + 1) {
-			LPCWSTR valp = NULL;
+		for (LPCWSTR linep = value.data(); col < FONTMAX && *linep; linep += wcslen(linep) + 1) {
+			LPCWSTR valp = nullptr;
 			for (LPCWSTR p = linep; *p; ++p) {
-				if (*p == L',' && ((char)*(p+1)<0x30 || (char)*(p+1)>0x39))		//尝试寻找字体链接中“，”后提供的字体名称
+				if (*p == L',' && (static_cast<char>(*(p+1)) < 0x30 || static_cast<char>(*(p+1)) > 0x39))		//尝试寻找字体链接中“，”后提供的字体名称
 					{
 						LPWSTR lp;
-						StringCchCopy(buf, nBufSize / sizeof(buf[0]), p + 1);
-						if (lp=wcschr(buf, L','))
+						StringCchCopy(buf.data(), buf.size(), p + 1);
+						if (lp=wcschr(buf.data(), L','))
 							*lp = 0;
-						valp = buf;
+						valp = buf.data();
 						break;
 					}
 			}
@@ -1396,7 +1398,7 @@ void CFontLinkInfo::init()
 				/*for (int k = 0; ; ++k) {
 					namesz = sizeof name;
 					value2sz = sizeof value2;
-					rc = RegEnumValue(h2, k, name, &namesz, 0, &regtype, (LPBYTE)value2, &value2sz);		//从字体柄蛐寻找
+					rc = RegEnumValue(h2, k, name, &namesz, 0, &regtype, reinterpret_cast<LPBYTE>(value2), &value2sz);		//从字体柄蛐寻找
 					if (rc == ERROR_NO_MORE_ITEMS) break;
 					if (rc != ERROR_SUCCESS) break;
 					if (regtype != REG_SZ) continue;
@@ -1405,7 +1407,7 @@ void CFontLinkInfo::init()
 					StringCchCopyW(buf, sizeof(buf)/sizeof(buf[0]), name);
 					if (buf[wcslen(buf) - 1] == L')') {				//去掉括号
 						LPWSTR p;
-						if ((p = wcsrchr(buf, L'(')) != NULL) {
+						if ((p = wcsrchr(buf, L'(')) != nullptr) {
 							*p = 0;
 						}
 					}
@@ -1415,14 +1417,14 @@ void CFontLinkInfo::init()
 					break;
 				}*/
 				LPWSTR lp;
-				StringCchCopy(buf, nBufSize / sizeof(buf[0]), linep);
-				if (lp=wcschr(buf, L','))
+				StringCchCopy(buf.data(), buf.size(), linep);
+				if (lp=wcschr(buf.data(), L','))
 					*lp = 0;
 
-				valp = FontNameCache.Find((TCHAR*)buf);
+				valp = FontNameCache.Find(buf.data());
 			}
 			if (valp) {
-				GetFontLocalName((TCHAR*)valp, buff);;
+				GetFontLocalName(const_cast<TCHAR*>(valp), buff);;
 				//StringCchCopy(truefont.lfFaceName, LF_FACESIZE, buff);	//复制到结构中
 				//pSettings->CopyForceFont(truefont, truefont);		//获得替换字虂E
 				info[row][col] = _wcsdup(buff);//truefont.lfFaceName);			//复制到链接柄蛐
@@ -1431,7 +1433,7 @@ void CFontLinkInfo::init()
 		}
 		if (col == 1) {			//只有一消楷即没有链接，删掉。
 			free(info[row][0]);
-			info[row][0] = NULL;
+			info[row][0] = nullptr;
 		} else {
 			/*if (sOsVinfo.dwMajorVersion>=6 && sOsVinfo.dwMinorVersion>=1)	//版本号>=6.1，是Win7系列
 			{
@@ -1444,8 +1446,6 @@ void CFontLinkInfo::init()
 			++row;
 		}
 	}
-	RegCloseKey(h1);
-	RegCloseKey(h2);
 	LOGFONT syslf = {0};
 	HGDIOBJ h = ORIG_GetStockObject(DEFAULT_GUI_FONT);
 	if (h) {
@@ -1460,39 +1460,39 @@ void CFontLinkInfo::init()
 		WCHAR envname[30] = L"MT_SYSFONT";
 		WCHAR envvalue[30] = { 0 };
 		HFONT tempfont;
-		if (GetEnvironmentVariable(L"MT_SYSFONT", envvalue, 29) && GetObjectType(tempfont = (HFONT)wcstoull(envvalue, 0 ,10)) == OBJ_FONT)//已经有字体存在
+		if (GetEnvironmentVariable(L"MT_SYSFONT", envvalue, 29) && GetObjectType(tempfont = reinterpret_cast<HFONT>(wcstoull(envvalue, nullptr, 10))) == OBJ_FONT)//已经有字体存在
 		{
 			g_alterGUIFont = tempfont;	//直接使用先前的字虂E
 		}
 		else
 		{
 			g_alterGUIFont = CreateFontIndirectW(&truefont);	//创建一个新的替换字虂E
-			_ui64tow((ULONG_PTR)g_alterGUIFont, envvalue, 10);	//转换为字符串
+			_ui64tow(reinterpret_cast<ULONG_PTR>(g_alterGUIFont), envvalue, 10);	//转换为字符串
 			SetEnvironmentVariable(envname, envvalue);		//写葋E肪潮淞?
 		}
 	}
 
 	//现在获取对应字体类型的默认字体链接
 	memset(DefaultFontLink, 0, sizeof(TCHAR)*(FF_DECORATIVE+1)*(LF_FACESIZE+1));	//初始化为0
-	HKEY h3;
 	DWORD len;
-	if (ERROR_SUCCESS != RegOpenKeyEx(HKEY_LOCAL_MACHINE, REGKEY3, 0, KEY_QUERY_VALUE, &h3)) return;
+	rawKey = nullptr;
+	if (ERROR_SUCCESS != RegOpenKeyEx(HKEY_LOCAL_MACHINE, REGKEY3, 0, KEY_QUERY_VALUE, &rawKey)) return;
+	renderer_raii::UniqueRegistryKey h3(rawKey);
 	len = (LF_FACESIZE+1)*sizeof(TCHAR);
-	RegQueryValueEx(h3, _T("FontPackage"), 0, &regtype, (LPBYTE)DefaultFontLink[1], &len);
+	RegQueryValueEx(h3.get(), _T("FontPackage"), 0, &regtype, reinterpret_cast<LPBYTE>(DefaultFontLink[1]), &len);
 	len = (LF_FACESIZE+1)*sizeof(TCHAR);
-	RegQueryValueEx(h3, _T("FontPackageDecorative"), 0, &regtype, (LPBYTE)DefaultFontLink[FF_DECORATIVE], &len);
+	RegQueryValueEx(h3.get(), _T("FontPackageDecorative"), 0, &regtype, reinterpret_cast<LPBYTE>(DefaultFontLink[FF_DECORATIVE]), &len);
 	len = (LF_FACESIZE+1)*sizeof(TCHAR);
-	RegQueryValueEx(h3, _T("FontPackageDontCare"), 0, &regtype, (LPBYTE)DefaultFontLink[FF_DONTCARE], &len);
+	RegQueryValueEx(h3.get(), _T("FontPackageDontCare"), 0, &regtype, reinterpret_cast<LPBYTE>(DefaultFontLink[FF_DONTCARE]), &len);
 	len = (LF_FACESIZE+1)*sizeof(TCHAR);
-	RegQueryValueEx(h3, _T("FontPackageModern"), 0, &regtype, (LPBYTE)DefaultFontLink[FF_MODERN], &len);
+	RegQueryValueEx(h3.get(), _T("FontPackageModern"), 0, &regtype, reinterpret_cast<LPBYTE>(DefaultFontLink[FF_MODERN]), &len);
 	len = (LF_FACESIZE+1)*sizeof(TCHAR);
-	RegQueryValueEx(h3, _T("FontPackageRoman"), 0, &regtype, (LPBYTE)DefaultFontLink[FF_ROMAN], &len);
+	RegQueryValueEx(h3.get(), _T("FontPackageRoman"), 0, &regtype, reinterpret_cast<LPBYTE>(DefaultFontLink[FF_ROMAN]), &len);
 	len = (LF_FACESIZE+1)*sizeof(TCHAR);
-	RegQueryValueEx(h3, _T("FontPackageScript"), 0, &regtype, (LPBYTE)DefaultFontLink[FF_SCRIPT], &len);
+	RegQueryValueEx(h3.get(), _T("FontPackageScript"), 0, &regtype, reinterpret_cast<LPBYTE>(DefaultFontLink[FF_SCRIPT]), &len);
 	len = (LF_FACESIZE+1)*sizeof(TCHAR);
-	RegQueryValueEx(h3, _T("FontPackageSwiss"), 0, &regtype, (LPBYTE)DefaultFontLink[FF_SWISS], &len);
-	RegCloseKey(h3);
-	
+	RegQueryValueEx(h3.get(), _T("FontPackageSwiss"), 0, &regtype, reinterpret_cast<LPBYTE>(DefaultFontLink[FF_SWISS]), &len);
+
 	for (int i=0; i<FF_DECORATIVE+1; ++i)	//转换字体名称
 	{
 		if (!*DefaultFontLink[i])
@@ -1500,29 +1500,26 @@ void CFontLinkInfo::init()
 	}
 
 	//现在获取对应的CodePage是否需要进行fontlink。默认都需要进行链接。
-	HKEY h4;
-	if (ERROR_SUCCESS != RegOpenKeyEx(HKEY_LOCAL_MACHINE, REGKEY4, 0, KEY_QUERY_VALUE, &h4)) return;
+	rawKey = nullptr;
+	if (ERROR_SUCCESS != RegOpenKeyEx(HKEY_LOCAL_MACHINE, REGKEY4, 0, KEY_QUERY_VALUE, &rawKey)) return;
+	renderer_raii::UniqueRegistryKey h4(rawKey);
 
 	for (int i=0; i<0xff; ++i)
 	{
-		namesz = nBufSize;
+		namesz = static_cast<DWORD>(name.size());
 		valuesz = nBufSize;
-		rc = RegEnumValue(h4, i, name, &namesz, 0, &regtype, (LPBYTE)value, &valuesz);	//获得一个charset的值
+		rc = RegEnumValue(h4.get(), i, name.data(), &namesz, 0, &regtype, reinterpret_cast<LPBYTE>(value.data()), &valuesz);	//获得一个charset的值
 		if (rc == ERROR_NO_MORE_ITEMS) break;
 		if (rc != ERROR_SUCCESS) break;
 		if (regtype != REG_SZ) continue;
-		if (_tcsicmp(value, _T("YES")))
+		if (_tcsicmp(value.data(), _T("YES")))
 		{
-			TCHAR* p = name;
-			while (*p!=_T('(') && p-name<(int)namesz) ++p;
+			TCHAR* p = name.data();
+			while (*p != _T('(') && p - name.data() < static_cast<int>(namesz)) ++p;
 			++p;
-			AllowDefaultLink[_tcstol(p,NULL,16)]=false;
+			AllowDefaultLink[_tcstol(p,nullptr,16)]=false;
 		}
 	}
-	RegCloseKey(h4);
-	delete[]name;
-	delete[]value;
-	delete[]buf;
 }
 
 void CFontLinkInfo::clear()
@@ -1530,7 +1527,7 @@ void CFontLinkInfo::clear()
 	for (int i = 0; i < INFOMAX; ++i) {
 		for (int j = 0; j < FONTMAX; ++j) {
 			free(info[i][j]);
-			info[i][j] = NULL;
+			info[i][j] = nullptr;
 		}
 	}
 }
@@ -1542,13 +1539,13 @@ const LPCWSTR * CFontLinkInfo::lookup(LPCWSTR fontname) const
 			return &info[i][1];
 		}
 	}
-	return NULL;
+	return nullptr;
 }
 
 LPCWSTR CFontLinkInfo::get(int row, int col) const
 {
-	if ((unsigned int)row >= (unsigned int)INFOMAX || (unsigned int)col >= (unsigned int)FONTMAX) {
-		return NULL;
+	if (static_cast<unsigned int>(row) >= static_cast<unsigned int>(INFOMAX) || static_cast<unsigned int>(col) >= static_cast<unsigned int>(FONTMAX)) {
+		return nullptr;
 	}
 	return info[row][col];
 }
@@ -1561,7 +1558,7 @@ CFontSubstituteData::CFontSubstituteData()
 int CALLBACK
 CFontSubstituteData::EnumFontFamProc(const LOGFONT *lplf, const TEXTMETRIC *lptm, DWORD /*FontType*/, LPARAM lParam)
 {
-	CFontSubstituteData& self = *(CFontSubstituteData *)lParam;
+	CFontSubstituteData& self = *reinterpret_cast<CFontSubstituteData*>(lParam);
 	self.m_lf = *lplf;
 	return 0;
 }
@@ -1583,7 +1580,7 @@ bool CFontSubstituteData::initnocheck(LPCTSTR config) {
 	}
 	if (p >= buf) {
 		StringCchCopy(m_lf.lfFaceName, countof(m_lf.lfFaceName), buf);
-		m_lf.lfCharSet = (BYTE)_StrToInt(p + 1, 0);
+		m_lf.lfCharSet = static_cast<BYTE>(_StrToInt(p + 1, 0));
 		m_bCharSet = true;
 	}
 	else {
@@ -1614,7 +1611,7 @@ bool CFontSubstituteData::init(LPCTSTR config)
 	}
 	if (p >= buf) {
 		StringCchCopy(lf.lfFaceName, countof(lf.lfFaceName), buf);
-		lf.lfCharSet = (BYTE)_StrToInt(p + 1, 0);
+		lf.lfCharSet = static_cast<BYTE>(_StrToInt(p + 1, 0));
 		m_bCharSet = true;
 	} else {
 		StringCchCopy(lf.lfFaceName, LF_FACESIZE, buf);
@@ -1622,9 +1619,8 @@ bool CFontSubstituteData::init(LPCTSTR config)
 		m_bCharSet = false;
 	}
 
-	HDC hdc = GetDC(NULL);
-	EnumFontFamiliesEx(hdc, &lf, &CFontSubstituteData::EnumFontFamProc, (LPARAM)this, 0);
-	ReleaseDC(NULL, hdc);
+	auto hdc = renderer_raii::AdoptWindowDeviceContext(nullptr, GetDC(nullptr));
+	EnumFontFamiliesEx(hdc.get(), &lf, &CFontSubstituteData::EnumFontFamProc, reinterpret_cast<LPARAM>(this), 0);
 
 	return m_lf.lfFaceName[0] != 0;
 }
@@ -1640,13 +1636,14 @@ CFontSubstituteData::operator == (const CFontSubstituteData& o) const
 	return false;
 }
 
-// We scan the registry and see if there is any font mapping whose mapping target is also one of our substitution source, 
+// We scan the registry and see if there is any font mapping whose mapping target is also one of our substitution source,
 // and we add them as our rules.
 void CFontSubstitutesInfo::initreg()
 {
 	const LPCTSTR REGKEY = _T("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\FontSubstitutes");
-	HKEY h;
-	if (ERROR_SUCCESS != RegOpenKeyEx(HKEY_LOCAL_MACHINE, REGKEY, 0, KEY_QUERY_VALUE, &h)) return;
+	HKEY rawKey = nullptr;
+	if (ERROR_SUCCESS != RegOpenKeyEx(HKEY_LOCAL_MACHINE, REGKEY, 0, KEY_QUERY_VALUE, &rawKey)) return;
+	renderer_raii::UniqueRegistryKey h(rawKey);
 	CFontSubstituteData k;
 	CFontSubstituteData v;
 
@@ -1656,9 +1653,9 @@ void CFontSubstitutesInfo::initreg()
 	DWORD regtype;
 
 	for (int i = 0; ; ++i) {
-		namesz = name.size();
-		valuesz = value.size();
-		LONG rc = RegEnumValue(h, i, name.data(), &namesz, 0, &regtype, (LPBYTE)value.data(), &valuesz);
+		namesz = static_cast<DWORD>(name.size());
+		valuesz = static_cast<DWORD>(value.size() * sizeof(WCHAR));
+		LONG rc = RegEnumValue(h.get(), i, name.data(), &namesz, 0, &regtype, reinterpret_cast<LPBYTE>(value.data()), &valuesz);
 		if (rc == ERROR_NO_MORE_ITEMS) break;
 		if (rc != ERROR_SUCCESS) break;
 		if (regtype != REG_SZ) continue;
@@ -1670,7 +1667,6 @@ void CFontSubstitutesInfo::initreg()
 			}
 		}
 	}
-	RegCloseKey(h);
 }
 
 void
@@ -1681,14 +1677,14 @@ CFontSubstitutesInfo::initini(const CFontSubstitutesIniArray& iniarray)
 //	TCHAR* buff, *buff2;
 	for (; it!=iniarray.end(); ++it) {
 		LPCTSTR inistr = it->c_str();
-		LPTSTR buf = _tcsdup(inistr);
+		renderer_raii::UniqueMallocMemory<TCHAR> buf(_tcsdup(inistr));
 		if (!buf) continue;
-		for (LPTSTR vp = buf; *vp; ++vp) {
+		for (LPTSTR vp = buf.get(); *vp; ++vp) {
 			if (*vp == _T('=')) {
 				*vp++ = 0;
 				CFontSubstituteData k;
 				CFontSubstituteData v;
-				if (k.init(buf) && v.init(vp)) {
+				if (k.init(buf.get()) && v.init(vp)) {
 				if (FindKey(k) < 0 && k.m_bCharSet == v.m_bCharSet) Add(k, v);
 				}
 /*					StringCchCopy(truefont.lfFaceName, LF_FACESIZE, buf);
@@ -1708,8 +1704,6 @@ CFontSubstitutesInfo::initini(const CFontSubstitutesIniArray& iniarray)
 */
 			}
 		}
-
-		free(buf);
 	}
 }
 
@@ -1726,7 +1720,7 @@ void GetMacTypeInternalFontName(LOGFONT* lf, LPTSTR fn)
 {
 	StringCchCopy(fn, 9, _T("MACTYPE_"));
 	fn+=8;
-	TCHAR* lfbyte=(TCHAR*)lf;
+	TCHAR* lfbyte = reinterpret_cast<TCHAR*>(lf);
 	for (int i=0;i<(sizeof(LOGFONT)-sizeof(TCHAR)*LF_FACESIZE+1)/sizeof(TCHAR);i++)
 		*fn++=_T('0') + *lfbyte++;
 	*fn=0;
@@ -1735,7 +1729,7 @@ void GetMacTypeInternalFontName(LOGFONT* lf, LPTSTR fn)
 const LOGFONT *
 CFontSubstitutesInfo::lookup(LOGFONT& lf) const
 {
-	if (GetSize() <= 0) return NULL;
+	if (GetSize() <= 0) return nullptr;
 	//bFontExist = true;
 	CFontSubstituteData v;
 	CFontSubstituteData k;
@@ -1745,11 +1739,11 @@ CFontSubstitutesInfo::lookup(LOGFONT& lf) const
 
 	TCHAR * buff;	//縼E倩竦米痔宓恼媸得?
 	LOGFONT mylf(lf);
-	if (!(buff = FontNameCache.Find((TCHAR*)lf.lfFaceName)))
+	if (!(buff = FontNameCache.Find(lf.lfFaceName)))
 	{
 		TCHAR localname[LF_FACESIZE+1];
 		if (GetFontLocalName(mylf.lfFaceName, localname)) {
-			FontNameCache.Add((TCHAR*)lf.lfFaceName, localname);
+			FontNameCache.Add(lf.lfFaceName, localname);
 			StringCchCopy(mylf.lfFaceName, LF_FACESIZE, localname);
 		}
 		else
@@ -1759,13 +1753,14 @@ CFontSubstitutesInfo::lookup(LOGFONT& lf) const
 			if (!(buff = FontNameCache.Find(inName)))
 			{
 				mylf.lfClipPrecision = FONT_MAGIC_NUMBER;
-				HFONT tempfont = CreateFontIndirect(&mylf);
-				HDC dc = CreateCompatibleDC(NULL);
-				HFONT oldfont = SelectFont(dc, tempfont);
-				ORIG_GetTextFaceW(dc, LF_FACESIZE, mylf.lfFaceName);
-				SelectFont(dc, oldfont);
-				DeleteFont(tempfont);
-				DeleteDC(dc);
+				renderer_raii::UniqueFont tempfont(CreateFontIndirect(&mylf));
+				renderer_raii::UniqueDeviceContext dc(CreateCompatibleDC(nullptr));
+				if (tempfont && dc) {
+					auto selectedFont = renderer_raii::SelectObject(dc.get(), tempfont.get());
+					if (selectedFont) {
+						ORIG_GetTextFaceW(dc.get(), LF_FACESIZE, mylf.lfFaceName);
+					}
+				}
 				FontNameCache.Add(inName, mylf.lfFaceName);
 			}
 		}
@@ -1780,9 +1775,9 @@ CFontSubstitutesInfo::lookup(LOGFONT& lf) const
 		pos = FindKey(k);
 	}
 	if (pos >= 0) {
-		return (const LOGFONT *)&GetValueAt(pos);
+		return reinterpret_cast<const LOGFONT*>(&GetValueAt(pos));
 	}
-	return NULL;
+	return nullptr;
 }
 
 CFontFaceNamesEnumerator::CFontFaceNamesEnumerator(LPCWSTR facename, int nFontFamily) : m_pos(0)
@@ -1790,9 +1785,9 @@ CFontFaceNamesEnumerator::CFontFaceNamesEnumerator(LPCWSTR facename, int nFontFa
 	//CCriticalSectionLock __lock;
 	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
 	TCHAR  buff[LF_FACESIZE+1];
-	GetFontLocalName((TCHAR*)facename, buff);
+	GetFontLocalName(const_cast<TCHAR*>(facename), buff);
 	LPCWSTR srcfacenames[] = {
-		buff, NULL, NULL
+		buff, nullptr, nullptr
 	};
 
 	int destpos = 0;

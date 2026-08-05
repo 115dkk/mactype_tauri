@@ -24,7 +24,7 @@ void FontLFree(void);
 
 COLORREF GetPaletteColor(HDC hdc, UINT paletteindex);
 
-#define ROUND(x) ((x)>0? int(x+0.5):int(x-0.5))	// a special round method used by windows
+#define ROUND(x) ((x) > 0 ? static_cast<int>((x) + 0.5) : static_cast<int>((x) - 0.5))	// a special round method used by windows
 class CDCTransformer {
 private:
 	float fXZoomFactor, fYZoomFactor;
@@ -54,12 +54,12 @@ public:
 	}
 	void SetSourceOffset(int X, int Y)
 	{
-		float temp = float(X)*m_xfm.eM11+m_xfm.eDx;
-		m_xfm.eDx = temp-(int)temp;
+		float temp = static_cast<float>(X)*m_xfm.eM11+m_xfm.eDx;
+		m_xfm.eDx = temp - static_cast<int>(temp);
 		if (ROUND(m_xfm.eDx)<0)	// change negive offset to positive
 			m_xfm.eDx+=1;
-		temp = float(Y)*m_xfm.eM22+m_xfm.eDy;
-		m_xfm.eDy = temp-(int)temp;
+		temp = static_cast<float>(Y)*m_xfm.eM22+m_xfm.eDy;
+		m_xfm.eDy = temp - static_cast<int>(temp);
 		if (ROUND(m_xfm.eDy)<0)
 			m_xfm.eDy+=1;
 	}
@@ -94,7 +94,7 @@ public:
 	}
 	int TransformXCoordinateAB(int nX)
 	{
-		return ROUND((float(nX))*fXZoomFactor/*+m_xfm.eDx*/);
+		return ROUND(static_cast<float>(nX)*fXZoomFactor/*+m_xfm.eDx*/);
 	}
 	int TransformXBA(int nX)
 	{
@@ -102,7 +102,7 @@ public:
 	}
 	int TransformXCoordinateBA(int nX)
 	{
-		return ROUND((float(nX)/*-m_xfm.eDx*/)/fXZoomFactor);
+		return ROUND((static_cast<float>(nX)/*-m_xfm.eDx*/)/fXZoomFactor);
 	}
 	int TransformYAB(int nY)
 	{
@@ -110,7 +110,7 @@ public:
 	}
 	int TransformYCoordinateAB(int nY)
 	{
-		return ROUND((float(nY))*fYZoomFactor/*+m_xfm.eDy*/);
+		return ROUND(static_cast<float>(nY)*fYZoomFactor/*+m_xfm.eDy*/);
 	}
 	int TransformYBA(int nY)
 	{
@@ -118,7 +118,7 @@ public:
 	}
 	int TransformYCoordinateBA(int nY)
 	{
-		return ROUND((float(nY)/*-m_xfm.eDy*/)/fYZoomFactor);
+		return ROUND((static_cast<float>(nY)/*-m_xfm.eDy*/)/fYZoomFactor);
 	}
 	void TransformlpDx(const int* lpDx, int* outlpDx, int szDx)
 	{
@@ -141,12 +141,10 @@ public:
 class ControlIder
 {
 private:
-	char* unicode;
+	std::vector<char> unicode;
 public:
-	ControlIder()
+	ControlIder() : unicode(0xffff, 0)
 	{
-		unicode = new char[0xffff];
-		memset(unicode, 0, sizeof(char)*0xffff);	// non-control char by default
 		//memset(unicode, 2, sizeof(char)*32);
 		for (int i=0;i<0x3000;i++)
 			unicode[i]=!!iswcntrl(i);
@@ -163,10 +161,7 @@ public:
 // 		unicode[0x9] = 0;
 		// Set width for some special control chars. They have zero width, but GetCharABCWidth gives wrong results for them.
 	}
-	~ControlIder()
-	{
-		delete[] unicode;
-	}
+	~ControlIder() = default;
 	ControlIder(const ControlIder&) = delete;
 	ControlIder& operator=(const ControlIder&) = delete;
 	void setcntrlAttribute(WCHAR wch, int cnType)
@@ -206,7 +201,7 @@ struct FREETYPE_PARAMS
 	{}
 
 	//FreeTypeTextOut用 (サイズ計算＋文字描画)
-	FREETYPE_PARAMS(UINT eto, HDC hdc, LOGFONTW* p, OUTLINETEXTMETRIC* lpotm = NULL)
+	FREETYPE_PARAMS(UINT eto, HDC hdc, LOGFONTW* p, OUTLINETEXTMETRIC* lpotm = nullptr)
 		: etoOptions(eto)
 		, ftOptions(0)
 		, charExtra(GetTextCharacterExtra(hdc))
@@ -245,22 +240,20 @@ class CGGOKerning : public CMap<DWORD, int>
 {
 private:
 	DWORD makekey(WORD first, WORD second) {
-		return ((DWORD)first << 16) | second;
+		return (static_cast<DWORD>(first) << 16) | second;
 	}
 public:
 	void init(HDC hdc)
 	{
 		DWORD rc;
-		rc = GetKerningPairs(hdc, 0, NULL);
+		rc = GetKerningPairs(hdc, 0, nullptr);
 		if (rc <= 0) return;
 		DWORD kpcnt = rc;
-		LPKERNINGPAIR kpp = (LPKERNINGPAIR)calloc(kpcnt, sizeof *kpp);
-		if (!kpp) return;
-		rc = GetKerningPairs(hdc, kpcnt, kpp);
+		std::vector<KERNINGPAIR> pairs(kpcnt);
+		rc = GetKerningPairs(hdc, kpcnt, pairs.data());
 		for (DWORD i = 0; i < rc; ++i) {
-			Add(makekey(kpp[i].wFirst, kpp[i].wSecond), kpp[i].iKernAmount);
+			Add(makekey(pairs[i].wFirst, pairs[i].wSecond), pairs[i].iKernAmount);
 		}
-		free(kpp);
 	}
 	int get(WORD first, WORD second) {
 		DWORD key = makekey(first, second);
@@ -297,6 +290,9 @@ struct FreeTypeDrawInfo
 	FTC_FaceID face_id_simsun;
 	FT_Face freetype_face_list[CFontLinkInfo::FONTMAX * 2 + 1];	// in order to solve italic issues.
 	int face_id_list_num;
+	std::vector<int> DxStorage;
+	std::vector<int> DyStorage;
+	std::vector<int> AAModesStorage;
 	int* Dx;
 	int* Dy;
 
@@ -318,39 +314,23 @@ struct FreeTypeDrawInfo
 	int* AAModes;
 
 
-	FreeTypeDrawInfo(FREETYPE_PARAMS& fp, HDC dc, LOGFONTW* lf = NULL, CBitmapCache* ca = NULL, const int* dx = NULL, int cbString =0, int xs=0, int ys = 0)
-		: freetype_face(&dummy_freetype_face), cmap_index(0), useKerning(0)
-		, pfi(NULL), pfs(NULL), pftCache(NULL), face_id_list_num(0), ggo_font_list(NULL)
-		, hdc(dc), x(0), y(0), yBase(0), yTop(0), face_id_simsun(NULL), px(0), xBase(0)
+	FreeTypeDrawInfo(FREETYPE_PARAMS& fp, HDC dc, LOGFONTW* lf = nullptr, CBitmapCache* ca = nullptr, const int* dx = nullptr, int cbString =0, int xs=0, int ys = 0)
+		: dummy_freetype_face{}, sx(xs), sy(ys), freetype_face(&dummy_freetype_face)
+		, cmap_index(0), useKerning(0), render_mode(FT_RENDER_MODE_NORMAL), font_type{}, scaler{}
+		, pfi(nullptr), pfs(nullptr), pftCache(nullptr), face_id_list(nullptr), ggo_font_list(nullptr)
+		, face_id_simsun(nullptr), freetype_face_list{}, face_id_list_num(0)
+		, DxStorage(static_cast<size_t>(cbString)), DyStorage(static_cast<size_t>(cbString))
+		, AAModesStorage(static_cast<size_t>(cbString)), Dx(DxStorage.data()), Dy(DyStorage.data())
+		, hdc(dc), xBase(0), y(0), x(0), px(0), yBase(0), yTop(0), height(0), width(0)
+		, lpDx(dx), pCache(ca), params(&fp)
+		, AAModes(AAModesStorage.data())
 	{
-		render_mode = FT_RENDER_MODE_NORMAL;
-		ZeroMemory(&scaler, sizeof(scaler));
-		ZeroMemory(&font_type, sizeof(font_type));
-		ZeroMemory(&face_id_list, sizeof face_id_list);
-		// init face list
-		ZeroMemory(&freetype_face_list, sizeof freetype_face_list);
-		lpDx   = dx;
-		pCache = ca;
-		params = &fp;
-		height = 0;
-		width = 0;
-		sx = xs;
-		sy = ys;
 		if(lf) params->lplf = lf;
-		memset(&dummy_freetype_face, 0, sizeof dummy_freetype_face);
-		Dx = new int[cbString];
-		Dy = new int[cbString];
-		AAModes = new int[cbString];
 		scaler.height = 12;
 		scaler.width = 12;
 		scaler.pixel = 1;
 	}
-	~FreeTypeDrawInfo()
-	{
-		delete Dx;
-		delete Dy;
-		delete[] AAModes;
-	}
+	~FreeTypeDrawInfo() = default;
 
 	const LOGFONTW& LogFont() const { return *params->lplf; }
 	COLORREF Color() const { return params->color; }
@@ -370,7 +350,7 @@ struct FreeTypeDrawInfo
 			scaler.face_id = face_id_list[index];
 			if (FTC_Manager_LookupSize(cache_man, &scaler, &font_size))
 			//if (FTC_Manager_LookupFace(cache_man, face_id_list[index], &freetype_face_list[index]))
-				freetype_face_list[index] = NULL;
+				freetype_face_list[index] = nullptr;
 			else {
 				if (scaler.height == 0)
 					return font_size->face;	// return without save, because the scaler is not prepared yet.
@@ -402,8 +382,8 @@ BOOL FreeTypeTextOut(
 
 BOOL FreeTypeGetGlyph(	// Get all the glyphs and widths needed.
 					  FreeTypeDrawInfo& FTInfo,
-					  LPCWSTR lpString,  
-					  int cbString,     
+					  LPCWSTR lpString,
+					  int cbString,
 					  int& width,
 					  FT_Referenced_Glyph* Glyphs,
 					  FT_DRAW_STATE* drState

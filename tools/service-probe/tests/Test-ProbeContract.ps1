@@ -31,9 +31,15 @@ if ($LASTEXITCODE -ne 0) {
     throw "CMake configure failed with exit code $LASTEXITCODE"
 }
 
-& cmake --build $buildDirectory --config Release --target probe-console probe-window probe-spawn-tree probe-timeout-fixture
+& cmake --build $buildDirectory --config Release --target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests
 if ($LASTEXITCODE -ne 0) {
     throw "CMake build failed with exit code $LASTEXITCODE"
+}
+
+$raiiTestPath = Join-Path $buildDirectory 'Release\renderer-raii-tests.exe'
+& $raiiTestPath
+if ($LASTEXITCODE -ne 0) {
+    throw "Renderer RAII fault-injection tests failed with exit code $LASTEXITCODE"
 }
 
 New-Item -ItemType Directory -Force $resultDirectory | Out-Null

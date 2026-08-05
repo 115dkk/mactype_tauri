@@ -1,7 +1,7 @@
 #include "common.h"
 #include "settings.h"
-CRITICAL_SECTION CCriticalSectionLock::m_cs[20];
-OWNED_CRITIAL_SECTION COwnedCriticalSectionLock::m_cs[2];
+renderer_raii::CriticalSection CCriticalSectionLock::m_cs[20];
+OwnedCriticalSectionResource COwnedCriticalSectionLock::m_cs[2];
 LONG CThreadCounter::interlock;	//snowie!! C++还需要额外申明，汗
 TCHAR CGdippSettings::m_szexeName[MAX_PATH+1] = {0};
 
@@ -61,7 +61,7 @@ BOOL WINAPI PathRemoveFileSpec(LPTSTR pszPath)
 		if (p <= pszPath) {
 			break;
 		}
-		p = CharPrev(NULL, p);
+		p = CharPrev(nullptr, p);
 	}
 
 END:
@@ -75,7 +75,7 @@ END:
 LPTSTR WINAPI PathFindExtension(LPCTSTR pszPath)
 {
 	if (!pszPath) {
-		return NULL;
+		return nullptr;
 	}
 
 	LPCTSTR p, pszEnd;
@@ -84,26 +84,26 @@ LPTSTR WINAPI PathFindExtension(LPCTSTR pszPath)
 	while (p > pszPath) {
 		switch (*p) {
 		case _T('.'):
-			return (LPTSTR)p;
+			return const_cast<LPTSTR>(p);
 		case _T('\\'):
 		case _T('/'):
 		case _T(':'):
-			return (LPTSTR)pszEnd;
+			return const_cast<LPTSTR>(pszEnd);
 		}
 		p = CharPrev(pszPath, p);
 	}
-	return (LPTSTR)pszEnd;
+	return const_cast<LPTSTR>(pszEnd);
 }
 
 LPTSTR WINAPI PathAddBackslash(LPTSTR pszPath)
 {
 	if (!pszPath) {
-		return NULL;
+		return nullptr;
 	}
 
 	int cch = _tcslen(pszPath);
 	if (cch + 1 >= MAX_PATH) {
-		return NULL;
+		return nullptr;
 	}
 
 	LPTSTR p = pszPath + cch;
@@ -122,7 +122,7 @@ LPTSTR WINAPI PathAddBackslash(LPTSTR pszPath)
 LPTSTR WINAPI PathCombine(LPTSTR pszDest, LPCTSTR pszDir, LPCTSTR pszFile)
 {
 	if (!pszDest || !pszDir || !pszFile) {
-		return NULL;
+		return nullptr;
 	}
 
 	//かなり手抜き
@@ -133,18 +133,18 @@ LPTSTR WINAPI PathCombine(LPTSTR pszDest, LPCTSTR pszDir, LPCTSTR pszFile)
 	PathAddBackslash(szDir);
 	if (!SetCurrentDirectory(szDir)) {
 		*pszDest = _T('\0');
-		return NULL;
+		return nullptr;
 	}
 	TCHAR szFile[MAX_PATH];
 	_tcsncpy(szFile, pszFile, MAX_PATH - 1);
 	szFile[MAX_PATH - 1] = _T('\0');
-	GetFullPathName(szFile, MAX_PATH, pszDest, NULL);
+	GetFullPathName(szFile, MAX_PATH, pszDest, nullptr);
 	SetCurrentDirectory(szCurDir);
 TRACE(_T("PathCombine: %s\n"), pszDest);
 	return pszDest;
 }
 
-LPWSTR _StrDupExAtoW(LPCSTR pszMB, int cchMB /*= -1*/, LPWSTR pszStack /*= NULL*/, int cchStack /*= 0*/, int* pcchWC /*= NULL*/, int nACP)
+LPWSTR _StrDupExAtoW(LPCSTR pszMB, int cchMB /*= -1*/, LPWSTR pszStack /*= nullptr*/, int cchStack /*= 0*/, int* pcchWC /*= nullptr*/, int nACP)
 {
 	int _cchWC;
 	if (!pcchWC) {
@@ -153,14 +153,14 @@ LPWSTR _StrDupExAtoW(LPCSTR pszMB, int cchMB /*= -1*/, LPWSTR pszStack /*= NULL*
 	*pcchWC = 0;
 
 	if (!pszMB) {
-		return NULL;
+		return nullptr;
 	}
 	if (cchMB == -1) {
 		cchMB = strlen(pszMB);
 	}
-	const int cchWC = MultiByteToWideChar(nACP, 0, pszMB, cchMB, NULL, 0);
+	const int cchWC = MultiByteToWideChar(nACP, 0, pszMB, cchMB, nullptr, 0);
 	if(cchWC < 0) {
-		return NULL;
+		return nullptr;
 	}
 
 	LPWSTR pszWC;
@@ -168,9 +168,9 @@ LPWSTR _StrDupExAtoW(LPCSTR pszMB, int cchMB /*= -1*/, LPWSTR pszStack /*= NULL*
 		pszWC = pszStack;
 		ZeroMemory(pszWC, sizeof(WCHAR) * (cchWC + 1));
 	} else {
-		pszWC = (LPWSTR)calloc(sizeof(WCHAR), cchWC + 1);
+		pszWC = static_cast<LPWSTR>(calloc(sizeof(WCHAR), cchWC + 1));
 		if (!pszWC) {
-			return NULL;
+			return nullptr;
 		}
 	}
 	MultiByteToWideChar(nACP, 0, pszMB, cchMB, pszWC, cchWC);
@@ -187,7 +187,7 @@ typedef struct {
 	UINT		xor;
 } FLAG_NAME_MAP;
 #define DEF_FLAG_NAME(f,m,x)	{ #f, f, m, x }
-#define END_FLAG()				{ NULL }
+#define END_FLAG()				{ nullptr, 0, 0, 0 }
 
 LPCSTR Dbg_GetFlagNames(UINT flags, const FLAG_NAME_MAP* p, LPSTR worker)
 {
@@ -224,13 +224,13 @@ void Dbg_TraceExtTextOutW(int nXStart, int nYStart, UINT fuOptions, LPCWSTR lpSt
 {
 	LPWSTR p;
 	if (fuOptions & ETO_GLYPH_INDEX) {
-		p = (LPWSTR)_alloca((cbString * 5 + 1) * sizeof(WCHAR));
+		p = static_cast<LPWSTR>(_alloca((cbString * 5 + 1) * sizeof(WCHAR)));
 		LPWSTR q = p;
 		for (int i = 0; i < cbString; ++i) {
 			q += wsprintf(q, _T(" %04X"), lpString[i]);
 		}
 	} else {
-		p = (LPWSTR)_alloca((cbString + 1) * sizeof(WCHAR));
+		p = static_cast<LPWSTR>(_alloca((cbString + 1) * sizeof(WCHAR)));
 		memcpy(p, lpString, cbString * sizeof(WCHAR));
 		p[cbString] = 0;
 	}
@@ -248,12 +248,12 @@ void Dbg_TraceExtTextOutW(int nXStart, int nYStart, UINT fuOptions, LPCWSTR lpSt
 	};
 	CHAR wk[1024];
 	TRACE(_T("ExtTextOutW(%d, %d, %hs, \"%ls\", %d, %hs)\n")
-			, nXStart, nYStart, Dbg_GetFlagNames(fuOptions, c_map, wk), p, cbString, lpDx ? "{...}" : "NULL");
+			, nXStart, nYStart, Dbg_GetFlagNames(fuOptions, c_map, wk), p, cbString, lpDx ? "{...}" : "nullptr");
 }
 
 void Dbg_TraceScriptItemize(const WCHAR* pwcInChars, int cInChars)
 {
-	LPWSTR p = (LPWSTR)_alloca((cInChars + 1) * sizeof(WCHAR));
+	LPWSTR p = static_cast<LPWSTR>(_alloca((cInChars + 1) * sizeof(WCHAR)));
 	memcpy(p, pwcInChars, cInChars * sizeof(WCHAR));
 	p[cInChars] = 0;
 
@@ -262,17 +262,17 @@ void Dbg_TraceScriptItemize(const WCHAR* pwcInChars, int cInChars)
 
 void Dbg_TraceScriptShape(const WCHAR* pwcChars, int cChars, const SCRIPT_ANALYSIS* psa, const WORD* pwOutGlyphs, int cGlyphs)
 {
-	LPWSTR pc = (LPWSTR)_alloca((cChars + 1) * sizeof(WCHAR));
+	LPWSTR pc = static_cast<LPWSTR>(_alloca((cChars + 1) * sizeof(WCHAR)));
 	memcpy(pc, pwcChars, cChars * sizeof(WCHAR));
 	pc[cChars] = 0;
 	LPWSTR pg;
 	if (pwOutGlyphs) {
 		if (psa->fNoGlyphIndex) {
-			pg = (LPWSTR)_alloca((cGlyphs + 1) * sizeof(WCHAR));
+			pg = static_cast<LPWSTR>(_alloca((cGlyphs + 1) * sizeof(WCHAR)));
 			memcpy(pg, pwOutGlyphs, cGlyphs * sizeof(WCHAR));
 			pg[cGlyphs] = 0;
 		} else {
-			pg = (LPWSTR)_alloca((cGlyphs * 5 + 1) * sizeof(WCHAR));
+			pg = static_cast<LPWSTR>(_alloca((cGlyphs * 5 + 1) * sizeof(WCHAR)));
 			LPWSTR q = pg;
 			for (int i = 0; i < cGlyphs; ++i) {
 				q += wsprintf(q, _T(" %04X"), pwOutGlyphs[i]);
@@ -280,15 +280,15 @@ void Dbg_TraceScriptShape(const WCHAR* pwcChars, int cChars, const SCRIPT_ANALYS
 		}
 	}
 
-	TRACE(_T("ScriptShape(\"%ls\", %d, Script=%d%S%S%S%S%S%S, BidiLevel=%d%S%S%S%S%S%S%S%S"), 
+	TRACE(_T("ScriptShape(\"%ls\", %d, Script=%d%S%S%S%S%S%S, BidiLevel=%d%S%S%S%S%S%S%S%S"),
 		pc, cChars,
-		psa->eScript, psa->fRTL ? ", RTL" : "", psa->fLayoutRTL ? ", LayoutRTL" : "", 
-		psa->fLinkBefore ? ", LinkBefore" : "", psa->fLinkAfter ? ", LinkAfter" : "", 
-		psa->fLogicalOrder ? ", LogicalOrder" : "", psa->fNoGlyphIndex ? ", NoGlyphIndex" : "", 
-		psa->s.uBidiLevel, psa->s.fOverrideDirection ? ", OverrideDirection" : "", 
-		psa->s.fInhibitSymSwap ? ", InhibitSymSwap" : "", psa->s.fCharShape ? ", CharShape" : "", 
-		psa->s.fDigitSubstitute ? ", DigitSubstitute" : "", psa->s.fInhibitLigate ? ", InhibitLigate" : "", 
-		psa->s.fDisplayZWG ? ", DisplayZWG" : "", psa->s.fArabicNumContext ? ", ArabicNumContext" : "", 
+		psa->eScript, psa->fRTL ? ", RTL" : "", psa->fLayoutRTL ? ", LayoutRTL" : "",
+		psa->fLinkBefore ? ", LinkBefore" : "", psa->fLinkAfter ? ", LinkAfter" : "",
+		psa->fLogicalOrder ? ", LogicalOrder" : "", psa->fNoGlyphIndex ? ", NoGlyphIndex" : "",
+		psa->s.uBidiLevel, psa->s.fOverrideDirection ? ", OverrideDirection" : "",
+		psa->s.fInhibitSymSwap ? ", InhibitSymSwap" : "", psa->s.fCharShape ? ", CharShape" : "",
+		psa->s.fDigitSubstitute ? ", DigitSubstitute" : "", psa->s.fInhibitLigate ? ", InhibitLigate" : "",
+		psa->s.fDisplayZWG ? ", DisplayZWG" : "", psa->s.fArabicNumContext ? ", ArabicNumContext" : "",
 		psa->s.fGcpClusters ? ", GcpClusters" : ""
 	);
 
@@ -301,7 +301,7 @@ void Dbg_TraceScriptShape(const WCHAR* pwcChars, int cChars, const SCRIPT_ANALYS
 
 void Dbg_TractGetTextExtent(LPCSTR lpString, int cbString, LPSIZE lpSize)
 {
-	LPSTR p = (LPSTR)_alloca((cbString + 1) * sizeof(CHAR));
+	LPSTR p = static_cast<LPSTR>(_alloca((cbString + 1) * sizeof(CHAR)));
 	memcpy(p, lpString, cbString * sizeof(CHAR));
 	p[cbString] = 0;
 	TRACE(_T("GetTextExtentA(\"%hs\", %d) = { %d, %d }\n")
@@ -310,7 +310,7 @@ void Dbg_TractGetTextExtent(LPCSTR lpString, int cbString, LPSIZE lpSize)
 
 void Dbg_TractGetTextExtent(LPCWSTR lpString, int cbString, LPSIZE lpSize)
 {
-	LPWSTR p = (LPWSTR)_alloca((cbString + 1) * sizeof(WCHAR));
+	LPWSTR p = static_cast<LPWSTR>(_alloca((cbString + 1) * sizeof(WCHAR)));
 	memcpy(p, lpString, cbString * sizeof(WCHAR));
 	p[cbString] = 0;
 	TRACE(_T("GetTextExtentW(\"%ls\", %d) = { %d, %d }\n")

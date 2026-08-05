@@ -29,8 +29,8 @@ public:
 		ZeroMemory(m_szBuffer, sizeof(m_szBuffer));
 	}
 	StringHashT(LPCTSTR psz)
+		: StringHashT()
 	{
-		this->StringHashT::StringHashT();
 		_tcsncpy(m_szBuffer, psz, BUFSIZE - 1);
 		UpdateHash();
 	}
@@ -66,10 +66,10 @@ typedef StringHashT<MAX_PATH,true>		StringHashModule;
 class CBitmapCache
 {
 private:
-	HBRUSH	m_brush;
-	HDC		m_hdc;
+	renderer_raii::UniqueBrush m_brush;
+	renderer_raii::UniqueDeviceContext m_hdc;
 	HDC		m_exthdc;
-	HBITMAP	m_hbmp;
+	renderer_raii::UniqueBitmap m_hbmp;
 	BYTE*	m_lpPixels;
 	SIZE	m_dibSize;
 	int		m_counter;
@@ -80,34 +80,16 @@ private:
 
 public:
 	CBitmapCache()
-		: m_hdc(NULL)
-		, m_hbmp(NULL)
-		, m_lpPixels(NULL)
+		: m_lpPixels(nullptr)
 		, m_counter(0)
-		, m_CurrentPixel(NULL)
-		, m_exthdc(NULL)
-		, m_brush(NULL)
-		, m_bkColor(NULL)
+		, m_CurrentPixel(nullptr)
+		, m_exthdc(nullptr)
+		, m_bkColor(0)
 	{
 		m_dibSize.cx = m_dibSize.cy = 0;
 	}
 
-	~CBitmapCache()
-	{
-		if (m_hdc) {
-			DeleteDC(m_hdc);
-		}
-		if (m_hbmp)	{
-			DeleteBitmap(m_hbmp);
-		}
-		if (m_brush) 
-			DeleteObject(m_brush);
-		m_hdc = NULL;
-		m_hbmp = NULL;
-		m_brush = NULL;
-		m_dibSize.cx = 0;
-		m_dibSize.cy = 0;
-	}
+	~CBitmapCache() = default;
 
 	const SIZE& Size() const
 	{
@@ -115,7 +97,7 @@ public:
 	}
 	BYTE* GetPixels()
 	{
-		Assert(m_lpPixels != NULL);
+		Assert(m_lpPixels != nullptr);
 		return m_lpPixels;
 	}
 
@@ -133,7 +115,7 @@ public:
 		// if ((unsigned)X >= (unsigned)m_dibSize.cx || (unsigned)Y >= (unsigned)m_dibSize.cy) {
 		// 	return;
 		// }
-		DWORD* lpPixels = (DWORD*)m_lpPixels;
+		DWORD* lpPixels = reinterpret_cast<DWORD*>(m_lpPixels);
 		m_CurrentPixel = &lpPixels[Y * m_dibSize.cx + X];
 		SetCurrentPixel(rgb);
 	}

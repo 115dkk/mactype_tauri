@@ -12,19 +12,19 @@ public:
 	T* GetPtr() const
 	{
 		if(tlsindex == INVALID_TLS_VALUE)
-			return NULL;
+			return nullptr;
 
 		T* pT = reinterpret_cast<T*>(::TlsGetValue(tlsindex));
 		if(pT)
 			return pT;
 
 		pT = new T;
- 		if(!pT)
- 			return NULL;
+		if(!pT)
+			return nullptr;
 
 		if(!::TlsSetValue(tlsindex, pT)) {
 			delete pT;
-			return NULL;
+			return nullptr;
 		}
 		if(pArray) {
 			pArray->Add(pT);
@@ -60,7 +60,7 @@ public:
 				delete pArray->operator[](i);
 			}
 			delete pArray;
-			pArray = NULL;
+			pArray = nullptr;
 		}
 	}
 //	bool ThreadInit()
@@ -75,6 +75,6 @@ public:
 			}
 			delete pT;
 		}
-		::TlsSetValue(tlsindex, NULL);
+		::TlsSetValue(tlsindex, nullptr);
 	}
 };

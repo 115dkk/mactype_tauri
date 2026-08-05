@@ -2,15 +2,15 @@
 #include <tchar.h>
 
 
-GdipDrawString pfnGdipDrawString = NULL;
-GdipGetBrushType pfnGdipGetBrushType = NULL;
-GdipGetDC pfnGdipGetDC = NULL;
-GdipGetLogFontW pfnGdipGetLogFontW = NULL;
-GdipGetSolidFillColor pfnGdipGetSolidFillColor = NULL;
-GdipGetStringFormatAlign pfnGdipGetStringFormatAlign = NULL;
-GdipGetStringFormatHotkeyPrefix pfnGdipGetStringFormatHotkeyPrefix = NULL;
-GdipGetStringFormatTrimming pfnGdipGetStringFormatTrimming = NULL;
-GdipReleaseDC pfnGdipReleaseDC = NULL;
+GdipDrawString pfnGdipDrawString = nullptr;
+GdipGetBrushType pfnGdipGetBrushType = nullptr;
+GdipGetDC pfnGdipGetDC = nullptr;
+GdipGetLogFontW pfnGdipGetLogFontW = nullptr;
+GdipGetSolidFillColor pfnGdipGetSolidFillColor = nullptr;
+GdipGetStringFormatAlign pfnGdipGetStringFormatAlign = nullptr;
+GdipGetStringFormatHotkeyPrefix pfnGdipGetStringFormatHotkeyPrefix = nullptr;
+GdipGetStringFormatTrimming pfnGdipGetStringFormatTrimming = nullptr;
+GdipReleaseDC pfnGdipReleaseDC = nullptr;
 
 bool InitGdiplusFuncs(){
 	static bool bInited = false;

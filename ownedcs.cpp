@@ -6,7 +6,7 @@ void WINAPI InitializeOwnedCritialSection(POWNED_CRITIAL_SECTION cs)
 	cs->nOwner = -1;
 	cs->nRecursiveCount = 0;
 	cs->nRequests = -1;
-	cs->hEvent = CreateEvent(NULL, false, false, NULL);
+	cs->hEvent = CreateEvent(nullptr, false, false, nullptr);
 	InitializeCriticalSection(&cs->threadLock);
 }
 

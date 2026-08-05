@@ -16,7 +16,14 @@ void MyDebug(const TCHAR * sz, ...)
 #endif
 }
 
-#define SET_VAL(x, y) *(DWORD_PTR*)&(x) = *(DWORD_PTR*)&(y)
+template <typename Target, typename Source>
+void SetPointerValue(Target& target, Source source) noexcept
+{
+	static_assert(sizeof(Target) == sizeof(Source), "hook pointer size mismatch");
+	memcpy(&target, &source, sizeof(target));
+}
+
+#define SET_VAL(x, y) SetPointerValue((x), (y))
 // To hook a method, add HOOK_MANUALLY() in hooklist.h and use this.
 
 #ifdef EASYHOOK
@@ -51,7 +58,7 @@ struct ComMethodHooker {
 		return (*reinterpret_cast<void***>(obj))[index]; \
 	}, \
 	[](IUnknown* obj) -> void { \
-		CComPtr<type> ptr = (type*)obj; \
+		CComPtr<type> ptr = static_cast<type*>(obj); \
 		HOOK(ptr, name, index); \
 	} \
 }
@@ -61,7 +68,7 @@ struct ComMethodHooker {
 		return false; \
 	}, \
 	[](IUnknown* obj) -> void* { \
-		return NULL; \
+		return nullptr; \
 	}, \
 	[](IUnknown* obj) -> void { \
 		return; \
@@ -87,8 +94,8 @@ struct Params {
 	void CreateParams(IDWriteFactory* dw_factory);
 };
 
-//IDWriteFactory* g_pDWriteFactory = NULL;
-CComPtr<IDWriteGdiInterop> g_pGdiInterop = NULL;
+//IDWriteFactory* g_pDWriteFactory = nullptr;
+CComPtr<IDWriteGdiInterop> g_pGdiInterop = nullptr;
 
 enum D2D1RenderTargetCategory {
 	D2D1_RENDER_TARGET_CATEGORY = 1,
@@ -109,16 +116,16 @@ inline HRESULT IfSupport(IUnknown* pUnknown, void(*lpFunc)(Intf*)) {
 
 void Params::CreateParams(IDWriteFactory *dw_factory)
 {
-	IDWriteFactory3* dw3 = NULL;
-	IDWriteFactory2* dw2 = NULL;
-	IDWriteFactory1* dw1 = NULL;
-	IDWriteRenderingParams3* r3 = NULL;
-	IDWriteRenderingParams2* r2 = NULL;
-	IDWriteRenderingParams1* r1 = NULL;
-	IDWriteRenderingParams* r0 = NULL;
+	IDWriteFactory3* dw3 = nullptr;
+	IDWriteFactory2* dw2 = nullptr;
+	IDWriteFactory1* dw1 = nullptr;
+	IDWriteRenderingParams3* r3 = nullptr;
+	IDWriteRenderingParams2* r2 = nullptr;
+	IDWriteRenderingParams1* r1 = nullptr;
+	IDWriteRenderingParams* r0 = nullptr;
 
 	CComPtr<IDWriteFactory> pDWriteFactory;
-	if (NULL == dw_factory) {
+	if (nullptr == dw_factory) {
 		ORIG_DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
 			__uuidof(IDWriteFactory),
 			reinterpret_cast<IUnknown**>(&pDWriteFactory));
@@ -190,11 +197,11 @@ void Params::CreateParams(IDWriteFactory *dw_factory)
 		return;
 	}
 
-	RenderingParams = NULL;
+	RenderingParams = nullptr;
 }
 
 Params::Params() {
-	//MessageBox(NULL, L"MakeParam", NULL, MB_OK);
+	//MessageBox(nullptr, L"MakeParam", nullptr, MB_OK);
 	const CGdippSettings* pSettings = CGdippSettings::GetInstanceNoInit();
 	//
 	Gamma = pSettings->GammaValueForDW();	//user defined value preferred.
@@ -202,7 +209,7 @@ Params::Params() {
 	//	Gamma = pSettings->GammaValue()*pSettings->GammaValue() > 1.3 ? pSettings->GammaValue()*pSettings->GammaValue() / 2 : 0.7f;
 	EnhancedContrast = pSettings->ContrastForDW();
 	ClearTypeLevel = pSettings->ClearTypeLevelForDW();
-	AntialiasMode = (D2D1_TEXT_ANTIALIAS_MODE)D2D1_TEXT_ANTIALIAS_MODE_DEFAULT;
+	AntialiasMode = static_cast<D2D1_TEXT_ANTIALIAS_MODE>(D2D1_TEXT_ANTIALIAS_MODE_DEFAULT);
 	switch (pSettings->AntiAliasModeForDW())
 	{
 		case 2:
@@ -217,8 +224,8 @@ Params::Params() {
 			PixelGeometry = DWRITE_PIXEL_GEOMETRY_FLAT;
 			AntialiasMode = D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE;
 	}
-	
-	RenderingMode = (DWRITE_RENDERING_MODE)pSettings->RenderingModeForDW();
+
+	RenderingMode = static_cast<DWRITE_RENDERING_MODE>(pSettings->RenderingModeForDW());
 	GrayscaleEnhancedContrast = pSettings->ContrastForDW();
 	switch (pSettings->GetFontSettings().GetHintingMode())
 	{
@@ -230,8 +237,8 @@ Params::Params() {
 			GridFitMode = DWRITE_GRID_FIT_MODE_ENABLED;
 			break;
 	}
-	RenderingMode1 = (DWRITE_RENDERING_MODE1)pSettings->RenderingModeForDW();
-	RenderingParams = NULL;
+	RenderingMode1 = static_cast<DWRITE_RENDERING_MODE1>(pSettings->RenderingModeForDW());
+	RenderingParams = nullptr;
 }
 
 Params* GetD2DParams() {
@@ -254,30 +261,30 @@ Params* GetDWParams() {
 	return &dwParams;
 }
 
-IDWriteRenderingParams* GetD2DRenderingParams(IDWriteRenderingParams* default) {
+IDWriteRenderingParams* GetD2DRenderingParams(IDWriteRenderingParams* fallback) {
 	Params* params = GetD2DParams();
 	static bool inited = [&] {
-		params->CreateParams(NULL);
+		params->CreateParams(nullptr);
 		return true;
 	}();
 
 	if (params->RenderingParams)
 		return params->RenderingParams;
 	else
-		return default;
+		return fallback;
 }
 
-IDWriteRenderingParams* GetDWRenderingParams(IDWriteRenderingParams* default) {
+IDWriteRenderingParams* GetDWRenderingParams(IDWriteRenderingParams* fallback) {
 	Params* params = GetDWParams();
 	static bool inited = [&] {
-		params->CreateParams(NULL);
+		params->CreateParams(nullptr);
 		return true;
 	}();
 
 	if (params->RenderingParams)
 		return params->RenderingParams;
 	else
-		return default;
+		return fallback;
 }
 
 // Hook the implementation rather than an interface.
@@ -480,7 +487,7 @@ void HookRenderTarget(
 	};
 
 	if (hookCategory == D2D1_RENDER_TARGET_CATEGORY) {
-		static bool loaded1 = [&] {			
+		static bool loaded1 = [&] {
 			CCriticalSectionLock __lock(CCriticalSectionLock::CS_DWRITE);
 			HookRenderTargetMethod(pD2D1RenderTarget, hookCategory, hookDrawText);
 			HookRenderTargetMethod(pD2D1RenderTarget, hookCategory, hookDrawGlyphRun);
@@ -523,8 +530,8 @@ void HookRenderTarget(
 
 	//pD2D1RenderTarget->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_DEFAULT);
 	pD2D1RenderTarget->SetTextAntialiasMode(GetD2DParams()->AntialiasMode);
-	if (GetD2DRenderingParams(NULL)) {
-		pD2D1RenderTarget->SetTextRenderingParams(GetD2DRenderingParams(NULL));
+	if (GetD2DRenderingParams(nullptr)) {
+		pD2D1RenderTarget->SetTextRenderingParams(GetD2DRenderingParams(nullptr));
 	}
 }
 
@@ -632,7 +639,7 @@ HRESULT WINAPI IMPL_CreateGlyphRunAnalysis(
 HRESULT WINAPI IMPL_GetGdiInterop(
 	IDWriteFactory* This,
 	IDWriteGdiInterop** gdiInterop
-	) 
+	)
 {
 	HRESULT hr = ORIG_GetGdiInterop(This, gdiInterop);
 	static bool loaded = [&] {
@@ -712,7 +719,7 @@ HRESULT WINAPI IMPL_CreateGlyphRunAnalysis2(
 	FLOAT baselineOriginX,
 	FLOAT baselineOriginY,
 	IDWriteGlyphRunAnalysis** glyphRunAnalysis
-	) 
+	)
 {
 	HRESULT hr = E_FAIL;
 	if (FAILED(hr) && renderingMode != DWRITE_RENDERING_MODE_ALIASED) {
@@ -722,7 +729,7 @@ HRESULT WINAPI IMPL_CreateGlyphRunAnalysis2(
 			hr = f->CreateGlyphRunAnalysis(
 				glyphRun,
 				transform,
-				(DWRITE_RENDERING_MODE1)renderingMode,
+				static_cast<DWRITE_RENDERING_MODE1>(renderingMode),
 				measuringMode,
 				gridFitMode,
 				antialiasMode,
@@ -941,7 +948,7 @@ HRESULT WINAPI IMPL_CreateWicBitmapRenderTarget(
 	ID2D1Factory* This,
 	IWICBitmap* target,
 	const D2D1_RENDER_TARGET_PROPERTIES* renderTargetProperties,
-	ID2D1RenderTarget** renderTarget 
+	ID2D1RenderTarget** renderTarget
 	) {
 	HRESULT hr = ORIG_CreateWicBitmapRenderTarget(
 		This,
@@ -1320,7 +1327,7 @@ return false;
 }*/
 
 /*
-void WINAPI IMPL_SetTextRenderingParams(ID2D1RenderTarget* self, __in_opt IDWriteRenderingParams *textRenderingParams = NULL)
+void WINAPI IMPL_SetTextRenderingParams(ID2D1RenderTarget* self, __in_opt IDWriteRenderingParams *textRenderingParams = nullptr)
 {
 return ORIG_SetTextRenderingParams(self, g_D2DParamsLarge.RenderingParams);
 }
@@ -1331,7 +1338,7 @@ return ORIG_SetTextAntialiasMode(self, g_D2DParamsLarge.AntialiasMode);
 }*/
 
 bool hookD2D1() {
-	//MessageBox(NULL, L"HookD2D1", NULL, MB_OK);
+	//MessageBox(nullptr, L"HookD2D1", nullptr, MB_OK);
 	static bool loaded = [&] {
 		return true;
 	}();
@@ -1350,14 +1357,14 @@ bool hookFontCreation(CComPtr<IDWriteFactory>& pDWriteFactory) {
 	DeleteDC(dc);*/
 
 	HOOK(pDWriteFactory, CreateTextFormat, 15);
-	CComPtr<IDWriteFont> dfont = NULL;
-	CComPtr<IDWriteFontCollection> fontcollection = NULL;
-	CComPtr<IDWriteFontFamily> ffamily = NULL;
+	CComPtr<IDWriteFont> dfont = nullptr;
+	CComPtr<IDWriteFontCollection> fontcollection = nullptr;
+	CComPtr<IDWriteFontFamily> ffamily = nullptr;
 	if (FAILED(pDWriteFactory->GetSystemFontCollection(&fontcollection, false))) FAILEXIT;
 	if (FAILED(fontcollection->GetFontFamily(0, &ffamily))) FAILEXIT;
 	if (FAILED(ffamily->GetFont(0, &dfont))) FAILEXIT;
 
-	CComPtr<IDWriteFont3> dfont3 = NULL;
+	CComPtr<IDWriteFont3> dfont3 = nullptr;
 	HRESULT hr = dfont->QueryInterface(&dfont3);
 	if (FAILED(hr)) {
 		HOOK(dfont, CreateFontFace, 13);
@@ -1370,9 +1377,9 @@ bool hookFontCreation(CComPtr<IDWriteFactory>& pDWriteFactory) {
 
 bool hookDirectWrite(IUnknown ** factory)	//此函数需要改进以判断是否成功hook
 {
-	//CoInitialize(NULL);
+	//CoInitialize(nullptr);
 #ifdef DEBUG
-	//MessageBox(NULL, L"HookDW", NULL, MB_OK);
+	//MessageBox(nullptr, L"HookDW", nullptr, MB_OK);
 #endif
 	static bool loaded = [&] {
 		CComPtr<IDWriteFactory> pDWriteFactory;
@@ -1481,6 +1488,7 @@ void TriggerHook(ID2D1Factory* d2d_factory) {
 // 					GetAlphaBlendParams
 static DWORD WINAPI HookExistingDirectWriteFactory(LPVOID moduleReference)
 {
+	renderer_raii::UniqueModuleReference selfReference(static_cast<HMODULE>(moduleReference));
 	CComPtr<IUnknown> factory;
 	if (ORIG_DWriteCreateFactory && SUCCEEDED(ORIG_DWriteCreateFactory(
 		DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), &factory)))
@@ -1489,27 +1497,48 @@ static DWORD WINAPI HookExistingDirectWriteFactory(LPVOID moduleReference)
 		hookDirectWrite(&rawFactory);
 	}
 	factory.Release();
-	FreeLibraryAndExitThread(static_cast<HMODULE>(moduleReference), 0);
+	HMODULE rawSelfReference = selfReference.release();
+	FreeLibraryAndExitThread(rawSelfReference, 0);
 	return 0;
 }
 
 static void ScheduleExistingDirectWriteFactoryHook()
 {
-	HMODULE moduleReference = NULL;
+	HMODULE moduleReference = nullptr;
 	if (!GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
 		reinterpret_cast<LPCTSTR>(&HookExistingDirectWriteFactory),
 		&moduleReference))
 		return;
-	HANDLE thread = CreateThread(NULL, 0, HookExistingDirectWriteFactory,
-		moduleReference, 0, NULL);
-	if (thread)
-		CloseHandle(thread);
-	else
-		FreeLibrary(moduleReference);
+	renderer_raii::UniqueModuleReference selfReference(moduleReference);
+	auto thread = renderer_raii::AdoptHandle(CreateThread(
+		nullptr, 0, HookExistingDirectWriteFactory, selfReference.get(), 0, nullptr));
+	if (thread) {
+		selfReference.release();
+	}
 }
 
-static HMODULE g_pinnedD2D1Module = nullptr;
-static HMODULE g_pinnedDWriteModule = nullptr;
+struct RendererModulePins
+{
+	renderer_raii::UniqueModuleReference d2d1;
+	renderer_raii::UniqueModuleReference dwrite;
+};
+
+static RendererModulePins& GetRendererModulePins()
+{
+	// The process owns this state. Explicit DLL unload releases its contained
+	// module references before FreeLibraryAndExitThread; process termination
+	// leaves the tiny state allocation to the OS to avoid FreeLibrary under the
+	// loader lock.
+	static RendererModulePins* pins = new RendererModulePins;
+	return *pins;
+}
+
+void ReleasePinnedRendererModules()
+{
+	RendererModulePins& pins = GetRendererModulePins();
+	pins.dwrite.reset();
+	pins.d2d1.reset();
+}
 
 void HookD2DDll()
 {
@@ -1527,29 +1556,33 @@ void HookD2DDll()
 		);
 	//Sleep(30 * 1000);
 #ifdef DEBUG
-	//MessageBox(0, L"HookD2DDll", NULL, MB_OK);
+	//MessageBox(0, L"HookD2DDll", nullptr, MB_OK);
 #endif
-	HMODULE d2d1 = GetModuleHandle(_T("d2d1.dll"));
-	HMODULE dw = GetModuleHandle(_T("dwrite.dll"));
+	renderer_raii::BorrowedModule d2d1(GetModuleHandle(_T("d2d1.dll")));
+	renderer_raii::BorrowedModule dw(GetModuleHandle(_T("dwrite.dll")));
+	RendererModulePins& pins = GetRendererModulePins();
 
 	if (!d2d1)
 	{
-		g_pinnedD2D1Module = LoadLibrary(_T("d2d1.dll"));
-		d2d1 = g_pinnedD2D1Module;
+		pins.d2d1.reset(LoadLibrary(_T("d2d1.dll")));
+		d2d1 = renderer_raii::BorrowedModule(pins.d2d1.get());
 	}
 	if (!dw)
 	{
-		g_pinnedDWriteModule = LoadLibrary(_T("dwrite.dll"));
-		dw = g_pinnedDWriteModule;
+		pins.dwrite.reset(LoadLibrary(_T("dwrite.dll")));
+		dw = renderer_raii::BorrowedModule(pins.dwrite.get());
 	}
-	void* D2D1Factory = GetProcAddress(d2d1, "D2D1CreateFactory");
-	void* D2D1Device = GetProcAddress(d2d1, "D2D1CreateDevice");
-	void* D2D1Context = GetProcAddress(d2d1, "D2D1CreateDeviceContext");
-	void* DWFactory = GetProcAddress(dw, "DWriteCreateFactory");
-	*(DWORD_PTR*)&ORIG_D2D1CreateFactory = (DWORD_PTR)D2D1Factory;
-	*(DWORD_PTR*)&ORIG_D2D1CreateDevice = (DWORD_PTR)D2D1Device;
-	*(DWORD_PTR*)&ORIG_D2D1CreateDeviceContext = (DWORD_PTR)D2D1Context;
-	*(DWORD_PTR*)&ORIG_DWriteCreateFactory = (DWORD_PTR)DWFactory;
+	if (!d2d1 || !dw) {
+		return;
+	}
+	void* D2D1Factory = GetProcAddress(d2d1.get(), "D2D1CreateFactory");
+	void* D2D1Device = GetProcAddress(d2d1.get(), "D2D1CreateDevice");
+	void* D2D1Context = GetProcAddress(d2d1.get(), "D2D1CreateDeviceContext");
+	void* DWFactory = GetProcAddress(dw.get(), "DWriteCreateFactory");
+	SET_VAL(ORIG_D2D1CreateFactory, D2D1Factory);
+	SET_VAL(ORIG_D2D1CreateDevice, D2D1Device);
+	SET_VAL(ORIG_D2D1CreateDeviceContext, D2D1Context);
+	SET_VAL(ORIG_DWriteCreateFactory, DWFactory);
 	if (DWFactory) {
 		hook_demand_DWriteCreateFactory();
 		// Service injection can happen after a browser has created its shared
@@ -1571,8 +1604,8 @@ void HookD2DDll()
 void HookGdiplus()
 {
 InitGdiplusFuncs();
-//*(DWORD_PTR*)&ORIG_D2D1CreateFactory = (DWORD_PTR)D2D1Factory;
-*(DWORD_PTR*)&ORIG_GdipDrawString = (DWORD_PTR)pfnGdipDrawString;
+//SET_VAL(ORIG_D2D1CreateFactory, D2D1Factory);
+SET_VAL(ORIG_GdipDrawString, pfnGdipDrawString);
 hook_demand_GdipDrawString();
 }
 
@@ -1590,15 +1623,15 @@ GDIPCONST GpBrush        *brush
 #define GDIPCHECK(x) if ((x)!=Ok) return GDIPEXEC
 if (string)
 {
-HDC dc = NULL;
+HDC dc = nullptr;
 LOGFONTW lf = {0};
 GpBrushType bt;
 ARGB FontColor=0 ,bkColor = 0;
 //GDIPLUS to gdi32 data preparation
-GDIPCHECK(pfnGdipGetLogFontW((GpFont*)font, graphics, &lf));
-GDIPCHECK(pfnGdipGetBrushType((GpBrush*)brush, &bt));
+GDIPCHECK(pfnGdipGetLogFontW(const_cast<GpFont*>(font), graphics, &lf));
+GDIPCHECK(pfnGdipGetBrushType(const_cast<GpBrush*>(brush), &bt));
 if (bt!=BrushTypeSolidColor) return GDIPEXEC; //only solid brush is supported by GDI32
-GDIPCHECK(pfnGdipGetSolidFillColor((GpSolidFill*)brush, &FontColor));
+GDIPCHECK(pfnGdipGetSolidFillColor(reinterpret_cast<GpSolidFill*>(const_cast<GpBrush*>(brush)), &FontColor));
 if (FontColor>>24!=0xFF) return GDIPEXEC;	//only transparent and Opaque is supported.
 GDIPCHECK(pfnGdipGetDC(graphics, &dc));
 HFONT ft = CreateFontIndirectW(&lf);
@@ -1608,7 +1641,7 @@ SetTextColor(dc, FontColor & 0x00FFFFFF);
 SetBkMode(dc, TRANSPARENT);
 RECT gdiRect = {ROUND(layoutRect->X), ROUND(layoutRect->Y), ROUND(layoutRect->X+layoutRect->Width), ROUND(layoutRect->Y+layoutRect->Height)};
 DrawText(dc, string, length, &gdiRect, DT_WORDBREAK);
-//ExtTextOutW(dc, gdiRect.left, gdiRect.top, 0, &gdiRect, string, wcslen(string), NULL);
+//ExtTextOutW(dc, gdiRect.left, gdiRect.top, 0, &gdiRect, string, wcslen(string), nullptr);
 
 SelectObject(dc, oldfont);
 DeleteObject(ft);
@@ -1625,7 +1658,7 @@ HRESULT WINAPI IMPL_DWriteCreateFactory(__in DWRITE_FACTORY_TYPE factoryType,
 	__in REFIID iid,
 	__out IUnknown **factory)
 {
-	HRESULT ret = ORIG_DWriteCreateFactory(factoryType, iid, factory); 
+	HRESULT ret = ORIG_DWriteCreateFactory(factoryType, iid, factory);
 	if (SUCCEEDED(ret))
 		hookDirectWrite(factory);
 	return ret;
@@ -1638,7 +1671,7 @@ HRESULT WINAPI IMPL_CreateFontFace(IDWriteFont* self,
 	if (ret == S_OK)
 	{
 		/*static bool loaded = [&] {
-			CComPtr<IDWriteFontFace3> dfont3 = NULL;
+			CComPtr<IDWriteFontFace3> dfont3 = nullptr;
 			HRESULT hr = self->QueryInterface(&dfont3);
 			if (SUCCEEDED(hr)) {
 				CComPtr<IDWriteFontFaceReference> ffref;
@@ -1657,7 +1690,7 @@ HRESULT WINAPI IMPL_CreateFontFace(IDWriteFont* self,
 		const CGdippSettings* pSettings = CGdippSettings::GetInstance();
 		if (pSettings->CopyForceFont(lf, lf))
 		{
-			IDWriteFont* writefont = NULL;
+			IDWriteFont* writefont = nullptr;
 			if (FAILED(g_pGdiInterop->CreateFontFromLOGFONT(&lf, &writefont)))
 				return ret;
 			(*fontFace)->Release();
@@ -1685,7 +1718,7 @@ bool SubstituteDWriteFont3(__out IDWriteFontFace3** fontFace3)
 		IDWriteFontFace3* fontFace3Out;
 		if (FAILED(fontFaceOut->QueryInterface(&fontFace3Out)))
 			return false;
-		
+
 		(*fontFace3)->Release();
 		*fontFace3 = fontFace3Out;
 	}

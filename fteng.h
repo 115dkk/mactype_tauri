@@ -8,11 +8,14 @@
 #include <freetype/ftoutln.h>
 #include <vector>
 #include "ftref.h"
+#include "freetype_raii.h"
 #include <math.h>
 #include "undocAPI.h"
 
 class FreeTypeFontEngine;
 extern FreeTypeFontEngine* g_pFTEngine;
+bool CreateFreeTypeFontEngine() noexcept;
+void DestroyFreeTypeFontEngine() noexcept;
 extern BOOL g_ccbCache;
 extern BOOL g_ccbIndividual;
 extern FTC_Manager    cache_man;
@@ -169,7 +172,6 @@ public:
 		//delete this;
 	}
 };
-static INT_PTR NULL_INT = NULL;
 class FreeTypeFontCache : public FreeTypeMruCounter, public FreeTypeGCCounter
 {
 	typedef map<int, FreeTypeCharData*> GlyphCache;
@@ -187,6 +189,11 @@ private:
 	FreeTypeCharData*	m_glyphs[FT_MAX_CHARS];
 #else
 	GlyphCache m_GlyphCache;
+	static FreeTypeCharData** MissingGlyph()
+	{
+		static FreeTypeCharData* missingGlyph = nullptr;
+		return &missingGlyph;
+	}
 #endif
 	NOCOPY(FreeTypeFontCache);
 	void Compact();
@@ -197,7 +204,7 @@ private:
 		return m_chars + wch;
 #else
 		GlyphCache::iterator it=m_GlyphCache.find(wch);
-		return it==m_GlyphCache.end()? reinterpret_cast<FreeTypeCharData**>(&NULL_INT): &(it->second);
+		return it == m_GlyphCache.end() ? MissingGlyph() : &(it->second);
 #endif
 	}
 	FreeTypeCharData** _GetGlyph(UINT glyph)
@@ -205,8 +212,8 @@ private:
 #ifdef _USE_ARRAY
 		return m_glyphs + glyph;
 #else
-		GlyphCache::iterator it=m_GlyphCache.find(-(int)glyph);
-		return it == m_GlyphCache.end() ? reinterpret_cast<FreeTypeCharData**>(&NULL_INT) : &(it->second);
+		GlyphCache::iterator it=m_GlyphCache.find(-static_cast<int>(glyph));
+		return it == m_GlyphCache.end() ? MissingGlyph() : &(it->second);
 #endif
 	}
 
@@ -228,7 +235,7 @@ public:
 	}
 	FreeTypeCharData* FindChar(WCHAR wch)
 	{
-		/*if (!g_ccbCache) return NULL;*/
+		/*if (!g_ccbCache) return nullptr;*/
 		FreeTypeCharData* p = *_GetChar(wch);
 		if(p) {
 			p->SetMruCounter(this);
@@ -238,8 +245,8 @@ public:
 
 	FreeTypeCharData* FindGlyphIndex(UINT glyph)
 	{
-		/*if (!g_ccbCache) return NULL;*/
-		FreeTypeCharData* p = (glyph & 0xffff0000) ? NULL : *_GetGlyph(glyph);
+		/*if (!g_ccbCache) return nullptr;*/
+		FreeTypeCharData* p = (glyph & 0xffff0000) ? nullptr : *_GetGlyph(glyph);
 		if(p) {
 			p->SetMruCounter(this);
 		}
@@ -275,8 +282,8 @@ private:
 	int  m_os2Weight;
 	int  m_nMaxSizes;
 	int	 m_nFontFamily;
-	HFONT m_ggoFont;
-	TT_OS2* m_OS2Table;
+	renderer_raii::UniqueFont m_ggoFont;
+	std::unique_ptr<TT_OS2> m_OS2Table;
 	char m_ebmps[256];
 	LONG volatile count;
 	CFontSettings m_set;
@@ -304,17 +311,17 @@ public:
 	{
 		if (!m_OS2Table)
 		{
-			TT_OS2 * os2_table = NULL;
+			TT_OS2 * os2_table = nullptr;
 			FT_Face freetype_face;
 			CCriticalSectionLock __lock(CCriticalSectionLock::CS_MANAGER);
-			if (FTC_Manager_LookupFace(cache_man, (FTC_FaceID)m_id, &freetype_face)) 
-				return NULL;
-			os2_table = (TT_OS2*) FT_Get_Sfnt_Table(freetype_face, ft_sfnt_os2);
-			if (!os2_table) return NULL;
-			m_OS2Table = new TT_OS2;
-			memcpy(m_OS2Table, os2_table, sizeof(TT_OS2));
+			if (FTC_Manager_LookupFace(cache_man, reinterpret_cast<FTC_FaceID>(m_id), &freetype_face))
+				return nullptr;
+			os2_table = static_cast<TT_OS2*>(FT_Get_Sfnt_Table(freetype_face, ft_sfnt_os2));
+			if (!os2_table) return nullptr;
+			m_OS2Table = std::make_unique<TT_OS2>();
+			memcpy(m_OS2Table.get(), os2_table, sizeof(TT_OS2));
 		}
-		return m_OS2Table;
+		return m_OS2Table.get();
 	}
 	BOOL FontHasHinting()
 	{
@@ -322,13 +329,13 @@ public:
 		{
 			FT_Face freetype_face;
 			CCriticalSectionLock __lock(CCriticalSectionLock::CS_MANAGER);
-			if (FTC_Manager_LookupFace(cache_man, (FTC_FaceID)m_id, &freetype_face))	//查询ft face
+			if (FTC_Manager_LookupFace(cache_man, reinterpret_cast<FTC_FaceID>(m_id), &freetype_face))	//查询ft face
 			{
 				m_hashinting = false;
-				return NULL;
+				return FALSE;
 			}
 			FT_ULong length = 0;
-			FT_Error err = FT_Load_Sfnt_Table(freetype_face, TTAG_fpgm, 0, NULL, &length);	//获取fpgm表长度
+			FT_Error err = FT_Load_Sfnt_Table(freetype_face, TTAG_fpgm, 0, nullptr, &length);	//获取fpgm表长度
 			if (!err && length>50)		//成功读取表，并且长度较长
 				m_hashinting = true;		//字体存在hinting
 			else
@@ -339,15 +346,15 @@ public:
 	wstring GetFullName() {return m_fullname;};
 	bool m_isSimSun;
 	bool IsPixel;
-	UINT getCacheHash(int px, int weight, bool italic, int width) {return ((px<<20)|(width<<8)|(weight<<1)|(int)italic); };	//计算一个hash值来定位cache
+	UINT getCacheHash(int px, int weight, bool italic, int width) {return ((px<<20)|(width<<8)|(weight<<1)|static_cast<int>(italic)); };	//计算一个hash值来定位cache
 	FreeTypeFontInfo(int n, LPCTSTR name, int weight, bool italic, int mru, wstring fullname, wstring familyname)
-		: m_id(n), m_weight(weight), m_italic(italic), m_OS2Table(NULL), IsPixel(false)
-		, FreeTypeMruCounter(mru), m_isSimSun(false), m_ggoFont(NULL), m_linkinited(false), m_linknum(0), m_os2Weight(0)
+		: m_id(n), m_weight(weight), m_italic(italic), m_OS2Table(), IsPixel(false)
+		, FreeTypeMruCounter(mru), m_isSimSun(false), m_ggoFont(), m_linkinited(false), m_linknum(0), m_os2Weight(0)
 		, m_SimSunID(0), count(1), m_fullname(fullname), m_familyname(familyname), m_hashinting(3), m_nFontFamily(0)
 	{
 		//m_set = set;
 		memset(m_ebmps, 0xff, sizeof(m_ebmps));
-		
+
 		enum { FTC_MAX_SIZES_DEFAULT = 4 };
 		const CGdippSettings* pSettings = CGdippSettings::GetInstance();
 		m_nMaxSizes = pSettings->CacheMaxSizes();
@@ -355,15 +362,15 @@ public:
 			m_nMaxSizes = FTC_MAX_SIZES_DEFAULT;
 		//extern BOOL g_EngineCreateFont;
 			if (pSettings->FontSubstitutes() < SETTING_FONTSUBSTITUTE_ALL)
-				m_ggoFont = CreateFont(10,0,0,0,weight,italic,0,0,DEFAULT_CHARSET,0,FONT_MAGIC_NUMBER,0,0,name);	
+				m_ggoFont.reset(CreateFont(10,0,0,0,weight,italic,0,0,DEFAULT_CHARSET,0,FONT_MAGIC_NUMBER,0,0,name));
 					//use magic number to create unsubstitud font
 			else
-				m_ggoFont = CreateFont(10,0,0,0,weight,italic,0,0,DEFAULT_CHARSET,0,0,0,0,name);
-			HDC hdc = CreateCompatibleDC(NULL);
-			HFONT old = SelectFont(hdc, m_ggoFont);
+				m_ggoFont.reset(CreateFont(10,0,0,0,weight,italic,0,0,DEFAULT_CHARSET,0,0,0,0,name));
+			renderer_raii::UniqueDeviceContext hdc(CreateCompatibleDC(nullptr));
+			auto selectedFont = renderer_raii::SelectObject(hdc.get(), m_ggoFont.get());
 			//获得字体的全称
-		
-			int nSize=GetOutlineTextMetrics(hdc, 0, NULL);
+
+			int nSize = hdc && selectedFont ? GetOutlineTextMetrics(hdc.get(), 0, nullptr) : 0;
 			if (nSize==0)
 				m_fullname = L"";
 			else
@@ -372,7 +379,7 @@ public:
 				std::vector<BYTE> metricBuffer(nSize, 0);
 				LPOUTLINETEXTMETRIC otm = reinterpret_cast<LPOUTLINETEXTMETRIC>(metricBuffer.data());
 				otm->otmSize = nSize;
-				if (GetOutlineTextMetrics(hdc, nSize, otm) == 0) {
+				if (GetOutlineTextMetrics(hdc.get(), nSize, otm) == 0) {
 					m_fullname = L"";
 				} else {
 					auto metricText = [otm](const void* offset) {
@@ -394,23 +401,17 @@ public:
 						m_fullname = L'@'+m_fullname;
 				}
 			}
-			SelectFont(hdc, old);
-			DeleteDC(hdc);
-		
 			//完成
 //		g_EngineCreateFont = false;
-		face_id_link[0]=(FTC_FaceID)NULL;
-		ggo_link[0] = NULL;
+		face_id_link[0] = nullptr;
+		ggo_link[0] = nullptr;
 	}
 	~FreeTypeFontInfo()
 	{
 		Erase();
-		DeleteFont(m_ggoFont);
-		if (m_OS2Table)
-			delete m_OS2Table;
 	}
 
-	HFONT GetGGOFont(){return m_ggoFont;};
+	HFONT GetGGOFont(){return m_ggoFont.get();};
 	int CalcNormalWeight() const
 	{
 		return m_set.GetNormalWeight();
@@ -447,8 +448,8 @@ public:
 	{
 		m_ftWeight = CalcBoldWeight(700/*m_weight*/);
 		//清除字体链接
-		face_id_link[0]=NULL;
-		ggo_link[0]=NULL;
+		face_id_link[0]=nullptr;
+		ggo_link[0]=nullptr;
 		m_linknum = 0;
 		m_linkinited = false;
 		m_SimSunID = 0;
@@ -539,11 +540,11 @@ public:
 	{
 		return weight < FW_BOLD ? 0: FW_BOLD;
 	}
-	FreeTypeFontInfo* AddFont(LPCTSTR lpFaceName, int weight, bool italic, BOOL* bIsFontLoaded = NULL);
+	FreeTypeFontInfo* AddFont(LPCTSTR lpFaceName, int weight, bool italic, BOOL* bIsFontLoaded = nullptr);
 	FreeTypeFontInfo* AddFont(void* lpparams);
 	int  GetFontIdByName(LPCTSTR lpFaceName, int weight, bool italic);
 //	LPCTSTR GetFontById(int faceid, int& weight, bool& italic);
-	FreeTypeFontInfo* FindFont(LPCTSTR lpFaceName, int weight, bool italic, bool AddOnFind = true, BOOL* bIsFontLoaded=NULL);
+	FreeTypeFontInfo* FindFont(LPCTSTR lpFaceName, int weight, bool italic, bool AddOnFind = true, BOOL* bIsFontLoaded=nullptr);
 	FreeTypeFontInfo* FindFont(int faceid);
 	FreeTypeFontInfo* FindFont(void* lpparams);
 
@@ -581,7 +582,7 @@ public:
 		COwnedCriticalSectionLock __olock(2);
 		CCriticalSectionLock __lock;
 		CGdippSettings* pSettings = CGdippSettings::GetInstance();
-		
+
 		FullNameMap::const_iterator iter=m_mfullMap.begin();
 		for (;iter!=m_mfullMap.end();)
 		{
@@ -595,7 +596,7 @@ public:
 																	m_mfullMap.erase(iter++);
 																	continue;
 																}*/
-		
+
 				p->Erase();
 				p->SetFontSettings(pSettings->FindIndividual(p->GetName()));
 				p->UpdateFontSetting();
@@ -610,26 +611,24 @@ public:
 class FreeTypeSysFontData
 {
 private:
-	HDC		m_hdc;
-	HFONT	m_hOldFont;
+	renderer_raii::UniqueDeviceContext m_hdc;
+	renderer_raii::UniqueFont m_font;
+	renderer_raii::SelectedFont m_selectedFont;
 	bool	m_isTTC;
 	bool	m_locked;
-	void*	m_pMapping;
+	renderer_raii::UniqueMappedView m_pMapping;
+	renderer_raii::PageLock m_mappingLock;
 	DWORD	m_dwSize;
-	FT_Face	m_ftFace;
+	renderer_raii::UniqueFreeTypeFace m_ftFace;
 	wstring m_name;
 	FT_StreamRec m_ftStream;
 
 	// Cppcheck 2.20 mistakes the private Init method for a data member.
 	// cppcheck-suppress uninitMemberVarPrivate
 	FreeTypeSysFontData()
-		: m_hdc(NULL)
-		, m_hOldFont(NULL)
-		, m_isTTC(false)
+		: m_isTTC(false)
 		, m_locked(false)
-		, m_pMapping(NULL)
 		, m_dwSize(0)
-		, m_ftFace(NULL)
 	{
 		ZeroMemory(&m_ftStream, sizeof(FT_StreamRec));
 	}
@@ -641,23 +640,10 @@ private:
 
 public:
 	static FreeTypeSysFontData* CreateInstance(LPCTSTR name, int weight, bool italic);
-	~FreeTypeSysFontData()
-	{
-		if (m_pMapping) {
-			UnmapViewOfFile(m_pMapping);
-		}
-		if (m_hOldFont) {
-			DeleteFont(SelectFont(m_hdc, m_hOldFont));
-		}
-		if (m_hdc) {
-			DeleteDC(m_hdc);
-		}
-	}
+	~FreeTypeSysFontData() = default;
 
 	FT_Face GetFace()
 	{
-		FT_Face face = m_ftFace;
-		m_ftFace = NULL;
-		return face;
+		return m_ftFace.release();
 	}
 };

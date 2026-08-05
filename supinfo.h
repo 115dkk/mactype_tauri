@@ -1,6 +1,7 @@
 #pragma once
 
 #include <mmsystem.h>	//mmioFOURCC
+#include "renderer_raii.h"
 #define FOURCC_GDIPP	mmioFOURCC('G', 'D', 'I', 'P')
 
 typedef struct {
@@ -19,7 +20,7 @@ void FillGdiPPStartupInfo(_STARTUPINFO& si, GDIPP_CREATE_MAGIC& gppcm)
 	ZeroMemory(&gppcm, sizeof(GDIPP_CREATE_MAGIC));
 	gppcm.magic = FOURCC_GDIPP;
 	si.cbReserved2 = sizeof(GDIPP_CREATE_MAGIC);
-	si.lpReserved2 = (LPBYTE)&gppcm;
+	si.lpReserved2 = reinterpret_cast<LPBYTE>(&gppcm);
 }
 #endif
 
@@ -28,7 +29,7 @@ template <typename _STARTUPINFO>
 bool IsGdiPPStartupInfo(const _STARTUPINFO& si)
 {
 	if(si.cbReserved2 >= sizeof(int) + sizeof(FOURCC)) {
-		GDIPP_CREATE_MAGIC* pMagic = (GDIPP_CREATE_MAGIC*)si.lpReserved2;
+		GDIPP_CREATE_MAGIC* pMagic = reinterpret_cast<GDIPP_CREATE_MAGIC*>(si.lpReserved2);
 		if (pMagic->dummy == 0 && pMagic->magic == FOURCC_GDIPP) {
 			return true;
 		}
@@ -54,7 +55,7 @@ BOOL _CreateProcessAorW(const _TCHAR* lpApp, _TCHAR* lpCmd, LPSECURITY_ATTRIBUTE
 	const bool hookCP = pSettings->HookChildProcesses();
 	const bool runGdi = pSettings->RunFromGdiExe();
 #endif
-	
+
 	if (!hookCP || (!lpApp && !lpCmd) || (dwFlags & (DEBUG_PROCESS | DEBUG_ONLY_THIS_PROCESS | DETACHED_PROCESS))/* || !psi || psi->cb < sizeof(_STARTUPINFO)*/) {
 		return fn(lpApp, lpCmd, pa, ta, bInherit, dwFlags, lpEnv, lpDir, psi, ppi);
 	}
@@ -65,7 +66,7 @@ BOOL _CreateProcessAorW(const _TCHAR* lpApp, _TCHAR* lpCmd, LPSECURITY_ATTRIBUTE
 	}
 
 	int szpsi = psi ? (psi->cb ? psi->cb: sizeof(_STARTUPINFO)) : sizeof(_STARTUPINFO);
-	_STARTUPINFO& si = *(_STARTUPINFO*)_alloca(szpsi);
+	_STARTUPINFO& si = *static_cast<_STARTUPINFO*>(_alloca(szpsi));
 	memset(&si, 0, sizeof(si));
 	si.cb=szpsi;
 	if (psi && psi->cb)
@@ -76,14 +77,13 @@ BOOL _CreateProcessAorW(const _TCHAR* lpApp, _TCHAR* lpCmd, LPSECURITY_ATTRIBUTE
 		FillGdiPPStartupInfo(si, gppcm);
 	}
 
-	LPWSTR pEnvW = GdippEnvironment(dwFlags, lpEnv);
-	if (pEnvW) {
-		lpEnv = pEnvW;
+	renderer_raii::UniqueMallocMemory<WCHAR> environment(GdippEnvironment(dwFlags, lpEnv));
+	if (environment) {
+		lpEnv = environment.get();
 	}
 
 	if (!fn(lpApp, lpCmd, pa, ta, bInherit, dwFlags | CREATE_SUSPENDED, lpEnv, lpDir, &si, ppi)) {
 		ZeroMemory(ppi, sizeof(*ppi));
-		free(pEnvW);
 		return FALSE;
 	}
 
@@ -91,7 +91,6 @@ BOOL _CreateProcessAorW(const _TCHAR* lpApp, _TCHAR* lpCmd, LPSECURITY_ATTRIBUTE
 	if (!(dwFlags & CREATE_SUSPENDED)) {
 		ResumeThread(ppi->hThread);
 	}
-	free(pEnvW);
 	return TRUE;
 }
 
@@ -116,7 +115,7 @@ BOOL _CreateProcessAsUserAorW(HANDLE hToken, const _TCHAR* lpApp, _TCHAR* lpCmd,
 		ppi = &_pi;
 	}
 	int szpsi = psi ? (psi->cb ? psi->cb: sizeof(_STARTUPINFO)) : sizeof(_STARTUPINFO);
-	_STARTUPINFO& si = *(_STARTUPINFO*)_alloca(szpsi);
+	_STARTUPINFO& si = *static_cast<_STARTUPINFO*>(_alloca(szpsi));
 	memset(&si, 0, sizeof(si));
 	si.cb=szpsi;
 	if (psi && psi->cb)
@@ -127,14 +126,13 @@ BOOL _CreateProcessAsUserAorW(HANDLE hToken, const _TCHAR* lpApp, _TCHAR* lpCmd,
 		FillGdiPPStartupInfo(si, gppcm);
 	}
 
-	LPWSTR pEnvW = GdippEnvironment(dwFlags, lpEnv);
-	if (pEnvW) {
-		lpEnv = pEnvW;
+	renderer_raii::UniqueMallocMemory<WCHAR> environment(GdippEnvironment(dwFlags, lpEnv));
+	if (environment) {
+		lpEnv = environment.get();
 	}
 
 	if (!fn(hToken, lpApp, lpCmd, pa, ta, bInherit, dwFlags | CREATE_SUSPENDED, lpEnv, lpDir, &si, ppi)) {
 		ZeroMemory(ppi, sizeof(*ppi));
-		free(pEnvW);
 		return FALSE;
 	}
 
@@ -142,57 +140,56 @@ BOOL _CreateProcessAsUserAorW(HANDLE hToken, const _TCHAR* lpApp, _TCHAR* lpCmd,
 	if (!(dwFlags & CREATE_SUSPENDED)) {
 		ResumeThread(ppi->hThread);
 	}
-	free(pEnvW);
 	return TRUE;
 }
 
 static wstring GetExeName(LPCTSTR lpApp, LPTSTR lpCmd)
 {
-// 	HANDLE logfile = CreateFile(_T("C:\\mt.log"), FILE_ALL_ACCESS, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, NULL, NULL);
-// 	SetFilePointer(logfile,0,NULL, FILE_END);
+// 	HANDLE logfile = CreateFile(_T("C:\\mt.log"), FILE_ALL_ACCESS, FILE_SHARE_READ|FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS, nullptr, nullptr);
+// 	SetFilePointer(logfile,0,nullptr, FILE_END);
 
 	wstring ret;
 // 	DWORD aa=0;
-// 	if (GetFileSize(logfile, NULL)==0)
-// 		WriteFile(logfile, "\xff\xfe", 2, &aa, NULL);
-	LPTSTR vlpApp = (LPTSTR)lpApp;	//变成可以操作的参数
+// 	if (GetFileSize(logfile, nullptr)==0)
+// 		WriteFile(logfile, "\xff\xfe", 2, &aa, nullptr);
+	LPTSTR vlpApp = const_cast<LPTSTR>(lpApp);	//变成可以操作的参数
 	if (lpApp)
 	{
-		do 
+		do
 		{
-// 			WriteFile(logfile, L"lpApp=", 12, &aa, NULL);
-// 			WriteFile(logfile, lpApp, _tcslen(lpApp)*2, &aa, NULL);
-// 			WriteFile(logfile, _T("\n"), 2, &aa, NULL);
+// 			WriteFile(logfile, L"lpApp=", 12, &aa, nullptr);
+// 			WriteFile(logfile, lpApp, _tcslen(lpApp)*2, &aa, nullptr);
+// 			WriteFile(logfile, _T("\n"), 2, &aa, nullptr);
 			vlpApp = _tcsstr(vlpApp+1, _T(" "));	//获得第一个空格所在的位置
 			ret.assign(lpApp);
 			if (vlpApp)
 				ret.resize(vlpApp-lpApp);
-// 			WriteFile(logfile, ret.c_str(), ret.length()*2, &aa, NULL);
-// 			WriteFile(logfile, _T("\n"), 2, &aa, NULL);
-			DWORD fa = GetFileAttributes(ret.c_str()); 
+// 			WriteFile(logfile, ret.c_str(), ret.length()*2, &aa, nullptr);
+// 			WriteFile(logfile, _T("\n"), 2, &aa, nullptr);
+			DWORD fa = GetFileAttributes(ret.c_str());
 			if (fa!=INVALID_FILE_ATTRIBUTES && fa!=FILE_ATTRIBUTE_DIRECTORY)	//文件是否存在
-			{		
+			{
 				int p = ret.find_last_of(_T("\\"));
 				if (p!=-1)
 					ret.erase(0, p+1);	//如果有路径就删掉路径
-// 				WriteFile(logfile, ret.c_str(), ret.length()*2, &aa, NULL);
-// 				WriteFile(logfile, _T("\n"), 2, &aa, NULL);
-// 				WriteFile(logfile, _T("==========\n"), 24, &aa, NULL);
+// 				WriteFile(logfile, ret.c_str(), ret.length()*2, &aa, nullptr);
+// 				WriteFile(logfile, _T("\n"), 2, &aa, nullptr);
+// 				WriteFile(logfile, _T("==========\n"), 24, &aa, nullptr);
 // 				CloseHandle(logfile);
 				return ret;
 			}
 			else
 			{
 				ret+=_T(".exe");	//加上.exe扩展名再试
-				DWORD fa = GetFileAttributes(ret.c_str()); 
+				DWORD fa = GetFileAttributes(ret.c_str());
 				if (fa!=INVALID_FILE_ATTRIBUTES && fa!=FILE_ATTRIBUTE_DIRECTORY)
-				{		
+				{
 					int p = ret.find_last_of(_T("\\"));
 					if (p!=-1)
 						ret.erase(0, p+1);	//如果有路径就删掉路径
-// 					WriteFile(logfile, ret.c_str(), ret.length()*2, &aa, NULL);
-// 					WriteFile(logfile, _T("\n"), 2, &aa, NULL);
-// 					WriteFile(logfile, _T("==========\n"), 24, &aa, NULL);
+// 					WriteFile(logfile, ret.c_str(), ret.length()*2, &aa, nullptr);
+// 					WriteFile(logfile, _T("\n"), 2, &aa, nullptr);
+// 					WriteFile(logfile, _T("==========\n"), 24, &aa, nullptr);
 // 					CloseHandle(logfile);
 					return ret;
 				}
@@ -202,8 +199,8 @@ static wstring GetExeName(LPCTSTR lpApp, LPTSTR lpCmd)
 
 	if (lpCmd)
 	{
-// 		WriteFile(logfile, L"lpCmd=", 10, &aa, NULL);
-// 		WriteFile(logfile, lpCmd, _tcslen(lpCmd)*2, &aa, NULL);
+// 		WriteFile(logfile, L"lpCmd=", 10, &aa, nullptr);
+// 		WriteFile(logfile, lpCmd, _tcslen(lpCmd)*2, &aa, nullptr);
 		ret.assign(lpCmd);
 		int p=0;
 		if ((*lpCmd)==_T('\"'))
@@ -215,20 +212,20 @@ static wstring GetExeName(LPCTSTR lpApp, LPTSTR lpCmd)
 			p=ret.find_first_of(_T(" "));
 		if (p>0)
 			ret.resize(p);	//获得Cmd里面的文件名
-// 		WriteFile(logfile, ret.c_str(), ret.length()*2, &aa, NULL);
-// 		WriteFile(logfile, _T("\n"), 2, &aa, NULL);
+// 		WriteFile(logfile, ret.c_str(), ret.length()*2, &aa, nullptr);
+// 		WriteFile(logfile, _T("\n"), 2, &aa, nullptr);
 		p = ret.find_last_of(_T("\\"));
 		if (p>0)
 			ret.erase(0, p+1);	//如果有路径就删掉路径
-// 		WriteFile(logfile, ret.c_str(), ret.length()*2, &aa, NULL);
-// 		WriteFile(logfile, _T("\n"), 2, &aa, NULL);
-// 		WriteFile(logfile, _T("==========\n"), 24, &aa, NULL);
+// 		WriteFile(logfile, ret.c_str(), ret.length()*2, &aa, nullptr);
+// 		WriteFile(logfile, _T("\n"), 2, &aa, nullptr);
+// 		WriteFile(logfile, _T("==========\n"), 24, &aa, nullptr);
 // 		CloseHandle(logfile);
 		return ret;
 	}
-// 	WriteFile(logfile, ret.c_str(), ret.length()*2, &aa, NULL);
-// 	WriteFile(logfile, _T("\n"), 2, &aa, NULL);
-// 	WriteFile(logfile, _T("==========\n"), 24, &aa, NULL);
+// 	WriteFile(logfile, ret.c_str(), ret.length()*2, &aa, nullptr);
+// 	WriteFile(logfile, _T("\n"), 2, &aa, nullptr);
+// 	WriteFile(logfile, _T("==========\n"), 24, &aa, nullptr);
 // 	CloseHandle(logfile);
 	return ret;
 }
@@ -251,7 +248,7 @@ BOOL _CreateProcessInternalW(HANDLE hToken, LPCTSTR lpApp, LPTSTR lpCmd, LPSECUR
 			return fn(hToken, lpApp, lpCmd, pa, ta, bInherit, dwFlags, lpEnv, lpDir, psi, ppi, hNewToken);
 	}
 
-	STARTUPINFO& si = *(STARTUPINFO*)_alloca(psi->cb);
+	STARTUPINFO& si = *static_cast<STARTUPINFO*>(_alloca(psi->cb));
 	memcpy(&si, psi, psi->cb);
 	psi = &si;
 
@@ -265,38 +262,34 @@ BOOL _CreateProcessInternalW(HANDLE hToken, LPCTSTR lpApp, LPTSTR lpCmd, LPSECUR
 		ppi = &_pi;
 	}
 
-	LPWSTR pEnvW = GdippEnvironment(dwFlags, lpEnv);
-	if (pEnvW) {
-		lpEnv = pEnvW;
+	renderer_raii::UniqueMallocMemory<WCHAR> environment(GdippEnvironment(dwFlags, lpEnv));
+	if (environment) {
+		lpEnv = environment.get();
 	}
 	if (!fn(hToken, lpApp, lpCmd, pa, ta, bInherit, dwFlags | CREATE_SUSPENDED, lpEnv, lpDir, psi, ppi, hNewToken)) {
 		ZeroMemory(ppi, sizeof(*ppi));
-		free(pEnvW);
 		return FALSE;
 	}
 	GdippInjectDLL(ppi);
 	if (!(dwFlags & CREATE_SUSPENDED)) {
 		ResumeThread(ppi->hThread);
 	}
-	free(pEnvW);
 #else
 	wstring exe_name = GetExeName(lpApp, lpCmd);
 	if (!hookCP || (!lpApp && !lpCmd) || (dwFlags & (DEBUG_PROCESS | DEBUG_ONLY_THIS_PROCESS)) || IsExeUnload(exe_name.c_str())) {
 			return fn(hToken, lpApp, lpCmd, pa, ta, bInherit, dwFlags, lpEnv, lpDir, psi, ppi, hNewToken);
 	}
-	LPWSTR pEnvW = GdippEnvironment(dwFlags, lpEnv);
-	if (pEnvW) {
-		lpEnv = pEnvW;
+	renderer_raii::UniqueMallocMemory<WCHAR> environment(GdippEnvironment(dwFlags, lpEnv));
+	if (environment) {
+		lpEnv = environment.get();
 	}
 	if (!fn(hToken, lpApp, lpCmd, pa, ta, bInherit, dwFlags | CREATE_SUSPENDED, lpEnv, lpDir, psi, ppi, hNewToken)) {
-		free(pEnvW);
 		return FALSE;
 	}
 	GdippInjectDLL(ppi);
 	if (!(dwFlags & CREATE_SUSPENDED)) {
 		ResumeThread(ppi->hThread);
 	}
-	free(pEnvW);
 #endif
 
 	return TRUE;

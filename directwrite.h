@@ -39,3 +39,5 @@
 #undef HOOK_MANUALLY
 
 #endif
+
+void ReleasePinnedRendererModules();

@@ -8,12 +8,11 @@ CMemLoadDll::~CMemLoadDll()
 {
  if(isLoadOk)
  {
-  //ASSERT(pImageBase != NULL);
-  //ASSERT(pDllMain   != NULL);
+  //ASSERT(pImageBase != nullptr);
+  //ASSERT(pDllMain   != nullptr);
   //脱钩，准备卸载dll
   if (m_bInitDllMain)
-	 pDllMain(reinterpret_cast<HINSTANCE>(pImageBase),DLL_PROCESS_DETACH,0);
-  VirtualFree(reinterpret_cast<LPVOID>(pImageBase), 0, MEM_RELEASE);
+	 pDllMain(reinterpret_cast<HINSTANCE>(pImageBase),DLL_PROCESS_DETACH,nullptr);
  }
 }
 
@@ -24,7 +23,7 @@ CMemLoadDll::~CMemLoadDll()
 BOOL CMemLoadDll::MemLoadLibrary(void* lpFileData, int DataLength, bool bInitDllMain)
 {
  this->m_bInitDllMain = bInitDllMain;
- if(pImageBase != NULL)
+ if(pImageBase != 0)
  {
   return FALSE;  //已经加载一个dll，还没有释放，不能加载新的dll
  }
@@ -35,9 +34,10 @@ BOOL CMemLoadDll::MemLoadLibrary(void* lpFileData, int DataLength, bool bInitDll
  if(ImageSize == 0) return FALSE;
 
  // 分配虚拟内存
- void *pMemoryAddress = VirtualAlloc(nullptr, ImageSize,
-     MEM_COMMIT|MEM_RESERVE, PAGE_EXECUTE_READWRITE);
- if(pMemoryAddress == NULL) return FALSE;
+ renderer_raii::UniqueVirtualMemory image(VirtualAlloc(nullptr, ImageSize,
+     MEM_COMMIT|MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+ void* pMemoryAddress = image.get();
+ if(pMemoryAddress == nullptr) return FALSE;
  else
  {
   CopyDllDatas(pMemoryAddress, lpFileData); //复制dll数据，并对齐每个段
@@ -51,29 +51,29 @@ BOOL CMemLoadDll::MemLoadLibrary(void* lpFileData, int DataLength, bool bInitDll
 
  //接下来要调用一下dll的入口函数，做初始化工作。
  pDllMain = reinterpret_cast<ProcDllMain>(pNTHeader->OptionalHeader.AddressOfEntryPoint + reinterpret_cast<DWORD_PTR>(pMemoryAddress));
- BOOL InitResult = !bInitDllMain || pDllMain(reinterpret_cast<HINSTANCE>(pMemoryAddress),DLL_PROCESS_ATTACH,0);
+ BOOL InitResult = !bInitDllMain || pDllMain(reinterpret_cast<HINSTANCE>(pMemoryAddress),DLL_PROCESS_ATTACH,nullptr);
  if(!InitResult) //初始化失败
  {
-  pDllMain(reinterpret_cast<HINSTANCE>(pMemoryAddress),DLL_PROCESS_DETACH,0);
-  VirtualFree(pMemoryAddress,0,MEM_RELEASE);
-  pDllMain = NULL;
+  pDllMain(reinterpret_cast<HINSTANCE>(pMemoryAddress),DLL_PROCESS_DETACH,nullptr);
+  pDllMain = nullptr;
   return FALSE;
  }
 
  isLoadOk = TRUE;
  pImageBase = reinterpret_cast<DWORD_PTR>(pMemoryAddress);
+ m_image = std::move(image);
  return TRUE;
 }
 
 //MemGetProcAddress函数从dll中获取指定函数的地址
-//返回值： 成功返回函数地址 , 失败返回NULL
+//返回值： 成功返回函数地址 , 失败返回nullptr
 //lpProcName: 要查找函数的名字或者序号
 FARPROC  CMemLoadDll::MemGetProcAddress(LPCSTR lpProcName)
 {
  if(pNTHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress == 0 ||
   pNTHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size == 0)
-  return NULL;
- if(!isLoadOk) return NULL;
+  return nullptr;
+ if(!isLoadOk) return nullptr;
 
  DWORD OffsetStart = pNTHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
  DWORD Size = pNTHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
@@ -109,12 +109,12 @@ FARPROC  CMemLoadDll::MemGetProcAddress(LPCSTR lpProcName)
   }
  }
 
- if(iOrdinal < 0 || static_cast<DWORD>(iOrdinal) >= iNumberOfFunctions) return NULL;
+ if(iOrdinal < 0 || static_cast<DWORD>(iOrdinal) >= iNumberOfFunctions) return nullptr;
  else
  {
   DWORD pFunctionOffset = pAddressOfFunctions[iOrdinal];
   if(pFunctionOffset > OffsetStart && pFunctionOffset < (OffsetStart+Size))//maybe Export Forwarding
-   return NULL;
+   return nullptr;
    else return reinterpret_cast<FARPROC>(pFunctionOffset + pImageBase);
  }
 
@@ -140,12 +140,12 @@ BOOL CMemLoadDll::CheckDataValide(void* lpFileData, int DataLength)
  //检查pe头的合法性
  if(pNTHeader->Signature != IMAGE_NT_SIGNATURE) return FALSE;  //0x00004550 : PE00
  if((pNTHeader->FileHeader.Characteristics & IMAGE_FILE_DLL) == 0) //0x2000  : File is a DLL
-  return FALSE; 
+  return FALSE;
  if((pNTHeader->FileHeader.Characteristics & IMAGE_FILE_EXECUTABLE_IMAGE) == 0) //0x0002 : 指出文件可以运行
   return FALSE;
  if(pNTHeader->FileHeader.SizeOfOptionalHeader != sizeof(IMAGE_OPTIONAL_HEADER32)) return FALSE;
 
- 
+
  //取得节表（段表）
  pSectionHeader = reinterpret_cast<PIMAGE_SECTION_HEADER>(reinterpret_cast<DWORD_PTR>(pNTHeader) + sizeof(IMAGE_NT_HEADERS32));
  //验证每个节表的空间
@@ -165,7 +165,7 @@ int CMemLoadDll::GetAlignedSize(int Origin, int Alignment)
 int CMemLoadDll::CalcTotalImageSize()
 {
  int Size;
- if(pNTHeader == NULL)return 0;
+ if(pNTHeader == nullptr)return 0;
  int nAlign = pNTHeader->OptionalHeader.SectionAlignment; //段对齐字节数
 
  // 计算所有头的尺寸。包括dos, coff, pe头 和 段表的大小
@@ -321,12 +321,11 @@ const void* CDllHelper::MyGetProcAddress(HMODULE dllBase, const wchar_t* procNam
 	for (DWORD i = 0; i < pExportDir->NumberOfNames; i++) {
 		//Calculate Absolute Address and cast
 		const char* name = reinterpret_cast<const char*>(dllBaseAddr + NameRVA[i]);
-		wchar_t* wname = CharToWChar_T(name);
+		renderer_raii::UniqueMallocMemory<wchar_t> wname(CharToWChar_T(name));
 		if (wname == nullptr) {
 			return nullptr;
 		}
-		const bool matches = StringMatches(wname, procName);
-		free(wname);
+		const bool matches = StringMatches(wname.get(), procName);
 		if (matches) {
 
 			//Lookup Ordinal

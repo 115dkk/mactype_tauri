@@ -1,4 +1,5 @@
 #include <windows.h>
+#include "renderer_raii.h"
 
 typedef   BOOL (__stdcall *ProcDllMain)(HINSTANCE, DWORD,  LPVOID );
 
@@ -22,6 +23,7 @@ private:
 
 private:
 	DWORD_PTR  pImageBase;
+	renderer_raii::UniqueVirtualMemory m_image;
 	bool   m_bInitDllMain;
 	PIMAGE_DOS_HEADER pDosHeader;
 	PIMAGE_NT_HEADERS32 pNTHeader;

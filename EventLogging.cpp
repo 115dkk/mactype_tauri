@@ -19,8 +19,8 @@ EventLogging::EventLogging()
 //	Default Constructor is used register the event source
 //******************************************************************************
 {
-	// returns a handle that links the source to the registry 
-	this->m_hEventLinker = RegisterEventSource(NULL,L"MacType");
+	// returns a handle that links the source to the registry
+	this->m_hEventLinker = RegisterEventSource(nullptr,L"MacType");
 
 }
 
@@ -50,6 +50,6 @@ void EventLogging::LogIt(WORD CategoryID, DWORD EventID, LPCTSTR ArrayOfStrings[
 
 	// Writes data to the event log
 	ReportEvent(m_hEventLinker,EVENTLOG_INFORMATION_TYPE,CategoryID,
-		EventID,NULL,NumOfArrayStr,RawDataSize,ArrayOfStrings,RawData);	
+		EventID,nullptr,NumOfArrayStr,RawDataSize,ArrayOfStrings,RawData);
 
 }

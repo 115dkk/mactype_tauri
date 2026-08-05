@@ -41,7 +41,7 @@ using json = nlohmann::json;
 #undef HOOK_MANUALLY
 
 /*
-struct CFontName  
+struct CFontName
 {
 	LPWSTR content;
 public:
@@ -171,7 +171,7 @@ public:
 	void init();
 	void clear();
 	const bool IsAllowFontLink(BYTE aCharset) const { return AllowDefaultLink[aCharset]; }
-	const LPCWSTR sysfn(int nFontFamily) const { 
+	const LPCWSTR sysfn(int nFontFamily) const {
 		return *DefaultFontLink[nFontFamily] ? DefaultFontLink[nFontFamily] : DefaultFontLink[1];	}
 	const LPCWSTR * lookup(LPCWSTR fontname) const;
 	LPCWSTR get(int row, int col) const;
@@ -202,7 +202,7 @@ typedef set<wstring> CFontSubstitutesIniArray;
 class CFontSubstitutesInfo : public CSimpleMap<CFontSubstituteData, CFontSubstituteData>
 {
 private:
-	//typedef map<wstring, wstring> FontSubMap; 
+	//typedef map<wstring, wstring> FontSubMap;
 	//FontSubMap m_mfontsub;
 	void initini(const CFontSubstitutesIniArray& iniarray);
 	void initreg();
@@ -227,7 +227,7 @@ class CGdippSettings;
 
 interface IControlCenter
 {
-	virtual HRESULT STDMETHODCALLTYPE QueryInterface( 
+	virtual HRESULT STDMETHODCALLTYPE QueryInterface(
 		/* [in] */ REFIID riid,
 		/* [iid_is][out] */ __RPC__deref_out void __RPC_FAR *__RPC_FAR *ppvObject) = 0;
 	virtual ULONG STDMETHODCALLTYPE AddRef( void) = 0;
@@ -592,14 +592,14 @@ private:
 		ATTR_FontSubstitute,
 		ATTR_LcdFilterWeight,
 		ATTR_ShadowBuffer,
-		ATTR_MaxBitmap, 
-		ATTR_DirectWrite, 
+		ATTR_MaxBitmap,
+		ATTR_DirectWrite,
 		ATTR_HintSmallFont,
 		ATTR_PixelLayout
 	};
 	typedef CArray<CFontIndividual>		IndividualArray;
 public:
-	HRESULT STDMETHODCALLTYPE QueryInterface( 
+	HRESULT STDMETHODCALLTYPE QueryInterface(
 		/* [in] */ REFIID riid,
 		/* [iid_is][out] */ __RPC__deref_out void __RPC_FAR *__RPC_FAR *ppvObject)
 	{
@@ -610,7 +610,7 @@ public:
 		return S_OK;
 	}
 	ULONG STDMETHODCALLTYPE AddRef( void) {return InterlockedIncrement(&m_nRefCount);};
-	ULONG STDMETHODCALLTYPE Release( void) { 
+	ULONG STDMETHODCALLTYPE Release( void) {
 		LONG result = InterlockedDecrement(&m_nRefCount);
 		if (!result)
 			delete this;
@@ -620,7 +620,7 @@ public:
 	static void UpdatePixelLayout() {
 		const CGdippSettings* pSettings = CGdippSettings::GetInstance();
 		if (pSettings->HarmonyLCD()) {
-			FT_Library_SetLcdFilter(NULL, FT_LCD_FILTER_NONE);
+			FT_Library_SetLcdFilter(nullptr, FT_LCD_FILTER_NONE);
 			// Harmony LCD rendering
 			if (pSettings->m_bUseCustomPixelLayout) {
 				FT_Vector  sub[3] = { { pSettings->m_arrPixelLayout[0], pSettings->m_arrPixelLayout[1]},
@@ -667,8 +667,8 @@ public:
 		}
 		FT_LCDMode_Set(freetype_library, 0);
 		const int nLcdFilter = pSettings->LcdFilter();
-		if ((int)FT_LCD_FILTER_NONE <= nLcdFilter && nLcdFilter < (int)FT_LCD_FILTER_MAX) {
-			FT_Library_SetLcdFilter(freetype_library, (FT_LcdFilter)nLcdFilter);
+		if (static_cast<int>(FT_LCD_FILTER_NONE) <= nLcdFilter && nLcdFilter < static_cast<int>(FT_LCD_FILTER_MAX)) {
+			FT_Library_SetLcdFilter(freetype_library, static_cast<FT_LcdFilter>(nLcdFilter));
 			if (pSettings->UseCustomLcdFilter())
 			{
 				unsigned char buff[5];
@@ -681,7 +681,7 @@ public:
 	BOOL WINAPI SetIntAttribute(int eSet, int nValue)
 	{
 		CGdippSettings* pSettings = CGdippSettings::GetInstance();
-		switch ((eMTSettings)eSet)
+		switch (static_cast<eMTSettings>(eSet))
 		{
 		case ATTR_HINTINGMODE:
 			pSettings->m_FontSettings.SetHintingMode(nValue);
@@ -748,7 +748,7 @@ public:
 					pSettings->m_fontlinkinfo.init();
 			}
 			pSettings->m_bFontLink = nValue;
-			break;	
+			break;
 		case ATTR_FontLoader:
 			pSettings->m_nFontLoader = nValue;
 			break;
@@ -763,12 +763,12 @@ public:
 			break;
 		case ATTR_LcdFilterWeight:
 			if (!nValue)
-				pSettings->m_bUseCustomLcdFilter = false;	//传NULL过来就是关闭自定义过滤器
+				pSettings->m_bUseCustomLcdFilter = false;	//传nullptr过来就是关闭自定义过滤器
 			else
 			{
 				pSettings->m_bUseCustomLcdFilter = true;	//否则打开过滤器
-				if (!IsBadReadPtr((void*)nValue, sizeof(pSettings->m_arrLcdFilterWeights)))	//如果指针有效
-					memcpy(pSettings->m_arrLcdFilterWeights, (void*)nValue, sizeof(pSettings->m_arrLcdFilterWeights));	//复制数据
+				if (!IsBadReadPtr(reinterpret_cast<const void*>(static_cast<INT_PTR>(nValue)), sizeof(pSettings->m_arrLcdFilterWeights)))	//如果指针有效
+					memcpy(pSettings->m_arrLcdFilterWeights, reinterpret_cast<const void*>(static_cast<INT_PTR>(nValue)), sizeof(pSettings->m_arrLcdFilterWeights));	//复制数据
 			}
 			UpdateLcdFilter();	//刷新过滤器
 			break;
@@ -780,17 +780,17 @@ public:
 			break;
 		case ATTR_PixelLayout:
 			pSettings->m_bUseCustomPixelLayout = false;
-			if (nValue && !IsBadReadPtr((void*)nValue, sizeof(pSettings->m_arrPixelLayout)))	//如果指针有效
+			if (nValue && !IsBadReadPtr(reinterpret_cast<const void*>(static_cast<INT_PTR>(nValue)), sizeof(pSettings->m_arrPixelLayout)))	//如果指针有效
 			{
-				memcpy(pSettings->m_arrPixelLayout, (void*)nValue, sizeof(pSettings->m_arrPixelLayout));	//复制数据
+				memcpy(pSettings->m_arrPixelLayout, reinterpret_cast<const void*>(static_cast<INT_PTR>(nValue)), sizeof(pSettings->m_arrPixelLayout));	//复制数据
 				pSettings->m_bUseCustomPixelLayout = true;
 			}
 			UpdatePixelLayout();
 			break;
 		case ATTR_ShadowBuffer:
-			if (nValue && !IsBadReadPtr((void*)nValue, sizeof(pSettings->m_nShadow)))	//指针有效
+			if (nValue && !IsBadReadPtr(reinterpret_cast<const void*>(static_cast<INT_PTR>(nValue)), sizeof(pSettings->m_nShadow)))	//指针有效
 			{
-				LPCTSTR szShadow = (LPCTSTR)nValue;
+				LPCTSTR szShadow = reinterpret_cast<LPCTSTR>(static_cast<INT_PTR>(nValue));
 				CStringTokenizer token;
 
 				if (token.Parse(szShadow) < 3) {
@@ -822,14 +822,14 @@ public:
 			break;
 		default:
 			return FALSE;
-		}	
+		}
 		m_bDirty = true;
 		return true;
 	}
 	BOOL WINAPI SetFloatAttribute(int eSet, float nValue)
 	{
 		CGdippSettings* pSettings = CGdippSettings::GetInstance();
-		switch ((eMTSettings)eSet)
+		switch (static_cast<eMTSettings>(eSet))
 		{
 			case ATTR_GammaValue:
 				pSettings->m_fGammaValue = nValue;
@@ -845,13 +845,13 @@ public:
 				break;
 			default:
 				return FALSE;
-		}	
+		}
 		m_bDirty = true;
 		return true;
 	};
 	int WINAPI GetIntAttribute(int eSet) {
 		CGdippSettings* pSettings = CGdippSettings::GetInstance();
-		switch ((eMTSettings)eSet)
+		switch (static_cast<eMTSettings>(eSet))
 		{
 		case ATTR_HINTINGMODE:
 			return pSettings->m_FontSettings.GetHintingMode();
@@ -909,12 +909,12 @@ public:
 				: 0;
 		default:
 			return 0;
-		}	
+		}
 		return 0;
 	};
 	float WINAPI GetFloatAttribute(int eSet) {
 		CGdippSettings* pSettings = CGdippSettings::GetInstance();
-		switch ((eMTSettings)eSet)
+		switch (static_cast<eMTSettings>(eSet))
 		{
 		case ATTR_GammaValue:
 			return pSettings->m_fGammaValue;
@@ -924,7 +924,7 @@ public:
 			return pSettings->m_fRenderWeight;
 		default:
 			return 0;
-		}	
+		}
 		return 0;
 	};
 	BOOL WINAPI RefreshSetting(void) {
@@ -941,8 +941,8 @@ public:
 		m_bDirty = true;
 		return true;
 	};
-	BOOL WINAPI AddIndividual(WCHAR* fontSetting) 
-	{ 
+	BOOL WINAPI AddIndividual(WCHAR* fontSetting)
+	{
 		CGdippSettings* pSettings = CGdippSettings::GetInstance();
 		IndividualArray& arr = pSettings->m_arrIndividual;
 		LPTSTR p = fontSetting;
@@ -961,7 +961,7 @@ public:
 				*value++ = _T('\0');
 				argc = token.Parse(value);
 			}
-			TCHAR buff[LF_FACESIZE+1];				
+			TCHAR buff[LF_FACESIZE+1];
 			GetFontLocalName(p, buff); //转换字体名
 
 			CFontIndividual fi(buff);
@@ -989,7 +989,7 @@ public:
 		}
 		m_bDirty = true;
 		return true; };
-	BOOL WINAPI DelIndividual(WCHAR* lpFaceName) { 
+	BOOL WINAPI DelIndividual(WCHAR* lpFaceName) {
 		CGdippSettings* pSettings = CGdippSettings::GetInstance();
 		CFontIndividual* p		= pSettings->m_arrIndividual.Begin();
 		CFontIndividual* end	= pSettings->m_arrIndividual.End();
@@ -1015,11 +1015,11 @@ public:
 		RefreshAlphaTable();
 		RefreshSetting();
 	}
-	CControlCenter():m_nRefCount(1), m_bDirty(false), m_msgwnd(NULL) {
+	CControlCenter():m_nRefCount(1), m_bDirty(false), m_msgwnd(nullptr) {
 		g_ControlCenter = this;
 	};
 	~CControlCenter(){
-		g_ControlCenter = NULL;
+		g_ControlCenter = nullptr;
 	};
 	static void WINAPI ReloadConfig()
 	{
@@ -1038,9 +1038,13 @@ public:
 			g_pFTEngine->ReloadAll();
 	}
 	HWND WINAPI CreateMessageWnd() {
-		HANDLE event = CreateEvent(NULL, true, false, NULL);
+		auto event = std::make_shared<renderer_raii::UniqueHandle>(
+			renderer_raii::AdoptHandle(CreateEvent(nullptr, true, false, nullptr)));
+		if (!*event) {
+			return nullptr;
+		}
 
-		auto run = [&]() -> void {
+		auto run = [this, event]() -> void {
 			if (this->m_msgwnd) {
 				SendMessage(this->m_msgwnd, WM_CLOSE, 0, 0);
 			}
@@ -1052,17 +1056,17 @@ public:
 			wndclass.cbClsExtra = 0;
 			wndclass.cbWndExtra = 0;
 			wndclass.hInstance = 0;
-			wndclass.hIcon = LoadIcon(NULL, IDI_APPLICATION);
-			wndclass.hCursor = LoadCursor(NULL, IDC_ARROW);
-			wndclass.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH);
-			wndclass.lpszMenuName = NULL;
+			wndclass.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
+			wndclass.hCursor = LoadCursor(nullptr, IDC_ARROW);
+			wndclass.hbrBackground = static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH));
+			wndclass.lpszMenuName = nullptr;
 			wndclass.lpszClassName = L"MT_CMSGWND";
 			RegisterClass(&wndclass);
-			this->m_msgwnd = CreateWindow(L"MT_CMSGWND", NULL, 0, 0, 0, 0, 0, HWND_MESSAGE, 0, 0, NULL);
-			SetEvent(event);
+			this->m_msgwnd = CreateWindow(L"MT_CMSGWND", nullptr, 0, 0, 0, 0, 0, HWND_MESSAGE, 0, 0, nullptr);
+			SetEvent(event->get());
 
 			MSG msg;
-			while (GetMessage(&msg, NULL, 0, 0)) //消息循环
+			while (GetMessage(&msg, nullptr, 0, 0)) //消息循环
 			{
 				TranslateMessage(&msg);
 				DispatchMessage(&msg);
@@ -1071,8 +1075,7 @@ public:
 		};
 		auto wndThread = thread(run);
 		wndThread.detach();
-		WaitForSingleObject(event, 10000);
-		CloseHandle(event);
+		WaitForSingleObject(event->get(), 10000);
 		return this->m_msgwnd;
 	}
 
@@ -1081,7 +1084,7 @@ public:
 			DWORD pid = 0;
 			GetWindowThreadProcessId(hwnd, &pid);
 			if (pid == lparam) {
-				RedrawWindow(hwnd, NULL, 0, RDW_ALLCHILDREN | RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
+				RedrawWindow(hwnd, nullptr, 0, RDW_ALLCHILDREN | RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
 			}
 			return true;
 		};
@@ -1092,11 +1095,11 @@ public:
 	LRESULT WINAPI MsgProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 		switch (msg) {
 			case WM_COPYDATA: {
-				COPYDATASTRUCT* data = (COPYDATASTRUCT*)lparam;
+				COPYDATASTRUCT* data = reinterpret_cast<COPYDATASTRUCT*>(lparam);
 				if (data->cbData && data->lpData) {	// ignore invalid request.
 					string json;
 					json.resize(data->cbData);
-					memcpy((void*)json.c_str(), data->lpData, data->cbData);
+					memcpy(&json[0], data->lpData, data->cbData);
 					// now parse the json string
 					auto jsonobj = json::parse(json.begin(), json.end());
 					string command = jsonobj["command"].get<std::string>();
@@ -1127,7 +1130,7 @@ public:
 	void WINAPI DestroyMessageWnd() {
 		if (m_msgwnd) {
 			DestroyWindow(m_msgwnd);
-			m_msgwnd = NULL;
+			m_msgwnd = nullptr;
 		}
 	}
 };

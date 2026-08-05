@@ -14,21 +14,21 @@ const DWORD GT_WORLD_TO_PAGE = 0x0203;
 const DWORD GT_PAGE_TO_DEVICE = 0x0304;
 
 typedef int(__stdcall * TGetTextFA)(HDC, int, LPWSTR);
-typedef BOOL (__stdcall *PFNCreateProcessInternalW) 
-( 
- HANDLE hToken, 
- LPCTSTR lpApplicationName,        
- LPTSTR lpCommandLine,        
- LPSECURITY_ATTRIBUTES lpProcessAttributes, 
- LPSECURITY_ATTRIBUTES lpThreadAttributes,        
- BOOL bInheritHandles,        
- DWORD dwCreationFlags, 
- LPVOID lpEnvironment,        
- LPCTSTR lpCurrentDirectory,        
- LPSTARTUPINFO lpStartupInfo,        
- LPPROCESS_INFORMATION lpProcessInformation , 
- PHANDLE hNewToken 
- ); 
+typedef BOOL (__stdcall *PFNCreateProcessInternalW)
+(
+ HANDLE hToken,
+ LPCTSTR lpApplicationName,
+ LPTSTR lpCommandLine,
+ LPSECURITY_ATTRIBUTES lpProcessAttributes,
+ LPSECURITY_ATTRIBUTES lpThreadAttributes,
+ BOOL bInheritHandles,
+ DWORD dwCreationFlags,
+ LPVOID lpEnvironment,
+ LPCTSTR lpCurrentDirectory,
+ LPSTARTUPINFO lpStartupInfo,
+ LPPROCESS_INFORMATION lpProcessInformation ,
+ PHANDLE hNewToken
+ );
 typedef BOOL
 (WINAPI *PFNCreateProcessW)(
 							__in_opt    LPCWSTR lpApplicationName,
@@ -63,13 +63,13 @@ typedef LONG (WINAPI * PFNLdrLoadDll)(
 						 IN PWCHAR               PathToFile OPTIONAL,
 						 IN ULONG                Flags OPTIONAL,
 						 IN UNICODE_STRING2*      ModuleFileName,
-						 OUT HANDLE*             ModuleHandle 
+						 OUT HANDLE*             ModuleHandle
 						 );
 typedef BOOL(WINAPI * PFNSetProcessMitigationPolicy)(
 	_In_ PROCESS_MITIGATION_POLICY MitigationPolicy,
 	_In_ PVOID                     lpBuffer,
 	_In_ SIZE_T                    dwLength);
-static TGetTransform GetTransform = (TGetTransform)GetProcAddress(LoadLibrary(_T("gdi32.dll")), "GetTransform");
+static TGetTransform GetTransform = reinterpret_cast<TGetTransform>(GetProcAddress(LoadLibrary(_T("gdi32.dll")), "GetTransform"));
  /***********************************************************************
   *           GetTransform    (GDI32.@)
 + *
@@ -88,9 +88,9 @@ static TGetTransform GetTransform = (TGetTransform)GetProcAddress(LoadLibrary(_T
 + *
   ************************************************************************/
 
-static TGdiGetCodePage GdiGetCodePage = (TGdiGetCodePage)GetProcAddress(LoadLibrary(_T("gdi32.dll")),"GdiGetCodePage");
-static TGetTextFA GetTextFaceAliasW= (TGetTextFA)GetProcAddress(LoadLibrary(_T("gdi32.dll")),"GetTextFaceAliasW");
-static PFNCreateProcessInternalW CreateProcessInternalW_KernelBase = (PFNCreateProcessInternalW)GetProcAddress(GetModuleHandle(_T("kernelbase.dll")),"CreateProcessInternalW");
-static PFNCreateProcessInternalW CreateProcessInternalW = CreateProcessInternalW_KernelBase ? CreateProcessInternalW_KernelBase:(PFNCreateProcessInternalW)GetProcAddress(GetModuleHandle(_T("kernel32.dll")),"CreateProcessInternalW");
+static TGdiGetCodePage GdiGetCodePage = reinterpret_cast<TGdiGetCodePage>(GetProcAddress(LoadLibrary(_T("gdi32.dll")),"GdiGetCodePage"));
+static TGetTextFA GetTextFaceAliasW= reinterpret_cast<TGetTextFA>(GetProcAddress(LoadLibrary(_T("gdi32.dll")),"GetTextFaceAliasW"));
+static PFNCreateProcessInternalW CreateProcessInternalW_KernelBase = reinterpret_cast<PFNCreateProcessInternalW>(GetProcAddress(GetModuleHandle(_T("kernelbase.dll")),"CreateProcessInternalW"));
+static PFNCreateProcessInternalW CreateProcessInternalW = CreateProcessInternalW_KernelBase ? CreateProcessInternalW_KernelBase : reinterpret_cast<PFNCreateProcessInternalW>(GetProcAddress(GetModuleHandle(_T("kernel32.dll")),"CreateProcessInternalW"));
 //static PFNIsWow64Process IsWow64Process=(PFNIsWow64Process)GetProcAddress(LoadLibrary(L"Kernel32.dll"), "IsWow64Process");
-static PFNGetFontResourceInfo GetFontResourceInfo=(PFNGetFontResourceInfo)GetProcAddress(LoadLibrary(L"gdi32.dll"), "GetFontResourceInfoW");
+static PFNGetFontResourceInfo GetFontResourceInfo = reinterpret_cast<PFNGetFontResourceInfo>(GetProcAddress(LoadLibrary(L"gdi32.dll"), "GetFontResourceInfoW"));

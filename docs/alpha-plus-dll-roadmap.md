@@ -220,6 +220,16 @@ matches the independently rendered replacement result. Current installed
 Chrome and Edge may be added as non-pinned compatibility lanes, but they cannot
 replace the pinned reproducible browsers.
 
+Chromium 149 enables `FontDataServiceAllWebContents` by default. That isolated
+browser-side path validates the embedded family name after MacType resolves a
+replacement and therefore rejects a replacement file whose family differs
+from the requested family. The pinned Chromium substitution proof explicitly
+uses Chromium's renderer-side DirectWrite compatibility path by disabling that
+feature; the selected mode is recorded in the retained JSON. Stock Chromium
+controls continue to run with the default feature set, and this compatibility
+mode does not relax the substitution criterion: the active source pixels must
+still exactly match the independently rendered replacement pixels.
+
 The native probe covers GDI and DirectWrite with injection before factory
 creation, injection after factory creation, multiple factories, worker-thread
 creation, child renderer processes, profile reload, missing profile, damaged

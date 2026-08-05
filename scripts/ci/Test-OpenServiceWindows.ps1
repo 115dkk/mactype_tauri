@@ -454,14 +454,28 @@ try {
             # The service serializes process-creation events and each fixed helper
             # has a 20-second absolute deadline. A browser process tree therefore
             # needs a larger observation window than a single helper invocation.
-            & node $BrowserProbeScript `
-                --engine $engine `
-                --output $resultPath `
-                --injection-health (Join-Path $machineRoot 'health.json') `
-                --source $sourceFamily `
-                --replacement 'Courier New' `
-                --expect 'substituted' `
-                --timeout-ms 60000
+            $browserProbeArguments = @(
+                $BrowserProbeScript,
+                '--engine', $engine,
+                '--output', $resultPath,
+                '--injection-health', (Join-Path $machineRoot 'health.json'),
+                '--source', $sourceFamily,
+                '--replacement', 'Courier New',
+                '--expect', 'substituted',
+                '--timeout-ms', '60000'
+            )
+            if ($engine -eq 'chromium') {
+                # Chromium 149 routes sandboxed web contents through the
+                # browser-side FontDataService and rejects a substituted font
+                # file when its embedded family differs from the requested
+                # family. Exercise Chromium's supported renderer-side
+                # DirectWrite path so the injected core owns both resolution
+                # and rasterization. The selected mode is retained in JSON.
+                $browserProbeArguments += @(
+                    '--chromium-font-data-service', 'disabled'
+                )
+            }
+            & node @browserProbeArguments
             if ($LASTEXITCODE -ne 0) {
                 throw "$engine did not render the configured $sourceFamily to Courier New substitution under the open service."
             }

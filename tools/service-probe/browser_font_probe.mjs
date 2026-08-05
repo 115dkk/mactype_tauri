@@ -20,6 +20,7 @@ function parseArguments(argv) {
     source: '',
     replacement: '',
     expect: 'substituted',
+    chromiumFontDataService: 'enabled',
     timeoutMs: 15000,
   };
   for (let index = 0; index < argv.length; index += 2) {
@@ -33,6 +34,9 @@ function parseArguments(argv) {
     else if (key === '--source') result.source = value;
     else if (key === '--replacement') result.replacement = value;
     else if (key === '--expect') result.expect = value;
+    else if (key === '--chromium-font-data-service') {
+      result.chromiumFontDataService = value;
+    }
     else if (key === '--timeout-ms') result.timeoutMs = Number(value);
     else throw new Error(`Unknown argument: ${key}`);
   }
@@ -44,6 +48,14 @@ function parseArguments(argv) {
   }
   if (!['stock', 'substituted'].includes(result.expect)) {
     throw new Error(`Unsupported expectation: ${result.expect}`);
+  }
+  if (!['enabled', 'disabled'].includes(result.chromiumFontDataService)) {
+    throw new Error(
+      `Unsupported Chromium FontDataService mode: ${result.chromiumFontDataService}`,
+    );
+  }
+  if (result.engine !== 'chromium' && result.chromiumFontDataService !== 'enabled') {
+    throw new Error('--chromium-font-data-service is only valid for Chromium');
   }
   if (!Number.isInteger(result.timeoutMs) || result.timeoutMs < 0 || result.timeoutMs > 60000) {
     throw new Error(`Invalid timeout: ${result.timeoutMs}`);
@@ -187,10 +199,15 @@ async function capture(browserType, options, disabled, waitForReplacement) {
   if (disabled) environment.MACTYPE_FONTSUBSTITUTES_ENV = '1';
   else delete environment.MACTYPE_FONTSUBSTITUTES_ENV;
 
+  const browserArguments = options.engine === 'chromium' &&
+      options.chromiumFontDataService === 'disabled'
+    ? ['--disable-features=FontDataServiceAllWebContents']
+    : [];
   const browserServer = await browserType.launchServer({
     executablePath: options.executable || undefined,
     headless: true,
     env: environment,
+    args: browserArguments,
   });
   try {
     const browserPid = browserServer.process().pid;
@@ -338,6 +355,9 @@ const result = {
   schemaVersion: 1,
   engine: options.engine,
   executable: options.executable || null,
+  chromiumFontDataService: options.engine === 'chromium'
+    ? options.chromiumFontDataService
+    : null,
   sourceFamily: options.source,
   replacementFamily: options.replacement,
   expectedState: options.expect,

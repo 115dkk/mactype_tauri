@@ -100,6 +100,10 @@ async function waitForInjectionQuiescence(healthPath, initialCount, timeoutMs) {
 
 async function capture(browserType, options, disabled, waitForReplacement) {
   const environment = { ...process.env };
+  // GitHub's Windows runner launches its test tree with a service token. The
+  // existing explicit force-load contract makes the injected DLL initialize
+  // its user-mode DirectWrite hooks without changing injector target policy.
+  environment.MACTYPE_FORCE_LOAD = '1';
   if (disabled) environment.MACTYPE_FONTSUBSTITUTES_ENV = '1';
   else delete environment.MACTYPE_FONTSUBSTITUTES_ENV;
 

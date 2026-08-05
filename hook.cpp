@@ -303,6 +303,11 @@ TIsImmersiveProcess IsUWP = reinterpret_cast<TIsImmersiveProcess>(GetProcAddress
 
 BOOL WINAPI IsRunAsUser(VOID)
 {
+	SetLastError(ERROR_SUCCESS);
+	DWORD const forceLoadLength =
+		GetEnvironmentVariableW(L"MACTYPE_FORCE_LOAD", nullptr, 0);
+	if (forceLoadLength != 0 || GetLastError() != ERROR_ENVVAR_NOT_FOUND)
+		return true;
 	if (IsUWP && IsUWP(GetCurrentProcess())) return true;	// treat all UWP apps as user exe
 	renderer_raii::UniqueHandle processToken;
 	DWORD groupLength = 50;

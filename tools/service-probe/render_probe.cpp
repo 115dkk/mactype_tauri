@@ -74,34 +74,40 @@ class ScopedFontTable final {
   void* context_;
 };
 
-bool FontNameTableContainsFamily(IDWriteFontFace* face,
-                                 const std::wstring_view family) {
-  if (face == nullptr || family.empty()) {
+bool FontTablesEqual(IDWriteFontFace* expected, IDWriteFontFace* actual,
+                     const UINT32 table_tag) {
+  if (expected == nullptr || actual == nullptr) {
     return false;
   }
-  const void* table_data = nullptr;
-  UINT32 table_size = 0;
-  void* table_context = nullptr;
-  BOOL exists = FALSE;
-  const HRESULT result = face->TryGetFontTable(
-      DWRITE_MAKE_OPENTYPE_TAG('n', 'a', 'm', 'e'), &table_data, &table_size,
-      &table_context, &exists);
-  if (FAILED(result) || exists == FALSE || table_data == nullptr) {
+  const void* expected_data = nullptr;
+  UINT32 expected_size = 0;
+  void* expected_context = nullptr;
+  BOOL expected_exists = FALSE;
+  const HRESULT expected_result = expected->TryGetFontTable(
+      table_tag, &expected_data, &expected_size, &expected_context,
+      &expected_exists);
+  if (FAILED(expected_result) || expected_exists == FALSE ||
+      expected_data == nullptr) {
     return false;
   }
-  ScopedFontTable table(face, table_context);
-  std::vector<std::byte> encoded_family;
-  encoded_family.reserve(family.size() * 2U);
-  for (const wchar_t character : family) {
-    encoded_family.push_back(
-        static_cast<std::byte>((static_cast<unsigned int>(character) >> 8U) &
-                               0xffU));
-    encoded_family.push_back(
-        static_cast<std::byte>(static_cast<unsigned int>(character) & 0xffU));
+  ScopedFontTable expected_table(expected, expected_context);
+
+  const void* actual_data = nullptr;
+  UINT32 actual_size = 0;
+  void* actual_context = nullptr;
+  BOOL actual_exists = FALSE;
+  const HRESULT actual_result = actual->TryGetFontTable(
+      table_tag, &actual_data, &actual_size, &actual_context, &actual_exists);
+  if (FAILED(actual_result) || actual_exists == FALSE ||
+      actual_data == nullptr) {
+    return false;
   }
-  const auto* first = static_cast<const std::byte*>(table_data);
-  return std::search(first, first + table_size, encoded_family.begin(),
-                     encoded_family.end()) != first + table_size;
+  ScopedFontTable actual_table(actual, actual_context);
+  const auto* expected_bytes = static_cast<const std::byte*>(expected_data);
+  const auto* actual_bytes = static_cast<const std::byte*>(actual_data);
+  return expected_size == actual_size &&
+         std::equal(expected_bytes, expected_bytes + expected_size,
+                    actual_bytes);
 }
 
 class FontSubstitutionSwitch final {
@@ -452,6 +458,87 @@ std::wstring ResolveDirectWriteFontDescriptor(
     return {};
   }
   return resolved.lfFaceName;
+}
+
+std::wstring ResolveFontSetDirectWriteFamily(
+    const std::wstring_view family, void* directwrite_factory,
+    std::wstring& error) {
+  IDWriteFactory* factory = static_cast<IDWriteFactory*>(directwrite_factory);
+  IDWriteFactory* raw_factory = nullptr;
+  UniqueCom<IDWriteFactory> owned_factory;
+  if (factory == nullptr) {
+    const HRESULT factory_result = DWriteCreateFactory(
+        DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+        reinterpret_cast<IUnknown**>(&raw_factory));
+    owned_factory.reset(raw_factory);
+    if (FAILED(factory_result) || owned_factory == nullptr) {
+      error = L"DWriteCreateFactory failed for font-set lookup";
+      return {};
+    }
+    factory = owned_factory.get();
+  }
+  IDWriteFactory3* raw_factory3 = nullptr;
+  const HRESULT factory3_result = factory->QueryInterface(&raw_factory3);
+  UniqueCom<IDWriteFactory3> factory3(raw_factory3);
+  if (FAILED(factory3_result) || factory3 == nullptr) {
+    error = L"IDWriteFactory3 is unavailable for font-set lookup";
+    return {};
+  }
+  IDWriteFontCollection* raw_system_collection = nullptr;
+  const HRESULT system_result =
+      factory->GetSystemFontCollection(&raw_system_collection);
+  UniqueCom<IDWriteFontCollection> system_collection(raw_system_collection);
+  IDWriteFontCollection1* raw_collection1 = nullptr;
+  const HRESULT collection1_result = system_collection == nullptr
+      ? E_FAIL
+      : system_collection->QueryInterface(&raw_collection1);
+  UniqueCom<IDWriteFontCollection1> collection1(raw_collection1);
+  if (FAILED(system_result) || FAILED(collection1_result) ||
+      collection1 == nullptr) {
+    error = L"IDWriteFontCollection1 is unavailable for font-set lookup";
+    return {};
+  }
+  IDWriteFontSet* raw_font_set = nullptr;
+  const HRESULT font_set_result = collection1->GetFontSet(&raw_font_set);
+  UniqueCom<IDWriteFontSet> font_set(raw_font_set);
+  if (FAILED(font_set_result) || font_set == nullptr) {
+    error = L"GetFontSet failed for font-set lookup";
+    return {};
+  }
+  IDWriteFontCollection1* raw_font_set_collection = nullptr;
+  const HRESULT create_result = factory3->CreateFontCollectionFromFontSet(
+      font_set.get(), &raw_font_set_collection);
+  UniqueCom<IDWriteFontCollection1> font_set_collection(
+      raw_font_set_collection);
+  if (FAILED(create_result) || font_set_collection == nullptr) {
+    error = L"CreateFontCollectionFromFontSet failed";
+    return {};
+  }
+  UINT32 family_index = 0;
+  BOOL family_exists = FALSE;
+  const std::wstring family_name(family);
+  if (FAILED(font_set_collection->FindFamilyName(
+          family_name.c_str(), &family_index, &family_exists)) ||
+      family_exists == FALSE) {
+    error = L"FindFamilyName failed for font-set collection";
+    return {};
+  }
+  IDWriteFontFamily* raw_font_family = nullptr;
+  const HRESULT family_result = font_set_collection->GetFontFamily(
+      family_index, &raw_font_family);
+  UniqueCom<IDWriteFontFamily> font_family(raw_font_family);
+  if (FAILED(family_result) || font_family == nullptr) {
+    error = L"GetFontFamily failed for font-set collection";
+    return {};
+  }
+  IDWriteFont* raw_font = nullptr;
+  const HRESULT font_result = font_family->GetFont(0, &raw_font);
+  UniqueCom<IDWriteFont> font(raw_font);
+  if (FAILED(font_result) || font == nullptr) {
+    error = L"GetFont failed for font-set collection";
+    return {};
+  }
+  return ResolveDirectWriteFontObject(font.get(), factory, error);
 }
 
 std::wstring ResolveIndexedDirectWriteFamily(
@@ -838,8 +925,9 @@ FontSubstitutionObservation ObserveFontSubstitution(
       !indexed.active_retained_source_postscript_name.empty() &&
       _wcsicmp(indexed.active_retained_source_postscript_name.c_str(),
                indexed.active_source_postscript_name.c_str()) == 0;
-  indexed.retained_name_table_stable = FontNameTableContainsFamily(
-      retained_active_source_face.get(), source_family);
+  indexed.retained_name_table_stable = FontTablesEqual(
+      pinned_disabled_source_face.get(), retained_active_source_face.get(),
+      DWRITE_MAKE_OPENTYPE_TAG('n', 'a', 'm', 'e'));
   indexed.replacement_observed =
       indexed.controls_stable &&
       _wcsicmp(indexed.active_source_family.c_str(),
@@ -847,10 +935,46 @@ FontSubstitutionObservation ObserveFontSubstitution(
       indexed.retained_object_replacement_observed &&
       indexed.retained_descriptor_replacement_observed &&
       indexed.retained_metadata_stable && indexed.retained_name_table_stable;
+  DirectWriteSubstitutionObservation& font_set =
+      result.direct_write_font_set_collection;
+  std::wstring repeated_disabled_font_set_source;
+  std::wstring repeated_disabled_font_set_replacement;
+  {
+    FontSubstitutionSwitch disabled;
+    font_set.disabled_source_family = ResolveFontSetDirectWriteFamily(
+        source_family, directwrite_factory, error);
+    font_set.disabled_replacement_family = ResolveFontSetDirectWriteFamily(
+        replacement_family, directwrite_factory, error);
+    repeated_disabled_font_set_source = ResolveFontSetDirectWriteFamily(
+        source_family, directwrite_factory, error);
+    repeated_disabled_font_set_replacement = ResolveFontSetDirectWriteFamily(
+        replacement_family, directwrite_factory, error);
+  }
+  font_set.active_source_family = ResolveFontSetDirectWriteFamily(
+      source_family, directwrite_factory, error);
+  const std::wstring repeated_active_font_set_source =
+      ResolveFontSetDirectWriteFamily(
+          source_family, directwrite_factory, error);
+  font_set.controls_stable =
+      !font_set.disabled_source_family.empty() &&
+      !font_set.disabled_replacement_family.empty() &&
+      _wcsicmp(font_set.disabled_source_family.c_str(),
+               repeated_disabled_font_set_source.c_str()) == 0 &&
+      _wcsicmp(font_set.disabled_replacement_family.c_str(),
+               repeated_disabled_font_set_replacement.c_str()) == 0 &&
+      _wcsicmp(font_set.active_source_family.c_str(),
+               repeated_active_font_set_source.c_str()) == 0;
+  font_set.replacement_observed =
+      font_set.controls_stable &&
+      _wcsicmp(font_set.disabled_source_family.c_str(),
+               font_set.disabled_replacement_family.c_str()) != 0 &&
+      _wcsicmp(font_set.active_source_family.c_str(),
+               font_set.disabled_replacement_family.c_str()) == 0;
   result.direct_write_custom_collection = observe_direct_write(true);
   if (result.direct_write.active_source_family.empty() ||
       indexed.active_source_family.empty() ||
       indexed.active_pinned_source_descriptor_family.empty() ||
+      font_set.active_source_family.empty() ||
       result.direct_write_custom_collection.active_source_family.empty()) {
     result.active_source_fingerprint.clear();
   }

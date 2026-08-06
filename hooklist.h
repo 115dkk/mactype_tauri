@@ -246,6 +246,18 @@ HOOK_MANUALLY(HRESULT, FontFamily_GetFont, (
 			  __out IDWriteFont** font
 			  ), (self, index, font))
 
+HOOK_MANUALLY(HRESULT, CustomFontFamily_GetFont, (
+			  IDWriteFontFamily* self,
+			  UINT32 index,
+			  __out IDWriteFont** font
+			  ), (self, index, font))
+
+HOOK_MANUALLY(HRESULT, FontSetFontFamily_GetFont, (
+			  IDWriteFontFamily* self,
+			  UINT32 index,
+			  __out IDWriteFont** font
+			  ), (self, index, font))
+
 HOOK_MANUALLY(HRESULT, Font_GetInformationalStrings, (
 			  IDWriteFont* self,
 			  DWRITE_INFORMATIONAL_STRING_ID informationalStringID,

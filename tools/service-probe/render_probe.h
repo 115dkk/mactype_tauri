@@ -31,6 +31,7 @@ struct FontSubstitutionObservation final {
   bool replacement_observed = false;
   DirectWriteSubstitutionObservation direct_write;
   DirectWriteSubstitutionObservation direct_write_indexed_collection;
+  DirectWriteSubstitutionObservation direct_write_font_set_collection;
   DirectWriteSubstitutionObservation direct_write_custom_collection;
 };
 

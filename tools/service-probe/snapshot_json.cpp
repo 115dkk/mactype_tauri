@@ -200,6 +200,31 @@ std::string BuildSnapshotJson(const ProbeOptions& options,
                : "false")
        << "\n"
        << "    },\n"
+       << "    \"directWriteFontSetCollection\": {\n"
+       << "      \"disabledSourceFamily\": \""
+       << EscapeJson(font_substitution.direct_write_font_set_collection
+                         .disabled_source_family)
+       << "\",\n"
+       << "      \"activeSourceFamily\": \""
+       << EscapeJson(font_substitution.direct_write_font_set_collection
+                         .active_source_family)
+       << "\",\n"
+       << "      \"disabledReplacementFamily\": \""
+       << EscapeJson(font_substitution.direct_write_font_set_collection
+                         .disabled_replacement_family)
+       << "\",\n"
+       << "      \"controlsStable\": "
+       << (font_substitution.direct_write_font_set_collection.controls_stable
+               ? "true"
+               : "false")
+       << ",\n"
+       << "      \"replacementObserved\": "
+       << (font_substitution.direct_write_font_set_collection
+                   .replacement_observed
+               ? "true"
+               : "false")
+       << "\n"
+       << "    },\n"
        << "    \"directWriteCustomCollection\": {\n"
        << "      \"disabledSourceFamily\": \""
        << EscapeJson(font_substitution.direct_write_custom_collection

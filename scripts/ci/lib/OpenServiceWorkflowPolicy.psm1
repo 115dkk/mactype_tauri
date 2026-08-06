@@ -34,7 +34,11 @@ function Test-OpenServiceWorkflowPolicy {
     $null = Test-RequiredTokens -Failures $failures -Path $markerVerifierPath `
         -MissingMessage 'scripts/ci/Test-OpenServiceMarkersWindows.ps1 is missing.' `
         -TokenMessage "hosted marker verification is missing generation-binding token '{0}'." `
-        -Tokens @('ExpectedRuntimeRoot', 'resolvedModuleRoot', 'OrdinalIgnoreCase', 'pid = [uint32]', 'sessionId = [uint32]')
+        -Tokens @(
+            'ExpectedRuntimeRoot', 'resolvedModuleRoot', 'OrdinalIgnoreCase',
+            'pid = [uint32]', 'sessionId = [uint32]',
+            'directWriteFontSetCollection.replacementObserved'
+        )
 
     $buildWorkflowPath = Join-Path $Root '.github\workflows\build.yml'
     $null = Test-RequiredTokens -Failures $failures -Path $buildWorkflowPath `

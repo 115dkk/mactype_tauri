@@ -273,7 +273,10 @@ comes from the source face, while CMAP, glyphs, metrics, file descriptors, and
 face indexes come from the replacement. The opaque font-table context owns the
 face that created it until `ReleaseFontTable`, so cleanup cannot cross the
 source/replacement boundary. Native DirectWrite pointers are exposed only when
-an API requires them. Firefox can
+an API requires them. Modern collections created from `IDWriteFontSet` have a
+distinct font-family implementation, so their `GetFont` path receives the same
+source-identity proxy instead of relying on the legacy system-family vtable.
+Firefox can
 also retain a source `IDWriteFont` and later convert it to `LOGFONT` while
 reading font tables, so the GDI interop conversion hook applies the same
 replacement to retained font objects. The marker contract retains substituted

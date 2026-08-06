@@ -63,12 +63,15 @@ static void *g_sharedFactoryCreateCustomCollectionVtableOriginal = nullptr;
 static void **g_isolatedFactoryCreateCustomCollectionVtableSlot = nullptr;
 static void *g_isolatedFactoryCreateCustomCollectionVtableOriginal = nullptr;
 static void *g_systemFontCreateFontFace = nullptr;
+static void *g_systemFontFamilyGetFont = nullptr;
 static void *g_systemFontFaceReferenceCreateFontFace = nullptr;
 static void *g_systemFontFaceReferenceCreateFontFaceWithSimulations = nullptr;
 static void* g_customFontCreateFontFace = nullptr;
+static void* g_customFontFamilyGetFont = nullptr;
 static void* g_customFontFaceReferenceCreateFontFace = nullptr;
 static void* g_customFontFaceReferenceCreateFontFaceWithSimulations = nullptr;
 static void* g_fontSetFontCreateFontFace = nullptr;
+static void* g_fontSetFontFamilyGetFont = nullptr;
 static void* g_fontSetFontFaceReferenceCreateFontFace = nullptr;
 static void* g_fontSetFontFaceReferenceCreateFontFaceWithSimulations = nullptr;
 static void SignalDirectWriteDiagnostic(WCHAR const *stage);
@@ -1996,6 +1999,8 @@ bool hookFontCreation(CComPtr<IDWriteFactory>& pDWriteFactory) {
 	}
 	if (FAILED(fontcollection->GetFontFamily(0, &ffamily))) FAILEXIT;
 	if (FAILED(ffamily->GetFont(0, &dfont))) FAILEXIT;
+	g_systemFontFamilyGetFont =
+		(*reinterpret_cast<void***>(ffamily.p))[5];
 	HOOK(ffamily, FontFamily_GetFont, 5);
 	HOOK(dfont, Font_GetInformationalStrings, 9);
 
@@ -2562,15 +2567,16 @@ UINT32 WINAPI IMPL_FontFace_GetIndex(IDWriteFontFace* self)
 	return ORIG_FontFace_GetIndex(replacementFace);
 }
 
-HRESULT WINAPI IMPL_FontFamily_GetFont(
-	IDWriteFontFamily* self, UINT32 index, IDWriteFont** font)
+static HRESULT SubstituteFontFamilyGetFont(
+	IDWriteFontFamily* self, UINT32 index, IDWriteFont** font,
+	decltype(ORIG_FontFamily_GetFont) originalGetFont)
 {
 	if (font == nullptr)
 		return E_POINTER;
 	*font = nullptr;
 	ClearPendingDWriteFontMetadata();
 	CComPtr<IDWriteFont> originalFont;
-	HRESULT const result = ORIG_FontFamily_GetFont(
+	HRESULT const result = originalGetFont(
 		self, index, &originalFont);
 	if (FAILED(result) || originalFont == nullptr)
 		return result;
@@ -2645,6 +2651,27 @@ HRESULT WINAPI IMPL_FontFamily_GetFont(
 	SignalDirectWriteDiagnostic(L"family-font-resolved");
 	SignalDirectWriteFamilyDiagnostic(L"family-font-resolved", originalFamily);
 	return result;
+}
+
+HRESULT WINAPI IMPL_FontFamily_GetFont(
+	IDWriteFontFamily* self, UINT32 index, IDWriteFont** font)
+{
+	return SubstituteFontFamilyGetFont(
+		self, index, font, ORIG_FontFamily_GetFont);
+}
+
+HRESULT WINAPI IMPL_CustomFontFamily_GetFont(
+	IDWriteFontFamily* self, UINT32 index, IDWriteFont** font)
+{
+	return SubstituteFontFamilyGetFont(
+		self, index, font, ORIG_CustomFontFamily_GetFont);
+}
+
+HRESULT WINAPI IMPL_FontSetFontFamily_GetFont(
+	IDWriteFontFamily* self, UINT32 index, IDWriteFont** font)
+{
+	return SubstituteFontFamilyGetFont(
+		self, index, font, ORIG_FontSetFontFamily_GetFont);
 }
 
 HRESULT WINAPI IMPL_GdiInterop_ConvertFontToLOGFONT(
@@ -2855,6 +2882,20 @@ static void HookCollectionFontCreation(
 	CComPtr<IDWriteFont> font;
 	if (FAILED(family->GetFont(0, &font)) || font == nullptr)
 		return;
+	void* const getFont = (*reinterpret_cast<void***>(family.p))[5];
+	if (kind == CollectionFontHookKind::custom) {
+		if (!ISHOOKED(CustomFontFamily_GetFont) &&
+			getFont != g_systemFontFamilyGetFont &&
+			getFont != g_fontSetFontFamilyGetFont) {
+			g_customFontFamilyGetFont = getFont;
+			HOOK(family, CustomFontFamily_GetFont, 5);
+		}
+	} else if (!ISHOOKED(FontSetFontFamily_GetFont) &&
+		getFont != g_systemFontFamilyGetFont &&
+		getFont != g_customFontFamilyGetFont) {
+		g_fontSetFontFamilyGetFont = getFont;
+		HOOK(family, FontSetFontFamily_GetFont, 5);
+	}
 	CComPtr<IDWriteFont3> font3;
 	if (FAILED(font->QueryInterface(&font3)) || font3 == nullptr)
 		return;

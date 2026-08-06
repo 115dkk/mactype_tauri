@@ -268,7 +268,12 @@ falling through to an unrelated serif face. Each result is a reference-counted
 `IDWriteFont` proxy that owns both source metadata and the native replacement;
 different source families that resolve to the same interned DirectWrite font
 therefore retain distinct identities across threads and later reuse. Native
-DirectWrite pointers are exposed only when an API requires them. Firefox can
+font faces are likewise reference-counted proxies: the OpenType `name` table
+comes from the source face, while CMAP, glyphs, metrics, file descriptors, and
+face indexes come from the replacement. The opaque font-table context owns the
+face that created it until `ReleaseFontTable`, so cleanup cannot cross the
+source/replacement boundary. Native DirectWrite pointers are exposed only when
+an API requires them. Firefox can
 also retain a source `IDWriteFont` and later convert it to `LOGFONT` while
 reading font tables, so the GDI interop conversion hook applies the same
 replacement to retained font objects. The marker contract retains substituted

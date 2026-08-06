@@ -208,6 +208,190 @@ private:
 	std::wstring family_;
 };
 
+class AliasedDWriteFontFace final : public IDWriteFontFace {
+public:
+	AliasedDWriteFontFace(
+		IDWriteFontFace* replacement, IDWriteFontFace* source) noexcept
+		: replacement_(replacement), source_(source)
+	{
+	}
+
+	HRESULT STDMETHODCALLTYPE QueryInterface(
+		REFIID iid, void** object) override
+	{
+		if (object == nullptr)
+			return E_POINTER;
+		*object = nullptr;
+		if (iid != __uuidof(IUnknown) && iid != __uuidof(IDWriteFontFace))
+			return E_NOINTERFACE;
+		*object = static_cast<IDWriteFontFace*>(this);
+		AddRef();
+		return S_OK;
+	}
+
+	ULONG STDMETHODCALLTYPE AddRef() override
+	{
+		return ++referenceCount_;
+	}
+
+	ULONG STDMETHODCALLTYPE Release() override
+	{
+		ULONG const remaining = --referenceCount_;
+		if (remaining == 0)
+			delete this;
+		return remaining;
+	}
+
+	DWRITE_FONT_FACE_TYPE STDMETHODCALLTYPE GetType() override
+	{
+		return replacement_->GetType();
+	}
+
+	HRESULT STDMETHODCALLTYPE GetFiles(
+		UINT32* numberOfFiles, IDWriteFontFile** fontFiles) override
+	{
+		return replacement_->GetFiles(numberOfFiles, fontFiles);
+	}
+
+	UINT32 STDMETHODCALLTYPE GetIndex() override
+	{
+		return replacement_->GetIndex();
+	}
+
+	DWRITE_FONT_SIMULATIONS STDMETHODCALLTYPE GetSimulations() override
+	{
+		return replacement_->GetSimulations();
+	}
+
+	BOOL STDMETHODCALLTYPE IsSymbolFont() override
+	{
+		return replacement_->IsSymbolFont();
+	}
+
+	void STDMETHODCALLTYPE GetMetrics(
+		DWRITE_FONT_METRICS* fontFaceMetrics) override
+	{
+		replacement_->GetMetrics(fontFaceMetrics);
+	}
+
+	UINT16 STDMETHODCALLTYPE GetGlyphCount() override
+	{
+		return replacement_->GetGlyphCount();
+	}
+
+	HRESULT STDMETHODCALLTYPE GetDesignGlyphMetrics(
+		UINT16 const* glyphIndices, UINT32 glyphCount,
+		DWRITE_GLYPH_METRICS* glyphMetrics, BOOL isSideways) override
+	{
+		return replacement_->GetDesignGlyphMetrics(
+			glyphIndices, glyphCount, glyphMetrics, isSideways);
+	}
+
+	HRESULT STDMETHODCALLTYPE GetGlyphIndices(
+		UINT32 const* codePoints, UINT32 codePointCount,
+		UINT16* glyphIndices) override
+	{
+		return replacement_->GetGlyphIndices(
+			codePoints, codePointCount, glyphIndices);
+	}
+
+	HRESULT STDMETHODCALLTYPE TryGetFontTable(
+		UINT32 openTypeTableTag, void const** tableData, UINT32* tableSize,
+		void** tableContext, BOOL* exists) override
+	{
+		if (tableContext == nullptr)
+			return E_POINTER;
+		*tableContext = nullptr;
+		IDWriteFontFace* const owner =
+			openTypeTableTag == DWRITE_MAKE_OPENTYPE_TAG('n', 'a', 'm', 'e')
+				? source_.p
+				: replacement_.p;
+		void* nativeContext = nullptr;
+		HRESULT const result = owner->TryGetFontTable(
+			openTypeTableTag, tableData, tableSize, &nativeContext, exists);
+		if (FAILED(result) || exists == nullptr || !*exists ||
+			nativeContext == nullptr)
+			return result;
+
+		std::unique_ptr<FontTableContext> context(
+			new (std::nothrow) FontTableContext(owner, nativeContext));
+		if (!context)
+		{
+			owner->ReleaseFontTable(nativeContext);
+			if (tableData != nullptr)
+				*tableData = nullptr;
+			if (tableSize != nullptr)
+				*tableSize = 0;
+			if (exists != nullptr)
+				*exists = FALSE;
+			return E_OUTOFMEMORY;
+		}
+		*tableContext = context.release();
+		return result;
+	}
+
+	void STDMETHODCALLTYPE ReleaseFontTable(void* tableContext) override
+	{
+		std::unique_ptr<FontTableContext> context(
+			static_cast<FontTableContext*>(tableContext));
+		if (context && context->nativeContext != nullptr)
+			context->owner->ReleaseFontTable(context->nativeContext);
+	}
+
+	HRESULT STDMETHODCALLTYPE GetGlyphRunOutline(
+		FLOAT emSize, UINT16 const* glyphIndices,
+		FLOAT const* glyphAdvances, DWRITE_GLYPH_OFFSET const* glyphOffsets,
+		UINT32 glyphCount, BOOL isSideways, BOOL isRightToLeft,
+		IDWriteGeometrySink* geometrySink) override
+	{
+		return replacement_->GetGlyphRunOutline(
+			emSize, glyphIndices, glyphAdvances, glyphOffsets, glyphCount,
+			isSideways, isRightToLeft, geometrySink);
+	}
+
+	HRESULT STDMETHODCALLTYPE GetRecommendedRenderingMode(
+		FLOAT emSize, FLOAT pixelsPerDip, DWRITE_MEASURING_MODE measuringMode,
+		IDWriteRenderingParams* renderingParams,
+		DWRITE_RENDERING_MODE* renderingMode) override
+	{
+		return replacement_->GetRecommendedRenderingMode(
+			emSize, pixelsPerDip, measuringMode, renderingParams, renderingMode);
+	}
+
+	HRESULT STDMETHODCALLTYPE GetGdiCompatibleMetrics(
+		FLOAT emSize, FLOAT pixelsPerDip, DWRITE_MATRIX const* transform,
+		DWRITE_FONT_METRICS* fontFaceMetrics) override
+	{
+		return replacement_->GetGdiCompatibleMetrics(
+			emSize, pixelsPerDip, transform, fontFaceMetrics);
+	}
+
+	HRESULT STDMETHODCALLTYPE GetGdiCompatibleGlyphMetrics(
+		FLOAT emSize, FLOAT pixelsPerDip, DWRITE_MATRIX const* transform,
+		BOOL useGdiNatural, UINT16 const* glyphIndices, UINT32 glyphCount,
+		DWRITE_GLYPH_METRICS* glyphMetrics, BOOL isSideways) override
+	{
+		return replacement_->GetGdiCompatibleGlyphMetrics(
+			emSize, pixelsPerDip, transform, useGdiNatural, glyphIndices,
+			glyphCount, glyphMetrics, isSideways);
+	}
+
+private:
+	struct FontTableContext final {
+		FontTableContext(IDWriteFontFace* tableOwner, void* context) noexcept
+			: owner(tableOwner), nativeContext(context)
+		{
+		}
+
+		CComPtr<IDWriteFontFace> owner;
+		void* nativeContext;
+	};
+
+	std::atomic<ULONG> referenceCount_{1};
+	CComPtr<IDWriteFontFace> replacement_;
+	CComPtr<IDWriteFontFace> source_;
+};
+
 static std::wstring TakePendingDWriteFamilyAlias()
 {
 	std::wstring alias = std::move(g_pendingDWriteFamilyAlias);
@@ -380,14 +564,26 @@ public:
 	HRESULT STDMETHODCALLTYPE CreateFontFace(
 		IDWriteFontFace** fontFace) override
 	{
-		HRESULT const result = replacement_->CreateFontFace(fontFace);
-		if (SUCCEEDED(result) && fontFace != nullptr && *fontFace != nullptr)
-		{
-			CComPtr<IDWriteFontFace3> fontFace3;
-			if (SUCCEEDED((*fontFace)->QueryInterface(&fontFace3)))
-				HookFontFaceFamilyNames(fontFace3, family_);
-		}
-		return result;
+		if (fontFace == nullptr)
+			return E_POINTER;
+		*fontFace = nullptr;
+		CComPtr<IDWriteFontFace> replacementFace;
+		HRESULT const replacementResult =
+			ORIG_CreateFontFace(replacement_, &replacementFace);
+		if (FAILED(replacementResult) || replacementFace == nullptr)
+			return replacementResult;
+		CComPtr<IDWriteFontFace> sourceFace;
+		HRESULT const sourceResult = ORIG_CreateFontFace(source_, &sourceFace);
+		if (FAILED(sourceResult) || sourceFace == nullptr)
+			return sourceResult;
+
+		std::unique_ptr<AliasedDWriteFontFace> aliasedFace(
+			new (std::nothrow) AliasedDWriteFontFace(
+				replacementFace, sourceFace));
+		if (!aliasedFace)
+			return E_OUTOFMEMORY;
+		*fontFace = aliasedFace.release();
+		return S_OK;
 	}
 
 	IDWriteFont* STDMETHODCALLTYPE GetReplacementFont() noexcept override

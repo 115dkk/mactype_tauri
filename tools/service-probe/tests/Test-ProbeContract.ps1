@@ -142,6 +142,9 @@ if (-not $result.fontSubstitution.directWriteIndexedCollection.controlsStable) {
 if (-not $result.fontSubstitution.directWriteIndexedCollection.retainedMetadataStable) {
     throw 'A retained indexed DirectWrite font must preserve its source metadata identity.'
 }
+if (-not $result.fontSubstitution.directWriteIndexedCollection.retainedNameTableStable) {
+    throw 'A retained indexed DirectWrite face must preserve its source OpenType name table.'
+}
 if ($result.fontSubstitution.directWriteIndexedCollection.disabledSourcePostScriptName -eq
     $result.fontSubstitution.directWriteIndexedCollection.disabledReplacementPostScriptName) {
     throw 'Indexed DirectWrite PostScript-name controls must remain distinct.'

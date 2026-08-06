@@ -17,6 +17,7 @@ struct DirectWriteSubstitutionObservation final {
   std::wstring active_pinned_source_descriptor_family;
   bool controls_stable = false;
   bool retained_metadata_stable = false;
+  bool retained_name_table_stable = false;
   bool retained_object_replacement_observed = false;
   bool retained_descriptor_replacement_observed = false;
   bool replacement_observed = false;

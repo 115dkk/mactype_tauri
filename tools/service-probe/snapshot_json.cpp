@@ -175,6 +175,12 @@ std::string BuildSnapshotJson(const ProbeOptions& options,
                ? "true"
                : "false")
        << ",\n"
+       << "      \"retainedNameTableStable\": "
+       << (font_substitution.direct_write_indexed_collection
+                    .retained_name_table_stable
+               ? "true"
+               : "false")
+       << ",\n"
        << "      \"retainedObjectReplacementObserved\": "
        << (font_substitution.direct_write_indexed_collection
                     .retained_object_replacement_observed

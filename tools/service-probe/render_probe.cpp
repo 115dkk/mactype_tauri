@@ -10,6 +10,7 @@
 #include <dwrite_3.h>
 #include <windows.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <iomanip>
@@ -53,6 +54,55 @@ struct ComReleaser {
 
 template <typename Interface>
 using UniqueCom = std::unique_ptr<Interface, ComReleaser<Interface>>;
+
+class ScopedFontTable final {
+ public:
+  ScopedFontTable(IDWriteFontFace* face, void* context) noexcept
+      : face_(face), context_(context) {}
+
+  ~ScopedFontTable() noexcept {
+    if (face_ != nullptr) {
+      face_->ReleaseFontTable(context_);
+    }
+  }
+
+  ScopedFontTable(const ScopedFontTable&) = delete;
+  ScopedFontTable& operator=(const ScopedFontTable&) = delete;
+
+ private:
+  IDWriteFontFace* face_;
+  void* context_;
+};
+
+bool FontNameTableContainsFamily(IDWriteFontFace* face,
+                                 const std::wstring_view family) {
+  if (face == nullptr || family.empty()) {
+    return false;
+  }
+  const void* table_data = nullptr;
+  UINT32 table_size = 0;
+  void* table_context = nullptr;
+  BOOL exists = FALSE;
+  const HRESULT result = face->TryGetFontTable(
+      DWRITE_MAKE_OPENTYPE_TAG('n', 'a', 'm', 'e'), &table_data, &table_size,
+      &table_context, &exists);
+  if (FAILED(result) || exists == FALSE || table_data == nullptr) {
+    return false;
+  }
+  ScopedFontTable table(face, table_context);
+  std::vector<std::byte> encoded_family;
+  encoded_family.reserve(family.size() * 2U);
+  for (const wchar_t character : family) {
+    encoded_family.push_back(
+        static_cast<std::byte>((static_cast<unsigned int>(character) >> 8U) &
+                               0xffU));
+    encoded_family.push_back(
+        static_cast<std::byte>(static_cast<unsigned int>(character) & 0xffU));
+  }
+  const auto* first = static_cast<const std::byte*>(table_data);
+  return std::search(first, first + table_size, encoded_family.begin(),
+                     encoded_family.end()) != first + table_size;
+}
 
 class FontSubstitutionSwitch final {
  public:
@@ -710,11 +760,12 @@ FontSubstitutionObservation ObserveFontSubstitution(
         repeated_disabled_replacement_postscript_name, nullptr, nullptr, error);
   }
   UniqueCom<IDWriteFont> retained_active_source;
+  UniqueCom<IDWriteFontFace> retained_active_source_face;
   indexed.active_source_family =
       ResolveIndexedDirectWriteFamily(source_family, directwrite_factory,
           indexed_source, false, indexed.active_source_postscript_name,
           &retained_active_source,
-          nullptr, error);
+          &retained_active_source_face, error);
   std::wstring repeated_active_source_postscript_name;
   const std::wstring repeated_active_indexed_source =
       ResolveIndexedDirectWriteFamily(source_family, directwrite_factory,
@@ -787,13 +838,15 @@ FontSubstitutionObservation ObserveFontSubstitution(
       !indexed.active_retained_source_postscript_name.empty() &&
       _wcsicmp(indexed.active_retained_source_postscript_name.c_str(),
                indexed.active_source_postscript_name.c_str()) == 0;
+  indexed.retained_name_table_stable = FontNameTableContainsFamily(
+      retained_active_source_face.get(), source_family);
   indexed.replacement_observed =
       indexed.controls_stable &&
       _wcsicmp(indexed.active_source_family.c_str(),
                indexed.disabled_replacement_family.c_str()) == 0 &&
       indexed.retained_object_replacement_observed &&
       indexed.retained_descriptor_replacement_observed &&
-      indexed.retained_metadata_stable;
+      indexed.retained_metadata_stable && indexed.retained_name_table_stable;
   result.direct_write_custom_collection = observe_direct_write(true);
   if (result.direct_write.active_source_family.empty() ||
       indexed.active_source_family.empty() ||

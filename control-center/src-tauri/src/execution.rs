@@ -290,9 +290,28 @@ fn ensure_active_runtime() -> Result<bool, String> {
     }
     let root =
         installation_root().ok_or_else(|| "MacType installation was not found".to_owned())?;
-    let (path, bytes) = crate::profile::default_profile_payload()?;
+    let (path, bytes) = bundled_default_profile_payload(&root)?;
     apply_profile(&root, &path, &bytes)?;
     Ok(true)
+}
+
+/// The one profile the machine may pick on its own when none is applied: the
+/// bundled ini\Default.ini, validated. Anything else must be an explicit user
+/// choice (apply or the migrate funnel), so a missing or unreadable
+/// Default.ini fails with a coded error instead of guessing.
+fn bundled_default_profile_payload(
+    installation_root: &Path,
+) -> Result<(PathBuf, Vec<u8>), String> {
+    crate::profile::bundled_default_profile_at(installation_root)
+        .map_err(|error| {
+            format!(
+                "control-center-default-profile-invalid: no profile is applied and ini\\Default.ini could not be validated: {error}"
+            )
+        })?
+        .ok_or_else(|| {
+            "control-center-default-profile-missing: no profile is applied and ini\\Default.ini was not found; apply a profile first"
+                .to_owned()
+        })
 }
 
 fn service_start_profile_at(
@@ -302,16 +321,7 @@ fn service_start_profile_at(
     let active = match runtime::active_runtime_from(runtime_root) {
         Ok(active) => active,
         Err(_) => {
-            let (path, bytes) = crate::profile::bundled_default_profile_at(installation_root)
-                .map_err(|error| {
-                    format!(
-                        "no profile is applied and ini\\Default.ini could not be validated: {error}"
-                    )
-                })?
-                .ok_or_else(|| {
-                    "no profile is applied and ini\\Default.ini was not found; apply a profile before starting the service"
-                        .to_owned()
-                })?;
+            let (path, bytes) = bundled_default_profile_payload(installation_root)?;
             runtime::prepare_runtime_at(runtime_root, installation_root, &path, &bytes)?
         }
     };
@@ -682,7 +692,47 @@ mod tests {
         let error = service_start_profile_at(&runtime_root, &installation).unwrap_err();
 
         assert!(error.contains(r"ini\Default.ini"), "{error}");
+        assert!(
+            error.starts_with("control-center-default-profile-missing:"),
+            "{error}"
+        );
         assert!(!runtime_root.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn machine_default_profile_fallback_never_picks_another_profile() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = env::temp_dir().join(format!("mactype-machine-default-{unique}"));
+        let installation = root.join("installation");
+        fs::create_dir_all(installation.join("ini")).unwrap();
+        fs::write(
+            installation.join("ini").join("Another.ini"),
+            b"[General]\r\nNormalWeight=9\r\n",
+        )
+        .unwrap();
+        fs::write(
+            installation.join("MacType.ini"),
+            b"[General]\r\nAlternativeFile=ini\\Another.ini\r\n",
+        )
+        .unwrap();
+
+        let missing = bundled_default_profile_payload(&installation).unwrap_err();
+        assert!(
+            missing.starts_with("control-center-default-profile-missing:"),
+            "{missing}"
+        );
+
+        let oversized = vec![b';'; mactype_service_contract::MAX_PROFILE_BYTES + 1];
+        fs::write(installation.join("ini").join("Default.ini"), &oversized).unwrap();
+        let invalid = bundled_default_profile_payload(&installation).unwrap_err();
+        assert!(
+            invalid.starts_with("control-center-default-profile-invalid:"),
+            "{invalid}"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

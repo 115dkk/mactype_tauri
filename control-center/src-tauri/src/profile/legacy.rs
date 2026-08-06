@@ -151,6 +151,7 @@ pub(super) fn find_default_profile_at(root: &Path) -> Result<Option<PathBuf>, St
     if default.is_file() {
         return Ok(Some(default));
     }
+    let mut candidates: Vec<PathBuf> = Vec::new();
     if let Ok(entries) = fs::read_dir(&profile_root) {
         for (index, entry) in entries.enumerate() {
             if index == MAX_PROFILE_DIRECTORY_ENTRIES {
@@ -166,20 +167,23 @@ pub(super) fn find_default_profile_at(root: &Path) -> Result<Option<PathBuf>, St
                 .extension()
                 .is_some_and(|extension| extension.eq_ignore_ascii_case("ini"))
             {
-                return Ok(Some(path));
+                candidates.push(path);
             }
         }
+    }
+    // Directory enumeration order is filesystem-dependent; pick the
+    // case-insensitive alphabetical minimum so the fallback is deterministic.
+    let fallback = candidates.into_iter().min_by_key(|path| {
+        path.file_name()
+            .map(|name| name.to_string_lossy().to_lowercase())
+    });
+    if fallback.is_some() {
+        return Ok(fallback);
     }
     Ok(root
         .join("MacType.ini")
         .is_file()
         .then(|| root.join("MacType.ini")))
-}
-
-pub(crate) fn default_profile_payload() -> Result<(PathBuf, Vec<u8>), String> {
-    let path = find_default_profile()?
-        .ok_or_else(|| "a default MacType profile was not found".to_owned())?;
-    default_profile_payload_from(path)
 }
 
 pub(super) fn default_profile_payload_from(path: PathBuf) -> Result<(PathBuf, Vec<u8>), String> {

@@ -24,9 +24,7 @@ mod tests;
 mod upstream_corpus_tests;
 
 pub(crate) use identity::source_profile_reference;
-pub(crate) use legacy::{
-    bundled_default_profile_at, default_profile_payload, legacy_alternative_file_bytes,
-};
+pub(crate) use legacy::{bundled_default_profile_at, legacy_alternative_file_bytes};
 
 #[cfg(test)]
 use document::hash;

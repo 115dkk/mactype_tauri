@@ -57,7 +57,8 @@ function Test-OpenServiceWorkflowPolicy {
             'OpenServiceAclFixture.psm1', 'Invoke-OpenServiceAclRepairFixture',
             '-RepairContext $stagedSetup', 'param($setupExecutable)',
             "`$sourceFamily = 'Cambria'",
-            "'--chromium-font-data-service', 'disabled'", 'replacementObserved',
+            "'--chromium-font-data-service', 'disabled'",
+            "'--firefox-child-pause-seconds', '10'", 'replacementObserved',
             "-Verb 'publish-profile' -InputBytes `$profileA",
             "Assert-ActiveRuntimeProfile -ExpectedBytes `$profileA"
         )
@@ -89,7 +90,8 @@ function Test-OpenServiceWorkflowPolicy {
         -Tokens @(
             'targetTreeHooked', 'initialSuccessCount',
             'browserPidInjectionObserved', 'waitForBrowserRoleInjection',
-            'dom.ipc.processPrelaunch.enabled'
+            'dom.ipc.processPrelaunch.enabled', 'firefoxChildPauseSeconds',
+            'MOZ_DEBUG_CHILD_PAUSE'
         )
 
     $aclFixtureModulePath = Join-Path $Root 'scripts\ci\lib\OpenServiceAclFixture.psm1'

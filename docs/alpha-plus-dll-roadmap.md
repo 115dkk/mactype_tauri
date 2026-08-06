@@ -230,6 +230,15 @@ controls continue to run with the default feature set, and this compatibility
 mode does not relax the substitution criterion: the active source pixels must
 still exactly match the independently rendered replacement pixels.
 
+Firefox normally locks its content processes down before the open service can
+load the renderer DLL. The pinned Firefox substitution proof therefore uses
+Mozilla's `MOZ_DEBUG_CHILD_PAUSE=10` startup diagnostic so the service can load
+the DLL before Firefox starts its normal sandbox. The stock control runs
+without the pause. The selected duration is recorded in the retained JSON,
+renderer-hook diagnostics are still mandatory before the first font lookup,
+and the active source pixels must still exactly match the independently
+rendered replacement pixels.
+
 The native probe covers GDI and DirectWrite with injection before factory
 creation, injection after factory creation, multiple factories, worker-thread
 creation, child renderer processes, profile reload, missing profile, damaged

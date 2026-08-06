@@ -21,6 +21,7 @@ function parseArguments(argv) {
     replacement: '',
     expect: 'substituted',
     chromiumFontDataService: 'enabled',
+    firefoxChildPauseSeconds: 0,
     timeoutMs: 15000,
   };
   for (let index = 0; index < argv.length; index += 2) {
@@ -36,6 +37,9 @@ function parseArguments(argv) {
     else if (key === '--expect') result.expect = value;
     else if (key === '--chromium-font-data-service') {
       result.chromiumFontDataService = value;
+    }
+    else if (key === '--firefox-child-pause-seconds') {
+      result.firefoxChildPauseSeconds = Number(value);
     }
     else if (key === '--timeout-ms') result.timeoutMs = Number(value);
     else throw new Error(`Unknown argument: ${key}`);
@@ -56,6 +60,13 @@ function parseArguments(argv) {
   }
   if (result.engine !== 'chromium' && result.chromiumFontDataService !== 'enabled') {
     throw new Error('--chromium-font-data-service is only valid for Chromium');
+  }
+  if (!Number.isInteger(result.firefoxChildPauseSeconds) ||
+      result.firefoxChildPauseSeconds < 0 || result.firefoxChildPauseSeconds > 30) {
+    throw new Error(`Invalid Firefox child pause: ${result.firefoxChildPauseSeconds}`);
+  }
+  if (result.engine !== 'firefox' && result.firefoxChildPauseSeconds !== 0) {
+    throw new Error('--firefox-child-pause-seconds is only valid for Firefox');
   }
   if (!Number.isInteger(result.timeoutMs) || result.timeoutMs < 0 || result.timeoutMs > 60000) {
     throw new Error(`Invalid timeout: ${result.timeoutMs}`);
@@ -250,6 +261,11 @@ async function capture(browserType, options, disabled, waitForReplacement) {
   environment.MACTYPE_FORCE_LOAD = '1';
   const diagnosticNamespace = `browser-${randomUUID()}`;
   environment.MACTYPE_DIRECTWRITE_DIAGNOSTICS = diagnosticNamespace;
+  if (options.engine === 'firefox' && options.firefoxChildPauseSeconds > 0) {
+    environment.MOZ_DEBUG_CHILD_PAUSE = String(options.firefoxChildPauseSeconds);
+  } else {
+    delete environment.MOZ_DEBUG_CHILD_PAUSE;
+  }
   if (disabled) environment.MACTYPE_FONTSUBSTITUTES_ENV = '1';
   else delete environment.MACTYPE_FONTSUBSTITUTES_ENV;
 
@@ -436,6 +452,9 @@ const result = {
   executable: options.executable || null,
   chromiumFontDataService: options.engine === 'chromium'
     ? options.chromiumFontDataService
+    : null,
+  firefoxChildPauseSeconds: options.engine === 'firefox'
+    ? options.firefoxChildPauseSeconds
     : null,
   sourceFamily: options.source,
   replacementFamily: options.replacement,

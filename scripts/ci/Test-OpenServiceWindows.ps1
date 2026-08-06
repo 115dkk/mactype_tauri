@@ -474,6 +474,14 @@ try {
                 $browserProbeArguments += @(
                     '--chromium-font-data-service', 'disabled'
                 )
+            } elseif ($engine -eq 'firefox') {
+                # Give the open service time to load the renderer DLL through
+                # Mozilla's child-startup diagnostic pause. Firefox starts its
+                # normal sandbox after this pause; the selected duration is
+                # retained in JSON and exact pixel equality remains mandatory.
+                $browserProbeArguments += @(
+                    '--firefox-child-pause-seconds', '10'
+                )
             }
             & node @browserProbeArguments
             if ($LASTEXITCODE -ne 0) {

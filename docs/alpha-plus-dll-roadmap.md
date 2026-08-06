@@ -270,8 +270,12 @@ different source families that resolve to the same interned DirectWrite font
 therefore retain distinct identities across threads and later reuse. Native
 font faces are likewise reference-counted proxies: the OpenType `name` table
 comes from the source face, while CMAP, glyphs, metrics, file descriptors, and
-face indexes come from the replacement. The opaque font-table context owns the
-face that created it until `ReleaseFontTable`, so cleanup cannot cross the
+face indexes come from the replacement. The proxy preserves one COM identity
+through `IDWriteFontFace1` to `IDWriteFontFace5`; advanced callers therefore
+receive the replacement font resource and can recreate the replacement face
+without bypassing the source-name alias. The x86/x64 marker contract exercises
+that resource-to-face round trip. The opaque font-table context owns the face
+that created it until `ReleaseFontTable`, so cleanup cannot cross the
 source/replacement boundary. Native DirectWrite pointers are exposed only when
 an API requires them. Modern collections created from `IDWriteFontSet` have a
 distinct font-family implementation, so their `GetFont` path receives the same

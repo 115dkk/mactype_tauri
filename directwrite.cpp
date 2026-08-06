@@ -211,12 +211,37 @@ private:
 	std::wstring family_;
 };
 
-class AliasedDWriteFontFace final : public IDWriteFontFace {
+struct AliasedDWriteFontAxisValue
+{
+	UINT32 axisTag;
+	FLOAT value;
+};
+
+struct __declspec(uuid("98EFF3A5-B667-479A-B145-E2FA5B9FDC29"))
+	IAliasedDWriteFontFace5 : IDWriteFontFace4
+{
+	virtual UINT32 STDMETHODCALLTYPE GetFontAxisValueCount() = 0;
+	virtual HRESULT STDMETHODCALLTYPE GetFontAxisValues(
+		AliasedDWriteFontAxisValue* fontAxisValues,
+		UINT32 fontAxisValueCount) = 0;
+	virtual BOOL STDMETHODCALLTYPE HasVariations() = 0;
+	virtual HRESULT STDMETHODCALLTYPE GetFontResource(
+		IUnknown** fontResource) = 0;
+	virtual BOOL STDMETHODCALLTYPE Equals(IDWriteFontFace* fontFace) = 0;
+};
+
+class AliasedDWriteFontFace final : public IAliasedDWriteFontFace5 {
 public:
 	AliasedDWriteFontFace(
 		IDWriteFontFace* replacement, IDWriteFontFace* source) noexcept
 		: replacement_(replacement), source_(source)
 	{
+		replacement_->QueryInterface(&replacement1_);
+		replacement_->QueryInterface(&replacement2_);
+		replacement_->QueryInterface(&replacement3_);
+		replacement_->QueryInterface(&replacement4_);
+		replacement_->QueryInterface(&replacement5_);
+		source_->QueryInterface(&source3_);
 	}
 
 	HRESULT STDMETHODCALLTYPE QueryInterface(
@@ -225,9 +250,21 @@ public:
 		if (object == nullptr)
 			return E_POINTER;
 		*object = nullptr;
-		if (iid != __uuidof(IUnknown) && iid != __uuidof(IDWriteFontFace))
+		if (iid == __uuidof(IUnknown) || iid == __uuidof(IDWriteFontFace))
+			*object = static_cast<IDWriteFontFace*>(this);
+		else if (iid == __uuidof(IDWriteFontFace1) && replacement1_ != nullptr)
+			*object = static_cast<IDWriteFontFace1*>(this);
+		else if (iid == __uuidof(IDWriteFontFace2) && replacement2_ != nullptr)
+			*object = static_cast<IDWriteFontFace2*>(this);
+		else if (iid == __uuidof(IDWriteFontFace3) && replacement3_ != nullptr)
+			*object = static_cast<IDWriteFontFace3*>(this);
+		else if (iid == __uuidof(IDWriteFontFace4) && replacement4_ != nullptr)
+			*object = static_cast<IDWriteFontFace4*>(this);
+		else if (iid == __uuidof(IAliasedDWriteFontFace5) &&
+			replacement5_ != nullptr)
+			*object = static_cast<IAliasedDWriteFontFace5*>(this);
+		else
 			return E_NOINTERFACE;
-		*object = static_cast<IDWriteFontFace*>(this);
 		AddRef();
 		return S_OK;
 	}
@@ -379,6 +416,288 @@ public:
 			glyphCount, glyphMetrics, isSideways);
 	}
 
+	void STDMETHODCALLTYPE GetMetrics(
+		DWRITE_FONT_METRICS1* fontMetrics) override
+	{
+		replacement1_->GetMetrics(fontMetrics);
+	}
+
+	HRESULT STDMETHODCALLTYPE GetGdiCompatibleMetrics(
+		FLOAT emSize, FLOAT pixelsPerDip, DWRITE_MATRIX const* transform,
+		DWRITE_FONT_METRICS1* fontMetrics) override
+	{
+		return replacement1_->GetGdiCompatibleMetrics(
+			emSize, pixelsPerDip, transform, fontMetrics);
+	}
+
+	void STDMETHODCALLTYPE GetCaretMetrics(
+		DWRITE_CARET_METRICS* caretMetrics) override
+	{
+		replacement1_->GetCaretMetrics(caretMetrics);
+	}
+
+	HRESULT STDMETHODCALLTYPE GetUnicodeRanges(
+		UINT32 maxRangeCount, DWRITE_UNICODE_RANGE* unicodeRanges,
+		UINT32* actualRangeCount) override
+	{
+		return replacement1_->GetUnicodeRanges(
+			maxRangeCount, unicodeRanges, actualRangeCount);
+	}
+
+	BOOL STDMETHODCALLTYPE IsMonospacedFont() override
+	{
+		return replacement1_->IsMonospacedFont();
+	}
+
+	HRESULT STDMETHODCALLTYPE GetDesignGlyphAdvances(
+		UINT32 glyphCount, UINT16 const* glyphIndices, INT32* glyphAdvances,
+		BOOL isSideways = FALSE) override
+	{
+		return replacement1_->GetDesignGlyphAdvances(
+			glyphCount, glyphIndices, glyphAdvances, isSideways);
+	}
+
+	HRESULT STDMETHODCALLTYPE GetGdiCompatibleGlyphAdvances(
+		FLOAT emSize, FLOAT pixelsPerDip, DWRITE_MATRIX const* transform,
+		BOOL useGdiNatural, BOOL isSideways, UINT32 glyphCount,
+		UINT16 const* glyphIndices, INT32* glyphAdvances) override
+	{
+		return replacement1_->GetGdiCompatibleGlyphAdvances(
+			emSize, pixelsPerDip, transform, useGdiNatural, isSideways,
+			glyphCount, glyphIndices, glyphAdvances);
+	}
+
+	HRESULT STDMETHODCALLTYPE GetKerningPairAdjustments(
+		UINT32 glyphCount, UINT16 const* glyphIndices,
+		INT32* glyphAdvanceAdjustments) override
+	{
+		return replacement1_->GetKerningPairAdjustments(
+			glyphCount, glyphIndices, glyphAdvanceAdjustments);
+	}
+
+	BOOL STDMETHODCALLTYPE HasKerningPairs() override
+	{
+		return replacement1_->HasKerningPairs();
+	}
+
+	HRESULT STDMETHODCALLTYPE GetRecommendedRenderingMode(
+		FLOAT fontEmSize, FLOAT dpiX, FLOAT dpiY,
+		DWRITE_MATRIX const* transform, BOOL isSideways,
+		DWRITE_OUTLINE_THRESHOLD outlineThreshold,
+		DWRITE_MEASURING_MODE measuringMode,
+		DWRITE_RENDERING_MODE* renderingMode) override
+	{
+		return replacement1_->GetRecommendedRenderingMode(
+			fontEmSize, dpiX, dpiY, transform, isSideways, outlineThreshold,
+			measuringMode, renderingMode);
+	}
+
+	HRESULT STDMETHODCALLTYPE GetVerticalGlyphVariants(
+		UINT32 glyphCount, UINT16 const* nominalGlyphIndices,
+		UINT16* verticalGlyphIndices) override
+	{
+		return replacement1_->GetVerticalGlyphVariants(
+			glyphCount, nominalGlyphIndices, verticalGlyphIndices);
+	}
+
+	BOOL STDMETHODCALLTYPE HasVerticalGlyphVariants() override
+	{
+		return replacement1_->HasVerticalGlyphVariants();
+	}
+
+	BOOL STDMETHODCALLTYPE IsColorFont() override
+	{
+		return replacement2_->IsColorFont();
+	}
+
+	UINT32 STDMETHODCALLTYPE GetColorPaletteCount() override
+	{
+		return replacement2_->GetColorPaletteCount();
+	}
+
+	UINT32 STDMETHODCALLTYPE GetPaletteEntryCount() override
+	{
+		return replacement2_->GetPaletteEntryCount();
+	}
+
+	HRESULT STDMETHODCALLTYPE GetPaletteEntries(
+		UINT32 colorPaletteIndex, UINT32 firstEntryIndex, UINT32 entryCount,
+		DWRITE_COLOR_F* paletteEntries) override
+	{
+		return replacement2_->GetPaletteEntries(
+			colorPaletteIndex, firstEntryIndex, entryCount, paletteEntries);
+	}
+
+	HRESULT STDMETHODCALLTYPE GetRecommendedRenderingMode(
+		FLOAT fontEmSize, FLOAT dpiX, FLOAT dpiY,
+		DWRITE_MATRIX const* transform, BOOL isSideways,
+		DWRITE_OUTLINE_THRESHOLD outlineThreshold,
+		DWRITE_MEASURING_MODE measuringMode,
+		IDWriteRenderingParams* renderingParams,
+		DWRITE_RENDERING_MODE* renderingMode,
+		DWRITE_GRID_FIT_MODE* gridFitMode) override
+	{
+		return replacement2_->GetRecommendedRenderingMode(
+			fontEmSize, dpiX, dpiY, transform, isSideways, outlineThreshold,
+			measuringMode, renderingParams, renderingMode, gridFitMode);
+	}
+
+	HRESULT STDMETHODCALLTYPE GetFontFaceReference(
+		IDWriteFontFaceReference** fontFaceReference) override
+	{
+		return replacement3_->GetFontFaceReference(fontFaceReference);
+	}
+
+	void STDMETHODCALLTYPE GetPanose(DWRITE_PANOSE* panose) override
+	{
+		replacement3_->GetPanose(panose);
+	}
+
+	DWRITE_FONT_WEIGHT STDMETHODCALLTYPE GetWeight() override
+	{
+		return replacement3_->GetWeight();
+	}
+
+	DWRITE_FONT_STRETCH STDMETHODCALLTYPE GetStretch() override
+	{
+		return replacement3_->GetStretch();
+	}
+
+	DWRITE_FONT_STYLE STDMETHODCALLTYPE GetStyle() override
+	{
+		return replacement3_->GetStyle();
+	}
+
+	HRESULT STDMETHODCALLTYPE GetFamilyNames(
+		IDWriteLocalizedStrings** names) override
+	{
+		return source3_ != nullptr
+			? source3_->GetFamilyNames(names)
+			: replacement3_->GetFamilyNames(names);
+	}
+
+	HRESULT STDMETHODCALLTYPE GetFaceNames(
+		IDWriteLocalizedStrings** names) override
+	{
+		return source3_ != nullptr
+			? source3_->GetFaceNames(names)
+			: replacement3_->GetFaceNames(names);
+	}
+
+	HRESULT STDMETHODCALLTYPE GetInformationalStrings(
+		DWRITE_INFORMATIONAL_STRING_ID informationalStringID,
+		IDWriteLocalizedStrings** informationalStrings, BOOL* exists) override
+	{
+		return source3_ != nullptr
+			? source3_->GetInformationalStrings(
+				informationalStringID, informationalStrings, exists)
+			: replacement3_->GetInformationalStrings(
+				informationalStringID, informationalStrings, exists);
+	}
+
+	BOOL STDMETHODCALLTYPE HasCharacter(UINT32 unicodeValue) override
+	{
+		return replacement3_->HasCharacter(unicodeValue);
+	}
+
+	HRESULT STDMETHODCALLTYPE GetRecommendedRenderingMode(
+		FLOAT fontEmSize, FLOAT dpiX, FLOAT dpiY,
+		DWRITE_MATRIX const* transform, BOOL isSideways,
+		DWRITE_OUTLINE_THRESHOLD outlineThreshold,
+		DWRITE_MEASURING_MODE measuringMode,
+		IDWriteRenderingParams* renderingParams,
+		DWRITE_RENDERING_MODE1* renderingMode,
+		DWRITE_GRID_FIT_MODE* gridFitMode) override
+	{
+		return replacement3_->GetRecommendedRenderingMode(
+			fontEmSize, dpiX, dpiY, transform, isSideways, outlineThreshold,
+			measuringMode, renderingParams, renderingMode, gridFitMode);
+	}
+
+	BOOL STDMETHODCALLTYPE IsCharacterLocal(UINT32 unicodeValue) override
+	{
+		return replacement3_->IsCharacterLocal(unicodeValue);
+	}
+
+	BOOL STDMETHODCALLTYPE IsGlyphLocal(UINT16 glyphId) override
+	{
+		return replacement3_->IsGlyphLocal(glyphId);
+	}
+
+	HRESULT STDMETHODCALLTYPE AreCharactersLocal(
+		WCHAR const* characters, UINT32 characterCount,
+		BOOL enqueueIfNotLocal, BOOL* isLocal) override
+	{
+		return replacement3_->AreCharactersLocal(
+			characters, characterCount, enqueueIfNotLocal, isLocal);
+	}
+
+	HRESULT STDMETHODCALLTYPE AreGlyphsLocal(
+		UINT16 const* glyphIndices, UINT32 glyphCount,
+		BOOL enqueueIfNotLocal, BOOL* isLocal) override
+	{
+		return replacement3_->AreGlyphsLocal(
+			glyphIndices, glyphCount, enqueueIfNotLocal, isLocal);
+	}
+
+	DWRITE_GLYPH_IMAGE_FORMATS STDMETHODCALLTYPE GetGlyphImageFormats() override
+	{
+		return replacement4_->GetGlyphImageFormats();
+	}
+
+	HRESULT STDMETHODCALLTYPE GetGlyphImageFormats(
+		UINT16 glyphId, UINT32 pixelsPerEmFirst, UINT32 pixelsPerEmLast,
+		DWRITE_GLYPH_IMAGE_FORMATS* glyphImageFormats) override
+	{
+		return replacement4_->GetGlyphImageFormats(
+			glyphId, pixelsPerEmFirst, pixelsPerEmLast, glyphImageFormats);
+	}
+
+	HRESULT STDMETHODCALLTYPE GetGlyphImageData(
+		UINT16 glyphId, UINT32 pixelsPerEm,
+		DWRITE_GLYPH_IMAGE_FORMATS glyphImageFormat,
+		DWRITE_GLYPH_IMAGE_DATA* glyphData, void** glyphDataContext) override
+	{
+		return replacement4_->GetGlyphImageData(
+			glyphId, pixelsPerEm, glyphImageFormat, glyphData,
+			glyphDataContext);
+	}
+
+	void STDMETHODCALLTYPE ReleaseGlyphImageData(
+		void* glyphDataContext) override
+	{
+		replacement4_->ReleaseGlyphImageData(glyphDataContext);
+	}
+
+	UINT32 STDMETHODCALLTYPE GetFontAxisValueCount() override
+	{
+		return replacement5_->GetFontAxisValueCount();
+	}
+
+	HRESULT STDMETHODCALLTYPE GetFontAxisValues(
+		AliasedDWriteFontAxisValue* fontAxisValues,
+		UINT32 fontAxisValueCount) override
+	{
+		return replacement5_->GetFontAxisValues(
+			fontAxisValues, fontAxisValueCount);
+	}
+
+	BOOL STDMETHODCALLTYPE HasVariations() override
+	{
+		return replacement5_->HasVariations();
+	}
+
+	HRESULT STDMETHODCALLTYPE GetFontResource(IUnknown** fontResource) override
+	{
+		return replacement5_->GetFontResource(fontResource);
+	}
+
+	BOOL STDMETHODCALLTYPE Equals(IDWriteFontFace* fontFace) override
+	{
+		return fontFace == static_cast<IDWriteFontFace*>(this) ||
+			replacement5_->Equals(fontFace);
+	}
+
 private:
 	struct FontTableContext final {
 		FontTableContext(IDWriteFontFace* tableOwner, void* context) noexcept
@@ -393,6 +712,12 @@ private:
 	std::atomic<ULONG> referenceCount_{1};
 	CComPtr<IDWriteFontFace> replacement_;
 	CComPtr<IDWriteFontFace> source_;
+	CComPtr<IDWriteFontFace1> replacement1_;
+	CComPtr<IDWriteFontFace2> replacement2_;
+	CComPtr<IDWriteFontFace3> replacement3_;
+	CComPtr<IDWriteFontFace4> replacement4_;
+	CComPtr<IAliasedDWriteFontFace5> replacement5_;
+	CComPtr<IDWriteFontFace3> source3_;
 };
 
 static std::wstring TakePendingDWriteFamilyAlias()

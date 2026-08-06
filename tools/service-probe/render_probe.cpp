@@ -460,6 +460,52 @@ std::wstring ResolveDirectWriteFontDescriptor(
   return resolved.lfFaceName;
 }
 
+std::wstring ResolveAdvancedDirectWriteFontDescriptor(
+    IDWriteFontFace* face, void* directwrite_factory, std::wstring& error) {
+  if (face == nullptr) {
+    error = L"DirectWrite font face is unavailable for advanced descriptor";
+    return {};
+  }
+
+  IDWriteFontFace5* raw_face5 = nullptr;
+  const HRESULT face5_result = face->QueryInterface(&raw_face5);
+  UniqueCom<IDWriteFontFace5> face5(raw_face5);
+  if (FAILED(face5_result) || face5 == nullptr) {
+    error = L"IDWriteFontFace5 is unavailable for advanced descriptor";
+    return {};
+  }
+
+  IDWriteFontResource* raw_resource = nullptr;
+  const HRESULT resource_result = face5->GetFontResource(&raw_resource);
+  UniqueCom<IDWriteFontResource> resource(raw_resource);
+  if (FAILED(resource_result) || resource == nullptr) {
+    error = L"IDWriteFontFace5::GetFontResource failed";
+    return {};
+  }
+
+  const UINT32 axis_count = face5->GetFontAxisValueCount();
+  std::vector<DWRITE_FONT_AXIS_VALUE> axis_values(axis_count);
+  if (axis_count != 0 &&
+      FAILED(face5->GetFontAxisValues(axis_values.data(), axis_count))) {
+    error = L"IDWriteFontFace5::GetFontAxisValues failed";
+    return {};
+  }
+
+  IDWriteFontFace5* raw_recreated_face = nullptr;
+  const HRESULT recreate_result = resource->CreateFontFace(
+      face5->GetSimulations(),
+      axis_count == 0 ? nullptr : axis_values.data(), axis_count,
+      &raw_recreated_face);
+  UniqueCom<IDWriteFontFace5> recreated_face(raw_recreated_face);
+  if (FAILED(recreate_result) || recreated_face == nullptr) {
+    error = L"IDWriteFontResource::CreateFontFace failed";
+    return {};
+  }
+
+  return ResolveDirectWriteFontDescriptor(
+      recreated_face.get(), directwrite_factory, error);
+}
+
 std::wstring ResolveFontSetDirectWriteFamily(
     const std::wstring_view family, void* directwrite_factory,
     std::wstring& error) {
@@ -894,6 +940,9 @@ FontSubstitutionObservation ObserveFontSubstitution(
   indexed.active_pinned_source_descriptor_family =
       ResolveDirectWriteFontDescriptor(
           pinned_disabled_source_face.get(), directwrite_factory, error);
+  indexed.active_advanced_face_descriptor_family =
+      ResolveAdvancedDirectWriteFontDescriptor(
+          retained_active_source_face.get(), directwrite_factory, error);
   indexed.controls_stable =
       !indexed.disabled_source_family.empty() &&
       !indexed.disabled_replacement_family.empty() &&
@@ -921,6 +970,9 @@ FontSubstitutionObservation ObserveFontSubstitution(
   indexed.retained_descriptor_replacement_observed =
       _wcsicmp(indexed.active_pinned_source_descriptor_family.c_str(),
                indexed.disabled_replacement_family.c_str()) == 0;
+  indexed.advanced_face_replacement_observed =
+      _wcsicmp(indexed.active_advanced_face_descriptor_family.c_str(),
+               indexed.disabled_replacement_family.c_str()) == 0;
   indexed.retained_metadata_stable =
       !indexed.active_retained_source_postscript_name.empty() &&
       _wcsicmp(indexed.active_retained_source_postscript_name.c_str(),
@@ -934,6 +986,7 @@ FontSubstitutionObservation ObserveFontSubstitution(
                indexed.disabled_replacement_family.c_str()) == 0 &&
       indexed.retained_object_replacement_observed &&
       indexed.retained_descriptor_replacement_observed &&
+      indexed.advanced_face_replacement_observed &&
       indexed.retained_metadata_stable && indexed.retained_name_table_stable;
   DirectWriteSubstitutionObservation& font_set =
       result.direct_write_font_set_collection;
@@ -974,6 +1027,7 @@ FontSubstitutionObservation ObserveFontSubstitution(
   if (result.direct_write.active_source_family.empty() ||
       indexed.active_source_family.empty() ||
       indexed.active_pinned_source_descriptor_family.empty() ||
+      indexed.active_advanced_face_descriptor_family.empty() ||
       font_set.active_source_family.empty() ||
       result.direct_write_custom_collection.active_source_family.empty()) {
     result.active_source_fingerprint.clear();

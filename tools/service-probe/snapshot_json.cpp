@@ -164,6 +164,10 @@ std::string BuildSnapshotJson(const ProbeOptions& options,
        << EscapeJson(font_substitution.direct_write_indexed_collection
                           .active_pinned_source_descriptor_family)
        << "\",\n"
+       << "      \"activeAdvancedFaceDescriptorFamily\": \""
+       << EscapeJson(font_substitution.direct_write_indexed_collection
+                          .active_advanced_face_descriptor_family)
+       << "\",\n"
        << "      \"controlsStable\": "
        << (font_substitution.direct_write_indexed_collection.controls_stable
                ? "true"
@@ -190,6 +194,12 @@ std::string BuildSnapshotJson(const ProbeOptions& options,
        << "      \"retainedDescriptorReplacementObserved\": "
        << (font_substitution.direct_write_indexed_collection
                     .retained_descriptor_replacement_observed
+               ? "true"
+               : "false")
+       << ",\n"
+       << "      \"advancedFaceReplacementObserved\": "
+       << (font_substitution.direct_write_indexed_collection
+                    .advanced_face_replacement_observed
                ? "true"
                : "false")
        << ",\n"

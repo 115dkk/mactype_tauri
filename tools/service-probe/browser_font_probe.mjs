@@ -132,6 +132,31 @@ async function waitForInjectionQuiescence(healthPath, initialCount, timeoutMs) {
   throw new Error('Open-service browser-process injection did not quiesce');
 }
 
+async function waitForBrowserRoleInjection(
+  healthPath,
+  initialSuccessCount,
+  diagnosticNamespace,
+  role,
+  timeoutMs,
+) {
+  const deadline = Date.now() + timeoutMs;
+  let telemetry;
+  do {
+    ({ telemetry } = await readX64InjectionTelemetry(healthPath));
+    if (telemetry?.successCount > initialSuccessCount) {
+      const diagnostics = collectDirectWriteDiagnostics(diagnosticNamespace);
+      if (diagnostics[role]?.['hook-entered']) return telemetry.successCount;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  } while (Date.now() < deadline);
+  throw new Error(
+    `Open service did not hook browser role ${role} ` +
+      `(initial count ${initialSuccessCount}, current count ` +
+      `${telemetry?.successCount ?? 'none'}, last PID ` +
+      `${telemetry?.lastSuccess?.pid ?? 'none'})`,
+  );
+}
+
 function collectDirectWriteDiagnostics(diagnosticNamespace) {
   const roles = ['main', 'renderer', 'utility', 'gpu', 'other'];
   const stages = [
@@ -232,6 +257,9 @@ async function capture(browserType, options, disabled, waitForReplacement) {
       options.chromiumFontDataService === 'disabled'
     ? ['--disable-features=FontDataServiceAllWebContents']
     : [];
+  const firefoxUserPrefs = options.engine === 'firefox'
+    ? { 'dom.ipc.processPrelaunch.enabled': false }
+    : undefined;
   let initialInjectionSuccessCount = null;
   if (options.injectionHealth) {
     const initialHealth = await readX64InjectionTelemetry(options.injectionHealth);
@@ -242,6 +270,7 @@ async function capture(browserType, options, disabled, waitForReplacement) {
     headless: true,
     env: environment,
     args: browserArguments,
+    firefoxUserPrefs,
   });
   try {
     const browserPid = browserServer.process().pid;
@@ -266,6 +295,13 @@ async function capture(browserType, options, disabled, waitForReplacement) {
     }
     const page = await browser.newPage({ viewport: { width: 900, height: 260 } });
     if (options.injectionHealth) {
+      injectionSuccessCount = await waitForBrowserRoleInjection(
+        options.injectionHealth,
+        injectionSuccessCount,
+        diagnosticNamespace,
+        'renderer',
+        options.timeoutMs,
+      );
       injectionSuccessCount = await waitForInjectionQuiescence(
         options.injectionHealth,
         injectionSuccessCount,

@@ -1838,7 +1838,12 @@ static WCHAR const* GetDirectWriteDiagnosticRole() noexcept
 {
 	WCHAR const* const commandLine = GetCommandLineW();
 	if (commandLine == nullptr || wcsstr(commandLine, L"--type=") == nullptr)
+	{
+		if (commandLine != nullptr &&
+			wcsstr(commandLine, L"-contentproc") != nullptr)
+			return L"renderer";
 		return L"main";
+	}
 	if (wcsstr(commandLine, L"--type=renderer") != nullptr)
 		return L"renderer";
 	if (wcsstr(commandLine, L"--type=utility") != nullptr)

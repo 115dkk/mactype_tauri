@@ -92,7 +92,9 @@ function Test-OpenServiceWorkflowPolicy {
             'targetTreeHooked', 'initialSuccessCount',
             'browserPidInjectionObserved', 'waitForBrowserRoleInjection',
             'dom.ipc.processPrelaunch.enabled', 'firefoxLaunchGate',
-            'MACTYPE_BROWSER_GATE_TARGET', 'MACTYPE_BROWSER_GATE_PID_FILE'
+            'MACTYPE_BROWSER_GATE_TARGET', 'MACTYPE_BROWSER_GATE_PID_FILE',
+            'FIREFOX_CHILD_PAUSE_SECONDS = 10', 'MOZ_DEBUG_CHILD_PAUSE',
+            'firefoxChildPauseSeconds'
         )
 
     $browserGatePath = Join-Path $Root 'tools\service-probe\browser_launch_gate.cpp'

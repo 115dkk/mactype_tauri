@@ -11,6 +11,7 @@ const require = createRequire(
     path.resolve(import.meta.dirname, '../../control-center/package.json'),
 );
 const { chromium, firefox } = require('@playwright/test');
+const FIREFOX_CHILD_PAUSE_SECONDS = 10;
 
 function parseArguments(argv) {
   const result = {
@@ -285,6 +286,7 @@ async function capture(browserType, options, disabled, waitForReplacement) {
       options.executable || browserType.executablePath();
     environment.MACTYPE_BROWSER_GATE_PID_FILE = gatePidPath;
     environment.MACTYPE_BROWSER_GATE_TIMEOUT_MS = String(options.timeoutMs);
+    environment.MOZ_DEBUG_CHILD_PAUSE = String(FIREFOX_CHILD_PAUSE_SECONDS);
   }
   let browserServer = null;
   try {
@@ -474,6 +476,9 @@ const result = {
     : null,
   firefoxLaunchGate: options.engine === 'firefox'
     ? (options.firefoxLaunchGate ? path.basename(options.firefoxLaunchGate) : null)
+    : null,
+  firefoxChildPauseSeconds: options.engine === 'firefox'
+    ? (options.firefoxLaunchGate ? FIREFOX_CHILD_PAUSE_SECONDS : 0)
     : null,
   sourceFamily: options.source,
   replacementFamily: options.replacement,

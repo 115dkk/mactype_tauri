@@ -178,9 +178,11 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
     && !appInitConflict;
   const systemModesSupported = generalMutationAllowed
     && (serviceInstallation === "absent" || serviceInstallation === "current" || serviceInstallation === "outdated");
-  const activeProfile = query.has("legacy-applied")
-    ? "Profiles\\Pretendard forever.ini"
-    : "ini\\Default.ini";
+  const activeProfile = query.has("profile-unapplied")
+    ? null
+    : query.has("legacy-applied")
+      ? "Profiles\\Pretendard forever.ini"
+      : "ini\\Default.ini";
   const legacyRequest = query.get("legacy");
   const legacyForeign = legacyRequest === "foreign";
   const legacyUncertain = legacyRequest === "inaccessible";
@@ -259,7 +261,7 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
     systemInjectionActive: legacyTrayClear && (query.has("raw-active") ? true : ready && !appInitConflict),
     injectionReady: !query.has("profile-runtime-missing"),
     activeProfile,
-    expectedProfileDigest: expectedGalleryDigest,
+    expectedProfileDigest: activeProfile ? expectedGalleryDigest : null,
     sessionTargets: [],
   };
 }
@@ -398,8 +400,13 @@ export function transitionGalleryExecutionStatus(
     return withGalleryLegacyTrayPolicy({ ...current, legacyMacTray: null }, current.legacyTray);
   }
 
+  // Mirrors the backend contract: starting or publishing with no applied
+  // profile applies the bundled default profile first.
+  const defaultApplied = (action === "start" || action === "publish-profile") && !current.activeProfile;
   return withGalleryLegacyTrayPolicy({
     ...current,
+    activeProfile: defaultApplied ? "ini\\Default.ini" : current.activeProfile,
+    expectedProfileDigest: defaultApplied ? expectedGalleryDigest : current.expectedProfileDigest,
     systemInjectionActive: true,
     systemService: runningGalleryService(current.systemService),
     legacyMacTray: action === "migrate-from-legacy" && current.legacyMacTray

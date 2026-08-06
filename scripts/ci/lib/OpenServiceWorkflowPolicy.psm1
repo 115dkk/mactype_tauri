@@ -109,6 +109,43 @@ function Test-OpenServiceWorkflowPolicy {
             'GetStartupInfoW', '-juggler-pipe'
         )
 
+    $directWritePath = Join-Path $Root 'directwrite.cpp'
+    $directWrite = Test-RequiredTokens -Failures $failures -Path $directWritePath `
+        -MissingMessage 'directwrite.cpp is missing.' `
+        -TokenMessage "DirectWrite launch readiness is missing race guard '{0}'." `
+        -Tokens @(
+            'static DWORD WINAPI HookExistingDirectWriteFactory',
+            'static void ScheduleExistingDirectWriteFactoryHook',
+            'sharedFactoryHooked && ISHOOKED(FontFamily_GetFont)',
+            'ISHOOKED(Font_GetInformationalStrings)',
+            'ISHOOKED(CreateFontFace) && ISHOOKED(Factory_CreateFontFace)',
+            'SignalDirectWriteDiagnostic(L"hook-ready");'
+        )
+    if ($directWrite) {
+        $workerStart = $directWrite.IndexOf(
+            'static DWORD WINAPI HookExistingDirectWriteFactory'
+        )
+        $workerEnd = $directWrite.IndexOf(
+            'static void ScheduleExistingDirectWriteFactoryHook',
+            $workerStart
+        )
+        $readyIndex = $directWrite.IndexOf(
+            'SignalDirectWriteDiagnostic(L"hook-ready");'
+        )
+        if ($workerStart -lt 0 -or $workerEnd -le $workerStart -or
+            $readyIndex -le $workerStart -or $readyIndex -ge $workerEnd) {
+            $failures.Add(
+                'hook-ready must be published by the completed shared-factory worker.'
+            )
+        }
+        if ([regex]::Matches(
+                $directWrite,
+                [regex]::Escape('SignalDirectWriteDiagnostic(L"hook-ready");')
+            ).Count -ne 1) {
+            $failures.Add('DirectWrite hook-ready must have exactly one publisher.')
+        }
+    }
+
     $aclFixtureModulePath = Join-Path $Root 'scripts\ci\lib\OpenServiceAclFixture.psm1'
     $null = Test-RequiredTokens -Failures $failures -Path $aclFixtureModulePath `
         -MissingMessage 'scripts/ci/lib/OpenServiceAclFixture.psm1 is missing.' `

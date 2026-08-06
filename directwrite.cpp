@@ -1780,12 +1780,13 @@ void TriggerHook(ID2D1Factory* d2d_factory) {
 static DWORD WINAPI HookExistingDirectWriteFactory(LPVOID moduleReference)
 {
 	renderer_raii::UniqueModuleReference selfReference(static_cast<HMODULE>(moduleReference));
+	bool sharedFactoryHooked = false;
 	CComPtr<IUnknown> factory;
 	if (ORIG_DWriteCreateFactory && SUCCEEDED(ORIG_DWriteCreateFactory(
 		DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), &factory)))
 	{
 		IUnknown* rawFactory = factory;
-		hookDirectWrite(&rawFactory);
+		sharedFactoryHooked = hookDirectWrite(&rawFactory);
 		CComPtr<IDWriteFactory> sharedFactory;
 		if (SUCCEEDED(factory->QueryInterface(&sharedFactory)))
 			HookFactoryCustomFontCollection(sharedFactory, false);
@@ -1799,6 +1800,16 @@ static DWORD WINAPI HookExistingDirectWriteFactory(LPVOID moduleReference)
 			HookFactoryCustomFontCollection(isolatedFactory, true);
 	}
 	factory.Release();
+	if (sharedFactoryHooked && ISHOOKED(FontFamily_GetFont) &&
+		ISHOOKED(Font_GetInformationalStrings) &&
+		ISHOOKED(CreateFontFace) && ISHOOKED(Factory_CreateFontFace) &&
+		g_systemFontCollectionVtableSlot != nullptr)
+	{
+		// The launch gate may now release the image-entry thread. In
+		// particular, do not publish this from HookD2DDll: this worker is the
+		// step that attaches the object-method hooks to the shared factory.
+		SignalDirectWriteDiagnostic(L"hook-ready");
+	}
 	HMODULE rawSelfReference = selfReference.release();
 	FreeLibraryAndExitThread(rawSelfReference, 0);
 	return 0;
@@ -1999,9 +2010,6 @@ void HookD2DDll()
 	SET_VAL(ORIG_DWriteCreateFactory, DWFactory);
 	if (DWFactory) {
 		hook_demand_DWriteCreateFactory();
-		// Service injection can happen after a browser has created its shared
-		// factory. Hook that implementation once the loader lock is released.
-		ScheduleExistingDirectWriteFactoryHook();
 	}
 	if (D2D1Factory){
 		hook_demand_D2D1CreateFactory();
@@ -2012,10 +2020,12 @@ void HookD2DDll()
 	if (D2D1Context) {
 		hook_demand_D2D1CreateDeviceContext();
 	}
-	// The Firefox launch gate must not release user entry-point code merely
-	// because this routine was entered. Publish readiness only after every
-	// synchronous DirectWrite/Direct2D demand hook above has been installed.
-	SignalDirectWriteDiagnostic(L"hook-ready");
+	if (DWFactory) {
+		// Service injection can happen after a browser has created its shared
+		// factory. Hook that implementation once the loader lock is released.
+		// The worker publishes hook-ready only after the object hooks exist.
+		ScheduleExistingDirectWriteFactoryHook();
+	}
 }
 
 /*

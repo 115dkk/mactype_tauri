@@ -236,8 +236,11 @@ the parent under `DEBUG_ONLY_THIS_PROCESS` through the tested browser launch
 gate. The gate restores a temporary PE image-entry breakpoint after Windows
 has completed DLL initialization, detaches the debugger with the main thread
 still suspended, and resumes that thread only after the exact Firefox PID
-publishes a DirectWrite `hook-ready` event after all synchronous demand hooks
-are installed. No Firefox user entry-point code runs before injection is ready.
+publishes a DirectWrite `hook-ready` event only after the demand hooks and the
+shared-factory object hooks have both been installed. The object hooks are
+attached by the post-loader-lock worker, so the event is not published merely
+because that worker was scheduled. No Firefox user entry-point code runs before
+injection is ready.
 The gate also forwards Playwright's inherited CRT
 descriptors 3 and 4 for `-juggler-pipe`, restoring their inheritance flags with
 RAII after the real Firefox process is created. Mozilla's

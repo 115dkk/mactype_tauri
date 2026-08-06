@@ -487,14 +487,9 @@ try {
                 # PID-specific hook-ready event proves both demand hooks and
                 # the shared-factory object hooks are installed. Mozilla's child
                 # diagnostic pause then lets the service load each renderer
-                # before its normal sandbox starts. Firefox's supported
-                # non-shared font-list mode keeps final font creation in those
-                # injected processes instead of reusing the parent snapshot.
-                # The stock control uses the same mode, and exact pixel
-                # equality remains mandatory.
+                # before its normal sandbox starts. Exact pixel equality remains mandatory.
                 $browserProbeArguments += @(
-                    '--firefox-launch-gate', $BrowserLaunchGate,
-                    '--firefox-shared-font-list', 'disabled'
+                    '--firefox-launch-gate', $BrowserLaunchGate
                 )
             }
             & node @browserProbeArguments

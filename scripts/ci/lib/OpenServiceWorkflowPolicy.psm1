@@ -44,8 +44,7 @@ function Test-OpenServiceWorkflowPolicy {
             'open-core:', 'mactype-open-core', 'artifacts/open-core',
             'open-service-windows:', 'Test-OpenServiceWindows.ps1',
             'Build-ServiceRuntime.ps1', 'ServiceRuntimeRoot', 'hook x86/x64 markers',
-            'BrowserLaunchGate', 'browser-launch-gate64.exe',
-            '--firefox-shared-font-list disabled'
+            'BrowserLaunchGate', 'browser-launch-gate64.exe'
         )
 
     $hostedLifecyclePath = Join-Path $Root 'scripts\ci\Test-OpenServiceWindows.ps1'
@@ -60,8 +59,7 @@ function Test-OpenServiceWorkflowPolicy {
             '-RepairContext $stagedSetup', 'param($setupExecutable)',
             "`$sourceFamily = 'Cambria'",
             "'--chromium-font-data-service', 'disabled'",
-            "'--firefox-launch-gate', `$BrowserLaunchGate",
-            "'--firefox-shared-font-list', 'disabled'", 'replacementObserved',
+            "'--firefox-launch-gate', `$BrowserLaunchGate", 'replacementObserved',
             "-Verb 'publish-profile' -InputBytes `$profileA",
             "Assert-ActiveRuntimeProfile -ExpectedBytes `$profileA"
         )
@@ -96,8 +94,7 @@ function Test-OpenServiceWorkflowPolicy {
             'dom.ipc.processPrelaunch.enabled', 'firefoxLaunchGate',
             'MACTYPE_BROWSER_GATE_TARGET', 'MACTYPE_BROWSER_GATE_PID_FILE',
             'FIREFOX_CHILD_PAUSE_SECONDS = 10', 'MOZ_DEBUG_CHILD_PAUSE',
-            'firefoxChildPauseSeconds', 'gfx.e10s.font-list.shared',
-            'firefoxSharedFontList'
+            'firefoxChildPauseSeconds'
         )
 
     $browserGatePath = Join-Path $Root 'tools\service-probe\browser_launch_gate.cpp'
@@ -121,6 +118,10 @@ function Test-OpenServiceWorkflowPolicy {
             'static void ScheduleExistingDirectWriteFactoryHook',
             'sharedFactoryHooked && ISHOOKED(FontFamily_GetFont)',
             'ISHOOKED(Font_GetInformationalStrings)',
+            'class AliasedDWriteFont final',
+            'CComPtr<IDWriteFont> replacement_',
+            'CComPtr<IDWriteFont> source_',
+            'UnwrapAliasedDWriteFont',
             'ISHOOKED(CreateFontFace) && ISHOOKED(FontFace_GetFiles)',
             'ISHOOKED(FontFace_GetIndex) && ISHOOKED(Factory_CreateFontFace)',
             'SignalDirectWriteDiagnostic(L"hook-ready");'

@@ -249,15 +249,10 @@ descriptors 3 and 4 for `-juggler-pipe`, restoring their inheritance flags with
 RAII after the real Firefox process is created. Mozilla's
 `MOZ_DEBUG_CHILD_PAUSE=10` diagnostic also holds each content process before
 its normal sandbox starts so the service can load the renderer DLL; the stock
-control uses neither gate nor pause. The proof selects Firefox's supported
-non-shared font-list compatibility mode for both its stock and injected
-captures. This keeps final system-font construction in the renderer processes
-whose early injection is proven, rather than asking the default shared parent
-snapshot to preserve an application-external COM substitution across IPC. The
-selected gate, pause, and shared-font-list mode are recorded in the retained
-JSON. Renderer hook diagnostics remain mandatory before the first font lookup,
-and the active source pixels must still exactly match the independently rendered
-replacement pixels.
+control uses neither gate nor pause. The selected gate and pause are recorded
+in the retained JSON, renderer hook diagnostics are still mandatory before the
+first font lookup, and the active source pixels must still exactly match the
+independently rendered replacement pixels.
 
 Firefox builds its shared Windows font list by enumerating family indexes rather
 than resolving every CSS family through `FindFamilyName`. The rendering core
@@ -267,13 +262,18 @@ matched against the configured replacement family before Firefox records the
 face descriptor. The x86/x64 marker contract pins a source index while
 substitution is disabled and requires that same index to return the replacement
 font when substitution is active. The returned replacement preserves the
-source face's informational strings during Firefox's immediate PostScript-name
-validation, preventing duplicate replacement names from emptying the source
-family and falling through to an unrelated serif face. Firefox can retain that
-source `IDWriteFont` and later convert it to `LOGFONT` while reading font tables,
-so the GDI interop conversion hook applies the same replacement to retained font
-objects. The marker contract retains a source font while substitution is
-disabled and requires its later conversion to resolve to the replacement.
+source face's informational strings during Firefox's PostScript-name validation,
+preventing duplicate replacement names from emptying the source family and
+falling through to an unrelated serif face. Each result is a reference-counted
+`IDWriteFont` proxy that owns both source metadata and the native replacement;
+different source families that resolve to the same interned DirectWrite font
+therefore retain distinct identities across threads and later reuse. Native
+DirectWrite pointers are exposed only when an API requires them. Firefox can
+also retain a source `IDWriteFont` and later convert it to `LOGFONT` while
+reading font tables, so the GDI interop conversion hook applies the same
+replacement to retained font objects. The marker contract retains substituted
+metadata across a competing alias lookup and retains a source font while
+substitution is disabled, requiring both identities to remain correct.
 
 The native probe covers GDI and DirectWrite with injection before factory
 creation, injection after factory creation, multiple factories, worker-thread

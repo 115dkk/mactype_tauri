@@ -459,30 +459,34 @@ std::wstring ResolveIndexedDirectWriteFamily(
     return {};
   }
 
-  BOOL postscript_name_exists = FALSE;
-  IDWriteLocalizedStrings* raw_postscript_names = nullptr;
-  const HRESULT postscript_result = font->GetInformationalStrings(
-      DWRITE_INFORMATIONAL_STRING_POSTSCRIPT_NAME, &raw_postscript_names,
-      &postscript_name_exists);
-  UniqueCom<IDWriteLocalizedStrings> postscript_names(raw_postscript_names);
-  if (FAILED(postscript_result) || postscript_name_exists == FALSE ||
-      postscript_names == nullptr || postscript_names->GetCount() == 0) {
-    error = L"GetInformationalStrings failed for indexed collection";
+  auto read_postscript_name = [&](IDWriteFont* target,
+                                  std::wstring& value) -> bool {
+    BOOL exists = FALSE;
+    IDWriteLocalizedStrings* raw_names = nullptr;
+    const HRESULT names_result = target->GetInformationalStrings(
+        DWRITE_INFORMATIONAL_STRING_POSTSCRIPT_NAME, &raw_names, &exists);
+    UniqueCom<IDWriteLocalizedStrings> names(raw_names);
+    if (FAILED(names_result) || exists == FALSE || names == nullptr ||
+        names->GetCount() == 0) {
+      error = L"GetInformationalStrings failed for indexed collection";
+      return false;
+    }
+    UINT32 length = 0;
+    if (FAILED(names->GetStringLength(0, &length))) {
+      error = L"GetStringLength failed for indexed collection";
+      return false;
+    }
+    value.assign(static_cast<std::size_t>(length) + 1U, L'\0');
+    if (FAILED(names->GetString(0, value.data(), length + 1U))) {
+      error = L"GetString failed for indexed collection";
+      return false;
+    }
+    value.resize(length);
+    return true;
+  };
+  if (!read_postscript_name(font.get(), postscript_name)) {
     return {};
   }
-  UINT32 postscript_length = 0;
-  if (FAILED(postscript_names->GetStringLength(0, &postscript_length))) {
-    error = L"GetStringLength failed for indexed collection";
-    return {};
-  }
-  postscript_name.assign(
-      static_cast<std::size_t>(postscript_length) + 1U, L'\0');
-  if (FAILED(postscript_names->GetString(
-          0, postscript_name.data(), postscript_length + 1U))) {
-    error = L"GetString failed for indexed collection";
-    return {};
-  }
-  postscript_name.resize(postscript_length);
 
   if (retained_face != nullptr) {
     IDWriteFontFace* raw_face = nullptr;
@@ -705,15 +709,48 @@ FontSubstitutionObservation ObserveFontSubstitution(
         replacement_family, directwrite_factory, indexed_replacement, false,
         repeated_disabled_replacement_postscript_name, nullptr, nullptr, error);
   }
+  UniqueCom<IDWriteFont> retained_active_source;
   indexed.active_source_family =
       ResolveIndexedDirectWriteFamily(source_family, directwrite_factory,
-          indexed_source, false, indexed.active_source_postscript_name, nullptr,
+          indexed_source, false, indexed.active_source_postscript_name,
+          &retained_active_source,
           nullptr, error);
   std::wstring repeated_active_source_postscript_name;
   const std::wstring repeated_active_indexed_source =
       ResolveIndexedDirectWriteFamily(source_family, directwrite_factory,
           indexed_source, false, repeated_active_source_postscript_name,
           nullptr, nullptr, error);
+  UINT32 competing_index = 0;
+  std::wstring competing_postscript_name;
+  std::wstring const competing_family =
+      _wcsicmp(std::wstring(source_family).c_str(), L"Impact") == 0
+          ? L"Cambria"
+          : L"Impact";
+  ResolveIndexedDirectWriteFamily(
+      competing_family, directwrite_factory, competing_index, true,
+      competing_postscript_name, nullptr, nullptr, error);
+  if (retained_active_source != nullptr) {
+    BOOL exists = FALSE;
+    IDWriteLocalizedStrings* raw_names = nullptr;
+    const HRESULT names_result = retained_active_source->GetInformationalStrings(
+        DWRITE_INFORMATIONAL_STRING_POSTSCRIPT_NAME, &raw_names, &exists);
+    UniqueCom<IDWriteLocalizedStrings> names(raw_names);
+    if (SUCCEEDED(names_result) && exists != FALSE && names != nullptr &&
+        names->GetCount() != 0) {
+      UINT32 length = 0;
+      if (SUCCEEDED(names->GetStringLength(0, &length))) {
+        indexed.active_retained_source_postscript_name.assign(
+            static_cast<std::size_t>(length) + 1U, L'\0');
+        if (SUCCEEDED(names->GetString(
+                0, indexed.active_retained_source_postscript_name.data(),
+                length + 1U))) {
+          indexed.active_retained_source_postscript_name.resize(length);
+        } else {
+          indexed.active_retained_source_postscript_name.clear();
+        }
+      }
+    }
+  }
   indexed.active_pinned_source_family = ResolveDirectWriteFontObject(
       pinned_disabled_source.get(), directwrite_factory, error);
   indexed.active_pinned_source_descriptor_family =
@@ -746,12 +783,17 @@ FontSubstitutionObservation ObserveFontSubstitution(
   indexed.retained_descriptor_replacement_observed =
       _wcsicmp(indexed.active_pinned_source_descriptor_family.c_str(),
                indexed.disabled_replacement_family.c_str()) == 0;
+  indexed.retained_metadata_stable =
+      !indexed.active_retained_source_postscript_name.empty() &&
+      _wcsicmp(indexed.active_retained_source_postscript_name.c_str(),
+               indexed.active_source_postscript_name.c_str()) == 0;
   indexed.replacement_observed =
       indexed.controls_stable &&
       _wcsicmp(indexed.active_source_family.c_str(),
                indexed.disabled_replacement_family.c_str()) == 0 &&
       indexed.retained_object_replacement_observed &&
-      indexed.retained_descriptor_replacement_observed;
+      indexed.retained_descriptor_replacement_observed &&
+      indexed.retained_metadata_stable;
   result.direct_write_custom_collection = observe_direct_write(true);
   if (result.direct_write.active_source_family.empty() ||
       indexed.active_source_family.empty() ||

@@ -43,6 +43,9 @@ function Test-Marker([string] $Executable, [string] $Architecture) {
     if (-not $result.fontSubstitution.directWriteIndexedCollection.replacementObserved) {
         throw "$Architecture marker loaded MacType but did not substitute the indexed DirectWrite collection face."
     }
+    if (-not $result.fontSubstitution.directWriteIndexedCollection.retainedMetadataStable) {
+        throw "$Architecture marker lost retained DirectWrite source metadata identity."
+    }
     if (-not $result.fontSubstitution.directWriteCustomCollection.replacementObserved) {
         throw "$Architecture marker loaded MacType but did not substitute through a custom DirectWrite font-set collection."
     }

@@ -71,8 +71,17 @@ static void* g_customFontFaceReferenceCreateFontFaceWithSimulations = nullptr;
 static void* g_fontSetFontCreateFontFace = nullptr;
 static void* g_fontSetFontFaceReferenceCreateFontFace = nullptr;
 static void* g_fontSetFontFaceReferenceCreateFontFaceWithSimulations = nullptr;
+static void SignalDirectWriteDiagnostic(WCHAR const *stage);
+static void SignalDirectWriteFamilyDiagnostic(
+	WCHAR const *stagePrefix, WCHAR const *familyName);
 
 namespace {
+
+struct __declspec(uuid("A8DBE02B-C9D8-4C51-BE27-3243C7E59085"))
+	IAliasedDWriteFont : IUnknown
+{
+	virtual IDWriteFont* STDMETHODCALLTYPE GetReplacementFont() noexcept = 0;
+};
 
 struct FontFaceAliasEntry {
 	IDWriteFontFace3* face = nullptr;
@@ -265,6 +274,142 @@ static void HookFontFaceFamilyNames(
 	HOOK(fontFace, FontFace3_GetFamilyNames, 40);
 }
 
+class AliasedDWriteFont final : public IDWriteFont, public IAliasedDWriteFont {
+public:
+	AliasedDWriteFont(
+		IDWriteFont* replacement, IDWriteFont* source, std::wstring family)
+		: replacement_(replacement), source_(source), family_(std::move(family))
+	{
+	}
+
+	HRESULT STDMETHODCALLTYPE QueryInterface(
+		REFIID iid, void** object) override
+	{
+		if (object == nullptr)
+			return E_POINTER;
+		*object = nullptr;
+		if (iid == __uuidof(IUnknown) || iid == __uuidof(IDWriteFont))
+			*object = static_cast<IDWriteFont*>(this);
+		else if (iid == __uuidof(IAliasedDWriteFont))
+			*object = static_cast<IAliasedDWriteFont*>(this);
+		else
+			// Delegating newer interfaces would expose the interned replacement
+			// object and discard the source-family identity carried by this proxy.
+			return E_NOINTERFACE;
+		AddRef();
+		return S_OK;
+	}
+
+	ULONG STDMETHODCALLTYPE AddRef() override
+	{
+		return ++referenceCount_;
+	}
+
+	ULONG STDMETHODCALLTYPE Release() override
+	{
+		ULONG const remaining = --referenceCount_;
+		if (remaining == 0)
+			delete this;
+		return remaining;
+	}
+
+	HRESULT STDMETHODCALLTYPE GetFontFamily(
+		IDWriteFontFamily** fontFamily) override
+	{
+		return source_->GetFontFamily(fontFamily);
+	}
+
+	DWRITE_FONT_WEIGHT STDMETHODCALLTYPE GetWeight() override
+	{
+		return replacement_->GetWeight();
+	}
+
+	DWRITE_FONT_STRETCH STDMETHODCALLTYPE GetStretch() override
+	{
+		return replacement_->GetStretch();
+	}
+
+	DWRITE_FONT_STYLE STDMETHODCALLTYPE GetStyle() override
+	{
+		return replacement_->GetStyle();
+	}
+
+	BOOL STDMETHODCALLTYPE IsSymbolFont() override
+	{
+		return replacement_->IsSymbolFont();
+	}
+
+	HRESULT STDMETHODCALLTYPE GetFaceNames(
+		IDWriteLocalizedStrings** names) override
+	{
+		return source_->GetFaceNames(names);
+	}
+
+	HRESULT STDMETHODCALLTYPE GetInformationalStrings(
+		DWRITE_INFORMATIONAL_STRING_ID informationalStringID,
+		IDWriteLocalizedStrings** informationalStrings,
+		BOOL* exists) override
+	{
+		HRESULT const result = source_->GetInformationalStrings(
+			informationalStringID, informationalStrings, exists);
+		if (SUCCEEDED(result) && exists != nullptr && *exists)
+		{
+			SignalDirectWriteDiagnostic(L"family-font-metadata");
+			SignalDirectWriteFamilyDiagnostic(
+				L"family-font-metadata", family_.c_str());
+		}
+		return result;
+	}
+
+	DWRITE_FONT_SIMULATIONS STDMETHODCALLTYPE GetSimulations() override
+	{
+		return replacement_->GetSimulations();
+	}
+
+	void STDMETHODCALLTYPE GetMetrics(DWRITE_FONT_METRICS* fontMetrics) override
+	{
+		replacement_->GetMetrics(fontMetrics);
+	}
+
+	HRESULT STDMETHODCALLTYPE HasCharacter(
+		UINT32 unicodeValue, BOOL* exists) override
+	{
+		return replacement_->HasCharacter(unicodeValue, exists);
+	}
+
+	HRESULT STDMETHODCALLTYPE CreateFontFace(
+		IDWriteFontFace** fontFace) override
+	{
+		HRESULT const result = replacement_->CreateFontFace(fontFace);
+		if (SUCCEEDED(result) && fontFace != nullptr && *fontFace != nullptr)
+		{
+			CComPtr<IDWriteFontFace3> fontFace3;
+			if (SUCCEEDED((*fontFace)->QueryInterface(&fontFace3)))
+				HookFontFaceFamilyNames(fontFace3, family_);
+		}
+		return result;
+	}
+
+	IDWriteFont* STDMETHODCALLTYPE GetReplacementFont() noexcept override
+	{
+		return replacement_;
+	}
+
+private:
+	std::atomic<ULONG> referenceCount_{1};
+	CComPtr<IDWriteFont> replacement_;
+	CComPtr<IDWriteFont> source_;
+	std::wstring family_;
+};
+
+static IDWriteFont* UnwrapAliasedDWriteFont(
+	IDWriteFont* font, CComPtr<IAliasedDWriteFont>& alias) noexcept
+{
+	if (font != nullptr && SUCCEEDED(font->QueryInterface(&alias)) && alias)
+		return alias->GetReplacementFont();
+	return font;
+}
+
 } // namespace
 
 enum class CollectionFontHookKind
@@ -296,9 +441,6 @@ static void HookFactoryCustomFontCollection(
 	IDWriteFactory *factory, bool isolated);
 static void HookSystemFontCollection(
 	IDWriteFontCollection *fontCollection);
-static void SignalDirectWriteDiagnostic(WCHAR const *stage);
-static void SignalDirectWriteFamilyDiagnostic(
-	WCHAR const *stagePrefix, WCHAR const *familyName);
 
 struct ComMethodHooker {
 	// The target function if it has been hooked
@@ -2292,10 +2434,18 @@ HRESULT WINAPI IMPL_FontFamily_GetFont(
 		return result;
 	}
 
+	std::unique_ptr<AliasedDWriteFont> aliasedFont(
+		new (std::nothrow) AliasedDWriteFont(
+			replacementFont, originalFont, originalFamily));
+	if (!aliasedFont)
+	{
+		*font = originalFont.Detach();
+		return result;
+	}
 	g_pendingDWriteFamilyAlias = originalFamily;
 	RememberPendingDWriteFontMetadata(
-		replacementFont, originalFont, originalFamily);
-	*font = replacementFont.Detach();
+		aliasedFont.get(), originalFont, originalFamily);
+	*font = aliasedFont.release();
 	SignalDirectWriteDiagnostic(L"family-font-resolved");
 	SignalDirectWriteFamilyDiagnostic(L"family-font-resolved", originalFamily);
 	return result;
@@ -2307,8 +2457,11 @@ HRESULT WINAPI IMPL_GdiInterop_ConvertFontToLOGFONT(
 	LOGFONTW* logFont,
 	BOOL* isSystemFont)
 {
+	CComPtr<IAliasedDWriteFont> aliasedFont;
+	IDWriteFont* const resolvedFont =
+		UnwrapAliasedDWriteFont(font, aliasedFont);
 	HRESULT const result = ORIG_GdiInterop_ConvertFontToLOGFONT(
-		self, font, logFont, isSystemFont);
+		self, resolvedFont, logFont, isSystemFont);
 	if (FAILED(result) || logFont == nullptr || isSystemFont == nullptr ||
 		!*isSystemFont)
 		return result;

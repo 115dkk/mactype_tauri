@@ -152,6 +152,10 @@ std::string BuildSnapshotJson(const ProbeOptions& options,
        << EscapeJson(font_substitution.direct_write_indexed_collection
                          .disabled_replacement_postscript_name)
        << "\",\n"
+       << "      \"activeRetainedSourcePostScriptName\": \""
+       << EscapeJson(font_substitution.direct_write_indexed_collection
+                         .active_retained_source_postscript_name)
+       << "\",\n"
        << "      \"activePinnedSourceFamily\": \""
        << EscapeJson(font_substitution.direct_write_indexed_collection
                           .active_pinned_source_family)
@@ -162,6 +166,12 @@ std::string BuildSnapshotJson(const ProbeOptions& options,
        << "\",\n"
        << "      \"controlsStable\": "
        << (font_substitution.direct_write_indexed_collection.controls_stable
+               ? "true"
+               : "false")
+       << ",\n"
+       << "      \"retainedMetadataStable\": "
+       << (font_substitution.direct_write_indexed_collection
+                    .retained_metadata_stable
                ? "true"
                : "false")
        << ",\n"

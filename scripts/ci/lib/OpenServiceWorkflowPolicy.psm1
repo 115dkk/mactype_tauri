@@ -56,6 +56,7 @@ function Test-OpenServiceWorkflowPolicy {
             'x86 and x64 marker telemetry is not bound to the same runtime generation',
             'OpenServiceAclFixture.psm1', 'Invoke-OpenServiceAclRepairFixture',
             '-RepairContext $stagedSetup', 'param($setupExecutable)',
+            "`$sourceFamily = 'Cambria'",
             "'--chromium-font-data-service', 'disabled'", 'replacementObserved',
             "-Verb 'publish-profile' -InputBytes `$profileA",
             "Assert-ActiveRuntimeProfile -ExpectedBytes `$profileA"

@@ -1618,6 +1618,7 @@ bool hookFontCreation(CComPtr<IDWriteFactory>& pDWriteFactory) {
 		}
 	}
 	if (FAILED(fontcollection->GetFontFamily(0, &ffamily))) FAILEXIT;
+	HOOK(ffamily, FontFamily_GetFont, 5);
 	if (FAILED(ffamily->GetFont(0, &dfont))) FAILEXIT;
 
 	CComPtr<IDWriteFont3> dfont3 = nullptr;
@@ -2113,6 +2114,79 @@ HRESULT WINAPI IMPL_CreateFontFace(IDWriteFont* self,
 			HookFontFaceFamilyNames(fontFace3, requestedAlias);
 	}
 	return ret;
+}
+
+HRESULT WINAPI IMPL_FontFamily_GetFont(
+	IDWriteFontFamily* self, UINT32 index, IDWriteFont** font)
+{
+	if (font == nullptr)
+		return E_POINTER;
+	*font = nullptr;
+	CComPtr<IDWriteFont> originalFont;
+	HRESULT const result = ORIG_FontFamily_GetFont(
+		self, index, &originalFont);
+	if (FAILED(result) || originalFont == nullptr)
+		return result;
+	if (g_pGdiInterop == nullptr)
+	{
+		*font = originalFont.Detach();
+		return result;
+	}
+
+	LOGFONT logFont = {};
+	BOOL isSystemFont = FALSE;
+	if (FAILED(g_pGdiInterop->ConvertFontToLOGFONT(
+		originalFont, &logFont, &isSystemFont)) || !isSystemFont)
+	{
+		*font = originalFont.Detach();
+		return result;
+	}
+	WCHAR originalFamily[LF_FACESIZE] = {};
+	StringCchCopyW(
+		originalFamily, ARRAYSIZE(originalFamily), logFont.lfFaceName);
+	SignalDirectWriteDiagnostic(L"family-font-called");
+	SignalDirectWriteFamilyDiagnostic(L"family-font", originalFamily);
+
+	const CGdippSettings* settings = CGdippSettings::GetInstance();
+	if (!settings->CopyForceFont(logFont, logFont))
+	{
+		*font = originalFont.Detach();
+		return result;
+	}
+
+	CComPtr<IDWriteFontCollection> collection;
+	CComPtr<IDWriteFontFamily> replacementFamily;
+	UINT32 replacementIndex = 0;
+	BOOL replacementExists = FALSE;
+	if (FAILED(self->GetFontCollection(&collection)) || collection == nullptr ||
+		ORIG_FontCollection_FindFamilyName == nullptr ||
+		FAILED(ORIG_FontCollection_FindFamilyName(
+			collection, logFont.lfFaceName,
+			&replacementIndex, &replacementExists)) ||
+		!replacementExists ||
+		FAILED(collection->GetFontFamily(
+			replacementIndex, &replacementFamily)) ||
+		replacementFamily == nullptr)
+	{
+		*font = originalFont.Detach();
+		return result;
+	}
+
+	CComPtr<IDWriteFont> replacementFont;
+	if (FAILED(replacementFamily->GetFirstMatchingFont(
+		originalFont->GetWeight(), originalFont->GetStretch(),
+		originalFont->GetStyle(), &replacementFont)) ||
+		replacementFont == nullptr)
+	{
+		*font = originalFont.Detach();
+		return result;
+	}
+
+	g_pendingDWriteFamilyAlias = originalFamily;
+	*font = replacementFont.Detach();
+	SignalDirectWriteDiagnostic(L"family-font-resolved");
+	SignalDirectWriteFamilyDiagnostic(L"family-font-resolved", originalFamily);
+	return result;
 }
 
 HRESULT WINAPI IMPL_Factory_CreateFontFace(

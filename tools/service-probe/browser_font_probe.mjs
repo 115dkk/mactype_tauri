@@ -172,6 +172,8 @@ function collectDirectWriteDiagnostics(diagnosticNamespace) {
     'system-hook-installed',
     'shared-factory-hook-installed',
     'isolated-factory-hook-installed',
+    'family-font-called',
+    'family-font-resolved',
     'find-called',
     'substitution-resolved',
     'face-called',
@@ -184,6 +186,8 @@ function collectDirectWriteDiagnostics(diagnosticNamespace) {
     ...['cambria', 'impact', 'courier-new'].flatMap((family) => [
       `find-${family}`,
       `resolved-${family}`,
+      `family-font-${family}`,
+      `family-font-resolved-${family}`,
       `face-${family}`,
       `face-resolved-${family}`,
       `face-created-${family}`,

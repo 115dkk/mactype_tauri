@@ -248,6 +248,15 @@ in the retained JSON, renderer hook diagnostics are still mandatory before the
 first font lookup, and the active source pixels must still exactly match the
 independently rendered replacement pixels.
 
+Firefox builds its shared Windows font list by enumerating family indexes rather
+than resolving every CSS family through `FindFamilyName`. The rendering core
+therefore hooks the system `IDWriteFontFamily::GetFont` implementation as well:
+the source family name and index remain stable, while weight/stretch/style are
+matched against the configured replacement family before Firefox records the
+face descriptor. The x86/x64 marker contract pins a source index while
+substitution is disabled and requires that same index to return the replacement
+font when substitution is active.
+
 The native probe covers GDI and DirectWrite with injection before factory
 creation, injection after factory creation, multiple factories, worker-thread
 creation, child renderer processes, profile reload, missing profile, damaged

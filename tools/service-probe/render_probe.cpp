@@ -279,6 +279,74 @@ std::wstring ResolveDirectWriteFamily(const std::wstring_view family,
   return resolved.lfFaceName;
 }
 
+std::wstring ResolveIndexedDirectWriteFamily(
+    const std::wstring_view family, void* directwrite_factory,
+    UINT32& pinned_index, const bool discover_index, std::wstring& error) {
+  IDWriteFactory* factory = static_cast<IDWriteFactory*>(directwrite_factory);
+  IDWriteFactory* raw_factory = nullptr;
+  UniqueCom<IDWriteFactory> owned_factory;
+  if (factory == nullptr) {
+    const HRESULT factory_result = DWriteCreateFactory(
+        DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+        reinterpret_cast<IUnknown**>(&raw_factory));
+    owned_factory.reset(raw_factory);
+    if (FAILED(factory_result) || owned_factory == nullptr) {
+      error = L"DWriteCreateFactory failed for indexed collection";
+      return {};
+    }
+    factory = owned_factory.get();
+  }
+
+  IDWriteFontCollection* raw_collection = nullptr;
+  const HRESULT collection_result =
+      factory->GetSystemFontCollection(&raw_collection);
+  UniqueCom<IDWriteFontCollection> collection(raw_collection);
+  if (FAILED(collection_result) || collection == nullptr) {
+    error = L"GetSystemFontCollection failed for indexed collection";
+    return {};
+  }
+  if (discover_index) {
+    BOOL exists = FALSE;
+    const std::wstring family_name(family);
+    if (FAILED(collection->FindFamilyName(family_name.c_str(), &pinned_index,
+                                          &exists)) ||
+        exists == FALSE) {
+      error = L"FindFamilyName failed for indexed collection";
+      return {};
+    }
+  }
+
+  IDWriteFontFamily* raw_family = nullptr;
+  const HRESULT family_result =
+      collection->GetFontFamily(pinned_index, &raw_family);
+  UniqueCom<IDWriteFontFamily> font_family(raw_family);
+  if (FAILED(family_result) || font_family == nullptr) {
+    error = L"GetFontFamily failed for indexed collection";
+    return {};
+  }
+  IDWriteFont* raw_font = nullptr;
+  const HRESULT font_result = font_family->GetFont(0, &raw_font);
+  UniqueCom<IDWriteFont> font(raw_font);
+  if (FAILED(font_result) || font == nullptr) {
+    error = L"GetFont failed for indexed collection";
+    return {};
+  }
+
+  IDWriteGdiInterop* raw_interop = nullptr;
+  const HRESULT interop_result = factory->GetGdiInterop(&raw_interop);
+  UniqueCom<IDWriteGdiInterop> interop(raw_interop);
+  LOGFONTW resolved{};
+  BOOL is_system_font = FALSE;
+  if (FAILED(interop_result) || interop == nullptr ||
+      FAILED(interop->ConvertFontToLOGFONT(font.get(), &resolved,
+                                          &is_system_font)) ||
+      is_system_font == FALSE) {
+    error = L"ConvertFontToLOGFONT failed for indexed collection";
+    return {};
+  }
+  return resolved.lfFaceName;
+}
+
 }  // namespace
 
 void* CreateDirectWriteFactory(const bool isolated, std::wstring& error) {
@@ -454,8 +522,50 @@ FontSubstitutionObservation ObserveFontSubstitution(
     return observation;
   };
   result.direct_write = observe_direct_write(false);
+  DirectWriteSubstitutionObservation& indexed =
+      result.direct_write_indexed_collection;
+  UINT32 indexed_source = 0;
+  UINT32 indexed_replacement = 0;
+  std::wstring repeated_disabled_indexed_source;
+  std::wstring repeated_disabled_indexed_replacement;
+  {
+    FontSubstitutionSwitch disabled;
+    indexed.disabled_source_family =
+        ResolveIndexedDirectWriteFamily(source_family, directwrite_factory,
+                                        indexed_source, true, error);
+    indexed.disabled_replacement_family =
+        ResolveIndexedDirectWriteFamily(replacement_family, directwrite_factory,
+                                        indexed_replacement, true, error);
+    repeated_disabled_indexed_source = ResolveIndexedDirectWriteFamily(
+        source_family, directwrite_factory, indexed_source, false, error);
+    repeated_disabled_indexed_replacement = ResolveIndexedDirectWriteFamily(
+        replacement_family, directwrite_factory, indexed_replacement, false,
+        error);
+  }
+  indexed.active_source_family =
+      ResolveIndexedDirectWriteFamily(source_family, directwrite_factory,
+                                      indexed_source, false, error);
+  const std::wstring repeated_active_indexed_source =
+      ResolveIndexedDirectWriteFamily(source_family, directwrite_factory,
+                                      indexed_source, false, error);
+  indexed.controls_stable =
+      !indexed.disabled_source_family.empty() &&
+      !indexed.disabled_replacement_family.empty() &&
+      _wcsicmp(indexed.disabled_source_family.c_str(),
+          repeated_disabled_indexed_source.c_str()) == 0 &&
+      _wcsicmp(indexed.disabled_replacement_family.c_str(),
+          repeated_disabled_indexed_replacement.c_str()) == 0 &&
+      _wcsicmp(indexed.active_source_family.c_str(),
+          repeated_active_indexed_source.c_str()) == 0 &&
+      _wcsicmp(indexed.disabled_source_family.c_str(),
+               indexed.disabled_replacement_family.c_str()) != 0;
+  indexed.replacement_observed =
+      indexed.controls_stable &&
+      _wcsicmp(indexed.active_source_family.c_str(),
+               indexed.disabled_replacement_family.c_str()) == 0;
   result.direct_write_custom_collection = observe_direct_write(true);
   if (result.direct_write.active_source_family.empty() ||
+      indexed.active_source_family.empty() ||
       result.direct_write_custom_collection.active_source_family.empty()) {
     result.active_source_fingerprint.clear();
   }

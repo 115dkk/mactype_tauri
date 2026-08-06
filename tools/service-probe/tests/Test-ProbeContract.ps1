@@ -132,6 +132,13 @@ if ($result.fontSubstitution.directWrite.disabledSourceFamily -ne 'Arial' -or
 if (-not $result.fontSubstitution.directWrite.controlsStable) {
     throw 'Repeated DirectWrite family observations must be stable.'
 }
+if ($result.fontSubstitution.directWriteIndexedCollection.disabledSourceFamily -ne 'Arial' -or
+    $result.fontSubstitution.directWriteIndexedCollection.disabledReplacementFamily -ne 'Courier New') {
+    throw 'Indexed DirectWrite collection controls did not resolve the requested font families.'
+}
+if (-not $result.fontSubstitution.directWriteIndexedCollection.controlsStable) {
+    throw 'Indexed DirectWrite collection controls must remain distinct.'
+}
 if ($result.fontSubstitution.directWriteCustomCollection.disabledSourceFamily -ne 'Arial' -or
     $result.fontSubstitution.directWriteCustomCollection.disabledReplacementFamily -ne 'Courier New') {
     throw 'Custom DirectWrite collection controls did not resolve the requested font families.'
@@ -150,6 +157,10 @@ if (-not $result.mactypeModuleLoaded) {
     if ($result.fontSubstitution.directWrite.activeSourceFamily -ne 'Arial' -or
         $result.fontSubstitution.directWrite.replacementObserved) {
         throw 'A stock Windows probe must not report a DirectWrite font substitution.'
+    }
+    if ($result.fontSubstitution.directWriteIndexedCollection.activeSourceFamily -ne 'Arial' -or
+        $result.fontSubstitution.directWriteIndexedCollection.replacementObserved) {
+        throw 'A stock Windows probe must not report an indexed DirectWrite collection substitution.'
     }
     if ($result.fontSubstitution.directWriteCustomCollection.activeSourceFamily -ne 'Arial' -or
         $result.fontSubstitution.directWriteCustomCollection.replacementObserved) {

@@ -230,6 +230,12 @@ HOOK_MANUALLY(HRESULT, CreateFontFace, (
 			  __out IDWriteFontFace** fontFace
 			  ), (self, fontFace))
 
+HOOK_MANUALLY(HRESULT, FontFamily_GetFont, (
+			  IDWriteFontFamily* self,
+			  UINT32 index,
+			  __out IDWriteFont** font
+			  ), (self, index, font))
+
 HOOK_MANUALLY(HRESULT, Factory_CreateFontFace, (
 			  IDWriteFactory* self,
 			  DWRITE_FONT_FACE_TYPE fontFaceType,

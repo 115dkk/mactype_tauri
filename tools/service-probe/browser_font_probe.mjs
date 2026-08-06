@@ -272,6 +272,16 @@ async function capture(browserType, options, disabled, waitForReplacement) {
   environment.MACTYPE_FORCE_LOAD = '1';
   const diagnosticNamespace = `browser-${randomUUID()}`;
   environment.MACTYPE_DIRECTWRITE_DIAGNOSTICS = diagnosticNamespace;
+  if (options.engine === 'firefox' && options.injectionHealth) {
+    const outputPath = path.resolve(options.output);
+    await mkdir(path.dirname(outputPath), { recursive: true });
+    const phase = disabled ? 'disabled' : 'active';
+    environment.MOZ_LOG = 'fontlist:5';
+    environment.MOZ_LOG_FILE = path.join(
+      path.dirname(outputPath),
+      `${path.basename(outputPath, path.extname(outputPath))}.${phase}.fontlist.log`,
+    );
+  }
   delete environment.MOZ_DEBUG_CHILD_PAUSE;
   if (disabled) environment.MACTYPE_FONTSUBSTITUTES_ENV = '1';
   else delete environment.MACTYPE_FONTSUBSTITUTES_ENV;

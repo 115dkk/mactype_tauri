@@ -484,7 +484,8 @@ try {
             } elseif ($engine -eq 'firefox') {
                 # Break the Firefox parent at its PE image entry point, detach
                 # with its main thread suspended, and resume only after its
-                # PID-specific hook event exists. Mozilla's child diagnostic
+                # PID-specific hook-ready event proves synchronous demand hooks
+                # are installed. Mozilla's child diagnostic
                 # pause then lets the service load each renderer before its
                 # normal sandbox starts. Exact pixel equality remains mandatory.
                 $browserProbeArguments += @(

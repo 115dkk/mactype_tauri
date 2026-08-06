@@ -1991,6 +1991,10 @@ void HookD2DDll()
 	if (D2D1Context) {
 		hook_demand_D2D1CreateDeviceContext();
 	}
+	// The Firefox launch gate must not release user entry-point code merely
+	// because this routine was entered. Publish readiness only after every
+	// synchronous DirectWrite/Direct2D demand hook above has been installed.
+	SignalDirectWriteDiagnostic(L"hook-ready");
 }
 
 /*

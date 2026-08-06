@@ -64,7 +64,7 @@ try {
     $gateEvent = [System.Threading.EventWaitHandle]::new(
         $false,
         [System.Threading.EventResetMode]::ManualReset,
-        "Local\MacType.$gateNamespace.pid-$gatedPid.hook-entered"
+        "Local\MacType.$gateNamespace.pid-$gatedPid.hook-ready"
     )
     $gateEvent.Set() | Out-Null
     if (-not $gate.WaitForExit(5000)) { throw 'Browser launch gate did not resume and reap its child.' }

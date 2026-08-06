@@ -75,7 +75,7 @@ bool WaitForHookEvent(const std::wstring& diagnostic_namespace,
   wchar_t event_name[256] = {};
   if (FAILED(StringCchPrintfW(
           event_name, ARRAYSIZE(event_name),
-          L"Local\\MacType.%s.pid-%lu.hook-entered",
+          L"Local\\MacType.%s.pid-%lu.hook-ready",
           diagnostic_namespace.c_str(), process_id))) {
     return false;
   }

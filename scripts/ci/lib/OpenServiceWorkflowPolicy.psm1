@@ -104,7 +104,7 @@ function Test-OpenServiceWorkflowPolicy {
         -Tokens @(
             'DEBUG_ONLY_THIS_PROCESS', 'AddressOfEntryPoint',
             'RestoreAndRewind', 'DebugActiveProcessStop',
-            'pid-%lu.hook-entered', 'SuspendMainThread',
+            'pid-%lu.hook-ready', 'SuspendMainThread',
             'ScopedInheritableDescriptor', '_get_osfhandle',
             'GetStartupInfoW', '-juggler-pipe'
         )

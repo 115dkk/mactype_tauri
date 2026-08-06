@@ -168,6 +168,7 @@ function collectDirectWriteDiagnostics(diagnosticNamespace) {
   const roles = ['main', 'renderer', 'utility', 'gpu', 'other'];
   const stages = [
     'hook-entered',
+    'hook-ready',
     'system-hook-installed',
     'shared-factory-hook-installed',
     'isolated-factory-hook-installed',

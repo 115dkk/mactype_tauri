@@ -59,7 +59,7 @@ below wherever the two conflict.
 4. Cherry-pick ONLY the product commits onto `codex/upstream-pr-prep`
    (its tree tracks main's frontend, so picks apply clean), then push.
 5. Manually dispatch the one-click build:
-   `gh workflow run build.yml --ref codex/upstream-pr-prep -f version=0.1.0`.
+   `gh workflow run build.yml --repo 115dkk/mactype_tauri --ref codex/upstream-pr-prep -f version=0.1.0`.
 
 ## Upstream hygiene — what never crosses over
 
@@ -92,6 +92,12 @@ cherry-picked. Docs/CI edits get their own commits that simply are not picked.
 
 ## Repo quirks worth knowing
 
+- **`gh` defaults to the UPSTREAM repo** (snowie2000/mactype, via the
+  `upstream` remote), not the fork. Every `gh pr`/`gh issue`/`gh api`/
+  `gh workflow` call MUST pass `--repo 115dkk/mactype_tauri`. A forgotten
+  flag aims PRs, comments, or workflow dispatches at the upstream project,
+  which the rules above forbid. Never "fix" this by removing or reordering
+  the `upstream` remote; pass the flag.
 - `pnpm` is not on PATH; use corepack (`corepack pnpm …`) or the shim dir.
 - `pnpm generate:settings`/`pnpm build` rewrite three generated files with
   line-ending-only noise (`generated_settings.rs`, `generated/settings.ts`,

@@ -40,6 +40,7 @@ const executionStateGallery = [
   { id: "initializing", query: "system-service=initializing", expected: "Running" },
   { id: "health-unknown", query: "system-service=unknown-health", expected: "Running" },
   { id: "stopped", query: "system-service=ready&service-runtime=stopped", expected: "Stopped" },
+  { id: "stopped-no-profile", query: "system-service=ready&service-runtime=stopped&profile-unapplied=1", expected: "No profile has been applied yet" },
   { id: "starting", query: "system-service=ready&service-runtime=start-pending", expected: "Starting" },
   { id: "stopping", query: "system-service=ready&service-runtime=stop-pending", expected: "Stopping" },
   { id: "paused", query: "system-service=ready&service-runtime=paused", expected: "Paused" },
@@ -1442,6 +1443,19 @@ test("a stopped new service with no alternative offers Start and Remove", async 
   await expect(summary.locator(".success")).toHaveCount(0);
   await expect(summary.locator(".warning")).toHaveCount(0);
   await expect(summary.locator(".neutral-status")).toHaveCount(1);
+});
+
+test("starting with no applied profile applies the bundled default and says so", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=ready&service-runtime=stopped&profile-unapplied=1", { waitUntil: "networkidle" });
+  const summary = page.locator("[data-service-summary]");
+  await expect(summary).toContainText("No profile has been applied yet");
+
+  await openServiceDetails(page);
+  await expect(page.locator(".system-injection-control")).toContainText("applies the bundled default profile (Default.ini) first");
+
+  await summary.getByRole("button", { name: "Start service" }).click();
+  await expect(page.locator(".success-message")).toContainText("the default profile (Default.ini) was applied before starting the service");
+  await expect(summary).toContainText("Default.ini");
 });
 
 test("the primary service action disables immediately while its mutation is busy", async ({ page }) => {

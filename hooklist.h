@@ -230,6 +230,17 @@ HOOK_MANUALLY(HRESULT, CreateFontFace, (
 			  __out IDWriteFontFace** fontFace
 			  ), (self, fontFace))
 
+HOOK_MANUALLY(HRESULT, Factory_CreateFontFace, (
+			  IDWriteFactory* self,
+			  DWRITE_FONT_FACE_TYPE fontFaceType,
+			  UINT32 numberOfFiles,
+			  IDWriteFontFile* const* fontFiles,
+			  UINT32 faceIndex,
+			  DWRITE_FONT_SIMULATIONS fontFaceSimulationFlags,
+			  __out IDWriteFontFace** fontFace
+			  ), (self, fontFaceType, numberOfFiles, fontFiles, faceIndex,
+				  fontFaceSimulationFlags, fontFace))
+
 HOOK_MANUALLY(HRESULT, FontFace3_GetFamilyNames, (
 			  IDWriteFontFace3* self,
 			  __out IDWriteLocalizedStrings** names

@@ -144,6 +144,9 @@ function collectDirectWriteDiagnostics(diagnosticNamespace) {
     'face-called',
     'face-resolved',
     'face-created',
+    'factory-face-called',
+    'factory-face-resolved',
+    'factory-face-created',
     'alias-returned',
     ...['cambria', 'impact', 'courier-new'].flatMap((family) => [
       `find-${family}`,
@@ -151,6 +154,9 @@ function collectDirectWriteDiagnostics(diagnosticNamespace) {
       `face-${family}`,
       `face-resolved-${family}`,
       `face-created-${family}`,
+      `factory-face-${family}`,
+      `factory-face-resolved-${family}`,
+      `factory-face-created-${family}`,
       `alias-${family}`,
     ]),
   ];

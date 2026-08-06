@@ -1578,6 +1578,7 @@ bool hookFontCreation(CComPtr<IDWriteFactory>& pDWriteFactory) {
 	DeleteDC(dc);*/
 
 	HOOK(pDWriteFactory, CreateTextFormat, 15);
+	HOOK(pDWriteFactory, Factory_CreateFontFace, 9);
 	CComPtr<IDWriteFont> dfont = nullptr;
 	CComPtr<IDWriteFontCollection> fontcollection = nullptr;
 	CComPtr<IDWriteFontFamily> ffamily = nullptr;
@@ -2093,6 +2094,64 @@ HRESULT WINAPI IMPL_CreateFontFace(IDWriteFont* self,
 			HookFontFaceFamilyNames(fontFace3, requestedAlias);
 	}
 	return ret;
+}
+
+HRESULT WINAPI IMPL_Factory_CreateFontFace(
+	IDWriteFactory* self,
+	DWRITE_FONT_FACE_TYPE fontFaceType,
+	UINT32 numberOfFiles,
+	IDWriteFontFile* const* fontFiles,
+	UINT32 faceIndex,
+	DWRITE_FONT_SIMULATIONS fontFaceSimulationFlags,
+	IDWriteFontFace** fontFace)
+{
+	std::wstring const requestedAlias = TakePendingDWriteFamilyAlias();
+	HRESULT const result = ORIG_Factory_CreateFontFace(
+		self,
+		fontFaceType,
+		numberOfFiles,
+		fontFiles,
+		faceIndex,
+		fontFaceSimulationFlags,
+		fontFace);
+	if (FAILED(result) || fontFace == nullptr || *fontFace == nullptr)
+		return result;
+
+	LOGFONT logFont = {};
+	if (FAILED(g_pGdiInterop->ConvertFontFaceToLOGFONT(*fontFace, &logFont)))
+		return result;
+	WCHAR originalFamily[LF_FACESIZE] = {};
+	StringCchCopy(originalFamily, ARRAYSIZE(originalFamily), logFont.lfFaceName);
+	SignalDirectWriteDiagnostic(L"factory-face-called");
+	SignalDirectWriteFamilyDiagnostic(L"factory-face", originalFamily);
+
+	const CGdippSettings* settings = CGdippSettings::GetInstance();
+	if (settings->CopyForceFont(logFont, logFont))
+	{
+		SignalDirectWriteDiagnostic(L"factory-face-resolved");
+		SignalDirectWriteFamilyDiagnostic(
+			L"factory-face-resolved", originalFamily);
+		CComPtr<IDWriteFont> replacementFont;
+		if (SUCCEEDED(g_pGdiInterop->CreateFontFromLOGFONT(
+			&logFont, &replacementFont)))
+		{
+			CComPtr<IDWriteFontFace> replacementFace;
+			if (SUCCEEDED(ORIG_CreateFontFace(
+				replacementFont, &replacementFace)))
+			{
+				(*fontFace)->Release();
+				*fontFace = replacementFace.Detach();
+				SignalDirectWriteDiagnostic(L"factory-face-created");
+				SignalDirectWriteFamilyDiagnostic(
+					L"factory-face-created", originalFamily);
+			}
+		}
+	}
+
+	CComPtr<IDWriteFontFace3> fontFace3;
+	if (SUCCEEDED((*fontFace)->QueryInterface(&fontFace3)))
+		HookFontFaceFamilyNames(fontFace3, requestedAlias);
+	return result;
 }
 
 HRESULT WINAPI IMPL_FontFace3_GetFamilyNames(

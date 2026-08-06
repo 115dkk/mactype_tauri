@@ -154,7 +154,11 @@ std::string BuildSnapshotJson(const ProbeOptions& options,
        << "\",\n"
        << "      \"activePinnedSourceFamily\": \""
        << EscapeJson(font_substitution.direct_write_indexed_collection
-                         .active_pinned_source_family)
+                          .active_pinned_source_family)
+       << "\",\n"
+       << "      \"activePinnedSourceDescriptorFamily\": \""
+       << EscapeJson(font_substitution.direct_write_indexed_collection
+                          .active_pinned_source_descriptor_family)
        << "\",\n"
        << "      \"controlsStable\": "
        << (font_substitution.direct_write_indexed_collection.controls_stable
@@ -163,7 +167,13 @@ std::string BuildSnapshotJson(const ProbeOptions& options,
        << ",\n"
        << "      \"retainedObjectReplacementObserved\": "
        << (font_substitution.direct_write_indexed_collection
-                   .retained_object_replacement_observed
+                    .retained_object_replacement_observed
+               ? "true"
+               : "false")
+       << ",\n"
+       << "      \"retainedDescriptorReplacementObserved\": "
+       << (font_substitution.direct_write_indexed_collection
+                    .retained_descriptor_replacement_observed
                ? "true"
                : "false")
        << ",\n"

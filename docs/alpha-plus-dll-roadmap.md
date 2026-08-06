@@ -240,7 +240,10 @@ publishes a DirectWrite `hook-ready` event only after the demand hooks and the
 shared-factory object hooks have both been installed. The object hooks are
 attached by the post-loader-lock worker, so the event is not published merely
 because that worker was scheduled. No Firefox user entry-point code runs before
-injection is ready.
+injection is ready. DirectWrite face file and collection-index access are also
+redirected through the replacement face, covering Firefox/WebRender font
+descriptor transfer instead of limiting substitution to the originating COM
+font object.
 The gate also forwards Playwright's inherited CRT
 descriptors 3 and 4 for `-juggler-pipe`, restoring their inheritance flags with
 RAII after the real Firefox process is created. Mozilla's

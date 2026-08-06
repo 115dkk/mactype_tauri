@@ -230,6 +230,16 @@ HOOK_MANUALLY(HRESULT, CreateFontFace, (
 			  __out IDWriteFontFace** fontFace
 			  ), (self, fontFace))
 
+HOOK_MANUALLY(HRESULT, FontFace_GetFiles, (
+			  IDWriteFontFace* self,
+			  __inout UINT32* numberOfFiles,
+			  __out_ecount_opt(*numberOfFiles) IDWriteFontFile** fontFiles
+			  ), (self, numberOfFiles, fontFiles))
+
+HOOK_MANUALLY(UINT32, FontFace_GetIndex, (
+			  IDWriteFontFace* self
+			  ), (self))
+
 HOOK_MANUALLY(HRESULT, FontFamily_GetFont, (
 			  IDWriteFontFamily* self,
 			  UINT32 index,

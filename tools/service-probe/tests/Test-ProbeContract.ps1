@@ -146,8 +146,14 @@ if ($result.fontSubstitution.directWriteIndexedCollection.disabledSourcePostScri
 if ($result.fontSubstitution.directWriteIndexedCollection.activePinnedSourceFamily -ne 'Arial') {
     throw 'A retained stock DirectWrite font object must continue to resolve to Arial.'
 }
+if ($result.fontSubstitution.directWriteIndexedCollection.activePinnedSourceDescriptorFamily -ne 'Arial') {
+    throw 'A retained stock DirectWrite face descriptor must continue to resolve to Arial.'
+}
 if ($result.fontSubstitution.directWriteIndexedCollection.retainedObjectReplacementObserved) {
     throw 'A retained stock DirectWrite font object must not report a substitution.'
+}
+if ($result.fontSubstitution.directWriteIndexedCollection.retainedDescriptorReplacementObserved) {
+    throw 'A retained stock DirectWrite face descriptor must not report a substitution.'
 }
 if ($result.fontSubstitution.directWriteCustomCollection.disabledSourceFamily -ne 'Arial' -or
     $result.fontSubstitution.directWriteCustomCollection.disabledReplacementFamily -ne 'Courier New') {

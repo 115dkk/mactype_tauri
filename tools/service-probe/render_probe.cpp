@@ -315,11 +315,100 @@ std::wstring ResolveDirectWriteFontObject(
   return resolved.lfFaceName;
 }
 
+std::wstring ResolveDirectWriteFontDescriptor(
+    IDWriteFontFace* face, void* directwrite_factory, std::wstring& error) {
+  if (face == nullptr) {
+    error = L"DirectWrite font face is unavailable";
+    return {};
+  }
+  IDWriteFactory* factory = static_cast<IDWriteFactory*>(directwrite_factory);
+  IDWriteFactory* raw_factory = nullptr;
+  UniqueCom<IDWriteFactory> owned_factory;
+  if (factory == nullptr) {
+    const HRESULT factory_result = DWriteCreateFactory(
+        DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+        reinterpret_cast<IUnknown**>(&raw_factory));
+    owned_factory.reset(raw_factory);
+    if (FAILED(factory_result) || owned_factory == nullptr) {
+      error = L"DWriteCreateFactory failed for retained face descriptor";
+      return {};
+    }
+    factory = owned_factory.get();
+  }
+
+  UINT32 file_count = 0;
+  if (FAILED(face->GetFiles(&file_count, nullptr)) || file_count == 0) {
+    error = L"GetFiles count failed for retained face descriptor";
+    return {};
+  }
+  std::vector<IDWriteFontFile*> files(file_count, nullptr);
+  if (FAILED(face->GetFiles(&file_count, files.data()))) {
+    for (IDWriteFontFile* file : files) {
+      if (file != nullptr) {
+        file->Release();
+      }
+    }
+    error = L"GetFiles failed for retained face descriptor";
+    return {};
+  }
+  std::vector<UniqueCom<IDWriteFontFile>> owned_files;
+  owned_files.reserve(files.size());
+  for (IDWriteFontFile* file : files) {
+    owned_files.emplace_back(file);
+  }
+
+  if (file_count != 1) {
+    error = L"Retained face descriptor must contain exactly one font file";
+    return {};
+  }
+  BOOL is_supported = FALSE;
+  DWRITE_FONT_FILE_TYPE file_type = DWRITE_FONT_FILE_TYPE_UNKNOWN;
+  DWRITE_FONT_FACE_TYPE face_type = DWRITE_FONT_FACE_TYPE_UNKNOWN;
+  UINT32 face_count = 0;
+  if (FAILED(files.front()->Analyze(&is_supported, &file_type, &face_type,
+                                    &face_count)) ||
+      is_supported == FALSE || file_type == DWRITE_FONT_FILE_TYPE_UNKNOWN ||
+      face_count == 0) {
+    error = L"Analyze failed for retained face descriptor";
+    return {};
+  }
+  const UINT32 face_index = face->GetIndex();
+  const DWRITE_FONT_SIMULATIONS simulations = face->GetSimulations();
+  IDWriteFontFace* raw_descriptor_face = nullptr;
+  const HRESULT face_result = factory->CreateFontFace(
+      face_type, file_count, files.data(), face_index, simulations,
+      &raw_descriptor_face);
+  UniqueCom<IDWriteFontFace> descriptor_face(raw_descriptor_face);
+  if (FAILED(face_result) || descriptor_face == nullptr) {
+    std::wostringstream message;
+    message << L"CreateFontFace failed for retained face descriptor: HRESULT 0x"
+            << std::hex << static_cast<unsigned long>(face_result)
+            << L", type " << static_cast<unsigned int>(face_type)
+            << L", files " << std::dec << file_count << L", index "
+            << face_index << L", simulations "
+            << static_cast<unsigned int>(simulations);
+    error = message.str();
+    return {};
+  }
+
+  IDWriteGdiInterop* raw_interop = nullptr;
+  const HRESULT interop_result = factory->GetGdiInterop(&raw_interop);
+  UniqueCom<IDWriteGdiInterop> interop(raw_interop);
+  LOGFONTW resolved{};
+  if (FAILED(interop_result) || interop == nullptr ||
+      FAILED(interop->ConvertFontFaceToLOGFONT(descriptor_face.get(),
+                                              &resolved))) {
+    error = L"ConvertFontFaceToLOGFONT failed for retained face descriptor";
+    return {};
+  }
+  return resolved.lfFaceName;
+}
+
 std::wstring ResolveIndexedDirectWriteFamily(
     const std::wstring_view family, void* directwrite_factory,
     UINT32& pinned_index, const bool discover_index,
     std::wstring& postscript_name, UniqueCom<IDWriteFont>* retained_font,
-    std::wstring& error) {
+    UniqueCom<IDWriteFontFace>* retained_face, std::wstring& error) {
   IDWriteFactory* factory = static_cast<IDWriteFactory*>(directwrite_factory);
   IDWriteFactory* raw_factory = nullptr;
   UniqueCom<IDWriteFactory> owned_factory;
@@ -394,6 +483,16 @@ std::wstring ResolveIndexedDirectWriteFamily(
     return {};
   }
   postscript_name.resize(postscript_length);
+
+  if (retained_face != nullptr) {
+    IDWriteFontFace* raw_face = nullptr;
+    const HRESULT face_result = font->CreateFontFace(&raw_face);
+    retained_face->reset(raw_face);
+    if (FAILED(face_result) || *retained_face == nullptr) {
+      error = L"CreateFontFace failed for retained indexed font";
+      return {};
+    }
+  }
 
   std::wstring resolved = ResolveDirectWriteFontObject(
       font.get(), factory, error);
@@ -587,34 +686,39 @@ FontSubstitutionObservation ObserveFontSubstitution(
   std::wstring repeated_disabled_source_postscript_name;
   std::wstring repeated_disabled_replacement_postscript_name;
   UniqueCom<IDWriteFont> pinned_disabled_source;
+  UniqueCom<IDWriteFontFace> pinned_disabled_source_face;
   {
     FontSubstitutionSwitch disabled;
     indexed.disabled_source_family =
         ResolveIndexedDirectWriteFamily(source_family, directwrite_factory,
             indexed_source, true, indexed.disabled_source_postscript_name,
-            &pinned_disabled_source, error);
+            &pinned_disabled_source, &pinned_disabled_source_face, error);
     indexed.disabled_replacement_family =
         ResolveIndexedDirectWriteFamily(replacement_family, directwrite_factory,
             indexed_replacement, true,
-            indexed.disabled_replacement_postscript_name, nullptr, error);
+            indexed.disabled_replacement_postscript_name, nullptr, nullptr,
+            error);
     repeated_disabled_indexed_source = ResolveIndexedDirectWriteFamily(
         source_family, directwrite_factory, indexed_source, false,
-        repeated_disabled_source_postscript_name, nullptr, error);
+        repeated_disabled_source_postscript_name, nullptr, nullptr, error);
     repeated_disabled_indexed_replacement = ResolveIndexedDirectWriteFamily(
         replacement_family, directwrite_factory, indexed_replacement, false,
-        repeated_disabled_replacement_postscript_name, nullptr, error);
+        repeated_disabled_replacement_postscript_name, nullptr, nullptr, error);
   }
   indexed.active_source_family =
       ResolveIndexedDirectWriteFamily(source_family, directwrite_factory,
           indexed_source, false, indexed.active_source_postscript_name, nullptr,
-          error);
+          nullptr, error);
   std::wstring repeated_active_source_postscript_name;
   const std::wstring repeated_active_indexed_source =
       ResolveIndexedDirectWriteFamily(source_family, directwrite_factory,
           indexed_source, false, repeated_active_source_postscript_name,
-          nullptr, error);
+          nullptr, nullptr, error);
   indexed.active_pinned_source_family = ResolveDirectWriteFontObject(
       pinned_disabled_source.get(), directwrite_factory, error);
+  indexed.active_pinned_source_descriptor_family =
+      ResolveDirectWriteFontDescriptor(
+          pinned_disabled_source_face.get(), directwrite_factory, error);
   indexed.controls_stable =
       !indexed.disabled_source_family.empty() &&
       !indexed.disabled_replacement_family.empty() &&
@@ -638,15 +742,20 @@ FontSubstitutionObservation ObserveFontSubstitution(
                indexed.disabled_replacement_family.c_str()) != 0;
   indexed.retained_object_replacement_observed =
       _wcsicmp(indexed.active_pinned_source_family.c_str(),
+                indexed.disabled_replacement_family.c_str()) == 0;
+  indexed.retained_descriptor_replacement_observed =
+      _wcsicmp(indexed.active_pinned_source_descriptor_family.c_str(),
                indexed.disabled_replacement_family.c_str()) == 0;
   indexed.replacement_observed =
       indexed.controls_stable &&
       _wcsicmp(indexed.active_source_family.c_str(),
                indexed.disabled_replacement_family.c_str()) == 0 &&
-      indexed.retained_object_replacement_observed;
+      indexed.retained_object_replacement_observed &&
+      indexed.retained_descriptor_replacement_observed;
   result.direct_write_custom_collection = observe_direct_write(true);
   if (result.direct_write.active_source_family.empty() ||
       indexed.active_source_family.empty() ||
+      indexed.active_pinned_source_descriptor_family.empty() ||
       result.direct_write_custom_collection.active_source_family.empty()) {
     result.active_source_fingerprint.clear();
   }

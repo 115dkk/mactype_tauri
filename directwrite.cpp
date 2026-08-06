@@ -85,6 +85,26 @@ thread_local CComPtr<IDWriteFont> g_pendingDWriteMetadataSource;
 thread_local std::wstring g_pendingDWriteMetadataFamily;
 thread_local std::array<FontFaceAliasEntry, 8> g_fontFaceAliases;
 thread_local size_t g_nextFontFaceAlias = 0;
+thread_local bool g_resolvingDWriteFontFaceDescriptor = false;
+
+class ScopedThreadFlag final {
+public:
+	explicit ScopedThreadFlag(bool& flag) noexcept : flag_(flag)
+	{
+		flag_ = true;
+	}
+
+	~ScopedThreadFlag() noexcept
+	{
+		flag_ = false;
+	}
+
+	ScopedThreadFlag(const ScopedThreadFlag&) = delete;
+	ScopedThreadFlag& operator=(const ScopedThreadFlag&) = delete;
+
+private:
+	bool& flag_;
+};
 
 class AliasedLocalizedStrings final : public IDWriteLocalizedStrings {
 public:
@@ -1663,6 +1683,11 @@ bool hookFontCreation(CComPtr<IDWriteFactory>& pDWriteFactory) {
 			HOOK(fontFaceReference, DWriteFontFaceReference_CreateFontFaceWithSimulations, 4);
 		}
 	}
+	CComPtr<IDWriteFontFace> fontFace;
+	if (SUCCEEDED(ORIG_CreateFontFace(dfont, &fontFace)) && fontFace != nullptr) {
+		HOOK(fontFace, FontFace_GetFiles, 4);
+		HOOK(fontFace, FontFace_GetIndex, 5);
+	}
 	return true;
 }
 
@@ -1802,7 +1827,8 @@ static DWORD WINAPI HookExistingDirectWriteFactory(LPVOID moduleReference)
 	factory.Release();
 	if (sharedFactoryHooked && ISHOOKED(FontFamily_GetFont) &&
 		ISHOOKED(Font_GetInformationalStrings) &&
-		ISHOOKED(CreateFontFace) && ISHOOKED(Factory_CreateFontFace) &&
+		ISHOOKED(CreateFontFace) && ISHOOKED(FontFace_GetFiles) &&
+		ISHOOKED(FontFace_GetIndex) && ISHOOKED(Factory_CreateFontFace) &&
 		g_systemFontCollectionVtableSlot != nullptr)
 	{
 		// The launch gate may now release the image-entry thread. In
@@ -2144,6 +2170,58 @@ HRESULT WINAPI IMPL_CreateFontFace(IDWriteFont* self,
 			HookFontFaceFamilyNames(fontFace3, requestedAlias);
 	}
 	return ret;
+}
+
+static bool ResolveDWriteFontFaceDescriptor(
+	IDWriteFontFace* fontFace, CComPtr<IDWriteFontFace>& replacementFace)
+{
+	if (fontFace == nullptr || g_pGdiInterop == nullptr ||
+		ORIG_CreateFontFace == nullptr ||
+		g_resolvingDWriteFontFaceDescriptor)
+		return false;
+
+	ScopedThreadFlag resolving(g_resolvingDWriteFontFaceDescriptor);
+	LOGFONT logFont = {};
+	if (FAILED(g_pGdiInterop->ConvertFontFaceToLOGFONT(fontFace, &logFont)))
+		return false;
+	const CGdippSettings* settings = CGdippSettings::GetInstance();
+	if (!settings->CopyForceFont(logFont, logFont))
+		return false;
+
+	CComPtr<IDWriteFont> replacementFont;
+	if (FAILED(g_pGdiInterop->CreateFontFromLOGFONT(
+			&logFont, &replacementFont)) || replacementFont == nullptr)
+		return false;
+	return SUCCEEDED(ORIG_CreateFontFace(
+		replacementFont, &replacementFace)) && replacementFace != nullptr;
+}
+
+HRESULT WINAPI IMPL_FontFace_GetFiles(
+	IDWriteFontFace* self, UINT32* numberOfFiles, IDWriteFontFile** fontFiles)
+{
+	if (g_resolvingDWriteFontFaceDescriptor)
+		return ORIG_FontFace_GetFiles(self, numberOfFiles, fontFiles);
+
+	SignalDirectWriteDiagnostic(L"files-called");
+	CComPtr<IDWriteFontFace> replacementFace;
+	if (!ResolveDWriteFontFaceDescriptor(self, replacementFace))
+		return ORIG_FontFace_GetFiles(self, numberOfFiles, fontFiles);
+	SignalDirectWriteDiagnostic(L"files-resolved");
+	return ORIG_FontFace_GetFiles(
+		replacementFace, numberOfFiles, fontFiles);
+}
+
+UINT32 WINAPI IMPL_FontFace_GetIndex(IDWriteFontFace* self)
+{
+	if (g_resolvingDWriteFontFaceDescriptor)
+		return ORIG_FontFace_GetIndex(self);
+
+	SignalDirectWriteDiagnostic(L"index-called");
+	CComPtr<IDWriteFontFace> replacementFace;
+	if (!ResolveDWriteFontFaceDescriptor(self, replacementFace))
+		return ORIG_FontFace_GetIndex(self);
+	SignalDirectWriteDiagnostic(L"index-resolved");
+	return ORIG_FontFace_GetIndex(replacementFace);
 }
 
 HRESULT WINAPI IMPL_FontFamily_GetFont(

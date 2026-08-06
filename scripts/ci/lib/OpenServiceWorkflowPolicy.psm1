@@ -118,7 +118,8 @@ function Test-OpenServiceWorkflowPolicy {
             'static void ScheduleExistingDirectWriteFactoryHook',
             'sharedFactoryHooked && ISHOOKED(FontFamily_GetFont)',
             'ISHOOKED(Font_GetInformationalStrings)',
-            'ISHOOKED(CreateFontFace) && ISHOOKED(Factory_CreateFontFace)',
+            'ISHOOKED(CreateFontFace) && ISHOOKED(FontFace_GetFiles)',
+            'ISHOOKED(FontFace_GetIndex) && ISHOOKED(Factory_CreateFontFace)',
             'SignalDirectWriteDiagnostic(L"hook-ready");'
         )
     if ($directWrite) {

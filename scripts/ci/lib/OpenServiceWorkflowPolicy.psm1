@@ -44,7 +44,8 @@ function Test-OpenServiceWorkflowPolicy {
             'open-core:', 'mactype-open-core', 'artifacts/open-core',
             'open-service-windows:', 'Test-OpenServiceWindows.ps1',
             'Build-ServiceRuntime.ps1', 'ServiceRuntimeRoot', 'hook x86/x64 markers',
-            'BrowserLaunchGate', 'browser-launch-gate64.exe'
+            'BrowserLaunchGate', 'browser-launch-gate64.exe',
+            '--firefox-shared-font-list disabled'
         )
 
     $hostedLifecyclePath = Join-Path $Root 'scripts\ci\Test-OpenServiceWindows.ps1'
@@ -59,7 +60,8 @@ function Test-OpenServiceWorkflowPolicy {
             '-RepairContext $stagedSetup', 'param($setupExecutable)',
             "`$sourceFamily = 'Cambria'",
             "'--chromium-font-data-service', 'disabled'",
-            "'--firefox-launch-gate', `$BrowserLaunchGate", 'replacementObserved',
+            "'--firefox-launch-gate', `$BrowserLaunchGate",
+            "'--firefox-shared-font-list', 'disabled'", 'replacementObserved',
             "-Verb 'publish-profile' -InputBytes `$profileA",
             "Assert-ActiveRuntimeProfile -ExpectedBytes `$profileA"
         )
@@ -94,7 +96,8 @@ function Test-OpenServiceWorkflowPolicy {
             'dom.ipc.processPrelaunch.enabled', 'firefoxLaunchGate',
             'MACTYPE_BROWSER_GATE_TARGET', 'MACTYPE_BROWSER_GATE_PID_FILE',
             'FIREFOX_CHILD_PAUSE_SECONDS = 10', 'MOZ_DEBUG_CHILD_PAUSE',
-            'firefoxChildPauseSeconds'
+            'firefoxChildPauseSeconds', 'gfx.e10s.font-list.shared',
+            'firefoxSharedFontList'
         )
 
     $browserGatePath = Join-Path $Root 'tools\service-probe\browser_launch_gate.cpp'

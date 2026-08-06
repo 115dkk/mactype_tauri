@@ -249,10 +249,15 @@ descriptors 3 and 4 for `-juggler-pipe`, restoring their inheritance flags with
 RAII after the real Firefox process is created. Mozilla's
 `MOZ_DEBUG_CHILD_PAUSE=10` diagnostic also holds each content process before
 its normal sandbox starts so the service can load the renderer DLL; the stock
-control uses neither gate nor pause. The selected gate and pause are recorded
-in the retained JSON, renderer hook diagnostics are still mandatory before the
-first font lookup, and the active source pixels must still exactly match the
-independently rendered replacement pixels.
+control uses neither gate nor pause. The proof selects Firefox's supported
+non-shared font-list compatibility mode for both its stock and injected
+captures. This keeps final system-font construction in the renderer processes
+whose early injection is proven, rather than asking the default shared parent
+snapshot to preserve an application-external COM substitution across IPC. The
+selected gate, pause, and shared-font-list mode are recorded in the retained
+JSON. Renderer hook diagnostics remain mandatory before the first font lookup,
+and the active source pixels must still exactly match the independently rendered
+replacement pixels.
 
 Firefox builds its shared Windows font list by enumerating family indexes rather
 than resolving every CSS family through `FindFamilyName`. The rendering core

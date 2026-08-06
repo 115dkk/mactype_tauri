@@ -100,6 +100,7 @@ jobs:
             --output artifacts/font-substitution-browser/stock-firefox.json `
             --source Arial `
             --replacement 'Courier New' `
+            --firefox-shared-font-list disabled `
             --expect stock
       - name: Build and verify x86 marker targets
         shell: pwsh

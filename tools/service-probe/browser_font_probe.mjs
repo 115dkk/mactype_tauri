@@ -24,6 +24,7 @@ function parseArguments(argv) {
     expect: 'substituted',
     chromiumFontDataService: 'enabled',
     firefoxLaunchGate: '',
+    firefoxSharedFontList: 'enabled',
     timeoutMs: 15000,
   };
   for (let index = 0; index < argv.length; index += 2) {
@@ -41,6 +42,9 @@ function parseArguments(argv) {
       result.chromiumFontDataService = value;
     }
     else if (key === '--firefox-launch-gate') result.firefoxLaunchGate = value;
+    else if (key === '--firefox-shared-font-list') {
+      result.firefoxSharedFontList = value;
+    }
     else if (key === '--timeout-ms') result.timeoutMs = Number(value);
     else throw new Error(`Unknown argument: ${key}`);
   }
@@ -63,6 +67,14 @@ function parseArguments(argv) {
   }
   if (result.engine !== 'firefox' && result.firefoxLaunchGate) {
     throw new Error('--firefox-launch-gate is only valid for Firefox');
+  }
+  if (!['enabled', 'disabled'].includes(result.firefoxSharedFontList)) {
+    throw new Error(
+      `Unsupported Firefox shared font-list mode: ${result.firefoxSharedFontList}`,
+    );
+  }
+  if (result.engine !== 'firefox' && result.firefoxSharedFontList !== 'enabled') {
+    throw new Error('--firefox-shared-font-list is only valid for Firefox');
   }
   if (!Number.isInteger(result.timeoutMs) || result.timeoutMs < 0 || result.timeoutMs > 60000) {
     throw new Error(`Invalid timeout: ${result.timeoutMs}`);
@@ -281,7 +293,10 @@ async function capture(browserType, options, disabled, waitForReplacement) {
     ? ['--disable-features=FontDataServiceAllWebContents']
     : [];
   const firefoxUserPrefs = options.engine === 'firefox'
-    ? { 'dom.ipc.processPrelaunch.enabled': false }
+    ? {
+        'dom.ipc.processPrelaunch.enabled': false,
+        'gfx.e10s.font-list.shared': options.firefoxSharedFontList === 'enabled',
+      }
     : undefined;
   let initialInjectionSuccessCount = null;
   if (options.injectionHealth) {
@@ -494,6 +509,9 @@ const result = {
     : null,
   firefoxChildPauseSeconds: options.engine === 'firefox'
     ? (options.firefoxLaunchGate ? FIREFOX_CHILD_PAUSE_SECONDS : 0)
+    : null,
+  firefoxSharedFontList: options.engine === 'firefox'
+    ? options.firefoxSharedFontList
     : null,
   sourceFamily: options.source,
   replacementFamily: options.replacement,

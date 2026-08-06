@@ -236,6 +236,13 @@ HOOK_MANUALLY(HRESULT, FontFamily_GetFont, (
 			  __out IDWriteFont** font
 			  ), (self, index, font))
 
+HOOK_MANUALLY(HRESULT, Font_GetInformationalStrings, (
+			  IDWriteFont* self,
+			  DWRITE_INFORMATIONAL_STRING_ID informationalStringID,
+			  __out IDWriteLocalizedStrings** informationalStrings,
+			  __out BOOL* exists
+			  ), (self, informationalStringID, informationalStrings, exists))
+
 HOOK_MANUALLY(HRESULT, Factory_CreateFontFace, (
 			  IDWriteFactory* self,
 			  DWRITE_FONT_FACE_TYPE fontFaceType,

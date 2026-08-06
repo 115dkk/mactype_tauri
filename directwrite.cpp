@@ -80,6 +80,9 @@ struct FontFaceAliasEntry {
 };
 
 thread_local std::wstring g_pendingDWriteFamilyAlias;
+thread_local IDWriteFont* g_pendingDWriteMetadataTarget = nullptr;
+thread_local CComPtr<IDWriteFont> g_pendingDWriteMetadataSource;
+thread_local std::wstring g_pendingDWriteMetadataFamily;
 thread_local std::array<FontFaceAliasEntry, 8> g_fontFaceAliases;
 thread_local size_t g_nextFontFaceAlias = 0;
 
@@ -181,6 +184,21 @@ static std::wstring TakePendingDWriteFamilyAlias()
 	std::wstring alias = std::move(g_pendingDWriteFamilyAlias);
 	g_pendingDWriteFamilyAlias.clear();
 	return alias;
+}
+
+static void ClearPendingDWriteFontMetadata()
+{
+	g_pendingDWriteMetadataTarget = nullptr;
+	g_pendingDWriteMetadataSource.Release();
+	g_pendingDWriteMetadataFamily.clear();
+}
+
+static void RememberPendingDWriteFontMetadata(
+	IDWriteFont* target, IDWriteFont* source, std::wstring family)
+{
+	g_pendingDWriteMetadataTarget = target;
+	g_pendingDWriteMetadataSource = source;
+	g_pendingDWriteMetadataFamily = std::move(family);
 }
 
 static void RememberFontFaceAlias(
@@ -1618,8 +1636,9 @@ bool hookFontCreation(CComPtr<IDWriteFactory>& pDWriteFactory) {
 		}
 	}
 	if (FAILED(fontcollection->GetFontFamily(0, &ffamily))) FAILEXIT;
-	HOOK(ffamily, FontFamily_GetFont, 5);
 	if (FAILED(ffamily->GetFont(0, &dfont))) FAILEXIT;
+	HOOK(ffamily, FontFamily_GetFont, 5);
+	HOOK(dfont, Font_GetInformationalStrings, 9);
 
 	CComPtr<IDWriteFont3> dfont3 = nullptr;
 	HRESULT hr = dfont->QueryInterface(&dfont3);
@@ -2122,6 +2141,7 @@ HRESULT WINAPI IMPL_FontFamily_GetFont(
 	if (font == nullptr)
 		return E_POINTER;
 	*font = nullptr;
+	ClearPendingDWriteFontMetadata();
 	CComPtr<IDWriteFont> originalFont;
 	HRESULT const result = ORIG_FontFamily_GetFont(
 		self, index, &originalFont);
@@ -2183,9 +2203,34 @@ HRESULT WINAPI IMPL_FontFamily_GetFont(
 	}
 
 	g_pendingDWriteFamilyAlias = originalFamily;
+	RememberPendingDWriteFontMetadata(
+		replacementFont, originalFont, originalFamily);
 	*font = replacementFont.Detach();
 	SignalDirectWriteDiagnostic(L"family-font-resolved");
 	SignalDirectWriteFamilyDiagnostic(L"family-font-resolved", originalFamily);
+	return result;
+}
+
+HRESULT WINAPI IMPL_Font_GetInformationalStrings(
+	IDWriteFont* self,
+	DWRITE_INFORMATIONAL_STRING_ID informationalStringID,
+	IDWriteLocalizedStrings** informationalStrings,
+	BOOL* exists)
+{
+	IDWriteFont* source = self;
+	bool const aliasesSource =
+		self == g_pendingDWriteMetadataTarget &&
+		g_pendingDWriteMetadataSource != nullptr;
+	if (aliasesSource)
+		source = g_pendingDWriteMetadataSource;
+	HRESULT const result = ORIG_Font_GetInformationalStrings(
+		source, informationalStringID, informationalStrings, exists);
+	if (aliasesSource && SUCCEEDED(result) && exists != nullptr && *exists)
+	{
+		SignalDirectWriteDiagnostic(L"family-font-metadata");
+		SignalDirectWriteFamilyDiagnostic(
+			L"family-font-metadata", g_pendingDWriteMetadataFamily.c_str());
+	}
 	return result;
 }
 

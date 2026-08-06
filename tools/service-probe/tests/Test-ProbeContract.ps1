@@ -139,6 +139,10 @@ if ($result.fontSubstitution.directWriteIndexedCollection.disabledSourceFamily -
 if (-not $result.fontSubstitution.directWriteIndexedCollection.controlsStable) {
     throw 'Indexed DirectWrite collection controls must remain distinct.'
 }
+if ($result.fontSubstitution.directWriteIndexedCollection.disabledSourcePostScriptName -eq
+    $result.fontSubstitution.directWriteIndexedCollection.disabledReplacementPostScriptName) {
+    throw 'Indexed DirectWrite PostScript-name controls must remain distinct.'
+}
 if ($result.fontSubstitution.directWriteCustomCollection.disabledSourceFamily -ne 'Arial' -or
     $result.fontSubstitution.directWriteCustomCollection.disabledReplacementFamily -ne 'Courier New') {
     throw 'Custom DirectWrite collection controls did not resolve the requested font families.'
@@ -161,6 +165,10 @@ if (-not $result.mactypeModuleLoaded) {
     if ($result.fontSubstitution.directWriteIndexedCollection.activeSourceFamily -ne 'Arial' -or
         $result.fontSubstitution.directWriteIndexedCollection.replacementObserved) {
         throw 'A stock Windows probe must not report an indexed DirectWrite collection substitution.'
+    }
+    if ($result.fontSubstitution.directWriteIndexedCollection.activeSourcePostScriptName -ne
+        $result.fontSubstitution.directWriteIndexedCollection.disabledSourcePostScriptName) {
+        throw 'A stock Windows probe must preserve indexed DirectWrite PostScript metadata.'
     }
     if ($result.fontSubstitution.directWriteCustomCollection.activeSourceFamily -ne 'Arial' -or
         $result.fontSubstitution.directWriteCustomCollection.replacementObserved) {

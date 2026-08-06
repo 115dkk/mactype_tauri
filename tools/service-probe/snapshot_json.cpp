@@ -140,6 +140,18 @@ std::string BuildSnapshotJson(const ProbeOptions& options,
        << EscapeJson(font_substitution.direct_write_indexed_collection
                          .disabled_replacement_family)
        << "\",\n"
+       << "      \"disabledSourcePostScriptName\": \""
+       << EscapeJson(font_substitution.direct_write_indexed_collection
+                         .disabled_source_postscript_name)
+       << "\",\n"
+       << "      \"activeSourcePostScriptName\": \""
+       << EscapeJson(font_substitution.direct_write_indexed_collection
+                         .active_source_postscript_name)
+       << "\",\n"
+       << "      \"disabledReplacementPostScriptName\": \""
+       << EscapeJson(font_substitution.direct_write_indexed_collection
+                         .disabled_replacement_postscript_name)
+       << "\",\n"
        << "      \"controlsStable\": "
        << (font_substitution.direct_write_indexed_collection.controls_stable
                ? "true"

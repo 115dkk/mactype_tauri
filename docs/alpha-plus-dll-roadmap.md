@@ -255,7 +255,10 @@ the source family name and index remain stable, while weight/stretch/style are
 matched against the configured replacement family before Firefox records the
 face descriptor. The x86/x64 marker contract pins a source index while
 substitution is disabled and requires that same index to return the replacement
-font when substitution is active.
+font when substitution is active. The returned replacement preserves the
+source face's informational strings during Firefox's immediate PostScript-name
+validation, preventing duplicate replacement names from emptying the source
+family and falling through to an unrelated serif face.
 
 The native probe covers GDI and DirectWrite with injection before factory
 creation, injection after factory creation, multiple factories, worker-thread

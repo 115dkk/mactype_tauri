@@ -281,7 +281,8 @@ std::wstring ResolveDirectWriteFamily(const std::wstring_view family,
 
 std::wstring ResolveIndexedDirectWriteFamily(
     const std::wstring_view family, void* directwrite_factory,
-    UINT32& pinned_index, const bool discover_index, std::wstring& error) {
+    UINT32& pinned_index, const bool discover_index,
+    std::wstring& postscript_name, std::wstring& error) {
   IDWriteFactory* factory = static_cast<IDWriteFactory*>(directwrite_factory);
   IDWriteFactory* raw_factory = nullptr;
   UniqueCom<IDWriteFactory> owned_factory;
@@ -331,6 +332,31 @@ std::wstring ResolveIndexedDirectWriteFamily(
     error = L"GetFont failed for indexed collection";
     return {};
   }
+
+  BOOL postscript_name_exists = FALSE;
+  IDWriteLocalizedStrings* raw_postscript_names = nullptr;
+  const HRESULT postscript_result = font->GetInformationalStrings(
+      DWRITE_INFORMATIONAL_STRING_POSTSCRIPT_NAME, &raw_postscript_names,
+      &postscript_name_exists);
+  UniqueCom<IDWriteLocalizedStrings> postscript_names(raw_postscript_names);
+  if (FAILED(postscript_result) || postscript_name_exists == FALSE ||
+      postscript_names == nullptr || postscript_names->GetCount() == 0) {
+    error = L"GetInformationalStrings failed for indexed collection";
+    return {};
+  }
+  UINT32 postscript_length = 0;
+  if (FAILED(postscript_names->GetStringLength(0, &postscript_length))) {
+    error = L"GetStringLength failed for indexed collection";
+    return {};
+  }
+  postscript_name.assign(
+      static_cast<std::size_t>(postscript_length) + 1U, L'\0');
+  if (FAILED(postscript_names->GetString(
+          0, postscript_name.data(), postscript_length + 1U))) {
+    error = L"GetString failed for indexed collection";
+    return {};
+  }
+  postscript_name.resize(postscript_length);
 
   IDWriteGdiInterop* raw_interop = nullptr;
   const HRESULT interop_result = factory->GetGdiInterop(&raw_interop);
@@ -528,26 +554,32 @@ FontSubstitutionObservation ObserveFontSubstitution(
   UINT32 indexed_replacement = 0;
   std::wstring repeated_disabled_indexed_source;
   std::wstring repeated_disabled_indexed_replacement;
+  std::wstring repeated_disabled_source_postscript_name;
+  std::wstring repeated_disabled_replacement_postscript_name;
   {
     FontSubstitutionSwitch disabled;
     indexed.disabled_source_family =
         ResolveIndexedDirectWriteFamily(source_family, directwrite_factory,
-                                        indexed_source, true, error);
+            indexed_source, true, indexed.disabled_source_postscript_name,
+            error);
     indexed.disabled_replacement_family =
         ResolveIndexedDirectWriteFamily(replacement_family, directwrite_factory,
-                                        indexed_replacement, true, error);
+            indexed_replacement, true,
+            indexed.disabled_replacement_postscript_name, error);
     repeated_disabled_indexed_source = ResolveIndexedDirectWriteFamily(
-        source_family, directwrite_factory, indexed_source, false, error);
+        source_family, directwrite_factory, indexed_source, false,
+        repeated_disabled_source_postscript_name, error);
     repeated_disabled_indexed_replacement = ResolveIndexedDirectWriteFamily(
         replacement_family, directwrite_factory, indexed_replacement, false,
-        error);
+        repeated_disabled_replacement_postscript_name, error);
   }
   indexed.active_source_family =
       ResolveIndexedDirectWriteFamily(source_family, directwrite_factory,
-                                      indexed_source, false, error);
+          indexed_source, false, indexed.active_source_postscript_name, error);
+  std::wstring repeated_active_source_postscript_name;
   const std::wstring repeated_active_indexed_source =
       ResolveIndexedDirectWriteFamily(source_family, directwrite_factory,
-                                      indexed_source, false, error);
+          indexed_source, false, repeated_active_source_postscript_name, error);
   indexed.controls_stable =
       !indexed.disabled_source_family.empty() &&
       !indexed.disabled_replacement_family.empty() &&
@@ -557,6 +589,16 @@ FontSubstitutionObservation ObserveFontSubstitution(
           repeated_disabled_indexed_replacement.c_str()) == 0 &&
       _wcsicmp(indexed.active_source_family.c_str(),
           repeated_active_indexed_source.c_str()) == 0 &&
+      _wcsicmp(indexed.disabled_source_postscript_name.c_str(),
+          repeated_disabled_source_postscript_name.c_str()) == 0 &&
+      _wcsicmp(indexed.disabled_replacement_postscript_name.c_str(),
+          repeated_disabled_replacement_postscript_name.c_str()) == 0 &&
+      _wcsicmp(indexed.active_source_postscript_name.c_str(),
+          repeated_active_source_postscript_name.c_str()) == 0 &&
+      _wcsicmp(indexed.disabled_source_postscript_name.c_str(),
+          indexed.active_source_postscript_name.c_str()) == 0 &&
+      _wcsicmp(indexed.disabled_source_postscript_name.c_str(),
+          indexed.disabled_replacement_postscript_name.c_str()) != 0 &&
       _wcsicmp(indexed.disabled_source_family.c_str(),
                indexed.disabled_replacement_family.c_str()) != 0;
   indexed.replacement_observed =

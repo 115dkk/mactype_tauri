@@ -3,8 +3,11 @@
 
 #include <strsafe.h>
 
+#include <io.h>
+
 #include <cstdint>
 #include <cwchar>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -137,6 +140,39 @@ class SuspendedChild final {
   renderer_raii::UniqueHandle thread_;
   DWORD process_id_ = 0;
   bool terminate_on_destruction_ = true;
+};
+
+class ScopedInheritableDescriptor final {
+ public:
+  explicit ScopedInheritableDescriptor(const int descriptor) noexcept {
+    const std::intptr_t raw = _get_osfhandle(descriptor);
+    if (raw == -1) {
+      return;
+    }
+    handle_ = reinterpret_cast<HANDLE>(raw);
+    if (GetHandleInformation(handle_, &original_flags_) == FALSE ||
+        SetHandleInformation(handle_, HANDLE_FLAG_INHERIT,
+                             HANDLE_FLAG_INHERIT) == FALSE) {
+      handle_ = nullptr;
+    }
+  }
+
+  ScopedInheritableDescriptor(const ScopedInheritableDescriptor&) = delete;
+  ScopedInheritableDescriptor& operator=(
+      const ScopedInheritableDescriptor&) = delete;
+
+  ~ScopedInheritableDescriptor() {
+    if (handle_ != nullptr) {
+      SetHandleInformation(handle_, HANDLE_FLAG_INHERIT,
+                           original_flags_ & HANDLE_FLAG_INHERIT);
+    }
+  }
+
+  explicit operator bool() const noexcept { return handle_ != nullptr; }
+
+ private:
+  HANDLE handle_ = nullptr;
+  DWORD original_flags_ = 0;
 };
 
 class EntryBreakpoint final {
@@ -354,12 +390,31 @@ int wmain(const int argc, wchar_t** argv) {
   std::vector<wchar_t> mutable_command(command.begin(), command.end());
   mutable_command.push_back(L'\0');
 
+  const bool uses_juggler_pipe = [&]() {
+    for (int index = 1; index < argc; ++index) {
+      if (std::wstring_view(argv[index]) == L"-juggler-pipe") {
+        return true;
+      }
+    }
+    return false;
+  }();
+  std::optional<ScopedInheritableDescriptor> juggler_read;
+  std::optional<ScopedInheritableDescriptor> juggler_write;
   STARTUPINFOW startup{};
-  startup.cb = sizeof(startup);
-  startup.dwFlags = STARTF_USESTDHANDLES;
-  startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-  startup.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
-  startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+  if (uses_juggler_pipe) {
+    juggler_read.emplace(3);
+    juggler_write.emplace(4);
+    if (!*juggler_read || !*juggler_write) {
+      return ERROR_INVALID_HANDLE;
+    }
+    GetStartupInfoW(&startup);
+  } else {
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    startup.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+  }
   PROCESS_INFORMATION process{};
   if (CreateProcessW(target.c_str(), mutable_command.data(), nullptr, nullptr,
                      TRUE, DEBUG_ONLY_THIS_PROCESS | CREATE_UNICODE_ENVIRONMENT,

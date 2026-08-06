@@ -237,11 +237,13 @@ gate. The gate restores a temporary PE image-entry breakpoint after Windows
 has completed DLL initialization, detaches the debugger with the main thread
 still suspended, and resumes that thread only after the exact Firefox PID
 publishes a DirectWrite `hook-entered` event. No Firefox user entry-point code
-runs before injection; Firefox then performs its normal initialization and
-sandbox setup. The selected gate is recorded in the retained JSON, renderer
-hook diagnostics are still mandatory before the first font lookup, and the
-active source pixels must still exactly match the independently rendered
-replacement pixels.
+runs before injection. The gate also forwards Playwright's inherited CRT
+descriptors 3 and 4 for `-juggler-pipe`, restoring their inheritance flags with
+RAII after the real Firefox process is created. Firefox then performs its
+normal initialization and sandbox setup. The selected gate is recorded in the
+retained JSON, renderer hook diagnostics are still mandatory before the first
+font lookup, and the active source pixels must still exactly match the
+independently rendered replacement pixels.
 
 The native probe covers GDI and DirectWrite with injection before factory
 creation, injection after factory creation, multiple factories, worker-thread

@@ -243,6 +243,13 @@ HOOK_MANUALLY(HRESULT, Font_GetInformationalStrings, (
 			  __out BOOL* exists
 			  ), (self, informationalStringID, informationalStrings, exists))
 
+HOOK_MANUALLY(HRESULT, GdiInterop_ConvertFontToLOGFONT, (
+			  IDWriteGdiInterop* self,
+			  IDWriteFont* font,
+			  __out LOGFONTW* logFont,
+			  __out BOOL* isSystemFont
+			  ), (self, font, logFont, isSystemFont))
+
 HOOK_MANUALLY(HRESULT, Factory_CreateFontFace, (
 			  IDWriteFactory* self,
 			  DWRITE_FONT_FACE_TYPE fontFaceType,

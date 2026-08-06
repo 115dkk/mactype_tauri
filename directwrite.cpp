@@ -1587,6 +1587,7 @@ bool hookD2D1() {
 #define FAILEXIT { /*CoUninitialize();*/ return false;}
 bool hookFontCreation(CComPtr<IDWriteFactory>& pDWriteFactory) {
 	if (FAILED(pDWriteFactory->GetGdiInterop(&g_pGdiInterop))) FAILEXIT;	//判断不正确
+	HOOK(g_pGdiInterop, GdiInterop_ConvertFontToLOGFONT, 4);
 
 /*
 	HDC dc = CreateCompatibleDC(0);
@@ -2155,7 +2156,8 @@ HRESULT WINAPI IMPL_FontFamily_GetFont(
 
 	LOGFONT logFont = {};
 	BOOL isSystemFont = FALSE;
-	if (FAILED(g_pGdiInterop->ConvertFontToLOGFONT(
+	if (FAILED(ORIG_GdiInterop_ConvertFontToLOGFONT(
+		g_pGdiInterop,
 		originalFont, &logFont, &isSystemFont)) || !isSystemFont)
 	{
 		*font = originalFont.Detach();
@@ -2208,6 +2210,32 @@ HRESULT WINAPI IMPL_FontFamily_GetFont(
 	*font = replacementFont.Detach();
 	SignalDirectWriteDiagnostic(L"family-font-resolved");
 	SignalDirectWriteFamilyDiagnostic(L"family-font-resolved", originalFamily);
+	return result;
+}
+
+HRESULT WINAPI IMPL_GdiInterop_ConvertFontToLOGFONT(
+	IDWriteGdiInterop* self,
+	IDWriteFont* font,
+	LOGFONTW* logFont,
+	BOOL* isSystemFont)
+{
+	HRESULT const result = ORIG_GdiInterop_ConvertFontToLOGFONT(
+		self, font, logFont, isSystemFont);
+	if (FAILED(result) || logFont == nullptr || isSystemFont == nullptr ||
+		!*isSystemFont)
+		return result;
+
+	WCHAR originalFamily[LF_FACESIZE] = {};
+	StringCchCopyW(
+		originalFamily, ARRAYSIZE(originalFamily), logFont->lfFaceName);
+	SignalDirectWriteDiagnostic(L"logfont-called");
+	SignalDirectWriteFamilyDiagnostic(L"logfont", originalFamily);
+	const CGdippSettings* settings = CGdippSettings::GetInstance();
+	if (settings->CopyForceFont(*logFont, *logFont))
+	{
+		SignalDirectWriteDiagnostic(L"logfont-resolved");
+		SignalDirectWriteFamilyDiagnostic(L"logfont-resolved", originalFamily);
+	}
 	return result;
 }
 

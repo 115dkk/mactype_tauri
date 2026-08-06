@@ -12,7 +12,9 @@ struct DirectWriteSubstitutionObservation final {
   std::wstring disabled_source_postscript_name;
   std::wstring active_source_postscript_name;
   std::wstring disabled_replacement_postscript_name;
+  std::wstring active_pinned_source_family;
   bool controls_stable = false;
+  bool retained_object_replacement_observed = false;
   bool replacement_observed = false;
 };
 

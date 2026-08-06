@@ -279,10 +279,47 @@ std::wstring ResolveDirectWriteFamily(const std::wstring_view family,
   return resolved.lfFaceName;
 }
 
+std::wstring ResolveDirectWriteFontObject(
+    IDWriteFont* font, void* directwrite_factory, std::wstring& error) {
+  if (font == nullptr) {
+    error = L"DirectWrite font object is unavailable";
+    return {};
+  }
+  IDWriteFactory* factory = static_cast<IDWriteFactory*>(directwrite_factory);
+  IDWriteFactory* raw_factory = nullptr;
+  UniqueCom<IDWriteFactory> owned_factory;
+  if (factory == nullptr) {
+    const HRESULT factory_result = DWriteCreateFactory(
+        DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+        reinterpret_cast<IUnknown**>(&raw_factory));
+    owned_factory.reset(raw_factory);
+    if (FAILED(factory_result) || owned_factory == nullptr) {
+      error = L"DWriteCreateFactory failed for indexed collection";
+      return {};
+    }
+    factory = owned_factory.get();
+  }
+
+  IDWriteGdiInterop* raw_interop = nullptr;
+  const HRESULT interop_result = factory->GetGdiInterop(&raw_interop);
+  UniqueCom<IDWriteGdiInterop> interop(raw_interop);
+  LOGFONTW resolved{};
+  BOOL is_system_font = FALSE;
+  if (FAILED(interop_result) || interop == nullptr ||
+      FAILED(interop->ConvertFontToLOGFONT(font, &resolved,
+                                          &is_system_font)) ||
+      is_system_font == FALSE) {
+    error = L"ConvertFontToLOGFONT failed for indexed collection";
+    return {};
+  }
+  return resolved.lfFaceName;
+}
+
 std::wstring ResolveIndexedDirectWriteFamily(
     const std::wstring_view family, void* directwrite_factory,
     UINT32& pinned_index, const bool discover_index,
-    std::wstring& postscript_name, std::wstring& error) {
+    std::wstring& postscript_name, UniqueCom<IDWriteFont>* retained_font,
+    std::wstring& error) {
   IDWriteFactory* factory = static_cast<IDWriteFactory*>(directwrite_factory);
   IDWriteFactory* raw_factory = nullptr;
   UniqueCom<IDWriteFactory> owned_factory;
@@ -358,19 +395,12 @@ std::wstring ResolveIndexedDirectWriteFamily(
   }
   postscript_name.resize(postscript_length);
 
-  IDWriteGdiInterop* raw_interop = nullptr;
-  const HRESULT interop_result = factory->GetGdiInterop(&raw_interop);
-  UniqueCom<IDWriteGdiInterop> interop(raw_interop);
-  LOGFONTW resolved{};
-  BOOL is_system_font = FALSE;
-  if (FAILED(interop_result) || interop == nullptr ||
-      FAILED(interop->ConvertFontToLOGFONT(font.get(), &resolved,
-                                          &is_system_font)) ||
-      is_system_font == FALSE) {
-    error = L"ConvertFontToLOGFONT failed for indexed collection";
-    return {};
+  std::wstring resolved = ResolveDirectWriteFontObject(
+      font.get(), factory, error);
+  if (!resolved.empty() && retained_font != nullptr) {
+    retained_font->reset(font.release());
   }
-  return resolved.lfFaceName;
+  return resolved;
 }
 
 }  // namespace
@@ -556,30 +586,35 @@ FontSubstitutionObservation ObserveFontSubstitution(
   std::wstring repeated_disabled_indexed_replacement;
   std::wstring repeated_disabled_source_postscript_name;
   std::wstring repeated_disabled_replacement_postscript_name;
+  UniqueCom<IDWriteFont> pinned_disabled_source;
   {
     FontSubstitutionSwitch disabled;
     indexed.disabled_source_family =
         ResolveIndexedDirectWriteFamily(source_family, directwrite_factory,
             indexed_source, true, indexed.disabled_source_postscript_name,
-            error);
+            &pinned_disabled_source, error);
     indexed.disabled_replacement_family =
         ResolveIndexedDirectWriteFamily(replacement_family, directwrite_factory,
             indexed_replacement, true,
-            indexed.disabled_replacement_postscript_name, error);
+            indexed.disabled_replacement_postscript_name, nullptr, error);
     repeated_disabled_indexed_source = ResolveIndexedDirectWriteFamily(
         source_family, directwrite_factory, indexed_source, false,
-        repeated_disabled_source_postscript_name, error);
+        repeated_disabled_source_postscript_name, nullptr, error);
     repeated_disabled_indexed_replacement = ResolveIndexedDirectWriteFamily(
         replacement_family, directwrite_factory, indexed_replacement, false,
-        repeated_disabled_replacement_postscript_name, error);
+        repeated_disabled_replacement_postscript_name, nullptr, error);
   }
   indexed.active_source_family =
       ResolveIndexedDirectWriteFamily(source_family, directwrite_factory,
-          indexed_source, false, indexed.active_source_postscript_name, error);
+          indexed_source, false, indexed.active_source_postscript_name, nullptr,
+          error);
   std::wstring repeated_active_source_postscript_name;
   const std::wstring repeated_active_indexed_source =
       ResolveIndexedDirectWriteFamily(source_family, directwrite_factory,
-          indexed_source, false, repeated_active_source_postscript_name, error);
+          indexed_source, false, repeated_active_source_postscript_name,
+          nullptr, error);
+  indexed.active_pinned_source_family = ResolveDirectWriteFontObject(
+      pinned_disabled_source.get(), directwrite_factory, error);
   indexed.controls_stable =
       !indexed.disabled_source_family.empty() &&
       !indexed.disabled_replacement_family.empty() &&
@@ -601,10 +636,14 @@ FontSubstitutionObservation ObserveFontSubstitution(
           indexed.disabled_replacement_postscript_name.c_str()) != 0 &&
       _wcsicmp(indexed.disabled_source_family.c_str(),
                indexed.disabled_replacement_family.c_str()) != 0;
+  indexed.retained_object_replacement_observed =
+      _wcsicmp(indexed.active_pinned_source_family.c_str(),
+               indexed.disabled_replacement_family.c_str()) == 0;
   indexed.replacement_observed =
       indexed.controls_stable &&
       _wcsicmp(indexed.active_source_family.c_str(),
-               indexed.disabled_replacement_family.c_str()) == 0;
+               indexed.disabled_replacement_family.c_str()) == 0 &&
+      indexed.retained_object_replacement_observed;
   result.direct_write_custom_collection = observe_direct_write(true);
   if (result.direct_write.active_source_family.empty() ||
       indexed.active_source_family.empty() ||

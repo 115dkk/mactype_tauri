@@ -143,6 +143,12 @@ if ($result.fontSubstitution.directWriteIndexedCollection.disabledSourcePostScri
     $result.fontSubstitution.directWriteIndexedCollection.disabledReplacementPostScriptName) {
     throw 'Indexed DirectWrite PostScript-name controls must remain distinct.'
 }
+if ($result.fontSubstitution.directWriteIndexedCollection.activePinnedSourceFamily -ne 'Arial') {
+    throw 'A retained stock DirectWrite font object must continue to resolve to Arial.'
+}
+if ($result.fontSubstitution.directWriteIndexedCollection.retainedObjectReplacementObserved) {
+    throw 'A retained stock DirectWrite font object must not report a substitution.'
+}
 if ($result.fontSubstitution.directWriteCustomCollection.disabledSourceFamily -ne 'Arial' -or
     $result.fontSubstitution.directWriteCustomCollection.disabledReplacementFamily -ne 'Courier New') {
     throw 'Custom DirectWrite collection controls did not resolve the requested font families.'

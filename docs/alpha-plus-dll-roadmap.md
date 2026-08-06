@@ -258,7 +258,11 @@ substitution is disabled and requires that same index to return the replacement
 font when substitution is active. The returned replacement preserves the
 source face's informational strings during Firefox's immediate PostScript-name
 validation, preventing duplicate replacement names from emptying the source
-family and falling through to an unrelated serif face.
+family and falling through to an unrelated serif face. Firefox can retain that
+source `IDWriteFont` and later convert it to `LOGFONT` while reading font tables,
+so the GDI interop conversion hook applies the same replacement to retained font
+objects. The marker contract retains a source font while substitution is
+disabled and requires its later conversion to resolve to the replacement.
 
 The native probe covers GDI and DirectWrite with injection before factory
 creation, injection after factory creation, multiple factories, worker-thread

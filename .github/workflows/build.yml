@@ -118,6 +118,7 @@ jobs:
             -Marker64 build/service-probe/x64/Release/probe-console64.exe `
             -FontSubstitutionProfile tools/service-probe/tests/fixtures/font-substitution.ini `
             -BrowserProbeScript tools/service-probe/browser_font_probe.mjs `
+            -BrowserLaunchGate build/service-probe/x64/Release/browser-launch-gate64.exe `
             -BrowserEvidenceRoot artifacts/font-substitution-browser
       - uses: actions/upload-artifact@v7
         if: always()

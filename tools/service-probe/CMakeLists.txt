@@ -55,11 +55,15 @@ add_executable(renderer-raii-tests tests/renderer_raii_tests.cpp)
 target_compile_features(renderer-raii-tests PRIVATE cxx_std_20)
 target_compile_definitions(renderer-raii-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
+add_executable(browser-launch-gate browser_launch_gate.cpp)
+target_link_libraries(browser-launch-gate PRIVATE service-probe-common)
+set_target_properties(browser-launch-gate PROPERTIES OUTPUT_NAME "browser-launch-gate${PROBE_ARCH_SUFFIX}")
+
 if(MSVC)
-  foreach(target service-probe-common probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests)
+  foreach(target service-probe-common probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests browser-launch-gate)
     target_compile_options(${target} PRIVATE /W4 /WX /permissive- /utf-8 /sdl)
   endforeach()
-  foreach(target probe-console probe-window probe-spawn-tree probe-timeout-fixture)
+  foreach(target probe-console probe-window probe-spawn-tree probe-timeout-fixture browser-launch-gate)
     target_link_options(${target} PRIVATE
       /MANIFEST:EMBED
       "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/probe.manifest"

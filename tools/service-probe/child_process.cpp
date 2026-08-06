@@ -56,9 +56,11 @@ void TerminateAssignedTree(const HANDLE job, const HANDLE root,
   WaitForJobCleanup(job);
 }
 
+}  // namespace
+
 // CreateProcessW receives a single mutable command line. This quoting is the
 // inverse of CommandLineToArgvW and must preserve trailing backslashes.
-std::wstring QuoteArgument(const std::wstring& argument) {
+std::wstring QuoteCommandLineArgument(const std::wstring& argument) {
   if (argument.find_first_of(L" \t\"") == std::wstring::npos) {
     return argument;
   }
@@ -84,16 +86,14 @@ std::wstring QuoteArgument(const std::wstring& argument) {
   return quoted;
 }
 
-}  // namespace
-
 ChildProcessResult LaunchAndWait(
     const std::filesystem::path& executable,
     const std::vector<std::wstring>& arguments,
     const DWORD timeout_milliseconds) {
-  std::wstring command = QuoteArgument(executable.wstring());
+  std::wstring command = QuoteCommandLineArgument(executable.wstring());
   for (const std::wstring& argument : arguments) {
     command.push_back(L' ');
-    command += QuoteArgument(argument);
+    command += QuoteCommandLineArgument(argument);
   }
   std::vector<wchar_t> mutable_command(command.begin(), command.end());
   mutable_command.push_back(L'\0');

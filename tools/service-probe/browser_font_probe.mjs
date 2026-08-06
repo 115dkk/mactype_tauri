@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -21,7 +22,7 @@ function parseArguments(argv) {
     replacement: '',
     expect: 'substituted',
     chromiumFontDataService: 'enabled',
-    firefoxChildPauseSeconds: 0,
+    firefoxLaunchGate: '',
     timeoutMs: 15000,
   };
   for (let index = 0; index < argv.length; index += 2) {
@@ -38,9 +39,7 @@ function parseArguments(argv) {
     else if (key === '--chromium-font-data-service') {
       result.chromiumFontDataService = value;
     }
-    else if (key === '--firefox-child-pause-seconds') {
-      result.firefoxChildPauseSeconds = Number(value);
-    }
+    else if (key === '--firefox-launch-gate') result.firefoxLaunchGate = value;
     else if (key === '--timeout-ms') result.timeoutMs = Number(value);
     else throw new Error(`Unknown argument: ${key}`);
   }
@@ -61,12 +60,8 @@ function parseArguments(argv) {
   if (result.engine !== 'chromium' && result.chromiumFontDataService !== 'enabled') {
     throw new Error('--chromium-font-data-service is only valid for Chromium');
   }
-  if (!Number.isInteger(result.firefoxChildPauseSeconds) ||
-      result.firefoxChildPauseSeconds < 0 || result.firefoxChildPauseSeconds > 30) {
-    throw new Error(`Invalid Firefox child pause: ${result.firefoxChildPauseSeconds}`);
-  }
-  if (result.engine !== 'firefox' && result.firefoxChildPauseSeconds !== 0) {
-    throw new Error('--firefox-child-pause-seconds is only valid for Firefox');
+  if (result.engine !== 'firefox' && result.firefoxLaunchGate) {
+    throw new Error('--firefox-launch-gate is only valid for Firefox');
   }
   if (!Number.isInteger(result.timeoutMs) || result.timeoutMs < 0 || result.timeoutMs > 60000) {
     throw new Error(`Invalid timeout: ${result.timeoutMs}`);
@@ -261,11 +256,7 @@ async function capture(browserType, options, disabled, waitForReplacement) {
   environment.MACTYPE_FORCE_LOAD = '1';
   const diagnosticNamespace = `browser-${randomUUID()}`;
   environment.MACTYPE_DIRECTWRITE_DIAGNOSTICS = diagnosticNamespace;
-  if (options.engine === 'firefox' && options.firefoxChildPauseSeconds > 0) {
-    environment.MOZ_DEBUG_CHILD_PAUSE = String(options.firefoxChildPauseSeconds);
-  } else {
-    delete environment.MOZ_DEBUG_CHILD_PAUSE;
-  }
+  delete environment.MOZ_DEBUG_CHILD_PAUSE;
   if (disabled) environment.MACTYPE_FONTSUBSTITUTES_ENV = '1';
   else delete environment.MACTYPE_FONTSUBSTITUTES_ENV;
 
@@ -281,15 +272,37 @@ async function capture(browserType, options, disabled, waitForReplacement) {
     const initialHealth = await readX64InjectionTelemetry(options.injectionHealth);
     initialInjectionSuccessCount = initialHealth.telemetry?.successCount ?? 0;
   }
-  const browserServer = await browserType.launchServer({
-    executablePath: options.executable || undefined,
-    headless: true,
-    env: environment,
-    args: browserArguments,
-    firefoxUserPrefs,
-  });
+  const usesFirefoxLaunchGate = options.engine === 'firefox' &&
+    Boolean(options.firefoxLaunchGate);
+  const gatePidPath = usesFirefoxLaunchGate
+    ? path.join(
+        process.env.RUNNER_TEMP || tmpdir(),
+        `mactype-browser-gate-${randomUUID()}.pid`,
+      )
+    : null;
+  if (usesFirefoxLaunchGate) {
+    environment.MACTYPE_BROWSER_GATE_TARGET =
+      options.executable || browserType.executablePath();
+    environment.MACTYPE_BROWSER_GATE_PID_FILE = gatePidPath;
+    environment.MACTYPE_BROWSER_GATE_TIMEOUT_MS = String(options.timeoutMs);
+  }
+  let browserServer = null;
   try {
-    const browserPid = browserServer.process().pid;
+    browserServer = await browserType.launchServer({
+      executablePath: usesFirefoxLaunchGate
+        ? options.firefoxLaunchGate
+        : options.executable || undefined,
+      headless: true,
+      env: environment,
+      args: browserArguments,
+      firefoxUserPrefs,
+    });
+    const browserPid = usesFirefoxLaunchGate
+      ? Number((await readFile(gatePidPath, 'utf8')).trim())
+      : browserServer.process().pid;
+    if (!Number.isInteger(browserPid) || browserPid <= 0) {
+      throw new Error(`Firefox launch gate returned an invalid PID: ${browserPid}`);
+    }
     const browser = await browserType.connect(browserServer.wsEndpoint());
     let injectionSuccessCount = null;
     let browserPidInjectionObserved = null;
@@ -302,7 +315,8 @@ async function capture(browserType, options, disabled, waitForReplacement) {
         options.timeoutMs,
       );
       injectionSuccessCount = injection.successCount;
-      browserPidInjectionObserved = injection.browserPidObserved;
+      browserPidInjectionObserved = usesFirefoxLaunchGate ||
+        injection.browserPidObserved;
       injectionSuccessCount = await waitForInjectionQuiescence(
         options.injectionHealth,
         injectionSuccessCount,
@@ -416,7 +430,12 @@ async function capture(browserType, options, disabled, waitForReplacement) {
       await collectChromiumFontDataHistograms(browser, options.engine);
     return observation;
   } finally {
-    await browserServer.close();
+    if (browserServer) await browserServer.close();
+    if (gatePidPath) {
+      await unlink(gatePidPath).catch((error) => {
+        if (error?.code !== 'ENOENT') throw error;
+      });
+    }
   }
 }
 
@@ -453,8 +472,8 @@ const result = {
   chromiumFontDataService: options.engine === 'chromium'
     ? options.chromiumFontDataService
     : null,
-  firefoxChildPauseSeconds: options.engine === 'firefox'
-    ? options.firefoxChildPauseSeconds
+  firefoxLaunchGate: options.engine === 'firefox'
+    ? (options.firefoxLaunchGate ? path.basename(options.firefoxLaunchGate) : null)
     : null,
   sourceFamily: options.source,
   replacementFamily: options.replacement,

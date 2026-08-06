@@ -1853,6 +1853,18 @@ static WCHAR const* GetDirectWriteDiagnosticRole() noexcept
 	return L"other";
 }
 
+static void RetainDirectWriteDiagnosticEvent(WCHAR const* eventName)
+{
+	renderer_raii::UniqueHandle event = renderer_raii::AdoptHandle(
+		CreateEventW(nullptr, TRUE, TRUE, eventName));
+	DWORD const createError = GetLastError();
+	if (!event || createError == ERROR_ALREADY_EXISTS)
+		return;
+
+	DirectWriteDiagnosticLock lock;
+	GetRendererModulePins().diagnosticEvents.emplace_back(std::move(event));
+}
+
 static void SignalDirectWriteDiagnostic(WCHAR const* stage)
 {
 	DWORD const namespaceLength = GetEnvironmentVariableW(
@@ -1879,15 +1891,13 @@ static void SignalDirectWriteDiagnostic(WCHAR const* stage)
 			eventName, ARRAYSIZE(eventName), L"Local\\MacType.%s.%s.%s",
 			diagnosticNamespace.data(), GetDirectWriteDiagnosticRole(), stage)))
 		return;
+	RetainDirectWriteDiagnosticEvent(eventName);
 
-	renderer_raii::UniqueHandle event = renderer_raii::AdoptHandle(
-		CreateEventW(nullptr, TRUE, TRUE, eventName));
-	DWORD const createError = GetLastError();
-	if (!event || createError == ERROR_ALREADY_EXISTS)
+	if (FAILED(StringCchPrintfW(
+			eventName, ARRAYSIZE(eventName), L"Local\\MacType.%s.pid-%lu.%s",
+			diagnosticNamespace.data(), GetCurrentProcessId(), stage)))
 		return;
-
-	DirectWriteDiagnosticLock lock;
-	GetRendererModulePins().diagnosticEvents.emplace_back(std::move(event));
+	RetainDirectWriteDiagnosticEvent(eventName);
 }
 
 static void SignalDirectWriteFamilyDiagnostic(

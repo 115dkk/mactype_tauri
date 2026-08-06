@@ -43,7 +43,8 @@ function Test-OpenServiceWorkflowPolicy {
         -Tokens @(
             'open-core:', 'mactype-open-core', 'artifacts/open-core',
             'open-service-windows:', 'Test-OpenServiceWindows.ps1',
-            'Build-ServiceRuntime.ps1', 'ServiceRuntimeRoot', 'hook x86/x64 markers'
+            'Build-ServiceRuntime.ps1', 'ServiceRuntimeRoot', 'hook x86/x64 markers',
+            'BrowserLaunchGate', 'browser-launch-gate64.exe'
         )
 
     $hostedLifecyclePath = Join-Path $Root 'scripts\ci\Test-OpenServiceWindows.ps1'
@@ -58,7 +59,7 @@ function Test-OpenServiceWorkflowPolicy {
             '-RepairContext $stagedSetup', 'param($setupExecutable)',
             "`$sourceFamily = 'Cambria'",
             "'--chromium-font-data-service', 'disabled'",
-            "'--firefox-child-pause-seconds', '10'", 'replacementObserved',
+            "'--firefox-launch-gate', `$BrowserLaunchGate", 'replacementObserved',
             "-Verb 'publish-profile' -InputBytes `$profileA",
             "Assert-ActiveRuntimeProfile -ExpectedBytes `$profileA"
         )
@@ -90,8 +91,18 @@ function Test-OpenServiceWorkflowPolicy {
         -Tokens @(
             'targetTreeHooked', 'initialSuccessCount',
             'browserPidInjectionObserved', 'waitForBrowserRoleInjection',
-            'dom.ipc.processPrelaunch.enabled', 'firefoxChildPauseSeconds',
-            'MOZ_DEBUG_CHILD_PAUSE'
+            'dom.ipc.processPrelaunch.enabled', 'firefoxLaunchGate',
+            'MACTYPE_BROWSER_GATE_TARGET', 'MACTYPE_BROWSER_GATE_PID_FILE'
+        )
+
+    $browserGatePath = Join-Path $Root 'tools\service-probe\browser_launch_gate.cpp'
+    $null = Test-RequiredTokens -Failures $failures -Path $browserGatePath `
+        -MissingMessage 'tools/service-probe/browser_launch_gate.cpp is missing.' `
+        -TokenMessage "browser launch gate is missing entry-point injection contract '{0}'." `
+        -Tokens @(
+            'DEBUG_ONLY_THIS_PROCESS', 'AddressOfEntryPoint',
+            'RestoreAndRewind', 'DebugActiveProcessStop',
+            'pid-%lu.hook-entered', 'SuspendMainThread'
         )
 
     $aclFixtureModulePath = Join-Path $Root 'scripts\ci\lib\OpenServiceAclFixture.psm1'

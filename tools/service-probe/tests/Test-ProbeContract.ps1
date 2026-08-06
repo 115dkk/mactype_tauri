@@ -31,7 +31,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "CMake configure failed with exit code $LASTEXITCODE"
 }
 
-& cmake --build $buildDirectory --config Release --target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests
+& cmake --build $buildDirectory --config Release --target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests browser-launch-gate
 if ($LASTEXITCODE -ne 0) {
     throw "CMake build failed with exit code $LASTEXITCODE"
 }
@@ -42,7 +42,43 @@ if ($LASTEXITCODE -ne 0) {
     throw "Renderer RAII fault-injection tests failed with exit code $LASTEXITCODE"
 }
 
+$gatePath = Join-Path $buildDirectory "Release\browser-launch-gate$suffix.exe"
+$gatePidPath = Join-Path $resultDirectory 'browser-launch-gate.pid'
+$gateNamespace = "probe-contract-$PID"
 New-Item -ItemType Directory -Force $resultDirectory | Out-Null
+Remove-Item -LiteralPath $gatePidPath -Force -ErrorAction SilentlyContinue
+$env:MACTYPE_BROWSER_GATE_TARGET = $env:ComSpec
+$env:MACTYPE_BROWSER_GATE_PID_FILE = $gatePidPath
+$env:MACTYPE_BROWSER_GATE_TIMEOUT_MS = '5000'
+$env:MACTYPE_DIRECTWRITE_DIAGNOSTICS = $gateNamespace
+$gate = $null
+$gateEvent = $null
+try {
+    $gate = Start-Process -FilePath $gatePath -ArgumentList '/d', '/c', 'exit 0' -PassThru
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    while (-not (Test-Path -LiteralPath $gatePidPath -PathType Leaf)) {
+        if ([DateTime]::UtcNow -ge $deadline) { throw 'Browser launch gate did not publish its child PID.' }
+        Start-Sleep -Milliseconds 25
+    }
+    $gatedPid = [int](Get-Content -LiteralPath $gatePidPath -Raw)
+    $gateEvent = [System.Threading.EventWaitHandle]::new(
+        $false,
+        [System.Threading.EventResetMode]::ManualReset,
+        "Local\MacType.$gateNamespace.pid-$gatedPid.hook-entered"
+    )
+    $gateEvent.Set() | Out-Null
+    if (-not $gate.WaitForExit(5000)) { throw 'Browser launch gate did not resume and reap its child.' }
+    if ($gate.ExitCode -ne 0) { throw "Browser launch gate failed with exit code $($gate.ExitCode)." }
+} finally {
+    if ($gateEvent) { $gateEvent.Dispose() }
+    if ($gate -and -not $gate.HasExited) { Stop-Process -Id $gate.Id -Force }
+    Remove-Item Env:MACTYPE_BROWSER_GATE_TARGET -ErrorAction SilentlyContinue
+    Remove-Item Env:MACTYPE_BROWSER_GATE_PID_FILE -ErrorAction SilentlyContinue
+    Remove-Item Env:MACTYPE_BROWSER_GATE_TIMEOUT_MS -ErrorAction SilentlyContinue
+    Remove-Item Env:MACTYPE_DIRECTWRITE_DIAGNOSTICS -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $gatePidPath -Force -ErrorAction SilentlyContinue
+}
+
 $resultPath = Join-Path $resultDirectory 'console.json'
 $probePath = Join-Path $buildDirectory "Release\probe-console$suffix.exe"
 & $probePath --out $resultPath --wait-ms 25 `

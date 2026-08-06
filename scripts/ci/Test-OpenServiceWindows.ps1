@@ -19,6 +19,8 @@ param(
 
     [string] $BrowserProbeScript,
 
+    [string] $BrowserLaunchGate,
+
     [string] $BrowserEvidenceRoot,
 
     [switch] $LeaveInstalledForReboot
@@ -48,14 +50,19 @@ foreach ($path in @($SetupExecutable, $ServiceExecutable, $Marker32, $Marker64))
 }
 if (-not (Test-Path -LiteralPath $OpenCoreRoot -PathType Container)) { throw "Open core artifact root is missing: $OpenCoreRoot" }
 
-$browserProofInputs = @($FontSubstitutionProfile, $BrowserProbeScript, $BrowserEvidenceRoot)
+$browserProofInputs = @(
+    $FontSubstitutionProfile,
+    $BrowserProbeScript,
+    $BrowserLaunchGate,
+    $BrowserEvidenceRoot
+)
 $browserProofInputCount = @($browserProofInputs | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
 if ($browserProofInputCount -ne 0 -and $browserProofInputCount -ne $browserProofInputs.Count) {
-    throw 'Font substitution profile, browser probe script, and browser evidence root must be supplied together.'
+    throw 'Font substitution profile, browser probe script, browser launch gate, and browser evidence root must be supplied together.'
 }
 $runBrowserProof = $browserProofInputCount -eq $browserProofInputs.Count
 if ($runBrowserProof) {
-    foreach ($path in @($FontSubstitutionProfile, $BrowserProbeScript)) {
+    foreach ($path in @($FontSubstitutionProfile, $BrowserProbeScript, $BrowserLaunchGate)) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
             throw "Required browser font-substitution input is missing: $path"
         }
@@ -475,12 +482,13 @@ try {
                     '--chromium-font-data-service', 'disabled'
                 )
             } elseif ($engine -eq 'firefox') {
-                # Give the open service time to load the renderer DLL through
-                # Mozilla's child-startup diagnostic pause. Firefox starts its
-                # normal sandbox after this pause; the selected duration is
-                # retained in JSON and exact pixel equality remains mandatory.
+                # Break the Firefox parent at its PE image entry point, detach
+                # with its main thread suspended, and resume only after its
+                # PID-specific hook event exists. Firefox then performs its
+                # normal initialization and sandbox setup. Exact pixel equality
+                # remains mandatory.
                 $browserProbeArguments += @(
-                    '--firefox-child-pause-seconds', '10'
+                    '--firefox-launch-gate', $BrowserLaunchGate
                 )
             }
             & node @browserProbeArguments

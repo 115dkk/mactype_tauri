@@ -13,6 +13,8 @@ struct ChildProcessResult {
   bool launched = false;
 };
 
+std::wstring QuoteCommandLineArgument(const std::wstring& argument);
+
 ChildProcessResult LaunchAndWait(
     const std::filesystem::path& executable,
     const std::vector<std::wstring>& arguments, DWORD timeout_milliseconds);

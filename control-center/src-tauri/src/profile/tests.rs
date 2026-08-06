@@ -100,6 +100,29 @@ fn default_profile_discovery_stops_at_the_directory_contract() {
 }
 
 #[test]
+fn default_profile_discovery_is_deterministic_without_a_bundled_default() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("mactype-default-order-{unique}"));
+    let profile_root = root.join("ini");
+    fs::create_dir_all(&profile_root).unwrap();
+    fs::write(profile_root.join("zeta.ini"), b"[General]\nA=1\n").unwrap();
+    fs::write(profile_root.join("notes.txt"), b"ignored").unwrap();
+    fs::write(profile_root.join("Alpha.ini"), b"[General]\nA=1\n").unwrap();
+    fs::write(root.join("MacType.ini"), b"[General]\nA=1\n").unwrap();
+
+    let picked = legacy::find_default_profile_at(&root).unwrap().unwrap();
+    assert_eq!(picked, profile_root.join("Alpha.ini"));
+
+    fs::write(profile_root.join("Default.ini"), b"[General]\nA=1\n").unwrap();
+    let picked = legacy::find_default_profile_at(&root).unwrap().unwrap();
+    assert_eq!(picked, profile_root.join("Default.ini"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn changing_one_key_preserves_comments_order_and_unknown_lines() {
     let bytes = b"; keep\r\n[General]\r\nUnknown = 7\r\nNormalWeight = 2  \r\n# tail\r\n";
     let path = temp_profile(bytes);

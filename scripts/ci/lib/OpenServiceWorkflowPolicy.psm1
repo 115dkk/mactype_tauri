@@ -82,6 +82,12 @@ function Test-OpenServiceWorkflowPolicy {
         }
     }
 
+    $browserProbePath = Join-Path $Root 'tools\service-probe\browser_font_probe.mjs'
+    $null = Test-RequiredTokens -Failures $failures -Path $browserProbePath `
+        -MissingMessage 'tools/service-probe/browser_font_probe.mjs is missing.' `
+        -TokenMessage "browser font proof is missing injection race guard '{0}'." `
+        -Tokens @('targetTreeHooked', 'initialSuccessCount', 'browserPidInjectionObserved')
+
     $aclFixtureModulePath = Join-Path $Root 'scripts\ci\lib\OpenServiceAclFixture.psm1'
     $null = Test-RequiredTokens -Failures $failures -Path $aclFixtureModulePath `
         -MissingMessage 'scripts/ci/lib/OpenServiceAclFixture.psm1 is missing.' `

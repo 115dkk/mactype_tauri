@@ -71,17 +71,38 @@ async function readX64InjectionTelemetry(healthPath) {
   };
 }
 
-async function waitForBrowserInjection(healthPath, browserPid, timeoutMs) {
+async function waitForBrowserInjection(
+  healthPath,
+  browserPid,
+  initialSuccessCount,
+  diagnosticNamespace,
+  timeoutMs,
+) {
   const deadline = Date.now() + timeoutMs;
   let telemetry;
+  let browserPidObserved = false;
   do {
     ({ telemetry } = await readX64InjectionTelemetry(healthPath));
-    if (telemetry?.lastSuccess?.pid === browserPid) return telemetry.successCount;
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    browserPidObserved ||= telemetry?.lastSuccess?.pid === browserPid;
+    if (telemetry?.successCount > initialSuccessCount) {
+      const diagnostics = collectDirectWriteDiagnostics(diagnosticNamespace);
+      const targetTreeHooked = Object.values(diagnostics).some(
+        (role) => role['hook-entered'],
+      );
+      if (targetTreeHooked) {
+        return {
+          successCount: telemetry.successCount,
+          browserPidObserved,
+        };
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
   } while (Date.now() < deadline);
   throw new Error(
-    `Open service did not record injection into browser PID ${browserPid} ` +
-      `(last PID ${telemetry?.lastSuccess?.pid ?? 'none'})`,
+    `Open service did not hook browser tree ${browserPid} ` +
+      `(initial count ${initialSuccessCount}, current count ` +
+      `${telemetry?.successCount ?? 'none'}, last PID ` +
+      `${telemetry?.lastSuccess?.pid ?? 'none'})`,
   );
 }
 
@@ -205,6 +226,11 @@ async function capture(browserType, options, disabled, waitForReplacement) {
       options.chromiumFontDataService === 'disabled'
     ? ['--disable-features=FontDataServiceAllWebContents']
     : [];
+  let initialInjectionSuccessCount = null;
+  if (options.injectionHealth) {
+    const initialHealth = await readX64InjectionTelemetry(options.injectionHealth);
+    initialInjectionSuccessCount = initialHealth.telemetry?.successCount ?? 0;
+  }
   const browserServer = await browserType.launchServer({
     executablePath: options.executable || undefined,
     headless: true,
@@ -215,12 +241,17 @@ async function capture(browserType, options, disabled, waitForReplacement) {
     const browserPid = browserServer.process().pid;
     const browser = await browserType.connect(browserServer.wsEndpoint());
     let injectionSuccessCount = null;
+    let browserPidInjectionObserved = null;
     if (options.injectionHealth) {
-      injectionSuccessCount = await waitForBrowserInjection(
+      const injection = await waitForBrowserInjection(
         options.injectionHealth,
         browserPid,
+        initialInjectionSuccessCount,
+        diagnosticNamespace,
         options.timeoutMs,
       );
+      injectionSuccessCount = injection.successCount;
+      browserPidInjectionObserved = injection.browserPidObserved;
       injectionSuccessCount = await waitForInjectionQuiescence(
         options.injectionHealth,
         injectionSuccessCount,
@@ -314,6 +345,7 @@ async function capture(browserType, options, disabled, waitForReplacement) {
     observation.attempts = attempts;
     observation.elapsedMs = Date.now() - startedAt;
     observation.browserPid = browserPid;
+    observation.browserPidInjectionObserved = browserPidInjectionObserved;
     observation.injectionSuccessCount = injectionSuccessCount;
     observation.directWriteDiagnostics = collectDirectWriteDiagnostics(
       diagnosticNamespace,

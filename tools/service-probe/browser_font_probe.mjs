@@ -295,9 +295,12 @@ async function capture(browserType, options, disabled, waitForReplacement) {
     }
     const page = await browser.newPage({ viewport: { width: 900, height: 260 } });
     if (options.injectionHealth) {
+      // Firefox can reuse a content process that the service hooked during
+      // launch, so prove this browser tree added the renderer after the
+      // pre-launch baseline instead of requiring another post-page injection.
       injectionSuccessCount = await waitForBrowserRoleInjection(
         options.injectionHealth,
-        injectionSuccessCount,
+        initialInjectionSuccessCount,
         diagnosticNamespace,
         'renderer',
         options.timeoutMs,

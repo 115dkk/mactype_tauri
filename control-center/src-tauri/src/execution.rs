@@ -299,9 +299,7 @@ fn ensure_active_runtime() -> Result<bool, String> {
 /// bundled ini\Default.ini, validated. Anything else must be an explicit user
 /// choice (apply or the migrate funnel), so a missing or unreadable
 /// Default.ini fails with a coded error instead of guessing.
-fn bundled_default_profile_payload(
-    installation_root: &Path,
-) -> Result<(PathBuf, Vec<u8>), String> {
+fn bundled_default_profile_payload(installation_root: &Path) -> Result<(PathBuf, Vec<u8>), String> {
     crate::profile::bundled_default_profile_at(installation_root)
         .map_err(|error| {
             format!(

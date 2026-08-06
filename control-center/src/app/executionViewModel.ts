@@ -423,7 +423,11 @@ function projectSystemInjectionAction(
 
   const copy = state === "legacy-service-migrate"
     ? legacyServiceCopy(status?.legacyMacTray)
-    : systemInjectionCopy[state];
+    : state === "inactive" && !status?.activeProfile
+      // Starting without an applied profile auto-applies the bundled default;
+      // disclose that here, before the click, instead of surprising afterwards.
+      ? { ...systemInjectionCopy.inactive, descriptionKey: "execution.systemInactiveNoProfileDescription" as const }
+      : systemInjectionCopy[state];
 
   return {
     intent,

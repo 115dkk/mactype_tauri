@@ -357,6 +357,8 @@ jobs:
       - name: Enforce open service static contracts
         shell: pwsh
         run: scripts/ci/Test-OpenServiceContract.ps1
+      - name: Test browser font generation evidence
+        run: node --test tools/service-probe/tests/browser_font_evidence.test.mjs
       - name: Verify independent distribution provenance and translations
         shell: pwsh
         run: scripts/ci/Test-DistributionPolicy.ps1

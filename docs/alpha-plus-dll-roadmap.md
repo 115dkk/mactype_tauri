@@ -257,10 +257,13 @@ core to become hook-ready; it is not itself a product substitution mechanism.
 Firefox 151 has already built and retained its shared font collection before
 that boundary, so an open-service injection at this point is reported as
 `unsupported-late-collection`. The required lane proves the source remains
-unchanged and that no factory acquisition returned an alias. It must not turn
-green through retained-object mutation, a renderer pause, or a compatibility
-preference. Supporting this Firefox path requires a browser adapter that runs
-before shared-font-list creation.
+unchanged and that the prepared alias snapshot was not consumed by the retained
+shared-font-list generation. A later, unrelated factory acquisition may return
+the new alias generation and is recorded separately; it does not retroactively
+make that acquisition early. The lane must not turn green through retained-object
+mutation, a renderer pause, or a compatibility preference. Supporting this
+Firefox path requires a browser adapter that runs before shared-font-list
+creation.
 
 Chromium's default FontDataService validates embedded font data outside the
 DirectWrite collection metadata seam. The coherent virtual SFNT solves that

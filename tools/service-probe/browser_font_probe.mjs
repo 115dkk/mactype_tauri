@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 
+import { classifyDirectWriteGeneration } from './browser_font_evidence.mjs';
 import { launchChromiumWithProductLoader } from './chromium_product_loader.mjs';
 
 const require = createRequire(
@@ -187,6 +188,7 @@ function collectDirectWriteDiagnostics(diagnosticNamespace) {
     'hook-entered',
     'hook-ready',
     'legacy-system-collection-called',
+    'legacy-system-collection-alias-returned',
     'system-font-set-called',
     'system-font-set-alias-returned',
     'modern-system-collection-called',
@@ -525,7 +527,7 @@ await mkdir(path.dirname(resolvedOutput), { recursive: true });
 await persistPngEvidence(disabled, 'disabled', resolvedOutput);
 await persistPngEvidence(active, 'active', resolvedOutput);
 const result = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   engine: options.engine,
   executable: options.executable || null,
   launchBoundary: options.chromiumLoader
@@ -551,32 +553,22 @@ result.replacementMetricsObserved = hasReplacementMetrics(active);
 result.replacementRasterObserved = hasReplacementRaster(active);
 result.replacementObserved ||=
   result.replacementMetricsObserved && result.replacementRasterObserved;
-if (options.injectionHealth || options.chromiumLoader) {
-  result.earlyAliasAcquisitionObserved = [
-    'system-font-set-alias-returned',
-    'modern-system-collection-alias-returned',
-  ].some((stage) => Object.values(active.directWriteDiagnostics).some(
-    (role) => role[stage],
-  ));
-} else {
-  result.earlyAliasAcquisitionObserved = null;
-}
+Object.assign(
+  result,
+  classifyDirectWriteGeneration(
+    result,
+    Boolean(options.injectionHealth || options.chromiumLoader),
+  ),
+);
 result.productLoaderBoundaryObserved = options.chromiumLoader
   ? active.browserPidInjectionObserved === true &&
     active.directWriteDiagnostics.main['hook-ready'] &&
-    result.earlyAliasAcquisitionObserved
+    result.aliasGenerationConsumedObserved
   : null;
 if (options.expect === 'unsupported-late-collection') {
-  const main = active.directWriteDiagnostics.main;
-  const aliasSnapshotPrepared =
-    main['alias-collection-applied'] || main['alias-collection-partial'];
   result.unsupportedLateCollectionObserved =
-    result.controlsDistinct &&
-    !result.sourceChanged &&
-    !result.replacementObserved &&
-    main['hook-ready'] &&
-    aliasSnapshotPrepared &&
-    result.earlyAliasAcquisitionObserved === false;
+    result.retainedStockGenerationObserved &&
+    result.aliasGenerationConsumedObserved === false;
   result.expectationMet = result.unsupportedLateCollectionObserved;
 } else {
   result.unsupportedLateCollectionObserved = null;
@@ -587,7 +579,7 @@ if (options.expect === 'unsupported-late-collection') {
   );
   if ((options.injectionHealth || options.chromiumLoader) &&
       options.expect === 'substituted') {
-    result.expectationMet &&= result.earlyAliasAcquisitionObserved;
+    result.expectationMet &&= result.aliasGenerationConsumedObserved;
   }
   if (options.chromiumLoader && options.expect === 'substituted') {
     result.expectationMet &&= result.productLoaderBoundaryObserved;

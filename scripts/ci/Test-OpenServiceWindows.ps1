@@ -471,8 +471,9 @@ try {
         $lateChromiumResult = Get-Content -LiteralPath $lateChromiumResultPath -Raw | ConvertFrom-Json
         if (-not $lateChromiumResult.expectationMet -or
             -not $lateChromiumResult.unsupportedLateCollectionObserved -or
+            -not $lateChromiumResult.retainedStockGenerationObserved -or
             $lateChromiumResult.replacementObserved -or
-            $lateChromiumResult.earlyAliasAcquisitionObserved) {
+            $lateChromiumResult.aliasGenerationConsumedObserved) {
             throw 'Chromium open-service evidence did not prove the immutable late-collection boundary.'
         }
 
@@ -523,8 +524,10 @@ try {
             Where-Object { $loaderChromiumResult.active.directWriteDiagnostics.$_.'hook-ready' }
         if (-not $loaderChromiumResult.expectationMet -or
             -not $loaderChromiumResult.replacementObserved -or
-            -not $loaderChromiumResult.earlyAliasAcquisitionObserved -or
+            -not $loaderChromiumResult.aliasCollectionReturnedObserved -or
+            -not $loaderChromiumResult.aliasGenerationConsumedObserved -or
             -not $loaderChromiumResult.productLoaderBoundaryObserved -or
+            $loaderChromiumResult.retainedStockGenerationObserved -or
             $loaderChromiumResult.launchBoundary -ne 'product-macloader' -or
             $nonMainLoaderHookObserved.Count -ne 0) {
             throw 'Chromium product-loader evidence did not prove default FontDataService substitution through an early immutable alias collection.'
@@ -551,8 +554,9 @@ try {
         $firefoxResult = Get-Content -LiteralPath $firefoxResultPath -Raw | ConvertFrom-Json
         if (-not $firefoxResult.expectationMet -or
             -not $firefoxResult.unsupportedLateCollectionObserved -or
+            -not $firefoxResult.retainedStockGenerationObserved -or
             $firefoxResult.replacementObserved -or
-            $firefoxResult.earlyAliasAcquisitionObserved) {
+            $firefoxResult.aliasGenerationConsumedObserved) {
             throw 'Firefox browser evidence did not prove the explicit pre-entry shared-font-list limitation.'
         }
     }

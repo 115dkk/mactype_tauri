@@ -73,7 +73,8 @@ function Test-OpenServiceWorkflowPolicy {
             "-Phase 'post-MacLoader service restart'",
             '--firefox-launch-gate $BrowserLaunchGate',
             '--expect unsupported-late-collection', 'unsupportedLateCollectionObserved',
-            'replacementObserved', 'earlyAliasAcquisitionObserved',
+            'replacementObserved', 'aliasGenerationConsumedObserved',
+            'aliasCollectionReturnedObserved', 'retainedStockGenerationObserved',
             "-Verb 'publish-profile' -InputBytes `$profileA",
             "Assert-ActiveRuntimeProfile -ExpectedBytes `$profileA"
         )
@@ -103,11 +104,15 @@ function Test-OpenServiceWorkflowPolicy {
         -MissingMessage 'tools/service-probe/browser_font_probe.mjs is missing.' `
         -TokenMessage "browser font proof is missing coherent rendering contract '{0}'." `
         -Tokens @(
+            'schemaVersion: 2',
+            'classifyDirectWriteGeneration',
             'targetTreeHooked', 'initialSuccessCount',
             'browserPidInjectionObserved', 'metricSamples',
             'rasterComparison', 'replacementMetricsObserved',
-            'replacementRasterObserved', 'earlyAliasAcquisitionObserved',
+            'replacementRasterObserved', 'aliasGenerationConsumedObserved',
+            'retainedStockGenerationObserved',
             'unsupportedLateCollectionObserved',
+            'legacy-system-collection-alias-returned',
             'system-font-set-alias-returned',
             'modern-system-collection-alias-returned', 'firefoxLaunchGate',
             'MACTYPE_BROWSER_GATE_TARGET', 'MACTYPE_BROWSER_GATE_PID_FILE',
@@ -115,6 +120,29 @@ function Test-OpenServiceWorkflowPolicy {
             'productLoaderBoundaryObserved'
         )
     $browserProbe = Get-Content -LiteralPath $browserProbePath -Raw
+
+    $browserEvidencePath = Join-Path $Root 'tools\service-probe\browser_font_evidence.mjs'
+    $browserEvidence = Test-RequiredTokens -Failures $failures -Path $browserEvidencePath `
+        -MissingMessage 'tools/service-probe/browser_font_evidence.mjs is missing.' `
+        -TokenMessage "browser generation evidence is missing classification token '{0}'." `
+        -Tokens @(
+            'classifyDirectWriteGeneration', 'ALIAS_RETURN_STAGES',
+            'aliasSnapshotPreparedObserved', 'aliasCollectionReturnedObserved',
+            'aliasGenerationConsumedObserved', 'retainedStockGenerationObserved',
+            'legacy-system-collection-alias-returned',
+            'system-font-set-alias-returned',
+            'modern-system-collection-alias-returned'
+        )
+
+    $browserEvidenceTestPath = Join-Path $Root 'tools\service-probe\tests\browser_font_evidence.test.mjs'
+    $null = Test-RequiredTokens -Failures $failures -Path $browserEvidenceTestPath `
+        -MissingMessage 'browser generation evidence tests are missing.' `
+        -TokenMessage "browser generation evidence tests are missing scenario '{0}'." `
+        -Tokens @(
+            'ordinary late Chromium retains the stock generation',
+            'MacLoader Chromium consumes the returned alias generation',
+            'a later Firefox alias return does not mutate its retained stock list'
+        )
 
     $productLoaderPath = Join-Path $Root 'tools\service-probe\chromium_product_loader.mjs'
     $productLoader = Test-RequiredTokens -Failures $failures -Path $productLoaderPath `
@@ -131,6 +159,7 @@ function Test-OpenServiceWorkflowPolicy {
         'FontDataServiceAllWebContents'
     )) {
         if ($browserProbe.Contains($forbiddenToken) -or
+            ($browserEvidence -and $browserEvidence.Contains($forbiddenToken)) -or
             ($productLoader -and $productLoader.Contains($forbiddenToken))) {
             $failures.Add("browser proof must not restore launch/injection tape '$forbiddenToken'.")
         }
@@ -161,6 +190,7 @@ function Test-OpenServiceWorkflowPolicy {
             'kFactory3GetSystemFontCollectionSlot = 38',
             'renderer_raii::PageProtection::TrySet',
             'PatchFactoryAliasVtables',
+            'legacy-system-collection-alias-returned',
             'SignalDirectWriteDiagnostic(L"hook-ready");'
         )
     if ($directWrite) {

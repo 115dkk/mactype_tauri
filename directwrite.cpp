@@ -2226,6 +2226,9 @@ HRESULT WINAPI IMPL_Factory_GetSystemFontCollection(
 			&aliasCollection);
 		if (SUCCEEDED(aliasResult))
 			*fontCollection = aliasCollection.Detach();
+		if (*fontCollection != nullptr)
+			SignalDirectWriteDiagnostic(
+				L"legacy-system-collection-alias-returned");
 		return aliasResult;
 	}
 	*fontCollection = systemCollection.Detach();

@@ -67,8 +67,11 @@ function Test-OpenServiceWorkflowPolicy {
             'OpenServiceAclFixture.psm1', 'Invoke-OpenServiceAclRepairFixture',
             '-RepairContext $stagedSetup', 'param($setupExecutable)',
             "`$sourceFamily = 'Cambria'",
-            "'--firefox-launch-gate', `$BrowserLaunchGate",
-            "'unsupported-late-collection'", 'unsupportedLateCollectionObserved',
+            '--chromium-loader $chromiumLoader',
+            "'product-macloader'", 'productLoaderBoundaryObserved',
+            "-Phase 'post-MacLoader service restart'",
+            '--firefox-launch-gate $BrowserLaunchGate',
+            '--expect unsupported-late-collection', 'unsupportedLateCollectionObserved',
             'replacementObserved', 'earlyAliasAcquisitionObserved',
             "-Verb 'publish-profile' -InputBytes `$profileA",
             "Assert-ActiveRuntimeProfile -ExpectedBytes `$profileA"
@@ -106,14 +109,28 @@ function Test-OpenServiceWorkflowPolicy {
             'unsupportedLateCollectionObserved',
             'system-font-set-alias-returned',
             'modern-system-collection-alias-returned', 'firefoxLaunchGate',
-            'MACTYPE_BROWSER_GATE_TARGET', 'MACTYPE_BROWSER_GATE_PID_FILE'
+            'MACTYPE_BROWSER_GATE_TARGET', 'MACTYPE_BROWSER_GATE_PID_FILE',
+            'chromiumLoader', 'launchChromiumWithProductLoader',
+            'productLoaderBoundaryObserved'
         )
     $browserProbe = Get-Content -LiteralPath $browserProbePath -Raw
+
+    $productLoaderPath = Join-Path $Root 'tools\service-probe\chromium_product_loader.mjs'
+    $productLoader = Test-RequiredTokens -Failures $failures -Path $productLoaderPath `
+        -MissingMessage 'tools/service-probe/chromium_product_loader.mjs is missing.' `
+        -TokenMessage "Chromium product-loader adapter is missing lifecycle token '{0}'." `
+        -Tokens @(
+            'spawn', 'connectOverCDP', 'DevToolsActivePort',
+            "session.send('Browser.close')", 'process.kill(pid)',
+            'removeUserDataDirectory', 'mactype-chromium-loader-'
+        )
     foreach ($forbiddenToken in @(
         'MOZ_DEBUG_CHILD_PAUSE',
-        'dom.ipc.processPrelaunch.enabled', 'waitForBrowserRoleInjection'
+        'dom.ipc.processPrelaunch.enabled', 'waitForBrowserRoleInjection',
+        'FontDataServiceAllWebContents'
     )) {
-        if ($browserProbe.Contains($forbiddenToken)) {
+        if ($browserProbe.Contains($forbiddenToken) -or
+            ($productLoader -and $productLoader.Contains($forbiddenToken))) {
             $failures.Add("browser proof must not restore launch/injection tape '$forbiddenToken'.")
         }
     }

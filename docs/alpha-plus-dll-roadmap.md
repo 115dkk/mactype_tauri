@@ -211,7 +211,8 @@ x64. A missing result is `UNKNOWN`, not `PASS`.
 | Stock Windows | Source and replacement controls render differently; no MacType module or machine-state change is present. |
 | Legacy MacTray | The same profile, process, API, and pixel fingerprint test runs with interactive tray injection. |
 | Legacy MacType service | The same test runs with the legacy machine service and records its injection state. |
-| Alpha open service | The service records the exact profile/runtime generation, target DLL, resolved family, and changed pixel fingerprint. |
+| Alpha open service | The service records the exact profile/runtime generation and target DLL; an already-retained immutable browser collection is reported explicitly as unsupported-late. |
+| Alpha product loader | The shipped MacLoader injects before process entry and records the resolved family and changed pixel fingerprint. |
 
 The browser gate downloads pinned Playwright Chromium and Firefox builds. It
 renders identical source and replacement samples, stores screenshots and
@@ -262,12 +263,16 @@ preference. Supporting this Firefox path requires a browser adapter that runs
 before shared-font-list creation.
 
 Chromium's default FontDataService validates embedded font data outside the
-DirectWrite collection metadata seam. The coherent virtual SFNT is the product
-adapter for that boundary: the bytes, native reference, and collection identity
-now agree. The required Chromium lane runs with the default feature set and
-must match an independent replacement render semantically or byte-for-byte.
-Disabling `FontDataServiceAllWebContents` is not accepted as product support or
-as a required-path success proof.
+DirectWrite collection metadata seam. The coherent virtual SFNT solves that
+identity boundary: the bytes, native reference, and collection identity now
+agree. It does not make a collection acquired before injection mutable. The WMI
+service observer is therefore required to report an ordinary late Chromium
+launch as `unsupported-late-collection`. The shipped MacLoader is the product
+adapter for Chromium support because it injects before process entry; its
+required lane must acquire the immutable alias collection early and match an
+independent replacement render semantically or byte-for-byte with the default
+feature set. Disabling `FontDataServiceAllWebContents` is not accepted as
+product support or as a required-path success proof.
 
 
 The native probe covers GDI and DirectWrite with injection before factory

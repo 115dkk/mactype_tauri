@@ -450,55 +450,93 @@ try {
     Assert-GenerationBoundMarkerTelemetry -MarkerResults $markerResults -ExpectedDigest $digestA
 
     if ($runBrowserProof) {
-        foreach ($engine in @('chromium', 'firefox')) {
-            # Exercise each browser with its default font-service behavior. The
-            # disk-backed DirectWrite file reference carries font identity across
-            # Chromium's FontDataService boundary. Firefox 151 completes its
-            # shared font list before PE image entry, so the test gate proves the
-            # late-collection limitation explicitly instead of presenting a
-            # compatibility mode as product support.
-            $sourceFamily = 'Cambria'
-            $expectedState = if ($engine -eq 'firefox') {
-                'unsupported-late-collection'
-            } else {
-                'substituted'
-            }
-            $resultPath = Join-Path $BrowserEvidenceRoot "open-service-$engine.json"
-            # The service serializes process-creation events and each fixed helper
-            # has a 20-second absolute deadline. A browser process tree therefore
-            # needs a larger observation window than a single helper invocation.
-            $browserProbeArguments = @(
-                $BrowserProbeScript,
-                '--engine', $engine,
-                '--output', $resultPath,
-                '--injection-health', (Join-Path $machineRoot 'health.json'),
-                '--source', $sourceFamily,
-                '--replacement', 'Courier New',
-                '--expect', $expectedState,
-                '--timeout-ms', '60000'
-            )
-            if ($engine -eq 'firefox') {
-                $browserProbeArguments += @(
-                    '--firefox-launch-gate', $BrowserLaunchGate
-                )
-            }
-            & node @browserProbeArguments
-            if ($LASTEXITCODE -ne 0) {
-                throw "$engine did not satisfy the declared browser font-substitution support contract."
-            }
-            $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
-            if ($engine -eq 'chromium') {
-                if (-not $result.expectationMet -or
-                    -not $result.replacementObserved -or
-                    -not $result.earlyAliasAcquisitionObserved) {
-                    throw 'Chromium browser evidence did not prove default FontDataService substitution through the immutable alias collection.'
-                }
-            } elseif (-not $result.expectationMet -or
-                -not $result.unsupportedLateCollectionObserved -or
-                $result.replacementObserved -or
-                $result.earlyAliasAcquisitionObserved) {
-                throw 'Firefox browser evidence did not prove the explicit pre-entry shared-font-list limitation.'
-            }
+        $sourceFamily = 'Cambria'
+        $serviceHealth = Join-Path $machineRoot 'health.json'
+
+        # The WMI observer discovers an ordinary Chromium process only after it
+        # starts. An immutable collection retained before that point must remain
+        # unchanged; this lane makes the service boundary explicit.
+        $lateChromiumResultPath = Join-Path $BrowserEvidenceRoot 'open-service-chromium-late.json'
+        & node $BrowserProbeScript `
+            --engine chromium `
+            --output $lateChromiumResultPath `
+            --injection-health $serviceHealth `
+            --source $sourceFamily `
+            --replacement 'Courier New' `
+            --expect unsupported-late-collection `
+            --timeout-ms 60000
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Chromium did not prove the declared open-service late-collection boundary.'
+        }
+        $lateChromiumResult = Get-Content -LiteralPath $lateChromiumResultPath -Raw | ConvertFrom-Json
+        if (-not $lateChromiumResult.expectationMet -or
+            -not $lateChromiumResult.unsupportedLateCollectionObserved -or
+            $lateChromiumResult.replacementObserved -or
+            $lateChromiumResult.earlyAliasAcquisitionObserved) {
+            throw 'Chromium open-service evidence did not prove the immutable late-collection boundary.'
+        }
+
+        # MacLoader is the shipped product boundary for applications that require
+        # injection before DirectWrite collection acquisition. Connect through a
+        # regular DevTools port so Chromium keeps its default FontDataService. The
+        # service is stopped for this lane so a WMI injection cannot masquerade as
+        # a successful product-loader boundary.
+        $null = Invoke-OpenServiceSetupLogged -SetupExecutable $stagedSetup -Verb 'stop'
+        if ((Get-Service -Name $serviceName).Status -ne 'Stopped') {
+            throw 'Service did not stop before the isolated product-loader browser proof.'
+        }
+        $chromiumLoader = Join-Path $activeRuntimeRoot 'MacLoader64.exe'
+        if (-not (Test-Path -LiteralPath $chromiumLoader -PathType Leaf)) {
+            throw "Active runtime Chromium loader is missing: $chromiumLoader"
+        }
+        $loaderChromiumResultPath = Join-Path $BrowserEvidenceRoot 'product-loader-chromium.json'
+        & node $BrowserProbeScript `
+            --engine chromium `
+            --output $loaderChromiumResultPath `
+            --chromium-loader $chromiumLoader `
+            --source $sourceFamily `
+            --replacement 'Courier New' `
+            --expect substituted `
+            --timeout-ms 60000
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Chromium did not satisfy the shipped MacLoader font-substitution contract.'
+        }
+        $loaderChromiumResult = Get-Content -LiteralPath $loaderChromiumResultPath -Raw | ConvertFrom-Json
+        $nonMainLoaderHookObserved = @('renderer', 'utility', 'gpu', 'other') |
+            Where-Object { $loaderChromiumResult.active.directWriteDiagnostics.$_.'hook-ready' }
+        if (-not $loaderChromiumResult.expectationMet -or
+            -not $loaderChromiumResult.replacementObserved -or
+            -not $loaderChromiumResult.earlyAliasAcquisitionObserved -or
+            -not $loaderChromiumResult.productLoaderBoundaryObserved -or
+            $loaderChromiumResult.launchBoundary -ne 'product-macloader' -or
+            $nonMainLoaderHookObserved.Count -ne 0) {
+            throw 'Chromium product-loader evidence did not prove default FontDataService substitution through an early immutable alias collection.'
+        }
+        $null = Invoke-OpenServiceSetupLogged -SetupExecutable $stagedSetup -Verb 'start'
+        Assert-PersistedReadyHealth -ExpectedDigest $digestA -Phase 'post-MacLoader service restart'
+
+        # Firefox 151 completes its shared font list before the observable PE-entry
+        # boundary. The deterministic gate records that unsupported late path; it
+        # is not counted as a product substitution mechanism.
+        $firefoxResultPath = Join-Path $BrowserEvidenceRoot 'open-service-firefox.json'
+        & node $BrowserProbeScript `
+            --engine firefox `
+            --output $firefoxResultPath `
+            --injection-health $serviceHealth `
+            --source $sourceFamily `
+            --replacement 'Courier New' `
+            --expect unsupported-late-collection `
+            --firefox-launch-gate $BrowserLaunchGate `
+            --timeout-ms 60000
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Firefox did not prove the declared shared-font-list boundary.'
+        }
+        $firefoxResult = Get-Content -LiteralPath $firefoxResultPath -Raw | ConvertFrom-Json
+        if (-not $firefoxResult.expectationMet -or
+            -not $firefoxResult.unsupportedLateCollectionObserved -or
+            $firefoxResult.replacementObserved -or
+            $firefoxResult.earlyAliasAcquisitionObserved) {
+            throw 'Firefox browser evidence did not prove the explicit pre-entry shared-font-list limitation.'
         }
     }
 

@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 
+import { launchChromiumWithProductLoader } from './chromium_product_loader.mjs';
+
 const require = createRequire(
   process.env.MACTYPE_PLAYWRIGHT_PACKAGE_ROOT ||
     path.resolve(import.meta.dirname, '../../control-center/package.json'),
@@ -20,6 +22,7 @@ function parseArguments(argv) {
     source: '',
     replacement: '',
     expect: 'substituted',
+    chromiumLoader: '',
     firefoxLaunchGate: '',
     timeoutMs: 15000,
   };
@@ -34,6 +37,7 @@ function parseArguments(argv) {
     else if (key === '--source') result.source = value;
     else if (key === '--replacement') result.replacement = value;
     else if (key === '--expect') result.expect = value;
+    else if (key === '--chromium-loader') result.chromiumLoader = value;
     else if (key === '--firefox-launch-gate') result.firefoxLaunchGate = value;
     else if (key === '--timeout-ms') result.timeoutMs = Number(value);
     else throw new Error(`Unknown argument: ${key}`);
@@ -54,10 +58,27 @@ function parseArguments(argv) {
   if (result.engine !== 'firefox' && result.firefoxLaunchGate) {
     throw new Error('--firefox-launch-gate is only valid for Firefox');
   }
+  if (result.engine !== 'chromium' && result.chromiumLoader) {
+    throw new Error('--chromium-loader is only valid for Chromium');
+  }
   if (!Number.isInteger(result.timeoutMs) || result.timeoutMs < 0 || result.timeoutMs > 60000) {
     throw new Error(`Invalid timeout: ${result.timeoutMs}`);
   }
   return result;
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function waitForDirectWriteHookReady(diagnosticNamespace, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    const diagnostics = collectDirectWriteDiagnostics(diagnosticNamespace);
+    if (diagnostics.main['hook-ready']) return;
+    await delay(50);
+  } while (Date.now() < deadline);
+  throw new Error('MacLoader Chromium did not publish DirectWrite hook-ready');
 }
 
 const metricTolerances = {
@@ -266,8 +287,10 @@ async function capture(browserType, options, disabled, waitForReplacement) {
   }
   if (disabled) environment.MACTYPE_FONTSUBSTITUTES_ENV = '1';
   else delete environment.MACTYPE_FONTSUBSTITUTES_ENV;
+  const usesChromiumLoader = options.engine === 'chromium' &&
+    Boolean(options.chromiumLoader);
   let initialInjectionSuccessCount = null;
-  if (options.injectionHealth) {
+  if (options.injectionHealth && !usesChromiumLoader) {
     const initialHealth = await readX64InjectionTelemetry(options.injectionHealth);
     initialInjectionSuccessCount = initialHealth.telemetry?.successCount ?? 0;
   }
@@ -286,24 +309,40 @@ async function capture(browserType, options, disabled, waitForReplacement) {
     environment.MACTYPE_BROWSER_GATE_TIMEOUT_MS = String(options.timeoutMs);
   }
   let browserServer = null;
+  let browser = null;
+  let browserPid = null;
+  let chromiumLoaderSession = null;
   try {
-    browserServer = await browserType.launchServer({
-      executablePath: usesFirefoxLaunchGate
-        ? options.firefoxLaunchGate
-        : options.executable || undefined,
-      headless: true,
-      env: environment,
-    });
-    const browserPid = usesFirefoxLaunchGate
-      ? Number((await readFile(gatePidPath, 'utf8')).trim())
-      : browserServer.process().pid;
+    if (usesChromiumLoader) {
+      chromiumLoaderSession = await launchChromiumWithProductLoader({
+        browserType,
+        environment,
+        executable: options.executable || browserType.executablePath(),
+        loader: options.chromiumLoader,
+        timeoutMs: options.timeoutMs,
+      });
+      browser = chromiumLoaderSession.browser;
+      browserPid = chromiumLoaderSession.browserPid;
+      await waitForDirectWriteHookReady(diagnosticNamespace, options.timeoutMs);
+    } else {
+      browserServer = await browserType.launchServer({
+        executablePath: usesFirefoxLaunchGate
+          ? options.firefoxLaunchGate
+          : options.executable || undefined,
+        headless: true,
+        env: environment,
+      });
+      browserPid = usesFirefoxLaunchGate
+        ? Number((await readFile(gatePidPath, 'utf8')).trim())
+        : browserServer.process().pid;
+      browser = await browserType.connect(browserServer.wsEndpoint());
+    }
     if (!Number.isInteger(browserPid) || browserPid <= 0) {
       throw new Error(`Browser launch returned an invalid PID: ${browserPid}`);
     }
-    const browser = await browserType.connect(browserServer.wsEndpoint());
     let injectionSuccessCount = null;
-    let browserPidInjectionObserved = null;
-    if (options.injectionHealth) {
+    let browserPidInjectionObserved = usesChromiumLoader ? true : null;
+    if (options.injectionHealth && !usesChromiumLoader) {
       const injection = await waitForBrowserInjection(
         options.injectionHealth,
         browserPid,
@@ -449,7 +488,8 @@ async function capture(browserType, options, disabled, waitForReplacement) {
       await collectChromiumFontDataHistograms(browser, options.engine);
     return observation;
   } finally {
-    if (browserServer) await browserServer.close();
+    if (chromiumLoaderSession) await chromiumLoaderSession.close();
+    else if (browserServer) await browserServer.close();
     if (gatePidPath) {
       await unlink(gatePidPath).catch((error) => {
         if (error?.code !== 'ENOENT') throw error;
@@ -488,6 +528,12 @@ const result = {
   schemaVersion: 1,
   engine: options.engine,
   executable: options.executable || null,
+  launchBoundary: options.chromiumLoader
+    ? 'product-macloader'
+    : (options.firefoxLaunchGate ? 'test-entry-gate' : 'ordinary-process-start'),
+  chromiumLoader: options.engine === 'chromium'
+    ? (options.chromiumLoader ? path.basename(options.chromiumLoader) : null)
+    : null,
   firefoxLaunchGate: options.engine === 'firefox'
     ? (options.firefoxLaunchGate ? path.basename(options.firefoxLaunchGate) : null)
     : null,
@@ -505,15 +551,21 @@ result.replacementMetricsObserved = hasReplacementMetrics(active);
 result.replacementRasterObserved = hasReplacementRaster(active);
 result.replacementObserved ||=
   result.replacementMetricsObserved && result.replacementRasterObserved;
-if (options.injectionHealth) {
-  const main = active.directWriteDiagnostics.main;
+if (options.injectionHealth || options.chromiumLoader) {
   result.earlyAliasAcquisitionObserved = [
     'system-font-set-alias-returned',
     'modern-system-collection-alias-returned',
-  ].some((stage) => main[stage]);
+  ].some((stage) => Object.values(active.directWriteDiagnostics).some(
+    (role) => role[stage],
+  ));
 } else {
   result.earlyAliasAcquisitionObserved = null;
 }
+result.productLoaderBoundaryObserved = options.chromiumLoader
+  ? active.browserPidInjectionObserved === true &&
+    active.directWriteDiagnostics.main['hook-ready'] &&
+    result.earlyAliasAcquisitionObserved
+  : null;
 if (options.expect === 'unsupported-late-collection') {
   const main = active.directWriteDiagnostics.main;
   const aliasSnapshotPrepared =
@@ -533,8 +585,12 @@ if (options.expect === 'unsupported-late-collection') {
       ? !result.sourceChanged && !result.replacementObserved
       : result.sourceChanged && result.replacementObserved
   );
-  if (options.injectionHealth && options.expect === 'substituted') {
+  if ((options.injectionHealth || options.chromiumLoader) &&
+      options.expect === 'substituted') {
     result.expectationMet &&= result.earlyAliasAcquisitionObserved;
+  }
+  if (options.chromiumLoader && options.expect === 'substituted') {
+    result.expectationMet &&= result.productLoaderBoundaryObserved;
   }
 }
 result.evidenceDigest = `sha256:${createHash('sha256')

@@ -37,7 +37,11 @@ function Test-OpenServiceWorkflowPolicy {
         -Tokens @(
             'ExpectedRuntimeRoot', 'resolvedModuleRoot', 'OrdinalIgnoreCase',
             'pid = [uint32]', 'sessionId = [uint32]',
-            'directWriteFontSetCollection.replacementObserved'
+            'directWriteFontSetCollection.replacementObserved',
+            'replacementMetadataCoherent',
+            'replacementNameTableCoherent',
+            'retainedGenerationObjectStable',
+            'replacementDescriptorCoherent'
         )
 
     $buildWorkflowPath = Join-Path $Root '.github\workflows\build.yml'
@@ -62,7 +66,6 @@ function Test-OpenServiceWorkflowPolicy {
             'OpenServiceAclFixture.psm1', 'Invoke-OpenServiceAclRepairFixture',
             '-RepairContext $stagedSetup', 'param($setupExecutable)',
             "`$sourceFamily = 'Cambria'",
-            "'--chromium-font-data-service', 'disabled'",
             "'--firefox-launch-gate', `$BrowserLaunchGate", 'replacementObserved',
             "-Verb 'publish-profile' -InputBytes `$profileA",
             "Assert-ActiveRuntimeProfile -ExpectedBytes `$profileA"
@@ -120,14 +123,12 @@ function Test-OpenServiceWorkflowPolicy {
         -Tokens @(
             'static DWORD WINAPI HookExistingDirectWriteFactory',
             'static void ScheduleExistingDirectWriteFactoryHook',
-            'sharedFactoryHooked && ISHOOKED(FontFamily_GetFont)',
-            'ISHOOKED(Font_GetInformationalStrings)',
-            'class AliasedDWriteFont final',
-            'CComPtr<IDWriteFont> replacement_',
-            'CComPtr<IDWriteFont> source_',
-            'UnwrapAliasedDWriteFont',
-            'ISHOOKED(CreateFontFace) && ISHOOKED(FontFace_GetFiles)',
-            'ISHOOKED(FontFace_GetIndex) && ISHOOKED(Factory_CreateFontFace)',
+            'static bool HookDirectWriteAliasCollection',
+            'kFactoryGetSystemFontCollectionSlot = 3',
+            'kFactory3GetSystemFontSetSlot = 35',
+            'kFactory3GetSystemFontCollectionSlot = 38',
+            'renderer_raii::PageProtection::TrySet',
+            'PatchFactoryAliasVtables',
             'SignalDirectWriteDiagnostic(L"hook-ready");'
         )
     if ($directWrite) {
@@ -153,7 +154,30 @@ function Test-OpenServiceWorkflowPolicy {
             ).Count -ne 1) {
             $failures.Add('DirectWrite hook-ready must have exactly one publisher.')
         }
+        foreach ($forbiddenToken in @(
+            'AliasedDWriteFont', 'AliasedDWriteFontFace',
+            'AliasedLocalizedStrings', 'thread_local',
+            'HookCollectionFontCreation', 'FontFace_GetFiles',
+            'FontFace_GetIndex', 'Factory_CreateFontFace'
+        )) {
+            if ($directWrite.Contains($forbiddenToken)) {
+                $failures.Add(
+                    "DirectWrite must not restore mixed-identity hook '$forbiddenToken'."
+                )
+            }
+        }
     }
+
+    $directWriteAliasPath = Join-Path $Root 'directwrite_alias.cpp'
+    $null = Test-RequiredTokens -Failures $failures -Path $directWriteAliasPath `
+        -MissingMessage 'directwrite_alias.cpp is missing.' `
+        -TokenMessage "DirectWrite alias collection is missing coherent object-graph token '{0}'." `
+        -Tokens @(
+            'IDWriteFontSetBuilder', 'CopyReplacementProperties',
+            'FindReplacementReference', 'AddAliasedReference',
+            'CreateFontCollectionFromFontSet',
+            'DWRITE_FONT_PROPERTY_ID_WIN32_FAMILY_NAME'
+        )
 
     $aclFixtureModulePath = Join-Path $Root 'scripts\ci\lib\OpenServiceAclFixture.psm1'
     $null = Test-RequiredTokens -Failures $failures -Path $aclFixtureModulePath `

@@ -22,7 +22,6 @@ function parseArguments(argv) {
     source: '',
     replacement: '',
     expect: 'substituted',
-    chromiumFontDataService: 'enabled',
     firefoxLaunchGate: '',
     timeoutMs: 15000,
   };
@@ -37,9 +36,6 @@ function parseArguments(argv) {
     else if (key === '--source') result.source = value;
     else if (key === '--replacement') result.replacement = value;
     else if (key === '--expect') result.expect = value;
-    else if (key === '--chromium-font-data-service') {
-      result.chromiumFontDataService = value;
-    }
     else if (key === '--firefox-launch-gate') result.firefoxLaunchGate = value;
     else if (key === '--timeout-ms') result.timeoutMs = Number(value);
     else throw new Error(`Unknown argument: ${key}`);
@@ -52,14 +48,6 @@ function parseArguments(argv) {
   }
   if (!['stock', 'substituted'].includes(result.expect)) {
     throw new Error(`Unsupported expectation: ${result.expect}`);
-  }
-  if (!['enabled', 'disabled'].includes(result.chromiumFontDataService)) {
-    throw new Error(
-      `Unsupported Chromium FontDataService mode: ${result.chromiumFontDataService}`,
-    );
-  }
-  if (result.engine !== 'chromium' && result.chromiumFontDataService !== 'enabled') {
-    throw new Error('--chromium-font-data-service is only valid for Chromium');
   }
   if (result.engine !== 'firefox' && result.firefoxLaunchGate) {
     throw new Error('--firefox-launch-gate is only valid for Firefox');
@@ -169,42 +157,25 @@ function collectDirectWriteDiagnostics(diagnosticNamespace) {
   const stages = [
     'hook-entered',
     'hook-ready',
-    'system-hook-installed',
-    'shared-factory-hook-installed',
-    'isolated-factory-hook-installed',
-    'family-font-called',
-    'family-font-resolved',
-    'family-font-metadata',
-    'logfont-called',
-    'logfont-resolved',
+    'legacy-system-collection-called',
+    'system-font-set-called',
+    'system-font-set-alias-returned',
+    'modern-system-collection-called',
+    'modern-system-collection-alias-returned',
+    'alias-collection-applied',
+    'alias-collection-partial',
+    'alias-collection-no-rules',
+    'alias-collection-unsupported-factory',
+    'alias-collection-system-set-unavailable',
+    'alias-collection-builder-unavailable',
+    'alias-collection-add-font-failed',
+    'alias-collection-create-set-failed',
+    'alias-collection-create-collection-failed',
     'find-called',
     'substitution-resolved',
-    'face-called',
-    'face-resolved',
-    'face-created',
-    'files-called',
-    'files-resolved',
-    'index-called',
-    'index-resolved',
-    'factory-face-called',
-    'factory-face-resolved',
-    'factory-face-created',
-    'alias-returned',
     ...['cambria', 'impact', 'courier-new'].flatMap((family) => [
       `find-${family}`,
       `resolved-${family}`,
-      `family-font-${family}`,
-      `family-font-resolved-${family}`,
-      `family-font-metadata-${family}`,
-      `logfont-${family}`,
-      `logfont-resolved-${family}`,
-      `face-${family}`,
-      `face-resolved-${family}`,
-      `face-created-${family}`,
-      `factory-face-${family}`,
-      `factory-face-resolved-${family}`,
-      `factory-face-created-${family}`,
-      `alias-${family}`,
     ]),
   ];
   const eventNames = roles.flatMap((role) => stages.map(
@@ -266,10 +237,6 @@ async function collectChromiumFontDataHistograms(browser, engine, delta = false)
 
 async function capture(browserType, options, disabled, waitForReplacement) {
   const environment = { ...process.env };
-  // GitHub's Windows runner launches its test tree with a service token. The
-  // existing explicit force-load contract makes the injected DLL initialize
-  // its user-mode DirectWrite hooks without changing injector target policy.
-  environment.MACTYPE_FORCE_LOAD = '1';
   const diagnosticNamespace = `browser-${randomUUID()}`;
   environment.MACTYPE_DIRECTWRITE_DIAGNOSTICS = diagnosticNamespace;
   if (options.engine === 'firefox' && options.injectionHealth) {
@@ -286,10 +253,6 @@ async function capture(browserType, options, disabled, waitForReplacement) {
   if (disabled) environment.MACTYPE_FONTSUBSTITUTES_ENV = '1';
   else delete environment.MACTYPE_FONTSUBSTITUTES_ENV;
 
-  const browserArguments = options.engine === 'chromium' &&
-      options.chromiumFontDataService === 'disabled'
-    ? ['--disable-features=FontDataServiceAllWebContents']
-    : [];
   const firefoxUserPrefs = options.engine === 'firefox'
     ? { 'dom.ipc.processPrelaunch.enabled': false }
     : undefined;
@@ -321,7 +284,6 @@ async function capture(browserType, options, disabled, waitForReplacement) {
         : options.executable || undefined,
       headless: true,
       env: environment,
-      args: browserArguments,
       firefoxUserPrefs,
     });
     const browserPid = usesFirefoxLaunchGate
@@ -368,24 +330,6 @@ async function capture(browserType, options, disabled, waitForReplacement) {
         options.timeoutMs,
       );
     }
-    // Chromium calls DWriteFontCollectionProxy::FindFamilyName before its
-    // first CreateCustomFontCollection call exposes that same proxy through
-    // IDWriteFontCollectionLoader. Load a dedicated family first so the hook
-    // is installed before the source family's first lookup. Never warm the
-    // source or replacement: those remain the independent pixel proof.
-    const warmupFamilies = ['Impact'].filter(
-      (family) => family !== options.source && family !== options.replacement,
-    );
-    await page.evaluate(async (families) => {
-      const canvas = document.createElement('canvas');
-      const context = canvas.getContext('2d');
-      for (const family of families) {
-        const escaped = family.replaceAll('"', '\\"');
-        context.font = `16px "${escaped}"`;
-        context.measureText('MacType font pipeline warmup');
-        await document.fonts.load(`16px "${escaped}"`);
-      }
-    }, warmupFamilies);
     await collectChromiumFontDataHistograms(browser, options.engine, true);
     const probeFamily = async (family) => {
       await page.evaluate(async (name) => {
@@ -496,9 +440,6 @@ const result = {
   schemaVersion: 1,
   engine: options.engine,
   executable: options.executable || null,
-  chromiumFontDataService: options.engine === 'chromium'
-    ? options.chromiumFontDataService
-    : null,
   firefoxLaunchGate: options.engine === 'firefox'
     ? (options.firefoxLaunchGate ? path.basename(options.firefoxLaunchGate) : null)
     : null,

@@ -152,54 +152,54 @@ std::string BuildSnapshotJson(const ProbeOptions& options,
        << EscapeJson(font_substitution.direct_write_indexed_collection
                          .disabled_replacement_postscript_name)
        << "\",\n"
-       << "      \"activeRetainedSourcePostScriptName\": \""
+       << "      \"activeReplacementPostScriptName\": \""
        << EscapeJson(font_substitution.direct_write_indexed_collection
-                         .active_retained_source_postscript_name)
+                         .active_replacement_postscript_name)
        << "\",\n"
-       << "      \"activePinnedSourceFamily\": \""
+       << "      \"retainedGenerationFamily\": \""
        << EscapeJson(font_substitution.direct_write_indexed_collection
-                          .active_pinned_source_family)
+                          .retained_generation_family)
        << "\",\n"
-       << "      \"activePinnedSourceDescriptorFamily\": \""
+       << "      \"retainedGenerationDescriptorFamily\": \""
        << EscapeJson(font_substitution.direct_write_indexed_collection
-                          .active_pinned_source_descriptor_family)
+                          .retained_generation_descriptor_family)
        << "\",\n"
-       << "      \"activeAdvancedFaceDescriptorFamily\": \""
+       << "      \"activeReplacementDescriptorFamily\": \""
        << EscapeJson(font_substitution.direct_write_indexed_collection
-                          .active_advanced_face_descriptor_family)
+                          .active_replacement_descriptor_family)
        << "\",\n"
        << "      \"controlsStable\": "
        << (font_substitution.direct_write_indexed_collection.controls_stable
                ? "true"
                : "false")
        << ",\n"
-       << "      \"retainedMetadataStable\": "
+       << "      \"replacementMetadataCoherent\": "
        << (font_substitution.direct_write_indexed_collection
-                    .retained_metadata_stable
+                    .replacement_metadata_coherent
                ? "true"
                : "false")
        << ",\n"
-       << "      \"retainedNameTableStable\": "
+       << "      \"replacementNameTableCoherent\": "
        << (font_substitution.direct_write_indexed_collection
-                    .retained_name_table_stable
+                    .replacement_name_table_coherent
                ? "true"
                : "false")
        << ",\n"
-       << "      \"retainedObjectReplacementObserved\": "
+       << "      \"retainedGenerationObjectStable\": "
        << (font_substitution.direct_write_indexed_collection
-                    .retained_object_replacement_observed
+                    .retained_generation_object_stable
                ? "true"
                : "false")
        << ",\n"
-       << "      \"retainedDescriptorReplacementObserved\": "
+       << "      \"retainedGenerationDescriptorStable\": "
        << (font_substitution.direct_write_indexed_collection
-                    .retained_descriptor_replacement_observed
+                    .retained_generation_descriptor_stable
                ? "true"
                : "false")
        << ",\n"
-       << "      \"advancedFaceReplacementObserved\": "
+       << "      \"replacementDescriptorCoherent\": "
        << (font_substitution.direct_write_indexed_collection
-                    .advanced_face_replacement_observed
+                    .replacement_descriptor_coherent
                ? "true"
                : "false")
        << ",\n"
@@ -235,26 +235,26 @@ std::string BuildSnapshotJson(const ProbeOptions& options,
                : "false")
        << "\n"
        << "    },\n"
-       << "    \"directWriteCustomCollection\": {\n"
+       << "    \"directWriteModernCollection\": {\n"
        << "      \"disabledSourceFamily\": \""
-       << EscapeJson(font_substitution.direct_write_custom_collection
+       << EscapeJson(font_substitution.direct_write_modern_collection
                          .disabled_source_family)
        << "\",\n"
        << "      \"activeSourceFamily\": \""
-       << EscapeJson(font_substitution.direct_write_custom_collection
+       << EscapeJson(font_substitution.direct_write_modern_collection
                          .active_source_family)
        << "\",\n"
        << "      \"disabledReplacementFamily\": \""
-       << EscapeJson(font_substitution.direct_write_custom_collection
+       << EscapeJson(font_substitution.direct_write_modern_collection
                          .disabled_replacement_family)
        << "\",\n"
        << "      \"controlsStable\": "
-       << (font_substitution.direct_write_custom_collection.controls_stable
+       << (font_substitution.direct_write_modern_collection.controls_stable
                ? "true"
                : "false")
        << ",\n"
        << "      \"replacementObserved\": "
-       << (font_substitution.direct_write_custom_collection
+       << (font_substitution.direct_write_modern_collection
                    .replacement_observed
                ? "true"
                : "false")

@@ -139,33 +139,25 @@ if ($result.fontSubstitution.directWriteIndexedCollection.disabledSourceFamily -
 if (-not $result.fontSubstitution.directWriteIndexedCollection.controlsStable) {
     throw 'Indexed DirectWrite collection controls must remain distinct.'
 }
-if (-not $result.fontSubstitution.directWriteIndexedCollection.retainedMetadataStable) {
-    throw 'A retained indexed DirectWrite font must preserve its source metadata identity.'
-}
-if (-not $result.fontSubstitution.directWriteIndexedCollection.retainedNameTableStable) {
-    throw 'A retained indexed DirectWrite face must preserve its source OpenType name table.'
-}
 if ($result.fontSubstitution.directWriteIndexedCollection.disabledSourcePostScriptName -eq
     $result.fontSubstitution.directWriteIndexedCollection.disabledReplacementPostScriptName) {
     throw 'Indexed DirectWrite PostScript-name controls must remain distinct.'
 }
-if ($result.fontSubstitution.directWriteIndexedCollection.activePinnedSourceFamily -ne 'Arial') {
-    throw 'A retained stock DirectWrite font object must continue to resolve to Arial.'
+if ($result.fontSubstitution.directWriteIndexedCollection.activeReplacementPostScriptName -ne
+    $result.fontSubstitution.directWriteIndexedCollection.activeSourcePostScriptName) {
+    throw 'An active DirectWrite font and its retained metadata view must agree.'
 }
-if ($result.fontSubstitution.directWriteIndexedCollection.activePinnedSourceDescriptorFamily -ne 'Arial') {
+if ($result.fontSubstitution.directWriteIndexedCollection.retainedGenerationFamily -ne 'Arial' -or
+    -not $result.fontSubstitution.directWriteIndexedCollection.retainedGenerationObjectStable) {
+    throw 'An object retained from the disabled collection must remain an immutable Arial object.'
+}
+if ($result.fontSubstitution.directWriteIndexedCollection.retainedGenerationDescriptorFamily -ne 'Arial' -or
+    -not $result.fontSubstitution.directWriteIndexedCollection.retainedGenerationDescriptorStable) {
     throw 'A retained stock DirectWrite face descriptor must continue to resolve to Arial.'
 }
-if ($result.fontSubstitution.directWriteIndexedCollection.activeAdvancedFaceDescriptorFamily -ne 'Arial') {
-    throw 'A stock advanced DirectWrite face descriptor must continue to resolve to Arial.'
-}
-if ($result.fontSubstitution.directWriteIndexedCollection.retainedObjectReplacementObserved) {
-    throw 'A retained stock DirectWrite font object must not report a substitution.'
-}
-if ($result.fontSubstitution.directWriteIndexedCollection.retainedDescriptorReplacementObserved) {
-    throw 'A retained stock DirectWrite face descriptor must not report a substitution.'
-}
-if ($result.fontSubstitution.directWriteIndexedCollection.advancedFaceReplacementObserved) {
-    throw 'A stock advanced DirectWrite face descriptor must not report a substitution.'
+if ($result.fontSubstitution.directWriteIndexedCollection.activeReplacementDescriptorFamily -ne
+    $result.fontSubstitution.directWriteIndexedCollection.activeSourceFamily) {
+    throw 'An active DirectWrite font and its advanced face/resource descriptor must agree.'
 }
 if ($result.fontSubstitution.directWriteFontSetCollection.disabledSourceFamily -ne 'Arial' -or
     $result.fontSubstitution.directWriteFontSetCollection.disabledReplacementFamily -ne 'Courier New') {
@@ -174,12 +166,12 @@ if ($result.fontSubstitution.directWriteFontSetCollection.disabledSourceFamily -
 if (-not $result.fontSubstitution.directWriteFontSetCollection.controlsStable) {
     throw 'Repeated font-set DirectWrite collection observations must be stable.'
 }
-if ($result.fontSubstitution.directWriteCustomCollection.disabledSourceFamily -ne 'Arial' -or
-    $result.fontSubstitution.directWriteCustomCollection.disabledReplacementFamily -ne 'Courier New') {
-    throw 'Custom DirectWrite collection controls did not resolve the requested font families.'
+if ($result.fontSubstitution.directWriteModernCollection.disabledSourceFamily -ne 'Arial' -or
+    $result.fontSubstitution.directWriteModernCollection.disabledReplacementFamily -ne 'Courier New') {
+    throw 'Modern DirectWrite collection controls did not resolve the requested font families.'
 }
-if (-not $result.fontSubstitution.directWriteCustomCollection.controlsStable) {
-    throw 'Repeated custom DirectWrite collection observations must be stable.'
+if (-not $result.fontSubstitution.directWriteModernCollection.controlsStable) {
+    throw 'Repeated modern DirectWrite collection observations must be stable.'
 }
 if (-not $result.mactypeModuleLoaded) {
     if ($result.fontSubstitution.gdi.activeSourceFingerprint -ne
@@ -201,13 +193,18 @@ if (-not $result.mactypeModuleLoaded) {
         $result.fontSubstitution.directWriteIndexedCollection.disabledSourcePostScriptName) {
         throw 'A stock Windows probe must preserve indexed DirectWrite PostScript metadata.'
     }
+    if ($result.fontSubstitution.directWriteIndexedCollection.replacementMetadataCoherent -or
+        $result.fontSubstitution.directWriteIndexedCollection.replacementNameTableCoherent -or
+        $result.fontSubstitution.directWriteIndexedCollection.replacementDescriptorCoherent) {
+        throw 'A stock Windows probe must not report replacement object-graph coherence.'
+    }
     if ($result.fontSubstitution.directWriteFontSetCollection.activeSourceFamily -ne 'Arial' -or
         $result.fontSubstitution.directWriteFontSetCollection.replacementObserved) {
         throw 'A stock Windows probe must not report a font-set DirectWrite collection substitution.'
     }
-    if ($result.fontSubstitution.directWriteCustomCollection.activeSourceFamily -ne 'Arial' -or
-        $result.fontSubstitution.directWriteCustomCollection.replacementObserved) {
-        throw 'A stock Windows probe must not report a custom DirectWrite collection substitution.'
+    if ($result.fontSubstitution.directWriteModernCollection.activeSourceFamily -ne 'Arial' -or
+        $result.fontSubstitution.directWriteModernCollection.replacementObserved) {
+        throw 'A stock Windows probe must not report a modern DirectWrite collection substitution.'
     }
 }
 

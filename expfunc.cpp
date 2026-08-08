@@ -154,6 +154,7 @@ EXTERN_C void SafeUnload()
 	auto lock = std::make_unique<CCriticalSectionLock>();
 	BOOL last;
 	if (last=InterlockedExchange(&g_bHookEnabled, FALSE)) {
+		RestoreDirectWriteVtableHooks();
 		if (hook_term()!=NOERROR)
 		{
 			InterlockedExchange(&g_bHookEnabled, last);

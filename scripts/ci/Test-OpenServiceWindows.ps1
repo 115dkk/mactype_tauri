@@ -471,21 +471,11 @@ try {
                 '--expect', 'substituted',
                 '--timeout-ms', '60000'
             )
-            if ($engine -eq 'chromium') {
-                # Chromium 149 routes sandboxed web contents through the
-                # browser-side FontDataService and rejects a substituted font
-                # file when its embedded family differs from the requested
-                # family. Exercise Chromium's supported renderer-side
-                # DirectWrite path so the injected core owns both resolution
-                # and rasterization. The selected mode is retained in JSON.
-                $browserProbeArguments += @(
-                    '--chromium-font-data-service', 'disabled'
-                )
-            } elseif ($engine -eq 'firefox') {
+            if ($engine -eq 'firefox') {
                 # Break the Firefox parent at its PE image entry point, detach
                 # with its main thread suspended, and resume only after its
                 # PID-specific hook-ready event proves both demand hooks and
-                # the shared-factory object hooks are installed. Mozilla's child
+                # the shared-factory collection boundary is installed. Mozilla's child
                 # diagnostic pause then lets the service load each renderer
                 # before its normal sandbox starts. Exact pixel equality remains mandatory.
                 $browserProbeArguments += @(

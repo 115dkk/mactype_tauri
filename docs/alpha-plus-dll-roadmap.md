@@ -220,72 +220,48 @@ matches the independently rendered replacement result. Current installed
 Chrome and Edge may be added as non-pinned compatibility lanes, but they cannot
 replace the pinned reproducible browsers.
 
-Chromium 149 enables `FontDataServiceAllWebContents` by default. That isolated
-browser-side path validates the embedded family name after MacType resolves a
-replacement and therefore rejects a replacement file whose family differs
-from the requested family. The pinned Chromium substitution proof explicitly
-uses Chromium's renderer-side DirectWrite compatibility path by disabling that
-feature; the selected mode is recorded in the retained JSON. Stock Chromium
-controls continue to run with the default feature set, and this compatibility
-mode does not relax the substitution criterion: the active source pixels must
-still exactly match the independently rendered replacement pixels.
+DirectWrite substitution now uses the documented custom-font-set alias model.
+The core copies the native system font set into an immutable
+`IDWriteFontSetBuilder`, replaces each configured source entry with the
+replacement's native `IDWriteFontFaceReference`, copies all searchable
+replacement properties, and overrides only the family-name properties with
+the requested source alias. The resulting collection can still locate
+`Cambria`, for example, while every returned font, face, resource, file,
+OpenType name table, PostScript name, metric, and glyph belongs coherently to
+`Courier New`.
 
-Firefox normally initializes its parent font cache before the open service can
-load the renderer DLL. The pinned Firefox substitution proof therefore starts
-the parent under `DEBUG_ONLY_THIS_PROCESS` through the tested browser launch
-gate. The gate restores a temporary PE image-entry breakpoint after Windows
-has completed DLL initialization, detaches the debugger with the main thread
-still suspended, and resumes that thread only after the exact Firefox PID
-publishes a DirectWrite `hook-ready` event only after the demand hooks and the
-shared-factory object hooks have both been installed. The object hooks are
-attached by the post-loader-lock worker, so the event is not published merely
-because that worker was scheduled. No Firefox user entry-point code runs before
-injection is ready. DirectWrite face file and collection-index access are also
-redirected through the replacement face, covering Firefox/WebRender font
-descriptor transfer instead of limiting substitution to the originating COM
-font object.
-The gate also forwards Playwright's inherited CRT
-descriptors 3 and 4 for `-juggler-pipe`, restoring their inheritance flags with
-RAII after the real Firefox process is created. Mozilla's
-`MOZ_DEBUG_CHILD_PAUSE=10` diagnostic also holds each content process before
-its normal sandbox starts so the service can load the renderer DLL; the stock
-control uses neither gate nor pause. The selected gate and pause are recorded
-in the retained JSON, renderer hook diagnostics are still mandatory before the
-first font lookup, and the active source pixels must still exactly match the
-independently rendered replacement pixels.
+This collection is installed only at the DirectWrite factory acquisition seam:
+`GetSystemFontCollection`, `IDWriteFactory3::GetSystemFontSet`, the modern
+`IDWriteFactory3::GetSystemFontCollection`, and the null-collection
+`CreateTextFormat` path. The post-loader-lock worker covers a shared factory
+created before injection. The core does not patch family, font, face,
+face-reference, file, index, informational-string, or font-table objects, and
+does not carry alias state in thread-local storage. A collection already
+returned before injection remains an honest older immutable generation;
+diagnostics report that timing instead of mutating retained objects.
 
-Firefox builds its shared Windows font list by enumerating family indexes rather
-than resolving every CSS family through `FindFamilyName`. The rendering core
-therefore hooks the system `IDWriteFontFamily::GetFont` implementation as well:
-the source family name and index remain stable, while weight/stretch/style are
-matched against the configured replacement family before Firefox records the
-face descriptor. The x86/x64 marker contract pins a source index while
-substitution is disabled and requires that same index to return the replacement
-font when substitution is active. The returned replacement preserves the
-source face's informational strings during Firefox's PostScript-name validation,
-preventing duplicate replacement names from emptying the source family and
-falling through to an unrelated serif face. Each result is a reference-counted
-`IDWriteFont` proxy that owns both source metadata and the native replacement;
-different source families that resolve to the same interned DirectWrite font
-therefore retain distinct identities across threads and later reuse. Native
-font faces are likewise reference-counted proxies: the OpenType `name` table
-comes from the source face, while CMAP, glyphs, metrics, file descriptors, and
-face indexes come from the replacement. The proxy preserves one COM identity
-through `IDWriteFontFace1` to `IDWriteFontFace5`; advanced callers therefore
-receive the replacement font resource and can recreate the replacement face
-without bypassing the source-name alias. The x86/x64 marker contract exercises
-that resource-to-face round trip. The opaque font-table context owns the face
-that created it until `ReleaseFontTable`, so cleanup cannot cross the
-source/replacement boundary. Native DirectWrite pointers are exposed only when
-an API requires them. Modern collections created from `IDWriteFontSet` have a
-distinct font-family implementation, so their `GetFont` path receives the same
-source-identity proxy instead of relying on the legacy system-family vtable.
-Firefox can
-also retain a source `IDWriteFont` and later convert it to `LOGFONT` while
-reading font tables, so the GDI interop conversion hook applies the same
-replacement to retained font objects. The marker contract retains substituted
-metadata across a competing alias lookup and retains a source font while
-substitution is disabled, requiring both identities to remain correct.
+The native x86/x64 contract proves both sides of that generation boundary. A
+font retained while substitution is disabled remains the native source after a
+new aliased collection is published. A source lookup in the active collection
+returns a replacement object graph whose LOGFONT family, PostScript name,
+OpenType `name` table, file/index descriptor, `IDWriteFontFace5` resource,
+and resource-created face all agree with the independently opened replacement.
+
+The Firefox launch gate remains a deterministic test adapter for the real
+late-injection order. It stops the parent before user entry, waits for the
+factory boundary hooks, and then releases execution; it is not itself a
+product substitution mechanism. The renderer child pause is likewise retained
+only to make hosted-runner injection timing observable. Pixel equality with an
+independent replacement render remains mandatory.
+
+Chromium's default FontDataService validates embedded font data outside this
+DirectWrite collection seam. Disabling `FontDataServiceAllWebContents` is not
+accepted as product support or as the required default-path success proof.
+The browser proof does not expose a compatibility-mode launch. Default
+Chromium support requires a separate coherent adapter or a consistently
+virtualized font file; it must never be simulated by mixing source names with
+replacement objects.
+
 
 The native probe covers GDI and DirectWrite with injection before factory
 creation, injection after factory creation, multiple factories, worker-thread

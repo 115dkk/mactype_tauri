@@ -1,10 +1,13 @@
 #include "directwrite.h"
+#include "directwrite_alias.h"
 #include "dynCodeHelper.h"
 #include "hookCounter.h"
 #include "settings.h"
 
 #include <array>
 #include <atomic>
+#include <mutex>
+#include <vector>
 
 void MyDebug(const TCHAR *sz, ...)
 {
@@ -50,921 +53,9 @@ void SetPointerValue(Target& target, Source source) noexcept
 		}                                                                      \
 	};
 
-static void *g_systemFontCollectionFindFamilyName = nullptr;
-static void *g_customFontCollectionFindFamilyName = nullptr;
-static void *g_fontSetCollectionFindFamilyName = nullptr;
-static void *g_loaderFontCollectionFindFamilyName = nullptr;
-static void **g_systemFontCollectionVtableSlot = nullptr;
-static void *g_systemFontCollectionVtableOriginal = nullptr;
-static void **g_loaderFontCollectionVtableSlot = nullptr;
-static void *g_loaderFontCollectionVtableOriginal = nullptr;
-static void **g_sharedFactoryCreateCustomCollectionVtableSlot = nullptr;
-static void *g_sharedFactoryCreateCustomCollectionVtableOriginal = nullptr;
-static void **g_isolatedFactoryCreateCustomCollectionVtableSlot = nullptr;
-static void *g_isolatedFactoryCreateCustomCollectionVtableOriginal = nullptr;
-static void *g_systemFontCreateFontFace = nullptr;
-static void *g_systemFontFamilyGetFont = nullptr;
-static void *g_systemFontFaceReferenceCreateFontFace = nullptr;
-static void *g_systemFontFaceReferenceCreateFontFaceWithSimulations = nullptr;
-static void* g_customFontCreateFontFace = nullptr;
-static void* g_customFontFamilyGetFont = nullptr;
-static void* g_customFontFaceReferenceCreateFontFace = nullptr;
-static void* g_customFontFaceReferenceCreateFontFaceWithSimulations = nullptr;
-static void* g_fontSetFontCreateFontFace = nullptr;
-static void* g_fontSetFontFamilyGetFont = nullptr;
-static void* g_fontSetFontFaceReferenceCreateFontFace = nullptr;
-static void* g_fontSetFontFaceReferenceCreateFontFaceWithSimulations = nullptr;
-static void SignalDirectWriteDiagnostic(WCHAR const *stage);
+static void SignalDirectWriteDiagnostic(WCHAR const* stage);
 static void SignalDirectWriteFamilyDiagnostic(
-	WCHAR const *stagePrefix, WCHAR const *familyName);
-
-namespace {
-
-struct __declspec(uuid("A8DBE02B-C9D8-4C51-BE27-3243C7E59085"))
-	IAliasedDWriteFont : IUnknown
-{
-	virtual IDWriteFont* STDMETHODCALLTYPE GetReplacementFont() noexcept = 0;
-};
-
-struct FontFaceAliasEntry {
-	IDWriteFontFace3* face = nullptr;
-	std::wstring family;
-};
-
-thread_local std::wstring g_pendingDWriteFamilyAlias;
-thread_local IDWriteFont* g_pendingDWriteMetadataTarget = nullptr;
-thread_local CComPtr<IDWriteFont> g_pendingDWriteMetadataSource;
-thread_local std::wstring g_pendingDWriteMetadataFamily;
-thread_local std::array<FontFaceAliasEntry, 8> g_fontFaceAliases;
-thread_local size_t g_nextFontFaceAlias = 0;
-thread_local bool g_resolvingDWriteFontFaceDescriptor = false;
-
-class ScopedThreadFlag final {
-public:
-	explicit ScopedThreadFlag(bool& flag) noexcept : flag_(flag)
-	{
-		flag_ = true;
-	}
-
-	~ScopedThreadFlag() noexcept
-	{
-		flag_ = false;
-	}
-
-	ScopedThreadFlag(const ScopedThreadFlag&) = delete;
-	ScopedThreadFlag& operator=(const ScopedThreadFlag&) = delete;
-
-private:
-	bool& flag_;
-};
-
-class AliasedLocalizedStrings final : public IDWriteLocalizedStrings {
-public:
-	AliasedLocalizedStrings(
-		IDWriteLocalizedStrings* original, std::wstring family)
-		: original_(original), family_(std::move(family))
-	{
-	}
-
-	HRESULT STDMETHODCALLTYPE QueryInterface(
-		REFIID iid, void** object) override
-	{
-		if (object == nullptr)
-			return E_POINTER;
-		*object = nullptr;
-		if (iid != __uuidof(IUnknown) &&
-			iid != __uuidof(IDWriteLocalizedStrings))
-			return E_NOINTERFACE;
-		*object = static_cast<IDWriteLocalizedStrings*>(this);
-		AddRef();
-		return S_OK;
-	}
-
-	ULONG STDMETHODCALLTYPE AddRef() override
-	{
-		return ++referenceCount_;
-	}
-
-	ULONG STDMETHODCALLTYPE Release() override
-	{
-		ULONG const remaining = --referenceCount_;
-		if (remaining == 0)
-			delete this;
-		return remaining;
-	}
-
-	UINT32 STDMETHODCALLTYPE GetCount() override
-	{
-		return original_->GetCount();
-	}
-
-	HRESULT STDMETHODCALLTYPE FindLocaleName(
-		WCHAR const* localeName, UINT32* index, BOOL* exists) override
-	{
-		return original_->FindLocaleName(localeName, index, exists);
-	}
-
-	HRESULT STDMETHODCALLTYPE GetLocaleNameLength(
-		UINT32 index, UINT32* length) override
-	{
-		return original_->GetLocaleNameLength(index, length);
-	}
-
-	HRESULT STDMETHODCALLTYPE GetLocaleName(
-		UINT32 index, WCHAR* localeName, UINT32 size) override
-	{
-		return original_->GetLocaleName(index, localeName, size);
-	}
-
-	HRESULT STDMETHODCALLTYPE GetStringLength(
-		UINT32 index, UINT32* length) override
-	{
-		if (length == nullptr)
-			return E_POINTER;
-		UINT32 originalLength = 0;
-		HRESULT const result =
-			original_->GetStringLength(index, &originalLength);
-		if (FAILED(result))
-			return result;
-		*length = static_cast<UINT32>(family_.size());
-		return S_OK;
-	}
-
-	HRESULT STDMETHODCALLTYPE GetString(
-		UINT32 index, WCHAR* value, UINT32 size) override
-	{
-		UINT32 originalLength = 0;
-		HRESULT const result =
-			original_->GetStringLength(index, &originalLength);
-		if (FAILED(result))
-			return result;
-		if (value == nullptr)
-			return E_POINTER;
-		if (size <= family_.size())
-			return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
-		return StringCchCopyW(value, size, family_.c_str());
-	}
-
-private:
-	std::atomic<ULONG> referenceCount_{1};
-	CComPtr<IDWriteLocalizedStrings> original_;
-	std::wstring family_;
-};
-
-struct AliasedDWriteFontAxisValue
-{
-	UINT32 axisTag;
-	FLOAT value;
-};
-
-struct __declspec(uuid("98EFF3A5-B667-479A-B145-E2FA5B9FDC29"))
-	IAliasedDWriteFontFace5 : IDWriteFontFace4
-{
-	virtual UINT32 STDMETHODCALLTYPE GetFontAxisValueCount() = 0;
-	virtual HRESULT STDMETHODCALLTYPE GetFontAxisValues(
-		AliasedDWriteFontAxisValue* fontAxisValues,
-		UINT32 fontAxisValueCount) = 0;
-	virtual BOOL STDMETHODCALLTYPE HasVariations() = 0;
-	virtual HRESULT STDMETHODCALLTYPE GetFontResource(
-		IUnknown** fontResource) = 0;
-	virtual BOOL STDMETHODCALLTYPE Equals(IDWriteFontFace* fontFace) = 0;
-};
-
-class AliasedDWriteFontFace final : public IAliasedDWriteFontFace5 {
-public:
-	AliasedDWriteFontFace(
-		IDWriteFontFace* replacement, IDWriteFontFace* source) noexcept
-		: replacement_(replacement), source_(source)
-	{
-		replacement_->QueryInterface(&replacement1_);
-		replacement_->QueryInterface(&replacement2_);
-		replacement_->QueryInterface(&replacement3_);
-		replacement_->QueryInterface(&replacement4_);
-		replacement_->QueryInterface(&replacement5_);
-		source_->QueryInterface(&source3_);
-	}
-
-	HRESULT STDMETHODCALLTYPE QueryInterface(
-		REFIID iid, void** object) override
-	{
-		if (object == nullptr)
-			return E_POINTER;
-		*object = nullptr;
-		if (iid == __uuidof(IUnknown) || iid == __uuidof(IDWriteFontFace))
-			*object = static_cast<IDWriteFontFace*>(this);
-		else if (iid == __uuidof(IDWriteFontFace1) && replacement1_ != nullptr)
-			*object = static_cast<IDWriteFontFace1*>(this);
-		else if (iid == __uuidof(IDWriteFontFace2) && replacement2_ != nullptr)
-			*object = static_cast<IDWriteFontFace2*>(this);
-		else if (iid == __uuidof(IDWriteFontFace3) && replacement3_ != nullptr)
-			*object = static_cast<IDWriteFontFace3*>(this);
-		else if (iid == __uuidof(IDWriteFontFace4) && replacement4_ != nullptr)
-			*object = static_cast<IDWriteFontFace4*>(this);
-		else if (iid == __uuidof(IAliasedDWriteFontFace5) &&
-			replacement5_ != nullptr)
-			*object = static_cast<IAliasedDWriteFontFace5*>(this);
-		else
-			return E_NOINTERFACE;
-		AddRef();
-		return S_OK;
-	}
-
-	ULONG STDMETHODCALLTYPE AddRef() override
-	{
-		return ++referenceCount_;
-	}
-
-	ULONG STDMETHODCALLTYPE Release() override
-	{
-		ULONG const remaining = --referenceCount_;
-		if (remaining == 0)
-			delete this;
-		return remaining;
-	}
-
-	DWRITE_FONT_FACE_TYPE STDMETHODCALLTYPE GetType() override
-	{
-		return replacement_->GetType();
-	}
-
-	HRESULT STDMETHODCALLTYPE GetFiles(
-		UINT32* numberOfFiles, IDWriteFontFile** fontFiles) override
-	{
-		return replacement_->GetFiles(numberOfFiles, fontFiles);
-	}
-
-	UINT32 STDMETHODCALLTYPE GetIndex() override
-	{
-		return replacement_->GetIndex();
-	}
-
-	DWRITE_FONT_SIMULATIONS STDMETHODCALLTYPE GetSimulations() override
-	{
-		return replacement_->GetSimulations();
-	}
-
-	BOOL STDMETHODCALLTYPE IsSymbolFont() override
-	{
-		return replacement_->IsSymbolFont();
-	}
-
-	void STDMETHODCALLTYPE GetMetrics(
-		DWRITE_FONT_METRICS* fontFaceMetrics) override
-	{
-		replacement_->GetMetrics(fontFaceMetrics);
-	}
-
-	UINT16 STDMETHODCALLTYPE GetGlyphCount() override
-	{
-		return replacement_->GetGlyphCount();
-	}
-
-	HRESULT STDMETHODCALLTYPE GetDesignGlyphMetrics(
-		UINT16 const* glyphIndices, UINT32 glyphCount,
-		DWRITE_GLYPH_METRICS* glyphMetrics, BOOL isSideways) override
-	{
-		return replacement_->GetDesignGlyphMetrics(
-			glyphIndices, glyphCount, glyphMetrics, isSideways);
-	}
-
-	HRESULT STDMETHODCALLTYPE GetGlyphIndices(
-		UINT32 const* codePoints, UINT32 codePointCount,
-		UINT16* glyphIndices) override
-	{
-		return replacement_->GetGlyphIndices(
-			codePoints, codePointCount, glyphIndices);
-	}
-
-	HRESULT STDMETHODCALLTYPE TryGetFontTable(
-		UINT32 openTypeTableTag, void const** tableData, UINT32* tableSize,
-		void** tableContext, BOOL* exists) override
-	{
-		if (tableContext == nullptr)
-			return E_POINTER;
-		*tableContext = nullptr;
-		IDWriteFontFace* const owner =
-			openTypeTableTag == DWRITE_MAKE_OPENTYPE_TAG('n', 'a', 'm', 'e')
-				? source_.p
-				: replacement_.p;
-		void* nativeContext = nullptr;
-		HRESULT const result = owner->TryGetFontTable(
-			openTypeTableTag, tableData, tableSize, &nativeContext, exists);
-		if (FAILED(result) || exists == nullptr || !*exists ||
-			nativeContext == nullptr)
-			return result;
-
-		std::unique_ptr<FontTableContext> context(
-			new (std::nothrow) FontTableContext(owner, nativeContext));
-		if (!context)
-		{
-			owner->ReleaseFontTable(nativeContext);
-			if (tableData != nullptr)
-				*tableData = nullptr;
-			if (tableSize != nullptr)
-				*tableSize = 0;
-			if (exists != nullptr)
-				*exists = FALSE;
-			return E_OUTOFMEMORY;
-		}
-		*tableContext = context.release();
-		return result;
-	}
-
-	void STDMETHODCALLTYPE ReleaseFontTable(void* tableContext) override
-	{
-		std::unique_ptr<FontTableContext> context(
-			static_cast<FontTableContext*>(tableContext));
-		if (context && context->nativeContext != nullptr)
-			context->owner->ReleaseFontTable(context->nativeContext);
-	}
-
-	HRESULT STDMETHODCALLTYPE GetGlyphRunOutline(
-		FLOAT emSize, UINT16 const* glyphIndices,
-		FLOAT const* glyphAdvances, DWRITE_GLYPH_OFFSET const* glyphOffsets,
-		UINT32 glyphCount, BOOL isSideways, BOOL isRightToLeft,
-		IDWriteGeometrySink* geometrySink) override
-	{
-		return replacement_->GetGlyphRunOutline(
-			emSize, glyphIndices, glyphAdvances, glyphOffsets, glyphCount,
-			isSideways, isRightToLeft, geometrySink);
-	}
-
-	HRESULT STDMETHODCALLTYPE GetRecommendedRenderingMode(
-		FLOAT emSize, FLOAT pixelsPerDip, DWRITE_MEASURING_MODE measuringMode,
-		IDWriteRenderingParams* renderingParams,
-		DWRITE_RENDERING_MODE* renderingMode) override
-	{
-		return replacement_->GetRecommendedRenderingMode(
-			emSize, pixelsPerDip, measuringMode, renderingParams, renderingMode);
-	}
-
-	HRESULT STDMETHODCALLTYPE GetGdiCompatibleMetrics(
-		FLOAT emSize, FLOAT pixelsPerDip, DWRITE_MATRIX const* transform,
-		DWRITE_FONT_METRICS* fontFaceMetrics) override
-	{
-		return replacement_->GetGdiCompatibleMetrics(
-			emSize, pixelsPerDip, transform, fontFaceMetrics);
-	}
-
-	HRESULT STDMETHODCALLTYPE GetGdiCompatibleGlyphMetrics(
-		FLOAT emSize, FLOAT pixelsPerDip, DWRITE_MATRIX const* transform,
-		BOOL useGdiNatural, UINT16 const* glyphIndices, UINT32 glyphCount,
-		DWRITE_GLYPH_METRICS* glyphMetrics, BOOL isSideways) override
-	{
-		return replacement_->GetGdiCompatibleGlyphMetrics(
-			emSize, pixelsPerDip, transform, useGdiNatural, glyphIndices,
-			glyphCount, glyphMetrics, isSideways);
-	}
-
-	void STDMETHODCALLTYPE GetMetrics(
-		DWRITE_FONT_METRICS1* fontMetrics) override
-	{
-		replacement1_->GetMetrics(fontMetrics);
-	}
-
-	HRESULT STDMETHODCALLTYPE GetGdiCompatibleMetrics(
-		FLOAT emSize, FLOAT pixelsPerDip, DWRITE_MATRIX const* transform,
-		DWRITE_FONT_METRICS1* fontMetrics) override
-	{
-		return replacement1_->GetGdiCompatibleMetrics(
-			emSize, pixelsPerDip, transform, fontMetrics);
-	}
-
-	void STDMETHODCALLTYPE GetCaretMetrics(
-		DWRITE_CARET_METRICS* caretMetrics) override
-	{
-		replacement1_->GetCaretMetrics(caretMetrics);
-	}
-
-	HRESULT STDMETHODCALLTYPE GetUnicodeRanges(
-		UINT32 maxRangeCount, DWRITE_UNICODE_RANGE* unicodeRanges,
-		UINT32* actualRangeCount) override
-	{
-		return replacement1_->GetUnicodeRanges(
-			maxRangeCount, unicodeRanges, actualRangeCount);
-	}
-
-	BOOL STDMETHODCALLTYPE IsMonospacedFont() override
-	{
-		return replacement1_->IsMonospacedFont();
-	}
-
-	HRESULT STDMETHODCALLTYPE GetDesignGlyphAdvances(
-		UINT32 glyphCount, UINT16 const* glyphIndices, INT32* glyphAdvances,
-		BOOL isSideways = FALSE) override
-	{
-		return replacement1_->GetDesignGlyphAdvances(
-			glyphCount, glyphIndices, glyphAdvances, isSideways);
-	}
-
-	HRESULT STDMETHODCALLTYPE GetGdiCompatibleGlyphAdvances(
-		FLOAT emSize, FLOAT pixelsPerDip, DWRITE_MATRIX const* transform,
-		BOOL useGdiNatural, BOOL isSideways, UINT32 glyphCount,
-		UINT16 const* glyphIndices, INT32* glyphAdvances) override
-	{
-		return replacement1_->GetGdiCompatibleGlyphAdvances(
-			emSize, pixelsPerDip, transform, useGdiNatural, isSideways,
-			glyphCount, glyphIndices, glyphAdvances);
-	}
-
-	HRESULT STDMETHODCALLTYPE GetKerningPairAdjustments(
-		UINT32 glyphCount, UINT16 const* glyphIndices,
-		INT32* glyphAdvanceAdjustments) override
-	{
-		return replacement1_->GetKerningPairAdjustments(
-			glyphCount, glyphIndices, glyphAdvanceAdjustments);
-	}
-
-	BOOL STDMETHODCALLTYPE HasKerningPairs() override
-	{
-		return replacement1_->HasKerningPairs();
-	}
-
-	HRESULT STDMETHODCALLTYPE GetRecommendedRenderingMode(
-		FLOAT fontEmSize, FLOAT dpiX, FLOAT dpiY,
-		DWRITE_MATRIX const* transform, BOOL isSideways,
-		DWRITE_OUTLINE_THRESHOLD outlineThreshold,
-		DWRITE_MEASURING_MODE measuringMode,
-		DWRITE_RENDERING_MODE* renderingMode) override
-	{
-		return replacement1_->GetRecommendedRenderingMode(
-			fontEmSize, dpiX, dpiY, transform, isSideways, outlineThreshold,
-			measuringMode, renderingMode);
-	}
-
-	HRESULT STDMETHODCALLTYPE GetVerticalGlyphVariants(
-		UINT32 glyphCount, UINT16 const* nominalGlyphIndices,
-		UINT16* verticalGlyphIndices) override
-	{
-		return replacement1_->GetVerticalGlyphVariants(
-			glyphCount, nominalGlyphIndices, verticalGlyphIndices);
-	}
-
-	BOOL STDMETHODCALLTYPE HasVerticalGlyphVariants() override
-	{
-		return replacement1_->HasVerticalGlyphVariants();
-	}
-
-	BOOL STDMETHODCALLTYPE IsColorFont() override
-	{
-		return replacement2_->IsColorFont();
-	}
-
-	UINT32 STDMETHODCALLTYPE GetColorPaletteCount() override
-	{
-		return replacement2_->GetColorPaletteCount();
-	}
-
-	UINT32 STDMETHODCALLTYPE GetPaletteEntryCount() override
-	{
-		return replacement2_->GetPaletteEntryCount();
-	}
-
-	HRESULT STDMETHODCALLTYPE GetPaletteEntries(
-		UINT32 colorPaletteIndex, UINT32 firstEntryIndex, UINT32 entryCount,
-		DWRITE_COLOR_F* paletteEntries) override
-	{
-		return replacement2_->GetPaletteEntries(
-			colorPaletteIndex, firstEntryIndex, entryCount, paletteEntries);
-	}
-
-	HRESULT STDMETHODCALLTYPE GetRecommendedRenderingMode(
-		FLOAT fontEmSize, FLOAT dpiX, FLOAT dpiY,
-		DWRITE_MATRIX const* transform, BOOL isSideways,
-		DWRITE_OUTLINE_THRESHOLD outlineThreshold,
-		DWRITE_MEASURING_MODE measuringMode,
-		IDWriteRenderingParams* renderingParams,
-		DWRITE_RENDERING_MODE* renderingMode,
-		DWRITE_GRID_FIT_MODE* gridFitMode) override
-	{
-		return replacement2_->GetRecommendedRenderingMode(
-			fontEmSize, dpiX, dpiY, transform, isSideways, outlineThreshold,
-			measuringMode, renderingParams, renderingMode, gridFitMode);
-	}
-
-	HRESULT STDMETHODCALLTYPE GetFontFaceReference(
-		IDWriteFontFaceReference** fontFaceReference) override
-	{
-		return replacement3_->GetFontFaceReference(fontFaceReference);
-	}
-
-	void STDMETHODCALLTYPE GetPanose(DWRITE_PANOSE* panose) override
-	{
-		replacement3_->GetPanose(panose);
-	}
-
-	DWRITE_FONT_WEIGHT STDMETHODCALLTYPE GetWeight() override
-	{
-		return replacement3_->GetWeight();
-	}
-
-	DWRITE_FONT_STRETCH STDMETHODCALLTYPE GetStretch() override
-	{
-		return replacement3_->GetStretch();
-	}
-
-	DWRITE_FONT_STYLE STDMETHODCALLTYPE GetStyle() override
-	{
-		return replacement3_->GetStyle();
-	}
-
-	HRESULT STDMETHODCALLTYPE GetFamilyNames(
-		IDWriteLocalizedStrings** names) override
-	{
-		return source3_ != nullptr
-			? source3_->GetFamilyNames(names)
-			: replacement3_->GetFamilyNames(names);
-	}
-
-	HRESULT STDMETHODCALLTYPE GetFaceNames(
-		IDWriteLocalizedStrings** names) override
-	{
-		return source3_ != nullptr
-			? source3_->GetFaceNames(names)
-			: replacement3_->GetFaceNames(names);
-	}
-
-	HRESULT STDMETHODCALLTYPE GetInformationalStrings(
-		DWRITE_INFORMATIONAL_STRING_ID informationalStringID,
-		IDWriteLocalizedStrings** informationalStrings, BOOL* exists) override
-	{
-		return source3_ != nullptr
-			? source3_->GetInformationalStrings(
-				informationalStringID, informationalStrings, exists)
-			: replacement3_->GetInformationalStrings(
-				informationalStringID, informationalStrings, exists);
-	}
-
-	BOOL STDMETHODCALLTYPE HasCharacter(UINT32 unicodeValue) override
-	{
-		return replacement3_->HasCharacter(unicodeValue);
-	}
-
-	HRESULT STDMETHODCALLTYPE GetRecommendedRenderingMode(
-		FLOAT fontEmSize, FLOAT dpiX, FLOAT dpiY,
-		DWRITE_MATRIX const* transform, BOOL isSideways,
-		DWRITE_OUTLINE_THRESHOLD outlineThreshold,
-		DWRITE_MEASURING_MODE measuringMode,
-		IDWriteRenderingParams* renderingParams,
-		DWRITE_RENDERING_MODE1* renderingMode,
-		DWRITE_GRID_FIT_MODE* gridFitMode) override
-	{
-		return replacement3_->GetRecommendedRenderingMode(
-			fontEmSize, dpiX, dpiY, transform, isSideways, outlineThreshold,
-			measuringMode, renderingParams, renderingMode, gridFitMode);
-	}
-
-	BOOL STDMETHODCALLTYPE IsCharacterLocal(UINT32 unicodeValue) override
-	{
-		return replacement3_->IsCharacterLocal(unicodeValue);
-	}
-
-	BOOL STDMETHODCALLTYPE IsGlyphLocal(UINT16 glyphId) override
-	{
-		return replacement3_->IsGlyphLocal(glyphId);
-	}
-
-	HRESULT STDMETHODCALLTYPE AreCharactersLocal(
-		WCHAR const* characters, UINT32 characterCount,
-		BOOL enqueueIfNotLocal, BOOL* isLocal) override
-	{
-		return replacement3_->AreCharactersLocal(
-			characters, characterCount, enqueueIfNotLocal, isLocal);
-	}
-
-	HRESULT STDMETHODCALLTYPE AreGlyphsLocal(
-		UINT16 const* glyphIndices, UINT32 glyphCount,
-		BOOL enqueueIfNotLocal, BOOL* isLocal) override
-	{
-		return replacement3_->AreGlyphsLocal(
-			glyphIndices, glyphCount, enqueueIfNotLocal, isLocal);
-	}
-
-	DWRITE_GLYPH_IMAGE_FORMATS STDMETHODCALLTYPE GetGlyphImageFormats() override
-	{
-		return replacement4_->GetGlyphImageFormats();
-	}
-
-	HRESULT STDMETHODCALLTYPE GetGlyphImageFormats(
-		UINT16 glyphId, UINT32 pixelsPerEmFirst, UINT32 pixelsPerEmLast,
-		DWRITE_GLYPH_IMAGE_FORMATS* glyphImageFormats) override
-	{
-		return replacement4_->GetGlyphImageFormats(
-			glyphId, pixelsPerEmFirst, pixelsPerEmLast, glyphImageFormats);
-	}
-
-	HRESULT STDMETHODCALLTYPE GetGlyphImageData(
-		UINT16 glyphId, UINT32 pixelsPerEm,
-		DWRITE_GLYPH_IMAGE_FORMATS glyphImageFormat,
-		DWRITE_GLYPH_IMAGE_DATA* glyphData, void** glyphDataContext) override
-	{
-		return replacement4_->GetGlyphImageData(
-			glyphId, pixelsPerEm, glyphImageFormat, glyphData,
-			glyphDataContext);
-	}
-
-	void STDMETHODCALLTYPE ReleaseGlyphImageData(
-		void* glyphDataContext) override
-	{
-		replacement4_->ReleaseGlyphImageData(glyphDataContext);
-	}
-
-	UINT32 STDMETHODCALLTYPE GetFontAxisValueCount() override
-	{
-		return replacement5_->GetFontAxisValueCount();
-	}
-
-	HRESULT STDMETHODCALLTYPE GetFontAxisValues(
-		AliasedDWriteFontAxisValue* fontAxisValues,
-		UINT32 fontAxisValueCount) override
-	{
-		return replacement5_->GetFontAxisValues(
-			fontAxisValues, fontAxisValueCount);
-	}
-
-	BOOL STDMETHODCALLTYPE HasVariations() override
-	{
-		return replacement5_->HasVariations();
-	}
-
-	HRESULT STDMETHODCALLTYPE GetFontResource(IUnknown** fontResource) override
-	{
-		return replacement5_->GetFontResource(fontResource);
-	}
-
-	BOOL STDMETHODCALLTYPE Equals(IDWriteFontFace* fontFace) override
-	{
-		return fontFace == static_cast<IDWriteFontFace*>(this) ||
-			replacement5_->Equals(fontFace);
-	}
-
-private:
-	struct FontTableContext final {
-		FontTableContext(IDWriteFontFace* tableOwner, void* context) noexcept
-			: owner(tableOwner), nativeContext(context)
-		{
-		}
-
-		CComPtr<IDWriteFontFace> owner;
-		void* nativeContext;
-	};
-
-	std::atomic<ULONG> referenceCount_{1};
-	CComPtr<IDWriteFontFace> replacement_;
-	CComPtr<IDWriteFontFace> source_;
-	CComPtr<IDWriteFontFace1> replacement1_;
-	CComPtr<IDWriteFontFace2> replacement2_;
-	CComPtr<IDWriteFontFace3> replacement3_;
-	CComPtr<IDWriteFontFace4> replacement4_;
-	CComPtr<IAliasedDWriteFontFace5> replacement5_;
-	CComPtr<IDWriteFontFace3> source3_;
-};
-
-static std::wstring TakePendingDWriteFamilyAlias()
-{
-	std::wstring alias = std::move(g_pendingDWriteFamilyAlias);
-	g_pendingDWriteFamilyAlias.clear();
-	return alias;
-}
-
-static void ClearPendingDWriteFontMetadata()
-{
-	g_pendingDWriteMetadataTarget = nullptr;
-	g_pendingDWriteMetadataSource.Release();
-	g_pendingDWriteMetadataFamily.clear();
-}
-
-static void RememberPendingDWriteFontMetadata(
-	IDWriteFont* target, IDWriteFont* source, std::wstring family)
-{
-	g_pendingDWriteMetadataTarget = target;
-	g_pendingDWriteMetadataSource = source;
-	g_pendingDWriteMetadataFamily = std::move(family);
-}
-
-static void RememberFontFaceAlias(
-	IDWriteFontFace3* face, std::wstring alias)
-{
-	if (face == nullptr)
-		return;
-	for (auto& entry : g_fontFaceAliases)
-	{
-		if (entry.face == face)
-		{
-			entry.family = std::move(alias);
-			return;
-		}
-	}
-	FontFaceAliasEntry& entry = g_fontFaceAliases[g_nextFontFaceAlias];
-	entry.face = face;
-	entry.family = std::move(alias);
-	g_nextFontFaceAlias = (g_nextFontFaceAlias + 1) % g_fontFaceAliases.size();
-}
-
-static std::wstring const* FindFontFaceAlias(IDWriteFontFace3* face)
-{
-	for (auto const& entry : g_fontFaceAliases)
-	{
-		if (entry.face == face && !entry.family.empty())
-			return &entry.family;
-	}
-	return nullptr;
-}
-
-static void HookFontFaceFamilyNames(
-	IDWriteFontFace3* face, std::wstring alias)
-{
-	if (face == nullptr)
-		return;
-	RememberFontFaceAlias(face, std::move(alias));
-	if (ISHOOKED(FontFace3_GetFamilyNames))
-		return;
-	CCriticalSectionLock hookLock(CCriticalSectionLock::CS_DWRITE);
-	if (ISHOOKED(FontFace3_GetFamilyNames))
-		return;
-	CComPtr<IDWriteFontFace3> fontFace = face;
-	HOOK(fontFace, FontFace3_GetFamilyNames, 40);
-}
-
-class AliasedDWriteFont final : public IDWriteFont, public IAliasedDWriteFont {
-public:
-	AliasedDWriteFont(
-		IDWriteFont* replacement, IDWriteFont* source, std::wstring family)
-		: replacement_(replacement), source_(source), family_(std::move(family))
-	{
-	}
-
-	HRESULT STDMETHODCALLTYPE QueryInterface(
-		REFIID iid, void** object) override
-	{
-		if (object == nullptr)
-			return E_POINTER;
-		*object = nullptr;
-		if (iid == __uuidof(IUnknown) || iid == __uuidof(IDWriteFont))
-			*object = static_cast<IDWriteFont*>(this);
-		else if (iid == __uuidof(IAliasedDWriteFont))
-			*object = static_cast<IAliasedDWriteFont*>(this);
-		else
-			// Delegating newer interfaces would expose the interned replacement
-			// object and discard the source-family identity carried by this proxy.
-			return E_NOINTERFACE;
-		AddRef();
-		return S_OK;
-	}
-
-	ULONG STDMETHODCALLTYPE AddRef() override
-	{
-		return ++referenceCount_;
-	}
-
-	ULONG STDMETHODCALLTYPE Release() override
-	{
-		ULONG const remaining = --referenceCount_;
-		if (remaining == 0)
-			delete this;
-		return remaining;
-	}
-
-	HRESULT STDMETHODCALLTYPE GetFontFamily(
-		IDWriteFontFamily** fontFamily) override
-	{
-		return source_->GetFontFamily(fontFamily);
-	}
-
-	DWRITE_FONT_WEIGHT STDMETHODCALLTYPE GetWeight() override
-	{
-		return replacement_->GetWeight();
-	}
-
-	DWRITE_FONT_STRETCH STDMETHODCALLTYPE GetStretch() override
-	{
-		return replacement_->GetStretch();
-	}
-
-	DWRITE_FONT_STYLE STDMETHODCALLTYPE GetStyle() override
-	{
-		return replacement_->GetStyle();
-	}
-
-	BOOL STDMETHODCALLTYPE IsSymbolFont() override
-	{
-		return replacement_->IsSymbolFont();
-	}
-
-	HRESULT STDMETHODCALLTYPE GetFaceNames(
-		IDWriteLocalizedStrings** names) override
-	{
-		return source_->GetFaceNames(names);
-	}
-
-	HRESULT STDMETHODCALLTYPE GetInformationalStrings(
-		DWRITE_INFORMATIONAL_STRING_ID informationalStringID,
-		IDWriteLocalizedStrings** informationalStrings,
-		BOOL* exists) override
-	{
-		HRESULT const result = source_->GetInformationalStrings(
-			informationalStringID, informationalStrings, exists);
-		if (SUCCEEDED(result) && exists != nullptr && *exists)
-		{
-			SignalDirectWriteDiagnostic(L"family-font-metadata");
-			SignalDirectWriteFamilyDiagnostic(
-				L"family-font-metadata", family_.c_str());
-		}
-		return result;
-	}
-
-	DWRITE_FONT_SIMULATIONS STDMETHODCALLTYPE GetSimulations() override
-	{
-		return replacement_->GetSimulations();
-	}
-
-	void STDMETHODCALLTYPE GetMetrics(DWRITE_FONT_METRICS* fontMetrics) override
-	{
-		replacement_->GetMetrics(fontMetrics);
-	}
-
-	HRESULT STDMETHODCALLTYPE HasCharacter(
-		UINT32 unicodeValue, BOOL* exists) override
-	{
-		return replacement_->HasCharacter(unicodeValue, exists);
-	}
-
-	HRESULT STDMETHODCALLTYPE CreateFontFace(
-		IDWriteFontFace** fontFace) override
-	{
-		if (fontFace == nullptr)
-			return E_POINTER;
-		*fontFace = nullptr;
-		CComPtr<IDWriteFontFace> replacementFace;
-		HRESULT const replacementResult =
-			ORIG_CreateFontFace(replacement_, &replacementFace);
-		if (FAILED(replacementResult) || replacementFace == nullptr)
-			return replacementResult;
-		CComPtr<IDWriteFontFace> sourceFace;
-		HRESULT const sourceResult = ORIG_CreateFontFace(source_, &sourceFace);
-		if (FAILED(sourceResult) || sourceFace == nullptr)
-			return sourceResult;
-
-		std::unique_ptr<AliasedDWriteFontFace> aliasedFace(
-			new (std::nothrow) AliasedDWriteFontFace(
-				replacementFace, sourceFace));
-		if (!aliasedFace)
-			return E_OUTOFMEMORY;
-		*fontFace = aliasedFace.release();
-		return S_OK;
-	}
-
-	IDWriteFont* STDMETHODCALLTYPE GetReplacementFont() noexcept override
-	{
-		return replacement_;
-	}
-
-private:
-	std::atomic<ULONG> referenceCount_{1};
-	CComPtr<IDWriteFont> replacement_;
-	CComPtr<IDWriteFont> source_;
-	std::wstring family_;
-};
-
-static IDWriteFont* UnwrapAliasedDWriteFont(
-	IDWriteFont* font, CComPtr<IAliasedDWriteFont>& alias) noexcept
-{
-	if (font != nullptr && SUCCEEDED(font->QueryInterface(&alias)) && alias)
-		return alias->GetReplacementFont();
-	return font;
-}
-
-} // namespace
-
-enum class CollectionFontHookKind
-{
-	custom,
-	fontSet,
-};
-
-static void HookCollectionFontCreation(
-	IDWriteFontCollection* collection, CollectionFontHookKind kind);
-static HRESULT WINAPI Vtable_SystemFontCollection_FindFamilyName(
-	IDWriteFontCollection *self,
-	WCHAR const *familyName,
-	UINT32 *index,
-	BOOL *exists);
-static HRESULT WINAPI Vtable_CreateCustomFontCollection(
-	IDWriteFactory *self,
-	IDWriteFontCollectionLoader *collectionLoader,
-	void const *collectionKey,
-	UINT32 collectionKeySize,
-	IDWriteFontCollection **fontCollection);
-static HRESULT WINAPI Vtable_IsolatedCreateCustomFontCollection(
-	IDWriteFactory *self,
-	IDWriteFontCollectionLoader *collectionLoader,
-	void const *collectionKey,
-	UINT32 collectionKeySize,
-	IDWriteFontCollection **fontCollection);
-static void HookFactoryCustomFontCollection(
-	IDWriteFactory *factory, bool isolated);
-static void HookSystemFontCollection(
-	IDWriteFontCollection *fontCollection);
+	WCHAR const* stagePrefix, WCHAR const* familyName);
 
 struct ComMethodHooker {
 	// The target function if it has been hooked
@@ -1020,8 +111,6 @@ struct Params {
 };
 
 //IDWriteFactory* g_pDWriteFactory = nullptr;
-CComPtr<IDWriteGdiInterop> g_pGdiInterop = nullptr;
-
 enum D2D1RenderTargetCategory {
 	D2D1_RENDER_TARGET_CATEGORY = 1,
 	// ID2D1DCRenderTarget, ID2D1HwndRenderTarget, ID2D1BitmapRenderTarget
@@ -1459,7 +548,6 @@ void HookRenderTarget(
 		pD2D1RenderTarget->SetTextRenderingParams(GetD2DRenderingParams(nullptr));
 	}
 }
-
 
 //DWrite hooks
 HRESULT WINAPI IMPL_CreateGlyphRunAnalysis(
@@ -2271,126 +1359,413 @@ bool hookD2D1() {
 }
 
 #define FAILEXIT { /*CoUninitialize();*/ return false;}
-bool hookFontCreation(CComPtr<IDWriteFactory>& pDWriteFactory) {
-	if (FAILED(pDWriteFactory->GetGdiInterop(&g_pGdiInterop))) FAILEXIT;	//判断不正确
-	HOOK(g_pGdiInterop, GdiInterop_ConvertFontToLOGFONT, 4);
+using FactoryGetSystemFontCollectionMethod = HRESULT (WINAPI *)(
+	IDWriteFactory*, IDWriteFontCollection**, BOOL);
+using Factory3GetSystemFontSetMethod = HRESULT (WINAPI *)(
+	IDWriteFactory3*, IDWriteFontSet**);
+using Factory3GetSystemFontCollectionMethod = HRESULT (WINAPI *)(
+	IDWriteFactory3*, BOOL, IDWriteFontCollection1**, BOOL);
 
-/*
-	HDC dc = CreateCompatibleDC(0);
-	CComQIPtr<IDWriteBitmapRenderTarget> rt;
-	g_pGdiInterop->CreateBitmapRenderTarget(dc, 1, 1, &rt);	//used to trigger CreateBitmapRenderTarget->DrawGlyphRun hook
-	rt.Release();
-	DeleteDC(dc);*/
+HRESULT WINAPI IMPL_Factory_GetSystemFontCollection(
+	IDWriteFactory*, IDWriteFontCollection**, BOOL);
+HRESULT WINAPI IMPL_Factory3_GetSystemFontSet(
+	IDWriteFactory3*, IDWriteFontSet**);
+HRESULT WINAPI IMPL_Factory3_GetSystemFontCollection(
+	IDWriteFactory3*, BOOL, IDWriteFontCollection1**, BOOL);
 
-	HOOK(pDWriteFactory, CreateTextFormat, 15);
-	HOOK(pDWriteFactory, Factory_CreateFontFace, 9);
-	CComPtr<IDWriteFont> dfont = nullptr;
-	CComPtr<IDWriteFontCollection> fontcollection = nullptr;
-	CComPtr<IDWriteFontFamily> ffamily = nullptr;
-	if (FAILED(pDWriteFactory->GetSystemFontCollection(&fontcollection, false))) FAILEXIT;
-	HookSystemFontCollection(fontcollection);
-	HookFactoryCustomFontCollection(pDWriteFactory, false);
-	CComPtr<IDWriteFontCollection1> fontCollection1;
-	if (SUCCEEDED(fontcollection->QueryInterface(&fontCollection1))) {
-		CComPtr<IDWriteFontSet> fontSet;
-		if (SUCCEEDED(fontCollection1->GetFontSet(&fontSet))) {
-			// IDWriteFontSet4 is guarded by a newer NTDDI macro than MacType's
-			// minimum target. Query it by its published IID while keeping the
-			// binary compatible with earlier Windows versions.
-			static const IID iidFontSet4 =
-				{ 0xeec175fc, 0xbea9, 0x4c86, { 0x8b, 0x53, 0xcc, 0xbd, 0xd7, 0xdf, 0x0c, 0x82 } };
-			CComPtr<IUnknown> fontSet4;
-			if (SUCCEEDED(fontSet->QueryInterface(iidFontSet4,
-				reinterpret_cast<void**>(&fontSet4)))) {
-				HOOK(fontSet4, FontSet4_GetMatchingFonts, 31);
-			}
+namespace {
 
-			CComPtr<IDWriteFactory3> factory3;
-			if (SUCCEEDED(pDWriteFactory->QueryInterface(&factory3))) {
-				CComPtr<IDWriteFontCollection1> fontSetCollection;
-				if (SUCCEEDED(factory3->CreateFontCollectionFromFontSet(
-					fontSet, &fontSetCollection)) && fontSetCollection != nullptr) {
-					void* const fontSetFindFamilyName =
-						(*reinterpret_cast<void***>(fontSetCollection.p))[5];
-					if (fontSetFindFamilyName !=
-						g_systemFontCollectionFindFamilyName) {
-						g_fontSetCollectionFindFamilyName = fontSetFindFamilyName;
-						HOOK(fontSetCollection, FontSetCollection_FindFamilyName, 5);
-					}
-				}
-				HOOK(factory3, CreateFontCollectionFromFontSet, 37);
-			}
+constexpr size_t kFactoryGetSystemFontCollectionSlot = 3;
+constexpr size_t kFactory3GetSystemFontSetSlot = 35;
+constexpr size_t kFactory3GetSystemFontCollectionSlot = 38;
+
+struct FactoryAliasVtableHooks
+{
+	void** vtable = nullptr;
+	FactoryGetSystemFontCollectionMethod getSystemFontCollection = nullptr;
+	Factory3GetSystemFontSetMethod getSystemFontSet = nullptr;
+	Factory3GetSystemFontCollectionMethod getModernSystemFontCollection = nullptr;
+	bool getSystemFontCollectionPatched = false;
+	bool getSystemFontSetPatched = false;
+	bool getModernSystemFontCollectionPatched = false;
+};
+
+struct FactoryAliasSource
+{
+	CComPtr<IUnknown> factoryIdentity;
+	CComPtr<IDWriteFontSet> systemSet;
+};
+
+std::mutex& GetFactoryAliasVtableMutex()
+{
+	static std::mutex* mutex = new std::mutex;
+	return *mutex;
+}
+
+std::vector<FactoryAliasVtableHooks>& GetFactoryAliasVtableRegistry()
+{
+	static std::vector<FactoryAliasVtableHooks>* registry =
+		new std::vector<FactoryAliasVtableHooks>;
+	return *registry;
+}
+
+std::vector<FactoryAliasSource>& GetFactoryAliasSourceRegistry()
+{
+	static std::vector<FactoryAliasSource>* registry =
+		new std::vector<FactoryAliasSource>;
+	return *registry;
+}
+
+CComPtr<IUnknown> GetFactoryIdentity(IDWriteFactory* factory)
+{
+	CComPtr<IUnknown> identity;
+	if (factory != nullptr)
+		factory->QueryInterface(&identity);
+	return identity;
+}
+
+void PublishFactoryAliasSource(
+	IDWriteFactory* factory,
+	IDWriteFontSet* systemSet,
+	bool replaceExisting = false)
+{
+	CComPtr<IUnknown> const identity = GetFactoryIdentity(factory);
+	if (identity == nullptr || systemSet == nullptr)
+		return;
+	std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+	for (FactoryAliasSource& source : GetFactoryAliasSourceRegistry())
+	{
+		if (source.factoryIdentity == identity)
+		{
+			if (replaceExisting)
+				source.systemSet = systemSet;
+			return;
 		}
 	}
-	if (FAILED(fontcollection->GetFontFamily(0, &ffamily))) FAILEXIT;
-	if (FAILED(ffamily->GetFont(0, &dfont))) FAILEXIT;
-	g_systemFontFamilyGetFont =
-		(*reinterpret_cast<void***>(ffamily.p))[5];
-	HOOK(ffamily, FontFamily_GetFont, 5);
-	HOOK(dfont, Font_GetInformationalStrings, 9);
+	GetFactoryAliasSourceRegistry().push_back({identity, systemSet});
+}
 
-	CComPtr<IDWriteFont3> dfont3 = nullptr;
-	HRESULT hr = dfont->QueryInterface(&dfont3);
-	if (FAILED(hr)) {
-		HOOK(dfont, CreateFontFace, 13);
-	} else {
-		// IDWriteFont::CreateFontFace just wraps this
-		g_systemFontCreateFontFace =
-			(*reinterpret_cast<void***>(dfont3.p))[19];
-		HOOK(dfont3, CreateFontFace, 19);
+CComPtr<IDWriteFontSet> GetFactoryAliasSource(IDWriteFactory* factory)
+{
+	CComPtr<IUnknown> const identity = GetFactoryIdentity(factory);
+	if (identity == nullptr)
+		return nullptr;
+	std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+	for (FactoryAliasSource const& source : GetFactoryAliasSourceRegistry())
+	{
+		if (source.factoryIdentity == identity)
+			return source.systemSet;
+	}
+	return nullptr;
+}
 
-		CComPtr<IDWriteFontFaceReference> fontFaceReference;
-		if (SUCCEEDED(dfont3->GetFontFaceReference(&fontFaceReference)) && fontFaceReference) {
-			// Modern browser font managers create faces through references instead
-			// of CreateTextFormat. Both reference interfaces share these slots.
-			g_systemFontFaceReferenceCreateFontFace =
-				(*reinterpret_cast<void***>(fontFaceReference.p))[3];
-			g_systemFontFaceReferenceCreateFontFaceWithSimulations =
-				(*reinterpret_cast<void***>(fontFaceReference.p))[4];
-			HOOK(fontFaceReference, DWriteFontFaceReference_CreateFontFace, 3);
-			HOOK(fontFaceReference, DWriteFontFaceReference_CreateFontFaceWithSimulations, 4);
-		}
+FactoryAliasVtableHooks& GetOrAddFactoryAliasVtable(void** vtable)
+{
+	auto& registry = GetFactoryAliasVtableRegistry();
+	for (FactoryAliasVtableHooks& hooks : registry)
+	{
+		if (hooks.vtable == vtable)
+			return hooks;
 	}
-	CComPtr<IDWriteFontFace> fontFace;
-	if (SUCCEEDED(ORIG_CreateFontFace(dfont, &fontFace)) && fontFace != nullptr) {
-		HOOK(fontFace, FontFace_GetFiles, 4);
-		HOOK(fontFace, FontFace_GetIndex, 5);
+	registry.emplace_back();
+	registry.back().vtable = vtable;
+	return registry.back();
+}
+
+template <typename Method>
+void* MethodAddress(Method method) noexcept
+{
+	void* address = nullptr;
+	SetPointerValue(address, method);
+	return address;
+}
+
+template <typename Method>
+bool PatchFactoryVtableMethod(
+	FactoryAliasVtableHooks& hooks,
+	size_t slot,
+	Method replacement,
+	Method& original,
+	bool& patched)
+{
+	if (hooks.vtable == nullptr)
+		return false;
+	void** const entry = hooks.vtable + slot;
+	void* const replacementAddress = MethodAddress(replacement);
+	if (patched)
+		return *entry == replacementAddress;
+
+	void* const originalAddress = *entry;
+	if (originalAddress == nullptr || originalAddress == replacementAddress)
+		return false;
+	SetPointerValue(original, originalAddress);
+
+	auto protection = renderer_raii::PageProtection::TrySet(
+		entry, sizeof(*entry), PAGE_READWRITE);
+	if (!protection)
+	{
+		original = nullptr;
+		return false;
 	}
+	InterlockedExchangePointer(
+		reinterpret_cast<PVOID*>(entry), replacementAddress);
+	if (!protection.restore())
+	{
+		InterlockedExchangePointer(
+			reinterpret_cast<PVOID*>(entry), originalAddress);
+		original = nullptr;
+		return false;
+	}
+	patched = true;
 	return true;
 }
 
-bool hookDirectWrite(IUnknown ** factory)	//此函数需要改进以判断是否成功hook
+template <typename Method>
+void RestoreFactoryVtableMethod(
+	FactoryAliasVtableHooks& hooks,
+	size_t slot,
+	Method replacement,
+	Method original,
+	bool& patched) noexcept
 {
-	//CoInitialize(nullptr);
-#ifdef DEBUG
-	//MessageBox(nullptr, L"HookDW", nullptr, MB_OK);
-#endif
-	static bool loaded = [&] {
-		CComPtr<IDWriteFactory> pDWriteFactory;
-		HRESULT hr1 = (*factory)->QueryInterface(&pDWriteFactory);
-		if (FAILED(hr1)) FAILEXIT;
-		HOOK(pDWriteFactory, CreateGlyphRunAnalysis, 23);
-		HOOK(pDWriteFactory, GetGdiInterop, 17);
-		const CGdippSettings* pSettings = CGdippSettings::GetInstance();
-		// Windows8/8.1 is too buggy, GDIinterpo doesn't work correctly
-		if (!pSettings->IsWindows81() && !pSettings->IsWindows8() && pSettings->DelayedInited() && pSettings->GetFontSubstitutesInfo().GetSize())
-			hookFontCreation(pDWriteFactory);
-		MyDebug(L"DW1 hooked");
+	if (!patched || hooks.vtable == nullptr || original == nullptr)
+		return;
+	void** const entry = hooks.vtable + slot;
+	void* const replacementAddress = MethodAddress(replacement);
+	void* const originalAddress = MethodAddress(original);
+	if (*entry != replacementAddress)
+	{
+		patched = false;
+		return;
+	}
 
-		CComPtr<IDWriteFactory2> pDWriteFactory2;
-		HRESULT hr2 = (*factory)->QueryInterface(&pDWriteFactory2);
-		if (FAILED(hr2)) FAILEXIT;
-		HOOK(pDWriteFactory2, CreateGlyphRunAnalysis2, 30);
-		MyDebug(L"DW2 hooked");
+	auto protection = renderer_raii::PageProtection::TrySet(
+		entry, sizeof(*entry), PAGE_READWRITE);
+	if (!protection)
+		return;
+	InterlockedExchangePointer(
+		reinterpret_cast<PVOID*>(entry), originalAddress);
+	if (protection.restore())
+		patched = false;
+}
 
-		CComPtr<IDWriteFactory3> pDWriteFactory3;
-		HRESULT hr3 = (*factory)->QueryInterface(&pDWriteFactory3);
-		if (FAILED(hr3)) FAILEXIT;
-		HOOK(pDWriteFactory3, CreateGlyphRunAnalysis3, 31);
-		MyDebug(L"DW3 hooked");
+bool PatchFactoryAliasVtables(
+	IDWriteFactory* factory,
+	IDWriteFactory3* factory3)
+{
+	if (factory == nullptr || factory3 == nullptr)
+		return false;
+	void** const factoryVtable = *reinterpret_cast<void***>(factory);
+	void** const factory3Vtable = *reinterpret_cast<void***>(factory3);
+	if (factoryVtable == nullptr || factory3Vtable == nullptr)
+		return false;
+
+	std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+	GetOrAddFactoryAliasVtable(factoryVtable);
+	GetOrAddFactoryAliasVtable(factory3Vtable);
+	FactoryAliasVtableHooks& factoryHooks =
+		GetOrAddFactoryAliasVtable(factoryVtable);
+	FactoryAliasVtableHooks& factory3Hooks =
+		GetOrAddFactoryAliasVtable(factory3Vtable);
+	bool const baseWasPatched = factoryHooks.getSystemFontCollectionPatched;
+	bool const setWasPatched = factory3Hooks.getSystemFontSetPatched;
+	bool const modernWasPatched =
+		factory3Hooks.getModernSystemFontCollectionPatched;
+	bool const patched = PatchFactoryVtableMethod(
+			factoryHooks,
+			kFactoryGetSystemFontCollectionSlot,
+			&IMPL_Factory_GetSystemFontCollection,
+			factoryHooks.getSystemFontCollection,
+			factoryHooks.getSystemFontCollectionPatched) &&
+		PatchFactoryVtableMethod(
+			factory3Hooks,
+			kFactory3GetSystemFontSetSlot,
+			&IMPL_Factory3_GetSystemFontSet,
+			factory3Hooks.getSystemFontSet,
+			factory3Hooks.getSystemFontSetPatched) &&
+		PatchFactoryVtableMethod(
+			factory3Hooks,
+			kFactory3GetSystemFontCollectionSlot,
+			&IMPL_Factory3_GetSystemFontCollection,
+			factory3Hooks.getModernSystemFontCollection,
+			factory3Hooks.getModernSystemFontCollectionPatched);
+	if (patched)
 		return true;
-	}();
-	return loaded;
+
+	if (!modernWasPatched)
+		RestoreFactoryVtableMethod(
+			factory3Hooks,
+			kFactory3GetSystemFontCollectionSlot,
+			&IMPL_Factory3_GetSystemFontCollection,
+			factory3Hooks.getModernSystemFontCollection,
+			factory3Hooks.getModernSystemFontCollectionPatched);
+	if (!setWasPatched)
+		RestoreFactoryVtableMethod(
+			factory3Hooks,
+			kFactory3GetSystemFontSetSlot,
+			&IMPL_Factory3_GetSystemFontSet,
+			factory3Hooks.getSystemFontSet,
+			factory3Hooks.getSystemFontSetPatched);
+	if (!baseWasPatched)
+		RestoreFactoryVtableMethod(
+			factoryHooks,
+			kFactoryGetSystemFontCollectionSlot,
+			&IMPL_Factory_GetSystemFontCollection,
+			factoryHooks.getSystemFontCollection,
+			factoryHooks.getSystemFontCollectionPatched);
+	return false;
+}
+
+FactoryGetSystemFontCollectionMethod GetOriginalSystemFontCollection(
+	IDWriteFactory* factory)
+{
+	void** const vtable = factory == nullptr ? nullptr :
+		*reinterpret_cast<void***>(factory);
+	std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+	for (FactoryAliasVtableHooks const& hooks : GetFactoryAliasVtableRegistry())
+	{
+		if (hooks.vtable == vtable)
+			return hooks.getSystemFontCollection;
+	}
+	return nullptr;
+}
+
+Factory3GetSystemFontSetMethod GetOriginalSystemFontSet(IDWriteFactory3* factory)
+{
+	void** const vtable = factory == nullptr ? nullptr :
+		*reinterpret_cast<void***>(factory);
+	std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+	for (FactoryAliasVtableHooks const& hooks : GetFactoryAliasVtableRegistry())
+	{
+		if (hooks.vtable == vtable)
+			return hooks.getSystemFontSet;
+	}
+	return nullptr;
+}
+
+Factory3GetSystemFontCollectionMethod GetOriginalModernSystemFontCollection(
+	IDWriteFactory3* factory)
+{
+	void** const vtable = factory == nullptr ? nullptr :
+		*reinterpret_cast<void***>(factory);
+	std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+	for (FactoryAliasVtableHooks const& hooks : GetFactoryAliasVtableRegistry())
+	{
+		if (hooks.vtable == vtable)
+			return hooks.getModernSystemFontCollection;
+	}
+	return nullptr;
+}
+
+bool CaptureFactoryAliasSource(IDWriteFactory* factory)
+{
+	if (factory == nullptr)
+		return false;
+	CComPtr<IDWriteFontCollection> systemCollection;
+	FactoryGetSystemFontCollectionMethod const original =
+		GetOriginalSystemFontCollection(factory);
+	HRESULT const result = original == nullptr ?
+		factory->GetSystemFontCollection(&systemCollection, FALSE) :
+		original(factory, &systemCollection, FALSE);
+	if (FAILED(result) || systemCollection == nullptr)
+		return false;
+
+	CComPtr<IDWriteFontCollection1> systemCollection1;
+	CComPtr<IDWriteFontSet> systemSet;
+	if (FAILED(systemCollection->QueryInterface(&systemCollection1)) ||
+		systemCollection1 == nullptr ||
+		FAILED(systemCollection1->GetFontSet(&systemSet)) || systemSet == nullptr)
+		return false;
+	PublishFactoryAliasSource(factory, systemSet);
+	return true;
+}
+
+void RestoreFactoryAliasVtables() noexcept
+{
+	std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+	for (FactoryAliasVtableHooks& hooks : GetFactoryAliasVtableRegistry())
+	{
+		RestoreFactoryVtableMethod(
+			hooks,
+			kFactory3GetSystemFontCollectionSlot,
+			&IMPL_Factory3_GetSystemFontCollection,
+			hooks.getModernSystemFontCollection,
+			hooks.getModernSystemFontCollectionPatched);
+		RestoreFactoryVtableMethod(
+			hooks,
+			kFactory3GetSystemFontSetSlot,
+			&IMPL_Factory3_GetSystemFontSet,
+			hooks.getSystemFontSet,
+			hooks.getSystemFontSetPatched);
+		RestoreFactoryVtableMethod(
+			hooks,
+			kFactoryGetSystemFontCollectionSlot,
+			&IMPL_Factory_GetSystemFontCollection,
+			hooks.getSystemFontCollection,
+			hooks.getSystemFontCollectionPatched);
+	}
+}
+
+void ClearFactoryAliasSources() noexcept
+{
+	std::vector<FactoryAliasSource> sources;
+	{
+		std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+		sources.swap(GetFactoryAliasSourceRegistry());
+	}
+	sources.clear();
+}
+
+} // namespace
+
+static bool HookDirectWriteAliasCollection(CComPtr<IDWriteFactory>& factory)
+{
+	HOOK(factory, CreateTextFormat, 15);
+
+	CComPtr<IDWriteFactory3> factory3;
+	if (FAILED(factory->QueryInterface(&factory3)) || factory3 == nullptr)
+		return false;
+	return ISHOOKED(CreateTextFormat) && CaptureFactoryAliasSource(factory) &&
+		PatchFactoryAliasVtables(factory, factory3);
+}
+
+bool hookDirectWrite(IUnknown** factory)
+{
+	if (factory == nullptr || *factory == nullptr)
+		return false;
+
+	CComPtr<IDWriteFactory> writeFactory;
+	if (FAILED((*factory)->QueryInterface(&writeFactory)) ||
+		writeFactory == nullptr)
+		return false;
+
+	HOOK(writeFactory, CreateGlyphRunAnalysis, 23);
+	HOOK(writeFactory, GetGdiInterop, 17);
+
+	CGdippSettings const* settings = CGdippSettings::GetInstance();
+	bool aliasCollectionReady = true;
+	if (!settings->IsWindows81() && !settings->IsWindows8() &&
+		settings->DelayedInited() &&
+		settings->GetFontSubstitutesInfo().GetSize() != 0)
+	{
+		aliasCollectionReady = HookDirectWriteAliasCollection(writeFactory);
+	}
+	MyDebug(L"DW1 hooked");
+
+	CComPtr<IDWriteFactory2> factory2;
+	if (SUCCEEDED((*factory)->QueryInterface(&factory2)) && factory2)
+	{
+		HOOK(factory2, CreateGlyphRunAnalysis2, 30);
+		MyDebug(L"DW2 hooked");
+	}
+
+	CComPtr<IDWriteFactory3> factory3;
+	if (SUCCEEDED((*factory)->QueryInterface(&factory3)) && factory3)
+	{
+		HOOK(factory3, CreateGlyphRunAnalysis3, 31);
+		MyDebug(L"DW3 hooked");
+	}
+	return aliasCollectionReady;
 }
 
 #undef FAILEXIT
@@ -2453,18 +1828,11 @@ void TriggerHook(ID2D1Factory* d2d_factory) {
 // 				IDWriteGlyphRunAnalysis
 // 					GetAlphaBlendParams
 
-// 			hookFontCreation
-// 				CreateTextFormat
-// 					IDWriteTextFormat
-// 				IDWriteFont
-// 					CreateFontFace
-// 						IDWriteFontFace
-// 				IDWriteFont3
-// 					   CreateFontFace
-// 					GetFontFaceReference()
-// 						IDWriteFontFaceReference
-// 							CreateFontFace
-// 							CreateFontFaceWithSimulations
+// 			Alias collection boundary
+// 				GetSystemFontCollection
+// 				IDWriteFactory3::GetSystemFontSet
+// 				IDWriteFactory3::GetSystemFontCollection
+// 				CreateTextFormat with the native system collection
 
 // 		IDWriteFactory<N>
 // 			CreateGlyphRunAnalysis<N>
@@ -2472,36 +1840,24 @@ void TriggerHook(ID2D1Factory* d2d_factory) {
 // 					GetAlphaBlendParams
 static DWORD WINAPI HookExistingDirectWriteFactory(LPVOID moduleReference)
 {
-	renderer_raii::UniqueModuleReference selfReference(static_cast<HMODULE>(moduleReference));
+	renderer_raii::UniqueModuleReference selfReference(
+		static_cast<HMODULE>(moduleReference));
 	bool sharedFactoryHooked = false;
 	CComPtr<IUnknown> factory;
-	if (ORIG_DWriteCreateFactory && SUCCEEDED(ORIG_DWriteCreateFactory(
-		DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), &factory)))
+	if (ORIG_DWriteCreateFactory != nullptr &&
+		SUCCEEDED(ORIG_DWriteCreateFactory(
+			DWRITE_FACTORY_TYPE_SHARED,
+			__uuidof(IDWriteFactory),
+			&factory)))
 	{
 		IUnknown* rawFactory = factory;
 		sharedFactoryHooked = hookDirectWrite(&rawFactory);
-		CComPtr<IDWriteFactory> sharedFactory;
-		if (SUCCEEDED(factory->QueryInterface(&sharedFactory)))
-			HookFactoryCustomFontCollection(sharedFactory, false);
 	}
-	factory.Release();
-	if (ORIG_DWriteCreateFactory && SUCCEEDED(ORIG_DWriteCreateFactory(
-		DWRITE_FACTORY_TYPE_ISOLATED, __uuidof(IDWriteFactory), &factory)))
+
+	if (sharedFactoryHooked)
 	{
-		CComPtr<IDWriteFactory> isolatedFactory;
-		if (SUCCEEDED(factory->QueryInterface(&isolatedFactory)))
-			HookFactoryCustomFontCollection(isolatedFactory, true);
-	}
-	factory.Release();
-	if (sharedFactoryHooked && ISHOOKED(FontFamily_GetFont) &&
-		ISHOOKED(Font_GetInformationalStrings) &&
-		ISHOOKED(CreateFontFace) && ISHOOKED(FontFace_GetFiles) &&
-		ISHOOKED(FontFace_GetIndex) && ISHOOKED(Factory_CreateFontFace) &&
-		g_systemFontCollectionVtableSlot != nullptr)
-	{
-		// The launch gate may now release the image-entry thread. In
-		// particular, do not publish this from HookD2DDll: this worker is the
-		// step that attaches the object-method hooks to the shared factory.
+		// The launch gate may release the image-entry thread only after the
+		// shared factory's collection boundary is installed.
 		SignalDirectWriteDiagnostic(L"hook-ready");
 	}
 	HMODULE rawSelfReference = selfReference.release();
@@ -2649,6 +2005,7 @@ static void SignalDirectWriteFamilyDiagnostic(
 
 void ReleasePinnedRendererModules()
 {
+	directwrite_alias::ClearCache();
 	RendererModulePins& pins = GetRendererModulePins();
 	{
 		DirectWriteDiagnosticLock lock;
@@ -2717,7 +2074,7 @@ void HookD2DDll()
 	if (DWFactory) {
 		// Service injection can happen after a browser has created its shared
 		// factory. Hook that implementation once the loader lock is released.
-		// The worker publishes hook-ready only after the object hooks exist.
+		// The worker publishes hook-ready only after the factory boundary exists.
 		ScheduleExistingDirectWriteFactoryHook();
 	}
 }
@@ -2786,960 +2143,215 @@ HRESULT WINAPI IMPL_DWriteCreateFactory(__in DWRITE_FACTORY_TYPE factoryType,
 	return ret;
 }
 
-HRESULT WINAPI IMPL_CreateFontFace(IDWriteFont* self,
-	__out IDWriteFontFace** fontFace)
+static bool IsAliasCollectionApplied(
+	directwrite_alias::BuildStatus status) noexcept
 {
-	std::wstring const requestedAlias = TakePendingDWriteFamilyAlias();
-	HRESULT ret = ORIG_CreateFontFace(self, fontFace);
-	if (ret == S_OK)
-	{
-		/*static bool loaded = [&] {
-			CComPtr<IDWriteFontFace3> dfont3 = nullptr;
-			HRESULT hr = self->QueryInterface(&dfont3);
-			if (SUCCEEDED(hr)) {
-				CComPtr<IDWriteFontFaceReference> ffref;
-				if (SUCCEEDED(dfont3->GetFontFaceReference(&ffref)) && ffref) {
-					// Same as IDWriteFontFaceReference1::CreateFontFace
-					HOOK(ffref, DWriteFontFaceReference_CreateFontFace, 3);
-					HOOK(ffref, DWriteFontFaceReference_CreateFontFaceWithSimulations, 4);
-				}
-			}
-			return true;
-		}();*/
-
-		LOGFONT lf = { 0 };
-		if (FAILED(g_pGdiInterop->ConvertFontFaceToLOGFONT(*fontFace, &lf)))
-			return ret;
-		WCHAR originalFamily[LF_FACESIZE] = {};
-		StringCchCopy(originalFamily, ARRAYSIZE(originalFamily), lf.lfFaceName);
-		SignalDirectWriteDiagnostic(L"face-called");
-		SignalDirectWriteFamilyDiagnostic(L"face", originalFamily);
-		const CGdippSettings* pSettings = CGdippSettings::GetInstance();
-		if (pSettings->CopyForceFont(lf, lf))
-		{
-			SignalDirectWriteDiagnostic(L"face-resolved");
-			SignalDirectWriteFamilyDiagnostic(L"face-resolved", originalFamily);
-			IDWriteFont* writefont = nullptr;
-			if (FAILED(g_pGdiInterop->CreateFontFromLOGFONT(&lf, &writefont)))
-				return ret;
-			(*fontFace)->Release();
-			HRESULT const replacementResult =
-				ORIG_CreateFontFace(writefont, fontFace);
-			writefont->Release();
-			if (SUCCEEDED(replacementResult))
-			{
-				SignalDirectWriteDiagnostic(L"face-created");
-				SignalDirectWriteFamilyDiagnostic(
-					L"face-created", originalFamily);
-			}
-		}
-		CComPtr<IDWriteFontFace3> fontFace3;
-		if (SUCCEEDED((*fontFace)->QueryInterface(&fontFace3)))
-			HookFontFaceFamilyNames(fontFace3, requestedAlias);
-	}
-	return ret;
+	return status == directwrite_alias::BuildStatus::applied ||
+		status == directwrite_alias::BuildStatus::appliedWithMissingReplacement;
 }
 
-static bool ResolveDWriteFontFaceDescriptor(
-	IDWriteFontFace* fontFace, CComPtr<IDWriteFontFace>& replacementFace)
+static void SignalAliasCollectionStatus(
+	directwrite_alias::BuildStatus status)
 {
-	if (fontFace == nullptr || g_pGdiInterop == nullptr ||
-		ORIG_CreateFontFace == nullptr ||
-		g_resolvingDWriteFontFaceDescriptor)
-		return false;
-
-	ScopedThreadFlag resolving(g_resolvingDWriteFontFaceDescriptor);
-	LOGFONT logFont = {};
-	if (FAILED(g_pGdiInterop->ConvertFontFaceToLOGFONT(fontFace, &logFont)))
-		return false;
-	const CGdippSettings* settings = CGdippSettings::GetInstance();
-	if (!settings->CopyForceFont(logFont, logFont))
-		return false;
-
-	CComPtr<IDWriteFont> replacementFont;
-	if (FAILED(g_pGdiInterop->CreateFontFromLOGFONT(
-			&logFont, &replacementFont)) || replacementFont == nullptr)
-		return false;
-	return SUCCEEDED(ORIG_CreateFontFace(
-		replacementFont, &replacementFace)) && replacementFace != nullptr;
+	SignalDirectWriteDiagnostic(directwrite_alias::StatusName(status));
 }
 
-HRESULT WINAPI IMPL_FontFace_GetFiles(
-	IDWriteFontFace* self, UINT32* numberOfFiles, IDWriteFontFile** fontFiles)
+static directwrite_alias::BuildStatus GetCanonicalFactoryAliases(
+	IDWriteFactory3* factory3,
+	directwrite_alias::AliasFontSet& aliases)
 {
-	if (g_resolvingDWriteFontFaceDescriptor)
-		return ORIG_FontFace_GetFiles(self, numberOfFiles, fontFiles);
+	CComPtr<IDWriteFactory> factory;
+	if (factory3 == nullptr ||
+		FAILED(factory3->QueryInterface(&factory)) || factory == nullptr)
+		return directwrite_alias::BuildStatus::unsupportedFactory;
 
-	SignalDirectWriteDiagnostic(L"files-called");
-	CComPtr<IDWriteFontFace> replacementFace;
-	if (!ResolveDWriteFontFaceDescriptor(self, replacementFace))
-		return ORIG_FontFace_GetFiles(self, numberOfFiles, fontFiles);
-	SignalDirectWriteDiagnostic(L"files-resolved");
-	return ORIG_FontFace_GetFiles(
-		replacementFace, numberOfFiles, fontFiles);
+	CComPtr<IDWriteFontSet> const systemSet = GetFactoryAliasSource(factory);
+	if (systemSet == nullptr)
+		return directwrite_alias::BuildStatus::systemSetUnavailable;
+	return directwrite_alias::GetOrCreate(factory, systemSet, aliases);
 }
 
-UINT32 WINAPI IMPL_FontFace_GetIndex(IDWriteFontFace* self)
-{
-	if (g_resolvingDWriteFontFaceDescriptor)
-		return ORIG_FontFace_GetIndex(self);
-
-	SignalDirectWriteDiagnostic(L"index-called");
-	CComPtr<IDWriteFontFace> replacementFace;
-	if (!ResolveDWriteFontFaceDescriptor(self, replacementFace))
-		return ORIG_FontFace_GetIndex(self);
-	SignalDirectWriteDiagnostic(L"index-resolved");
-	return ORIG_FontFace_GetIndex(replacementFace);
-}
-
-static HRESULT SubstituteFontFamilyGetFont(
-	IDWriteFontFamily* self, UINT32 index, IDWriteFont** font,
-	decltype(ORIG_FontFamily_GetFont) originalGetFont)
-{
-	if (font == nullptr)
-		return E_POINTER;
-	*font = nullptr;
-	ClearPendingDWriteFontMetadata();
-	CComPtr<IDWriteFont> originalFont;
-	HRESULT const result = originalGetFont(
-		self, index, &originalFont);
-	if (FAILED(result) || originalFont == nullptr)
-		return result;
-	if (g_pGdiInterop == nullptr)
-	{
-		*font = originalFont.Detach();
-		return result;
-	}
-
-	LOGFONT logFont = {};
-	BOOL isSystemFont = FALSE;
-	if (FAILED(ORIG_GdiInterop_ConvertFontToLOGFONT(
-		g_pGdiInterop,
-		originalFont, &logFont, &isSystemFont)) || !isSystemFont)
-	{
-		*font = originalFont.Detach();
-		return result;
-	}
-	WCHAR originalFamily[LF_FACESIZE] = {};
-	StringCchCopyW(
-		originalFamily, ARRAYSIZE(originalFamily), logFont.lfFaceName);
-	SignalDirectWriteDiagnostic(L"family-font-called");
-	SignalDirectWriteFamilyDiagnostic(L"family-font", originalFamily);
-
-	const CGdippSettings* settings = CGdippSettings::GetInstance();
-	if (!settings->CopyForceFont(logFont, logFont))
-	{
-		*font = originalFont.Detach();
-		return result;
-	}
-
-	CComPtr<IDWriteFontCollection> collection;
-	CComPtr<IDWriteFontFamily> replacementFamily;
-	UINT32 replacementIndex = 0;
-	BOOL replacementExists = FALSE;
-	if (FAILED(self->GetFontCollection(&collection)) || collection == nullptr ||
-		ORIG_FontCollection_FindFamilyName == nullptr ||
-		FAILED(ORIG_FontCollection_FindFamilyName(
-			collection, logFont.lfFaceName,
-			&replacementIndex, &replacementExists)) ||
-		!replacementExists ||
-		FAILED(collection->GetFontFamily(
-			replacementIndex, &replacementFamily)) ||
-		replacementFamily == nullptr)
-	{
-		*font = originalFont.Detach();
-		return result;
-	}
-
-	CComPtr<IDWriteFont> replacementFont;
-	if (FAILED(replacementFamily->GetFirstMatchingFont(
-		originalFont->GetWeight(), originalFont->GetStretch(),
-		originalFont->GetStyle(), &replacementFont)) ||
-		replacementFont == nullptr)
-	{
-		*font = originalFont.Detach();
-		return result;
-	}
-
-	std::unique_ptr<AliasedDWriteFont> aliasedFont(
-		new (std::nothrow) AliasedDWriteFont(
-			replacementFont, originalFont, originalFamily));
-	if (!aliasedFont)
-	{
-		*font = originalFont.Detach();
-		return result;
-	}
-	g_pendingDWriteFamilyAlias = originalFamily;
-	RememberPendingDWriteFontMetadata(
-		aliasedFont.get(), originalFont, originalFamily);
-	*font = aliasedFont.release();
-	SignalDirectWriteDiagnostic(L"family-font-resolved");
-	SignalDirectWriteFamilyDiagnostic(L"family-font-resolved", originalFamily);
-	return result;
-}
-
-HRESULT WINAPI IMPL_FontFamily_GetFont(
-	IDWriteFontFamily* self, UINT32 index, IDWriteFont** font)
-{
-	return SubstituteFontFamilyGetFont(
-		self, index, font, ORIG_FontFamily_GetFont);
-}
-
-HRESULT WINAPI IMPL_CustomFontFamily_GetFont(
-	IDWriteFontFamily* self, UINT32 index, IDWriteFont** font)
-{
-	return SubstituteFontFamilyGetFont(
-		self, index, font, ORIG_CustomFontFamily_GetFont);
-}
-
-HRESULT WINAPI IMPL_FontSetFontFamily_GetFont(
-	IDWriteFontFamily* self, UINT32 index, IDWriteFont** font)
-{
-	return SubstituteFontFamilyGetFont(
-		self, index, font, ORIG_FontSetFontFamily_GetFont);
-}
-
-HRESULT WINAPI IMPL_GdiInterop_ConvertFontToLOGFONT(
-	IDWriteGdiInterop* self,
-	IDWriteFont* font,
-	LOGFONTW* logFont,
-	BOOL* isSystemFont)
-{
-	CComPtr<IAliasedDWriteFont> aliasedFont;
-	IDWriteFont* const resolvedFont =
-		UnwrapAliasedDWriteFont(font, aliasedFont);
-	HRESULT const result = ORIG_GdiInterop_ConvertFontToLOGFONT(
-		self, resolvedFont, logFont, isSystemFont);
-	if (FAILED(result) || logFont == nullptr || isSystemFont == nullptr ||
-		!*isSystemFont)
-		return result;
-
-	WCHAR originalFamily[LF_FACESIZE] = {};
-	StringCchCopyW(
-		originalFamily, ARRAYSIZE(originalFamily), logFont->lfFaceName);
-	SignalDirectWriteDiagnostic(L"logfont-called");
-	SignalDirectWriteFamilyDiagnostic(L"logfont", originalFamily);
-	const CGdippSettings* settings = CGdippSettings::GetInstance();
-	if (settings->CopyForceFont(*logFont, *logFont))
-	{
-		SignalDirectWriteDiagnostic(L"logfont-resolved");
-		SignalDirectWriteFamilyDiagnostic(L"logfont-resolved", originalFamily);
-	}
-	return result;
-}
-
-HRESULT WINAPI IMPL_Font_GetInformationalStrings(
-	IDWriteFont* self,
-	DWRITE_INFORMATIONAL_STRING_ID informationalStringID,
-	IDWriteLocalizedStrings** informationalStrings,
-	BOOL* exists)
-{
-	IDWriteFont* source = self;
-	bool const aliasesSource =
-		self == g_pendingDWriteMetadataTarget &&
-		g_pendingDWriteMetadataSource != nullptr;
-	if (aliasesSource)
-		source = g_pendingDWriteMetadataSource;
-	HRESULT const result = ORIG_Font_GetInformationalStrings(
-		source, informationalStringID, informationalStrings, exists);
-	if (aliasesSource && SUCCEEDED(result) && exists != nullptr && *exists)
-	{
-		SignalDirectWriteDiagnostic(L"family-font-metadata");
-		SignalDirectWriteFamilyDiagnostic(
-			L"family-font-metadata", g_pendingDWriteMetadataFamily.c_str());
-	}
-	return result;
-}
-
-HRESULT WINAPI IMPL_Factory_CreateFontFace(
+HRESULT WINAPI IMPL_Factory_GetSystemFontCollection(
 	IDWriteFactory* self,
-	DWRITE_FONT_FACE_TYPE fontFaceType,
-	UINT32 numberOfFiles,
-	IDWriteFontFile* const* fontFiles,
-	UINT32 faceIndex,
-	DWRITE_FONT_SIMULATIONS fontFaceSimulationFlags,
-	IDWriteFontFace** fontFace)
+	IDWriteFontCollection** fontCollection,
+	BOOL checkForUpdates)
 {
-	std::wstring const requestedAlias = TakePendingDWriteFamilyAlias();
-	HRESULT const result = ORIG_Factory_CreateFontFace(
-		self,
-		fontFaceType,
-		numberOfFiles,
-		fontFiles,
-		faceIndex,
-		fontFaceSimulationFlags,
-		fontFace);
-	if (FAILED(result) || fontFace == nullptr || *fontFace == nullptr)
+	HCounter counter;
+	SignalDirectWriteDiagnostic(L"legacy-system-collection-called");
+	if (fontCollection == nullptr)
+		return E_POINTER;
+	*fontCollection = nullptr;
+
+	FactoryGetSystemFontCollectionMethod const original =
+		GetOriginalSystemFontCollection(self);
+	if (original == nullptr)
+		return E_UNEXPECTED;
+	CComPtr<IDWriteFontCollection> systemCollection;
+	HRESULT const result = original(self, &systemCollection, checkForUpdates);
+	if (FAILED(result) || systemCollection == nullptr)
 		return result;
 
-	LOGFONT logFont = {};
-	if (FAILED(g_pGdiInterop->ConvertFontFaceToLOGFONT(*fontFace, &logFont)))
-		return result;
-	WCHAR originalFamily[LF_FACESIZE] = {};
-	StringCchCopy(originalFamily, ARRAYSIZE(originalFamily), logFont.lfFaceName);
-	SignalDirectWriteDiagnostic(L"factory-face-called");
-	SignalDirectWriteFamilyDiagnostic(L"factory-face", originalFamily);
-
-	const CGdippSettings* settings = CGdippSettings::GetInstance();
-	if (settings->CopyForceFont(logFont, logFont))
+	CComPtr<IDWriteFontCollection1> systemCollection1;
+	CComPtr<IDWriteFontSet> systemSet;
+	if (FAILED(systemCollection->QueryInterface(&systemCollection1)) ||
+		systemCollection1 == nullptr ||
+		FAILED(systemCollection1->GetFontSet(&systemSet)) ||
+		systemSet == nullptr)
 	{
-		SignalDirectWriteDiagnostic(L"factory-face-resolved");
-		SignalDirectWriteFamilyDiagnostic(
-			L"factory-face-resolved", originalFamily);
-		CComPtr<IDWriteFont> replacementFont;
-		if (SUCCEEDED(g_pGdiInterop->CreateFontFromLOGFONT(
-			&logFont, &replacementFont)))
-		{
-			CComPtr<IDWriteFontFace> replacementFace;
-			if (SUCCEEDED(ORIG_CreateFontFace(
-				replacementFont, &replacementFace)))
-			{
-				(*fontFace)->Release();
-				*fontFace = replacementFace.Detach();
-				SignalDirectWriteDiagnostic(L"factory-face-created");
-				SignalDirectWriteFamilyDiagnostic(
-					L"factory-face-created", originalFamily);
-			}
-		}
+		SignalAliasCollectionStatus(
+			directwrite_alias::BuildStatus::systemSetUnavailable);
+		*fontCollection = systemCollection.Detach();
+		return result;
 	}
-
-	CComPtr<IDWriteFontFace3> fontFace3;
-	if (SUCCEEDED((*fontFace)->QueryInterface(&fontFace3)))
-		HookFontFaceFamilyNames(fontFace3, requestedAlias);
-	return result;
-}
-
-HRESULT WINAPI IMPL_FontFace3_GetFamilyNames(
-	IDWriteFontFace3* self, IDWriteLocalizedStrings** names)
-{
-	HRESULT const result = ORIG_FontFace3_GetFamilyNames(self, names);
-	if (FAILED(result) || names == nullptr || *names == nullptr)
-		return result;
-	std::wstring const* const alias = FindFontFaceAlias(self);
-	if (alias == nullptr)
-		return result;
-
-	CComPtr<IDWriteLocalizedStrings> original;
-	original.Attach(*names);
-	*names = nullptr;
-	std::unique_ptr<AliasedLocalizedStrings> wrapper(
-		new (std::nothrow) AliasedLocalizedStrings(original, *alias));
-	if (!wrapper)
+	CComPtr<IDWriteFontSet> canonicalSystemSet = GetFactoryAliasSource(self);
+	if (canonicalSystemSet == nullptr || checkForUpdates)
 	{
-		*names = original.Detach();
-		return result;
+		PublishFactoryAliasSource(self, systemSet, checkForUpdates != FALSE);
+		canonicalSystemSet = GetFactoryAliasSource(self);
 	}
-	*names = wrapper.release();
-	SignalDirectWriteDiagnostic(L"alias-returned");
-	SignalDirectWriteFamilyDiagnostic(L"alias", alias->c_str());
-	return result;
-}
 
-bool SubstituteDWriteFont3(__out IDWriteFontFace3** fontFace3)
-{
-	LOGFONT lf = { 0 };
-	if (FAILED(g_pGdiInterop->ConvertFontFaceToLOGFONT(*fontFace3, &lf)))
-		return false;
-	WCHAR originalFamily[LF_FACESIZE] = {};
-	StringCchCopy(originalFamily, ARRAYSIZE(originalFamily), lf.lfFaceName);
-	SignalDirectWriteDiagnostic(L"face-called");
-	SignalDirectWriteFamilyDiagnostic(L"face", originalFamily);
-	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
-	if (pSettings->CopyForceFont(lf, lf))
+	directwrite_alias::AliasFontSet aliases;
+	directwrite_alias::BuildStatus const status =
+		directwrite_alias::GetOrCreate(self, canonicalSystemSet, aliases);
+	SignalAliasCollectionStatus(status);
+	if (IsAliasCollectionApplied(status))
 	{
-		SignalDirectWriteDiagnostic(L"face-resolved");
-		SignalDirectWriteFamilyDiagnostic(L"face-resolved", originalFamily);
-		CComPtr<IDWriteFont> writefont;
-		if (FAILED(g_pGdiInterop->CreateFontFromLOGFONT(&lf, &writefont)))
-			return false;
-
-		CComPtr<IDWriteFontFace> fontFaceOut;
-		ORIG_CreateFontFace(writefont, &fontFaceOut);
-		IDWriteFontFace3* fontFace3Out;
-		if (FAILED(fontFaceOut->QueryInterface(&fontFace3Out)))
-			return false;
-
-		(*fontFace3)->Release();
-		*fontFace3 = fontFace3Out;
-		SignalDirectWriteDiagnostic(L"face-created");
-		SignalDirectWriteFamilyDiagnostic(L"face-created", originalFamily);
+		CComPtr<IDWriteFontCollection> aliasCollection;
+		HRESULT const aliasResult = aliases.collection->QueryInterface(
+			&aliasCollection);
+		if (SUCCEEDED(aliasResult))
+			*fontCollection = aliasCollection.Detach();
+		return aliasResult;
 	}
-	return true;
-}
-
-HRESULT WINAPI IMPL_DWriteFontFaceReference_CreateFontFace(
-	IDWriteFontFaceReference* self,
-	__out IDWriteFontFace3** fontFace)
-{
-	std::wstring const requestedAlias = TakePendingDWriteFamilyAlias();
-	HRESULT ret = ORIG_DWriteFontFaceReference_CreateFontFace(self, fontFace);
-	if (ret == S_OK) {
-		SubstituteDWriteFont3(fontFace);
-		HookFontFaceFamilyNames(*fontFace, requestedAlias);
-	}
-	return ret;
-}
-
-HRESULT WINAPI IMPL_DWriteFontFaceReference_CreateFontFaceWithSimulations(
-	IDWriteFontFaceReference* self,
-	DWRITE_FONT_SIMULATIONS fontFaceSimulationFlags,
-	__out IDWriteFontFace3** fontFace)
-{
-	std::wstring const requestedAlias = TakePendingDWriteFamilyAlias();
-	HRESULT ret = ORIG_DWriteFontFaceReference_CreateFontFaceWithSimulations(self,
-		fontFaceSimulationFlags, fontFace);
-	if (ret == S_OK) {
-		SubstituteDWriteFont3(fontFace);
-		HookFontFaceFamilyNames(*fontFace, requestedAlias);
-	}
-	return ret;
-}
-
-static void HookCollectionFontCreation(
-	IDWriteFontCollection* collection, CollectionFontHookKind kind)
-{
-	if (collection == nullptr)
-		return;
-	CCriticalSectionLock hookLock(CCriticalSectionLock::CS_DWRITE);
-	CComPtr<IDWriteFontFamily> family;
-	if (FAILED(collection->GetFontFamily(0, &family)) || family == nullptr)
-		return;
-	CComPtr<IDWriteFont> font;
-	if (FAILED(family->GetFont(0, &font)) || font == nullptr)
-		return;
-	void* const getFont = (*reinterpret_cast<void***>(family.p))[5];
-	if (kind == CollectionFontHookKind::custom) {
-		if (!ISHOOKED(CustomFontFamily_GetFont) &&
-			getFont != g_systemFontFamilyGetFont &&
-			getFont != g_fontSetFontFamilyGetFont) {
-			g_customFontFamilyGetFont = getFont;
-			HOOK(family, CustomFontFamily_GetFont, 5);
-		}
-	} else if (!ISHOOKED(FontSetFontFamily_GetFont) &&
-		getFont != g_systemFontFamilyGetFont &&
-		getFont != g_customFontFamilyGetFont) {
-		g_fontSetFontFamilyGetFont = getFont;
-		HOOK(family, FontSetFontFamily_GetFont, 5);
-	}
-	CComPtr<IDWriteFont3> font3;
-	if (FAILED(font->QueryInterface(&font3)) || font3 == nullptr)
-		return;
-
-	void* const createFontFace = (*reinterpret_cast<void***>(font3.p))[19];
-	if (kind == CollectionFontHookKind::custom) {
-		if (!ISHOOKED(CustomFont_CreateFontFace) &&
-			createFontFace != g_systemFontCreateFontFace &&
-			createFontFace != g_fontSetFontCreateFontFace) {
-			g_customFontCreateFontFace = createFontFace;
-			HOOK(font3, CustomFont_CreateFontFace, 19);
-		}
-	} else if (!ISHOOKED(FontSetFont_CreateFontFace) &&
-		createFontFace != g_systemFontCreateFontFace &&
-		createFontFace != g_customFontCreateFontFace) {
-		g_fontSetFontCreateFontFace = createFontFace;
-		HOOK(font3, FontSetFont_CreateFontFace, 19);
-	}
-
-	CComPtr<IDWriteFontFaceReference> reference;
-	if (FAILED(font3->GetFontFaceReference(&reference)) || reference == nullptr)
-		return;
-	void* const createReferenceFace =
-		(*reinterpret_cast<void***>(reference.p))[3];
-	void* const createReferenceFaceWithSimulations =
-		(*reinterpret_cast<void***>(reference.p))[4];
-	if (kind == CollectionFontHookKind::custom) {
-		if (!ISHOOKED(CustomFontFaceReference_CreateFontFace) &&
-			createReferenceFace != g_systemFontFaceReferenceCreateFontFace &&
-			createReferenceFace != g_fontSetFontFaceReferenceCreateFontFace) {
-			g_customFontFaceReferenceCreateFontFace = createReferenceFace;
-			HOOK(reference, CustomFontFaceReference_CreateFontFace, 3);
-		}
-		if (!ISHOOKED(CustomFontFaceReference_CreateFontFaceWithSimulations) &&
-			createReferenceFaceWithSimulations !=
-				g_systemFontFaceReferenceCreateFontFaceWithSimulations &&
-			createReferenceFaceWithSimulations !=
-				g_fontSetFontFaceReferenceCreateFontFaceWithSimulations) {
-			g_customFontFaceReferenceCreateFontFaceWithSimulations =
-				createReferenceFaceWithSimulations;
-			HOOK(reference,
-				CustomFontFaceReference_CreateFontFaceWithSimulations, 4);
-		}
-	} else {
-		if (!ISHOOKED(FontSetFontFaceReference_CreateFontFace) &&
-			createReferenceFace != g_systemFontFaceReferenceCreateFontFace &&
-			createReferenceFace != g_customFontFaceReferenceCreateFontFace) {
-			g_fontSetFontFaceReferenceCreateFontFace = createReferenceFace;
-			HOOK(reference, FontSetFontFaceReference_CreateFontFace, 3);
-		}
-		if (!ISHOOKED(FontSetFontFaceReference_CreateFontFaceWithSimulations) &&
-			createReferenceFaceWithSimulations !=
-				g_systemFontFaceReferenceCreateFontFaceWithSimulations &&
-			createReferenceFaceWithSimulations !=
-				g_customFontFaceReferenceCreateFontFaceWithSimulations) {
-			g_fontSetFontFaceReferenceCreateFontFaceWithSimulations =
-				createReferenceFaceWithSimulations;
-			HOOK(reference,
-				FontSetFontFaceReference_CreateFontFaceWithSimulations, 4);
-		}
-	}
-}
-
-HRESULT WINAPI IMPL_CustomFont_CreateFontFace(
-	IDWriteFont3* self, IDWriteFontFace3** fontFace)
-{
-	std::wstring const requestedAlias = TakePendingDWriteFamilyAlias();
-	HRESULT const result = ORIG_CustomFont_CreateFontFace(self, fontFace);
-	if (result == S_OK) {
-		SubstituteDWriteFont3(fontFace);
-		HookFontFaceFamilyNames(*fontFace, requestedAlias);
-	}
+	*fontCollection = systemCollection.Detach();
 	return result;
 }
 
-HRESULT WINAPI IMPL_CustomFontFaceReference_CreateFontFace(
-	IDWriteFontFaceReference* self, IDWriteFontFace3** fontFace)
+HRESULT WINAPI IMPL_Factory3_GetSystemFontSet(
+	IDWriteFactory3* self,
+	IDWriteFontSet** fontSet)
 {
-	std::wstring const requestedAlias = TakePendingDWriteFamilyAlias();
-	HRESULT const result =
-		ORIG_CustomFontFaceReference_CreateFontFace(self, fontFace);
-	if (result == S_OK) {
-		SubstituteDWriteFont3(fontFace);
-		HookFontFaceFamilyNames(*fontFace, requestedAlias);
+	HCounter counter;
+	SignalDirectWriteDiagnostic(L"system-font-set-called");
+	if (fontSet == nullptr)
+		return E_POINTER;
+	*fontSet = nullptr;
+
+	Factory3GetSystemFontSetMethod const original =
+		GetOriginalSystemFontSet(self);
+	if (original == nullptr)
+		return E_UNEXPECTED;
+	CComPtr<IDWriteFontSet> systemSet;
+	HRESULT const result = original(self, &systemSet);
+	if (FAILED(result) || systemSet == nullptr)
+		return result;
+
+	directwrite_alias::AliasFontSet aliases;
+	directwrite_alias::BuildStatus const status =
+		GetCanonicalFactoryAliases(self, aliases);
+	SignalAliasCollectionStatus(status);
+	if (IsAliasCollectionApplied(status))
+	{
+		SignalDirectWriteDiagnostic(L"system-font-set-alias-returned");
+		return aliases.fontSet.CopyTo(fontSet);
 	}
+	*fontSet = systemSet.Detach();
 	return result;
 }
 
-HRESULT WINAPI IMPL_CustomFontFaceReference_CreateFontFaceWithSimulations(
-	IDWriteFontFaceReference* self,
-	DWRITE_FONT_SIMULATIONS fontFaceSimulationFlags,
-	IDWriteFontFace3** fontFace)
+HRESULT WINAPI IMPL_Factory3_GetSystemFontCollection(
+	IDWriteFactory3* self,
+	BOOL includeDownloadableFonts,
+	IDWriteFontCollection1** fontCollection,
+	BOOL checkForUpdates)
 {
-	std::wstring const requestedAlias = TakePendingDWriteFamilyAlias();
-	HRESULT const result =
-		ORIG_CustomFontFaceReference_CreateFontFaceWithSimulations(
-			self, fontFaceSimulationFlags, fontFace);
-	if (result == S_OK) {
-		SubstituteDWriteFont3(fontFace);
-		HookFontFaceFamilyNames(*fontFace, requestedAlias);
+	HCounter counter;
+	SignalDirectWriteDiagnostic(L"modern-system-collection-called");
+	if (fontCollection == nullptr)
+		return E_POINTER;
+	*fontCollection = nullptr;
+
+	Factory3GetSystemFontCollectionMethod const original =
+		GetOriginalModernSystemFontCollection(self);
+	if (original == nullptr)
+		return E_UNEXPECTED;
+	CComPtr<IDWriteFontCollection1> systemCollection;
+	HRESULT const result = original(
+		self, includeDownloadableFonts, &systemCollection, checkForUpdates);
+	if (FAILED(result) || systemCollection == nullptr)
+		return result;
+
+	directwrite_alias::AliasFontSet aliases;
+	directwrite_alias::BuildStatus const status =
+		GetCanonicalFactoryAliases(self, aliases);
+	SignalAliasCollectionStatus(status);
+	if (IsAliasCollectionApplied(status))
+	{
+		SignalDirectWriteDiagnostic(L"modern-system-collection-alias-returned");
+		return aliases.collection.CopyTo(fontCollection);
 	}
+	*fontCollection = systemCollection.Detach();
 	return result;
 }
 
-HRESULT WINAPI IMPL_FontSetFont_CreateFontFace(
-	IDWriteFont3* self, IDWriteFontFace3** fontFace)
+static WCHAR const* ResolveFactoryFamilyName(
+	WCHAR const* familyName,
+	LOGFONT& replacement)
 {
-	std::wstring const requestedAlias = TakePendingDWriteFamilyAlias();
-	HRESULT const result = ORIG_FontSetFont_CreateFontFace(self, fontFace);
-	if (result == S_OK) {
-		SubstituteDWriteFont3(fontFace);
-		HookFontFaceFamilyNames(*fontFace, requestedAlias);
-	}
-	return result;
-}
+	if (familyName == nullptr)
+		return familyName;
 
-HRESULT WINAPI IMPL_FontSetFontFaceReference_CreateFontFace(
-	IDWriteFontFaceReference* self, IDWriteFontFace3** fontFace)
-{
-	std::wstring const requestedAlias = TakePendingDWriteFamilyAlias();
-	HRESULT const result =
-		ORIG_FontSetFontFaceReference_CreateFontFace(self, fontFace);
-	if (result == S_OK) {
-		SubstituteDWriteFont3(fontFace);
-		HookFontFaceFamilyNames(*fontFace, requestedAlias);
-	}
-	return result;
-}
-
-HRESULT WINAPI IMPL_FontSetFontFaceReference_CreateFontFaceWithSimulations(
-	IDWriteFontFaceReference* self,
-	DWRITE_FONT_SIMULATIONS fontFaceSimulationFlags,
-	IDWriteFontFace3** fontFace)
-{
-	std::wstring const requestedAlias = TakePendingDWriteFamilyAlias();
-	HRESULT const result =
-		ORIG_FontSetFontFaceReference_CreateFontFaceWithSimulations(
-			self, fontFaceSimulationFlags, fontFace);
-	if (result == S_OK) {
-		SubstituteDWriteFont3(fontFace);
-		HookFontFaceFamilyNames(*fontFace, requestedAlias);
-	}
-	return result;
-}
-
-static WCHAR const* ResolveDWriteFamilyName(WCHAR const* familyName, LOGFONT& resolved)
-{
-	g_pendingDWriteFamilyAlias.clear();
-	if (!familyName) return familyName;
 	SignalDirectWriteDiagnostic(L"find-called");
 	SignalDirectWriteFamilyDiagnostic(L"find", familyName);
-	StringCchCopy(resolved.lfFaceName, LF_FACESIZE, familyName);
-	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
-	if (pSettings->CopyForceFont(resolved, resolved))
-	{
-		g_pendingDWriteFamilyAlias = familyName;
-		SignalDirectWriteDiagnostic(L"substitution-resolved");
-		SignalDirectWriteFamilyDiagnostic(L"resolved", familyName);
-		return resolved.lfFaceName;
-	}
-	return familyName;
+	LOGFONT source = {};
+	source.lfCharSet = DEFAULT_CHARSET;
+	if (FAILED(StringCchCopyW(
+			source.lfFaceName, ARRAYSIZE(source.lfFaceName), familyName)))
+		return familyName;
+	replacement = source;
+
+	CGdippSettings const* settings = CGdippSettings::GetInstance();
+	if (!settings->CopyForceFont(replacement, source))
+		return familyName;
+	SignalDirectWriteDiagnostic(L"substitution-resolved");
+	SignalDirectWriteFamilyDiagnostic(L"resolved", familyName);
+	return replacement.lfFaceName;
 }
 
-HRESULT WINAPI IMPL_FontCollection_FindFamilyName(
-	IDWriteFontCollection* self,
-	WCHAR const* familyName,
-	UINT32* index,
-	BOOL* exists)
-{
-	LOGFONT resolved = { 0 };
-	return ORIG_FontCollection_FindFamilyName(
-		self, ResolveDWriteFamilyName(familyName, resolved), index, exists);
-}
-
-static HRESULT WINAPI Vtable_SystemFontCollection_FindFamilyName(
-	IDWriteFontCollection *self,
-	WCHAR const *familyName,
-	UINT32 *index,
-	BOOL *exists)
-{
-	HCounter call;
-	return IMPL_FontCollection_FindFamilyName(
-		self, familyName, index, exists);
-}
-
-HRESULT WINAPI IMPL_CustomFontCollection_FindFamilyName(
-	IDWriteFontCollection* self,
-	WCHAR const* familyName,
-	UINT32* index,
-	BOOL* exists)
-{
-	LOGFONT resolved = { 0 };
-	return ORIG_CustomFontCollection_FindFamilyName(
-		self, ResolveDWriteFamilyName(familyName, resolved), index, exists);
-}
-
-HRESULT WINAPI IMPL_FontSetCollection_FindFamilyName(
-	IDWriteFontCollection *self,
-	WCHAR const *familyName,
-	UINT32 *index,
-	BOOL *exists)
-{
-	LOGFONT resolved = {0};
-	return ORIG_FontSetCollection_FindFamilyName(
-		self, ResolveDWriteFamilyName(familyName, resolved), index, exists);
-}
-
-HRESULT WINAPI IMPL_LoaderFontCollection_FindFamilyName(
-	IDWriteFontCollection *self,
-	WCHAR const *familyName,
-	UINT32 *index,
-	BOOL *exists)
-{
-	LOGFONT resolved = {0};
-	return ORIG_LoaderFontCollection_FindFamilyName(
-		self, ResolveDWriteFamilyName(familyName, resolved), index, exists);
-}
-
-static HRESULT WINAPI Vtable_LoaderFontCollection_FindFamilyName(
-	IDWriteFontCollection *self,
-	WCHAR const *familyName,
-	UINT32 *index,
-	BOOL *exists)
-{
-	HCounter call;
-	return IMPL_LoaderFontCollection_FindFamilyName(
-		self, familyName, index, exists);
-}
-
-static bool ReplaceVtableSlot(void **slot, void *replacement, void *&original)
-{
-	if (slot == nullptr || replacement == nullptr)
-		return false;
-	renderer_raii::PageProtection protection =
-		renderer_raii::PageProtection::TrySet(slot, sizeof(*slot), PAGE_READWRITE);
-	if (!protection)
-		return false;
-	original = *slot;
-	InterlockedExchangePointer(
-		reinterpret_cast<PVOID *>(slot), replacement);
-	if (protection.restore())
-		return true;
-	InterlockedExchangePointer(
-		reinterpret_cast<PVOID *>(slot), original);
-	protection.restore();
-	original = nullptr;
-	return false;
-}
-
-static void HookSystemFontCollection(IDWriteFontCollection *fontCollection)
-{
-	if (fontCollection == nullptr)
-		return;
-	CCriticalSectionLock hookLock(CCriticalSectionLock::CS_DWRITE);
-	void **const slot = &(*reinterpret_cast<void ***>(fontCollection))[5];
-	void *replacement = nullptr;
-	SET_VAL(replacement, &Vtable_SystemFontCollection_FindFamilyName);
-	if (*slot == replacement)
-		return;
-
-	void *original = nullptr;
-	SET_VAL(ORIG_FontCollection_FindFamilyName, *slot);
-	if (!ReplaceVtableSlot(slot, replacement, original))
-		return;
-	g_systemFontCollectionFindFamilyName = original;
-	g_systemFontCollectionVtableSlot = slot;
-	g_systemFontCollectionVtableOriginal = original;
-	SET_VAL(ORIG_FontCollection_FindFamilyName, original);
-	SignalDirectWriteDiagnostic(L"system-hook-installed");
-}
-
-static void HookFactoryCustomFontCollection(
-	IDWriteFactory *factory, bool isolated)
-{
-	if (factory == nullptr)
-		return;
-	CCriticalSectionLock hookLock(CCriticalSectionLock::CS_DWRITE);
-	void **const slot = &(*reinterpret_cast<void ***>(factory))[4];
-	void *sharedReplacement = nullptr;
-	void *isolatedReplacement = nullptr;
-	SET_VAL(sharedReplacement, &Vtable_CreateCustomFontCollection);
-	SET_VAL(isolatedReplacement, &Vtable_IsolatedCreateCustomFontCollection);
-	if (*slot == sharedReplacement || *slot == isolatedReplacement)
-		return;
-
-	void *replacement = isolated ? isolatedReplacement : sharedReplacement;
-	void *original = nullptr;
-	if (isolated)
-		SET_VAL(ORIG_IsolatedCreateCustomFontCollection, *slot);
-	else
-		SET_VAL(ORIG_CreateCustomFontCollection, *slot);
-	if (!ReplaceVtableSlot(slot, replacement, original))
-		return;
-
-	if (isolated)
-	{
-		g_isolatedFactoryCreateCustomCollectionVtableSlot = slot;
-		g_isolatedFactoryCreateCustomCollectionVtableOriginal = original;
-		SET_VAL(ORIG_IsolatedCreateCustomFontCollection, original);
-	}
-	else
-	{
-		g_sharedFactoryCreateCustomCollectionVtableSlot = slot;
-		g_sharedFactoryCreateCustomCollectionVtableOriginal = original;
-		SET_VAL(ORIG_CreateCustomFontCollection, original);
-	}
-	SignalDirectWriteDiagnostic(
-		isolated ? L"isolated-factory-hook-installed" :
-			L"shared-factory-hook-installed");
-}
-
-static void HookCollectionLoader(IDWriteFontCollectionLoader *collectionLoader)
-{
-	CComPtr<IDWriteFontCollection> loaderCollection;
-	if (collectionLoader != nullptr &&
-		SUCCEEDED(collectionLoader->QueryInterface(&loaderCollection)) &&
-		loaderCollection != nullptr)
-	{
-		void *const findFamilyName =
-			(*reinterpret_cast<void ***>(loaderCollection.p))[5];
-		if (!ISHOOKED(LoaderFontCollection_FindFamilyName) &&
-			findFamilyName != g_systemFontCollectionFindFamilyName &&
-			findFamilyName != g_customFontCollectionFindFamilyName &&
-			findFamilyName != g_fontSetCollectionFindFamilyName)
-		{
-			CCriticalSectionLock hookLock(CCriticalSectionLock::CS_DWRITE);
-			void **const slot =
-				&(*reinterpret_cast<void ***>(loaderCollection.p))[5];
-			if (g_loaderFontCollectionVtableSlot == nullptr)
-			{
-				void *replacement = nullptr;
-				SET_VAL(replacement, &Vtable_LoaderFontCollection_FindFamilyName);
-				void *original = nullptr;
-				SET_VAL(ORIG_LoaderFontCollection_FindFamilyName, findFamilyName);
-				if (ReplaceVtableSlot(slot, replacement, original))
-				{
-					g_loaderFontCollectionFindFamilyName = original;
-					g_loaderFontCollectionVtableSlot = slot;
-					g_loaderFontCollectionVtableOriginal = original;
-					SET_VAL(ORIG_LoaderFontCollection_FindFamilyName, original);
-				}
-			}
-		}
-	}
-}
-
-void RestoreDirectWriteVtableHooks()
-{
-	CCriticalSectionLock hookLock(CCriticalSectionLock::CS_DWRITE);
-	void *ignored = nullptr;
-	if (g_loaderFontCollectionVtableSlot != nullptr &&
-		g_loaderFontCollectionVtableOriginal != nullptr && ReplaceVtableSlot(
-			g_loaderFontCollectionVtableSlot,
-			g_loaderFontCollectionVtableOriginal,
-			ignored))
-	{
-		g_loaderFontCollectionVtableSlot = nullptr;
-		g_loaderFontCollectionVtableOriginal = nullptr;
-		g_loaderFontCollectionFindFamilyName = nullptr;
-	}
-	ignored = nullptr;
-	if (g_systemFontCollectionVtableSlot != nullptr &&
-		g_systemFontCollectionVtableOriginal != nullptr && ReplaceVtableSlot(
-			g_systemFontCollectionVtableSlot,
-			g_systemFontCollectionVtableOriginal,
-			ignored))
-	{
-		g_systemFontCollectionVtableSlot = nullptr;
-		g_systemFontCollectionVtableOriginal = nullptr;
-		g_systemFontCollectionFindFamilyName = nullptr;
-	}
-	ignored = nullptr;
-	if (g_isolatedFactoryCreateCustomCollectionVtableSlot != nullptr &&
-		g_isolatedFactoryCreateCustomCollectionVtableOriginal != nullptr &&
-		ReplaceVtableSlot(
-			g_isolatedFactoryCreateCustomCollectionVtableSlot,
-			g_isolatedFactoryCreateCustomCollectionVtableOriginal,
-			ignored))
-	{
-		g_isolatedFactoryCreateCustomCollectionVtableSlot = nullptr;
-		g_isolatedFactoryCreateCustomCollectionVtableOriginal = nullptr;
-	}
-	ignored = nullptr;
-	if (g_sharedFactoryCreateCustomCollectionVtableSlot != nullptr &&
-		g_sharedFactoryCreateCustomCollectionVtableOriginal != nullptr &&
-		ReplaceVtableSlot(
-			g_sharedFactoryCreateCustomCollectionVtableSlot,
-			g_sharedFactoryCreateCustomCollectionVtableOriginal,
-			ignored))
-	{
-		g_sharedFactoryCreateCustomCollectionVtableSlot = nullptr;
-		g_sharedFactoryCreateCustomCollectionVtableOriginal = nullptr;
-	}
-}
-
-static HRESULT HookCreatedCustomFontCollection(
-	HRESULT result,
-	IDWriteFontCollection **fontCollection)
-{
-	if (SUCCEEDED(result) && fontCollection != nullptr &&
-		*fontCollection != nullptr)
-	{
-		CComPtr<IDWriteFontCollection> collection = *fontCollection;
-		void *const findFamilyName =
-			(*reinterpret_cast<void ***>(collection.p))[5];
-		if (findFamilyName != g_systemFontCollectionFindFamilyName &&
-			findFamilyName != g_fontSetCollectionFindFamilyName &&
-			findFamilyName != g_loaderFontCollectionFindFamilyName)
-		{
-			g_customFontCollectionFindFamilyName = findFamilyName;
-			HOOK(collection, CustomFontCollection_FindFamilyName, 5);
-		}
-		HookCollectionFontCreation(collection, CollectionFontHookKind::custom);
-	}
-	return result;
-}
-
-HRESULT WINAPI IMPL_CreateCustomFontCollection(
+HRESULT WINAPI IMPL_CreateTextFormat(
 	IDWriteFactory* self,
-	IDWriteFontCollectionLoader* collectionLoader,
-	void const* collectionKey,
-	UINT32 collectionKeySize,
-	IDWriteFontCollection** fontCollection)
-{
-	HookCollectionLoader(collectionLoader);
-	return HookCreatedCustomFontCollection(
-		ORIG_CreateCustomFontCollection(
-			self, collectionLoader, collectionKey, collectionKeySize, fontCollection),
-		fontCollection);
-}
-
-HRESULT WINAPI IMPL_IsolatedCreateCustomFontCollection(
-	IDWriteFactory* self,
-	IDWriteFontCollectionLoader* collectionLoader,
-	void const* collectionKey,
-	UINT32 collectionKeySize,
-	IDWriteFontCollection** fontCollection)
-{
-	HookCollectionLoader(collectionLoader);
-	return HookCreatedCustomFontCollection(
-		ORIG_IsolatedCreateCustomFontCollection(
-			self, collectionLoader, collectionKey, collectionKeySize, fontCollection),
-		fontCollection);
-}
-
-static HRESULT WINAPI Vtable_CreateCustomFontCollection(
-	IDWriteFactory *self,
-	IDWriteFontCollectionLoader *collectionLoader,
-	void const *collectionKey,
-	UINT32 collectionKeySize,
-	IDWriteFontCollection **fontCollection)
-{
-	HCounter call;
-	return IMPL_CreateCustomFontCollection(
-		self, collectionLoader, collectionKey, collectionKeySize, fontCollection);
-}
-
-static HRESULT WINAPI Vtable_IsolatedCreateCustomFontCollection(
-	IDWriteFactory *self,
-	IDWriteFontCollectionLoader *collectionLoader,
-	void const *collectionKey,
-	UINT32 collectionKeySize,
-	IDWriteFontCollection **fontCollection)
-{
-	HCounter call;
-	return IMPL_IsolatedCreateCustomFontCollection(
-		self, collectionLoader, collectionKey, collectionKeySize, fontCollection);
-}
-
-HRESULT WINAPI IMPL_CreateFontCollectionFromFontSet(
-	IDWriteFactory3* self,
-	IDWriteFontSet* fontSet,
-	IDWriteFontCollection1** fontCollection)
-{
-	HRESULT const result = ORIG_CreateFontCollectionFromFontSet(
-		self, fontSet, fontCollection);
-	if (SUCCEEDED(result) && fontCollection != nullptr &&
-		*fontCollection != nullptr) {
-		CComPtr<IDWriteFontCollection1> collection = *fontCollection;
-		void* const findFamilyName =
-			(*reinterpret_cast<void***>(collection.p))[5];
-		if (findFamilyName != g_systemFontCollectionFindFamilyName &&
-			findFamilyName != g_customFontCollectionFindFamilyName &&
-			findFamilyName != g_loaderFontCollectionFindFamilyName) {
-			g_fontSetCollectionFindFamilyName = findFamilyName;
-			HOOK(collection, FontSetCollection_FindFamilyName, 5);
-		}
-		HookCollectionFontCreation(collection, CollectionFontHookKind::fontSet);
-	}
-	return result;
-}
-
-HRESULT WINAPI IMPL_FontSet4_GetMatchingFonts(
-	IUnknown* self,
-	WCHAR const* familyName,
-	void const* fontAxisValues,
-	UINT32 fontAxisValueCount,
-	DWRITE_FONT_SIMULATIONS allowedSimulations,
-	IUnknown** matchingFonts)
-{
-	LOGFONT resolved = { 0 };
-	return ORIG_FontSet4_GetMatchingFonts(
-		self, ResolveDWriteFamilyName(familyName, resolved), fontAxisValues,
-		fontAxisValueCount, allowedSimulations, matchingFonts);
-}
-
-HRESULT  WINAPI IMPL_CreateTextFormat(IDWriteFactory* self,
-	__in_z WCHAR const* fontFamilyName,
-	__maybenull IDWriteFontCollection* fontCollection,
+	WCHAR const* fontFamilyName,
+	IDWriteFontCollection* fontCollection,
 	DWRITE_FONT_WEIGHT fontWeight,
 	DWRITE_FONT_STYLE fontStyle,
 	DWRITE_FONT_STRETCH fontStretch,
 	FLOAT fontSize,
-	__in_z WCHAR const* localeName,
-	__out IDWriteTextFormat** textFormat)
+	WCHAR const* localeName,
+	IDWriteTextFormat** textFormat)
 {
-	LOGFONT resolved = { 0 };
-	return ORIG_CreateTextFormat(self, ResolveDWriteFamilyName(fontFamilyName, resolved),
-		fontCollection, fontWeight, fontStyle, fontStretch, fontSize, localeName, textFormat);
+	// Explicit collections own their own naming model. The nullptr path uses
+	// the factory's native system collection, so resolve it at this boundary.
+	LOGFONT replacement = {};
+	WCHAR const* resolvedFamily = fontCollection == nullptr ?
+		ResolveFactoryFamilyName(fontFamilyName, replacement) : fontFamilyName;
+	return ORIG_CreateTextFormat(
+		self,
+		resolvedFamily,
+		fontCollection,
+		fontWeight,
+		fontStyle,
+		fontStretch,
+		fontSize,
+		localeName,
+		textFormat);
+}
+
+void RestoreDirectWriteVtableHooks()
+{
+	RestoreFactoryAliasVtables();
+	HCounter::wait(3000);
+	ClearFactoryAliasSources();
+	directwrite_alias::ClearCache();
 }
 
 void WINAPI IMPL_D2D1RenderTarget_DrawGlyphRun1(

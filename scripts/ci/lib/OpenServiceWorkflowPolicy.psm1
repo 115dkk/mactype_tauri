@@ -69,6 +69,7 @@ function Test-OpenServiceWorkflowPolicy {
             "`$sourceFamily = 'Cambria'",
             '--chromium-loader $chromiumLoader',
             "'product-macloader'", 'productLoaderBoundaryObserved',
+            "'product-loader-runtime'", 'AlternativeFile=profile.ini',
             "-Phase 'post-MacLoader service restart'",
             '--firefox-launch-gate $BrowserLaunchGate',
             '--expect unsupported-late-collection', 'unsupportedLateCollectionObserved',

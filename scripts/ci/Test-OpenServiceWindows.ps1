@@ -485,10 +485,27 @@ try {
         if ((Get-Service -Name $serviceName).Status -ne 'Stopped') {
             throw 'Service did not stop before the isolated product-loader browser proof.'
         }
-        $chromiumLoader = Join-Path $activeRuntimeRoot 'MacLoader64.exe'
-        if (-not (Test-Path -LiteralPath $chromiumLoader -PathType Leaf)) {
-            throw "Active runtime Chromium loader is missing: $chromiumLoader"
+        $productLoaderRuntime = Join-Path $stagingRoot 'product-loader-runtime'
+        New-Item -ItemType Directory -Path $productLoaderRuntime -Force | Out-Null
+        $productLoaderSources = [ordered]@{
+            'MacLoader64.exe' = (Join-Path $OpenCoreRoot 'MacLoader64.exe')
+            'MacType64.dll' = (Join-Path $activeRuntimeRoot 'MacType64.dll')
         }
+        foreach ($entry in $productLoaderSources.GetEnumerator()) {
+            if (-not (Test-Path -LiteralPath $entry.Value -PathType Leaf)) {
+                throw "Product-loader runtime source is missing: $($entry.Value)"
+            }
+            Copy-Item -LiteralPath $entry.Value `
+                -Destination (Join-Path $productLoaderRuntime $entry.Key)
+        }
+        Copy-Item -LiteralPath (Join-Path $activeRuntimeRoot 'MacType.ini') `
+            -Destination (Join-Path $productLoaderRuntime 'profile.ini')
+        [IO.File]::WriteAllText(
+            (Join-Path $productLoaderRuntime 'MacType.ini'),
+            "[General]`r`nAlternativeFile=profile.ini`r`n",
+            [Text.UTF8Encoding]::new($false)
+        )
+        $chromiumLoader = Join-Path $productLoaderRuntime 'MacLoader64.exe'
         $loaderChromiumResultPath = Join-Path $BrowserEvidenceRoot 'product-loader-chromium.json'
         & node $BrowserProbeScript `
             --engine chromium `

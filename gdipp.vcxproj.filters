@@ -60,6 +60,12 @@
     <ClCompile Include="directwrite.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="directwrite_alias.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="directwrite_virtual_font.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="dynCodeHelper.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -146,6 +152,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="directwrite.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="directwrite_alias.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="directwrite_virtual_font.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="dynCodeHelper.h">

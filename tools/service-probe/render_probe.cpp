@@ -57,11 +57,12 @@ using UniqueCom = std::unique_ptr<Interface, ComReleaser<Interface>>;
 
 class ScopedFontTable final {
  public:
-  ScopedFontTable(IDWriteFontFace* face, void* context) noexcept
-      : face_(face), context_(context) {}
+  ScopedFontTable(IDWriteFontFace* face, void* context,
+                  const bool acquired) noexcept
+      : face_(face), context_(context), acquired_(acquired) {}
 
   ~ScopedFontTable() noexcept {
-    if (face_ != nullptr) {
+    if (face_ != nullptr && acquired_) {
       face_->ReleaseFontTable(context_);
     }
   }
@@ -72,12 +73,21 @@ class ScopedFontTable final {
  private:
   IDWriteFontFace* face_;
   void* context_;
+  bool acquired_;
 };
 
-bool FontTablesEqual(IDWriteFontFace* expected, IDWriteFontFace* actual,
-                     const UINT32 table_tag) {
+enum class FontTableComparison {
+  unavailable,
+  same_missing,
+  same_present,
+  different_present,
+};
+
+FontTableComparison CompareFontTables(IDWriteFontFace* expected,
+                                      IDWriteFontFace* actual,
+                                      const UINT32 table_tag) {
   if (expected == nullptr || actual == nullptr) {
-    return false;
+    return FontTableComparison::unavailable;
   }
   const void* expected_data = nullptr;
   UINT32 expected_size = 0;
@@ -86,11 +96,11 @@ bool FontTablesEqual(IDWriteFontFace* expected, IDWriteFontFace* actual,
   const HRESULT expected_result = expected->TryGetFontTable(
       table_tag, &expected_data, &expected_size, &expected_context,
       &expected_exists);
-  if (FAILED(expected_result) || expected_exists == FALSE ||
-      expected_data == nullptr) {
-    return false;
+  if (FAILED(expected_result)) {
+    return FontTableComparison::unavailable;
   }
-  ScopedFontTable expected_table(expected, expected_context);
+  ScopedFontTable expected_table(
+      expected, expected_context, expected_exists != FALSE);
 
   const void* actual_data = nullptr;
   UINT32 actual_size = 0;
@@ -98,16 +108,140 @@ bool FontTablesEqual(IDWriteFontFace* expected, IDWriteFontFace* actual,
   BOOL actual_exists = FALSE;
   const HRESULT actual_result = actual->TryGetFontTable(
       table_tag, &actual_data, &actual_size, &actual_context, &actual_exists);
-  if (FAILED(actual_result) || actual_exists == FALSE ||
-      actual_data == nullptr) {
-    return false;
+  if (FAILED(actual_result)) {
+    return FontTableComparison::unavailable;
   }
-  ScopedFontTable actual_table(actual, actual_context);
+  ScopedFontTable actual_table(actual, actual_context, actual_exists != FALSE);
+  if (expected_exists != actual_exists) {
+    return FontTableComparison::unavailable;
+  }
+  if (expected_exists == FALSE) {
+    return FontTableComparison::same_missing;
+  }
+  if (expected_data == nullptr || actual_data == nullptr) {
+    return FontTableComparison::unavailable;
+  }
   const auto* expected_bytes = static_cast<const std::byte*>(expected_data);
   const auto* actual_bytes = static_cast<const std::byte*>(actual_data);
   return expected_size == actual_size &&
-         std::equal(expected_bytes, expected_bytes + expected_size,
-                    actual_bytes);
+                 std::equal(expected_bytes, expected_bytes + expected_size,
+                            actual_bytes)
+             ? FontTableComparison::same_present
+             : FontTableComparison::different_present;
+}
+
+bool FontTablesEqual(IDWriteFontFace* expected, IDWriteFontFace* actual,
+                     const UINT32 table_tag) {
+  return CompareFontTables(expected, actual, table_tag) ==
+         FontTableComparison::same_present;
+}
+
+bool FontMetricsEqual(const DWRITE_FONT_METRICS& expected,
+                      const DWRITE_FONT_METRICS& actual) noexcept {
+  return expected.designUnitsPerEm == actual.designUnitsPerEm &&
+         expected.ascent == actual.ascent &&
+         expected.descent == actual.descent &&
+         expected.lineGap == actual.lineGap &&
+         expected.capHeight == actual.capHeight &&
+         expected.xHeight == actual.xHeight &&
+         expected.underlinePosition == actual.underlinePosition &&
+         expected.underlineThickness == actual.underlineThickness &&
+         expected.strikethroughPosition == actual.strikethroughPosition &&
+         expected.strikethroughThickness == actual.strikethroughThickness;
+}
+
+bool GlyphMetricsEqual(const DWRITE_GLYPH_METRICS& expected,
+                       const DWRITE_GLYPH_METRICS& actual) noexcept {
+  return expected.leftSideBearing == actual.leftSideBearing &&
+         expected.advanceWidth == actual.advanceWidth &&
+         expected.rightSideBearing == actual.rightSideBearing &&
+         expected.topSideBearing == actual.topSideBearing &&
+         expected.advanceHeight == actual.advanceHeight &&
+         expected.bottomSideBearing == actual.bottomSideBearing &&
+         expected.verticalOriginY == actual.verticalOriginY;
+}
+
+bool FontGeometryEqual(IDWriteFontFace* expected, IDWriteFontFace* actual) {
+  if (expected == nullptr || actual == nullptr) {
+    return false;
+  }
+
+  DWRITE_FONT_METRICS expected_metrics{};
+  DWRITE_FONT_METRICS actual_metrics{};
+  expected->GetMetrics(&expected_metrics);
+  actual->GetMetrics(&actual_metrics);
+  if (!FontMetricsEqual(expected_metrics, actual_metrics)) {
+    return false;
+  }
+
+  constexpr std::array<UINT32, 12> code_points = {
+      L'A', L'M', L'W', L'a', L'g', L'm', L'w', L'0', L'8', L'?',
+      0x00e9, 0x03a9};
+  std::array<UINT16, code_points.size()> expected_glyphs{};
+  std::array<UINT16, code_points.size()> actual_glyphs{};
+  if (FAILED(expected->GetGlyphIndices(
+          code_points.data(), static_cast<UINT32>(code_points.size()),
+          expected_glyphs.data())) ||
+      FAILED(actual->GetGlyphIndices(
+          code_points.data(), static_cast<UINT32>(code_points.size()),
+          actual_glyphs.data())) ||
+      expected_glyphs != actual_glyphs) {
+    return false;
+  }
+
+  std::array<DWRITE_GLYPH_METRICS, code_points.size()>
+      expected_glyph_metrics{};
+  std::array<DWRITE_GLYPH_METRICS, code_points.size()> actual_glyph_metrics{};
+  if (FAILED(expected->GetDesignGlyphMetrics(
+          expected_glyphs.data(), static_cast<UINT32>(expected_glyphs.size()),
+          expected_glyph_metrics.data(), FALSE)) ||
+      FAILED(actual->GetDesignGlyphMetrics(
+          actual_glyphs.data(), static_cast<UINT32>(actual_glyphs.size()),
+          actual_glyph_metrics.data(), FALSE))) {
+    return false;
+  }
+  for (std::size_t index = 0; index < expected_glyph_metrics.size(); ++index) {
+    if (!GlyphMetricsEqual(expected_glyph_metrics[index],
+                           actual_glyph_metrics[index])) {
+      return false;
+    }
+  }
+
+  constexpr std::array<UINT32, 4> required_tables = {
+      DWRITE_MAKE_OPENTYPE_TAG('c', 'm', 'a', 'p'),
+      DWRITE_MAKE_OPENTYPE_TAG('m', 'a', 'x', 'p'),
+      DWRITE_MAKE_OPENTYPE_TAG('h', 'h', 'e', 'a'),
+      DWRITE_MAKE_OPENTYPE_TAG('h', 'm', 't', 'x')};
+  for (const UINT32 table : required_tables) {
+    if (!FontTablesEqual(expected, actual, table)) {
+      return false;
+    }
+  }
+
+  const FontTableComparison glyf = CompareFontTables(
+      expected, actual, DWRITE_MAKE_OPENTYPE_TAG('g', 'l', 'y', 'f'));
+  if (glyf == FontTableComparison::unavailable ||
+      glyf == FontTableComparison::different_present) {
+    return false;
+  }
+  if (glyf == FontTableComparison::same_present &&
+      !FontTablesEqual(expected, actual,
+                       DWRITE_MAKE_OPENTYPE_TAG('l', 'o', 'c', 'a'))) {
+    return false;
+  }
+  const FontTableComparison cff = CompareFontTables(
+      expected, actual, DWRITE_MAKE_OPENTYPE_TAG('C', 'F', 'F', ' '));
+  const FontTableComparison cff2 = CompareFontTables(
+      expected, actual, DWRITE_MAKE_OPENTYPE_TAG('C', 'F', 'F', '2'));
+  if (cff == FontTableComparison::unavailable ||
+      cff == FontTableComparison::different_present ||
+      cff2 == FontTableComparison::unavailable ||
+      cff2 == FontTableComparison::different_present) {
+    return false;
+  }
+  return glyf == FontTableComparison::same_present ||
+         cff == FontTableComparison::same_present ||
+         cff2 == FontTableComparison::same_present;
 }
 
 class FontSubstitutionSwitch final {
@@ -186,6 +320,7 @@ bool HashSha256(const std::byte* bytes, const std::size_t size,
 std::wstring ResolveDirectWriteFamily(const std::wstring_view family,
                                       void* directwrite_factory,
                                       const bool use_modern_collection,
+                                      UniqueCom<IDWriteFontFace>* retained_face,
                                       std::wstring& error) {
   IDWriteFactory* factory = static_cast<IDWriteFactory*>(directwrite_factory);
   IDWriteFactory* raw_factory = nullptr;
@@ -277,6 +412,9 @@ std::wstring ResolveDirectWriteFamily(const std::wstring_view family,
   if (FAILED(interop->ConvertFontFaceToLOGFONT(face.get(), &resolved))) {
     error = L"IDWriteGdiInterop::ConvertFontFaceToLOGFONT failed";
     return {};
+  }
+  if (retained_face != nullptr) {
+    retained_face->reset(face.release());
   }
   return resolved.lfFaceName;
 }
@@ -407,7 +545,10 @@ std::wstring ResolveDirectWriteFontDescriptor(
 }
 
 std::wstring ResolveAdvancedDirectWriteFontDescriptor(
-    IDWriteFontFace* face, void* directwrite_factory, std::wstring& error) {
+    IDWriteFontFace* face, void* directwrite_factory,
+    bool& name_table_stable, bool& geometry_stable, std::wstring& error) {
+  name_table_stable = false;
+  geometry_stable = false;
   if (face == nullptr) {
     error = L"DirectWrite font face is unavailable for advanced descriptor";
     return {};
@@ -448,12 +589,18 @@ std::wstring ResolveAdvancedDirectWriteFontDescriptor(
     return {};
   }
 
+  name_table_stable = FontTablesEqual(
+      face, recreated_face.get(),
+      DWRITE_MAKE_OPENTYPE_TAG('n', 'a', 'm', 'e'));
+  geometry_stable = FontGeometryEqual(face, recreated_face.get());
+
   return ResolveDirectWriteFontDescriptor(
       recreated_face.get(), directwrite_factory, error);
 }
 
 std::wstring ResolveFontSetDirectWriteFamily(
     const std::wstring_view family, void* directwrite_factory,
+    UniqueCom<IDWriteFontFace>* retained_face,
     std::wstring& error) {
   IDWriteFactory* factory = static_cast<IDWriteFactory*>(directwrite_factory);
   IDWriteFactory* raw_factory = nullptr;
@@ -516,7 +663,18 @@ std::wstring ResolveFontSetDirectWriteFamily(
     error = L"GetFont failed for font-set collection";
     return {};
   }
-  return ResolveDirectWriteFontObject(font.get(), factory, error);
+  std::wstring const resolved = ResolveDirectWriteFontObject(
+      font.get(), factory, error);
+  if (!resolved.empty() && retained_face != nullptr) {
+    IDWriteFontFace* raw_face = nullptr;
+    const HRESULT face_result = font->CreateFontFace(&raw_face);
+    retained_face->reset(raw_face);
+    if (FAILED(face_result) || *retained_face == nullptr) {
+      error = L"CreateFontFace failed for font-set collection";
+      return {};
+    }
+  }
+  return resolved;
 }
 
 std::wstring ResolveIndexedDirectWriteFamily(
@@ -754,27 +912,35 @@ FontSubstitutionObservation ObserveFontSubstitution(
     DirectWriteSubstitutionObservation observation;
     std::wstring repeated_disabled_source_family;
     std::wstring repeated_disabled_replacement_family;
+    UniqueCom<IDWriteFontFace> disabled_replacement_face;
     {
       FontSubstitutionSwitch disabled;
       static_cast<void>(ResolveDirectWriteFamily(
-          source_family, directwrite_factory, use_modern_collection, error));
+          source_family, directwrite_factory, use_modern_collection, nullptr,
+          error));
       observation.disabled_source_family = ResolveDirectWriteFamily(
-          source_family, directwrite_factory, use_modern_collection, error);
+          source_family, directwrite_factory, use_modern_collection, nullptr,
+          error);
       observation.disabled_replacement_family = ResolveDirectWriteFamily(
           replacement_family, directwrite_factory, use_modern_collection,
-          error);
+          &disabled_replacement_face, error);
       repeated_disabled_source_family = ResolveDirectWriteFamily(
-          source_family, directwrite_factory, use_modern_collection, error);
+          source_family, directwrite_factory, use_modern_collection, nullptr,
+          error);
       repeated_disabled_replacement_family = ResolveDirectWriteFamily(
           replacement_family, directwrite_factory, use_modern_collection,
-          error);
+          nullptr, error);
     }
     static_cast<void>(ResolveDirectWriteFamily(
-        source_family, directwrite_factory, use_modern_collection, error));
+        source_family, directwrite_factory, use_modern_collection, nullptr,
+        error));
+    UniqueCom<IDWriteFontFace> active_source_face;
     observation.active_source_family = ResolveDirectWriteFamily(
-        source_family, directwrite_factory, use_modern_collection, error);
+        source_family, directwrite_factory, use_modern_collection,
+        &active_source_face, error);
     const std::wstring repeated_active_source_family = ResolveDirectWriteFamily(
-        source_family, directwrite_factory, use_modern_collection, error);
+        source_family, directwrite_factory, use_modern_collection, nullptr,
+        error);
     if (observation.disabled_source_family.empty() ||
         observation.disabled_replacement_family.empty() ||
         observation.active_source_family.empty()) {
@@ -787,10 +953,12 @@ FontSubstitutionObservation ObserveFontSubstitution(
                  repeated_disabled_replacement_family.c_str()) == 0 &&
         _wcsicmp(observation.active_source_family.c_str(),
                  repeated_active_source_family.c_str()) == 0;
+    observation.replacement_geometry_coherent = FontGeometryEqual(
+        disabled_replacement_face.get(), active_source_face.get());
     observation.replacement_observed =
-        observation.controls_stable &&
+        observation.controls_stable && observation.replacement_geometry_coherent &&
         _wcsicmp(observation.active_source_family.c_str(),
-                 observation.disabled_replacement_family.c_str()) == 0;
+                 observation.disabled_source_family.c_str()) == 0;
     return observation;
   };
   DirectWriteSubstitutionObservation& indexed =
@@ -821,56 +989,26 @@ FontSubstitutionObservation ObserveFontSubstitution(
         replacement_family, directwrite_factory, indexed_replacement, false,
         ignored_repeated_postscript_name, nullptr, nullptr, error);
   }
-  UniqueCom<IDWriteFont> active_replacement_font;
-  UniqueCom<IDWriteFontFace> active_replacement_face;
+  UniqueCom<IDWriteFontFace> active_alias_face;
   indexed.active_source_family =
       ResolveIndexedDirectWriteFamily(source_family, directwrite_factory,
           indexed_source, false, indexed.active_source_postscript_name,
-          &active_replacement_font,
-          &active_replacement_face, error);
+          nullptr, &active_alias_face, error);
   const std::wstring repeated_active_indexed_source =
       ResolveIndexedDirectWriteFamily(source_family, directwrite_factory,
           indexed_source, false, ignored_repeated_postscript_name,
           nullptr, nullptr, error);
-  UINT32 competing_index = 0;
-  std::wstring competing_postscript_name;
-  std::wstring const competing_family =
-      _wcsicmp(std::wstring(source_family).c_str(), L"Impact") == 0
-          ? L"Cambria"
-          : L"Impact";
-  ResolveIndexedDirectWriteFamily(
-      competing_family, directwrite_factory, competing_index, true,
-      competing_postscript_name, nullptr, nullptr, error);
-  if (active_replacement_font != nullptr) {
-    BOOL exists = FALSE;
-    IDWriteLocalizedStrings* raw_names = nullptr;
-    const HRESULT names_result = active_replacement_font->GetInformationalStrings(
-        DWRITE_INFORMATIONAL_STRING_POSTSCRIPT_NAME, &raw_names, &exists);
-    UniqueCom<IDWriteLocalizedStrings> names(raw_names);
-    if (SUCCEEDED(names_result) && exists != FALSE && names != nullptr &&
-        names->GetCount() != 0) {
-      UINT32 length = 0;
-      if (SUCCEEDED(names->GetStringLength(0, &length))) {
-        indexed.active_replacement_postscript_name.assign(
-            static_cast<std::size_t>(length) + 1U, L'\0');
-        if (SUCCEEDED(names->GetString(
-                0, indexed.active_replacement_postscript_name.data(),
-                length + 1U))) {
-          indexed.active_replacement_postscript_name.resize(length);
-        } else {
-          indexed.active_replacement_postscript_name.clear();
-        }
-      }
-    }
-  }
   indexed.retained_generation_family = ResolveDirectWriteFontObject(
       pinned_disabled_source.get(), directwrite_factory, error);
   indexed.retained_generation_descriptor_family =
       ResolveDirectWriteFontDescriptor(
           pinned_disabled_source_face.get(), directwrite_factory, error);
-  indexed.active_replacement_descriptor_family =
+  bool resource_name_table_stable = false;
+  bool resource_geometry_stable = false;
+  indexed.active_alias_descriptor_family =
       ResolveAdvancedDirectWriteFontDescriptor(
-          active_replacement_face.get(), directwrite_factory, error);
+          active_alias_face.get(), directwrite_factory,
+          resource_name_table_stable, resource_geometry_stable, error);
   indexed.controls_stable =
       !indexed.disabled_source_family.empty() &&
       !indexed.disabled_replacement_family.empty() &&
@@ -886,48 +1024,62 @@ FontSubstitutionObservation ObserveFontSubstitution(
   indexed.retained_generation_descriptor_stable =
       _wcsicmp(indexed.retained_generation_descriptor_family.c_str(),
                indexed.disabled_source_family.c_str()) == 0;
-  indexed.replacement_descriptor_coherent =
-      _wcsicmp(indexed.active_replacement_descriptor_family.c_str(),
-               indexed.disabled_replacement_family.c_str()) == 0;
-  indexed.replacement_metadata_coherent =
-      !indexed.active_replacement_postscript_name.empty() &&
-      _wcsicmp(indexed.active_replacement_postscript_name.c_str(),
-               indexed.active_source_postscript_name.c_str()) == 0 &&
-      _wcsicmp(indexed.active_source_postscript_name.c_str(),
-               indexed.disabled_replacement_postscript_name.c_str()) == 0;
-  indexed.replacement_name_table_coherent = FontTablesEqual(
-      pinned_disabled_replacement_face.get(), active_replacement_face.get(),
-      DWRITE_MAKE_OPENTYPE_TAG('n', 'a', 'm', 'e'));
+  indexed.active_identity_coherent =
+      !indexed.active_source_postscript_name.empty() &&
+      _wcsicmp(indexed.active_source_family.c_str(),
+               indexed.disabled_source_family.c_str()) == 0 &&
+      _wcsicmp(indexed.active_alias_descriptor_family.c_str(),
+               indexed.active_source_family.c_str()) == 0;
+  indexed.virtual_name_table_coherent =
+      resource_name_table_stable &&
+      CompareFontTables(
+          pinned_disabled_replacement_face.get(), active_alias_face.get(),
+          DWRITE_MAKE_OPENTYPE_TAG('n', 'a', 'm', 'e')) ==
+          FontTableComparison::different_present &&
+      CompareFontTables(
+          pinned_disabled_source_face.get(), active_alias_face.get(),
+          DWRITE_MAKE_OPENTYPE_TAG('n', 'a', 'm', 'e')) ==
+          FontTableComparison::different_present;
+  indexed.replacement_geometry_coherent = FontGeometryEqual(
+      pinned_disabled_replacement_face.get(), active_alias_face.get());
+  indexed.resource_round_trip_coherent =
+      resource_name_table_stable && resource_geometry_stable &&
+      _wcsicmp(indexed.active_alias_descriptor_family.c_str(),
+               indexed.active_source_family.c_str()) == 0;
   indexed.replacement_observed =
       indexed.controls_stable &&
       _wcsicmp(indexed.active_source_family.c_str(),
-               indexed.disabled_replacement_family.c_str()) == 0 &&
+               indexed.disabled_source_family.c_str()) == 0 &&
       indexed.retained_generation_object_stable &&
       indexed.retained_generation_descriptor_stable &&
-      indexed.replacement_descriptor_coherent &&
-      indexed.replacement_metadata_coherent &&
-      indexed.replacement_name_table_coherent;
+      indexed.active_identity_coherent &&
+      indexed.virtual_name_table_coherent &&
+      indexed.resource_round_trip_coherent &&
+      indexed.replacement_geometry_coherent;
   result.direct_write = observe_direct_write(false);
   DirectWriteSubstitutionObservation& font_set =
       result.direct_write_font_set_collection;
   std::wstring repeated_disabled_font_set_source;
   std::wstring repeated_disabled_font_set_replacement;
+  UniqueCom<IDWriteFontFace> disabled_font_set_replacement_face;
   {
     FontSubstitutionSwitch disabled;
     font_set.disabled_source_family = ResolveFontSetDirectWriteFamily(
-        source_family, directwrite_factory, error);
+        source_family, directwrite_factory, nullptr, error);
     font_set.disabled_replacement_family = ResolveFontSetDirectWriteFamily(
-        replacement_family, directwrite_factory, error);
+        replacement_family, directwrite_factory,
+        &disabled_font_set_replacement_face, error);
     repeated_disabled_font_set_source = ResolveFontSetDirectWriteFamily(
-        source_family, directwrite_factory, error);
+        source_family, directwrite_factory, nullptr, error);
     repeated_disabled_font_set_replacement = ResolveFontSetDirectWriteFamily(
-        replacement_family, directwrite_factory, error);
+        replacement_family, directwrite_factory, nullptr, error);
   }
+  UniqueCom<IDWriteFontFace> active_font_set_source_face;
   font_set.active_source_family = ResolveFontSetDirectWriteFamily(
-      source_family, directwrite_factory, error);
+      source_family, directwrite_factory, &active_font_set_source_face, error);
   const std::wstring repeated_active_font_set_source =
       ResolveFontSetDirectWriteFamily(
-          source_family, directwrite_factory, error);
+          source_family, directwrite_factory, nullptr, error);
   font_set.controls_stable =
       !font_set.disabled_source_family.empty() &&
       !font_set.disabled_replacement_family.empty() &&
@@ -937,15 +1089,18 @@ FontSubstitutionObservation ObserveFontSubstitution(
                repeated_disabled_font_set_replacement.c_str()) == 0 &&
       _wcsicmp(font_set.active_source_family.c_str(),
                repeated_active_font_set_source.c_str()) == 0;
+  font_set.replacement_geometry_coherent = FontGeometryEqual(
+      disabled_font_set_replacement_face.get(),
+      active_font_set_source_face.get());
   font_set.replacement_observed =
-      font_set.controls_stable &&
+      font_set.controls_stable && font_set.replacement_geometry_coherent &&
       _wcsicmp(font_set.active_source_family.c_str(),
-               font_set.disabled_replacement_family.c_str()) == 0;
+               font_set.disabled_source_family.c_str()) == 0;
   result.direct_write_modern_collection = observe_direct_write(true);
   if (result.direct_write.active_source_family.empty() ||
       indexed.active_source_family.empty() ||
       indexed.retained_generation_descriptor_family.empty() ||
-      indexed.active_replacement_descriptor_family.empty() ||
+      indexed.active_alias_descriptor_family.empty() ||
       font_set.active_source_family.empty() ||
       result.direct_write_modern_collection.active_source_family.empty()) {
     result.active_source_fingerprint.clear();

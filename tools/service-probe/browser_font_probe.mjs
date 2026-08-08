@@ -11,8 +11,6 @@ const require = createRequire(
     path.resolve(import.meta.dirname, '../../control-center/package.json'),
 );
 const { chromium, firefox } = require('@playwright/test');
-const FIREFOX_CHILD_PAUSE_SECONDS = 10;
-
 function parseArguments(argv) {
   const result = {
     engine: 'chromium',
@@ -46,7 +44,11 @@ function parseArguments(argv) {
   if (!['chromium', 'firefox'].includes(result.engine)) {
     throw new Error(`Unsupported engine: ${result.engine}`);
   }
-  if (!['stock', 'substituted'].includes(result.expect)) {
+  if (![
+    'stock',
+    'substituted',
+    'unsupported-late-collection',
+  ].includes(result.expect)) {
     throw new Error(`Unsupported expectation: ${result.expect}`);
   }
   if (result.engine !== 'firefox' && result.firefoxLaunchGate) {
@@ -56,6 +58,37 @@ function parseArguments(argv) {
     throw new Error(`Invalid timeout: ${result.timeoutMs}`);
   }
   return result;
+}
+
+const metricTolerances = {
+  width: 1 / 64,
+  actualBoundingBoxLeft: 1,
+  actualBoundingBoxRight: 1,
+  actualBoundingBoxAscent: 1,
+  actualBoundingBoxDescent: 1,
+  fontBoundingBoxAscent: 1 / 64,
+  fontBoundingBoxDescent: 1 / 64,
+};
+
+function hasReplacementMetrics(observation) {
+  return observation.source.metricSamples.every((sourceMetric, index) => {
+    const replacementMetric = observation.replacement.metricSamples[index];
+    return replacementMetric?.text === sourceMetric.text &&
+      Object.entries(metricTolerances).every(([property, tolerance]) =>
+        Math.abs(sourceMetric[property] - replacementMetric[property]) <=
+          tolerance
+      );
+  });
+}
+
+function hasReplacementRaster(observation) {
+  return observation.rasterComparison.meanAbsoluteRgbDelta <= 1 &&
+    observation.rasterComparison.darkPixelIntersectionOverUnion >= 0.9;
+}
+
+function hasSemanticReplacement(observation) {
+  return hasReplacementMetrics(observation) &&
+    hasReplacementRaster(observation);
 }
 
 async function readX64InjectionTelemetry(healthPath) {
@@ -127,31 +160,6 @@ async function waitForInjectionQuiescence(healthPath, initialCount, timeoutMs) {
   throw new Error('Open-service browser-process injection did not quiesce');
 }
 
-async function waitForBrowserRoleInjection(
-  healthPath,
-  initialSuccessCount,
-  diagnosticNamespace,
-  role,
-  timeoutMs,
-) {
-  const deadline = Date.now() + timeoutMs;
-  let telemetry;
-  do {
-    ({ telemetry } = await readX64InjectionTelemetry(healthPath));
-    if (telemetry?.successCount > initialSuccessCount) {
-      const diagnostics = collectDirectWriteDiagnostics(diagnosticNamespace);
-      if (diagnostics[role]?.['hook-entered']) return telemetry.successCount;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  } while (Date.now() < deadline);
-  throw new Error(
-    `Open service did not hook browser role ${role} ` +
-      `(initial count ${initialSuccessCount}, current count ` +
-      `${telemetry?.successCount ?? 'none'}, last PID ` +
-      `${telemetry?.lastSuccess?.pid ?? 'none'})`,
-  );
-}
-
 function collectDirectWriteDiagnostics(diagnosticNamespace) {
   const roles = ['main', 'renderer', 'utility', 'gpu', 'other'];
   const stages = [
@@ -165,9 +173,16 @@ function collectDirectWriteDiagnostics(diagnosticNamespace) {
     'alias-collection-applied',
     'alias-collection-partial',
     'alias-collection-no-rules',
+    'alias-collection-settings-not-initialized',
+    'alias-collection-no-resolved-rules',
     'alias-collection-unsupported-factory',
     'alias-collection-system-set-unavailable',
     'alias-collection-builder-unavailable',
+    'alias-collection-replacement-unavailable',
+    'alias-collection-virtual-font-failed',
+    'alias-collection-alias-reference-rejected',
+    'alias-collection-out-of-memory',
+    'alias-collection-unexpected-failure',
     'alias-collection-add-font-failed',
     'alias-collection-create-set-failed',
     'alias-collection-create-collection-failed',
@@ -249,13 +264,8 @@ async function capture(browserType, options, disabled, waitForReplacement) {
       `${path.basename(outputPath, path.extname(outputPath))}.${phase}.fontlist.log`,
     );
   }
-  delete environment.MOZ_DEBUG_CHILD_PAUSE;
   if (disabled) environment.MACTYPE_FONTSUBSTITUTES_ENV = '1';
   else delete environment.MACTYPE_FONTSUBSTITUTES_ENV;
-
-  const firefoxUserPrefs = options.engine === 'firefox'
-    ? { 'dom.ipc.processPrelaunch.enabled': false }
-    : undefined;
   let initialInjectionSuccessCount = null;
   if (options.injectionHealth) {
     const initialHealth = await readX64InjectionTelemetry(options.injectionHealth);
@@ -274,7 +284,6 @@ async function capture(browserType, options, disabled, waitForReplacement) {
       options.executable || browserType.executablePath();
     environment.MACTYPE_BROWSER_GATE_PID_FILE = gatePidPath;
     environment.MACTYPE_BROWSER_GATE_TIMEOUT_MS = String(options.timeoutMs);
-    environment.MOZ_DEBUG_CHILD_PAUSE = String(FIREFOX_CHILD_PAUSE_SECONDS);
   }
   let browserServer = null;
   try {
@@ -284,13 +293,12 @@ async function capture(browserType, options, disabled, waitForReplacement) {
         : options.executable || undefined,
       headless: true,
       env: environment,
-      firefoxUserPrefs,
     });
     const browserPid = usesFirefoxLaunchGate
       ? Number((await readFile(gatePidPath, 'utf8')).trim())
       : browserServer.process().pid;
     if (!Number.isInteger(browserPid) || browserPid <= 0) {
-      throw new Error(`Firefox launch gate returned an invalid PID: ${browserPid}`);
+      throw new Error(`Browser launch returned an invalid PID: ${browserPid}`);
     }
     const browser = await browserType.connect(browserServer.wsEndpoint());
     let injectionSuccessCount = null;
@@ -304,6 +312,7 @@ async function capture(browserType, options, disabled, waitForReplacement) {
         options.timeoutMs,
       );
       injectionSuccessCount = injection.successCount;
+      // The gate resumes only after the exact parent PID signals hook-ready.
       browserPidInjectionObserved = usesFirefoxLaunchGate ||
         injection.browserPidObserved;
       injectionSuccessCount = await waitForInjectionQuiescence(
@@ -313,23 +322,6 @@ async function capture(browserType, options, disabled, waitForReplacement) {
       );
     }
     const page = await browser.newPage({ viewport: { width: 900, height: 260 } });
-    if (options.injectionHealth) {
-      // Firefox can reuse a content process that the service hooked during
-      // launch, so prove this browser tree added the renderer after the
-      // pre-launch baseline instead of requiring another post-page injection.
-      injectionSuccessCount = await waitForBrowserRoleInjection(
-        options.injectionHealth,
-        initialInjectionSuccessCount,
-        diagnosticNamespace,
-        'renderer',
-        options.timeoutMs,
-      );
-      injectionSuccessCount = await waitForInjectionQuiescence(
-        options.injectionHealth,
-        injectionSuccessCount,
-        options.timeoutMs,
-      );
-    }
     await collectChromiumFontDataHistograms(browser, options.engine, true);
     const probeFamily = async (family) => {
       await page.evaluate(async (name) => {
@@ -367,15 +359,69 @@ async function capture(browserType, options, disabled, waitForReplacement) {
           context.font = `48px "${family.replaceAll('"', '\\"')}"`;
           context.fillText(sample, 16, 24);
           const metrics = context.measureText(sample);
+          const metricSamples = [
+            sample,
+            'iiiiiiiiiiiiiiii',
+            'WWWWWWWWWWWWWWWW',
+            '0123456789012345',
+            'Hamburgefons AV fi fl',
+          ].map((text) => {
+            const measured = context.measureText(text);
+            return {
+              text,
+              width: measured.width,
+              actualBoundingBoxLeft: measured.actualBoundingBoxLeft,
+              actualBoundingBoxRight: measured.actualBoundingBoxRight,
+              actualBoundingBoxAscent: measured.actualBoundingBoxAscent,
+              actualBoundingBoxDescent: measured.actualBoundingBoxDescent,
+              fontBoundingBoxAscent: measured.fontBoundingBoxAscent,
+              fontBoundingBoxDescent: measured.fontBoundingBoxDescent,
+            };
+          });
           return {
             pngDataUrl: canvas.toDataURL('image/png'),
+            pixels: context.getImageData(0, 0, canvas.width, canvas.height).data,
             width: metrics.width,
+            metricSamples,
             font: context.font,
           };
         };
+        const sourceRender = await render(source);
+        const replacementRender = await render(replacement);
+        let totalRgbDelta = 0;
+        let differentPixels = 0;
+        let darkUnion = 0;
+        let darkIntersection = 0;
+        const darkThreshold = 224;
+        for (let index = 0; index < sourceRender.pixels.length; index += 4) {
+          const sourceDark = sourceRender.pixels[index] < darkThreshold;
+          const replacementDark = replacementRender.pixels[index] < darkThreshold;
+          if (sourceDark || replacementDark) darkUnion += 1;
+          if (sourceDark && replacementDark) darkIntersection += 1;
+          let pixelDifferent = false;
+          for (let channel = 0; channel < 3; channel += 1) {
+            const delta = Math.abs(
+              sourceRender.pixels[index + channel] -
+                replacementRender.pixels[index + channel],
+            );
+            totalRgbDelta += delta;
+            pixelDifferent ||= delta !== 0;
+          }
+          if (pixelDifferent) differentPixels += 1;
+        }
+        const pixelCount = sourceRender.pixels.length / 4;
+        delete sourceRender.pixels;
+        delete replacementRender.pixels;
         return {
-          source: await render(source),
-          replacement: await render(replacement),
+          source: sourceRender,
+          replacement: replacementRender,
+          rasterComparison: {
+            meanAbsoluteRgbDelta: totalRgbDelta / (pixelCount * 3),
+            differentPixelRatio: differentPixels / pixelCount,
+            darkPixelIntersectionOverUnion:
+              darkUnion === 0 ? 1 : darkIntersection / darkUnion,
+            darkThreshold,
+          },
           sourceAvailable: document.fonts.check(`48px "${source}"`),
           replacementAvailable: document.fonts.check(`48px "${replacement}"`),
           userAgent: navigator.userAgent,
@@ -383,6 +429,7 @@ async function capture(browserType, options, disabled, waitForReplacement) {
       }, { source: options.source, replacement: options.replacement });
       if (!waitForReplacement ||
           observation.source.pngDataUrl === observation.replacement.pngDataUrl ||
+          hasSemanticReplacement(observation) ||
           Date.now() - startedAt >= options.timeoutMs) {
         break;
       }
@@ -390,6 +437,7 @@ async function capture(browserType, options, disabled, waitForReplacement) {
     } while (true);
     observation.attempts = attempts;
     observation.elapsedMs = Date.now() - startedAt;
+    observation.diagnosticNamespace = diagnosticNamespace;
     observation.browserPid = browserPid;
     observation.browserPidInjectionObserved = browserPidInjectionObserved;
     observation.injectionSuccessCount = injectionSuccessCount;
@@ -443,9 +491,6 @@ const result = {
   firefoxLaunchGate: options.engine === 'firefox'
     ? (options.firefoxLaunchGate ? path.basename(options.firefoxLaunchGate) : null)
     : null,
-  firefoxChildPauseSeconds: options.engine === 'firefox'
-    ? (options.firefoxLaunchGate ? FIREFOX_CHILD_PAUSE_SECONDS : 0)
-    : null,
   sourceFamily: options.source,
   replacementFamily: options.replacement,
   expectedState: options.expect,
@@ -456,11 +501,42 @@ const result = {
   sourceChanged: active.source.hash !== disabled.source.hash,
   replacementObserved: active.source.hash === active.replacement.hash,
 };
-result.expectationMet = result.controlsDistinct && (
-  options.expect === 'stock'
-    ? !result.sourceChanged && !result.replacementObserved
-    : result.sourceChanged && result.replacementObserved
-);
+result.replacementMetricsObserved = hasReplacementMetrics(active);
+result.replacementRasterObserved = hasReplacementRaster(active);
+result.replacementObserved ||=
+  result.replacementMetricsObserved && result.replacementRasterObserved;
+if (options.injectionHealth) {
+  const main = active.directWriteDiagnostics.main;
+  result.earlyAliasAcquisitionObserved = [
+    'system-font-set-alias-returned',
+    'modern-system-collection-alias-returned',
+  ].some((stage) => main[stage]);
+} else {
+  result.earlyAliasAcquisitionObserved = null;
+}
+if (options.expect === 'unsupported-late-collection') {
+  const main = active.directWriteDiagnostics.main;
+  const aliasSnapshotPrepared =
+    main['alias-collection-applied'] || main['alias-collection-partial'];
+  result.unsupportedLateCollectionObserved =
+    result.controlsDistinct &&
+    !result.sourceChanged &&
+    !result.replacementObserved &&
+    main['hook-ready'] &&
+    aliasSnapshotPrepared &&
+    result.earlyAliasAcquisitionObserved === false;
+  result.expectationMet = result.unsupportedLateCollectionObserved;
+} else {
+  result.unsupportedLateCollectionObserved = null;
+  result.expectationMet = result.controlsDistinct && (
+    options.expect === 'stock'
+      ? !result.sourceChanged && !result.replacementObserved
+      : result.sourceChanged && result.replacementObserved
+  );
+  if (options.injectionHealth && options.expect === 'substituted') {
+    result.expectationMet &&= result.earlyAliasAcquisitionObserved;
+  }
+}
 result.evidenceDigest = `sha256:${createHash('sha256')
   .update(JSON.stringify(result))
   .digest('hex')}`;

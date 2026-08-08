@@ -9,9 +9,16 @@ enum class BuildStatus
 	applied,
 	appliedWithMissingReplacement,
 	noSubstitutions,
+	settingsNotInitialized,
+	noResolvedSubstitutions,
 	unsupportedFactory,
 	systemSetUnavailable,
 	builderUnavailable,
+	replacementUnavailable,
+	virtualFontFailed,
+	aliasReferenceRejected,
+	outOfMemory,
+	unexpectedFailure,
 	addFontFailed,
 	createSetFailed,
 	createCollectionFailed,
@@ -28,7 +35,7 @@ struct AliasFontSet
 BuildStatus GetOrCreate(
 	IDWriteFactory* factory,
 	IDWriteFontSet* systemFontSet,
-	AliasFontSet& result);
+	AliasFontSet& result) noexcept;
 
 void ClearCache() noexcept;
 

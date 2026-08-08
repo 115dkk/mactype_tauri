@@ -220,15 +220,17 @@ matches the independently rendered replacement result. Current installed
 Chrome and Edge may be added as non-pinned compatibility lanes, but they cannot
 replace the pinned reproducible browsers.
 
-DirectWrite substitution now uses the documented custom-font-set alias model.
-The core copies the native system font set into an immutable
-`IDWriteFontSetBuilder`, replaces each configured source entry with the
-replacement's native `IDWriteFontFaceReference`, copies all searchable
-replacement properties, and overrides only the family-name properties with
-the requested source alias. The resulting collection can still locate
-`Cambria`, for example, while every returned font, face, resource, file,
-OpenType name table, PostScript name, metric, and glyph belongs coherently to
-`Courier New`.
+DirectWrite substitution now uses an immutable custom font set backed by
+coherent virtual SFNT files. The core copies the native system font set into
+an `IDWriteFontSetBuilder`; for each configured source it reads the replacement
+through the documented DirectWrite file stream, rewrites the complete OpenType
+`name` table to the source alias, repairs every SFNT checksum, and publishes an
+immutable content-addressed file in the per-user MacType cache. The builder is
+given an ordinary native `IDWriteFontFaceReference` for that file. The resulting
+collection can locate `Cambria`, for example, while its name-table identity is
+consistently `Cambria` and its metrics, outlines, file, resource, and glyph data
+are consistently derived from `Courier New`. No COM proxy presents two
+different identities for the same object.
 
 This collection is installed only at the DirectWrite factory acquisition seam:
 `GetSystemFontCollection`, `IDWriteFactory3::GetSystemFontSet`, the modern
@@ -243,24 +245,29 @@ diagnostics report that timing instead of mutating retained objects.
 The native x86/x64 contract proves both sides of that generation boundary. A
 font retained while substitution is disabled remains the native source after a
 new aliased collection is published. A source lookup in the active collection
-returns a replacement object graph whose LOGFONT family, PostScript name,
-OpenType `name` table, file/index descriptor, `IDWriteFontFace5` resource,
-and resource-created face all agree with the independently opened replacement.
+returns a native object graph whose family, PostScript name, OpenType `name`
+table, file/index descriptor, `IDWriteFontFace5` resource, and resource-created
+face remain mutually consistent, while its metrics and glyph fingerprint agree
+with the independently opened replacement.
 
 The Firefox launch gate remains a deterministic test adapter for the real
-late-injection order. It stops the parent before user entry, waits for the
-factory boundary hooks, and then releases execution; it is not itself a
-product substitution mechanism. The renderer child pause is likewise retained
-only to make hosted-runner injection timing observable. Pixel equality with an
-independent replacement render remains mandatory.
+late-injection order. It stops the parent before user entry and waits for the
+core to become hook-ready; it is not itself a product substitution mechanism.
+Firefox 151 has already built and retained its shared font collection before
+that boundary, so an open-service injection at this point is reported as
+`unsupported-late-collection`. The required lane proves the source remains
+unchanged and that no factory acquisition returned an alias. It must not turn
+green through retained-object mutation, a renderer pause, or a compatibility
+preference. Supporting this Firefox path requires a browser adapter that runs
+before shared-font-list creation.
 
-Chromium's default FontDataService validates embedded font data outside this
-DirectWrite collection seam. Disabling `FontDataServiceAllWebContents` is not
-accepted as product support or as the required default-path success proof.
-The browser proof does not expose a compatibility-mode launch. Default
-Chromium support requires a separate coherent adapter or a consistently
-virtualized font file; it must never be simulated by mixing source names with
-replacement objects.
+Chromium's default FontDataService validates embedded font data outside the
+DirectWrite collection metadata seam. The coherent virtual SFNT is the product
+adapter for that boundary: the bytes, native reference, and collection identity
+now agree. The required Chromium lane runs with the default feature set and
+must match an independent replacement render semantically or byte-for-byte.
+Disabling `FontDataServiceAllWebContents` is not accepted as product support or
+as a required-path success proof.
 
 
 The native probe covers GDI and DirectWrite with injection before factory

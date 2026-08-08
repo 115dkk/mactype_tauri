@@ -143,10 +143,6 @@ if ($result.fontSubstitution.directWriteIndexedCollection.disabledSourcePostScri
     $result.fontSubstitution.directWriteIndexedCollection.disabledReplacementPostScriptName) {
     throw 'Indexed DirectWrite PostScript-name controls must remain distinct.'
 }
-if ($result.fontSubstitution.directWriteIndexedCollection.activeReplacementPostScriptName -ne
-    $result.fontSubstitution.directWriteIndexedCollection.activeSourcePostScriptName) {
-    throw 'An active DirectWrite font and its retained metadata view must agree.'
-}
 if ($result.fontSubstitution.directWriteIndexedCollection.retainedGenerationFamily -ne 'Arial' -or
     -not $result.fontSubstitution.directWriteIndexedCollection.retainedGenerationObjectStable) {
     throw 'An object retained from the disabled collection must remain an immutable Arial object.'
@@ -155,7 +151,7 @@ if ($result.fontSubstitution.directWriteIndexedCollection.retainedGenerationDesc
     -not $result.fontSubstitution.directWriteIndexedCollection.retainedGenerationDescriptorStable) {
     throw 'A retained stock DirectWrite face descriptor must continue to resolve to Arial.'
 }
-if ($result.fontSubstitution.directWriteIndexedCollection.activeReplacementDescriptorFamily -ne
+if ($result.fontSubstitution.directWriteIndexedCollection.activeAliasDescriptorFamily -ne
     $result.fontSubstitution.directWriteIndexedCollection.activeSourceFamily) {
     throw 'An active DirectWrite font and its advanced face/resource descriptor must agree.'
 }
@@ -182,6 +178,7 @@ if (-not $result.mactypeModuleLoaded) {
         throw 'A stock Windows probe must not report a MacType font substitution.'
     }
     if ($result.fontSubstitution.directWrite.activeSourceFamily -ne 'Arial' -or
+        $result.fontSubstitution.directWrite.replacementGeometryCoherent -or
         $result.fontSubstitution.directWrite.replacementObserved) {
         throw 'A stock Windows probe must not report a DirectWrite font substitution.'
     }
@@ -193,16 +190,17 @@ if (-not $result.mactypeModuleLoaded) {
         $result.fontSubstitution.directWriteIndexedCollection.disabledSourcePostScriptName) {
         throw 'A stock Windows probe must preserve indexed DirectWrite PostScript metadata.'
     }
-    if ($result.fontSubstitution.directWriteIndexedCollection.replacementMetadataCoherent -or
-        $result.fontSubstitution.directWriteIndexedCollection.replacementNameTableCoherent -or
-        $result.fontSubstitution.directWriteIndexedCollection.replacementDescriptorCoherent) {
-        throw 'A stock Windows probe must not report replacement object-graph coherence.'
+    if ($result.fontSubstitution.directWriteIndexedCollection.virtualNameTableCoherent -or
+        $result.fontSubstitution.directWriteIndexedCollection.replacementGeometryCoherent) {
+        throw 'A stock Windows probe must not report an aliased replacement object graph.'
     }
     if ($result.fontSubstitution.directWriteFontSetCollection.activeSourceFamily -ne 'Arial' -or
+        $result.fontSubstitution.directWriteFontSetCollection.replacementGeometryCoherent -or
         $result.fontSubstitution.directWriteFontSetCollection.replacementObserved) {
         throw 'A stock Windows probe must not report a font-set DirectWrite collection substitution.'
     }
     if ($result.fontSubstitution.directWriteModernCollection.activeSourceFamily -ne 'Arial' -or
+        $result.fontSubstitution.directWriteModernCollection.replacementGeometryCoherent -or
         $result.fontSubstitution.directWriteModernCollection.replacementObserved) {
         throw 'A stock Windows probe must not report a modern DirectWrite collection substitution.'
     }

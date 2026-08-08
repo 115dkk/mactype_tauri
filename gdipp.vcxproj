@@ -819,6 +819,7 @@
     <ClCompile Include="common.cpp" />
     <ClCompile Include="directwrite.cpp" />
     <ClCompile Include="directwrite_alias.cpp" />
+    <ClCompile Include="directwrite_virtual_font.cpp" />
     <ClCompile Include="dll.cpp" />
     <ClCompile Include="dynCodeHelper.cpp" />
     <ClCompile Include="EventLogging.cpp" />
@@ -852,6 +853,7 @@
     <ClInclude Include="crc32.h" />
     <ClInclude Include="directwrite.h" />
     <ClInclude Include="directwrite_alias.h" />
+    <ClInclude Include="directwrite_virtual_font.h" />
     <ClInclude Include="dll.h" />
     <ClInclude Include="dynCodeHelper.h" />
     <ClInclude Include="EventLogging.h" />

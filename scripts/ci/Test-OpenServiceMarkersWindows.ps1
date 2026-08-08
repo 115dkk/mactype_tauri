@@ -37,25 +37,29 @@ function Test-Marker([string] $Executable, [string] $Architecture) {
     if (-not $result.mactypeModuleLoaded) { throw "Open service did not hook the $Architecture marker target." }
     if ([string]::IsNullOrWhiteSpace($result.mactypeModulePath)) { throw "$Architecture marker omitted the loaded MacType module path." }
     if ($result.renderFingerprint -notmatch '^sha256:[0-9a-f]{64}$') { throw "$Architecture marker returned an invalid render fingerprint." }
-    if (-not $result.fontSubstitution.directWrite.replacementObserved) {
-        throw "$Architecture marker loaded MacType but did not resolve the configured DirectWrite replacement face."
+    if (-not $result.fontSubstitution.directWrite.replacementObserved -or
+        -not $result.fontSubstitution.directWrite.replacementGeometryCoherent) {
+        throw "$Architecture marker did not preserve the source alias over replacement DirectWrite geometry."
     }
     if (-not $result.fontSubstitution.directWriteIndexedCollection.replacementObserved) {
         throw "$Architecture marker loaded MacType but did not substitute the indexed DirectWrite collection face."
     }
-    if (-not $result.fontSubstitution.directWriteIndexedCollection.replacementMetadataCoherent -or
-        -not $result.fontSubstitution.directWriteIndexedCollection.replacementNameTableCoherent -or
-        -not $result.fontSubstitution.directWriteIndexedCollection.replacementDescriptorCoherent) {
-        throw "$Architecture marker returned a mixed DirectWrite replacement object graph."
+    if (-not $result.fontSubstitution.directWriteIndexedCollection.activeIdentityCoherent -or
+        -not $result.fontSubstitution.directWriteIndexedCollection.virtualNameTableCoherent -or
+        -not $result.fontSubstitution.directWriteIndexedCollection.resourceRoundTripCoherent -or
+        -not $result.fontSubstitution.directWriteIndexedCollection.replacementGeometryCoherent) {
+        throw "$Architecture marker returned an incoherent native DirectWrite alias object graph."
     }
     if (-not $result.fontSubstitution.directWriteIndexedCollection.retainedGenerationObjectStable -or
         -not $result.fontSubstitution.directWriteIndexedCollection.retainedGenerationDescriptorStable) {
         throw "$Architecture marker mutated an object retained from an immutable collection generation."
     }
-    if (-not $result.fontSubstitution.directWriteFontSetCollection.replacementObserved) {
+    if (-not $result.fontSubstitution.directWriteFontSetCollection.replacementObserved -or
+        -not $result.fontSubstitution.directWriteFontSetCollection.replacementGeometryCoherent) {
         throw "$Architecture marker loaded MacType but did not substitute through a DirectWrite font-set collection."
     }
-    if (-not $result.fontSubstitution.directWriteModernCollection.replacementObserved) {
+    if (-not $result.fontSubstitution.directWriteModernCollection.replacementObserved -or
+        -not $result.fontSubstitution.directWriteModernCollection.replacementGeometryCoherent) {
         throw "$Architecture marker loaded MacType but did not substitute through the modern DirectWrite system collection."
     }
     if (-not $result.modules -or $result.modules.Count -eq 0) { throw "$Architecture marker returned no module inventory." }

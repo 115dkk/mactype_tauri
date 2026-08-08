@@ -12,16 +12,16 @@ struct DirectWriteSubstitutionObservation final {
   std::wstring disabled_source_postscript_name;
   std::wstring active_source_postscript_name;
   std::wstring disabled_replacement_postscript_name;
-  std::wstring active_replacement_postscript_name;
   std::wstring retained_generation_family;
   std::wstring retained_generation_descriptor_family;
-  std::wstring active_replacement_descriptor_family;
+  std::wstring active_alias_descriptor_family;
   bool controls_stable = false;
-  bool replacement_metadata_coherent = false;
-  bool replacement_name_table_coherent = false;
+  bool active_identity_coherent = false;
+  bool virtual_name_table_coherent = false;
   bool retained_generation_object_stable = false;
   bool retained_generation_descriptor_stable = false;
-  bool replacement_descriptor_coherent = false;
+  bool resource_round_trip_coherent = false;
+  bool replacement_geometry_coherent = false;
   bool replacement_observed = false;
 };
 

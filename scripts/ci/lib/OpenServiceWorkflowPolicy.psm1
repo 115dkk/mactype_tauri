@@ -38,10 +38,11 @@ function Test-OpenServiceWorkflowPolicy {
             'ExpectedRuntimeRoot', 'resolvedModuleRoot', 'OrdinalIgnoreCase',
             'pid = [uint32]', 'sessionId = [uint32]',
             'directWriteFontSetCollection.replacementObserved',
-            'replacementMetadataCoherent',
-            'replacementNameTableCoherent',
+            'activeIdentityCoherent',
+            'virtualNameTableCoherent',
             'retainedGenerationObjectStable',
-            'replacementDescriptorCoherent'
+            'resourceRoundTripCoherent',
+            'replacementGeometryCoherent'
         )
 
     $buildWorkflowPath = Join-Path $Root '.github\workflows\build.yml'
@@ -66,7 +67,9 @@ function Test-OpenServiceWorkflowPolicy {
             'OpenServiceAclFixture.psm1', 'Invoke-OpenServiceAclRepairFixture',
             '-RepairContext $stagedSetup', 'param($setupExecutable)',
             "`$sourceFamily = 'Cambria'",
-            "'--firefox-launch-gate', `$BrowserLaunchGate", 'replacementObserved',
+            "'--firefox-launch-gate', `$BrowserLaunchGate",
+            "'unsupported-late-collection'", 'unsupportedLateCollectionObserved',
+            'replacementObserved', 'earlyAliasAcquisitionObserved',
             "-Verb 'publish-profile' -InputBytes `$profileA",
             "Assert-ActiveRuntimeProfile -ExpectedBytes `$profileA"
         )
@@ -94,15 +97,26 @@ function Test-OpenServiceWorkflowPolicy {
     $browserProbePath = Join-Path $Root 'tools\service-probe\browser_font_probe.mjs'
     $null = Test-RequiredTokens -Failures $failures -Path $browserProbePath `
         -MissingMessage 'tools/service-probe/browser_font_probe.mjs is missing.' `
-        -TokenMessage "browser font proof is missing injection race guard '{0}'." `
+        -TokenMessage "browser font proof is missing coherent rendering contract '{0}'." `
         -Tokens @(
             'targetTreeHooked', 'initialSuccessCount',
-            'browserPidInjectionObserved', 'waitForBrowserRoleInjection',
-            'dom.ipc.processPrelaunch.enabled', 'firefoxLaunchGate',
-            'MACTYPE_BROWSER_GATE_TARGET', 'MACTYPE_BROWSER_GATE_PID_FILE',
-            'FIREFOX_CHILD_PAUSE_SECONDS = 10', 'MOZ_DEBUG_CHILD_PAUSE',
-            'firefoxChildPauseSeconds'
+            'browserPidInjectionObserved', 'metricSamples',
+            'rasterComparison', 'replacementMetricsObserved',
+            'replacementRasterObserved', 'earlyAliasAcquisitionObserved',
+            'unsupportedLateCollectionObserved',
+            'system-font-set-alias-returned',
+            'modern-system-collection-alias-returned', 'firefoxLaunchGate',
+            'MACTYPE_BROWSER_GATE_TARGET', 'MACTYPE_BROWSER_GATE_PID_FILE'
         )
+    $browserProbe = Get-Content -LiteralPath $browserProbePath -Raw
+    foreach ($forbiddenToken in @(
+        'MOZ_DEBUG_CHILD_PAUSE',
+        'dom.ipc.processPrelaunch.enabled', 'waitForBrowserRoleInjection'
+    )) {
+        if ($browserProbe.Contains($forbiddenToken)) {
+            $failures.Add("browser proof must not restore launch/injection tape '$forbiddenToken'.")
+        }
+    }
 
     $browserGatePath = Join-Path $Root 'tools\service-probe\browser_launch_gate.cpp'
     $null = Test-RequiredTokens -Failures $failures -Path $browserGatePath `
@@ -158,7 +172,13 @@ function Test-OpenServiceWorkflowPolicy {
             'AliasedDWriteFont', 'AliasedDWriteFontFace',
             'AliasedLocalizedStrings', 'thread_local',
             'HookCollectionFontCreation', 'FontFace_GetFiles',
-            'FontFace_GetIndex', 'Factory_CreateFontFace'
+            'FontFace_GetIndex', 'Factory_CreateFontFace',
+            'PatchRetainedCollectionAlias',
+            'IMPL_Factory_CreateCustomFontCollection',
+            'IMPL_Factory3_CreateFontCollectionFromFontSet',
+            'IMPL_Factory_CreateFontFace', 'IMPL_FontFamily_GetFont',
+            'IMPL_Collection_GetFontFamilyCount',
+            'IMPL_Collection1_GetFontSet'
         )) {
             if ($directWrite.Contains($forbiddenToken)) {
                 $failures.Add(
@@ -173,11 +193,25 @@ function Test-OpenServiceWorkflowPolicy {
         -MissingMessage 'directwrite_alias.cpp is missing.' `
         -TokenMessage "DirectWrite alias collection is missing coherent object-graph token '{0}'." `
         -Tokens @(
-            'IDWriteFontSetBuilder', 'CopyReplacementProperties',
-            'FindReplacementReference', 'AddAliasedReference',
+            'IDWriteFontSetBuilder', 'FindReplacementReference',
+            'directwrite_virtual_font::CreateAliasedReference',
+            'builder->AddFontFaceReference(virtualReference)',
             'CreateFontCollectionFromFontSet',
             'DWRITE_FONT_PROPERTY_ID_WIN32_FAMILY_NAME'
         )
+
+    $virtualFontPath = Join-Path $Root 'directwrite_virtual_font.cpp'
+    $virtualFont = Test-RequiredTokens -Failures $failures -Path $virtualFontPath `
+        -MissingMessage 'directwrite_virtual_font.cpp is missing.' `
+        -TokenMessage "disk-backed virtual font is missing required token '{0}'." `
+        -Tokens @(
+            'BuildAliasedSfnt', 'PersistFont', 'BCryptHashData',
+            'renderer_raii::UniqueHandle', 'MoveFileExW',
+            'CreateFontFileReference'
+        )
+    if ($virtualFont -and $virtualFont.Contains('CreateInMemoryFontFileLoader')) {
+        $failures.Add('virtual fonts must not depend on a process-local DirectWrite loader.')
+    }
 
     $aclFixtureModulePath = Join-Path $Root 'scripts\ci\lib\OpenServiceAclFixture.psm1'
     $null = Test-RequiredTokens -Failures $failures -Path $aclFixtureModulePath `

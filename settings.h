@@ -209,6 +209,11 @@ private:
 public:
 	void init(int nFontSubstitutes, const CFontSubstitutesIniArray& iniarray);
 	const LOGFONT * lookup(LOGFONT &lf) const;
+	bool CopyRule(
+		int index,
+		LOGFONT& source,
+		LOGFONT& replacement,
+		bool& charsetSpecific) const;
 	//void RemoveAll() {m_mfontsub.clear();};
 	//bool TrySub(LPCTSTR lpFacename) {return m_mfontsub.find(lpFacename)!=m_mfontsub.end(); };
 };

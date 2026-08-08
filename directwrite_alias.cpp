@@ -1,27 +1,30 @@
 #include "directwrite_alias.h"
 
+#include "directwrite_virtual_font.h"
 #include "settings.h"
 
+#include <algorithm>
 #include <array>
 #include <mutex>
+#include <new>
 #include <string>
 #include <vector>
 
 namespace directwrite_alias {
 namespace {
 
-struct OwnedFontProperty
-{
-	DWRITE_FONT_PROPERTY_ID id = DWRITE_FONT_PROPERTY_ID_NONE;
-	std::wstring value;
-	std::wstring locale;
-};
-
 struct CacheEntry
 {
 	CComPtr<IUnknown> factoryIdentity;
 	CComPtr<IUnknown> systemSetIdentity;
 	AliasFontSet aliases;
+};
+
+struct SubstitutionRule
+{
+	std::wstring sourceFamily;
+	std::wstring replacementFamily;
+	bool charsetSpecific = false;
 };
 
 struct AliasCache
@@ -40,19 +43,6 @@ AliasCache& GetCache()
 {
 	static AliasCache* cache = new AliasCache;
 	return *cache;
-}
-
-std::mutex& GetResolverMutex()
-{
-	static std::mutex* mutex = new std::mutex;
-	return *mutex;
-}
-
-bool IsFamilyProperty(DWRITE_FONT_PROPERTY_ID id) noexcept
-{
-	return id == DWRITE_FONT_PROPERTY_ID_WEIGHT_STRETCH_STYLE_FAMILY_NAME ||
-		id == DWRITE_FONT_PROPERTY_ID_TYPOGRAPHIC_FAMILY_NAME ||
-		id == DWRITE_FONT_PROPERTY_ID_WIN32_FAMILY_NAME;
 }
 
 bool ReadLocalizedString(
@@ -81,12 +71,12 @@ bool ReadLocalizedString(
 
 bool ResolveLocalizedFamily(
 	IDWriteLocalizedStrings* familyNames,
+	std::vector<SubstitutionRule> const& rules,
 	std::wstring& sourceFamily,
 	std::wstring& replacementFamily)
 {
 	if (familyNames == nullptr)
 		return false;
-	CGdippSettings const* settings = CGdippSettings::GetInstance();
 	for (UINT32 nameIndex = 0; nameIndex < familyNames->GetCount(); ++nameIndex)
 	{
 		std::wstring family;
@@ -95,26 +85,14 @@ bool ResolveLocalizedFamily(
 				familyNames, nameIndex, family, locale) || family.empty())
 			continue;
 
-		LOGFONT source = {};
-		source.lfCharSet = DEFAULT_CHARSET;
-		if (FAILED(StringCchCopyW(
-				source.lfFaceName,
-				ARRAYSIZE(source.lfFaceName),
-				family.c_str())))
-			continue;
-		LOGFONT replacement = source;
-		bool substituted = false;
+		for (SubstitutionRule const& rule : rules)
 		{
-			std::lock_guard<std::mutex> lock(GetResolverMutex());
-			substituted = settings->CopyForceFont(replacement, source);
+			if (_wcsicmp(family.c_str(), rule.sourceFamily.c_str()) != 0)
+				continue;
+			sourceFamily = std::move(family);
+			replacementFamily = rule.replacementFamily;
+			return true;
 		}
-		if (!substituted ||
-			_wcsicmp(source.lfFaceName, replacement.lfFaceName) == 0)
-			continue;
-
-		sourceFamily = std::move(family);
-		replacementFamily = replacement.lfFaceName;
-		return true;
 	}
 	return false;
 }
@@ -122,6 +100,7 @@ bool ResolveLocalizedFamily(
 bool ResolveReplacementFamily(
 	IDWriteFontSet* systemFontSet,
 	UINT32 index,
+	std::vector<SubstitutionRule> const& rules,
 	std::wstring& sourceFamily,
 	std::wstring& replacementFamily)
 {
@@ -134,17 +113,54 @@ bool ResolveReplacementFamily(
 			!exists || familyNames == nullptr)
 			continue;
 		if (ResolveLocalizedFamily(
-				familyNames, sourceFamily, replacementFamily))
+				familyNames, rules, sourceFamily, replacementFamily))
 			return true;
 	}
 	return false;
+}
+
+std::vector<SubstitutionRule> CollectSubstitutionRules(
+	CFontSubstitutesInfo const& substitutions)
+{
+	std::vector<SubstitutionRule> rules;
+	rules.reserve(static_cast<size_t>(substitutions.GetSize()));
+	for (int index = 0; index < substitutions.GetSize(); ++index)
+	{
+		LOGFONT source = {};
+		LOGFONT replacement = {};
+		bool charsetSpecific = false;
+		if (!substitutions.CopyRule(
+				index, source, replacement, charsetSpecific) ||
+			(charsetSpecific && source.lfCharSet != DEFAULT_CHARSET) ||
+			_wcsicmp(source.lfFaceName, replacement.lfFaceName) == 0)
+			continue;
+
+		auto existing = std::find_if(
+			rules.begin(), rules.end(), [&](SubstitutionRule const& rule) {
+				return _wcsicmp(
+					rule.sourceFamily.c_str(), source.lfFaceName) == 0;
+			});
+		if (existing == rules.end())
+		{
+			rules.push_back({
+				source.lfFaceName,
+				replacement.lfFaceName,
+				charsetSpecific,
+			});
+		}
+		else if (charsetSpecific && !existing->charsetSpecific)
+		{
+			existing->replacementFamily = replacement.lfFaceName;
+			existing->charsetSpecific = true;
+		}
+	}
+	return rules;
 }
 
 HRESULT FindReplacementReference(
 	IDWriteFontSet* systemFontSet,
 	IDWriteFontFaceReference* sourceReference,
 	WCHAR const* replacementFamily,
-	CComPtr<IDWriteFontSet>& replacementSet,
 	CComPtr<IDWriteFontFaceReference>& replacementReference)
 {
 	DWRITE_FONT_WEIGHT weight = DWRITE_FONT_WEIGHT_NORMAL;
@@ -158,6 +174,7 @@ HRESULT FindReplacementReference(
 		style = sourceFace->GetStyle();
 	}
 
+	CComPtr<IDWriteFontSet> replacementSet;
 	HRESULT result = systemFontSet->GetMatchingFonts(
 		replacementFamily, weight, stretch, style, &replacementSet);
 	if (SUCCEEDED(result) && replacementSet != nullptr &&
@@ -181,85 +198,6 @@ HRESULT FindReplacementReference(
 	return FAILED(result) ? result : DWRITE_E_NOFONT;
 }
 
-bool CopyReplacementProperties(
-	IDWriteFontSet* replacementSet,
-	WCHAR const* sourceFamily,
-	std::vector<OwnedFontProperty>& owned)
-{
-	std::array<bool, 3> familyProperties = {};
-	for (UINT32 rawId = DWRITE_FONT_PROPERTY_ID_WEIGHT_STRETCH_STYLE_FAMILY_NAME;
-		rawId < DWRITE_FONT_PROPERTY_ID_TOTAL_RS3; ++rawId)
-	{
-		auto const id = static_cast<DWRITE_FONT_PROPERTY_ID>(rawId);
-		BOOL exists = FALSE;
-		CComPtr<IDWriteLocalizedStrings> values;
-		if (FAILED(replacementSet->GetPropertyValues(0, id, &exists, &values)))
-			return false;
-		if (!exists || values == nullptr)
-			continue;
-
-		for (UINT32 valueIndex = 0; valueIndex < values->GetCount(); ++valueIndex)
-		{
-			OwnedFontProperty property;
-			property.id = id;
-			if (!ReadLocalizedString(
-					values, valueIndex, property.value, property.locale))
-				return false;
-			if (IsFamilyProperty(id))
-				property.value = sourceFamily;
-			owned.emplace_back(std::move(property));
-		}
-
-		if (values->GetCount() != 0)
-		{
-			if (id == DWRITE_FONT_PROPERTY_ID_WEIGHT_STRETCH_STYLE_FAMILY_NAME)
-				familyProperties[0] = true;
-			else if (id == DWRITE_FONT_PROPERTY_ID_TYPOGRAPHIC_FAMILY_NAME)
-				familyProperties[1] = true;
-			else if (id == DWRITE_FONT_PROPERTY_ID_WIN32_FAMILY_NAME)
-				familyProperties[2] = true;
-		}
-	}
-
-	for (size_t index = 0; index < kFamilyPropertyIds.size(); ++index)
-	{
-		if (familyProperties[index])
-			continue;
-		OwnedFontProperty property;
-		property.id = kFamilyPropertyIds[index];
-		property.value = sourceFamily;
-		property.locale = L"en-us";
-		owned.emplace_back(std::move(property));
-	}
-	return !owned.empty();
-}
-
-HRESULT AddAliasedReference(
-	IDWriteFontSetBuilder* builder,
-	IDWriteFontFaceReference* replacementReference,
-	IDWriteFontSet* replacementSet,
-	WCHAR const* sourceFamily)
-{
-	std::vector<OwnedFontProperty> owned;
-	if (!CopyReplacementProperties(replacementSet, sourceFamily, owned))
-		return E_FAIL;
-
-	std::vector<DWRITE_FONT_PROPERTY> properties;
-	properties.reserve(owned.size());
-	for (OwnedFontProperty const& property : owned)
-	{
-		properties.push_back({
-			property.id,
-			property.value.c_str(),
-			property.locale.empty() ? nullptr : property.locale.c_str(),
-		});
-	}
-	return builder->AddFontFaceReference(
-		replacementReference,
-		properties.data(),
-		static_cast<UINT32>(properties.size()));
-}
-
 BuildStatus Build(
 	IDWriteFactory* factory,
 	IDWriteFontSet* systemFontSet,
@@ -270,8 +208,16 @@ BuildStatus Build(
 		return BuildStatus::systemSetUnavailable;
 
 	CGdippSettings const* settings = CGdippSettings::GetInstance();
-	if (!settings->DelayedInited() ||
-		settings->GetFontSubstitutesInfo().GetSize() == 0)
+	if (!settings->DelayedInited())
+		return BuildStatus::settingsNotInitialized;
+	SetLastError(ERROR_SUCCESS);
+	DWORD const disabled = GetEnvironmentVariableW(
+		L"MACTYPE_FONTSUBSTITUTES_ENV", nullptr, 0);
+	if (disabled != 0 || GetLastError() != ERROR_ENVVAR_NOT_FOUND)
+		return BuildStatus::noSubstitutions;
+	std::vector<SubstitutionRule> const rules =
+		CollectSubstitutionRules(settings->GetFontSubstitutesInfo());
+	if (rules.empty())
 		return BuildStatus::noSubstitutions;
 
 	CComPtr<IDWriteFactory3> factory3;
@@ -281,8 +227,9 @@ BuildStatus Build(
 	CComPtr<IDWriteFontSetBuilder> builder;
 	if (FAILED(factory3->CreateFontSetBuilder(&builder)) || builder == nullptr)
 		return BuildStatus::builderUnavailable;
-
 	bool missingReplacement = false;
+	bool resolvedRule = false;
+	BuildStatus emptyResultStatus = BuildStatus::replacementUnavailable;
 	UINT32 const fontCount = systemFontSet->GetFontCount();
 	for (UINT32 index = 0; index < fontCount; ++index)
 	{
@@ -295,28 +242,37 @@ BuildStatus Build(
 		std::wstring sourceFamily;
 		std::wstring replacementFamily;
 		if (!ResolveReplacementFamily(
-				systemFontSet, index, sourceFamily, replacementFamily))
+			systemFontSet, index, rules, sourceFamily, replacementFamily))
 		{
 			if (FAILED(builder->AddFontFaceReference(sourceReference)))
 				return BuildStatus::addFontFailed;
 			continue;
 		}
+		resolvedRule = true;
 
-		CComPtr<IDWriteFontSet> replacementSet;
 		CComPtr<IDWriteFontFaceReference> replacementReference;
 		addResult = FindReplacementReference(
 			systemFontSet,
 			sourceReference,
-			replacementFamily.c_str(),
-			replacementSet,
-			replacementReference);
+			replacementFamily.c_str(), replacementReference);
 		if (SUCCEEDED(addResult) && replacementReference != nullptr)
 		{
-			addResult = AddAliasedReference(
-				builder,
+			CComPtr<IDWriteFontFaceReference> virtualReference;
+			directwrite_virtual_font::Identity identity;
+			addResult = directwrite_virtual_font::CreateAliasedReference(
+				factory3,
 				replacementReference,
-				replacementSet,
-				sourceFamily.c_str());
+				sourceFamily.c_str(),
+				virtualReference,
+				identity);
+			if (FAILED(addResult))
+				emptyResultStatus = BuildStatus::virtualFontFailed;
+			else
+			{
+				addResult = builder->AddFontFaceReference(virtualReference);
+				if (FAILED(addResult))
+					emptyResultStatus = BuildStatus::aliasReferenceRejected;
+			}
 		}
 		if (FAILED(addResult))
 		{
@@ -329,7 +285,8 @@ BuildStatus Build(
 	}
 
 	if (result.substitutionCount == 0)
-		return BuildStatus::noSubstitutions;
+		return resolvedRule ? emptyResultStatus :
+			BuildStatus::noResolvedSubstitutions;
 	if (FAILED(builder->CreateFontSet(&result.fontSet)) ||
 		result.fontSet == nullptr)
 		return BuildStatus::createSetFailed;
@@ -350,9 +307,7 @@ CComPtr<IUnknown> GetIdentity(IUnknown* object)
 	return identity;
 }
 
-} // namespace
-
-BuildStatus GetOrCreate(
+BuildStatus GetOrCreateUnchecked(
 	IDWriteFactory* factory,
 	IDWriteFontSet* systemFontSet,
 	AliasFontSet& result)
@@ -398,6 +353,29 @@ BuildStatus GetOrCreate(
 	return status;
 }
 
+} // namespace
+
+BuildStatus GetOrCreate(
+	IDWriteFactory* factory,
+	IDWriteFontSet* systemFontSet,
+	AliasFontSet& result) noexcept
+{
+	try
+	{
+		return GetOrCreateUnchecked(factory, systemFontSet, result);
+	}
+	catch (std::bad_alloc const&)
+	{
+		result = {};
+		return BuildStatus::outOfMemory;
+	}
+	catch (...)
+	{
+		result = {};
+		return BuildStatus::unexpectedFailure;
+	}
+}
+
 void ClearCache() noexcept
 {
 	AliasCache& cache = GetCache();
@@ -415,12 +393,26 @@ WCHAR const* StatusName(BuildStatus status) noexcept
 		return L"alias-collection-partial";
 	case BuildStatus::noSubstitutions:
 		return L"alias-collection-no-rules";
+	case BuildStatus::settingsNotInitialized:
+		return L"alias-collection-settings-not-initialized";
+	case BuildStatus::noResolvedSubstitutions:
+		return L"alias-collection-no-resolved-rules";
 	case BuildStatus::unsupportedFactory:
 		return L"alias-collection-unsupported-factory";
 	case BuildStatus::systemSetUnavailable:
 		return L"alias-collection-system-set-unavailable";
 	case BuildStatus::builderUnavailable:
 		return L"alias-collection-builder-unavailable";
+	case BuildStatus::replacementUnavailable:
+		return L"alias-collection-replacement-unavailable";
+	case BuildStatus::virtualFontFailed:
+		return L"alias-collection-virtual-font-failed";
+	case BuildStatus::aliasReferenceRejected:
+		return L"alias-collection-alias-reference-rejected";
+	case BuildStatus::outOfMemory:
+		return L"alias-collection-out-of-memory";
+	case BuildStatus::unexpectedFailure:
+		return L"alias-collection-unexpected-failure";
 	case BuildStatus::addFontFailed:
 		return L"alias-collection-add-font-failed";
 	case BuildStatus::createSetFailed:

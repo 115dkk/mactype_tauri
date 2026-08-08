@@ -451,12 +451,18 @@ try {
 
     if ($runBrowserProof) {
         foreach ($engine in @('chromium', 'firefox')) {
-            # Browsers resolve common last-resort families, including Arial
-            # and Courier New, before the open service can inject into their
-            # process trees. Prove the post-injection path with Cambria while
-            # retaining Arial mapping coverage in the x86/x64 GDI and
-            # DirectWrite marker contract above.
+            # Exercise each browser with its default font-service behavior. The
+            # disk-backed DirectWrite file reference carries font identity across
+            # Chromium's FontDataService boundary. Firefox 151 completes its
+            # shared font list before PE image entry, so the test gate proves the
+            # late-collection limitation explicitly instead of presenting a
+            # compatibility mode as product support.
             $sourceFamily = 'Cambria'
+            $expectedState = if ($engine -eq 'firefox') {
+                'unsupported-late-collection'
+            } else {
+                'substituted'
+            }
             $resultPath = Join-Path $BrowserEvidenceRoot "open-service-$engine.json"
             # The service serializes process-creation events and each fixed helper
             # has a 20-second absolute deadline. A browser process tree therefore
@@ -468,27 +474,30 @@ try {
                 '--injection-health', (Join-Path $machineRoot 'health.json'),
                 '--source', $sourceFamily,
                 '--replacement', 'Courier New',
-                '--expect', 'substituted',
+                '--expect', $expectedState,
                 '--timeout-ms', '60000'
             )
             if ($engine -eq 'firefox') {
-                # Break the Firefox parent at its PE image entry point, detach
-                # with its main thread suspended, and resume only after its
-                # PID-specific hook-ready event proves both demand hooks and
-                # the shared-factory collection boundary is installed. Mozilla's child
-                # diagnostic pause then lets the service load each renderer
-                # before its normal sandbox starts. Exact pixel equality remains mandatory.
                 $browserProbeArguments += @(
                     '--firefox-launch-gate', $BrowserLaunchGate
                 )
             }
             & node @browserProbeArguments
             if ($LASTEXITCODE -ne 0) {
-                throw "$engine did not render the configured $sourceFamily to Courier New substitution under the open service."
+                throw "$engine did not satisfy the declared browser font-substitution support contract."
             }
             $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
-            if (-not $result.expectationMet -or -not $result.replacementObserved) {
-                throw "$engine browser evidence did not record the configured replacement."
+            if ($engine -eq 'chromium') {
+                if (-not $result.expectationMet -or
+                    -not $result.replacementObserved -or
+                    -not $result.earlyAliasAcquisitionObserved) {
+                    throw 'Chromium browser evidence did not prove default FontDataService substitution through the immutable alias collection.'
+                }
+            } elseif (-not $result.expectationMet -or
+                -not $result.unsupportedLateCollectionObserved -or
+                $result.replacementObserved -or
+                $result.earlyAliasAcquisitionObserved) {
+                throw 'Firefox browser evidence did not prove the explicit pre-entry shared-font-list limitation.'
             }
         }
     }

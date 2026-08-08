@@ -1768,6 +1768,22 @@ CFontSubstitutesInfo::lookup(LOGFONT& lf) const
 	return nullptr;
 }
 
+bool CFontSubstitutesInfo::CopyRule(
+	int index,
+	LOGFONT& source,
+	LOGFONT& replacement,
+	bool& charsetSpecific) const
+{
+	if (index < 0 || index >= GetSize())
+		return false;
+	CFontSubstituteData const& key = GetKeyAt(index);
+	source = key.m_lf;
+	replacement = GetValueAt(index).m_lf;
+	charsetSpecific = key.m_bCharSet;
+	return source.lfFaceName[0] != L'\0' &&
+		replacement.lfFaceName[0] != L'\0';
+}
+
 CFontFaceNamesEnumerator::CFontFaceNamesEnumerator(LPCWSTR facename, int nFontFamily) : m_pos(0)
 {
 	//CCriticalSectionLock __lock;

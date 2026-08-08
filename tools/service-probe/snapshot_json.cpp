@@ -122,6 +122,11 @@ std::string BuildSnapshotJson(const ProbeOptions& options,
        << "      \"controlsStable\": "
        << (font_substitution.direct_write.controls_stable ? "true" : "false")
        << ",\n"
+       << "      \"replacementGeometryCoherent\": "
+       << (font_substitution.direct_write.replacement_geometry_coherent
+               ? "true"
+               : "false")
+       << ",\n"
        << "      \"replacementObserved\": "
        << (font_substitution.direct_write.replacement_observed ? "true"
                                                                : "false")
@@ -152,10 +157,6 @@ std::string BuildSnapshotJson(const ProbeOptions& options,
        << EscapeJson(font_substitution.direct_write_indexed_collection
                          .disabled_replacement_postscript_name)
        << "\",\n"
-       << "      \"activeReplacementPostScriptName\": \""
-       << EscapeJson(font_substitution.direct_write_indexed_collection
-                         .active_replacement_postscript_name)
-       << "\",\n"
        << "      \"retainedGenerationFamily\": \""
        << EscapeJson(font_substitution.direct_write_indexed_collection
                           .retained_generation_family)
@@ -164,24 +165,24 @@ std::string BuildSnapshotJson(const ProbeOptions& options,
        << EscapeJson(font_substitution.direct_write_indexed_collection
                           .retained_generation_descriptor_family)
        << "\",\n"
-       << "      \"activeReplacementDescriptorFamily\": \""
+       << "      \"activeAliasDescriptorFamily\": \""
        << EscapeJson(font_substitution.direct_write_indexed_collection
-                          .active_replacement_descriptor_family)
+                           .active_alias_descriptor_family)
        << "\",\n"
        << "      \"controlsStable\": "
        << (font_substitution.direct_write_indexed_collection.controls_stable
                ? "true"
                : "false")
        << ",\n"
-       << "      \"replacementMetadataCoherent\": "
+       << "      \"activeIdentityCoherent\": "
        << (font_substitution.direct_write_indexed_collection
-                    .replacement_metadata_coherent
+                     .active_identity_coherent
                ? "true"
                : "false")
        << ",\n"
-       << "      \"replacementNameTableCoherent\": "
+       << "      \"virtualNameTableCoherent\": "
        << (font_substitution.direct_write_indexed_collection
-                    .replacement_name_table_coherent
+                     .virtual_name_table_coherent
                ? "true"
                : "false")
        << ",\n"
@@ -197,9 +198,15 @@ std::string BuildSnapshotJson(const ProbeOptions& options,
                ? "true"
                : "false")
        << ",\n"
-       << "      \"replacementDescriptorCoherent\": "
+       << "      \"resourceRoundTripCoherent\": "
        << (font_substitution.direct_write_indexed_collection
-                    .replacement_descriptor_coherent
+                     .resource_round_trip_coherent
+               ? "true"
+               : "false")
+       << ",\n"
+       << "      \"replacementGeometryCoherent\": "
+       << (font_substitution.direct_write_indexed_collection
+                    .replacement_geometry_coherent
                ? "true"
                : "false")
        << ",\n"
@@ -228,6 +235,12 @@ std::string BuildSnapshotJson(const ProbeOptions& options,
                ? "true"
                : "false")
        << ",\n"
+       << "      \"replacementGeometryCoherent\": "
+       << (font_substitution.direct_write_font_set_collection
+                    .replacement_geometry_coherent
+               ? "true"
+               : "false")
+       << ",\n"
        << "      \"replacementObserved\": "
        << (font_substitution.direct_write_font_set_collection
                    .replacement_observed
@@ -250,6 +263,12 @@ std::string BuildSnapshotJson(const ProbeOptions& options,
        << "\",\n"
        << "      \"controlsStable\": "
        << (font_substitution.direct_write_modern_collection.controls_stable
+               ? "true"
+               : "false")
+       << ",\n"
+       << "      \"replacementGeometryCoherent\": "
+       << (font_substitution.direct_write_modern_collection
+                    .replacement_geometry_coherent
                ? "true"
                : "false")
        << ",\n"

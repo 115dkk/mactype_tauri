@@ -45,6 +45,14 @@ AliasCache& GetCache()
 	return *cache;
 }
 
+bool IsSubstitutionDisabled() noexcept
+{
+	SetLastError(ERROR_SUCCESS);
+	DWORD const length = GetEnvironmentVariableW(
+		L"MACTYPE_FONTSUBSTITUTES_ENV", nullptr, 0);
+	return length != 0 || GetLastError() != ERROR_ENVVAR_NOT_FOUND;
+}
+
 bool ReadLocalizedString(
 	IDWriteLocalizedStrings* strings,
 	UINT32 index,
@@ -210,10 +218,7 @@ BuildStatus Build(
 	CGdippSettings const* settings = CGdippSettings::GetInstance();
 	if (!settings->DelayedInited())
 		return BuildStatus::settingsNotInitialized;
-	SetLastError(ERROR_SUCCESS);
-	DWORD const disabled = GetEnvironmentVariableW(
-		L"MACTYPE_FONTSUBSTITUTES_ENV", nullptr, 0);
-	if (disabled != 0 || GetLastError() != ERROR_ENVVAR_NOT_FOUND)
+	if (IsSubstitutionDisabled())
 		return BuildStatus::noSubstitutions;
 	std::vector<SubstitutionRule> const rules =
 		CollectSubstitutionRules(settings->GetFontSubstitutesInfo());
@@ -312,6 +317,12 @@ BuildStatus GetOrCreateUnchecked(
 	IDWriteFontSet* systemFontSet,
 	AliasFontSet& result)
 {
+	result = {};
+	// The enablement state selects the immutable generation. A cached alias
+	// must never escape while the caller explicitly requests the stock set.
+	if (IsSubstitutionDisabled())
+		return BuildStatus::noSubstitutions;
+
 	CComPtr<IUnknown> const factoryIdentity = GetIdentity(factory);
 	CComPtr<IUnknown> const systemSetIdentity = GetIdentity(systemFontSet);
 	if (factoryIdentity == nullptr || systemSetIdentity == nullptr)

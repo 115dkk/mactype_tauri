@@ -679,7 +679,6 @@ std::wstring ResolveFontSetDirectWriteFamily(
 
 std::wstring ResolveIndexedDirectWriteFamily(
     const std::wstring_view family, void* directwrite_factory,
-    UINT32& pinned_index, const bool discover_index,
     std::wstring& postscript_name, UniqueCom<IDWriteFont>* retained_font,
     UniqueCom<IDWriteFontFace>* retained_face, std::wstring& error) {
   IDWriteFactory* factory = static_cast<IDWriteFactory*>(directwrite_factory);
@@ -705,20 +704,21 @@ std::wstring ResolveIndexedDirectWriteFamily(
     error = L"GetSystemFontCollection failed for indexed collection";
     return {};
   }
-  if (discover_index) {
-    BOOL exists = FALSE;
-    const std::wstring family_name(family);
-    if (FAILED(collection->FindFamilyName(family_name.c_str(), &pinned_index,
-                                          &exists)) ||
-        exists == FALSE) {
-      error = L"FindFamilyName failed for indexed collection";
-      return {};
-    }
+  // Family indexes belong to one immutable collection generation. Resolve the
+  // index again after the substitution switch publishes another generation.
+  UINT32 family_index = 0;
+  BOOL exists = FALSE;
+  const std::wstring family_name(family);
+  if (FAILED(collection->FindFamilyName(family_name.c_str(), &family_index,
+                                        &exists)) ||
+      exists == FALSE) {
+    error = L"FindFamilyName failed for indexed collection";
+    return {};
   }
 
   IDWriteFontFamily* raw_family = nullptr;
   const HRESULT family_result =
-      collection->GetFontFamily(pinned_index, &raw_family);
+      collection->GetFontFamily(family_index, &raw_family);
   UniqueCom<IDWriteFontFamily> font_family(raw_family);
   if (FAILED(family_result) || font_family == nullptr) {
     error = L"GetFontFamily failed for indexed collection";
@@ -963,8 +963,6 @@ FontSubstitutionObservation ObserveFontSubstitution(
   };
   DirectWriteSubstitutionObservation& indexed =
       result.direct_write_indexed_collection;
-  UINT32 indexed_source = 0;
-  UINT32 indexed_replacement = 0;
   std::wstring repeated_disabled_indexed_source;
   std::wstring repeated_disabled_indexed_replacement;
   std::wstring ignored_repeated_postscript_name;
@@ -975,28 +973,27 @@ FontSubstitutionObservation ObserveFontSubstitution(
     FontSubstitutionSwitch disabled;
     indexed.disabled_source_family =
         ResolveIndexedDirectWriteFamily(source_family, directwrite_factory,
-            indexed_source, true, indexed.disabled_source_postscript_name,
+            indexed.disabled_source_postscript_name,
             &pinned_disabled_source, &pinned_disabled_source_face, error);
     indexed.disabled_replacement_family =
         ResolveIndexedDirectWriteFamily(replacement_family, directwrite_factory,
-            indexed_replacement, true,
             indexed.disabled_replacement_postscript_name, nullptr,
             &pinned_disabled_replacement_face, error);
     repeated_disabled_indexed_source = ResolveIndexedDirectWriteFamily(
-        source_family, directwrite_factory, indexed_source, false,
+        source_family, directwrite_factory,
         ignored_repeated_postscript_name, nullptr, nullptr, error);
     repeated_disabled_indexed_replacement = ResolveIndexedDirectWriteFamily(
-        replacement_family, directwrite_factory, indexed_replacement, false,
+        replacement_family, directwrite_factory,
         ignored_repeated_postscript_name, nullptr, nullptr, error);
   }
   UniqueCom<IDWriteFontFace> active_alias_face;
   indexed.active_source_family =
       ResolveIndexedDirectWriteFamily(source_family, directwrite_factory,
-          indexed_source, false, indexed.active_source_postscript_name,
+          indexed.active_source_postscript_name,
           nullptr, &active_alias_face, error);
   const std::wstring repeated_active_indexed_source =
       ResolveIndexedDirectWriteFamily(source_family, directwrite_factory,
-          indexed_source, false, ignored_repeated_postscript_name,
+          ignored_repeated_postscript_name,
           nullptr, nullptr, error);
   indexed.retained_generation_family = ResolveDirectWriteFontObject(
       pinned_disabled_source.get(), directwrite_factory, error);

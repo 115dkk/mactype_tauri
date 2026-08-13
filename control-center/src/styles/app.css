@@ -222,7 +222,10 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .preview-panel[data-compact="true"] .sample-input, .preview-panel[data-compact="true"] .preview-footer { display: none; }
 .preview-panel[data-compact="true"] .preview-toolbar { padding-block: var(--space-1); }
 .preview-panel[data-compact="true"] .preview-canvas { padding: var(--space-2); }
-.settings-workspace[data-preview-docked="true"] { grid-template-columns: minmax(0, 1fr) clamp(340px, 30%, 440px); grid-template-rows: minmax(0, 1fr); column-gap: var(--space-5); }
+/* The docked column is what the reader judges the rendering in, so it takes a
+   larger share than a side panel would: the strips wrap to whatever width it
+   gets, and a narrow column turns one sample line into four. */
+.settings-workspace[data-preview-docked="true"] { grid-template-columns: minmax(0, 1fr) clamp(360px, 38%, 520px); grid-template-rows: minmax(0, 1fr); column-gap: var(--space-5); }
 .settings-workspace[data-preview-docked="true"] .preview-panel { margin: 0; padding-inline-start: var(--space-5); border-inline-start: 1px solid var(--color-border); overflow-y: auto; }
 .settings-workspace[data-preview-docked="true"] .preview-toolbar { align-items: stretch; flex-direction: column; gap: var(--space-2); }
 .settings-workspace[data-preview-docked="true"] .preview-controls { width: 100%; flex-wrap: wrap; }

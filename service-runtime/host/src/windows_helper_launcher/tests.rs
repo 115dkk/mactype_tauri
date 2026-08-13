@@ -41,6 +41,7 @@ fn current_process_invocation(
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn helper_job_enforces_single_process_and_kill_on_close() {
     let job = JobObject::new().unwrap();
     let limits = job.query_limits().unwrap();
@@ -56,6 +57,7 @@ fn helper_job_enforces_single_process_and_kill_on_close() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn in_flight_helper_is_cancelled_without_waiting_for_its_twenty_second_timeout() {
     let _guard = HELPER_TEST_LOCK
         .lock()
@@ -103,6 +105,7 @@ fn in_flight_helper_is_cancelled_without_waiting_for_its_twenty_second_timeout()
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn absolute_timeout_terminates_the_helper_job_without_an_orphan() {
     let _guard = HELPER_TEST_LOCK
         .lock()
@@ -149,6 +152,7 @@ fn absolute_timeout_terminates_the_helper_job_without_an_orphan() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn closing_the_service_owned_job_terminates_a_running_helper() {
     let job = JobObject::new().unwrap();
     let executable =

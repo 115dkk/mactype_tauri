@@ -1,0 +1,33 @@
+name: Miri
+
+on:
+  pull_request:
+  push:
+    branches: [main, codex/miri-ci]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-service-runtime:
+    name: Windows service runtime
+    runs-on: windows-2022
+    timeout-minutes: 60
+    env:
+      MIRIFLAGS: -Zmiri-disable-isolation
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Miri
+        shell: pwsh
+        run: |
+          rustup toolchain install nightly --component miri --profile minimal
+          cargo +nightly miri setup --target x86_64-pc-windows-msvc
+      - name: Interpret Windows service tests
+        run: >-
+          cargo +nightly miri test
+          --manifest-path service-runtime/Cargo.toml
+          --workspace
+          --all-targets
+          --all-features
+          --target x86_64-pc-windows-msvc

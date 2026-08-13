@@ -280,6 +280,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn liveness_probe_distinguishes_a_running_process_from_a_reused_pid() {
         let inspector = WindowsProcessInspector::new(0);
         let own_identity = inspector.inspect(std::process::id()).unwrap();
@@ -299,6 +300,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn liveness_probe_reports_an_exited_child_as_vanished() {
         let mut child = std::process::Command::new("cmd")
             .stdin(std::process::Stdio::piped())

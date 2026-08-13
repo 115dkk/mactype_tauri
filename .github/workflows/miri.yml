@@ -23,11 +23,24 @@ jobs:
         run: |
           rustup toolchain install nightly --component miri --profile minimal
           cargo +nightly miri setup --target x86_64-pc-windows-msvc
-      - name: Interpret Windows service tests
+      - name: Interpret Windows service contracts
         run: >-
           cargo +nightly miri test
           --manifest-path service-runtime/Cargo.toml
-          --workspace
+          --package mactype-service-contract
           --all-targets
+          --all-features
+          --target x86_64-pc-windows-msvc
+      - name: Interpret Windows host state machines
+        run: >-
+          cargo +nightly miri test
+          --manifest-path service-runtime/Cargo.toml
+          --package mactype-service-host
+          --lib
+          --test control_contract
+          --test orchestration_driver
+          --test process_orchestration
+          --test startup_conflicts
+          --test target_validation
           --all-features
           --target x86_64-pc-windows-msvc

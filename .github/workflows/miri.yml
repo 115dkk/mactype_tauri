@@ -3,7 +3,7 @@ name: Miri
 on:
   pull_request:
   push:
-    branches: [main, codex/miri-ci]
+    branches: [main]
   workflow_dispatch:
 
 permissions:

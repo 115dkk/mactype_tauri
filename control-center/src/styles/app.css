@@ -109,7 +109,10 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .warning-text { color: var(--color-warning); font-weight: 600; }
 .split-section { display: flex; align-items: center; justify-content: space-between; gap: var(--space-6); margin-top: var(--space-8); padding: var(--space-5) 0; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
 .split-section p { max-width: 680px; margin-top: var(--space-2); color: var(--color-muted); }
-.profile-page { --control-height: 28px; display: flex; max-width: 1440px; height: calc(100vh - var(--titlebar-height)); overflow: hidden; flex-direction: column; padding-block: var(--space-5); }
+/* Tighter side padding than the reading pages: this one spends its width on a
+   settings table and a docked preview, and every pixel here decides whether
+   the preview docks at all. */
+.profile-page { --control-height: 28px; display: flex; max-width: 1440px; height: calc(100vh - var(--titlebar-height)); overflow: hidden; flex-direction: column; padding-block: var(--space-5); padding-inline: var(--space-6); }
 .profile-header { align-items: center; padding-bottom: var(--space-3); }
 .profile-header h1 { font-size: 20px; }
 .profile-editing { font-size: 12px; }
@@ -222,7 +225,10 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .preview-panel[data-compact="true"] .sample-input, .preview-panel[data-compact="true"] .preview-footer { display: none; }
 .preview-panel[data-compact="true"] .preview-toolbar { padding-block: var(--space-1); }
 .preview-panel[data-compact="true"] .preview-canvas { padding: var(--space-2); }
-.settings-workspace[data-preview-docked="true"] { grid-template-columns: minmax(0, 1fr) clamp(340px, 30%, 440px); grid-template-rows: minmax(0, 1fr); column-gap: var(--space-5); }
+/* The docked column is what the reader judges the rendering in, so it takes a
+   larger share than a side panel would: the strips wrap to whatever width it
+   gets, and a narrow column turns one sample line into four. */
+.settings-workspace[data-preview-docked="true"] { grid-template-columns: minmax(0, 1fr) clamp(360px, 38%, 520px); grid-template-rows: minmax(0, 1fr); column-gap: var(--space-5); }
 .settings-workspace[data-preview-docked="true"] .preview-panel { margin: 0; padding-inline-start: var(--space-5); border-inline-start: 1px solid var(--color-border); overflow-y: auto; }
 .settings-workspace[data-preview-docked="true"] .preview-toolbar { align-items: stretch; flex-direction: column; gap: var(--space-2); }
 .settings-workspace[data-preview-docked="true"] .preview-controls { width: 100%; flex-wrap: wrap; }

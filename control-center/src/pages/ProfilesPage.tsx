@@ -20,10 +20,15 @@ type ProfileMode = "quick" | "advanced";
 
 /* The guided step is a short column of choices and trades width for height
    readily, so it docks the preview early. The settings table needs room for a
-   label beside its control column, so it docks only in a genuinely wide
-   window. Below the threshold the preview falls back to a capped bottom
-   panel. */
-const DOCKED_PREVIEW_MIN_WIDTH: Readonly<Record<ProfileMode, number>> = { quick: 780, advanced: 1000 };
+   label beside its control column, so it docks later. Below the threshold the
+   preview falls back to a capped bottom panel.
+
+   The advanced figure is what the shipped default window reaches: the workspace
+   is the window less the navigation rail, the page padding and the section
+   index, so docking by default costs roughly 1300 logical pixels of window.
+   Raising it further would push the default past a 1366-wide laptop, and the
+   preview only reads as a right column if it starts as one. */
+const DOCKED_PREVIEW_MIN_WIDTH: Readonly<Record<ProfileMode, number>> = { quick: 780, advanced: 840 };
 
 interface ProfilesPageProps {
   ciSmoke?: boolean;

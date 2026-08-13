@@ -93,6 +93,59 @@ function previewPalette(dark: boolean): { foreground: string; background: string
 /* The helper rejects bitmaps above 2048 device pixels; stay under it at 2x. */
 const MAX_STRIP_HEIGHT = 1000;
 
+/* A strip is drawn at the width we ask for and the layout caps it at the
+   canvas, so a bitmap wider than the canvas gets resampled down and the reader
+   sees glyphs smaller than the size they picked. Asking for the canvas width
+   instead keeps every layout at true size, and because the helper draws with
+   ETO_CLIPPED rather than wrapping, the sample is broken into fitting lines
+   here. */
+const SAMPLE_INSET = 18;
+/* Browser metrics and the helper's GDI metrics disagree by a little, so the
+   last word keeps a margin rather than risking the clip. */
+const SAMPLE_RIGHT_MARGIN = 12;
+const MIN_SAMPLE_WIDTH = 220;
+/* Follow the canvas in steps so a drag across the window edge does not churn
+   state on every pixel. */
+const SAMPLE_WIDTH_STEP = 8;
+/* Latin breaks at spaces; CJK writes without them, so every syllable or
+   ideograph is its own break opportunity. */
+const CJK = "\\u1100-\\u11FF\\u2E80-\\u303F\\u3040-\\u30FF\\u3400-\\u4DBF\\u4E00-\\u9FFF\\uA960-\\uA97F\\uAC00-\\uD7FF\\uF900-\\uFAFF\\uFF00-\\uFF60";
+const SAMPLE_TOKENS = new RegExp(`[${CJK}]\\s*|[^\\s${CJK}]+\\s*|\\s+`, "gu");
+
+let sampleMeasureContext: CanvasRenderingContext2D | null | undefined;
+
+function sampleMeasurer(fontFace: string, fontSizePt: number): ((text: string) => number) | null {
+  if (sampleMeasureContext === undefined) sampleMeasureContext = document.createElement("canvas").getContext("2d");
+  const context = sampleMeasureContext;
+  if (!context) return null;
+  context.font = `${(fontSizePt * 96) / 72}px "${fontFace}", sans-serif`;
+  return (text: string) => context.measureText(text).width;
+}
+
+function wrapSampleLine(line: string, measure: (text: string) => number, room: number): ReadonlyArray<string> {
+  const tokens = line.match(SAMPLE_TOKENS);
+  if (!tokens) return [line];
+  const wrapped: string[] = [];
+  let current = "";
+  for (const token of tokens) {
+    if (current && measure((current + token).trimEnd()) > room) {
+      wrapped.push(current.trimEnd());
+      current = token.trimStart();
+    } else {
+      current += token;
+    }
+  }
+  wrapped.push(current.trimEnd());
+  return wrapped;
+}
+
+function wrapSample(text: string, fontFace: string, fontSizePt: number, widthPx: number): string {
+  const room = widthPx - SAMPLE_INSET - SAMPLE_RIGHT_MARGIN;
+  const measure = room > 0 ? sampleMeasurer(fontFace, fontSizePt) : null;
+  if (!measure) return text;
+  return text.split("\n").flatMap((line) => wrapSampleLine(line, measure, room)).join("\n");
+}
+
 function stripHeightFor(text: string, fontSize: number): number {
   const lines = Math.max(1, text.split("\n").length);
   const lineSpacing = Math.max(22, Math.round(fontSize * 2));
@@ -123,6 +176,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
   const [nativeVisible, setNativeVisible] = useState(false);
   const [nativeMode, setNativeMode] = useState<NativePreviewMode>("default");
   const [previewHeight, setPreviewHeight] = useState(DEFAULT_PREVIEW_HEIGHT);
+  const [sampleWidth, setSampleWidth] = useState(0);
   const [sampleEditorOpen, setSampleEditorOpen] = useState(false);
   const [comparing, setComparing] = useState(false);
   const hasUnsavedEdits = savedValues !== undefined
@@ -178,6 +232,21 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
     if (!available) return;
     const largest = Math.max(MIN_PREVIEW_HEIGHT, Math.min(MAX_PREVIEW_HEIGHT, available - MIN_SETTINGS_HEIGHT));
     setPreviewHeight((current) => Math.min(current, largest));
+  }, []);
+
+  /* Docking moves the canvas between a full-width bottom panel and a narrow
+     right column, so the strips are re-rendered for the width they land in. */
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return undefined;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const room = Math.floor(entry.contentRect.width / SAMPLE_WIDTH_STEP) * SAMPLE_WIDTH_STEP;
+        setSampleWidth(Math.max(MIN_SAMPLE_WIDTH, room));
+      }
+    });
+    observer.observe(canvas);
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
@@ -238,12 +307,12 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
   }, [ciSmoke, isCurrentGeneration, onError, onPreviewReady]);
 
   useEffect(() => {
-    if (!profilePath || variants.length === 0) return undefined;
+    if (!profilePath || variants.length === 0 || sampleWidth === 0) return undefined;
     const requestGeneration = generation.current;
     const timer = window.setTimeout(() => {
       if (!isCurrentGeneration(requestGeneration)) return;
       const displayScale = window.devicePixelRatio || 1;
-      const width = Math.max(320, canvasRef.current?.clientWidth ?? 760);
+      const width = sampleWidth;
       /* Comparing means rendering each variant twice, so the saved side is
          only requested while the reader has comparison switched on. Captions
          are resolved at render time; keeping them out of the batch means the
@@ -256,7 +325,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
         generation: requestGeneration,
         batchId: ++batchCounter.current,
         requests: variants.flatMap((variant) => {
-          const text = variant.text ?? sampleText;
+          const text = wrapSample(variant.text ?? sampleText, fontFace, fontSize, width);
           return sides.map((side) => ({
             key: `${variant.key}${side.suffix}`,
             label: variant.label,
@@ -284,7 +353,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
       void drainPreviewQueue();
     }, 40);
     return () => window.clearTimeout(timer);
-  }, [compareOverrides, darkPreview, drainPreviewQueue, fontFace, fontSize, isCurrentGeneration, profilePath, sampleText, values, variants]);
+  }, [compareOverrides, darkPreview, drainPreviewQueue, fontFace, fontSize, isCurrentGeneration, profilePath, sampleText, sampleWidth, values, variants]);
 
   const resizePreviewFromKeyboard = (event: KeyboardEvent<HTMLDivElement>) => {
     const increments: Partial<Record<string, number>> = { ArrowUp: 16, ArrowDown: -16, PageUp: 48, PageDown: -48 };

@@ -1,8 +1,14 @@
 import { expect, test } from "@playwright/test";
+import fs from "node:fs";
 import path from "node:path";
 import { galleryLocales, galleryViews } from "./windows";
 
 const galleryRoot = path.resolve(__dirname, "../../artifacts/frontend-gallery");
+/* The docked preview is a property of the shipped window size, so the gallery
+   reads that size rather than restating it. */
+const defaultWindow = JSON.parse(
+  fs.readFileSync(path.resolve(__dirname, "../../control-center/src-tauri/tauri.conf.json"), "utf8"),
+).app.windows[0] as { width: number; height: number };
 
 async function overflowingElements(page: import("@playwright/test").Page) {
   return page.evaluate(() => {
@@ -268,6 +274,31 @@ test("profile preview docks as a full-height right column at wide widths", async
   expect(previewBox!.x, "docked preview must sit right of the settings form").toBeGreaterThanOrEqual(formBox!.x + formBox!.width);
   expect(await overflowingElements(page)).toEqual([]);
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-preview-docked-ko.png`), fullPage: true });
+});
+
+test("the shipped default window docks the preview and never resamples the sample", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "The default window is a single size");
+  await page.setViewportSize(defaultWindow);
+  await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
+
+  await expect(page.locator('.settings-workspace[data-preview-docked="true"]')).toHaveCount(1);
+
+  // A strip is a bitmap drawn at the width the panel asked for. Asking for more
+  // than the canvas holds makes the browser scale it down, which shrinks the
+  // glyphs below the size the reader picked and defeats the preview.
+  const strip = page.locator(".preview-strip img").first();
+  for (const size of ["12", "14", "18"]) {
+    await page.getByRole("combobox", { name: "프리뷰 크기" }).selectOption(size);
+    await expect(strip).toHaveJSProperty("complete", true);
+    const scale = await strip.evaluate((image) => {
+      const rendered = image.getBoundingClientRect().width;
+      return rendered / Number((image as HTMLImageElement).getAttribute("width"));
+    });
+    expect(scale, `the ${size} pt sample must render at its own size in the docked column`).toBeCloseTo(1, 2);
+  }
+
+  expect(await overflowingElements(page)).toEqual([]);
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-preview-default-window-ko.png`), fullPage: true });
 });
 
 test("native preview display mode dropdown drives the runtime adapter", async ({ page }, testInfo) => {

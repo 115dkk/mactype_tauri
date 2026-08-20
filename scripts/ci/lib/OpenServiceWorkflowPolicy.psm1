@@ -191,9 +191,12 @@ function Test-OpenServiceWorkflowPolicy {
             'renderer_raii::PageProtection::TrySet',
             'PatchFactoryAliasVtables',
             'legacy-system-collection-alias-returned',
-            'SignalDirectWriteDiagnostic(L"hook-ready");'
+            'SignalDirectWriteDiagnostic(readyStage);',
+            'HookSharedDirectWriteFactory(ORIG_DWriteCreateFactory, L"hook-ready");'
         )
     if ($directWrite) {
+        $readyCall = 'HookSharedDirectWriteFactory(ORIG_DWriteCreateFactory, L"hook-ready");'
+        $readyPublisher = 'SignalDirectWriteDiagnostic(readyStage);'
         $workerStart = $directWrite.IndexOf(
             'static DWORD WINAPI HookExistingDirectWriteFactory'
         )
@@ -201,20 +204,24 @@ function Test-OpenServiceWorkflowPolicy {
             'static void ScheduleExistingDirectWriteFactoryHook',
             $workerStart
         )
-        $readyIndex = $directWrite.IndexOf(
-            'SignalDirectWriteDiagnostic(L"hook-ready");'
-        )
+        $readyIndex = $directWrite.IndexOf($readyCall)
         if ($workerStart -lt 0 -or $workerEnd -le $workerStart -or
             $readyIndex -le $workerStart -or $readyIndex -ge $workerEnd) {
             $failures.Add(
-                'hook-ready must be published by the completed shared-factory worker.'
+                'hook-ready must be requested by the completed shared-factory worker.'
             )
         }
         if ([regex]::Matches(
                 $directWrite,
-                [regex]::Escape('SignalDirectWriteDiagnostic(L"hook-ready");')
+                [regex]::Escape($readyCall)
             ).Count -ne 1) {
-            $failures.Add('DirectWrite hook-ready must have exactly one publisher.')
+            $failures.Add('DirectWrite hook-ready must have exactly one worker request.')
+        }
+        if ([regex]::Matches(
+                $directWrite,
+                [regex]::Escape($readyPublisher)
+            ).Count -ne 1) {
+            $failures.Add('The shared-factory helper must have exactly one readiness publisher.')
         }
         foreach ($forbiddenToken in @(
             'AliasedDWriteFont', 'AliasedDWriteFontFace',

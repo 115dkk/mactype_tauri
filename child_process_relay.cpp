@@ -705,7 +705,6 @@ EXTERN_C VOID CALLBACK RelayChildProcess(
         : ChildRelayReason::identityUnavailable;
     if (classification != ChildRelayReason::none)
     {
-        CloseHandle(process);
         ExitProcess(
             classification == ChildRelayReason::identityUnavailable
                 ? ERROR_INVALID_PARAMETER
@@ -722,7 +721,6 @@ EXTERN_C VOID CALLBACK RelayChildProcess(
         LPCSTR modules[] = {ansi.c_str()};
         injected = DetourUpdateProcessWithDll(process, modules, 1);
     }
-    CloseHandle(process);
     ExitProcess(injected ? ERROR_SUCCESS : ERROR_DLL_INIT_FAILED);
 }
 

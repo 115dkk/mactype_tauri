@@ -6,10 +6,11 @@ use std::time::Duration;
 
 use mactype_service_contract::{HealthReport, HealthState, StructuredServiceError};
 use mactype_service_host::{
-    initialize_process_orchestration, BrokerDisposition, BrokerResult, HealthPublisher,
-    InitializedRuntime, InjectionBroker, InjectionRequest, ProcessArchitecture, ProcessEventSource,
-    ProcessIdentity, ProcessInspector, RuntimeInitializer, ServiceRuntime, ServiceStatus,
-    SessionChange, StatusReporter, StopSignal, TargetLiveness,
+    initialize_process_orchestration, BinarySignaturePolicy, BrokerDisposition, BrokerResult,
+    DynamicCodePolicy, HealthPublisher, InitializedRuntime, InjectionBroker, InjectionRequest,
+    InspectionEvidence, ProcessArchitecture, ProcessEventSource, ProcessIdentity,
+    ProcessInspection, ProcessInspectionError, ProcessInspector, RuntimeInitializer,
+    ServiceRuntime, ServiceStatus, SessionChange, StatusReporter, StopSignal, TargetLiveness,
 };
 
 const PROFILE_DIGEST: &str =
@@ -37,16 +38,32 @@ impl ProcessEventSource for QueueSource {
 
 struct FixedInspector;
 
+fn ordinary_inspection(identity: ProcessIdentity) -> ProcessInspection {
+    ProcessInspection {
+        identity,
+        image_name: InspectionEvidence::Known("ordinary.exe".to_owned()),
+        protected: InspectionEvidence::Known(false),
+        critical: InspectionEvidence::Known(false),
+        dynamic_code: InspectionEvidence::Known(DynamicCodePolicy {
+            prohibit_dynamic_code: false,
+            allow_thread_opt_out: false,
+        }),
+        binary_signature: InspectionEvidence::Known(BinarySignaturePolicy {
+            microsoft_signed_only: false,
+            store_signed_only: false,
+            mitigation_opt_in: false,
+        }),
+    }
+}
+
 impl ProcessInspector for FixedInspector {
-    fn inspect(&self, pid: u32) -> Result<ProcessIdentity, StructuredServiceError> {
-        Ok(ProcessIdentity {
+    fn inspect(&self, pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
+        Ok(ordinary_inspection(ProcessIdentity {
             pid,
             creation_time: 100,
             session_id: 2,
             architecture: ProcessArchitecture::X64,
-            protected: false,
-            critical: false,
-        })
+        }))
     }
 }
 
@@ -389,15 +406,13 @@ fn cleanup_unknown_degrades_its_generation_then_next_success_recovers_ready() {
 struct VanishedTargetInspector;
 
 impl ProcessInspector for VanishedTargetInspector {
-    fn inspect(&self, pid: u32) -> Result<ProcessIdentity, StructuredServiceError> {
-        Ok(ProcessIdentity {
+    fn inspect(&self, pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
+        Ok(ordinary_inspection(ProcessIdentity {
             pid,
             creation_time: 100,
             session_id: 2,
             architecture: ProcessArchitecture::X64,
-            protected: false,
-            critical: false,
-        })
+        }))
     }
 
     fn probe_target_liveness(&self, _identity: &ProcessIdentity) -> TargetLiveness {
@@ -559,7 +574,7 @@ fn invalid_helper_response_degrades_its_generation_then_next_success_recovers_re
 struct TargetInspectionRaceInspector;
 
 impl ProcessInspector for TargetInspectionRaceInspector {
-    fn inspect(&self, pid: u32) -> Result<ProcessIdentity, StructuredServiceError> {
+    fn inspect(&self, pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
         let code = match pid {
             10 => Some("process-protected-or-inaccessible"),
             20 => Some("process-creation-time-unavailable"),
@@ -569,20 +584,20 @@ impl ProcessInspector for TargetInspectionRaceInspector {
             _ => None,
         };
         if let Some(code) = code {
-            return Err(StructuredServiceError {
-                code: code.to_owned(),
-                message: "the observed target changed during inspection".to_owned(),
-                win32_error: Some(5),
-            });
+            return Err(ProcessInspectionError::TargetUnavailable(
+                StructuredServiceError {
+                    code: code.to_owned(),
+                    message: "the observed target changed during inspection".to_owned(),
+                    win32_error: Some(5),
+                },
+            ));
         }
-        Ok(ProcessIdentity {
+        Ok(ordinary_inspection(ProcessIdentity {
             pid,
             creation_time: u64::from(pid),
             session_id: 2,
             architecture: ProcessArchitecture::X64,
-            protected: false,
-            critical: false,
-        })
+        }))
     }
 }
 

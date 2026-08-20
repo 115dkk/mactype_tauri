@@ -20,7 +20,13 @@ This file fixes the domain language used by code, tests, CI, and architecture do
 : The host module that consumes a verified target decision, binds the identity to one runtime generation, applies deduplication/retry/cancellation policy, records a bounded target result, and owns generation-bound injection telemetry and terminal health classification. Normal target skips and pre-injection rejection must not change global service health.
 
 **ProcessTargetValidator**
-: The host adapter that inspects one observed PID and returns a verified eligible identity or an explicit skip. It owns self, session-zero, protected, critical, target-race, and PID-mismatch classification; it does not own generation binding, retry, or result history.
+: The host module that consumes typed facts for one observed PID and returns a verified eligible identity or an explicit process-local skip. The Windows inspector owns fact collection only; the validator owns self, session-zero, protected, critical, image-name, mitigation, target-race, and PID-mismatch classification. It does not own generation binding, retry, result history, health, or notifications.
+
+**DirectWriteLifecycle**
+: The rendering module that owns classic DirectWrite and app-local DWriteCore discovery, entry hooks, shared-factory readiness, worker cancellation, module pins, diagnostics, and explicit-unload ordering. Its interface is process-lifetime start plus transactional stop; loader interception and provider-specific state remain implementation details behind its seam.
+
+**ChildInjectionTransaction**
+: The synchronous core module behind the `CreateProcessInternalW` hook. It creates an eligible child suspended, verifies its exact handle-bound identity and safety facts, binds only the current core's fixed adjacent generation through the same- or mixed-architecture adapter, and then restores the caller-requested thread state. Quiet skips never become image-wide bans or service alerts; an unprovable in-flight mixed-helper mutation terminates the new child rather than resuming uncertain state.
 
 **fixed helper**
 : The adjacent x86 or x64 `mactype-injector` executable selected by architecture. Its interface accepts only an inherited process handle plus fixed identity fields. It cannot accept an arbitrary DLL, executable, command line, service name, or profile path.

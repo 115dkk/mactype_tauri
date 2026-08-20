@@ -17,6 +17,7 @@ struct TreeArguments {
   std::filesystem::path node_path;
   std::filesystem::path child_executable;
   std::filesystem::path grandchild_executable;
+  std::filesystem::path preload_mactype_path;
   DWORD wait_milliseconds = 3000;
   DWORD level = 0;
   bool show_help = false;
@@ -49,6 +50,8 @@ bool ParseArguments(const int argc, wchar_t** argv, TreeArguments& result,
       result.child_executable = argv[++index];
     } else if (argument == L"--grandchild-exe" && index + 1 < argc) {
       result.grandchild_executable = argv[++index];
+    } else if (argument == L"--preload-mactype" && index + 1 < argc) {
+      result.preload_mactype_path = argv[++index];
     } else if (argument == L"--wait-ms" && index + 1 < argc) {
       if (!ParseUnsigned(argv[++index], result.wait_milliseconds)) {
         error = L"--wait-ms must be an unsigned integer";
@@ -133,7 +136,7 @@ void PrintUsage() {
   std::wcerr
       << L"Usage: probe-spawn-tree{32|64}.exe --out <manifest.json> "
          L"[--wait-ms <milliseconds>] [--child-exe <path>] "
-         L"[--grandchild-exe <path>]\n";
+         L"[--grandchild-exe <path>] [--preload-mactype <dll>]\n";
 }
 
 }  // namespace
@@ -162,6 +165,9 @@ int wmain(const int argc, wchar_t** argv) {
   probe_options.role = RoleForLevel(arguments.level);
   probe_options.tree_level = arguments.level;
   probe_options.wait_milliseconds = arguments.wait_milliseconds;
+  if (arguments.level == 0) {
+    probe_options.preload_mactype_path = arguments.preload_mactype_path;
+  }
   const int probe_exit = mactype::service_probe::ObserveAndWrite(
       probe_options, false, error);
   if (probe_exit != 0) {

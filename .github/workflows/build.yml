@@ -107,6 +107,43 @@ jobs:
       - name: Build and verify x64 marker targets
         shell: pwsh
         run: tools/service-probe/tests/Test-ProbeContract.ps1 -Architecture x64 -BuildRoot build/service-probe
+      - name: Prove pre-entry child relay on x86 and x64 process trees
+        shell: pwsh
+        run: |
+          scripts/ci/Test-EarlyInjectionRelay.ps1 `
+            -Architecture Win32 `
+            -BuildRoot build/service-probe `
+            -OpenCoreRoot artifacts/open-core `
+            -Profile distribution/ini/Default.ini `
+            -OutputRoot artifacts/early-injection-relay/x86
+          scripts/ci/Test-EarlyInjectionRelay.ps1 `
+            -Architecture x64 `
+            -BuildRoot build/service-probe `
+            -OpenCoreRoot artifacts/open-core `
+            -Profile distribution/ini/Default.ini `
+            -OutputRoot artifacts/early-injection-relay/x64
+          scripts/ci/Test-EarlyInjectionRelay.ps1 `
+            -Architecture x64 `
+            -BuildRoot build/service-probe `
+            -OpenCoreRoot artifacts/open-core `
+            -Profile distribution/ini/Default.ini `
+            -OutputRoot artifacts/early-injection-relay/mixed `
+            -CrossArchitecture
+      - name: Prove app-local DWriteCore factory interception on x86 and x64
+        shell: pwsh
+        run: |
+          scripts/ci/Test-DWriteCoreHook.ps1 `
+            -Architecture Win32 `
+            -BuildRoot build/service-probe `
+            -OpenCoreRoot artifacts/open-core `
+            -Profile distribution/ini/Default.ini `
+            -OutputRoot artifacts/dwritecore-hook/x86
+          scripts/ci/Test-DWriteCoreHook.ps1 `
+            -Architecture x64 `
+            -BuildRoot build/service-probe `
+            -OpenCoreRoot artifacts/open-core `
+            -Profile distribution/ini/Default.ini `
+            -OutputRoot artifacts/dwritecore-hook/x64
       - name: Install, start, hook x86/x64 markers, stop, and remove isolated service
         shell: pwsh
         run: |
@@ -125,6 +162,18 @@ jobs:
         with:
           name: font-substitution-browser-evidence
           path: artifacts/font-substitution-browser
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: early-injection-relay-evidence
+          path: artifacts/early-injection-relay
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: dwritecore-hook-evidence
+          path: artifacts/dwritecore-hook
           if-no-files-found: warn
 
   windows-build:
@@ -358,7 +407,7 @@ jobs:
         shell: pwsh
         run: scripts/ci/Test-OpenServiceContract.ps1
       - name: Test browser font generation evidence
-        run: node --test tools/service-probe/tests/browser_font_evidence.test.mjs
+        run: node --test tools/service-probe/tests/browser_font_evidence.test.mjs tools/service-probe/tests/dwritecore_hook_contract.test.mjs tools/service-probe/tests/early_injection_relay_contract.test.mjs
       - name: Verify independent distribution provenance and translations
         shell: pwsh
         run: scripts/ci/Test-DistributionPolicy.ps1

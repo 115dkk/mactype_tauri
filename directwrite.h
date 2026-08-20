@@ -26,7 +26,8 @@
 #define HOOK_MANUALLY HOOK_DEFINE
 #define HOOK_DEFINE(rettype, name, argtype, arglist) \
 	extern rettype(WINAPI * ORIG_##name) argtype;  \
-	extern BOOL IsHooked_##name;
+	extern BOOL IsHooked_##name; \
+	extern rettype WINAPI REF_##name argtype;
 #include "hooklist.h"
 #undef HOOK_DEFINE
 #undef HOOK_MANUALLY
@@ -40,5 +41,16 @@
 
 #endif
 
-void ReleasePinnedRendererModules();
-void RestoreDirectWriteVtableHooks();
+enum class DirectWriteLifecycleStopPreparation : unsigned char
+{
+	prepared,
+	alreadyStopped,
+	unsafeToUnload,
+};
+
+void StartDirectWriteLifecycle();
+DirectWriteLifecycleStopPreparation PrepareDirectWriteLifecycleStop(
+	DWORD timeoutMilliseconds = 3000);
+void AbortDirectWriteLifecycleStop();
+bool CommitDirectWriteLifecycleStop(DWORD timeoutMilliseconds = 3000);
+bool RestoreDirectWriteVtableHooks(DWORD timeoutMilliseconds = 3000);

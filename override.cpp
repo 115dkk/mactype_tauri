@@ -2,6 +2,7 @@
 // 2006/09/27
 
 #include "override.h"
+#include "child_process_relay.h"
 #include "ft.h"
 #include "fteng.h"
 #include "supinfo.h"
@@ -263,6 +264,40 @@ BOOL WINAPI IMPL_CreateProcessInternalW( HANDLE hToken, LPCTSTR lpApplicationNam
 	CCriticalSectionLock __lock;
 	return _CreateProcessInternalW(hToken, lpApplicationName, lpCommandLine, lpProcessAttributes, lpThreadAttributes, bInheritHandles, dwCreationFlags, lpEnvironment, lpCurrentDirectory, lpStartupInfo, lpProcessInformation, hNewToken, ORIG_CreateProcessInternalW);
 }*/
+
+#ifdef USE_DETOURS
+BOOL WINAPI IMPL_CreateProcessInternalW(
+	HANDLE token,
+	LPCTSTR applicationName,
+	LPTSTR commandLine,
+	LPSECURITY_ATTRIBUTES processAttributes,
+	LPSECURITY_ATTRIBUTES threadAttributes,
+	BOOL inheritHandles,
+	DWORD creationFlags,
+	LPVOID environment,
+	LPCTSTR currentDirectory,
+	LPSTARTUPINFO startupInfo,
+	LPPROCESS_INFORMATION processInformation,
+	PHANDLE newToken)
+{
+	ChildProcessCreateCall const call{
+		token,
+		applicationName,
+		commandLine,
+		processAttributes,
+		threadAttributes,
+		inheritHandles,
+		creationFlags,
+		environment,
+		currentDirectory,
+		startupInfo,
+		processInformation,
+		newToken,
+	};
+	return ExecuteVerifiedChildInjection(call, ORIG_CreateProcessInternalW)
+		.ReturnToHookCaller();
+}
+#endif
 
 /*
 BOOL WINAPI IMPL_nCreateProcessA(LPCSTR lpApp, LPSTR lpCmd, LPSECURITY_ATTRIBUTES pa, LPSECURITY_ATTRIBUTES ta, BOOL bInherit, DWORD dwFlags, LPVOID lpEnv, LPCSTR lpDir, LPSTARTUPINFOA psi, LPPROCESS_INFORMATION ppi)

@@ -10,46 +10,62 @@ use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows_sys::Win32::System::SystemInformation::{
     IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_I386, IMAGE_FILE_MACHINE_UNKNOWN,
 };
+use windows_sys::Win32::System::SystemServices::{
+    PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY, PROCESS_MITIGATION_DYNAMIC_CODE_POLICY,
+};
 use windows_sys::Win32::System::Threading::{
-    GetExitCodeProcess, GetProcessInformation, GetProcessTimes, IsProcessCritical, IsWow64Process2,
-    OpenProcess, ProcessProtectionLevelInfo, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
-    PROCESS_PROTECTION_LEVEL_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROTECTION_LEVEL_NONE,
+    GetExitCodeProcess, GetProcessInformation, GetProcessMitigationPolicy, GetProcessTimes,
+    IsProcessCritical, IsWow64Process2, OpenProcess, ProcessDynamicCodePolicy,
+    ProcessProtectionLevelInfo, ProcessSignaturePolicy, QueryFullProcessImageNameW,
+    PROCESS_NAME_WIN32, PROCESS_PROTECTION_LEVEL_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION,
+    PROTECTION_LEVEL_NONE,
 };
 
-use crate::{ProcessArchitecture, ProcessIdentity, ProcessInspector, TargetLiveness};
+use crate::{
+    BinarySignaturePolicy, DynamicCodePolicy, InspectionEvidence, ProcessArchitecture,
+    ProcessIdentity, ProcessInspection, ProcessInspectionError, ProcessInspector, TargetLiveness,
+};
 
-pub struct WindowsProcessInspector {
-    service_pid: u32,
-}
+#[derive(Default)]
+pub struct WindowsProcessInspector;
 
 impl WindowsProcessInspector {
-    pub const fn new(service_pid: u32) -> Self {
-        Self { service_pid }
+    pub const fn new() -> Self {
+        Self
     }
 }
 
 impl ProcessInspector for WindowsProcessInspector {
-    fn inspect(&self, pid: u32) -> Result<ProcessIdentity, StructuredServiceError> {
+    fn inspect(&self, pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
         if pid == 0 {
-            return Err(service_error(
+            return Err(ProcessInspectionError::TargetUnavailable(service_error(
                 "process-identity-invalid",
                 "process ID zero cannot be inspected",
                 None,
-            ));
+            )));
         }
-        let process = OwnedHandle::open(pid)?;
-        let creation_time = process.creation_time()?;
-        let session_id = process.session_id(pid)?;
-        let architecture = process.architecture()?;
-        let protected = process.is_protected();
-        let excluded_from_injection = pid == self.service_pid || process.must_skip_injection();
-        Ok(ProcessIdentity {
-            pid,
-            creation_time,
-            session_id,
-            architecture,
-            protected,
-            critical: excluded_from_injection,
+        let process = OwnedHandle::open(pid).map_err(ProcessInspectionError::TargetUnavailable)?;
+        let creation_time = process
+            .creation_time()
+            .map_err(ProcessInspectionError::TargetUnavailable)?;
+        let session_id = process
+            .session_id(pid)
+            .map_err(ProcessInspectionError::TargetUnavailable)?;
+        let architecture = process
+            .architecture()
+            .map_err(ProcessInspectionError::TargetUnavailable)?;
+        Ok(ProcessInspection {
+            identity: ProcessIdentity {
+                pid,
+                creation_time,
+                session_id,
+                architecture,
+            },
+            image_name: process.image_name(),
+            protected: process.protection(),
+            critical: process.criticality(),
+            dynamic_code: process.dynamic_code_policy(),
+            binary_signature: process.binary_signature_policy(),
         })
     }
 
@@ -147,7 +163,7 @@ impl OwnedHandle {
         Some(exit_code != STILL_ACTIVE as u32)
     }
 
-    fn is_protected(&self) -> bool {
+    fn protection(&self) -> InspectionEvidence<bool> {
         let mut information = PROCESS_PROTECTION_LEVEL_INFORMATION::default();
         if unsafe {
             GetProcessInformation(
@@ -158,34 +174,74 @@ impl OwnedHandle {
             )
         } == 0
         {
-            return true;
+            return InspectionEvidence::Unavailable;
         }
-        information.ProtectionLevel != PROTECTION_LEVEL_NONE
+        InspectionEvidence::Known(information.ProtectionLevel != PROTECTION_LEVEL_NONE)
     }
 
-    fn must_skip_injection(&self) -> bool {
+    fn criticality(&self) -> InspectionEvidence<bool> {
         let mut critical = 0;
-        if unsafe { IsProcessCritical(self.0, &mut critical) } == 0 || critical != 0 {
-            return true;
+        if unsafe { IsProcessCritical(self.0, &mut critical) } == 0 {
+            return InspectionEvidence::Unavailable;
         }
-        self.image_name().as_deref().map_or(true, |name| {
-            is_important_windows_process(name) || is_installer_control_process(name)
+        InspectionEvidence::Known(critical != 0)
+    }
+
+    fn dynamic_code_policy(&self) -> InspectionEvidence<DynamicCodePolicy> {
+        let mut dynamic_code = PROCESS_MITIGATION_DYNAMIC_CODE_POLICY::default();
+        if unsafe {
+            GetProcessMitigationPolicy(
+                self.0,
+                ProcessDynamicCodePolicy,
+                (&mut dynamic_code as *mut PROCESS_MITIGATION_DYNAMIC_CODE_POLICY).cast(),
+                size_of::<PROCESS_MITIGATION_DYNAMIC_CODE_POLICY>(),
+            )
+        } == 0
+        {
+            return InspectionEvidence::Unavailable;
+        }
+        let flags = unsafe { dynamic_code.Anonymous.Flags };
+        InspectionEvidence::Known(DynamicCodePolicy {
+            prohibit_dynamic_code: flags & (1 << 0) != 0,
+            allow_thread_opt_out: flags & (1 << 1) != 0,
         })
     }
 
-    fn image_name(&self) -> Option<String> {
+    fn binary_signature_policy(&self) -> InspectionEvidence<BinarySignaturePolicy> {
+        let mut signature = PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY::default();
+        if unsafe {
+            GetProcessMitigationPolicy(
+                self.0,
+                ProcessSignaturePolicy,
+                (&mut signature as *mut PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY).cast(),
+                size_of::<PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY>(),
+            )
+        } == 0
+        {
+            return InspectionEvidence::Unavailable;
+        }
+        let flags = unsafe { signature.Anonymous.Flags };
+        InspectionEvidence::Known(BinarySignaturePolicy {
+            microsoft_signed_only: flags & (1 << 0) != 0,
+            store_signed_only: flags & (1 << 1) != 0,
+            mitigation_opt_in: flags & (1 << 2) != 0,
+        })
+    }
+
+    fn image_name(&self) -> InspectionEvidence<String> {
         let mut buffer = vec![0u16; 32_768];
         let mut length = buffer.len() as u32;
         if unsafe {
             QueryFullProcessImageNameW(self.0, PROCESS_NAME_WIN32, buffer.as_mut_ptr(), &mut length)
         } == 0
         {
-            return None;
+            return InspectionEvidence::Unavailable;
         }
         let path = OsString::from_wide(&buffer[..length as usize]);
         std::path::Path::new(&path)
             .file_name()
-            .map(|name| name.to_string_lossy().to_ascii_lowercase())
+            .map(|name| InspectionEvidence::Known(name.to_string_lossy().into_owned()))
+            .unwrap_or(InspectionEvidence::Unavailable)
     }
 }
 
@@ -214,35 +270,6 @@ impl Drop for OwnedHandle {
             CloseHandle(self.0);
         }
     }
-}
-
-fn is_important_windows_process(name: &str) -> bool {
-    matches!(
-        name,
-        "smss.exe"
-            | "csrss.exe"
-            | "wininit.exe"
-            | "winlogon.exe"
-            | "services.exe"
-            | "lsass.exe"
-            | "fontdrvhost.exe"
-    )
-}
-
-fn is_installer_control_process(name: &str) -> bool {
-    name == "mactype-service-setup.exe" || is_inno_uninstaller(name)
-}
-
-fn is_inno_uninstaller(name: &str) -> bool {
-    let Some((stem, extension)) = name.rsplit_once('.') else {
-        return false;
-    };
-    if !matches!(extension, "exe" | "tmp") {
-        return false;
-    }
-    let stem = stem.strip_prefix('_').unwrap_or(stem);
-    stem.strip_prefix("unins")
-        .is_some_and(|sequence| sequence.bytes().all(|character| character.is_ascii_digit()))
 }
 
 fn last_error(code: &str, message: &str) -> StructuredServiceError {
@@ -282,8 +309,8 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)]
     fn liveness_probe_distinguishes_a_running_process_from_a_reused_pid() {
-        let inspector = WindowsProcessInspector::new(0);
-        let own_identity = inspector.inspect(std::process::id()).unwrap();
+        let inspector = WindowsProcessInspector::new();
+        let own_identity = inspector.inspect(std::process::id()).unwrap().identity;
         assert_eq!(
             probe_windows_target_liveness(&own_identity),
             TargetLiveness::Alive
@@ -308,7 +335,10 @@ mod tests {
             .stderr(std::process::Stdio::null())
             .spawn()
             .unwrap();
-        let identity = WindowsProcessInspector::new(0).inspect(child.id()).unwrap();
+        let identity = WindowsProcessInspector::new()
+            .inspect(child.id())
+            .unwrap()
+            .identity;
         drop(child.stdin.take());
         child.wait().unwrap();
 
@@ -316,40 +346,5 @@ mod tests {
             probe_windows_target_liveness(&identity),
             TargetLiveness::Vanished
         );
-    }
-
-    #[test]
-    fn installer_control_processes_are_never_injection_targets() {
-        for name in [
-            "mactype-service-setup.exe",
-            "unins000.exe",
-            "unins000.tmp",
-            "_unins.tmp",
-            "_unins001.exe",
-            "_unins001.tmp",
-        ] {
-            assert!(
-                is_installer_control_process(name),
-                "installer control process was eligible for injection: {name}"
-            );
-            assert!(
-                !is_important_windows_process(name),
-                "installer control process leaked into the Windows system-process predicate: {name}"
-            );
-        }
-
-        for name in [
-            "mactype-service-setup.exe.disabled",
-            "uninstall-helper.exe",
-            "unison.exe",
-        ] {
-            assert!(
-                !is_installer_control_process(name),
-                "unrelated process was excluded by an over-broad name rule: {name}"
-            );
-        }
-
-        assert!(is_important_windows_process("services.exe"));
-        assert!(!is_installer_control_process("services.exe"));
     }
 }

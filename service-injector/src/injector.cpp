@@ -75,6 +75,35 @@ constexpr USHORT kExpectedMachine = IMAGE_FILE_MACHINE_I386;
     return process_value == IMAGE_FILE_MACHINE_UNKNOWN ? native_value : process_value;
 }
 
+[[nodiscard]] HookCompatibility hook_compatibility(HANDLE process,
+                                                   DWORD& error) noexcept {
+    PROCESS_MITIGATION_DYNAMIC_CODE_POLICY dynamic_code{};
+    const bool dynamic_code_query_succeeded =
+        GetProcessMitigationPolicy(process, ProcessDynamicCodePolicy, &dynamic_code,
+                                   sizeof(dynamic_code)) != FALSE;
+    if (!dynamic_code_query_succeeded) {
+        error = GetLastError();
+    }
+
+    PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY signature{};
+    const bool signature_query_succeeded =
+        GetProcessMitigationPolicy(process, ProcessSignaturePolicy, &signature,
+                                   sizeof(signature)) != FALSE;
+    if (!signature_query_succeeded && error == 0U) {
+        error = GetLastError();
+    }
+
+    return classify_hook_compatibility(HookCompatibilityEvidence{
+        dynamic_code_query_succeeded,
+        dynamic_code.ProhibitDynamicCode != 0U,
+        dynamic_code.AllowThreadOptOut != 0U,
+        signature_query_succeeded,
+        signature.MicrosoftSignedOnly != 0U,
+        signature.StoreSignedOnly != 0U,
+        signature.MitigationOptIn != 0U,
+    });
+}
+
 }  // namespace
 
 Result inject_fixed_adjacent_module(const BrokerRequest& request) noexcept {
@@ -149,6 +178,15 @@ Result inject_fixed_adjacent_module(const BrokerRequest& request) noexcept {
     if (*machine != kExpectedMachine) {
         return make_result(request, ResultStatus::skipped, "architecture-mismatch",
                            kFixedModuleNameUtf8);
+    }
+
+    DWORD mitigation_error = 0U;
+    const HookCompatibility compatibility =
+        hook_compatibility(process.get(), mitigation_error);
+    if (compatibility != HookCompatibility::compatible) {
+        return make_result(request, ResultStatus::skipped,
+                           hook_compatibility_code(compatibility),
+                           kFixedModuleNameUtf8, mitigation_error);
     }
 
     const auto module_path = fixed_module_path();

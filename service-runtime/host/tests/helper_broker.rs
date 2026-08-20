@@ -78,8 +78,6 @@ fn fixed_helper_broker_selects_architecture_and_emits_only_the_strict_cli_contra
             creation_time: 133_967_890_123_456_789,
             session_id: 2,
             architecture: ProcessArchitecture::X86,
-            protected: false,
-            critical: false,
         },
         generation_id: assets.generation_id().to_owned(),
     };
@@ -139,8 +137,6 @@ fn interrupted_helper_is_a_service_stop_cancellation() {
             creation_time: 100,
             session_id: 2,
             architecture: ProcessArchitecture::X64,
-            protected: false,
-            critical: false,
         },
         generation_id: assets.generation_id().to_owned(),
     });
@@ -165,8 +161,6 @@ fn before_resume_launch_failure_never_claims_unknown_target_cleanup() {
             creation_time: 100,
             session_id: 2,
             architecture: ProcessArchitecture::X64,
-            protected: false,
-            critical: false,
         },
         generation_id: assets.generation_id().to_owned(),
     });
@@ -192,8 +186,6 @@ fn post_resume_service_stop_is_terminal_cleanup_unknown() {
             creation_time: 100,
             session_id: 2,
             architecture: ProcessArchitecture::X64,
-            protected: false,
-            critical: false,
         },
         generation_id: assets.generation_id().to_owned(),
     });
@@ -218,8 +210,6 @@ fn absolute_helper_timeout_is_terminal_cleanup_unknown() {
             creation_time: 100,
             session_id: 2,
             architecture: ProcessArchitecture::X64,
-            protected: false,
-            critical: false,
         },
         generation_id: assets.generation_id().to_owned(),
     });
@@ -269,8 +259,6 @@ fn stop_requested_before_launch_prevents_a_new_helper_process() {
                 creation_time,
                 session_id: 1,
                 architecture: ProcessArchitecture::X64,
-                protected: false,
-                critical: false,
             },
             generation_id: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
                 .into(),
@@ -302,8 +290,6 @@ fn incomplete_remote_thread_cleanup_is_a_terminal_broker_result() {
             creation_time: 100,
             session_id: 2,
             architecture: ProcessArchitecture::X64,
-            protected: false,
-            critical: false,
         },
         generation_id: generation,
     });
@@ -333,8 +319,6 @@ fn explicit_post_injection_unknown_code_is_preserved_for_generation_health() {
             creation_time: 100,
             session_id: 2,
             architecture: ProcessArchitecture::X64,
-            protected: false,
-            critical: false,
         },
         generation_id: generation,
     });

@@ -5,6 +5,7 @@ EXPORTS
 ;	SafeUnload @3
 	CreateControlCenter @4
 	ReloadConfig @5
+	RelayChildProcess @6
 ;;	GdippInjectDLL
 ;	GdippInstallHook
 ;	GdippRemoveHook

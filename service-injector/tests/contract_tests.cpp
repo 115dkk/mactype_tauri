@@ -164,6 +164,65 @@ bool unknown_process_protection_is_rejected() {
            !protection_state_allows_injection(false, false);
 }
 
+bool incompatible_process_mitigations_are_classified_before_injection() {
+    using mactype::injector::HookCompatibility;
+    using mactype::injector::HookCompatibilityEvidence;
+    using mactype::injector::classify_hook_compatibility;
+    using mactype::injector::hook_compatibility_code;
+
+    const HookCompatibilityEvidence compatible{
+        true, false, false,
+        true, false, false, false,
+    };
+    const HookCompatibilityEvidence thread_opt_out{
+        true, true, true,
+        true, false, false, false,
+    };
+    const HookCompatibilityEvidence dynamic_code_blocked{
+        true, true, false,
+        true, false, false, false,
+    };
+    const HookCompatibilityEvidence microsoft_only{
+        true, false, false,
+        true, true, false, false,
+    };
+    const HookCompatibilityEvidence store_only{
+        true, false, false,
+        true, false, true, false,
+    };
+    const HookCompatibilityEvidence mitigation_opt_in{
+        true, false, false,
+        true, false, false, true,
+    };
+    const HookCompatibilityEvidence unavailable_but_not_explicitly_blocked{
+        false, false, false,
+        true, false, false, false,
+    };
+    const HookCompatibilityEvidence partially_observed_signature_block{
+        false, false, false,
+        true, true, false, false,
+    };
+
+    return classify_hook_compatibility(compatible) == HookCompatibility::compatible &&
+           classify_hook_compatibility(thread_opt_out) == HookCompatibility::compatible &&
+           classify_hook_compatibility(dynamic_code_blocked) ==
+               HookCompatibility::dynamic_code_prohibited &&
+           hook_compatibility_code(HookCompatibility::dynamic_code_prohibited) ==
+               "dynamic-code-policy-blocks-hooks" &&
+           classify_hook_compatibility(microsoft_only) ==
+               HookCompatibility::binary_signature_restricted &&
+           classify_hook_compatibility(store_only) ==
+               HookCompatibility::binary_signature_restricted &&
+           classify_hook_compatibility(mitigation_opt_in) ==
+               HookCompatibility::binary_signature_restricted &&
+           hook_compatibility_code(HookCompatibility::binary_signature_restricted) ==
+               "binary-signature-policy-blocks-module" &&
+           classify_hook_compatibility(unavailable_but_not_explicitly_blocked) ==
+               HookCompatibility::compatible &&
+           classify_hook_compatibility(partially_observed_signature_block) ==
+               HookCompatibility::binary_signature_restricted;
+}
+
 bool completed_remote_execution_is_cross_checked_against_module_inventory() {
     using mactype::injector::ModuleInventoryEvidence;
     using mactype::injector::RemoteCompletion;
@@ -290,6 +349,10 @@ int wmain() {
     if (!unknown_process_protection_is_rejected()) {
         std::cerr << "unknown process protection was allowed to inject\n";
         return 5;
+    }
+    if (!incompatible_process_mitigations_are_classified_before_injection()) {
+        std::cerr << "incompatible process mitigations were not classified\n";
+        return 10;
     }
     if (!malformed_or_missing_process_handle_is_rejected()) {
         std::cerr << "malformed or missing inherited process handle was accepted\n";

@@ -5,11 +5,12 @@ use std::time::Duration;
 
 use mactype_service_contract::StructuredServiceError;
 use mactype_service_host::{
-    initialize_process_orchestration, subscribe_process_creation, BrokerDisposition, BrokerResult,
-    InjectionBroker, InjectionRequest, ProcessArchitecture, ProcessEventSource, ProcessIdentity,
-    ProcessInspector, ProcessOrchestrator, ProcessOutcome, RetryPolicy, RetryScheduler,
-    SessionChange, TargetLiveness, MAX_TRACKED_PROCESS_RESULTS, PROCESS_CREATION_QUERY,
-    TARGET_VANISHED_RESULT_CODE,
+    initialize_process_orchestration, subscribe_process_creation, BinarySignaturePolicy,
+    BrokerDisposition, BrokerResult, DynamicCodePolicy, InjectionBroker, InjectionRequest,
+    InspectionEvidence, ProcessArchitecture, ProcessEventSource, ProcessIdentity,
+    ProcessInspection, ProcessInspectionError, ProcessInspector, ProcessOrchestrator,
+    ProcessOutcome, RetryPolicy, RetryScheduler, SessionChange, TargetLiveness,
+    MAX_TRACKED_PROCESS_RESULTS, PROCESS_CREATION_QUERY, TARGET_VANISHED_RESULT_CODE,
 };
 
 #[derive(Default)]
@@ -29,14 +30,14 @@ impl ProcessEventSource for RecordingEventSource {
 }
 
 #[test]
-fn observer_subscribes_with_the_exact_observed_temporary_wmi_query() {
+fn observer_subscribes_to_the_immediate_process_start_trace() {
     let mut source = RecordingEventSource::default();
 
     subscribe_process_creation(&mut source).unwrap();
 
     assert_eq!(
         PROCESS_CREATION_QUERY,
-        "SELECT * FROM __InstanceCreationEvent WITHIN 1 WHERE TargetInstance ISA 'Win32_Process'"
+        "SELECT * FROM Win32_ProcessStartTrace"
     );
     assert_eq!(source.query.as_deref(), Some(PROCESS_CREATION_QUERY));
 }
@@ -45,10 +46,37 @@ struct FixedInspector {
     identity: ProcessIdentity,
 }
 
+fn ordinary_inspection(identity: ProcessIdentity) -> ProcessInspection {
+    ProcessInspection {
+        identity,
+        image_name: InspectionEvidence::Known("ordinary.exe".to_owned()),
+        protected: InspectionEvidence::Known(false),
+        critical: InspectionEvidence::Known(false),
+        dynamic_code: InspectionEvidence::Known(DynamicCodePolicy {
+            prohibit_dynamic_code: false,
+            allow_thread_opt_out: false,
+        }),
+        binary_signature: InspectionEvidence::Known(BinarySignaturePolicy {
+            microsoft_signed_only: false,
+            store_signed_only: false,
+            mitigation_opt_in: false,
+        }),
+    }
+}
+
 impl ProcessInspector for FixedInspector {
-    fn inspect(&self, pid: u32) -> Result<ProcessIdentity, StructuredServiceError> {
+    fn inspect(&self, pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
         assert_eq!(pid, self.identity.pid);
-        Ok(self.identity.clone())
+        Ok(ordinary_inspection(self.identity.clone()))
+    }
+}
+
+struct InspectionInspector(ProcessInspection);
+
+impl ProcessInspector for InspectionInspector {
+    fn inspect(&self, pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
+        assert_eq!(pid, self.0.identity.pid);
+        Ok(self.0.clone())
     }
 }
 
@@ -75,8 +103,6 @@ fn process_identity_is_requeried_before_the_fixed_broker_request() {
         creation_time: 133_967_890_123_456_789,
         session_id: 2,
         architecture: ProcessArchitecture::X64,
-        protected: false,
-        critical: false,
     };
     let inspector = FixedInspector {
         identity: identity.clone(),
@@ -105,43 +131,52 @@ fn process_identity_is_requeried_before_the_fixed_broker_request() {
 
 #[test]
 fn session_zero_service_self_protected_and_critical_targets_are_skipped() {
-    for identity in [
-        ProcessIdentity {
-            pid: 900,
-            creation_time: 1,
-            session_id: 2,
-            architecture: ProcessArchitecture::X64,
-            protected: false,
-            critical: false,
-        },
-        ProcessIdentity {
-            pid: 42,
-            creation_time: 2,
-            session_id: 0,
-            architecture: ProcessArchitecture::X64,
-            protected: false,
-            critical: false,
-        },
-        ProcessIdentity {
-            pid: 43,
-            creation_time: 3,
-            session_id: 2,
-            architecture: ProcessArchitecture::X64,
-            protected: true,
-            critical: false,
-        },
-        ProcessIdentity {
-            pid: 44,
-            creation_time: 4,
-            session_id: 2,
-            architecture: ProcessArchitecture::X86,
-            protected: false,
-            critical: true,
-        },
-    ] {
-        let inspector = FixedInspector {
-            identity: identity.clone(),
-        };
+    let service_self = ProcessIdentity {
+        pid: 900,
+        creation_time: 1,
+        session_id: 2,
+        architecture: ProcessArchitecture::X64,
+    };
+    let broker = RecordingBroker::default();
+    let service_inspector = FixedInspector {
+        identity: service_self.clone(),
+    };
+    let mut orchestrator = ProcessOrchestrator::new(
+        900,
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        &service_inspector,
+        &broker,
+    );
+    assert_eq!(
+        orchestrator.handle_pid(service_self.pid).unwrap(),
+        ProcessOutcome::Skipped
+    );
+    assert!(broker.requests.lock().unwrap().is_empty());
+
+    let session_zero = ordinary_inspection(ProcessIdentity {
+        pid: 42,
+        creation_time: 2,
+        session_id: 0,
+        architecture: ProcessArchitecture::X64,
+    });
+    let mut protected = ordinary_inspection(ProcessIdentity {
+        pid: 43,
+        creation_time: 3,
+        session_id: 2,
+        architecture: ProcessArchitecture::X64,
+    });
+    protected.protected = InspectionEvidence::Known(true);
+    let mut critical = ordinary_inspection(ProcessIdentity {
+        pid: 44,
+        creation_time: 4,
+        session_id: 2,
+        architecture: ProcessArchitecture::X86,
+    });
+    critical.critical = InspectionEvidence::Known(true);
+
+    for inspection in [session_zero, protected, critical] {
+        let pid = inspection.identity.pid;
+        let inspector = InspectionInspector(inspection);
         let broker = RecordingBroker::default();
         let mut orchestrator = ProcessOrchestrator::new(
             900,
@@ -151,19 +186,83 @@ fn session_zero_service_self_protected_and_critical_targets_are_skipped() {
         );
 
         assert_eq!(
-            orchestrator.handle_pid(identity.pid).unwrap(),
+            orchestrator.handle_pid(pid).unwrap(),
             ProcessOutcome::Skipped
         );
         assert!(broker.requests.lock().unwrap().is_empty());
     }
 }
 
+struct InspectionSequenceInspector {
+    inspections: Mutex<VecDeque<ProcessInspection>>,
+}
+
+impl ProcessInspector for InspectionSequenceInspector {
+    fn inspect(&self, pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
+        let inspection = self.inspections.lock().unwrap().pop_front().unwrap();
+        assert_eq!(inspection.identity.pid, pid);
+        Ok(inspection)
+    }
+}
+
+#[test]
+fn an_explicit_hook_block_skips_only_that_process_without_latching_the_image_name() {
+    let mut blocked = ordinary_inspection(ProcessIdentity {
+        pid: 42,
+        creation_time: 100,
+        session_id: 2,
+        architecture: ProcessArchitecture::X64,
+    });
+    blocked.image_name = InspectionEvidence::Known("same-app.exe".to_owned());
+    blocked.dynamic_code = InspectionEvidence::Known(DynamicCodePolicy {
+        prohibit_dynamic_code: true,
+        allow_thread_opt_out: false,
+    });
+
+    let mut eligible = ordinary_inspection(ProcessIdentity {
+        pid: 43,
+        creation_time: 101,
+        session_id: 2,
+        architecture: ProcessArchitecture::X64,
+    });
+    eligible.image_name = InspectionEvidence::Known("same-app.exe".to_owned());
+
+    let inspector = InspectionSequenceInspector {
+        inspections: Mutex::new(VecDeque::from([blocked, eligible])),
+    };
+    let broker = RecordingBroker::default();
+    let mut orchestrator = ProcessOrchestrator::new(
+        900,
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        &inspector,
+        &broker,
+    );
+
+    assert_eq!(
+        orchestrator.handle_pid(42).unwrap(),
+        ProcessOutcome::Skipped
+    );
+    assert!(broker.requests.lock().unwrap().is_empty());
+    assert!(orchestrator.generation_health_error().is_none());
+
+    assert_eq!(
+        orchestrator.handle_pid(43).unwrap(),
+        ProcessOutcome::Injected
+    );
+    assert_eq!(
+        broker.requests.lock().unwrap()[0].identity.pid,
+        43,
+        "the explicit PID-local block must not become an image-wide ban"
+    );
+    assert!(orchestrator.generation_health_error().is_none());
+}
+
 struct FailingInspector {
-    error: StructuredServiceError,
+    error: ProcessInspectionError,
 }
 
 impl ProcessInspector for FailingInspector {
-    fn inspect(&self, _pid: u32) -> Result<ProcessIdentity, StructuredServiceError> {
+    fn inspect(&self, _pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
         Err(self.error.clone())
     }
 }
@@ -171,15 +270,13 @@ impl ProcessInspector for FailingInspector {
 struct MismatchedInspector;
 
 impl ProcessInspector for MismatchedInspector {
-    fn inspect(&self, _pid: u32) -> Result<ProcessIdentity, StructuredServiceError> {
-        Ok(ProcessIdentity {
+    fn inspect(&self, _pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
+        Ok(ordinary_inspection(ProcessIdentity {
             pid: 77,
             creation_time: 100,
             session_id: 2,
             architecture: ProcessArchitecture::X64,
-            protected: false,
-            critical: false,
-        })
+        }))
     }
 }
 
@@ -187,11 +284,11 @@ impl ProcessInspector for MismatchedInspector {
 fn unknown_inspector_failures_and_identity_mismatch_remain_errors_without_helper_retry() {
     let broker = RecordingBroker::default();
     let inspector = FailingInspector {
-        error: StructuredServiceError {
+        error: ProcessInspectionError::Infrastructure(StructuredServiceError {
             code: "inspector-infrastructure-failed".to_owned(),
             message: "the inspector adapter failed".to_owned(),
             win32_error: Some(1722),
-        },
+        }),
     };
     let mut orchestrator = ProcessOrchestrator::new(
         900,
@@ -220,10 +317,10 @@ struct SequenceInspector {
 }
 
 impl ProcessInspector for SequenceInspector {
-    fn inspect(&self, pid: u32) -> Result<ProcessIdentity, StructuredServiceError> {
+    fn inspect(&self, pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
         let identity = self.identities.lock().unwrap().pop_front().unwrap();
         assert_eq!(identity.pid, pid);
-        Ok(identity)
+        Ok(ordinary_inspection(identity))
     }
 }
 
@@ -234,8 +331,6 @@ fn duplicate_identity_is_suppressed_but_a_reused_pid_with_new_creation_time_is_p
         creation_time: 100,
         session_id: 2,
         architecture: ProcessArchitecture::X64,
-        protected: false,
-        critical: false,
     };
     let reused = ProcessIdentity {
         creation_time: 101,
@@ -298,8 +393,6 @@ fn retryable_helper_failures_use_bounded_exponential_backoff() {
         creation_time: 100,
         session_id: 2,
         architecture: ProcessArchitecture::X64,
-        protected: false,
-        critical: false,
     };
     let inspector = FixedInspector { identity };
     let broker = SequenceBroker {
@@ -361,8 +454,6 @@ fn each_explicitly_safe_transient_code_retries_the_same_process_identity() {
                 creation_time: 100,
                 session_id: 2,
                 architecture: ProcessArchitecture::X64,
-                protected: false,
-                critical: false,
             },
         };
         let broker = SequenceBroker {
@@ -425,8 +516,6 @@ fn only_explicitly_safe_transient_codes_can_retry_the_same_process_identity() {
                 creation_time: 100,
                 session_id: 2,
                 architecture: ProcessArchitecture::X64,
-                protected: false,
-                critical: false,
             },
         };
         let broker = SequenceBroker {
@@ -475,8 +564,6 @@ fn stop_or_shutdown_cancels_retry_without_another_helper_launch() {
             creation_time: 100,
             session_id: 2,
             architecture: ProcessArchitecture::X64,
-            protected: false,
-            critical: false,
         },
     };
     let broker = SequenceBroker {
@@ -510,8 +597,6 @@ fn exhausted_retry_records_the_last_bounded_process_result() {
         creation_time: 100,
         session_id: 2,
         architecture: ProcessArchitecture::X64,
-        protected: false,
-        critical: false,
     };
     let inspector = FixedInspector {
         identity: identity.clone(),
@@ -566,15 +651,13 @@ fn exhausted_retry_records_the_last_bounded_process_result() {
 struct IdentityFromPidInspector;
 
 impl ProcessInspector for IdentityFromPidInspector {
-    fn inspect(&self, pid: u32) -> Result<ProcessIdentity, StructuredServiceError> {
-        Ok(ProcessIdentity {
+    fn inspect(&self, pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
+        Ok(ordinary_inspection(ProcessIdentity {
             pid,
             creation_time: u64::from(pid),
             session_id: 2,
             architecture: ProcessArchitecture::X64,
-            protected: false,
-            critical: false,
-        })
+        }))
     }
 }
 
@@ -615,8 +698,6 @@ fn wts_logoff_clears_dedupe_state_for_that_session() {
         creation_time: 100,
         session_id: 2,
         architecture: ProcessArchitecture::X64,
-        protected: false,
-        critical: false,
     };
     let inspector = FixedInspector { identity };
     let broker = RecordingBroker::default();
@@ -654,8 +735,6 @@ fn session_queue_overflow_clears_all_dedupe_state() {
         creation_time: 100,
         session_id: 2,
         architecture: ProcessArchitecture::X64,
-        protected: false,
-        critical: false,
     };
     let inspector = FixedInspector { identity };
     let broker = RecordingBroker::default();
@@ -714,8 +793,6 @@ fn verified_late_success_records_generation_bound_telemetry() {
             creation_time: 100,
             session_id: 2,
             architecture: ProcessArchitecture::X64,
-            protected: false,
-            critical: false,
         },
     };
     let scheduler = RecordingScheduler::default();
@@ -754,8 +831,6 @@ fn service_stop_cancellation_is_not_retried_or_classified_as_degraded() {
             creation_time: 100,
             session_id: 2,
             architecture: ProcessArchitecture::X64,
-            protected: false,
-            critical: false,
         },
     };
     let broker = ServiceStopBroker;
@@ -783,8 +858,6 @@ fn post_resume_service_stop_is_terminal_and_degrades_its_generation() {
             creation_time: 100,
             session_id: 2,
             architecture: ProcessArchitecture::X64,
-            protected: false,
-            critical: false,
         },
     };
     let broker = SequenceBroker {
@@ -832,9 +905,9 @@ impl ProbingInspector {
 }
 
 impl ProcessInspector for ProbingInspector {
-    fn inspect(&self, pid: u32) -> Result<ProcessIdentity, StructuredServiceError> {
+    fn inspect(&self, pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
         assert_eq!(pid, self.identity.pid);
-        Ok(self.identity.clone())
+        Ok(ordinary_inspection(self.identity.clone()))
     }
 
     fn probe_target_liveness(&self, identity: &ProcessIdentity) -> TargetLiveness {
@@ -861,8 +934,6 @@ fn cleanup_unknown_for_a_vanished_target_is_a_trusted_skip_with_a_bounded_result
         creation_time: 100,
         session_id: 2,
         architecture: ProcessArchitecture::X64,
-        protected: false,
-        critical: false,
     };
     let inspector = ProbingInspector::new(identity.clone(), TargetLiveness::Vanished);
     let broker = cleanup_unknown_broker();
@@ -903,8 +974,6 @@ fn cleanup_unknown_for_a_target_still_alive_keeps_the_degraded_classification() 
         creation_time: 100,
         session_id: 2,
         architecture: ProcessArchitecture::X64,
-        protected: false,
-        critical: false,
     };
     let inspector = ProbingInspector::new(identity, TargetLiveness::Alive);
     let broker = cleanup_unknown_broker();
@@ -935,8 +1004,6 @@ fn undeterminable_liveness_after_cleanup_unknown_keeps_the_degraded_classificati
         creation_time: 100,
         session_id: 2,
         architecture: ProcessArchitecture::X64,
-        protected: false,
-        critical: false,
     };
     let inspector = ProbingInspector::new(identity, TargetLiveness::Unknown);
     let broker = cleanup_unknown_broker();
@@ -962,8 +1029,6 @@ fn terminal_results_without_cleanup_unknown_never_probe_target_liveness() {
         creation_time: 100,
         session_id: 2,
         architecture: ProcessArchitecture::X64,
-        protected: false,
-        critical: false,
     };
     let inspector = ProbingInspector::new(identity, TargetLiveness::Vanished);
     let broker = SequenceBroker {
@@ -998,8 +1063,6 @@ fn conflicting_mactype_module_is_terminal_deduplicated_and_process_local() {
             creation_time: 100,
             session_id: 2,
             architecture: ProcessArchitecture::X64,
-            protected: false,
-            critical: false,
         },
     };
     let broker = SequenceBroker {
@@ -1084,8 +1147,6 @@ fn runtime_is_ready_only_after_exact_subscription_and_both_helpers_are_verified(
                 creation_time: 100,
                 session_id: 2,
                 architecture: ProcessArchitecture::X64,
-                protected: false,
-                critical: false,
             },
         }),
         Box::new(broker),

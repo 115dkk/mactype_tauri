@@ -675,7 +675,7 @@ float _StrToFloat(LPCTSTR pStr, float fDefault)
 #undef isdigit
 }*/
 
-void HookD2DDll();
+void StartDirectWriteLifecycle();
 bool HookD2D1();
 void HookGdiplus();
 void ChangeFileName(LPWSTR lpSrc, int nSize, LPCWSTR lpNewFileName);

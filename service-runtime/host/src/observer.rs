@@ -2,8 +2,7 @@ use std::time::Duration;
 
 use mactype_service_contract::StructuredServiceError;
 
-pub const PROCESS_CREATION_QUERY: &str =
-    "SELECT * FROM __InstanceCreationEvent WITHIN 1 WHERE TargetInstance ISA 'Win32_Process'";
+pub const PROCESS_CREATION_QUERY: &str = "SELECT * FROM Win32_ProcessStartTrace";
 pub trait ProcessEventSource {
     fn subscribe(&mut self, query: &str) -> Result<(), StructuredServiceError>;
 
@@ -26,8 +25,6 @@ pub struct ProcessIdentity {
     pub creation_time: u64,
     pub session_id: u32,
     pub architecture: ProcessArchitecture,
-    pub protected: bool,
-    pub critical: bool,
 }
 
 /// How a previously verified injection target looked when it was re-checked
@@ -42,18 +39,6 @@ pub enum TargetLiveness {
     Vanished,
     /// Liveness could not be established either way.
     Unknown,
-}
-
-pub trait ProcessInspector {
-    fn inspect(&self, pid: u32) -> Result<ProcessIdentity, StructuredServiceError>;
-
-    /// Re-checks whether the exact verified identity still exists after a
-    /// terminal result that could not be trusted. The default cannot prove a
-    /// vanish, so callers keep their conservative classification.
-    fn probe_target_liveness(&self, identity: &ProcessIdentity) -> TargetLiveness {
-        let _ = identity;
-        TargetLiveness::Unknown
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -6,8 +6,9 @@ namespace mactype::service_probe::internal {
 namespace {
 
 constexpr DWORD kCleanupWaitMilliseconds = 5000;
-// The launcher is outside this job; only its child and grandchild can coexist.
-constexpr DWORD kMaximumJobProcesses = 2;
+// The launcher is outside this job. A mixed-architecture pre-entry relay adds
+// one short-lived rundll32 helper while the child and grandchild coexist.
+constexpr DWORD kMaximumJobProcesses = 3;
 
 struct HandleCloser {
   void operator()(HANDLE handle) const noexcept {

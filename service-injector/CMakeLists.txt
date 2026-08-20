@@ -35,7 +35,7 @@ target_compile_features(${_injector_target} PRIVATE cxx_std_20)
 target_compile_definitions(${_injector_target} PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_compile_options(${_injector_target} PRIVATE /W4 /WX /permissive- /utf-8 /EHsc /guard:cf)
 target_link_options(${_injector_target} PRIVATE ${_injector_link_options})
-target_include_directories(${_injector_target} PRIVATE include)
+target_include_directories(${_injector_target} PRIVATE include ../shared)
 
 add_executable(injector-contract-tests
   src/broker_request.cpp
@@ -47,7 +47,7 @@ add_executable(injector-contract-tests
 )
 target_compile_features(injector-contract-tests PRIVATE cxx_std_20)
 target_compile_options(injector-contract-tests PRIVATE /W4 /WX /permissive- /utf-8 /EHsc)
-target_include_directories(injector-contract-tests PRIVATE include)
+target_include_directories(injector-contract-tests PRIVATE include ../shared)
 
 if(BUILD_TESTING)
   add_test(NAME injector-contract-tests COMMAND injector-contract-tests)
@@ -132,7 +132,7 @@ if(BUILD_TESTING)
     /W4 /WX /permissive- /utf-8 /EHsc /guard:cf
   )
   target_link_options(injector-integration-helper PRIVATE ${_injector_link_options})
-  target_include_directories(injector-integration-helper PRIVATE include)
+  target_include_directories(injector-integration-helper PRIVATE include ../shared)
   set_target_properties(injector-integration-helper PROPERTIES
     OUTPUT_NAME "mactype-injector-integration"
   )
@@ -152,7 +152,7 @@ if(BUILD_TESTING)
     /W4 /WX /permissive- /utf-8 /EHsc /guard:cf
   )
   target_link_options(injector-timeout-helper PRIVATE ${_injector_link_options})
-  target_include_directories(injector-timeout-helper PRIVATE include)
+  target_include_directories(injector-timeout-helper PRIVATE include ../shared)
   set_target_properties(injector-timeout-helper PROPERTIES
     OUTPUT_NAME "mactype-injector-timeout"
   )

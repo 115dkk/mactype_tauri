@@ -31,7 +31,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "CMake configure failed with exit code $LASTEXITCODE"
 }
 
-& cmake --build $buildDirectory --config Release --target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests browser-launch-gate
+& cmake --build $buildDirectory --config Release --target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe
 if ($LASTEXITCODE -ne 0) {
     throw "CMake build failed with exit code $LASTEXITCODE"
 }

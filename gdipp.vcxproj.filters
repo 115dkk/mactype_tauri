@@ -60,6 +60,9 @@
     <ClCompile Include="directwrite.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="child_process_relay.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="directwrite_alias.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -136,6 +139,9 @@
     <ClInclude Include="settings.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="shared\hook_compatibility.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="stdint.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -152,6 +158,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="directwrite.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="child_process_relay.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="directwrite_alias.h">

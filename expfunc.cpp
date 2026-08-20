@@ -90,17 +90,29 @@ extern LONG g_bHookEnabled;
 //
 #define HOOK_MANUALLY(rettype, name, argtype, arglist) ;
 #define HOOK_DEFINE(rettype, name, argtype, arglist) \
-	transaction.Detach(reinterpret_cast<PVOID*>(&ORIG_##name), reinterpret_cast<PVOID>(IMPL_##name));
+	if (IsHooked_##name) transaction.Detach( \
+		reinterpret_cast<PVOID*>(&ORIG_##name), reinterpret_cast<PVOID>(REF_##name));
 LONG hook_term()
 {
 	renderer_raii::DetourTransaction transaction;
 
+#undef HOOK_MANUALLY
+#define HOOK_MANUALLY HOOK_DEFINE
 #include "hooklist.h"
+#undef HOOK_MANUALLY
+
 
 	LONG error = transaction.Commit();
 
 	if (error != NOERROR) {
 		TRACE(_T("hook_term error: %#x\n"), error);
+	} else {
+#define HOOK_MANUALLY HOOK_DEFINE
+#undef HOOK_DEFINE
+#define HOOK_DEFINE(rettype, name, argtype, arglist) IsHooked_##name = false;
+#include "hooklist.h"
+#undef HOOK_DEFINE
+#undef HOOK_MANUALLY
 	}
 	return error;
 }
@@ -152,16 +164,36 @@ EXTERN_C void SafeUnload()
 	while (CThreadCounter::Count())
 		Sleep(0);
 	auto lock = std::make_unique<CCriticalSectionLock>();
-	BOOL last;
-	if (last=InterlockedExchange(&g_bHookEnabled, FALSE)) {
-		RestoreDirectWriteVtableHooks();
+	BOOL const last = InterlockedExchange(&g_bHookEnabled, FALSE);
+	DirectWriteLifecycleStopPreparation const preparation =
+		PrepareDirectWriteLifecycleStop();
+	if (preparation == DirectWriteLifecycleStopPreparation::unsafeToUnload)
+	{
+		if (last)
+			InterlockedExchange(&g_bHookEnabled, last);
+		bInited = false;
+		lock.reset();
+		ExitThread(ERROR_BUSY);
+	}
+	if (last) {
 		if (hook_term()!=NOERROR)
 		{
+			if (preparation == DirectWriteLifecycleStopPreparation::prepared)
+				AbortDirectWriteLifecycleStop();
 			InterlockedExchange(&g_bHookEnabled, last);
 			bInited = false;
 			lock.reset();
 			ExitThread(ERROR_ACCESS_DENIED);
 		}
+	}
+	if (preparation == DirectWriteLifecycleStopPreparation::prepared &&
+		!CommitDirectWriteLifecycleStop())
+	{
+		// Detours are already detached, so keep the lifecycle stopped and all
+		// module references alive. A later SafeUnload call can retry the drain.
+		bInited = false;
+		lock.reset();
+		ExitThread(ERROR_BUSY);
 	}
 	lock.reset();
 	while (CThreadCounter::Count())
@@ -172,7 +204,6 @@ EXTERN_C void SafeUnload()
 		Sleep(10);
 	} while (CThreadCounter::Count());	//double check for xp
 
-	ReleasePinnedRendererModules();
 	bInited = false;
 	FreeLibraryAndExitThread(g_dllInstance, 0);
 }

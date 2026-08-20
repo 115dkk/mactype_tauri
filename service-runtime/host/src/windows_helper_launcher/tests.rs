@@ -31,8 +31,6 @@ fn current_process_invocation(
             creation_time: process_creation_time(process.get()).unwrap(),
             session_id: 1,
             architecture: crate::ProcessArchitecture::X64,
-            protected: false,
-            critical: false,
         },
         generation_id: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
             .to_owned(),

@@ -149,6 +149,10 @@ application-owned bitmap or glyph-atlas text may prevent injection or make
 font substitution irrelevant. The diagnostic output must distinguish these
 states from a successful hook that rendered the wrong font.
 
+The current upstream failure inventory, quiet per-process exclusion rule, and
+implemented compatibility paths are tracked in
+[`hooking-compatibility.md`](hooking-compatibility.md).
+
 Rebel Inc remains a local compatibility target because its licensed binaries
 cannot be redistributed in CI. Its test records process/module evidence and a
 repeatable visual capture, while noting that Unity assets may contain

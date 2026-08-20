@@ -1843,27 +1843,201 @@ void TriggerHook(ID2D1Factory* d2d_factory) {
 // 			CreateGlyphRunAnalysis<N>
 // 				IDWriteGlyphRunAnalysis
 // 					GetAlphaBlendParams
+enum class DirectWriteLifecyclePhase
+{
+	dormant,
+	active,
+	stopping,
+	stopped,
+};
+
+struct DirectWriteLifecycleState
+{
+	renderer_raii::UniqueModuleReference d2d1;
+	renderer_raii::UniqueModuleReference dwrite;
+	renderer_raii::UniqueModuleReference dwriteCore;
+	renderer_raii::UniqueHandle existingFactoryWorker;
+	renderer_raii::UniqueHandle dwriteCoreWorker;
+	renderer_raii::UniqueHandle cancelEvent;
+	std::vector<renderer_raii::UniqueHandle> diagnosticEvents;
+	std::mutex stateMutex;
+	std::mutex dwriteCoreHookMutex;
+	std::atomic<bool> dwriteCoreWorkerScheduled{false};
+	std::atomic<bool> stopping{false};
+	DirectWriteLifecyclePhase phase = DirectWriteLifecyclePhase::dormant;
+};
+
+static DirectWriteLifecycleState& GetDirectWriteLifecycleState()
+{
+	// The process owns this state. Explicit DLL unload releases its contained
+	// module references before FreeLibraryAndExitThread; process termination
+	// leaves the tiny state allocation to the OS to avoid FreeLibrary under the
+	// loader lock.
+	static DirectWriteLifecycleState* state = new DirectWriteLifecycleState;
+	return *state;
+}
+
+using DirectWriteFactoryFunction = HRESULT (WINAPI *)(
+	DWRITE_FACTORY_TYPE, REFIID, IUnknown**);
+
+static bool HookSharedDirectWriteFactory(
+	DirectWriteFactoryFunction createFactory,
+	WCHAR const* readyStage)
+{
+	if (createFactory == nullptr)
+		return false;
+	CComPtr<IUnknown> factory;
+	if (FAILED(createFactory(
+			DWRITE_FACTORY_TYPE_SHARED,
+			__uuidof(IDWriteFactory),
+			&factory)) || factory == nullptr)
+		return false;
+	IUnknown* rawFactory = factory;
+	bool const hooked = hookDirectWrite(&rawFactory);
+	if (hooked)
+		SignalDirectWriteDiagnostic(readyStage);
+	return hooked;
+}
+
+static bool IsDWriteCoreModule(HMODULE module)
+{
+	if (module == nullptr)
+		return false;
+	WCHAR modulePath[32'768]{};
+	DWORD const length = GetModuleFileNameW(
+		module, modulePath, static_cast<DWORD>(_countof(modulePath)));
+	if (length == 0 || length >= _countof(modulePath))
+		return false;
+	WCHAR const* const slash = wcsrchr(modulePath, L'\\');
+	WCHAR const* const name = slash == nullptr ? modulePath : slash + 1;
+	return _wcsicmp(name, L"DWriteCore.dll") == 0;
+}
+
+static bool HookDWriteCoreFactoryEntry(FARPROC factoryProcedure)
+{
+	if (factoryProcedure == nullptr)
+		return false;
+
+	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
+	std::lock_guard<std::mutex> lock(lifecycle.dwriteCoreHookMutex);
+	if (lifecycle.stopping.load(std::memory_order_acquire))
+		return false;
+	if (ISHOOKED(DWriteCoreCreateFactory))
+		return true;
+
+	SET_VAL(ORIG_DWriteCoreCreateFactory, factoryProcedure);
+	if (hook_demand_DWriteCoreCreateFactory() != NOERROR ||
+		!ISHOOKED(DWriteCoreCreateFactory))
+		return false;
+
+	HMODULE moduleReference = nullptr;
+	if (GetModuleHandleExW(
+			GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+			reinterpret_cast<LPCWSTR>(factoryProcedure),
+			&moduleReference))
+		lifecycle.dwriteCore.reset(moduleReference);
+	SignalDirectWriteDiagnostic(L"dwritecore-entry-hooked");
+	return true;
+}
+
+static bool HookLoadedDWriteCoreModule()
+{
+	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
+	if (lifecycle.stopping.load(std::memory_order_acquire))
+		return false;
+	HMODULE moduleReference = nullptr;
+	if (!GetModuleHandleExW(0, L"DWriteCore.dll", &moduleReference))
+		return false;
+	renderer_raii::UniqueModuleReference module(moduleReference);
+	FARPROC const factory = ORIG_GetProcAddress != nullptr
+		? ORIG_GetProcAddress(module.get(), "DWriteCoreCreateFactory")
+		: GetProcAddress(module.get(), "DWriteCoreCreateFactory");
+	if (!HookDWriteCoreFactoryEntry(factory))
+		return false;
+	return HookSharedDirectWriteFactory(
+		ORIG_DWriteCoreCreateFactory, L"dwritecore-hook-ready");
+}
+
+static DWORD WINAPI HookLoadedDWriteCoreWorker(LPVOID moduleReference)
+{
+	renderer_raii::UniqueModuleReference selfReference(
+		static_cast<HMODULE>(moduleReference));
+	HookLoadedDWriteCoreModule();
+	GetDirectWriteLifecycleState().dwriteCoreWorkerScheduled.store(
+		false, std::memory_order_release);
+	HMODULE const rawSelfReference = selfReference.release();
+	FreeLibraryAndExitThread(rawSelfReference, 0);
+	return 0;
+}
+
+static void ScheduleLoadedDWriteCoreHook()
+{
+	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
+	if (lifecycle.stopping.load(std::memory_order_acquire) ||
+		GetModuleHandleW(L"DWriteCore.dll") == nullptr ||
+		lifecycle.dwriteCoreWorkerScheduled.exchange(
+			true, std::memory_order_acq_rel))
+		return;
+
+	HMODULE moduleReference = nullptr;
+	if (!GetModuleHandleEx(
+			GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+			reinterpret_cast<LPCTSTR>(&HookLoadedDWriteCoreWorker),
+			&moduleReference))
+	{
+		lifecycle.dwriteCoreWorkerScheduled.store(false, std::memory_order_release);
+		return;
+	}
+	renderer_raii::UniqueModuleReference selfReference(moduleReference);
+	{
+		std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
+		if (lifecycle.stopping.load(std::memory_order_acquire))
+		{
+			lifecycle.dwriteCoreWorkerScheduled.store(false, std::memory_order_release);
+			return;
+		}
+		auto thread = renderer_raii::AdoptHandle(CreateThread(
+			nullptr, 0, HookLoadedDWriteCoreWorker, selfReference.get(),
+			CREATE_SUSPENDED, nullptr));
+		if (!thread)
+		{
+			lifecycle.dwriteCoreWorkerScheduled.store(false, std::memory_order_release);
+			return;
+		}
+		HANDLE const rawThread = thread.get();
+		HMODULE const rawSelfReference = selfReference.release();
+		lifecycle.dwriteCoreWorker = std::move(thread);
+		if (ResumeThread(rawThread) == static_cast<DWORD>(-1))
+		{
+			lifecycle.dwriteCoreWorker.reset();
+			FreeLibrary(rawSelfReference);
+			lifecycle.dwriteCoreWorkerScheduled.store(false, std::memory_order_release);
+		}
+	}
+}
+
 static DWORD WINAPI HookExistingDirectWriteFactory(LPVOID moduleReference)
 {
 	renderer_raii::UniqueModuleReference selfReference(
 		static_cast<HMODULE>(moduleReference));
-	bool sharedFactoryHooked = false;
-	CComPtr<IUnknown> factory;
-	if (ORIG_DWriteCreateFactory != nullptr &&
-		SUCCEEDED(ORIG_DWriteCreateFactory(
-			DWRITE_FACTORY_TYPE_SHARED,
-			__uuidof(IDWriteFactory),
-			&factory)))
-	{
-		IUnknown* rawFactory = factory;
-		sharedFactoryHooked = hookDirectWrite(&rawFactory);
-	}
+	// The launch gate may release the image-entry thread only after the
+	// shared factory's collection boundary is installed.
+	HookSharedDirectWriteFactory(ORIG_DWriteCreateFactory, L"hook-ready");
 
-	if (sharedFactoryHooked)
+	// DWriteCore can be an app-local Windows App SDK dependency loaded just
+	// before user entry. Keep a short startup watch in addition to the
+	// LoadLibraryExW hook so import-driven loads are covered too.
+	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
+	for (unsigned int attempt = 0;
+		 attempt != 100 && !HookLoadedDWriteCoreModule(); ++attempt)
 	{
-		// The launch gate may release the image-entry thread only after the
-		// shared factory's collection boundary is installed.
-		SignalDirectWriteDiagnostic(L"hook-ready");
+		if (lifecycle.stopping.load(std::memory_order_acquire))
+			break;
+		if (lifecycle.cancelEvent &&
+			WaitForSingleObject(lifecycle.cancelEvent.get(), 50) == WAIT_OBJECT_0)
+			break;
+		if (!lifecycle.cancelEvent)
+			Sleep(50);
 	}
 	HMODULE rawSelfReference = selfReference.release();
 	FreeLibraryAndExitThread(rawSelfReference, 0);
@@ -1872,25 +2046,45 @@ static DWORD WINAPI HookExistingDirectWriteFactory(LPVOID moduleReference)
 
 static void ScheduleExistingDirectWriteFactoryHook()
 {
+	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
+	if (lifecycle.stopping.load(std::memory_order_acquire))
+		return;
+	{
+		std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
+		if (lifecycle.existingFactoryWorker &&
+			WaitForSingleObject(lifecycle.existingFactoryWorker.get(), 0) == WAIT_TIMEOUT)
+			return;
+		lifecycle.existingFactoryWorker.reset();
+	}
 	HMODULE moduleReference = nullptr;
 	if (!GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
 		reinterpret_cast<LPCTSTR>(&HookExistingDirectWriteFactory),
 		&moduleReference))
 		return;
 	renderer_raii::UniqueModuleReference selfReference(moduleReference);
-	auto thread = renderer_raii::AdoptHandle(CreateThread(
-		nullptr, 0, HookExistingDirectWriteFactory, selfReference.get(), 0, nullptr));
-	if (thread) {
-		selfReference.release();
+	{
+		std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
+		if (lifecycle.stopping.load(std::memory_order_acquire) ||
+			(lifecycle.existingFactoryWorker &&
+			 WaitForSingleObject(
+				 lifecycle.existingFactoryWorker.get(), 0) == WAIT_TIMEOUT))
+			return;
+		lifecycle.existingFactoryWorker.reset();
+		auto thread = renderer_raii::AdoptHandle(CreateThread(
+			nullptr, 0, HookExistingDirectWriteFactory, selfReference.get(),
+			CREATE_SUSPENDED, nullptr));
+		if (thread) {
+			HANDLE const rawThread = thread.get();
+			HMODULE const rawSelfReference = selfReference.release();
+			lifecycle.existingFactoryWorker = std::move(thread);
+			if (ResumeThread(rawThread) == static_cast<DWORD>(-1))
+			{
+				lifecycle.existingFactoryWorker.reset();
+				FreeLibrary(rawSelfReference);
+			}
+		}
 	}
 }
-
-struct RendererModulePins
-{
-	renderer_raii::UniqueModuleReference d2d1;
-	renderer_raii::UniqueModuleReference dwrite;
-	std::vector<renderer_raii::UniqueHandle> diagnosticEvents;
-};
 
 static SRWLOCK g_directWriteDiagnosticLock = SRWLOCK_INIT;
 
@@ -1910,16 +2104,6 @@ public:
 	DirectWriteDiagnosticLock(const DirectWriteDiagnosticLock&) = delete;
 	DirectWriteDiagnosticLock& operator=(const DirectWriteDiagnosticLock&) = delete;
 };
-
-static RendererModulePins& GetRendererModulePins()
-{
-	// The process owns this state. Explicit DLL unload releases its contained
-	// module references before FreeLibraryAndExitThread; process termination
-	// leaves the tiny state allocation to the OS to avoid FreeLibrary under the
-	// loader lock.
-	static RendererModulePins* pins = new RendererModulePins;
-	return *pins;
-}
 
 static WCHAR const* GetDirectWriteDiagnosticRole() noexcept
 {
@@ -1949,7 +2133,7 @@ static void RetainDirectWriteDiagnosticEvent(WCHAR const* eventName)
 		return;
 
 	DirectWriteDiagnosticLock lock;
-	GetRendererModulePins().diagnosticEvents.emplace_back(std::move(event));
+	GetDirectWriteLifecycleState().diagnosticEvents.emplace_back(std::move(event));
 }
 
 static void SignalDirectWriteDiagnostic(WCHAR const* stage)
@@ -2008,20 +2192,127 @@ static void SignalDirectWriteFamilyDiagnostic(
 		SignalDirectWriteDiagnostic(stage);
 }
 
-void ReleasePinnedRendererModules()
+static bool WaitForLifecycleWorker(HANDLE worker, ULONGLONG deadline)
 {
-	directwrite_alias::ClearCache();
-	RendererModulePins& pins = GetRendererModulePins();
-	{
-		DirectWriteDiagnosticLock lock;
-		pins.diagnosticEvents.clear();
-	}
-	pins.dwrite.reset();
-	pins.d2d1.reset();
+	if (worker == nullptr)
+		return true;
+	ULONGLONG const now = GetTickCount64();
+	DWORD const remaining = now >= deadline ? 0 : static_cast<DWORD>(deadline - now);
+	return WaitForSingleObject(worker, remaining) == WAIT_OBJECT_0;
 }
 
-void HookD2DDll()
+DirectWriteLifecycleStopPreparation PrepareDirectWriteLifecycleStop(
+	DWORD timeoutMilliseconds)
 {
+	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
+	HANDLE existingWorker = nullptr;
+	HANDLE coreWorker = nullptr;
+	{
+		std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
+		if (lifecycle.phase == DirectWriteLifecyclePhase::dormant ||
+			lifecycle.phase == DirectWriteLifecyclePhase::stopped)
+			return DirectWriteLifecycleStopPreparation::alreadyStopped;
+		if (lifecycle.phase != DirectWriteLifecyclePhase::stopping)
+		{
+			lifecycle.phase = DirectWriteLifecyclePhase::stopping;
+			lifecycle.stopping.store(true, std::memory_order_release);
+			if (lifecycle.cancelEvent)
+				SetEvent(lifecycle.cancelEvent.get());
+		}
+		existingWorker = lifecycle.existingFactoryWorker.get();
+		coreWorker = lifecycle.dwriteCoreWorker.get();
+	}
+
+	ULONGLONG const deadline = GetTickCount64() + timeoutMilliseconds;
+	if (!WaitForLifecycleWorker(existingWorker, deadline) ||
+		!WaitForLifecycleWorker(coreWorker, deadline))
+	{
+		AbortDirectWriteLifecycleStop();
+		return DirectWriteLifecycleStopPreparation::unsafeToUnload;
+	}
+	return DirectWriteLifecycleStopPreparation::prepared;
+}
+
+void AbortDirectWriteLifecycleStop()
+{
+	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
+	bool shouldResumeStartupWatch = false;
+	{
+		std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
+		if (lifecycle.phase != DirectWriteLifecyclePhase::stopping)
+			return;
+		if (lifecycle.existingFactoryWorker &&
+			WaitForSingleObject(lifecycle.existingFactoryWorker.get(), 0) == WAIT_OBJECT_0)
+			lifecycle.existingFactoryWorker.reset();
+		if (lifecycle.dwriteCoreWorker &&
+			WaitForSingleObject(lifecycle.dwriteCoreWorker.get(), 0) == WAIT_OBJECT_0)
+			lifecycle.dwriteCoreWorker.reset();
+		if (lifecycle.cancelEvent)
+			ResetEvent(lifecycle.cancelEvent.get());
+		lifecycle.stopping.store(false, std::memory_order_release);
+		lifecycle.phase = DirectWriteLifecyclePhase::active;
+		shouldResumeStartupWatch = !lifecycle.existingFactoryWorker;
+	}
+	if (shouldResumeStartupWatch && !ISHOOKED(DWriteCoreCreateFactory))
+		ScheduleExistingDirectWriteFactoryHook();
+}
+
+bool CommitDirectWriteLifecycleStop(DWORD timeoutMilliseconds)
+{
+	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
+	{
+		std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
+		if (lifecycle.phase != DirectWriteLifecyclePhase::stopping)
+			return lifecycle.phase == DirectWriteLifecyclePhase::stopped ||
+				lifecycle.phase == DirectWriteLifecyclePhase::dormant;
+	}
+	if (!RestoreDirectWriteVtableHooks(timeoutMilliseconds))
+		return false;
+	directwrite_alias::ClearCache();
+	{
+		DirectWriteDiagnosticLock lock;
+		lifecycle.diagnosticEvents.clear();
+	}
+	std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
+	lifecycle.existingFactoryWorker.reset();
+	lifecycle.dwriteCoreWorker.reset();
+	lifecycle.cancelEvent.reset();
+	lifecycle.dwriteCore.reset();
+	lifecycle.dwrite.reset();
+	lifecycle.d2d1.reset();
+	lifecycle.dwriteCoreWorkerScheduled.store(false, std::memory_order_release);
+	lifecycle.phase = DirectWriteLifecyclePhase::stopped;
+	return true;
+}
+
+static renderer_raii::BorrowedModule PinOrLoadRendererModule(
+	WCHAR const* name,
+	renderer_raii::UniqueModuleReference& pin)
+{
+	HMODULE module = nullptr;
+	if (GetModuleHandleExW(0, name, &module))
+		pin.reset(module);
+	else
+		pin.reset(LoadLibraryW(name));
+	return renderer_raii::BorrowedModule(pin.get());
+}
+
+void StartDirectWriteLifecycle()
+{
+	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
+	{
+		std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
+		if (lifecycle.phase == DirectWriteLifecyclePhase::active ||
+			lifecycle.phase == DirectWriteLifecyclePhase::stopping)
+			return;
+		if (!lifecycle.cancelEvent)
+			lifecycle.cancelEvent = renderer_raii::AdoptHandle(
+				CreateEventW(nullptr, TRUE, FALSE, nullptr));
+		else
+			ResetEvent(lifecycle.cancelEvent.get());
+		lifecycle.stopping.store(false, std::memory_order_release);
+		lifecycle.phase = DirectWriteLifecyclePhase::active;
+	}
 	SignalDirectWriteDiagnostic(L"hook-entered");
 	typedef HRESULT (WINAPI *PFN_DWriteCreateFactory)(
 		_In_ DWRITE_FACTORY_TYPE factoryType,
@@ -2039,20 +2330,10 @@ void HookD2DDll()
 #ifdef DEBUG
 	//MessageBox(0, L"HookD2DDll", nullptr, MB_OK);
 #endif
-	renderer_raii::BorrowedModule d2d1(GetModuleHandle(_T("d2d1.dll")));
-	renderer_raii::BorrowedModule dw(GetModuleHandle(_T("dwrite.dll")));
-	RendererModulePins& pins = GetRendererModulePins();
-
-	if (!d2d1)
-	{
-		pins.d2d1.reset(LoadLibrary(_T("d2d1.dll")));
-		d2d1 = renderer_raii::BorrowedModule(pins.d2d1.get());
-	}
-	if (!dw)
-	{
-		pins.dwrite.reset(LoadLibrary(_T("dwrite.dll")));
-		dw = renderer_raii::BorrowedModule(pins.dwrite.get());
-	}
+	renderer_raii::BorrowedModule d2d1 = PinOrLoadRendererModule(
+		L"d2d1.dll", lifecycle.d2d1);
+	renderer_raii::BorrowedModule dw = PinOrLoadRendererModule(
+		L"dwrite.dll", lifecycle.dwrite);
 	if (!d2d1 || !dw) {
 		return;
 	}
@@ -2060,12 +2341,26 @@ void HookD2DDll()
 	void* D2D1Device = GetProcAddress(d2d1.get(), "D2D1CreateDevice");
 	void* D2D1Context = GetProcAddress(d2d1.get(), "D2D1CreateDeviceContext");
 	void* DWFactory = GetProcAddress(dw.get(), "DWriteCreateFactory");
+	HMODULE const kernelBase = GetModuleHandleW(L"kernelbase.dll");
+	void* const loadLibraryEx = kernelBase == nullptr ? nullptr :
+		GetProcAddress(kernelBase, "LoadLibraryExW");
+	HMODULE const kernel32 = GetModuleHandleW(L"kernel32.dll");
+	void* const getProcAddress = kernel32 == nullptr ? nullptr :
+		GetProcAddress(kernel32, "GetProcAddress");
 	SET_VAL(ORIG_D2D1CreateFactory, D2D1Factory);
 	SET_VAL(ORIG_D2D1CreateDevice, D2D1Device);
 	SET_VAL(ORIG_D2D1CreateDeviceContext, D2D1Context);
 	SET_VAL(ORIG_DWriteCreateFactory, DWFactory);
+	SET_VAL(ORIG_LoadLibraryExW, loadLibraryEx);
+	SET_VAL(ORIG_GetProcAddress, getProcAddress);
 	if (DWFactory) {
 		hook_demand_DWriteCreateFactory();
+	}
+	if (loadLibraryEx) {
+		hook_demand_LoadLibraryExW();
+	}
+	if (getProcAddress) {
+		hook_demand_GetProcAddress();
 	}
 	if (D2D1Factory){
 		hook_demand_D2D1CreateFactory();
@@ -2354,12 +2649,57 @@ HRESULT WINAPI IMPL_CreateTextFormat(
 		textFormat);
 }
 
-void RestoreDirectWriteVtableHooks()
+bool RestoreDirectWriteVtableHooks(DWORD timeoutMilliseconds)
 {
+	if (!HCounter::wait(static_cast<int>(timeoutMilliseconds)))
+		return false;
 	RestoreFactoryAliasVtables();
-	HCounter::wait(3000);
 	ClearFactoryAliasSources();
 	directwrite_alias::ClearCache();
+	return true;
+}
+
+HRESULT WINAPI IMPL_DWriteCoreCreateFactory(
+	__in DWRITE_FACTORY_TYPE factoryType,
+	__in REFIID iid,
+	__out IUnknown **factory)
+{
+	HRESULT const result = ORIG_DWriteCoreCreateFactory(factoryType, iid, factory);
+	if (SUCCEEDED(result) && hookDirectWrite(factory))
+		SignalDirectWriteDiagnostic(L"dwritecore-hook-ready");
+	return result;
+}
+
+HMODULE WINAPI IMPL_LoadLibraryExW(
+	__in LPCWSTR fileName,
+	__reserved HANDLE file,
+	__in DWORD flags)
+{
+	HMODULE const module = ORIG_LoadLibraryExW(fileName, file, flags);
+	if (IsDWriteCoreModule(module))
+		ScheduleLoadedDWriteCoreHook();
+	return module;
+}
+
+FARPROC WINAPI IMPL_GetProcAddress(
+	__in HMODULE module,
+	__in LPCSTR procedureName)
+{
+	FARPROC const procedure = ORIG_GetProcAddress(module, procedureName);
+	if (procedure == nullptr ||
+		reinterpret_cast<ULONG_PTR>(procedureName) <= 0xffff ||
+		strcmp(procedureName, "DWriteCoreCreateFactory") != 0)
+		return procedure;
+
+	if (!IsDWriteCoreModule(module))
+		return procedure;
+
+	// Install the entry detour synchronously, then preserve GetProcAddress's
+	// contract by returning the module's real export address. Returning a
+	// MacType implementation address would leave callers holding a pointer into
+	// this DLL after an explicit unload.
+	HookDWriteCoreFactoryEntry(procedure);
+	return procedure;
 }
 
 void WINAPI IMPL_D2D1RenderTarget_DrawGlyphRun1(

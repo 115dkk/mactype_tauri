@@ -12,15 +12,25 @@ use windows::Win32::System::Rpc::{RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE};
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::System::Wmi::{
     IEnumWbemClassObject, IWbemClassObject, IWbemLocator, IWbemServices, WbemLocator,
-    WBEM_FLAG_FORWARD_ONLY, WBEM_FLAG_RETURN_IMMEDIATELY, WBEM_S_TIMEDOUT,
+    WBEM_E_ACCESS_DENIED, WBEM_E_INVALID_CLASS, WBEM_FLAG_FORWARD_ONLY,
+    WBEM_FLAG_RETURN_IMMEDIATELY, WBEM_S_TIMEDOUT,
 };
 
 use crate::ProcessEventSource;
 
 const PROCESS_SNAPSHOT_QUERY: &str = "SELECT ProcessID FROM Win32_Process";
+const FALLBACK_PROCESS_CREATION_QUERY: &str =
+    "SELECT * FROM __InstanceCreationEvent WITHIN 1 WHERE TargetInstance ISA 'Win32_Process'";
+
+#[derive(Clone, Copy)]
+enum ProcessEventKind {
+    StartTrace,
+    IntrinsicCreation,
+}
 
 pub struct WmiProcessEventSource {
     enumerator: Option<IEnumWbemClassObject>,
+    event_kind: Option<ProcessEventKind>,
     services: IWbemServices,
     _apartment: ComApartment,
 }
@@ -78,6 +88,7 @@ impl WmiProcessEventSource {
         })?;
         Ok(Self {
             enumerator: None,
+            event_kind: None,
             services,
             _apartment: apartment,
         })
@@ -87,18 +98,43 @@ impl WmiProcessEventSource {
 impl ProcessEventSource for WmiProcessEventSource {
     fn subscribe(&mut self, query: &str) -> Result<(), StructuredServiceError> {
         let flags = WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY;
-        let enumerator = unsafe {
+        let trace = unsafe {
             self.services
                 .ExecNotificationQuery(&BSTR::from("WQL"), &BSTR::from(query), flags, None)
-        }
-        .map_err(|error| {
-            com_error(
-                "wmi-subscription-failed",
-                "the temporary Win32_Process creation subscription failed",
-                error,
-            )
-        })?;
+        };
+        let (enumerator, event_kind) = match trace {
+            Ok(enumerator) => (enumerator, ProcessEventKind::StartTrace),
+            Err(error)
+                if error.code().0 == WBEM_E_ACCESS_DENIED.0
+                    || error.code().0 == WBEM_E_INVALID_CLASS.0 =>
+            {
+                let fallback = unsafe {
+                    self.services.ExecNotificationQuery(
+                        &BSTR::from("WQL"),
+                        &BSTR::from(FALLBACK_PROCESS_CREATION_QUERY),
+                        flags,
+                        None,
+                    )
+                }
+                .map_err(|fallback_error| {
+                    com_error(
+                        "wmi-subscription-failed",
+                        "both immediate and fallback process creation subscriptions failed",
+                        fallback_error,
+                    )
+                })?;
+                (fallback, ProcessEventKind::IntrinsicCreation)
+            }
+            Err(error) => {
+                return Err(com_error(
+                    "wmi-subscription-failed",
+                    "the immediate process creation subscription failed",
+                    error,
+                ));
+            }
+        };
         self.enumerator = Some(enumerator);
+        self.event_kind = Some(event_kind);
         Ok(())
     }
 
@@ -180,11 +216,33 @@ impl ProcessEventSource for WmiProcessEventSource {
                 None,
             )
         })?;
-        extract_process_id(&event).map(Some)
+        match self.event_kind {
+            Some(ProcessEventKind::StartTrace) => extract_process_id(&event).map(Some),
+            Some(ProcessEventKind::IntrinsicCreation) => {
+                extract_intrinsic_process_id(&event).map(Some)
+            }
+            None => Err(service_error(
+                "wmi-not-subscribed",
+                "the WMI process observer has no event shape",
+                None,
+            )),
+        }
     }
 }
 
 fn extract_process_id(event: &IWbemClassObject) -> Result<u32, StructuredServiceError> {
+    let pid = extract_process_id_property(event)?;
+    if pid == 0 {
+        return Err(service_error(
+            "wmi-event-invalid",
+            "the WMI process event ProcessID is zero",
+            None,
+        ));
+    }
+    Ok(pid)
+}
+
+fn extract_intrinsic_process_id(event: &IWbemClassObject) -> Result<u32, StructuredServiceError> {
     let mut target = VARIANT::default();
     unsafe {
         event.Get(
@@ -198,21 +256,21 @@ fn extract_process_id(event: &IWbemClassObject) -> Result<u32, StructuredService
     .map_err(|error| {
         com_error(
             "wmi-event-invalid",
-            "the WMI process event has no TargetInstance",
+            "the fallback WMI process event has no TargetInstance",
             error,
         )
     })?;
     let unknown = IUnknown::try_from(&target).map_err(|error| {
         com_error(
             "wmi-event-invalid",
-            "the WMI process event TargetInstance is not an object",
+            "the fallback WMI TargetInstance is not an object",
             error,
         )
     })?;
     let target: IWbemClassObject = unknown.cast().map_err(|error| {
         com_error(
             "wmi-event-invalid",
-            "the WMI process event TargetInstance is not a Win32_Process object",
+            "the fallback WMI TargetInstance is not a Win32_Process object",
             error,
         )
     })?;
@@ -220,7 +278,7 @@ fn extract_process_id(event: &IWbemClassObject) -> Result<u32, StructuredService
     if pid == 0 {
         return Err(service_error(
             "wmi-event-invalid",
-            "the WMI process event ProcessID is zero",
+            "the fallback WMI process event ProcessID is zero",
             None,
         ));
     }

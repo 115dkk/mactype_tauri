@@ -46,7 +46,7 @@ pub use named_pipe::{NamedPipeHealthPublisher, HEALTH_PIPE_SECURITY_SDDL};
 pub type ProcessOrchestrator<'a> = InjectionOrchestrator<'a>;
 pub use observer::{
     subscribe_process_creation, BrokerDisposition, BrokerResult, InjectionBroker, InjectionRequest,
-    ProcessArchitecture, ProcessEventSource, ProcessIdentity, ProcessInspector, TargetLiveness,
+    ProcessArchitecture, ProcessEventSource, ProcessIdentity, TargetLiveness,
     PROCESS_CREATION_QUERY,
 };
 pub use orchestration_runtime::initialize_process_orchestration;
@@ -58,7 +58,11 @@ pub use runtime::{
 pub use runtime_assets::ProtectedRuntimeAssets;
 pub use startup_safety::{LegacyServiceRuntimeState, StartupSafetySnapshot};
 pub use status::{ScmState, ServiceStatus, StatusReporter, SERVICE_STOP_WAIT_HINT_MS};
-pub use target_validation::{ProcessTargetDecision, ProcessTargetValidator};
+pub use target_validation::{
+    BinarySignaturePolicy, DynamicCodePolicy, InspectionEvidence, ProcessInspection,
+    ProcessInspectionError, ProcessInspector, ProcessSkipReason, ProcessTargetDecision,
+    ProcessTargetValidator,
+};
 #[cfg(windows)]
 pub use windows_helper_launcher::WindowsHelperLauncher;
 #[cfg(windows)]

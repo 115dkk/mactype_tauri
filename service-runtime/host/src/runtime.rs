@@ -20,6 +20,10 @@ pub trait StopSignal: Send + Sync {
         self.wait().map(|()| true)
     }
 
+    fn stop_requested(&self) -> bool {
+        false
+    }
+
     fn take_session_change(&self) -> Option<crate::SessionChange> {
         None
     }

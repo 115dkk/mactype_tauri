@@ -149,6 +149,10 @@ impl StopSignal for Win32StopSignal {
         }
     }
 
+    fn stop_requested(&self) -> bool {
+        matches!(self.wait_timeout(Duration::ZERO), Ok(true))
+    }
+
     fn take_session_change(&self) -> Option<SessionChange> {
         SESSION_CHANGES.pop()
     }

@@ -17,6 +17,7 @@ const PROFILE: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 struct RecorderState {
     events: Vec<String>,
     reports: Vec<HealthReport>,
+    statuses: Vec<ServiceStatus>,
 }
 
 #[derive(Default)]
@@ -25,25 +26,28 @@ struct Recorder {
 }
 
 impl Recorder {
-    fn record(&self, event: String, report: Option<&HealthReport>) {
+    fn record(&self, event: String, report: Option<&HealthReport>, status: Option<ServiceStatus>) {
         let mut state = self.state.lock().unwrap();
         state.events.push(event);
         if let Some(report) = report {
             state.reports.push(report.clone());
+        }
+        if let Some(status) = status {
+            state.statuses.push(status);
         }
     }
 }
 
 impl StatusReporter for Recorder {
     fn report(&self, status: ServiceStatus) -> io::Result<()> {
-        self.record(format!("scm:{:?}", status.state), None);
+        self.record(format!("scm:{:?}", status.state), None, Some(status));
         Ok(())
     }
 }
 
 impl HealthPublisher for Recorder {
     fn publish(&self, report: &HealthReport) -> io::Result<()> {
-        self.record(format!("health:{:?}", report.health), Some(report));
+        self.record(format!("health:{:?}", report.health), Some(report), None);
         Ok(())
     }
 }
@@ -385,6 +389,119 @@ fn stop_statuses_are_nonzero_checkpoint_only_while_pending() {
     assert_eq!(stop.checkpoint, 2);
     assert_eq!(ServiceStatus::running().checkpoint, 0);
     assert_eq!(ServiceStatus::stopped().checkpoint, 0);
+}
+
+struct FailingDriver {
+    wait_for_stop: bool,
+}
+
+impl RuntimeDriver for FailingDriver {
+    fn run(
+        &mut self,
+        stop: &dyn StopSignal,
+        _health: &dyn RuntimeHealthReporter,
+    ) -> Result<(), StructuredServiceError> {
+        if self.wait_for_stop {
+            stop.wait()?;
+        }
+        Err(StructuredServiceError {
+            code: "driver-wind-down-failed".to_owned(),
+            message: "the runtime driver failed while winding down".to_owned(),
+            win32_error: Some(31),
+        })
+    }
+}
+
+struct FailingDriverInitializer {
+    wait_for_stop: bool,
+}
+
+impl RuntimeInitializer for FailingDriverInitializer {
+    fn initialize(&self) -> Result<InitializedRuntime, StructuredServiceError> {
+        Ok(InitializedRuntime::driven(
+            Some(PROFILE.to_owned()),
+            ReadinessReport::ready(),
+            Box::new(FailingDriver {
+                wait_for_stop: self.wait_for_stop,
+            }),
+        ))
+    }
+}
+
+#[derive(Default)]
+struct RequestedStop {
+    requested: AtomicBool,
+}
+
+impl StopSignal for RequestedStop {
+    fn wait(&self) -> Result<(), StructuredServiceError> {
+        self.requested.store(true, Ordering::Release);
+        Ok(())
+    }
+
+    fn stop_requested(&self) -> bool {
+        self.requested.load(Ordering::Acquire)
+    }
+}
+
+#[test]
+fn driver_error_after_requested_stop_reports_clean_stop_with_terminal_error() {
+    let recorder = Recorder::default();
+
+    ServiceRuntime::new("0.2.0")
+        .run(
+            &recorder,
+            &recorder,
+            &FailingDriverInitializer {
+                wait_for_stop: true,
+            },
+            &RequestedStop::default(),
+        )
+        .unwrap();
+
+    let state = recorder.state.lock().unwrap();
+    assert_eq!(state.statuses.last(), Some(&ServiceStatus::stopped()));
+    assert_eq!(state.statuses.last().unwrap().win32_exit_code, 0);
+    assert_eq!(state.statuses.last().unwrap().service_specific_exit_code, 0);
+    let terminal = state.reports.last().unwrap();
+    assert_eq!(terminal.health, HealthState::Unknown);
+    assert_eq!(
+        terminal.last_error,
+        Some(StructuredServiceError {
+            code: "driver-wind-down-failed".to_owned(),
+            message: "the runtime driver failed while winding down".to_owned(),
+            win32_error: Some(31),
+        })
+    );
+    assert!(terminal.validate().is_ok());
+}
+
+#[test]
+fn driver_error_without_requested_stop_reports_failure() {
+    let recorder = Recorder::default();
+
+    assert!(ServiceRuntime::new("0.2.0")
+        .run(
+            &recorder,
+            &recorder,
+            &FailingDriverInitializer {
+                wait_for_stop: false,
+            },
+            &ImmediateStop,
+        )
+        .is_err());
+
+    let state = recorder.state.lock().unwrap();
+    let failure = state.reports.last().unwrap();
+    assert_eq!(failure.health, HealthState::Failed);
+    assert_eq!(
+        failure.last_error.as_ref().unwrap().code,
+        "driver-wind-down-failed"
+    );
+    assert_eq!(
+        state.statuses.last(),
+        Some(&ServiceStatus::stopped_with_error(1066, 1))
+    );
 }
 
 struct RecordingDriver {

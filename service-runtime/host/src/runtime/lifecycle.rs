@@ -97,10 +97,14 @@ impl ServiceRuntime<'_> {
             Some(driver) => driver.run(stop, &runtime_health),
             None => stop.wait(),
         };
-        if let Err(error) = wait_result {
-            self.report_failure(status, health, &error);
-            return Err(HostError::Runtime(error));
-        }
+        let terminal_error = match wait_result {
+            Ok(()) => None,
+            Err(error) if stop.stop_requested() => Some(error),
+            Err(error) => {
+                self.report_failure(status, health, &error);
+                return Err(HostError::Runtime(error));
+            }
+        };
 
         let _ = health.publish(&HealthReport {
             protocol_version: HEALTH_PROTOCOL_VERSION,
@@ -109,7 +113,7 @@ impl ServiceRuntime<'_> {
             active_profile_digest: None,
             readiness: ReadinessReport::not_required(),
             injection: InjectionTelemetry::default(),
-            last_error: None,
+            last_error: terminal_error,
         });
         if let Err(error) = status.report(ServiceStatus::stopped()) {
             return Err(self.report_io_failure(

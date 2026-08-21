@@ -720,3 +720,168 @@ fn target_inspection_races_are_skipped_without_degrading_ready_or_blocking_the_n
     assert!(latest.last_error.is_none());
     assert_eq!(latest.injection.x64.success_count, 5);
 }
+
+struct TelemetryInitializer {
+    requests: Arc<Mutex<Vec<InjectionRequest>>>,
+    process_count: usize,
+}
+
+impl RuntimeInitializer for TelemetryInitializer {
+    fn initialize(&self) -> Result<InitializedRuntime, StructuredServiceError> {
+        initialize_process_orchestration(
+            Some(PROFILE_DIGEST.to_owned()),
+            900,
+            RUNTIME_GENERATION,
+            Box::new(QueueSource {
+                snapshot: Vec::new(),
+                pids: (0..self.process_count)
+                    .map(|index| Some(1000 + index as u32))
+                    .collect(),
+            }),
+            Box::new(FixedInspector),
+            Box::new(SharedBroker {
+                requests: self.requests.clone(),
+            }),
+        )
+    }
+}
+
+struct StopAfterProcesses {
+    polls: AtomicUsize,
+    process_count: usize,
+}
+
+impl StopSignal for StopAfterProcesses {
+    fn wait(&self) -> Result<(), StructuredServiceError> {
+        Ok(())
+    }
+
+    fn wait_timeout(&self, _timeout: Duration) -> Result<bool, StructuredServiceError> {
+        Ok(self.polls.fetch_add(1, Ordering::AcqRel) >= self.process_count)
+    }
+}
+
+#[derive(Clone, Copy)]
+enum TelemetryFailurePattern {
+    First(usize),
+    Always,
+    Intermittent,
+}
+
+struct TelemetryHealthPublisher {
+    pattern: TelemetryFailurePattern,
+    attempts: AtomicUsize,
+    successes: AtomicUsize,
+}
+
+impl TelemetryHealthPublisher {
+    fn new(pattern: TelemetryFailurePattern) -> Self {
+        Self {
+            pattern,
+            attempts: AtomicUsize::new(0),
+            successes: AtomicUsize::new(0),
+        }
+    }
+}
+
+impl HealthPublisher for TelemetryHealthPublisher {
+    fn publish(&self, report: &HealthReport) -> io::Result<()> {
+        if report.health != HealthState::Ready || report.injection.x64.success_count == 0 {
+            return Ok(());
+        }
+        let attempt = self.attempts.fetch_add(1, Ordering::AcqRel) + 1;
+        let fail = match self.pattern {
+            TelemetryFailurePattern::First(count) => attempt <= count,
+            TelemetryFailurePattern::Always => true,
+            TelemetryFailurePattern::Intermittent => attempt % 2 == 1,
+        };
+        if fail {
+            Err(io::Error::other("injected telemetry publish fault"))
+        } else {
+            self.successes.fetch_add(1, Ordering::AcqRel);
+            Ok(())
+        }
+    }
+}
+
+#[test]
+fn bounded_consecutive_health_report_failures_recover_and_stop_cleanly() {
+    let process_count = 6;
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let health = TelemetryHealthPublisher::new(TelemetryFailurePattern::First(4));
+    let status = Recorder::default();
+
+    ServiceRuntime::new("0.2.0")
+        .run(
+            &status,
+            &health,
+            &TelemetryInitializer {
+                requests: requests.clone(),
+                process_count,
+            },
+            &StopAfterProcesses {
+                polls: AtomicUsize::new(0),
+                process_count,
+            },
+        )
+        .unwrap();
+
+    assert_eq!(requests.lock().unwrap().len(), process_count);
+    assert_eq!(health.attempts.load(Ordering::Acquire), process_count);
+    assert_eq!(health.successes.load(Ordering::Acquire), 2);
+}
+
+#[test]
+fn excessive_consecutive_health_report_failures_return_the_publish_error() {
+    let process_count = 21;
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let health = TelemetryHealthPublisher::new(TelemetryFailurePattern::Always);
+    let status = Recorder::default();
+
+    let error = ServiceRuntime::new("0.2.0")
+        .run(
+            &status,
+            &health,
+            &TelemetryInitializer {
+                requests: requests.clone(),
+                process_count,
+            },
+            &StopAfterProcesses {
+                polls: AtomicUsize::new(0),
+                process_count,
+            },
+        )
+        .expect_err("the twenty-first consecutive telemetry failure must stop the driver");
+
+    assert!(error.to_string().contains("health-publish-failed"));
+    assert_eq!(requests.lock().unwrap().len(), process_count);
+    assert_eq!(health.attempts.load(Ordering::Acquire), process_count);
+    assert_eq!(health.successes.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn intermittent_health_report_failures_reset_the_consecutive_failure_count() {
+    let process_count = 42;
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let health = TelemetryHealthPublisher::new(TelemetryFailurePattern::Intermittent);
+    let status = Recorder::default();
+
+    ServiceRuntime::new("0.2.0")
+        .run(
+            &status,
+            &health,
+            &TelemetryInitializer {
+                requests: requests.clone(),
+                process_count,
+            },
+            &StopAfterProcesses {
+                polls: AtomicUsize::new(0),
+                process_count,
+            },
+        )
+        .unwrap();
+
+    assert_eq!(requests.lock().unwrap().len(), process_count);
+    assert_eq!(health.attempts.load(Ordering::Acquire), process_count);
+    assert_eq!(health.successes.load(Ordering::Acquire), process_count / 2);
+}

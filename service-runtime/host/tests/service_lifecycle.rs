@@ -14,26 +14,36 @@ use mactype_service_host::{
 const PROFILE: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 #[derive(Default)]
+struct RecorderState {
+    events: Vec<String>,
+    reports: Vec<HealthReport>,
+}
+
+#[derive(Default)]
 struct Recorder {
-    events: Mutex<Vec<String>>,
+    state: Mutex<RecorderState>,
+}
+
+impl Recorder {
+    fn record(&self, event: String, report: Option<&HealthReport>) {
+        let mut state = self.state.lock().unwrap();
+        state.events.push(event);
+        if let Some(report) = report {
+            state.reports.push(report.clone());
+        }
+    }
 }
 
 impl StatusReporter for Recorder {
     fn report(&self, status: ServiceStatus) -> io::Result<()> {
-        self.events
-            .lock()
-            .unwrap()
-            .push(format!("scm:{:?}", status.state));
+        self.record(format!("scm:{:?}", status.state), None);
         Ok(())
     }
 }
 
 impl HealthPublisher for Recorder {
     fn publish(&self, report: &HealthReport) -> io::Result<()> {
-        self.events
-            .lock()
-            .unwrap()
-            .push(format!("health:{:?}", report.health));
+        self.record(format!("health:{:?}", report.health), Some(report));
         Ok(())
     }
 }
@@ -58,22 +68,92 @@ impl StopSignal for ImmediateStop {
 }
 
 #[test]
-fn scm_running_and_internal_ready_are_reported_as_separate_events() {
+fn driverless_graceful_stop_publishes_terminal_unknown_before_scm_stopped() {
     let recorder = Recorder::default();
     ServiceRuntime::new("0.2.0")
         .run(&recorder, &recorder, &ReadyInitializer, &ImmediateStop)
         .unwrap();
 
+    let state = recorder.state.lock().unwrap();
+    let terminal_health = state
+        .events
+        .iter()
+        .position(|event| event == "health:Unknown")
+        .unwrap();
+    let stopped = state
+        .events
+        .iter()
+        .position(|event| event == "scm:Stopped")
+        .unwrap();
+    assert_eq!(state.events.len(), 6);
+    assert_eq!(state.events[0], "scm:StartPending");
+    assert_eq!(state.events[1], "health:Initializing");
+    assert_eq!(state.events[2], "scm:Running");
+    assert_eq!(state.events[3], "health:Ready");
+    assert_eq!(state.events[4], "health:Unknown");
+    assert_eq!(state.events[5], "scm:Stopped");
+    assert!(terminal_health < stopped);
+    let terminal = state.reports.last().unwrap();
+    assert_eq!(terminal.health, HealthState::Unknown);
+    assert_eq!(terminal.readiness, ReadinessReport::not_required());
+    assert_eq!(terminal.active_profile_digest, None);
+    assert_eq!(terminal.last_error, None);
     assert_eq!(
-        *recorder.events.lock().unwrap(),
-        [
-            "scm:StartPending",
-            "health:Initializing",
-            "scm:Running",
-            "health:Ready",
-            "scm:Stopped",
-        ]
+        terminal.injection,
+        mactype_service_contract::InjectionTelemetry::default()
     );
+    assert!(terminal.validate().is_ok());
+}
+
+struct TerminalPublishFailureRecorder {
+    events: Mutex<Vec<String>>,
+}
+
+impl StatusReporter for TerminalPublishFailureRecorder {
+    fn report(&self, status: ServiceStatus) -> io::Result<()> {
+        self.events
+            .lock()
+            .unwrap()
+            .push(format!("scm:{:?}", status.state));
+        Ok(())
+    }
+}
+
+impl HealthPublisher for TerminalPublishFailureRecorder {
+    fn publish(&self, report: &HealthReport) -> io::Result<()> {
+        self.events
+            .lock()
+            .unwrap()
+            .push(format!("health:{:?}", report.health));
+        if report.health == HealthState::Unknown {
+            Err(io::Error::other("injected terminal publish fault"))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[test]
+fn terminal_health_publish_failure_does_not_fail_graceful_stop() {
+    let recorder = TerminalPublishFailureRecorder {
+        events: Mutex::new(Vec::new()),
+    };
+
+    ServiceRuntime::new("0.2.0")
+        .run(&recorder, &recorder, &ReadyInitializer, &ImmediateStop)
+        .unwrap();
+
+    let events = recorder.events.lock().unwrap();
+    let terminal = events
+        .iter()
+        .position(|event| event == "health:Unknown")
+        .unwrap();
+    let stopped = events
+        .iter()
+        .position(|event| event == "scm:Stopped")
+        .unwrap();
+    assert!(terminal < stopped);
+    assert!(!events.contains(&"health:Failed".to_owned()));
 }
 
 #[test]
@@ -93,11 +173,11 @@ fn initialization_failure_never_reports_running_or_ready() {
     assert!(ServiceRuntime::new("0.2.0")
         .run(&recorder, &recorder, &FailedInitializer, &ImmediateStop)
         .is_err());
-    let events = recorder.events.lock().unwrap();
-    assert!(events.contains(&"health:Failed".to_owned()));
-    assert!(events.contains(&"scm:Stopped".to_owned()));
-    assert!(!events.contains(&"scm:Running".to_owned()));
-    assert!(!events.contains(&"health:Ready".to_owned()));
+    let state = recorder.state.lock().unwrap();
+    assert!(state.events.contains(&"health:Failed".to_owned()));
+    assert!(state.events.contains(&"scm:Stopped".to_owned()));
+    assert!(!state.events.contains(&"scm:Running".to_owned()));
+    assert!(!state.events.contains(&"health:Ready".to_owned()));
 }
 
 #[derive(Clone, Copy)]
@@ -205,10 +285,10 @@ fn incomplete_required_readiness_is_reported_as_failed_before_exit() {
     assert!(ServiceRuntime::new("0.2.0")
         .run(&recorder, &recorder, &IncompleteInitializer, &ImmediateStop)
         .is_err());
-    let events = recorder.events.lock().unwrap();
-    assert!(events.contains(&"health:Failed".to_owned()));
-    assert!(events.contains(&"scm:Stopped".to_owned()));
-    assert!(!events.contains(&"health:Ready".to_owned()));
+    let state = recorder.state.lock().unwrap();
+    assert!(state.events.contains(&"health:Failed".to_owned()));
+    assert!(state.events.contains(&"scm:Stopped".to_owned()));
+    assert!(!state.events.contains(&"health:Ready".to_owned()));
 }
 
 #[test]
@@ -241,9 +321,10 @@ fn composite_health_publisher_updates_pipe_and_persisted_snapshot_together() {
 
     assert_eq!(FileHealthPublisher::read(&path).unwrap(), report);
     assert!(recorder
-        .events
+        .state
         .lock()
         .unwrap()
+        .events
         .contains(&"health:Ready".to_owned()));
 }
 
@@ -314,15 +395,25 @@ impl RuntimeDriver for RecordingDriver {
     fn run(
         &mut self,
         stop: &dyn StopSignal,
-        _health: &dyn RuntimeHealthReporter,
+        health: &dyn RuntimeHealthReporter,
     ) -> Result<(), StructuredServiceError> {
         self.ran.store(true, Ordering::Release);
+        health.report(
+            HealthState::Degraded,
+            ReadinessReport::ready(),
+            mactype_service_contract::InjectionTelemetry::default(),
+            Some(StructuredServiceError {
+                code: "transient-injection-miss".to_owned(),
+                message: "a transient injection attempt failed".to_owned(),
+                win32_error: None,
+            }),
+        )?;
         stop.wait()
     }
 }
 
 #[test]
-fn ready_runtime_drives_the_process_observer_until_stop() {
+fn driven_graceful_stop_replaces_degraded_with_terminal_unknown_before_scm_stopped() {
     struct DrivenInitializer {
         ran: Arc<AtomicBool>,
     }
@@ -339,15 +430,39 @@ fn ready_runtime_drives_the_process_observer_until_stop() {
     }
 
     let ran = Arc::new(AtomicBool::new(false));
-    let recorder = Recorder::default();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("health.json");
+    let persisted = FileHealthPublisher::new(path.clone());
+    let live = Recorder::default();
+    let status = Recorder::default();
+    let composite = CompositeHealthPublisher::new(&live, &persisted);
     ServiceRuntime::new("0.2.0")
         .run(
-            &recorder,
-            &recorder,
+            &status,
+            &composite,
             &DrivenInitializer { ran: ran.clone() },
             &ImmediateStop,
         )
         .unwrap();
 
     assert!(ran.load(Ordering::Acquire));
+    let live_state = live.state.lock().unwrap();
+    let status_state = status.state.lock().unwrap();
+    assert!(live_state
+        .reports
+        .iter()
+        .any(|report| report.health == HealthState::Degraded));
+    let terminal = live_state.reports.last().unwrap();
+    assert_eq!(terminal.health, HealthState::Unknown);
+    assert_eq!(terminal.readiness, ReadinessReport::not_required());
+    assert_eq!(terminal.active_profile_digest, None);
+    assert_eq!(terminal.last_error, None);
+    assert_eq!(
+        terminal.injection,
+        mactype_service_contract::InjectionTelemetry::default()
+    );
+    assert!(terminal.validate().is_ok());
+    assert_eq!(live_state.events.last().unwrap(), "health:Unknown");
+    assert_eq!(status_state.events.last().unwrap(), "scm:Stopped");
+    assert_eq!(FileHealthPublisher::read(&path).unwrap(), terminal.clone());
 }

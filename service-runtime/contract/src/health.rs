@@ -119,6 +119,15 @@ impl ArchitectureInjectionTelemetry {
 }
 
 impl ReadinessReport {
+    pub const fn not_required() -> Self {
+        Self {
+            profile: ComponentReadiness::NotRequired,
+            observer: ComponentReadiness::NotRequired,
+            injector32: ComponentReadiness::NotRequired,
+            injector64: ComponentReadiness::NotRequired,
+        }
+    }
+
     pub const fn initializing() -> Self {
         Self {
             profile: ComponentReadiness::Initializing,

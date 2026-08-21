@@ -13,6 +13,8 @@ The setup interface has fixed verbs only: `install`, `upgrade`, `repair`, `remov
 
 The 신식 서비스 recovery policy retries after 5 seconds and then 30 seconds. `SERVICE_FAILURE_ACTIONS_FLAG` enables those actions for non-crash `SERVICE_STOPPED` errors with a nonzero exit code, including initialization failures.
 
+Because of that flag, a requested stop must never report a nonzero exit code, or recovery would resurrect a service the operator deliberately stopped. Once the stop event is signalled, an error raised while winding down is carried in the terminal `Unknown` health snapshot's `last_error` and the service still reports a clean `SERVICE_STOPPED`. For the same reason the driver loop tolerates up to twenty consecutive health-publication failures: periodic telemetry is observability, and losing it must not end a run that is still injecting correctly.
+
 ## Build and local non-mutating checks
 
 ```powershell

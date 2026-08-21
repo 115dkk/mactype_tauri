@@ -23,6 +23,25 @@ fn ready_health_is_versioned_and_distinct_from_scm_running() {
 }
 
 #[test]
+fn terminal_unknown_health_accepts_not_required_readiness_without_runtime_state() {
+    let report = HealthReport {
+        protocol_version: HEALTH_PROTOCOL_VERSION,
+        service_version: "0.2.0".to_owned(),
+        health: HealthState::Unknown,
+        active_profile_digest: None,
+        readiness: ReadinessReport::not_required(),
+        injection: Default::default(),
+        last_error: None,
+    };
+
+    assert_eq!(report.readiness.profile, ComponentReadiness::NotRequired);
+    assert_eq!(report.readiness.observer, ComponentReadiness::NotRequired);
+    assert_eq!(report.readiness.injector32, ComponentReadiness::NotRequired);
+    assert_eq!(report.readiness.injector64, ComponentReadiness::NotRequired);
+    assert!(report.validate().is_ok());
+}
+
+#[test]
 fn running_without_ready_health_cannot_be_reported_as_active() {
     let report = HealthReport {
         protocol_version: HEALTH_PROTOCOL_VERSION,

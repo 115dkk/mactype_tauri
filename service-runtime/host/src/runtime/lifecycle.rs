@@ -102,6 +102,15 @@ impl ServiceRuntime<'_> {
             return Err(HostError::Runtime(error));
         }
 
+        let _ = health.publish(&HealthReport {
+            protocol_version: HEALTH_PROTOCOL_VERSION,
+            service_version: self.service_version.to_owned(),
+            health: HealthState::Unknown,
+            active_profile_digest: None,
+            readiness: ReadinessReport::not_required(),
+            injection: InjectionTelemetry::default(),
+            last_error: None,
+        });
         if let Err(error) = status.report(ServiceStatus::stopped()) {
             return Err(self.report_io_failure(
                 status,

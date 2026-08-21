@@ -1,4 +1,4 @@
-import type { ExecutionStatus, LegacyMacTrayStatus, LegacyTrayStatus, SystemServiceAction } from "./model";
+import type { ExecutionStatus, LegacyMacTrayStatus, LegacyTrayStatus, SystemServiceAction, SystemServiceStatus } from "./model";
 import type { MessageKey } from "../i18n/i18n";
 
 type SystemInjectionState = "loading" | "active" | "running-unverified" | "running-profile-mismatch" | "running-appinit-conflict" | "running-legacy-tray-conflict" | "legacy-service-migrate" | "inactive" | "unavailable";
@@ -63,9 +63,24 @@ export interface ServiceSummary {
   actions: ReadonlyArray<ServiceSummaryAction>;
 }
 
+export interface ServiceStatusLine {
+  installationKey: MessageKey;
+  runtimeKey: MessageKey;
+  healthKey: MessageKey | null;
+}
+
+export type ProfileIndicatorKind = "matched" | "mismatch" | "unverified" | "service-off";
+
+export interface ProfileIndicator {
+  kind: ProfileIndicatorKind;
+  labelKey: MessageKey;
+}
+
 export interface ExecutionViewModel {
   status: ExecutionStatus | null;
   profileMatches: boolean;
+  profileIndicator: ProfileIndicator;
+  serviceStatusLine: ServiceStatusLine | null;
   serviceNeedsUpgrade: boolean;
   serviceNeedsRepair: boolean;
   serviceBinaryPath: string | null;
@@ -79,6 +94,47 @@ export interface ExecutionViewModel {
   canRemove: boolean;
   canMigrateLegacy: boolean;
   canRemoveLegacy: boolean;
+}
+
+function projectServiceStatusLine(service: SystemServiceStatus): ServiceStatusLine {
+  // A stopped service reports no live health. Only a persisted failure or
+  // degradation record is worth repeating; anything else would read as a
+  // present-tense diagnosis of a service the user deliberately turned off.
+  const healthKey: MessageKey | null = service.runtime === "stopped"
+    ? service.health === "failed"
+      ? "execution.health.failed"
+      : service.health === "degraded"
+        ? "execution.health.degradedStopped"
+        : null
+    : `execution.health.${service.health}` as MessageKey;
+  return {
+    installationKey: `execution.installation.${service.installation}` as MessageKey,
+    runtimeKey: `execution.serviceState.${service.runtime}` as MessageKey,
+    healthKey,
+  };
+}
+
+function projectProfileIndicator(
+  status: ExecutionStatus | null,
+  profileMatches: boolean,
+): ProfileIndicator {
+  const service = status?.systemService;
+  if (service?.runtime === "stopped") {
+    // No generation is active while the service is off; reporting a mismatch
+    // would blame a profile for a state the user chose.
+    return { kind: "service-off", labelKey: "execution.profileServiceOff" };
+  }
+  if (profileMatches) {
+    return { kind: "matched", labelKey: "execution.profileMatched" };
+  }
+  const mismatch = Boolean(
+    status?.expectedProfileDigest
+      && service?.activeProfileDigest
+      && service.activeProfileDigest !== status.expectedProfileDigest,
+  );
+  return mismatch
+    ? { kind: "mismatch", labelKey: "execution.profileMismatch" }
+    : { kind: "unverified", labelKey: "execution.profileUnverified" };
 }
 
 function projectServiceSummary(
@@ -480,6 +536,8 @@ export function projectExecutionView(
   return {
     status,
     profileMatches,
+    profileIndicator: projectProfileIndicator(status, profileMatches),
+    serviceStatusLine: service ? projectServiceStatusLine(service) : null,
     serviceNeedsUpgrade: service?.installation === "outdated",
     serviceNeedsRepair: service?.installation === "current" && service.health === "failed",
     serviceBinaryPath: service?.installation === "absent" ? null : service?.binaryPath ?? null,

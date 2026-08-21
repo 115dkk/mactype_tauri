@@ -197,6 +197,15 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
   const legacyTray = galleryLegacyTrayStatus(query);
   const legacyTrayClear = legacyTray.conflict === "clear";
   const conflictFreeMutationAllowed = generalMutationAllowed && legacyTrayClear;
+  const liveServiceHealth = ready
+    ? "ready"
+    : fixture === "degraded"
+      ? "degraded"
+      : fixture === "initializing"
+        ? "initializing"
+        : fixture === "failed"
+          ? "failed"
+          : "unknown";
   const conflictFreeSystemModesSupported = systemModesSupported && legacyTrayClear;
 
   return {
@@ -208,26 +217,25 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
       backend: serviceBackend,
       installation: serviceInstallation,
       runtime: serviceRuntime,
-      health: ready
-        ? "ready"
-        : fixture === "degraded"
-          ? "degraded"
-          : fixture === "initializing"
-            ? "initializing"
-            : fixture === "failed"
-              ? "failed"
-              : "unknown",
+      // The backend reads live health and the active generation only from a
+      // running service; a stopped one keeps at most a persisted degraded or
+      // failed record.
+      health: serviceRuntime === "running" || liveServiceHealth === "degraded" || liveServiceHealth === "failed"
+        ? liveServiceHealth
+        : "unknown",
       binaryPath: fixture === "migration-available" || fixture === "inaccessible-service"
         ? null
         : fixture === "foreign-service"
           ? "C:\\Program Files\\Unknown\\service.exe"
           : "C:\\Program Files\\MacType Control Center\\Service\\mactype-service.exe",
       win32Error: null,
-      activeProfileDigest: profileMismatch
-        ? "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-        : ready
-          ? expectedGalleryDigest
-          : null,
+      activeProfileDigest: serviceRuntime !== "running"
+        ? null
+        : profileMismatch
+          ? "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          : ready
+            ? expectedGalleryDigest
+            : null,
       canInstall: conflictFreeMutationAllowed && serviceInstallation === "absent",
       canRemove: conflictFreeMutationAllowed && (serviceInstallation === "current" || serviceInstallation === "outdated"),
       canStart: conflictFreeMutationAllowed && serviceInstallation === "current" && serviceRuntime === "stopped",

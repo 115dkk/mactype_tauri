@@ -175,7 +175,19 @@ fn ready_driver_consumes_process_events_until_stop() {
         [42, 40, 41]
     );
     let reports = recorder.reports.lock().unwrap();
-    let latest = reports.last().unwrap();
+    let terminal = reports.last().unwrap();
+    assert_eq!(terminal.health, HealthState::Unknown);
+    assert_eq!(
+        terminal.readiness,
+        mactype_service_contract::ReadinessReport::not_required()
+    );
+    assert!(terminal.last_error.is_none());
+    assert!(terminal.active_profile_digest.is_none());
+    let latest = reports
+        .iter()
+        .rev()
+        .find(|report| report.health == HealthState::Ready)
+        .unwrap();
     assert_eq!(latest.injection.x64.success_count, 3);
     assert_eq!(latest.injection.x86.success_count, 0);
     assert_eq!(
@@ -255,7 +267,11 @@ fn terminal_target_failure_keeps_global_ready_while_the_result_stays_process_loc
 
     assert_eq!(requests.lock().unwrap().len(), 1);
     let reports = recorder.reports.lock().unwrap();
-    let latest = reports.last().unwrap();
+    let latest = reports
+        .iter()
+        .rev()
+        .find(|report| report.health == HealthState::Ready)
+        .unwrap();
     assert_eq!(latest.health, HealthState::Ready);
     assert!(latest.last_error.is_none());
 }
@@ -370,7 +386,11 @@ fn cleanup_unknown_degrades_its_generation_then_next_success_recovers_ready() {
         assert!(error.message.contains(identity));
     }
     assert_eq!(error.win32_error, Some(109));
-    let latest = reports.last().unwrap();
+    let latest = reports
+        .iter()
+        .rev()
+        .find(|report| report.health == HealthState::Ready)
+        .unwrap();
     assert_eq!(latest.health, HealthState::Ready);
     assert!(latest.last_error.is_none());
     assert_eq!(latest.injection.x64.success_count, 1);
@@ -455,7 +475,11 @@ fn cleanup_unknown_for_a_vanished_target_never_degrades_global_health() {
             .all(|report| report.health != HealthState::Degraded),
         "a proven target vanish must never latch Degraded health"
     );
-    let latest = reports.last().unwrap();
+    let latest = reports
+        .iter()
+        .rev()
+        .find(|report| report.health == HealthState::Ready)
+        .unwrap();
     assert_eq!(latest.health, HealthState::Ready);
     assert!(latest.last_error.is_none());
     assert_eq!(latest.injection.x64.success_count, 1);
@@ -495,7 +519,11 @@ fn conflicting_mactype_module_stays_process_local_and_global_ready() {
     assert!(reports
         .iter()
         .all(|report| report.health != HealthState::Degraded));
-    let latest = reports.last().unwrap();
+    let latest = reports
+        .iter()
+        .rev()
+        .find(|report| report.health == HealthState::Ready)
+        .unwrap();
     assert_eq!(latest.health, HealthState::Ready);
     assert!(latest.last_error.is_none());
     assert_eq!(latest.injection.x64.success_count, 1);
@@ -542,7 +570,11 @@ fn invalid_helper_response_degrades_its_generation_then_next_success_recovers_re
     assert!(error
         .message
         .contains(&format!("generation={RUNTIME_GENERATION}")));
-    let latest = reports.last().unwrap();
+    let latest = reports
+        .iter()
+        .rev()
+        .find(|report| report.health == HealthState::Ready)
+        .unwrap();
     assert_eq!(latest.health, HealthState::Ready);
     assert!(latest.last_error.is_none());
     assert_eq!(
@@ -664,7 +696,11 @@ fn target_inspection_races_are_skipped_without_degrading_ready_or_blocking_the_n
     assert!(reports.iter().all(
         |report| report.health != HealthState::Degraded && report.health != HealthState::Failed
     ));
-    let latest = reports.last().unwrap();
+    let latest = reports
+        .iter()
+        .rev()
+        .find(|report| report.health == HealthState::Ready)
+        .unwrap();
     assert_eq!(latest.health, HealthState::Ready);
     assert!(latest.last_error.is_none());
     assert_eq!(latest.injection.x64.success_count, 5);

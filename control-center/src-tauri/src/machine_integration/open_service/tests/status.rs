@@ -103,8 +103,29 @@ fn persisted_health_is_diagnostic_only_and_never_revives_stale_ready() {
         win32_error: None,
     });
     assert!(failed.validate().is_ok());
+    let mut degraded = failed.clone();
+    degraded.health = mactype_service_contract::HealthState::Degraded;
+    assert!(degraded.validate().is_ok());
+    let terminal = HealthReport {
+        protocol_version: mactype_service_contract::HEALTH_PROTOCOL_VERSION,
+        service_version: "0.2.0".to_owned(),
+        health: mactype_service_contract::HealthState::Unknown,
+        active_profile_digest: None,
+        readiness: mactype_service_contract::ReadinessReport::not_required(),
+        injection: Default::default(),
+        last_error: None,
+    };
+    assert!(terminal.validate().is_ok());
 
     assert!(select_service_health(RuntimeState::Stopped, 0, None, Some(ready.clone())).is_none());
+    assert!(select_service_health(RuntimeState::Stopped, 0, None, Some(terminal)).is_none());
+    let stopped_degradation =
+        select_service_health(RuntimeState::Stopped, 0, None, Some(degraded)).unwrap();
+    assert!(!stopped_degradation.live);
+    assert_eq!(
+        stopped_degradation.report.health,
+        mactype_service_contract::HealthState::Degraded
+    );
     let stopped_failure =
         select_service_health(RuntimeState::Stopped, 0, None, Some(failed.clone())).unwrap();
     assert!(!stopped_failure.live);

@@ -255,6 +255,11 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
   const legacyService = executionView.status?.legacyMacTray;
   const legacyTrayResolution = executionView.legacyTrayResolution;
   const serviceSummary = executionView.serviceSummary;
+  const serviceStatusLine = executionView.serviceStatusLine;
+  const profileIndicator = executionView.profileIndicator;
+  const serviceStateText = serviceStatusLine
+    ? [serviceStatusLine.installationKey, serviceStatusLine.runtimeKey, ...(serviceStatusLine.healthKey ? [serviceStatusLine.healthKey] : [])].map((key) => t(key)).join(" · ")
+    : t("execution.checking");
   const servicePackageNotice = status?.serviceManagementPackage === "not-installed"
     ? {
         titleKey: "execution.servicePackageNotInstalledTitle" as const,
@@ -359,7 +364,7 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
         <summary>
           <span className="service-row-icon"><ServerCog aria-hidden="true" size={19} /></span>
           <span className="service-row-copy"><h2>{t("execution.systemTitle")}</h2><p>{t("execution.systemDescription")}</p></span>
-          <span className="service-row-state" data-tone={serviceSummary.tone}>{service ? `${t(`execution.installation.${service.installation}`)} · ${t(`execution.serviceState.${service.runtime}`)} · ${t(`execution.health.${service.health}`)}` : t("execution.checking")}</span>
+          <span className="service-row-state" data-tone={serviceSummary.tone}>{serviceStateText}</span>
           <ChevronDown aria-hidden="true" className="service-row-chevron" size={17} />
         </summary>
         <div className="service-row-body">
@@ -392,8 +397,8 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
           </button>
         </div>
         <dl className="detail-list">
-          <div><dt>{t("execution.openServiceStatus")}</dt><dd>{systemInjectionAction.state === "active" ? <Check className="success" size={17} /> : <AlertTriangle className="warning" size={17} />}<span>{service ? `${t(`execution.installation.${service.installation}`)} · ${t(`execution.serviceState.${service.runtime}`)} · ${t(`execution.health.${service.health}`)}` : t("execution.checking")}</span></dd></div>
-          <div><dt>{t("execution.profileGeneration")}</dt><dd>{executionView.profileMatches ? <Check className="success" size={17} /> : <AlertTriangle className="warning" size={17} />}<span>{executionView.profileMatches ? t("execution.profileMatched") : t("execution.profileNotMatched")}</span></dd></div>
+          <div><dt>{t("execution.openServiceStatus")}</dt><dd>{systemInjectionAction.state === "active" ? <Check className="success" size={17} /> : systemInjectionAction.state === "inactive" ? <PowerOff className="neutral-status" size={17} /> : <AlertTriangle className="warning" size={17} />}<span>{serviceStateText}</span></dd></div>
+          <div><dt>{t("execution.profileGeneration")}</dt><dd>{profileIndicator.kind === "matched" ? <Check className="success" size={17} /> : profileIndicator.kind === "service-off" ? <PowerOff className="neutral-status" size={17} /> : <AlertTriangle className="warning" size={17} />}<span>{t(profileIndicator.labelKey)}</span></dd></div>
           <div><dt>{t("execution.appInit")}</dt><dd>{status?.registryModeDetected ? <ShieldAlert className="warning" size={17} /> : <Check className="success" size={17} />}<span>{status?.registryModeDetected ? t("execution.entryDetected") : t("profiles.disabled")}</span></dd></div>
         </dl>
         <div className="service-controls">

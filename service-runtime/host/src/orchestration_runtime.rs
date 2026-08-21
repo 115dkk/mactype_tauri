@@ -1,13 +1,15 @@
 use std::{collections::VecDeque, time::Duration};
 
 use mactype_service_contract::{
-    ComponentReadiness, HealthState, ReadinessReport, StructuredServiceError,
+    ComponentReadiness, HealthState, InjectionTelemetry, ReadinessReport, StructuredServiceError,
 };
 
 use crate::{
     subscribe_process_creation, InitializedRuntime, InjectionBroker, ProcessArchitecture,
     ProcessEventSource, ProcessInspector, RuntimeDriver, RuntimeHealthReporter, StopSignal,
 };
+
+const MAX_TOLERATED_CONSECUTIVE_HEALTH_REPORT_FAILURES: usize = 20;
 
 pub fn initialize_process_orchestration(
     active_profile_digest: Option<String>,
@@ -70,6 +72,7 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
             crate::RetryPolicy::default(),
             &scheduler,
         );
+        let mut consecutive_health_report_failures = 0;
         loop {
             if stop.wait_timeout(Duration::ZERO)? {
                 return Ok(());
@@ -89,7 +92,9 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
                     None => continue,
                 },
                 Err(error) => {
-                    health.report(
+                    let _ = report_runtime_health(
+                        health,
+                        &mut consecutive_health_report_failures,
                         HealthState::Failed,
                         ReadinessReport {
                             observer: ComponentReadiness::Failed,
@@ -97,13 +102,15 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
                         },
                         orchestrator.injection_telemetry(),
                         Some(error.clone()),
-                    )?;
+                    );
                     return Err(error);
                 }
             };
             match orchestrator.handle_pid(pid) {
                 Ok(crate::ProcessOutcome::Injected) => {
-                    health.report(
+                    report_runtime_health(
+                        health,
+                        &mut consecutive_health_report_failures,
                         HealthState::Ready,
                         ReadinessReport::ready(),
                         orchestrator.injection_telemetry(),
@@ -112,7 +119,9 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
                 }
                 Ok(crate::ProcessOutcome::Rejected | crate::ProcessOutcome::RetryExhausted) => {
                     if let Some(error) = orchestrator.generation_health_error() {
-                        health.report(
+                        report_runtime_health(
+                            health,
+                            &mut consecutive_health_report_failures,
                             HealthState::Degraded,
                             ReadinessReport::ready(),
                             orchestrator.injection_telemetry(),
@@ -123,13 +132,39 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
                 Ok(crate::ProcessOutcome::Cancelled) => return Ok(()),
                 Ok(_) => {}
                 Err(error) => {
-                    health.report(
+                    report_runtime_health(
+                        health,
+                        &mut consecutive_health_report_failures,
                         HealthState::Degraded,
                         ReadinessReport::ready(),
                         orchestrator.injection_telemetry(),
                         Some(error),
                     )?;
                 }
+            }
+        }
+    }
+}
+
+fn report_runtime_health(
+    health: &dyn RuntimeHealthReporter,
+    consecutive_failures: &mut usize,
+    state: HealthState,
+    readiness: ReadinessReport,
+    injection: InjectionTelemetry,
+    last_error: Option<StructuredServiceError>,
+) -> Result<(), StructuredServiceError> {
+    match health.report(state, readiness, injection, last_error) {
+        Ok(()) => {
+            *consecutive_failures = 0;
+            Ok(())
+        }
+        Err(error) => {
+            *consecutive_failures += 1;
+            if *consecutive_failures > MAX_TOLERATED_CONSECUTIVE_HEALTH_REPORT_FAILURES {
+                Err(error)
+            } else {
+                Ok(())
             }
         }
     }

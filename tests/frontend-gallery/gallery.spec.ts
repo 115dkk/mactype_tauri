@@ -1181,7 +1181,8 @@ test("a running profile mismatch remains stoppable and identifies the mismatched
   await expect(openService.getByRole("button", { name: "Stop applying to new processes" })).toBeEnabled();
   await expect(openService).toContainText("Service running with a different profile");
   await expect(openService).toContainText("The running generation does not match the profile expected by Control Center. Stop remains available; verified system application is not claimed.");
-  await expect(openService).toContainText("Profile mismatch or not yet verified");
+  await expect(openService).toContainText("Profile mismatch");
+  await expect(openService).not.toContainText("or not yet verified");
 });
 
 test("AppInit conflict preserves the backend-authorized recovery stop", async ({ page }) => {
@@ -1474,6 +1475,38 @@ test("a stopped new service with no alternative offers Start and Remove", async 
   await expect(summary.locator(".success")).toHaveCount(0);
   await expect(summary.locator(".warning")).toHaveCount(0);
   await expect(summary.locator(".neutral-status")).toHaveCount(1);
+});
+
+test("a deliberately stopped service reports neutrally instead of claiming degradation", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=ready&service-runtime=stopped", { waitUntil: "networkidle" });
+  await openServiceDetails(page);
+
+  const openService = page.locator('[data-service-backend="open-source"]');
+  const statusRow = openService.locator(".detail-list > div").filter({ hasText: "New service status" });
+  await expect(statusRow).toContainText("Current installation · Stopped");
+  await expect(statusRow).not.toContainText("Not checked");
+  await expect(statusRow.locator(".neutral-status")).toBeVisible();
+  await expect(statusRow.locator(".warning")).toHaveCount(0);
+
+  const profileRow = openService.locator(".detail-list > div").filter({ hasText: "Active profile generation" });
+  await expect(profileRow).toContainText("Service is off");
+  await expect(profileRow).not.toContainText("mismatch");
+  await expect(profileRow.locator(".neutral-status")).toBeVisible();
+  await expect(profileRow.locator(".warning")).toHaveCount(0);
+});
+
+test("a stopped service surfaces a persisted degradation as a last-run record", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=en&system-service=degraded&service-runtime=stopped", { waitUntil: "networkidle" });
+  const summary = page.locator("[data-service-summary]");
+  await expect(summary).toContainText("Stopped");
+  await expect(summary.locator(".neutral-status")).toHaveCount(1);
+  await openServiceDetails(page);
+
+  const openService = page.locator('[data-service-backend="open-source"]');
+  const statusRow = openService.locator(".detail-list > div").filter({ hasText: "New service status" });
+  await expect(statusRow).toContainText("Degraded during the last run");
+  const profileRow = openService.locator(".detail-list > div").filter({ hasText: "Active profile generation" });
+  await expect(profileRow).toContainText("Service is off");
 });
 
 test("starting with no applied profile applies the bundled default and says so", async ({ page }) => {

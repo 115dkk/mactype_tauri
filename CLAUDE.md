@@ -62,9 +62,11 @@ below wherever the two conflict.
   policy from `CGdippSettings`.
 - Renderer startup fails closed when the adjacent profile or its selected
   `AlternativeFile` is missing, malformed, non-regular, empty, or oversized.
-  Do not restore the historical implicit defaults. Feature and interface
-  presence, not manifest-sensitive Windows version numbers, select modern
-  rendering paths.
+  A renderer still mapped from a retired generation must stop child propagation
+  as soon as its adjacent `MacType.ini` disappears; it must not inject a child
+  that can only fail during process initialization. Do not restore the
+  historical implicit defaults. Feature and interface presence, not
+  manifest-sensitive Windows version numbers, select modern rendering paths.
 - A process that explicitly blocks hooks or module loading is a quiet
   process-local skip keyed by `(pid, creation time)`. Preserve its exact reason
   in the bounded orchestrator result, deduplicate that identity, keep global

@@ -26,6 +26,7 @@ test('HookChildProcesses relays only the fixed generation DLL before child entry
   assert.match(relay, /ScopedChildRelayBypass/);
   assert.match(relay, /MacType64(?:\.Core)?\.dll/);
   assert.match(relay, /MacType(?:\.Core)?\.dll/);
+  assert.match(relay, /MacType\.ini/);
   assert.match(relay, /ProcessDynamicCodePolicy/);
   assert.match(relay, /ProcessSignaturePolicy/);
   assert.match(relay, /shared\/hook_compatibility\.h/);
@@ -47,5 +48,6 @@ test('HookChildProcesses relays only the fixed generation DLL before child entry
   assert.doesNotMatch(relay, /SetProcessMitigationPolicy/);
   assert.doesNotMatch(relay, /MACTYPE_RELAY_EVIDENCE/);
   assert.match(spawnTree, /--preload-mactype/);
+  assert.match(spawnTree, /--retire-profile-before-child/);
   assert.match(spawnTree, /probe_options\.preload_mactype_path/);
 });

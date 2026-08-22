@@ -18,6 +18,7 @@ struct TreeArguments {
   std::filesystem::path child_executable;
   std::filesystem::path grandchild_executable;
   std::filesystem::path preload_mactype_path;
+  std::filesystem::path retire_profile_before_child;
   DWORD wait_milliseconds = 3000;
   DWORD level = 0;
   bool show_help = false;
@@ -52,6 +53,8 @@ bool ParseArguments(const int argc, wchar_t** argv, TreeArguments& result,
       result.grandchild_executable = argv[++index];
     } else if (argument == L"--preload-mactype" && index + 1 < argc) {
       result.preload_mactype_path = argv[++index];
+    } else if (argument == L"--retire-profile-before-child" && index + 1 < argc) {
+      result.retire_profile_before_child = argv[++index];
     } else if (argument == L"--wait-ms" && index + 1 < argc) {
       if (!ParseUnsigned(argv[++index], result.wait_milliseconds)) {
         error = L"--wait-ms must be an unsigned integer";
@@ -70,6 +73,23 @@ bool ParseArguments(const int argc, wchar_t** argv, TreeArguments& result,
   if (!result.show_help && result.manifest_path.empty()) {
     error = L"--out <manifest.json> is required";
     return false;
+  }
+  if (!result.retire_profile_before_child.empty() &&
+      (result.level != 0 || result.preload_mactype_path.empty())) {
+    error = L"--retire-profile-before-child requires a root MacType preload";
+    return false;
+  }
+  if (!result.retire_profile_before_child.empty()) {
+    std::error_code path_error;
+    const bool same_directory = std::filesystem::equivalent(
+        result.retire_profile_before_child.parent_path(),
+        result.preload_mactype_path.parent_path(), path_error);
+    if (path_error || !same_directory ||
+        _wcsicmp(result.retire_profile_before_child.filename().c_str(),
+                 L"MacType.ini") != 0) {
+      error = L"the retired profile must be MacType.ini beside the preloaded DLL";
+      return false;
+    }
   }
   return true;
 }
@@ -136,7 +156,8 @@ void PrintUsage() {
   std::wcerr
       << L"Usage: probe-spawn-tree{32|64}.exe --out <manifest.json> "
          L"[--wait-ms <milliseconds>] [--child-exe <path>] "
-         L"[--grandchild-exe <path>] [--preload-mactype <dll>]\n";
+         L"[--grandchild-exe <path>] [--preload-mactype <dll>] "
+         L"[--retire-profile-before-child <MacType.ini>]\n";
 }
 
 }  // namespace
@@ -172,6 +193,17 @@ int wmain(const int argc, wchar_t** argv) {
       probe_options, false, error);
   if (probe_exit != 0) {
     std::wcerr << error << L'\n';
+  }
+
+  if (probe_exit == 0 && arguments.level == 0 &&
+      !arguments.retire_profile_before_child.empty()) {
+    std::error_code remove_error;
+    const bool removed = std::filesystem::remove(
+        arguments.retire_profile_before_child, remove_error);
+    if (!removed || remove_error) {
+      std::wcerr << L"failed to retire the renderer profile before child launch\n";
+      return 5;
+    }
   }
 
   mactype::service_probe::internal::ChildProcessResult child;

@@ -334,6 +334,11 @@ bool FixedModulePath(bool target32Bit, std::wstring& target) noexcept
         return false;
     try
     {
+        std::wstring const profile = directory + L"MacType.ini";
+        DWORD const profileAttributes = GetFileAttributesW(profile.c_str());
+        if (profileAttributes == INVALID_FILE_ATTRIBUTES ||
+            (profileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+            return false;
         WCHAR const* const targetName = target32Bit
             ? (coreBuild ? L"MacType.Core.dll" : L"MacType.dll")
             : (coreBuild ? L"MacType64.Core.dll" : L"MacType64.dll");

@@ -106,6 +106,10 @@ a separately versioned diagnostic Interface.
   automatically, and triggers an exact-identity liveness recheck. A proven
   vanished target becomes a quiet skip; an alive or unknown target retains the
   uncertain result and may affect generation health.
+- A long-lived renderer may remain mapped after its runtime is removed. Its
+  child-injection Adapter treats the adjacent `MacType.ini` as part of the
+  fixed generation boundary and stops propagation once that profile is gone,
+  so a later child cannot fail during process initialization on a retired DLL.
 - Diagnostic integrity failure is distinct from renderer startup failure.
   Retry and health decisions are exhaustive typed mappings, never code-prefix
   or code-suffix tests.

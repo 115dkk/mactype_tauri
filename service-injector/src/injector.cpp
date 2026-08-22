@@ -199,13 +199,13 @@ Result inject_fixed_adjacent_module(const BrokerRequest& request) noexcept {
                            kFixedModuleNameUtf8,
                            static_cast<std::uint32_t>(module_error.value()));
     }
+    RendererLoadOrigin load_origin = RendererLoadOrigin::loaded_by_request;
     switch (fixed_module_state(process.get(), *module_path)) {
         case FixedModuleState::Absent:
             break;
         case FixedModuleState::ExpectedModuleLoaded:
-            return make_result(request, ResultStatus::integrity_failed,
-                               "existing-renderer-unverified",
-                               kFixedModuleNameUtf8);
+            load_origin = RendererLoadOrigin::already_loaded;
+            break;
         case FixedModuleState::SameBasenameDifferentPath:
             return make_result(request, ResultStatus::rejected,
                                "conflicting-mactype-module-loaded",
@@ -222,7 +222,8 @@ Result inject_fixed_adjacent_module(const BrokerRequest& request) noexcept {
     }
     return bind_renderer_activation_evidence(
         process.get(), request, *module_path,
-        inject_module(process.get(), request, *module_path, deadline), deadline);
+        inject_module(process.get(), request, *module_path, deadline), load_origin,
+        deadline);
 }
 
 }  // namespace mactype::injector

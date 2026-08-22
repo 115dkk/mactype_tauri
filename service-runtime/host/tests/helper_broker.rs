@@ -614,7 +614,82 @@ fn verified_renderer_quiet_skip_stays_process_local() {
 }
 
 #[test]
-fn already_loaded_module_without_a_safe_lease_is_integrity_uncertainty() {
+fn verified_already_loaded_renderer_with_a_helper_lease_is_injected() {
+    let (_base, runtime) = runtime();
+    let request = x64_request(&runtime);
+    let evidence = renderer_evidence_hex(
+        &request.identity,
+        request.binding,
+        RendererModuleLoad::AlreadyLoaded,
+        RendererActivationDisposition::Active,
+        RendererActivationReason::None,
+    );
+    let result = inject_static_response(
+        &runtime,
+        &request,
+        0,
+        format!(
+            "{{\"schemaVersion\":2,\"status\":\"injected\",\"code\":\"renderer-active\",\"pid\":42,\"sessionId\":2,\"generationId\":\"{}\",\"module\":\"MacType64.dll\",\"windowsError\":0,\"cleanupComplete\":true,\"rendererEvidence\":\"{evidence}\"}}",
+            request.binding.runtime_generation_id(),
+        ),
+    );
+
+    assert_eq!(result.disposition, BrokerDisposition::Injected);
+    assert_eq!(result.code, "renderer-active");
+}
+
+#[test]
+fn verified_already_loaded_quiet_skip_stays_process_local() {
+    let (_base, runtime) = runtime();
+    let request = x64_request(&runtime);
+    let evidence = renderer_evidence_hex(
+        &request.identity,
+        request.binding,
+        RendererModuleLoad::AlreadyLoaded,
+        RendererActivationDisposition::QuietSkip,
+        RendererActivationReason::ProcessExcluded,
+    );
+    let result = inject_static_response(
+        &runtime,
+        &request,
+        0,
+        format!(
+            "{{\"schemaVersion\":2,\"status\":\"skipped\",\"code\":\"process-excluded\",\"pid\":42,\"sessionId\":2,\"generationId\":\"{}\",\"module\":\"MacType64.dll\",\"windowsError\":0,\"cleanupComplete\":true,\"rendererEvidence\":\"{evidence}\"}}",
+            request.binding.runtime_generation_id(),
+        ),
+    );
+
+    assert_eq!(result.disposition, BrokerDisposition::Skipped);
+    assert_eq!(result.code, "process-excluded");
+}
+
+#[test]
+fn verified_already_loaded_failure_with_a_released_lease_is_rejected() {
+    let (_base, runtime) = runtime();
+    let request = x64_request(&runtime);
+    let evidence = renderer_evidence_hex(
+        &request.identity,
+        request.binding,
+        RendererModuleLoad::AlreadyLoaded,
+        RendererActivationDisposition::Failed,
+        RendererActivationReason::InitializationFailed,
+    );
+    let result = inject_static_response(
+        &runtime,
+        &request,
+        3,
+        format!(
+            "{{\"schemaVersion\":2,\"status\":\"failed\",\"code\":\"initialization-failed\",\"pid\":42,\"sessionId\":2,\"generationId\":\"{}\",\"module\":\"MacType64.dll\",\"windowsError\":0,\"cleanupComplete\":true,\"rendererEvidence\":\"{evidence}\"}}",
+            request.binding.runtime_generation_id(),
+        ),
+    );
+
+    assert_eq!(result.disposition, BrokerDisposition::Rejected);
+    assert_eq!(result.code, "initialization-failed");
+}
+
+#[test]
+fn legacy_unleased_existing_renderer_response_remains_integrity_uncertainty() {
     let (_base, runtime) = runtime();
     let request = x64_request(&runtime);
     let result = inject_static_response(
@@ -629,6 +704,31 @@ fn already_loaded_module_without_a_safe_lease_is_integrity_uncertainty() {
 
     assert_eq!(result.disposition, BrokerDisposition::UncertainIntegrity);
     assert_eq!(result.code, "existing-renderer-unverified");
+}
+
+#[test]
+fn already_loaded_reference_release_uncertainty_is_typed_cleanup_uncertainty() {
+    let (_base, runtime) = runtime();
+    let request = x64_request(&runtime);
+    let evidence = renderer_evidence_hex(
+        &request.identity,
+        request.binding,
+        RendererModuleLoad::AlreadyLoaded,
+        RendererActivationDisposition::Active,
+        RendererActivationReason::None,
+    );
+    let result = inject_static_response(
+        &runtime,
+        &request,
+        4,
+        format!(
+            "{{\"schemaVersion\":2,\"status\":\"timeout\",\"code\":\"renderer-reference-release-cleanup-unknown\",\"pid\":42,\"sessionId\":2,\"generationId\":\"{}\",\"module\":\"MacType64.dll\",\"windowsError\":1460,\"cleanupComplete\":false,\"rendererEvidence\":\"{evidence}\"}}",
+            request.binding.runtime_generation_id(),
+        ),
+    );
+
+    assert_eq!(result.disposition, BrokerDisposition::UncertainCleanup);
+    assert_eq!(result.code, "renderer-reference-release-cleanup-unknown");
 }
 
 #[test]

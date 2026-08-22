@@ -23,7 +23,7 @@ This file fixes the domain language used by code, tests, CI, and architecture do
 : The host Module that consumes a verified target decision and `RendererRuntimeBinding`, applies exact-identity de-duplication, retry, cancellation, liveness recheck, bounded result history, telemetry, and terminal health impact. `InjectionOrchestrator` is its orchestration Interface. Helper diagnostic text is evidence only; typed disposition owns policy. Normal target skips and verified pre-injection rejection do not change global service health.
 
 **RendererActivationEvidence**
-: The versioned, fixed-width C/Rust evidence returned by the renderer after a helper-owned load. It binds exact PID, creation time, session, architecture, `RendererRuntimeBinding`, module-load origin, renderer admission, lifecycle revision, and capability sets. `Active`, `QuietSkip`, and `Failed` are distinct. Health v1 is derived from this evidence and remains wire-compatible.
+: The versioned, fixed-width C/Rust evidence returned by the renderer while the helper owns a module reference. It binds exact PID, creation time, session, architecture, `RendererRuntimeBinding`, module-load origin, renderer admission, lifecycle revision, and capability sets. `Active`, `QuietSkip`, and `Failed` are distinct. Health v1 is derived from this evidence and remains wire-compatible.
 
 **ProfileRuntime**
 : The renderer Module that publishes only a complete immutable `RendererPolicySnapshot`. It holds the selected profile under a stable read lease through parsing, hashes its exact bytes, binds font substitution to the same revision, and preserves the preceding snapshot when publication fails.

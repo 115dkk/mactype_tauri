@@ -23,11 +23,11 @@ enumeration. A fixed MacType module is considered loaded only when its
 normalized, case-insensitive full path exactly matches the adjacent DLL; a
 same-named DLL from another directory is not accepted. Closed, non-inherited,
 mismatched, session-0, protected, critical, and architecture-mismatched targets
-fail closed with explicit results. An already-loaded exact module is not
-queried or released because the helper cannot acquire a safe lifetime lease
-without changing another owner's reference count. It is reported as
-`existing-renderer-unverified`, never as a verified renderer success or an
-explicit process-policy skip.
+fail closed with explicit results. For an already-loaded exact module, the
+helper first acquires one reference of its own with the same fixed adjacent
+path. It queries activation evidence only while that lease is held and then
+releases exactly that reference. A conflicting path or uncertain lease release
+never becomes a verified renderer success.
 
 After a verified load, the helper calls the fixed
 `MacTypeQueryActivationEvidenceV1` export in the target. The 312-byte generated
@@ -36,7 +36,9 @@ origin, renderer admission, lifecycle revision, and capability evidence. The
 helper reports injection success only for validated `Active` evidence. A
 validated `QuietSkip` is process-local: when the helper loaded the module, it
 releases that reference and confirms the module is absent before reporting the
-quiet skip. It never releases an already-loaded reference.
+quiet skip. When the module pre-existed, it releases only the extra reference
+it acquired for the evidence query; the target's preceding reference remains
+owned by the target.
 
 Standard output contains one JSON object of at most 1,536 bytes. Its schema is:
 

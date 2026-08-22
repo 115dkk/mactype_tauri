@@ -92,11 +92,13 @@ a separately versioned diagnostic Interface.
   point. That repeated verification is intentional TOCTOU defense.
 - The renderer verifies the effective profile it actually consumes. Success
   cannot be recorded when its digest differs from the requested binding.
-- Activation evidence is requested only while the helper owns the module
-  reference created by that attempt. An exact module that was already loaded
-  is not queried or released without a renderer-owned lifetime lease; it is
-  reported as `existing-renderer-unverified` integrity uncertainty rather than
-  a success or an explicit process-policy skip.
+- Activation evidence is requested only while the helper owns a module
+  reference. For an exact module that was already loaded, the helper acquires
+  one additional reference through the same fixed adjacent path, reports the
+  evidence origin as `AlreadyLoaded`, and releases exactly that reference after
+  the query completes. It never queries or releases a pre-existing renderer
+  without this lease; an uncertain query thread keeps the lease rather than
+  risking a use-after-unload.
 - A known dynamic-code or binary-signature refusal is a `QuietSkip` for the
   exact `(pid, creation time)`. It is de-duplicated, produces no user alert,
   and never becomes an executable-name ban.

@@ -383,12 +383,18 @@ fn classify_renderer_result(
         (
             "injected",
             true,
-            Some((RendererActivationDisposition::Active, RendererModuleLoad::LoadedByRequest)),
+            Some((
+                RendererActivationDisposition::Active,
+                RendererModuleLoad::LoadedByRequest | RendererModuleLoad::AlreadyLoaded,
+            )),
         ) if code == "renderer-active" => Ok(BrokerDisposition::Injected),
         (
             "skipped",
             true,
-            Some((RendererActivationDisposition::QuietSkip, RendererModuleLoad::LoadedByRequest)),
+            Some((
+                RendererActivationDisposition::QuietSkip,
+                RendererModuleLoad::LoadedByRequest | RendererModuleLoad::AlreadyLoaded,
+            )),
         ) if code == evidence.ok_or(())?.reason().map_err(|_| ())?.code() => {
             Ok(BrokerDisposition::Skipped)
         }
@@ -402,6 +408,25 @@ fn classify_renderer_result(
             false,
             Some((RendererActivationDisposition::Failed, RendererModuleLoad::LoadedByRequest)),
         ) if code == evidence.ok_or(())?.reason().map_err(|_| ())?.code() => {
+            Ok(BrokerDisposition::UncertainCleanup)
+        }
+        (
+            "failed",
+            true,
+            Some((RendererActivationDisposition::Failed, RendererModuleLoad::AlreadyLoaded)),
+        ) if code == evidence.ok_or(())?.reason().map_err(|_| ())?.code() => {
+            Ok(BrokerDisposition::Rejected)
+        }
+        (
+            "timeout",
+            false,
+            Some((
+                RendererActivationDisposition::Active
+                | RendererActivationDisposition::QuietSkip
+                | RendererActivationDisposition::Failed,
+                RendererModuleLoad::AlreadyLoaded,
+            )),
+        ) if code == "renderer-reference-release-cleanup-unknown" => {
             Ok(BrokerDisposition::UncertainCleanup)
         }
         ("skipped", true, None) => Ok(BrokerDisposition::Skipped),

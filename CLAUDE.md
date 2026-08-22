@@ -51,7 +51,10 @@ below wherever the two conflict.
   effective profile digest, admission, lifecycle revision, and capability
   evidence. Keep helper wire text inside its Adapter; retry, cleanup, health,
   and quiet-skip policy consume typed dispositions. Never query or release an
-  already-loaded renderer without a renderer-owned lifetime lease.
+  already-loaded renderer without a renderer-owned lifetime lease. For an
+  exact pre-existing DLL, acquire one fixed-path helper reference, query it as
+  `AlreadyLoaded`, and release only that reference after the query completes;
+  retain it when query-thread cleanup is uncertain.
 - `ProfileRuntime` publishes one complete immutable `RendererPolicySnapshot`
   after the selected profile remains stable through hashing and parsing. A
   failed publication preserves the prior snapshot. FreeType startup, raster,

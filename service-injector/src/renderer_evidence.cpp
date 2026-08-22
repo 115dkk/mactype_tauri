@@ -73,6 +73,17 @@ enum class QueryState {
     cleanup_unknown,
 };
 
+enum class ReferenceReleaseState {
+    complete,
+    cleanup_unknown,
+};
+
+struct ReferenceReleaseResult final {
+    ReferenceReleaseState state{ReferenceReleaseState::cleanup_unknown};
+    FixedModuleState module_state{FixedModuleState::InventoryUnavailable};
+    DWORD windows_error{};
+};
+
 struct QueryResult final {
     QueryState state{QueryState::failed};
     std::optional<MacTypeRendererActivationEvidenceV1> evidence;
@@ -257,48 +268,80 @@ struct QueryResult final {
             ERROR_SUCCESS};
 }
 
-[[nodiscard]] bool unload_renderer(
+[[nodiscard]] ReferenceReleaseResult release_renderer_reference(
     HANDLE process, const std::filesystem::path& module_path,
-    const OperationDeadline& deadline, DWORD& windows_error) noexcept {
+    const OperationDeadline& deadline) noexcept {
     const auto module = fixed_module_base(process, module_path);
+    if (!module) {
+        return {ReferenceReleaseState::cleanup_unknown,
+                FixedModuleState::InventoryUnavailable, GetLastError()};
+    }
     const auto free_library = remote_free_library(process);
-    if (!module || !free_library) {
-        windows_error = GetLastError();
-        return false;
+    if (!free_library) {
+        return {ReferenceReleaseState::cleanup_unknown,
+                FixedModuleState::InventoryUnavailable, GetLastError()};
     }
     const DWORD wait_budget = deadline.remaining(kEvidenceTimeoutMs);
     if (wait_budget == 0U) {
-        windows_error = WAIT_TIMEOUT;
-        return false;
+        return {ReferenceReleaseState::cleanup_unknown,
+                FixedModuleState::InventoryUnavailable, WAIT_TIMEOUT};
     }
     const UniqueHandle thread{CreateRemoteThread(
         process, nullptr, 0U, *free_library,
         reinterpret_cast<void*>(*module), 0U, nullptr)};
     if (!thread) {
-        windows_error = GetLastError();
-        return false;
+        return {ReferenceReleaseState::cleanup_unknown,
+                FixedModuleState::InventoryUnavailable, GetLastError()};
     }
     const DWORD wait = WaitForSingleObject(thread.get(), wait_budget);
     if (wait != WAIT_OBJECT_0) {
-        windows_error = wait == WAIT_FAILED ? GetLastError() : WAIT_TIMEOUT;
-        return false;
+        return {ReferenceReleaseState::cleanup_unknown,
+                FixedModuleState::InventoryUnavailable,
+                wait == WAIT_FAILED ? GetLastError() : WAIT_TIMEOUT};
     }
     DWORD unloaded = FALSE;
     if (!GetExitCodeThread(thread.get(), &unloaded)) {
-        windows_error = GetLastError();
-        return false;
+        return {ReferenceReleaseState::cleanup_unknown,
+                FixedModuleState::InventoryUnavailable, GetLastError()};
     }
     if (unloaded == FALSE) {
-        windows_error = ERROR_DLL_INIT_FAILED;
-        return false;
+        return {ReferenceReleaseState::cleanup_unknown,
+                FixedModuleState::InventoryUnavailable, ERROR_DLL_INIT_FAILED};
     }
     const FixedModuleState state = fixed_module_state(process, module_path);
-    if (state != FixedModuleState::Absent) {
-        windows_error = ERROR_BUSY;
-        return false;
+    DWORD state_error = ERROR_SUCCESS;
+    if (state == FixedModuleState::InventoryUnavailable) {
+        state_error = GetLastError();
+        if (state_error == ERROR_SUCCESS) {
+            state_error = ERROR_PARTIAL_COPY;
+        }
     }
-    windows_error = ERROR_SUCCESS;
-    return true;
+    return {ReferenceReleaseState::complete, state, state_error};
+}
+
+[[nodiscard]] bool expected_post_release_state(
+    const RendererLoadOrigin load_origin,
+    const MacTypeRendererActivationDisposition disposition,
+    const FixedModuleState state) noexcept {
+    if (load_origin == RendererLoadOrigin::loaded_by_request) {
+        return disposition == MACTYPE_RENDERER_DISPOSITION_QUIET_SKIP &&
+               state == FixedModuleState::Absent;
+    }
+    if (disposition == MACTYPE_RENDERER_DISPOSITION_ACTIVE) {
+        return state == FixedModuleState::ExpectedModuleLoaded;
+    }
+    return state == FixedModuleState::ExpectedModuleLoaded ||
+           state == FixedModuleState::Absent;
+}
+
+void record_release_uncertainty(
+    Result& result, const ReferenceReleaseResult& release,
+    const std::string_view code =
+        "renderer-reference-release-cleanup-unknown") noexcept {
+    result.status = ResultStatus::timed_out;
+    result.code = code;
+    result.windows_error = release.windows_error;
+    result.cleanup_complete = false;
 }
 
 }  // namespace
@@ -306,49 +349,80 @@ struct QueryResult final {
 Result bind_renderer_activation_evidence(
     HANDLE process, const BrokerRequest& request,
     const std::filesystem::path& module_path, Result module_result,
+    const RendererLoadOrigin load_origin,
     const OperationDeadline& deadline) noexcept {
     if (module_result.status != ResultStatus::injected) {
         return module_result;
     }
     const QueryResult query = query_renderer(
-        process, request, module_path, true, deadline);
+        process, request, module_path,
+        load_origin == RendererLoadOrigin::loaded_by_request, deadline);
     if (query.state != QueryState::complete || !query.evidence) {
+        if (load_origin == RendererLoadOrigin::already_loaded &&
+            query.state == QueryState::failed) {
+            const ReferenceReleaseResult release =
+                release_renderer_reference(process, module_path, deadline);
+            if (release.state != ReferenceReleaseState::complete) {
+                record_release_uncertainty(module_result, release);
+                return module_result;
+            }
+        }
         module_result.status = query.state == QueryState::cleanup_unknown
                                    ? ResultStatus::timed_out
                                    : ResultStatus::integrity_failed;
         module_result.code = query.code;
         module_result.windows_error = query.windows_error;
-        module_result.cleanup_complete = false;
+        module_result.cleanup_complete =
+            load_origin == RendererLoadOrigin::already_loaded &&
+            query.state == QueryState::failed;
         return module_result;
     }
 
     module_result.renderer_evidence = query.evidence;
     const auto disposition = query.evidence->disposition;
+    if (load_origin == RendererLoadOrigin::already_loaded ||
+        disposition == MACTYPE_RENDERER_DISPOSITION_QUIET_SKIP) {
+        const ReferenceReleaseResult release =
+            release_renderer_reference(process, module_path, deadline);
+        if (release.state != ReferenceReleaseState::complete) {
+            record_release_uncertainty(
+                module_result, release,
+                load_origin == RendererLoadOrigin::loaded_by_request
+                    ? "renderer-quiet-skip-unload-cleanup-unknown"
+                    : "renderer-reference-release-cleanup-unknown");
+            return module_result;
+        }
+        if (!expected_post_release_state(
+                load_origin, disposition, release.module_state)) {
+            module_result.renderer_evidence.reset();
+            module_result.status = ResultStatus::integrity_failed;
+            module_result.code = "renderer-reference-release-state-invalid";
+            module_result.windows_error = release.windows_error != ERROR_SUCCESS
+                                              ? release.windows_error
+                                              : ERROR_INVALID_DATA;
+            module_result.cleanup_complete = true;
+            return module_result;
+        }
+    }
     if (disposition == MACTYPE_RENDERER_DISPOSITION_ACTIVE) {
         module_result.status = ResultStatus::injected;
         module_result.code = "renderer-active";
+        module_result.windows_error = ERROR_SUCCESS;
+        module_result.cleanup_complete = true;
         return module_result;
     }
     if (disposition == MACTYPE_RENDERER_DISPOSITION_QUIET_SKIP) {
-        DWORD unload_error = ERROR_SUCCESS;
-        if (unload_renderer(process, module_path, deadline, unload_error)) {
-            module_result.status = ResultStatus::skipped;
-            module_result.code = MacTypeRendererActivationReasonCode(query.evidence->reason);
-            module_result.windows_error = ERROR_SUCCESS;
-            module_result.cleanup_complete = true;
-        } else {
-            module_result.status = ResultStatus::timed_out;
-            module_result.code = "renderer-quiet-skip-unload-cleanup-unknown";
-            module_result.windows_error = unload_error;
-            module_result.cleanup_complete = false;
-        }
+        module_result.status = ResultStatus::skipped;
+        module_result.code = MacTypeRendererActivationReasonCode(query.evidence->reason);
+        module_result.windows_error = ERROR_SUCCESS;
+        module_result.cleanup_complete = true;
         return module_result;
     }
 
     module_result.status = ResultStatus::failed;
     module_result.code = MacTypeRendererActivationReasonCode(query.evidence->reason);
     module_result.windows_error = ERROR_SUCCESS;
-    module_result.cleanup_complete = false;
+    module_result.cleanup_complete = load_origin == RendererLoadOrigin::already_loaded;
     return module_result;
 }
 

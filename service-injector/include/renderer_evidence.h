@@ -10,9 +10,14 @@
 
 namespace mactype::injector {
 
+enum class RendererLoadOrigin {
+    loaded_by_request,
+    already_loaded,
+};
+
 [[nodiscard]] Result bind_renderer_activation_evidence(
     HANDLE process, const BrokerRequest& request,
     const std::filesystem::path& module_path, Result module_result,
-    const OperationDeadline& deadline) noexcept;
+    RendererLoadOrigin load_origin, const OperationDeadline& deadline) noexcept;
 
 }  // namespace mactype::injector

@@ -112,6 +112,17 @@ function Assert-Response($Invocation, [int] $ExitCode, [string] $Status, [string
     }
 }
 
+function Assert-EvidenceModuleLoad($Invocation, [int] $Expected) {
+    $encoded = [string]$Invocation.Response.rendererEvidence
+    if ($encoded -notmatch '^[0-9a-f]{624}$') {
+        throw "Injector response omitted canonical renderer evidence: $($Invocation.Json)"
+    }
+    $actual = [Convert]::ToInt32($encoded.Substring(18, 2), 16)
+    if ($actual -ne $Expected) {
+        throw "Unexpected renderer module-load origin $actual (expected $Expected): $($Invocation.Json)"
+    }
+}
+
 New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
 try {
     foreach ($path in @($Injector, $Target, $Module, $QuietModule, $SlowModule, $DecoyModule, $TimeoutInjector, $InheritedHandleLauncher)) {
@@ -129,12 +140,14 @@ try {
     if ([string]$loaded.Response.rendererEvidence -notmatch '^[0-9a-f]{624}$') {
         throw 'Successful injection omitted canonical renderer activation evidence.'
     }
+    Assert-EvidenceModuleLoad $loaded 2
 
     $duplicate = Invoke-Broker -Executable $Injector -Identity $valid.Identity
-    Assert-Response $duplicate 3 'integrity' 'existing-renderer-unverified'
-    if ($null -ne $duplicate.Response.rendererEvidence) {
-        throw 'Already-loaded renderer should not be queried without a helper-owned reference.'
+    Assert-Response $duplicate 0 'injected' 'renderer-active'
+    if (-not $duplicate.Response.cleanupComplete) {
+        throw 'Already-loaded renderer verification did not release its helper-owned reference.'
     }
+    Assert-EvidenceModuleLoad $duplicate 3
 
     $valid.Process.WaitForExit(5000)
     if (-not $valid.Process.HasExited -or $valid.Process.ExitCode -ne 0) {
@@ -151,9 +164,22 @@ try {
         [string]$quietResponse.Response.rendererEvidence -notmatch '^[0-9a-f]{624}$') {
         throw 'Renderer quiet skip did not return verified bounded evidence and cleanup.'
     }
+    Assert-EvidenceModuleLoad $quietResponse 2
     $quiet.Process.WaitForExit(7000)
     if (-not $quiet.Process.HasExited -or $quiet.Process.ExitCode -ne 7) {
         throw 'Explicit renderer skip left the fixed renderer resident in the target.'
+    }
+
+    $quietPreloaded = Start-Marker -Name 'renderer-quiet-skip-preloaded' -PreloadModule $fixedModule
+    $quietPreloadedResponse = Invoke-Broker -Executable $Injector -Identity $quietPreloaded.Identity
+    Assert-Response $quietPreloadedResponse 0 'skipped' 'process-excluded'
+    if (-not $quietPreloadedResponse.Response.cleanupComplete) {
+        throw 'Preloaded quiet renderer verification did not release its helper-owned reference.'
+    }
+    Assert-EvidenceModuleLoad $quietPreloadedResponse 3
+    $quietPreloaded.Process.WaitForExit(5000)
+    if (-not $quietPreloaded.Process.HasExited -or $quietPreloaded.Process.ExitCode -ne 0) {
+        throw 'Preloaded quiet renderer lost the target-owned module reference.'
     }
     Copy-Item -LiteralPath $moduleBackup -Destination $fixedModule -Force
     Remove-Item -LiteralPath $moduleBackup -Force

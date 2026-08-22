@@ -84,7 +84,7 @@ struct _TEB_T_
     T CsrClientThread;
     T Win32ThreadInfo;
     DWORD User32Reserved[26];
-    //rest of the structure is not defined for now, as it is not needed
+    // Only the consumed structure prefix is defined.
 };
 
 template <class T>

@@ -46,37 +46,6 @@ enum FT_EngineConstants {
 	FT_MAX_CHARS	= 65536,
 };
 
-/*
-  FreeTypeに文字幅、太字、斜体をキャッシュする機構が無いのでそれらを補う
-
-  1. まずDllMain(DLL_PROCESS_ATTACH)でFreeTypeFontEngineのインスタンスが生成される。
-     (順番はCGdiPPSettings→FontLInit(FreeType)→FreeTypeFontEngine→フック)
-     ForceChangeFontもここで処理する。
-
-  2. CreateFontでFreeTypeFontEngine::AddFontが呼び出され、FreeTypeFontInfoと
-     フォント名を結びつける。
-     ついでにFreeTypeFontInfoはIndividualの設定をコピーして持つ。
-
-  3. ExtTextOutやGetTextExtentなどからFreeTypePrepare関数が呼び出されると
-     さらに内部でFreeTypeFontInfo::GetCacheが呼び出され、フォントサイズなどから
-     FreeTypeFontCacheを得る。無ければ生成する。
-     FreeTypeFontCacheは内部にFreeTypeCharDataのテーブル(UCS2なので2^16個)を
-     持っていて、FreeTypeCharDataには文字毎にキャッシュデータを保管する。
-
-  4. FreeTypeFontCacheから、文字またはグリフ番号を元にFreeTypeCharDataを得る。
-     キャッシュがあれば(メモリ中に残っていれば)、MRUカウンタをセットする。
-     無い場合は一旦スルーし、後でAddCharDataでキャッシュを追加する。
-
-  5. 追加しまくるとメモリを喰らうので、追加が一定数(FREETYPE_REQCOUNTMAX)を超えると
-     GCモドキで最近参照されたキャッシュデータをFREETYPE_GC_COUNTER個だけ残し、
-     それ以外のデータ(FreeTypeCharData)は開放される。
-     この2つの定数はiniで設定変更できた方がいいような気もする。
-
-  6. 最後に、DllMain(DLL_PROCESS_DETACH)でFreeTypeFontEngineのインスタンスが破棄され、
-     全てのキャッシュメモリが開放される。
-
- */
-
 class FreeTypeGCCounter
 {
 private:
@@ -173,7 +142,6 @@ public:
 
 	void Erase()
 	{
-		//delete this;
 	}
 };
 class FreeTypeFontCache : public FreeTypeMruCounter, public FreeTypeGCCounter
@@ -232,7 +200,6 @@ public:
 
 	FreeTypeCharData* FindChar(WCHAR wch)
 	{
-		/*if (!g_ccbCache) return nullptr;*/
 		FreeTypeCharData* p = *_GetChar(wch);
 		if(p) {
 			p->SetMruCounter(this);
@@ -242,7 +209,6 @@ public:
 
 	FreeTypeCharData* FindGlyphIndex(UINT glyph)
 	{
-		/*if (!g_ccbCache) return nullptr;*/
 		FreeTypeCharData* p = (glyph & 0xffff0000) ? nullptr : *_GetGlyph(glyph);
 		if(p) {
 			p->SetMruCounter(this);
@@ -372,7 +338,6 @@ public:
 			if (nSize==0)
 				m_fullname = L"";
 			else
-			//if (m_fullname.size()==0)	//构造函数中不提供，自己获取
 			{
 				std::vector<BYTE> metricBuffer(nSize, 0);
 				LPOUTLINETEXTMETRIC otm = reinterpret_cast<LPOUTLINETEXTMETRIC>(metricBuffer.data());
@@ -400,7 +365,6 @@ public:
 				}
 			}
 			//完成
-//		g_EngineCreateFont = false;
 		face_id_link[0] = nullptr;
 		ggo_link[0] = nullptr;
 	}
@@ -495,7 +459,6 @@ public:
 class FreeTypeFontEngine : public FreeTypeGCCounter
 {
 private:
-	//typedef CArray<FreeTypeFontInfo*>	FontListArray;
 	typedef map<myfont, FreeTypeFontInfo*> FontMap;
 	typedef map<wstring, FreeTypeFontInfo*> FullNameMap;
 	typedef vector<FreeTypeFontInfo*> FontList;
@@ -593,14 +556,6 @@ public:
 			FreeTypeFontInfo* p =iter->second;
 			if (p)
 			{
-				/*
-								if (p->GetFullName()!=iter->first)	//是替换字体
-																{
-																	p->Release();	//释放掉多重引用
-																	m_mfullMap.erase(iter++);
-																	continue;
-																}*/
-
 				p->Erase();
 				CFontSettings settings =
 					policy->font_settings_for(p->GetName());
@@ -614,7 +569,6 @@ public:
 		}
 		m_policyGeneration.store(
 			policy->generation(), std::memory_order_release);
-		//m_mfontMap.clear();
 	}
 	std::uint64_t PolicyGeneration() const noexcept
 	{

@@ -93,7 +93,7 @@ function previewPalette(dark: boolean): { foreground: string; background: string
 /* The helper rejects bitmaps above 2048 device pixels; stay under it at 2x. */
 const MAX_STRIP_HEIGHT = 1000;
 
-/* A strip is drawn at the width we ask for and the layout caps it at the
+/* A strip is drawn at the requested width and the layout caps it at the
    canvas, so a bitmap wider than the canvas gets resampled down and the reader
    sees glyphs smaller than the size they picked. Asking for the canvas width
    instead keeps every layout at true size, and because the helper draws with

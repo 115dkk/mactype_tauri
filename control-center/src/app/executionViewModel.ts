@@ -120,8 +120,6 @@ function projectProfileIndicator(
 ): ProfileIndicator {
   const service = status?.systemService;
   if (service?.runtime === "stopped") {
-    // No generation is active while the service is off; reporting a mismatch
-    // would blame a profile for a state the user chose.
     return { kind: "service-off", labelKey: "execution.profileServiceOff" };
   }
   if (profileMatches) {
@@ -480,8 +478,6 @@ function projectSystemInjectionAction(
   const copy = state === "legacy-service-migrate"
     ? legacyServiceCopy(status?.legacyMacTray)
     : state === "inactive" && !status?.activeProfile
-      // Starting without an applied profile auto-applies the bundled default;
-      // disclose that here, before the click, instead of surprising afterwards.
       ? { ...systemInjectionCopy.inactive, descriptionKey: "execution.systemInactiveNoProfileDescription" as const }
       : systemInjectionCopy[state];
 

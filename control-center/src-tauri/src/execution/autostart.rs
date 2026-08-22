@@ -20,6 +20,8 @@ fn read_registry_string(
     let subkey = wide(subkey);
     let value = wide(value);
     let mut bytes = 0u32;
+    // SAFETY: both names are NUL-terminated, the HKEY is borrowed for this
+    // call, and a null data pointer requests only the byte count.
     let result = unsafe {
         RegGetValueW(
             root,
@@ -38,6 +40,8 @@ fn read_registry_string(
     let capacity_bytes = bytes;
     let mut buffer = vec![0u16; units];
     let mut read_bytes = capacity_bytes;
+    // SAFETY: registry_wide_units proved an even bounded byte count, so the
+    // UTF-16 allocation advertises exactly its initialized capacity.
     let result = unsafe {
         RegGetValueW(
             root,

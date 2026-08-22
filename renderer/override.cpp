@@ -8,7 +8,6 @@
 #include "supinfo.h"
 #include "undocAPI.h"
 #include "freetype_raii.h"
-//#include "lrucache.hpp"
 
 #include <malloc.h>		// _alloca
 #include <mbctype.h>	// _getmbcp
@@ -81,7 +80,6 @@ BOOL IsValidDC(HDC hdc)
 
 BOOL IsProcessExcluded()
 {
-//	if (GetModuleHandle(nullptr) == GetModuleHandle(_T("gdi++.exe"))) {
 //		return TRUE;
 //	}
 
@@ -101,7 +99,6 @@ BOOL IsProcessExcluded()
 
 BOOL IsProcessUnload()
 {
-//	if (GetModuleHandle(nullptr) == GetModuleHandle(_T("gdi++.exe"))) {
 //		return TRUE;
 //	}
 
@@ -163,107 +160,10 @@ BOOL _GetTextExtentPoint32AorW(HDC hdc, _TCHAR* lpString, int cbString, LPSIZE l
 }
 
 //firefox
-/*
-BOOL WINAPI IMPL_GetTextExtentPoint32A(HDC hdc, LPCSTR lpString, int cbString, LPSIZE lpSize)
-{
-	//CThreadCounter __counter;
-	//CCriticalSectionLock __lock;
-	return _GetTextExtentPoint32AorW(hdc, lpString, cbString, lpSize) || ORIG_GetTextExtentPoint32A(hdc, lpString, cbString, lpSize);
-}
-
-BOOL WINAPI IMPL_GetTextExtentPoint32W(HDC hdc, LPCWSTR lpString, int cbString, LPSIZE lpSize)
-{
-	//CThreadCounter __counter;
-	//CCriticalSectionLock __lock;
-	return _GetTextExtentPoint32AorW(hdc, lpString, cbString, lpSize) || ORIG_GetTextExtentPoint32W(hdc, lpString, cbString, lpSize);
-}
-
-BOOL WINAPI IMPL_GetTextExtentPointA(HDC hdc, LPCSTR lpString, int cbString, LPSIZE lpSize)
-{
-	//CThreadCounter __counter;
-	//CCriticalSectionLock __lock;
-	return _GetTextExtentPoint32AorW(hdc, lpString, cbString, lpSize) || ORIG_GetTextExtentPoint32A(hdc, lpString, cbString, lpSize);
-}
-
-BOOL WINAPI IMPL_GetTextExtentPointW(HDC hdc, LPCWSTR lpString, int cbString, LPSIZE lpSize)
-{
-	//CThreadCounter __counter;
-	//CCriticalSectionLock __lock;
-	return _GetTextExtentPoint32AorW(hdc, lpString, cbString, lpSize) || ORIG_GetTextExtentPoint32W(hdc, lpString, cbString, lpSize);
-}
-
-BOOL WINAPI IMPL_GetCharWidthW(HDC hdc, UINT iFirstChar, UINT iLastChar, LPINT lpBuffer)
-{
-	//CThreadCounter __counter;
-	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
-	if (pSettings->WidthMode() == SETTING_WIDTHMODE_GDI32
-		|| !IsValidDC(hdc) || !lpBuffer || !FreeTypeGetCharWidth(hdc, iFirstChar, iLastChar, lpBuffer)) {
-		return ORIG_GetCharWidthW(hdc, iFirstChar, iLastChar, lpBuffer);
-	}
-	return TRUE;
-}
-
-BOOL WINAPI IMPL_GetCharWidth32W(HDC hdc, UINT iFirstChar, UINT iLastChar, LPINT lpBuffer)
-{
-	//CThreadCounter __counter;
-	TRACE(_T("GetCharWidth32W(%u, %u, {...})\n"), iFirstChar, iLastChar);
-	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
-	if (pSettings->WidthMode() == SETTING_WIDTHMODE_GDI32
-		|| !IsValidDC(hdc) || !lpBuffer || !FreeTypeGetCharWidth(hdc, iFirstChar, iLastChar, lpBuffer)) {
-		return ORIG_GetCharWidth32W(hdc, iFirstChar, iLastChar, lpBuffer);
-	}
-	return TRUE;
-}*/
-/*
-extern PFNLdrGetProcedureAddress LdrGetProcedureAddress;
-int MyGetProcAddress(HMODULE dll, LPSTR funcname)
-{
-	ANSI_STRING dumy;
-	dumy.Length = strlen(funcname);
-	dumy.MaximumLength = strlen(funcname);
-	dumy.Buffer = funcname;
-	int nRet;
-	LdrGetProcedureAddress(dll, &dumy, 0, reinterpret_cast<void**>(&nRet));
-	return nRet;
-}*/
 
 
-/*
-LONG WINAPI IMPL_LdrLoadDll(IN PWCHAR PathToFile OPTIONAL, IN ULONG Flags OPTIONAL, IN UNICODE_STRING2* ModuleFileName, OUT HANDLE* ModuleHandle)
-{
-	static bool bFisrtTimeHook = GetModuleHandle(_T("d2d1.dll"))!=0;
-	if (!bD2D1Loaded)
-	{
-		wstring filename = wstring(ModuleFileName->Buffer);
-		int last_slash=filename.find_last_of('\\');
-		if (last_slash!=-1)
-			filename.erase(0,last_slash+1);	//删除路径
-		if (_wcsicmp(filename.c_str(), L"d2d1.dll")==0)	//正在载入d2d1.dll
-		{
-			bD2D1Loaded = true;
-			LONG result = ORIG_LdrLoadDll(PathToFile, Flags, ModuleFileName, ModuleHandle);
-			HookD2D1(static_cast<HMODULE>(*ModuleHandle));
-			return result;
-		}
-		if (bFisrtTimeHook)
-		{
-			bFisrtTimeHook = false;
-			bD2D1Loaded = true;
-			HookD2D1(GetModuleHandle(_T("d2d1.dll")));
-		}
-	}
-	return ORIG_LdrLoadDll(PathToFile, Flags, ModuleFileName, ModuleHandle);
-}*/
 
 
-/*
-BOOL WINAPI IMPL_CreateProcessInternalW( HANDLE hToken, LPCTSTR lpApplicationName, LPTSTR lpCommandLine, LPSECURITY_ATTRIBUTES lpProcessAttributes, LPSECURITY_ATTRIBUTES lpThreadAttributes, BOOL bInheritHandles, \
-										DWORD dwCreationFlags, LPVOID lpEnvironment, LPCTSTR lpCurrentDirectory, LPSTARTUPINFO lpStartupInfo, LPPROCESS_INFORMATION lpProcessInformation , PHANDLE hNewToken)
-{
-	//CThreadCounter __counter;
-	CCriticalSectionLock __lock;
-	return _CreateProcessInternalW(hToken, lpApplicationName, lpCommandLine, lpProcessAttributes, lpThreadAttributes, bInheritHandles, dwCreationFlags, lpEnvironment, lpCurrentDirectory, lpStartupInfo, lpProcessInformation, hNewToken, ORIG_CreateProcessInternalW);
-}*/
 
 #ifdef USE_DETOURS
 BOOL WINAPI IMPL_CreateProcessInternalW(
@@ -299,137 +199,9 @@ BOOL WINAPI IMPL_CreateProcessInternalW(
 }
 #endif
 
-/*
-BOOL WINAPI IMPL_nCreateProcessA(LPCSTR lpApp, LPSTR lpCmd, LPSECURITY_ATTRIBUTES pa, LPSECURITY_ATTRIBUTES ta, BOOL bInherit, DWORD dwFlags, LPVOID lpEnv, LPCSTR lpDir, LPSTARTUPINFOA psi, LPPROCESS_INFORMATION ppi)
-{
-	//CThreadCounter __counter;
-	CCriticalSectionLock __lock;
-	TRACE(_T("CreateProcessA(\"%hs\", \"%hs\", ...)\n"), lpApp, lpCmd);
-	return _CreateProcessAorW(lpApp, lpCmd, pa, ta, bInherit, dwFlags, lpEnv, lpDir, psi, ppi, ORIG_nCreateProcessA);
-}
-
-BOOL WINAPI IMPL_nCreateProcessW(LPCWSTR lpApp, LPWSTR lpCmd, LPSECURITY_ATTRIBUTES pa, LPSECURITY_ATTRIBUTES ta, BOOL bInherit, DWORD dwFlags, LPVOID lpEnv, LPCWSTR lpDir, LPSTARTUPINFOW psi, LPPROCESS_INFORMATION ppi)
-{
-	//CThreadCounter __counter;
-	CCriticalSectionLock __lock;
-	TRACE(_T("CreateProcessW(\"%ls\", \"%ls\", ...)\n"), lpApp, lpCmd);
-	return _CreateProcessAorW(lpApp, lpCmd, pa, ta, bInherit, dwFlags, lpEnv, lpDir, psi, ppi, ORIG_nCreateProcessW);
-}
 
 
-BOOL WINAPI IMPL_CreateProcessAsUserA(HANDLE hToken, LPCSTR lpApp, LPSTR lpCmd, LPSECURITY_ATTRIBUTES pa, LPSECURITY_ATTRIBUTES ta, BOOL bInherit, DWORD dwFlags, LPVOID lpEnv, LPCSTR lpDir, LPSTARTUPINFOA psi, LPPROCESS_INFORMATION ppi)
-{
-	//CThreadCounter __counter;
-	CCriticalSectionLock __lock;
-	TRACE(_T("CreateProcessA(\"%hs\", \"%hs\", ...)\n"), lpApp, lpCmd);
-	return _CreateProcessAsUserAorW(hToken, lpApp, lpCmd, pa, ta, bInherit, dwFlags, lpEnv, lpDir, psi, ppi, ORIG_CreateProcessAsUserA);
-}
 
-BOOL WINAPI IMPL_CreateProcessAsUserW(HANDLE hToken, LPCWSTR lpApp, LPWSTR lpCmd, LPSECURITY_ATTRIBUTES pa, LPSECURITY_ATTRIBUTES ta, BOOL bInherit, DWORD dwFlags, LPVOID lpEnv, LPCWSTR lpDir, LPSTARTUPINFOW psi, LPPROCESS_INFORMATION ppi)
-{
-	//CThreadCounter __counter;
-	CCriticalSectionLock __lock;
-	TRACE(_T("CreateProcessW(\"%ls\", \"%ls\", ...)\n"), lpApp, lpCmd);
-	return _CreateProcessAsUserAorW(hToken, lpApp, lpCmd, pa, ta, bInherit, dwFlags, lpEnv, lpDir, psi, ppi, ORIG_CreateProcessAsUserW);
-}*/
-
-/*
-HOOK_DEFINE(user32.dll, DWORD, GetTabbedTextExtentA, (HDC hdc, LPCSTR lpString, int nCount, int nTabPositions, CONST LPINT lpnTabStopPositions), (hdc, lpString, nCount, nTabPositions, lpnTabStopPositions))
-HOOK_DEFINE(user32.dll, DWORD, GetTabbedTextExtentW, (HDC hdc, LPCWSTR lpString, int nCount, int nTabPositions, CONST LPINT lpnTabStopPositions), (hdc, lpString, nCount, nTabPositions, lpnTabStopPositions))
-HOOK_DEFINE(gdi32.dll, BOOL, GetTextExtentExPointA, (HDC hdc, LPCSTR lpszStr, int cchString, int nMaxExtent, LPINT lpnFit, LPINT lpDx, LPSIZE lpSize), (hdc, lpszStr, cchString, nMaxExtent, lpnFit, lpDx, lpSize))
-HOOK_DEFINE(gdi32.dll, BOOL, GetTextExtentExPointW, (HDC hdc, LPCWSTR lpszStr, int cchString, int nMaxExtent, LPINT lpnFit, LPINT lpDx, LPSIZE lpSize), (hdc, lpszStr, cchString, nMaxExtent, lpnFit, lpDx, lpSize))
-HOOK_DEFINE(gdi32.dll, BOOL, GetTextExtentExPointI, (HDC hdc, LPWORD pgiIn, int cgi, int nMaxExtent, LPINT lpnFit, LPINT lpDx, LPSIZE lpSize), (hdc, pgiIn, cgi, nMaxExtent, lpnFit, lpDx, lpSize))
-HOOK_DEFINE(gdi32.dll, BOOL, GetTextExtentPointA, (HDC hdc, LPCSTR lpString, int cbString, LPSIZE lpSize), (hdc, lpString, cbString, lpSize))
-HOOK_DEFINE(gdi32.dll, BOOL, GetTextExtentPointW, (HDC hdc, LPCWSTR lpString, int cbString, LPSIZE lpSize), (hdc, lpString, cbString, lpSize))
-HOOK_DEFINE(gdi32.dll, BOOL, GetTextExtentPointI, (HDC hdc, LPWORD pgiIn, int cgi, LPSIZE lpSize), (hdc, pgiIn, cgi, lpSize))
-*/
-
-
-/*
-HFONT WINAPI IMPL_CreateFontA(int nHeight, int nWidth, int nEscapement, int nOrientation, int fnWeight, DWORD fdwItalic, DWORD fdwUnderline, DWORD fdwStrikeOut, DWORD fdwCharSet, DWORD fdwOutputPrecision, DWORD fdwClipPrecision, DWORD fdwQuality, DWORD fdwPitchAndFamily, LPCSTR  lpszFace)
-{
-	LOGFONTA lf = {
-		nHeight,
-		nWidth,
-		nEscapement,
-		nOrientation,
-		fnWeight,
-		!!fdwItalic,
-		!!fdwUnderline,
-		!!fdwStrikeOut,
-		static_cast<BYTE>(fdwCharSet),
-		static_cast<BYTE>(fdwOutputPrecision),
-		static_cast<BYTE>(fdwClipPrecision),
-		static_cast<BYTE>(fdwQuality),
-		static_cast<BYTE>(fdwPitchAndFamily),
-	};
-	if (lpszFace)
-		strncpy(lf.lfFaceName, lpszFace, LF_FACESIZE - 1);
-	return IMPL_CreateFontIndirectA(&lf);
-}
-
-HFONT WINAPI IMPL_CreateFontW(int nHeight, int nWidth, int nEscapement, int nOrientation, int fnWeight, DWORD fdwItalic, DWORD fdwUnderline, DWORD fdwStrikeOut, DWORD fdwCharSet, DWORD fdwOutputPrecision, DWORD fdwClipPrecision, DWORD fdwQuality, DWORD fdwPitchAndFamily, LPCWSTR lpszFace)
-{
-	LOGFONTW lf = {
-		nHeight,
-		nWidth,
-		nEscapement,
-		nOrientation,
-		fnWeight,
-		!!fdwItalic,
-		!!fdwUnderline,
-		!!fdwStrikeOut,
-		static_cast<BYTE>(fdwCharSet),
-		static_cast<BYTE>(fdwOutputPrecision),
-		static_cast<BYTE>(fdwClipPrecision),
-		static_cast<BYTE>(fdwQuality),
-		static_cast<BYTE>(fdwPitchAndFamily),
-	};
-	if (lpszFace)
-		wcsncpy(lf.lfFaceName, lpszFace, LF_FACESIZE - 1);
-	return IMPL_CreateFontIndirectW(&lf);
-}
-
-HFONT WINAPI IMPL_CreateFontIndirectA(CONST LOGFONTA *lplfA)
-{
-	if(!lplfA) {
-		SetLastError(ERROR_INVALID_PARAMETER);
-		return nullptr;
-	}
-
-	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
-	if (pSettings->IsFontExcluded(lplfA->lfFaceName)) {
-		return ORIG_CreateFontIndirectA(lplfA);
-	}
-
-	LOGFONT lf = {
-		lplfA->lfHeight,
-		lplfA->lfWidth,
-		lplfA->lfEscapement,
-		lplfA->lfOrientation,
-		lplfA->lfWeight,
-		lplfA->lfItalic,
-		lplfA->lfUnderline,
-		lplfA->lfStrikeOut,
-		lplfA->lfCharSet,
-		lplfA->lfOutPrecision,
-		lplfA->lfClipPrecision,
-		lplfA->lfQuality,
-		lplfA->lfPitchAndFamily,
-	};
-	MultiByteToWideChar(CP_ACP, 0, lplfA->lfFaceName, LF_FACESIZE, lf.lfFaceName, LF_FACESIZE);
-
-	LOGFONT* lplf = &lf;
-	if (pSettings->CopyForceFont(lf, lf)) {
-		lplf = &lf;
-	}
-	HFONT hf = IMPL_CreateFontIndirectW(lplf);
-//	if(hf && lplf && !pSettings->LoadOnDemand()) {
-//		AddFontToFT(lplf->lfFaceName, lplf->lfWeight, !!lplf->lfItalic);
-//	}
-	return hf;
-}
-*/
 
 //Snowie!!
 LPCWSTR GetCachedFont(HFONT lFont)
@@ -487,24 +259,6 @@ int WINAPI IMPL_GetTextFaceAliasW(HDC hdc, int nLen, LPWSTR lpAliasW)
 }
 
 // Won't get any better for clipbox, obsolete.
-/*
-cache::lru_cache<HFONT, int> FontHeightCache(200);	// cache 200 most frequently used fonts' height
-const WCHAR TEST_ALPHABET_SEQUENCE[] = L"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-
-int GetFontMaxAlphabetHeight(HDC dc, MAT2 *lpmt2) {
-	HFONT ft = GetCurrentFont(dc);
-	if (FontHeightCache.exists(ft))
-		return FontHeightCache.get(ft);
-	GLYPHMETRICS lppm = { 0 };
-	int nHeight = 0;
-	for (int i = 0; i < 26; ++i) {
-		ORIG_GetGlyphOutlineW(dc, TEST_ALPHABET_SEQUENCE[i], GGO_METRICS, &lppm, 0, 0, lpmt2);
-		if (lppm.gmptGlyphOrigin.y>nHeight)
-			nHeight = lppm.gmptGlyphOrigin.y;
-	}
-	FontHeightCache.put(ft, nHeight);
-	return nHeight;
-}*/
 
 DWORD WINAPI IMPL_GetGlyphOutlineW(__in HDC hdc, __in UINT uChar, __in UINT fuFormat, __out LPGLYPHMETRICS lpgm, __in DWORD cjBuffer, __out_bcount_opt(cjBuffer) LPVOID pvBuffer, __in CONST MAT2 *lpmat2)
 {
@@ -528,11 +282,6 @@ DWORD WINAPI IMPL_GetGlyphOutlineW(__in HDC hdc, __in UINT uChar, __in UINT fuFo
 			}
 			else nDeltaY = 0;
 			lpgm->gmptGlyphOrigin.y += nDeltaY;
-			/*if (lpgm->gmptGlyphOrigin.x > 0)
-				lpgm->gmBlackBoxX += n; // increase blackbox width if it's not a ligature
-			if (lpgm->gmBlackBoxX > tm.tmMaxCharWidth) {
-				lpgm->gmBlackBoxX = tm.tmMaxCharWidth;
-			}*/
 			lpgm->gmBlackBoxY += nDeltaY;
 			if (tm.tmAscent - lpgm->gmptGlyphOrigin.y + lpgm->gmBlackBoxY - 1 < tm.tmHeight)	// still has some room to scale up
 			{
@@ -554,7 +303,6 @@ DWORD WINAPI IMPL_GetGlyphOutlineA(__in HDC hdc, __in UINT uChar, __in UINT fuFo
 	//fuFormat |= GGO_UNHINTED;
 	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
 	DWORD ret=  ORIG_GetGlyphOutlineA(hdc, uChar, fuFormat, lpgm, cjBuffer, pvBuffer, lpmat2);
-// 	if (pSettings->EnableClipBoxFix())
 // 	{
 // 		lpgm->gmptGlyphOrigin.y+=1;
 // 		lpgm->gmBlackBoxY+=1;
@@ -571,11 +319,6 @@ DWORD WINAPI IMPL_GetGlyphOutlineA(__in HDC hdc, __in UINT uChar, __in UINT fuFo
 				}
 			}
 			else nDeltaY = 0;
-			/*if (lpgm->gmptGlyphOrigin.x > 0)
-				lpgm->gmBlackBoxX += n; // increase blackbox width if it's not a ligature
-			if (lpgm->gmBlackBoxX > tm.tmMaxCharWidth) {
-				lpgm->gmBlackBoxX = tm.tmMaxCharWidth;
-			}*/
 			lpgm->gmptGlyphOrigin.y += nDeltaY;
 
 			lpgm->gmBlackBoxY += nDeltaY;
@@ -640,13 +383,6 @@ HGDIOBJ WINAPI IMPL_GetStockObject(__in int i)
 				else
 					return ORIG_GetStockObject(i);
 			}
-/*
-		case SYSTEM_FONT:
-			{
-				if (g_alterSysFont)
-					return g_alterSysFont;
-				break;
-			}*/
 
 		default: return ORIG_GetStockObject(i);
 	}
@@ -731,10 +467,6 @@ HFONT WINAPI IMPL_CreateFontIndirectExW(CONST ENUMLOGFONTEXDV *penumlfex)
 		}
 	}
 
-	/*
-		GetEnvironmentVariableW(L"MACTYPE_FONTSUBSTITUTES_ENV", nullptr, 0);
-			if (GetLastError()!=ERROR_ENVVAR_NOT_FOUND)
-				return ORIG_CreateFontIndirectExW(penumlfex);*/
 
 
 	if(!penumlfex) {
@@ -754,22 +486,6 @@ HFONT WINAPI IMPL_CreateFontIndirectExW(CONST ENUMLOGFONTEXDV *penumlfex)
 		LOGFONT lfOrg(lf);
 		BOOL bForced = false;
 		if (bForced = pSettings->CopyForceFont(lf, lfOrg)) {
-/*
-			mfont->elfEnumLogfontEx.elfLogFont.lfHeight			= lf.lfHeight;
-	//			mfont->elfEnumLogfontEx.elfLogFont.lfWidth			= lfOrg.lfWidth;
-			mfont->elfEnumLogfontEx.elfLogFont.lfWidth			= lf.lfWidth;
-			mfont->elfEnumLogfontEx.elfLogFont.lfEscapement		= lf.lfEscapement;
-			mfont->elfEnumLogfontEx.elfLogFont.lfOrientation	= lf.lfOrientation;
-			mfont->elfEnumLogfontEx.elfLogFont.lfWeight			= lf.lfWeight;
-			mfont->elfEnumLogfontEx.elfLogFont.lfItalic			= lf.lfItalic;
-			mfont->elfEnumLogfontEx.elfLogFont.lfUnderline		= lf.lfUnderline;
-			mfont->elfEnumLogfontEx.elfLogFont.lfStrikeOut		= lf.lfStrikeOut;
-			mfont->elfEnumLogfontEx.elfLogFont.lfCharSet		= lf.lfCharSet;
-			mfont->elfEnumLogfontEx.elfLogFont.lfOutPrecision	= 0;
-			mfont->elfEnumLogfontEx.elfLogFont.lfClipPrecision	= 0;
-			mfont->elfEnumLogfontEx.elfLogFont.lfQuality		= 0;
-			mfont->elfEnumLogfontEx.elfLogFont.lfPitchAndFamily	= 0;
-			StringCchCopy(mfont->elfEnumLogfontEx.elfLogFont.lfFaceName, LF_FACESIZE, lf.lfFaceName);*/
 
 			TRACE(L"Font substitutes to \"%s\"\n", lf.lfFaceName);
 		}
@@ -777,8 +493,6 @@ HFONT WINAPI IMPL_CreateFontIndirectExW(CONST ENUMLOGFONTEXDV *penumlfex)
 			TRACE(L"Normal font\n");
 		//bypass = true;
 		HFONT hf = ORIG_CreateFontIndirectExW(&mfont);
-		//ORIG_CreateFontIndirectExW(
-		//if(hf && lplf && !pSettings->LoadOnDemand()) {
 		//	AddFontToFT(lplf->lfFaceName, lplf->lfWeight, !!lplf->lfItalic);
 		//}
 		if (hf && bForced) {
@@ -808,64 +522,6 @@ HFONT WINAPI IMPL_CreateFontIndirectW(CONST LOGFONTW *lplf)	//重新启用这个
 }
 
 
-/*
-BOOL WINAPI IMPL_DrawStateA(HDC hdc, HBRUSH hbr, DRAWSTATEPROC lpOutputFunc, LPARAM lData, WPARAM wData, int x, int y, int cx, int cy, UINT uFlags)
-{
-	//CThreadCounter __counter;
-	int cchW;
-	LPWSTR lpStringW;
-
-	if(lData && uFlags & DSS_DISABLED) {
-		switch(uFlags & 0x0f) {
-		case DST_TEXT:
-		case DST_PREFIXTEXT:
-			lpStringW = _StrDupAtoW(reinterpret_cast<LPCSTR>(lData), wData ? wData : -1, &cchW);
-			if(lpStringW) {
-				BOOL ret = IMPL_DrawStateW(hdc, hbr, lpOutputFunc, reinterpret_cast<LPARAM>(lpStringW), cchW, x, y, cx, cy, uFlags);
-				free(lpStringW);
-				return ret;
-			}
-			break;
-		}
-	}
-	return ORIG_DrawStateA(hdc, hbr, lpOutputFunc, lData, wData, x, y, cx, cy, uFlags);
-}
-
-//灰色描画をDrawTextへ投げる
-//DrawTextは内部でExtTextOutしてくれるので問題なし
-BOOL WINAPI IMPL_DrawStateW(HDC hdc, HBRUSH hbr, DRAWSTATEPROC lpOutputFunc, LPARAM lData, WPARAM wData, int x, int y, int cx, int cy, UINT uFlags)
-{
-	//CThreadCounter __counter;
-	if(lData && uFlags & DSS_DISABLED) {
-		switch(uFlags & 0x0f) {
-		case DST_TEXT:
-		case DST_PREFIXTEXT:
-			{
-			//wData==0の時に文字数自動計算
-			//他のAPIと違って-1の時ではない
-			if(wData == 0) {
-				wData = static_cast<WPARAM>(wcslen(reinterpret_cast<LPCWSTR>(lData)));
-			}
-			RECT rect = { x, y, x + 10000, y + 10000 };
-			//どうやら3DHighLightの上に1pxずらして3DShadowを重ねてるらしい
-			int oldbm = SetBkMode(hdc, TRANSPARENT);
-			COLORREF oldfg = SetTextColor(hdc, GetSysColor(COLOR_3DHIGHLIGHT));
-			//DrawStateとDrawTextではprefixのフラグが逆(APIの設計ダメすぎ)
-			const UINT uDTFlags = DT_SINGLELINE | DT_NOCLIP | (uFlags & DST_PREFIXTEXT ? 0 : DT_NOPREFIX);
-
-			OffsetRect(&rect, 1, 1);
-			DrawTextW(hdc, reinterpret_cast<LPCWSTR>(lData), static_cast<int>(wData), &rect, uDTFlags);
-			SetTextColor(hdc, GetSysColor(COLOR_3DSHADOW));
-			OffsetRect(&rect, -1, -1);
-			DrawTextW(hdc, reinterpret_cast<LPCWSTR>(lData), static_cast<int>(wData), &rect, uDTFlags);
-			SetTextColor(hdc, oldfg);
-			SetBkMode(hdc, oldbm);
-			}
-			return TRUE;
-		}
-	}
-	return ORIG_DrawStateW(hdc, hbr, lpOutputFunc, lData, wData, x, y, cx, cy, uFlags);
-}*/
 
 
 class FreeTypeFontEngine;
@@ -878,12 +534,6 @@ BOOL __stdcall IMPL_RemoveFontResourceExW(__in LPCWSTR name, __in DWORD fl, __re
 	return ORIG_RemoveFontResourceExW(name, fl, pdv);
 }
 
-/*
-BOOL __stdcall IMPL_RemoveFontResourceW(__in LPCWSTR lpFileName)
-{
-	g_pFTEngine->RemoveFont(lpFileName);
-	return ORIG_RemoveFontResourceW(lpFileName);
-}*/
 
 BOOL WINAPI IMPL_TextOutA(HDC hdc, int nXStart, int nYStart, LPCSTR lpString, int cbString)
 {
@@ -932,7 +582,6 @@ BOOL WINAPI IMPL_ExtTextOutA(HDC hdc, int nXStart, int nYStart, UINT fuOptions, 
 		return ORIG_ExtTextOutA(hdc, nXStart, nYStart, fuOptions, lprc, lpString, cbString, lpDx);
 
 	//HDBENCHチート
-//	if (lpString && cbString == 7 && pSettings->IsHDBench() && (memcmp(lpString, "HDBENCH", 7) == 0 || memcmp(lpString, "       ", 7) == 0))
 //		return ORIG_ExtTextOutA(hdc, nXStart, nYStart, fuOptions, lprc, lpString, cbString, lpDx);
 
 	LPWSTR lpszUnicode;
@@ -941,37 +590,7 @@ BOOL WINAPI IMPL_ExtTextOutA(HDC hdc, int nXStart, int nYStart, UINT fuOptions, 
 	WCHAR szStack[CCH_MAX_STACK];
 	int dxStack[CCH_MAX_STACK];
 	int nACP = GdiGetCodePage(hdc);//CP_ACP;
-	//DWORD nCharset = GetTextCharsetInfo(hdc, nullptr, 0);
 
-	/*
-	switch (nCharset)
-		{
-		case 0:
-			{
-				break;
-			}
-		case SYMBOL_CHARSET:
-			{
-				nACP = CP_SYMBOL;
-				break;
-			}
-		case MAC_CHARSET:
-			{
-				nACP = CP_MACCP;
-				break;
-			}
-		case OEM_CHARSET:
-			{
-				nACP = CP_OEMCP;
-				break;
-			}
-		default:
-			{
-				CHARSETINFO Cs={0,CP_ACP,0};
-				TranslateCharsetInfo(reinterpret_cast<DWORD*>(nCharset), &Cs, TCI_SRCCHARSET);
-				nACP = Cs.ciACP;
-			}
-		}*/
 
 
 	lpszUnicode = _StrDupExAtoW(lpString, cbString, szStack, CCH_MAX_STACK, &bufferLength, nACP);
@@ -1034,23 +653,6 @@ typedef enum {
 #define ETO_THROW(code)	error = (code); goto _EXCEPTION_THRU
 #define ETO_CATCH()		} _EXCEPTION_THRU:
 
-/*
-BOOL FreeTypeGetTextExtentPoint(HDC hdc, LPCSTR lpString, int cbString, LPSIZE lpSize, const FREETYPE_PARAMS* params)
-{
-	WCHAR szStack[CCH_MAX_STACK];
-
-	int cchStringW;
-	LPWSTR lpStringW = _StrDupExAtoW(lpString, cbString, szStack, CCH_MAX_STACK, &cchStringW);
-	if(!lpStringW) {
-		SetLastError(ERROR_NOT_ENOUGH_MEMORY);
-		return FALSE;
-	}
-
-	BOOL ret = FreeTypeGetTextExtentPoint(hdc, lpStringW, cchStringW, lpSize, params);
-	if (lpStringW != szStack)
-		free(lpStringW);
-	return ret;
-}*/
 
 
 class CETOBitmap
@@ -1176,7 +778,7 @@ BOOL WINAPI IMPL_ExtTextOutW(HDC hdc, int nXStart, int nYStart, UINT fuOptions, 
 		set<int>& aff = pSettings->DisplayAffinity();
 		int id = DisplayFromDC(hdc);
 		if (id >= 0 && aff.find(id) == aff.end()) {
-			// display is not in the list, we should drop rendering for it.
+			// Excluded displays bypass the renderer.
 			return ORIG_ExtTextOutW(hdc, nXStart, nYStart, fuOptions, lprc, lpString, cbString, lpDx);
 		}
 	}
@@ -1201,23 +803,6 @@ BOOL WINAPI IMPL_ExtTextOutW(HDC hdc, int nXStart, int nYStart, UINT fuOptions, 
 		}
 	}
 
-/*
-
-#ifndef _DEBUG		//debug模式下此参数有问题
-	if (pSettings->FontLoader()==SETTING_FONTLOADER_WIN32)
-	{
-		if (!(fuOptions & ETO_GLYPH_INDEX) 	//复杂文件，不进行渲染
-		&& !(fuOptions & ETO_IGNORELANGUAGE) && ScriptIsComplex(lpString, cbString, SIC_COMPLEX) == S_OK) {
-			return ORIG_ExtTextOutW(hdc, nXStart, nYStart, fuOptions, lprc, lpString, cbString, lpDx);
-		}
-	}
-	else
-		if (!(fuOptions & ETO_GLYPH_INDEX) && / *iswcntrl(lpString[0])* /CID.myiswcntrl(lpString[0])) {
-			return ORIG_ExtTextOutW(hdc, nXStart, nYStart, fuOptions, lprc, lpString, cbString, lpDx);
-		}
-#endif
-
-*/
 
 
 
@@ -1246,36 +831,10 @@ BOOL WINAPI IMPL_ExtTextOutW(HDC hdc, int nXStart, int nYStart, UINT fuOptions, 
 		}
 	}
 
-/*
-	int mm = GetMapMode(hdc);
-	if (mm!=MM_TEXT)
-	{
-		SIZE size;
-		GetWindowExtEx(hdc, &size);
-		if (size.cx!=1 || size.cy!=1)
-			return ORIG_ExtTextOutW(hdc, nXStart, nYStart, fuOptions, lprc, lpString, cbString, lpDx);
-	}
-	if (GetGraphicsMode(hdc)==GM_ADVANCED)
-	{
-		XFORM xfm;
-		GetWorldTransform(hdc, &xfm);
-		if (xfm.eM11!=1.0 || xfm.eM22!=1.0)
-			return ORIG_ExtTextOutW(hdc, nXStart, nYStart, fuOptions, lprc, lpString, cbString, lpDx);
-	}*/
 
-	//if (GetROP2(hdc)!=13)
 	//	return ORIG_ExtTextOutW(hdc, nXStart, nYStart, fuOptions, lprc, lpString, cbString, lpDx);
-	//if (GetStretchBltMode(hdc)!=BLACKONWHITE)
 	//	return ORIG_ExtTextOutW(hdc, nXStart, nYStart, fuOptions, lprc, lpString, cbString, lpDx);
 
-/*
-	SIZE size;
-	if (fuOptions & ETO_GLYPH_INDEX)
-		GetTextExtentPointI(hdc, const_cast<LPWORD>(reinterpret_cast<const WORD*>(lpString)), cbString, &size);
-	else
-		GetTextExtentPoint(hdc, lpString, cbString, &size);
-	if (!size.cx)
-		return ORIG_ExtTextOutW(hdc, nXStart, nYStart, fuOptions, lprc, lpString, cbString, lpDx);*/
 
 	COwnedCriticalSectionLock __lock2(1, COwnedCriticalSectionLock::OCS_DC);	//获取所有权，防止冲突
 	CBitmapCache& cache	= pTLInfo->BitmapCache();
@@ -1357,16 +916,10 @@ ETO_TRY();
 	}	//0ms
 
 	align = GetTextAlign(hdc);	// Get align
-	//if (pTLInfo->InUniscribe() && !(fuOptions & ETO_IGNORELANGUAGE))
 	//	align &= ~TA_UPDATECP;
 	if(align & TA_UPDATECP) {
 		GetCurrentPositionEx(hdc, &curPos);
 	}
-/*
-	if (!align && lpDx && !fuOptions)	//optimized
-	{
-	//	ETO_THROW(ETOE_FREETYPE);
-	}//0ms*/
 
 
 	hCurFont = GetCurrentFont(hdc);	// get font name of current DC, warning: the font name is potaintially incorrect.
@@ -1405,7 +958,6 @@ ETO_TRY();
 		tm.tmAscent = DCTrans->TransformYAB(tm.tmAscent);
 		tm.tmDescent = DCTrans->TransformYAB(tm.tmDescent);
 		tm.tmAveCharWidth = DCTrans->TransformXAB(tm.tmAveCharWidth);
-// 		if (!DCTrans->TransformMode() && !lf.lfWidth && DCTrans->MirrorX())
 // 			lf.lfWidth = tm.tmAveCharWidth;
 		if (lpDx && cbString)	//firefox uses coord Y of ETO_PDY to print vertical text
 		{
@@ -1468,37 +1020,7 @@ ETO_TRY();
 			FTInfo.Dx[i]-=FTInfo.xBase;	// modify the start position of painting
 	}
 
-	/*if (bZoomedDC && DCTrans->MirrorX())	//左右反向，RGB和BGR要相反
-		for (int i=0; i<cbString; ++i)
-		{
-			switch (FTInfo.AAModes[i])
-			{
-			case 2:
-				FTInfo.AAModes[i] = 3;
-				break;
-			case 3:
-				FTInfo.AAModes[i] = 2;
-				break;
-			case 4:
-				FTInfo.AAModes[i] = 5;
-				break;
-			case 5:
-				FTInfo.AAModes[i] = 4;
-				break;
-			}
-		}*/
 	//POINT destSize;	//LP下的大小和起始位置
-	/*
-	if (bZoomedDC)
-		{
-			if (hOldMDCFont)
-			{
-				SelectFont(hCanvasDC, hOldMDCFont);
-				DeleteFont(hZoomedFont);
-				hZoomedFont = nullptr;
-				hOldMDCFont = nullptr;
-			}
-		}*/
 
 	textSize.cx = width;
 	textSize.cy = FTInfo.y + tm.tmHeight;
@@ -1594,7 +1116,6 @@ ETO_TRY();
 
 		if(fillrect || GetBkMode(hdc) == OPAQUE) {
 			COLORREF  bgcolor = GetBkColor(hdc); //両方とも同じ背景色に
-			//if ((bgcolor>>24)%2 || (bgcolor>>28)%2)
 			//	bgcolor = 0;
 			if ((bgcolor>>24)%2 || (bgcolor>>28)%2)
 				bgcolor = GetPaletteColor(hdc, bgcolor);
@@ -1653,17 +1174,6 @@ ETO_TRY();
 	}
 
 	//blt + clipping
-	/*
-	if(lprc && (fuOptions & ETO_CLIPPED)) {
-			//TRACE(_T("ClipRect={%d %d %d %d}, pos = (%d,%d)\n"), lprc->left, lprc->top, lprc->right, lprc->bottom,
-			//	nXStart, nYStart);
-			//trace(L"ClipRect=%d %d %d %d\n", lprc->left, lprc->top, lprc->right, lprc->bottom);
-			const RECT rcBlt = { destPos.x, destPos.y, destPos.x + drawSize.cx, destPos.y + drawSize.cy };
-			RECT rcClip = { 0 };
-			IntersectRect(&rcClip, &rcBlt, lprc);
-			BitBlt(hdc, rcClip.left, rcClip.top, rcClip.right - rcClip.left, rcClip.bottom - rcClip.top,
-					hCanvasDC, rcClip.left - rcBlt.left, rcClip.top - rcBlt.top, SRCCOPY);
-		} else {*/
 	if (!bZoomedDC)
 		BitBlt(hdc, destPos.x, destPos.y, drawSize.cx, drawSize.cy, hCanvasDC, xorg, yorg, SRCCOPY);
 	else
@@ -1710,21 +1220,6 @@ BOOL WINAPI IMPL_MySetProcessMitigationPolicy(
 }
 
 
-//HFONT dummy=nullptr;
-/*
-int WINAPI IMPL_GdipCreateFontFamilyFromName(const WCHAR *name, void *fontCollection, void **FontFamily)
-{
-	LOGFONT lf={};
-	memset(&lf, 0, sizeof lf);
-	StringCchCopy(lf.lfFaceName, LF_FACESIZE, name);
-	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
-	if (pSettings->CopyForceFont(lf, lf))
-	{
-		//dummy = CreateFont(1,0,0,0,0,0,0,0,DEFAULT_CHARSET,0,0,0,0,lf.lfFaceName);
-		return ORIG_GdipCreateFontFamilyFromName(lf.lfFaceName, fontCollection, FontFamily);
-	}
-	return ORIG_GdipCreateFontFamilyFromName(name, fontCollection, FontFamily);
-}*/
 
 
 DWORD WINAPI IMPL_GetFontData(_In_ HDC     hdc,
@@ -1733,7 +1228,7 @@ DWORD WINAPI IMPL_GetFontData(_In_ HDC     hdc,
 	_Out_writes_bytes_to_opt_(cjBuffer, return) PVOID pvBuffer,
 	_In_ DWORD   cjBuffer
 ) {
-	if (dwTable != 0x656d616e)	// we only simulate the name table, for other tables, use the substituted font data
+	if (dwTable != 0x656d616e)	// Only the name table is simulated; other tables use substituted font data.
 		return ORIG_GetFontData(hdc, dwTable, dwOffset, pvBuffer, cjBuffer);
 
 	DWORD ret = GDI_ERROR;
@@ -1754,45 +1249,6 @@ DWORD WINAPI IMPL_GetFontData(_In_ HDC     hdc,
 	return ret;
 }
 
-/*
-HPAINTBUFFER WINAPI IMPL_BeginBufferedPaint(
-	HDC hdcTarget,
-	const RECT* prcTarget,
-	BP_BUFFERFORMAT dwFormat,
-	BP_PAINTPARAMS* pPaintParams,
-	HDC* phdc
-) {
-	CCriticalSectionLock __lock(CCriticalSectionLock::CS_DCRELATION);
-	auto ret = ORIG_BeginBufferedPaint(hdcTarget, prcTarget, dwFormat, pPaintParams, phdc);
-	// save relations between memoryDC and realDC
-	if (phdc && *phdc && hdcTarget) {
-		PaintBufferCache[ret] = *phdc;
-		// unchain dc relations
-		auto it = DCRelation.find(hdcTarget);
-		if (it != DCRelation.end()) {
-			TRACE(L"BeginBufferedPaint %d->%d->%d", *phdc, hdcTarget, it->second);
-			hdcTarget = it->second;
-		}
-		else {
-			TRACE(L"BeginBufferedPaint: %d->%d\n", *phdc, hdcTarget);
-		}
-		DCRelation[*phdc] = hdcTarget;
-	}
-	return ret;
-}
-
-HRESULT WINAPI IMPL_EndBufferedPaint(HPAINTBUFFER hBufferedPaint, BOOL fUpdateTarget) {
-	CCriticalSectionLock __lock(CCriticalSectionLock::CS_DCRELATION);
-	auto it = PaintBufferCache.find(hBufferedPaint);
-	// remove obsolete DC relations
-	if (it != PaintBufferCache.end()) {
-		TRACE(L"EndBufferedPaint %d", it->second);
-		DCRelation.erase(it->second);
-		PaintBufferCache.erase(it);
-	}
-	return ORIG_EndBufferedPaint(hBufferedPaint, fUpdateTarget);
-}
-*/
 
 void inline hdcAddRef(HDC dc)  {
 	auto it = DCRef.find(dc);

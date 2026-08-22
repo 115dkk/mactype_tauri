@@ -8,8 +8,6 @@ CMemLoadDll::~CMemLoadDll()
 {
  if(isLoadOk)
  {
-  //ASSERT(pImageBase != nullptr);
-  //ASSERT(pDllMain   != nullptr);
   //脱钩，准备卸载dll
   if (m_bInitDllMain)
 	 pDllMain(reinterpret_cast<HINSTANCE>(pImageBase),DLL_PROCESS_DETACH,nullptr);
@@ -356,8 +354,8 @@ const void* CDllHelper::MyGetProcAddress(HMODULE dllBase, const wchar_t* procNam
 				free(str_arr);*/
 			}
 			else {
-				// but in some cases, the IAT can be forged, meaning that the IAT we got here is not the real one in the file.
-				// hence, we only pass the offset of IAT to the shellcode, and let shellcode search for its IAT and caculate the function address there.
+				// A forged IAT may differ from the on-disk table. Pass only its
+				// offset; the shellcode resolves the address in its own image.
 				procAddr = paddr; // the offset to the func IAT, it's a DWORD, you get real address by (imgbase + *(dword*)(imgbase+paddr))
 			}
 			break;

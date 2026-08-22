@@ -253,12 +253,6 @@ void CGdippSettings::DelayedInit()
 	}
 	if (IsBadCodePtr(reinterpret_cast<FARPROC>(RegOpenKeyExW)) || *reinterpret_cast<const DWORD_PTR*>(RegOpenKeyExW) == 0)
 		return;
-	/*
-	In Windows 8, this call will fail in restricted environment
-	if GetDC failed, we are in a restricted environment where features like font subsitutations doesn't work properly.
-	Because these features requires DC to get the real font name and we don't have access to any DC, even CreateCompatibleDC(null) fails (it will succeed, but DeleteDC will fail)
-	So it is better exit than doing initialization.
-	*/
 	m_bDelayedInit = true;
 
 	// Font-substitution rules are configuration data, not screen-DC state.
@@ -283,18 +277,7 @@ void CGdippSettings::DelayedInit()
 		return;
 	}
 
-	//ForceChangeFont
-	//if (m_szForceChangeFont[0]) {
-	//	EnumFontFamilies(hdcScreen, m_szForceChangeFont, EnumFontFamProc, reinterpret_cast<LPARAM>(this));
-	//}
-	//fetch screen dpi
 	m_nScreenDpi = GetDeviceCaps(hdcScreen.get(), LOGPIXELSX);
-
-// 	//FontLink
-// 	if (FontLink()) {
-// 		m_fontlinkinfo.init();
-// 	}
-
 
 	const int nTextTuning = _GetFreeTypeProfileInt(_T("TextTuning"), 0, nullptr),
 		nTextTuningR = _GetFreeTypeProfileInt(_T("TextTuningR"), 0, nullptr),
@@ -314,21 +297,15 @@ void CGdippSettings::DelayedInit()
 		AddIndividualFromSection(_T("Individual"), nullptr, m_arrIndividual);
 
 	AddExcludeListFromSection(_T("Exclude"), nullptr, m_arrExcludeFont);
-	AddExcludeListFromSection(_T("Include"), nullptr, m_arrIncludeFont);	//I know it's include not exclude, but they share the same logic.
-	//WritePrivateProfileString(nullptr, nullptr, nullptr, m_szFileName);
+	// Both lists share parsing; inclusion semantics are applied during lookup.
+	AddExcludeListFromSection(_T("Include"), nullptr, m_arrIncludeFont);
 
-	//m_bDelayedInit = true;
-
-	//FontLink
 	if (FontLink()) {
 		m_fontlinkinfo.init();
 	}
 
-	// check wheteher harmony LCD should be used over ClearType
 	FT_LCDMode_Set(freetype_library, this->HarmonyLCD() ? 1 : 0);
 
-	// Init LCD settings
-	// this->m_bHarmonyLCDRendering = FT_Library_SetLcdFilter(nullptr, FT_LCD_FILTER_NONE) == FT_Err_Unimplemented_Feature; // official method of detecting freetype mode.
 	if (this->HarmonyLCD()) {
 		FT_Library_SetLcdFilter(nullptr, FT_LCD_FILTER_NONE);
 		// Harmony LCD rendering
@@ -376,7 +353,7 @@ void CGdippSettings::DelayedInit()
 			case 1:
 			case 4:
 			case 5:
-				nLcdFilter = FT_LCD_FILTER_LIGHT;	// now we apply a light filter to lcd based on AA mode automatically, unless a custom lcd filter is defined.
+				nLcdFilter = FT_LCD_FILTER_LIGHT;	// AA mode selects the light filter unless the profile defines one.
 			}
 			FT_Library_SetLcdFilter(freetype_library, static_cast<FT_LcdFilter>(nLcdFilter));
 			if (UseCustomLcdFilter())
@@ -388,21 +365,6 @@ void CGdippSettings::DelayedInit()
 		}
 	}
 
-
-	//強制フォント
-/*
-	LPCTSTR lpszFace = GetForceFontName();
-	if (lpszFace)
-		g_pFTEngine->AddFont(lpszFace, FW_NORMAL, false);*/
-
-
-/*	DWORD dwVersion = GetVersion();
-
-	if (m_bDirectWrite && static_cast<DWORD>(LOBYTE(LOWORD(dwVersion))) > 5)	//vista or later
-	{
-		if (GetModuleHandle(_T("d2d1.dll")))	//directwrite support
-			HookD2D1();
-	}*/
 	PublishRendererPolicySnapshot(true);
 }
 
@@ -740,9 +702,6 @@ bool CGdippSettings::LoadAppSettings(LPCTSTR lpszFile)
 		}
 		for (int i=0; i<3; i++) {
 			m_nShadow[i] = _StrToInt(token.GetArgument(i), 0);
-			/*if (m_nShadow[i] <= 0) {
-				goto SKIP;
-			}*/
 		}
 		m_bEnableShadow = true;
 		if (token.GetCount()>=4)	//如果指定了浅色阴影
@@ -779,12 +738,6 @@ SKIP:
 	m_nRenderingModeForDW = Bound(FastGetProfileInt(c_szDirectWrite, _T("RenderingMode"), 5), 0, 6);
 	m_fClearTypeLevelForDW = Bound(FastGetProfileFloat(c_szDirectWrite, _T("ClearTypeLevel"), 1.0f), 0.0f, 1.0f);
 
-#ifdef _DEBUG
-	// GammaValue検証用
-	//CHAR GammaValueTest[1025];
-	//sprintf(GammaValueTest, "GammaValue=%.6f\nContrast=%.6f\n", m_fGammaValue, m_fContrast);
-	//MessageBoxA(nullptr, GammaValueTest, "GammaValueテスト", 0);
-#endif
 	m_bLoadOnDemand	= !!_GetFreeTypeProfileInt(_T("LoadOnDemand"), false, lpszFile);
 	m_bFontLink		= _GetFreeTypeProfileInt(_T("FontLink"), 0, lpszFile);
 
@@ -883,28 +836,12 @@ SKIP:
 		m_bFontLink = 0;
 	}
 
-	// フォント指定
 	ZeroMemory(&m_lfForceFont, sizeof(LOGFONT));
 	m_szForceChangeFont[0] = _T('\0');
-	//_GetFreeTypeProfileString(_T("ForceChangeFont"), _T(""), m_szForceChangeFont, LF_FACESIZE, lpszFile);
 
 	STARTUPINFO si = { sizeof(STARTUPINFO) };
 	GetStartupInfo(&si);
 	m_bRunFromGdiExe = IsGdiPPStartupInfo(si);
-//	if (!m_bRunFromGdiExe) {
-//		m_bHookChildProcesses = false;
-//	}
-/*
-	const int nTextTuning = _GetFreeTypeProfileInt(_T("TextTuning"), 0, lpszFile),
-		nTextTuningR = _GetFreeTypeProfileInt(_T("TextTuningR"), 0, lpszFile),
-		nTextTuningG = _GetFreeTypeProfileInt(_T("TextTuningG"), 0, lpszFile),
-		nTextTuningB = _GetFreeTypeProfileInt(_T("TextTuningB"), 0, lpszFile);
-	InitInitTuneTable();
-	InitTuneTable(nTextTuning, m_nTuneTable);
-	InitTuneTable(nTextTuningR, m_nTuneTableR);
-	InitTuneTable(nTextTuningG, m_nTuneTableG);
-	InitTuneTable(nTextTuningB, m_nTuneTableB);*/
-//	m_bIsHDBench = (GetModuleHandle(_T("HDBENCH.EXE")) == GetModuleHandle(nullptr));
 
 	m_arrExcludeFont.clear();
 	m_arrIncludeFont.clear();
@@ -913,20 +850,11 @@ SKIP:
 	m_arrUnloadModule.clear();
 	m_arrUnFontSubModule.clear();
 
-	// [Exclude]セクションから除外フォントリストを読み込む
-	// [ExcludeModule]セクションから除外モジュールリストを読み込む
 	AddListFromSection(_T("ExcludeModule"), lpszFile, m_arrExcludeModule);
-	//AddListFromSection(_T("ExcludeModule"), szMainFile, m_arrExcludeModule);
-	// [IncludeModule]セクションから対象モジュールリストを読み込む
 	AddListFromSection(_T("IncludeModule"), lpszFile, m_arrIncludeModule);
-	//AddListFromSection(_T("IncludeModule"), szMainFile, m_arrIncludeModule);
-	// [UnloadDLL]蛠E患釉氐哪？丒
 	AddListFromSection(_T("UnloadDLL"), lpszFile, m_arrUnloadModule);
-	//AddListFromSection(_T("UnloadDLL"), szMainFile, m_arrUnloadModule);
-	// [ExcludeSub]不进行字体替换的模縼E
 	AddListFromSection(L"ExcludeSub", lpszFile, m_arrUnFontSubModule);
-	//AddListFromSection(L"ExcludeSub", szMainFile, m_arrUnFontSubModule);
-	//如果是排除的模块，则关闭字体替换
+	// A loaded ExcludeSub module disables substitution for this process.
 	if (m_nFontSubstitutes)
 	{
 		ModuleHashMap::const_iterator it=m_arrUnFontSubModule.begin();
@@ -941,7 +869,6 @@ SKIP:
 		}
 	}
 
-	// [Individual]セクションからフォント別設定を読み込む
 	wstring names = _T("LcdFilterWeight@") + wstring(m_szexeName);
 	if (_IsFreeTypeProfileSectionExists(names.c_str(), lpszFile))
 		m_bUseCustomLcdFilter = AddLcdFilterFromSection(names.c_str(), lpszFile, m_arrLcdFilterWeights);
@@ -1247,7 +1174,7 @@ bool CGdippSettings::IsProcessUnload() const
 	ModuleHashMap::const_iterator it = m_arrUnloadModule.begin();
 	for(; it != m_arrUnloadModule.end(); ++it) {
 		if (IsFolder(it->c_str())) {
-			// if the user is trying to include a folder instead of a single executable.
+			// Folder entries match the executable directory.
 			if (GetAppDir() == LowerCase(*it)) {
 				return true;
 			}
@@ -1308,7 +1235,7 @@ bool CGdippSettings::IsProcessExcluded() const
 	ModuleHashMap::const_iterator it = m_arrExcludeModule.begin();
 	for(; it != m_arrExcludeModule.end(); ++it) {
 		if (IsFolder(it->c_str())) {
-			// if the user is trying to exclude a folder instead of a single executable.
+			// Folder entries match every executable below that directory.
 			if (GetAppDir().find(LowerCase(*it)) == 0) {
 				return true;
 			}
@@ -1332,7 +1259,7 @@ bool CGdippSettings::IsProcessIncluded() const
 	ModuleHashMap::const_iterator it = m_arrIncludeModule.begin();
 	for(; it != m_arrIncludeModule.end(); ++it) {
 		if (IsFolder(it->c_str())) {
-			// if the user is trying to include a folder instead of a single executable.
+			// Folder entries match the executable directory.
 			if (GetAppDir() == LowerCase(*it)) {
 				return true;
 			}
@@ -1458,21 +1385,6 @@ CFontLinkInfo::~CFontLinkInfo()
 	clear();
 }
 
-/*
-static int CALLBACK EnumFontCallBack(const LOGFONT *lplf, const TEXTMETRIC *lptm, DWORD / *FontType* /, LPARAM lParam)
-{
-	LOGFONT* lf = reinterpret_cast<LOGFONT*>(lParam);
-	StringCchCopy(lf->lfFaceName, LF_FACESIZE, lplf->lfFaceName);
-	return 0;
-}
-
-static void GetFontLocalName(LOGFONT& lf)	//获得字体的本地化名称
-{
-	HDC dc=GetDC(nullptr);
-	EnumFontFamiliesEx(dc, &lf, &EnumFontCallBack, reinterpret_cast<LPARAM>(&lf), 0);
-	ReleaseDC(nullptr, dc);
-}*/
-
 
 void CFontLinkInfo::init()
 {
@@ -1554,27 +1466,6 @@ void CFontLinkInfo::init()
 					}
 			}
 			if (!valp) {		//没找到字体链接中提供的名称
-				/*for (int k = 0; ; ++k) {
-					namesz = sizeof name;
-					value2sz = sizeof value2;
-					rc = RegEnumValue(h2, k, name, &namesz, 0, &regtype, reinterpret_cast<LPBYTE>(value2), &value2sz);		//从字体柄蛐寻找
-					if (rc == ERROR_NO_MORE_ITEMS) break;
-					if (rc != ERROR_SUCCESS) break;
-					if (regtype != REG_SZ) continue;
-					if (lstrcmpi(value2, linep) != 0) continue;		//寻找字体链接中字体文件对应的字体脕E
-
-					StringCchCopyW(buf, sizeof(buf)/sizeof(buf[0]), name);
-					if (buf[wcslen(buf) - 1] == L')') {				//去掉括号
-						LPWSTR p;
-						if ((p = wcsrchr(buf, L'(')) != nullptr) {
-							*p = 0;
-						}
-					}
-					while (buf[wcslen(buf)-1] == L' ')
-						buf[wcslen(buf)-1] = 0;
-					valp = buf;
-					break;
-				}*/
 				LPWSTR lp;
 				StringCchCopy(buf.data(), buf.size(), linep);
 				if (lp=wcschr(buf.data(), L','))
@@ -1584,8 +1475,6 @@ void CFontLinkInfo::init()
 			}
 			if (valp) {
 				GetFontLocalName(const_cast<TCHAR*>(valp), buff);;
-				//StringCchCopy(truefont.lfFaceName, LF_FACESIZE, buff);	//复制到结构中
-				//pSettings->CopyForceFont(truefont, truefont);		//获得替换字虂E
 				info[row][col] = _wcsdup(buff);//truefont.lfFaceName);			//复制到链接柄蛐
 				++col;
 			}
@@ -1594,14 +1483,6 @@ void CFontLinkInfo::init()
 			free(info[row][0]);
 			info[row][0] = nullptr;
 		} else {
-			/*if (sOsVinfo.dwMajorVersion>=6 && sOsVinfo.dwMinorVersion>=1)	//版本号>=6.1，是Win7系列
-			{
-				//对字体链接柄篥逆向处纴E
-				LPWSTR swapbuff[32];
-				memcpy(swapbuff, info[row], 32*sizeof(LPWSTR));	//整个柄源制过来
-				for (int i=1; i<col; i++)
-					info[row][i]=swapbuff[col-i];	//逆序字体链接眮E
-			}*/
 			++row;
 		}
 	}
@@ -1778,8 +1659,7 @@ CFontSubstituteData::operator == (const CFontSubstituteData& o) const
 	return false;
 }
 
-// We scan the registry and see if there is any font mapping whose mapping target is also one of our substitution source,
-// and we add them as our rules.
+// Extend configured substitutions through registry aliases that target them.
 void CFontSubstitutesInfo::initreg()
 {
 	const LPCTSTR REGKEY = _T("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\FontSubstitutes");
@@ -1829,21 +1709,6 @@ CFontSubstitutesInfo::initini(const CFontSubstitutesIniArray& iniarray)
 				if (k.init(buf.get()) && v.init(vp)) {
 				if (FindKey(k) < 0 && k.m_bCharSet == v.m_bCharSet) Add(k, v);
 				}
-/*					StringCchCopy(truefont.lfFaceName, LF_FACESIZE, buf);
-					truefont.lfCharSet=DEFAULT_CHARSET;
-					if (!GetFontLocalName(truefont))
-						continue;	//没有此字虂E
-					buff = truefont.lfFaceName;
-
-					StringCchCopy(truefont2.lfFaceName, LF_FACESIZE, vp);
-					truefont2.lfCharSet=DEFAULT_CHARSET;
-					if (!GetFontLocalName(truefont2))
-						continue;	//没有此字虂E
-					buff2 = truefont2.lfFaceName;
-
-				if (m_mfontsub.find(buff)==m_mfontsub.end())
-					m_mfontsub[buff]=wstring(buff2);
-*/
 			}
 		}
 	}

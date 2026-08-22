@@ -37,45 +37,6 @@ using json = nlohmann::json;
 #undef HOOK_DEFINE	//为了确保此文件也能直接使用正确的函数，需要申明。
 #undef HOOK_MANUALLY
 
-/*
-struct CFontName
-{
-	LPWSTR content;
-public:
-	bool operator < (const CFontName fn) const {
-		return wcscmp(content, fn.content)>0;
-	}
-	CFontName(LPCWSTR fontname)
-	{
-		content = _wcsdup(fontname);
-		wcsupr(content);
-	}
-	~CFontName()
-	{
-		free(content);
-	}
-};
-
-struct CFontSubResult
-{
-public:
-	LPWSTR lpRealName;
-	LPWSTR lpGDIName;
-	CFontSubResult(LPCWSTR RealName, LPCWSTR GDIName)
-	{
-		lpRealName = _wcsdup(RealName);
-		lpGDIName = _wcsdup(GDIName);
-	}
-	~CFontSubResult()
-	{
-		free(lpRealName);
-		free(lpGDIName);
-	}
-};
-
-typedef map<CFontName,CFontSubResult> CFontNameCache;*/
-
-
 int _StrToInt(LPCTSTR pStr, int nDefault);
 
 
@@ -131,7 +92,6 @@ class CFontSubstituteData
 private:
 	LOGFONT m_lf;
 	bool m_bCharSet;
-	//TCHAR CustomName[LF_FACESIZE];
 public:
 	bool operator == (const CFontSubstituteData& o) const;
 private:
@@ -148,7 +108,6 @@ typedef set<wstring> CFontSubstitutesIniArray;
 class CFontSubstitutesInfo : public CSimpleMap<CFontSubstituteData, CFontSubstituteData>
 {
 private:
-	//typedef map<wstring, wstring> FontSubMap;
 	//FontSubMap m_mfontsub;
 	void initini(const CFontSubstitutesIniArray& iniarray);
 	void initreg();
@@ -390,7 +349,6 @@ public:
 	char FontLink() const { return m_bFontLink; }
 	BOOL DirectWrite() const { return m_bDirectWrite; }
 	BOOL HintSmallFont() const { return m_bHintSmallFont; }
-//	bool EnableKerning() const { return m_bEnableKerning; }
 
 	int BolderMode() const { return m_nBolderMode; }
 	int GammaMode() const { return m_nGammaMode; }
@@ -404,8 +362,6 @@ public:
 	float ClearTypeLevelForDW() const { return m_fClearTypeLevelForDW;  }
 	int RenderingModeForDW() const { return m_nRenderingModeForDW; }
 	int AntiAliasModeForDW() const { return m_nAntiAliasModeForDW; }
-	/*const CFontSubstitutesInfo& GetFontSubstitutesInfoForDW() const
-		{ _ASSERTE(m_bDelayedInit); return m_FontSubstitutesInfoForDW; }*/
 
 	float RenderWeight() const { return m_fRenderWeight; }
 	float Contrast() const { return m_fContrast; }
@@ -742,9 +698,6 @@ public:
 				}
 				for (int i=0; i<3; i++) {
 					pSettings->m_nShadow[i] = _StrToInt(token.GetArgument(i), 0);
-					/*if (m_nShadow[i] <= 0) {
-						goto SKIP;
-					}*/
 				}
 				pSettings->m_bEnableShadow = true;
 				if (token.GetCount()>=4)	//如果指定了浅色阴影
@@ -758,7 +711,6 @@ public:
 				}
 				else
 				{
-					//pSettings->m_nShadowLightColor = pSettings->m_nShadowLightColor;		//否则和浅色阴影相同
 					pSettings->m_nShadow[3] = pSettings->m_nShadow[2];		//深度也相同
 				}
 				RefreshAlphaTable();
@@ -1053,7 +1005,6 @@ public:
 					string json;
 					json.resize(data->cbData);
 					memcpy(&json[0], data->lpData, data->cbData);
-					// now parse the json string
 					auto jsonobj = json::parse(json.begin(), json.end());
 					string command = jsonobj["command"].get<std::string>();
 					// various command dispatch

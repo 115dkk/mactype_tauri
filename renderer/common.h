@@ -17,9 +17,7 @@
 #include <Windows.h>
 #include <Uxtheme.h>
 #include <usp10.h>
-//#include <limits>
 #include <functional>
-//#include <iterator>
 #include <algorithm>
 #include <cstddef>
 #include <memory>
@@ -39,8 +37,6 @@
 #include <string>
 #include <locale>
 #include <codecvt>
-//#include <wincodec.h>
-//#include <wincodecsdk.h>
 
 #define for if(0);else for
 
@@ -57,9 +53,6 @@
 #include <map>
 #include <string>
 using namespace std;
-#ifdef _M_IX86
-//#include "optimize/optimize.h"
-#endif
 
 #define FONT_MAGIC_NUMBER 0xA8
 
@@ -122,8 +115,6 @@ public:
 		CS_LIBRARY,
 		CS_CACHEDFONT,
 		CS_FONTENG,
-		//CS_CMAPCACHE,
-		//CS_IMAGECACHE,
 		CS_SETTING,
 		CS_MAIN,
 		CS_FONTCACHE,
@@ -172,50 +163,10 @@ static void _Trace(LPCTSTR pszFormat, ...)
 	wvsprintf(szBuffer, pszFormat, argptr);
 	va_end(argptr);
 
-	//デバッガをアタッチしてる時はデバッガにメッセージを出す
-	//if (IsDebuggerPresent()) {
 	OutputDebugString(szBuffer);
-	return;
-	//}
-
-	extern HANDLE g_hfDbgText;
-	HANDLE hf = g_hfDbgText;
-	if (!hf) {
-		TCHAR szFileName[MAX_PATH+16];
-		GetModuleFileName(GetDLLInstance(), szFileName, MAX_PATH);
-		TCHAR *p1 = _tcsrchr(szFileName, _T('\\'));
-		if (p1 && p1 > szFileName) {
-			*p1 = 0;
-			TCHAR *p2 = _tcsrchr(szFileName, _T('\\'));
-			if (p2)
-				memmove(p2 + 1, p1 + 1, (_tcslen(p1) + 1) * sizeof(TCHAR));
-		}
-		_tcscpy(szFileName + _tcslen(szFileName) - 4, L"_dbg.txt");
-		g_hfDbgText = hf = CreateFile(szFileName, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, 0, nullptr);
-		if(hf != INVALID_HANDLE_VALUE) {
-			SetFilePointer(hf, 0, nullptr, FILE_BEGIN);
-#ifdef _UNICODE
-			WORD w = 0xfeff;
-			DWORD cb;
-			WriteFile(hf, &w, sizeof(WORD), &cb, nullptr);
-#endif
-		}
-	}
-	if(hf != INVALID_HANDLE_VALUE) {
-		DWORD cb;
-		WriteFile(hf, szBuffer, _tcslen(szBuffer) * sizeof(TCHAR), &cb, nullptr);
-	}
 }
 #else	//!_DEBUG
 #define TRACE	NOP_FUNCTION
-//↓PSDK 2003R2のwinnt.h
-//#ifndef NOP_FUNCTION
-//#if (_MSC_VER >= 1210)
-//#define NOP_FUNCTION __noop
-//#else
-//#define NOP_FUNCTION static_cast<void>(0)
-//#endif
-//#endif
 #endif	//_DEBUG
 
 //TRACEマクロ
@@ -547,133 +498,6 @@ public:
 #endif
 #endif
 
-
-//String to int等系列函数的定义
-/*
-int _StrToInt(LPCTSTR pStr, int nDefault)
-{
-#define isspace(ch)		(ch == _T('\t') || ch == _T(' '))
-#define isdigit(ch)		(static_cast<_TUCHAR>(ch - _T('0')) <= 9)
-
-	int ret;
-	bool neg = false;
-	LPCTSTR pStart;
-
-	for (; isspace(*pStr); pStr++);
-	switch (*pStr) {
-	case _T('-'):
-		neg = true;
-	case _T('+'):
-		pStr++;
-		break;
-	}
-
-	pStart = pStr;
-	ret = 0;
-	for (; isdigit(*pStr); pStr++) {
-		ret = 10 * ret + (*pStr - _T('0'));
-	}
-
-	if (pStr == pStart) {
-		return nDefault;
-	}
-	return neg ? -ret : ret;
-
-#undef isspace
-#undef isdigit
-}
-
-int _httoi(const TCHAR *value)
-{
-	struct CHexMap
-	{
-		TCHAR chr;
-		int value;
-	};
-	const int HexMapL = 16;
-	CHexMap HexMap[HexMapL] =
-	{
-		{'0', 0}, {'1', 1},
-		{'2', 2}, {'3', 3},
-		{'4', 4}, {'5', 5},
-		{'6', 6}, {'7', 7},
-		{'8', 8}, {'9', 9},
-		{'A', 10}, {'B', 11},
-		{'C', 12}, {'D', 13},
-		{'E', 14}, {'F', 15}
-	};
-	renderer_raii::UniqueMallocMemory<TCHAR> mstr(_tcsdup(value));
-	if (!mstr) return 0;
-	_tcsupr(mstr.get());
-	TCHAR *s = mstr.get();
-	int result = 0;
-	if (*s == '0' && *(s + 1) == 'X') s += 2;
-	bool firsttime = true;
-	while (*s != '\0')
-	{
-		bool found = false;
-		for (int i = 0; i < HexMapL; i++)
-		{
-			if (*s == HexMap[i].chr)
-			{
-				if (!firsttime) result <<= 4;
-				result |= HexMap[i].value;
-				found = true;
-				break;
-			}
-		}
-		if (!found) break;
-		s++;
-		firsttime = false;
-	}
-	return result;
-}
-
-//atofにデフォルト値を返せるようにしたような物
-float _StrToFloat(LPCTSTR pStr, float fDefault)
-{
-#define isspace(ch)		(ch == _T('\t') || ch == _T(' '))
-#define isdigit(ch)		(static_cast<_TUCHAR>(ch - _T('0')) <= 9)
-
-	int ret_i;
-	int ret_d;
-	float ret;
-	bool neg = false;
-	LPCTSTR pStart;
-
-	for (; isspace(*pStr); pStr++);
-	switch (*pStr) {
-	case _T('-'):
-		neg = true;
-	case _T('+'):
-		pStr++;
-		break;
-	}
-
-	pStart = pStr;
-	ret = 0;
-	ret_i = 0;
-	ret_d = 1;
-	for (; isdigit(*pStr); pStr++) {
-		ret_i = 10 * ret_i + (*pStr - _T('0'));
-	}
-	if (*pStr == _T('.')) {
-		pStr++;
-		for (; isdigit(*pStr); pStr++) {
-			ret_i = 10 * ret_i + (*pStr - _T('0'));
-			ret_d *= 10;
-		}
-	}
-	ret = static_cast<float>(ret_i) / static_cast<float>(ret_d);
-
-	if (pStr == pStart) {
-		return fDefault;
-	}
-	return neg ? -ret : ret;
-
-#undef isspace
-#undef isdigit
-}*/
 
 void StartDirectWriteLifecycle();
 bool HookD2D1();

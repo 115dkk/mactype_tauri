@@ -159,7 +159,6 @@ struct Params {
 	void CreateParams(IDWriteFactory* dw_factory);
 };
 
-//IDWriteFactory* g_pDWriteFactory = nullptr;
 enum D2D1RenderTargetCategory {
 	D2D1_RENDER_TARGET_CATEGORY = 1,
 	// ID2D1DCRenderTarget, ID2D1HwndRenderTarget, ID2D1BitmapRenderTarget
@@ -264,12 +263,8 @@ void Params::CreateParams(IDWriteFactory *dw_factory)
 }
 
 Params::Params() {
-	//MessageBox(nullptr, L"MakeParam", nullptr, MB_OK);
 	const CGdippSettings* pSettings = CGdippSettings::GetInstanceNoInit();
-	//
 	Gamma = pSettings->GammaValueForDW();	//user defined value preferred.
-	//if (Gamma == 0)
-	//	Gamma = pSettings->GammaValue()*pSettings->GammaValue() > 1.3 ? pSettings->GammaValue()*pSettings->GammaValue() / 2 : 0.7f;
 	EnhancedContrast = pSettings->ContrastForDW();
 	ClearTypeLevel = pSettings->ClearTypeLevelForDW();
 	AntialiasMode = static_cast<D2D1_TEXT_ANTIALIAS_MODE>(D2D1_TEXT_ANTIALIAS_MODE_DEFAULT);
@@ -318,7 +313,6 @@ Params* GetDWParams() {
 			p.RenderingMode = DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC;
 			p.RenderingMode1 = DWRITE_RENDERING_MODE1_NATURAL_SYMMETRIC;
 		}
-		//g_DWParams.Gamma = powf(g_D2DParams.Gamma, 1.0 / 3.0);
 		return p;
 	}();
 	return &dwParams;
@@ -540,7 +534,7 @@ void HookRenderTarget(
 	// vftable for ID2D1DeviceContext is different if hookCategory is not
 	// D2D1_DEVICE_CONTEXT_CATEGORY. It consists of thunks each of which adjusts
 	// the this pointer and then jumps to the corresponding method for
-	// ID2D1RenderTarget (So we don't have to hook them as well), and the other
+	// ID2D1RenderTarget (so those methods need no second hook), and the other
 	// functions for ID2D1DeviceContext.
 	static ComMethodHooker hookDrawGlyphRun1[] = {
 		COM_METHOD_HOOKER_EMPTY(),
@@ -1373,34 +1367,7 @@ HRESULT WINAPI IMPL_CreateDevice7(
 	return hr;
 }
 
-
-/*
-bool CreateFontFace(IDWriteGdiInterop* gdi, IDWriteFont*** dfont, LOGFONT* lf)
-{
-__try
-{
-gdi->CreateFontFromLOGFONT(lf, *dfont);
-return true;
-}
-__except(EXCEPTION_EXECUTE_HANDLER)
-{
-return false;
-}
-}*/
-
-/*
-void WINAPI IMPL_SetTextRenderingParams(ID2D1RenderTarget* self, __in_opt IDWriteRenderingParams *textRenderingParams = nullptr)
-{
-return ORIG_SetTextRenderingParams(self, g_D2DParamsLarge.RenderingParams);
-}
-
-void WINAPI IMPL_SetTextAntialiasMode(ID2D1RenderTarget* self,  D2D1_TEXT_ANTIALIAS_MODE textAntialiasMode)
-{
-return ORIG_SetTextAntialiasMode(self, g_D2DParamsLarge.AntialiasMode);
-}*/
-
 bool hookD2D1() {
-	//MessageBox(nullptr, L"HookD2D1", nullptr, MB_OK);
 	static bool loaded = [&] {
 		return true;
 	}();
@@ -2419,10 +2386,6 @@ static bool InitializeDirectWriteLifecycle()
 		const D2D1_FACTORY_OPTIONS* pFactoryOptions,
 		void** ppIFactory
 		);
-	//Sleep(30 * 1000);
-#ifdef DEBUG
-	//MessageBox(0, L"HookD2DDll", nullptr, MB_OK);
-#endif
 	renderer_raii::BorrowedModule d2d1 = PinOrLoadRendererModule(
 		L"d2d1.dll", lifecycle.d2d1);
 	renderer_raii::BorrowedModule dw = PinOrLoadRendererModule(
@@ -2577,60 +2540,6 @@ void StartDirectWriteLifecycle()
 	}
 }
 
-/*
-void HookGdiplus()
-{
-InitGdiplusFuncs();
-//SET_VAL(ORIG_D2D1CreateFactory, D2D1Factory);
-SET_VAL(ORIG_GdipDrawString, pfnGdipDrawString);
-hook_demand_GdipDrawString();
-}
-
-GpStatus WINAPI IMPL_GdipDrawString(
-GpGraphics               *graphics,
-GDIPCONST WCHAR          *string,
-INT                       length,
-GDIPCONST GpFont         *font,
-GDIPCONST RectF          *layoutRect,
-GDIPCONST GpStringFormat *stringFormat,
-GDIPCONST GpBrush        *brush
-)
-{
-#define GDIPEXEC ORIG_GdipDrawString(graphics, string, length, font, layoutRect, stringFormat, brush)
-#define GDIPCHECK(x) if ((x)!=Ok) return GDIPEXEC
-if (string)
-{
-HDC dc = nullptr;
-LOGFONTW lf = {0};
-GpBrushType bt;
-ARGB FontColor=0 ,bkColor = 0;
-//GDIPLUS to gdi32 data preparation
-GDIPCHECK(pfnGdipGetLogFontW(const_cast<GpFont*>(font), graphics, &lf));
-GDIPCHECK(pfnGdipGetBrushType(const_cast<GpBrush*>(brush), &bt));
-if (bt!=BrushTypeSolidColor) return GDIPEXEC; //only solid brush is supported by GDI32
-GDIPCHECK(pfnGdipGetSolidFillColor(reinterpret_cast<GpSolidFill*>(const_cast<GpBrush*>(brush)), &FontColor));
-if (FontColor>>24!=0xFF) return GDIPEXEC;	//only transparent and Opaque is supported.
-GDIPCHECK(pfnGdipGetDC(graphics, &dc));
-HFONT ft = CreateFontIndirectW(&lf);
-HFONT oldfont = SelectFont(dc, ft);
-
-SetTextColor(dc, FontColor & 0x00FFFFFF);
-SetBkMode(dc, TRANSPARENT);
-RECT gdiRect = {ROUND(layoutRect->X), ROUND(layoutRect->Y), ROUND(layoutRect->X+layoutRect->Width), ROUND(layoutRect->Y+layoutRect->Height)};
-DrawText(dc, string, length, &gdiRect, DT_WORDBREAK);
-//ExtTextOutW(dc, gdiRect.left, gdiRect.top, 0, &gdiRect, string, wcslen(string), nullptr);
-
-SelectObject(dc, oldfont);
-DeleteObject(ft);
-pfnGdipReleaseDC(graphics, dc);
-return Ok;
-}
-else
-return ORIG_GdipDrawString(graphics, string, length, font, layoutRect, stringFormat, brush);
-#undef GDIPCHECK
-#undef GDIPEXEC
-}
-*/
 HRESULT WINAPI IMPL_DWriteCreateFactory(__in DWRITE_FACTORY_TYPE factoryType,
 	__in REFIID iid,
 	__out IUnknown **factory)

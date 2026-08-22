@@ -270,16 +270,13 @@ FARPROC K32GetProcAddress(LPCSTR lpProcName)
 {
 #ifndef _WIN64
 	//序数渡しには対応しない
-	//Assert(!IS_INTRESOURCE(lpProcName));
 
 	//kernel32のベースアドレス取得
 	LPBYTE pBase = reinterpret_cast<LPBYTE>(GetModuleHandleA("kernel32.dll"));
 
 	//この辺は100%成功するはずなのでエラーチェックしない
 	PIMAGE_DOS_HEADER pdosh = reinterpret_cast<PIMAGE_DOS_HEADER>(pBase);
-	//Assert(pdosh->e_magic == IMAGE_DOS_SIGNATURE);
 	PIMAGE_NT_HEADERS pnth = reinterpret_cast<PIMAGE_NT_HEADERS>(pBase + pdosh->e_lfanew);
-	//Assert(pnth->Signature == IMAGE_NT_SIGNATURE);
 
 	const DWORD offs = pnth->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
 	const DWORD size = pnth->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
@@ -305,7 +302,6 @@ FARPROC K32GetProcAddress(LPCSTR lpProcName)
 	}
 	return nullptr;
 #else
-	//Assert(!IS_INTRESOURCE(lpProcName));
 
 	//kernel32のベースアドレス取得
 	WCHAR sysdir[MAX_PATH];
@@ -907,7 +903,6 @@ emit_dw(0xD0FF);	//call eax
 		wsprintf(msg, L"API paddr: 0x%I64x\r\nOffset: %x\r\nAPI addr: 0x%I64x\r\nKernel32.dll: 0x%I64x\r\nKernelBase: 0x%I64x", (DWORD_PTR)pfn, *(PDWORD)pfn, *(PDWORD)pfn + (DWORD_PTR)GetModuleHandle(L"kernel32.dll"),
 			(DWORD_PTR)GetModuleHandle(L"kernel32.dll"), (DWORD_PTR)GetModuleHandle(L"kernelbase.dll"));
 		MessageBoxW(nullptr, msg, nullptr, MB_OK);*/
-		//if(!pfn)
 		//	return false;
 		//emit_db(0xEB);
 		//emit_db(0xFE);	// make a dead loop

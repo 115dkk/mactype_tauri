@@ -145,37 +145,22 @@ BOOL _CreateProcessAsUserAorW(HANDLE hToken, const _TCHAR* lpApp, _TCHAR* lpCmd,
 
 static wstring GetExeName(LPCTSTR lpApp, LPTSTR lpCmd)
 {
-// 	HANDLE logfile = CreateFile(_T("C:\\mt.log"), FILE_ALL_ACCESS, FILE_SHARE_READ|FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS, nullptr, nullptr);
-// 	SetFilePointer(logfile,0,nullptr, FILE_END);
-
 	wstring ret;
-// 	DWORD aa=0;
-// 	if (GetFileSize(logfile, nullptr)==0)
-// 		WriteFile(logfile, "\xff\xfe", 2, &aa, nullptr);
 	LPTSTR vlpApp = const_cast<LPTSTR>(lpApp);	//变成可以操作的参数
 	if (lpApp)
 	{
 		do
 		{
-// 			WriteFile(logfile, L"lpApp=", 12, &aa, nullptr);
-// 			WriteFile(logfile, lpApp, _tcslen(lpApp)*2, &aa, nullptr);
-// 			WriteFile(logfile, _T("\n"), 2, &aa, nullptr);
 			vlpApp = _tcsstr(vlpApp+1, _T(" "));	//获得第一个空格所在的位置
 			ret.assign(lpApp);
 			if (vlpApp)
 				ret.resize(vlpApp-lpApp);
-// 			WriteFile(logfile, ret.c_str(), ret.length()*2, &aa, nullptr);
-// 			WriteFile(logfile, _T("\n"), 2, &aa, nullptr);
 			DWORD fa = GetFileAttributes(ret.c_str());
 			if (fa!=INVALID_FILE_ATTRIBUTES && fa!=FILE_ATTRIBUTE_DIRECTORY)	//文件是否存在
 			{
 				int p = ret.find_last_of(_T("\\"));
 				if (p!=-1)
 					ret.erase(0, p+1);	//如果有路径就删掉路径
-// 				WriteFile(logfile, ret.c_str(), ret.length()*2, &aa, nullptr);
-// 				WriteFile(logfile, _T("\n"), 2, &aa, nullptr);
-// 				WriteFile(logfile, _T("==========\n"), 24, &aa, nullptr);
-// 				CloseHandle(logfile);
 				return ret;
 			}
 			else
@@ -187,10 +172,6 @@ static wstring GetExeName(LPCTSTR lpApp, LPTSTR lpCmd)
 					int p = ret.find_last_of(_T("\\"));
 					if (p!=-1)
 						ret.erase(0, p+1);	//如果有路径就删掉路径
-// 					WriteFile(logfile, ret.c_str(), ret.length()*2, &aa, nullptr);
-// 					WriteFile(logfile, _T("\n"), 2, &aa, nullptr);
-// 					WriteFile(logfile, _T("==========\n"), 24, &aa, nullptr);
-// 					CloseHandle(logfile);
 					return ret;
 				}
 			}
@@ -199,8 +180,6 @@ static wstring GetExeName(LPCTSTR lpApp, LPTSTR lpCmd)
 
 	if (lpCmd)
 	{
-// 		WriteFile(logfile, L"lpCmd=", 10, &aa, nullptr);
-// 		WriteFile(logfile, lpCmd, _tcslen(lpCmd)*2, &aa, nullptr);
 		ret.assign(lpCmd);
 		int p=0;
 		if ((*lpCmd)==_T('\"'))
@@ -212,21 +191,11 @@ static wstring GetExeName(LPCTSTR lpApp, LPTSTR lpCmd)
 			p=ret.find_first_of(_T(" "));
 		if (p>0)
 			ret.resize(p);	//获得Cmd里面的文件名
-// 		WriteFile(logfile, ret.c_str(), ret.length()*2, &aa, nullptr);
-// 		WriteFile(logfile, _T("\n"), 2, &aa, nullptr);
 		p = ret.find_last_of(_T("\\"));
 		if (p>0)
 			ret.erase(0, p+1);	//如果有路径就删掉路径
-// 		WriteFile(logfile, ret.c_str(), ret.length()*2, &aa, nullptr);
-// 		WriteFile(logfile, _T("\n"), 2, &aa, nullptr);
-// 		WriteFile(logfile, _T("==========\n"), 24, &aa, nullptr);
-// 		CloseHandle(logfile);
 		return ret;
 	}
-// 	WriteFile(logfile, ret.c_str(), ret.length()*2, &aa, nullptr);
-// 	WriteFile(logfile, _T("\n"), 2, &aa, nullptr);
-// 	WriteFile(logfile, _T("==========\n"), 24, &aa, nullptr);
-// 	CloseHandle(logfile);
 	return ret;
 }
 

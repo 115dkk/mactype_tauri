@@ -136,7 +136,6 @@ void CopyHookPointer(Target& target, Source source) noexcept
 //PFNCreateProcessW nCreateProcessW = (PFNCreateProcessW)MyGetProcAddress(LoadLibrary(_T("kernel32.dll")),"CreateProcessW");
 //PFNCreateProcessA nCreateProcessA = (PFNCreateProcessA)MyGetProcAddress(LoadLibrary(_T("kernel32.dll")),"CreateProcessA");
 // HMODULE hGDIPP = GetModuleHandleW(L"gdiplus.dll");
-// typedef int (WINAPI *PFNGdipCreateFontFamilyFromName)(const WCHAR *name, void *fontCollection, void **FontFamily);
 // PFNGdipCreateFontFamilyFromName GdipCreateFontFamilyFromName = hGDIPP? (PFNGdipCreateFontFamilyFromName)GetProcAddress(hGDIPP, "GdipCreateFontFamilyFromName"):0;
 
 #ifdef USE_DETOURS
@@ -378,13 +377,11 @@ CTlsData<CThreadLocalInfo>	g_TLInfo;
 HINSTANCE					g_hinstDLL;
 LONG						g_bHookEnabled;
 #ifdef _DEBUG
-HANDLE						g_hfDbgText;
 #endif
 
 //void InstallManagerHook();
 //void RemoveManagerHook();
 
-//#include "APITracer.hpp"
 
 //ベースアドレスを変えた方がロードが早くなる
 #if _DLL
@@ -441,18 +438,8 @@ BOOL WINAPI IsRunAsUser(VOID)
 		}
 	}
 
-	//
-	//  We now know the groups associated with this token.  We want to look to	see if
-		//  the interactive group is active in the token, and if so, we know that
-		//  this is an interactive process.
-		//
-		//  We also look for the "service" SID, and if it's present, we know we're a service.
-		//
-		//  The service SID will be present iff the service is running in a
-		//  user account (and was invoked by the service controller).
-		//
-
-
+	// Interactive membership identifies a desktop process. Service membership
+	// identifies a service launched in a user account by the service controller.
 	if (!AllocateAndInitializeSid(&siaNt, 1, SECURITY_INTERACTIVE_RID, 0,
 		0,
 		0, 0, 0, 0, 0, &rawInteractiveSid))
@@ -473,46 +460,22 @@ BOOL WINAPI IsRunAsUser(VOID)
 		SID_AND_ATTRIBUTES sanda = groupInfo->Groups[i];
 		PSID Sid = sanda.Sid;
 
-		//
-		//  Check to see if the group we're looking at is one of
-		//  the 2 groups we're interested in.
-		//
-
-	if (EqualSid(Sid, interactiveSid.get()))
+		if (EqualSid(Sid, interactiveSid.get()))
 		{
-			//
-			//  This process has the Interactive SID in its
-			//  token.  This means that the process is running as
-			//  an EXE.
-			//
 			fExe = true;
 			goto ret;
 		}
 		else if (EqualSid(Sid, serviceSid.get()))
 		{
-			//
-			//  This process has the Service SID in its
-			//  token.  This means that the process is running as
-			//  a service running in a user account.
-			//
 			fExe = FALSE;
 			goto ret;
 		}
 	}
 
-	//
-	//  Neither Interactive or Service was present in the current users token,
-	//  This implies that the process is running as a service, most likely
-	//  running as LocalSystem.
-	//
+	// A token with neither SID is treated conservatively as a service host.
 	fExe = FALSE;
 
 ret:
-// 	EventLogging logger;
-// 	TCHAR s[100] = { 0 };
-// 	wsprintf(s, L"Loading processid %d, isUserProcess=%d", GetCurrentProcessId(), (int)fExe);
-// 	LPCTSTR lpStrings[] = {s};
-// 	logger.LogIt(1, 1, lpStrings, 1);
 	return(fExe);
 }
 
@@ -635,9 +598,6 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 		switch (reason) {
 		case DLL_PROCESS_ATTACH:
 		{
-#ifdef DEBUG
-			//MessageBox(0, L"Load", nullptr, MB_OK);
-#endif
 			DebugOut(L"Begin core loading stage, pid %d", ::GetCurrentProcessId());
 			if (bDllInited)
 				return true;
@@ -648,33 +608,10 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 #ifdef EASYHOOK
 			EZHookMain(instance, reason, lpReserved);
 #endif
-			//初期化順序
-			//DLL_PROCESS_DETACHではこれの逆順にする
-			//1. CRT関数の初期化
-			//2. クリティカルセクションの初期化
-			//3. TLSの準備
-			//4. CGdippSettingsのインスタンス生成、INI読み込み
-			//5. ExcludeModuleチェック
-			// 6. FreeTypeライブラリの初期化
-			// 7. FreeTypeFontEngineのインスタンス生成
-			// 8. APIをフック
-			// 9. ManagerのGetProcAddressをフック
-
-			//1
 			_CrtSetDbgFlag(_CrtSetDbgFlag(_CRTDBG_REPORT_FLAG) | _CRTDBG_LEAK_CHECK_DF);
 			_CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_DEBUG | _CRTDBG_MODE_WNDW);
-			//_CrtSetBreakAlloc(100);
-
-			//Operaよ止まれ～
-			//Assert(GetModuleHandleA("opera.exe") == nullptr);
-
-			//setlocale(LC_ALL, "");
 			g_hinstDLL = instance;
 
-
-			//APITracer::Start(instance, APITracer::OutputFile);
-
-					//2, 3
 			CCriticalSectionLock::Init();
 			COwnedCriticalSectionLock::Init();
 			CThreadCounter::Init();
@@ -683,11 +620,9 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 				return FALSE;
 			}
 
-			// Above classes are heavily referenced and must be initialized as early as possible.
-			// Unload dll is not safe until their initialization is complete.
+			// Explicit unload is unsafe until these process-wide primitives exist.
 			bDllInited = true;
 
-			//4
 			{
 #ifdef INFINALITY
 				// enable infinality exclusive features
@@ -704,7 +639,6 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 				bHookChildProcesses = pSettings->HookChildProcesses();
 			}
 			if (!IsUnload) hook_initinternal();	//不加载的模块就不做任何事莵E
-			//5
 			const bool processExcluded = IsProcessExcluded();
 			if (!processExcluded && !IsUnload) {
 #ifndef _WIN64
@@ -717,8 +651,6 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 				if (!CreateFreeTypeFontEngine()) {
 					return FALSE;
 				}
-
-				//if (!AddEasyHookEnv()) return FALSE;	//fail to load easyhook
 				InterlockedExchange(&g_bHookEnabled, TRUE);
 				if (hook_init() != NOERROR) {
 					DebugOut(L"Can't do hooking, exiting");
@@ -754,17 +686,9 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 						renderer::CapabilityReason::explicitlyDisabled);
 				}
 #endif
-				//hook d2d if already loaded
-	/*
-				DWORD dwSessionID = 0;
-				if (ProcessIdToSessionIdProc)
-					ProcessIdToSessionIdProc(GetCurrentThreadId(), &dwSessionID);
-				else
-					dwSessionID = 1;*/
 				if (IsRunAsUser() && bEnableDW)
 				{
 					StartDirectWriteLifecycle();
-					//hook_demand_LdrLoadDll();
 				}
 				else
 				{
@@ -772,7 +696,6 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 						renderer::HookCapability::directWrite, 0, false,
 						renderer::CapabilityReason::explicitlyDisabled);
 				}
-				// only hook font creation funcs if font substition is set.
 				if (bUseFontSubstitute) {
 					HookFontCreation();
 				}
@@ -795,8 +718,6 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 					renderer::HookCapability::fontSubstitution, 0, true,
 					renderer::CapabilityReason::explicitlyDisabled);
 			}
-			//获得当前加载模式
-
 			if (IsUnload)
 			{
 				auto mutex_offical = renderer_raii::AdoptHandle(OpenMutex(MUTEX_ALL_ACCESS, false, _T("{46AD3688-30D0-411e-B2AA-CB177818F428}")));
@@ -812,8 +733,6 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 					return false;
 				}
 			}
-
-			//APITracer::Finish();
 			if (!runtimeStart.Complete())
 				return FALSE;
 			if (processExcluded)
@@ -847,20 +766,14 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 #endif
 			break;
 		case DLL_PROCESS_DETACH:
-			//		RemoveManagerHook();
 			if (!bDllInited)
 				return true;
 			renderer::ProcessHookCoordinator().BeginStop();
 			bDllInited = false;
 			if (InterlockedExchange(&g_bHookEnabled, FALSE) && lpReserved == nullptr)
-			{ // 如果是进程终止，则不需要释放
+			{
 				RestoreDirectWriteVtableHooks();
 				hook_term();
-				// delete AACacheFull;
-				// delete AACache;
-				// 			for (int i=0;i<CACHE_SIZE;i++)
-				// 				delete g_AACache2[i];	//清除缓磥E
-				// free(g_charmapCache);
 			}
 #ifndef DEBUG
 			if (lpReserved != nullptr) return true;
@@ -870,19 +783,10 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 				DestroyFreeTypeFontEngine();
 
 #ifdef INFINALITY
-			// enable infinality exclusive features
 			FT_freeEnv();
 #endif
-			//if (g_alterGUIFont)
-			//	DeleteObject(g_alterGUIFont);
 			if (freetype_library != nullptr)
 				FontLFree();
-			/*
-			#ifndef _WIN64
-					__FUnloadDelayLoadedDLL2("easyhook32.dll");
-			#else
-					__FUnloadDelayLoadedDLL2("easyhook64.dll");
-			#endif*/
 
 			CGdippSettings::DestroyInstance();
 			g_TLInfo.ProcessTerm();

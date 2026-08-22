@@ -217,9 +217,6 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
       backend: serviceBackend,
       installation: serviceInstallation,
       runtime: serviceRuntime,
-      // The backend reads live health and the active generation only from a
-      // running service; a stopped one keeps at most a persisted degraded or
-      // failed record.
       health: serviceRuntime === "running" || liveServiceHealth === "degraded" || liveServiceHealth === "failed"
         ? liveServiceHealth
         : "unknown",
@@ -408,8 +405,6 @@ export function transitionGalleryExecutionStatus(
     return withGalleryLegacyTrayPolicy({ ...current, legacyMacTray: null }, current.legacyTray);
   }
 
-  // Mirrors the backend contract: starting or publishing with no applied
-  // profile applies the bundled default profile first.
   const defaultApplied = (action === "start" || action === "publish-profile") && !current.activeProfile;
   return withGalleryLegacyTrayPolicy({
     ...current,

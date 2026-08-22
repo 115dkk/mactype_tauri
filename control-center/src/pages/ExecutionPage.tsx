@@ -129,8 +129,6 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
     try {
       const nextStatus = await manageSystemService(action);
       setStatus(nextStatus);
-      // "start" and "publish-profile" auto-apply the bundled default profile
-      // when none was applied yet; name what happened instead of a generic note.
       const defaultApplied = !hadProfile && Boolean(nextStatus.activeProfile);
       const appliedName = nextStatus.activeProfile?.split(/[\\/]/).pop() ?? "";
       setMessage(

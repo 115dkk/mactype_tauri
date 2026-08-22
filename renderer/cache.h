@@ -113,7 +113,6 @@ public:
 	}
 
 	void SetPixelV(int X, int Y, COLORREF rgb) {
-		// if ((unsigned)X >= (unsigned)m_dibSize.cx || (unsigned)Y >= (unsigned)m_dibSize.cy) {
 		// 	return;
 		// }
 		DWORD* lpPixels = reinterpret_cast<DWORD*>(m_lpPixels);

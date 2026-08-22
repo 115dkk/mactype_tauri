@@ -37,6 +37,8 @@ pub(super) struct Configuration {
 
 pub(super) fn query_configuration(service: SC_HANDLE) -> Result<Configuration, u32> {
     let mut required = 0;
+    // SAFETY: `service` is a borrowed live SCM handle and the null buffer/zero
+    // size pair requests the required byte count only.
     unsafe { QueryServiceConfigW(service, std::ptr::null_mut(), 0, &mut required) };
     let error = unsafe { GetLastError() };
     if error != ERROR_INSUFFICIENT_BUFFER || required == 0 {
@@ -50,9 +52,13 @@ pub(super) fn query_configuration(service: SC_HANDLE) -> Result<Configuration, u
     }
     let capacity = u32::try_from(capacity_bytes).map_err(|_| ERROR_INVALID_DATA)?;
     let configuration = buffer.as_mut_ptr().cast::<QUERY_SERVICE_CONFIGW>();
+    // SAFETY: usize storage satisfies QUERY_SERVICE_CONFIGW alignment and
+    // `capacity` is the exact size of the writable allocation.
     if unsafe { QueryServiceConfigW(service, configuration, capacity, &mut required) } == 0 {
         return Err(unsafe { GetLastError() });
     }
+    // SAFETY: the successful query initialized the fixed header; every child
+    // pointer is independently range-checked before it is read.
     let configuration = unsafe { &*configuration };
     Ok(Configuration {
         service_type: configuration.dwServiceType,
@@ -163,6 +169,8 @@ fn wide_units_in_buffer(buffer: &[usize], value: *const u16) -> Result<&[u16], u
         return Err(ERROR_INVALID_DATA);
     }
     let units = (end - address) / size_of::<u16>();
+    // SAFETY: the address and alignment checks above confine the slice to the
+    // live aligned SCM response allocation.
     Ok(unsafe { std::slice::from_raw_parts(value, units) })
 }
 

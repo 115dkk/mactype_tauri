@@ -146,8 +146,8 @@ pub(crate) fn remove_after_verified(
     }
     if let Err(error) = legacy_mactray::remove_for_migration() {
         // Do not roll back on a removal failure: rollback restarts the legacy
-        // service, but the new service is already the verified live injector by
-        // now, so a restart would double-inject. The legacy service stays stopped
+        // service after the new service has become the verified live injector,
+        // so a restart would double-inject. The legacy service stays stopped
         // and disabled (migration_stop), which is safe; the caller can retry.
         return Err(format!(
             "legacy removal failed; the legacy service remains stopped and disabled: {error}"

@@ -352,7 +352,6 @@ struct FreeTypeDrawInfo
 			//FTC_ScalerRec fscaler={face_id_list[index], 1,1,1,0,0};
 			scaler.face_id = face_id_list[index];
 			if (FTC_Manager_LookupSize(cache_man, &scaler, &font_size))
-			//if (FTC_Manager_LookupFace(cache_man, face_id_list[index], &freetype_face_list[index]))
 				freetype_face_list[index] = nullptr;
 			else {
 				if (scaler.height == 0)

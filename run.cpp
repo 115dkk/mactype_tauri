@@ -79,7 +79,6 @@ HINSTANCE hinstDLL;
 
 #define _GDIPP_EXE
 #define _GDIPP_RUN_CPP
-//#include "renderer/supinfo.h"
 
 //#define OLD_PSDK
 

@@ -25,11 +25,8 @@ AutoEnableDynamicCodeGen::AutoEnableDynamicCodeGen(bool enable) : enabled(false)
 		return;
 	}
 
-	//
-	// Snap the dynamic code generation policy for this process so that we
-	// don't need to resolve APIs and query it each time. We expect the policy
-	// to have been established upfront.
-	//
+	// Dynamic-code policy is process-wide and established before hook admission;
+	// cache it instead of resolving and querying the API for every hook.
 
 	std::call_once(processPolicyOnce, []
 		{

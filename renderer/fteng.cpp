@@ -353,7 +353,7 @@ void FreeTypeFontCache::AddCharData(WCHAR wch, UINT glyphindex, int width, int g
 	std::unique_ptr<FreeTypeCharData> charData;
 	try {
 		charData = std::make_unique<FreeTypeCharData>(
-			/*ppChar*/nullptr, nullptr, wch, glyphindex, width, MruIncrement(), gdiWidth, AAMode);
+			nullptr, nullptr, wch, glyphindex, width, MruIncrement(), gdiWidth, AAMode);
 	} catch (const std::bad_alloc&) {
 		return;
 	}
@@ -457,7 +457,6 @@ void FreeTypeFontInfo::Createlink()
 	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
 	for (fn.next() ; !fn.atend(); fn.next()) {	//跳过第一个链接
 		//FreeTypeFontInfo* pfitemp = g_pFTEngine->FindFont(fn, m_weight, m_italic);
-		//if (pfitemp && pfitemp->m_isSimSun)
 		//	IsSimSun = true;
 		if (!m_SimSunID)
 			IsSimSun = (_wcsicmp(fn,L"宋体")==0 || _wcsicmp(fn,L"SimSun")==0);
@@ -526,7 +525,7 @@ FreeTypeFontCache* FreeTypeFontInfo::GetCache(FTC_ScalerRec& scaler, const LOGFO
 		std::unique_ptr<FreeTypeFontCache> cache;
 		try {
 			cache = std::make_unique<FreeTypeFontCache>(
-				/*scaler.height, weight, italic,*/ MruIncrement());
+				MruIncrement());
 		} catch (const std::bad_alloc&) {
 			return nullptr;
 		}
@@ -677,7 +676,7 @@ FreeTypeFontInfo* FreeTypeFontEngine::AddFont(void* lpparams)
 	std::unique_ptr<FreeTypeFontInfo> newFont;
 	try {
 		newFont = std::make_unique<FreeTypeFontInfo>(
-			/*m_mfullMap.size() + 1*/faceId, lplf.lfFaceName, lplf.lfWeight,
+			faceId, lplf.lfFaceName, lplf.lfWeight,
 			!!lplf.lfItalic, MruIncrement(), params->strFullName, params->strFamilyName);
 	} catch (const std::bad_alloc&) {
 		ReleaseFaceID();
@@ -690,14 +689,6 @@ FreeTypeFontInfo* FreeTypeFontEngine::AddFont(void* lpparams)
 			ReleaseFaceID();
 			return nullptr;
 		}
-/*
-	TCHAR buff[255]={0};
-	if (params->strFamilyName.length()==8)
-	{
-		wsprintf(buff, L"Adding familiyname \"%s\" fullname \"%s\" weight %d\n\result: \"%s\"\n", params->strFamilyName.c_str(), params->strFullName.c_str(),
-			params->lplf->lfWeight, pfi->GetFullName().c_str());
-		Log(buff);
-	}*/
 
 	FullNameMap::const_iterator it = m_mfullMap.find(pfi->GetFullName());
 	if (it!=m_mfullMap.end())	//是已经存在的字体了,原因是字体替换使两种名字指向一个字体
@@ -718,22 +709,9 @@ FreeTypeFontInfo* FreeTypeFontEngine::AddFont(void* lpparams)
 		m_mfullMap[params->strFullName] = pfi;	//双重引用，指向同一个字体
 	}
 
-	//bool ret = !!arr.Add(pfi);
-	//weight = weight < FW_BOLD ? 0: FW_BOLD;
 	myfont font(lplf.lfFaceName, lplf.lfWeight, !!params->otm->otmTextMetrics.tmItalic);
-	/*
-	FontMap::const_iterator it = m_mfontMap.find(font);
-		if (it!=m_mfontMap.end())
-		{
-			it->second->Release();
-		}*/
 
 	m_mfontMap[font]=pfi;
-	/*
-	if (!ret) {
-	delete pfi;
-	return nullptr;
-	}*/
 
 
 #ifdef _DEBUG
@@ -749,20 +727,17 @@ FreeTypeFontInfo* FreeTypeFontEngine::AddFont(void* lpparams)
 FreeTypeFontInfo* FreeTypeFontEngine::AddFont(LPCTSTR lpFaceName, int weight, bool italic, BOOL* bIsFontLoaded)
 {
 	CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTENG);
-	if(lpFaceName == nullptr || _tcslen(lpFaceName) == 0/* || FontExists(lpFaceName, weight, italic)*/)
+	if(lpFaceName == nullptr || _tcslen(lpFaceName) == 0)
 		return nullptr;
 
-	//FontListArray& arr = m_arrFontList;
-
 	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
-	//const CFontSettings& fs = pSettings->FindIndividual(lpFaceName);
 	wstring dumy;
 	//dumy.clear();
 	const int faceId = GetFaceID();
 	std::unique_ptr<FreeTypeFontInfo> newFont;
 	try {
 		newFont = std::make_unique<FreeTypeFontInfo>(
-			/*m_mfullMap.size() + 1*/faceId, lpFaceName, weight, italic, MruIncrement(), dumy, dumy);
+			faceId, lpFaceName, weight, italic, MruIncrement(), dumy, dumy);
 	} catch (const std::bad_alloc&) {
 		ReleaseFaceID();
 		return nullptr;
@@ -792,15 +767,8 @@ FreeTypeFontInfo* FreeTypeFontEngine::AddFont(LPCTSTR lpFaceName, int weight, bo
 			*bIsFontLoaded = false;
 	}
 
-	//bool ret = !!arr.Add(pfi);
-	//weight = weight < FW_BOLD ? 0: FW_BOLD;
 	myfont font(lpFaceName, weight, italic);
 	m_mfontMap[font]=pfi;		//添加在次要map表
-/*
-	if (!ret) {
-		delete pfi;
-		return nullptr;
-	}*/
 
 
 #ifdef _DEBUG
@@ -819,25 +787,6 @@ int FreeTypeFontEngine::GetFontIdByName(LPCTSTR lpFaceName, int weight, bool ita
 	return pfi ? pfi->GetId() : 0;
 }
 
-/*
-LPCTSTR FreeTypeFontEngine::GetFontById(int faceid, int& weight, bool& italic)
-{
-	CCriticalSectionLock __lock;
-
-	FreeTypeFontInfo** pp	= m_arrFontList.Begin();
-	FreeTypeFontInfo** end	= m_arrFontList.End();
-	for(; pp != end; ++pp) {
-		FreeTypeFontInfo* p = *pp;
-		if (p->GetId() == faceid) {
-			p->SetMruCounter(this);
-			weight = p->GetWeight();
-			italic = p->IsItalic();
-			return p->GetName();
-		}
-	}
-	return nullptr;
-}
-*/
 FreeTypeFontInfo* FreeTypeFontEngine::FindFont(void* lpparams)
 {
 	FREETYPE_PARAMS* params = static_cast<FREETYPE_PARAMS*>(lpparams);
@@ -857,13 +806,6 @@ FreeTypeFontInfo* FreeTypeFontEngine::FindFont(void* lpparams)
 
 FreeTypeFontInfo* FreeTypeFontEngine::FindFont(LPCTSTR lpFaceName, int weight, bool italic, bool AddOnFind, BOOL* bIsFontLoaded)
 {
-/*
-	if (m_bAddOnFind)
-	{
-		m_bAddOnFind = false;
-		return nullptr;
-	}*/
-
 	CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTMAP);
 	weight = CalcBoldWeight(weight);
 	myfont font(lpFaceName, weight, italic);
@@ -872,19 +814,10 @@ FreeTypeFontInfo* FreeTypeFontEngine::FindFont(LPCTSTR lpFaceName, int weight, b
 	{
 		FreeTypeFontInfo* p = iter->second;
 		p->SetMruCounter(this);
-/*
-		TCHAR buff[255]={0};
-		if (wcslen(lpFaceName)==8)
-		{
-			wsprintf(buff, L"Finding familiyname \"%s\" weight %d\n\tFound: \"%s\"\n", lpFaceName,
-				weight, p->GetFullName().c_str());
-			Log(buff);
-		}*/
 		if (bIsFontLoaded)
 			*bIsFontLoaded = true;
 		return p;
 	}
-	//m_bAddOnFind = true;
 	return AddFont(lpFaceName, weight, italic, bIsFontLoaded);
 }
 
@@ -895,16 +828,6 @@ FreeTypeFontInfo* FreeTypeFontEngine::FindFont(int faceid)
 		return nullptr;
 	else
 		return m_mfontList[faceid-1];	//存在bug！！！
-	/*
-	FullNameMap::const_iterator iter=m_mfullMap.begin();
-		for(; iter != m_mfullMap.end(); ++iter) {
-			FreeTypeFontInfo* p = iter->second;
-			if (p->GetId() == faceid) {
-				p->SetMruCounter(this);
-				return p;
-			}
-		}
-		return nullptr;*/
 
 }
 

@@ -71,7 +71,7 @@ fn a_disabled_start_type_is_still_the_owned_service_but_other_start_types_are_fo
         ServicePresence::Owned
     );
 
-    // Any other start type (manual, boot, system) is not a shape we ever set.
+    // Manual, boot, and system start types are not owned configurations.
     for start_type in [0u32, 1, 3] {
         let mut other = owned_service_configuration(path);
         other.start_type = start_type;

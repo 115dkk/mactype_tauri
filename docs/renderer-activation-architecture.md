@@ -46,6 +46,23 @@ after parsing and validation succeed. A failed reload preserves the previously
 published snapshot. One render request retains one snapshot revision, so it
 cannot observe a mixture of policy generations.
 
+## Process-lifetime and unload policy
+
+Process-owned renderer registries use explicit teardown rather than C++ static
+destruction because Windows may run the latter while holding the loader lock.
+The active renderer is never released through a raw `FreeLibrary`; a caller
+that is about to terminate leaves process cleanup to Windows. The helper may
+release only the reference it created for a verified `QuietSkip`, after the
+renderer has confirmed that no hook capability is active or failed and has
+cleared its policy, substitution, and lifecycle snapshots. Failure to prove
+that state is cleanup uncertainty, not a successful skip.
+
+The same rule governs FreeType and DirectWrite owners. Explicit teardown runs
+outside the loader lock in dependency order; process termination may leave a
+small owner container for the operating system rather than execute library or
+COM release paths from static destructors. Code-local comments retain only the
+specific ordering or loader-lock warning needed at each owner.
+
 ## Evidence Interface
 
 The renderer-activation contract is versioned independently of health v1. Its

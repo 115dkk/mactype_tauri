@@ -22,6 +22,13 @@ The editor keeps the selected source profile as the editing identity. A writable
 
 User-facing and persisted source identities are portable (`ini\Default.ini` or `Profiles\Foo.ini`) for files in those profile directories. Absolute paths are retained only for actual file I/O and reveal-in-Explorer actions. Applying is allowed only from a saved document and publishes the exact saved bytes into the service's protected generation; the generated `profile.ini`, digest, and runtime path remain internal implementation details. Imports are strictly decoded as INI documents, copied byte-for-byte, and receive a collision-safe name.
 
+When no profile has been applied, only a `start` or `publish-profile` action may
+select the validated bundled `ini\Default.ini`; every other profile remains an
+explicit user choice. The frontend announces that default before the action
+and names it after success. A stopped service has no live generation, so its
+summary does not invent a profile mismatch or repeat stale live-health text;
+only a persisted degraded or failed record remains diagnostically relevant.
+
 Scalar settings use the public core's `[General]` keys. Structured `[Individual]`, font include/exclude, and module include/exclude sections retain their surrounding comments while edited entries are validated and replaced. The legacy-codec gate vendors a pinned, licensed 70-profile community corpus and requires correct encoding detection, byte-identical no-edit round trips, edit/save/reopen behavior, and line-ending/BOM preservation without network access.
 
 `shared/settings-schema.json` is the source for generated Rust, TypeScript, and C++ setting definitions. CI regenerates and rejects drift.
@@ -44,4 +51,4 @@ The official single-instance plugin is registered before every other Tauri plugi
 
 ## Maintenance notes
 
-Cross-module contracts belong in this architecture document, `docs/control-center-ci.md`, or `docs/legacy-behavior-notes.md` rather than being repeated beside each implementation. Source comments are reserved for local invariants and platform or compatibility traps that are easy to violate while editing. Generated files retain only their generated-file warning; routine control flow and temporary implementation history should remain uncommented.
+Cross-module contracts belong in this architecture document, `docs/control-center-ci.md`, or `docs/legacy-behavior-notes.md` rather than being repeated beside each implementation. Source comments follow `docs/source-comment-policy.md`: local invariants and platform or compatibility traps remain beside the code, while routine control flow and temporary implementation history remain uncommented.

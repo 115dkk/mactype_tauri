@@ -41,6 +41,10 @@ below wherever the two conflict.
   substitutions consume the immutable font-substitution snapshot, and
   FreeType manager ownership ends before its library. Do not add an independent
   runtime phase machine or read mutable profile maps from a render hot path.
+- Source comments follow `docs/source-comment-policy.md`. Keep code-local
+  safety proofs and platform traps, move repeated cross-Module contracts to
+  their canonical document, and do not leave narration, disabled code, model
+  provenance, or untracked TODO/FIXME/HACK markers in first-party source.
 - Protected runtime and profile identity travel only as one
   `RendererRuntimeBinding`. A helper-owned load is successful only after the
   generated `RendererActivationEvidence` contract binds the exact process,

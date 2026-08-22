@@ -51,6 +51,14 @@ path; do not repeatedly prompt, retry equivalent privileged commands, or keep
 the task apparently stalled waiting for an approval the user may not be able
 to grant immediately.
 
+## Source comments are contract surface
+
+Follow `docs/source-comment-policy.md` for every first-party source change.
+Preserve `SAFETY:` proofs and code-local compatibility warnings. Move repeated
+architecture rationale to the named canonical document. Remove progress
+narration, commented-out code, model provenance, and untracked
+TODO/FIXME/HACK/XXX markers before delivery.
+
 ## `codex/alpha-plus-dll` exception
 
 `codex/alpha-plus-dll` is the long-lived delivery branch and must never be

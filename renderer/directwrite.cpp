@@ -2,6 +2,7 @@
 #include "directwrite_alias.h"
 #include "dynCodeHelper.h"
 #include "hookCounter.h"
+#include "hook_lifecycle.h"
 #include "settings.h"
 
 #include <array>
@@ -31,6 +32,54 @@ void SetPointerValue(Target& target, Source source) noexcept
 }
 
 #define SET_VAL(x, y) SetPointerValue((x), (y))
+
+namespace {
+
+using DemandHookFunction = LONG (*)(bool);
+
+LONG InstallDemandHook(
+	renderer::HookCapability capability,
+	void* target,
+	DemandHookFunction install)
+{
+	renderer::HookCoordinator& coordinator = renderer::ProcessHookCoordinator();
+	renderer::HookAttempt const attempt = coordinator.BeginAttempt(
+		capability, reinterpret_cast<std::uintptr_t>(target), target != nullptr);
+	if (!attempt.valid())
+		return ERROR_BUSY;
+
+	if (target == nullptr)
+	{
+		coordinator.CompleteAttempt(
+			attempt, false, renderer::CapabilityReason::moduleMissing,
+			ERROR_MOD_NOT_FOUND);
+		return ERROR_MOD_NOT_FOUND;
+	}
+
+	LONG const status = install(false);
+	coordinator.CompleteAttempt(
+		attempt, status == NOERROR,
+		status == NOERROR ? renderer::CapabilityReason::none
+		                  : renderer::CapabilityReason::transactionFailed,
+		status);
+	return status;
+}
+
+void PublishUnavailableCapability(
+	renderer::HookCapability capability,
+	void* target,
+	bool modulePresent,
+	renderer::CapabilityReason reason,
+	LONG status)
+{
+	renderer::HookCoordinator& coordinator = renderer::ProcessHookCoordinator();
+	renderer::HookAttempt const attempt = coordinator.BeginAttempt(
+		capability, reinterpret_cast<std::uintptr_t>(target), modulePresent);
+	if (attempt.valid())
+		coordinator.CompleteAttempt(attempt, false, reason, status);
+}
+
+} // namespace
 // To hook a method, add HOOK_MANUALLY() in hooklist.h and use this.
 
 #ifdef EASYHOOK
@@ -1846,7 +1895,9 @@ void TriggerHook(ID2D1Factory* d2d_factory) {
 enum class DirectWriteLifecyclePhase
 {
 	dormant,
+	starting,
 	active,
+	failed,
 	stopping,
 	stopped,
 };
@@ -1856,6 +1907,7 @@ struct DirectWriteLifecycleState
 	renderer_raii::UniqueModuleReference d2d1;
 	renderer_raii::UniqueModuleReference dwrite;
 	renderer_raii::UniqueModuleReference dwriteCore;
+	renderer_raii::UniqueHandle startupWorker;
 	renderer_raii::UniqueHandle existingFactoryWorker;
 	renderer_raii::UniqueHandle dwriteCoreWorker;
 	renderer_raii::UniqueHandle cancelEvent;
@@ -1865,6 +1917,8 @@ struct DirectWriteLifecycleState
 	std::atomic<bool> dwriteCoreWorkerScheduled{false};
 	std::atomic<bool> stopping{false};
 	DirectWriteLifecyclePhase phase = DirectWriteLifecyclePhase::dormant;
+	DirectWriteLifecyclePhase phaseBeforeStop = DirectWriteLifecyclePhase::dormant;
+	bool startupSucceeded = false;
 };
 
 static DirectWriteLifecycleState& GetDirectWriteLifecycleState()
@@ -1916,7 +1970,13 @@ static bool IsDWriteCoreModule(HMODULE module)
 static bool HookDWriteCoreFactoryEntry(FARPROC factoryProcedure)
 {
 	if (factoryProcedure == nullptr)
+	{
+		PublishUnavailableCapability(
+			renderer::HookCapability::directWriteCore, nullptr, true,
+			renderer::CapabilityReason::interfaceUnsupported,
+			ERROR_PROC_NOT_FOUND);
 		return false;
+	}
 
 	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
 	std::lock_guard<std::mutex> lock(lifecycle.dwriteCoreHookMutex);
@@ -1926,7 +1986,10 @@ static bool HookDWriteCoreFactoryEntry(FARPROC factoryProcedure)
 		return true;
 
 	SET_VAL(ORIG_DWriteCoreCreateFactory, factoryProcedure);
-	if (hook_demand_DWriteCoreCreateFactory() != NOERROR ||
+	if (InstallDemandHook(
+			renderer::HookCapability::directWriteCore,
+			reinterpret_cast<void*>(factoryProcedure),
+			hook_demand_DWriteCoreCreateFactory) != NOERROR ||
 		!ISHOOKED(DWriteCoreCreateFactory))
 		return false;
 
@@ -2028,6 +2091,7 @@ static DWORD WINAPI HookExistingDirectWriteFactory(LPVOID moduleReference)
 	// before user entry. Keep a short startup watch in addition to the
 	// LoadLibraryExW hook so import-driven loads are covered too.
 	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
+	bool dwriteCoreHooked = false;
 	for (unsigned int attempt = 0;
 		 attempt != 100 && !HookLoadedDWriteCoreModule(); ++attempt)
 	{
@@ -2038,6 +2102,15 @@ static DWORD WINAPI HookExistingDirectWriteFactory(LPVOID moduleReference)
 			break;
 		if (!lifecycle.cancelEvent)
 			Sleep(50);
+	}
+	dwriteCoreHooked = ISHOOKED(DWriteCoreCreateFactory);
+	if (!dwriteCoreHooked &&
+		!lifecycle.stopping.load(std::memory_order_acquire))
+	{
+		PublishUnavailableCapability(
+			renderer::HookCapability::directWriteCore, nullptr, false,
+			renderer::CapabilityReason::moduleMissing,
+			ERROR_MOD_NOT_FOUND);
 	}
 	HMODULE rawSelfReference = selfReference.release();
 	FreeLibraryAndExitThread(rawSelfReference, 0);
@@ -2205,6 +2278,7 @@ DirectWriteLifecycleStopPreparation PrepareDirectWriteLifecycleStop(
 	DWORD timeoutMilliseconds)
 {
 	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
+	HANDLE startupWorker = nullptr;
 	HANDLE existingWorker = nullptr;
 	HANDLE coreWorker = nullptr;
 	{
@@ -2214,17 +2288,20 @@ DirectWriteLifecycleStopPreparation PrepareDirectWriteLifecycleStop(
 			return DirectWriteLifecycleStopPreparation::alreadyStopped;
 		if (lifecycle.phase != DirectWriteLifecyclePhase::stopping)
 		{
+			lifecycle.phaseBeforeStop = lifecycle.phase;
 			lifecycle.phase = DirectWriteLifecyclePhase::stopping;
 			lifecycle.stopping.store(true, std::memory_order_release);
 			if (lifecycle.cancelEvent)
 				SetEvent(lifecycle.cancelEvent.get());
 		}
+		startupWorker = lifecycle.startupWorker.get();
 		existingWorker = lifecycle.existingFactoryWorker.get();
 		coreWorker = lifecycle.dwriteCoreWorker.get();
 	}
 
 	ULONGLONG const deadline = GetTickCount64() + timeoutMilliseconds;
-	if (!WaitForLifecycleWorker(existingWorker, deadline) ||
+	if (!WaitForLifecycleWorker(startupWorker, deadline) ||
+		!WaitForLifecycleWorker(existingWorker, deadline) ||
 		!WaitForLifecycleWorker(coreWorker, deadline))
 	{
 		AbortDirectWriteLifecycleStop();
@@ -2241,6 +2318,13 @@ void AbortDirectWriteLifecycleStop()
 		std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
 		if (lifecycle.phase != DirectWriteLifecyclePhase::stopping)
 			return;
+		bool startupFinished = false;
+		if (lifecycle.startupWorker &&
+			WaitForSingleObject(lifecycle.startupWorker.get(), 0) == WAIT_OBJECT_0)
+		{
+			startupFinished = true;
+			lifecycle.startupWorker.reset();
+		}
 		if (lifecycle.existingFactoryWorker &&
 			WaitForSingleObject(lifecycle.existingFactoryWorker.get(), 0) == WAIT_OBJECT_0)
 			lifecycle.existingFactoryWorker.reset();
@@ -2250,8 +2334,18 @@ void AbortDirectWriteLifecycleStop()
 		if (lifecycle.cancelEvent)
 			ResetEvent(lifecycle.cancelEvent.get());
 		lifecycle.stopping.store(false, std::memory_order_release);
-		lifecycle.phase = DirectWriteLifecyclePhase::active;
-		shouldResumeStartupWatch = !lifecycle.existingFactoryWorker;
+		if (lifecycle.phaseBeforeStop == DirectWriteLifecyclePhase::starting)
+			lifecycle.phase = !startupFinished
+				? DirectWriteLifecyclePhase::starting
+				: (lifecycle.startupSucceeded
+					? DirectWriteLifecyclePhase::active
+					: DirectWriteLifecyclePhase::failed);
+		else
+			lifecycle.phase = lifecycle.phaseBeforeStop;
+		lifecycle.phaseBeforeStop = DirectWriteLifecyclePhase::dormant;
+		shouldResumeStartupWatch =
+			lifecycle.phase == DirectWriteLifecyclePhase::active &&
+			!lifecycle.existingFactoryWorker;
 	}
 	if (shouldResumeStartupWatch && !ISHOOKED(DWriteCoreCreateFactory))
 		ScheduleExistingDirectWriteFactoryHook();
@@ -2274,6 +2368,7 @@ bool CommitDirectWriteLifecycleStop(DWORD timeoutMilliseconds)
 		lifecycle.diagnosticEvents.clear();
 	}
 	std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
+	lifecycle.startupWorker.reset();
 	lifecycle.existingFactoryWorker.reset();
 	lifecycle.dwriteCoreWorker.reset();
 	lifecycle.cancelEvent.reset();
@@ -2282,6 +2377,8 @@ bool CommitDirectWriteLifecycleStop(DWORD timeoutMilliseconds)
 	lifecycle.d2d1.reset();
 	lifecycle.dwriteCoreWorkerScheduled.store(false, std::memory_order_release);
 	lifecycle.phase = DirectWriteLifecyclePhase::stopped;
+	lifecycle.phaseBeforeStop = DirectWriteLifecyclePhase::dormant;
+	lifecycle.startupSucceeded = false;
 	return true;
 }
 
@@ -2297,22 +2394,9 @@ static renderer_raii::BorrowedModule PinOrLoadRendererModule(
 	return renderer_raii::BorrowedModule(pin.get());
 }
 
-void StartDirectWriteLifecycle()
+static bool InitializeDirectWriteLifecycle()
 {
 	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
-	{
-		std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
-		if (lifecycle.phase == DirectWriteLifecyclePhase::active ||
-			lifecycle.phase == DirectWriteLifecyclePhase::stopping)
-			return;
-		if (!lifecycle.cancelEvent)
-			lifecycle.cancelEvent = renderer_raii::AdoptHandle(
-				CreateEventW(nullptr, TRUE, FALSE, nullptr));
-		else
-			ResetEvent(lifecycle.cancelEvent.get());
-		lifecycle.stopping.store(false, std::memory_order_release);
-		lifecycle.phase = DirectWriteLifecyclePhase::active;
-	}
 	SignalDirectWriteDiagnostic(L"hook-entered");
 	typedef HRESULT (WINAPI *PFN_DWriteCreateFactory)(
 		_In_ DWRITE_FACTORY_TYPE factoryType,
@@ -2335,7 +2419,17 @@ void StartDirectWriteLifecycle()
 	renderer_raii::BorrowedModule dw = PinOrLoadRendererModule(
 		L"dwrite.dll", lifecycle.dwrite);
 	if (!d2d1 || !dw) {
-		return;
+		if (!d2d1)
+			PublishUnavailableCapability(
+				renderer::HookCapability::direct2D, nullptr, false,
+				renderer::CapabilityReason::moduleMissing,
+				ERROR_MOD_NOT_FOUND);
+		if (!dw)
+			PublishUnavailableCapability(
+				renderer::HookCapability::directWrite, nullptr, false,
+				renderer::CapabilityReason::moduleMissing,
+				ERROR_MOD_NOT_FOUND);
+		return false;
 	}
 	void* D2D1Factory = GetProcAddress(d2d1.get(), "D2D1CreateFactory");
 	void* D2D1Device = GetProcAddress(d2d1.get(), "D2D1CreateDevice");
@@ -2353,29 +2447,117 @@ void StartDirectWriteLifecycle()
 	SET_VAL(ORIG_DWriteCreateFactory, DWFactory);
 	SET_VAL(ORIG_LoadLibraryExW, loadLibraryEx);
 	SET_VAL(ORIG_GetProcAddress, getProcAddress);
-	if (DWFactory) {
-		hook_demand_DWriteCreateFactory();
-	}
-	if (loadLibraryEx) {
-		hook_demand_LoadLibraryExW();
-	}
-	if (getProcAddress) {
-		hook_demand_GetProcAddress();
-	}
-	if (D2D1Factory){
-		hook_demand_D2D1CreateFactory();
-	}
-	if (D2D1Device) {
-		hook_demand_D2D1CreateDevice();
-	}
-	if (D2D1Context) {
-		hook_demand_D2D1CreateDeviceContext();
-	}
+	LONG const directWriteStatus = InstallDemandHook(
+		renderer::HookCapability::directWrite, DWFactory,
+		hook_demand_DWriteCreateFactory);
+	InstallDemandHook(
+		renderer::HookCapability::directWriteCore, loadLibraryEx,
+		hook_demand_LoadLibraryExW);
+	InstallDemandHook(
+		renderer::HookCapability::directWriteCore, getProcAddress,
+		hook_demand_GetProcAddress);
+	InstallDemandHook(
+		renderer::HookCapability::direct2D, D2D1Factory,
+		hook_demand_D2D1CreateFactory);
+	InstallDemandHook(
+		renderer::HookCapability::direct2D, D2D1Device,
+		hook_demand_D2D1CreateDevice);
+	InstallDemandHook(
+		renderer::HookCapability::direct2D, D2D1Context,
+		hook_demand_D2D1CreateDeviceContext);
 	if (DWFactory) {
 		// Service injection can happen after a browser has created its shared
 		// factory. Hook that implementation once the loader lock is released.
 		// The worker publishes hook-ready only after the factory boundary exists.
 		ScheduleExistingDirectWriteFactoryHook();
+	}
+	return directWriteStatus == NOERROR;
+}
+
+static DWORD WINAPI StartDirectWriteLifecycleWorker(LPVOID moduleReference)
+{
+	renderer_raii::UniqueModuleReference selfReference(
+		static_cast<HMODULE>(moduleReference));
+	bool const succeeded = InitializeDirectWriteLifecycle();
+	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
+	{
+		std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
+		lifecycle.startupSucceeded = succeeded;
+		if (lifecycle.phase == DirectWriteLifecyclePhase::starting)
+			lifecycle.phase = succeeded
+				? DirectWriteLifecyclePhase::active
+				: DirectWriteLifecyclePhase::failed;
+	}
+	HMODULE const rawSelfReference = selfReference.release();
+	FreeLibraryAndExitThread(rawSelfReference, succeeded ? 0 : ERROR_DLL_INIT_FAILED);
+	return 0;
+}
+
+void StartDirectWriteLifecycle()
+{
+	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
+	std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
+	if (lifecycle.phase == DirectWriteLifecyclePhase::starting ||
+		lifecycle.phase == DirectWriteLifecyclePhase::active ||
+		lifecycle.phase == DirectWriteLifecyclePhase::stopping)
+		return;
+	if (!lifecycle.cancelEvent)
+		lifecycle.cancelEvent = renderer_raii::AdoptHandle(
+			CreateEventW(nullptr, TRUE, FALSE, nullptr));
+	else
+		ResetEvent(lifecycle.cancelEvent.get());
+	if (!lifecycle.cancelEvent)
+	{
+		PublishUnavailableCapability(
+			renderer::HookCapability::directWrite, nullptr, false,
+			renderer::CapabilityReason::initializationFailed,
+			static_cast<LONG>(GetLastError()));
+		lifecycle.phase = DirectWriteLifecyclePhase::failed;
+		return;
+	}
+	lifecycle.startupWorker.reset();
+	lifecycle.startupSucceeded = false;
+	lifecycle.stopping.store(false, std::memory_order_release);
+	lifecycle.phase = DirectWriteLifecyclePhase::starting;
+
+	HMODULE moduleReference = nullptr;
+	if (!GetModuleHandleEx(
+			GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+			reinterpret_cast<LPCTSTR>(&StartDirectWriteLifecycleWorker),
+			&moduleReference))
+	{
+		PublishUnavailableCapability(
+			renderer::HookCapability::directWrite, nullptr, false,
+			renderer::CapabilityReason::initializationFailed,
+			static_cast<LONG>(GetLastError()));
+		lifecycle.phase = DirectWriteLifecyclePhase::failed;
+		return;
+	}
+	renderer_raii::UniqueModuleReference selfReference(moduleReference);
+	auto worker = renderer_raii::AdoptHandle(CreateThread(
+		nullptr, 0, StartDirectWriteLifecycleWorker, selfReference.get(),
+		CREATE_SUSPENDED, nullptr));
+	if (!worker)
+	{
+		PublishUnavailableCapability(
+			renderer::HookCapability::directWrite, nullptr, false,
+			renderer::CapabilityReason::initializationFailed,
+			static_cast<LONG>(GetLastError()));
+		lifecycle.phase = DirectWriteLifecyclePhase::failed;
+		return;
+	}
+	HANDLE const rawWorker = worker.get();
+	HMODULE const rawSelfReference = selfReference.release();
+	lifecycle.startupWorker = std::move(worker);
+	if (ResumeThread(rawWorker) == static_cast<DWORD>(-1))
+	{
+		LONG const status = static_cast<LONG>(GetLastError());
+		lifecycle.startupWorker.reset();
+		FreeLibrary(rawSelfReference);
+		PublishUnavailableCapability(
+			renderer::HookCapability::directWrite, nullptr, false,
+			renderer::CapabilityReason::initializationFailed, status);
+		lifecycle.phase = DirectWriteLifecyclePhase::failed;
 	}
 }
 

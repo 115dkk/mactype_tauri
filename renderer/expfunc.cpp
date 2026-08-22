@@ -2,6 +2,7 @@
 #include "settings.h"
 #include "override.h"
 #include "directwrite.h"
+#include "hook_lifecycle.h"
 #include <tlhelp32.h>
 #include <shlwapi.h>	//DLLVERSIONINFO
 #include "undocAPI.h"
@@ -161,6 +162,16 @@ EXTERN_C void SafeUnload()
 	if (bInited)
 		return;	//防重入
 	bInited = true;
+	renderer::HookCoordinator& hookCoordinator =
+		renderer::ProcessHookCoordinator();
+	bool const coordinatorStopStarted = hookCoordinator.BeginStop();
+	if (!coordinatorStopStarted &&
+		hookCoordinator.phase() != renderer::RuntimePhase::stopping &&
+		hookCoordinator.phase() != renderer::RuntimePhase::uninitialized)
+	{
+		bInited = false;
+		ExitThread(ERROR_BUSY);
+	}
 	while (CThreadCounter::Count())
 		Sleep(0);
 	auto lock = std::make_unique<CCriticalSectionLock>();
@@ -171,6 +182,8 @@ EXTERN_C void SafeUnload()
 	{
 		if (last)
 			InterlockedExchange(&g_bHookEnabled, last);
+		if (coordinatorStopStarted)
+			hookCoordinator.AbortStop();
 		bInited = false;
 		lock.reset();
 		ExitThread(ERROR_BUSY);
@@ -181,6 +194,8 @@ EXTERN_C void SafeUnload()
 			if (preparation == DirectWriteLifecycleStopPreparation::prepared)
 				AbortDirectWriteLifecycleStop();
 			InterlockedExchange(&g_bHookEnabled, last);
+			if (coordinatorStopStarted)
+				hookCoordinator.AbortStop();
 			bInited = false;
 			lock.reset();
 			ExitThread(ERROR_ACCESS_DENIED);
@@ -191,6 +206,13 @@ EXTERN_C void SafeUnload()
 	{
 		// Detours are already detached, so keep the lifecycle stopped and all
 		// module references alive. A later SafeUnload call can retry the drain.
+		bInited = false;
+		lock.reset();
+		ExitThread(ERROR_BUSY);
+	}
+	if (hookCoordinator.phase() == renderer::RuntimePhase::stopping &&
+		!hookCoordinator.CompleteStop())
+	{
 		bInited = false;
 		lock.reset();
 		ExitThread(ERROR_BUSY);

@@ -31,7 +31,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "CMake configure failed with exit code $LASTEXITCODE"
 }
 
-& cmake --build $buildDirectory --config Release --target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe
+& cmake --build $buildDirectory --config Release --target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe
 if ($LASTEXITCODE -ne 0) {
     throw "CMake build failed with exit code $LASTEXITCODE"
 }
@@ -40,6 +40,12 @@ $raiiTestPath = Join-Path $buildDirectory 'Release\renderer-raii-tests.exe'
 & $raiiTestPath
 if ($LASTEXITCODE -ne 0) {
     throw "Renderer RAII fault-injection tests failed with exit code $LASTEXITCODE"
+}
+
+$hookLifecycleTestPath = Join-Path $buildDirectory 'Release\hook-lifecycle-tests.exe'
+& $hookLifecycleTestPath
+if ($LASTEXITCODE -ne 0) {
+    throw "Hook lifecycle tests failed with exit code $LASTEXITCODE"
 }
 
 $gatePath = Join-Path $buildDirectory "Release\browser-launch-gate$suffix.exe"

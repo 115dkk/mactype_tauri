@@ -22,6 +22,7 @@
 #include <VersionHelpers.h>
 #include "EventLogging.h"
 #include "hookCounter.h"
+#include "hook_lifecycle.h"
 #include <vector>
 
 bool RestoreDirectWriteVtableHooks(DWORD timeoutMilliseconds = 3000);
@@ -43,6 +44,85 @@ bool RestoreDirectWriteVtableHooks(DWORD timeoutMilliseconds = 3000);
 #pragma comment(lib, "delayimp")
 
 HINSTANCE g_dllInstance;
+
+namespace {
+
+class RuntimeStartGuard
+{
+public:
+	RuntimeStartGuard()
+		: coordinator_(renderer::ProcessHookCoordinator()),
+		  ownsStart_(coordinator_.BeginStart())
+	{
+	}
+
+	~RuntimeStartGuard()
+	{
+		if (ownsStart_ && !settled_)
+			coordinator_.FailStart(ERROR_DLL_INIT_FAILED);
+	}
+
+	RuntimeStartGuard(const RuntimeStartGuard&) = delete;
+	RuntimeStartGuard& operator=(const RuntimeStartGuard&) = delete;
+
+	bool owns_start() const noexcept { return ownsStart_; }
+
+	bool Complete() noexcept
+	{
+		if (!ownsStart_ || settled_)
+			return false;
+		settled_ = coordinator_.CompleteStart();
+		return settled_;
+	}
+
+private:
+	renderer::HookCoordinator& coordinator_;
+	bool ownsStart_ = false;
+	bool settled_ = false;
+};
+
+void PublishUnavailableCapability(
+	renderer::HookCapability capability,
+	std::uintptr_t target,
+	bool modulePresent,
+	renderer::CapabilityReason reason,
+	LONG status = NOERROR)
+{
+	renderer::HookCoordinator& coordinator = renderer::ProcessHookCoordinator();
+	renderer::HookAttempt const attempt = coordinator.BeginAttempt(
+		capability, target, modulePresent);
+	if (attempt.valid())
+		coordinator.CompleteAttempt(attempt, false, reason, status);
+}
+
+LONG InstallTrackedDemandHook(
+	renderer::HookCapability capability,
+	void* target,
+	LONG (*install)(bool))
+{
+	if (target == nullptr)
+	{
+		PublishUnavailableCapability(
+			capability, 0, true,
+			renderer::CapabilityReason::interfaceUnsupported,
+			ERROR_PROC_NOT_FOUND);
+		return ERROR_PROC_NOT_FOUND;
+	}
+	renderer::HookCoordinator& coordinator = renderer::ProcessHookCoordinator();
+	renderer::HookAttempt const attempt = coordinator.BeginAttempt(
+		capability, reinterpret_cast<std::uintptr_t>(target), true);
+	if (!attempt.valid())
+		return ERROR_BUSY;
+	LONG const status = install(false);
+	coordinator.CompleteAttempt(
+		attempt, status == NOERROR,
+		status == NOERROR ? renderer::CapabilityReason::none
+		                  : renderer::CapabilityReason::transactionFailed,
+		status);
+	return status;
+}
+
+} // namespace
 
 template <typename Target, typename Source>
 void CopyHookPointer(Target& target, Source source) noexcept
@@ -104,6 +184,13 @@ static void hook_initinternal()
 
 static LONG hook_init()
 {
+	renderer::HookCoordinator& coordinator = renderer::ProcessHookCoordinator();
+	renderer::HookAttempt const attempt = coordinator.BeginAttempt(
+		renderer::HookCapability::gdi,
+		reinterpret_cast<std::uintptr_t>(&ORIG_ExtTextOutW), true);
+	if (!attempt.valid())
+		return IsHooked_ExtTextOutW ? NOERROR : ERROR_BUSY;
+
 	DetourRestoreAfterWith();
 
 	renderer_raii::DetourTransaction transaction;
@@ -122,6 +209,11 @@ static LONG hook_init()
 		#undef HOOK_MANUALLY
 		TRACE(_T("hook_init error: %#x\n"), error);
 	}
+	coordinator.CompleteAttempt(
+		attempt, error == NOERROR,
+		error == NOERROR ? renderer::CapabilityReason::none
+		                 : renderer::CapabilityReason::transactionFailed,
+		error);
 	return error;
 }
 #undef HOOK_DEFINE
@@ -462,8 +554,19 @@ void HookFontCreation() {
 		CopyHookPointer(ORIG_CreateFontIndirectW, CreateFontIndirectW);
 		CopyHookPointer(ORIG_CreateFontIndirectExW, CreateFontIndirectExW);
 
-		hook_demand_CreateFontIndirectExW();
-		hook_demand_CreateFontIndirectW();
+		InstallTrackedDemandHook(
+			renderer::HookCapability::fontSubstitution,
+			CreateFontIndirectExW, hook_demand_CreateFontIndirectExW);
+		InstallTrackedDemandHook(
+			renderer::HookCapability::fontSubstitution,
+			CreateFontIndirectW, hook_demand_CreateFontIndirectW);
+	}
+	else
+	{
+		PublishUnavailableCapability(
+			renderer::HookCapability::fontSubstitution, 0, false,
+			renderer::CapabilityReason::moduleMissing,
+			ERROR_MOD_NOT_FOUND);
 	}
 }
 
@@ -530,12 +633,16 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 
 		switch (reason) {
 		case DLL_PROCESS_ATTACH:
+		{
 #ifdef DEBUG
 			//MessageBox(0, L"Load", nullptr, MB_OK);
 #endif
 			DebugOut(L"Begin core loading stage, pid %d", ::GetCurrentProcessId());
 			if (bDllInited)
 				return true;
+			RuntimeStartGuard runtimeStart;
+			if (!runtimeStart.owns_start())
+				return FALSE;
 			g_dllInstance = instance;
 #ifdef EASYHOOK
 			EZHookMain(instance, reason, lpReserved);
@@ -620,8 +727,29 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 				{
 					CopyHookPointer(
 						ORIG_CreateProcessInternalW, CreateProcessInternalW);
-					if (hook_demand_CreateProcessInternalW() != NOERROR)
+					renderer::HookCoordinator& coordinator =
+						renderer::ProcessHookCoordinator();
+					renderer::HookAttempt const attempt = coordinator.BeginAttempt(
+						renderer::HookCapability::childInjection,
+						reinterpret_cast<std::uintptr_t>(&ORIG_CreateProcessInternalW),
+						true);
+					LONG const childHookStatus = hook_demand_CreateProcessInternalW();
+					if (attempt.valid())
+						coordinator.CompleteAttempt(
+							attempt, childHookStatus == NOERROR,
+							childHookStatus == NOERROR
+								? renderer::CapabilityReason::none
+								: renderer::CapabilityReason::transactionFailed,
+							childHookStatus);
+					if (childHookStatus != NOERROR)
 						DebugOut(L"Child process relay hook is unavailable");
+				}
+				else
+				{
+					PublishUnavailableCapability(
+						renderer::HookCapability::childInjection, 0,
+						CreateProcessInternalW != nullptr,
+						renderer::CapabilityReason::explicitlyDisabled);
 				}
 #endif
 				//hook d2d if already loaded
@@ -636,10 +764,34 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 					StartDirectWriteLifecycle();
 					//hook_demand_LdrLoadDll();
 				}
+				else
+				{
+					PublishUnavailableCapability(
+						renderer::HookCapability::directWrite, 0, false,
+						renderer::CapabilityReason::explicitlyDisabled);
+				}
 				// only hook font creation funcs if font substition is set.
 				if (bUseFontSubstitute) {
 					HookFontCreation();
 				}
+				else
+				{
+					PublishUnavailableCapability(
+						renderer::HookCapability::fontSubstitution, 0, true,
+						renderer::CapabilityReason::explicitlyDisabled);
+				}
+			}
+			else
+			{
+				PublishUnavailableCapability(
+					renderer::HookCapability::gdi, 0, true,
+					renderer::CapabilityReason::explicitlyDisabled);
+				PublishUnavailableCapability(
+					renderer::HookCapability::directWrite, 0, false,
+					renderer::CapabilityReason::explicitlyDisabled);
+				PublishUnavailableCapability(
+					renderer::HookCapability::fontSubstitution, 0, true,
+					renderer::CapabilityReason::explicitlyDisabled);
 			}
 			//获得当前加载模式
 
@@ -660,7 +812,10 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 			}
 
 			//APITracer::Finish();
+			if (!runtimeStart.Complete())
+				return FALSE;
 			break;
+		}
 		case DLL_THREAD_ATTACH:
 #ifdef EASYHOOK
 			EZHookMain(instance, reason, lpReserved);
@@ -676,6 +831,7 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 			//		RemoveManagerHook();
 			if (!bDllInited)
 				return true;
+			renderer::ProcessHookCoordinator().BeginStop();
 			bDllInited = false;
 			if (InterlockedExchange(&g_bHookEnabled, FALSE) && lpReserved == nullptr)
 			{ // 如果是进程终止，则不需要释放
@@ -714,6 +870,9 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 #ifdef EASYHOOK
 			EZHookMain(instance, reason, lpReserved);
 #endif
+			if (renderer::ProcessHookCoordinator().phase() ==
+				renderer::RuntimePhase::stopping)
+				renderer::ProcessHookCoordinator().CompleteStop();
 			break;
 		}
 		return TRUE;

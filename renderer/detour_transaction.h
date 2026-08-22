@@ -1,12 +1,19 @@
 #pragma once
 
 #include <Windows.h>
+#include <mutex>
 
 #include "detours.h"
 
 namespace renderer_raii {
 
 namespace detail {
+
+inline std::mutex& ProcessDetoursTransactionMutex() noexcept
+{
+	static std::mutex mutex;
+	return mutex;
+}
 
 struct DetoursApi
 {
@@ -27,7 +34,9 @@ template <typename Api = detail::DetoursApi>
 class BasicDetourTransaction
 {
 public:
-	BasicDetourTransaction() noexcept : active_(false), status_(Api::Begin())
+	BasicDetourTransaction()
+		: transactionLock_(detail::ProcessDetoursTransactionMutex()),
+		  active_(false), status_(Api::Begin())
 	{
 		if (status_ == NOERROR) {
 			active_ = true;
@@ -82,6 +91,9 @@ public:
 	bool active() const noexcept { return active_; }
 
 private:
+	// Detours exposes one transaction per process. Keep ownership ahead of the
+	// transaction state so the lock is released only after a pending abort.
+	std::unique_lock<std::mutex> transactionLock_;
 	bool active_;
 	LONG status_;
 };

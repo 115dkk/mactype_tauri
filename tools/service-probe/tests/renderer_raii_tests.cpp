@@ -1,7 +1,10 @@
 #include "../../../renderer/detour_transaction.h"
 #include "../../../renderer/renderer_raii.h"
 
+#include <atomic>
 #include <iostream>
+#include <thread>
+#include <vector>
 
 namespace {
 
@@ -164,6 +167,36 @@ struct FakeDetoursApi
         ++detour_detach_calls;
         return detour_detach_result;
     }
+};
+
+std::atomic<int> concurrent_detours_active{0};
+std::atomic<int> concurrent_detours_max_active{0};
+
+struct ConcurrentDetoursApi
+{
+    static LONG Begin() noexcept
+    {
+        const int active = concurrent_detours_active.fetch_add(1) + 1;
+        int maximum = concurrent_detours_max_active.load();
+        while (active > maximum &&
+               !concurrent_detours_max_active.compare_exchange_weak(maximum, active)) {
+        }
+        Sleep(25);
+        return NOERROR;
+    }
+    static LONG Abort() noexcept
+    {
+        concurrent_detours_active.fetch_sub(1);
+        return NOERROR;
+    }
+    static LONG Commit() noexcept
+    {
+        concurrent_detours_active.fetch_sub(1);
+        return NOERROR;
+    }
+    static LONG UpdateThread(HANDLE) noexcept { return NOERROR; }
+    static LONG Attach(PVOID*, PVOID) noexcept { return NOERROR; }
+    static LONG Detach(PVOID*, PVOID) noexcept { return NOERROR; }
 };
 
 bool Expect(bool condition, const char* message)
@@ -400,6 +433,36 @@ bool TestDetourTransactionFaultCleanup()
         "failed DetourTransactionBegin was treated as active");
 }
 
+bool TestDetourTransactionsAreProcessSerialized()
+{
+    using Transaction = renderer_raii::BasicDetourTransaction<ConcurrentDetoursApi>;
+    concurrent_detours_active = 0;
+    concurrent_detours_max_active = 0;
+    std::atomic<unsigned int> ready{0};
+    std::atomic<bool> start{false};
+    std::vector<std::thread> workers;
+    for (unsigned int index = 0; index < 2; ++index) {
+        workers.emplace_back([&ready, &start]() {
+            ++ready;
+            while (!start.load(std::memory_order_acquire)) {
+                Sleep(0);
+            }
+            Transaction transaction;
+            Sleep(25);
+            transaction.Commit();
+        });
+    }
+    while (ready.load(std::memory_order_acquire) != 2) {
+        Sleep(0);
+    }
+    start.store(true, std::memory_order_release);
+    for (std::thread& worker : workers) {
+        worker.join();
+    }
+    return Expect(concurrent_detours_max_active == 1,
+        "process-global Detours transactions overlapped");
+}
+
 } // namespace
 
 int main()
@@ -407,7 +470,8 @@ int main()
     if (!TestStandardOwnersCallMatchingReleaseExactlyOnce() ||
         !TestContextualLeasesRestoreOnEveryExit() ||
         !TestExplicitCriticalSectionOwnerIsIdempotent() ||
-        !TestDetourTransactionFaultCleanup()) {
+        !TestDetourTransactionFaultCleanup() ||
+        !TestDetourTransactionsAreProcessSerialized()) {
         return 1;
     }
     std::cout << "Renderer RAII fault-injection tests passed.\n";

@@ -832,6 +832,7 @@
     <ClCompile Include="renderer\gdiPlusFlat2.cpp" />
     <ClCompile Include="renderer\hash_list.cpp" />
     <ClCompile Include="renderer\hook.cpp" />
+    <ClCompile Include="renderer\hook_lifecycle.cpp" />
     <ClCompile Include="renderer\hookCounter.cpp" />
     <ClCompile Include="renderer\misc.cpp" />
     <ClCompile Include="renderer\override.cpp">
@@ -867,6 +868,7 @@
     <ClInclude Include="renderer\gdiPlusFlat2.h" />
     <ClInclude Include="renderer\hash_list.h" />
     <ClInclude Include="renderer\hookCounter.h" />
+    <ClInclude Include="renderer\hook_lifecycle.h" />
     <ClInclude Include="renderer\hooklist.h" />
     <ClInclude Include="renderer\ivs_otft.h" />
     <ClInclude Include="renderer\json.hpp" />

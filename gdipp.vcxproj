@@ -828,6 +828,7 @@
     <ClCompile Include="renderer\ft.cpp" />
     <ClCompile Include="renderer\ft2vert.c" />
     <ClCompile Include="renderer\fteng.cpp" />
+    <ClCompile Include="renderer\font_substitution.cpp" />
     <ClCompile Include="renderer\ftref.c" />
     <ClCompile Include="renderer\gdiPlusFlat2.cpp" />
     <ClCompile Include="renderer\hash_list.cpp" />
@@ -866,6 +867,7 @@
     <ClInclude Include="renderer\fteng.h" />
     <ClInclude Include="renderer\ftref.h" />
     <ClInclude Include="renderer\freetype_runtime.h" />
+    <ClInclude Include="renderer\font_substitution.h" />
     <ClInclude Include="renderer\gdiPlusFlat2.h" />
     <ClInclude Include="renderer\hash_list.h" />
     <ClInclude Include="renderer\hookCounter.h" />

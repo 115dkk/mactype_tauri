@@ -1,6 +1,7 @@
 #include "directwrite_alias.h"
 
 #include "directwrite_virtual_font.h"
+#include "font_substitution.h"
 #include "settings.h"
 
 #include <algorithm>
@@ -17,14 +18,8 @@ struct CacheEntry
 {
 	CComPtr<IUnknown> factoryIdentity;
 	CComPtr<IUnknown> systemSetIdentity;
+	std::uint64_t generation = 0;
 	AliasFontSet aliases;
-};
-
-struct SubstitutionRule
-{
-	std::wstring sourceFamily;
-	std::wstring replacementFamily;
-	bool charsetSpecific = false;
 };
 
 struct AliasCache
@@ -79,7 +74,7 @@ bool ReadLocalizedString(
 
 bool ResolveLocalizedFamily(
 	IDWriteLocalizedStrings* familyNames,
-	std::vector<SubstitutionRule> const& rules,
+	renderer::font_substitution::Snapshot const& snapshot,
 	std::wstring& sourceFamily,
 	std::wstring& replacementFamily)
 {
@@ -93,14 +88,13 @@ bool ResolveLocalizedFamily(
 				familyNames, nameIndex, family, locale) || family.empty())
 			continue;
 
-		for (SubstitutionRule const& rule : rules)
-		{
-			if (_wcsicmp(family.c_str(), rule.sourceFamily.c_str()) != 0)
-				continue;
-			sourceFamily = std::move(family);
-			replacementFamily = rule.replacementFamily;
-			return true;
-		}
+		renderer::font_substitution::Resolution const resolution =
+			snapshot.Resolve({family, DEFAULT_CHARSET});
+		if (!resolution.matched)
+			continue;
+		sourceFamily = std::move(family);
+		replacementFamily = resolution.family;
+		return true;
 	}
 	return false;
 }
@@ -108,7 +102,7 @@ bool ResolveLocalizedFamily(
 bool ResolveReplacementFamily(
 	IDWriteFontSet* systemFontSet,
 	UINT32 index,
-	std::vector<SubstitutionRule> const& rules,
+	renderer::font_substitution::Snapshot const& snapshot,
 	std::wstring& sourceFamily,
 	std::wstring& replacementFamily)
 {
@@ -121,48 +115,10 @@ bool ResolveReplacementFamily(
 			!exists || familyNames == nullptr)
 			continue;
 		if (ResolveLocalizedFamily(
-				familyNames, rules, sourceFamily, replacementFamily))
+				familyNames, snapshot, sourceFamily, replacementFamily))
 			return true;
 	}
 	return false;
-}
-
-std::vector<SubstitutionRule> CollectSubstitutionRules(
-	CFontSubstitutesInfo const& substitutions)
-{
-	std::vector<SubstitutionRule> rules;
-	rules.reserve(static_cast<size_t>(substitutions.GetSize()));
-	for (int index = 0; index < substitutions.GetSize(); ++index)
-	{
-		LOGFONT source = {};
-		LOGFONT replacement = {};
-		bool charsetSpecific = false;
-		if (!substitutions.CopyRule(
-				index, source, replacement, charsetSpecific) ||
-			(charsetSpecific && source.lfCharSet != DEFAULT_CHARSET) ||
-			_wcsicmp(source.lfFaceName, replacement.lfFaceName) == 0)
-			continue;
-
-		auto existing = std::find_if(
-			rules.begin(), rules.end(), [&](SubstitutionRule const& rule) {
-				return _wcsicmp(
-					rule.sourceFamily.c_str(), source.lfFaceName) == 0;
-			});
-		if (existing == rules.end())
-		{
-			rules.push_back({
-				source.lfFaceName,
-				replacement.lfFaceName,
-				charsetSpecific,
-			});
-		}
-		else if (charsetSpecific && !existing->charsetSpecific)
-		{
-			existing->replacementFamily = replacement.lfFaceName;
-			existing->charsetSpecific = true;
-		}
-	}
-	return rules;
 }
 
 HRESULT FindReplacementReference(
@@ -209,21 +165,19 @@ HRESULT FindReplacementReference(
 BuildStatus Build(
 	IDWriteFactory* factory,
 	IDWriteFontSet* systemFontSet,
+	std::shared_ptr<const renderer::font_substitution::Snapshot> const& snapshot,
 	AliasFontSet& result)
 {
 	result = {};
 	if (factory == nullptr || systemFontSet == nullptr)
 		return BuildStatus::systemSetUnavailable;
 
-	CGdippSettings const* settings = CGdippSettings::GetInstance();
-	if (!settings->DelayedInited())
-		return BuildStatus::settingsNotInitialized;
 	if (IsSubstitutionDisabled())
 		return BuildStatus::noSubstitutions;
-	std::vector<SubstitutionRule> const rules =
-		CollectSubstitutionRules(settings->GetFontSubstitutesInfo());
-	if (rules.empty())
+	if (!snapshot || snapshot->rules().empty())
 		return BuildStatus::noSubstitutions;
+	result.substitutionGeneration = snapshot->generation();
+	result.substitutionDigest = snapshot->digest();
 
 	CComPtr<IDWriteFactory3> factory3;
 	if (FAILED(factory->QueryInterface(&factory3)) || factory3 == nullptr)
@@ -247,7 +201,7 @@ BuildStatus Build(
 		std::wstring sourceFamily;
 		std::wstring replacementFamily;
 		if (!ResolveReplacementFamily(
-			systemFontSet, index, rules, sourceFamily, replacementFamily))
+			systemFontSet, index, *snapshot, sourceFamily, replacementFamily))
 		{
 			if (FAILED(builder->AddFontFaceReference(sourceReference)))
 				return BuildStatus::addFontFailed;
@@ -322,6 +276,14 @@ BuildStatus GetOrCreateUnchecked(
 	// must never escape while the caller explicitly requests the stock set.
 	if (IsSubstitutionDisabled())
 		return BuildStatus::noSubstitutions;
+	CGdippSettings const* settings = CGdippSettings::GetInstance();
+	if (!settings->DelayedInited())
+		return BuildStatus::settingsNotInitialized;
+	std::shared_ptr<const renderer::font_substitution::Snapshot> const snapshot =
+		renderer::font_substitution::ProcessRegistry().Load();
+	if (!snapshot || snapshot->rules().empty())
+		return BuildStatus::noSubstitutions;
+	std::uint64_t const generation = snapshot->generation();
 
 	CComPtr<IUnknown> const factoryIdentity = GetIdentity(factory);
 	CComPtr<IUnknown> const systemSetIdentity = GetIdentity(systemFontSet);
@@ -331,10 +293,18 @@ BuildStatus GetOrCreateUnchecked(
 	AliasCache& cache = GetCache();
 	{
 		std::lock_guard<std::mutex> lock(cache.mutex);
+		cache.entries.erase(
+			std::remove_if(
+				cache.entries.begin(), cache.entries.end(),
+				[generation](CacheEntry const& entry) {
+					return entry.generation != generation;
+				}),
+			cache.entries.end());
 		for (CacheEntry const& entry : cache.entries)
 		{
 			if (entry.factoryIdentity == factoryIdentity &&
-				entry.systemSetIdentity == systemSetIdentity)
+				entry.systemSetIdentity == systemSetIdentity &&
+				entry.generation == generation)
 			{
 				result = entry.aliases;
 				return result.status;
@@ -343,7 +313,7 @@ BuildStatus GetOrCreateUnchecked(
 	}
 
 	AliasFontSet built;
-	BuildStatus const status = Build(factory, systemFontSet, built);
+	BuildStatus const status = Build(factory, systemFontSet, snapshot, built);
 	built.status = status;
 	if (status != BuildStatus::applied &&
 		status != BuildStatus::appliedWithMissingReplacement)
@@ -353,13 +323,15 @@ BuildStatus GetOrCreateUnchecked(
 	for (CacheEntry const& entry : cache.entries)
 	{
 		if (entry.factoryIdentity == factoryIdentity &&
-			entry.systemSetIdentity == systemSetIdentity)
+			entry.systemSetIdentity == systemSetIdentity &&
+			entry.generation == generation)
 		{
 			result = entry.aliases;
 			return result.status;
 		}
 	}
-	cache.entries.push_back({factoryIdentity, systemSetIdentity, built});
+	cache.entries.push_back({
+		factoryIdentity, systemSetIdentity, generation, built});
 	result = built;
 	return status;
 }

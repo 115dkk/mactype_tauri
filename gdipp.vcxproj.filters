@@ -33,6 +33,9 @@
     <ClCompile Include="renderer\fteng.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="renderer\font_substitution.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="renderer\ftref.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -119,6 +122,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="renderer\freetype_runtime.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="renderer\font_substitution.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="renderer\gdiPlusFlat2.h">

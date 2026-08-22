@@ -2,6 +2,8 @@
 
 #include "common.h"
 
+#include <cstdint>
+
 namespace directwrite_alias {
 
 enum class BuildStatus
@@ -29,6 +31,8 @@ struct AliasFontSet
 	CComPtr<IDWriteFontSet> fontSet;
 	CComPtr<IDWriteFontCollection1> collection;
 	UINT32 substitutionCount = 0;
+	std::uint64_t substitutionGeneration = 0;
+	std::uint64_t substitutionDigest = 0;
 	BuildStatus status = BuildStatus::noSubstitutions;
 };
 

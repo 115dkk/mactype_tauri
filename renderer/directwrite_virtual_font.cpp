@@ -1044,6 +1044,33 @@ HRESULT CreateAliasedReference(
 		if (FAILED(result) || fontFile == nullptr)
 			return FAILED(result) ? result : E_FAIL;
 
+		CComPtr<IDWriteFontFaceReference1> replacementReference1;
+		CComPtr<IDWriteFactory6> factory6;
+		if (SUCCEEDED(replacementReference->QueryInterface(
+				&replacementReference1)) && replacementReference1 != nullptr &&
+			SUCCEEDED(factory->QueryInterface(&factory6)) && factory6 != nullptr)
+		{
+			UINT32 const axisCount = replacementReference1->GetFontAxisValueCount();
+			std::vector<DWRITE_FONT_AXIS_VALUE> axisValues(axisCount);
+			if (axisCount == 0 || SUCCEEDED(replacementReference1->GetFontAxisValues(
+					axisValues.data(), axisCount)))
+			{
+				CComPtr<IDWriteFontFaceReference1> aliasedReference1;
+				result = factory6->CreateFontFaceReference(
+					fontFile,
+					0,
+					replacementReference->GetSimulations(),
+					axisValues.data(),
+					axisCount,
+					&aliasedReference1);
+				if (FAILED(result) || aliasedReference1 == nullptr)
+					return FAILED(result) ? result : E_FAIL;
+				reference = aliasedReference1;
+				return S_OK;
+			}
+			return E_FAIL;
+		}
+
 		return factory->CreateFontFaceReference(
 			fontFile,
 			0,

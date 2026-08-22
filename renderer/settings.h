@@ -208,6 +208,7 @@ private:
 	void initreg();
 public:
 	void init(int nFontSubstitutes, const CFontSubstitutesIniArray& iniarray);
+	void Canonicalize(LOGFONT& lf) const;
 	const LOGFONT * lookup(LOGFONT &lf) const;
 	bool CopyRule(
 		int index,
@@ -379,6 +380,7 @@ private:
 	void InitInitTuneTable();
 	static void InitTuneTable(int v, int* table);
 	void DelayedInit();
+	void PublishFontSubstitutionSnapshot() const;
 	int	_GetAlternativeProfileName(LPTSTR lpszName, LPCTSTR lpszFile);
 
 	CFontLinkInfo m_fontlinkinfo;
@@ -1013,6 +1015,7 @@ public:
 		ClearIndividual();
 		pSettings->m_FontSubstitutesInfoForDW.RemoveAll();
 		pSettings->m_FontSubstitutesInfo.RemoveAll();
+		pSettings->PublishFontSubstitutionSnapshot();
 		pSettings->m_fontlinkinfo.clear();
 		pSettings->LoadAppSettings(lpFileName);
 		pSettings->m_bDelayedInit = false;
@@ -1034,6 +1037,7 @@ public:
 		pSettings->m_arrIndividual.RemoveAll();
 		pSettings->m_FontSubstitutesInfoForDW.RemoveAll();
 		pSettings->m_FontSubstitutesInfo.RemoveAll();
+		pSettings->PublishFontSubstitutionSnapshot();
 		pSettings->m_fontlinkinfo.clear();
 		pSettings->LoadSettings(g_dllInstance);
 		pSettings->m_bDelayedInit = false;

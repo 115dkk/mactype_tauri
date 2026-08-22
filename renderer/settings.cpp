@@ -3,6 +3,8 @@
 #include <math.h>	//pow
 #include "supinfo.h"
 #include "fteng.h"
+#include "font_substitution.h"
+#include <atomic>
 #include <stdlib.h>
 #include <freetype/ftmodapi.h>
 #ifdef INFINALITY
@@ -10,6 +12,12 @@
 #endif
 
 CControlCenter* g_ControlCenter = nullptr;
+
+namespace {
+
+std::atomic<std::uint64_t> g_fontSubstitutionGeneration{0};
+
+} // namespace
 
 inline BOOL IsFolder(LPCTSTR pszPath) {
 	return pszPath && *pszPath && *(pszPath + wcslen(pszPath) - 1) == '\\';
@@ -179,6 +187,7 @@ void CGdippSettings::DelayedInit()
 	else
 		AddListFromSection(_T("FontSubstitutes"), m_szFileName, arrFontSubstitutes);
 	m_FontSubstitutesInfo.init(m_nFontSubstitutes, arrFontSubstitutes);
+	PublishFontSubstitutionSnapshot();
 
 	auto hdcScreen = renderer_raii::AdoptWindowDeviceContext(nullptr, GetDC(nullptr));
 	if (!hdcScreen) {
@@ -305,6 +314,32 @@ void CGdippSettings::DelayedInit()
 		if (GetModuleHandle(_T("d2d1.dll")))	//directwrite support
 			HookD2D1();
 	}*/
+}
+
+void CGdippSettings::PublishFontSubstitutionSnapshot() const
+{
+	std::vector<renderer::font_substitution::Rule> rules;
+	rules.reserve(static_cast<size_t>(m_FontSubstitutesInfo.GetSize()));
+	for (int index = 0; index < m_FontSubstitutesInfo.GetSize(); ++index)
+	{
+		LOGFONT source = {};
+		LOGFONT replacement = {};
+		bool charsetSpecific = false;
+		if (!m_FontSubstitutesInfo.CopyRule(
+				index, source, replacement, charsetSpecific))
+			continue;
+		rules.emplace_back(
+			source.lfFaceName,
+			replacement.lfFaceName,
+			charsetSpecific,
+			source.lfCharSet,
+			0);
+	}
+	std::uint64_t const generation =
+		g_fontSubstitutionGeneration.fetch_add(1, std::memory_order_relaxed) + 1;
+	renderer::font_substitution::ProcessRegistry().Publish(
+		renderer::font_substitution::Snapshot::Build(
+			std::move(rules), generation));
 }
 
 bool CGdippSettings::LoadSettings(HINSTANCE hModule)
@@ -1264,18 +1299,22 @@ bool CGdippSettings::CopyForceFont(LOGFONT& lf, const LOGFONT& lfOrg) const
 		GetEnvironmentVariableW(L"MACTYPE_FONTSUBSTITUTES_ENV", nullptr, 0);
 	if (environmentLength != 0 || GetLastError() != ERROR_ENVVAR_NOT_FOUND)
 		return false;
-	//&lf == &lfOrgも可
-	bool bForceFont = false;
-	BOOL bFontExist = true;
-	const LOGFONT *lplf;
-	lplf = GetFontSubstitutesInfo().lookup((LOGFONT&)lfOrg);
-	if (lplf) bForceFont = true;
+	// &lf == &lfOrg is supported: preserve the full request before resolving.
+	LOGFONT const original = lfOrg;
+	std::shared_ptr<const renderer::font_substitution::Snapshot> const snapshot =
+		renderer::font_substitution::ProcessRegistry().Load();
+	if (snapshot->rules().empty())
+		return false;
+	LOGFONT canonical = original;
+	GetFontSubstitutesInfo().Canonicalize(canonical);
+	renderer::font_substitution::Resolution const resolution = snapshot->Resolve(
+		{canonical.lfFaceName, canonical.lfCharSet});
+	if (!resolution.matched)
+		return false;
 
-	if (bForceFont) {
-		memcpy(&lf, &lfOrg, sizeof(LOGFONT)-sizeof(lf.lfFaceName));
-		StringCchCopy(lf.lfFaceName, LF_FACESIZE, lplf->lfFaceName);
-	}
-	return bForceFont;
+	lf = original;
+	return SUCCEEDED(StringCchCopy(
+		lf.lfFaceName, LF_FACESIZE, resolution.family.c_str()));
 }
 
 //値的にchar(-128～127)で十分
@@ -1714,18 +1753,9 @@ void GetMacTypeInternalFontName(LOGFONT* lf, LPTSTR fn)
 	*fn=0;
 }
 
-const LOGFONT *
-CFontSubstitutesInfo::lookup(LOGFONT& lf) const
+void CFontSubstitutesInfo::Canonicalize(LOGFONT& lf) const
 {
-	if (GetSize() <= 0) return nullptr;
-	//bFontExist = true;
-	CFontSubstituteData v;
-	CFontSubstituteData k;
-
-	k.m_bCharSet = true;
-	k.m_lf = lf;
-
-	TCHAR * buff;	//縼E倩竦米痔宓恼媸得?
+	TCHAR* buff;
 	LOGFONT mylf(lf);
 	if (!(buff = FontNameCache.Find(lf.lfFaceName)))
 	{
@@ -1754,8 +1784,17 @@ CFontSubstitutesInfo::lookup(LOGFONT& lf) const
 		}
 		buff = mylf.lfFaceName;
 	}
-	StringCchCopy(k.m_lf.lfFaceName, LF_FACESIZE, buff);
 	StringCchCopy(lf.lfFaceName, LF_FACESIZE, buff);
+}
+
+const LOGFONT *
+CFontSubstitutesInfo::lookup(LOGFONT& lf) const
+{
+	if (GetSize() <= 0) return nullptr;
+	Canonicalize(lf);
+	CFontSubstituteData k;
+	k.m_bCharSet = true;
+	k.m_lf = lf;
 
 	int pos = FindKey(k);
 	if (pos < 0) {

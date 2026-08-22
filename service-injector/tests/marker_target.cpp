@@ -130,6 +130,9 @@ int wmain(int count, wchar_t** values) {
 
     if (loaded) {
         std::this_thread::sleep_for(std::chrono::milliseconds{1'500});
+        loaded = mactype::injector::fixed_module_state(
+                     GetCurrentProcess(), options->expected_module) ==
+                 mactype::injector::FixedModuleState::ExpectedModuleLoaded;
     }
 
     const std::string result = std::string{"{\"loaded\":"} +

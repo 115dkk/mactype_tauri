@@ -2,8 +2,8 @@ use mactype_service_contract::{MachinePaths, StructuredServiceError};
 
 use crate::{
     initialize_process_orchestration, FixedHelperBroker, InitializedRuntime,
-    ProtectedProfileInitializer, ProtectedRuntimeAssets, RuntimeInitializer, WindowsHelperLauncher,
-    WindowsProcessInspector, WindowsStartupSafety, WmiProcessEventSource,
+    ProtectedRendererRuntime, RuntimeInitializer, WindowsHelperLauncher, WindowsProcessInspector,
+    WindowsStartupSafety, WmiProcessEventSource,
 };
 
 pub struct WindowsOpenServiceInitializer {
@@ -18,18 +18,16 @@ impl WindowsOpenServiceInitializer {
 
 impl RuntimeInitializer for WindowsOpenServiceInitializer {
     fn initialize(&self) -> Result<InitializedRuntime, StructuredServiceError> {
-        let profile = ProtectedProfileInitializer::new(self.paths.clone()).initialize()?;
-        let assets = ProtectedRuntimeAssets::load(self.paths.clone())?;
-        WindowsStartupSafety::verify(&assets.root().join("mactype-service.exe"))?;
+        let runtime = ProtectedRendererRuntime::load(self.paths.clone())?;
+        WindowsStartupSafety::verify(&runtime.assets().root().join("mactype-service.exe"))?;
         let source = WmiProcessEventSource::connect()?;
         let service_pid = std::process::id();
         let inspector = WindowsProcessInspector::new();
         let launcher = WindowsHelperLauncher::new(crate::scm::stop_requested);
-        let broker = FixedHelperBroker::new(&assets, launcher);
+        let broker = FixedHelperBroker::new(&runtime, launcher);
         initialize_process_orchestration(
-            profile.active_profile_digest,
+            runtime.binding(),
             service_pid,
-            assets.generation_id(),
             Box::new(source),
             Box::new(inspector),
             Box::new(broker),

@@ -1,6 +1,6 @@
 use mactype_service_contract::{
-    HealthReport, HealthState, InjectionTelemetry, ReadinessReport, StructuredServiceError,
-    HEALTH_PROTOCOL_VERSION,
+    HealthReport, HealthState, InjectionTelemetry, ReadinessReport, RendererRuntimeBinding,
+    StructuredServiceError, HEALTH_PROTOCOL_VERSION,
 };
 
 use super::{
@@ -64,7 +64,7 @@ impl ServiceRuntime<'_> {
             protocol_version: HEALTH_PROTOCOL_VERSION,
             service_version: self.service_version.to_owned(),
             health: HealthState::Ready,
-            active_profile_digest: initialized.active_profile_digest.clone(),
+            active_profile_digest: Some(initialized.binding.profile_digest().to_string()),
             readiness: initialized.readiness.clone(),
             injection: InjectionTelemetry::default(),
             last_error: None,
@@ -91,7 +91,7 @@ impl ServiceRuntime<'_> {
         let runtime_health = RuntimeHealthAdapter {
             publisher: health,
             service_version: self.service_version,
-            active_profile_digest: initialized.active_profile_digest.clone(),
+            binding: initialized.binding,
         };
         let wait_result = match initialized.driver.as_mut() {
             Some(driver) => driver.run(stop, &runtime_health),
@@ -167,7 +167,7 @@ impl ServiceRuntime<'_> {
 struct RuntimeHealthAdapter<'a> {
     publisher: &'a dyn HealthPublisher,
     service_version: &'a str,
-    active_profile_digest: Option<String>,
+    binding: RendererRuntimeBinding,
 }
 
 impl RuntimeHealthReporter for RuntimeHealthAdapter<'_> {
@@ -182,7 +182,7 @@ impl RuntimeHealthReporter for RuntimeHealthAdapter<'_> {
             protocol_version: HEALTH_PROTOCOL_VERSION,
             service_version: self.service_version.to_owned(),
             health,
-            active_profile_digest: self.active_profile_digest.clone(),
+            active_profile_digest: Some(self.binding.profile_digest().to_string()),
             readiness,
             injection,
             last_error,

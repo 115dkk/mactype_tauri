@@ -1,8 +1,9 @@
 use std::time::Duration;
 
-use mactype_service_contract::StructuredServiceError;
+use mactype_service_contract::{RendererRuntimeBinding, StructuredServiceError};
 
 pub const PROCESS_CREATION_QUERY: &str = "SELECT * FROM Win32_ProcessStartTrace";
+pub const MAX_BROKER_DIAGNOSTIC_CODE_BYTES: usize = 128;
 pub trait ProcessEventSource {
     fn subscribe(&mut self, query: &str) -> Result<(), StructuredServiceError>;
 
@@ -27,24 +28,10 @@ pub struct ProcessIdentity {
     pub architecture: ProcessArchitecture,
 }
 
-/// How a previously verified injection target looked when it was re-checked
-/// after an untrustworthy terminal result.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TargetLiveness {
-    /// The exact verified identity (PID and creation time) is still running.
-    Alive,
-    /// The verified identity provably no longer exists: the PID is absent,
-    /// the PID was reused by a process with a different creation time, or the
-    /// process has exited.
-    Vanished,
-    /// Liveness could not be established either way.
-    Unknown,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InjectionRequest {
     pub identity: ProcessIdentity,
-    pub generation_id: String,
+    pub binding: RendererRuntimeBinding,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,7 +39,9 @@ pub enum BrokerDisposition {
     Injected,
     Skipped,
     Rejected,
-    RetryableFailure,
+    Retryable,
+    UncertainCleanup,
+    UncertainIntegrity,
     Cancelled,
 }
 
@@ -61,6 +50,41 @@ pub struct BrokerResult {
     pub disposition: BrokerDisposition,
     pub code: String,
     pub win32_error: Option<u32>,
+}
+
+impl BrokerResult {
+    pub fn new(
+        disposition: BrokerDisposition,
+        code: impl Into<String>,
+        win32_error: Option<u32>,
+    ) -> Self {
+        Self {
+            disposition,
+            code: code.into(),
+            win32_error,
+        }
+        .into_bounded_evidence()
+    }
+
+    pub(crate) fn into_bounded_evidence(self) -> Self {
+        if valid_diagnostic_code(&self.code) {
+            self
+        } else {
+            Self {
+                disposition: BrokerDisposition::UncertainIntegrity,
+                code: "broker-diagnostic-evidence-invalid".to_owned(),
+                win32_error: self.win32_error,
+            }
+        }
+    }
+}
+
+fn valid_diagnostic_code(code: &str) -> bool {
+    !code.is_empty()
+        && code.len() <= MAX_BROKER_DIAGNOSTIC_CODE_BYTES
+        && code
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-'))
 }
 
 pub trait InjectionBroker {

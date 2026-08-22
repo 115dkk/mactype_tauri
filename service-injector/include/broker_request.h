@@ -14,6 +14,7 @@ struct BrokerRequest final {
     std::uint64_t expected_creation_time{};
     std::uint32_t expected_session_id{};
     std::string generation_id;
+    std::string profile_digest;
 };
 
 [[nodiscard]] std::optional<BrokerRequest> parse_broker_request(

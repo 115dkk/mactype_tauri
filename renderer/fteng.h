@@ -6,10 +6,12 @@
 #include <freetype/tttables.h>
 #include <freetype/tttags.h>	// FT_TRUETYPE_TAGS_H
 #include <freetype/ftoutln.h>
+#include <atomic>
 #include <vector>
 #include "ftref.h"
 #include "freetype_raii.h"
 #include "freetype_runtime.h"
+#include "profile_runtime.h"
 #include <math.h>
 #include "undocAPI.h"
 
@@ -501,6 +503,7 @@ private:
 	int				m_nMaxFaces;
 	int				m_nMemUsed;
 	bool			m_bAddOnFind;
+	std::atomic<std::uint64_t> m_policyGeneration;
 	FontMap			m_mfontMap;
 	FullNameMap		m_mfullMap;
 	FontList		m_mfontList;
@@ -510,11 +513,18 @@ public:
 	// Cppcheck 2.20 mistakes the overloaded AddFont/FindFont methods for data members.
 	// cppcheck-suppress uninitMemberVar
 	FreeTypeFontEngine()
-		: m_nMaxFaces(0), m_nMemUsed(0), m_bAddOnFind(false)
+		: m_nMaxFaces(0), m_nMemUsed(0), m_bAddOnFind(false),
+		  m_policyGeneration(0)
 	{
 		enum { FTC_MAX_FACES_DEFAULT = 2 };
-		const CGdippSettings* pSettings = CGdippSettings::GetInstanceNoInit();
-		m_nMaxFaces = pSettings->CacheMaxFaces();
+		renderer::RendererPolicyRef const policy =
+			renderer::CurrentRendererPolicy();
+		if (policy)
+		{
+			m_nMaxFaces = policy->free_type().cacheMaxFaces;
+			m_policyGeneration.store(
+				policy->generation(), std::memory_order_relaxed);
+		}
 		if (m_nMaxFaces == 0)
 			m_nMaxFaces = FTC_MAX_FACES_DEFAULT;
 	}
@@ -572,7 +582,10 @@ public:
 		//重新载入全部字体，即清空所有字体缓存
 		COwnedCriticalSectionLock __olock(2);
 		CCriticalSectionLock __lock;
-		CGdippSettings* pSettings = CGdippSettings::GetInstance();
+		renderer::RendererPolicyRef const policy =
+			renderer::CurrentRendererPolicy();
+		if (!policy)
+			return;
 
 		FullNameMap::const_iterator iter=m_mfullMap.begin();
 		for (;iter!=m_mfullMap.end();)
@@ -589,12 +602,23 @@ public:
 																}*/
 
 				p->Erase();
-				p->SetFontSettings(pSettings->FindIndividual(p->GetName()));
+				CFontSettings settings =
+					policy->font_settings_for(p->GetName());
+				if (settings.GetAntiAliasMode() > 2 &&
+					policy->raster().harmonyLcd)
+					settings.SetAntiAliasMode(2);
+				p->SetFontSettings(settings);
 				p->UpdateFontSetting();
 			}
 			++iter;
 		}
+		m_policyGeneration.store(
+			policy->generation(), std::memory_order_release);
 		//m_mfontMap.clear();
+	}
+	std::uint64_t PolicyGeneration() const noexcept
+	{
+		return m_policyGeneration.load(std::memory_order_acquire);
 	}
 };
 

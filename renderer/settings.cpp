@@ -4,7 +4,7 @@
 #include "supinfo.h"
 #include "fteng.h"
 #include "font_substitution.h"
-#include <atomic>
+#include "profile_runtime.h"
 #include <stdlib.h>
 #include <freetype/ftmodapi.h>
 #ifdef INFINALITY
@@ -15,9 +15,80 @@ CControlCenter* g_ControlCenter = nullptr;
 
 namespace {
 
-std::atomic<std::uint64_t> g_fontSubstitutionGeneration{0};
-
 constexpr LONGLONG kMaximumProfileBytes = 4LL * 1024 * 1024;
+
+bool SameFileIdentity(
+	const BY_HANDLE_FILE_INFORMATION& left,
+	const BY_HANDLE_FILE_INFORMATION& right) noexcept
+{
+	return left.dwVolumeSerialNumber == right.dwVolumeSerialNumber &&
+		left.nFileIndexHigh == right.nFileIndexHigh &&
+		left.nFileIndexLow == right.nFileIndexLow &&
+		left.nFileSizeHigh == right.nFileSizeHigh &&
+		left.nFileSizeLow == right.nFileSizeLow &&
+		left.ftLastWriteTime.dwHighDateTime ==
+			right.ftLastWriteTime.dwHighDateTime &&
+		left.ftLastWriteTime.dwLowDateTime ==
+			right.ftLastWriteTime.dwLowDateTime;
+}
+
+struct StableProfileDocument final
+{
+	renderer_raii::UniqueHandle file;
+	BY_HANDLE_FILE_INFORMATION identity{};
+	std::string digest;
+
+	bool Unchanged() const noexcept
+	{
+		BY_HANDLE_FILE_INFORMATION current{};
+		return file && GetFileInformationByHandle(file.get(), &current) &&
+			SameFileIdentity(identity, current);
+	}
+};
+
+bool LoadStableProfileDocument(
+	LPCTSTR path,
+	CParseIni& document,
+	StableProfileDocument& stable)
+{
+	stable = {};
+	if (path == nullptr || *path == _T('\0'))
+		return false;
+	stable.file = renderer_raii::AdoptHandle(CreateFile(
+		path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+		FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN |
+			FILE_FLAG_OPEN_REPARSE_POINT,
+		nullptr));
+	if (!stable.file ||
+		!GetFileInformationByHandle(stable.file.get(), &stable.identity) ||
+		(stable.identity.dwFileAttributes &
+			(FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0)
+		return false;
+
+	ULARGE_INTEGER size{};
+	size.HighPart = stable.identity.nFileSizeHigh;
+	size.LowPart = stable.identity.nFileSizeLow;
+	if (size.QuadPart == 0 || size.QuadPart > kMaximumProfileBytes)
+		return false;
+	std::vector<unsigned char> bytes(static_cast<size_t>(size.QuadPart));
+	size_t offset = 0;
+	while (offset < bytes.size())
+	{
+		DWORD received = 0;
+		const DWORD wanted = static_cast<DWORD>(bytes.size() - offset);
+		if (!ReadFile(
+				stable.file.get(), bytes.data() + offset, wanted, &received,
+				nullptr) || received == 0)
+			return false;
+		offset += received;
+	}
+	if (!renderer::Sha256ProfileDigest(
+			bytes.data(), bytes.size(), stable.digest))
+		return false;
+
+	document.Clear();
+	return document.LoadFromFile(path) && stable.Unchanged();
+}
 
 bool BuildMainProfilePath(
 	HINSTANCE module,
@@ -31,71 +102,7 @@ bool BuildMainProfilePath(
 		profilePath, modulePath, _T("MacType.ini")) != nullptr;
 }
 
-bool IsReadableProfileFile(LPCTSTR path) noexcept
-{
-	if (path == nullptr || *path == _T('\0'))
-		return false;
-	WIN32_FILE_ATTRIBUTE_DATA attributes = {};
-	if (!GetFileAttributesEx(path, GetFileExInfoStandard, &attributes) ||
-		(attributes.dwFileAttributes &
-			(FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0)
-		return false;
-	ULARGE_INTEGER size = {};
-	size.HighPart = attributes.nFileSizeHigh;
-	size.LowPart = attributes.nFileSizeLow;
-	return size.QuadPart != 0 && size.QuadPart <= kMaximumProfileBytes;
-}
-
-bool LoadProfileDocument(LPCTSTR path, CParseIni& document)
-{
-	if (!IsReadableProfileFile(path))
-		return false;
-	document.Clear();
-	return document.LoadFromFile(path) &&
-		document.IsPartExists(_T("General"));
-}
-
 } // namespace
-
-bool ValidateRendererProfile(HINSTANCE module) noexcept
-{
-	try
-	{
-		TCHAR mainPath[MAX_PATH] = {};
-		if (!BuildMainProfilePath(module, mainPath))
-			return false;
-
-		CParseIni document;
-		if (!LoadProfileDocument(mainPath, document))
-			return false;
-		CIniPart& general = document[_T("General")];
-		if (!general.IsValueExists(_T("AlternativeFile")))
-			return true;
-		LPCTSTR const configured = general.GetValueString(_T("AlternativeFile"));
-		if (configured == nullptr || *configured == _T('\0'))
-			return true;
-
-		TCHAR alternative[MAX_PATH] = {};
-		if (PathIsRelative(configured))
-		{
-			TCHAR directory[MAX_PATH] = {};
-			if (FAILED(StringCchCopy(directory, MAX_PATH, mainPath)) ||
-				!PathRemoveFileSpec(directory) ||
-				PathCombine(alternative, directory, configured) == nullptr)
-				return false;
-		}
-		else if (FAILED(StringCchCopy(alternative, MAX_PATH, configured)))
-		{
-			return false;
-		}
-		CParseIni selected;
-		return LoadProfileDocument(alternative, selected);
-	}
-	catch (...)
-	{
-		return false;
-	}
-}
 
 inline BOOL IsFolder(LPCTSTR pszPath) {
 	return pszPath && *pszPath && *(pszPath + wcslen(pszPath) - 1) == '\\';
@@ -265,7 +272,11 @@ void CGdippSettings::DelayedInit()
 	else
 		AddListFromSection(_T("FontSubstitutes"), m_szFileName, arrFontSubstitutes);
 	m_FontSubstitutesInfo.init(m_nFontSubstitutes, arrFontSubstitutes);
-	PublishFontSubstitutionSnapshot();
+	if (!PublishRendererPolicySnapshot(true))
+	{
+		m_bDelayedInit = false;
+		return;
+	}
 
 	auto hdcScreen = renderer_raii::AdoptWindowDeviceContext(nullptr, GetDC(nullptr));
 	if (!hdcScreen) {
@@ -392,32 +403,73 @@ void CGdippSettings::DelayedInit()
 		if (GetModuleHandle(_T("d2d1.dll")))	//directwrite support
 			HookD2D1();
 	}*/
+	PublishRendererPolicySnapshot(true);
 }
 
-void CGdippSettings::PublishFontSubstitutionSnapshot() const
+bool CGdippSettings::PublishRendererPolicySnapshot(
+	bool substitutionsReady) const
 {
-	std::vector<renderer::font_substitution::Rule> rules;
-	rules.reserve(static_cast<size_t>(m_FontSubstitutesInfo.GetSize()));
-	for (int index = 0; index < m_FontSubstitutesInfo.GetSize(); ++index)
+	renderer::RendererPolicyCandidate candidate;
+	candidate.valid = true;
+	candidate.profileDigest = m_profileDigest;
+	candidate.hooks.childProcesses = m_bHookChildProcesses;
+	candidate.hooks.directWrite = m_bDirectWrite != FALSE;
+	candidate.hooks.fontSubstitution = m_nFontSubstitutes != 0;
+	candidate.freeType.cacheMaxFaces = m_nCacheMaxFaces;
+	candidate.freeType.cacheMaxSizes = m_nCacheMaxSizes;
+	candidate.freeType.cacheMaxBytes = m_nCacheMaxBytes;
+	candidate.raster.fontLoader = m_nFontLoader;
+	candidate.raster.fontLinkMode = m_bFontLink;
+	candidate.raster.bitmapHeight = m_nBitmapHeight;
+	candidate.raster.bolderMode = m_nBolderMode;
+	candidate.raster.widthMode = m_nWidthMode;
+	candidate.raster.lcdFilter = m_nLcdFilter;
+	candidate.raster.hintSmallFont = m_bHintSmallFont != FALSE;
+	candidate.raster.harmonyLcd = HarmonyLCD();
+	candidate.raster.loadColorFont = m_bColorFont;
+	candidate.raster.invertColor = m_bInvertColor;
+	candidate.raster.gamma = m_fGammaValue;
+	candidate.raster.shadowDarkColor = m_nShadowDarkColor;
+	candidate.raster.shadowLightColor = m_nShadowLightColor;
+	candidate.directWrite.enabled = m_bDirectWrite != FALSE;
+	candidate.directWrite.gamma = m_fGammaValueForDW;
+	candidate.directWrite.contrast = m_fContrastForDW;
+	candidate.directWrite.clearTypeLevel = m_fClearTypeLevelForDW;
+	candidate.directWrite.renderingMode = m_nRenderingModeForDW;
+	candidate.directWrite.antiAliasMode = m_nAntiAliasModeForDW;
+	candidate.commonFontSettings = m_FontSettings;
+
+	const CFontIndividual* individual = m_arrIndividual.Begin();
+	const CFontIndividual* const individualEnd = m_arrIndividual.End();
+	for (; individual != individualEnd; ++individual)
 	{
-		LOGFONT source = {};
-		LOGFONT replacement = {};
-		bool charsetSpecific = false;
-		if (!m_FontSubstitutesInfo.CopyRule(
-				index, source, replacement, charsetSpecific))
-			continue;
-		rules.emplace_back(
-			source.lfFaceName,
-			replacement.lfFaceName,
-			charsetSpecific,
-			source.lfCharSet,
-			0);
+		candidate.individualFonts.push_back({
+			individual->GetName(), individual->GetIndividual()});
 	}
-	std::uint64_t const generation =
-		g_fontSubstitutionGeneration.fetch_add(1, std::memory_order_relaxed) + 1;
-	renderer::font_substitution::ProcessRegistry().Publish(
-		renderer::font_substitution::Snapshot::Build(
-			std::move(rules), generation));
+
+	candidate.substitutionsReady = substitutionsReady;
+	if (substitutionsReady)
+	{
+		candidate.substitutionRules.reserve(
+			static_cast<size_t>(m_FontSubstitutesInfo.GetSize()));
+		for (int index = 0; index < m_FontSubstitutesInfo.GetSize(); ++index)
+		{
+			LOGFONT source = {};
+			LOGFONT replacement = {};
+			bool charsetSpecific = false;
+			if (!m_FontSubstitutesInfo.CopyRule(
+					index, source, replacement, charsetSpecific))
+				continue;
+			candidate.substitutionRules.emplace_back(
+				source.lfFaceName,
+				replacement.lfFaceName,
+				charsetSpecific,
+				source.lfCharSet,
+				0);
+		}
+	}
+	return renderer::ProcessProfileRuntime().Publish(
+		std::move(candidate)).published();
 }
 
 bool CGdippSettings::LoadSettings(HINSTANCE hModule)
@@ -634,15 +686,16 @@ bool CGdippSettings::LoadAppSettings(LPCTSTR lpszFile)
 	// Shadow=1,1,4
 	// [Individual]
 	// ＭＳ Ｐゴシック=0,1,2,3,4,5
-	if (!IsReadableProfileFile(lpszFile))
-		return false;
-	m_Config.Clear();
-	if (!m_Config.LoadFromFile(lpszFile) ||
+	WritePrivateProfileString(nullptr, nullptr, nullptr, lpszFile);
+	StableProfileDocument mainProfile;
+	if (!LoadStableProfileDocument(lpszFile, m_Config, mainProfile) ||
 		!m_Config.IsPartExists(c_szGeneral))
 	{
 		m_Config.Clear();
 		return false;
 	}
+	StableProfileDocument alternativeProfile;
+	StableProfileDocument* selectedProfile = &mainProfile;
 
 	TCHAR szAlternative[MAX_PATH];
 	if (FastGetProfileString(c_szGeneral, _T("AlternativeFile"), _T(""), szAlternative, MAX_PATH)) {
@@ -653,19 +706,19 @@ bool CGdippSettings::LoadAppSettings(LPCTSTR lpszFile)
 				PathCombine(szAlternative, szDir, szAlternative) == nullptr)
 				return false;
 		}
-		if (!IsReadableProfileFile(szAlternative) ||
-			FAILED(StringCchCopy(m_szFileName, MAX_PATH, szAlternative)))
+		if (FAILED(StringCchCopy(m_szFileName, MAX_PATH, szAlternative)))
 			return false;
 		lpszFile = m_szFileName;
-		m_Config.Clear();
-		if (!m_Config.LoadFromFile(lpszFile) ||
+		WritePrivateProfileString(nullptr, nullptr, nullptr, lpszFile);
+		if (!LoadStableProfileDocument(
+				lpszFile, m_Config, alternativeProfile) ||
 			!m_Config.IsPartExists(c_szGeneral))
 		{
 			m_Config.Clear();
 			return false;
 		}
+		selectedProfile = &alternativeProfile;
 	}
-	WritePrivateProfileString(nullptr, nullptr, nullptr, lpszFile);
 
 	_GetAlternativeProfileName(m_szexeName, lpszFile);
 	CFontSettings& fs = m_FontSettings;
@@ -897,7 +950,10 @@ SKIP:
 
 	m_bUseCustomPixelLayout = AddPixelModeFromSection(_T("PixelLayout"), lpszFile, m_arrPixelLayout);
 
-	return true;
+	if (!selectedProfile->Unchanged())
+		return false;
+	m_profileDigest = selectedProfile->digest;
+	return PublishRendererPolicySnapshot(false);
 }
 
 bool CGdippSettings::AddExcludeListFromSection(LPCTSTR lpszSection, LPCTSTR lpszFile, set<wstring> & arr)
@@ -1389,16 +1445,6 @@ bool CGdippSettings::CopyForceFont(LOGFONT& lf, const LOGFONT& lfOrg) const
 	return SUCCEEDED(StringCchCopy(
 		lf.lfFaceName, LF_FACESIZE, resolution.family.c_str()));
 }
-
-//値的にchar(-128～127)で十分
-const char CFontSettings::m_bound[MAX_FONT_SETTINGS][2] = {
-	{ HINTING_MIN,	HINTING_MAX	},	//Hinting
-	{ AAMODE_MIN,	AAMODE_MAX	},	//AAMode
-	{ NWEIGHT_MIN,	NWEIGHT_MAX	},	//NormalWeight
-	{ BWEIGHT_MIN,	BWEIGHT_MAX	},	//BoldWeight
-	{ SLANT_MIN,	SLANT_MAX	},	//ItalicSlant
-	{ 0,			1			},	//Kerning
-};
 
 CFontLinkInfo::CFontLinkInfo()
 {

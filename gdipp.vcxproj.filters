@@ -60,6 +60,15 @@
     <ClCompile Include="renderer\ownedcs.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="renderer\profile_runtime.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="renderer\renderer_activation.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="renderer\renderer_policy.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="renderer\settings.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -143,6 +152,15 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="renderer\ownedcs.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="renderer\profile_runtime.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="renderer\renderer_activation.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="renderer\renderer_policy.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="renderer\resource.h">

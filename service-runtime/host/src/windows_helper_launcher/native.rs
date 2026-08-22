@@ -23,7 +23,7 @@ use windows_sys::Win32::System::Threading::{
     PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
 };
 
-const MAX_HELPER_OUTPUT_BYTES: usize = 1024;
+use crate::helper_broker::MAX_HELPER_OUTPUT_BYTES;
 
 pub(super) struct OwnedHandle(HANDLE);
 

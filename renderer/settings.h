@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common.h"
+#include "renderer_policy.h"
 #include "gdiPlusFlat2.h"
 #include "cache.h"
 #include "hash_list.h"
@@ -27,10 +28,6 @@ using json = nlohmann::json;
 #endif
 
 #define MACTYPE_VERSION		20220712
-#define MAX_FONT_SETTINGS	16
-#define DEFINE_FS_MEMBER(name, param) \
-	int  Get##name() const { return GetParam(param); } \
-	void Set##name(int n)  { SetParam(param, n); }
 
 #define HOOK_MANUALLY HOOK_DEFINE
 #define HOOK_DEFINE(rettype, name, argtype, arglist) \
@@ -81,58 +78,6 @@ typedef map<CFontName,CFontSubResult> CFontNameCache;*/
 
 int _StrToInt(LPCTSTR pStr, int nDefault);
 
-class CFontSettings
-{
-private:
-	int m_settings[MAX_FONT_SETTINGS];
-	static const char m_bound[MAX_FONT_SETTINGS][2];
-
-	enum _FontSettingsParams {
-		FSP_HINTING			= 0,
-		FSP_AAMODE			= 1,
-		FSP_NORMAL_WEIGHT	= 2,
-		FSP_BOLD_WEIGHT		= 3,
-		FSP_ITALIC_SLANT	= 4,
-		FSP_KERNING			= 5,
-	};
-
-public:
-	CFontSettings()
-	{
-		Clear();
-	}
-
-	DEFINE_FS_MEMBER(HintingMode,	FSP_HINTING);
-	DEFINE_FS_MEMBER(AntiAliasMode,	FSP_AAMODE);
-	DEFINE_FS_MEMBER(NormalWeight,	FSP_NORMAL_WEIGHT);
-	DEFINE_FS_MEMBER(BoldWeight,	FSP_BOLD_WEIGHT);
-	DEFINE_FS_MEMBER(ItalicSlant,	FSP_ITALIC_SLANT);
-	DEFINE_FS_MEMBER(Kerning,		FSP_KERNING);
-
-	int GetParam(int x) const
-	{
-		Assert(0 <= x && x < MAX_FONT_SETTINGS);
-		return m_settings[x];
-	}
-	void SetParam(int x, int n)
-	{
-		Assert(0 <= x && x < MAX_FONT_SETTINGS);
-		m_settings[x] = Bound<int>(n, m_bound[x][0], m_bound[x][1]);
-	}
-	void Clear()
-	{
-		ZeroMemory(m_settings, sizeof(m_settings));
-	}
-
-	void SetSettings(const int* p, int count)
-	{
-		count = Min(count, MAX_FONT_SETTINGS);
-		memcpy(m_settings, p, count * sizeof(int));
-	}
-};
-
-#undef DEFINE_FS_MEMBER
-
 
 class CFontIndividual
 {
@@ -149,6 +94,7 @@ public:
 	}
 
 	CFontSettings& GetIndividual() { return m_set; }
+	const CFontSettings& GetIndividual() const { return m_set; }
 	LPCTSTR GetName() const { return m_hash.c_str(); }
 	const StringHashFont& GetHash() const { return m_hash; }
 	bool operator ==(const CFontIndividual& x) const { return (m_hash == x.m_hash); }
@@ -230,8 +176,6 @@ public:
 #define SETTING_FONTLOADER_WIN32     (1)
 
 class CGdippSettings;
-
-bool ValidateRendererProfile(HINSTANCE module) noexcept;
 
 interface IControlCenter
 {
@@ -351,6 +295,7 @@ private:
 
 	//INIファイル名
 	TCHAR m_szFileName[MAX_PATH];
+	std::string m_profileDigest;
 
 	//INIからの読み込み処理
 	bool LoadAppSettings(LPCTSTR lpszFile);
@@ -378,7 +323,7 @@ private:
 	void InitInitTuneTable();
 	static void InitTuneTable(int v, int* table);
 	void DelayedInit();
-	void PublishFontSubstitutionSnapshot() const;
+	bool PublishRendererPolicySnapshot(bool substitutionsReady) const;
 	int	_GetAlternativeProfileName(LPTSTR lpszName, LPCTSTR lpszFile);
 
 	CFontLinkInfo m_fontlinkinfo;
@@ -927,8 +872,14 @@ public:
 		return 0;
 	};
 	BOOL WINAPI RefreshSetting(void) {
-		if (m_bDirty)
-			g_pFTEngine->ReloadAll();
+		if (m_bDirty) {
+			CGdippSettings* pSettings = CGdippSettings::GetInstance();
+			if (!pSettings->PublishRendererPolicySnapshot(
+					pSettings->m_bDelayedInit))
+				return FALSE;
+			if (g_pFTEngine)
+				g_pFTEngine->ReloadAll();
+		}
 		m_bDirty = false;
 		return true;
 	};
@@ -1007,9 +958,9 @@ public:
 		ClearIndividual();
 		pSettings->m_FontSubstitutesInfoForDW.RemoveAll();
 		pSettings->m_FontSubstitutesInfo.RemoveAll();
-		pSettings->PublishFontSubstitutionSnapshot();
 		pSettings->m_fontlinkinfo.clear();
-		pSettings->LoadAppSettings(lpFileName);
+		if (!pSettings->LoadAppSettings(lpFileName))
+			return;
 		pSettings->m_bDelayedInit = false;
 		m_bDirty = true;
 		RefreshAlphaTable();
@@ -1029,10 +980,11 @@ public:
 		pSettings->m_arrIndividual.RemoveAll();
 		pSettings->m_FontSubstitutesInfoForDW.RemoveAll();
 		pSettings->m_FontSubstitutesInfo.RemoveAll();
-		pSettings->PublishFontSubstitutionSnapshot();
 		pSettings->m_fontlinkinfo.clear();
-		pSettings->LoadSettings(g_dllInstance);
+		if (!pSettings->LoadSettings(g_dllInstance))
+			return;
 		pSettings->m_bDelayedInit = false;
+		pSettings = CGdippSettings::GetInstance();
 		RefreshAlphaTable();
 		UpdateLcdFilter();
 		if (g_pFTEngine)

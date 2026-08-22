@@ -23,6 +23,7 @@ set(_injector_sources
   src/module_inventory.cpp
   src/remote_injection.cpp
   src/remote_injection_verdict.cpp
+  src/renderer_evidence.cpp
   src/result.cpp
   src/safety_policy.cpp
 )
@@ -77,6 +78,7 @@ if(BUILD_TESTING)
     UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
   )
   target_compile_options(injector-marker-dll PRIVATE /W4 /WX /permissive- /utf-8 /EHsc)
+  target_include_directories(injector-marker-dll PRIVATE ../shared)
   if(CMAKE_SIZEOF_VOID_P EQUAL 8)
     set(_marker_module_name "MacTypeInjectorMarker64")
   else()
@@ -87,6 +89,20 @@ if(BUILD_TESTING)
     OUTPUT_NAME "${_marker_module_name}"
   )
 
+  add_library(injector-quiet-marker-dll SHARED tests/marker_dll.cpp)
+  target_compile_features(injector-quiet-marker-dll PRIVATE cxx_std_20)
+  target_compile_definitions(injector-quiet-marker-dll PRIVATE
+    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX MACTYPE_MARKER_QUIET_SKIP=1
+  )
+  target_compile_options(injector-quiet-marker-dll PRIVATE
+    /W4 /WX /permissive- /utf-8 /EHsc
+  )
+  target_include_directories(injector-quiet-marker-dll PRIVATE ../shared)
+  set_target_properties(injector-quiet-marker-dll PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME "${_marker_module_name}Quiet"
+  )
+
   add_library(injector-slow-marker-dll SHARED tests/marker_dll.cpp)
   target_compile_features(injector-slow-marker-dll PRIVATE cxx_std_20)
   target_compile_definitions(injector-slow-marker-dll PRIVATE
@@ -95,6 +111,7 @@ if(BUILD_TESTING)
   target_compile_options(injector-slow-marker-dll PRIVATE
     /W4 /WX /permissive- /utf-8 /EHsc
   )
+  target_include_directories(injector-slow-marker-dll PRIVATE ../shared)
   set_target_properties(injector-slow-marker-dll PROPERTIES
     PREFIX ""
     OUTPUT_NAME "${_marker_module_name}Slow"
@@ -108,14 +125,19 @@ if(BUILD_TESTING)
   target_compile_options(injector-decoy-marker-dll PRIVATE
     /W4 /WX /permissive- /utf-8 /EHsc
   )
+  target_include_directories(injector-decoy-marker-dll PRIVATE ../shared)
   set_target_properties(injector-decoy-marker-dll PROPERTIES
     PREFIX ""
     OUTPUT_NAME "${_marker_module_name}"
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/decoy"
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/decoy"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/decoy"
   )
   foreach(_configuration DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
     set_target_properties(injector-decoy-marker-dll PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY_${_configuration} "${CMAKE_CURRENT_BINARY_DIR}/decoy/${_configuration}"
+      ARCHIVE_OUTPUT_DIRECTORY_${_configuration} "${CMAKE_CURRENT_BINARY_DIR}/decoy/${_configuration}"
+      LIBRARY_OUTPUT_DIRECTORY_${_configuration} "${CMAKE_CURRENT_BINARY_DIR}/decoy/${_configuration}"
     )
   endforeach()
   add_executable(injector-integration-helper
@@ -164,6 +186,7 @@ if(BUILD_TESTING)
       -Injector "$<TARGET_FILE:injector-integration-helper>"
       -Target "$<TARGET_FILE:injector-marker-target>"
       -Module "$<TARGET_FILE:injector-marker-dll>"
+      -QuietModule "$<TARGET_FILE:injector-quiet-marker-dll>"
       -SlowModule "$<TARGET_FILE:injector-slow-marker-dll>"
       -DecoyModule "$<TARGET_FILE:injector-decoy-marker-dll>"
       -TimeoutInjector "$<TARGET_FILE:injector-timeout-helper>"

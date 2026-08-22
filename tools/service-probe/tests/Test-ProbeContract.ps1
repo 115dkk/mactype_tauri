@@ -31,7 +31,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "CMake configure failed with exit code $LASTEXITCODE"
 }
 
-& cmake --build $buildDirectory --config Release --target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests freetype-runtime-tests font-substitution-tests renderer-profile-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe
+& cmake --build $buildDirectory --config Release --target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests freetype-runtime-tests renderer-policy-tests font-substitution-tests renderer-profile-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe
 if ($LASTEXITCODE -ne 0) {
     throw "CMake build failed with exit code $LASTEXITCODE"
 }
@@ -52,6 +52,12 @@ $freeTypeRuntimeTestPath = Join-Path $buildDirectory 'Release\freetype-runtime-t
 & $freeTypeRuntimeTestPath
 if ($LASTEXITCODE -ne 0) {
     throw "FreeType runtime ownership tests failed with exit code $LASTEXITCODE"
+}
+
+$rendererPolicyTestPath = Join-Path $buildDirectory 'Release\renderer-policy-tests.exe'
+& $rendererPolicyTestPath
+if ($LASTEXITCODE -ne 0) {
+    throw "Renderer policy publication tests failed with exit code $LASTEXITCODE"
 }
 
 $fontSubstitutionTestPath = Join-Path $buildDirectory 'Release\font-substitution-tests.exe'

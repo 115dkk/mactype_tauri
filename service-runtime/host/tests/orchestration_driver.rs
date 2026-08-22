@@ -4,7 +4,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use mactype_service_contract::{HealthReport, HealthState, StructuredServiceError};
+use mactype_service_contract::{
+    HealthReport, HealthState, ProfileDigest, RendererRuntimeBinding, RuntimeGenerationId,
+    StructuredServiceError,
+};
 use mactype_service_host::{
     initialize_process_orchestration, BinarySignaturePolicy, BrokerDisposition, BrokerResult,
     DynamicCodePolicy, HealthPublisher, InitializedRuntime, InjectionBroker, InjectionRequest,
@@ -16,6 +19,13 @@ use mactype_service_host::{
 const PROFILE_DIGEST: &str =
     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const RUNTIME_GENERATION: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+fn binding() -> RendererRuntimeBinding {
+    RendererRuntimeBinding::new(
+        RuntimeGenerationId::parse(RUNTIME_GENERATION).unwrap(),
+        ProfileDigest::parse(PROFILE_DIGEST).unwrap(),
+    )
+}
 
 struct QueueSource {
     snapshot: Vec<u32>,
@@ -96,12 +106,8 @@ struct TestInitializer {
 impl RuntimeInitializer for TestInitializer {
     fn initialize(&self) -> Result<InitializedRuntime, StructuredServiceError> {
         initialize_process_orchestration(
-            Some(
-                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                    .to_owned(),
-            ),
+            binding(),
             900,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             Box::new(QueueSource {
                 snapshot: vec![40, 41],
                 pids: VecDeque::from([Some(42)]),
@@ -234,7 +240,7 @@ impl InjectionBroker for TerminalBroker {
     fn inject(&self, request: &InjectionRequest) -> BrokerResult {
         self.requests.lock().unwrap().push(request.clone());
         BrokerResult {
-            disposition: BrokerDisposition::RetryableFailure,
+            disposition: BrokerDisposition::Rejected,
             code: "remote-load-timeout".to_owned(),
             win32_error: Some(1460),
         }
@@ -248,12 +254,8 @@ struct TerminalInitializer {
 impl RuntimeInitializer for TerminalInitializer {
     fn initialize(&self) -> Result<InitializedRuntime, StructuredServiceError> {
         initialize_process_orchestration(
-            Some(
-                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                    .to_owned(),
-            ),
+            binding(),
             900,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             Box::new(QueueSource {
                 snapshot: Vec::new(),
                 pids: VecDeque::from([Some(42)]),
@@ -296,6 +298,7 @@ fn terminal_target_failure_keeps_global_ready_while_the_result_stays_process_loc
 struct RecoveringBroker {
     attempts: AtomicUsize,
     requests: Arc<Mutex<Vec<InjectionRequest>>>,
+    first_disposition: BrokerDisposition,
     first_code: &'static str,
     first_win32_error: Option<u32>,
 }
@@ -312,7 +315,7 @@ impl InjectionBroker for RecoveringBroker {
         self.requests.lock().unwrap().push(request.clone());
         if self.attempts.fetch_add(1, Ordering::AcqRel) == 0 {
             BrokerResult {
-                disposition: BrokerDisposition::Rejected,
+                disposition: self.first_disposition,
                 code: self.first_code.to_owned(),
                 win32_error: self.first_win32_error,
             }
@@ -328,6 +331,7 @@ impl InjectionBroker for RecoveringBroker {
 
 struct RecoveringInitializer {
     requests: Arc<Mutex<Vec<InjectionRequest>>>,
+    first_disposition: BrokerDisposition,
     first_code: &'static str,
     first_win32_error: Option<u32>,
 }
@@ -335,9 +339,8 @@ struct RecoveringInitializer {
 impl RuntimeInitializer for RecoveringInitializer {
     fn initialize(&self) -> Result<InitializedRuntime, StructuredServiceError> {
         initialize_process_orchestration(
-            Some(PROFILE_DIGEST.to_owned()),
+            binding(),
             900,
-            RUNTIME_GENERATION,
             Box::new(QueueSource {
                 snapshot: Vec::new(),
                 pids: VecDeque::from([Some(42), Some(43)]),
@@ -346,6 +349,7 @@ impl RuntimeInitializer for RecoveringInitializer {
             Box::new(RecoveringBroker {
                 attempts: AtomicUsize::new(0),
                 requests: self.requests.clone(),
+                first_disposition: self.first_disposition,
                 first_code: self.first_code,
                 first_win32_error: self.first_win32_error,
             }),
@@ -378,6 +382,7 @@ fn cleanup_unknown_degrades_its_generation_then_next_success_recovers_ready() {
             &recorder,
             &RecoveringInitializer {
                 requests: requests.clone(),
+                first_disposition: BrokerDisposition::UncertainCleanup,
                 first_code: "post-injection-state-cleanup-unknown",
                 first_win32_error: Some(109),
             },
@@ -447,9 +452,8 @@ struct VanishedTargetInitializer {
 impl RuntimeInitializer for VanishedTargetInitializer {
     fn initialize(&self) -> Result<InitializedRuntime, StructuredServiceError> {
         initialize_process_orchestration(
-            Some(PROFILE_DIGEST.to_owned()),
+            binding(),
             900,
-            RUNTIME_GENERATION,
             Box::new(QueueSource {
                 snapshot: Vec::new(),
                 pids: VecDeque::from([Some(42), Some(43)]),
@@ -458,6 +462,7 @@ impl RuntimeInitializer for VanishedTargetInitializer {
             Box::new(RecoveringBroker {
                 attempts: AtomicUsize::new(0),
                 requests: self.requests.clone(),
+                first_disposition: BrokerDisposition::UncertainCleanup,
                 first_code: "post-injection-state-cleanup-unknown",
                 first_win32_error: Some(299),
             }),
@@ -521,6 +526,7 @@ fn conflicting_mactype_module_stays_process_local_and_global_ready() {
             &recorder,
             &RecoveringInitializer {
                 requests: requests.clone(),
+                first_disposition: BrokerDisposition::Rejected,
                 first_code: "conflicting-mactype-module-loaded",
                 first_win32_error: None,
             },
@@ -565,6 +571,7 @@ fn invalid_helper_response_degrades_its_generation_then_next_success_recovers_re
             &recorder,
             &RecoveringInitializer {
                 requests: requests.clone(),
+                first_disposition: BrokerDisposition::UncertainIntegrity,
                 first_code: "helper-response-invalid",
                 first_win32_error: None,
             },
@@ -640,9 +647,8 @@ struct TargetInspectionRaceInitializer {
 impl RuntimeInitializer for TargetInspectionRaceInitializer {
     fn initialize(&self) -> Result<InitializedRuntime, StructuredServiceError> {
         initialize_process_orchestration(
-            Some(PROFILE_DIGEST.to_owned()),
+            binding(),
             900,
-            RUNTIME_GENERATION,
             Box::new(QueueSource {
                 snapshot: Vec::new(),
                 pids: VecDeque::from([
@@ -729,9 +735,8 @@ struct TelemetryInitializer {
 impl RuntimeInitializer for TelemetryInitializer {
     fn initialize(&self) -> Result<InitializedRuntime, StructuredServiceError> {
         initialize_process_orchestration(
-            Some(PROFILE_DIGEST.to_owned()),
+            binding(),
             900,
-            RUNTIME_GENERATION,
             Box::new(QueueSource {
                 snapshot: Vec::new(),
                 pids: (0..self.process_count)

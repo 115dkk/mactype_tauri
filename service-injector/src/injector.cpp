@@ -4,6 +4,8 @@
 #include "module_inventory.h"
 #include "remote_injection.h"
 #include "safety_policy.h"
+#include "renderer_evidence.h"
+#include "operation_deadline.h"
 #include "unique_handle.h"
 
 #include <windows.h>
@@ -107,6 +109,7 @@ constexpr USHORT kExpectedMachine = IMAGE_FILE_MACHINE_I386;
 }  // namespace
 
 Result inject_fixed_adjacent_module(const BrokerRequest& request) noexcept {
+    const OperationDeadline deadline;
     const UniqueHandle process{reinterpret_cast<HANDLE>(request.process_handle)};
     if (!process) {
         return make_result(request, ResultStatus::rejected, "process-handle-invalid",
@@ -200,7 +203,8 @@ Result inject_fixed_adjacent_module(const BrokerRequest& request) noexcept {
         case FixedModuleState::Absent:
             break;
         case FixedModuleState::ExpectedModuleLoaded:
-            return make_result(request, ResultStatus::skipped, "module-already-loaded",
+            return make_result(request, ResultStatus::integrity_failed,
+                               "existing-renderer-unverified",
                                kFixedModuleNameUtf8);
         case FixedModuleState::SameBasenameDifferentPath:
             return make_result(request, ResultStatus::rejected,
@@ -216,7 +220,9 @@ Result inject_fixed_adjacent_module(const BrokerRequest& request) noexcept {
         return make_result(request, ResultStatus::rejected, "creation-time-mismatch",
                            kFixedModuleNameUtf8);
     }
-    return inject_module(process.get(), request, *module_path);
+    return bind_renderer_activation_evidence(
+        process.get(), request, *module_path,
+        inject_module(process.get(), request, *module_path, deadline), deadline);
 }
 
 }  // namespace mactype::injector

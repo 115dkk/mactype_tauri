@@ -10,6 +10,9 @@ param(
     [string] $Module,
 
     [Parameter(Mandatory)]
+    [string] $QuietModule,
+
+    [Parameter(Mandatory)]
     [string] $SlowModule,
 
     [Parameter(Mandatory)]
@@ -28,6 +31,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $generation = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+$profileDigest = "sha256:$generation"
 $testRoot = Join-Path $env:TEMP ("mactype-injector-test-" + [Guid]::NewGuid().ToString('N'))
 $processes = [System.Collections.Generic.List[System.Diagnostics.Process]]::new()
 $fixedModule = Join-Path (Split-Path -Parent $Injector) ([IO.Path]::GetFileName($Module))
@@ -81,7 +85,8 @@ function Invoke-Broker(
         '--pid', [string]$Identity.pid,
         '--creation-time', [string]$Identity.creationTime,
         '--session-id', [string]$Identity.sessionId,
-        '--generation-id', $generation
+        '--generation-id', $generation,
+        '--profile-digest', $profileDigest
     ) + $ExtraArguments
     $json = & $InheritedHandleLauncher $arguments
     $exitCode = $LASTEXITCODE
@@ -97,19 +102,19 @@ function Invoke-Broker(
 
 function Assert-Response($Invocation, [int] $ExitCode, [string] $Status, [string] $Code) {
     if ($Invocation.ExitCode -ne $ExitCode -or
-        $Invocation.Response.schemaVersion -ne 1 -or
+        $Invocation.Response.schemaVersion -ne 2 -or
         $Invocation.Response.status -ne $Status -or
         $Invocation.Response.code -ne $Code) {
         throw "Unexpected injector response: $($Invocation.Json) (exit $($Invocation.ExitCode))"
     }
-    if ($Invocation.Json.Length -gt 1024) {
-        throw 'Injector response exceeded the 1024-byte public bound.'
+    if ($Invocation.Json.Length -gt 1536) {
+        throw 'Injector response exceeded the 1536-byte public bound.'
     }
 }
 
 New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
 try {
-    foreach ($path in @($Injector, $Target, $Module, $SlowModule, $DecoyModule, $TimeoutInjector, $InheritedHandleLauncher)) {
+    foreach ($path in @($Injector, $Target, $Module, $QuietModule, $SlowModule, $DecoyModule, $TimeoutInjector, $InheritedHandleLauncher)) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
             throw "Required test artifact does not exist: $path"
         }
@@ -117,18 +122,42 @@ try {
 
     $valid = Start-Marker -Name 'valid'
     $loaded = Invoke-Broker -Executable $Injector -Identity $valid.Identity
-    Assert-Response $loaded 0 'injected' 'module-loaded'
+    Assert-Response $loaded 0 'injected' 'renderer-active'
     if (-not $loaded.Response.cleanupComplete) {
         throw 'Successful injection did not report complete cleanup.'
     }
+    if ([string]$loaded.Response.rendererEvidence -notmatch '^[0-9a-f]{624}$') {
+        throw 'Successful injection omitted canonical renderer activation evidence.'
+    }
 
     $duplicate = Invoke-Broker -Executable $Injector -Identity $valid.Identity
-    Assert-Response $duplicate 0 'skipped' 'module-already-loaded'
+    Assert-Response $duplicate 3 'integrity' 'existing-renderer-unverified'
+    if ($null -ne $duplicate.Response.rendererEvidence) {
+        throw 'Already-loaded renderer should not be queried without a helper-owned reference.'
+    }
 
     $valid.Process.WaitForExit(5000)
     if (-not $valid.Process.HasExited -or $valid.Process.ExitCode -ne 0) {
         throw 'Marker target did not observe the fixed adjacent module.'
     }
+
+    Copy-Item -LiteralPath $fixedModule -Destination $moduleBackup -Force
+    Copy-Item -LiteralPath $QuietModule -Destination $fixedModule -Force
+    $moduleReplaced = $true
+    $quiet = Start-Marker -Name 'renderer-quiet-skip'
+    $quietResponse = Invoke-Broker -Executable $Injector -Identity $quiet.Identity
+    Assert-Response $quietResponse 0 'skipped' 'process-excluded'
+    if (-not $quietResponse.Response.cleanupComplete -or
+        [string]$quietResponse.Response.rendererEvidence -notmatch '^[0-9a-f]{624}$') {
+        throw 'Renderer quiet skip did not return verified bounded evidence and cleanup.'
+    }
+    $quiet.Process.WaitForExit(7000)
+    if (-not $quiet.Process.HasExited -or $quiet.Process.ExitCode -ne 7) {
+        throw 'Explicit renderer skip left the fixed renderer resident in the target.'
+    }
+    Copy-Item -LiteralPath $moduleBackup -Destination $fixedModule -Force
+    Remove-Item -LiteralPath $moduleBackup -Force
+    $moduleReplaced = $false
 
     if ([IO.Path]::GetFileName($DecoyModule) -ne [IO.Path]::GetFileName($fixedModule) -or
         [IO.Path]::GetFullPath($DecoyModule) -eq [IO.Path]::GetFullPath($fixedModule)) {
@@ -155,7 +184,7 @@ try {
 
     $afterConflict = Start-Marker -Name 'after-same-basename-conflict'
     $afterConflictResponse = Invoke-Broker -Executable $Injector -Identity $afterConflict.Identity
-    Assert-Response $afterConflictResponse 0 'injected' 'module-loaded'
+    Assert-Response $afterConflictResponse 0 'injected' 'renderer-active'
     $afterConflict.Process.WaitForExit(5000)
     if (-not $afterConflict.Process.HasExited -or $afterConflict.Process.ExitCode -ne 0) {
         throw 'A clean process did not recover to normal injection after a conflict.'
@@ -177,7 +206,8 @@ try {
         '--pid', [string]$wrongHandle.Identity.pid,
         '--creation-time', [string]$wrongHandle.Identity.creationTime,
         '--session-id', [string]$wrongHandle.Identity.sessionId,
-        '--generation-id', $generation
+        '--generation-id', $generation,
+        '--profile-digest', $profileDigest
     )
     $invalidHandleJson = & $Injector $invalidHandleArguments
     $invalidHandleResponse = [pscustomobject]@{
@@ -222,7 +252,7 @@ try {
     $moduleReplaced = $true
     $slow = Start-Marker -Name 'late-load'
     $timeoutResponse = Invoke-Broker -Executable $TimeoutInjector -Identity $slow.Identity
-    Assert-Response $timeoutResponse 0 'injected' 'module-loaded-late'
+    Assert-Response $timeoutResponse 0 'injected' 'renderer-active'
     if (-not $timeoutResponse.Response.cleanupComplete) {
         throw 'Verified late injection did not release remote memory and handles.'
     }

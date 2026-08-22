@@ -79,7 +79,8 @@ private:
 }  // namespace
 
 Result inject_module(HANDLE process, const BrokerRequest& request,
-                     const std::filesystem::path& module_path) noexcept {
+                     const std::filesystem::path& module_path,
+                     const OperationDeadline& deadline) noexcept {
     const std::wstring module = module_path.native();
     const std::size_t byte_count = (module.size() + 1U) * sizeof(wchar_t);
     void* address = VirtualAllocEx(process, nullptr, byte_count, MEM_COMMIT | MEM_RESERVE,
@@ -105,6 +106,14 @@ Result inject_module(HANDLE process, const BrokerRequest& request,
         return make_result(request, ResultStatus::failed, "loader-address-unavailable",
                            kFixedModuleNameUtf8, error, cleanup_complete);
     }
+    const DWORD initial_budget = deadline.remaining(kRemoteTimeoutMs);
+    if (initial_budget == 0U) {
+        const bool cleanup_complete = allocation.release();
+        return make_result(request, ResultStatus::timed_out,
+                           cleanup_complete ? "remote-deadline-exhausted"
+                                            : "remote-deadline-cleanup-unknown",
+                           kFixedModuleNameUtf8, WAIT_TIMEOUT, cleanup_complete);
+    }
     const UniqueHandle thread{CreateRemoteThread(process, nullptr, 0U, *load_library,
                                                   allocation.get(), 0U, nullptr)};
     if (!thread) {
@@ -115,9 +124,12 @@ Result inject_module(HANDLE process, const BrokerRequest& request,
     }
 
     RemoteCompletion completion = RemoteCompletion::completed_on_time;
-    DWORD wait = WaitForSingleObject(thread.get(), kRemoteTimeoutMs);
+    DWORD wait = WaitForSingleObject(thread.get(), initial_budget);
     if (wait == WAIT_TIMEOUT) {
-        wait = WaitForSingleObject(thread.get(), kCleanupGraceMs);
+        const DWORD cleanup_budget = deadline.remaining(kCleanupGraceMs);
+        wait = cleanup_budget == 0U
+                   ? WAIT_TIMEOUT
+                   : WaitForSingleObject(thread.get(), cleanup_budget);
         if (wait != WAIT_OBJECT_0) {
             const DWORD error = wait == WAIT_FAILED ? GetLastError() : 0U;
             allocation.abandon();

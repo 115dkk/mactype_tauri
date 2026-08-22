@@ -23,6 +23,7 @@
 #include "EventLogging.h"
 #include "hookCounter.h"
 #include "hook_lifecycle.h"
+#include "renderer_activation.h"
 #include <vector>
 
 bool RestoreDirectWriteVtableHooks(DWORD timeoutMilliseconds = 3000);
@@ -640,8 +641,6 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 			DebugOut(L"Begin core loading stage, pid %d", ::GetCurrentProcessId());
 			if (bDllInited)
 				return true;
-			if (!ValidateRendererProfile(instance))
-				return FALSE;
 			RuntimeStartGuard runtimeStart;
 			if (!runtimeStart.owns_start())
 				return FALSE;
@@ -706,7 +705,8 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 			}
 			if (!IsUnload) hook_initinternal();	//不加载的模块就不做任何事莵E
 			//5
-			if (!IsProcessExcluded() && !IsUnload) {
+			const bool processExcluded = IsProcessExcluded();
+			if (!processExcluded && !IsUnload) {
 #ifndef _WIN64
 				InitWow64ext();
 #endif
@@ -816,6 +816,23 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 			//APITracer::Finish();
 			if (!runtimeStart.Complete())
 				return FALSE;
+			if (processExcluded)
+			{
+				renderer::PublishRendererAdmission(
+					renderer::RendererAdmission::quietSkip,
+					renderer::RendererAdmissionReason::processExcluded);
+			}
+			else if (IsUnload)
+			{
+				renderer::PublishRendererAdmission(
+					renderer::RendererAdmission::quietSkip,
+					renderer::RendererAdmissionReason::processUnloadRequested);
+			}
+			else
+			{
+				renderer::PublishRendererAdmission(
+					renderer::RendererAdmission::active);
+			}
 			break;
 		}
 		case DLL_THREAD_ATTACH:

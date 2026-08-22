@@ -43,14 +43,20 @@ template <typename Integer>
     return true;
 }
 
+[[nodiscard]] bool is_profile_digest(std::wstring_view value) noexcept {
+    return value.size() == 71U && value.starts_with(L"sha256:") &&
+           is_generation_id(value.substr(7U));
+}
+
 }  // namespace
 
 std::optional<BrokerRequest> parse_broker_request(
     std::span<const std::wstring_view> arguments) noexcept {
-    if (arguments.size() != 11U || arguments[1] != L"--process-handle" ||
+    if (arguments.size() != 13U || arguments[1] != L"--process-handle" ||
         arguments[3] != L"--pid" || arguments[5] != L"--creation-time" ||
         arguments[7] != L"--session-id" || arguments[9] != L"--generation-id" ||
-        !is_generation_id(arguments[10])) {
+        !is_generation_id(arguments[10]) || arguments[11] != L"--profile-digest" ||
+        !is_profile_digest(arguments[12])) {
         return std::nullopt;
     }
 
@@ -68,8 +74,13 @@ std::optional<BrokerRequest> parse_broker_request(
     for (const wchar_t character : arguments[10]) {
         generation_id.push_back(static_cast<char>(character));
     }
+    std::string profile_digest;
+    profile_digest.reserve(arguments[12].size());
+    for (const wchar_t character : arguments[12]) {
+        profile_digest.push_back(static_cast<char>(character));
+    }
     return BrokerRequest{*process_handle, *pid, *creation_time, *session_id,
-                         std::move(generation_id)};
+                         std::move(generation_id), std::move(profile_digest)};
 }
 
 }  // namespace mactype::injector

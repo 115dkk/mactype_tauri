@@ -3,6 +3,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::thread;
 
+use mactype_service_contract::{ProfileDigest, RendererRuntimeBinding, RuntimeGenerationId};
+use windows_sys::Win32::Storage::FileSystem::WriteFile;
 use windows_sys::Win32::System::JobObjects::{
     JOB_OBJECT_LIMIT_ACTIVE_PROCESS, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
@@ -32,9 +34,56 @@ fn current_process_invocation(
             session_id: 1,
             architecture: crate::ProcessArchitecture::X64,
         },
-        generation_id: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-            .to_owned(),
+        binding: RendererRuntimeBinding::new(
+            RuntimeGenerationId::parse(
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            )
+            .unwrap(),
+            ProfileDigest::parse(
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            )
+            .unwrap(),
+        ),
         timeout,
+    }
+}
+
+#[test]
+fn helper_output_reader_preserves_schema2_evidence_and_bounds_growth() {
+    for (payload_bytes, expected_bytes) in [
+        (
+            crate::helper_broker::MAX_HELPER_OUTPUT_BYTES,
+            crate::helper_broker::MAX_HELPER_OUTPUT_BYTES,
+        ),
+        (
+            crate::helper_broker::MAX_HELPER_OUTPUT_BYTES + 512,
+            crate::helper_broker::MAX_HELPER_OUTPUT_BYTES + 1,
+        ),
+    ] {
+        let security = SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: std::ptr::null_mut(),
+            bInheritHandle: 1,
+        };
+        let (read, write) = inherited_pipe(&security).unwrap();
+        let payload = vec![b'x'; payload_bytes];
+        let mut written = 0;
+        assert_ne!(
+            unsafe {
+                WriteFile(
+                    write.get(),
+                    payload.as_ptr().cast(),
+                    payload.len() as u32,
+                    &mut written,
+                    std::ptr::null_mut(),
+                )
+            },
+            0
+        );
+        assert_eq!(written as usize, payload.len());
+        drop(write);
+
+        assert_eq!(read_bounded_output(read).unwrap().len(), expected_bytes);
     }
 }
 

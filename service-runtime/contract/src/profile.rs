@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -120,6 +121,31 @@ impl fmt::Display for ProfileError {
 
 impl std::error::Error for ProfileError {}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProtectedRendererProfileError {
+    InvalidProfile(ProfileError),
+    MissingGeneralSection,
+    AlternativeFileNotAllowed,
+}
+
+impl fmt::Display for ProtectedRendererProfileError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "protected renderer profile validation failed: {self:?}"
+        )
+    }
+}
+
+impl std::error::Error for ProtectedRendererProfileError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidProfile(error) => Some(error),
+            Self::MissingGeneralSection | Self::AlternativeFileNotAllowed => None,
+        }
+    }
+}
+
 impl ProfileCatalog {
     pub fn new() -> Self {
         Self::default()
@@ -187,7 +213,50 @@ impl ProfileCatalog {
     }
 }
 
+pub fn validate_protected_renderer_profile(
+    bytes: &[u8],
+) -> Result<(), ProtectedRendererProfileError> {
+    let structure =
+        profile_structure_bytes(bytes).map_err(ProtectedRendererProfileError::InvalidProfile)?;
+    validate_ini_structure(&structure).map_err(ProtectedRendererProfileError::InvalidProfile)?;
+
+    let mut saw_general = false;
+    let mut in_general = false;
+    for raw_line in structure.split(|byte| *byte == b'\n') {
+        let line = trim_ascii(raw_line);
+        if line.is_empty() || line[0] == b';' || line[0] == b'#' {
+            continue;
+        }
+        if line.len() >= 3 && line[0] == b'[' && line[line.len() - 1] == b']' {
+            let section = &line[1..line.len() - 1];
+            in_general = section.eq_ignore_ascii_case(b"General");
+            saw_general |= in_general;
+            continue;
+        }
+        if !in_general {
+            continue;
+        }
+        let Some(separator) = line.iter().position(|byte| *byte == b'=') else {
+            continue;
+        };
+        if trim_ascii(&line[..separator]).eq_ignore_ascii_case(b"AlternativeFile")
+            && !trim_ascii(&line[separator + 1..]).is_empty()
+        {
+            return Err(ProtectedRendererProfileError::AlternativeFileNotAllowed);
+        }
+    }
+    if !saw_general {
+        return Err(ProtectedRendererProfileError::MissingGeneralSection);
+    }
+    Ok(())
+}
+
 fn validate_profile(bytes: &[u8]) -> Result<(), ProfileError> {
+    let structure = profile_structure_bytes(bytes)?;
+    validate_ini_structure(&structure)
+}
+
+fn profile_structure_bytes(bytes: &[u8]) -> Result<Cow<'_, [u8]>, ProfileError> {
     if bytes.is_empty() || bytes.len() > MAX_PROFILE_BYTES {
         return Err(ProfileError::InvalidSize);
     }
@@ -207,14 +276,14 @@ fn validate_profile(bytes: &[u8]) -> Result<(), ProfileError> {
         });
         let decoded =
             String::from_utf16(&units.collect::<Vec<_>>()).map_err(|_| ProfileError::InvalidIni)?;
-        return validate_ini_structure(decoded.as_bytes());
+        return Ok(Cow::Owned(decoded.into_bytes()));
     }
 
     let structure_bytes = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(bytes);
     if structure_bytes.contains(&0) {
         return Err(ProfileError::InvalidIni);
     }
-    validate_ini_structure(structure_bytes)
+    Ok(Cow::Borrowed(structure_bytes))
 }
 
 fn validate_ini_structure(bytes: &[u8]) -> Result<(), ProfileError> {

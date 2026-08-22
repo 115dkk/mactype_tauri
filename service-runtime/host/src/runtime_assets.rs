@@ -4,13 +4,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use mactype_service_contract::{
-    runtime_generation_id, MachinePaths, StructuredServiceError, IMMUTABLE_RUNTIME_FILES,
-    MAX_PROFILE_BYTES, MAX_RUNTIME_FILE_BYTES,
+    runtime_generation_id, MachinePaths, RuntimeGenerationId, RuntimeGenerationPointer,
+    StructuredServiceError, IMMUTABLE_RUNTIME_FILES, MAX_PROFILE_BYTES, MAX_RUNTIME_FILE_BYTES,
 };
 
-use crate::protected_path::{
-    has_reparse_ancestor, read_bounded_regular_file, runtime_pointer_version, MAX_POINTER_BYTES,
-};
+use crate::protected_path::{has_reparse_ancestor, read_bounded_regular_file};
 
 const REQUIRED_RUNTIME_FILES: [&str; 6] = [
     "mactype-service.exe",
@@ -26,37 +24,15 @@ pub struct ProtectedRuntimeAssets {
     root: PathBuf,
     injector32: PathBuf,
     injector64: PathBuf,
-    generation_id: String,
+    generation_id: RuntimeGenerationId,
 }
 
 impl ProtectedRuntimeAssets {
-    pub fn load(paths: MachinePaths) -> Result<Self, StructuredServiceError> {
-        let pointer = paths.runtime_pointer();
-        reject_reparse(pointer)?;
-        let bytes = read_bounded_regular_file(pointer, MAX_POINTER_BYTES).map_err(|error| {
-            if error.kind() == std::io::ErrorKind::InvalidData {
-                service_error(
-                    "active-runtime-invalid",
-                    "the protected active runtime pointer is not a bounded regular file",
-                    error.raw_os_error(),
-                )
-            } else {
-                service_error(
-                    "active-runtime-unavailable",
-                    "the protected active runtime pointer could not be read",
-                    error.raw_os_error(),
-                )
-            }
-        })?;
-        let version = runtime_pointer_version(&bytes).ok_or_else(|| {
-            service_error(
-                "active-runtime-invalid",
-                "the protected active runtime pointer has an unsupported value",
-                None,
-            )
-        })?;
-
-        let root = paths.runtime_versions().join(version);
+    pub(crate) fn load(
+        paths: &MachinePaths,
+        pointer: &RuntimeGenerationPointer,
+    ) -> Result<Self, StructuredServiceError> {
+        let root = paths.runtime_versions().join(pointer.version());
         reject_reparse(&root)?;
         if !root.is_dir() {
             return Err(service_error(
@@ -107,6 +83,13 @@ impl ProtectedRuntimeAssets {
                 None,
             )
         })?;
+        let generation_id = RuntimeGenerationId::parse(&generation_id).map_err(|_| {
+            service_error(
+                "runtime-generation-invalid",
+                "the protected runtime generation identity is not canonical",
+                None,
+            )
+        })?;
 
         Ok(Self {
             injector32: root.join("mactype-injector32.exe"),
@@ -128,7 +111,7 @@ impl ProtectedRuntimeAssets {
         &self.injector64
     }
 
-    pub fn generation_id(&self) -> &str {
+    pub const fn generation_id(&self) -> &RuntimeGenerationId {
         &self.generation_id
     }
 }

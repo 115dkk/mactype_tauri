@@ -1,0 +1,104 @@
+{
+  "$schema": "mactype-renderer-activation-contract-v1",
+  "contract": {
+    "schemaVersion": 1,
+    "queryExport": "MacTypeQueryActivationEvidenceV1",
+    "evidenceSize": 312,
+    "evidenceAlignment": 8,
+    "runtimeGenerationCanonicalChars": 64,
+    "runtimeGenerationTextBytes": 65,
+    "profileDigestCanonicalChars": 71,
+    "profileDigestTextBytes": 72,
+    "profileDigestPrefix": "sha256:",
+    "reservedBytes": 32
+  },
+  "enums": {
+    "architecture": {
+      "wireType": "u8",
+      "values": [
+        { "name": "x86", "value": 1, "code": "x86" },
+        { "name": "x64", "value": 2, "code": "x64" }
+      ]
+    },
+    "moduleLoad": {
+      "wireType": "u8",
+      "values": [
+        { "name": "not_loaded", "value": 1, "code": "not-loaded" },
+        { "name": "loaded_by_request", "value": 2, "code": "loaded-by-request" },
+        { "name": "already_loaded", "value": 3, "code": "already-loaded" },
+        { "name": "unknown", "value": 4, "code": "unknown" }
+      ]
+    },
+    "disposition": {
+      "wireType": "u8",
+      "values": [
+        { "name": "active", "value": 1, "code": "active" },
+        { "name": "quiet_skip", "value": 2, "code": "quiet-skip" },
+        { "name": "failed", "value": 3, "code": "failed" }
+      ]
+    },
+    "reason": {
+      "wireType": "u16",
+      "values": [
+        { "name": "none", "value": 0, "code": "none" },
+        { "name": "profile_missing", "value": 1, "code": "profile-missing" },
+        { "name": "profile_invalid", "value": 2, "code": "profile-invalid" },
+        { "name": "profile_digest_mismatch", "value": 3, "code": "profile-digest-mismatch" },
+        { "name": "process_excluded", "value": 4, "code": "process-excluded" },
+        { "name": "process_unload_requested", "value": 5, "code": "process-unload-requested" },
+        { "name": "runtime_generation_mismatch", "value": 6, "code": "runtime-generation-mismatch" },
+        { "name": "initialization_failed", "value": 7, "code": "initialization-failed" },
+        { "name": "hook_transaction_failed", "value": 8, "code": "hook-transaction-failed" },
+        { "name": "lifecycle_stopping", "value": 9, "code": "lifecycle-stopping" },
+        { "name": "evidence_unavailable", "value": 10, "code": "evidence-unavailable" },
+        { "name": "unsupported_contract", "value": 11, "code": "unsupported-contract" },
+        { "name": "module_load_failed", "value": 12, "code": "module-load-failed" },
+        { "name": "module_unload_failed", "value": 13, "code": "module-unload-failed" }
+      ]
+    }
+  },
+  "capabilities": [
+    { "name": "gdi", "bit": 0, "code": "gdi" },
+    { "name": "child_injection", "bit": 1, "code": "child-injection" },
+    { "name": "direct_write", "bit": 2, "code": "direct-write" },
+    { "name": "direct_write_core", "bit": 3, "code": "direct-write-core" },
+    { "name": "direct2d", "bit": 4, "code": "direct2d" },
+    { "name": "gdi_plus", "bit": 5, "code": "gdi-plus" },
+    { "name": "font_substitution", "bit": 6, "code": "font-substitution" }
+  ],
+  "structs": {
+    "runtimeBinding": {
+      "size": 137,
+      "alignment": 1,
+      "fields": [
+        { "name": "runtime_generation_id", "type": "char", "count": 65, "offset": 0 },
+        { "name": "profile_digest", "type": "char", "count": 72, "offset": 65 }
+      ]
+    },
+    "activationEvidenceV1": {
+      "size": 312,
+      "alignment": 8,
+      "fields": [
+        { "name": "struct_size", "type": "u32", "offset": 0 },
+        { "name": "schema_version", "type": "u16", "offset": 4 },
+        { "name": "reason", "type": "u16", "offset": 6 },
+        { "name": "architecture", "type": "u8", "offset": 8 },
+        { "name": "module_load", "type": "u8", "offset": 9 },
+        { "name": "disposition", "type": "u8", "offset": 10 },
+        { "name": "reserved0", "type": "u8", "offset": 11 },
+        { "name": "pid", "type": "u32", "offset": 12 },
+        { "name": "session_id", "type": "u32", "offset": 16 },
+        { "name": "reserved1", "type": "u32", "offset": 20 },
+        { "name": "creation_time", "type": "u64", "offset": 24 },
+        { "name": "binding", "type": "runtimeBinding", "offset": 32 },
+        { "name": "effective_profile_digest", "type": "char", "count": 72, "offset": 169 },
+        { "name": "reserved_alignment", "type": "bytes", "count": 7, "offset": 241 },
+        { "name": "lifecycle_revision", "type": "u64", "offset": 248 },
+        { "name": "capability_active", "type": "u64", "offset": 256 },
+        { "name": "capability_unavailable", "type": "u64", "offset": 264 },
+        { "name": "capability_failed", "type": "u64", "offset": 272 },
+        { "name": "reserved", "type": "bytes", "count": 32, "offset": 280 }
+      ]
+    }
+  }
+}

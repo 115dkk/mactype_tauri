@@ -8,7 +8,7 @@ mod support;
 use std::fs;
 
 use mactype_service_contract::SourceMetadata;
-use mactype_service_host::{ProtectedProfileInitializer, RuntimeInitializer};
+use mactype_service_host::ProtectedRendererRuntime;
 use mactype_service_setup::{ProfileStore, RuntimeInstaller, SetupError};
 
 use active_support::active_version;
@@ -92,17 +92,15 @@ fn production_profile_initializer_validates_the_candidate_during_activation_heal
     let payload = payload(base.path(), "0.2.0", b"service-v2");
     RuntimeInstaller::new(paths.clone())
         .deploy_with_health_check(&payload, |_| {
-            let initialized = ProtectedProfileInitializer::new(paths.clone())
-                .initialize()
-                .map_err(|error| {
-                    SetupError::Runtime(format!(
-                        "production profile initialization failed at {}: {}",
-                        error.code, error.message
-                    ))
-                })?;
+            let runtime = ProtectedRendererRuntime::load(paths.clone()).map_err(|error| {
+                SetupError::Runtime(format!(
+                    "production profile initialization failed at {}: {}",
+                    error.code, error.message
+                ))
+            })?;
             assert_eq!(
-                initialized.active_profile_digest.as_deref(),
-                Some(expected.as_str())
+                runtime.binding().profile_digest().as_str(),
+                expected.as_str()
             );
             Ok(())
         })

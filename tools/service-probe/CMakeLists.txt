@@ -68,6 +68,26 @@ add_executable(freetype-runtime-tests tests/freetype_runtime_tests.cpp)
 target_compile_features(freetype-runtime-tests PRIVATE cxx_std_20)
 target_compile_definitions(freetype-runtime-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
+add_executable(renderer-policy-tests
+  tests/renderer_policy_tests.cpp
+  ../../renderer/renderer_policy.cpp
+  ../../renderer/profile_runtime.cpp
+  ../../renderer/font_substitution.cpp
+)
+target_compile_features(renderer-policy-tests PRIVATE cxx_std_20)
+target_compile_definitions(renderer-policy-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+
+add_executable(renderer-activation-tests
+  tests/renderer_activation_tests.cpp
+  ../../renderer/renderer_activation.cpp
+  ../../renderer/hook_lifecycle.cpp
+  ../../renderer/renderer_policy.cpp
+  ../../renderer/profile_runtime.cpp
+  ../../renderer/font_substitution.cpp
+)
+target_compile_features(renderer-activation-tests PRIVATE cxx_std_20)
+target_compile_definitions(renderer-activation-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+
 add_executable(font-substitution-tests
   tests/font_substitution_tests.cpp
   ../../renderer/font_substitution.cpp
@@ -114,7 +134,7 @@ set_target_properties(relay-policy-probe PROPERTIES
 )
 
 if(MSVC)
-  foreach(target service-probe-common probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests freetype-runtime-tests font-substitution-tests renderer-profile-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe)
+  foreach(target service-probe-common probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests freetype-runtime-tests renderer-policy-tests renderer-activation-tests font-substitution-tests renderer-profile-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe)
     target_compile_options(${target} PRIVATE /W4 /WX /permissive- /utf-8 /sdl)
   endforeach()
   foreach(target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-profile-probe browser-launch-gate dwritecore-contract-probe relay-policy-probe)
@@ -124,7 +144,7 @@ if(MSVC)
     )
   endforeach()
   if(MACTYPE_ENABLE_ASAN)
-    foreach(target renderer-raii-tests hook-lifecycle-tests freetype-runtime-tests font-substitution-tests)
+    foreach(target renderer-raii-tests hook-lifecycle-tests freetype-runtime-tests renderer-policy-tests font-substitution-tests)
       target_compile_options(${target} PRIVATE /fsanitize=address /Zi)
       target_link_options(${target} PRIVATE /INCREMENTAL:NO)
     endforeach()

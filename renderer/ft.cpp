@@ -45,6 +45,7 @@
 #include "fteng.h"
 #include "freetype_raii.h"
 #include "freetype_runtime.h"
+#include "profile_runtime.h"
 
 #include "ft2vert.h"
 
@@ -65,22 +66,9 @@ ControlIder CID;
 
 renderer::freetype::RasterPolicy CaptureFreeTypeRasterPolicy()
 {
-	const CGdippSettings* settings = CGdippSettings::GetInstance();
-	renderer::freetype::RasterPolicy policy;
-	policy.fontLoader = settings->FontLoader();
-	policy.fontLinkMode = settings->FontLink();
-	policy.bitmapHeight = settings->BitmapHeight();
-	policy.bolderMode = settings->BolderMode();
-	policy.widthMode = settings->WidthMode();
-	policy.lcdFilter = settings->LcdFilter();
-	policy.hintSmallFont = settings->HintSmallFont();
-	policy.harmonyLcd = settings->HarmonyLCD();
-	policy.loadColorFont = settings->LoadColorFont();
-	policy.invertColor = settings->InvertColor();
-	policy.gamma = settings->GammaValue();
-	policy.shadowDarkColor = settings->ShadowDarkColor();
-	policy.shadowLightColor = settings->ShadowLightColor();
-	return policy;
+	renderer::RendererPolicyRef const policy =
+		renderer::CurrentRendererPolicy();
+	return policy ? policy->raster() : renderer::freetype::RasterPolicy{};
 }
 
 #if _MSC_VER <= 1200
@@ -3459,12 +3447,16 @@ BOOL FontLInit(void) {
 	//enable stem darkening feature introduced in 2.6.2
 	FT_Bool     no_stem_darkening = FALSE;
 	FT_Property_Set(library.get(), "cff", "no-stem-darkening", &no_stem_darkening);
-	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
+	renderer::RendererPolicyRef const policy =
+		renderer::CurrentRendererPolicy();
+	if (!policy)
+		return FALSE;
+	const renderer::freetype::StartupPolicy& startup = policy->free_type();
 	FTC_Manager rawManager = nullptr;
 	if (FTC_Manager_New(library.get(),
-		pSettings->CacheMaxFaces(),
-		pSettings->CacheMaxSizes(),
-		pSettings->CacheMaxBytes(),
+		startup.cacheMaxFaces,
+		startup.cacheMaxSizes,
+		startup.cacheMaxBytes,
 		face_requester, nullptr,
 		&rawManager))
 	{

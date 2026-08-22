@@ -5,6 +5,7 @@ mod manifest;
 mod migration_pin;
 mod paths;
 mod profile;
+mod renderer_activation;
 mod runtime_activation;
 
 pub use broker::{parse_broker_command, BrokerCommand, BrokerCommandError};
@@ -24,8 +25,19 @@ pub use migration_pin::{
 };
 pub use paths::{MachinePathError, MachinePaths};
 pub use profile::{
-    GenerationId, GenerationPointer, ProfileCatalog, ProfileError, SourceMetadata,
-    MAX_PROFILE_BYTES, PROFILE_POINTER_SCHEMA,
+    validate_protected_renderer_profile, GenerationId, GenerationPointer, ProfileCatalog,
+    ProfileError, ProtectedRendererProfileError, SourceMetadata, MAX_PROFILE_BYTES,
+    PROFILE_POINTER_SCHEMA,
+};
+pub use renderer_activation::{
+    ProfileDigest, RendererActivationContractError, RendererActivationDisposition,
+    RendererActivationEvidenceV1, RendererActivationReason, RendererArchitecture,
+    RendererCapability, RendererCapabilitySet, RendererModuleLoad, RendererProcessIdentity,
+    RendererRuntimeBinding, RuntimeGenerationId, PROFILE_DIGEST_CANONICAL_CHARS,
+    PROFILE_DIGEST_PREFIX, PROFILE_DIGEST_TEXT_BYTES, RENDERER_ACTIVATION_EVIDENCE_V1_SIZE,
+    RENDERER_ACTIVATION_QUERY_EXPORT, RENDERER_ACTIVATION_SCHEMA_VERSION,
+    RENDERER_CAPABILITY_KNOWN_MASK, RUNTIME_GENERATION_CANONICAL_CHARS,
+    RUNTIME_GENERATION_TEXT_BYTES,
 };
 pub use runtime_activation::{
     parse_runtime_activation_receipt, valid_runtime_version_component,

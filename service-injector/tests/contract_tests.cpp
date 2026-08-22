@@ -4,7 +4,10 @@
 #include "result.h"
 #include "safety_policy.h"
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -27,12 +30,16 @@ bool valid_fixed_broker_request_is_accepted() {
         std::wstring_view{L"2"},
         std::wstring_view{L"--generation-id"},
         std::wstring_view{L"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
+        std::wstring_view{L"--profile-digest"},
+        std::wstring_view{L"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
     };
 
     const auto parsed = mactype::injector::parse_broker_request(arguments);
     return parsed.has_value() && parsed->process_handle == 4096U && parsed->pid == 1234U &&
            parsed->expected_creation_time == 133967890123456789ULL &&
-           parsed->expected_session_id == 2U;
+           parsed->expected_session_id == 2U &&
+           parsed->profile_digest ==
+               "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 }
 
 bool arbitrary_runtime_selectors_are_rejected() {
@@ -48,6 +55,8 @@ bool arbitrary_runtime_selectors_are_rejected() {
         std::wstring_view{L"2"},
         std::wstring_view{L"--generation-id"},
         std::wstring_view{L"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
+        std::wstring_view{L"--profile-digest"},
+        std::wstring_view{L"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
     };
     constexpr std::array selectors{
         std::array{std::wstring_view{L"--dll"},
@@ -80,6 +89,8 @@ bool malformed_generation_is_rejected() {
         std::wstring_view{L"2"},
         std::wstring_view{L"--generation-id"},
         std::wstring_view{L"not-a-digest"},
+        std::wstring_view{L"--profile-digest"},
+        std::wstring_view{L"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
     };
     if (mactype::injector::parse_broker_request(arguments).has_value()) {
         return false;
@@ -96,8 +107,29 @@ bool malformed_generation_is_rejected() {
         std::wstring_view{L"2"},
         std::wstring_view{L"--generation-id"},
         std::wstring_view{L"0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef"},
+        std::wstring_view{L"--profile-digest"},
+        std::wstring_view{L"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
     };
     return !mactype::injector::parse_broker_request(uppercase).has_value();
+}
+
+bool malformed_profile_digest_is_rejected() {
+    constexpr std::array arguments{
+        std::wstring_view{L"mactype-injector.exe"},
+        std::wstring_view{L"--process-handle"},
+        std::wstring_view{L"4096"},
+        std::wstring_view{L"--pid"},
+        std::wstring_view{L"1234"},
+        std::wstring_view{L"--creation-time"},
+        std::wstring_view{L"133967890123456789"},
+        std::wstring_view{L"--session-id"},
+        std::wstring_view{L"2"},
+        std::wstring_view{L"--generation-id"},
+        std::wstring_view{L"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
+        std::wstring_view{L"--profile-digest"},
+        std::wstring_view{L"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
+    };
+    return !mactype::injector::parse_broker_request(arguments).has_value();
 }
 
 bool malformed_or_missing_process_handle_is_rejected() {
@@ -122,6 +154,8 @@ bool malformed_or_missing_process_handle_is_rejected() {
             std::wstring_view{L"2"},
             std::wstring_view{L"--generation-id"},
             digest,
+            std::wstring_view{L"--profile-digest"},
+            std::wstring_view{L"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
         };
         if (mactype::injector::parse_broker_request(arguments).has_value()) {
             return false;
@@ -137,6 +171,8 @@ bool malformed_or_missing_process_handle_is_rejected() {
         std::wstring_view{L"2"},
         std::wstring_view{L"--generation-id"},
         digest,
+        std::wstring_view{L"--profile-digest"},
+        std::wstring_view{L"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
     };
     return !mactype::injector::parse_broker_request(missing).has_value();
 }
@@ -148,12 +184,14 @@ bool structured_result_is_bounded() {
         133967890123456789ULL,
         2U,
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     };
     const auto result = mactype::injector::make_result(
         request, mactype::injector::ResultStatus::injected, "module-loaded", "MacType64.dll");
     const auto json = mactype::injector::to_json(result);
-    return json.size() <= 1024U && json.find("\"schemaVersion\":1") != std::string::npos &&
-           json.find("\"cleanupComplete\":true") != std::string::npos;
+    return json.size() <= 1536U && json.find("\"schemaVersion\":2") != std::string::npos &&
+           json.find("\"cleanupComplete\":true") != std::string::npos &&
+           json.find("\"rendererEvidence\":null") != std::string::npos;
 }
 
 bool unknown_process_protection_is_rejected() {
@@ -162,6 +200,56 @@ bool unknown_process_protection_is_rejected() {
            !protection_state_allows_injection(true, false) &&
            !protection_state_allows_injection(false, true) &&
            !protection_state_allows_injection(false, false);
+}
+
+bool renderer_evidence_is_emitted_as_one_fixed_hex_frame() {
+    const mactype::injector::BrokerRequest request{
+        4096U,
+        1234U,
+        133967890123456789ULL,
+        2U,
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    };
+    MacTypeRendererActivationEvidenceV1 evidence{};
+    evidence.struct_size = MACTYPE_RENDERER_ACTIVATION_EVIDENCE_V1_SIZE;
+    evidence.schema_version = MACTYPE_RENDERER_ACTIVATION_SCHEMA_VERSION;
+    evidence.architecture = MACTYPE_RENDERER_ARCHITECTURE_X64;
+    evidence.module_load = MACTYPE_RENDERER_MODULE_LOAD_LOADED_BY_REQUEST;
+    evidence.disposition = MACTYPE_RENDERER_DISPOSITION_ACTIVE;
+    evidence.pid = request.pid;
+    evidence.session_id = request.expected_session_id;
+    evidence.creation_time = request.expected_creation_time;
+    std::memcpy(evidence.binding.runtime_generation_id,
+                request.generation_id.data(), request.generation_id.size());
+    std::memcpy(evidence.binding.profile_digest,
+                request.profile_digest.data(), request.profile_digest.size());
+    std::memcpy(evidence.effective_profile_digest,
+                request.profile_digest.data(), request.profile_digest.size());
+    evidence.lifecycle_revision = 1U;
+    evidence.capability_active = MACTYPE_RENDERER_CAPABILITY_GDI;
+    if (!MacTypeValidateRendererActivationEvidenceV1(&evidence)) {
+        return false;
+    }
+    auto result = mactype::injector::make_result(
+        request, mactype::injector::ResultStatus::injected,
+        "renderer-active", "MacType64.dll");
+    result.renderer_evidence = evidence;
+    const auto json = mactype::injector::to_json(result);
+    constexpr std::string_view prefix = "\"rendererEvidence\":\"";
+    const auto marker = json.find(prefix);
+    if (json.size() > 1536U || marker == std::string::npos) {
+        return false;
+    }
+    const auto first = marker + prefix.size();
+    const auto last = json.find('"', first);
+    return last != std::string::npos && last - first == sizeof(evidence) * 2U &&
+           std::all_of(json.begin() + static_cast<std::ptrdiff_t>(first),
+                       json.begin() + static_cast<std::ptrdiff_t>(last),
+                       [](const char value) {
+                           return (value >= '0' && value <= '9') ||
+                                  (value >= 'a' && value <= 'f');
+                       });
 }
 
 bool incompatible_process_mitigations_are_classified_before_injection() {
@@ -342,9 +430,17 @@ int wmain() {
         std::cerr << "malformed generation ID was accepted\n";
         return 3;
     }
+    if (!malformed_profile_digest_is_rejected()) {
+        std::cerr << "malformed profile digest was accepted\n";
+        return 11;
+    }
     if (!structured_result_is_bounded()) {
         std::cerr << "structured result violated its public bound\n";
         return 4;
+    }
+    if (!renderer_evidence_is_emitted_as_one_fixed_hex_frame()) {
+        std::cerr << "renderer evidence did not use the fixed hex frame\n";
+        return 12;
     }
     if (!unknown_process_protection_is_rejected()) {
         std::cerr << "unknown process protection was allowed to inject\n";

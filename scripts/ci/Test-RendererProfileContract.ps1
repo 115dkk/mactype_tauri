@@ -28,7 +28,8 @@ foreach ($required in @($probe, $sourceCore)) {
 $testRoot = Join-Path $resolvedBuildRoot "renderer-profile-contract-$Architecture"
 $runtimeCore = Join-Path $testRoot $coreName
 $runtimeProfile = Join-Path $testRoot 'MacType.ini'
-$knownNames = @($coreName, 'MacType.ini')
+$selectedProfile = Join-Path $testRoot 'selected-profile.ini'
+$knownNames = @($coreName, 'MacType.ini', 'selected-profile.ini')
 
 function Remove-TestRoot {
     if (-not (Test-Path -LiteralPath $testRoot)) { return }
@@ -38,7 +39,7 @@ function Remove-TestRoot {
     if ($unexpected.Count -ne 0) {
         throw "Refusing to clean renderer profile test directory with unexpected contents: $($unexpected.FullName -join ', ')"
     }
-    foreach ($path in @($runtimeProfile, $runtimeCore)) {
+    foreach ($path in @($selectedProfile, $runtimeProfile, $runtimeCore)) {
         if (Test-Path -LiteralPath $path) {
             Remove-Item -LiteralPath $path -Force
         }
@@ -84,6 +85,16 @@ try {
         "[General]`r`nAlternativeFile=missing-profile.ini`r`n"
     )
     Assert-Rejected 'missing selected profile'
+
+    [IO.File]::WriteAllText(
+        $selectedProfile,
+        "[General]`r`nDirectWrite=0`r`nFontSubstitutes=0`r`nHookChildProcesses=0`r`n"
+    )
+    [IO.File]::WriteAllText(
+        $runtimeProfile,
+        "[General]`r`nAlternativeFile=selected-profile.ini`r`n"
+    )
+    Assert-Loaded 'stable selected profile'
 
     $oversized = [IO.File]::Open($runtimeProfile, [IO.FileMode]::Create, [IO.FileAccess]::Write)
     try { $oversized.SetLength(4MB + 1) } finally { $oversized.Dispose() }

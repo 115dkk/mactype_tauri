@@ -1,6 +1,13 @@
 use mactype_service_contract::StructuredServiceError;
 
-use crate::{ProcessIdentity, TargetLiveness};
+use crate::observer::ProcessIdentity;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetLiveness {
+    Alive,
+    Vanished,
+    Unknown,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InspectionEvidence<T> {

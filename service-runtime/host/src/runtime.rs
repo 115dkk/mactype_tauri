@@ -3,7 +3,9 @@ mod lifecycle;
 use std::fmt;
 use std::io;
 
-use mactype_service_contract::{ReadinessReport, StructuredServiceError};
+use mactype_service_contract::{ReadinessReport, RendererRuntimeBinding, StructuredServiceError};
+
+use crate::injection_orchestrator::SessionChange;
 
 pub trait HealthPublisher: Send + Sync {
     fn publish(&self, report: &mactype_service_contract::HealthReport) -> io::Result<()>;
@@ -24,33 +26,33 @@ pub trait StopSignal: Send + Sync {
         false
     }
 
-    fn take_session_change(&self) -> Option<crate::SessionChange> {
+    fn take_session_change(&self) -> Option<SessionChange> {
         None
     }
 }
 
 pub struct InitializedRuntime {
-    pub active_profile_digest: Option<String>,
+    pub binding: RendererRuntimeBinding,
     pub readiness: ReadinessReport,
     driver: Option<Box<dyn RuntimeDriver>>,
 }
 
 impl InitializedRuntime {
-    pub fn ready(active_profile_digest: Option<String>, readiness: ReadinessReport) -> Self {
+    pub fn ready(binding: RendererRuntimeBinding, readiness: ReadinessReport) -> Self {
         Self {
-            active_profile_digest,
+            binding,
             readiness,
             driver: None,
         }
     }
 
     pub fn driven(
-        active_profile_digest: Option<String>,
+        binding: RendererRuntimeBinding,
         readiness: ReadinessReport,
         driver: Box<dyn RuntimeDriver>,
     ) -> Self {
         Self {
-            active_profile_digest,
+            binding,
             readiness,
             driver: Some(driver),
         }

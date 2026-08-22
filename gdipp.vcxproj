@@ -844,6 +844,9 @@
       <ExceptionHandling Condition="'$(Configuration)|$(Platform)'=='Release Infinality|Win32'">Sync</ExceptionHandling>
     </ClCompile>
     <ClCompile Include="renderer\ownedcs.cpp" />
+    <ClCompile Include="renderer\profile_runtime.cpp" />
+    <ClCompile Include="renderer\renderer_activation.cpp" />
+    <ClCompile Include="renderer\renderer_policy.cpp" />
     <ClCompile Include="renderer\settings.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -877,6 +880,9 @@
     <ClInclude Include="renderer\json.hpp" />
     <ClInclude Include="renderer\override.h" />
     <ClInclude Include="renderer\ownedcs.h" />
+    <ClInclude Include="renderer\profile_runtime.h" />
+    <ClInclude Include="renderer\renderer_activation.h" />
+    <ClInclude Include="renderer\renderer_policy.h" />
     <ClInclude Include="renderer\resource.h" />
     <ClInclude Include="renderer\settings.h" />
     <ClInclude Include="shared\hook_compatibility.h" />

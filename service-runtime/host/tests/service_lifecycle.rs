@@ -3,7 +3,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use mactype_service_contract::{
-    ComponentReadiness, HealthReport, HealthState, ReadinessReport, StructuredServiceError,
+    ComponentReadiness, HealthReport, HealthState, ProfileDigest, ReadinessReport,
+    RendererRuntimeBinding, RuntimeGenerationId, StructuredServiceError,
 };
 use mactype_service_host::{
     CompositeHealthPublisher, FileHealthPublisher, HealthPublisher, InitializedRuntime,
@@ -12,6 +13,14 @@ use mactype_service_host::{
 };
 
 const PROFILE: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const RUNTIME_GENERATION: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+fn binding() -> RendererRuntimeBinding {
+    RendererRuntimeBinding::new(
+        RuntimeGenerationId::parse(RUNTIME_GENERATION).unwrap(),
+        ProfileDigest::parse(PROFILE).unwrap(),
+    )
+}
 
 #[derive(Default)]
 struct RecorderState {
@@ -57,7 +66,7 @@ struct ReadyInitializer;
 impl RuntimeInitializer for ReadyInitializer {
     fn initialize(&self) -> Result<InitializedRuntime, StructuredServiceError> {
         Ok(InitializedRuntime::ready(
-            Some(PROFILE.to_owned()),
+            binding(),
             ReadinessReport::ready(),
         ))
     }
@@ -274,7 +283,7 @@ fn incomplete_required_readiness_is_reported_as_failed_before_exit() {
     impl RuntimeInitializer for IncompleteInitializer {
         fn initialize(&self) -> Result<InitializedRuntime, StructuredServiceError> {
             Ok(InitializedRuntime::ready(
-                Some(PROFILE.to_owned()),
+                binding(),
                 ReadinessReport {
                     profile: ComponentReadiness::Ready,
                     observer: ComponentReadiness::Initializing,
@@ -419,7 +428,7 @@ struct FailingDriverInitializer {
 impl RuntimeInitializer for FailingDriverInitializer {
     fn initialize(&self) -> Result<InitializedRuntime, StructuredServiceError> {
         Ok(InitializedRuntime::driven(
-            Some(PROFILE.to_owned()),
+            binding(),
             ReadinessReport::ready(),
             Box::new(FailingDriver {
                 wait_for_stop: self.wait_for_stop,
@@ -537,7 +546,7 @@ fn driven_graceful_stop_replaces_degraded_with_terminal_unknown_before_scm_stopp
     impl RuntimeInitializer for DrivenInitializer {
         fn initialize(&self) -> Result<InitializedRuntime, StructuredServiceError> {
             Ok(InitializedRuntime::driven(
-                Some(PROFILE.to_owned()),
+                binding(),
                 ReadinessReport::ready(),
                 Box::new(RecordingDriver {
                     ran: self.ran.clone(),

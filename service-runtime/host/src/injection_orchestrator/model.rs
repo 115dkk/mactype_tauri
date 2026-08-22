@@ -1,6 +1,8 @@
 use std::time::Duration;
 
-use crate::ProcessIdentity;
+use mactype_service_contract::RendererRuntimeBinding;
+
+use crate::observer::{BrokerDisposition, ProcessIdentity};
 
 pub const MAX_TRACKED_PROCESS_RESULTS: usize = 4_096;
 
@@ -38,8 +40,9 @@ pub enum ProcessOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcessAttemptRecord {
     pub identity: ProcessIdentity,
-    pub runtime_generation_id: String,
+    pub binding: RendererRuntimeBinding,
     pub outcome: ProcessOutcome,
+    pub broker_disposition: BrokerDisposition,
     pub attempts: u8,
     pub code: String,
     pub win32_error: Option<u32>,

@@ -17,6 +17,7 @@ cmake --build $build --config RelWithDebInfo --target `
     renderer-raii-tests `
     hook-lifecycle-tests `
     freetype-runtime-tests `
+    renderer-policy-tests `
     font-substitution-tests
 
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -48,6 +49,7 @@ try {
         'renderer-raii-tests.exe',
         'hook-lifecycle-tests.exe',
         'freetype-runtime-tests.exe',
+        'renderer-policy-tests.exe',
         'font-substitution-tests.exe'
     )) {
         & (Join-Path $build "RelWithDebInfo\$test")

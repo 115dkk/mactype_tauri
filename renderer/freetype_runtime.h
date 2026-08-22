@@ -1,5 +1,7 @@
 #pragma once
 
+#include "renderer_policy.h"
+
 #include <cstdint>
 #include <limits>
 #include <utility>
@@ -64,24 +66,10 @@ struct RasterCacheKey
 	}
 };
 
-// Immutable for one render request. Settings reloads may publish a new policy,
-// but an in-flight glyph run never observes a mixture of old and new values.
-struct RasterPolicy
-{
-	int fontLoader = 0;
-	int fontLinkMode = 0;
-	int bitmapHeight = 0;
-	int bolderMode = 0;
-	int widthMode = 0;
-	int lcdFilter = 0;
-	bool hintSmallFont = false;
-	bool harmonyLcd = false;
-	bool loadColorFont = false;
-	bool invertColor = false;
-	float gamma = 1.0f;
-	std::uint32_t shadowDarkColor = 0;
-	std::uint32_t shadowLightColor = 0;
-};
+// Compatibility name for the immutable per-render view published by
+// ProfileRuntime. The policy owns its root snapshot generation.
+using RasterPolicy = ::renderer::RasterPolicy;
+using StartupPolicy = ::renderer::FreeTypeStartupPolicy;
 
 // FTC_Manager owns faces and caches that call back into its FT_Library. This
 // pair makes the required manager-before-library release order impossible to

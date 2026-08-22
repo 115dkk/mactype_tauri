@@ -86,6 +86,9 @@ jobs:
         with:
           name: mactype-open-core
           path: artifacts/open-core
+      - name: Verify renderer activation generated sources and x86/x64 ABI
+        shell: pwsh
+        run: scripts/ci/Test-RendererActivationContract.ps1
       - name: Check standalone service formatting
         run: cargo fmt --manifest-path service-runtime/Cargo.toml --all -- --check
       - name: Lint standalone service without Tauri or WebView

@@ -1,43 +1,39 @@
 use std::{collections::VecDeque, time::Duration};
 
 use mactype_service_contract::{
-    ComponentReadiness, HealthState, InjectionTelemetry, ReadinessReport, StructuredServiceError,
+    ComponentReadiness, HealthState, InjectionTelemetry, ReadinessReport, RendererRuntimeBinding,
+    StructuredServiceError,
 };
 
-use crate::{
-    subscribe_process_creation, InitializedRuntime, InjectionBroker, ProcessArchitecture,
-    ProcessEventSource, ProcessInspector, RuntimeDriver, RuntimeHealthReporter, StopSignal,
+use crate::injection_orchestrator::{
+    InjectionOrchestrator, ProcessOutcome, RetryPolicy, RetryScheduler,
 };
+use crate::observer::{
+    subscribe_process_creation, InjectionBroker, ProcessArchitecture, ProcessEventSource,
+};
+use crate::runtime::{InitializedRuntime, RuntimeDriver, RuntimeHealthReporter, StopSignal};
+use crate::target_validation::ProcessInspector;
 
 const MAX_TOLERATED_CONSECUTIVE_HEALTH_REPORT_FAILURES: usize = 20;
 
 pub fn initialize_process_orchestration(
-    active_profile_digest: Option<String>,
+    binding: RendererRuntimeBinding,
     service_pid: u32,
-    generation_id: impl Into<String>,
     mut source: Box<dyn ProcessEventSource>,
     inspector: Box<dyn ProcessInspector>,
     broker: Box<dyn InjectionBroker>,
 ) -> Result<InitializedRuntime, StructuredServiceError> {
-    let profile_digest = active_profile_digest
-        .clone()
-        .ok_or_else(|| StructuredServiceError {
-            code: "active-profile-unavailable".to_owned(),
-            message: "process orchestration requires an active protected profile".to_owned(),
-            win32_error: None,
-        })?;
     broker.verify_ready(ProcessArchitecture::X86)?;
     broker.verify_ready(ProcessArchitecture::X64)?;
     subscribe_process_creation(source.as_mut())?;
     let snapshot_pids = source.snapshot_pids()?.into();
 
     Ok(InitializedRuntime::driven(
-        active_profile_digest,
+        binding,
         ReadinessReport::ready(),
         Box::new(ProcessOrchestrationDriver {
             service_pid,
-            generation_id: generation_id.into(),
-            profile_digest,
+            binding,
             snapshot_pids,
             source,
             inspector,
@@ -48,8 +44,7 @@ pub fn initialize_process_orchestration(
 
 struct ProcessOrchestrationDriver {
     service_pid: u32,
-    generation_id: String,
-    profile_digest: String,
+    binding: RendererRuntimeBinding,
     snapshot_pids: VecDeque<u32>,
     source: Box<dyn ProcessEventSource>,
     inspector: Box<dyn ProcessInspector>,
@@ -63,13 +58,12 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
         health: &dyn RuntimeHealthReporter,
     ) -> Result<(), StructuredServiceError> {
         let scheduler = StopRetryScheduler(stop);
-        let mut orchestrator = crate::InjectionOrchestrator::with_runtime_context(
+        let mut orchestrator = InjectionOrchestrator::with_retry_policy(
             self.service_pid,
-            &self.generation_id,
-            &self.profile_digest,
+            self.binding,
             self.inspector.as_ref(),
             self.broker.as_ref(),
-            crate::RetryPolicy::default(),
+            RetryPolicy::default(),
             &scheduler,
         );
         let mut consecutive_health_report_failures = 0;
@@ -107,7 +101,7 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
                 }
             };
             match orchestrator.handle_pid(pid) {
-                Ok(crate::ProcessOutcome::Injected) => {
+                Ok(ProcessOutcome::Injected) => {
                     report_runtime_health(
                         health,
                         &mut consecutive_health_report_failures,
@@ -117,7 +111,7 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
                         None,
                     )?;
                 }
-                Ok(crate::ProcessOutcome::Rejected | crate::ProcessOutcome::RetryExhausted) => {
+                Ok(ProcessOutcome::Rejected | ProcessOutcome::RetryExhausted) => {
                     if let Some(error) = orchestrator.generation_health_error() {
                         report_runtime_health(
                             health,
@@ -129,7 +123,7 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
                         )?;
                     }
                 }
-                Ok(crate::ProcessOutcome::Cancelled) => return Ok(()),
+                Ok(ProcessOutcome::Cancelled) => return Ok(()),
                 Ok(_) => {}
                 Err(error) => {
                     report_runtime_health(
@@ -172,7 +166,7 @@ fn report_runtime_health(
 
 struct StopRetryScheduler<'a>(&'a dyn StopSignal);
 
-impl crate::RetryScheduler for StopRetryScheduler<'_> {
+impl RetryScheduler for StopRetryScheduler<'_> {
     fn wait(&self, delay: Duration) -> bool {
         matches!(self.0.wait_timeout(delay), Ok(false))
     }

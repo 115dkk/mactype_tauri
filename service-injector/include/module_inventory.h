@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string_view>
@@ -19,7 +20,11 @@ enum class FixedModuleState {
                                       std::wstring_view right) noexcept;
 [[nodiscard]] FixedModuleState fixed_module_state(
     HANDLE process, const std::filesystem::path& expected_path) noexcept;
+[[nodiscard]] std::optional<std::uintptr_t> fixed_module_base(
+    HANDLE process, const std::filesystem::path& expected_path) noexcept;
 [[nodiscard]] std::optional<LPTHREAD_START_ROUTINE> remote_load_library(
+    HANDLE process) noexcept;
+[[nodiscard]] std::optional<LPTHREAD_START_ROUTINE> remote_free_library(
     HANDLE process) noexcept;
 
 }  // namespace mactype::injector

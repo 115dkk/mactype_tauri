@@ -1,8 +1,10 @@
 #pragma once
 
 #include "broker_request.h"
+#include "renderer_activation_contract.h"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -13,6 +15,7 @@ enum class ResultStatus {
     skipped,
     rejected,
     failed,
+    integrity_failed,
     timed_out,
 };
 
@@ -25,6 +28,7 @@ struct Result final {
     std::string_view module;
     std::uint32_t windows_error{};
     bool cleanup_complete{true};
+    std::optional<MacTypeRendererActivationEvidenceV1> renderer_evidence;
 };
 
 [[nodiscard]] Result make_result(

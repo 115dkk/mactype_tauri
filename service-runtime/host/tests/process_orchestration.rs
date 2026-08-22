@@ -3,7 +3,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use mactype_service_contract::StructuredServiceError;
+use mactype_service_contract::{
+    ProfileDigest, RendererRuntimeBinding, RuntimeGenerationId, StructuredServiceError,
+};
 use mactype_service_host::{
     initialize_process_orchestration, subscribe_process_creation, BinarySignaturePolicy,
     BrokerDisposition, BrokerResult, DynamicCodePolicy, InjectionBroker, InjectionRequest,
@@ -12,6 +14,17 @@ use mactype_service_host::{
     ProcessOutcome, RetryPolicy, RetryScheduler, SessionChange, TargetLiveness,
     MAX_TRACKED_PROCESS_RESULTS, PROCESS_CREATION_QUERY, TARGET_VANISHED_RESULT_CODE,
 };
+
+const PROFILE_DIGEST: &str =
+    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const RUNTIME_GENERATION: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+fn binding() -> RendererRuntimeBinding {
+    RendererRuntimeBinding::new(
+        RuntimeGenerationId::parse(RUNTIME_GENERATION).unwrap(),
+        ProfileDigest::parse(PROFILE_DIGEST).unwrap(),
+    )
+}
 
 #[derive(Default)]
 struct RecordingEventSource {
@@ -108,12 +121,7 @@ fn process_identity_is_requeried_before_the_fixed_broker_request() {
         identity: identity.clone(),
     };
     let broker = RecordingBroker::default();
-    let mut orchestrator = ProcessOrchestrator::new(
-        900,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        &inspector,
-        &broker,
-    );
+    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
 
     assert_eq!(
         orchestrator.handle_pid(42).unwrap(),
@@ -123,8 +131,7 @@ fn process_identity_is_requeried_before_the_fixed_broker_request() {
         *broker.requests.lock().unwrap(),
         [InjectionRequest {
             identity,
-            generation_id: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-                .to_owned(),
+            binding: binding(),
         }]
     );
 }
@@ -141,12 +148,7 @@ fn session_zero_service_self_protected_and_critical_targets_are_skipped() {
     let service_inspector = FixedInspector {
         identity: service_self.clone(),
     };
-    let mut orchestrator = ProcessOrchestrator::new(
-        900,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        &service_inspector,
-        &broker,
-    );
+    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &service_inspector, &broker);
     assert_eq!(
         orchestrator.handle_pid(service_self.pid).unwrap(),
         ProcessOutcome::Skipped
@@ -178,12 +180,7 @@ fn session_zero_service_self_protected_and_critical_targets_are_skipped() {
         let pid = inspection.identity.pid;
         let inspector = InspectionInspector(inspection);
         let broker = RecordingBroker::default();
-        let mut orchestrator = ProcessOrchestrator::new(
-            900,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            &inspector,
-            &broker,
-        );
+        let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
 
         assert_eq!(
             orchestrator.handle_pid(pid).unwrap(),
@@ -231,12 +228,7 @@ fn an_explicit_hook_block_skips_only_that_process_without_latching_the_image_nam
         inspections: Mutex::new(VecDeque::from([blocked.clone(), blocked, eligible])),
     };
     let broker = RecordingBroker::default();
-    let mut orchestrator = ProcessOrchestrator::new(
-        900,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        &inspector,
-        &broker,
-    );
+    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
 
     assert_eq!(
         orchestrator.handle_pid(42).unwrap(),
@@ -301,23 +293,13 @@ fn unknown_inspector_failures_and_identity_mismatch_remain_errors_without_helper
             win32_error: Some(1722),
         }),
     };
-    let mut orchestrator = ProcessOrchestrator::new(
-        900,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        &inspector,
-        &broker,
-    );
+    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
 
     let error = orchestrator.handle_pid(42).unwrap_err();
     assert_eq!(error.code, "inspector-infrastructure-failed");
     assert!(broker.requests.lock().unwrap().is_empty());
 
-    let mut orchestrator = ProcessOrchestrator::new(
-        900,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        &MismatchedInspector,
-        &broker,
-    );
+    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &MismatchedInspector, &broker);
     let error = orchestrator.handle_pid(42).unwrap_err();
     assert_eq!(error.code, "process-identity-mismatch");
     assert!(broker.requests.lock().unwrap().is_empty());
@@ -351,12 +333,7 @@ fn duplicate_identity_is_suppressed_but_a_reused_pid_with_new_creation_time_is_p
         identities: Mutex::new(VecDeque::from([identity.clone(), identity, reused])),
     };
     let broker = RecordingBroker::default();
-    let mut orchestrator = ProcessOrchestrator::new(
-        900,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        &inspector,
-        &broker,
-    );
+    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
 
     assert_eq!(
         orchestrator.handle_pid(42).unwrap(),
@@ -409,12 +386,12 @@ fn retryable_helper_failures_use_bounded_exponential_backoff() {
     let broker = SequenceBroker {
         results: Mutex::new(VecDeque::from([
             BrokerResult {
-                disposition: BrokerDisposition::RetryableFailure,
+                disposition: BrokerDisposition::Retryable,
                 code: "session-unavailable".to_owned(),
                 win32_error: Some(5),
             },
             BrokerResult {
-                disposition: BrokerDisposition::RetryableFailure,
+                disposition: BrokerDisposition::Retryable,
                 code: "architecture-unavailable".to_owned(),
                 win32_error: Some(5),
             },
@@ -429,7 +406,7 @@ fn retryable_helper_failures_use_bounded_exponential_backoff() {
     let scheduler = RecordingScheduler::default();
     let mut orchestrator = ProcessOrchestrator::with_retry_policy(
         900,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        binding(),
         &inspector,
         &broker,
         RetryPolicy {
@@ -452,7 +429,7 @@ fn retryable_helper_failures_use_bounded_exponential_backoff() {
 }
 
 #[test]
-fn each_explicitly_safe_transient_code_retries_the_same_process_identity() {
+fn each_typed_retryable_outcome_retries_the_same_process_identity() {
     for code in [
         "session-unavailable",
         "identity-unavailable",
@@ -470,7 +447,7 @@ fn each_explicitly_safe_transient_code_retries_the_same_process_identity() {
         let broker = SequenceBroker {
             results: Mutex::new(VecDeque::from([
                 BrokerResult {
-                    disposition: BrokerDisposition::RetryableFailure,
+                    disposition: BrokerDisposition::Retryable,
                     code: code.to_owned(),
                     win32_error: Some(5),
                 },
@@ -485,7 +462,7 @@ fn each_explicitly_safe_transient_code_retries_the_same_process_identity() {
         let scheduler = RecordingScheduler::default();
         let mut orchestrator = ProcessOrchestrator::with_retry_policy(
             900,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            binding(),
             &inspector,
             &broker,
             RetryPolicy::default(),
@@ -495,7 +472,7 @@ fn each_explicitly_safe_transient_code_retries_the_same_process_identity() {
         assert_eq!(
             orchestrator.handle_pid(42).unwrap(),
             ProcessOutcome::Injected,
-            "{code} must be the bounded safe-retry allowlist"
+            "typed retryable evidence {code} must retry"
         );
         assert_eq!(broker.requests.lock().unwrap().len(), 2);
         assert_eq!(scheduler.waits.lock().unwrap().len(), 1);
@@ -503,7 +480,7 @@ fn each_explicitly_safe_transient_code_retries_the_same_process_identity() {
 }
 
 #[test]
-fn only_explicitly_safe_transient_codes_can_retry_the_same_process_identity() {
+fn diagnostic_codes_cannot_promote_a_verified_rejection_to_retryable() {
     for code in [
         "remote-load-timeout",
         "remote-load-cleanup-unknown",
@@ -531,7 +508,7 @@ fn only_explicitly_safe_transient_codes_can_retry_the_same_process_identity() {
         };
         let broker = SequenceBroker {
             results: Mutex::new(VecDeque::from([BrokerResult {
-                disposition: BrokerDisposition::RetryableFailure,
+                disposition: BrokerDisposition::Rejected,
                 code: code.to_owned(),
                 win32_error: Some(5),
             }])),
@@ -540,7 +517,7 @@ fn only_explicitly_safe_transient_codes_can_retry_the_same_process_identity() {
         let scheduler = RecordingScheduler::default();
         let mut orchestrator = ProcessOrchestrator::with_retry_policy(
             900,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            binding(),
             &inspector,
             &broker,
             RetryPolicy::default(),
@@ -556,6 +533,7 @@ fn only_explicitly_safe_transient_codes_can_retry_the_same_process_identity() {
         let result = orchestrator.last_result(42, 100).unwrap();
         assert_eq!(result.attempts, 1);
         assert_eq!(result.code, code);
+        assert!(orchestrator.generation_health_error().is_none());
     }
 }
 
@@ -565,6 +543,85 @@ impl RetryScheduler for CancellingScheduler {
     fn wait(&self, _delay: Duration) -> bool {
         false
     }
+}
+
+#[test]
+fn retry_policy_consumes_typed_broker_semantics_not_diagnostic_code_text() {
+    let inspector = FixedInspector {
+        identity: ProcessIdentity {
+            pid: 42,
+            creation_time: 100,
+            session_id: 2,
+            architecture: ProcessArchitecture::X64,
+        },
+    };
+    let broker = SequenceBroker {
+        results: Mutex::new(VecDeque::from([
+            BrokerResult {
+                disposition: BrokerDisposition::Retryable,
+                code: "diagnostic-text-does-not-authorize-retry".to_owned(),
+                win32_error: None,
+            },
+            BrokerResult {
+                disposition: BrokerDisposition::Injected,
+                code: "module-loaded".to_owned(),
+                win32_error: None,
+            },
+        ])),
+        requests: Mutex::new(Vec::new()),
+    };
+    let scheduler = RecordingScheduler::default();
+    let mut orchestrator = ProcessOrchestrator::with_retry_policy(
+        900,
+        binding(),
+        &inspector,
+        &broker,
+        RetryPolicy::default(),
+        &scheduler,
+    );
+
+    assert_eq!(
+        orchestrator.handle_pid(42).unwrap(),
+        ProcessOutcome::Injected
+    );
+    assert_eq!(broker.requests.lock().unwrap().len(), 2);
+    assert_eq!(scheduler.waits.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn invalid_broker_diagnostic_evidence_is_bounded_and_typed_as_integrity_uncertainty() {
+    let inspector = FixedInspector {
+        identity: ProcessIdentity {
+            pid: 42,
+            creation_time: 100,
+            session_id: 2,
+            architecture: ProcessArchitecture::X64,
+        },
+    };
+    let broker = SequenceBroker {
+        results: Mutex::new(VecDeque::from([BrokerResult {
+            disposition: BrokerDisposition::Rejected,
+            code: "x".repeat(129),
+            win32_error: None,
+        }])),
+        requests: Mutex::new(Vec::new()),
+    };
+    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
+
+    assert_eq!(
+        orchestrator.handle_pid(42).unwrap(),
+        ProcessOutcome::Rejected
+    );
+    let record = orchestrator.last_result(42, 100).unwrap();
+    assert_eq!(
+        record.broker_disposition,
+        BrokerDisposition::UncertainIntegrity
+    );
+    assert_eq!(record.code, "broker-diagnostic-evidence-invalid");
+    assert_eq!(
+        orchestrator.generation_health_error().unwrap().code,
+        "injection-helper-response-integrity-unknown"
+    );
 }
 
 #[test]
@@ -579,7 +636,7 @@ fn stop_or_shutdown_cancels_retry_without_another_helper_launch() {
     };
     let broker = SequenceBroker {
         results: Mutex::new(VecDeque::from([BrokerResult {
-            disposition: BrokerDisposition::RetryableFailure,
+            disposition: BrokerDisposition::Retryable,
             code: "session-unavailable".to_owned(),
             win32_error: None,
         }])),
@@ -587,7 +644,7 @@ fn stop_or_shutdown_cancels_retry_without_another_helper_launch() {
     };
     let mut orchestrator = ProcessOrchestrator::with_retry_policy(
         900,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        binding(),
         &inspector,
         &broker,
         RetryPolicy::default(),
@@ -615,12 +672,12 @@ fn exhausted_retry_records_the_last_bounded_process_result() {
     let broker = SequenceBroker {
         results: Mutex::new(VecDeque::from([
             BrokerResult {
-                disposition: BrokerDisposition::RetryableFailure,
+                disposition: BrokerDisposition::Retryable,
                 code: "identity-unavailable".to_owned(),
                 win32_error: Some(87),
             },
             BrokerResult {
-                disposition: BrokerDisposition::RetryableFailure,
+                disposition: BrokerDisposition::Retryable,
                 code: "module-inventory-unavailable".to_owned(),
                 win32_error: Some(1460),
             },
@@ -630,7 +687,7 @@ fn exhausted_retry_records_the_last_bounded_process_result() {
     let scheduler = RecordingScheduler::default();
     let mut orchestrator = ProcessOrchestrator::with_retry_policy(
         900,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        binding(),
         &inspector,
         &broker,
         RetryPolicy {
@@ -649,10 +706,7 @@ fn exhausted_retry_records_the_last_bounded_process_result() {
         .last_result(identity.pid, identity.creation_time)
         .expect("the final bounded attempt must remain observable");
     assert_eq!(result.identity, identity);
-    assert_eq!(
-        result.runtime_generation_id,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-    );
+    assert_eq!(result.binding, binding());
     assert_eq!(result.outcome, ProcessOutcome::RetryExhausted);
     assert_eq!(result.attempts, 2);
     assert_eq!(result.code, "module-inventory-unavailable");
@@ -675,12 +729,8 @@ impl ProcessInspector for IdentityFromPidInspector {
 #[test]
 fn process_result_memory_is_bounded_and_evicts_the_oldest_identity() {
     let broker = RecordingBroker::default();
-    let mut orchestrator = ProcessOrchestrator::new(
-        u32::MAX,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        &IdentityFromPidInspector,
-        &broker,
-    );
+    let mut orchestrator =
+        ProcessOrchestrator::new(u32::MAX, binding(), &IdentityFromPidInspector, &broker);
 
     for pid in 1..=(MAX_TRACKED_PROCESS_RESULTS as u32 + 1) {
         assert_eq!(
@@ -712,12 +762,7 @@ fn wts_logoff_clears_dedupe_state_for_that_session() {
     };
     let inspector = FixedInspector { identity };
     let broker = RecordingBroker::default();
-    let mut orchestrator = ProcessOrchestrator::new(
-        900,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        &inspector,
-        &broker,
-    );
+    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
     assert_eq!(
         orchestrator.handle_pid(42).unwrap(),
         ProcessOutcome::Injected
@@ -749,12 +794,7 @@ fn session_queue_overflow_clears_all_dedupe_state() {
     };
     let inspector = FixedInspector { identity };
     let broker = RecordingBroker::default();
-    let mut orchestrator = ProcessOrchestrator::new(
-        900,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        &inspector,
-        &broker,
-    );
+    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
     assert_eq!(
         orchestrator.handle_pid(42).unwrap(),
         ProcessOutcome::Injected
@@ -807,10 +847,9 @@ fn verified_late_success_records_generation_bound_telemetry() {
         },
     };
     let scheduler = RecordingScheduler::default();
-    let mut orchestrator = ProcessOrchestrator::with_runtime_context(
+    let mut orchestrator = ProcessOrchestrator::with_retry_policy(
         900,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        binding(),
         &inspector,
         &LateSuccessBroker,
         RetryPolicy::default(),
@@ -828,10 +867,8 @@ fn verified_late_success_records_generation_bound_telemetry() {
     assert_eq!(success.pid, 42);
     assert_eq!(success.creation_time, 100);
     assert_eq!(success.session_id, 2);
-    assert_eq!(
-        success.runtime_generation_id,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-    );
+    assert_eq!(success.runtime_generation_id, RUNTIME_GENERATION);
+    assert_eq!(success.profile_digest, PROFILE_DIGEST);
 }
 
 #[test]
@@ -845,12 +882,7 @@ fn service_stop_cancellation_is_not_retried_or_classified_as_degraded() {
         },
     };
     let broker = ServiceStopBroker;
-    let mut orchestrator = ProcessOrchestrator::new(
-        900,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        &inspector,
-        &broker,
-    );
+    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
 
     assert_eq!(
         orchestrator.handle_pid(42).unwrap(),
@@ -873,18 +905,13 @@ fn post_resume_service_stop_is_terminal_and_degrades_its_generation() {
     };
     let broker = SequenceBroker {
         results: Mutex::new(VecDeque::from([BrokerResult {
-            disposition: BrokerDisposition::Rejected,
+            disposition: BrokerDisposition::UncertainCleanup,
             code: "helper-service-stop-cleanup-unknown".to_owned(),
             win32_error: Some(1223),
         }])),
         requests: Mutex::new(Vec::new()),
     };
-    let mut orchestrator = ProcessOrchestrator::new(
-        900,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        &inspector,
-        &broker,
-    );
+    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
 
     assert_eq!(
         orchestrator.handle_pid(42).unwrap(),
@@ -930,7 +957,7 @@ impl ProcessInspector for ProbingInspector {
 fn cleanup_unknown_broker() -> SequenceBroker {
     SequenceBroker {
         results: Mutex::new(VecDeque::from([BrokerResult {
-            disposition: BrokerDisposition::Rejected,
+            disposition: BrokerDisposition::UncertainCleanup,
             code: "post-injection-state-cleanup-unknown".to_owned(),
             win32_error: Some(299),
         }])),
@@ -948,12 +975,7 @@ fn cleanup_unknown_for_a_vanished_target_is_a_trusted_skip_with_a_bounded_result
     };
     let inspector = ProbingInspector::new(identity.clone(), TargetLiveness::Vanished);
     let broker = cleanup_unknown_broker();
-    let mut orchestrator = ProcessOrchestrator::new(
-        900,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        &inspector,
-        &broker,
-    );
+    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
 
     assert_eq!(
         orchestrator.handle_pid(42).unwrap(),
@@ -988,12 +1010,7 @@ fn cleanup_unknown_for_a_target_still_alive_keeps_the_degraded_classification() 
     };
     let inspector = ProbingInspector::new(identity, TargetLiveness::Alive);
     let broker = cleanup_unknown_broker();
-    let mut orchestrator = ProcessOrchestrator::new(
-        900,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        &inspector,
-        &broker,
-    );
+    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
 
     assert_eq!(
         orchestrator.handle_pid(42).unwrap(),
@@ -1018,12 +1035,7 @@ fn undeterminable_liveness_after_cleanup_unknown_keeps_the_degraded_classificati
     };
     let inspector = ProbingInspector::new(identity, TargetLiveness::Unknown);
     let broker = cleanup_unknown_broker();
-    let mut orchestrator = ProcessOrchestrator::new(
-        900,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        &inspector,
-        &broker,
-    );
+    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
 
     assert_eq!(
         orchestrator.handle_pid(42).unwrap(),
@@ -1050,12 +1062,7 @@ fn terminal_results_without_cleanup_unknown_never_probe_target_liveness() {
         }])),
         requests: Mutex::new(Vec::new()),
     };
-    let mut orchestrator = ProcessOrchestrator::new(
-        900,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        &inspector,
-        &broker,
-    );
+    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
 
     assert_eq!(
         orchestrator.handle_pid(42).unwrap(),
@@ -1084,12 +1091,7 @@ fn conflicting_mactype_module_is_terminal_deduplicated_and_process_local() {
         }])),
         requests: Mutex::new(Vec::new()),
     };
-    let mut orchestrator = ProcessOrchestrator::new(
-        900,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        &inspector,
-        &broker,
-    );
+    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
 
     assert_eq!(
         orchestrator.handle_pid(42).unwrap(),
@@ -1146,9 +1148,8 @@ fn runtime_is_ready_only_after_exact_subscription_and_both_helpers_are_verified(
     let broker = ReadyBroker::default();
     let checked = broker.checked.clone();
     let runtime = initialize_process_orchestration(
-        Some("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned()),
+        binding(),
         900,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         Box::new(SharedEventSource {
             query: query.clone(),
         }),
@@ -1168,6 +1169,7 @@ fn runtime_is_ready_only_after_exact_subscription_and_both_helpers_are_verified(
         runtime.readiness,
         mactype_service_contract::ReadinessReport::ready()
     );
+    assert_eq!(runtime.binding, binding());
     assert_eq!(
         query.lock().unwrap().as_deref(),
         Some(PROCESS_CREATION_QUERY)

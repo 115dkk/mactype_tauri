@@ -3,11 +3,15 @@ mod model;
 use std::collections::{HashMap, VecDeque};
 
 use mactype_service_contract::{
-    InjectionArchitecture, InjectionSuccess, InjectionTelemetry, StructuredServiceError,
+    InjectionArchitecture, InjectionSuccess, InjectionTelemetry, RendererRuntimeBinding,
+    StructuredServiceError,
 };
 
-use crate::{
-    BrokerDisposition, BrokerResult, InjectionBroker, InjectionRequest, ProcessIdentity,
+use crate::observer::{
+    BrokerDisposition, BrokerResult, InjectionBroker, InjectionRequest, ProcessArchitecture,
+    ProcessIdentity,
+};
+use crate::target_validation::{
     ProcessInspector, ProcessTargetDecision, ProcessTargetValidator, TargetLiveness,
 };
 
@@ -21,8 +25,7 @@ pub use model::{
 pub const TARGET_VANISHED_RESULT_CODE: &str = "injection-target-vanished";
 
 pub struct InjectionOrchestrator<'a> {
-    generation_id: String,
-    profile_digest: Option<String>,
+    binding: RendererRuntimeBinding,
     target_validator: ProcessTargetValidator<'a>,
     inspector: &'a dyn ProcessInspector,
     broker: &'a dyn InjectionBroker,
@@ -37,13 +40,13 @@ pub struct InjectionOrchestrator<'a> {
 impl<'a> InjectionOrchestrator<'a> {
     pub fn new(
         service_pid: u32,
-        generation_id: impl Into<String>,
+        binding: RendererRuntimeBinding,
         inspector: &'a dyn ProcessInspector,
         broker: &'a dyn InjectionBroker,
     ) -> Self {
         Self::build(
             service_pid,
-            generation_id,
+            binding,
             inspector,
             broker,
             RetryPolicy::default(),
@@ -53,7 +56,7 @@ impl<'a> InjectionOrchestrator<'a> {
 
     pub fn with_retry_policy(
         service_pid: u32,
-        generation_id: impl Into<String>,
+        binding: RendererRuntimeBinding,
         inspector: &'a dyn ProcessInspector,
         broker: &'a dyn InjectionBroker,
         retry_policy: RetryPolicy,
@@ -61,7 +64,7 @@ impl<'a> InjectionOrchestrator<'a> {
     ) -> Self {
         Self::build(
             service_pid,
-            generation_id,
+            binding,
             inspector,
             broker,
             retry_policy,
@@ -69,38 +72,16 @@ impl<'a> InjectionOrchestrator<'a> {
         )
     }
 
-    pub fn with_runtime_context(
-        service_pid: u32,
-        generation_id: impl Into<String>,
-        profile_digest: impl Into<String>,
-        inspector: &'a dyn ProcessInspector,
-        broker: &'a dyn InjectionBroker,
-        retry_policy: RetryPolicy,
-        retry_scheduler: &'a dyn RetryScheduler,
-    ) -> Self {
-        let mut orchestrator = Self::with_retry_policy(
-            service_pid,
-            generation_id,
-            inspector,
-            broker,
-            retry_policy,
-            retry_scheduler,
-        );
-        orchestrator.profile_digest = Some(profile_digest.into());
-        orchestrator
-    }
-
     fn build(
         service_pid: u32,
-        generation_id: impl Into<String>,
+        binding: RendererRuntimeBinding,
         inspector: &'a dyn ProcessInspector,
         broker: &'a dyn InjectionBroker,
         retry_policy: RetryPolicy,
         retry_scheduler: Option<&'a dyn RetryScheduler>,
     ) -> Self {
         Self {
-            generation_id: generation_id.into(),
-            profile_digest: None,
+            binding,
             target_validator: ProcessTargetValidator::new(service_pid, inspector),
             inspector,
             broker,
@@ -128,11 +109,7 @@ impl<'a> InjectionOrchestrator<'a> {
                         identity,
                         ProcessOutcome::Skipped,
                         0,
-                        BrokerResult {
-                            disposition: BrokerDisposition::Skipped,
-                            code: reason.code().to_owned(),
-                            win32_error: None,
-                        },
+                        BrokerResult::new(BrokerDisposition::Skipped, reason.code(), None),
                     );
                 }
                 return Ok(ProcessOutcome::Skipped);
@@ -146,17 +123,12 @@ impl<'a> InjectionOrchestrator<'a> {
         }
         let request = InjectionRequest {
             identity,
-            generation_id: self.generation_id.clone(),
+            binding: self.binding,
         };
         let attempts = self.retry_policy.max_attempts.max(1);
         let mut delay = self.retry_policy.initial_delay;
         for attempt in 1..=attempts {
-            let mut result = self.broker.inject(&request);
-            if result.disposition == BrokerDisposition::RetryableFailure
-                && !safe_to_retry_same_identity(&result.code)
-            {
-                result.disposition = BrokerDisposition::Rejected;
-            }
+            let result = self.broker.inject(&request).into_bounded_evidence();
             if let Some(outcome) = terminal_outcome(result.disposition, attempt == attempts) {
                 if outcome == ProcessOutcome::Injected {
                     self.last_injected_identity = Some(request.identity.clone());
@@ -224,18 +196,14 @@ impl<'a> InjectionOrchestrator<'a> {
 
     pub fn generation_health_error(&self) -> Option<StructuredServiceError> {
         let record = self.most_recent_result()?;
-        let code = if record.code.ends_with("-cleanup-unknown") {
-            "injection-cleanup-unknown"
-        } else if matches!(
-            record.code.as_str(),
-            "helper-response-invalid"
-                | "helper-response-too-large"
-                | "helper-exit-mismatch"
-                | "runtime-generation-mismatch"
-        ) {
-            "injection-helper-response-integrity-unknown"
-        } else {
-            return None;
+        let code = match record.broker_disposition {
+            BrokerDisposition::UncertainCleanup => "injection-cleanup-unknown",
+            BrokerDisposition::UncertainIntegrity => "injection-helper-response-integrity-unknown",
+            BrokerDisposition::Injected
+            | BrokerDisposition::Skipped
+            | BrokerDisposition::Rejected
+            | BrokerDisposition::Retryable
+            | BrokerDisposition::Cancelled => return None,
         };
         Some(StructuredServiceError {
             code: code.to_owned(),
@@ -244,21 +212,13 @@ impl<'a> InjectionOrchestrator<'a> {
                 record.identity.pid,
                 record.identity.creation_time,
                 record.identity.session_id,
-                record.runtime_generation_id,
+                record.binding.runtime_generation_id(),
                 record.code
             ),
             win32_error: record.win32_error,
         })
     }
 
-    /// A `*-cleanup-unknown` result only says the helper could not verify the
-    /// post-injection state; when the target exits during that verification the
-    /// evidence (for example win32 error 299, `ERROR_PARTIAL_COPY`) is a
-    /// process vanish, not runtime damage. Re-checking the exact verified
-    /// identity turns a proven vanish into a normal target skip that must not
-    /// change global service health, while keeping a distinct bounded target
-    /// result for telemetry. An alive or undeterminable target keeps the
-    /// conservative untrustworthy classification.
     fn reclassify_vanished_target(
         &self,
         identity: &ProcessIdentity,
@@ -268,37 +228,35 @@ impl<'a> InjectionOrchestrator<'a> {
         if !matches!(
             outcome,
             ProcessOutcome::Rejected | ProcessOutcome::RetryExhausted
-        ) || !result.code.ends_with("-cleanup-unknown")
+        ) || result.disposition != BrokerDisposition::UncertainCleanup
         {
             return (outcome, result);
         }
         match self.inspector.probe_target_liveness(identity) {
             TargetLiveness::Vanished => (
                 ProcessOutcome::Skipped,
-                BrokerResult {
-                    code: TARGET_VANISHED_RESULT_CODE.to_owned(),
-                    ..result
-                },
+                BrokerResult::new(
+                    BrokerDisposition::Skipped,
+                    TARGET_VANISHED_RESULT_CODE,
+                    result.win32_error,
+                ),
             ),
             TargetLiveness::Alive | TargetLiveness::Unknown => (outcome, result),
         }
     }
 
     fn record_injection_success(&mut self, identity: &ProcessIdentity) {
-        let Some(profile_digest) = &self.profile_digest else {
-            return;
-        };
         self.injection_telemetry.record_success(
             match identity.architecture {
-                crate::ProcessArchitecture::X86 => InjectionArchitecture::X86,
-                crate::ProcessArchitecture::X64 => InjectionArchitecture::X64,
+                ProcessArchitecture::X86 => InjectionArchitecture::X86,
+                ProcessArchitecture::X64 => InjectionArchitecture::X64,
             },
             InjectionSuccess {
                 pid: identity.pid,
                 creation_time: identity.creation_time,
                 session_id: identity.session_id,
-                runtime_generation_id: self.generation_id.clone(),
-                profile_digest: profile_digest.clone(),
+                runtime_generation_id: self.binding.runtime_generation_id().to_string(),
+                profile_digest: self.binding.profile_digest().to_string(),
             },
         );
     }
@@ -310,6 +268,7 @@ impl<'a> InjectionOrchestrator<'a> {
         attempts: u8,
         result: BrokerResult,
     ) {
+        let result = result.into_bounded_evidence();
         let key = (identity.pid, identity.creation_time);
         if !self.processed.contains_key(&key) {
             while self.processed.len() >= MAX_TRACKED_PROCESS_RESULTS {
@@ -323,8 +282,9 @@ impl<'a> InjectionOrchestrator<'a> {
             key,
             ProcessAttemptRecord {
                 identity,
-                runtime_generation_id: self.generation_id.clone(),
+                binding: self.binding,
                 outcome,
+                broker_disposition: result.disposition,
                 attempts,
                 code: result.code,
                 win32_error: result.win32_error,
@@ -338,20 +298,10 @@ fn terminal_outcome(disposition: BrokerDisposition, final_attempt: bool) -> Opti
         BrokerDisposition::Cancelled => Some(ProcessOutcome::Cancelled),
         BrokerDisposition::Injected => Some(ProcessOutcome::Injected),
         BrokerDisposition::Skipped => Some(ProcessOutcome::Skipped),
-        BrokerDisposition::Rejected => Some(ProcessOutcome::Rejected),
-        BrokerDisposition::RetryableFailure if final_attempt => {
-            Some(ProcessOutcome::RetryExhausted)
-        }
-        BrokerDisposition::RetryableFailure => None,
+        BrokerDisposition::Rejected
+        | BrokerDisposition::UncertainCleanup
+        | BrokerDisposition::UncertainIntegrity => Some(ProcessOutcome::Rejected),
+        BrokerDisposition::Retryable if final_attempt => Some(ProcessOutcome::RetryExhausted),
+        BrokerDisposition::Retryable => None,
     }
-}
-
-fn safe_to_retry_same_identity(code: &str) -> bool {
-    matches!(
-        code,
-        "session-unavailable"
-            | "identity-unavailable"
-            | "architecture-unavailable"
-            | "module-inventory-unavailable"
-    )
 }

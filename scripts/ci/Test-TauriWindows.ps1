@@ -39,7 +39,13 @@ if (Test-Path -LiteralPath $sourceIni) {
     }
 }
 $defaultProfile = Join-Path $fixtureRoot 'ini\Default.ini'
-if (-not (Test-Path -LiteralPath $defaultProfile)) { "[FreeType]`r`nNormalWeight=0`r`nGammaValue=1.0`r`n" | Set-Content -LiteralPath $defaultProfile -Encoding utf8NoBOM }
+if (-not (Test-Path -LiteralPath $defaultProfile)) {
+    # The renderer fails closed unless the selected profile is structurally
+    # complete. Keep this synthetic profile minimal, but do not make the smoke
+    # test depend on historical implicit defaults that production rejects.
+    "[General]`r`nDirectWrite=0`r`nFontSubstitutes=0`r`n`r`n[FreeType]`r`nNormalWeight=0`r`nGammaValue=1.0`r`n" |
+        Set-Content -LiteralPath $defaultProfile -Encoding utf8NoBOM
+}
 $globalConfig = Join-Path $fixtureRoot 'MacType.ini'
 if (-not (Test-Path -LiteralPath $globalConfig)) { "[General]`r`nAlternativeFile=ini\Default.ini`r`n" | Set-Content -LiteralPath $globalConfig -Encoding ascii }
 $previousLocalAppData = $env:LOCALAPPDATA

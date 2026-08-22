@@ -740,7 +740,7 @@ function formatRust(content) {
   if (formatted.status !== 0) {
     fail(`rustfmt failed while generating Rust output: ${formatted.stderr || formatted.error}`);
   }
-  return formatted.stdout;
+  return formatted.stdout.replace(/\r\n/g, '\n');
 }
 
 validateSchema();

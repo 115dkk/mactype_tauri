@@ -515,8 +515,6 @@
   "execution.launchedRegistered": "{count} 個の登録アプリを MacType で起動しました。",
   "group.advanced.label": "詳細・実験機能",
   "group.advanced.description": "DirectWrite、キャッシュ、実験機能の全設定です。",
-  "settings.hook_child_processes.label": "子プロセスをフック",
-  "settings.hook_child_processes.description": "HookChildProcesses コア設定をプロファイルに保存します。",
   "settings.use_mapping.label": "フォントファイルをマップ",
   "settings.use_mapping.description": "UseMapping コア設定をプロファイルに保存します。",
   "settings.use_include.label": "包含リストを使用",

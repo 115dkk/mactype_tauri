@@ -515,8 +515,6 @@
   "execution.launchedRegistered": "Started {count} registered apps with MacType.",
   "group.advanced.label": "Advanced & experimental",
   "group.advanced.description": "All DirectWrite, cache, and experimental settings.",
-  "settings.hook_child_processes.label": "Hook child processes",
-  "settings.hook_child_processes.description": "Stores the HookChildProcesses core setting in the profile.",
   "settings.use_mapping.label": "Map font files",
   "settings.use_mapping.description": "Stores the UseMapping core setting in the profile.",
   "settings.use_include.label": "Use include lists",

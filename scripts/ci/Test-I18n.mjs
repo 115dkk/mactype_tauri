@@ -9,6 +9,7 @@ const catalogs = Object.fromEntries(locales.map((locale) => [locale, readJson(`c
 const ko = catalogs.ko;
 const en = catalogs.en;
 const schema = readJson("shared/settings-schema.json");
+const settingIds = new Set(schema.map((setting) => setting.id));
 
 const koKeys = Object.keys(ko).sort();
 const placeholders = (message) => [...message.matchAll(/\{(\w+)\}/g)].map((match) => match[1]).sort();
@@ -21,6 +22,10 @@ for (const [locale, catalog] of Object.entries(catalogs)) {
   }
   for (const key of koKeys) {
     if (!catalog[key].trim()) throw new Error(`Empty translation in ${locale}: ${key}`);
+    const settingKey = key.match(/^settings\.([^.]+)\./);
+    if (settingKey && !settingIds.has(settingKey[1])) {
+      throw new Error(`Orphaned setting translation in ${locale}: ${key}`);
+    }
     if (JSON.stringify(placeholders(ko[key])) !== JSON.stringify(placeholders(catalog[key]))) {
       throw new Error(`Placeholder mismatch in ${locale}: ${key}`);
     }

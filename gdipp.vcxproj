@@ -865,6 +865,7 @@
     <ClInclude Include="renderer\ft2vert.h" />
     <ClInclude Include="renderer\fteng.h" />
     <ClInclude Include="renderer\ftref.h" />
+    <ClInclude Include="renderer\freetype_runtime.h" />
     <ClInclude Include="renderer\gdiPlusFlat2.h" />
     <ClInclude Include="renderer\hash_list.h" />
     <ClInclude Include="renderer\hookCounter.h" />

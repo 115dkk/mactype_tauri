@@ -54,6 +54,10 @@ bool CreateFreeTypeFontEngine() noexcept
 	if (runtime == nullptr) {
 		return false;
 	}
+	if (runtime->engine) {
+		g_pFTEngine = runtime->engine.get();
+		return true;
+	}
 	std::unique_ptr<FreeTypeFontEngine> engine;
 	try {
 		engine = std::make_unique<FreeTypeFontEngine>();
@@ -252,12 +256,15 @@ void FreeTypeCharData::SetGlyph(FT_Render_Mode render_mode, FT_Referenced_Bitmap
 {
 	const bool bMono = (render_mode == FT_RENDER_MODE_MONO);
 	FT_Referenced_BitmapGlyph& gl = bMono ? m_glyphMono : m_glyph;
-	if (gl)
+	int& size = bMono ? m_bmpMonoSize : m_bmpSize;
+	if (gl) {
+		g_pFTEngine->SubMemUsed(size);
+		size = 0;
 		FT_Done_Ref_Glyph(reinterpret_cast<FT_Referenced_Glyph*>(&gl));
+	}
 	{
 		FT_Glyph_Ref_Copy(reinterpret_cast<FT_Referenced_Glyph>(glyph), reinterpret_cast<FT_Referenced_Glyph*>(&gl));
 		if (gl) {
-			int& size = bMono ? m_bmpMonoSize : m_bmpSize;
 			size  = FT_Bitmap_CalcSize(gl->ft_glyph);
 			size += sizeof(FT_BitmapGlyphRec);
 			g_pFTEngine->AddMemUsed(size);
@@ -416,7 +423,21 @@ void FreeTypeFontInfo::Compact()
 {
 	//TRACE(_T("FreeTypeFontInfo::Compact: %d > %d\n"), m_cache.GetSize(), m_nMaxSizes);
 	ResetGCCounter();
-	::CompactMap(m_cache, m_cache.size(), m_nMaxSizes);
+	while (m_cache.size() > static_cast<size_t>(m_nMaxSizes))
+	{
+		CacheArray::iterator victim = m_cache.end();
+		for (CacheArray::iterator candidate = m_cache.begin();
+			 candidate != m_cache.end(); ++candidate)
+		{
+			if (victim == m_cache.end() ||
+				candidate->second->GetMruCounter() <
+					victim->second->GetMruCounter())
+				victim = candidate;
+		}
+		if (victim == m_cache.end())
+			break;
+		m_cache.erase(victim);
+	}
 	CacheArray::const_iterator it=m_cache.begin();
 	for (;it!=m_cache.end();++it)
 		it->second->Deactive();
@@ -493,11 +514,12 @@ FreeTypeFontCache* FreeTypeFontInfo::GetCache(FTC_ScalerRec& scaler, const LOGFO
 	if (scaler.height>0xfff || scaler.width>0xfff/* || scaler.height<0 || scaler.width<0*/)	//超大字体不渲染
 		return nullptr;
 	FreeTypeFontCache* p = nullptr;
-	UINT hash=getCacheHash(scaler.height, weight, italic, lf.lfWidth ? scaler.width : 0);	//计算hash
-	CacheArray::iterator it=m_cache.find(hash); //寻找cache
+	renderer::freetype::RasterCacheKey const key(
+		scaler.height, lf.lfWidth ? scaler.width : 0, weight, italic);
+	CacheArray::iterator it=m_cache.find(key);
 	if (it!=m_cache.end())//cache存在
 	{
-		p = it->second;
+		p = it->second.get();
 	}
 	else
 	{
@@ -508,8 +530,15 @@ FreeTypeFontCache* FreeTypeFontInfo::GetCache(FTC_ScalerRec& scaler, const LOGFO
 		} catch (const std::bad_alloc&) {
 			return nullptr;
 		}
-		m_cache[hash] = cache.release();
-		p = m_cache[hash];
+		try {
+			CacheArray::iterator const inserted =
+				m_cache.emplace(key, std::move(cache)).first;
+			p = inserted->second.get();
+		} catch (const std::bad_alloc&) {
+			return nullptr;
+		}
+		if (m_cache.size() > static_cast<size_t>(m_nMaxSizes))
+			Compact();
 	}
 
 	Assert(p != nullptr);
@@ -616,7 +645,7 @@ BOOL FreeTypeFontEngine::RemoveFont(LPCWSTR FontName)
 		CTLSDCArray::iterator iter = TLSDCArray.begin();
 		while (iter!=TLSDCArray.end())
 		{
-			(static_cast<CBitmapCache*>(*iter))->~CBitmapCache();	//清除掉所有使用中的DC
+			(*iter)->Reset();	// clear cached GDI resources without ending TLS object lifetime
 			++iter;
 		}
 	}
@@ -1085,12 +1114,18 @@ unsigned long FreeTypeSysFontData::IoFunc(
 	FreeTypeSysFontData * pThis = reinterpret_cast<FreeTypeSysFontData*>(stream->descriptor.pointer);
 	Assert(pThis != nullptr);
 
+	unsigned long const readable = renderer::freetype::BoundedStreamReadSize(
+		stream->size, offset, count);
+	if (readable == 0)
+		return 0;
 	DWORD result = 0;
 	if (pThis->m_pMapping) {
-		result = Min(pThis->m_dwSize - offset, count);
+		result = readable;
 		memcpy(buffer, static_cast<const BYTE*>(pThis->m_pMapping.get()) + offset, result);
 	} else {
-		result = ::GetFontData(pThis->m_hdc.get(), pThis->m_isTTC ? TVP_TT_TABLE_ttcf : 0, offset, buffer, count);
+		result = ::GetFontData(
+			pThis->m_hdc.get(), pThis->m_isTTC ? TVP_TT_TABLE_ttcf : 0,
+			offset, buffer, readable);
 		if(result == GDI_ERROR) {
 			// エラー
 			return 0;

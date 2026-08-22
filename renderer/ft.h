@@ -270,6 +270,8 @@ extern FTC_Manager    cache_man;
 extern FTC_CMapCache  cmap_cache;
 extern FTC_ImageCache image_cache;
 
+renderer::freetype::RasterPolicy CaptureFreeTypeRasterPolicy();
+
 struct FreeTypeDrawInfo
 {
 	FT_FaceRec_ dummy_freetype_face;
@@ -312,6 +314,7 @@ struct FreeTypeDrawInfo
 	CBitmapCache* pCache;
 	FREETYPE_PARAMS* params;
 	int* AAModes;
+	renderer::freetype::RasterPolicy rasterPolicy;
 
 
 	FreeTypeDrawInfo(FREETYPE_PARAMS& fp, HDC dc, LOGFONTW* lf = nullptr, CBitmapCache* ca = nullptr, const int* dx = nullptr, int cbString =0, int xs=0, int ys = 0)
@@ -323,7 +326,7 @@ struct FreeTypeDrawInfo
 		, AAModesStorage(static_cast<size_t>(cbString)), Dx(DxStorage.data()), Dy(DyStorage.data())
 		, hdc(dc), xBase(0), y(0), x(0), px(0), yBase(0), yTop(0), height(0), width(0)
 		, lpDx(dx), pCache(ca), params(&fp)
-		, AAModes(AAModesStorage.data())
+		, AAModes(AAModesStorage.data()), rasterPolicy(CaptureFreeTypeRasterPolicy())
 	{
 		if(lf) params->lplf = lf;
 		scaler.height = 12;

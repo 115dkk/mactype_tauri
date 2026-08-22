@@ -118,6 +118,9 @@
     <ClInclude Include="renderer\ftref.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="renderer\freetype_runtime.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="renderer\gdiPlusFlat2.h">
       <Filter>Header Files</Filter>
     </ClInclude>

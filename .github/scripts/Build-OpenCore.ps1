@@ -68,6 +68,44 @@ Sync-Dependency -Url 'https://github.com/snowie2000/IniParser.git' -Path $iniPar
 Sync-Dependency -Url 'https://github.com/microsoft/Detours.git' -Path $detoursRoot -Commit 'd644ce94e8c7f7f5a31591577c78134ea3ac1fae'
 Sync-Dependency -Url 'https://github.com/snowie2000/rewolf-wow64ext.git' -Path $wow64extRoot -Commit '667359c7967249dd9d28d8f8cef65b60e7e2d963'
 
+# MacType calls a private extension that is not part of upstream FreeType's
+# ABI. A matching SHA is necessary but not sufficient: fail closed if the
+# fork is rewritten or checked out incompletely and its expected contract is
+# absent.
+$freeTypeGlyphSource = Get-Content -LiteralPath (
+    Join-Path $freetypeRoot 'src\base\ftglyph.c'
+) -Raw
+foreach ($requiredPattern in @(
+    'FT_Glyph_To_BitmapEx',
+    'FT_Bool\s+loadcolor',
+    'FT_UInt\s+glyphindex',
+    'FT_Face\s+face'
+)) {
+    if ($freeTypeGlyphSource -notmatch $requiredPattern) {
+        throw "Pinned FreeType fork is missing the required MacType glyph ABI: $requiredPattern"
+    }
+}
+
+$freeTypeOptions = Get-Content -LiteralPath (
+    Join-Path $freetypeRoot 'include\freetype\config\ftoption.h'
+) -Raw
+if ($freeTypeOptions -notmatch '(?m)^\s*#define\s+FT_CONFIG_OPTION_SUBPIXEL_RENDERING\b') {
+    throw 'Pinned FreeType fork does not enable the required subpixel renderer.'
+}
+
+$freeTypeVersion = Get-Content -LiteralPath (
+    Join-Path $freetypeRoot 'include\freetype\freetype.h'
+) -Raw
+foreach ($versionPattern in @(
+    'FREETYPE_MAJOR\s+2',
+    'FREETYPE_MINOR\s+14',
+    'FREETYPE_PATCH\s+3'
+)) {
+    if ($freeTypeVersion -notmatch $versionPattern) {
+        throw "Pinned FreeType headers have an unexpected ABI version: $versionPattern"
+    }
+}
+
 function Build-Freetype([string] $Platform, [string] $BuildName, [string] $OutputName) {
     $buildPath = Join-Path $dependencyRoot $BuildName
     cmake -S $freetypeRoot -B $buildPath -A $Platform -DBUILD_SHARED_LIBS=OFF -DCMAKE_POLICY_DEFAULT_CMP0091=NEW -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DFT_DISABLE_BROTLI=ON -DFT_DISABLE_BZIP2=ON -DFT_DISABLE_HARFBUZZ=ON -DFT_DISABLE_PNG=ON -DFT_DISABLE_ZLIB=ON

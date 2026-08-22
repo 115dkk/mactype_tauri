@@ -62,6 +62,10 @@ add_executable(hook-lifecycle-tests
 target_compile_features(hook-lifecycle-tests PRIVATE cxx_std_20)
 target_compile_definitions(hook-lifecycle-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
+add_executable(freetype-runtime-tests tests/freetype_runtime_tests.cpp)
+target_compile_features(freetype-runtime-tests PRIVATE cxx_std_20)
+target_compile_definitions(freetype-runtime-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+
 add_executable(browser-launch-gate browser_launch_gate.cpp)
 target_link_libraries(browser-launch-gate PRIVATE service-probe-common)
 set_target_properties(browser-launch-gate PROPERTIES OUTPUT_NAME "browser-launch-gate${PROBE_ARCH_SUFFIX}")
@@ -94,7 +98,7 @@ set_target_properties(relay-policy-probe PROPERTIES
 )
 
 if(MSVC)
-  foreach(target service-probe-common probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe)
+  foreach(target service-probe-common probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests freetype-runtime-tests browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe)
     target_compile_options(${target} PRIVATE /W4 /WX /permissive- /utf-8 /sdl)
   endforeach()
   foreach(target probe-console probe-window probe-spawn-tree probe-timeout-fixture browser-launch-gate dwritecore-contract-probe relay-policy-probe)

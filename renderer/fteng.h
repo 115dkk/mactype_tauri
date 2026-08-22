@@ -9,6 +9,7 @@
 #include <vector>
 #include "ftref.h"
 #include "freetype_raii.h"
+#include "freetype_runtime.h"
 #include <math.h>
 #include "undocAPI.h"
 
@@ -138,7 +139,8 @@ private:
 	//FT_Bitmap::bufferのサイズを返す
 	static inline int FT_Bitmap_CalcSize(FT_BitmapGlyph gl)
 	{
-		return gl->bitmap.pitch * gl->bitmap.rows;
+		return renderer::freetype::BitmapByteSize(
+			gl->bitmap.pitch, gl->bitmap.rows);
 	}
 
 public:
@@ -177,9 +179,6 @@ class FreeTypeFontCache : public FreeTypeMruCounter, public FreeTypeGCCounter
 	typedef map<int, FreeTypeCharData*> GlyphCache;
 
 private:
-	int  m_px;
-	int  m_weight;
-	bool m_italic;
 	bool m_active;
 	TEXTMETRIC m_tm;
 
@@ -229,10 +228,6 @@ public:
 		return m_tm;
 	}
 
-	bool Equals(int px, int weight, bool italic) const
-	{
-		return (m_px == px && m_weight == weight && m_italic == italic);
-	}
 	FreeTypeCharData* FindChar(WCHAR wch)
 	{
 		/*if (!g_ccbCache) return nullptr;*/
@@ -264,6 +259,7 @@ public:
 
 	void Erase();
 	void Deactive() { m_active = false; };
+	bool IsActive() const { return m_active; }
 	void AddCharData(WCHAR wch, UINT glyphindex, int width, int gdiWidth, FT_Referenced_BitmapGlyph glyph, FT_Render_Mode render_mode, int AAMode);
 	void AddGlyphData(UINT glyphindex, int width, int gdiWidth, FT_Referenced_BitmapGlyph glyph, FT_Render_Mode render_mode, int AAMode);
 };
@@ -289,7 +285,8 @@ private:
 	CFontSettings m_set;
 	StringHashFont m_hash;
 	wstring	m_fullname, m_familyname, m_stylename;
-	typedef map<UINT, FreeTypeFontCache*>	CacheArray;
+	typedef map<renderer::freetype::RasterCacheKey,
+		std::unique_ptr<FreeTypeFontCache>> CacheArray;
 	CacheArray m_cache;
 	//快速链接
 	FTC_FaceID face_id_link[CFontLinkInfo::FONTMAX * 2 + 1];
@@ -346,7 +343,6 @@ public:
 	wstring GetFullName() {return m_fullname;};
 	bool m_isSimSun;
 	bool IsPixel;
-	UINT getCacheHash(int px, int weight, bool italic, int width) {return ((px<<20)|(width<<8)|(weight<<1)|static_cast<int>(italic)); };	//计算一个hash值来定位cache
 	FreeTypeFontInfo(int n, LPCTSTR name, int weight, bool italic, int mru, wstring fullname, wstring familyname)
 		: m_id(n), m_weight(weight), m_italic(italic), m_OS2Table(), IsPixel(false)
 		, FreeTypeMruCounter(mru), m_isSimSun(false), m_ggoFont(), m_linkinited(false), m_linknum(0), m_os2Weight(0)
@@ -490,11 +486,6 @@ public:
 	void Erase()
 	{
 		CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTCACHE);
-		CacheArray::iterator it = m_cache.begin();
-		for (;it!=m_cache.end();++it)
-		{
-			delete it->second;
-		}
 		m_cache.clear();
 	}
 };

@@ -41,6 +41,17 @@ foreach ($commit in @(
 )) {
     if (-not $buildScript.Contains($commit)) { throw "Core dependency is not pinned: $commit" }
 }
+foreach ($freeTypeAbiToken in @(
+    'FT_Glyph_To_BitmapEx',
+    'FT_CONFIG_OPTION_SUBPIXEL_RENDERING',
+    'FREETYPE_MAJOR\s+2',
+    'FREETYPE_MINOR\s+14',
+    'FREETYPE_PATCH\s+3'
+)) {
+    if (-not $buildScript.Contains($freeTypeAbiToken)) {
+        throw "Open-core build does not verify required FreeType fork ABI token: $freeTypeAbiToken"
+    }
+}
 
 $installer = Get-Content -LiteralPath (Join-Path $root 'installer\mactype-control-center.iss') -Raw
 foreach ($legacy in @('MacTray.exe', 'MacTuner.exe', 'MacWiz.exe', 'VisTuner.exe', 'EasyHK32.dll', 'EasyHK64.dll')) {

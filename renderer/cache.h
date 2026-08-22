@@ -90,6 +90,7 @@ public:
 	}
 
 	~CBitmapCache() = default;
+	void Reset() noexcept;
 
 	const SIZE& Size() const
 	{

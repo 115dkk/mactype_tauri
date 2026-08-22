@@ -3,6 +3,19 @@
 //CreateDIB计数，将在绘制下列次数后更新DIB区
 #define BITMAP_REDUCE_COUNTER	256//默认1024
 
+void CBitmapCache::Reset() noexcept
+{
+	m_brush.reset();
+	m_hbmp.reset();
+	m_hdc.reset();
+	m_exthdc = nullptr;
+	m_lpPixels = nullptr;
+	m_dibSize = {};
+	m_counter = 0;
+	m_CurrentPixel = nullptr;
+	m_bkColor = 0;
+}
+
 
 HDC CBitmapCache::CreateDC(HDC dc)
 {

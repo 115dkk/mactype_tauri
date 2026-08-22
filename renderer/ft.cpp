@@ -44,6 +44,7 @@
 
 #include "fteng.h"
 #include "freetype_raii.h"
+#include "freetype_runtime.h"
 
 #include "ft2vert.h"
 
@@ -61,6 +62,26 @@ FT_Error New_FT_Outline_Embolden(FT_Outline* outline, FT_Pos str_h, FT_Pos str_v
 FT_Error Old_FT_Outline_Embolden(FT_Outline* outline, FT_Pos strength);
 FT_Error Vert_FT_Outline_Embolden(FT_Outline* outline, FT_Pos strength);
 ControlIder CID;
+
+renderer::freetype::RasterPolicy CaptureFreeTypeRasterPolicy()
+{
+	const CGdippSettings* settings = CGdippSettings::GetInstance();
+	renderer::freetype::RasterPolicy policy;
+	policy.fontLoader = settings->FontLoader();
+	policy.fontLinkMode = settings->FontLink();
+	policy.bitmapHeight = settings->BitmapHeight();
+	policy.bolderMode = settings->BolderMode();
+	policy.widthMode = settings->WidthMode();
+	policy.lcdFilter = settings->LcdFilter();
+	policy.hintSmallFont = settings->HintSmallFont();
+	policy.harmonyLcd = settings->HarmonyLCD();
+	policy.loadColorFont = settings->LoadColorFont();
+	policy.invertColor = settings->InvertColor();
+	policy.gamma = settings->GammaValue();
+	policy.shadowDarkColor = settings->ShadowDarkColor();
+	policy.shadowLightColor = settings->ShadowLightColor();
+	return policy;
+}
 
 #if _MSC_VER <= 1200
 #pragma warning(disable: 4786)
@@ -1431,7 +1452,7 @@ BOOL FreeTypePrepare(FreeTypeDrawInfo& FTInfo)
 	//Assert(_tcsicmp(lf.lfFaceName, _T("@Arial Unicode MS")) != 0);
 	pfi = nullptr;
 	CGdippSettings* pSettings = CGdippSettings::GetInstance();
-	const bool bVertical = pSettings->FontLoader() == SETTING_FONTLOADER_FREETYPE ? lf.lfFaceName[0] == _T('@') : false;
+	const bool bVertical = FTInfo.rasterPolicy.fontLoader == SETTING_FONTLOADER_FREETYPE ? lf.lfFaceName[0] == _T('@') : false;
 
 	FreeTypeFontInfo* pfitemp = g_pFTEngine->FindFont(FTInfo.params);
 	if (pfitemp) {
@@ -1456,7 +1477,7 @@ BOOL FreeTypePrepare(FreeTypeDrawInfo& FTInfo)
 	pfs = &pfi->GetFontSettings();
 
 	cmap_index = -1;
-	switch (pSettings->FontLoader()) {
+	switch (FTInfo.rasterPolicy.fontLoader) {
 	case SETTING_FONTLOADER_FREETYPE:
 	{
 		face_id = reinterpret_cast<FTC_FaceID>(pfi->GetId());
@@ -1541,7 +1562,7 @@ BOOL FreeTypePrepare(FreeTypeDrawInfo& FTInfo)
 	if(FT_Request_Size(freetype_face, &size_request))
 	goto Exit2;*/
 
-	switch (pSettings->FontLoader()) {
+	switch (FTInfo.rasterPolicy.fontLoader) {
 	case SETTING_FONTLOADER_FREETYPE:
 		// font_typeを設定
 		font_type.face_id = face_id;
@@ -1623,7 +1644,7 @@ BOOL FreeTypePrepare(FreeTypeDrawInfo& FTInfo)
 		}
 	}
 
-	if (pSettings->HintSmallFont() /*&& font_type.flags & FT_LOAD_TARGET_LIGHT*/ && font_type.height != -1 && font_type.height < 12)  //通用设置不使用hinting，但是打开了小字体hinting开关
+	if (FTInfo.rasterPolicy.hintSmallFont /*&& font_type.flags & FT_LOAD_TARGET_LIGHT*/ && font_type.height != -1 && font_type.height < 12)  //通用设置不使用hinting，但是打开了小字体hinting开关
 	{
 		/*
 		if (!(freetype_face->face_flags & FT_FACE_FLAG_TRICKY))	//如果不是tricky字体
@@ -1635,7 +1656,7 @@ BOOL FreeTypePrepare(FreeTypeDrawInfo& FTInfo)
 
 	FTInfo.useKerning = FALSE;
 	if (pfs->GetKerning()) {
-		switch (pSettings->FontLoader()) {
+		switch (FTInfo.rasterPolicy.fontLoader) {
 		case SETTING_FONTLOADER_FREETYPE:
 			FTInfo.useKerning = !!FT_HAS_KERNING(freetype_face);
 			break;
@@ -1753,7 +1774,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 	BOOL bIsSymbol = GetTextCharsetInfo(FTInfo.hdc, nullptr, 0) == SYMBOL_CHARSET;
 	BOOL bAllowDefaultLink = pSettings->GetFontLinkInfo().IsAllowFontLink(static_cast<BYTE>(GetTextCharsetInfo(FTInfo.hdc, nullptr, 0)));	//是否为符号
 	BOOL nRet = true;
-	BOOL bWindowsLink = pSettings->FontLink() == 2;
+	BOOL bWindowsLink = FTInfo.rasterPolicy.fontLinkMode == 2;
 	//!!Snowie
 
 	/*const*/ FT_Face freetype_face = FTInfo.freetype_face;	//去掉常量属性，下面要改他
@@ -1763,7 +1784,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 	const int LinkNum = FTInfo.face_id_list_num;
 	int AAMode = FTInfo.pfs->GetAntiAliasMode();
 	// fix AAMode to LCD if harmony lcd is enabled. This is will not affect directwrite output.
-	if (AAMode > 2 && pSettings->HarmonyLCD()) {
+	if (AAMode > 2 && FTInfo.rasterPolicy.harmonyLcd) {
 		AAMode = 2;
 	}
 	int* AAList = FTInfo.AAModes;
@@ -1771,7 +1792,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 	FreeTypeFontCache* pftCache = FTInfo.pftCache;
 	const CFontSettings*& pfs = FTInfo.pfs;
 	FreeTypeFontInfo*& pfi = FTInfo.pfi;
-	const bool bLoadColor = pSettings->LoadColorFont();
+	const bool bLoadColor = FTInfo.rasterPolicy.loadColorFont;
 	const bool bGlyphIndex = FTInfo.IsGlyphIndex();
 	//const bool bSizeOnly = FTInfo.IsSizeOnly();
 	//const bool bOwnCache = !(FTInfo.font_type.flags & FT_LOAD_RENDER);
@@ -1873,7 +1894,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 				glyph_index = wch;
 				*AAList = AAMode;
 				GetCharWidthI(FTInfo.hdc, wch, 1, reinterpret_cast<LPWORD>(&wch), &gdi32x);	//index的文字必须计算宽度
-				if (FTInfo.font_type.height <= pSettings->BitmapHeight() && pfi->EmbeddedBmpExist(FTInfo.font_type.height))
+				if (FTInfo.font_type.height <= FTInfo.rasterPolicy.bitmapHeight && pfi->EmbeddedBmpExist(FTInfo.font_type.height))
 				{
 					f_glyph = false;	//使用点阵，不绘图
 					*drState = FT_DRAW_EMBEDDED_BITMAP;	//设置为点阵绘图方式
@@ -1965,7 +1986,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 										break;
 									}
 								}
-								if (pSettings->HintSmallFont() && FTInfo.font_type.flags & FT_LOAD_TARGET_LIGHT && FTInfo.font_type.height != -1 && FTInfo.font_type.height < 12)  //通用设置不使用hinting，但是打开了小字体hinting开关
+								if (FTInfo.rasterPolicy.hintSmallFont && FTInfo.font_type.flags & FT_LOAD_TARGET_LIGHT && FTInfo.font_type.height != -1 && FTInfo.font_type.height < 12)  //通用设置不使用hinting，但是打开了小字体hinting开关
 									FTInfo.font_type.flags = FTInfo.font_type.flags & (~FT_LOAD_NO_HINTING)/* | (pfi->FontHasHinting() ? FT_LOAD_DEFAULT : FT_LOAD_FORCE_AUTOHINT)*/;
 
 								AAMode = *AAList/*pfs->GetAntiAliasMode()*/;
@@ -1973,7 +1994,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 								bLightLcdMode = (AAMode == 4) || (AAMode == 5);
 								//更新完成
 							}
-							if (FTInfo.font_type.height <= pSettings->BitmapHeight() && pfi->EmbeddedBmpExist(FTInfo.font_type.height))
+							if (FTInfo.font_type.height <= FTInfo.rasterPolicy.bitmapHeight && pfi->EmbeddedBmpExist(FTInfo.font_type.height))
 							{
 								f_glyph = false;	//使用点阵，不绘图
 								*drState = FT_DRAW_EMBEDDED_BITMAP;	//设置为点阵绘图方式
@@ -2104,7 +2125,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 
 				bIsIndivBold = freetype_face->style_flags & FT_STYLE_FLAG_BOLD;	// separate bold font?
 				bIsBold = (IsFontBold(lf) && !bIsIndivBold);	// bold font creation required but no separate bold font found, we need to embold the regular bold to mimic it
-				bRequiredownsize = bIsBold && /*(pSettings->BolderMode()==2 || (*/pSettings->BolderMode() != 1 /*&& FTInfo.height>FT_BOLD_LOW))*/;
+				bRequiredownsize = bIsBold && FTInfo.rasterPolicy.bolderMode != 1;
 				if (bRequiredownsize)
 				{
 					FTInfo.font_type.width -= (FTInfo.font_type.width) / 36;
@@ -2262,7 +2283,7 @@ BOOL ForEachGetGlyphGGO(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString
 	BOOL bIsSymbol = GetTextCharsetInfo(FTInfo.hdc, nullptr, 0) == SYMBOL_CHARSET;
 	BOOL bAllowDefaultLink = pSettings->GetFontLinkInfo().IsAllowFontLink(static_cast<BYTE>(GetTextCharsetInfo(FTInfo.hdc, nullptr, 0)));	//是否为符号
 	BOOL nRet = true;
-	BOOL bWindowsLink = pSettings->FontLink() == 2;
+	BOOL bWindowsLink = FTInfo.rasterPolicy.fontLinkMode == 2;
 	//!!Snowie
 
 	/*const*/ FT_Face freetype_face = FTInfo.freetype_face;	//去掉常量属性，下面要改他
@@ -2287,7 +2308,7 @@ BOOL ForEachGetGlyphGGO(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString
 	bool bLcdMode = render_mode == FT_RENDER_MODE_LCD;
 	bool bLightLcdMode = (AAMode == 4) || (AAMode == 5);
 	ClpDx clpdx(FTInfo.lpDx, FTInfo.params->etoOptions);
-	const bool bWidthGDI32 = pSettings->WidthMode() == SETTING_WIDTHMODE_GDI32;
+	const bool bWidthGDI32 = FTInfo.rasterPolicy.widthMode == SETTING_WIDTHMODE_GDI32;
 	const int ggoformatbase = (FTInfo.font_type.flags & FT_LOAD_NO_HINTING) ? GGO_UNHINTED | GGO_NATIVE : GGO_NATIVE;
 
 	if (!s_GGOGlyphLoader.init(freetype_library)) {
@@ -2812,16 +2833,15 @@ BOOL FreeTypeTextOut(
 
 	//===============计算颜色缓存======================
 
-	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
 	int lightdiff, darkdiff, bDarkColor = 0, ShadowColor = 0;
 	if (FTInfo.params->alpha != 1)
 	{
-		float Gamma = pSettings->GammaValue();
+		float Gamma = FTInfo.rasterPolicy.gamma;
 		bDarkColor = IsColorDark(FTInfo.params->color, Gamma);
-		int diff = max(darkdiff = abs(IsColorDark(pSettings->ShadowDarkColor(), Gamma) - bDarkColor), lightdiff = abs(IsColorDark(pSettings->ShadowLightColor(), Gamma) - bDarkColor));
-		ShadowColor = lightdiff <= darkdiff ? pSettings->ShadowDarkColor() : pSettings->ShadowLightColor();
+		int diff = max(darkdiff = abs(IsColorDark(FTInfo.rasterPolicy.shadowDarkColor, Gamma) - bDarkColor), lightdiff = abs(IsColorDark(FTInfo.rasterPolicy.shadowLightColor, Gamma) - bDarkColor));
+		ShadowColor = lightdiff <= darkdiff ? FTInfo.rasterPolicy.shadowDarkColor : FTInfo.rasterPolicy.shadowLightColor;
 		bDarkColor = lightdiff <= darkdiff;
-		if (/*diff<10 || abs(lightdiff-darkdiff)<20 &&*/ pSettings->ShadowDarkColor() == pSettings->ShadowLightColor())
+		if (FTInfo.rasterPolicy.shadowDarkColor == FTInfo.rasterPolicy.shadowLightColor)
 		{
 			//无视底色问题，强制开启阴影
 			FTInfo.params->alphatuner = 1;
@@ -2853,8 +2873,8 @@ BOOL FreeTypeTextOut(
 		shadow = std::make_unique<CAlphaBlendColor>( /*FTInfo.params->color*/ShadowColor, FTInfo.params->alpha, false, bDarkColor, true);
 		break;
 	default:
-		solid = std::make_unique<CAlphaBlendColor>(FTInfo.params->color, 1, pSettings->LcdFilter(), true);
-		shadow = std::make_unique<CAlphaBlendColor>( /*FTInfo.params->color*/ShadowColor, FTInfo.params->alpha, pSettings->LcdFilter(), bDarkColor);
+		solid = std::make_unique<CAlphaBlendColor>(FTInfo.params->color, 1, FTInfo.rasterPolicy.lcdFilter, true);
+		shadow = std::make_unique<CAlphaBlendColor>( /*FTInfo.params->color*/ShadowColor, FTInfo.params->alpha, FTInfo.rasterPolicy.lcdFilter, bDarkColor);
 		break;
 	}
 
@@ -2865,7 +2885,7 @@ BOOL FreeTypeTextOut(
 	if (lf.lfUnderline || lf.lfStrikeOut) {
 
 		if (lf.lfUnderline) {
-			switch (pSettings->FontLoader()) {
+			switch (FTInfo.rasterPolicy.fontLoader) {
 			case SETTING_FONTLOADER_FREETYPE:
 				decorationInfo_height = decorationInfo_otm.otmTextMetrics.tmHeight; //FT_PosToInt(freetype_face->size->metrics.height);
 				decorationInfo_thickness =
@@ -2881,7 +2901,7 @@ BOOL FreeTypeTextOut(
 		}
 
 		if (lf.lfStrikeOut) {
-			switch (pSettings->FontLoader()) {
+			switch (FTInfo.rasterPolicy.fontLoader) {
 			case SETTING_FONTLOADER_FREETYPE:
 				decorationInfo_thickness =
 					MulDiv(freetype_face->underline_thickness,
@@ -2897,7 +2917,7 @@ BOOL FreeTypeTextOut(
 
 	//===============计算完成==========================
 
-	FreeTypeGlyphInfo FTGInfo = { &FTInfo, 0, nullptr, 0, solid.get(), shadow.get(), pSettings->InvertColor() };
+	FreeTypeGlyphInfo FTGInfo = { &FTInfo, 0, nullptr, 0, solid.get(), shadow.get(), FTInfo.rasterPolicy.invertColor };
 	for (int i = 0; i < cbString; ++i, ++lpString)
 	{
 		WCHAR wch = *lpString;
@@ -3008,9 +3028,8 @@ BOOL FreeTypeGetGlyph(	//获得所有图形和需要的宽度
 		if (!FreeTypePrepare(FTInfo))
 			return false;
 	}
-	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
 	BOOL nRet = false;
-	switch (pSettings->FontLoader()) {
+	switch (FTInfo.rasterPolicy.fontLoader) {
 	case SETTING_FONTLOADER_FREETYPE:
 		nRet = ForEachGetGlyphFT(FTInfo, lpString, cbString, Glyphs, drState);
 		break;
@@ -3395,11 +3414,9 @@ FT_Error Vert_FT_Outline_Embolden(FT_Outline* outline, FT_Pos strength)
 	return FT_Err_Ok;
 		}
 
-struct FreeTypeRuntimeResources
-{
-	renderer_raii::UniqueFreeTypeLibrary library;
-	renderer_raii::UniqueFreeTypeManager manager;
-};
+using FreeTypeRuntimeResources = renderer::freetype::OrderedRuntimeOwners<
+	renderer_raii::UniqueFreeTypeLibrary,
+	renderer_raii::UniqueFreeTypeManager>;
 
 static FreeTypeRuntimeResources& GetFreeTypeRuntimeResources()
 {
@@ -3413,47 +3430,61 @@ static FreeTypeRuntimeResources& GetFreeTypeRuntimeResources()
 BOOL FontLInit(void) {
 	CCriticalSectionLock __lock;
 	FreeTypeRuntimeResources& resources = GetFreeTypeRuntimeResources();
+	if (resources.initialized())
+	{
+		freetype_library = resources.library();
+		cache_man = resources.manager();
+		return TRUE;
+	}
+	resources.Reset();
+	freetype_library = nullptr;
+	cache_man = nullptr;
+	cmap_cache = nullptr;
+	image_cache = nullptr;
 
 	FT_Library rawLibrary = nullptr;
 	if (FT_Init_FreeType(&rawLibrary)) {
 		return FALSE;
 	}
-	resources.library.reset(rawLibrary);
-	freetype_library = resources.library.get();
+	renderer_raii::UniqueFreeTypeLibrary library(rawLibrary);
 
 #ifdef INFINALITY
 #define TT_INTERPRETER_VERSION_35  35
 #define TT_INTERPRETER_VERSION_38  38
 #define TT_INTERPRETER_VERSION_40  40
 	FT_UInt     interpreter_version = TT_INTERPRETER_VERSION_38;
-	FT_Property_Set(freetype_library, "truetype", "interpreter-version", &interpreter_version);
+	FT_Property_Set(library.get(), "truetype", "interpreter-version", &interpreter_version);
 #endif
 
 	//enable stem darkening feature introduced in 2.6.2
 	FT_Bool     no_stem_darkening = FALSE;
-	FT_Property_Set(freetype_library, "cff", "no-stem-darkening", &no_stem_darkening);
+	FT_Property_Set(library.get(), "cff", "no-stem-darkening", &no_stem_darkening);
 	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
 	FTC_Manager rawManager = nullptr;
-	if (FTC_Manager_New(freetype_library,
+	if (FTC_Manager_New(library.get(),
 		pSettings->CacheMaxFaces(),
 		pSettings->CacheMaxSizes(),
 		pSettings->CacheMaxBytes(),
 		face_requester, nullptr,
 		&rawManager))
 	{
-		FontLFree();
 		return FALSE;
 	}
-	resources.manager.reset(rawManager);
-	cache_man = resources.manager.get();
-	if (FTC_CMapCache_New(cache_man, &cmap_cache)) {
-		FontLFree();
+	renderer_raii::UniqueFreeTypeManager manager(rawManager);
+	FTC_CMapCache newCmapCache = nullptr;
+	FTC_ImageCache newImageCache = nullptr;
+	if (FTC_CMapCache_New(manager.get(), &newCmapCache)) {
 		return FALSE;
 	}
-	if (FTC_ImageCache_New(cache_man, &image_cache)) {
-		FontLFree();
+	if (FTC_ImageCache_New(manager.get(), &newImageCache)) {
 		return FALSE;
 	}
+
+	resources.Publish(std::move(library), std::move(manager));
+	freetype_library = resources.library();
+	cache_man = resources.manager();
+	cmap_cache = newCmapCache;
+	image_cache = newImageCache;
 
 	//s_AlphaBlendTable.init();
 	s_AlphaBlendTable.initRGB();
@@ -3465,11 +3496,10 @@ void FontLFree(void) {
 	CCriticalSectionLock __lock;
 	FreeTypeRuntimeResources& resources = GetFreeTypeRuntimeResources();
 
-	resources.manager.reset();
 	cache_man = nullptr;
 	cmap_cache = nullptr;
 	image_cache = nullptr;
-	resources.library.reset();
+	resources.Reset();
 	freetype_library = nullptr;
 }
 

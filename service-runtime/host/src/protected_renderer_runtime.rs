@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use mactype_service_contract::{
     GenerationPointer, MachinePaths, RendererRuntimeBinding, RuntimeGenerationPointer,
     StructuredServiceError,

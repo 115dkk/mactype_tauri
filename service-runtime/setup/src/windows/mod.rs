@@ -7,6 +7,7 @@ mod legacy_tray;
 mod machine_lock;
 mod runtime_recovery;
 pub(crate) mod scm;
+mod security_acl;
 
 use mactype_service_contract::BrokerCommand;
 

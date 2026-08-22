@@ -96,6 +96,7 @@ public:
 	Registry();
 	void Publish(std::shared_ptr<const Snapshot> snapshot) noexcept;
 	std::shared_ptr<const Snapshot> Load() const noexcept;
+	void ClearForQuietUnload() noexcept;
 
 private:
 	mutable std::mutex mutex_;
@@ -103,6 +104,7 @@ private:
 };
 
 Registry& ProcessRegistry();
+void ClearProcessRegistryForQuietUnload() noexcept;
 
 } // namespace font_substitution
 } // namespace renderer

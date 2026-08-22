@@ -17,6 +17,7 @@ constexpr DWORD kRemoteTimeoutMs = 10'000U;
 constexpr DWORD kRemoteTimeoutMs = MACTYPE_REMOTE_TIMEOUT_MS;
 #endif
 constexpr DWORD kCleanupGraceMs = 5'000U;
+constexpr DWORD kActivationReserveMs = 4'000U;
 
 class RemoteAllocation final {
 public:
@@ -106,7 +107,8 @@ Result inject_module(HANDLE process, const BrokerRequest& request,
         return make_result(request, ResultStatus::failed, "loader-address-unavailable",
                            kFixedModuleNameUtf8, error, cleanup_complete);
     }
-    const DWORD initial_budget = deadline.remaining(kRemoteTimeoutMs);
+    const DWORD initial_budget = deadline.remaining_before_reserve(
+        kRemoteTimeoutMs, kActivationReserveMs);
     if (initial_budget == 0U) {
         const bool cleanup_complete = allocation.release();
         return make_result(request, ResultStatus::timed_out,
@@ -126,7 +128,8 @@ Result inject_module(HANDLE process, const BrokerRequest& request,
     RemoteCompletion completion = RemoteCompletion::completed_on_time;
     DWORD wait = WaitForSingleObject(thread.get(), initial_budget);
     if (wait == WAIT_TIMEOUT) {
-        const DWORD cleanup_budget = deadline.remaining(kCleanupGraceMs);
+        const DWORD cleanup_budget = deadline.remaining_before_reserve(
+            kCleanupGraceMs, kActivationReserveMs);
         wait = cleanup_budget == 0U
                    ? WAIT_TIMEOUT
                    : WaitForSingleObject(thread.get(), cleanup_budget);

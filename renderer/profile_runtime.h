@@ -46,6 +46,7 @@ public:
 	[[nodiscard]] RendererPolicyRef Load() const noexcept;
 	[[nodiscard]] bool MatchesProfileDigest(
 		const std::string& expected) const noexcept;
+	void ClearForQuietUnload() noexcept;
 
 private:
 	mutable std::mutex publishMutex_;
@@ -56,5 +57,6 @@ private:
 
 ProfileRuntime& ProcessProfileRuntime();
 RendererPolicyRef CurrentRendererPolicy() noexcept;
+void ClearProcessProfileRuntimeForQuietUnload() noexcept;
 
 } // namespace renderer

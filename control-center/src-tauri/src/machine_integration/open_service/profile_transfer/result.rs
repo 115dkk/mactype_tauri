@@ -87,11 +87,11 @@ impl BrokerResultPipeServer {
                 &attributes,
             )
         };
+        let create_error = (handle == INVALID_HANDLE_VALUE).then(|| unsafe { GetLastError() });
         unsafe { LocalFree(descriptor) };
-        if handle == INVALID_HANDLE_VALUE {
+        if let Some(error) = create_error {
             return Err(format!(
-                "creating the first broker result pipe instance failed with {}",
-                unsafe { GetLastError() }
+                "creating the first broker result pipe instance failed with {error}"
             ));
         }
         Ok(Self {

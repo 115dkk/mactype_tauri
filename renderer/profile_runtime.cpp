@@ -198,6 +198,15 @@ bool ProfileRuntime::MatchesProfileDigest(
 	return current && current->profile_digest() == expected;
 }
 
+void ProfileRuntime::ClearForQuietUnload() noexcept
+{
+	std::lock_guard<std::mutex> lock(publishMutex_);
+	std::atomic_store_explicit(
+		&current_, RendererPolicyRef{}, std::memory_order_release);
+	generation_ = 0;
+	revision_ = 0;
+}
+
 ProfileRuntime& ProcessProfileRuntime()
 {
 	// Explicit renderer teardown owns live resources. Policy values contain no
@@ -210,6 +219,11 @@ ProfileRuntime& ProcessProfileRuntime()
 RendererPolicyRef CurrentRendererPolicy() noexcept
 {
 	return ProcessProfileRuntime().Load();
+}
+
+void ClearProcessProfileRuntimeForQuietUnload() noexcept
+{
+	ProcessProfileRuntime().ClearForQuietUnload();
 }
 
 } // namespace renderer

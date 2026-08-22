@@ -92,6 +92,7 @@ public:
     bool BeginStop() noexcept;
     bool AbortStop() noexcept;
     bool CompleteStop() noexcept;
+	bool ClearForQuietUnload() noexcept;
     [[nodiscard]] HookAttempt BeginAttempt(
         HookCapability capability,
         std::uintptr_t target,

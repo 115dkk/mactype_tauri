@@ -304,7 +304,6 @@ PreviewRuntime::~PreviewRuntime() {
   }
   if (native_window_) DestroyWindow(native_window_);
   if (hidden_window_) DestroyWindow(hidden_window_);
-  if (module_) FreeLibrary(module_);
   if (com_initialized_) CoUninitialize();
 }
 

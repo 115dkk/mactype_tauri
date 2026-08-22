@@ -221,6 +221,15 @@ int main()
     Require(
         quietEvidence.lifecycle_revision == activeLifecycle.revision,
         "quiet-skip evidence must retain the current lifecycle revision");
+    Require(
+        !renderer::CurrentRendererPolicy(),
+        "quiet skip must release the published renderer policy before unload");
+    Require(
+        lifecycle.phase() == renderer::RuntimePhase::uninitialized,
+        "quiet skip must release lifecycle storage before unload");
+    Require(
+        !renderer::font_substitution::ProcessRegistry().Load(),
+        "quiet skip must release the substitution snapshot before unload");
 
     MacTypeRendererActivationEvidenceV1 malformed = RequestFor(activeDigest);
     malformed.struct_size = 0;
@@ -230,6 +239,11 @@ int main()
     Require(
         MacTypeQueryActivationEvidenceV1(&malformed) == ERROR_INVALID_DATA,
         "the renderer export must reject a malformed request");
+    Require(
+        MacTypeQueryActivationEvidenceV1(
+            reinterpret_cast<MacTypeRendererActivationEvidenceV1*>(1)) !=
+            ERROR_SUCCESS,
+        "the renderer export must reject an unreadable caller pointer without crashing");
 
     std::cout << "Renderer activation round-trip tests passed.\n";
     return 0;

@@ -99,6 +99,27 @@ bool HookCoordinator::CompleteStop() noexcept
     return true;
 }
 
+bool HookCoordinator::ClearForQuietUnload() noexcept
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	if (phase_ != RuntimePhase::active ||
+		std::any_of(
+			capabilities_.begin(), capabilities_.end(),
+			[](const CapabilityEntry& entry) {
+				return entry.record.state == CapabilityState::pending ||
+					entry.record.state == CapabilityState::active ||
+					entry.record.state == CapabilityState::failed;
+			}))
+		return false;
+	std::vector<CapabilityEntry>().swap(capabilities_);
+	phase_ = RuntimePhase::uninitialized;
+	phaseBeforeStop_ = RuntimePhase::uninitialized;
+	failureStatus_ = 0;
+	nextAttemptSequence_ = 1;
+	++revision_;
+	return true;
+}
+
 HookAttempt HookCoordinator::BeginAttempt(
     HookCapability capability,
     std::uintptr_t target,

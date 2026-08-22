@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use std::time::Duration;
 
 use mactype_service_contract::{RendererRuntimeBinding, StructuredServiceError};

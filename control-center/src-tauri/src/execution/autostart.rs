@@ -31,10 +31,13 @@ fn read_registry_string(
             &mut bytes,
         )
     };
-    if result != ERROR_SUCCESS || bytes < 2 {
+    let units = registry_wide_units(bytes)?;
+    if result != ERROR_SUCCESS {
         return None;
     }
-    let mut buffer = vec![0u16; bytes as usize / 2];
+    let capacity_bytes = bytes;
+    let mut buffer = vec![0u16; units];
+    let mut read_bytes = capacity_bytes;
     let result = unsafe {
         RegGetValueW(
             root,
@@ -43,17 +46,40 @@ fn read_registry_string(
             flags,
             std::ptr::null_mut(),
             buffer.as_mut_ptr().cast(),
-            &mut bytes,
+            &mut read_bytes,
         )
     };
-    if result != ERROR_SUCCESS {
+    if result != ERROR_SUCCESS || read_bytes > capacity_bytes {
         return None;
     }
+    buffer.truncate(registry_wide_units(read_bytes)?);
     let length = buffer
         .iter()
         .position(|unit| *unit == 0)
         .unwrap_or(buffer.len());
     Some(String::from_utf16_lossy(&buffer[..length]))
+}
+
+#[cfg(windows)]
+fn registry_wide_units(bytes: u32) -> Option<usize> {
+    const MAX_REGISTRY_STRING_BYTES: u32 = 64 * 1024;
+    ((2..=MAX_REGISTRY_STRING_BYTES).contains(&bytes) && bytes % 2 == 0)
+        .then_some(bytes as usize / 2)
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::registry_wide_units;
+
+    #[test]
+    fn registry_string_size_must_be_even_and_bounded() {
+        assert_eq!(registry_wide_units(2), Some(1));
+        assert_eq!(registry_wide_units(64 * 1024), Some(32 * 1024));
+        assert_eq!(registry_wide_units(0), None);
+        assert_eq!(registry_wide_units(1), None);
+        assert_eq!(registry_wide_units(3), None);
+        assert_eq!(registry_wide_units(64 * 1024 + 2), None);
+    }
 }
 
 #[cfg(windows)]

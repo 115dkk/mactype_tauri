@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 mod appinit;
 mod broker;
 mod health;

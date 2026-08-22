@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 mod model;
 
 use std::collections::{HashMap, VecDeque};

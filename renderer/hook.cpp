@@ -866,7 +866,8 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 			if (lpReserved != nullptr) return true;
 #endif
 
-			DestroyFreeTypeFontEngine();
+			if (g_pFTEngine != nullptr)
+				DestroyFreeTypeFontEngine();
 
 #ifdef INFINALITY
 			// enable infinality exclusive features
@@ -874,7 +875,8 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 #endif
 			//if (g_alterGUIFont)
 			//	DeleteObject(g_alterGUIFont);
-			FontLFree();
+			if (freetype_library != nullptr)
+				FontLFree();
 			/*
 			#ifndef _WIN64
 					__FUnloadDelayLoadedDLL2("easyhook32.dll");

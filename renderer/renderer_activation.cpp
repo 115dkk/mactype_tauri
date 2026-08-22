@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <new>
 
 namespace renderer {
 namespace {
@@ -147,16 +148,16 @@ void PublishRendererAdmission(
 
 } // namespace renderer
 
-extern "C" DWORD WINAPI MacTypeQueryActivationEvidenceV1(
-	MacTypeRendererActivationEvidenceV1* evidence) noexcept
+namespace {
+
+DWORD BuildRendererActivationEvidence(
+	const MacTypeRendererActivationEvidenceV1& request,
+	MacTypeRendererActivationEvidenceV1& result)
 {
-	if (!MacTypeValidateRendererActivationRequestV1(evidence))
-		return ERROR_INVALID_DATA;
-	const MacTypeRendererActivationEvidenceV1 request = *evidence;
 	if (!renderer::CurrentProcessMatches(request))
 		return ERROR_INVALID_PARAMETER;
 
-	MacTypeRendererActivationEvidenceV1 result = request;
+	result = request;
 	const renderer::RendererPolicyRef policy =
 		renderer::CurrentRendererPolicy();
 	const renderer::HookLifecycleSnapshot lifecycle =
@@ -230,6 +231,61 @@ extern "C" DWORD WINAPI MacTypeQueryActivationEvidenceV1(
 
 	if (!MacTypeValidateRendererActivationEvidenceV1(&result))
 		return ERROR_INVALID_DATA;
-	*evidence = result;
+	return ERROR_SUCCESS;
+}
+
+} // namespace
+
+extern "C" DWORD WINAPI MacTypeQueryActivationEvidenceV1(
+	MacTypeRendererActivationEvidenceV1* evidence) noexcept
+{
+	if (evidence == nullptr)
+		return ERROR_INVALID_PARAMETER;
+	MacTypeRendererActivationEvidenceV1 request{};
+	SIZE_T bytesRead = 0;
+	if (!ReadProcessMemory(
+			GetCurrentProcess(), evidence, &request, sizeof(request), &bytesRead) ||
+		bytesRead != sizeof(request))
+	{
+		const DWORD error = GetLastError();
+		return error != ERROR_SUCCESS ? error : ERROR_PARTIAL_COPY;
+	}
+	if (!MacTypeValidateRendererActivationRequestV1(&request))
+		return ERROR_INVALID_DATA;
+
+	MacTypeRendererActivationEvidenceV1 result{};
+	DWORD status = ERROR_SUCCESS;
+	try
+	{
+		status = BuildRendererActivationEvidence(request, result);
+	}
+	catch (const std::bad_alloc&)
+	{
+		return ERROR_NOT_ENOUGH_MEMORY;
+	}
+	catch (...)
+	{
+		return ERROR_UNHANDLED_EXCEPTION;
+	}
+	if (status != ERROR_SUCCESS)
+		return status;
+	if (result.disposition == MACTYPE_RENDERER_DISPOSITION_QUIET_SKIP &&
+		!renderer::ProcessHookCoordinator().ClearForQuietUnload())
+		return ERROR_BUSY;
+
+	SIZE_T bytesWritten = 0;
+	if (!WriteProcessMemory(
+			GetCurrentProcess(), evidence, &result, sizeof(result),
+			&bytesWritten) ||
+		bytesWritten != sizeof(result))
+	{
+		const DWORD error = GetLastError();
+		return error != ERROR_SUCCESS ? error : ERROR_PARTIAL_COPY;
+	}
+	if (result.disposition == MACTYPE_RENDERER_DISPOSITION_QUIET_SKIP)
+	{
+		renderer::ClearProcessProfileRuntimeForQuietUnload();
+		renderer::font_substitution::ClearProcessRegistryForQuietUnload();
+	}
 	return ERROR_SUCCESS;
 }

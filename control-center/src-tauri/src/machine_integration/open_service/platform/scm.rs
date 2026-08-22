@@ -1,8 +1,12 @@
 use super::super::RuntimeState;
 use mactype_service_contract::SERVICE_NAME;
-use std::{ffi::OsStr, os::windows::ffi::OsStrExt};
+use std::{
+    ffi::OsStr,
+    mem::{align_of, size_of},
+    os::windows::ffi::OsStrExt,
+};
 use windows_sys::Win32::{
-    Foundation::{GetLastError, ERROR_INSUFFICIENT_BUFFER},
+    Foundation::{GetLastError, ERROR_INSUFFICIENT_BUFFER, ERROR_INVALID_DATA},
     System::Services::{
         CloseServiceHandle, OpenSCManagerW, OpenServiceW, QueryServiceConfigW,
         QueryServiceStatusEx, QUERY_SERVICE_CONFIGW, SC_HANDLE, SC_MANAGER_CONNECT,
@@ -38,9 +42,15 @@ pub(super) fn query_configuration(service: SC_HANDLE) -> Result<Configuration, u
     if error != ERROR_INSUFFICIENT_BUFFER || required == 0 {
         return Err(error);
     }
-    let mut buffer = vec![0_u8; required as usize];
+    let words = (required as usize).div_ceil(size_of::<usize>());
+    let mut buffer = vec![0_usize; words];
+    let capacity_bytes = std::mem::size_of_val(buffer.as_slice());
+    if capacity_bytes < size_of::<QUERY_SERVICE_CONFIGW>() {
+        return Err(ERROR_INVALID_DATA);
+    }
+    let capacity = u32::try_from(capacity_bytes).map_err(|_| ERROR_INVALID_DATA)?;
     let configuration = buffer.as_mut_ptr().cast::<QUERY_SERVICE_CONFIGW>();
-    if unsafe { QueryServiceConfigW(service, configuration, required, &mut required) } == 0 {
+    if unsafe { QueryServiceConfigW(service, configuration, capacity, &mut required) } == 0 {
         return Err(unsafe { GetLastError() });
     }
     let configuration = unsafe { &*configuration };
@@ -48,40 +58,41 @@ pub(super) fn query_configuration(service: SC_HANDLE) -> Result<Configuration, u
         service_type: configuration.dwServiceType,
         start_type: configuration.dwStartType,
         error_control: configuration.dwErrorControl,
-        binary_path: unsafe { wide_pointer(configuration.lpBinaryPathName) },
-        account: unsafe { wide_pointer(configuration.lpServiceStartName) },
-        display_name: unsafe { wide_pointer(configuration.lpDisplayName) },
-        load_order_group: unsafe { wide_pointer(configuration.lpLoadOrderGroup) },
+        binary_path: wide_pointer(&buffer, configuration.lpBinaryPathName)?,
+        account: wide_pointer(&buffer, configuration.lpServiceStartName)?,
+        display_name: wide_pointer(&buffer, configuration.lpDisplayName)?,
+        load_order_group: wide_pointer(&buffer, configuration.lpLoadOrderGroup)?,
         tag_id: configuration.dwTagId,
-        dependencies: unsafe { wide_multi_pointer(configuration.lpDependencies) },
+        dependencies: wide_multi_pointer(&buffer, configuration.lpDependencies)?,
     })
 }
 
-unsafe fn wide_multi_pointer(value: *const u16) -> Vec<String> {
+fn wide_multi_pointer(buffer: &[usize], value: *const u16) -> Result<Vec<String>, u32> {
     if value.is_null() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
+    wide_multi_units(wide_units_in_buffer(buffer, value)?)
+}
+
+fn wide_multi_units(units: &[u16]) -> Result<Vec<String>, u32> {
     let mut entries = Vec::new();
     let mut offset = 0usize;
     loop {
-        let start = unsafe { value.add(offset) };
-        if unsafe { *start } == 0 {
-            break;
+        let remaining = units.get(offset..).ok_or(ERROR_INVALID_DATA)?;
+        if remaining.first() == Some(&0) {
+            return Ok(entries);
         }
-        let mut length = 0usize;
-        while unsafe { *start.add(length) } != 0 {
-            length += 1;
-        }
-        entries.push(String::from_utf16_lossy(unsafe {
-            std::slice::from_raw_parts(start, length)
-        }));
+        let length = remaining
+            .iter()
+            .position(|unit| *unit == 0)
+            .ok_or(ERROR_INVALID_DATA)?;
+        entries.push(String::from_utf16_lossy(&remaining[..length]));
         offset += length + 1;
     }
-    entries
 }
 
 pub(super) fn query_runtime(service: SC_HANDLE) -> Result<(RuntimeState, u32), u32> {
-    let mut status: SERVICE_STATUS_PROCESS = unsafe { std::mem::zeroed() };
+    let mut status = SERVICE_STATUS_PROCESS::default();
     let mut needed = 0;
     if unsafe {
         QueryServiceStatusEx(
@@ -127,17 +138,53 @@ pub(in crate::machine_integration::open_service) fn running_service_process_id(
     Ok(process_id)
 }
 
-unsafe fn wide_pointer(value: *const u16) -> String {
+fn wide_pointer(buffer: &[usize], value: *const u16) -> Result<String, u32> {
     if value.is_null() {
-        return String::new();
+        return Ok(String::new());
     }
-    let mut length = 0;
-    while unsafe { *value.add(length) } != 0 {
-        length += 1;
+    wide_string_units(wide_units_in_buffer(buffer, value)?)
+}
+
+fn wide_string_units(units: &[u16]) -> Result<String, u32> {
+    let length = units
+        .iter()
+        .position(|unit| *unit == 0)
+        .ok_or(ERROR_INVALID_DATA)?;
+    Ok(String::from_utf16_lossy(&units[..length]))
+}
+
+fn wide_units_in_buffer(buffer: &[usize], value: *const u16) -> Result<&[u16], u32> {
+    let start = buffer.as_ptr() as usize;
+    let end = start
+        .checked_add(std::mem::size_of_val(buffer))
+        .ok_or(ERROR_INVALID_DATA)?;
+    let address = value as usize;
+    if address < start || address >= end || address % align_of::<u16>() != 0 {
+        return Err(ERROR_INVALID_DATA);
     }
-    String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(value, length) })
+    let units = (end - address) / size_of::<u16>();
+    Ok(unsafe { std::slice::from_raw_parts(value, units) })
 }
 
 pub(in crate::machine_integration::open_service) fn wide(value: impl AsRef<OsStr>) -> Vec<u16> {
     value.as_ref().encode_wide().chain(Some(0)).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{wide_multi_units, wide_string_units, ERROR_INVALID_DATA};
+
+    #[test]
+    fn bounded_scm_strings_require_in_buffer_terminators() {
+        assert_eq!(wide_string_units(&[b'a' as u16, 0]).unwrap(), "a");
+        assert_eq!(wide_string_units(&[b'a' as u16]), Err(ERROR_INVALID_DATA));
+        assert_eq!(
+            wide_multi_units(&[b'a' as u16, 0, b'b' as u16, 0, 0]).unwrap(),
+            vec!["a".to_owned(), "b".to_owned()]
+        );
+        assert_eq!(
+            wide_multi_units(&[b'a' as u16, 0, b'b' as u16]),
+            Err(ERROR_INVALID_DATA)
+        );
+    }
 }

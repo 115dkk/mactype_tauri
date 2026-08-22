@@ -20,7 +20,7 @@ use windows_sys::Win32::{
     UI::Shell::{FOLDERID_Windows, SHGetKnownFolderPath},
 };
 
-pub(super) fn known_folder(id: *const windows_sys::core::GUID) -> Result<PathBuf, String> {
+pub(super) fn known_folder(id: &windows_sys::core::GUID) -> Result<PathBuf, String> {
     let mut value = std::ptr::null_mut();
     let result = unsafe { SHGetKnownFolderPath(id, 0, std::ptr::null_mut(), &mut value) };
     if result < 0 || value.is_null() {

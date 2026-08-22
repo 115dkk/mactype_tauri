@@ -200,10 +200,21 @@ std::shared_ptr<const Snapshot> Registry::Load() const noexcept
 	return snapshot_;
 }
 
+void Registry::ClearForQuietUnload() noexcept
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	snapshot_.reset();
+}
+
 Registry& ProcessRegistry()
 {
 	static Registry* registry = new Registry;
 	return *registry;
+}
+
+void ClearProcessRegistryForQuietUnload() noexcept
+{
+	ProcessRegistry().ClearForQuietUnload();
 }
 
 } // namespace font_substitution

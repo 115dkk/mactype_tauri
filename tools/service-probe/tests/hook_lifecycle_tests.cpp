@@ -118,6 +118,25 @@ int main()
     Require(abortedStop.phase() == renderer::RuntimePhase::active,
             "an aborted stop must restore the prior active phase");
 
+    renderer::HookCoordinator quietUnload;
+    Require(quietUnload.BeginStart(), "quiet unload registry must start");
+    const renderer::HookAttempt unavailable = quietUnload.BeginAttempt(
+        renderer::HookCapability::gdi, 0, true);
+    Require(quietUnload.CompleteAttempt(
+                unavailable, false, renderer::CapabilityReason::explicitlyDisabled, 0),
+            "quiet unload must record an explicitly unavailable capability");
+    Require(quietUnload.CompleteStart(), "quiet unload registry must become active");
+    Require(quietUnload.ClearForQuietUnload(),
+            "a runtime with no active or failed hook may release quiet state");
+    Require(quietUnload.phase() == renderer::RuntimePhase::uninitialized,
+            "quiet state release must close the lifecycle generation");
+    Require(quietUnload.Snapshot().capabilities.empty(),
+            "quiet state release must free capability storage before DLL unload");
+
+    Require(capabilities.CompleteStart(), "active capability registry must become active");
+    Require(!capabilities.ClearForQuietUnload(),
+            "an active hook must block the quiet-unload cleanup path");
+
     renderer::HookCoordinator concurrent;
     Require(concurrent.BeginStart(), "concurrency registry must start with the runtime");
     std::atomic<unsigned int> admitted{0};

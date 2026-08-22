@@ -17,7 +17,85 @@ namespace {
 
 std::atomic<std::uint64_t> g_fontSubstitutionGeneration{0};
 
+constexpr LONGLONG kMaximumProfileBytes = 4LL * 1024 * 1024;
+
+bool BuildMainProfilePath(
+	HINSTANCE module,
+	TCHAR (&profilePath)[MAX_PATH]) noexcept
+{
+	TCHAR modulePath[MAX_PATH] = {};
+	DWORD const length = GetModuleFileName(module, modulePath, MAX_PATH);
+	if (length == 0 || length >= MAX_PATH || !PathRemoveFileSpec(modulePath))
+		return false;
+	return PathCombine(
+		profilePath, modulePath, _T("MacType.ini")) != nullptr;
+}
+
+bool IsReadableProfileFile(LPCTSTR path) noexcept
+{
+	if (path == nullptr || *path == _T('\0'))
+		return false;
+	WIN32_FILE_ATTRIBUTE_DATA attributes = {};
+	if (!GetFileAttributesEx(path, GetFileExInfoStandard, &attributes) ||
+		(attributes.dwFileAttributes &
+			(FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0)
+		return false;
+	ULARGE_INTEGER size = {};
+	size.HighPart = attributes.nFileSizeHigh;
+	size.LowPart = attributes.nFileSizeLow;
+	return size.QuadPart != 0 && size.QuadPart <= kMaximumProfileBytes;
+}
+
+bool LoadProfileDocument(LPCTSTR path, CParseIni& document)
+{
+	if (!IsReadableProfileFile(path))
+		return false;
+	document.Clear();
+	return document.LoadFromFile(path) &&
+		document.IsPartExists(_T("General"));
+}
+
 } // namespace
+
+bool ValidateRendererProfile(HINSTANCE module) noexcept
+{
+	try
+	{
+		TCHAR mainPath[MAX_PATH] = {};
+		if (!BuildMainProfilePath(module, mainPath))
+			return false;
+
+		CParseIni document;
+		if (!LoadProfileDocument(mainPath, document))
+			return false;
+		CIniPart& general = document[_T("General")];
+		if (!general.IsValueExists(_T("AlternativeFile")))
+			return true;
+		LPCTSTR const configured = general.GetValueString(_T("AlternativeFile"));
+		if (configured == nullptr || *configured == _T('\0'))
+			return true;
+
+		TCHAR alternative[MAX_PATH] = {};
+		if (PathIsRelative(configured))
+		{
+			TCHAR directory[MAX_PATH] = {};
+			if (FAILED(StringCchCopy(directory, MAX_PATH, mainPath)) ||
+				!PathRemoveFileSpec(directory) ||
+				PathCombine(alternative, directory, configured) == nullptr)
+				return false;
+		}
+		else if (FAILED(StringCchCopy(alternative, MAX_PATH, configured)))
+		{
+			return false;
+		}
+		CParseIni selected;
+		return LoadProfileDocument(alternative, selected);
+	}
+	catch (...)
+	{
+		return false;
+	}
+}
 
 inline BOOL IsFolder(LPCTSTR pszPath) {
 	return pszPath && *pszPath && *(pszPath + wcslen(pszPath) - 1) == '\\';
@@ -345,11 +423,9 @@ void CGdippSettings::PublishFontSubstitutionSnapshot() const
 bool CGdippSettings::LoadSettings(HINSTANCE hModule)
 {
 	CCriticalSectionLock __lock(CCriticalSectionLock::CS_SETTING);
-	int nSize = ::GetModuleFileName(hModule, m_szFileName, MAX_PATH - sizeof(".ini") + 1);
-	if (!nSize) {
+	if (!BuildMainProfilePath(hModule, m_szFileName)) {
 		return false;
 	}
-	ChangeFileName(m_szFileName, nSize, L"MacType.ini");
 
 	return LoadAppSettings(m_szFileName);
 }
@@ -530,16 +606,6 @@ DWORD CGdippSettings::_GetFreeTypeProfileString(LPCTSTR lpszKey, LPCTSTR lpszDef
 	}
 }
 
-void CGdippSettings::GetOSVersion() {
-	OSVERSIONINFO info;
-	memset(&info, 0, sizeof(OSVERSIONINFO));
-	info.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
-
-	GetVersionEx(&info);
-	m_dwOSMajorVer = info.dwMajorVersion;
-	m_dwOSMinorVer = info.dwMinorVersion;
-}
-
 bool CGdippSettings::LoadAppSettings(LPCTSTR lpszFile)
 {
 	// 各種設定読み込み
@@ -568,26 +634,38 @@ bool CGdippSettings::LoadAppSettings(LPCTSTR lpszFile)
 	// Shadow=1,1,4
 	// [Individual]
 	// ＭＳ Ｐゴシック=0,1,2,3,4,5
-	GetOSVersion();
-	WritePrivateProfileString(nullptr, nullptr, nullptr, lpszFile);
-
+	if (!IsReadableProfileFile(lpszFile))
+		return false;
 	m_Config.Clear();
-	m_Config.LoadFromFile(lpszFile);
+	if (!m_Config.LoadFromFile(lpszFile) ||
+		!m_Config.IsPartExists(c_szGeneral))
+	{
+		m_Config.Clear();
+		return false;
+	}
 
-	TCHAR szAlternative[MAX_PATH], szMainFile[MAX_PATH];
+	TCHAR szAlternative[MAX_PATH];
 	if (FastGetProfileString(c_szGeneral, _T("AlternativeFile"), _T(""), szAlternative, MAX_PATH)) {
 		if (PathIsRelative(szAlternative)) {
 			TCHAR szDir[MAX_PATH];
-			StringCchCopy(szDir, MAX_PATH, lpszFile);
-			PathRemoveFileSpec(szDir);
-			PathCombine(szAlternative, szDir, szAlternative);
+			if (FAILED(StringCchCopy(szDir, MAX_PATH, lpszFile)) ||
+				!PathRemoveFileSpec(szDir) ||
+				PathCombine(szAlternative, szDir, szAlternative) == nullptr)
+				return false;
 		}
-		StringCchCopy(szMainFile, MAX_PATH, lpszFile);	//把原始文件名保存下来
-		StringCchCopy(m_szFileName, MAX_PATH, szAlternative);
+		if (!IsReadableProfileFile(szAlternative) ||
+			FAILED(StringCchCopy(m_szFileName, MAX_PATH, szAlternative)))
+			return false;
 		lpszFile = m_szFileName;
 		m_Config.Clear();
-		m_Config.LoadFromFile(lpszFile);
+		if (!m_Config.LoadFromFile(lpszFile) ||
+			!m_Config.IsPartExists(c_szGeneral))
+		{
+			m_Config.Clear();
+			return false;
+		}
 	}
+	WritePrivateProfileString(nullptr, nullptr, nullptr, lpszFile);
 
 	_GetAlternativeProfileName(m_szexeName, lpszFile);
 	CFontSettings& fs = m_FontSettings;
@@ -756,11 +834,6 @@ SKIP:
 	ZeroMemory(&m_lfForceFont, sizeof(LOGFONT));
 	m_szForceChangeFont[0] = _T('\0');
 	//_GetFreeTypeProfileString(_T("ForceChangeFont"), _T(""), m_szForceChangeFont, LF_FACESIZE, lpszFile);
-
-	// OSのバージョンがXP以降かどうか
-	//OSVERSIONINFO osvi = { sizeof(OSVERSIONINFO) };
-	//GetVersionEx(&osvi);
-	m_bIsWinXPorLater = IsWindowsXPOrGreater();
 
 	STARTUPINFO si = { sizeof(STARTUPINFO) };
 	GetStartupInfo(&si);
@@ -1370,10 +1443,6 @@ void CFontLinkInfo::init()
 		return;
 	}
 	renderer_raii::UniqueRegistryKey h2(rawKey);
-	//OSVERSIONINFO sOsVinfo={sizeof(OSVERSIONINFO),0,0,0,0,{0}};
-	//GetVersionEx(&sOsVinfo);	//获得操作系统版本号
-	//const CGdippSettings* pSettings = CGdippSettings::GetInstance();
-
 	std::vector<WCHAR> name(0x2000);
 	DWORD namesz;
 	DWORD valuesz;
@@ -1846,7 +1915,7 @@ CFontFaceNamesEnumerator::CFontFaceNamesEnumerator(LPCWSTR facename, int nFontFa
 		}
 	}
 	m_facenames[0] = facename;
-	if (pSettings->IsWinXPorLater() && pSettings->FontLink() &&
+	if (pSettings->FontLink() &&
 		pSettings->FontLoader() == SETTING_FONTLOADER_FREETYPE) {
 			m_facenames[destpos++] = pSettings->GetFontLinkInfo().sysfn(nFontFamily);
 	}

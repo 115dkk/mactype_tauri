@@ -640,6 +640,8 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 			DebugOut(L"Begin core loading stage, pid %d", ::GetCurrentProcessId());
 			if (bDllInited)
 				return true;
+			if (!ValidateRendererProfile(instance))
+				return FALSE;
 			RuntimeStartGuard runtimeStart;
 			if (!runtimeStart.owns_start())
 				return FALSE;
@@ -759,7 +761,7 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 					ProcessIdToSessionIdProc(GetCurrentThreadId(), &dwSessionID);
 				else
 					dwSessionID = 1;*/
-				if (IsRunAsUser() && bEnableDW && IsWindowsVistaOrGreater())	//vista or later
+				if (IsRunAsUser() && bEnableDW)
 				{
 					StartDirectWriteLifecycle();
 					//hook_demand_LdrLoadDll();

@@ -228,7 +228,7 @@ fn an_explicit_hook_block_skips_only_that_process_without_latching_the_image_nam
     eligible.image_name = InspectionEvidence::Known("same-app.exe".to_owned());
 
     let inspector = InspectionSequenceInspector {
-        inspections: Mutex::new(VecDeque::from([blocked, eligible])),
+        inspections: Mutex::new(VecDeque::from([blocked.clone(), blocked, eligible])),
     };
     let broker = RecordingBroker::default();
     let mut orchestrator = ProcessOrchestrator::new(
@@ -244,6 +244,17 @@ fn an_explicit_hook_block_skips_only_that_process_without_latching_the_image_nam
     );
     assert!(broker.requests.lock().unwrap().is_empty());
     assert!(orchestrator.generation_health_error().is_none());
+    assert_eq!(
+        orchestrator.handle_pid(42).unwrap(),
+        ProcessOutcome::Duplicate,
+        "the exact explicitly skipped process must stay excluded"
+    );
+    let skip = orchestrator
+        .last_result(42, 100)
+        .expect("the process-local skip evidence must be retained");
+    assert_eq!(skip.outcome, ProcessOutcome::Skipped);
+    assert_eq!(skip.code, "dynamic-code-policy-blocks-hooks");
+    assert_eq!(skip.attempts, 0);
 
     assert_eq!(
         orchestrator.handle_pid(43).unwrap(),

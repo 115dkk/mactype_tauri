@@ -22,6 +22,12 @@ test('the DirectWrite lifecycle owns existing, future, and teardown paths', asyn
   assert.match(directWrite, /GetProcAddress\([^\n]+, "DWriteCoreCreateFactory"\)/);
   assert.match(directWrite, /hook_demand_DWriteCoreCreateFactory/);
   assert.match(directWrite, /ScheduleLoadedDWriteCoreHook/);
+  assert.match(hookList, /HOOK_MANUALLY\(LONG, LdrLoadDll,/);
+  assert.match(directWrite, /hook_demand_LdrLoadDll/);
+  assert.match(directWrite, /IMPL_LdrLoadDll/);
+  assert.match(directWrite, /HookKnownDirectWriteFactories/);
+  assert.match(directWrite, /DWRITE_FACTORY_TYPE_SHARED/);
+  assert.match(directWrite, /DWRITE_FACTORY_TYPE_ISOLATED/);
   assert.match(directWrite, /IMPL_LoadLibraryExW/);
   assert.match(hookList, /HOOK_MANUALLY\(FARPROC, GetProcAddress,/);
   assert.match(directWrite, /IMPL_GetProcAddress/);

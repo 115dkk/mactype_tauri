@@ -118,6 +118,13 @@ HOOK_MANUALLY(FARPROC, GetProcAddress, (
 			  __in HMODULE module,
 			  __in LPCSTR procedureName), (module, procedureName))
 
+HOOK_MANUALLY(LONG, LdrLoadDll, (
+			  __in_opt PWCHAR pathToFile,
+			  __in_opt PULONG dllCharacteristics,
+			  __in UNICODE_STRING2* moduleFileName,
+			  __out HANDLE* moduleHandle),
+			  (pathToFile, dllCharacteristics, moduleFileName, moduleHandle))
+
 #ifdef USE_DETOURS
 HOOK_MANUALLY(BOOL, CreateProcessInternalW, (
 	HANDLE token,

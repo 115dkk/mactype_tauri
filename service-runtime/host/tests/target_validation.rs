@@ -68,7 +68,10 @@ fn service_self_is_skipped_before_any_target_query() {
         ProcessTargetValidator::new(900, &inspector)
             .validate(900)
             .unwrap(),
-        ProcessTargetDecision::Skipped(ProcessSkipReason::ServiceSelf)
+        ProcessTargetDecision::Skipped {
+            identity: None,
+            reason: ProcessSkipReason::ServiceSelf,
+        }
     );
     assert!(!inspector.0.load(Ordering::Relaxed));
 }
@@ -100,12 +103,16 @@ fn validator_preserves_the_exact_process_local_skip_reason() {
         (image_unknown, ProcessSkipReason::ImageNameUnavailable),
     ] {
         let pid = candidate.identity.pid;
+        let expected_identity = candidate.identity.clone();
         let inspector = FixedInspector(Ok(candidate));
         assert_eq!(
             ProcessTargetValidator::new(900, &inspector)
                 .validate(pid)
                 .unwrap(),
-            ProcessTargetDecision::Skipped(reason)
+            ProcessTargetDecision::Skipped {
+                identity: Some(expected_identity),
+                reason,
+            }
         );
     }
 
@@ -120,7 +127,10 @@ fn validator_preserves_the_exact_process_local_skip_reason() {
         ProcessTargetValidator::new(900, &unavailable)
             .validate(42)
             .unwrap(),
-        ProcessTargetDecision::Skipped(ProcessSkipReason::TargetUnavailable)
+        ProcessTargetDecision::Skipped {
+            identity: None,
+            reason: ProcessSkipReason::TargetUnavailable,
+        }
     );
 }
 
@@ -164,7 +174,10 @@ fn exact_system_and_installer_names_are_skipped_without_broad_name_bans() {
             ProcessTargetValidator::new(900, &inspector)
                 .validate(42)
                 .unwrap(),
-            ProcessTargetDecision::Skipped(reason),
+            ProcessTargetDecision::Skipped {
+                identity: Some(identity(42)),
+                reason,
+            },
             "{name}"
         );
     }
@@ -196,7 +209,10 @@ fn only_known_hook_blocking_mitigations_are_quietly_skipped() {
         ProcessTargetValidator::new(900, &inspector)
             .validate(42)
             .unwrap(),
-        ProcessTargetDecision::Skipped(ProcessSkipReason::DynamicCodeProhibited)
+        ProcessTargetDecision::Skipped {
+            identity: Some(identity(42)),
+            reason: ProcessSkipReason::DynamicCodeProhibited,
+        }
     );
 
     let mut thread_opt_out = ordinary_inspection(42);
@@ -234,7 +250,10 @@ fn only_known_hook_blocking_mitigations_are_quietly_skipped() {
             ProcessTargetValidator::new(900, &inspector)
                 .validate(42)
                 .unwrap(),
-            ProcessTargetDecision::Skipped(ProcessSkipReason::BinarySignatureRestricted)
+            ProcessTargetDecision::Skipped {
+                identity: Some(identity(42)),
+                reason: ProcessSkipReason::BinarySignatureRestricted,
+            }
         );
     }
 

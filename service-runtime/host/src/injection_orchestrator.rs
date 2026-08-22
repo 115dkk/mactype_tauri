@@ -116,7 +116,27 @@ impl<'a> InjectionOrchestrator<'a> {
     pub fn handle_pid(&mut self, pid: u32) -> Result<ProcessOutcome, StructuredServiceError> {
         let identity = match self.target_validator.validate(pid)? {
             ProcessTargetDecision::Eligible(identity) => identity,
-            ProcessTargetDecision::Skipped(_) => return Ok(ProcessOutcome::Skipped),
+            ProcessTargetDecision::Skipped { identity, reason } => {
+                if let Some(identity) = identity {
+                    if self
+                        .processed
+                        .contains_key(&(identity.pid, identity.creation_time))
+                    {
+                        return Ok(ProcessOutcome::Duplicate);
+                    }
+                    self.record_result(
+                        identity,
+                        ProcessOutcome::Skipped,
+                        0,
+                        BrokerResult {
+                            disposition: BrokerDisposition::Skipped,
+                            code: reason.code().to_owned(),
+                            win32_error: None,
+                        },
+                    );
+                }
+                return Ok(ProcessOutcome::Skipped);
+            }
         };
         if self
             .processed

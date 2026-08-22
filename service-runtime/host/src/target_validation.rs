@@ -77,10 +77,32 @@ pub enum ProcessSkipReason {
     BinarySignatureRestricted,
 }
 
+impl ProcessSkipReason {
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::TargetUnavailable => "target-unavailable",
+            Self::ServiceSelf => "service-self",
+            Self::SessionZero => "session-zero",
+            Self::Protected => "protected-process",
+            Self::ProtectionUnavailable => "protection-query-unavailable",
+            Self::Critical => "critical-process",
+            Self::CriticalityUnavailable => "criticality-query-unavailable",
+            Self::ImportantWindowsProcess => "important-windows-process",
+            Self::InstallerControlProcess => "installer-control-process",
+            Self::ImageNameUnavailable => "image-name-unavailable",
+            Self::DynamicCodeProhibited => "dynamic-code-policy-blocks-hooks",
+            Self::BinarySignatureRestricted => "binary-signature-policy-blocks-module",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProcessTargetDecision {
     Eligible(ProcessIdentity),
-    Skipped(ProcessSkipReason),
+    Skipped {
+        identity: Option<ProcessIdentity>,
+        reason: ProcessSkipReason,
+    },
 }
 
 pub struct ProcessTargetValidator<'a> {
@@ -98,16 +120,18 @@ impl<'a> ProcessTargetValidator<'a> {
 
     pub fn validate(&self, pid: u32) -> Result<ProcessTargetDecision, StructuredServiceError> {
         if pid == self.service_pid {
-            return Ok(ProcessTargetDecision::Skipped(
-                ProcessSkipReason::ServiceSelf,
-            ));
+            return Ok(ProcessTargetDecision::Skipped {
+                identity: None,
+                reason: ProcessSkipReason::ServiceSelf,
+            });
         }
         let inspection = match self.inspector.inspect(pid) {
             Ok(inspection) => inspection,
             Err(ProcessInspectionError::TargetUnavailable(_)) => {
-                return Ok(ProcessTargetDecision::Skipped(
-                    ProcessSkipReason::TargetUnavailable,
-                ));
+                return Ok(ProcessTargetDecision::Skipped {
+                    identity: None,
+                    reason: ProcessSkipReason::TargetUnavailable,
+                });
             }
             Err(ProcessInspectionError::Infrastructure(error)) => return Err(error),
         };
@@ -118,16 +142,15 @@ impl<'a> ProcessTargetValidator<'a> {
             ));
         }
         if inspection.identity.session_id == 0 {
-            return Ok(ProcessTargetDecision::Skipped(
-                ProcessSkipReason::SessionZero,
-            ));
+            return Ok(skipped(&inspection, ProcessSkipReason::SessionZero));
         }
         match inspection.protected {
             InspectionEvidence::Known(true) => {
-                return Ok(ProcessTargetDecision::Skipped(ProcessSkipReason::Protected));
+                return Ok(skipped(&inspection, ProcessSkipReason::Protected));
             }
             InspectionEvidence::Unavailable => {
-                return Ok(ProcessTargetDecision::Skipped(
+                return Ok(skipped(
+                    &inspection,
                     ProcessSkipReason::ProtectionUnavailable,
                 ));
             }
@@ -135,10 +158,11 @@ impl<'a> ProcessTargetValidator<'a> {
         }
         match inspection.critical {
             InspectionEvidence::Known(true) => {
-                return Ok(ProcessTargetDecision::Skipped(ProcessSkipReason::Critical));
+                return Ok(skipped(&inspection, ProcessSkipReason::Critical));
             }
             InspectionEvidence::Unavailable => {
-                return Ok(ProcessTargetDecision::Skipped(
+                return Ok(skipped(
+                    &inspection,
                     ProcessSkipReason::CriticalityUnavailable,
                 ));
             }
@@ -146,17 +170,20 @@ impl<'a> ProcessTargetValidator<'a> {
         }
         match inspection.image_name {
             InspectionEvidence::Known(ref name) if is_important_windows_process(name) => {
-                return Ok(ProcessTargetDecision::Skipped(
+                return Ok(skipped(
+                    &inspection,
                     ProcessSkipReason::ImportantWindowsProcess,
                 ));
             }
             InspectionEvidence::Known(ref name) if is_installer_control_process(name) => {
-                return Ok(ProcessTargetDecision::Skipped(
+                return Ok(skipped(
+                    &inspection,
                     ProcessSkipReason::InstallerControlProcess,
                 ));
             }
             InspectionEvidence::Unavailable => {
-                return Ok(ProcessTargetDecision::Skipped(
+                return Ok(skipped(
+                    &inspection,
                     ProcessSkipReason::ImageNameUnavailable,
                 ));
             }
@@ -166,7 +193,8 @@ impl<'a> ProcessTargetValidator<'a> {
             inspection.binary_signature,
             InspectionEvidence::Known(policy) if policy.explicitly_blocks_modules()
         ) {
-            return Ok(ProcessTargetDecision::Skipped(
+            return Ok(skipped(
+                &inspection,
                 ProcessSkipReason::BinarySignatureRestricted,
             ));
         }
@@ -174,11 +202,19 @@ impl<'a> ProcessTargetValidator<'a> {
             inspection.dynamic_code,
             InspectionEvidence::Known(policy) if policy.explicitly_blocks_hooks()
         ) {
-            return Ok(ProcessTargetDecision::Skipped(
+            return Ok(skipped(
+                &inspection,
                 ProcessSkipReason::DynamicCodeProhibited,
             ));
         }
         Ok(ProcessTargetDecision::Eligible(inspection.identity))
+    }
+}
+
+fn skipped(inspection: &ProcessInspection, reason: ProcessSkipReason) -> ProcessTargetDecision {
+    ProcessTargetDecision::Skipped {
+        identity: Some(inspection.identity.clone()),
+        reason,
     }
 }
 

@@ -61,7 +61,7 @@ typedef BOOL (WINAPI * TGetTransform)(HDC, DWORD, XFORM*);
 typedef BOOL (WINAPI * PFNGetFontResourceInfo)(LPCWSTR, DWORD*, VOID*, DWORD);
 typedef LONG (WINAPI * PFNLdrLoadDll)(
 						 IN PWCHAR               PathToFile OPTIONAL,
-						 IN ULONG                Flags OPTIONAL,
+						 IN PULONG               DllCharacteristics OPTIONAL,
 						 IN UNICODE_STRING2*      ModuleFileName,
 						 OUT HANDLE*             ModuleHandle
 						 );

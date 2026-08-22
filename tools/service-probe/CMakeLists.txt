@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.24)
 
 project(mactype_service_probe LANGUAGES CXX)
 
+option(MACTYPE_ENABLE_ASAN "Instrument renderer runtime tests with AddressSanitizer" OFF)
+
 if(NOT WIN32)
   message(FATAL_ERROR "The MacType service probes only support Windows.")
 endif()
@@ -73,6 +75,13 @@ add_executable(font-substitution-tests
 target_compile_features(font-substitution-tests PRIVATE cxx_std_20)
 target_compile_definitions(font-substitution-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
+add_executable(renderer-profile-probe tests/renderer_profile_probe.cpp)
+target_compile_features(renderer-profile-probe PRIVATE cxx_std_20)
+target_compile_definitions(renderer-profile-probe PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+set_target_properties(renderer-profile-probe PROPERTIES
+  OUTPUT_NAME "renderer-profile-probe${PROBE_ARCH_SUFFIX}"
+)
+
 add_executable(browser-launch-gate browser_launch_gate.cpp)
 target_link_libraries(browser-launch-gate PRIVATE service-probe-common)
 set_target_properties(browser-launch-gate PROPERTIES OUTPUT_NAME "browser-launch-gate${PROBE_ARCH_SUFFIX}")
@@ -105,13 +114,19 @@ set_target_properties(relay-policy-probe PROPERTIES
 )
 
 if(MSVC)
-  foreach(target service-probe-common probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests freetype-runtime-tests font-substitution-tests browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe)
+  foreach(target service-probe-common probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests freetype-runtime-tests font-substitution-tests renderer-profile-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe)
     target_compile_options(${target} PRIVATE /W4 /WX /permissive- /utf-8 /sdl)
   endforeach()
-  foreach(target probe-console probe-window probe-spawn-tree probe-timeout-fixture browser-launch-gate dwritecore-contract-probe relay-policy-probe)
+  foreach(target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-profile-probe browser-launch-gate dwritecore-contract-probe relay-policy-probe)
     target_link_options(${target} PRIVATE
       /MANIFEST:EMBED
       "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/probe.manifest"
     )
   endforeach()
+  if(MACTYPE_ENABLE_ASAN)
+    foreach(target renderer-raii-tests hook-lifecycle-tests freetype-runtime-tests font-substitution-tests)
+      target_compile_options(${target} PRIVATE /fsanitize=address /Zi)
+      target_link_options(${target} PRIVATE /INCREMENTAL:NO)
+    endforeach()
+  endif()
 endif()

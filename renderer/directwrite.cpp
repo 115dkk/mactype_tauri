@@ -1798,8 +1798,7 @@ bool hookDirectWrite(IUnknown** factory)
 
 	CGdippSettings const* settings = CGdippSettings::GetInstance();
 	bool aliasCollectionReady = true;
-	if (!settings->IsWindows81() && !settings->IsWindows8() &&
-		settings->DelayedInited() &&
+	if (settings->DelayedInited() &&
 		settings->GetFontSubstitutesInfo().GetSize() != 0)
 	{
 		aliasCollectionReady = HookDirectWriteAliasCollection(writeFactory);
@@ -1934,23 +1933,33 @@ static DirectWriteLifecycleState& GetDirectWriteLifecycleState()
 using DirectWriteFactoryFunction = HRESULT (WINAPI *)(
 	DWRITE_FACTORY_TYPE, REFIID, IUnknown**);
 
-static bool HookSharedDirectWriteFactory(
+static bool HookDirectWriteFactory(
 	DirectWriteFactoryFunction createFactory,
-	WCHAR const* readyStage)
+	DWRITE_FACTORY_TYPE factoryType)
 {
 	if (createFactory == nullptr)
 		return false;
 	CComPtr<IUnknown> factory;
 	if (FAILED(createFactory(
-			DWRITE_FACTORY_TYPE_SHARED,
+			factoryType,
 			__uuidof(IDWriteFactory),
 			&factory)) || factory == nullptr)
 		return false;
 	IUnknown* rawFactory = factory;
-	bool const hooked = hookDirectWrite(&rawFactory);
-	if (hooked)
+	return hookDirectWrite(&rawFactory);
+}
+
+static bool HookKnownDirectWriteFactories(
+	DirectWriteFactoryFunction createFactory,
+	WCHAR const* readyStage)
+{
+	bool const sharedHooked = HookDirectWriteFactory(
+		createFactory, DWRITE_FACTORY_TYPE_SHARED);
+	bool const isolatedHooked = HookDirectWriteFactory(
+		createFactory, DWRITE_FACTORY_TYPE_ISOLATED);
+	if (sharedHooked || isolatedHooked)
 		SignalDirectWriteDiagnostic(readyStage);
-	return hooked;
+	return sharedHooked || isolatedHooked;
 }
 
 static bool IsDWriteCoreModule(HMODULE module)
@@ -2017,7 +2026,7 @@ static bool HookLoadedDWriteCoreModule()
 		: GetProcAddress(module.get(), "DWriteCoreCreateFactory");
 	if (!HookDWriteCoreFactoryEntry(factory))
 		return false;
-	return HookSharedDirectWriteFactory(
+	return HookKnownDirectWriteFactories(
 		ORIG_DWriteCoreCreateFactory, L"dwritecore-hook-ready");
 }
 
@@ -2085,7 +2094,7 @@ static DWORD WINAPI HookExistingDirectWriteFactory(LPVOID moduleReference)
 		static_cast<HMODULE>(moduleReference));
 	// The launch gate may release the image-entry thread only after the
 	// shared factory's collection boundary is installed.
-	HookSharedDirectWriteFactory(ORIG_DWriteCreateFactory, L"hook-ready");
+	HookKnownDirectWriteFactories(ORIG_DWriteCreateFactory, L"hook-ready");
 
 	// DWriteCore can be an app-local Windows App SDK dependency loaded just
 	// before user entry. Keep a short startup watch in addition to the
@@ -2441,12 +2450,16 @@ static bool InitializeDirectWriteLifecycle()
 	HMODULE const kernel32 = GetModuleHandleW(L"kernel32.dll");
 	void* const getProcAddress = kernel32 == nullptr ? nullptr :
 		GetProcAddress(kernel32, "GetProcAddress");
+	HMODULE const ntdll = GetModuleHandleW(L"ntdll.dll");
+	void* const ldrLoadDll = ntdll == nullptr ? nullptr :
+		GetProcAddress(ntdll, "LdrLoadDll");
 	SET_VAL(ORIG_D2D1CreateFactory, D2D1Factory);
 	SET_VAL(ORIG_D2D1CreateDevice, D2D1Device);
 	SET_VAL(ORIG_D2D1CreateDeviceContext, D2D1Context);
 	SET_VAL(ORIG_DWriteCreateFactory, DWFactory);
 	SET_VAL(ORIG_LoadLibraryExW, loadLibraryEx);
 	SET_VAL(ORIG_GetProcAddress, getProcAddress);
+	SET_VAL(ORIG_LdrLoadDll, ldrLoadDll);
 	LONG const directWriteStatus = InstallDemandHook(
 		renderer::HookCapability::directWrite, DWFactory,
 		hook_demand_DWriteCreateFactory);
@@ -2456,6 +2469,9 @@ static bool InitializeDirectWriteLifecycle()
 	InstallDemandHook(
 		renderer::HookCapability::directWriteCore, getProcAddress,
 		hook_demand_GetProcAddress);
+	InstallDemandHook(
+		renderer::HookCapability::directWriteCore, ldrLoadDll,
+		hook_demand_LdrLoadDll);
 	InstallDemandHook(
 		renderer::HookCapability::direct2D, D2D1Factory,
 		hook_demand_D2D1CreateFactory);
@@ -2882,6 +2898,33 @@ FARPROC WINAPI IMPL_GetProcAddress(
 	// this DLL after an explicit unload.
 	HookDWriteCoreFactoryEntry(procedure);
 	return procedure;
+}
+
+LONG WINAPI IMPL_LdrLoadDll(
+	__in_opt PWCHAR pathToFile,
+	__in_opt PULONG dllCharacteristics,
+	__in UNICODE_STRING2* moduleFileName,
+	__out HANDLE* moduleHandle)
+{
+	LONG const status = ORIG_LdrLoadDll(
+		pathToFile, dllCharacteristics, moduleFileName, moduleHandle);
+	if (status < 0 || moduleHandle == nullptr || *moduleHandle == nullptr ||
+		!IsDWriteCoreModule(static_cast<HMODULE>(*moduleHandle)))
+		return status;
+
+	// LdrLoadDll has completed its own loader transaction before returning to
+	// this boundary. Patch the concrete app-local export before the caller can
+	// invoke an import-resolved DWriteCore factory. A short worker remains as a
+	// fallback for nested loader transactions, but correctness does not depend
+	// on a bounded startup polling window.
+	FARPROC const factory = ORIG_GetProcAddress != nullptr
+		? ORIG_GetProcAddress(
+			static_cast<HMODULE>(*moduleHandle), "DWriteCoreCreateFactory")
+		: GetProcAddress(
+			static_cast<HMODULE>(*moduleHandle), "DWriteCoreCreateFactory");
+	if (!HookDWriteCoreFactoryEntry(factory))
+		ScheduleLoadedDWriteCoreHook();
+	return status;
 }
 
 void WINAPI IMPL_D2D1RenderTarget_DrawGlyphRun1(

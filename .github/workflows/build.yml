@@ -47,6 +47,22 @@ jobs:
           path: artifacts/cppcheck-open-core
           if-no-files-found: warn
 
+  renderer-asan:
+    name: Alpha renderer runtime / ASan ${{ matrix.architecture }}
+    if: github.ref == 'refs/heads/codex/alpha-plus-dll' || github.base_ref == 'codex/alpha-plus-dll'
+    runs-on: windows-2022
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [Win32, x64]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: microsoft/setup-msbuild@v3
+      - name: Run instrumented renderer ownership and policy modules
+        shell: pwsh
+        run: scripts/ci/Test-RendererAsan.ps1 -Architecture ${{ matrix.architecture }}
+
   open-service-windows:
     name: Open service hosted Windows contract
     needs: open-core
@@ -107,6 +123,17 @@ jobs:
       - name: Build and verify x64 marker targets
         shell: pwsh
         run: tools/service-probe/tests/Test-ProbeContract.ps1 -Architecture x64 -BuildRoot build/service-probe
+      - name: Reject missing or malformed renderer profiles on x86 and x64
+        shell: pwsh
+        run: |
+          scripts/ci/Test-RendererProfileContract.ps1 `
+            -Architecture Win32 `
+            -BuildRoot build/service-probe `
+            -OpenCoreRoot artifacts/open-core
+          scripts/ci/Test-RendererProfileContract.ps1 `
+            -Architecture x64 `
+            -BuildRoot build/service-probe `
+            -OpenCoreRoot artifacts/open-core
       - name: Prove pre-entry child relay on x86 and x64 process trees
         shell: pwsh
         run: |

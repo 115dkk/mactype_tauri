@@ -231,6 +231,8 @@ public:
 
 class CGdippSettings;
 
+bool ValidateRendererProfile(HINSTANCE module) noexcept;
+
 interface IControlCenter
 {
 	virtual HRESULT STDMETHODCALLTYPE QueryInterface(
@@ -271,7 +273,6 @@ private:
 	bool m_bEnableShadow			: 1;
 
 	//それ以外
-	bool m_bIsWinXPorLater			: 1;
 	bool m_bRunFromGdiExe			: 1;
 	bool m_bIsInclude				: 1;
 	bool m_bDelayedInit				: 1;
@@ -323,8 +324,6 @@ private:
 	int  m_nCacheMaxFaces;
 	int  m_nCacheMaxSizes;
 	int  m_nCacheMaxBytes;
-	int	 m_dwOSMajorVer;
-	int	 m_dwOSMinorVer;
 
 	// アンチエイリアス調整用テーブル
 	int  m_nTuneTable[256];
@@ -355,7 +354,6 @@ private:
 
 	//INIからの読み込み処理
 	bool LoadAppSettings(LPCTSTR lpszFile);
-	void GetOSVersion();
 	float FastGetProfileFloat(LPCTSTR lpszSection, LPCTSTR lpszKey, float fDefault);
 	int FastGetProfileInt(LPCTSTR lpszSection, LPCTSTR lpszKey, int nDefault);
 	DWORD FastGetProfileString(LPCTSTR lpszSection, LPCTSTR lpszKey, LPCTSTR lpszDefault, LPTSTR lpszRet, DWORD cch);
@@ -393,7 +391,6 @@ private:
 		, m_bEnableShadow(false)
 		, m_bFontLink(0)
 //		, m_bEnableKerning(false)
-		, m_bIsWinXPorLater(false)
 		, m_bRunFromGdiExe(false)
 		, m_bIsInclude(false)
 		, m_bDelayedInit(false)
@@ -490,14 +487,9 @@ public:
 	const int* GetShadowParams() const { return m_nShadow; }
 	bool DelayedInited() const { return m_bDelayedInit; }	// return the delayedinit status
 
-// OS version comparsion for magic code
-	bool IsWindows8() const { return m_dwOSMajorVer == 6 && m_dwOSMinorVer == 2; }
-	bool IsWindows81() const { return m_dwOSMajorVer == 6 && m_dwOSMinorVer == 3; }
-
 	bool CopyForceFont(LOGFONT& lf, const LOGFONT& lfOrg) const;
 
 	//それ以外
-	bool IsWinXPorLater() const { return m_bIsWinXPorLater; }
 	bool IsInclude() const { return m_bIsInclude; }
 //	bool IsHDBench() const { return m_bIsHDBench; }
 	bool RunFromGdiExe() const { return m_bRunFromGdiExe; }

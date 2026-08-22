@@ -22,12 +22,12 @@ state checks. Each later modernization tranche must shrink that list.
 Every first-party translation unit in `gdipp.vcxproj` stays in the project
 analysis. A first-party file that has no build reference, include reference,
 or runtime purpose is deleted rather than placed on an exclusion list.
-`json.hpp` is required third-party source and retains a narrow documented
+`renderer/json.hpp` is required third-party source and retains a narrow documented
 suppression for Cppcheck 2.20's `missingReturn` template-analysis false
 positive.
 
 On ordinary branches, generated files, build output, required third-party
-headers, `json.hpp`, and dependency trees remain outside first-party source
+headers, `renderer/json.hpp`, and dependency trees remain outside first-party source
 linting. On `codex/alpha-plus-dll`, the override above governs every tracked
 rendering translation unit; dependency boundaries may be narrow and documented
 but may not be used to hide first-party code.

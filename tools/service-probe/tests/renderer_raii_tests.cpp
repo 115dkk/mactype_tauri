@@ -1,5 +1,5 @@
-#include "../../../detour_transaction.h"
-#include "../../../renderer_raii.h"
+#include "../../../renderer/detour_transaction.h"
+#include "../../../renderer/renderer_raii.h"
 
 #include <iostream>
 

@@ -177,9 +177,9 @@ function Test-OpenServiceWorkflowPolicy {
             'GetStartupInfoW', '-juggler-pipe'
         )
 
-    $directWritePath = Join-Path $Root 'directwrite.cpp'
+    $directWritePath = Join-Path $Root 'renderer\directwrite.cpp'
     $directWrite = Test-RequiredTokens -Failures $failures -Path $directWritePath `
-        -MissingMessage 'directwrite.cpp is missing.' `
+        -MissingMessage 'renderer/directwrite.cpp is missing.' `
         -TokenMessage "DirectWrite launch readiness is missing race guard '{0}'." `
         -Tokens @(
             'static DWORD WINAPI HookExistingDirectWriteFactory',
@@ -243,9 +243,9 @@ function Test-OpenServiceWorkflowPolicy {
         }
     }
 
-    $directWriteAliasPath = Join-Path $Root 'directwrite_alias.cpp'
+    $directWriteAliasPath = Join-Path $Root 'renderer\directwrite_alias.cpp'
     $null = Test-RequiredTokens -Failures $failures -Path $directWriteAliasPath `
-        -MissingMessage 'directwrite_alias.cpp is missing.' `
+        -MissingMessage 'renderer/directwrite_alias.cpp is missing.' `
         -TokenMessage "DirectWrite alias collection is missing coherent object-graph token '{0}'." `
         -Tokens @(
             'IDWriteFontSetBuilder', 'FindReplacementReference',
@@ -255,9 +255,9 @@ function Test-OpenServiceWorkflowPolicy {
             'DWRITE_FONT_PROPERTY_ID_WIN32_FAMILY_NAME'
         )
 
-    $virtualFontPath = Join-Path $Root 'directwrite_virtual_font.cpp'
+    $virtualFontPath = Join-Path $Root 'renderer\directwrite_virtual_font.cpp'
     $virtualFont = Test-RequiredTokens -Failures $failures -Path $virtualFontPath `
-        -MissingMessage 'directwrite_virtual_font.cpp is missing.' `
+        -MissingMessage 'renderer/directwrite_virtual_font.cpp is missing.' `
         -TokenMessage "disk-backed virtual font is missing required token '{0}'." `
         -Tokens @(
             'BuildAliasedSfnt', 'PersistFont', 'BCryptHashData',

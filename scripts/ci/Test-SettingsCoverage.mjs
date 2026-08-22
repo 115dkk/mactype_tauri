@@ -40,7 +40,7 @@ for (const key of ["Shadow", "LcdFilterWeight", "PixelLayout", "FontSubstitutes"
   if (!profile.includes(`\"${key}\"`)) throw new Error(`Structured profile editor is missing ${key}`);
 }
 
-const settingsHeader = fs.readFileSync(path.join(root, "settings.h"), "utf8");
+const settingsHeader = fs.readFileSync(path.join(root, "renderer", "settings.h"), "utf8");
 const shadowOffset = settingsHeader.match(/case ATTR_ShadowOffset:([\s\S]*?)case ATTR_Fontlink:/)?.[1] ?? "";
 if (!/\bbreak\s*;/.test(shadowOffset)) throw new Error("ATTR_ShadowOffset still falls through into ATTR_Fontlink");
 for (const attribute of ["ATTR_HookChildProcess", "ATTR_FontSubstitute", "ATTR_DirectWrite", "ATTR_PixelLayout"]) {

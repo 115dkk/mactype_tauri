@@ -19,7 +19,7 @@ DLL_PREFIX = ..\gdidll
 
 .SUFFIXES: .c .cpp .obj .rc .res
 
-CPPFLAGS  = /nologo /D "WIN32" /I. /EHsc /D
+CPPFLAGS  = /nologo /D "WIN32" /I. /Irenderer /EHsc /D
 LINKFLAGS = /nologo
 LINK_EXE  = /map:$(EXE_PREFIX).map
 LINK_DLL  = /map:$(DLL_PREFIX).map
@@ -70,16 +70,16 @@ all: $(TARGET_EXE) $(TARGET_DLL)
 $(TARGET_EXE): $(EXE_OBJS)
 	link $(LINKFLAGS) $(LINK_EXE) /LTCG /out:$@ $(EXE_OBJS)
 
-$(TARGET_DLL): $(DLL_OBJS) expfunc.def
-	link /dll $(LINKFLAGS) $(LINK_DLL) /LTCG /def:expfunc.def /out:$@ $(DLL_OBJS) $(DLL_LIBS)
+$(TARGET_DLL): $(DLL_OBJS) renderer\expfunc.def
+	link /dll $(LINKFLAGS) $(LINK_DLL) /LTCG /def:renderer\expfunc.def /out:$@ $(DLL_OBJS) $(DLL_LIBS)
 	if exist $@.manifest mt -manifest $@.manifest -outputresource:$@;2
 
 pgi:
 	-del gdi++*.pg*
-	link /dll $(LINKFLAGS) $(LINK_DLL) /LTCG:PGI /def:expfunc.def /out:gdi++.dll $(DLL_OBJS) $(DLL_LIBS)
+	link /dll $(LINKFLAGS) $(LINK_DLL) /LTCG:PGI /def:renderer\expfunc.def /out:gdi++.dll $(DLL_OBJS) $(DLL_LIBS)
 
 pgo:
-	link /dll $(LINKFLAGS) $(LINK_DLL) /LTCG:PGO /def:expfunc.def /out:gdi++.dll $(DLL_OBJS) $(DLL_LIBS)
+	link /dll $(LINKFLAGS) $(LINK_DLL) /LTCG:PGO /def:renderer\expfunc.def /out:gdi++.dll $(DLL_OBJS) $(DLL_LIBS)
 
 .c.obj:
 	cl $(CPPFLAGS) /W3 /Fo$@ /c $<
@@ -89,6 +89,15 @@ pgo:
 
 .rc.res:
 	rc /l 0x411 $<
+
+{renderer}.c{}.obj:
+	cl $(CPPFLAGS) /W3 /Fo$@ /c $<
+
+{renderer}.cpp{}.obj:
+	cl $(CPPFLAGS) /W3 /Fo$@ /c $<
+
+{renderer}.rc{}.res:
+	rc /l 0x411 /fo$@ $<
 
 clean: cleanobj
 	@-erase "$(TARGET_EXE)"
@@ -109,15 +118,15 @@ cleanobj:
 memcpy_amd.obj: optimize/memcpy__amd.cpp optimize/memcpy_amd.h
 	cl $(CPPFLAGS) /W3 /Fomemcpy_amd.obj /c optimize/memcpy__amd.cpp
 
-hook.obj:     hook.cpp ft.h hooklist.h override.h common.h array.h cache.h settings.h tlsdata.h fteng.h
-override.obj: override.cpp ft.h hooklist.h override.h common.h array.h cache.h settings.h tlsdata.h fteng.h
-cache.obj:    cache.cpp hooklist.h override.h common.h array.h cache.h
-misc.obj:     misc.cpp common.h array.h
-settings.obj: settings.cpp common.h array.h cache.h settings.h strtoken.h
-expfunc.obj:  expfunc.cpp common.h array.h cache.h settings.h
-ft.obj:       ft.cpp ft.h override.h common.h array.h cache.h settings.h fteng.h ft2vert.h
-fteng.obj:    fteng.cpp ft.h override.h common.h array.h cache.h settings.h fteng.h
-ft2vert.obj:  ft2vert.c ft2vert.h
-run.obj:      run.cpp expfunc.cpp gdiexe.rc
-gdiexe.res:   gdiexe.rc gdidll.rc
-gdidll.res:   gdidll.rc
+hook.obj:     renderer\hook.cpp renderer\ft.h renderer\hooklist.h renderer\override.h renderer\common.h renderer\array.h renderer\cache.h renderer\settings.h renderer\tlsdata.h renderer\fteng.h
+override.obj: renderer\override.cpp renderer\ft.h renderer\hooklist.h renderer\override.h renderer\common.h renderer\array.h renderer\cache.h renderer\settings.h renderer\tlsdata.h renderer\fteng.h
+cache.obj:    renderer\cache.cpp renderer\hooklist.h renderer\override.h renderer\common.h renderer\array.h renderer\cache.h
+misc.obj:     renderer\misc.cpp renderer\common.h renderer\array.h
+settings.obj: renderer\settings.cpp renderer\common.h renderer\array.h renderer\cache.h renderer\settings.h renderer\strtoken.h
+expfunc.obj:  renderer\expfunc.cpp renderer\common.h renderer\array.h renderer\cache.h renderer\settings.h
+ft.obj:       renderer\ft.cpp renderer\ft.h renderer\override.h renderer\common.h renderer\array.h renderer\cache.h renderer\settings.h renderer\fteng.h renderer\ft2vert.h
+fteng.obj:    renderer\fteng.cpp renderer\ft.h renderer\override.h renderer\common.h renderer\array.h renderer\cache.h renderer\settings.h renderer\fteng.h
+ft2vert.obj:  renderer\ft2vert.c renderer\ft2vert.h
+run.obj:      run.cpp renderer\expfunc.cpp gdiexe.rc
+gdiexe.res:   gdiexe.rc renderer\gdidll.rc
+gdidll.res:   renderer\gdidll.rc

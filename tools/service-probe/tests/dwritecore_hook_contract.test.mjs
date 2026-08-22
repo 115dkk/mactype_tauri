@@ -10,10 +10,10 @@ async function source(path) {
 
 test('the DirectWrite lifecycle owns existing, future, and teardown paths', async () => {
   const [hookList, directWrite, directWriteHeader, exportsSource] = await Promise.all([
-    source('hooklist.h'),
-    source('directwrite.cpp'),
-    source('directwrite.h'),
-    source('expfunc.cpp'),
+    source('renderer/hooklist.h'),
+    source('renderer/directwrite.cpp'),
+    source('renderer/directwrite.h'),
+    source('renderer/expfunc.cpp'),
   ]);
 
   assert.match(hookList, /HOOK_MANUALLY\(HRESULT, DWriteCoreCreateFactory,/);

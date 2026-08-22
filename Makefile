@@ -22,7 +22,7 @@ DLL_PREFIX = ..\gdidll
 
 .SUFFIXES: .c .cpp .obj .rc .res
 
-CPPFLAGS   = /nologo /D "WIN32"
+CPPFLAGS   = /nologo /D "WIN32" /Irenderer
 LINKFLAGS  = /nologo
 LINK_EXE   = /map:$(EXE_PREFIX).map
 LINK_DLL   = /map:$(DLL_PREFIX).map
@@ -73,8 +73,8 @@ all: $(TARGET_EXE) $(TARGET_DLL)
 $(TARGET_EXE): $(EXE_OBJS)
 	link $(LINKFLAGS) $(LINK_EXE) $(LINK_LIBS) /out:$@ $(EXE_OBJS)
 
-$(TARGET_DLL): $(DLL_OBJS) expfunc.def
-	link /dll $(LINKFLAGS) $(LINK_DLL) $(LINK_LIBS) /def:expfunc.def /out:$@ $(DLL_OBJS)
+$(TARGET_DLL): $(DLL_OBJS) renderer\expfunc.def
+	link /dll $(LINKFLAGS) $(LINK_DLL) $(LINK_LIBS) /def:renderer\expfunc.def /out:$@ $(DLL_OBJS)
 
 .c.obj:
 	cl $(CPPFLAGS) /GF /GA /W3 /Fo$@ /c $<
@@ -84,6 +84,15 @@ $(TARGET_DLL): $(DLL_OBJS) expfunc.def
 
 .rc.res:
 	rc /l 0x411 $<
+
+{renderer}.c{}.obj:
+	cl $(CPPFLAGS) /GF /GA /W3 /Fo$@ /c $<
+
+{renderer}.cpp{}.obj:
+	cl $(CPPFLAGS) /GF /GA /W3 /Fo$@ /c $<
+
+{renderer}.rc{}.res:
+	rc /l 0x411 /fo$@ $<
 
 clean: cleanobj
 	@-erase "$(TARGET_EXE)"
@@ -104,14 +113,14 @@ cleanobj:
 	@-erase "$(GDI_PREFIX_SSE).exp"
 	@-erase "$(GDI_PREFIX_SSE).lib"
 
-hook.obj:     hook.cpp ft.h hooklist.h override.h common.h array.h cache.h settings.h tlsdata.h fteng.h
-override.obj: override.cpp ft.h hooklist.h override.h common.h array.h cache.h settings.h tlsdata.h fteng.h supinfo.h
-cache.obj:    cache.cpp hooklist.h override.h common.h array.h cache.h
-misc.obj:     misc.cpp common.h array.h
-settings.obj: settings.cpp common.h array.h cache.h settings.h strtoken.h supinfo.h fteng.h
-expfunc.obj:  expfunc.cpp common.h array.h cache.h settings.h
-ft.obj:       ft.cpp ft.h override.h common.h array.h cache.h settings.h fteng.h ft2vert.h
-fteng.obj:    fteng.cpp ft.h override.h common.h array.h cache.h settings.h fteng.h
-ft2vert.obj:  ft2vert.c ft2vert.h
-run.obj:      run.cpp expfunc.cpp supinfo.h gdiexe.rc
-gdiexe.res:   gdiexe.rc gdidll.rc
+hook.obj:     renderer\hook.cpp renderer\ft.h renderer\hooklist.h renderer\override.h renderer\common.h renderer\array.h renderer\cache.h renderer\settings.h renderer\tlsdata.h renderer\fteng.h
+override.obj: renderer\override.cpp renderer\ft.h renderer\hooklist.h renderer\override.h renderer\common.h renderer\array.h renderer\cache.h renderer\settings.h renderer\tlsdata.h renderer\fteng.h renderer\supinfo.h
+cache.obj:    renderer\cache.cpp renderer\hooklist.h renderer\override.h renderer\common.h renderer\array.h renderer\cache.h
+misc.obj:     renderer\misc.cpp renderer\common.h renderer\array.h
+settings.obj: renderer\settings.cpp renderer\common.h renderer\array.h renderer\cache.h renderer\settings.h renderer\strtoken.h renderer\supinfo.h renderer\fteng.h
+expfunc.obj:  renderer\expfunc.cpp renderer\common.h renderer\array.h renderer\cache.h renderer\settings.h
+ft.obj:       renderer\ft.cpp renderer\ft.h renderer\override.h renderer\common.h renderer\array.h renderer\cache.h renderer\settings.h renderer\fteng.h renderer\ft2vert.h
+fteng.obj:    renderer\fteng.cpp renderer\ft.h renderer\override.h renderer\common.h renderer\array.h renderer\cache.h renderer\settings.h renderer\fteng.h
+ft2vert.obj:  renderer\ft2vert.c renderer\ft2vert.h
+run.obj:      run.cpp renderer\expfunc.cpp renderer\supinfo.h gdiexe.rc
+gdiexe.res:   gdiexe.rc renderer\gdidll.rc

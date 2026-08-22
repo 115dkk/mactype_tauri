@@ -10,10 +10,10 @@ async function source(path) {
 
 test('HookChildProcesses relays only the fixed generation DLL before child entry', async () => {
   const [hookList, hook, relay, relayHeader, spawnTree] = await Promise.all([
-    source('hooklist.h'),
-    source('hook.cpp'),
-    source('child_process_relay.cpp'),
-    source('child_process_relay.h'),
+    source('renderer/hooklist.h'),
+    source('renderer/hook.cpp'),
+    source('renderer/child_process_relay.cpp'),
+    source('renderer/child_process_relay.h'),
     source('tools/service-probe/spawn_tree.cpp'),
   ]);
 

@@ -1,5 +1,5 @@
 #include "child_process.h"
-#include "../../renderer_raii.h"
+#include "../../renderer/renderer_raii.h"
 
 #include <strsafe.h>
 

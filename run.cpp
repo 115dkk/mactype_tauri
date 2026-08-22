@@ -12,7 +12,7 @@
 #include <ShlObj.h>
 #include <ShLwApi.h>
 #include <tchar.h>
-#include "array.h"
+#include "renderer/array.h"
 #include <strsafe.h>
 
 // _vsnwprintf用
@@ -60,7 +60,7 @@ inline HRESULT HresultFromLastError()
 }
 
 
-#include "detours.h"
+#include "renderer/detours.h"
 #ifdef _M_IX86
 #pragma comment (lib, "detours.lib")
 const auto MacTypeDll = L"MacType.dll";
@@ -79,7 +79,7 @@ HINSTANCE hinstDLL;
 
 #define _GDIPP_EXE
 #define _GDIPP_RUN_CPP
-//#include "supinfo.h"
+//#include "renderer/supinfo.h"
 
 //#define OLD_PSDK
 

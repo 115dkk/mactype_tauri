@@ -52,6 +52,7 @@ This file fixes the domain language used by code, tests, CI, and architecture do
 - Tauri's MachineIntegration adapter translates fixed user actions into system commands and read-only state.
 - Rust setup and host modules own SCM, protected generations, observation, health, recovery, and rollback.
 - The fixed helper and public MacType C/C++ code own injection and rendering.
+- `renderer/` is the physical implementation boundary of the `MacType.Core.dll` module: hooks, settings, rendering adapters, lifecycle code, and renderer-owned resources stay local there. Workspace build manifests remain at the repository root, while cross-component hook compatibility remains under `shared/`.
 - The 레거시 서비스 remains a migration subject and fallback only; it is not part of normal operation.
 
 ## Architecture language

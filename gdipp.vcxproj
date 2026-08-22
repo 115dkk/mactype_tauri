@@ -353,7 +353,7 @@
     <Link>
       <AdditionalDependencies>freetype.lib;usp10.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreSpecificDefaultLibraries>LIBCMT;%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
-      <ModuleDefinitionFile>expfunc.def</ModuleDefinitionFile>
+      <ModuleDefinitionFile>renderer\expfunc.def</ModuleDefinitionFile>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <SupportUnloadOfDelayLoadedDLL>true</SupportUnloadOfDelayLoadedDLL>
@@ -382,7 +382,7 @@
     <Link>
       <AdditionalDependencies>freetype_inf.lib;usp10.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreSpecificDefaultLibraries>LIBCMT;%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
-      <ModuleDefinitionFile>expfunc.def</ModuleDefinitionFile>
+      <ModuleDefinitionFile>renderer\expfunc.def</ModuleDefinitionFile>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <SupportUnloadOfDelayLoadedDLL>true</SupportUnloadOfDelayLoadedDLL>
@@ -412,7 +412,7 @@
     <Link>
       <AdditionalDependencies>freetype64.lib;usp10.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreSpecificDefaultLibraries>LIBCMT;%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
-      <ModuleDefinitionFile>expfunc.def</ModuleDefinitionFile>
+      <ModuleDefinitionFile>renderer\expfunc.def</ModuleDefinitionFile>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <SupportUnloadOfDelayLoadedDLL>true</SupportUnloadOfDelayLoadedDLL>
@@ -443,7 +443,7 @@
     <Link>
       <AdditionalDependencies>freetype64.lib;usp10.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreSpecificDefaultLibraries>LIBCMT;%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
-      <ModuleDefinitionFile>expfunc.def</ModuleDefinitionFile>
+      <ModuleDefinitionFile>renderer\expfunc.def</ModuleDefinitionFile>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <SupportUnloadOfDelayLoadedDLL>true</SupportUnloadOfDelayLoadedDLL>
@@ -474,7 +474,7 @@
     <Link>
       <AdditionalDependencies>freetype.lib;usp10.lib;dwrite.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
-      <ModuleDefinitionFile>expfunc.def</ModuleDefinitionFile>
+      <ModuleDefinitionFile>renderer\expfunc.def</ModuleDefinitionFile>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
@@ -511,7 +511,7 @@
     <Link>
       <AdditionalDependencies>freetype.lib;usp10.lib;dwrite.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
-      <ModuleDefinitionFile>expfunc.def</ModuleDefinitionFile>
+      <ModuleDefinitionFile>renderer\expfunc.def</ModuleDefinitionFile>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
@@ -549,7 +549,7 @@
     <Link>
       <AdditionalDependencies>freetype.lib;usp10.lib;dwrite.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
-      <ModuleDefinitionFile>expfunc.def</ModuleDefinitionFile>
+      <ModuleDefinitionFile>renderer\expfunc.def</ModuleDefinitionFile>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
@@ -587,7 +587,7 @@
     <Link>
       <AdditionalDependencies>freetype.lib;usp10.lib;dwrite.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
-      <ModuleDefinitionFile>expfunc.def</ModuleDefinitionFile>
+      <ModuleDefinitionFile>renderer\expfunc.def</ModuleDefinitionFile>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
@@ -622,7 +622,7 @@
     <Link>
       <AdditionalDependencies>freetype_inf.lib;usp10.lib;dwrite.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
-      <ModuleDefinitionFile>expfunc.def</ModuleDefinitionFile>
+      <ModuleDefinitionFile>renderer\expfunc.def</ModuleDefinitionFile>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
@@ -656,7 +656,7 @@
     <Link>
       <AdditionalDependencies>freetype64.lib;usp10.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
-      <ModuleDefinitionFile>expfunc.def</ModuleDefinitionFile>
+      <ModuleDefinitionFile>renderer\expfunc.def</ModuleDefinitionFile>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
@@ -693,7 +693,7 @@
     <Link>
       <AdditionalDependencies>freetype64.lib;usp10.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
-      <ModuleDefinitionFile>expfunc.def</ModuleDefinitionFile>
+      <ModuleDefinitionFile>renderer\expfunc.def</ModuleDefinitionFile>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
@@ -730,7 +730,7 @@
     <Link>
       <AdditionalDependencies>freetype64.lib;usp10.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
-      <ModuleDefinitionFile>expfunc.def</ModuleDefinitionFile>
+      <ModuleDefinitionFile>renderer\expfunc.def</ModuleDefinitionFile>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
@@ -767,7 +767,7 @@
     <Link>
       <AdditionalDependencies>freetype64.lib;usp10.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
-      <ModuleDefinitionFile>expfunc.def</ModuleDefinitionFile>
+      <ModuleDefinitionFile>renderer\expfunc.def</ModuleDefinitionFile>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
@@ -803,7 +803,7 @@
     <Link>
       <AdditionalDependencies>freetype64_inf.lib;usp10.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
-      <ModuleDefinitionFile>expfunc.def</ModuleDefinitionFile>
+      <ModuleDefinitionFile>renderer\expfunc.def</ModuleDefinitionFile>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
@@ -815,75 +815,75 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="cache.cpp" />
-    <ClCompile Include="child_process_relay.cpp" />
-    <ClCompile Include="common.cpp" />
-    <ClCompile Include="directwrite.cpp" />
-    <ClCompile Include="directwrite_alias.cpp" />
-    <ClCompile Include="directwrite_virtual_font.cpp" />
-    <ClCompile Include="dll.cpp" />
-    <ClCompile Include="dynCodeHelper.cpp" />
-    <ClCompile Include="EventLogging.cpp" />
-    <ClCompile Include="expfunc.cpp" />
-    <ClCompile Include="ft.cpp" />
-    <ClCompile Include="ft2vert.c" />
-    <ClCompile Include="fteng.cpp" />
-    <ClCompile Include="ftref.c" />
-    <ClCompile Include="gdiPlusFlat2.cpp" />
-    <ClCompile Include="hash_list.cpp" />
-    <ClCompile Include="hook.cpp" />
-    <ClCompile Include="hookCounter.cpp" />
-    <ClCompile Include="misc.cpp" />
-    <ClCompile Include="override.cpp">
+    <ClCompile Include="renderer\cache.cpp" />
+    <ClCompile Include="renderer\child_process_relay.cpp" />
+    <ClCompile Include="renderer\common.cpp" />
+    <ClCompile Include="renderer\directwrite.cpp" />
+    <ClCompile Include="renderer\directwrite_alias.cpp" />
+    <ClCompile Include="renderer\directwrite_virtual_font.cpp" />
+    <ClCompile Include="renderer\dll.cpp" />
+    <ClCompile Include="renderer\dynCodeHelper.cpp" />
+    <ClCompile Include="renderer\EventLogging.cpp" />
+    <ClCompile Include="renderer\expfunc.cpp" />
+    <ClCompile Include="renderer\ft.cpp" />
+    <ClCompile Include="renderer\ft2vert.c" />
+    <ClCompile Include="renderer\fteng.cpp" />
+    <ClCompile Include="renderer\ftref.c" />
+    <ClCompile Include="renderer\gdiPlusFlat2.cpp" />
+    <ClCompile Include="renderer\hash_list.cpp" />
+    <ClCompile Include="renderer\hook.cpp" />
+    <ClCompile Include="renderer\hookCounter.cpp" />
+    <ClCompile Include="renderer\misc.cpp" />
+    <ClCompile Include="renderer\override.cpp">
       <ExceptionHandling Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Sync</ExceptionHandling>
       <ExceptionHandling Condition="'$(Configuration)|$(Platform)'=='Rel+Detours|Win32'">Sync</ExceptionHandling>
       <ExceptionHandling Condition="'$(Configuration)|$(Platform)'=='Release+StaticHook|Win32'">Sync</ExceptionHandling>
       <ExceptionHandling Condition="'$(Configuration)|$(Platform)'=='Rel+Trace|Win32'">Sync</ExceptionHandling>
       <ExceptionHandling Condition="'$(Configuration)|$(Platform)'=='Release Infinality|Win32'">Sync</ExceptionHandling>
     </ClCompile>
-    <ClCompile Include="ownedcs.cpp" />
-    <ClCompile Include="settings.cpp" />
+    <ClCompile Include="renderer\ownedcs.cpp" />
+    <ClCompile Include="renderer\settings.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="expfunc.def" />
+    <None Include="renderer\expfunc.def" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="array.h" />
-    <ClInclude Include="cache.h" />
-    <ClInclude Include="child_process_relay.h" />
-    <ClInclude Include="common.h" />
-    <ClInclude Include="crc32.h" />
-    <ClInclude Include="directwrite.h" />
-    <ClInclude Include="directwrite_alias.h" />
-    <ClInclude Include="directwrite_virtual_font.h" />
-    <ClInclude Include="dll.h" />
-    <ClInclude Include="dynCodeHelper.h" />
-    <ClInclude Include="EventLogging.h" />
-    <ClInclude Include="ft.h" />
-    <ClInclude Include="ft2build.h" />
-    <ClInclude Include="ft2vert.h" />
-    <ClInclude Include="fteng.h" />
-    <ClInclude Include="ftref.h" />
-    <ClInclude Include="gdiPlusFlat2.h" />
-    <ClInclude Include="hash_list.h" />
-    <ClInclude Include="hookCounter.h" />
-    <ClInclude Include="hooklist.h" />
-    <ClInclude Include="ivs_otft.h" />
-    <ClInclude Include="json.hpp" />
-    <ClInclude Include="override.h" />
-    <ClInclude Include="ownedcs.h" />
-    <ClInclude Include="resource.h" />
-    <ClInclude Include="settings.h" />
+    <ClInclude Include="renderer\array.h" />
+    <ClInclude Include="renderer\cache.h" />
+    <ClInclude Include="renderer\child_process_relay.h" />
+    <ClInclude Include="renderer\common.h" />
+    <ClInclude Include="renderer\crc32.h" />
+    <ClInclude Include="renderer\directwrite.h" />
+    <ClInclude Include="renderer\directwrite_alias.h" />
+    <ClInclude Include="renderer\directwrite_virtual_font.h" />
+    <ClInclude Include="renderer\dll.h" />
+    <ClInclude Include="renderer\dynCodeHelper.h" />
+    <ClInclude Include="renderer\EventLogging.h" />
+    <ClInclude Include="renderer\ft.h" />
+    <ClInclude Include="renderer\ft2build.h" />
+    <ClInclude Include="renderer\ft2vert.h" />
+    <ClInclude Include="renderer\fteng.h" />
+    <ClInclude Include="renderer\ftref.h" />
+    <ClInclude Include="renderer\gdiPlusFlat2.h" />
+    <ClInclude Include="renderer\hash_list.h" />
+    <ClInclude Include="renderer\hookCounter.h" />
+    <ClInclude Include="renderer\hooklist.h" />
+    <ClInclude Include="renderer\ivs_otft.h" />
+    <ClInclude Include="renderer\json.hpp" />
+    <ClInclude Include="renderer\override.h" />
+    <ClInclude Include="renderer\ownedcs.h" />
+    <ClInclude Include="renderer\resource.h" />
+    <ClInclude Include="renderer\settings.h" />
     <ClInclude Include="shared\hook_compatibility.h" />
-    <ClInclude Include="stdint.h" />
-    <ClInclude Include="strtoken.h" />
-    <ClInclude Include="supinfo.h" />
-    <ClInclude Include="tlsdata.h" />
-    <ClInclude Include="undocAPI.h" />
-    <ClInclude Include="wow64ext.h" />
+    <ClInclude Include="renderer\stdint.h" />
+    <ClInclude Include="renderer\strtoken.h" />
+    <ClInclude Include="renderer\supinfo.h" />
+    <ClInclude Include="renderer\tlsdata.h" />
+    <ClInclude Include="renderer\undocAPI.h" />
+    <ClInclude Include="renderer\wow64ext.h" />
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="gdidll.rc" />
+    <ResourceCompile Include="renderer\gdidll.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

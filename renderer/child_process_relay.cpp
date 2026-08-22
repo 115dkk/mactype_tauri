@@ -2,7 +2,7 @@
 
 #include "detours.h"
 #include "renderer_raii.h"
-#include "shared/hook_compatibility.h"
+#include "../shared/hook_compatibility.h"
 
 #include <cstdio>
 #include <string>

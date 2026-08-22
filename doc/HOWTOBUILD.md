@@ -44,7 +44,7 @@
 
         Build it as easyhook32.lib and easyhook64.lib, or get the binary distributions.
 
-        Dll filename is not important but you'd better give it a special name to avoid dll confliction as stated above. Do not forget to modify filename in `hook.cpp` of MacType.
+        Dll filename is not important but you'd better give it a special name to avoid dll confliction as stated above. Do not forget to modify filename in `renderer/hook.cpp` of MacType.
 
     - Detours
 

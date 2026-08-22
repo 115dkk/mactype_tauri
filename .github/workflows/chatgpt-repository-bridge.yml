@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   bundle:
-    if: startsWith(github.event.head_commit.message, 'chatgpt-bundle: ')
+    if: "${{ startsWith(github.event.head_commit.message, 'chatgpt-bundle: ') }}"
     runs-on: ubuntu-latest
     timeout-minutes: 10
 

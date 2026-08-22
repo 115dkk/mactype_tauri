@@ -60,6 +60,7 @@ Reboot, multi-session, AppInit, and migration remain `UNKNOWN` until their dispa
 | `appinit-conflict` | Disable the conflicting registry mode through an explicit user action, then start again. Never silently edit AppInit. |
 | helper timeout or cleanup unknown | Treat the target result as terminal, retain logs, and verify the Job ended. Do not retry the same target automatically. |
 | one target inaccessible or unsupported | Keep global Ready if infrastructure remains healthy; the target is skipped fail-closed. |
+| one target explicitly blocks hooks/modules | Retain its exact identity and reason as a quiet process-local skip. A repeat is a duplicate; do not raise a global warning, report “performance degradation,” or blacklist the executable name. |
 | observer or protected-runtime failure | Mark global health degraded/failed and stop claiming active integration. |
 | migration failure | Restore the pinned runtime, original 레거시 서비스 configuration, and prior running state from the protected receipt. |
 

@@ -30,11 +30,37 @@ below wherever the two conflict.
   FreeType work, stronger font substitution, broader DirectWrite support, and
   Windows 11 application compatibility. Upstream patch size and upstream
   acceptance are not design constraints here.
-- Sanitized core binaries are test artifacts only. Run x86 and x64 MSVC ASan
-  variants through native, open-service, and browser injection proofs; never
-  publish them in an installer or integration bundle. Because MSVC ASan does
-  not provide LeakSanitizer, use a separate bounded Application Verifier and
-  UMDH lane for leaks, handles, locks, and module-unload cleanup.
+- Never import or cherry-pick `codex/renderer-memory-safety` into this branch.
+  That branch deliberately uses a classic-C++/no-RAII paradigm for a separate
+  upstream contribution. Alpha renderer ownership changes must be implemented
+  and reviewed independently.
+- The completed alpha renderer architecture is an invariant, not a suggestion:
+  new top-level hook admission and capability state goes through
+  `HookCoordinator`, provider vtable registries stay local to their adapter,
+  Detours transactions remain process-serialized, GDI and DirectWrite
+  substitutions consume the immutable font-substitution snapshot, and
+  FreeType manager ownership ends before its library. Do not add an independent
+  runtime phase machine or read mutable profile maps from a render hot path.
+- Renderer startup fails closed when the adjacent profile or its selected
+  `AlternativeFile` is missing, malformed, non-regular, empty, or oversized.
+  Do not restore the historical implicit defaults. Feature and interface
+  presence, not manifest-sensitive Windows version numbers, select modern
+  rendering paths.
+- A process that explicitly blocks hooks or module loading is a quiet
+  process-local skip keyed by `(pid, creation time)`. Preserve its exact reason
+  in the bounded orchestrator result, deduplicate that identity, keep global
+  service health Ready, and never turn an executable name into an image-wide
+  ban. Keep the health-v1 wire schema stable unless a separately versioned
+  migration and rollback is designed.
+- MSVC ASan is mandatory on x86 and x64 for the new renderer ownership,
+  lifecycle, FreeType-policy, and substitution modules. Do not call these
+  focused tests a sanitized injected core: stock IniParser and other linked
+  C++ dependencies currently have incompatible STL annotations. A full-core
+  ASan lane requires every linked C++ dependency to use matching sanitizer and
+  runtime settings. Sanitized artifacts never enter an installer or bundle.
+  Application Verifier/UMDH is a disposable-lab procedure only; do not mutate
+  a developer or hosted runner's machine-global verifier state merely to claim
+  a pass.
 - Aggressive core work must not weaken the service, installer, elevation,
   installed-root, ownership, or payload-integrity boundaries. Unsupported or
   protected processes must fail explicitly; do not create a hidden bypass to

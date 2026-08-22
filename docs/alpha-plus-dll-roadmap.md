@@ -1,4 +1,4 @@
-# Alpha Plus DLL core modernization roadmap
+# Alpha Plus DLL core modernization record
 
 ## Status and scope
 
@@ -13,6 +13,46 @@ work session, this branch must inspect `origin/main` and cherry-pick useful
 changes before starting overlapping work. The initial branch baseline is
 `origin/main` at `14eba4f8636c70380d3dfb99c48fecdf6d0d5314` on 2026-08-05.
 
+## Completion record (2026-08-22)
+
+The large renderer code tranche is complete on `codex/alpha-plus-dll`. This
+means the planned in-repository ownership, lifecycle, substitution, profile,
+service-policy, and CI seams have executable contracts. It does not turn an
+unrun machine or application experiment into a pass. The terms below are
+deliberately narrower than “works everywhere”:
+
+- `IMPLEMENTED`: the production path and an executable regression contract
+  exist in this repository.
+- `PROVED LOCAL`: the contract also passed on the development Windows host for
+  both applicable architectures unless a narrower result is stated.
+- `CI REQUIRED`: GitHub Actions must pass for the exact delivered commit.
+- `LAB ONLY`: the claim needs external software, licensed content, a disposable
+  machine, or machine-global verifier configuration and is not a code blocker.
+
+| Area | Final code status | Evidence or deliberate boundary |
+| --- | --- | --- |
+| Renderer module boundary | `IMPLEMENTED` | Renderer-owned sources and resources live under `renderer/`; workspace manifests remain at the root. |
+| Hook lifecycle | `IMPLEMENTED`, `PROVED LOCAL`, `CI REQUIRED` | `HookCoordinator` owns five runtime phases, concrete-target attempt records, first-failure evidence, duplicate suppression, the process-global Detours transaction lock, and stop admission. DirectWrite performs heavy startup on a self-pinned worker. Existing shared and isolated factories are exercised on x86/x64, while `LdrLoadDll`, `LoadLibraryExW`, and `GetProcAddress` cover future app-local DWriteCore loads. The direct native-loader path passed locally on x64; endpoint protection removed the purpose-built x86 loader probe, so the isolated exact-commit CI result is authoritative for that cell. |
+| FreeType runtime | `IMPLEMENTED`, `PROVED LOCAL` | Manager-before-library ownership, transactional/idempotent initialization, bounded streams, signed-pitch accounting, typed LRU keys, immutable per-render policy, and cache teardown have focused x86/x64 tests. The pinned fork is intentionally retained; no unmeasured raster-output change is claimed. See [`freetype-runtime.md`](freetype-runtime.md). |
+| Font substitution | `IMPLEMENTED`, `PROVED LOCAL` | GDI and DirectWrite consume one immutable generation snapshot. Chaining, cycles, depth, charset precedence, concurrent reload, stable rule identity, coherent virtual SFNT identity, collection generations, and variable axes are covered. An object returned before injection remains its honest older generation. |
+| Profile selection | `IMPLEMENTED`, `PROVED LOCAL` | The adjacent `MacType.ini` and its exact `AlternativeFile` must be bounded, regular, readable INI files with `[General]`; missing, empty, malformed, selected-missing, reparse, and oversized inputs fail closed instead of loading historical defaults. CI exercises a valid profile and the portable negative cases; reparse rejection is enforced by the file-attribute check. |
+| Explicit process refusal | `IMPLEMENTED`, `PROVED LOCAL` | The Rust validator retains the exact `(pid, creation time)` and reason in the bounded process result. Re-observation is a duplicate, service health stays `Ready`, no `lastError` or performance warning is manufactured, and another PID with the same image name remains eligible. The health-v1 wire schema is unchanged for rollback compatibility. |
+| Windows feature detection | `IMPLEMENTED` | Manifest-sensitive OS-version guesses were removed from renderer decisions. Interface queries, module/export presence, and concrete mitigation facts now select capabilities. |
+| Sanitizer gate | `IMPLEMENTED`, `PROVED LOCAL`, `CI REQUIRED` | MSVC ASan instruments the new ownership, lifecycle, FreeType-policy, and substitution modules on x86/x64. A fully instrumented injected DLL remains unavailable because stock IniParser and other linked dependencies do not share ASan/STL annotations; CI must not mislabel module coverage as whole-process certification. |
+| Application Verifier/UMDH | `LAB ONLY`, not run | The current host lacks the complete `gflags`/UMDH toolchain and these tools mutate machine-global verifier state. The lane was reevaluated and intentionally not automated after the surrounding modules changed. Run it only in a disposable Windows lab with explicit cleanup evidence. |
+| Browser, WinUI, WPF, Qt, Rebel Inc, soak and golden images | `LAB ONLY` | Native contracts establish the API seams. Product-specific pixel, performance, and licensed-application claims remain `UNKNOWN` until their retained artifacts exist. They are compatibility evidence, not unfinished renderer ownership code. |
+
+The classic-C++ upstream renderer branch is a separate contribution experiment.
+None of its no-RAII assumptions or commits are inputs to this record.
+
+The requested post-work architecture pass was reevaluated after the lifecycle,
+FreeType, substitution, and Rust compatibility tranches. Its high-leverage
+changes were already made in place: the coordinator, immutable snapshot,
+ordered FreeType runtime, process validator, and orchestrator result registry
+are the deep modules and seams. A second sweeping refactor would now cut these
+new modules into pass-through layers and churn freshly verified adapters, so
+that separate step is intentionally skipped.
+
 ## Why this branch exists
 
 The current open service can prove that a MacType DLL was loaded into a target
@@ -21,13 +61,14 @@ profile or substituted the requested font. A local Google Chrome experiment
 showed this distinction: service telemetry recorded successful injection, but
 the rendered source-font fingerprint remained identical to stock Windows.
 
-The service may inject after a browser has already created its shared
-DirectWrite factory. The former hook path only observed later calls to
-`DWriteCreateFactory`, so an existing factory could remain unhooked. The first
-branch patch schedules post-loader-lock discovery of the shared factory. The
-service probe now reproduces the late-injection order by creating the factory
-before loading MacType. This patch is a starting correction, not the final
-DirectWrite architecture.
+The service may inject after a browser has already created a DirectWrite
+factory. The former hook path only observed later calls to
+`DWriteCreateFactory`, so an existing factory could remain unhooked. The final
+branch path now coordinates existing shared and isolated factories after the
+loader lock, tracks their concrete hook targets, and also observes future
+classic and app-local DWriteCore factory entry points. An immutable font
+collection already returned to an application is still not mutated
+retroactively; diagnostics preserve that generation boundary.
 
 The branch exists to replace fragile accumulated hook behavior with a measured
 and maintainable system while retaining MacType's profile semantics and the
@@ -172,38 +213,28 @@ separate claims and must never be collapsed into one success flag.
 
 ### 8. Sanitizers, verifier, and leak evidence
 
-Build dedicated x86 and x64 diagnostic cores with MSVC AddressSanitizer and
-debug information. These DLLs, matching sanitizer runtimes, symbols, and dump
-settings are CI-only artifacts and must never enter an installer, release, or
-integration/developer bundle. Run them through the native late-injection
-probe, the open-service contract, and the pinned Chromium and Firefox pixel
-proofs so that the exercised code is the same injected rendering code used by
-the product rather than an isolated unit-test substitute.
+The repeatable CI seam is narrower than the original full-DLL proposal. The
+x86 and x64 MSVC AddressSanitizer jobs instrument the new renderer ownership,
+hook-lifecycle, FreeType runtime-policy, and substitution modules, run them
+with the matching Visual C++ ASan runtime, and fail on any non-zero result.
+Ordinary non-sanitized core builds remain mandatory because instrumentation
+changes layout and timing.
 
-An ASan lane is RED when the sanitizer reports an error, writes an
-`ASAN_SAVE_DUMPS` dump, terminates a target, causes a browser renderer or
-service host to restart, or prevents required hook/profile/pixel telemetry
-from completing. Retain stdout, stderr, symbols, module hashes, dumps, service
-events, browser JSON, and screenshots on every failure. Keep the ordinary
-non-sanitized lane because sanitizer instrumentation changes layout and timing
-and cannot prove production artifacts by itself.
+A full injected `MacType.Core.dll` cannot yet be honestly instrumented in this
+tree. The stock static IniParser build carries incompatible STL annotation
+settings, producing link-time annotation mismatches when only the core uses
+ASan. Full-DLL ASan becomes valid only when every linked C++ dependency is
+built with matching compiler, runtime, iterator-debug, and sanitizer settings.
+Until then, neither native nor browser injection may be described as
+whole-core ASan coverage.
 
-MSVC AddressSanitizer does not implement LeakSanitizer. Leak checking is a
-separate job using Application Verifier for heap, handle, lock, and exception
-checks plus UMDH snapshots and bounded process counters. Run verifier against
-purpose-built native and browser-host probes, not indiscriminately against the
-entire hosted runner. Include an explicit DLL unload cycle: process-exit-only
-cleanup cannot prove that an injected MacType module releases its own state.
-Repeated samples fail on a confirmed leaked allocation stack, leaked handle,
-verifier stop, or statistically meaningful private-bytes/handle/GDI/USER
-object growth after warm-up. Threshold changes require retained before/after
-evidence, never a silent increase.
-
-Partial instrumentation is recorded honestly. ASan can diagnose accesses made
-by the instrumented core and helper modules even when the stock browser is not
-instrumented, but it cannot certify uninstrumented browser or Windows code.
-The diagnostic manifest therefore lists every instrumented module and the
-exact sanitizer runtime loaded in each target process.
+MSVC AddressSanitizer does not implement LeakSanitizer. Application Verifier
+plus UMDH therefore remains a disposable-lab procedure for heap, handle, lock,
+exception, and explicit-unload evidence. It is intentionally absent from the
+hosted workflow: the current environment lacks the complete tools, and
+verifier configuration is machine-global. Any future lane must record its
+exact target image, before/after configuration, symbols, dumps, bounded
+process counters, and cleanup rather than silently changing runner state.
 
 ## Required evidence matrix
 
@@ -282,34 +313,42 @@ feature set. Disabling `FontDataServiceAllWebContents` is not accepted as
 product support or as a required-path success proof.
 
 
-The native probe covers GDI and DirectWrite with injection before factory
-creation, injection after factory creation, multiple factories, worker-thread
-creation, child renderer processes, profile reload, missing profile, damaged
-profile, and shutdown during initialization. CI retains the JSON, screenshots,
-module inventory, profile, and exact binary hashes needed to reproduce a
-failure.
+The native probes cover GDI and DirectWrite substitution before factory
+creation, an isolated factory created before core load, existing and future
+classic/DWriteCore factories, multiple immutable collection generations,
+worker-thread creation, child renderer processes, and missing, valid, damaged,
+selected-missing, and oversized profiles. Concurrent snapshot reload and
+shutdown admission are focused module tests. CI retains the applicable JSON,
+module inventory, profile, and exact binary artifacts; screenshot and
+application-specific golden evidence remains a lab matrix item.
 
-## Delivery sequence
+## Delivery sequence and final disposition
 
-Work proceeds in bounded tranches. A later tranche may begin only when the
-previous tranche's required evidence is retained.
+Work proceeded in bounded tranches. Items 2 through 5 are the completed large
+renderer code program. Items 1, 6, and 7 include ongoing distribution or lab
+evidence and must not be used to reopen the ownership architecture without a
+new reproduced defect.
 
 1. **Evidence baseline and alpha release:** Finish the real browser gate,
    capture stock/legacy/open-service comparisons, enable all `main` and core
    CI on this branch, establish the Cppcheck safety ratchet and sanitizer/leak
    job contracts, and publish only `alpha-` prereleases.
-2. **RAII and runtime state:** Introduce ownership primitives and the explicit
-   runtime state machine without changing rendering. Prove behavioral parity,
-   cleanup under injected failures, and clean process shutdown.
-3. **Substitution resolver:** Centralize parsing and family resolution, add
-   alias/cycle/variable-font tests, then switch GDI and DirectWrite adapters to
-   the shared immutable snapshot.
-4. **DirectWrite lifecycle:** Replace the provisional shared-factory fix with
-   the capability registry and cover pre-existing/future factories,
-   collections, font sets, fallbacks, and DirectWriteCore.
-5. **FreeType modernization:** Update ownership and caches first, then evaluate
-   a pinned FreeType update and rendering changes with golden images and
-   performance evidence.
+2. **RAII and runtime state — complete:** Ownership primitives and explicit
+   runtime/capability state were introduced without importing the unrelated
+   classic-C++ renderer branch.
+3. **Substitution resolver — complete:** Parsing and family resolution use one
+   immutable snapshot; chain, cycle, charset, reload, virtual-font identity,
+   and variable-axis contracts cover the shared GDI/DirectWrite seam.
+4. **DirectWrite lifecycle — complete at the supported collection seam:** The
+   provisional shared-factory fix was replaced by the coordinator and now
+   covers pre-existing shared/isolated factories, future classic/DWriteCore
+   entry points, collections, and font sets. Retained pre-injection objects and
+   application-private fallback/renderers remain explicit boundaries rather
+   than mutable proxies.
+5. **FreeType modernization — complete without a raster-policy change:**
+   Ownership and caches were modernized and the fork ABI is verified. The
+   pinned 2.14.3 fork remains because changing it without golden and
+   performance evidence would add risk without a reproduced benefit.
 6. **Windows 11 application work:** Expand the application matrix, fix only
    reproduced incompatibilities, and document platform-enforced exclusions.
 7. **Stabilization:** Run long browser/native soak tests, concurrent profile
@@ -322,8 +361,10 @@ A core change is complete only when its focused regression test first fails on
 the prior branch state and passes with the change, both core architectures
 build, relevant native and browser proofs pass, security/static policy tests
 remain green, and diagnostics can distinguish a real substitution from mere
-DLL presence. Performance-sensitive changes also record before/after CPU,
-allocation, working-set, and render-time measurements.
+DLL presence. Performance claims also require before/after CPU, allocation,
+working-set, and render-time measurements. This tranche claims bounded
+ownership and cache correctness, not a speedup or a preferred raster-output
+change.
 
 All branch releases remain GitHub prereleases. Tags, titles, installers,
 integration/developer bundles, and checksum downloads use the `alpha-` prefix

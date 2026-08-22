@@ -22,8 +22,20 @@ This file fixes the domain language used by code, tests, CI, and architecture do
 **ProcessTargetValidator**
 : The host module that consumes typed facts for one observed PID and returns a verified eligible identity or an explicit process-local skip. The Windows inspector owns fact collection only; the validator owns self, session-zero, protected, critical, image-name, mitigation, target-race, and PID-mismatch classification. It does not own generation binding, retry, result history, health, or notifications.
 
+**explicit process-local skip**
+: A normal `InjectionOrchestrator` result for one verified `(pid, creation time)` that cannot or must not receive hooks. Its exact reason is retained in the bounded process-result registry, repeat observation becomes `Duplicate`, and another process with the same executable name remains eligible. It never creates a global health error, warning notification, or health-protocol extension.
+
+**HookCoordinator**
+: The process-wide renderer module that owns `Uninitialized`, `Starting`, `Active`, `Failed`, and `Stopping` admission, concrete hook-target attempts, duplicate suppression, first-failure evidence, and transactional stop. Provider-specific DirectWrite, DWriteCore, D2D, GDI, child-injection, and substitution adapters publish capability results through this interface instead of inferring global state independently.
+
 **DirectWriteLifecycle**
-: The rendering module that owns classic DirectWrite and app-local DWriteCore discovery, entry hooks, shared-factory readiness, worker cancellation, module pins, diagnostics, and explicit-unload ordering. Its interface is process-lifetime start plus transactional stop; loader interception and provider-specific state remain implementation details behind its seam.
+: The rendering module that owns classic DirectWrite and app-local DWriteCore discovery, concrete entry hooks, existing shared and isolated factory readiness, direct native-loader coverage for future app-local modules, worker cancellation, module pins, diagnostics, and explicit-unload ordering. Its interface is process-lifetime start plus transactional stop; loader interception and provider-specific state remain implementation details behind its seam. A font collection returned before injection remains an immutable older generation.
+
+**FontSubstitutionSnapshot**
+: The immutable, reference-counted rule generation consumed by both GDI and DirectWrite adapters. It owns case-insensitive rule identity, charset precedence, deterministic chains, cycle/depth failure, generation, and digest. Reload publishes a new snapshot; in-flight rendering keeps the old one and no adapter reads the mutable profile rule map.
+
+**FreeTypeRuntime**
+: The renderer module that owns the paired FreeType library and cache manager, bounded stream reads, bitmap byte accounting, typed raster cache keys, and the immutable per-render `RasterPolicy`. Its release order is manager before library. The pinned fork and private `FT_Glyph_To_BitmapEx` ABI are part of this interface.
 
 **ChildInjectionTransaction**
 : The synchronous core module behind the `CreateProcessInternalW` hook. It creates an eligible child suspended, verifies its exact handle-bound identity and safety facts, binds only the current core's fixed adjacent generation through the same- or mixed-architecture adapter, and then restores the caller-requested thread state. Quiet skips never become image-wide bans or service alerts; an unprovable in-flight mixed-helper mutation terminates the new child rather than resuming uncertain state.
@@ -50,7 +62,7 @@ This file fixes the domain language used by code, tests, CI, and architecture do
 
 - React and `ExecutionViewModel` own presentation and user intent.
 - Tauri's MachineIntegration adapter translates fixed user actions into system commands and read-only state.
-- Rust setup and host modules own SCM, protected generations, observation, health, recovery, and rollback.
+- Rust setup and host modules own SCM, protected generations, observation, health, recovery, rollback, and bounded process-local skip evidence.
 - The fixed helper and public MacType C/C++ code own injection and rendering.
 - `renderer/` is the physical implementation boundary of the `MacType.Core.dll` module: hooks, settings, rendering adapters, lifecycle code, and renderer-owned resources stay local there. Workspace build manifests remain at the repository root, while cross-component hook compatibility remains under `shared/`.
 - The 레거시 서비스 remains a migration subject and fallback only; it is not part of normal operation.

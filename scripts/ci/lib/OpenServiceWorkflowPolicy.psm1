@@ -192,10 +192,12 @@ function Test-OpenServiceWorkflowPolicy {
             'PatchFactoryAliasVtables',
             'legacy-system-collection-alias-returned',
             'SignalDirectWriteDiagnostic(readyStage);',
-            'HookSharedDirectWriteFactory(ORIG_DWriteCreateFactory, L"hook-ready");'
+            'DWRITE_FACTORY_TYPE_SHARED',
+            'DWRITE_FACTORY_TYPE_ISOLATED',
+            'HookKnownDirectWriteFactories(ORIG_DWriteCreateFactory, L"hook-ready");'
         )
     if ($directWrite) {
-        $readyCall = 'HookSharedDirectWriteFactory(ORIG_DWriteCreateFactory, L"hook-ready");'
+        $readyCall = 'HookKnownDirectWriteFactories(ORIG_DWriteCreateFactory, L"hook-ready");'
         $readyPublisher = 'SignalDirectWriteDiagnostic(readyStage);'
         $workerStart = $directWrite.IndexOf(
             'static DWORD WINAPI HookExistingDirectWriteFactory'
@@ -208,7 +210,7 @@ function Test-OpenServiceWorkflowPolicy {
         if ($workerStart -lt 0 -or $workerEnd -le $workerStart -or
             $readyIndex -le $workerStart -or $readyIndex -ge $workerEnd) {
             $failures.Add(
-                'hook-ready must be requested by the completed shared-factory worker.'
+                'hook-ready must be requested by the completed existing-factory worker.'
             )
         }
         if ([regex]::Matches(
@@ -221,7 +223,7 @@ function Test-OpenServiceWorkflowPolicy {
                 $directWrite,
                 [regex]::Escape($readyPublisher)
             ).Count -ne 1) {
-            $failures.Add('The shared-factory helper must have exactly one readiness publisher.')
+            $failures.Add('The existing-factory helper must have exactly one readiness publisher.')
         }
         foreach ($forbiddenToken in @(
             'AliasedDWriteFont', 'AliasedDWriteFontFace',

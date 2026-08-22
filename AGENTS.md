@@ -35,6 +35,22 @@ end-to-end delivery is authorized, all of the following are mandatory:
 Always pass `--repo 115dkk/mactype_tauri` to `gh`. Never target the upstream
 repository unless the user explicitly requests upstream contact.
 
+## Approval-latency discipline
+
+Treat an unexplained interactive pause as possible approval latency before
+assuming the user is available to respond. Routine inspection, building, and
+testing must avoid unnecessary approval surfaces: do not recursively delete
+worktrees or broad build roots, mutate machine-global settings, or request
+elevation when a fixed repository-local evidence directory is sufficient.
+Prefer non-destructive overwrites and leave ignored evidence in `build/` when
+cleanup is not required for correctness.
+
+This is not permission to conceal or bypass a protected action. If the task
+genuinely requires new authority, ask once with the exact scope and stop that
+path; do not repeatedly prompt, retry equivalent privileged commands, or keep
+the task apparently stalled waiting for an approval the user may not be able
+to grant immediately.
+
 ## `codex/alpha-plus-dll` exception
 
 `codex/alpha-plus-dll` is the long-lived delivery branch and must never be

@@ -41,6 +41,18 @@ below wherever the two conflict.
   substitutions consume the immutable font-substitution snapshot, and
   FreeType manager ownership ends before its library. Do not add an independent
   runtime phase machine or read mutable profile maps from a render hot path.
+- Protected runtime and profile identity travel only as one
+  `RendererRuntimeBinding`. A helper-owned load is successful only after the
+  generated `RendererActivationEvidence` contract binds the exact process,
+  effective profile digest, admission, lifecycle revision, and capability
+  evidence. Keep helper wire text inside its Adapter; retry, cleanup, health,
+  and quiet-skip policy consume typed dispositions. Never query or release an
+  already-loaded renderer without a renderer-owned lifetime lease.
+- `ProfileRuntime` publishes one complete immutable `RendererPolicySnapshot`
+  after the selected profile remains stable through hashing and parsing. A
+  failed publication preserves the prior snapshot. FreeType startup, raster,
+  reload, and new renderer work consume that snapshot rather than rebuilding
+  policy from `CGdippSettings`.
 - Renderer startup fails closed when the adjacent profile or its selected
   `AlternativeFile` is missing, malformed, non-regular, empty, or oversized.
   Do not restore the historical implicit defaults. Feature and interface
@@ -68,7 +80,10 @@ below wherever the two conflict.
 - At the start of each work session, fetch and inspect `origin/main`, compare
   it with this branch, and review new service, Control Center, packaging,
   security, and CI commits. Cherry-pick useful commits into this branch before
-  starting conflicting work, then rerun the affected branch gates.
+  starting conflicting work, then rerun the affected branch gates. After the
+  renderer/service deepening, follow the direct-pick and semantic-port rules in
+  `docs/alpha-plus-refactor-cherry-picks.md`; the Module ownership and old-to-new
+  symbol map are fixed in `docs/renderer-activation-architecture.md`.
 - Releases from this branch are prereleases only. Their tag, release title,
   installer download, integration/developer bundle, and checksum download must
   begin with `alpha-`. Never publish a stable release from this branch.

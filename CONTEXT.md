@@ -16,8 +16,20 @@ This file fixes the domain language used by code, tests, CI, and architecture do
 **generation**
 : An immutable, digest- or version-addressed runtime or profile directory under a protected machine root. Activation changes a small durable pointer; it never edits an active generation in place.
 
-**InjectionOrchestrator**
-: The host module that consumes a verified target decision, binds the identity to one runtime generation, applies deduplication/retry/cancellation policy, records a bounded target result, and owns generation-bound injection telemetry and terminal health classification. Normal target skips and pre-injection rejection must not change global service health.
+**RendererRuntimeBinding**
+: The typed pairing of one verified protected runtime generation and one verified protected profile digest. `ProtectedRendererRuntime` constructs it only while both active pointers and their content remain stable. Process observation, helper invocation, telemetry, and renderer evidence carry this value as one Interface; callers never recombine two unrelated strings.
+
+**ProcessInjection**
+: The host Module that consumes a verified target decision and `RendererRuntimeBinding`, applies exact-identity de-duplication, retry, cancellation, liveness recheck, bounded result history, telemetry, and terminal health impact. `InjectionOrchestrator` is its orchestration Interface. Helper diagnostic text is evidence only; typed disposition owns policy. Normal target skips and verified pre-injection rejection do not change global service health.
+
+**RendererActivationEvidence**
+: The versioned, fixed-width C/Rust evidence returned by the renderer after a helper-owned load. It binds exact PID, creation time, session, architecture, `RendererRuntimeBinding`, module-load origin, renderer admission, lifecycle revision, and capability sets. `Active`, `QuietSkip`, and `Failed` are distinct. Health v1 is derived from this evidence and remains wire-compatible.
+
+**ProfileRuntime**
+: The renderer Module that publishes only a complete immutable `RendererPolicySnapshot`. It holds the selected profile under a stable read lease through parsing, hashes its exact bytes, binds font substitution to the same revision, and preserves the preceding snapshot when publication fails.
+
+**RendererPolicySnapshot**
+: The immutable policy generation consumed by renderer Implementations. It contains the effective profile digest, hook/FreeType/DirectWrite policy, raster policy, font settings, and font-substitution snapshot. One render request retains one snapshot generation and never rereads mutable profile maps.
 
 **ProcessTargetValidator**
 : The host module that consumes typed facts for one observed PID and returns a verified eligible identity or an explicit process-local skip. The Windows inspector owns fact collection only; the validator owns self, session-zero, protected, critical, image-name, mitigation, target-race, and PID-mismatch classification. It does not own generation binding, retry, result history, health, or notifications.
@@ -41,7 +53,7 @@ This file fixes the domain language used by code, tests, CI, and architecture do
 : The synchronous core module behind the `CreateProcessInternalW` hook. It creates an eligible child suspended, verifies its exact handle-bound identity and safety facts, binds only the current core's fixed adjacent generation through the same- or mixed-architecture adapter, and then restores the caller-requested thread state. Quiet skips never become image-wide bans or service alerts; an unprovable in-flight mixed-helper mutation terminates the new child rather than resuming uncertain state.
 
 **fixed helper**
-: The adjacent x86 or x64 `mactype-injector` executable selected by architecture. Its interface accepts only an inherited process handle plus fixed identity fields. It cannot accept an arbitrary DLL, executable, command line, service name, or profile path.
+: The adjacent x86 or x64 `mactype-injector` executable selected by architecture. Its Interface accepts only an inherited process handle, exact process identity, and `RendererRuntimeBinding`. It cannot accept an arbitrary DLL, executable, command line, service name, or profile path. It reports success only after validating `RendererActivationEvidence`; an explicit `QuietSkip` unloads only the helper-owned module reference and stays process-local.
 
 **ExecutionViewModel**
 : The frontend-facing model derived from MachineIntegration state. It chooses user-visible actions and explanations without teaching React about SCM flags, registry layouts, helper processes, or migration receipt internals.
@@ -64,7 +76,7 @@ This file fixes the domain language used by code, tests, CI, and architecture do
 - Tauri's MachineIntegration adapter translates fixed user actions into system commands and read-only state.
 - Rust setup and host modules own SCM, protected generations, observation, health, recovery, rollback, and bounded process-local skip evidence.
 - The fixed helper and public MacType C/C++ code own injection and rendering.
-- `renderer/` is the physical implementation boundary of the `MacType.Core.dll` module: hooks, settings, rendering adapters, lifecycle code, and renderer-owned resources stay local there. Workspace build manifests remain at the repository root, while cross-component hook compatibility remains under `shared/`.
+- `renderer/` is the physical Implementation root of the `MacType.Core.dll` Module: hooks, settings, rendering Adapters, lifecycle code, and renderer-owned resources stay local there. Workspace build manifests remain at the repository root, while cross-Module contracts remain under `shared/`.
 - The 레거시 서비스 remains a migration subject and fallback only; it is not part of normal operation.
 
 ## Architecture language

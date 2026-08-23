@@ -55,7 +55,7 @@ const executionStateGallery = [
   { id: "outdated", query: "system-service=outdated", expected: "Update required" },
   { id: "profile-mismatch", query: "system-service=profile-mismatch", expected: "Service running with a different profile" },
   { id: "not-installed", query: "system-service=migration-available", expected: "Install service" },
-  { id: "foreign-service", query: "system-service=foreign-service", expected: "unexpected configuration" },
+  { id: "foreign-service", query: "system-service=foreign-service", expected: "different configuration" },
   { id: "inaccessible-service", query: "system-service=inaccessible-service", expected: "Inaccessible" },
   { id: "removal-pending", query: "system-service=delete-pending", expected: "Removal pending" },
   { id: "appinit-running", query: "system-service=legacy-conflict&legacy=migration-available&raw-active=1", expected: "Service running while AppInit conflicts" },
@@ -880,7 +880,7 @@ test("execution and new system service controls remain interactive", async ({ pa
   await page.getByRole("button", { name: "등록 프로그램 실행" }).click();
   await expect(page.getByText(/등록 프로그램 1개를 MacType로 시작/)).toBeVisible();
   await page.getByRole("button", { name: "MacType로 실행" }).click();
-  await expect(page.getByText(/MacLoader를 통해 프로세스 4242/)).toBeVisible();
+  await expect(page.getByText(/MacLoader로 프로세스 4242/)).toBeVisible();
   await expect(page.getByRole("heading", { name: "시스템 범위 모드" })).toBeVisible();
 
   await expect(page.getByText("MacType 시스템 적용 중", { exact: true })).toBeVisible();
@@ -1030,7 +1030,7 @@ test("a verified legacy service funnels activation through Migrate until it is r
   const openService = page.locator('[data-service-backend="open-source"]');
   await expect(openService.locator('[data-state="legacy-service-migrate"]')).toBeVisible();
   await expect(openService).toContainText("A legacy MacTray service must be resolved first");
-  await expect(openService).toContainText("A verified legacy MacTray service is installed");
+  await expect(openService).toContainText("A legacy MacTray service is installed");
   await expect(openService).not.toContainText("foreign legacy MacTray service");
   await expect(openService).not.toContainText("status could not be verified");
   await expect(openService.getByRole("button", { name: "Apply current profile" })).toBeDisabled();
@@ -1203,11 +1203,11 @@ test("a running unverified service remains stoppable without claiming it is inac
   await expect(page.getByText("MacType system application is temporarily off.", { exact: true })).toBeVisible();
 });
 
-test("a running profile mismatch remains stoppable and identifies the mismatched generation", async ({ page }) => {
+test("a running profile mismatch remains stoppable and identifies the selected profile mismatch", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=profile-mismatch", { waitUntil: "networkidle" });
   const summary = page.locator("[data-service-summary]");
   await expect(summary).toContainText("Service running with a different profile");
-  await expect(summary).toContainText("The running generation does not match the profile expected by Control Center.");
+  await expect(summary).toContainText("The profile running in the service does not match the profile selected in Control Center.");
   await expect(summary.getByRole("button", { name: "Stop" })).toBeEnabled();
   await openServiceDetails(page);
 
@@ -1355,7 +1355,7 @@ test("a foreign same-name service is prominent without exposing an unsafe action
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=foreign-service", { waitUntil: "networkidle" });
 
   const summary = page.locator("[data-service-summary]");
-  await expect(summary).toContainText("A service with the same name has an unexpected configuration");
+  await expect(summary).toContainText("A service with the same name has a different configuration");
   await expect(summary.locator("[data-prominent-exception]")).toHaveAttribute("data-kind", "foreign-service");
   await expect(summary.getByRole("button")).toHaveCount(0);
   await expect(page.getByText("Manage the new service", { exact: true })).toBeHidden();
@@ -1381,7 +1381,7 @@ const legacyServiceIdentityCases = [
     query: "legacy=migration-available",
     kind: "migration",
     title: "Legacy MacTray was detected.",
-    description: "A verified legacy MacTray service is installed.",
+    description: "A legacy MacTray service is installed.",
     detailWarning: null,
   },
   {
@@ -1397,8 +1397,8 @@ const legacyServiceIdentityCases = [
     query: "legacy=inaccessible",
     kind: "legacy-service-uncertain",
     title: "Legacy MacTray service status could not be verified",
-    description: "could not read enough service information",
-    detailWarning: "could not read enough service information",
+    description: "Not enough service information could be read to identify the service",
+    detailWarning: "Not enough service information could be read to identify the service",
   },
 ] as const;
 
@@ -1423,7 +1423,7 @@ for (const identity of legacyServiceIdentityCases) {
     if (identity.detailWarning) await expect(legacy).toContainText(identity.detailWarning);
     else {
       await expect(legacy).not.toContainText("does not match the expected MacTray configuration");
-      await expect(legacy).not.toContainText("could not read enough service information");
+      await expect(legacy).not.toContainText("Not enough service information could be read to identify the service");
     }
     await page.screenshot({
       path: path.join(galleryRoot, `${testInfo.project.name}-execution-detail-legacy-identity-${identity.id}-en.png`),

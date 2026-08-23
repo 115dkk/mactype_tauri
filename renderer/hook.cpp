@@ -24,6 +24,7 @@
 #include "hookCounter.h"
 #include "hook_lifecycle.h"
 #include "renderer_activation.h"
+#include "unload_lifecycle.h"
 #include <vector>
 
 bool RestoreDirectWriteVtableHooks(DWORD timeoutMilliseconds = 3000);
@@ -733,6 +734,12 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 					return false;
 				}
 			}
+			if (!processExcluded && !IsUnload &&
+				!renderer::AcquireProcessRendererLease(instance))
+			{
+				DebugOut(L"Can't acquire the renderer unload lease, exiting");
+				return FALSE;
+			}
 			if (!runtimeStart.Complete())
 				return FALSE;
 			if (processExcluded)
@@ -768,16 +775,18 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 		case DLL_PROCESS_DETACH:
 			if (!bDllInited)
 				return true;
+			// Process termination owns the address space and has already removed
+			// peer threads. Cleanup here would run under the loader lock against
+			// potentially torn-down dependencies.
+			if (lpReserved != nullptr)
+				return true;
 			renderer::ProcessHookCoordinator().BeginStop();
 			bDllInited = false;
-			if (InterlockedExchange(&g_bHookEnabled, FALSE) && lpReserved == nullptr)
+			if (InterlockedExchange(&g_bHookEnabled, FALSE))
 			{
 				RestoreDirectWriteVtableHooks();
 				hook_term();
 			}
-#ifndef DEBUG
-			if (lpReserved != nullptr) return true;
-#endif
 
 			if (g_pFTEngine != nullptr)
 				DestroyFreeTypeFontEngine();

@@ -3,6 +3,7 @@
 #include "override.h"
 #include "directwrite.h"
 #include "hook_lifecycle.h"
+#include "unload_lifecycle.h"
 #include <tlhelp32.h>
 #include <shlwapi.h>	//DLLVERSIONINFO
 #include "undocAPI.h"
@@ -11,6 +12,8 @@
 #include <dwrite_2.h>
 #include <dwrite_3.h>
 #include <locale>
+#include <cstdint>
+#include <limits>
 #include "wow64ext.h"
 #include <VersionHelpers.h>
 #include "crc32.h"
@@ -156,12 +159,12 @@ EXTERN_C void WINAPI ReloadConfig()
 }
 
 extern HINSTANCE g_dllInstance;
-EXTERN_C void SafeUnload()
+EXTERN_C DWORD WINAPI SafeUnload(LPVOID)
 {
-	static BOOL bInited = false;
-	if (bInited)
-		return;	//防重入
-	bInited = true;
+	renderer::UnloadAttemptGate& unloadGate =
+		renderer::ProcessUnloadAttemptGate();
+	if (!unloadGate.TryBegin())
+		return ERROR_BUSY;
 	renderer::HookCoordinator& hookCoordinator =
 		renderer::ProcessHookCoordinator();
 	bool const coordinatorStopStarted = hookCoordinator.BeginStop();
@@ -169,55 +172,50 @@ EXTERN_C void SafeUnload()
 		hookCoordinator.phase() != renderer::RuntimePhase::stopping &&
 		hookCoordinator.phase() != renderer::RuntimePhase::uninitialized)
 	{
-		bInited = false;
-		ExitThread(ERROR_BUSY);
+		unloadGate.EndForRetry();
+		return ERROR_BUSY;
 	}
 	while (CThreadCounter::Count())
 		Sleep(0);
-	auto lock = std::make_unique<CCriticalSectionLock>();
-	BOOL const last = InterlockedExchange(&g_bHookEnabled, FALSE);
-	DirectWriteLifecycleStopPreparation const preparation =
-		PrepareDirectWriteLifecycleStop();
-	if (preparation == DirectWriteLifecycleStopPreparation::unsafeToUnload)
 	{
-		if (last)
-			InterlockedExchange(&g_bHookEnabled, last);
-		if (coordinatorStopStarted)
-			hookCoordinator.AbortStop();
-		bInited = false;
-		lock.reset();
-		ExitThread(ERROR_BUSY);
-	}
-	if (last) {
-		if (hook_term()!=NOERROR)
+		CCriticalSectionLock lock;
+		BOOL const last = InterlockedExchange(&g_bHookEnabled, FALSE);
+		DirectWriteLifecycleStopPreparation const preparation =
+			PrepareDirectWriteLifecycleStop();
+		if (preparation == DirectWriteLifecycleStopPreparation::unsafeToUnload)
+		{
+			if (last)
+				InterlockedExchange(&g_bHookEnabled, last);
+			if (coordinatorStopStarted)
+				hookCoordinator.AbortStop();
+			unloadGate.EndForRetry();
+			return ERROR_BUSY;
+		}
+		if (last && hook_term()!=NOERROR)
 		{
 			if (preparation == DirectWriteLifecycleStopPreparation::prepared)
 				AbortDirectWriteLifecycleStop();
 			InterlockedExchange(&g_bHookEnabled, last);
 			if (coordinatorStopStarted)
 				hookCoordinator.AbortStop();
-			bInited = false;
-			lock.reset();
-			ExitThread(ERROR_ACCESS_DENIED);
+			unloadGate.EndForRetry();
+			return ERROR_ACCESS_DENIED;
+		}
+		if (preparation == DirectWriteLifecycleStopPreparation::prepared &&
+			!CommitDirectWriteLifecycleStop())
+		{
+			// Detours are already detached. Keep module references alive and
+			// reopen unload admission so a later thread can finish the drain.
+			unloadGate.EndForRetry();
+			return ERROR_BUSY;
+		}
+		if (hookCoordinator.phase() == renderer::RuntimePhase::stopping &&
+			!hookCoordinator.CompleteStop())
+		{
+			unloadGate.EndForRetry();
+			return ERROR_BUSY;
 		}
 	}
-	if (preparation == DirectWriteLifecycleStopPreparation::prepared &&
-		!CommitDirectWriteLifecycleStop())
-	{
-		// Detours are already detached, so keep the lifecycle stopped and all
-		// module references alive. A later SafeUnload call can retry the drain.
-		bInited = false;
-		lock.reset();
-		ExitThread(ERROR_BUSY);
-	}
-	if (hookCoordinator.phase() == renderer::RuntimePhase::stopping &&
-		!hookCoordinator.CompleteStop())
-	{
-		bInited = false;
-		lock.reset();
-		ExitThread(ERROR_BUSY);
-	}
-	lock.reset();
 	while (CThreadCounter::Count())
 		Sleep(10);
 	Sleep(0);
@@ -226,8 +224,11 @@ EXTERN_C void SafeUnload()
 		Sleep(10);
 	} while (CThreadCounter::Count());	//double check for xp
 
-	bInited = false;
-	FreeLibraryAndExitThread(g_dllInstance, 0);
+	HMODULE const rendererLease = renderer::TakeProcessRendererLease();
+	FreeLibraryAndExitThread(
+		rendererLease != nullptr ? rendererLease : g_dllInstance,
+		ERROR_SUCCESS);
+	return ERROR_SUCCESS;
 }
 
 void ChangeFileName(LPWSTR lpSrc, int nSize, LPCWSTR lpNewFileName) {
@@ -269,57 +270,65 @@ std::wstring MakeUniqueFontName(const std::wstring& strFullName, const std::wstr
 FARPROC K32GetProcAddress(LPCSTR lpProcName)
 {
 #ifndef _WIN64
-	//序数渡しには対応しない
-
-	//kernel32のベースアドレス取得
-	LPBYTE pBase = reinterpret_cast<LPBYTE>(GetModuleHandleA("kernel32.dll"));
-
-	//この辺は100%成功するはずなのでエラーチェックしない
-	PIMAGE_DOS_HEADER pdosh = reinterpret_cast<PIMAGE_DOS_HEADER>(pBase);
-	PIMAGE_NT_HEADERS pnth = reinterpret_cast<PIMAGE_NT_HEADERS>(pBase + pdosh->e_lfanew);
-
-	const DWORD offs = pnth->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
-	const DWORD size = pnth->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
-	if (offs == 0 || size == 0) {
+	HMODULE const module = GetModuleHandleA("kernel32.dll");
+	std::size_t moduleSize = 0;
+	if (!renderer::QueryMappedModuleSize(module, &moduleSize))
 		return nullptr;
-	}
-
-	PIMAGE_EXPORT_DIRECTORY pdir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(pBase + offs);
-	const DWORD* pFunc = reinterpret_cast<const DWORD*>(pBase + pdir->AddressOfFunctions);
-	const WORD* pOrd = reinterpret_cast<const WORD*>(pBase + pdir->AddressOfNameOrdinals);
-	const DWORD* pName = reinterpret_cast<const DWORD*>(pBase + pdir->AddressOfNames);
-
-	for(DWORD i=0; i<pdir->NumberOfFunctions; i++) {
-		for(DWORD j=0; j<pdir->NumberOfNames; j++) {
-			if(pOrd[j] != i)
-				continue;
-
-			if(strcmp(reinterpret_cast<LPCSTR>(pBase) + pName[j], lpProcName) != 0)
-				continue;
-
-			return reinterpret_cast<FARPROC>(pBase + pFunc[i]);
-		}
-	}
-	return nullptr;
+	renderer::PeExportView const image(
+		module, moduleSize, renderer::PeImageLayout::mappedImage);
+	DWORD functionRva = 0;
+	if (!image.FindFunctionRva(lpProcName, &functionRva))
+		return nullptr;
+	std::uintptr_t const base = reinterpret_cast<std::uintptr_t>(module);
+	if (functionRva > std::numeric_limits<std::uintptr_t>::max() - base)
+		return nullptr;
+	return reinterpret_cast<FARPROC>(base + functionRva);
 #else
-
-	//kernel32のベースアドレス取得
-	WCHAR sysdir[MAX_PATH];
-	GetWindowsDirectory(sysdir, MAX_PATH);
-	wcscat(sysdir, L"\\SysWow64\\kernel32.dll");	// ¼ÓÔØkernel32.dll
+	WCHAR sysdir[MAX_PATH] = {};
+	UINT const directoryLength = GetSystemWow64DirectoryW(sysdir, ARRAYSIZE(sysdir));
+	if (directoryLength == 0 || directoryLength >= ARRAYSIZE(sysdir) ||
+		FAILED(StringCchCatW(sysdir, ARRAYSIZE(sysdir), L"\\kernel32.dll")))
+		return nullptr;
 	auto hFile = renderer_raii::AdoptHandle(CreateFile(
 		sysdir, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr));
 	if (!hFile)
 		return nullptr;
-	DWORD dwSize = GetFileSize(hFile.get(), nullptr);
-	std::vector<BYTE> image(dwSize);
-	ReadFile(hFile.get(), image.data(), dwSize, &dwSize, nullptr);//读取文件
-
-	CMemLoadDll MemDll;
-	MemDll.MemLoadLibrary(image.data(), dwSize, false);
-	return reinterpret_cast<FARPROC>(reinterpret_cast<DWORD_PTR>(MemDll.MemGetProcAddress(lpProcName)) - MemDll.GetImageBase());	//返回偏移值
+	LARGE_INTEGER fileSize{};
+	if (!GetFileSizeEx(hFile.get(), &fileSize) || fileSize.QuadPart <= 0 ||
+		static_cast<unsigned long long>(fileSize.QuadPart) >
+			std::numeric_limits<std::size_t>::max())
+		return nullptr;
+	auto mapping = renderer_raii::AdoptHandle(CreateFileMappingW(
+		hFile.get(), nullptr, PAGE_READONLY, 0, 0, nullptr));
+	if (!mapping)
+		return nullptr;
+	renderer_raii::UniqueMappedView bytes(
+		MapViewOfFile(mapping.get(), FILE_MAP_READ, 0, 0, 0));
+	if (!bytes)
+		return nullptr;
+	renderer::PeExportView const image(
+		bytes.get(), static_cast<std::size_t>(fileSize.QuadPart),
+		renderer::PeImageLayout::rawFile);
+	DWORD functionRva = 0;
+	return image.FindFunctionRva(lpProcName, &functionRva)
+		? reinterpret_cast<FARPROC>(static_cast<ULONG_PTR>(functionRva))
+		: nullptr;
 
 #endif
+}
+
+static DWORD K32GetProcAddressTableEntryRva(LPCSTR lpProcName)
+{
+	HMODULE const module = GetModuleHandleA("kernel32.dll");
+	std::size_t moduleSize = 0;
+	if (!renderer::QueryMappedModuleSize(module, &moduleSize))
+		return 0;
+	renderer::PeExportView const image(
+		module, moduleSize, renderer::PeImageLayout::mappedImage);
+	DWORD tableEntryRva = 0;
+	return image.FindAddressTableEntryRva(lpProcName, &tableEntryRva)
+		? tableEntryRva
+		: 0;
 }
 
 typedef struct _UNICODE_STRING64 {
@@ -896,9 +905,9 @@ emit_dw(0xD0FF);	//call eax
 
 		//なぜかGetProcAddressでLoadLibraryWのアドレスが正しく取れないことがあるので
 		//kernel32のヘッダから自前で取得する
-		static FARPROC pfn = reinterpret_cast<FARPROC>(
-			reinterpret_cast<INT_PTR>(CDllHelper::MyGetProcAddress(GetModuleHandle(L"kernel32.dll"), L"LoadLibraryW")) -
-			reinterpret_cast<INT_PTR>(GetModuleHandle(L"kernel32.dll")));
+		static DWORD const pfn = K32GetProcAddressTableEntryRva("LoadLibraryW");
+		if (pfn == 0)
+			return false;
 		/*WCHAR msg[500] = { 0 };
 		wsprintf(msg, L"API paddr: 0x%I64x\r\nOffset: %x\r\nAPI addr: 0x%I64x\r\nKernel32.dll: 0x%I64x\r\nKernelBase: 0x%I64x", (DWORD_PTR)pfn, *(PDWORD)pfn, *(PDWORD)pfn + (DWORD_PTR)GetModuleHandle(L"kernel32.dll"),
 			(DWORD_PTR)GetModuleHandle(L"kernel32.dll"), (DWORD_PTR)GetModuleHandle(L"kernelbase.dll"));

@@ -54,6 +54,12 @@ int wmain(const int count, wchar_t** values) {
     std::wcerr << L"MacType preload failed: " << GetLastError() << L'\n';
     return 2;
   }
+  const auto safe_unload = reinterpret_cast<LPTHREAD_START_ROUTINE>(
+      GetProcAddress(core, "SafeUnload"));
+  if (safe_unload == nullptr) {
+    std::wcerr << L"MacType SafeUnload export is missing\n";
+    return 12;
+  }
   if (!WaitForLifecycleStage(diagnostic_namespace, L"hook-ready")) {
     std::wcerr << L"MacType DirectWrite lifecycle did not become ready\n";
     return 7;
@@ -111,5 +117,47 @@ int wmain(const int count, wchar_t** values) {
     return 5;
   }
   factory->Release();
+
+  if (FreeLibrary(core) == FALSE) {
+    std::wcerr << L"the caller's renderer reference could not be released\n";
+    return 10;
+  }
+  HMODULE retained_core = nullptr;
+  if (GetModuleHandleExW(
+          GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+              GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+          reinterpret_cast<LPCWSTR>(core), &retained_core) == FALSE ||
+      retained_core != core) {
+    std::wcerr << L"plain FreeLibrary unmapped an active renderer\n";
+    return 11;
+  }
+
+  const HANDLE unload_thread =
+      CreateThread(nullptr, 0, safe_unload, nullptr, 0, nullptr);
+  if (unload_thread == nullptr ||
+      WaitForSingleObject(unload_thread, 10'000) != WAIT_OBJECT_0) {
+    if (unload_thread != nullptr) {
+      CloseHandle(unload_thread);
+    }
+    std::wcerr << L"SafeUnload did not reach quiescence\n";
+    return 13;
+  }
+  DWORD unload_status = ERROR_GEN_FAILURE;
+  const bool unload_succeeded =
+      GetExitCodeThread(unload_thread, &unload_status) != FALSE &&
+      unload_status == ERROR_SUCCESS;
+  CloseHandle(unload_thread);
+  if (!unload_succeeded) {
+    std::wcerr << L"SafeUnload failed: " << unload_status << L'\n';
+    return 14;
+  }
+  retained_core = nullptr;
+  if (GetModuleHandleExW(
+          GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+              GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+          reinterpret_cast<LPCWSTR>(core), &retained_core) != FALSE) {
+    std::wcerr << L"SafeUnload left the renderer image mapped\n";
+    return 15;
+  }
   return 0;
 }

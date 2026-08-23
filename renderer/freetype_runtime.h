@@ -2,6 +2,7 @@
 
 #include "renderer_policy.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <utility>
@@ -30,6 +31,106 @@ constexpr int BitmapByteSize(int pitch, unsigned int rows) noexcept
 		? std::numeric_limits<int>::max()
 		: static_cast<int>(bytes);
 }
+
+struct BitmapRowView
+{
+	const unsigned char* data;
+	std::size_t size;
+
+	explicit operator bool() const noexcept { return data != nullptr; }
+};
+
+// FT_Bitmap::buffer starts at the upper row for positive pitch and at the
+// lower row for negative pitch. Expose one top-down logical row and keep all
+// signed-pitch, multiplication, and address-overflow checks in this interface.
+inline BitmapRowView CheckedBitmapRow(
+	const unsigned char* buffer,
+	int pitch,
+	unsigned int rows,
+	unsigned int row,
+	std::uint64_t requiredBytes = 0) noexcept
+{
+	if (buffer == nullptr || pitch == 0 || row >= rows)
+		return {nullptr, 0};
+
+	std::int64_t const signedPitch = pitch;
+	std::uint64_t const rowBytes = static_cast<std::uint64_t>(
+		signedPitch < 0 ? -signedPitch : signedPitch);
+	if (rowBytes == 0 || requiredBytes > rowBytes ||
+		rowBytes > static_cast<std::uint64_t>(
+			std::numeric_limits<std::size_t>::max()))
+		return {nullptr, 0};
+
+	std::uint64_t const physicalRow = pitch > 0 ? row : rows - 1u - row;
+	if (physicalRow != 0 &&
+		rowBytes > std::numeric_limits<std::uint64_t>::max() / physicalRow)
+		return {nullptr, 0};
+	std::uint64_t const offset = physicalRow * rowBytes;
+	std::uintptr_t const base = reinterpret_cast<std::uintptr_t>(buffer);
+	if (offset > static_cast<std::uint64_t>(
+			std::numeric_limits<std::uintptr_t>::max() - base))
+		return {nullptr, 0};
+
+	return {
+		reinterpret_cast<const unsigned char*>(
+			base + static_cast<std::uintptr_t>(offset)),
+		static_cast<std::size_t>(rowBytes)};
+}
+
+struct CheckedFaceIndex
+{
+	std::size_t value;
+	bool valid;
+};
+
+inline CheckedFaceIndex CheckFaceIndex(
+	int oneBasedFaceId,
+	std::size_t fontCount) noexcept
+{
+	if (oneBasedFaceId <= 0)
+		return {0, false};
+	std::size_t const index = static_cast<std::size_t>(oneBasedFaceId - 1);
+	return {index, index < fontCount};
+}
+
+class StreamBackingOwnership
+{
+public:
+	StreamBackingOwnership() = default;
+	StreamBackingOwnership(const StreamBackingOwnership&) = delete;
+	StreamBackingOwnership& operator=(const StreamBackingOwnership&) = delete;
+
+	bool TransferToFace() noexcept
+	{
+		if (phase_ != Phase::builder)
+			return false;
+		phase_ = Phase::faceCallback;
+		return true;
+	}
+
+	bool ReclaimFromCloseCallback() noexcept
+	{
+		if (phase_ != Phase::faceCallback)
+			return false;
+		phase_ = Phase::closed;
+		return true;
+	}
+
+	bool callback_owned() const noexcept
+	{
+		return phase_ == Phase::faceCallback;
+	}
+
+private:
+	enum class Phase : unsigned char
+	{
+		builder,
+		faceCallback,
+		closed,
+	};
+
+	Phase phase_ = Phase::builder;
+};
 
 struct RasterCacheKey
 {

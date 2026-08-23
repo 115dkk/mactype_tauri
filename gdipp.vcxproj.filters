@@ -51,6 +51,9 @@
     <ClCompile Include="renderer\hook_lifecycle.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="renderer\unload_lifecycle.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="renderer\misc.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -218,6 +221,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="renderer\hook_lifecycle.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="renderer\unload_lifecycle.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

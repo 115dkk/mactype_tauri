@@ -1,41 +1,66 @@
+#pragma once
+
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
-#include "renderer_raii.h"
 
-typedef   BOOL (__stdcall *ProcDllMain)(HINSTANCE, DWORD,  LPVOID );
+#include <cstddef>
 
-class CMemLoadDll
+namespace renderer {
+
+enum class PeImageLayout : unsigned char
+{
+	rawFile,
+	mappedImage,
+};
+
+// A read-only PE export view. It never maps executable memory, applies
+// relocations, or calls a foreign entry point. Every header, section, array,
+// string, and RVA conversion is bounded by the supplied byte range.
+class PeExportView
 {
 public:
-	CMemLoadDll();
-	~CMemLoadDll();
-	BOOL    MemLoadLibrary(void* lpFileData, int DataLength, bool bInitDllMain);  // Dll file data buffer
-	FARPROC MemGetProcAddress(LPCSTR lpProcName);
-	DWORD_PTR	GetImageBase() {return pImageBase;};
-private:
-	BOOL isLoadOk;
-	BOOL CheckDataValide(void* lpFileData, int DataLength);
-	int  CalcTotalImageSize();
-	void CopyDllDatas(void* pDest, void* pSrc);
-	static int GetAlignedSize(int Origin, int Alignment);
-private:
-	ProcDllMain pDllMain;
+	PeExportView(
+		const void* bytes,
+		std::size_t size,
+		PeImageLayout layout) noexcept;
 
+	bool valid() const noexcept { return valid_; }
+	bool FindFunctionRva(const char* name, DWORD* functionRva) const noexcept;
+	bool FindAddressTableEntryRva(
+		const char* name,
+		DWORD* addressTableEntryRva) const noexcept;
 
 private:
-	DWORD_PTR  pImageBase;
-	renderer_raii::UniqueVirtualMemory m_image;
-	bool   m_bInitDllMain;
-	PIMAGE_DOS_HEADER pDosHeader;
-	PIMAGE_NT_HEADERS32 pNTHeader;
-	PIMAGE_SECTION_HEADER pSectionHeader;
+	bool Initialize() noexcept;
+	bool ReadBytes(
+		std::size_t offset,
+		void* destination,
+		std::size_t length) const noexcept;
+	bool RvaToOffset(
+		DWORD rva,
+		std::size_t length,
+		std::size_t* offset) const noexcept;
+	bool RvaStringEquals(DWORD rva, const char* expected) const noexcept;
+	bool FindNamedExport(
+		const char* name,
+		DWORD* functionRva,
+		DWORD* addressTableEntryRva) const noexcept;
+
+	const unsigned char* bytes_;
+	std::size_t size_;
+	PeImageLayout layout_;
+	bool valid_;
+	WORD sectionCount_;
+	std::size_t sectionTableOffset_;
+	DWORD sizeOfImage_;
+	DWORD sizeOfHeaders_;
+	IMAGE_DATA_DIRECTORY exportDirectory_;
 };
 
-class CDllHelper {
-private:
-	static int StringLengthA(const char* str);
-	static wchar_t* CharToWChar_T(const char* str);
-	static wchar_t ToLowerW(wchar_t ch);
-	static bool StringMatches(const wchar_t* str1, const wchar_t* str2);
-public:
-	static const void* MyGetProcAddress(HMODULE dllBase, const wchar_t* procName);
-};
+// Returns the complete allocation span for a loader-mapped module without
+// trusting the module's own SizeOfImage field first.
+bool QueryMappedModuleSize(HMODULE module, std::size_t* size) noexcept;
+
+} // namespace renderer

@@ -576,31 +576,17 @@ public:
 	}
 };
 
-//GetFontDataのメモリストリーム
+class FreeTypeStreamBacking;
+
+// Builds an FT_Face and transfers its separate stream backing to FreeType only
+// after initialization succeeds. The builder itself is never callback-owned.
 class FreeTypeSysFontData
 {
 private:
-	renderer_raii::UniqueDeviceContext m_hdc;
-	renderer_raii::UniqueFont m_font;
-	renderer_raii::SelectedFont m_selectedFont;
-	bool	m_isTTC;
-	bool	m_locked;
-	renderer_raii::UniqueMappedView m_pMapping;
-	renderer_raii::PageLock m_mappingLock;
-	DWORD	m_dwSize;
+	std::unique_ptr<FreeTypeStreamBacking> m_streamBacking;
 	renderer_raii::UniqueFreeTypeFace m_ftFace;
-	wstring m_name;
-	FT_StreamRec m_ftStream;
 
-	// Cppcheck 2.20 mistakes the private Init method for a data member.
-	// cppcheck-suppress uninitMemberVarPrivate
-	FreeTypeSysFontData()
-		: m_isTTC(false)
-		, m_locked(false)
-		, m_dwSize(0)
-	{
-		ZeroMemory(&m_ftStream, sizeof(FT_StreamRec));
-	}
+	FreeTypeSysFontData();
 
 	static unsigned long IoFunc(FT_Stream stream, unsigned long offset, unsigned char* buffer, unsigned long count);
 	static void CloseFunc(FT_Stream  stream);
@@ -609,10 +595,7 @@ private:
 
 public:
 	static FreeTypeSysFontData* CreateInstance(LPCTSTR name, int weight, bool italic);
-	~FreeTypeSysFontData() = default;
+	~FreeTypeSysFontData();
 
-	FT_Face GetFace()
-	{
-		return m_ftFace.release();
-	}
+	FT_Face ReleaseFace() noexcept;
 };

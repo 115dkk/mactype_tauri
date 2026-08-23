@@ -848,6 +848,7 @@
     <ClCompile Include="renderer\renderer_activation.cpp" />
     <ClCompile Include="renderer\renderer_policy.cpp" />
     <ClCompile Include="renderer\settings.cpp" />
+    <ClCompile Include="renderer\unload_lifecycle.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="renderer\expfunc.def" />
@@ -890,6 +891,7 @@
     <ClInclude Include="renderer\strtoken.h" />
     <ClInclude Include="renderer\supinfo.h" />
     <ClInclude Include="renderer\tlsdata.h" />
+    <ClInclude Include="renderer\unload_lifecycle.h" />
     <ClInclude Include="renderer\undocAPI.h" />
     <ClInclude Include="renderer\wow64ext.h" />
   </ItemGroup>

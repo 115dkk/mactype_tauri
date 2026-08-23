@@ -302,21 +302,23 @@ class CThreadCounter
 private:
 	static LONG interlock;
 public:
-	CThreadCounter()
+	CThreadCounter() noexcept
 	{
 		InterlockedIncrement(&interlock);
 	}
-	~CThreadCounter()
+	~CThreadCounter() noexcept
 	{
 		InterlockedDecrement(&interlock);
 	}
+	CThreadCounter(const CThreadCounter&) = delete;
+	CThreadCounter& operator=(const CThreadCounter&) = delete;
 	static void Init()
 	{
-		interlock = 0;
+		InterlockedExchange(&interlock, 0);
 	}
-	static int Count()
+	static LONG Count() noexcept
 	{
-		return InterlockedExchange(&interlock, interlock);
+		return InterlockedCompareExchange(&interlock, 0, 0);
 	}
 };
 

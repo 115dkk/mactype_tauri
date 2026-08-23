@@ -58,7 +58,9 @@ if ($LASTEXITCODE -ne 0) {
     architecture = if ($Architecture -eq 'x64') { 'x64' } else { 'x86' }
     dynamicFactoryLookupIntercepted = $true
     factoryCreated = $true
+    plainFreeLibraryRetainedActiveRenderer = $true
+    safeUnloadCompleted = $true
     core = $coreName
 } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $fullOutputRoot 'result.json') -Encoding utf8
 
-Write-Host "DWriteCore dynamic factory lookup and creation passed for $Architecture."
+Write-Host "DWriteCore factory interception, active-image retention, and SafeUnload passed for $Architecture."

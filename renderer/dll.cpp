@@ -1,365 +1,434 @@
 #include "dll.h"
 
-CMemLoadDll::CMemLoadDll()
-	: isLoadOk(FALSE), pDllMain(nullptr), pImageBase(0), m_bInitDllMain(true),
-	  pDosHeader(nullptr), pNTHeader(nullptr), pSectionHeader(nullptr)
-{}
-CMemLoadDll::~CMemLoadDll()
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <limits>
+
+namespace renderer {
+
+namespace {
+
+bool CheckedAdd(std::size_t left, std::size_t right, std::size_t* result) noexcept
 {
- if(isLoadOk)
- {
-  //脱钩，准备卸载dll
-  if (m_bInitDllMain)
-	 pDllMain(reinterpret_cast<HINSTANCE>(pImageBase),DLL_PROCESS_DETACH,nullptr);
- }
+	if (result == nullptr || right > std::numeric_limits<std::size_t>::max() - left)
+		return false;
+	*result = left + right;
+	return true;
 }
 
-//MemLoadLibrary函数从内存缓冲区数据中加载一个dll到当前进程的地址空间，缺省位置0x10000000
-//返回值： 成功返回TRUE , 失败返回FALSE
-//lpFileData: 存放dll文件数据的缓冲区
-//DataLength: 缓冲区中数据的总长度
-BOOL CMemLoadDll::MemLoadLibrary(void* lpFileData, int DataLength, bool bInitDllMain)
+bool CheckedMultiply(std::size_t left, std::size_t right, std::size_t* result) noexcept
 {
- this->m_bInitDllMain = bInitDllMain;
- if(pImageBase != 0)
- {
-  return FALSE;  //已经加载一个dll，还没有释放，不能加载新的dll
- }
- //检查数据有效性，并初始化
- if(!CheckDataValide(lpFileData, DataLength))return FALSE;
- //计算所需的加载空间
- int ImageSize = CalcTotalImageSize();
- if(ImageSize == 0) return FALSE;
-
- // 分配虚拟内存
- renderer_raii::UniqueVirtualMemory image(VirtualAlloc(nullptr, ImageSize,
-     MEM_COMMIT|MEM_RESERVE, PAGE_EXECUTE_READWRITE));
- void* pMemoryAddress = image.get();
- if(pMemoryAddress == nullptr) return FALSE;
- else
- {
-  CopyDllDatas(pMemoryAddress, lpFileData); //复制dll数据，并对齐每个段
-  //修改页属性。应该根据每个页的属性单独设置其对应内存页的属性。这里简化一下。
-  //统一设置成一个属性PAGE_EXECUTE_READWRITE
-  unsigned long old;
-  VirtualProtect(pMemoryAddress, ImageSize, PAGE_EXECUTE_READWRITE,&old);
- }
- //修正基地址
- pNTHeader->OptionalHeader.ImageBase = static_cast<DWORD>(reinterpret_cast<DWORD_PTR>(pMemoryAddress));
-
- //接下来要调用一下dll的入口函数，做初始化工作。
- pDllMain = reinterpret_cast<ProcDllMain>(pNTHeader->OptionalHeader.AddressOfEntryPoint + reinterpret_cast<DWORD_PTR>(pMemoryAddress));
- BOOL InitResult = !bInitDllMain || pDllMain(reinterpret_cast<HINSTANCE>(pMemoryAddress),DLL_PROCESS_ATTACH,nullptr);
- if(!InitResult) //初始化失败
- {
-  pDllMain(reinterpret_cast<HINSTANCE>(pMemoryAddress),DLL_PROCESS_DETACH,nullptr);
-  pDllMain = nullptr;
-  return FALSE;
- }
-
- isLoadOk = TRUE;
- pImageBase = reinterpret_cast<DWORD_PTR>(pMemoryAddress);
- m_image = std::move(image);
- return TRUE;
+	if (result == nullptr ||
+		(left != 0 && right > std::numeric_limits<std::size_t>::max() / left))
+		return false;
+	*result = left * right;
+	return true;
 }
 
-//MemGetProcAddress函数从dll中获取指定函数的地址
-//返回值： 成功返回函数地址 , 失败返回nullptr
-//lpProcName: 要查找函数的名字或者序号
-FARPROC  CMemLoadDll::MemGetProcAddress(LPCSTR lpProcName)
+bool FitsDwordRange(DWORD start, DWORD length) noexcept
 {
- if(pNTHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress == 0 ||
-  pNTHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size == 0)
-  return nullptr;
- if(!isLoadOk) return nullptr;
-
- DWORD OffsetStart = pNTHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
- DWORD Size = pNTHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
-
- PIMAGE_EXPORT_DIRECTORY pExport = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(pImageBase + pNTHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress);
- const DWORD iNumberOfFunctions = pExport->NumberOfFunctions;
- const DWORD* pAddressOfFunctions = reinterpret_cast<const DWORD*>(pExport->AddressOfFunctions + pImageBase);
- const WORD* pAddressOfOrdinals = reinterpret_cast<const WORD*>(pExport->AddressOfNameOrdinals + pImageBase);
- const DWORD* pAddressOfNames = reinterpret_cast<const DWORD*>(pExport->AddressOfNames + pImageBase);
-
- int iOrdinal = -1;
-
- const DWORD_PTR procNameValue = reinterpret_cast<DWORD_PTR>(lpProcName);
- if((procNameValue & 0xFFFF0000) == 0) //IT IS A ORDINAL!
- {
-  iOrdinal = static_cast<int>(procNameValue & 0x0000FFFF) - static_cast<int>(pExport->Base);
- }
- else  //use name
- {
-  int iFound = -1;
-
-  for(DWORD i=0;i<pExport->NumberOfNames;i++)
-  {
-   const char* pName = reinterpret_cast<const char*>(pAddressOfNames[i] + pImageBase);
-   if(strcmp(pName, lpProcName) == 0)
-   {
-    iFound = i; break;
-   }
-  }
-  if(iFound >= 0)
-  {
-    iOrdinal = static_cast<int>(pAddressOfOrdinals[iFound]);
-  }
- }
-
- if(iOrdinal < 0 || static_cast<DWORD>(iOrdinal) >= iNumberOfFunctions) return nullptr;
- else
- {
-  DWORD pFunctionOffset = pAddressOfFunctions[iOrdinal];
-  if(pFunctionOffset > OffsetStart && pFunctionOffset < (OffsetStart+Size))//maybe Export Forwarding
-   return nullptr;
-   else return reinterpret_cast<FARPROC>(pFunctionOffset + pImageBase);
- }
-
+	return static_cast<std::uint64_t>(start) + length <=
+		static_cast<std::uint64_t>(std::numeric_limits<DWORD>::max()) + 1u;
 }
 
-
-//CheckDataValide函数用于检查缓冲区中的数据是否有效的dll文件
-//返回值： 是一个可执行的dll则返回TRUE，否则返回FALSE。
-//lpFileData: 存放dll数据的内存缓冲区
-//DataLength: dll文件的长度
-BOOL CMemLoadDll::CheckDataValide(void* lpFileData, int DataLength)
+bool IsReadableProtection(DWORD protection) noexcept
 {
- //检查长度
- if(DataLength < sizeof(IMAGE_DOS_HEADER)) return FALSE;
- pDosHeader = static_cast<PIMAGE_DOS_HEADER>(lpFileData);  // DOSͷ
- //检查dos头的标记
- if(pDosHeader->e_magic != IMAGE_DOS_SIGNATURE) return FALSE;  //0x5A4D : MZ
-
- //检查长度
- if(static_cast<DWORD>(DataLength) < (pDosHeader->e_lfanew + sizeof(IMAGE_NT_HEADERS32)) ) return FALSE;
- //取得pe头
- pNTHeader = reinterpret_cast<PIMAGE_NT_HEADERS32>(reinterpret_cast<DWORD_PTR>(lpFileData) + static_cast<DWORD_PTR>(pDosHeader->e_lfanew)); // PEͷ
- //检查pe头的合法性
- if(pNTHeader->Signature != IMAGE_NT_SIGNATURE) return FALSE;  //0x00004550 : PE00
- if((pNTHeader->FileHeader.Characteristics & IMAGE_FILE_DLL) == 0) //0x2000  : File is a DLL
-  return FALSE;
- if((pNTHeader->FileHeader.Characteristics & IMAGE_FILE_EXECUTABLE_IMAGE) == 0) //0x0002 : 指出文件可以运行
-  return FALSE;
- if(pNTHeader->FileHeader.SizeOfOptionalHeader != sizeof(IMAGE_OPTIONAL_HEADER32)) return FALSE;
-
-
- //取得节表（段表）
- pSectionHeader = reinterpret_cast<PIMAGE_SECTION_HEADER>(reinterpret_cast<DWORD_PTR>(pNTHeader) + sizeof(IMAGE_NT_HEADERS32));
- //验证每个节表的空间
- for(int i=0; i< pNTHeader->FileHeader.NumberOfSections; i++)
- {
-  if((pSectionHeader[i].PointerToRawData + pSectionHeader[i].SizeOfRawData) > static_cast<DWORD>(DataLength))return FALSE;
- }
- return TRUE;
-}
-
-//计算对齐边界
-int CMemLoadDll::GetAlignedSize(int Origin, int Alignment)
-{
- return (Origin + Alignment - 1) / Alignment * Alignment;
-}
-//计算整个dll映像文件的尺寸
-int CMemLoadDll::CalcTotalImageSize()
-{
- int Size;
- if(pNTHeader == nullptr)return 0;
- int nAlign = pNTHeader->OptionalHeader.SectionAlignment; //段对齐字节数
-
- // 计算所有头的尺寸。包括dos, coff, pe头 和 段表的大小
- Size = GetAlignedSize(pNTHeader->OptionalHeader.SizeOfHeaders, nAlign);
- // 计算所有节的大小
- for(int i=0; i < pNTHeader->FileHeader.NumberOfSections; ++i)
- {
-  //得到该节的大小
-  int CodeSize = pSectionHeader[i].Misc.VirtualSize ;
-  int LoadSize = pSectionHeader[i].SizeOfRawData;
-  int MaxSize = (LoadSize > CodeSize)?(LoadSize):(CodeSize);
-
-  int SectionSize = GetAlignedSize(pSectionHeader[i].VirtualAddress + MaxSize, nAlign);
-  if(Size < SectionSize)
-   Size = SectionSize;  //Use the Max;
- }
- return Size;
-}
-//CopyDllDatas函数将dll数据复制到指定内存区域，并对齐所有节
-//pSrc: 存放dll数据的原始缓冲区
-//pDest:目标内存地址
-void CMemLoadDll::CopyDllDatas(void* pDest, void* pSrc)
-{
- // 计算需要复制的PE头+段表字节数
- int  HeaderSize = pNTHeader->OptionalHeader.SizeOfHeaders;
- int  SectionSize = pNTHeader->FileHeader.NumberOfSections * sizeof(IMAGE_SECTION_HEADER);
- int  MoveSize = HeaderSize + SectionSize;
- //复制头和段信息
- memmove(pDest, pSrc, MoveSize);
-
- //复制每个节
- for(int i=0; i < pNTHeader->FileHeader.NumberOfSections; ++i)
- {
-  if(pSectionHeader[i].VirtualAddress == 0 || pSectionHeader[i].SizeOfRawData == 0)continue;
-  // 定位该节在内存中的位置
-  void *pSectionAddress = reinterpret_cast<void*>(reinterpret_cast<DWORD_PTR>(pDest) + pSectionHeader[i].VirtualAddress);
-  // 复制段数据到虚拟内存
-  memmove(pSectionAddress,
-       reinterpret_cast<void*>(reinterpret_cast<DWORD_PTR>(pSrc) + pSectionHeader[i].PointerToRawData),
-    pSectionHeader[i].SizeOfRawData);
- }
-
- //修正指针，指向新分配的内存
- //新的dos头
- pDosHeader = static_cast<PIMAGE_DOS_HEADER>(pDest);
- //新的pe头地址
- pNTHeader = reinterpret_cast<PIMAGE_NT_HEADERS32>(reinterpret_cast<DWORD_PTR>(pDest) + static_cast<DWORD_PTR>(pDosHeader->e_lfanew));
- //新的节表地址
- pSectionHeader = reinterpret_cast<PIMAGE_SECTION_HEADER>(reinterpret_cast<DWORD_PTR>(pNTHeader) + sizeof(IMAGE_NT_HEADERS32));
- return ;
-}
-
-
-
-
-// =========== Dll helper to treat dlls our own way ================
-/*
-* StringLengthA
-*
-* Use: Retrieve length of char string
-* Parameters: char string
-* Return: Length of string
-*/
-int CDllHelper::StringLengthA(const char* str) {
-	int length;
-
-	for (length = 0; str[length] != '\0'; length++) {}
-	return length;
-}
-/*
-* CharToWChar_T
-*
-* Use: Convert char string to wchar_t string - caller responsible for freeing memory
-* Parameters: char string
-* Return: wchar_t string
-*/
-wchar_t* CDllHelper::CharToWChar_T(const char* str) {
-	if (str == nullptr) {
-		return nullptr;
-	}
-
-	const int length = StringLengthA(str);
-	wchar_t* wstr_t = static_cast<wchar_t*>(malloc(sizeof(wchar_t) * (length + 1)));
-	if (wstr_t == nullptr) {
-		return nullptr;
-	}
-
-	for (int i = 0; i < length; i++) {
-		wstr_t[i] = str[i];
-	}
-	wstr_t[length] = '\0';
-	return wstr_t;
-}
-/*
-* ToLowerW
-*
-* Use: Convert char to lower case if necessary
-* Parameters: char
-* Return: char
-*/
-wchar_t CDllHelper::ToLowerW(wchar_t ch) {
-	if (ch > 0x40 && ch < 0x5B) {
-		return ch + 0x20;
-	}
-	return ch;
-}
-/*
-* StringMatches
-*
-* Use: Case Insensitive String Compare
-* Parameters: two wchar_t strings
-* Return: Result of wchar_t equality
-*/
-bool CDllHelper::StringMatches(const wchar_t* str1, const wchar_t* str2) {
-	if (str1 == nullptr || str2 == nullptr || wcslen(str1) != wcslen(str2)) {
+	switch (protection & 0xffu) {
+	case PAGE_READONLY:
+	case PAGE_READWRITE:
+	case PAGE_WRITECOPY:
+	case PAGE_EXECUTE_READ:
+	case PAGE_EXECUTE_READWRITE:
+	case PAGE_EXECUTE_WRITECOPY:
+		return true;
+	default:
 		return false;
 	}
+}
 
-	for (int i = 0; str1[i] != '\0' && str2[i] != '\0'; i++) {
-		if (ToLowerW(str1[i]) != ToLowerW(str2[i])) {
+bool IsReadableMemoryRange(const void* address, std::size_t length) noexcept
+{
+	if (address == nullptr || length == 0)
+		return false;
+	std::uintptr_t cursor = reinterpret_cast<std::uintptr_t>(address);
+	if (length > std::numeric_limits<std::uintptr_t>::max() - cursor)
+		return false;
+	std::uintptr_t const end = cursor + length;
+	while (cursor < end) {
+		MEMORY_BASIC_INFORMATION memory{};
+		if (::VirtualQuery(
+				reinterpret_cast<const void*>(cursor), &memory, sizeof(memory)) == 0 ||
+			memory.State != MEM_COMMIT ||
+			(memory.Protect & PAGE_GUARD) != 0 ||
+			!IsReadableProtection(memory.Protect))
 			return false;
-		}
+		std::uintptr_t const regionBase =
+			reinterpret_cast<std::uintptr_t>(memory.BaseAddress);
+		if (memory.RegionSize == 0 ||
+			memory.RegionSize > std::numeric_limits<std::uintptr_t>::max() - regionBase)
+			return false;
+		std::uintptr_t const regionEnd = regionBase + memory.RegionSize;
+		if (regionEnd <= cursor)
+			return false;
+		cursor = (std::min)(regionEnd, end);
 	}
 	return true;
 }
 
-/*
-* GetProcAddress
-*
-* Use: Independent GetProcAddress using TIB/PEB/LDR
-* Parameters: wchar_t string with DLL Name, wchar_t string with Function Name
-* Return: void* to Function - nullptr if not found
-*/
-const void* CDllHelper::MyGetProcAddress(HMODULE dllBase, const wchar_t* procName) {
-	const void* procAddr = nullptr;
+} // namespace
 
-	//DllBase as unsigned long for arithmetic
-	const DWORD_PTR dllBaseAddr = reinterpret_cast<DWORD_PTR>(dllBase);
+PeExportView::PeExportView(
+	const void* bytes,
+	std::size_t size,
+	PeImageLayout layout) noexcept
+	: bytes_(static_cast<const unsigned char*>(bytes))
+	, size_(size)
+	, layout_(layout)
+	, valid_(false)
+	, sectionCount_(0)
+	, sectionTableOffset_(0)
+	, sizeOfImage_(0)
+	, sizeOfHeaders_(0)
+	, exportDirectory_{}
+{
+	valid_ = Initialize();
+}
 
-	//Cast DllBase to use struct
-	const PIMAGE_DOS_HEADER dosHeader = reinterpret_cast<PIMAGE_DOS_HEADER>(dllBaseAddr);
+bool PeExportView::ReadBytes(
+	std::size_t offset,
+	void* destination,
+	std::size_t length) const noexcept
+{
+	if (bytes_ == nullptr || destination == nullptr || offset > size_ ||
+		length > size_ - offset)
+		return false;
+	std::uintptr_t const base = reinterpret_cast<std::uintptr_t>(bytes_);
+	if (offset > std::numeric_limits<std::uintptr_t>::max() - base)
+		return false;
+	const unsigned char* const source =
+		reinterpret_cast<const unsigned char*>(base + offset);
+	if (!IsReadableMemoryRange(source, length))
+		return false;
+	std::memcpy(destination, source, length);
+	return true;
+}
 
-	//Calculate NTHeader and Cast
-	const PIMAGE_NT_HEADERS64 pNtHeader = reinterpret_cast<PIMAGE_NT_HEADERS64>(dllBaseAddr + dosHeader->e_lfanew);
+bool PeExportView::Initialize() noexcept
+{
+	IMAGE_DOS_HEADER dosHeader{};
+	if (!ReadBytes(0, &dosHeader, sizeof(dosHeader)) ||
+		dosHeader.e_magic != IMAGE_DOS_SIGNATURE || dosHeader.e_lfanew < 0)
+		return false;
 
-	//Calculate ExportDir Address and Cast
-	const PIMAGE_EXPORT_DIRECTORY pExportDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(dllBaseAddr + pNtHeader->OptionalHeader.DataDirectory[0].VirtualAddress);
+	std::size_t const ntOffset = static_cast<std::size_t>(dosHeader.e_lfanew);
+	DWORD signature = 0;
+	if (!ReadBytes(ntOffset, &signature, sizeof(signature)) ||
+		signature != IMAGE_NT_SIGNATURE)
+		return false;
 
-	//Calculate AddressOfNames Absolute and Cast
-	const unsigned int* NameRVA = reinterpret_cast<const unsigned int*>(dllBaseAddr + pExportDir->AddressOfNames);
+	std::size_t fileHeaderOffset = 0;
+	if (!CheckedAdd(ntOffset, sizeof(signature), &fileHeaderOffset))
+		return false;
+	IMAGE_FILE_HEADER fileHeader{};
+	if (!ReadBytes(fileHeaderOffset, &fileHeader, sizeof(fileHeader)) ||
+		(fileHeader.Characteristics & IMAGE_FILE_EXECUTABLE_IMAGE) == 0 ||
+		fileHeader.NumberOfSections == 0)
+		return false;
 
-	//Iterate over AddressOfNames
-	for (DWORD i = 0; i < pExportDir->NumberOfNames; i++) {
-		//Calculate Absolute Address and cast
-		const char* name = reinterpret_cast<const char*>(dllBaseAddr + NameRVA[i]);
-		renderer_raii::UniqueMallocMemory<wchar_t> wname(CharToWChar_T(name));
-		if (wname == nullptr) {
-			return nullptr;
-		}
-		const bool matches = StringMatches(wname.get(), procName);
-		if (matches) {
+	std::size_t optionalHeaderOffset = 0;
+	if (!CheckedAdd(fileHeaderOffset, sizeof(fileHeader), &optionalHeaderOffset))
+		return false;
+	WORD optionalMagic = 0;
+	if (!ReadBytes(optionalHeaderOffset, &optionalMagic, sizeof(optionalMagic)))
+		return false;
 
-			//Lookup Ordinal
-			const unsigned short NameOrdinal = reinterpret_cast<const unsigned short*>(dllBaseAddr + pExportDir->AddressOfNameOrdinals)[i];
+	if (optionalMagic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
+		if (fileHeader.SizeOfOptionalHeader < sizeof(IMAGE_OPTIONAL_HEADER32))
+			return false;
+		IMAGE_OPTIONAL_HEADER32 optionalHeader{};
+		if (!ReadBytes(optionalHeaderOffset, &optionalHeader, sizeof(optionalHeader)) ||
+			optionalHeader.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_EXPORT)
+			return false;
+		sizeOfImage_ = optionalHeader.SizeOfImage;
+		sizeOfHeaders_ = optionalHeader.SizeOfHeaders;
+		exportDirectory_ = optionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+	}
+	else if (optionalMagic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+		if (fileHeader.SizeOfOptionalHeader < sizeof(IMAGE_OPTIONAL_HEADER64))
+			return false;
+		IMAGE_OPTIONAL_HEADER64 optionalHeader{};
+		if (!ReadBytes(optionalHeaderOffset, &optionalHeader, sizeof(optionalHeader)) ||
+			optionalHeader.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_EXPORT)
+			return false;
+		sizeOfImage_ = optionalHeader.SizeOfImage;
+		sizeOfHeaders_ = optionalHeader.SizeOfHeaders;
+		exportDirectory_ = optionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+	}
+	else {
+		return false;
+	}
 
-			//Use Ordinal to Lookup Function Address and Calculate Absolute
-			const unsigned int* functionAddresses = reinterpret_cast<const unsigned int*>(dllBaseAddr + pExportDir->AddressOfFunctions);
-			const unsigned int addr = functionAddresses[NameOrdinal];
-			const void* paddr = &functionAddresses[NameOrdinal];
+	if (sizeOfImage_ == 0 || sizeOfHeaders_ == 0 ||
+		sizeOfHeaders_ > sizeOfImage_ ||
+		exportDirectory_.VirtualAddress == 0 || exportDirectory_.Size == 0 ||
+		!FitsDwordRange(exportDirectory_.VirtualAddress, exportDirectory_.Size))
+		return false;
 
-			//Function is forwarded
-			if (addr > pNtHeader->OptionalHeader.DataDirectory[0].VirtualAddress && addr < pNtHeader->OptionalHeader.DataDirectory[0].VirtualAddress + pNtHeader->OptionalHeader.DataDirectory[0].Size) {
-				//Grab and Parse Forward String
-				continue;
-				/*char* forwardStr = (char*)(dllBaseAddr + addr);
+	std::size_t optionalHeaderEnd = 0;
+	if (!CheckedAdd(
+			optionalHeaderOffset,
+			fileHeader.SizeOfOptionalHeader,
+			&optionalHeaderEnd))
+		return false;
+	sectionTableOffset_ = optionalHeaderEnd;
+	sectionCount_ = fileHeader.NumberOfSections;
 
-				wchar_t** str_arr = ParseForwardString(forwardStr);
+	std::size_t sectionTableSize = 0;
+	std::size_t sectionTableEnd = 0;
+	if (!CheckedMultiply(sectionCount_, sizeof(IMAGE_SECTION_HEADER), &sectionTableSize) ||
+		!CheckedAdd(sectionTableOffset_, sectionTableSize, &sectionTableEnd) ||
+		sectionTableEnd > sizeOfHeaders_ || sectionTableEnd > size_)
+		return false;
 
-				//Attempt to load library if not loaded
-				if (!LibraryLoaded(str_arr[0])) {
-				void* dllBase = _LoadLibraryW(str_arr[0]);
-				}
+	if (layout_ == PeImageLayout::mappedImage) {
+		if (sizeOfImage_ > size_)
+			return false;
+	}
+	else if (sizeOfHeaders_ > size_) {
+		return false;
+	}
 
-				//Recurse using forward information
-				procAddr = GetProcAddress(str_arr[0], str_arr[1]);
-				free(str_arr[0]);
-				free(str_arr[1]);
-				free(str_arr);*/
-			}
-			else {
-				// A forged IAT may differ from the on-disk table. Pass only its
-				// offset; the shellcode resolves the address in its own image.
-				procAddr = paddr; // the offset to the func IAT, it's a DWORD, you get real address by (imgbase + *(dword*)(imgbase+paddr))
-			}
-			break;
+	for (WORD index = 0; index < sectionCount_; ++index) {
+		IMAGE_SECTION_HEADER section{};
+		std::size_t sectionOffset = 0;
+		if (!CheckedAdd(
+				sectionTableOffset_,
+				static_cast<std::size_t>(index) * sizeof(section),
+				&sectionOffset) ||
+			!ReadBytes(sectionOffset, &section, sizeof(section)))
+			return false;
+
+		DWORD const virtualSpan = (std::max)(section.Misc.VirtualSize, section.SizeOfRawData);
+		if (virtualSpan != 0 &&
+			(!FitsDwordRange(section.VirtualAddress, virtualSpan) ||
+			 static_cast<std::uint64_t>(section.VirtualAddress) + virtualSpan > sizeOfImage_))
+			return false;
+		if (layout_ == PeImageLayout::rawFile && section.SizeOfRawData != 0) {
+			std::uint64_t const rawEnd =
+				static_cast<std::uint64_t>(section.PointerToRawData) + section.SizeOfRawData;
+			if (rawEnd > size_)
+				return false;
 		}
 	}
-	return procAddr;
+
+	std::size_t exportOffset = 0;
+	return RvaToOffset(
+		exportDirectory_.VirtualAddress,
+		exportDirectory_.Size,
+		&exportOffset);
 }
+
+bool PeExportView::RvaToOffset(
+	DWORD rva,
+	std::size_t length,
+	std::size_t* offset) const noexcept
+{
+	if (offset == nullptr || length == 0)
+		return false;
+
+	if (layout_ == PeImageLayout::mappedImage) {
+		std::size_t const candidate = rva;
+		if (candidate >= sizeOfImage_ || length > sizeOfImage_ - candidate ||
+			candidate > size_ || length > size_ - candidate)
+			return false;
+		*offset = candidate;
+		return true;
+	}
+
+	if (rva < sizeOfHeaders_) {
+		std::size_t const candidate = rva;
+		if (length > sizeOfHeaders_ - candidate || candidate > size_ ||
+			length > size_ - candidate)
+			return false;
+		*offset = candidate;
+		return true;
+	}
+
+	for (WORD index = 0; index < sectionCount_; ++index) {
+		IMAGE_SECTION_HEADER section{};
+		std::size_t const sectionOffset = sectionTableOffset_ +
+			static_cast<std::size_t>(index) * sizeof(section);
+		if (!ReadBytes(sectionOffset, &section, sizeof(section)))
+			return false;
+
+		DWORD const virtualSpan = (std::max)(section.Misc.VirtualSize, section.SizeOfRawData);
+		if (rva < section.VirtualAddress ||
+			static_cast<std::uint64_t>(rva) >=
+				static_cast<std::uint64_t>(section.VirtualAddress) + virtualSpan)
+			continue;
+
+		std::size_t const delta =
+			static_cast<std::size_t>(rva - section.VirtualAddress);
+		if (delta > section.SizeOfRawData || length > section.SizeOfRawData - delta)
+			return false;
+		std::size_t candidate = 0;
+		if (!CheckedAdd(section.PointerToRawData, delta, &candidate) ||
+			candidate > size_ || length > size_ - candidate)
+			return false;
+		*offset = candidate;
+		return true;
+	}
+	return false;
+}
+
+bool PeExportView::RvaStringEquals(DWORD rva, const char* expected) const noexcept
+{
+	if (expected == nullptr)
+		return false;
+	for (std::size_t index = 0;; ++index) {
+		if (index > std::numeric_limits<DWORD>::max() - rva)
+			return false;
+		std::size_t offset = 0;
+		if (!RvaToOffset(rva + static_cast<DWORD>(index), 1, &offset))
+			return false;
+		char actual = '\0';
+		if (!ReadBytes(offset, &actual, sizeof(actual)))
+			return false;
+		if (actual != expected[index])
+			return false;
+		if (actual == '\0')
+			return true;
+	}
+}
+
+bool PeExportView::FindNamedExport(
+	const char* name,
+	DWORD* functionRva,
+	DWORD* addressTableEntryRva) const noexcept
+{
+	if (!valid_ || name == nullptr ||
+		(functionRva == nullptr && addressTableEntryRva == nullptr))
+		return false;
+
+	std::size_t exportOffset = 0;
+	if (!RvaToOffset(exportDirectory_.VirtualAddress, sizeof(IMAGE_EXPORT_DIRECTORY),
+			&exportOffset))
+		return false;
+	IMAGE_EXPORT_DIRECTORY directory{};
+	if (!ReadBytes(exportOffset, &directory, sizeof(directory)) ||
+		directory.NumberOfFunctions == 0 || directory.NumberOfNames == 0)
+		return false;
+
+	std::size_t functionBytes = 0;
+	std::size_t nameBytes = 0;
+	std::size_t ordinalBytes = 0;
+	if (!CheckedMultiply(directory.NumberOfFunctions, sizeof(DWORD), &functionBytes) ||
+		!CheckedMultiply(directory.NumberOfNames, sizeof(DWORD), &nameBytes) ||
+		!CheckedMultiply(directory.NumberOfNames, sizeof(WORD), &ordinalBytes))
+		return false;
+
+	std::size_t functionsOffset = 0;
+	std::size_t namesOffset = 0;
+	std::size_t ordinalsOffset = 0;
+	if (!RvaToOffset(directory.AddressOfFunctions, functionBytes, &functionsOffset) ||
+		!RvaToOffset(directory.AddressOfNames, nameBytes, &namesOffset) ||
+		!RvaToOffset(directory.AddressOfNameOrdinals, ordinalBytes, &ordinalsOffset))
+		return false;
+
+	for (DWORD index = 0; index < directory.NumberOfNames; ++index) {
+		DWORD nameRva = 0;
+		if (!ReadBytes(
+				namesOffset + static_cast<std::size_t>(index) * sizeof(nameRva),
+				&nameRva,
+				sizeof(nameRva)))
+			return false;
+		if (!RvaStringEquals(nameRva, name))
+			continue;
+
+		WORD ordinal = 0;
+		if (!ReadBytes(
+				ordinalsOffset + static_cast<std::size_t>(index) * sizeof(ordinal),
+				&ordinal,
+				sizeof(ordinal)) ||
+			ordinal >= directory.NumberOfFunctions)
+			return false;
+
+		DWORD resolvedRva = 0;
+		std::size_t const functionOffset =
+			functionsOffset + static_cast<std::size_t>(ordinal) * sizeof(resolvedRva);
+		if (!ReadBytes(functionOffset, &resolvedRva, sizeof(resolvedRva)) ||
+			resolvedRva == 0)
+			return false;
+
+		std::uint64_t const exportEnd =
+			static_cast<std::uint64_t>(exportDirectory_.VirtualAddress) +
+			exportDirectory_.Size;
+		if (resolvedRva >= exportDirectory_.VirtualAddress && resolvedRva < exportEnd)
+			return false;
+		std::size_t ignored = 0;
+		if (!RvaToOffset(resolvedRva, 1, &ignored))
+			return false;
+
+		if (functionRva != nullptr)
+			*functionRva = resolvedRva;
+		if (addressTableEntryRva != nullptr) {
+			std::uint64_t const slotRva =
+				static_cast<std::uint64_t>(directory.AddressOfFunctions) +
+				static_cast<std::uint64_t>(ordinal) * sizeof(DWORD);
+			if (slotRva > std::numeric_limits<DWORD>::max())
+				return false;
+			*addressTableEntryRva = static_cast<DWORD>(slotRva);
+		}
+		return true;
+	}
+	return false;
+}
+
+bool PeExportView::FindFunctionRva(
+	const char* name,
+	DWORD* functionRva) const noexcept
+{
+	return FindNamedExport(name, functionRva, nullptr);
+}
+
+bool PeExportView::FindAddressTableEntryRva(
+	const char* name,
+	DWORD* addressTableEntryRva) const noexcept
+{
+	return FindNamedExport(name, nullptr, addressTableEntryRva);
+}
+
+bool QueryMappedModuleSize(HMODULE module, std::size_t* size) noexcept
+{
+	if (module == nullptr || size == nullptr)
+		return false;
+
+	std::uintptr_t const base = reinterpret_cast<std::uintptr_t>(module);
+	std::uintptr_t cursor = base;
+	std::uintptr_t end = base;
+	for (;;) {
+		MEMORY_BASIC_INFORMATION memory{};
+		if (::VirtualQuery(
+				reinterpret_cast<const void*>(cursor), &memory, sizeof(memory)) == 0)
+			return false;
+		if (memory.AllocationBase != module)
+			break;
+		std::uintptr_t const regionBase =
+			reinterpret_cast<std::uintptr_t>(memory.BaseAddress);
+		if (memory.RegionSize == 0 ||
+			memory.RegionSize > std::numeric_limits<std::uintptr_t>::max() - regionBase)
+			return false;
+		std::uintptr_t const regionEnd = regionBase + memory.RegionSize;
+		if (regionEnd <= cursor)
+			return false;
+		end = (std::max)(end, regionEnd);
+		cursor = regionEnd;
+	}
+	if (end <= base || end - base > std::numeric_limits<std::size_t>::max())
+		return false;
+	*size = static_cast<std::size_t>(end - base);
+	return true;
+}
+
+} // namespace renderer

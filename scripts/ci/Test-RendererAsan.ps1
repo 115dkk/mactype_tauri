@@ -17,6 +17,8 @@ cmake --build $build --config RelWithDebInfo --target `
     renderer-raii-tests `
     hook-lifecycle-tests `
     freetype-runtime-tests `
+    pe-export-view-tests `
+    unload-lifecycle-tests `
     renderer-policy-tests `
     font-substitution-tests
 
@@ -49,6 +51,8 @@ try {
         'renderer-raii-tests.exe',
         'hook-lifecycle-tests.exe',
         'freetype-runtime-tests.exe',
+        'pe-export-view-tests.exe',
+        'unload-lifecycle-tests.exe',
         'renderer-policy-tests.exe',
         'font-substitution-tests.exe'
     )) {

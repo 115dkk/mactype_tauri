@@ -1,6 +1,7 @@
 #include "../../../renderer/freetype_runtime.h"
 
 #include <cstdlib>
+#include <cstdint>
 #include <iostream>
 #include <memory>
 #include <set>
@@ -20,6 +21,18 @@ struct RecordingDelete
 };
 
 using Owner = std::unique_ptr<int, RecordingDelete>;
+
+struct StreamBackingProbe
+{
+    explicit StreamBackingProbe(int* destructionCount)
+        : destructionCount(destructionCount)
+    {
+    }
+    ~StreamBackingProbe() { ++*destructionCount; }
+
+    renderer::freetype::StreamBackingOwnership ownership;
+    int* destructionCount;
+};
 
 void Require(bool condition, const char* message)
 {
@@ -48,6 +61,59 @@ int main()
             "a bottom-up bitmap pitch must not produce a negative cache charge");
     Require(renderer::freetype::BitmapByteSize(-12, 0) == 0,
             "an empty bitmap must not consume cache bytes");
+
+    unsigned char bitmap[12]{};
+    auto row = renderer::freetype::CheckedBitmapRow(bitmap, 4, 3, 0, 4);
+    Require(row && row.data == bitmap && row.size == 4,
+            "positive pitch must expose its first logical row at the buffer start");
+    row = renderer::freetype::CheckedBitmapRow(bitmap, 4, 3, 2, 4);
+    Require(row && row.data == bitmap + 8,
+            "positive pitch must advance down through the backing buffer");
+    row = renderer::freetype::CheckedBitmapRow(bitmap, -4, 3, 0, 4);
+    Require(row && row.data == bitmap + 8,
+            "negative pitch must expose the physical last row as the logical top");
+    row = renderer::freetype::CheckedBitmapRow(bitmap, -4, 3, 2, 4);
+    Require(row && row.data == bitmap,
+            "negative pitch must finish at the physical first row");
+    Require(!renderer::freetype::CheckedBitmapRow(bitmap, 4, 3, 3, 1),
+            "a row index at the bitmap boundary must be rejected");
+    Require(!renderer::freetype::CheckedBitmapRow(bitmap, 4, 3, 0, 5),
+            "a consumer wider than the physical row must be rejected");
+    Require(!renderer::freetype::CheckedBitmapRow(nullptr, 4, 3, 0, 1),
+            "a non-empty row must reject a null backing buffer");
+
+    auto faceIndex = renderer::freetype::CheckFaceIndex(1, 2);
+    Require(faceIndex.valid && faceIndex.value == 0,
+            "face id one must address the first font");
+    faceIndex = renderer::freetype::CheckFaceIndex(2, 2);
+    Require(faceIndex.valid && faceIndex.value == 1,
+            "the upper one-based face id must remain valid");
+    Require(!renderer::freetype::CheckFaceIndex(0, 2).valid,
+            "face id zero must not underflow to the end of the font vector");
+    Require(!renderer::freetype::CheckFaceIndex(-1, 2).valid,
+            "negative face ids must be rejected");
+    Require(!renderer::freetype::CheckFaceIndex(3, 2).valid,
+            "face ids above the font count must be rejected");
+
+    int streamBackingDestructions = 0;
+    {
+        std::unique_ptr<StreamBackingProbe> builder(
+            new StreamBackingProbe(&streamBackingDestructions));
+        Require(!builder->ownership.ReclaimFromCloseCallback(),
+                "a failed FT_Open_Face close callback must not delete builder-owned backing");
+        Require(builder->ownership.TransferToFace(),
+                "a complete face must accept exactly one backing transfer");
+        Require(!builder->ownership.TransferToFace(),
+                "stream backing ownership must not transfer twice");
+        StreamBackingProbe* callbackBacking = builder.release();
+        Require(callbackBacking->ownership.callback_owned(),
+                "released stream backing must be visibly callback-owned");
+        Require(callbackBacking->ownership.ReclaimFromCloseCallback(),
+                "the face close callback must reclaim transferred backing");
+        std::unique_ptr<StreamBackingProbe> reclaimed(callbackBacking);
+    }
+    Require(streamBackingDestructions == 1,
+            "callback-owned stream backing must be destroyed exactly once");
 
     const renderer::freetype::RasterCacheKey normal{12, 0, 0, false};
     const renderer::freetype::RasterCacheKey wide{12, 32, 0, false};

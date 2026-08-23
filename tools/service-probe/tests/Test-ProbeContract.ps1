@@ -31,7 +31,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "CMake configure failed with exit code $LASTEXITCODE"
 }
 
-& cmake --build $buildDirectory --config Release --target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests freetype-runtime-tests renderer-policy-tests font-substitution-tests renderer-profile-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe
+& cmake --build $buildDirectory --config Release --target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests freetype-runtime-tests pe-export-view-tests unload-lifecycle-tests renderer-policy-tests renderer-activation-tests font-substitution-tests renderer-profile-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe
 if ($LASTEXITCODE -ne 0) {
     throw "CMake build failed with exit code $LASTEXITCODE"
 }
@@ -54,10 +54,28 @@ if ($LASTEXITCODE -ne 0) {
     throw "FreeType runtime ownership tests failed with exit code $LASTEXITCODE"
 }
 
+$peExportViewTestPath = Join-Path $buildDirectory 'Release\pe-export-view-tests.exe'
+& $peExportViewTestPath
+if ($LASTEXITCODE -ne 0) {
+    throw "Checked PE export view tests failed with exit code $LASTEXITCODE"
+}
+
+$unloadLifecycleTestPath = Join-Path $buildDirectory 'Release\unload-lifecycle-tests.exe'
+& $unloadLifecycleTestPath
+if ($LASTEXITCODE -ne 0) {
+    throw "Unload lifecycle tests failed with exit code $LASTEXITCODE"
+}
+
 $rendererPolicyTestPath = Join-Path $buildDirectory 'Release\renderer-policy-tests.exe'
 & $rendererPolicyTestPath
 if ($LASTEXITCODE -ne 0) {
     throw "Renderer policy publication tests failed with exit code $LASTEXITCODE"
+}
+
+$rendererActivationTestPath = Join-Path $buildDirectory 'Release\renderer-activation-tests.exe'
+& $rendererActivationTestPath
+if ($LASTEXITCODE -ne 0) {
+    throw "Renderer activation round-trip tests failed with exit code $LASTEXITCODE"
 }
 
 $fontSubstitutionTestPath = Join-Path $buildDirectory 'Release\font-substitution-tests.exe'
@@ -70,7 +88,9 @@ $gatePath = Join-Path $buildDirectory "Release\browser-launch-gate$suffix.exe"
 $gatePidPath = Join-Path $resultDirectory 'browser-launch-gate.pid'
 $gateNamespace = "probe-contract-$PID"
 New-Item -ItemType Directory -Force $resultDirectory | Out-Null
-Remove-Item -LiteralPath $gatePidPath -Force -ErrorAction SilentlyContinue
+if (Test-Path -LiteralPath $gatePidPath) {
+    throw "Browser launch gate evidence already exists: $gatePidPath"
+}
 $env:MACTYPE_BROWSER_GATE_TARGET = $env:ComSpec
 $env:MACTYPE_BROWSER_GATE_PID_FILE = $gatePidPath
 $env:MACTYPE_BROWSER_GATE_TIMEOUT_MS = '5000'
@@ -96,11 +116,10 @@ try {
 } finally {
     if ($gateEvent) { $gateEvent.Dispose() }
     if ($gate -and -not $gate.HasExited) { Stop-Process -Id $gate.Id -Force }
-    Remove-Item Env:MACTYPE_BROWSER_GATE_TARGET -ErrorAction SilentlyContinue
-    Remove-Item Env:MACTYPE_BROWSER_GATE_PID_FILE -ErrorAction SilentlyContinue
-    Remove-Item Env:MACTYPE_BROWSER_GATE_TIMEOUT_MS -ErrorAction SilentlyContinue
-    Remove-Item Env:MACTYPE_DIRECTWRITE_DIAGNOSTICS -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $gatePidPath -Force -ErrorAction SilentlyContinue
+    $env:MACTYPE_BROWSER_GATE_TARGET = $null
+    $env:MACTYPE_BROWSER_GATE_PID_FILE = $null
+    $env:MACTYPE_BROWSER_GATE_TIMEOUT_MS = $null
+    $env:MACTYPE_DIRECTWRITE_DIAGNOSTICS = $null
 }
 
 $resultPath = Join-Path $resultDirectory 'console.json'

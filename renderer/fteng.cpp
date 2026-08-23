@@ -824,13 +824,42 @@ FreeTypeFontInfo* FreeTypeFontEngine::FindFont(LPCTSTR lpFaceName, int weight, b
 FreeTypeFontInfo* FreeTypeFontEngine::FindFont(int faceid)
 {
 	CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTMAP);
-	if (faceid>m_mfontList.size())
-		return nullptr;
-	else
-		return m_mfontList[faceid-1];	//存在bug！！！
-
+	renderer::freetype::CheckedFaceIndex const index =
+		renderer::freetype::CheckFaceIndex(faceid, m_mfontList.size());
+	return index.valid ? m_mfontList[index.value] : nullptr;
 }
 
+
+class FreeTypeStreamBacking
+{
+public:
+	renderer_raii::UniqueDeviceContext hdc;
+	renderer_raii::UniqueFont font;
+	renderer_raii::SelectedFont selectedFont;
+	bool isTtc = false;
+	renderer_raii::UniqueMappedView mapping;
+	renderer_raii::PageLock mappingLock;
+	renderer::freetype::StreamBackingOwnership ownership;
+	FT_StreamRec stream{};
+};
+
+// cppcheck-suppress uninitMemberVarPrivate
+FreeTypeSysFontData::FreeTypeSysFontData()
+	: m_streamBacking(new FreeTypeStreamBacking)
+{
+}
+
+FreeTypeSysFontData::~FreeTypeSysFontData() = default;
+
+FT_Face FreeTypeSysFontData::ReleaseFace() noexcept
+{
+	if (!m_ftFace || !m_streamBacking)
+		return nullptr;
+	if (!m_streamBacking->ownership.TransferToFace())
+		return nullptr;
+	m_streamBacking.release();
+	return m_ftFace.release();
+}
 
 //FreeTypeSysFontData
 // http://kikyou.info/diary/?200510#i10 を参考にした
@@ -861,16 +890,16 @@ bool FreeTypeSysFontData::Init(LPCTSTR name, int weight, bool italic)
 	DWORD cbFontData;
 	int index;
 	DWORD buf;
-	FT_StreamRec& fsr = m_ftStream;
-	m_name.assign(name);
-	m_hdc.reset(CreateCompatibleDC(nullptr));
-	if(!m_hdc) {
+	FreeTypeStreamBacking& backing = *m_streamBacking;
+	FT_StreamRec& fsr = backing.stream;
+	backing.hdc.reset(CreateCompatibleDC(nullptr));
+	if(!backing.hdc) {
 		return false;
 	}
 	// 名前以外適当
 	if (pSettings->FontSubstitutes() < SETTING_FONTSUBSTITUTE_ALL)
 	{
-		m_font.reset(CreateFont(
+		backing.font.reset(CreateFont(
 					12, 0, 0, 0, weight,
 					italic, FALSE, FALSE,
 					DEFAULT_CHARSET,
@@ -881,7 +910,7 @@ bool FreeTypeSysFontData::Init(LPCTSTR name, int weight, bool italic)
 					name));
 	}
 	else
-		m_font.reset(CreateFont(
+		backing.font.reset(CreateFont(
 					12, 0, 0, 0, weight,
 					italic, FALSE, FALSE,
 					DEFAULT_CHARSET,
@@ -891,16 +920,16 @@ bool FreeTypeSysFontData::Init(LPCTSTR name, int weight, bool italic)
 					DEFAULT_PITCH | FF_DONTCARE,
 					name));
 
-	if(!m_font){
+	if(!backing.font){
 		return false;
 	}
 
-	m_selectedFont = renderer_raii::SelectObject(m_hdc.get(), m_font.get());
-	if (!m_selectedFont) {
+	backing.selectedFont = renderer_raii::SelectObject(backing.hdc.get(), backing.font.get());
+	if (!backing.selectedFont) {
 		return false;
 	}
 	// フォントデータが得られそうかチェック
-	cbNameTable = ORIG_GetFontData(m_hdc.get(), TVP_TT_TABLE_name, 0, nullptr, 0);
+	cbNameTable = ORIG_GetFontData(backing.hdc.get(), TVP_TT_TABLE_name, 0, nullptr, 0);
 	if(cbNameTable == GDI_ERROR){
 		goto ERROR_Init;
 	}
@@ -915,19 +944,19 @@ bool FreeTypeSysFontData::Init(LPCTSTR name, int weight, bool italic)
 	}
 
 	//- name タグの内容をメモリに読み込む
-	if(ORIG_GetFontData(m_hdc.get(), TVP_TT_TABLE_name, 0, pNameFromGDI.get(), cbNameTable) == GDI_ERROR){
+	if(ORIG_GetFontData(backing.hdc.get(), TVP_TT_TABLE_name, 0, pNameFromGDI.get(), cbNameTable) == GDI_ERROR){
 		goto ERROR_Init;
 	}
 
 	// フォントサイズ取得処理
-	cbFontData = ORIG_GetFontData(m_hdc.get(), TVP_TT_TABLE_ttcf, 0, &buf, 1);
+	cbFontData = ORIG_GetFontData(backing.hdc.get(), TVP_TT_TABLE_ttcf, 0, &buf, 1);
 	if(cbFontData == 1){
 		// TTC ファイルだと思われる
-		cbFontData = ORIG_GetFontData(m_hdc.get(), TVP_TT_TABLE_ttcf, 0, nullptr, 0);
-		m_isTTC = true;
+		cbFontData = ORIG_GetFontData(backing.hdc.get(), TVP_TT_TABLE_ttcf, 0, nullptr, 0);
+		backing.isTtc = true;
 	}
 	else{
-		cbFontData = ORIG_GetFontData(m_hdc.get(), 0, 0, nullptr, 0);
+		cbFontData = ORIG_GetFontData(backing.hdc.get(), 0, 0, nullptr, 0);
 	}
 	if(cbFontData == GDI_ERROR){
 		// エラー; GetFontData では扱えなかった
@@ -941,19 +970,17 @@ bool FreeTypeSysFontData::Init(LPCTSTR name, int weight, bool italic)
 		if (!hmap) {
 			goto ERROR_Init;
 		}
-		m_pMapping.reset(MapViewOfFile(hmap.get(), FILE_MAP_ALL_ACCESS, 0, 0, cbFontData));
+		backing.mapping.reset(MapViewOfFile(hmap.get(), FILE_MAP_ALL_ACCESS, 0, 0, cbFontData));
 
-		if (m_pMapping) {
-			if (ORIG_GetFontData(m_hdc.get(), m_isTTC ? TVP_TT_TABLE_ttcf : 0,
-				0, m_pMapping.get(), cbFontData) != GDI_ERROR) {
-				m_mappingLock = renderer_raii::PageLock::TryLock(m_pMapping.get(), cbFontData);
-				if (m_mappingLock) {
-					m_dwSize = cbFontData;
-				} else {
-					m_pMapping.reset();
+		if (backing.mapping) {
+			if (ORIG_GetFontData(backing.hdc.get(), backing.isTtc ? TVP_TT_TABLE_ttcf : 0,
+				0, backing.mapping.get(), cbFontData) != GDI_ERROR) {
+				backing.mappingLock = renderer_raii::PageLock::TryLock(backing.mapping.get(), cbFontData);
+				if (!backing.mappingLock) {
+					backing.mapping.reset();
 				}
 			} else {
-				m_pMapping.reset();
+				backing.mapping.reset();
 			}
 		}
 	}
@@ -962,13 +989,12 @@ bool FreeTypeSysFontData::Init(LPCTSTR name, int weight, bool italic)
 	fsr.base				= 0;
 	fsr.size				= cbFontData;
 	fsr.pos					= 0;
-	fsr.descriptor.pointer	= this;
+	fsr.descriptor.pointer	= &backing;
 	fsr.pathname.pointer	= nullptr;
 	fsr.read				= IoFunc;
 	fsr.close				= CloseFunc;
 
 	index = 0;
-	m_locked = true;
 	if(!OpenFaceByIndex(index)){
 		goto ERROR_Init;
 	}
@@ -1013,14 +1039,12 @@ bool FreeTypeSysFontData::Init(LPCTSTR name, int weight, bool italic)
 		}
 	}
 
-	m_locked = false;
 	return true;
 
 ERROR_Init:
 	m_ftFace.reset();
-	m_selectedFont.reset();
-	m_font.reset();
-	m_locked = false;
+	backing.selectedFont.reset();
+	backing.font.reset();
 	return false;
 }
 
@@ -1034,20 +1058,23 @@ unsigned long FreeTypeSysFontData::IoFunc(
 		return 0;
 	}
 
-	FreeTypeSysFontData * pThis = reinterpret_cast<FreeTypeSysFontData*>(stream->descriptor.pointer);
-	Assert(pThis != nullptr);
+	FreeTypeStreamBacking* backing =
+		static_cast<FreeTypeStreamBacking*>(stream->descriptor.pointer);
+	Assert(backing != nullptr);
+	if (backing == nullptr)
+		return 0;
 
 	unsigned long const readable = renderer::freetype::BoundedStreamReadSize(
 		stream->size, offset, count);
 	if (readable == 0)
 		return 0;
 	DWORD result = 0;
-	if (pThis->m_pMapping) {
+	if (backing->mapping) {
 		result = readable;
-		memcpy(buffer, static_cast<const BYTE*>(pThis->m_pMapping.get()) + offset, result);
+		memcpy(buffer, static_cast<const BYTE*>(backing->mapping.get()) + offset, result);
 	} else {
 		result = ::GetFontData(
-			pThis->m_hdc.get(), pThis->m_isTTC ? TVP_TT_TABLE_ttcf : 0,
+			backing->hdc.get(), backing->isTtc ? TVP_TT_TABLE_ttcf : 0,
 			offset, buffer, readable);
 		if(result == GDI_ERROR) {
 			// エラー
@@ -1059,11 +1086,14 @@ unsigned long FreeTypeSysFontData::IoFunc(
 
 void FreeTypeSysFontData::CloseFunc(FT_Stream stream)
 {
-	FreeTypeSysFontData * pThis = reinterpret_cast<FreeTypeSysFontData*>(stream->descriptor.pointer);
-	Assert(pThis != nullptr);
-
-	if(!pThis->m_locked)
-		delete pThis;
+	FreeTypeStreamBacking* backing =
+		static_cast<FreeTypeStreamBacking*>(stream->descriptor.pointer);
+	Assert(backing != nullptr);
+	if (backing == nullptr ||
+		!backing->ownership.ReclaimFromCloseCallback())
+		return;
+	stream->descriptor.pointer = nullptr;
+	std::unique_ptr<FreeTypeStreamBacking> owner(backing);
 }
 
 bool FreeTypeSysFontData::OpenFaceByIndex(int index)
@@ -1072,7 +1102,7 @@ bool FreeTypeSysFontData::OpenFaceByIndex(int index)
 
 	FT_Open_Args args = { 0 };
 	args.flags		= FT_OPEN_STREAM;
-	args.stream		= &m_ftStream;
+	args.stream		= &m_streamBacking->stream;
 
 	// FreeType で扱えるか？
 	FT_Face face = nullptr;

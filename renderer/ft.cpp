@@ -537,6 +537,30 @@ typedef struct
 	bool bInvertColor;	// invert color for chrome/skia
 } FreeTypeGlyphInfo, * PFreeTypeGlyphInfo;
 
+static FT_Bytes CheckedBitmapRow(
+	const FT_Bitmap& bitmap,
+	unsigned int row,
+	std::uint64_t requiredBytes)
+{
+	renderer::freetype::BitmapRowView const view =
+		renderer::freetype::CheckedBitmapRow(
+			bitmap.buffer, bitmap.pitch, bitmap.rows, row, requiredBytes);
+	return view.data;
+}
+
+static std::uint64_t MonoBitmapRowBytes(unsigned int width) noexcept
+{
+	return static_cast<std::uint64_t>(width / 8u) + (width % 8u != 0 ? 1u : 0u);
+}
+
+static bool BitmapDimensionsFitInt(const FT_Bitmap& bitmap) noexcept
+{
+	return bitmap.width <= static_cast<unsigned int>(
+			(std::numeric_limits<int>::max)()) &&
+		bitmap.rows <= static_cast<unsigned int>(
+			(std::numeric_limits<int>::max)());
+}
+
 
 // 2階調
 static void FreeTypeDrawBitmapPixelModeMono(FreeTypeGlyphInfo& FTGInfo,
@@ -552,6 +576,8 @@ static void FreeTypeDrawBitmapPixelModeMono(FreeTypeGlyphInfo& FTGInfo,
 	if (bitmap->pixel_mode != FT_PIXEL_MODE_MONO) {
 		return;
 	}
+	if (!BitmapDimensionsFitInt(*bitmap) || x == (std::numeric_limits<int>::min)())
+		return;
 
 	const COLORREF color = RGB2DIB(FTGInfo.FTInfo->Color());
 
@@ -573,9 +599,11 @@ static void FreeTypeDrawBitmapPixelModeMono(FreeTypeGlyphInfo& FTGInfo,
 
 	for (j = top, dy = y; j < height; ++j, ++dy) {
 		if (static_cast<unsigned int>(dy) >= static_cast<unsigned int>(cachebufsize.cy)) continue;
-		p = bitmap->pitch < 0 ?
-			&bitmap->buffer[(-bitmap->pitch * bitmap->rows) - bitmap->pitch * j] :	// up-flow
-			&bitmap->buffer[bitmap->pitch * j];	// down-flow
+		p = CheckedBitmapRow(
+			*bitmap, static_cast<unsigned int>(j),
+			MonoBitmapRowBytes(bitmap->width));
+		if (p == nullptr)
+			return;
 		cachebufrowp = &cachebufp[dy * cachebufsize.cx];
 		for (i = left, dx = x; i < width; ++i, ++dx) {
 			if ((p[i / 8] & (1 << (7 - (i % 8)))) != 0) {
@@ -601,6 +629,9 @@ static void FreeTypeDrawBitmapPixelModeLCD(FreeTypeGlyphInfo& FTGInfo,
 	if (bitmap->pixel_mode != FT_PIXEL_MODE_LCD) {
 		return;
 	}
+	if (!BitmapDimensionsFitInt(*bitmap) ||
+		x < -(std::numeric_limits<int>::max)() / 3)
+		return;
 
 	const COLORREF color = FTGInfo.FTInfo->Color();
 
@@ -618,6 +649,7 @@ static void FreeTypeDrawBitmapPixelModeLCD(FreeTypeGlyphInfo& FTGInfo,
 		left = 0;
 	}
 	width = Min(static_cast<int>(bitmap->width), static_cast<int>(cachebufsize.cx - x) * 3);
+	width -= width % 3;
 	top = 0;
 	height = bitmap->rows;
 	//CAlphaBlendColor ab(color, ftdi.params->alpha, true, true);
@@ -630,9 +662,10 @@ static void FreeTypeDrawBitmapPixelModeLCD(FreeTypeGlyphInfo& FTGInfo,
 		for (j = 0, dy = y; j < height; ++j, ++dy) {
 			if (static_cast<unsigned int>(dy) >= static_cast<unsigned int>(cachebufsize.cy)) continue;
 
-			p = bitmap->pitch < 0 ?
-				&bitmap->buffer[(-bitmap->pitch * bitmap->rows) - bitmap->pitch * j] :	// up-flow
-				&bitmap->buffer[bitmap->pitch * j];	// down-flow
+			p = CheckedBitmapRow(
+				*bitmap, static_cast<unsigned int>(j), bitmap->width);
+			if (p == nullptr)
+				return;
 
 			cachebufrowp = &cachebufp[dy * cachebufsize.cx];
 			for (i = left, dx = x; i < width; i += 3, ++dx) {
@@ -658,9 +691,10 @@ static void FreeTypeDrawBitmapPixelModeLCD(FreeTypeGlyphInfo& FTGInfo,
 		for (j = 0, dy = y; j < height; ++j, ++dy) {
 			if (static_cast<unsigned int>(dy) >= static_cast<unsigned int>(cachebufsize.cy)) continue;
 
-			p = bitmap->pitch < 0 ?
-				&bitmap->buffer[(-bitmap->pitch * bitmap->rows) - bitmap->pitch * j] :	// up-flow
-				&bitmap->buffer[bitmap->pitch * j];	// down-flow
+			p = CheckedBitmapRow(
+				*bitmap, static_cast<unsigned int>(j), bitmap->width);
+			if (p == nullptr)
+				return;
 
 			cachebufrowp = &cachebufp[dy * cachebufsize.cx];
 			for (i = left, dx = x; i < width; i += 3, ++dx) {
@@ -726,6 +760,11 @@ static void FreeTypeDrawBitmapPixelModeBGRA(FreeTypeGlyphInfo& FTGInfo, int x, i
 	if (bitmap->pixel_mode != FT_PIXEL_MODE_BGRA) {
 		return;
 	}
+	if (!BitmapDimensionsFitInt(*bitmap) ||
+		bitmap->width > static_cast<unsigned int>(
+			(std::numeric_limits<int>::max)() / 4) ||
+		x < -(std::numeric_limits<int>::max)() / 4)
+		return;
 
 	const COLORREF color = FTGInfo.FTInfo->Color();
 
@@ -754,9 +793,11 @@ static void FreeTypeDrawBitmapPixelModeBGRA(FreeTypeGlyphInfo& FTGInfo, int x, i
 	for (j = 0, dy = y; j < height; ++j, ++dy) {
 		if (static_cast<unsigned int>(dy) >= static_cast<unsigned int>(cachebufsize.cy)) continue;
 
-		p = bitmap->pitch < 0 ?
-			&bitmap->buffer[(-bitmap->pitch * bitmap->rows) - bitmap->pitch * j] :	// up-flow
-			&bitmap->buffer[bitmap->pitch * j];	// down-flow
+		p = CheckedBitmapRow(
+			*bitmap, static_cast<unsigned int>(j),
+			static_cast<std::uint64_t>(bitmap->width) * 4u);
+		if (p == nullptr)
+			return;
 
 		cachebufrowp = &cachebufp[dy * cachebufsize.cx];
 		for (i = left, dx = x; i < width; i += 4, ++dx) {
@@ -782,6 +823,8 @@ static void FreeTypeDrawBitmapGray(FreeTypeGlyphInfo& FTGInfo, CAlphaBlendColor&
 
 	CBitmapCache& cache = *FTGInfo.FTInfo->pCache;
 	const FT_Bitmap* bitmap = &FTGInfo.FTGlyph->bitmap;
+	if (!BitmapDimensionsFitInt(*bitmap) || x == (std::numeric_limits<int>::min)())
+		return;
 	BYTE alphatuner = FTGInfo.FTInfo->params->alphatuner;
 
 	BOOL bAlphaDraw = FTGInfo.FTInfo->params->alpha != 1;
@@ -809,9 +852,10 @@ static void FreeTypeDrawBitmapGray(FreeTypeGlyphInfo& FTGInfo, CAlphaBlendColor&
 
 	for (j = top, dy = y; j < height; ++j, ++dy) {
 		if (static_cast<unsigned int>(dy) >= static_cast<unsigned int>(cachebufsize.cy)) continue;
-		p = bitmap->pitch < 0 ?
-			&bitmap->buffer[(-bitmap->pitch * bitmap->rows) - bitmap->pitch * j] :	// up-flow
-			&bitmap->buffer[bitmap->pitch * j];	// down-flow
+		p = CheckedBitmapRow(
+			*bitmap, static_cast<unsigned int>(j), bitmap->width);
+		if (p == nullptr)
+			return;
 		cachebufrowp = &cachebufp[dy * cachebufsize.cx];
 		for (i = left, dx = x; i < width; ++i, ++dx) {
 			alpha = p[i];
@@ -863,6 +907,8 @@ static void FreeTypeDrawBitmapPixelModeMonoV(FreeTypeGlyphInfo& FTGInfo,
 	if (bitmap->pixel_mode != FT_PIXEL_MODE_MONO) {
 		return;
 	}
+	if (!BitmapDimensionsFitInt(*bitmap))
+		return;
 
 	const COLORREF color = FTGInfo.FTInfo->Color();
 
@@ -870,9 +916,11 @@ static void FreeTypeDrawBitmapPixelModeMonoV(FreeTypeGlyphInfo& FTGInfo,
 	const int height = bitmap->rows;
 
 	for (j = 0, dy = x; j < height; ++j, ++dy) {
-		p = bitmap->pitch < 0 ?
-			&bitmap->buffer[(-bitmap->pitch * bitmap->rows) - bitmap->pitch * j] :	// up-flow
-			&bitmap->buffer[bitmap->pitch * j];	// down-flow
+		p = CheckedBitmapRow(
+			*bitmap, static_cast<unsigned int>(j),
+			MonoBitmapRowBytes(bitmap->width));
+		if (p == nullptr)
+			return;
 		for (i = 0, dx = y + width; i < width; ++i, --dx) {
 			if ((p[i / 8] & (1 << (7 - (i % 8)))) != 0) {
 				if (cache.GetPixel(dx, dy) != CLR_INVALID) { // dx dy エラーチェック
@@ -892,30 +940,34 @@ static void FreeTypeDrawBitmapPixelModeLCDV(FreeTypeGlyphInfo& FTGInfo,
 	const FT_Bitmap* bitmap = &FTGInfo.FTGlyph->bitmap;
 	BYTE alphatuner = FTGInfo.FTInfo->params->alphatuner;
 	int AAMode = FTGInfo.AAMode;
-	int i, j;
+	int i;
+	unsigned int row;
 	int dx, dy;	// display
 	COLORREF c;
-	FT_Bytes p;
+	FT_Bytes row0;
+	FT_Bytes row1;
+	FT_Bytes row2;
 
 	if (bitmap->pixel_mode != FT_PIXEL_MODE_LCD_V) {
 		return;
 	}
+	if (!BitmapDimensionsFitInt(*bitmap))
+		return;
 
 	const COLORREF color = FTGInfo.FTInfo->Color();
 
 	// LCDは3サブピクセル分ある
 	const int width = bitmap->width;
-	const int height = bitmap->rows;
-	const int pitch = bitmap->pitch;
-	const int pitchabs = pitch < 0 ? -pitch : pitch;
 	BOOL bAlphaDraw = FTGInfo.FTInfo->params->alpha != 1;
 	//CAlphaBlendColor ab(color, ftdi.params->alpha, true);
 
 	if (bAlphaDraw)
-		for (j = 0, dy = x; j < height; j += 3, ++dy) {
-			p = pitch < 0 ?
-				&bitmap->buffer[(pitchabs * bitmap->rows) + pitchabs * j] :	// up-flow
-				&bitmap->buffer[pitchabs * j];	// down-flow
+		for (row = 0, dy = x; bitmap->rows - row >= 3u; row += 3u, ++dy) {
+			row0 = CheckedBitmapRow(*bitmap, row, bitmap->width);
+			row1 = CheckedBitmapRow(*bitmap, row + 1u, bitmap->width);
+			row2 = CheckedBitmapRow(*bitmap, row + 2u, bitmap->width);
+			if (row0 == nullptr || row1 == nullptr || row2 == nullptr)
+				return;
 
 			int alphaR, alphaG, alphaB;
 			for (i = 0, dx = y + width; i < width; ++i, --dx) {
@@ -924,15 +976,15 @@ static void FreeTypeDrawBitmapPixelModeLCDV(FreeTypeGlyphInfo& FTGInfo,
 				if (backColor == color || backColor == CLR_INVALID) continue;
 				if (AAMode == 2 || AAMode == 4) {
 					// これはRGBの順にサブピクセルがあるディスプレイ用
-					alphaR = p[i + 0] / alphatuner;
-					alphaG = p[i + pitch] / alphatuner;
-					alphaB = p[i + pitch * 2] / alphatuner;
+					alphaR = row0[i] / alphatuner;
+					alphaG = row1[i] / alphatuner;
+					alphaB = row2[i] / alphatuner;
 				}
 				else {
 					// BGR
-					alphaR = p[i + pitch * 2] / alphatuner;
-					alphaG = p[i + pitch] / alphatuner;
-					alphaB = p[i + 0] / alphatuner;
+					alphaR = row2[i] / alphatuner;
+					alphaG = row1[i] / alphatuner;
+					alphaB = row0[i] / alphatuner;
 				}
 
 				c = ab.doAB(backColor, alphaR, alphaG, alphaB, !bAlphaDraw);
@@ -943,10 +995,12 @@ static void FreeTypeDrawBitmapPixelModeLCDV(FreeTypeGlyphInfo& FTGInfo,
 				continue;
 		}
 	else
-		for (j = 0, dy = x; j < height; j += 3, ++dy) {
-			p = pitch < 0 ?
-				&bitmap->buffer[(pitchabs * bitmap->rows) + pitchabs * j] :	// up-flow
-				&bitmap->buffer[pitchabs * j];	// down-flow
+		for (row = 0, dy = x; bitmap->rows - row >= 3u; row += 3u, ++dy) {
+			row0 = CheckedBitmapRow(*bitmap, row, bitmap->width);
+			row1 = CheckedBitmapRow(*bitmap, row + 1u, bitmap->width);
+			row2 = CheckedBitmapRow(*bitmap, row + 2u, bitmap->width);
+			if (row0 == nullptr || row1 == nullptr || row2 == nullptr)
+				return;
 
 			int alphaR, alphaG, alphaB;
 			for (i = 0, dx = y + width; i < width; ++i, --dx) {
@@ -955,15 +1009,15 @@ static void FreeTypeDrawBitmapPixelModeLCDV(FreeTypeGlyphInfo& FTGInfo,
 				if (backColor == color || backColor == CLR_INVALID) continue;
 				if (AAMode == 2 || AAMode == 4) {
 					// これはRGBの順にサブピクセルがあるディスプレイ用
-					alphaR = p[i + 0];
-					alphaG = p[i + pitch];
-					alphaB = p[i + pitch * 2];
+					alphaR = row0[i];
+					alphaG = row1[i];
+					alphaB = row2[i];
 				}
 				else {
 					// BGR
-					alphaR = p[i + pitch * 2];
-					alphaG = p[i + pitch];
-					alphaB = p[i + 0];
+					alphaR = row2[i];
+					alphaG = row1[i];
+					alphaB = row0[i];
 				}
 
 				c = ab.doAB(backColor, alphaR, alphaG, alphaB, !bAlphaDraw);
@@ -979,6 +1033,8 @@ void FreeTypeDrawBitmapGrayV(FreeTypeGlyphInfo& FTGInfo, CAlphaBlendColor& ab, i
 {
 	CBitmapCache& cache = *FTGInfo.FTInfo->pCache;
 	const FT_Bitmap* bitmap = &FTGInfo.FTGlyph->bitmap;
+	if (!BitmapDimensionsFitInt(*bitmap))
+		return;
 	BYTE alphatuner = FTGInfo.FTInfo->params->alphatuner;
 	int i, j;
 	int dx, dy;	// display
@@ -996,9 +1052,10 @@ void FreeTypeDrawBitmapGrayV(FreeTypeGlyphInfo& FTGInfo, CAlphaBlendColor& ab, i
 	//	CAlphaBlendColor ab(color, ftdi.params->alpha, false);
 
 	for (j = 0, dy = x; j < height; ++j, ++dy) {
-		p = bitmap->pitch < 0 ?
-			&bitmap->buffer[(-bitmap->pitch * bitmap->rows) - bitmap->pitch * j] :	// up-flow
-			&bitmap->buffer[bitmap->pitch * j];	// down-flow
+		p = CheckedBitmapRow(
+			*bitmap, static_cast<unsigned int>(j), bitmap->width);
+		if (p == nullptr)
+			return;
 		for (i = 0, dx = y + width; i < width; ++i, --dx) {
 			const COLORREF backColor = cache.GetPixel(dy, dx);
 			if (backColor == color || backColor == CLR_INVALID) continue;
@@ -1056,13 +1113,14 @@ int CALLBACK CGGOGlyphLoader::EnumFontFamProc(const LOGFONT* lplf, const TEXTMET
 	}
 
 	TRACE(_T("Face: %s\n"), lplf->lfFaceName);
-	FreeTypeSysFontData* pFont = FreeTypeSysFontData::CreateInstance(lplf->lfFaceName, 0, false);
-	if (!pFont) {
+	std::unique_ptr<FreeTypeSysFontData> fontData(
+		FreeTypeSysFontData::CreateInstance(lplf->lfFaceName, 0, false));
+	if (!fontData) {
 		return TRUE;
 	}
 
 	const FT_Glyph_Class* clazz = nullptr;
-	renderer_raii::UniqueFreeTypeFace face(pFont->GetFace());
+	renderer_raii::UniqueFreeTypeFace face(fontData->ReleaseFace());
 	FT_Error err = FT_Set_Pixel_Sizes(face.get(), 0, 12);//optimized
 	if (!err) {
 		err = FT_Load_Char(face.get(), lptm->tmDefaultChar, FT_LOAD_NO_BITMAP);
@@ -2721,12 +2779,9 @@ FT_Error face_requester(
 		return FT_Err_Cannot_Open_Resource;
 	}
 
-	renderer_raii::UniqueFreeTypeFace faceOwner(fontData->GetFace());
+	renderer_raii::UniqueFreeTypeFace faceOwner(fontData->ReleaseFace());
 	if (!faceOwner)
 		return 0x6;	// FreeTypeSysFontData returned no face.
-	// The FT_Stream close callback owns and deletes the stream holder after the
-	// face crosses this C callback boundary.
-	fontData.release();
 	face = faceOwner.get();
 	// Charmapを設定しておく
 	ret = FT_Select_Charmap(face, FT_ENCODING_UNICODE);

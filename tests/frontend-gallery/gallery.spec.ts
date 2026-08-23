@@ -1112,7 +1112,7 @@ test("a foreign legacy MacType service blocks activation and offers no migration
   const openService = page.locator('[data-service-backend="open-source"]');
   await expect(openService.locator('[data-state="legacy-service-migrate"]')).toBeVisible();
   await expect(openService).toContainText("A foreign legacy MacTray service was detected");
-  await expect(openService).toContainText("does not match the verified MacTray service");
+  await expect(openService).toContainText("does not match the expected MacTray configuration");
   await expect(openService).not.toContainText("Use Migrate below");
   await expect(openService.getByRole("button", { name: "Apply current profile" })).toBeDisabled();
   await expect(openService.getByRole("button", { name: "Install service" })).toBeDisabled();
@@ -1181,7 +1181,7 @@ test("legacy migration explains the verified transaction before it can continue"
   const continueMigration = dialog.getByRole("button", { name: "Continue migration" });
   await expect(dialog).toBeVisible();
   await expect(cancel).toBeFocused();
-  await expect(dialog).toContainText("AppInit and exact legacy service configuration");
+  await expect(dialog).toContainText("AppInit and the legacy service configuration and ownership");
   await expect(dialog).toContainText("current INI state");
   await expect(dialog).toContainText("when a profile file exists");
   await expect(dialog).toContainText("Stops the legacy service");
@@ -1298,7 +1298,7 @@ test("a running unverified service remains stoppable without claiming it is inac
   const openService = page.locator('[data-service-backend="open-source"]');
   await expect(openService.getByRole("button", { name: "Stop applying to new processes" })).toBeEnabled();
   await expect(openService).toContainText("Service running without verified system application");
-  await expect(openService).toContainText("The service is running, but verified system-wide rendering cannot be confirmed. Stop remains available for safe recovery.");
+  await expect(openService).toContainText("The service is running, but system-wide application could not be confirmed. Stop remains available.");
   await expect(openService).not.toContainText("Reopen the target app in this state to compare rendering without the applied settings.");
   await openService.getByRole("button", { name: "Stop applying to new processes" }).click();
   await expect(page.getByText("MacType system application is temporarily off.", { exact: true })).toBeVisible();
@@ -1315,7 +1315,7 @@ test("a running profile mismatch remains stoppable and identifies the mismatched
   const openService = page.locator('[data-service-backend="open-source"]');
   await expect(openService.getByRole("button", { name: "Stop applying to new processes" })).toBeEnabled();
   await expect(openService).toContainText("Service running with a different profile");
-  await expect(openService).toContainText("The running generation does not match the profile expected by Control Center. Stop remains available; verified system application is not claimed.");
+  await expect(openService).toContainText("The profile running in the service does not match the profile selected in Control Center. Stop remains available, and this is not shown as normal system-wide application.");
   await expect(openService).toContainText("Profile mismatch");
   await expect(openService).not.toContainText("or not yet verified");
 });
@@ -1490,8 +1490,8 @@ const legacyServiceIdentityCases = [
     query: "legacy=foreign",
     kind: "legacy-service-foreign",
     title: "A foreign legacy MacTray service was detected",
-    description: "does not match the verified MacTray service",
-    detailWarning: "does not match the verified MacTray service",
+    description: "does not match the expected MacTray configuration",
+    detailWarning: "does not match the expected MacTray configuration",
   },
   {
     id: "uncertain",
@@ -1523,7 +1523,7 @@ for (const identity of legacyServiceIdentityCases) {
     const legacy = page.locator('[data-service-backend="legacy-mactray"]');
     if (identity.detailWarning) await expect(legacy).toContainText(identity.detailWarning);
     else {
-      await expect(legacy).not.toContainText("does not match the verified MacTray service");
+      await expect(legacy).not.toContainText("does not match the expected MacTray configuration");
       await expect(legacy).not.toContainText("could not read enough service information");
     }
     await page.screenshot({

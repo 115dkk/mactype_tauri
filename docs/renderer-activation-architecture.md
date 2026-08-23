@@ -19,8 +19,10 @@ RendererActivation
   -> ProfileRuntime
   -> RendererPolicySnapshot
      -> FreeTypeRuntime
+     -> PeExportView
      -> DirectWriteLifecycle
      -> font-substitution Adapters
+  -> RendererUnloadLifecycle
 ```
 
 `RendererRuntimeBinding` is the only Interface that pairs a protected runtime
@@ -50,18 +52,35 @@ cannot observe a mixture of policy generations.
 
 Process-owned renderer registries use explicit teardown rather than C++ static
 destruction because Windows may run the latter while holding the loader lock.
-The active renderer is never released through a raw `FreeLibrary`; a caller
-that is about to terminate leaves process cleanup to Windows. The helper may
+An active renderer owns one module self-reference through
+`RendererUnloadLifecycle`. A raw `FreeLibrary` can release only the caller's
+reference and cannot unmap live hook code. The exported `SafeUnload` thread
+procedure is the supported explicit teardown Interface: one atomic gate admits
+the attempt, it drains hook leases and DirectWrite workers, commits stop, and
+releases the self-reference with `FreeLibraryAndExitThread`. Preparation
+failure reopens admission for a later retry. If another caller reference is
+still present, the stopped image remains mapped until that caller releases its
+own reference. A caller that is about to terminate leaves process cleanup to
+Windows. The helper may
 release only the reference it created for a verified `QuietSkip`, after the
 renderer has confirmed that no hook capability is active or failed and has
 cleared its policy, substitution, and lifecycle snapshots. Failure to prove
-that state is cleanup uncertainty, not a successful skip.
+that state is cleanup uncertainty, not a successful skip. A quiet-skip
+renderer never acquires the active-image self-reference.
 
 The same rule governs FreeType and DirectWrite owners. Explicit teardown runs
 outside the loader lock in dependency order; process termination may leave a
 small owner container for the operating system rather than execute library or
 COM release paths from static destructors. Code-local comments retain only the
 specific ordering or loader-lock warning needed at each owner.
+
+`FreeTypeRuntime` presents logical top-down bitmap rows through one checked
+Interface for both pitch signs. Raster Adapters do not perform their own row
+pointer arithmetic. Its face builder retains a separate stream backing until
+construction succeeds, then transfers only that backing to the stream close
+callback. `PeExportView` similarly keeps PE knowledge local: raw-file and
+loader-mapped views validate every header, section, export array, string, and
+RVA conversion without creating an executable image or invoking foreign code.
 
 ## Evidence Interface
 
@@ -128,6 +147,9 @@ a separately versioned diagnostic Interface.
 | `DllMain` treated profile exclusion as a loaded but otherwise invisible state | `RendererActivation` reports `QuietSkip(reason)` |
 | render paths repeatedly queried `CGdippSettings` | immutable `RendererPolicySnapshot` from `ProfileRuntime` |
 | `freetype_runtime.h` exposed helpers while ownership remained global | deep `FreeTypeRuntime` owns startup/stop order and consumes policy snapshots |
+| repeated signed `FT_Bitmap::pitch` pointer arithmetic | `FreeTypeRuntime::CheckedBitmapRow` Interface |
+| `CMemLoadDll` copied a disk DLL to RWX memory to obtain an RVA | read-only `PeExportView` |
+| `SafeUnload` used a plain static reentry flag and arbitrary `FreeLibrary` could unmap live hooks | `RendererUnloadLifecycle` atomic admission plus active-image self-reference |
 | DirectWrite lifecycle declarations mixed with hook Implementation declarations | narrow lifecycle Interface with classic DirectWrite and DWriteCore Adapters |
 
 ## Required verification
@@ -142,5 +164,11 @@ a separately versioned diagnostic Interface.
   not a quiet skip and not verified activation.
 - Failed policy publication preserves the preceding snapshot and revision.
 - FreeType partial-start tests prove manager and caches end before the library.
+- Positive and negative bitmap pitch fixtures resolve every logical row within
+  the computed backing extent; zero, negative, and out-of-range face IDs fail.
+- Truncated and malformed PE fixtures fail under x86 and x64 ASan, while the
+  fixed cross-architecture loader RVA still supports mixed child relay.
+- Plain `FreeLibrary` leaves an active renderer mapped, while `SafeUnload`
+  drains DWriteCore and removes the final self-reference on a dedicated thread.
 - x86 and x64 injected probes bind marker identity, runtime generation, profile
   digest, and renderer evidence to the same process attempt.

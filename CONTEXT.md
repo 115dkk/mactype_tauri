@@ -47,7 +47,13 @@ This file fixes the domain language used by code, tests, CI, and architecture do
 : The immutable, reference-counted rule generation consumed by both GDI and DirectWrite adapters. It owns case-insensitive rule identity, charset precedence, deterministic chains, cycle/depth failure, generation, and digest. Reload publishes a new snapshot; in-flight rendering keeps the old one and no adapter reads the mutable profile rule map.
 
 **FreeTypeRuntime**
-: The renderer module that owns the paired FreeType library and cache manager, bounded stream reads, bitmap byte accounting, typed raster cache keys, and the immutable per-render `RasterPolicy`. Its release order is manager before library. The pinned fork and private `FT_Glyph_To_BitmapEx` ABI are part of this interface.
+: The renderer module that owns the paired FreeType library and cache manager, bounded stream reads, checked top-down logical bitmap rows for either pitch sign, one-based face-ID validation, bitmap byte accounting, typed raster cache keys, and the immutable per-render `RasterPolicy`. Its release order is manager before library. A constructed face receives a separate callback-owned stream backing; its builder is never callback-owned. The pinned fork and private `FT_Glyph_To_BitmapEx` ABI are part of this interface.
+
+**PeExportView**
+: The renderer module that resolves a named export function RVA or export-address-table slot RVA from a bounded raw-file or loader-mapped PE view. It validates headers, section and export arrays, strings, forwarders, arithmetic, and readable mapped ranges. It never copies an image into executable memory, relocates it, or calls its entry point.
+
+**RendererUnloadLifecycle**
+: The renderer module that serializes explicit unload attempts and owns the active renderer's self-reference. Plain `FreeLibrary` cannot unmap live hook code. The `SafeUnload` thread-procedure Interface drains workers and hook leases, commits stop, and releases the self-reference atomically with thread exit; failed preparation reopens retry admission. Quiet-skip renderers do not acquire this lease, and process termination leaves cleanup to Windows.
 
 **ChildInjectionTransaction**
 : The synchronous core module behind the `CreateProcessInternalW` hook. It creates an eligible child suspended, verifies its exact handle-bound identity and safety facts, binds only the current core's fixed adjacent DLL while that generation's adjacent `MacType.ini` still exists, and then restores the caller-requested thread state. A retired generation stops propagating immediately even when its DLL remains mapped in a long-lived parent. Quiet skips never become image-wide bans or service alerts; an unprovable in-flight mixed-helper mutation terminates the new child rather than resuming uncertain state.

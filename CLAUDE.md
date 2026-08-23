@@ -41,6 +41,24 @@ below wherever the two conflict.
   substitutions consume the immutable font-substitution snapshot, and
   FreeType manager ownership ends before its library. Do not add an independent
   runtime phase machine or read mutable profile maps from a render hot path.
+- `FreeTypeRuntime` is also the sole Interface for logical bitmap rows and
+  one-based face IDs. Render Adapters must use `CheckedBitmapRow`; they never
+  reconstruct signed-pitch pointer arithmetic. An `FT_Face` receives a
+  separate callback-owned stream backing only after successful construction;
+  the builder itself is never deleted by an `FT_Stream` callback.
+- PE export lookup is read-only through `PeExportView`. Do not restore a
+  manual loader, executable/RWX image copy, relocation pass, foreign
+  `DllMain` call, or unchecked RVA arithmetic merely to obtain a function or
+  export-table-slot RVA.
+- An active renderer owns one `RendererUnloadLifecycle` self-reference. A raw
+  `FreeLibrary` may release a caller reference but cannot unmap live hook code.
+  Supported explicit teardown runs the exported `SafeUnload` thread procedure,
+  which serializes attempts, drains workers and hook counters, commits the
+  hook lifecycle, and releases the self-reference with
+  `FreeLibraryAndExitThread`. If a caller retains another module reference,
+  the stopped image remains mapped until that caller releases its own
+  reference. `QuietSkip` renderers acquire no self-reference, and process
+  termination performs no complex loader-lock cleanup.
 - Source comments follow `docs/source-comment-policy.md`. Keep code-local
   safety proofs and platform traps, move repeated cross-Module contracts to
   their canonical document, and do not leave narration, disabled code, model
@@ -74,7 +92,7 @@ below wherever the two conflict.
   ban. Keep the health-v1 wire schema stable unless a separately versioned
   migration and rollback is designed.
 - MSVC ASan is mandatory on x86 and x64 for the new renderer ownership,
-  lifecycle, FreeType-policy, and substitution modules. Do not call these
+  lifecycle, checked-PE, FreeType-policy, and substitution modules. Do not call these
   focused tests a sanitized injected core: stock IniParser and other linked
   C++ dependencies currently have incompatible STL annotations. A full-core
   ASan lane requires every linked C++ dependency to use matching sanitizer and

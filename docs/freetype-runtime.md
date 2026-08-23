@@ -53,11 +53,23 @@ legacy renderer implementation.
 - `BitmapByteSize` uses the absolute bitmap pitch and saturates its public
   `int` charge, so bottom-up bitmaps cannot create a negative or wrapped cache
   size.
+- `CheckedBitmapRow` converts either pitch sign to a top-down logical row and
+  validates row multiplication, start address, and the complete returned span
+  before exposing a pointer.
+- The face-requester C callback converts `std::bad_alloc` to
+  `FT_Err_Out_Of_Memory` and every other C++ exception to a bounded FreeType
+  failure; no C++ exception crosses the C ABI.
 
 Focused tests inject recording owners to prove manager-before-library release,
 republish cleanup, repeated reset, stream boundaries, and signed bitmap pitch.
 Both Win32 and x64 targets are part of the service-probe contract and the ASan
 matrix.
+
+During supported explicit unload, the font engine and manager/library pair are
+released before settings and outside the loader lock. Verified quiet skip uses
+the same resource-drain Interface. Supported final `DLL_PROCESS_DETACH`
+retains only TLS slot and already-empty lock-storage release; process
+termination leaves the small owner containers to Windows.
 
 ## Cache and render-policy boundary
 

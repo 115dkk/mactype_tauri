@@ -50,15 +50,19 @@ below wherever the two conflict.
   manual loader, executable/RWX image copy, relocation pass, foreign
   `DllMain` call, or unchecked RVA arithmetic merely to obtain a function or
   export-table-slot RVA.
-- An active renderer owns one `RendererUnloadLifecycle` self-reference. A raw
-  `FreeLibrary` may release a caller reference but cannot unmap live hook code.
-  Supported explicit teardown runs the exported `SafeUnload` thread procedure,
-  which serializes attempts, drains workers and hook counters, commits the
-  hook lifecycle, and releases the self-reference with
-  `FreeLibraryAndExitThread`. If a caller retains another module reference,
-  the stopped image remains mapped until that caller releases its own
-  reference. `QuietSkip` renderers acquire no self-reference, and process
-  termination performs no complex loader-lock cleanup.
+- An active renderer owns one `RendererUnloadLifecycle` self-reference. A
+  balanced caller may release its own `LoadLibrary` reference without
+  unmapping live hook code. Windows references are not owner-tagged, so
+  unmatched or repeated `FreeLibrary` calls are outside the supported
+  contract. Supported explicit teardown runs the exported `SafeUnload` thread
+  procedure, which serializes attempts, drains workers, hooks, FreeType,
+  renderer policy, substitution, and settings outside the loader lock, then
+  releases the self-reference with `FreeLibraryAndExitThread`. If a caller
+  retains another module reference, mutable exports reject work and the
+  stopped image remains mapped until that caller releases its own reference.
+  Final explicit detach releases only the TLS slot and empty lock storage;
+  `QuietSkip` renderers acquire no self-reference, and process termination
+  leaves cleanup to Windows.
 - Source comments follow `docs/source-comment-policy.md`. Keep code-local
   safety proofs and platform traps, move repeated cross-Module contracts to
   their canonical document, and do not leave narration, disabled code, model

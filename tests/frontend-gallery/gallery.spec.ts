@@ -103,6 +103,36 @@ for (const wording of [
   });
 }
 
+test("copy review gallery captures the Korean ready service", async ({ page }, testInfo) => {
+  await page.goto("/?view=execution&gallery=1&lang=ko&system-service=ready", { waitUntil: "networkidle" });
+  await expect(page.locator("[data-service-summary]")).toContainText("현재 프로필");
+  await page.screenshot({
+    path: path.join(galleryRoot, `${testInfo.project.name}-copy-review-ready-ko.png`),
+    fullPage: true,
+  });
+});
+
+test("copy review gallery captures the Korean degraded service", async ({ page }, testInfo) => {
+  await page.goto("/?view=execution&gallery=1&lang=ko&system-service=degraded", { waitUntil: "networkidle" });
+  await expect(page.locator("[data-service-summary]")).toContainText("서비스는 실행 중");
+  await page.screenshot({
+    path: path.join(galleryRoot, `${testInfo.project.name}-copy-review-degraded-ko.png`),
+    fullPage: true,
+  });
+});
+
+test("copy review gallery captures the Korean migration explanation", async ({ page }, testInfo) => {
+  await page.goto("/?view=execution&gallery=1&lang=ko&system-service=migration-available&legacy=migration-available", { waitUntil: "networkidle" });
+  await page.locator("[data-service-summary]").getByRole("button", { name: "마이그레이션" }).click();
+  const dialog = page.getByRole("dialog", { name: "레거시 MacTray를 마이그레이션할까요?" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("Control Center");
+  await page.screenshot({
+    path: path.join(galleryRoot, `${testInfo.project.name}-copy-review-migration-ko.png`),
+    fullPage: true,
+  });
+});
+
 for (const view of galleryViews) {
   for (const locale of galleryLocales) {
     test(`${view.id} renders fully in ${locale.id}`, async ({ page }, testInfo) => {

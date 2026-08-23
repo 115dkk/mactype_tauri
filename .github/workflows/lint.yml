@@ -29,6 +29,8 @@ jobs:
       - working-directory: control-center
         run: pnpm test:i18n
       - working-directory: control-center
+        run: pnpm test:i18n-experiment
+      - working-directory: control-center
         run: pnpm test:settings
       - working-directory: control-center
         run: pnpm test:unity-catalog

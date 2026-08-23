@@ -10,6 +10,8 @@
     "build": "pnpm generate:settings && tsc -b && vite build",
     "lint": "eslint . --max-warnings 0",
     "test:i18n": "node ../scripts/ci/Test-I18n.mjs",
+    "test:i18n-experiment": "node ../scripts/ci/Test-I18nCopyExperiment.mjs",
+    "experiment:i18n": "node ../scripts/i18n/run-copy-experiment.mjs",
     "test:settings": "node ../scripts/ci/Test-SettingsCoverage.mjs",
     "test:unity-catalog": "node ../scripts/generate-unity-anticheat-catalog.mjs --check",
     "test:gallery": "playwright test -c ../tests/frontend-gallery/playwright.config.ts",

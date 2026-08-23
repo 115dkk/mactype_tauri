@@ -19,4 +19,5 @@ artifacts/
 /detours.lib
 /detours64.lib
 tmp/
+_workspace/
 .superloopy/cache/

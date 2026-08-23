@@ -16,10 +16,12 @@ const ko = JSON.parse(fs.readFileSync(path.join(root, "control-center/src/i18n/k
 const en = JSON.parse(fs.readFileSync(path.join(root, "control-center/src/i18n/en.json"), "utf8"));
 
 assertModelThinking("gemini-3.5-flash-lite", "minimal");
+assertModelThinking("gemini-3.5-flash", "low", "antigravity");
 assertModelThinking("gemini-3.6-flash", "minimal");
 assertModelThinking("gemini-3.7-flash", "low");
 assert.throws(() => assertModelThinking("gemini-3.7-flash", "minimal"), /does not support/u);
 assert.throws(() => assertModelThinking("gemini-3.6-flash", "minimal", "antigravity"), /not minimal/u);
+assert.throws(() => assertModelThinking("gemini-3.5-flash-lite", "low", "antigravity"), /does not expose/u);
 
 for (const entry of sample.entries) {
   assert.equal(typeof ko[entry.key], "string", `Missing live Korean key ${entry.key}`);

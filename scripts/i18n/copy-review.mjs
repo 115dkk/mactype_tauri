@@ -4,9 +4,12 @@ import path from "node:path";
 
 export const supportedModels = {
   "gemini-3.5-flash-lite": new Set(["minimal", "low", "medium", "high"]),
+  "gemini-3.5-flash": new Set(["minimal", "low", "medium", "high"]),
   "gemini-3.6-flash": new Set(["minimal", "low", "medium", "high"]),
   "gemini-3.7-flash": new Set(["low", "medium", "high"]),
 };
+
+const antigravityModels = new Set(["gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.7-flash"]);
 
 const verdicts = new Set(["keep", "rewrite", "remove_clause"]);
 const risks = new Set(["low", "medium", "high"]);
@@ -19,6 +22,9 @@ export function assertModelThinking(model, thinking, provider = "api") {
   }
   if (provider === "antigravity" && thinking === "minimal") {
     throw new Error("Antigravity exposes low/medium/high effort, not minimal; use the Developer API for a minimal-thinking comparison.");
+  }
+  if (provider === "antigravity" && !antigravityModels.has(model)) {
+    throw new Error(`Antigravity does not expose ${model} in its selectable model list.`);
   }
 }
 
@@ -170,8 +176,8 @@ export async function runDeveloperApi({ apiKey, model, thinking, prompt, schema 
   return { payload: JSON.parse(text), providerMetadata: { usage: envelope.usageMetadata ?? null } };
 }
 
-function antigravitySlug(model) {
-  return `${model}-medium`;
+function antigravitySlug(model, thinking) {
+  return `${model}-${thinking}`;
 }
 
 function spawnCapture(command, args, options = {}) {
@@ -193,7 +199,7 @@ export async function runAntigravity({ model, thinking, prompt, schemaPath, cwd 
   const command = process.env.AGY_BIN || "agy";
   const { stdout } = await spawnCapture(command, [
     "-p", prompt,
-    "--model", antigravitySlug(model),
+    "--model", antigravitySlug(model, thinking),
     "--effort", thinking,
     "--output-format", "json",
     "--json-schema", schemaPath,

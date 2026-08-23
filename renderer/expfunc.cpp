@@ -14,6 +14,7 @@
 #include <locale>
 #include <cstdint>
 #include <limits>
+#include <new>
 #include "wow64ext.h"
 #include <VersionHelpers.h>
 #include "crc32.h"
@@ -150,11 +151,22 @@ HMODULE GetSelfModuleHandle()
 
 EXTERN_C void WINAPI CreateControlCenter(IControlCenter** ret)
 {
-	*ret = static_cast<IControlCenter*>(new CControlCenter);
+	CThreadCounter exportLease;
+	if (ret == nullptr)
+		return;
+	*ret = nullptr;
+	if (renderer::ProcessHookCoordinator().phase() !=
+		renderer::RuntimePhase::active)
+		return;
+	*ret = static_cast<IControlCenter*>(new (std::nothrow) CControlCenter);
 }
 
 EXTERN_C void WINAPI ReloadConfig()
 {
+	CThreadCounter exportLease;
+	if (renderer::ProcessHookCoordinator().phase() !=
+		renderer::RuntimePhase::active)
+		return;
 	CControlCenter::ReloadConfig();
 }
 
@@ -223,6 +235,11 @@ EXTERN_C DWORD WINAPI SafeUnload(LPVOID)
 	{
 		Sleep(10);
 	} while (CThreadCounter::Count());	//double check for xp
+	if (!renderer::DrainProcessRendererResourcesOutsideLoaderLock())
+	{
+		unloadGate.EndForRetry();
+		return ERROR_UNHANDLED_EXCEPTION;
+	}
 
 	HMODULE const rendererLease = renderer::TakeProcessRendererLease();
 	FreeLibraryAndExitThread(

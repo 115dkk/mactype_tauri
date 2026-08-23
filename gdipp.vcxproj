@@ -849,6 +849,7 @@
     <ClCompile Include="renderer\renderer_policy.cpp" />
     <ClCompile Include="renderer\settings.cpp" />
     <ClCompile Include="renderer\unload_lifecycle.cpp" />
+    <ClCompile Include="renderer\unload_resources.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="renderer\expfunc.def" />

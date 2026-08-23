@@ -2,6 +2,7 @@
 
 #include "hook_lifecycle.h"
 #include "profile_runtime.h"
+#include "unload_lifecycle.h"
 
 #include <atomic>
 #include <cstdint>
@@ -284,8 +285,8 @@ extern "C" DWORD WINAPI MacTypeQueryActivationEvidenceV1(
 	}
 	if (result.disposition == MACTYPE_RENDERER_DISPOSITION_QUIET_SKIP)
 	{
-		renderer::ClearProcessProfileRuntimeForQuietUnload();
-		renderer::font_substitution::ClearProcessRegistryForQuietUnload();
+		if (!renderer::DrainProcessRendererResourcesOutsideLoaderLock())
+			return ERROR_UNHANDLED_EXCEPTION;
 	}
 	return ERROR_SUCCESS;
 }

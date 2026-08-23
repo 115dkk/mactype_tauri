@@ -2762,44 +2762,46 @@ FT_Error face_requester(
 	FT_Pointer /*request_data*/,
 	FT_Face* aface)
 {
-	FT_Error ret = FT_Err_Ok;
-	FT_Face face;
+	return renderer::freetype::InvokeFreeTypeCallbackBoundary<FT_Error>(
+		[&]() -> FT_Error {
+			if (aface == nullptr || g_pFTEngine == nullptr)
+				return FT_Err_Invalid_Argument;
+			FreeTypeFontInfo* pfi = g_pFTEngine->FindFont(
+				static_cast<int>(reinterpret_cast<INT_PTR>(face_id)));
+			Assert(pfi);
+			if (!pfi)
+				return FT_Err_Invalid_Argument;
+			LPCTSTR fontname = pfi->GetName();
 
-	FreeTypeFontInfo* pfi = g_pFTEngine->FindFont(static_cast<int>(reinterpret_cast<INT_PTR>(face_id)));
-	Assert(pfi);
-	if (!pfi) {
-		return FT_Err_Invalid_Argument;
-	}
-	LPCTSTR fontname = pfi->GetName();
+			// 名称を指定してフォントを取得
+			std::unique_ptr<FreeTypeSysFontData> fontData(
+				FreeTypeSysFontData::CreateInstance(
+					fontname, pfi->GetFontWeight(), pfi->IsItalic()));
+			if (!fontData)
+				return FT_Err_Cannot_Open_Resource;
 
-	// 名称を指定してフォントを取得
-	std::unique_ptr<FreeTypeSysFontData> fontData(
-		FreeTypeSysFontData::CreateInstance(fontname, pfi->GetFontWeight(), pfi->IsItalic()));
-	if (!fontData) {
-		return FT_Err_Cannot_Open_Resource;
-	}
+			renderer_raii::UniqueFreeTypeFace faceOwner(fontData->ReleaseFace());
+			if (!faceOwner)
+				return 0x6;	// FreeTypeSysFontData returned no face.
+			FT_Face face = faceOwner.get();
+			// Charmapを設定しておく
+			FT_Error ret = FT_Select_Charmap(face, FT_ENCODING_UNICODE);
+			if (ret != FT_Err_Ok)
+				ret = FT_Select_Charmap(face, FT_ENCODING_MS_SYMBOL);
+			if (ret != FT_Err_Ok)
+				return ret;
 
-	renderer_raii::UniqueFreeTypeFace faceOwner(fontData->ReleaseFace());
-	if (!faceOwner)
-		return 0x6;	// FreeTypeSysFontData returned no face.
-	face = faceOwner.get();
-	// Charmapを設定しておく
-	ret = FT_Select_Charmap(face, FT_ENCODING_UNICODE);
-	if (ret != FT_Err_Ok)
-		ret = FT_Select_Charmap(face, FT_ENCODING_MS_SYMBOL);
+			struct ft2vert_st* vert = ft2vert_init(face);
+			face->generic.data = vert;
+			face->generic.finalizer = VertFinalizer;
 
-	if (ret != FT_Err_Ok)
-	{
-		return ret;
-	}
-	struct ft2vert_st* vert = ft2vert_init(face);
-	face->generic.data = vert;
-	face->generic.finalizer = VertFinalizer;
-
-	// select named instance for variable font
-	VarFontByAlias(face, pfi->GetStyleName());
-	*aface = faceOwner.release();
-	return 0;
+			// select named instance for variable font
+			VarFontByAlias(face, pfi->GetStyleName());
+			*aface = faceOwner.release();
+			return FT_Err_Ok;
+		},
+		static_cast<FT_Error>(FT_Err_Out_Of_Memory),
+		static_cast<FT_Error>(FT_Err_Invalid_Argument));
 }
 
 //新太字アルゴリズム

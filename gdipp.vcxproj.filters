@@ -54,6 +54,9 @@
     <ClCompile Include="renderer\unload_lifecycle.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="renderer\unload_resources.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="renderer\misc.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

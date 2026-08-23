@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <new>
 #include <utility>
 
 namespace renderer {
@@ -70,11 +71,35 @@ inline BitmapRowView CheckedBitmapRow(
 	if (offset > static_cast<std::uint64_t>(
 			std::numeric_limits<std::uintptr_t>::max() - base))
 		return {nullptr, 0};
+	std::uintptr_t const rowStart =
+		base + static_cast<std::uintptr_t>(offset);
+	if (rowBytes > static_cast<std::uint64_t>(
+			std::numeric_limits<std::uintptr_t>::max() - rowStart))
+		return {nullptr, 0};
 
 	return {
-		reinterpret_cast<const unsigned char*>(
-			base + static_cast<std::uintptr_t>(offset)),
+		reinterpret_cast<const unsigned char*>(rowStart),
 		static_cast<std::size_t>(rowBytes)};
+}
+
+// FreeType invokes face_requester through a C callback. Keep C++ allocation
+// and implementation exceptions inside that ABI boundary and express only
+// FreeType error values to the caller.
+template <typename CallbackResult, typename Callback>
+CallbackResult InvokeFreeTypeCallbackBoundary(
+	Callback&& callback,
+	CallbackResult outOfMemory,
+	CallbackResult unexpectedFailure) noexcept
+{
+	try {
+		return std::forward<Callback>(callback)();
+	}
+	catch (const std::bad_alloc&) {
+		return outOfMemory;
+	}
+	catch (...) {
+		return unexpectedFailure;
+	}
 }
 
 struct CheckedFaceIndex

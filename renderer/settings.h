@@ -13,6 +13,10 @@
 
 using json = nlohmann::json;
 
+namespace renderer {
+bool DrainProcessRendererResourcesOutsideLoaderLock() noexcept;
+}
+
 #ifdef _WIN64
 #ifdef DEBUG
 #pragma comment (lib, "iniparser64_dbg.lib")
@@ -165,6 +169,7 @@ class CGdippSettings
 	friend CControlCenter;
 	friend CFontSubstituteData;
 	friend BOOL WINAPI DllMain(HINSTANCE, DWORD, LPVOID);
+	friend bool renderer::DrainProcessRendererResourcesOutsideLoaderLock() noexcept;
 private:
 	static CGdippSettings* s_pInstance;
 	//INI用

@@ -575,6 +575,7 @@ void EZHookMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved) {
 
 extern COLORCACHE* g_AACache2[MAX_CACHE_SIZE];
 HANDLE hDelayHook = 0;
+
 BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 {
 	try {
@@ -780,33 +781,29 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 			// potentially torn-down dependencies.
 			if (lpReserved != nullptr)
 				return true;
-			renderer::ProcessHookCoordinator().BeginStop();
 			bDllInited = false;
 			if (InterlockedExchange(&g_bHookEnabled, FALSE))
 			{
+				// A balanced active renderer reaches detach only after SafeUnload.
+				// This is best-effort containment for an unsupported unmatched
+				// FreeLibrary; heavyweight owners are never destroyed here.
+				renderer::ProcessHookCoordinator().BeginStop();
 				RestoreDirectWriteVtableHooks();
 				hook_term();
+				if (renderer::ProcessHookCoordinator().phase() ==
+					renderer::RuntimePhase::stopping)
+					renderer::ProcessHookCoordinator().CompleteStop();
 			}
 
-			if (g_pFTEngine != nullptr)
-				DestroyFreeTypeFontEngine();
-
-#ifdef INFINALITY
-			FT_freeEnv();
-#endif
-			if (freetype_library != nullptr)
-				FontLFree();
-
-			CGdippSettings::DestroyInstance();
+			// SafeUnload or verified QuietSkip already drained FreeType,
+			// renderer policy, substitution, and settings outside loader lock.
+			// Keep only final TLS-slot and empty lock-storage release here.
 			g_TLInfo.ProcessTerm();
 			CCriticalSectionLock::Term();
 			COwnedCriticalSectionLock::Term();
 #ifdef EASYHOOK
 			EZHookMain(instance, reason, lpReserved);
 #endif
-			if (renderer::ProcessHookCoordinator().phase() ==
-				renderer::RuntimePhase::stopping)
-				renderer::ProcessHookCoordinator().CompleteStop();
 			break;
 		}
 		return TRUE;

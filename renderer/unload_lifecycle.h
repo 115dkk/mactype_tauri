@@ -21,11 +21,17 @@ private:
 
 UnloadAttemptGate& ProcessUnloadAttemptGate() noexcept;
 
-// Active renderers keep one owned reference to their own image. An arbitrary
-// FreeLibrary can release the caller's reference but cannot unmap live hooks.
-// SafeUnload takes this lease only after the renderer has reached quiescence.
+// Active renderers keep one owned reference to their own image. A balanced
+// caller release of its own LoadLibrary reference cannot unmap live hooks;
+// Windows references are not owner-tagged, so unmatched releases are outside
+// the supported contract. SafeUnload takes this lease only after quiescence.
 bool AcquireProcessRendererLease(HMODULE module) noexcept;
 HMODULE TakeProcessRendererLease() noexcept;
 bool ProcessRendererLeaseHeld() noexcept;
+
+// Releases renderer-owned heavyweight resources in dependency order. The
+// supported callers are SafeUnload and the verified quiet-skip evidence path,
+// both of which execute outside the loader lock after admission has closed.
+bool DrainProcessRendererResourcesOutsideLoaderLock() noexcept;
 
 } // namespace renderer

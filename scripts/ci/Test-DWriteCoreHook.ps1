@@ -60,7 +60,10 @@ if ($LASTEXITCODE -ne 0) {
     factoryCreated = $true
     plainFreeLibraryRetainedActiveRenderer = $true
     safeUnloadCompleted = $true
+    safeUnloadRetainedStoppedRenderer = $true
+    stoppedExportsRejected = $true
+    finalCallerReleaseUnmappedRenderer = $true
     core = $coreName
 } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $fullOutputRoot 'result.json') -Encoding utf8
 
-Write-Host "DWriteCore factory interception, active-image retention, and SafeUnload passed for $Architecture."
+Write-Host "DWriteCore interception, retained-caller SafeUnload, and final unmap passed for $Architecture."

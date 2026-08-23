@@ -13,6 +13,7 @@ namespace {
 
 constexpr std::string_view kRuntimeGeneration =
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+bool resourceDrainCalled = false;
 
 void Require(bool condition, const char* message)
 {
@@ -119,6 +120,18 @@ void RequireCanonicalBinding(
 }
 
 } // namespace
+
+namespace renderer {
+
+bool DrainProcessRendererResourcesOutsideLoaderLock() noexcept
+{
+    resourceDrainCalled = true;
+    ClearProcessProfileRuntimeForQuietUnload();
+    font_substitution::ClearProcessRegistryForQuietUnload();
+    return true;
+}
+
+} // namespace renderer
 
 int main()
 {
@@ -230,6 +243,9 @@ int main()
     Require(
         !renderer::font_substitution::ProcessRegistry().Load(),
         "quiet skip must release the substitution snapshot before unload");
+    Require(
+        resourceDrainCalled,
+        "quiet skip must use the outside-loader-lock resource drain interface");
 
     MacTypeRendererActivationEvidenceV1 malformed = RequestFor(activeDigest);
     malformed.struct_size = 0;

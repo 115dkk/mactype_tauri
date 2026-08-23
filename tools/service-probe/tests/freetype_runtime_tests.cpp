@@ -4,7 +4,9 @@
 #include <cstdint>
 #include <iostream>
 #include <memory>
+#include <new>
 #include <set>
+#include <stdexcept>
 #include <vector>
 
 namespace {
@@ -81,6 +83,23 @@ int main()
             "a consumer wider than the physical row must be rejected");
     Require(!renderer::freetype::CheckedBitmapRow(nullptr, 4, 3, 0, 1),
             "a non-empty row must reject a null backing buffer");
+    const auto nearAddressLimit = reinterpret_cast<const unsigned char*>(
+        std::numeric_limits<std::uintptr_t>::max() - 1u);
+    Require(!renderer::freetype::CheckedBitmapRow(
+                nearAddressLimit, 4, 1, 0, 1),
+            "a returned row span must not wrap past the address boundary");
+
+    using renderer::freetype::InvokeFreeTypeCallbackBoundary;
+    Require(InvokeFreeTypeCallbackBoundary(
+                [] { return 17; }, 12, 13) == 17,
+            "a successful FreeType callback must preserve its result");
+    Require(InvokeFreeTypeCallbackBoundary(
+                []() -> int { throw std::bad_alloc(); }, 12, 13) == 12,
+            "allocation failure must stay inside the FreeType C callback boundary");
+    Require(InvokeFreeTypeCallbackBoundary(
+                []() -> int { throw std::runtime_error("callback failure"); },
+                12, 13) == 13,
+            "an unexpected C++ exception must stay inside the FreeType C callback boundary");
 
     auto faceIndex = renderer::freetype::CheckFaceIndex(1, 2);
     Require(faceIndex.valid && faceIndex.value == 0,

@@ -8,6 +8,8 @@ namespace {
 
 using CreateFactory = HRESULT(WINAPI*)(DWRITE_FACTORY_TYPE, REFIID, IUnknown**);
 using RawFactoryAddress = FARPROC(WINAPI*)();
+using CreateControlCenter = void(WINAPI*)(void**);
+using ReloadConfig = void(WINAPI*)();
 struct NativeUnicodeString {
   USHORT length;
   USHORT maximum_length;
@@ -59,6 +61,11 @@ int wmain(const int count, wchar_t** values) {
   if (safe_unload == nullptr) {
     std::wcerr << L"MacType SafeUnload export is missing\n";
     return 12;
+  }
+  const HMODULE final_caller_reference = LoadLibraryW(values[1]);
+  if (final_caller_reference != core) {
+    std::wcerr << L"MacType additional caller reference was not retained\n";
+    return 16;
   }
   if (!WaitForLifecycleStage(diagnostic_namespace, L"hook-ready")) {
     std::wcerr << L"MacType DirectWrite lifecycle did not become ready\n";
@@ -155,9 +162,47 @@ int wmain(const int count, wchar_t** values) {
   if (GetModuleHandleExW(
           GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
               GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-          reinterpret_cast<LPCWSTR>(core), &retained_core) != FALSE) {
-    std::wcerr << L"SafeUnload left the renderer image mapped\n";
+          reinterpret_cast<LPCWSTR>(core), &retained_core) == FALSE ||
+      retained_core != core) {
+    std::wcerr << L"SafeUnload consumed a caller-owned renderer reference\n";
     return 15;
   }
+
+  const auto restored = reinterpret_cast<CreateFactory>(
+      GetProcAddress(dwrite_core, "DWriteCoreCreateFactory"));
+  if (restored == nullptr ||
+      reinterpret_cast<FARPROC>(restored) != raw_address()) {
+    std::wcerr << L"SafeUnload did not restore the DWriteCore entry\n";
+    return 17;
+  }
+  const auto create_control_center = reinterpret_cast<CreateControlCenter>(
+      GetProcAddress(core, "CreateControlCenter"));
+  const auto reload_config = reinterpret_cast<ReloadConfig>(
+      GetProcAddress(core, "ReloadConfig"));
+  if (create_control_center == nullptr || reload_config == nullptr) {
+    std::wcerr << L"stopped renderer exports are missing\n";
+    return 18;
+  }
+  void* control_center = reinterpret_cast<void*>(1);
+  create_control_center(&control_center);
+  reload_config();
+  if (control_center != nullptr) {
+    std::wcerr << L"a stopped renderer admitted a mutable control interface\n";
+    return 19;
+  }
+
+  if (FreeLibrary(final_caller_reference) == FALSE) {
+    std::wcerr << L"the final caller reference could not be released\n";
+    return 20;
+  }
+  retained_core = nullptr;
+  if (GetModuleHandleExW(
+          GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+              GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+          reinterpret_cast<LPCWSTR>(core), &retained_core) != FALSE) {
+    std::wcerr << L"the final caller release left the stopped renderer mapped\n";
+    return 21;
+  }
+  FreeLibrary(dwrite_core);
   return 0;
 }

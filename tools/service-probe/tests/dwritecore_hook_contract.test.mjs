@@ -9,11 +9,24 @@ async function source(path) {
 }
 
 test('the DirectWrite lifecycle owns existing, future, and teardown paths', async () => {
-  const [hookList, directWrite, directWriteHeader, exportsSource] = await Promise.all([
+  const [
+    hookList,
+    directWrite,
+    directWriteHeader,
+    exportsSource,
+    hookSource,
+    unloadResources,
+    activationSource,
+    contractProbe,
+  ] = await Promise.all([
     source('renderer/hooklist.h'),
     source('renderer/directwrite.cpp'),
     source('renderer/directwrite.h'),
     source('renderer/expfunc.cpp'),
+    source('renderer/hook.cpp'),
+    source('renderer/unload_resources.cpp'),
+    source('renderer/renderer_activation.cpp'),
+    source('tools/service-probe/tests/dwritecore_contract_probe.cpp'),
   ]);
 
   assert.match(hookList, /HOOK_MANUALLY\(HRESULT, DWriteCoreCreateFactory,/);
@@ -47,4 +60,27 @@ test('the DirectWrite lifecycle owns existing, future, and teardown paths', asyn
   );
   assert.match(exportsSource, /reinterpret_cast<PVOID>\(REF_##name\)/);
   assert.doesNotMatch(exportsSource, /ReleasePinnedRendererModules/);
+
+  assert.match(
+    exportsSource,
+    /CompleteStop\(\)[\s\S]+DrainProcessRendererResourcesOutsideLoaderLock\(\)[\s\S]+TakeProcessRendererLease\(\)/,
+  );
+  assert.match(
+    activationSource,
+    /QUIET_SKIP[\s\S]+DrainProcessRendererResourcesOutsideLoaderLock\(\)/,
+  );
+  assert.match(unloadResources, /std::call_once\(g_rendererResourceDrainOnce/);
+  const processDetach = hookSource.match(
+    /case DLL_PROCESS_DETACH:([\s\S]*?)\n\s*break;/,
+  );
+  assert.ok(processDetach, 'DLL_PROCESS_DETACH must remain structurally visible');
+  assert.doesNotMatch(
+    processDetach[1],
+    /DestroyFreeTypeFontEngine|FT_freeEnv|FontLFree|CGdippSettings::DestroyInstance/,
+  );
+  assert.match(processDetach[1], /g_TLInfo\.ProcessTerm\(\)/);
+  assert.match(contractProbe, /final_caller_reference = LoadLibraryW/);
+  assert.match(contractProbe, /SafeUnload consumed a caller-owned renderer reference/);
+  assert.match(contractProbe, /a stopped renderer admitted a mutable control interface/);
+  assert.match(contractProbe, /FreeLibrary\(final_caller_reference\)/);
 });

@@ -105,7 +105,7 @@ for (const wording of [
 
 test("copy review gallery captures the Korean ready service", async ({ page }, testInfo) => {
   await page.goto("/?view=execution&gallery=1&lang=ko&system-service=ready", { waitUntil: "networkidle" });
-  await expect(page.locator("[data-service-summary]")).toContainText("현재 프로필");
+  await expect(page.locator("main")).toContainText("현재 프로필");
   await page.screenshot({
     path: path.join(galleryRoot, `${testInfo.project.name}-copy-review-ready-ko.png`),
     fullPage: true,
@@ -114,7 +114,7 @@ test("copy review gallery captures the Korean ready service", async ({ page }, t
 
 test("copy review gallery captures the Korean degraded service", async ({ page }, testInfo) => {
   await page.goto("/?view=execution&gallery=1&lang=ko&system-service=degraded", { waitUntil: "networkidle" });
-  await expect(page.locator("[data-service-summary]")).toContainText("서비스는 실행 중");
+  await expect(page.locator("main")).toContainText("서비스는 실행 중");
   await page.screenshot({
     path: path.join(galleryRoot, `${testInfo.project.name}-copy-review-degraded-ko.png`),
     fullPage: true,

@@ -395,7 +395,7 @@
   "execution.legacyRemoved": "O serviço legado foi removido.",
   "execution.health.unknown": "Não verificado",
   "execution.health.initializing": "A inicializar",
-  "execution.health.ready": "Pronto",
+  "execution.health.ready": "Operacional",
   "execution.health.degraded": "Funcionamento degradado",
   "execution.health.degradedStopped": "Funcionamento degradado na última execução",
   "execution.health.failed": "Falhou",

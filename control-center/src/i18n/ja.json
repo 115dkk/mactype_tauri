@@ -395,7 +395,7 @@
   "execution.legacyRemoved": "レガシーサービスを削除しました。",
   "execution.health.unknown": "未確認",
   "execution.health.initializing": "初期化中",
-  "execution.health.ready": "準備完了",
+  "execution.health.ready": "正常",
   "execution.health.degraded": "一部機能低下",
   "execution.health.degradedStopped": "前回の実行で一部機能低下",
   "execution.health.failed": "準備失敗",

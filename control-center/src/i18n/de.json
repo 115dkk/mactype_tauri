@@ -395,7 +395,7 @@
   "execution.legacyRemoved": "Der alte Dienst wurde entfernt.",
   "execution.health.unknown": "Nicht geprüft",
   "execution.health.initializing": "Wird initialisiert",
-  "execution.health.ready": "Bereit",
+  "execution.health.ready": "Funktionsfähig",
   "execution.health.degraded": "Eingeschränkt",
   "execution.health.degradedStopped": "Eingeschränkt im letzten Lauf",
   "execution.health.failed": "Fehlgeschlagen",

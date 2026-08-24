@@ -395,7 +395,7 @@
   "execution.legacyRemoved": "أُزيلت الخدمة القديمة.",
   "execution.health.unknown": "لم تُفحص",
   "execution.health.initializing": "جارٍ التهيئة",
-  "execution.health.ready": "جاهزة",
+  "execution.health.ready": "سليمة",
   "execution.health.degraded": "أداء جزئي",
   "execution.health.degradedStopped": "أداء جزئي في التشغيل الأخير",
   "execution.health.failed": "فشلت",

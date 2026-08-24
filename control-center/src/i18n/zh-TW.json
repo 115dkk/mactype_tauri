@@ -395,7 +395,7 @@
   "execution.legacyRemoved": "舊版服務已移除。",
   "execution.health.unknown": "尚未檢查",
   "execution.health.initializing": "正在初始化",
-  "execution.health.ready": "準備完成",
+  "execution.health.ready": "正常",
   "execution.health.degraded": "部分功能受限",
   "execution.health.degradedStopped": "上次執行時部分功能受限",
   "execution.health.failed": "準備失敗",

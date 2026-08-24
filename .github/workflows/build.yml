@@ -437,7 +437,7 @@ jobs:
         shell: pwsh
         run: scripts/ci/Test-OpenServiceContract.ps1
       - name: Test browser font generation evidence
-        run: node --test tools/service-probe/tests/browser_font_evidence.test.mjs tools/service-probe/tests/dwritecore_hook_contract.test.mjs tools/service-probe/tests/early_injection_relay_contract.test.mjs
+        run: node --test tools/service-probe/tests/browser_font_evidence.test.mjs tools/service-probe/tests/chromium_product_loader.test.mjs tools/service-probe/tests/dwritecore_hook_contract.test.mjs tools/service-probe/tests/early_injection_relay_contract.test.mjs
       - name: Verify independent distribution provenance and translations
         shell: pwsh
         run: scripts/ci/Test-DistributionPolicy.ps1

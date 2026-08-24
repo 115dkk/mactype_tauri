@@ -83,7 +83,52 @@ function isProcessRunning(pid) {
   }
 }
 
+export function processTreeTerminationCommand(
+  pid,
+  platform = process.platform,
+  systemRoot = process.env.SystemRoot || 'C:\\Windows',
+) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    throw new Error(`Invalid browser PID for process-tree cleanup: ${pid}`);
+  }
+  if (platform !== 'win32') return null;
+  return {
+    executable: path.win32.join(systemRoot, 'System32', 'taskkill.exe'),
+    arguments: ['/PID', String(pid), '/T', '/F'],
+  };
+}
+
+async function terminateWindowsProcessTree(pid) {
+  const command = processTreeTerminationCommand(pid);
+  if (!command || !isProcessRunning(pid)) return false;
+  await new Promise((resolve, reject) => {
+    const child = spawn(command.executable, command.arguments, {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    child.once('error', reject);
+    child.once('exit', (code, signal) => {
+      if (code === 0 || !isProcessRunning(pid)) {
+        resolve();
+      } else {
+        reject(new Error(
+          `Browser process-tree cleanup exited with code ` +
+            `${code ?? 'none'} and signal ${signal ?? 'none'}`,
+        ));
+      }
+    });
+  });
+  return true;
+}
+
 async function closeBrowserProcess(browser, pid) {
+  // Browser.close can let the root exit before Windows releases every child.
+  // Terminate the exact test-owned tree while its verified root PID still
+  // exists, so a detached utility process cannot retain the temporary profile.
+  if (pid && await terminateWindowsProcessTree(pid)) {
+    await closeBrowserWithin(browser, 2000);
+    return;
+  }
   try {
     const session = await browser.newBrowserCDPSession();
     await Promise.race([

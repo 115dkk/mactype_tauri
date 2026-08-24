@@ -395,7 +395,7 @@
   "execution.legacyRemoved": "Se eliminó el servicio heredado.",
   "execution.health.unknown": "Sin comprobar",
   "execution.health.initializing": "Inicializando",
-  "execution.health.ready": "Listo",
+  "execution.health.ready": "Operativo",
   "execution.health.degraded": "Funcionamiento degradado",
   "execution.health.degradedStopped": "Funcionamiento degradado en la última ejecución",
   "execution.health.failed": "Error",

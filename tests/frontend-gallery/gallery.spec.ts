@@ -935,7 +935,7 @@ test("a running legacy service is never claimed as verified system application",
   const openService = page.locator('[data-service-backend="open-source"]');
   await expect(openService).toBeVisible();
   await expect(openService).toContainText("MacType Control Center 서비스");
-  await expect(openService).toContainText("준비 완료");
+  await expect(openService).toContainText("정상");
   await expect(page.getByText("MacType 시스템 적용 중", { exact: true })).toHaveCount(0);
   await expect(openService.locator('[data-state="running-unverified"]')).toBeVisible();
 
@@ -1147,7 +1147,7 @@ test("the service page keeps its normal state to one summary and one action", as
   await expect(summary.getByRole("button", { name: "Stop" })).toBeEnabled();
   await expect(summary.getByRole("button")).toHaveCount(1);
   await expect(page.getByRole("heading", { name: "System-wide modes" })).toBeVisible();
-  await expect(page.locator('details.service-row[data-kind="system"]')).toContainText("Current installation · Running · Ready");
+  await expect(page.locator('details.service-row[data-kind="system"]')).toContainText("Current installation · Running · Healthy");
   await expect(page.getByRole("button", { name: "Remove service" })).toBeHidden();
   await expect(page.locator("details.service-row[open]")).toHaveCount(0);
 });

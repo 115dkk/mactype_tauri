@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "targetLocales": ["zh-CN", "zh-TW", "ja", "fr", "de", "es", "pt", "ar"],
   "entries": [
     {
@@ -71,6 +71,11 @@
       "key": "execution.migrationConfirmStrictCheck",
       "intent": "State that AppInit, service configuration, and ownership are checked before changes. Remove strict/exact emphasis.",
       "requiredTokens": ["AppInit"]
+    },
+    {
+      "key": "execution.health.ready",
+      "intent": "Use the locale's concise, native software-health status equivalent of Healthy/normal. The adjacent runtime label already says the service is running, so do not translate this as ready, preparation complete, or available.",
+      "requiredTokens": []
     }
   ]
 }

@@ -360,6 +360,41 @@ test("preview comparison renders the saved and edited sides only while edits exi
   await expect(strips).toHaveCount(baseline);
 });
 
+test("RGB comparison replaces the completed preview stack atomically", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "The four-channel preview is docked at desktop width");
+  await page.goto("/?view=overview&gallery=1&lang=ko&preview-delay=25", { waitUntil: "networkidle" });
+  await page.locator(".navigation").getByRole("group", { name: "튜너" }).getByRole("button", { name: "단계별 설정" }).click();
+  await page.locator(".settings-index").getByRole("button", { name: "LCD 배열과 색조" }).click();
+
+  const strips = page.locator(".preview-strip");
+  await expect(strips).toHaveCount(4);
+  const firstSlider = page.locator('.setting-row input[type="range"]').first();
+  await firstSlider.focus();
+  await firstSlider.press("ArrowRight");
+  const compare = page.getByRole("button", { name: "비교", exact: true });
+  await expect(compare).toBeEnabled();
+
+  await page.locator(".preview-canvas").evaluate((canvas) => {
+    const counts = [canvas.querySelectorAll(".preview-strip").length];
+    window.sessionStorage.setItem("gallery-preview-strip-counts", counts.join(","));
+    const observer = new MutationObserver(() => {
+      counts.push(canvas.querySelectorAll(".preview-strip").length);
+      window.sessionStorage.setItem("gallery-preview-strip-counts", counts.join(","));
+    });
+    observer.observe(canvas, { childList: true, subtree: true });
+  });
+
+  await compare.click();
+  await expect(strips).toHaveCount(8);
+  const observedCounts = await page.evaluate(() => (window.sessionStorage.getItem("gallery-preview-strip-counts") ?? "")
+    .split(",")
+    .filter(Boolean)
+    .map(Number));
+  expect(observedCounts, "comparison must keep the old four-line stack until all eight replacements are ready")
+    .toEqual(expect.arrayContaining([4, 8]));
+  expect(observedCounts.filter((count) => count !== 4 && count !== 8)).toEqual([]);
+});
+
 test("settings navigation restores the legacy Wizard and Tuner hierarchy", async ({ page }, testInfo) => {
   await page.goto("/?view=overview&gallery=1&lang=ko", { waitUntil: "networkidle" });
 
@@ -600,6 +635,40 @@ test("slider drags and exact number edits create one undo revision per interacti
   await cacheValue.press("Enter");
   await undo.click();
   await expect(cacheValue).toHaveValue("64");
+});
+
+test("continuous number-wheel changes preview immediately but commit one undo revision", async ({ page }) => {
+  await page.goto("/?view=profiles&gallery=1&lang=ko&preview-delay=20", { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "글자 모양", exact: true }).click();
+
+  const weightRow = page.locator(".setting-row").filter({ hasText: "일반 글자 굵기" });
+  const exactWeight = weightRow.locator('input[type="number"]');
+  const undo = page.getByRole("button", { name: "되돌리기", exact: true });
+  await expect(exactWeight).toHaveValue("0");
+  await expect(page.locator(".preview-strip img")).toHaveCount(1);
+  await exactWeight.focus();
+  await page.evaluate(() => window.sessionStorage.setItem("gallery-preview-started", "0"));
+
+  const requestCounts = await exactWeight.evaluate(async (input: HTMLInputElement) => {
+    const counts: number[] = [];
+    for (let index = 0; index < 6; index += 1) {
+      input.stepUp();
+      input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+      counts.push(Number(window.sessionStorage.getItem("gallery-preview-started") ?? "0"));
+    }
+    return counts;
+  });
+
+  expect(requestCounts.some((count) => count > 0), "preview rendering must begin before continuous wheel input ends").toBe(true);
+  await expect(exactWeight).toHaveValue("6");
+  await expect(undo).toBeDisabled();
+
+  await exactWeight.press("Tab");
+  await expect(undo).toBeEnabled();
+  await undo.click();
+  await expect(exactWeight).toHaveValue("0");
+  await expect(undo).toBeDisabled();
 });
 
 test("field revert restores the saved value while default restore and profile-wide reset use core defaults", async ({ page }) => {

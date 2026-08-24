@@ -7,13 +7,15 @@ This runbook covers the **신식 서비스** (`MacTypeControlCenter`) and its is
 1. Query SCM state, ImagePath, account, start mode, and PID. Do not equate `Running` with Ready.
 2. Read the bounded protected `%ProgramFiles%\MacType Control Center\Service\health.json` snapshot or the versioned health pipe.
 3. Require protocol 1, `health=ready`, four Ready components, an active profile digest, and no `lastError` before reporting system integration active.
-4. Compare `current.json`, `active.json`, and the DLL-adjacent `MacType.ini`. A recovery journal or byte mismatch is a repair condition, not a cosmetic warning.
+4. Compare `current.json`, `active.json`, and the DLL-adjacent `MacType.ini` according to service state. Ready requires an exact generated copy; a broker-stopped service requires that copy to be absent while the protected generation remains intact. A recovery journal, byte mismatch, or adjacent profile present after a supported stop is a repair condition, not a cosmetic warning.
 
 The setup interface has fixed verbs only: `install`, `upgrade`, `repair`, `remove`, `start`, `stop`, `publish-profile`, `rollback`, and `restore-runtime`. Never add a service-name or path override for operator convenience.
 
 The 신식 서비스 recovery policy retries after 5 seconds and then 30 seconds. `SERVICE_FAILURE_ACTIONS_FLAG` enables those actions for non-crash `SERVICE_STOPPED` errors with a nonzero exit code, including initialization failures.
 
 Because of that flag, a requested stop must never report a nonzero exit code, or recovery would resurrect a service the operator deliberately stopped. Once the stop event is signalled, an error raised while winding down is carried in the terminal `Unknown` health snapshot's `last_error` and the service still reports a clean `SERVICE_STOPPED`. For the same reason the driver loop tolerates up to twenty consecutive health-publication failures: periodic telemetry is observability, and losing it must not end a run that is still injecting correctly.
+
+The generated DLL-adjacent `MacType.ini` is also the child-relay liveness lease. The fixed setup broker removes only the byte-for-byte verified active generation after `stop`, and after any install, repair, upgrade, restore, profile change, or rollback that intentionally ends stopped. The protected active pointer and immutable profile generation remain available. `start` restores the exact copy before SCM launch. An older renderer already mapped into Steam or another long-lived parent therefore remains safely mapped but cannot inject another child after the supported stop. Use the Control Center or fixed setup broker for this transition; a raw external `sc stop` does not perform the protected profile transaction.
 
 ## Build and local non-mutating checks
 
@@ -46,7 +48,7 @@ Reboot, multi-session, AppInit, and migration remain `UNKNOWN` until their dispa
 
 ## Repair and rollback
 
-- `repair` preserves the caller's running/stopped state. A running service is stopped, repaired from the fixed payload, restarted, and required to reach Ready.
+- `repair` and `upgrade` preserve the caller's running/stopped state. A running service is stopped, its child relay is suspended, repaired or upgraded from the fixed payload, then restarted and required to reach Ready. A stopped service remains stopped with no DLL-adjacent relay profile.
 - `rollback` changes the active profile generation and keeps the displaced generation as the next rollback target.
 - `restore-runtime` uses the protected migration runtime pin; it is not a general version selector.
 - If an activation or repair journal exists, every mutating verb first runs durable recovery. Do not delete journals manually.

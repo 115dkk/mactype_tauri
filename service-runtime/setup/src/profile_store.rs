@@ -268,4 +268,16 @@ impl ProfileStore {
         }
         Ok(generation)
     }
+
+    pub fn suspend_active_runtime(&self) -> Result<Option<GenerationId>, SetupError> {
+        let generation = self.active_generation()?;
+        let bridge = ProfileRuntimeBridge::new(self.paths.clone());
+        if let Some(generation) = &generation {
+            bridge
+                .clear_materialized_generation(generation)
+                .map_err(MaterializedProfileClearError::into_setup_error)?;
+        }
+        bridge.ensure_materialized_profile_absent()?;
+        Ok(generation)
+    }
 }

@@ -11,6 +11,10 @@ use crate::{
 const BUNDLED_DEFAULT_PROFILE: &[u8] =
     include_bytes!("../../../../../distribution/ini/Default.ini");
 
+fn preserve_stopped_state(observation: OpenServiceObservation) -> bool {
+    observation == OpenServiceObservation::OwnedStopped
+}
+
 impl WindowsInstallerBackend {
     pub(super) fn apply_transaction(
         &self,
@@ -27,6 +31,12 @@ impl WindowsInstallerBackend {
         super::super::acl::harden_machine_directory(self.paths.service_root())?;
         if snapshot.open_service == OpenServiceObservation::OwnedRunning {
             self.manager.stop()?;
+        }
+        if matches!(
+            snapshot.open_service,
+            OpenServiceObservation::OwnedStopped | OpenServiceObservation::OwnedRunning
+        ) {
+            store.suspend_active_runtime()?;
         }
 
         let payload = FixedPayload::beside_setup_executable()?;
@@ -88,7 +98,12 @@ impl WindowsInstallerBackend {
             },
             |_, generation| {
                 self.manager
-                    .start_and_wait_ready_for_profile(generation.as_str())
+                    .start_and_wait_ready_for_profile(generation.as_str())?;
+                if preserve_stopped_state(snapshot.open_service) {
+                    self.manager.stop()?;
+                    store.suspend_active_runtime()?;
+                }
+                Ok(())
             },
         );
 
@@ -140,7 +155,11 @@ impl WindowsInstallerBackend {
             }
         }
         match snapshot.open_service {
-            OpenServiceObservation::Absent | OpenServiceObservation::OwnedStopped => {}
+            OpenServiceObservation::Absent | OpenServiceObservation::OwnedStopped => {
+                if let Err(error) = store.suspend_active_runtime() {
+                    failures.push(format!("suspend restored runtime profile: {error}"));
+                }
+            }
             OpenServiceObservation::OwnedRunning => match previous_profile {
                 Some(generation) => {
                     if let Err(error) = store.synchronize_active_runtime() {
@@ -165,5 +184,19 @@ impl WindowsInstallerBackend {
         } else {
             Err(SetupError::CleanupUnknown(failures.join("; ")))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reinstall_preserves_an_owned_stopped_service_after_the_ready_probe() {
+        assert!(preserve_stopped_state(OpenServiceObservation::OwnedStopped));
+        assert!(!preserve_stopped_state(OpenServiceObservation::Absent));
+        assert!(!preserve_stopped_state(
+            OpenServiceObservation::OwnedRunning
+        ));
     }
 }

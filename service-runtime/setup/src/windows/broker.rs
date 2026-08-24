@@ -4,7 +4,7 @@ mod service;
 use mactype_service_contract::{BrokerCommand, MachinePaths};
 
 use super::{known_folders, machine_lock, runtime_recovery, scm};
-use crate::{ProfileStore, SetupError};
+use crate::{OpenServiceObservation, ProfileStore, SetupError};
 
 struct BrokerContext {
     paths: MachinePaths,
@@ -30,6 +30,16 @@ pub(super) fn run(
         .map_err(|error| {
             error.at_machine_path("recover protected profile state", paths.active_profile())
         })?;
+    let profile_store = ProfileStore::new(paths.clone());
+    match manager.observe_fixed_service() {
+        OpenServiceObservation::OwnedRunning => {
+            profile_store.synchronize_active_runtime()?;
+        }
+        OpenServiceObservation::Absent | OpenServiceObservation::OwnedStopped => {
+            profile_store.suspend_active_runtime()?;
+        }
+        OpenServiceObservation::Foreign | OpenServiceObservation::Unknown => {}
+    }
     let context = BrokerContext { paths, manager };
 
     match command {

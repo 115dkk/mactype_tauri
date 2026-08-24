@@ -6,31 +6,41 @@ use crate::{FixedPayload, ProfileStore, RuntimeInstaller, SetupError};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RepairStep {
     Stop,
+    SuspendBeforeRepair,
     Repair,
+    SuspendAfterRepair,
     StartReady,
 }
 
 struct RepairPlan(&'static [RepairStep]);
 
 fn repair_plan(was_running: bool) -> RepairPlan {
-    const STOPPED: &[RepairStep] = &[RepairStep::Repair];
-    const RUNNING: &[RepairStep] = &[RepairStep::Stop, RepairStep::Repair, RepairStep::StartReady];
+    const STOPPED: &[RepairStep] = &[RepairStep::Repair, RepairStep::SuspendAfterRepair];
+    const RUNNING: &[RepairStep] = &[
+        RepairStep::Stop,
+        RepairStep::SuspendBeforeRepair,
+        RepairStep::Repair,
+        RepairStep::StartReady,
+    ];
     RepairPlan(if was_running { RUNNING } else { STOPPED })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum UpgradeStep {
     Stop,
+    SuspendBeforeUpgrade,
     Upgrade,
+    SuspendAfterUpgrade,
     StartReady,
 }
 
 struct UpgradePlan(&'static [UpgradeStep]);
 
 fn upgrade_plan(was_running: bool) -> UpgradePlan {
-    const STOPPED: &[UpgradeStep] = &[UpgradeStep::Upgrade];
+    const STOPPED: &[UpgradeStep] = &[UpgradeStep::Upgrade, UpgradeStep::SuspendAfterUpgrade];
     const RUNNING: &[UpgradeStep] = &[
         UpgradeStep::Stop,
+        UpgradeStep::SuspendBeforeUpgrade,
         UpgradeStep::Upgrade,
         UpgradeStep::StartReady,
     ];
@@ -40,13 +50,17 @@ fn upgrade_plan(was_running: bool) -> UpgradePlan {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum UpgradeRecoveryStep {
     RecoverExactBinding,
+    SuspendChildRelay,
     StartPreviousReady,
 }
 
 struct UpgradeRecoveryPlan(&'static [UpgradeRecoveryStep]);
 
 fn upgrade_recovery_plan(was_running: bool) -> UpgradeRecoveryPlan {
-    const STOPPED: &[UpgradeRecoveryStep] = &[UpgradeRecoveryStep::RecoverExactBinding];
+    const STOPPED: &[UpgradeRecoveryStep] = &[
+        UpgradeRecoveryStep::RecoverExactBinding,
+        UpgradeRecoveryStep::SuspendChildRelay,
+    ];
     const RUNNING: &[UpgradeRecoveryStep] = &[
         UpgradeRecoveryStep::RecoverExactBinding,
         UpgradeRecoveryStep::StartPreviousReady,
@@ -62,12 +76,14 @@ pub(super) fn install(context: &BrokerContext) -> Result<String, SetupError> {
         .deploy_with_prepare_and_health_check(
             &payload,
             |binary| context.manager.install(binary),
-            |_, _| Ok(()),
+            |_, _| suspend_child_relay(context),
         );
     let installed = match installed {
         Ok((installed, ())) => installed,
         Err(operation) => {
-            if let Err(restoration) = runtime_recovery::recover(&context.paths, &context.manager) {
+            let restoration = runtime_recovery::recover(&context.paths, &context.manager)
+                .and_then(|_| suspend_child_relay(context));
+            if let Err(restoration) = restoration {
                 return Err(combine_operation_and_restore_error(operation, restoration));
             }
             return Err(operation);
@@ -84,6 +100,9 @@ pub(super) fn upgrade(context: &BrokerContext) -> Result<String, SetupError> {
     if plan.0.contains(&UpgradeStep::Stop) {
         context.manager.stop()?;
     }
+    if plan.0.contains(&UpgradeStep::SuspendBeforeUpgrade) {
+        suspend_child_relay(context)?;
+    }
     let payload = FixedPayload::beside_setup_executable()?;
     let installer = RuntimeInstaller::new(context.paths.clone());
     let previous = installer.inspect_current_stable()?.ok_or_else(|| {
@@ -95,7 +114,9 @@ pub(super) fn upgrade(context: &BrokerContext) -> Result<String, SetupError> {
             |binary| context.manager.reconfigure(binary),
             |_, _| {
                 if plan.0.contains(&UpgradeStep::StartReady) {
-                    context.manager.start_and_wait_ready()?;
+                    synchronize_and_start(context)?;
+                } else if plan.0.contains(&UpgradeStep::SuspendAfterUpgrade) {
+                    suspend_child_relay(context)?;
                 }
                 Ok(())
             },
@@ -125,6 +146,9 @@ pub(super) fn repair(context: &BrokerContext) -> Result<String, SetupError> {
         context.manager.stop().map_err(|error| {
             error.at_machine_path("stop service before repair", context.paths.service_root())
         })?;
+        if plan.0.contains(&RepairStep::SuspendBeforeRepair) {
+            suspend_child_relay(context)?;
+        }
     }
     let repair = (|| {
         let payload = FixedPayload::beside_setup_executable().map_err(|error| {
@@ -134,7 +158,15 @@ pub(super) fn repair(context: &BrokerContext) -> Result<String, SetupError> {
             .repair_current_with_prepare_and_health_check(
                 &payload,
                 |binary| context.manager.reconfigure(binary),
-                |_, _| Ok(()),
+                |_, _| {
+                    if plan.0.contains(&RepairStep::StartReady) {
+                        synchronize_and_start(context)
+                    } else if plan.0.contains(&RepairStep::SuspendAfterRepair) {
+                        suspend_child_relay(context)
+                    } else {
+                        Ok(())
+                    }
+                },
             )
             .map_err(|error| {
                 error.at_machine_path(
@@ -142,20 +174,7 @@ pub(super) fn repair(context: &BrokerContext) -> Result<String, SetupError> {
                     context.paths.service_root(),
                 )
             })?;
-        ProfileStore::new(context.paths.clone())
-            .synchronize_active_runtime()
-            .map_err(|error| {
-                error.at_machine_path(
-                    "synchronize active profile after repair",
-                    context.paths.active_profile(),
-                )
-            })?;
         super::super::acl::harden_machine_directory(context.paths.service_root())?;
-        if plan.0.contains(&RepairStep::StartReady) {
-            context.manager.start_and_wait_ready().map_err(|error| {
-                error.at_machine_path("restart service after repair", context.paths.service_root())
-            })?;
-        }
         Ok::<(), SetupError>(())
     })();
     if let Err(operation) = repair {
@@ -163,9 +182,11 @@ pub(super) fn repair(context: &BrokerContext) -> Result<String, SetupError> {
             return Err(combine_operation_and_restore_error(operation, restoration));
         }
         if plan.0.contains(&RepairStep::StartReady) {
-            if let Err(restoration) = context.manager.start_and_wait_ready() {
+            if let Err(restoration) = synchronize_and_start(context) {
                 return Err(combine_operation_and_restore_error(operation, restoration));
             }
+        } else if let Err(restoration) = suspend_child_relay(context) {
+            return Err(combine_operation_and_restore_error(operation, restoration));
         }
         return Err(operation);
     }
@@ -174,6 +195,7 @@ pub(super) fn repair(context: &BrokerContext) -> Result<String, SetupError> {
 
 pub(super) fn remove(context: &BrokerContext) -> Result<String, SetupError> {
     context.manager.remove()?;
+    suspend_child_relay(context)?;
     Ok("{\"ok\":true,\"verb\":\"remove\"}".to_owned())
 }
 
@@ -192,6 +214,7 @@ pub(super) fn start(context: &BrokerContext) -> Result<String, SetupError> {
 
 pub(super) fn stop(context: &BrokerContext) -> Result<String, SetupError> {
     context.manager.stop()?;
+    suspend_child_relay(context)?;
     Ok("{\"ok\":true,\"verb\":\"stop\"}".to_owned())
 }
 
@@ -199,8 +222,10 @@ pub(super) fn restore_runtime(context: &BrokerContext) -> Result<String, SetupEr
     if context.manager.is_running()? {
         context.manager.stop()?;
     }
+    suspend_child_relay(context)?;
     let restored = RuntimeInstaller::new(context.paths.clone())
         .restore_pinned_current_with_health_check(|binary| context.manager.reconfigure(binary))?;
+    suspend_child_relay(context)?;
     super::super::acl::harden_machine_directory(context.paths.service_root())?;
     Ok(version_result("restore-runtime", restored.version()))
 }
@@ -219,9 +244,40 @@ fn restore_upgrade_state(
         ));
     }
     if plan.0.contains(&UpgradeRecoveryStep::StartPreviousReady) {
-        context.manager.start_and_wait_ready()?;
+        synchronize_and_start(context)?;
+    } else if plan.0.contains(&UpgradeRecoveryStep::SuspendChildRelay) {
+        suspend_child_relay(context)?;
     }
     Ok(())
+}
+
+fn synchronize_and_start(context: &BrokerContext) -> Result<(), SetupError> {
+    ProfileStore::new(context.paths.clone())
+        .synchronize_active_runtime()
+        .map_err(|error| {
+            error.at_machine_path(
+                "enable child injection relay before service start",
+                context.paths.active_profile(),
+            )
+        })?;
+    context.manager.start_and_wait_ready().map_err(|error| {
+        error.at_machine_path(
+            "start service and wait for Ready",
+            context.paths.service_root(),
+        )
+    })
+}
+
+fn suspend_child_relay(context: &BrokerContext) -> Result<(), SetupError> {
+    ProfileStore::new(context.paths.clone())
+        .suspend_active_runtime()
+        .map(|_| ())
+        .map_err(|error| {
+            error.at_machine_path(
+                "suspend child injection relay",
+                context.paths.service_root(),
+            )
+        })
 }
 
 fn combine_operation_and_restore_error(
@@ -243,20 +299,32 @@ mod tests {
 
     #[test]
     fn repair_preserves_the_callers_runtime_state() {
-        assert_eq!(repair_plan(false).0, &[RepairStep::Repair]);
+        assert_eq!(
+            repair_plan(false).0,
+            &[RepairStep::Repair, RepairStep::SuspendAfterRepair]
+        );
         assert_eq!(
             repair_plan(true).0,
-            &[RepairStep::Stop, RepairStep::Repair, RepairStep::StartReady]
+            &[
+                RepairStep::Stop,
+                RepairStep::SuspendBeforeRepair,
+                RepairStep::Repair,
+                RepairStep::StartReady,
+            ]
         );
     }
 
     #[test]
     fn upgrade_preserves_the_callers_runtime_state() {
-        assert_eq!(upgrade_plan(false).0, &[UpgradeStep::Upgrade]);
+        assert_eq!(
+            upgrade_plan(false).0,
+            &[UpgradeStep::Upgrade, UpgradeStep::SuspendAfterUpgrade]
+        );
         assert_eq!(
             upgrade_plan(true).0,
             &[
                 UpgradeStep::Stop,
+                UpgradeStep::SuspendBeforeUpgrade,
                 UpgradeStep::Upgrade,
                 UpgradeStep::StartReady,
             ]
@@ -274,7 +342,10 @@ mod tests {
         );
         assert_eq!(
             upgrade_recovery_plan(false).0,
-            &[UpgradeRecoveryStep::RecoverExactBinding]
+            &[
+                UpgradeRecoveryStep::RecoverExactBinding,
+                UpgradeRecoveryStep::SuspendChildRelay,
+            ]
         );
     }
 

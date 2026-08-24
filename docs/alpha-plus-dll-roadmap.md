@@ -40,7 +40,7 @@ deliberately narrower than “works everywhere”:
 | Windows feature detection | `IMPLEMENTED` | Manifest-sensitive OS-version guesses were removed from renderer decisions. Interface queries, module/export presence, and concrete mitigation facts now select capabilities. |
 | Sanitizer gate | `IMPLEMENTED`, `PROVED LOCAL`, `CI REQUIRED` | MSVC ASan instruments the new ownership, lifecycle, FreeType-policy, and substitution modules on x86/x64. A fully instrumented injected DLL remains unavailable because stock IniParser and other linked dependencies do not share ASan/STL annotations; CI must not mislabel module coverage as whole-process certification. |
 | Application Verifier/UMDH | `LAB ONLY`, not run | The current host lacks the complete `gflags`/UMDH toolchain and these tools mutate machine-global verifier state. The lane was reevaluated and intentionally not automated after the surrounding modules changed. Run it only in a disposable Windows lab with explicit cleanup evidence. |
-| Browser, WinUI, WPF, Qt, Rebel Inc, soak and golden images | `LAB ONLY` | Native contracts establish the API seams. Product-specific pixel, performance, and licensed-application claims remain `UNKNOWN` until their retained artifacts exist. They are compatibility evidence, not unfinished renderer ownership code. |
+| Browser, WinUI, WPF, Qt, licensed games, soak and golden images | `LAB ONLY` | Native contracts establish the API seams. The local Unity lane now records hashed Rebel Inc and Plague Inc binaries, exact injected module identity, responsiveness, WER, and private-FreeType markers. Rebel's reporter-machine crash and product-specific pixel or performance claims remain `UNKNOWN` until retained artifacts reproduce them. They are compatibility evidence, not unfinished renderer ownership code. |
 
 The classic-C++ upstream renderer branch is a separate contribution experiment.
 None of its no-RAII assumptions or commits are inputs to this record.
@@ -194,10 +194,11 @@ The current upstream failure inventory, quiet per-process exclusion rule, and
 implemented compatibility paths are tracked in
 [`hooking-compatibility.md`](hooking-compatibility.md).
 
-Rebel Inc remains a local compatibility target because its licensed binaries
-cannot be redistributed in CI. Its test records process/module evidence and a
-repeatable visual capture, while noting that Unity assets may contain
-pre-rendered glyphs that no system-font hook can replace.
+Rebel Inc and Plague Inc remain local compatibility targets because their
+licensed binaries cannot be redistributed in CI. The repeatable lab script
+records exact process/module and WER evidence plus Unity renderer markers.
+Visual capture remains a separate manual artifact; Unity's private FreeType
+glyph atlas or pre-rendered assets are not a system-font hook surface.
 
 ### 7. Diagnostics and field evidence
 

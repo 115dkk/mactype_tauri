@@ -1,6 +1,6 @@
 # Hooking compatibility and explicit exclusions
 
-This inventory was refreshed on 2026-08-22 from the upstream
+This inventory was refreshed on 2026-08-24 from the upstream
 `snowie2000/mactype` issue tracker. It classifies reported failures by mechanism
 rather than adding executable-name workarounds. A browser or packaged app can
 host several process roles with different policies, so compatibility decisions
@@ -43,7 +43,7 @@ or executable-name workaround.
 | Windows App SDK / WinUI 3 uses app-local DWriteCore | [#882](https://github.com/snowie2000/mactype/issues/882) and the packaged-app reports above | Detect existing and future `DWriteCore.dll`, hook its concrete `DWriteCoreCreateFactory`, intercept immediate dynamic lookup, and cover direct `LdrLoadDll` loads beyond the bounded startup window. The same collection seam is installed on shared and isolated factories. x86 and x64 native-load probes are CI gates. |
 | Qt 6.8+ changed its default Windows text backend | [#884](https://github.com/snowie2000/mactype/issues/884), [#950](https://github.com/snowie2000/mactype/issues/950), [#1097](https://github.com/snowie2000/mactype/issues/1097) | A loaded MacType DLL is not proof of a GDI render delta. Qt 6.8 moved its default backend to DirectWrite, where upstream MacType behavior is a parameter/collection intervention rather than the FreeType GDI replacement. Exercise this as a rendering-adapter and pixel/face-identity contract; do not misclassify it as failed injection or force a protected process. |
 | Protected, critical, anti-cheat, antivirus, Secure Boot, or sandbox conflict | [#426](https://github.com/snowie2000/mactype/issues/426), [#1059](https://github.com/snowie2000/mactype/issues/1059), [#1106](https://github.com/snowie2000/mactype/issues/1106) | Keep the protection boundary. Protected/critical/session-0 or explicitly incompatible instances are quiet skips; external software that blocks injection remains external evidence, not a reason to weaken system policy. |
-| Application owns the renderer instead of using GDI/DirectWrite | [#607](https://github.com/snowie2000/mactype/issues/607), [#1112](https://github.com/snowie2000/mactype/issues/1112), [#1143](https://github.com/snowie2000/mactype/issues/1143) | Classify as a renderer boundary, not an injection failure. Blender's private FreeType/OpenGL path and Windows Terminal's Atlas/custom glyph path cannot be corrected by forcing a Windows font API hook. |
+| Application owns the renderer instead of using GDI/DirectWrite | [#607](https://github.com/snowie2000/mactype/issues/607), [#1112](https://github.com/snowie2000/mactype/issues/1112), [#1143](https://github.com/snowie2000/mactype/issues/1143) | Classify as a renderer boundary, not an injection failure. Blender's private FreeType/OpenGL path, Windows Terminal's Atlas/custom glyph path, and Unity's private FreeType glyph atlas cannot be corrected by forcing a Windows font API hook. |
 | DLL presence or process-manager status but no verified visual change | [#1022](https://github.com/snowie2000/mactype/issues/1022), [#1054](https://github.com/snowie2000/mactype/issues/1054), [#1138](https://github.com/snowie2000/mactype/issues/1138), [#1139](https://github.com/snowie2000/mactype/issues/1139), [#1144](https://github.com/snowie2000/mactype/issues/1144), [#1146](https://github.com/snowie2000/mactype/issues/1146) | Keep module-loaded, hook-installed, rule-resolved, and pixel/face-substituted as separate claims. Several recent reports resolve to old or incompatible profiles, DirectWrite's narrower behavior, retained browser collections, ClearType state, or a private pixel layout rather than injection itself. The branch probes therefore require the active profile generation and semantic render evidence instead of treating a loaded module as success. |
 | Unsupported machine architecture | [#904](https://github.com/snowie2000/mactype/issues/904), [#1085](https://github.com/snowie2000/mactype/issues/1085) | Native ARM64 remains explicitly unsupported until a native core/helper exists. It is not sent to an x64 helper and does not degrade global health. |
 
@@ -65,6 +65,34 @@ the x86/x64 CI matrix. Missing, empty, malformed, selected-missing, and
 oversized renderer profiles are rejected before a renderer can claim
 successful configuration; the positive minimal-profile case prevents an
 always-rejecting implementation from satisfying that gate.
+
+The supported setup stop also retires the exact generated DLL-adjacent
+profile. The existing early-injection tree test keeps a renderer loaded in a
+parent, retires that profile before child creation, and requires both child and
+grandchild to remain uninjected. Hosted service lifecycle coverage requires
+the profile to stay absent through stopped repair and upgrade, then return with
+the exact protected bytes before Ready.
+
+## Unity game evidence
+
+`scripts/lab/Test-UnityGameCompatibility.ps1` records licensed local game
+evidence without redistributing a game binary. It hashes the executable and
+`UnityPlayer.dll`, records Unity version and private-renderer markers, launches
+stock or through the shipped `MacLoader`, verifies the exact MacType module,
+observes responsiveness for a bounded interval, checks WER, and terminates
+only the exact test process it launched.
+
+On 2026-08-24 the current branch survived the injected test for Rebel Inc
+Escalation 2022.3.62, including an observed Steam overlay run, and Plague Inc
+Evolved 2019.4.41. Both `UnityPlayer.dll` files contained `FT_Init_FreeType`,
+`TextRenderingPrivate`,
+`Gulim`, and `Malgun Gothic`, while the GDI/DirectWrite font entry-point markers
+were absent. Plague's lack of a MacType pixel change is therefore an
+application-private FreeType boundary, not failed module injection. Rebel's
+reported crash remains unreproduced on this machine; the new evidence lane and
+the service-stop relay retirement are the bounded fix and reporter-machine
+retest path. No executable-name blacklist or unsupported claim of Unity glyph
+replacement is added.
 
 ## Remaining platform boundary
 

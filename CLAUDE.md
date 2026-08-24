@@ -89,6 +89,14 @@ below wherever the two conflict.
   that can only fail during process initialization. Do not restore the
   historical implicit defaults. Feature and interface presence, not
   manifest-sensitive Windows version numbers, select modern rendering paths.
+- The fixed setup broker materializes DLL-adjacent `MacType.ini` only for an
+  active service. A supported stop and every maintenance or profile operation
+  that ends stopped remove only the exact verified generated copy while
+  retaining the protected profile generation; start restores exact bytes
+  before SCM launch. Preserve this old-renderer-compatible liveness lease so a
+  long-lived injected parent cannot keep propagating after the user stops the
+  service. Do not substitute an invalid profile, executable-name blacklist, or
+  global warning for this state transition.
 - A process that explicitly blocks hooks or module loading is a quiet
   process-local skip keyed by `(pid, creation time)`. Preserve its exact reason
   in the bounded orchestrator result, deduplicate that identity, keep global

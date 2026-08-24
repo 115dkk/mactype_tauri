@@ -18,12 +18,14 @@ pub(super) fn publish(
         .to_owned();
     create_protected_directory(&data_root)?;
     super::super::acl::harden_machine_directory(&data_root)?;
-    let generation = ProfileStore::new(context.paths.clone()).publish_and_activate(
+    let store = ProfileStore::new(context.paths.clone());
+    let generation = store.publish_and_activate(
         input,
         SourceMetadata {
             display_name: "MacType Control Center".to_owned(),
         },
     )?;
+    suspend_if_service_stopped(context, &store)?;
     super::super::acl::harden_machine_directory(&data_root)?;
     harden_runtime_if_installed(context)?;
     Ok(format!(
@@ -33,7 +35,9 @@ pub(super) fn publish(
 }
 
 pub(super) fn rollback(context: &BrokerContext) -> Result<String, SetupError> {
-    let generation = ProfileStore::new(context.paths.clone()).rollback()?;
+    let store = ProfileStore::new(context.paths.clone());
+    let generation = store.rollback()?;
+    suspend_if_service_stopped(context, &store)?;
     harden_runtime_if_installed(context)?;
     Ok(match generation {
         Some(generation) => format!(
@@ -42,6 +46,16 @@ pub(super) fn rollback(context: &BrokerContext) -> Result<String, SetupError> {
         ),
         None => "{\"ok\":true,\"verb\":\"rollback\",\"generation\":null}".to_owned(),
     })
+}
+
+fn suspend_if_service_stopped(
+    context: &BrokerContext,
+    store: &ProfileStore,
+) -> Result<(), SetupError> {
+    if !context.manager.is_running()? {
+        store.suspend_active_runtime()?;
+    }
+    Ok(())
 }
 
 fn harden_runtime_if_installed(context: &BrokerContext) -> Result<(), SetupError> {

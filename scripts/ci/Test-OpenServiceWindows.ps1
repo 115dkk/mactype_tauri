@@ -161,7 +161,12 @@ function Assert-ProtectedTree([string] $Path) {
     }
 }
 
-function Assert-ActiveRuntimeProfile([byte[]] $ExpectedBytes, [string] $ExpectedDigest, [string] $Phase) {
+function Assert-ActiveRuntimeProfile(
+    [byte[]] $ExpectedBytes,
+    [string] $ExpectedDigest,
+    [string] $Phase,
+    [switch] $Suspended
+) {
     foreach ($journal in @(
         (Join-Path $machineRoot 'runtime-activation.json'),
         (Join-Path $profileRoot 'profile-activation.json')
@@ -182,23 +187,30 @@ function Assert-ActiveRuntimeProfile([byte[]] $ExpectedBytes, [string] $Expected
     $protectedProfilePath = Join-Path $profileRoot "generations\$ExpectedDigest\profile.ini"
     $runtimePointer = Get-Content -LiteralPath (Join-Path $machineRoot 'current.json') -Raw | ConvertFrom-Json -AsHashtable
     $runtimeProfilePath = Join-Path $machineRoot "bin\$($runtimePointer.version)\MacType.ini"
-    foreach ($path in @($protectedProfilePath, $runtimeProfilePath)) {
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-            throw "$Phase profile bridge output is missing: $path"
+    if (-not (Test-Path -LiteralPath $protectedProfilePath -PathType Leaf)) {
+        throw "$Phase protected profile generation is missing: $protectedProfilePath"
+    }
+    if ($Suspended) {
+        if (Test-Path -LiteralPath $runtimeProfilePath) {
+            throw "$Phase left child injection relay enabled while the service is stopped: $runtimeProfilePath"
         }
+    } elseif (-not (Test-Path -LiteralPath $runtimeProfilePath -PathType Leaf)) {
+        throw "$Phase DLL-adjacent profile bridge output is missing: $runtimeProfilePath"
     }
 
     [byte[]] $protectedBytes = Get-Content -LiteralPath $protectedProfilePath -AsByteStream -Raw
-    [byte[]] $runtimeBytes = Get-Content -LiteralPath $runtimeProfilePath -AsByteStream -Raw
     $expectedBase64 = [Convert]::ToBase64String($ExpectedBytes)
     if ([Convert]::ToBase64String($protectedBytes) -cne $expectedBase64) {
         throw "$Phase protected profile generation does not contain the exact published bytes."
     }
-    if ([Convert]::ToBase64String($runtimeBytes) -cne $expectedBase64) {
-        throw "$Phase DLL-adjacent MacType.ini does not contain the exact active profile bytes."
-    }
-    if ((Get-LowerHexDigest $runtimeBytes) -cne $ExpectedDigest) {
-        throw "$Phase DLL-adjacent MacType.ini digest does not match the active generation."
+    if (-not $Suspended) {
+        [byte[]] $runtimeBytes = Get-Content -LiteralPath $runtimeProfilePath -AsByteStream -Raw
+        if ([Convert]::ToBase64String($runtimeBytes) -cne $expectedBase64) {
+            throw "$Phase DLL-adjacent MacType.ini does not contain the exact active profile bytes."
+        }
+        if ((Get-LowerHexDigest $runtimeBytes) -cne $ExpectedDigest) {
+            throw "$Phase DLL-adjacent MacType.ini digest does not match the active generation."
+        }
     }
     Assert-ProtectedTree $machineRoot
 }
@@ -305,7 +317,8 @@ try {
         -Verb 'publish-profile' -InputBytes $profileA
     $generationA = Join-Path $profileRoot "generations\$digestA\profile.ini"
     if (-not (Test-Path -LiteralPath $generationA -PathType Leaf)) { throw "First protected profile generation is missing: $generationA" }
-    Assert-ActiveRuntimeProfile -ExpectedBytes $profileA -ExpectedDigest $digestA -Phase 'publish A'
+    Assert-ActiveRuntimeProfile -ExpectedBytes $profileA -ExpectedDigest $digestA `
+        -Phase 'publish A while stopped' -Suspended
     Assert-ProtectedTree $profileRoot
 
     $poisonedAclPath = Join-Path $installedRuntimeRoot 'mactype-service.exe'
@@ -327,6 +340,7 @@ try {
 
     $null = Invoke-OpenServiceSetupLogged -SetupExecutable $stagedSetup -Verb 'start'
     if ((Get-Service -Name $serviceName).Status -ne 'Running') { throw "$serviceName did not reach SCM Running after its Ready handshake." }
+    Assert-ActiveRuntimeProfile -ExpectedBytes $profileA -ExpectedDigest $digestA -Phase 'initial start'
     Assert-PersistedReadyHealth -ExpectedDigest $digestA -Phase 'initial start'
 
     Write-PayloadManifest '0.3.0'
@@ -486,6 +500,8 @@ try {
         if ((Get-Service -Name $serviceName).Status -ne 'Stopped') {
             throw 'Service did not stop before the isolated product-loader browser proof.'
         }
+        Assert-ActiveRuntimeProfile -ExpectedBytes $profileA -ExpectedDigest $digestA `
+            -Phase 'product-loader isolation stop' -Suspended
         $productLoaderRuntime = Join-Path $stagingRoot 'product-loader-runtime'
         New-Item -ItemType Directory -Path $productLoaderRuntime -Force | Out-Null
         $productLoaderSources = [ordered]@{
@@ -499,7 +515,7 @@ try {
             Copy-Item -LiteralPath $entry.Value `
                 -Destination (Join-Path $productLoaderRuntime $entry.Key)
         }
-        Copy-Item -LiteralPath (Join-Path $activeRuntimeRoot 'MacType.ini') `
+        Copy-Item -LiteralPath $generationA `
             -Destination (Join-Path $productLoaderRuntime 'profile.ini')
         [IO.File]::WriteAllText(
             (Join-Path $productLoaderRuntime 'MacType.ini'),
@@ -533,6 +549,8 @@ try {
             throw 'Chromium product-loader evidence did not prove default FontDataService substitution through an early immutable alias collection.'
         }
         $null = Invoke-OpenServiceSetupLogged -SetupExecutable $stagedSetup -Verb 'start'
+        Assert-ActiveRuntimeProfile -ExpectedBytes $profileA -ExpectedDigest $digestA `
+            -Phase 'post-MacLoader service restart'
         Assert-PersistedReadyHealth -ExpectedDigest $digestA -Phase 'post-MacLoader service restart'
 
         # Firefox 151 completes its shared font list before the observable PE-entry
@@ -563,11 +581,31 @@ try {
 
     $null = Invoke-OpenServiceSetupLogged -SetupExecutable $stagedSetup -Verb 'stop'
     if ((Get-Service -Name $serviceName).Status -ne 'Stopped') { throw "$serviceName did not stop." }
+    Assert-ActiveRuntimeProfile -ExpectedBytes $profileA -ExpectedDigest $digestA `
+        -Phase 'final lifecycle stop' -Suspended
+
+    Write-PayloadManifest '0.4.0'
+    $null = Invoke-OpenServiceSetupLogged -SetupExecutable $stagedSetup -Verb 'upgrade'
+    if ((Get-Service -Name $serviceName).Status -ne 'Stopped') {
+        throw 'Upgrade changed a previously stopped service to Running.'
+    }
+    $stoppedUpgradePointer = Get-Content -LiteralPath $runtimePointerPath -Raw |
+        ConvertFrom-Json -AsHashtable
+    if ($stoppedUpgradePointer.Count -ne 2 -or
+        $stoppedUpgradePointer.schema -ne 1 -or
+        $stoppedUpgradePointer.version -ne '0.4.0') {
+        throw 'Stopped upgrade did not activate the bundled 0.4.0 runtime generation.'
+    }
+    Assert-ActiveRuntimeProfile -ExpectedBytes $profileA -ExpectedDigest $digestA `
+        -Phase 'stopped upgrade' -Suspended
+
     $null = Invoke-OpenServiceSetupLogged -SetupExecutable $stagedSetup -Verb 'repair'
     if ((Get-Service -Name $serviceName).Status -ne 'Stopped') { throw 'Repair changed a previously stopped service to Running.' }
-    Assert-ActiveRuntimeProfile -ExpectedBytes $profileA -ExpectedDigest $digestA -Phase 'stopped repair'
+    Assert-ActiveRuntimeProfile -ExpectedBytes $profileA -ExpectedDigest $digestA `
+        -Phase 'stopped repair' -Suspended
     if ($LeaveInstalledForReboot) {
         $null = Invoke-OpenServiceSetupLogged -SetupExecutable $stagedSetup -Verb 'start'
+        Assert-ActiveRuntimeProfile -ExpectedBytes $profileA -ExpectedDigest $digestA -Phase 'pre-reboot start'
         Assert-PersistedReadyHealth -ExpectedDigest $digestA -Phase 'pre-reboot start'
         $leaveInstalled = $true
     }

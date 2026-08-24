@@ -104,6 +104,70 @@ fn reactivating_the_current_generation_repairs_a_missing_adjacent_profile() {
 }
 
 #[test]
+fn suspending_the_active_runtime_removes_only_the_materialized_copy_and_can_resume_it() {
+    let (_base, paths) = test_paths();
+    let runtime = install_active_runtime(&paths, "0.2.0");
+    let store = ProfileStore::new(paths.clone());
+    let bytes = profile("1.25");
+    let generation = store
+        .publish_and_activate(&bytes, source("suspend and resume"))
+        .unwrap();
+
+    assert_eq!(
+        store.suspend_active_runtime().unwrap(),
+        Some(generation.clone())
+    );
+
+    assert!(!runtime.join("MacType.ini").exists());
+    assert_eq!(
+        read_pointer(paths.active_profile()).generation(),
+        &generation
+    );
+    assert_eq!(
+        fs::read(
+            paths
+                .profile_generations()
+                .join(generation.directory_name())
+                .join("profile.ini")
+        )
+        .unwrap(),
+        bytes
+    );
+
+    assert_eq!(store.synchronize_active_runtime().unwrap(), generation);
+    assert_eq!(fs::read(runtime.join("MacType.ini")).unwrap(), bytes);
+}
+
+#[test]
+fn suspending_the_active_runtime_preserves_foreign_adjacent_profile_bytes() {
+    let (_base, paths) = test_paths();
+    let runtime = install_active_runtime(&paths, "0.2.0");
+    let store = ProfileStore::new(paths);
+    store
+        .publish_and_activate(&profile("1.25"), source("foreign adjacent profile"))
+        .unwrap();
+    let foreign = profile("9.9");
+    fs::write(runtime.join("MacType.ini"), &foreign).unwrap();
+
+    let error = store.suspend_active_runtime().unwrap_err();
+
+    assert!(matches!(error, SetupError::CleanupUnknown(_)));
+    assert_eq!(fs::read(runtime.join("MacType.ini")).unwrap(), foreign);
+}
+
+#[test]
+fn suspending_without_an_active_profile_accepts_an_already_absent_runtime_copy() {
+    let (_base, paths) = test_paths();
+    let runtime = install_active_runtime(&paths, "0.2.0");
+
+    assert_eq!(
+        ProfileStore::new(paths).suspend_active_runtime().unwrap(),
+        None
+    );
+    assert!(!runtime.join("MacType.ini").exists());
+}
+
+#[test]
 fn synchronization_removes_an_interrupted_generated_profile_temporary_file() {
     let (_base, paths) = test_paths();
     let runtime = install_active_runtime(&paths, "0.2.0");

@@ -15,6 +15,7 @@ test('the DirectWrite lifecycle owns existing, future, and teardown paths', asyn
     directWriteHeader,
     exportsSource,
     hookSource,
+    unloadProviders,
     unloadResources,
     activationSource,
     contractProbe,
@@ -24,6 +25,7 @@ test('the DirectWrite lifecycle owns existing, future, and teardown paths', asyn
     source('renderer/directwrite.h'),
     source('renderer/expfunc.cpp'),
     source('renderer/hook.cpp'),
+    source('renderer/unload_providers.cpp'),
     source('renderer/unload_resources.cpp'),
     source('renderer/renderer_activation.cpp'),
     source('tools/service-probe/tests/dwritecore_contract_probe.cpp'),
@@ -53,10 +55,20 @@ test('the DirectWrite lifecycle owns existing, future, and teardown paths', asyn
     directWrite,
     /CreateThread\([\s\S]+?CREATE_SUSPENDED[\s\S]+?dwriteCoreWorker = std::move\(thread\)[\s\S]+?ResumeThread/,
   );
-  assert.match(exportsSource, /PrepareDirectWriteLifecycleStop\(\)/);
+  assert.doesNotMatch(exportsSource, /PrepareDirectWriteLifecycleStop/);
+  assert.match(exportsSource, /MakeProcessRendererProviderDrainTransaction\(\)/);
+  assert.match(exportsSource, /providerDrain\.Prepare\(\)/);
   assert.match(
     exportsSource,
-    /#define HOOK_MANUALLY HOOK_DEFINE[\s\S]+transaction\.Commit\(\)[\s\S]+CommitDirectWriteLifecycleStop\(\)/,
+    /#define HOOK_MANUALLY HOOK_DEFINE[\s\S]+transaction\.Commit\(\)[\s\S]+providerDrain\.Commit\(\)/,
+  );
+  assert.match(unloadProviders, /PrepareDirectWriteLifecycleStop\(timeout\)/);
+  assert.match(unloadProviders, /CommitDirectWriteLifecycleStop\(timeout\)/);
+  assert.match(unloadProviders, /PrepareUnityFontHookLifecycleStop\(timeout\)/);
+  assert.match(unloadProviders, /CommitUnityFontHookLifecycleStop\(\)/);
+  assert.match(
+    unloadProviders,
+    /PrepareDirectWrite[\s\S]+PrepareUnity[\s\S]+RendererProviderDrainTransaction/,
   );
   assert.match(exportsSource, /reinterpret_cast<PVOID>\(REF_##name\)/);
   assert.doesNotMatch(exportsSource, /ReleasePinnedRendererModules/);

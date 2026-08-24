@@ -41,6 +41,18 @@ below wherever the two conflict.
   substitutions consume the immutable font-substitution snapshot, and
   FreeType manager ownership ends before its library. Do not add an independent
   runtime phase machine or read mutable profile maps from a render hot path.
+- Unity font hooking is startup policy owned by `UnityFontHookLifecycle`. It is
+  off by default and accepts only exact PE timestamp/image-size, CodeView PDB
+  identity, render ABI, and target-prefix descriptors. Never replace this with
+  wildcard signature scanning. Font-file substitution patches only
+  UnityPlayer's own `CreateFileA/W` IAT slots, resolves installed families from
+  DirectWrite, registry, and bounded SFNT/TTC name parsing, and falls back to
+  the original file when the replacement cannot be opened. `Most games`
+  admission is an explicit process-local skip when the 신식 서비스 finds
+  anti-cheat evidence or cannot prove the bounded installation scan; selected
+  and all-games modes do not weaken existing protected-process or mitigation
+  guards. The renderer's repeated anti-cheat scan is direct-injection defense,
+  not a second service-admission authority.
 - `FreeTypeRuntime` is also the sole Interface for logical bitmap rows and
   one-based face IDs. Render Adapters must use `CheckedBitmapRow`; they never
   reconstruct signed-pitch pointer arithmetic. An `FT_Face` receives a
@@ -63,6 +75,10 @@ below wherever the two conflict.
   Final explicit detach releases only the TLS slot and empty lock storage;
   `QuietSkip` renderers acquire no self-reference, and process termination
   leaves cleanup to Windows.
+- `RendererUnloadLifecycle` also owns one provider-drain transaction. SafeUnload
+  must not branch on DirectWrite- or Unity-specific preparation enums. New
+  renderer providers join that drain seam so partial commit retry and rollback
+  ordering remain local to the Module.
 - Source comments follow `docs/source-comment-policy.md`. Keep code-local
   safety proofs and platform traps, move repeated cross-Module contracts to
   their canonical document, and do not leave narration, disabled code, model

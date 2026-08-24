@@ -3,8 +3,56 @@
 #include <windows.h>
 
 #include <atomic>
+#include <array>
+#include <cstddef>
 
 namespace renderer {
+
+enum class UnloadProviderPreparation : unsigned char
+{
+	prepared,
+	alreadyStopped,
+	unsafeToUnload,
+};
+
+struct UnloadProviderAdapter final
+{
+	void* context = nullptr;
+	UnloadProviderPreparation (*prepare)(void*, DWORD) noexcept = nullptr;
+	void (*abort)(void*) noexcept = nullptr;
+	bool (*commit)(void*, DWORD) noexcept = nullptr;
+};
+
+class RendererProviderDrainTransaction final
+{
+public:
+	RendererProviderDrainTransaction(
+		const UnloadProviderAdapter* providers,
+		std::size_t count) noexcept;
+	~RendererProviderDrainTransaction();
+	RendererProviderDrainTransaction(
+		RendererProviderDrainTransaction&& other) noexcept;
+	RendererProviderDrainTransaction& operator=(
+		RendererProviderDrainTransaction&& other) noexcept;
+	RendererProviderDrainTransaction(
+		const RendererProviderDrainTransaction&) = delete;
+	RendererProviderDrainTransaction& operator=(
+		const RendererProviderDrainTransaction&) = delete;
+
+	bool Prepare(DWORD timeoutMilliseconds = 3000) noexcept;
+	void Abort() noexcept;
+	bool Commit(DWORD timeoutMilliseconds = 3000) noexcept;
+
+private:
+	static constexpr std::size_t kMaximumProviders = 8;
+	std::array<UnloadProviderAdapter, kMaximumProviders> providers_{};
+	std::array<bool, kMaximumProviders> prepared_{};
+	std::size_t count_ = 0;
+	bool valid_ = false;
+	bool settled_ = false;
+};
+
+RendererProviderDrainTransaction MakeProcessRendererProviderDrainTransaction() noexcept;
 
 // Serializes the prepare/commit unload protocol while allowing a failed
 // attempt to publish retry admission again.

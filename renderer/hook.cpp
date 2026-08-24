@@ -25,6 +25,7 @@
 #include "hook_lifecycle.h"
 #include "renderer_activation.h"
 #include "unload_lifecycle.h"
+#include "unity_font_hook.h"
 #include <vector>
 
 bool RestoreDirectWriteVtableHooks(DWORD timeoutMilliseconds = 3000);
@@ -581,6 +582,7 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 	try {
 		static bool bDllInited = false;
 		BOOL IsUnload = false, bEnableDW = true, bUseFontSubstitute = false;
+		bool bUseUnityFontHook = false;
 		bool bHookChildProcesses = false;
 
 #ifdef USE_DETOURS
@@ -639,6 +641,7 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 				bEnableDW = pSettings->DirectWrite();
 				bUseFontSubstitute = !!pSettings->FontSubstitutes();
 				bHookChildProcesses = pSettings->HookChildProcesses();
+				bUseUnityFontHook = pSettings->UnityFontHookEnabledForProcess();
 			}
 			if (!IsUnload) hook_initinternal();	//不加载的模块就不做任何事莵E
 			const bool processExcluded = IsProcessExcluded();
@@ -707,6 +710,16 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 						renderer::HookCapability::fontSubstitution, 0, true,
 						renderer::CapabilityReason::explicitlyDisabled);
 				}
+				if (bUseUnityFontHook)
+				{
+					StartUnityFontHookLifecycle();
+				}
+				else
+				{
+					PublishUnavailableCapability(
+						renderer::HookCapability::unityFont, 0, false,
+						renderer::CapabilityReason::explicitlyDisabled);
+				}
 			}
 			else
 			{
@@ -718,6 +731,9 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 					renderer::CapabilityReason::explicitlyDisabled);
 				PublishUnavailableCapability(
 					renderer::HookCapability::fontSubstitution, 0, true,
+					renderer::CapabilityReason::explicitlyDisabled);
+				PublishUnavailableCapability(
+					renderer::HookCapability::unityFont, 0, false,
 					renderer::CapabilityReason::explicitlyDisabled);
 			}
 			if (IsUnload)

@@ -350,6 +350,8 @@ jobs:
         run: pnpm test:i18n
       - working-directory: control-center
         run: pnpm test:settings
+      - working-directory: control-center
+        run: pnpm test:unity-catalog
       - name: Verify generated settings sources are committed
         run: git diff --exit-code -- control-center/src/generated/settings.ts control-center/src-tauri/src/generated_settings.rs preview-helper/include/generated_settings.h
       - working-directory: control-center

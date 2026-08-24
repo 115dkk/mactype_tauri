@@ -94,6 +94,22 @@ int main()
     Require(retrySnapshot.capabilities[0].firstFailureStatus == 126,
             "successful recovery must not erase the first failure evidence");
 
+    for (renderer::CapabilityReason reason : {
+             renderer::CapabilityReason::antiCheatDetected,
+             renderer::CapabilityReason::safetyEvidenceUnavailable,
+         }) {
+        renderer::HookCoordinator safetyRefusal;
+        Require(safetyRefusal.BeginStart(),
+                "Unity safety refusal registry must start");
+        const renderer::HookAttempt attempt = safetyRefusal.BeginAttempt(
+            renderer::HookCapability::unityFont, 0, false);
+        Require(safetyRefusal.CompleteAttempt(attempt, false, reason, 5),
+                "Unity safety refusal must publish a result");
+        Require(safetyRefusal.Snapshot().capabilities[0].state ==
+                    renderer::CapabilityState::unavailable,
+                "Unity safety refusal must be unavailable rather than failed");
+    }
+
     renderer::HookCoordinator draining;
     Require(draining.BeginStart(), "drain registry must start with the runtime");
     const renderer::HookAttempt pending = draining.BeginAttempt(

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstring>
+#include <cmath>
 #include <cwctype>
 
 const signed char CFontSettings::bounds_[MAX_FONT_SETTINGS][2] = {
@@ -88,6 +89,8 @@ std::uint64_t PolicyDigest(const RendererPolicySnapshot& snapshot) noexcept
 	HashValue(digest, snapshot.hooks().childProcesses);
 	HashValue(digest, snapshot.hooks().directWrite);
 	HashValue(digest, snapshot.hooks().fontSubstitution);
+	HashValue(digest, snapshot.hooks().unityFontMode);
+	HashValue(digest, snapshot.hooks().unityFontEnabledForProcess);
 	HashValue(digest, snapshot.free_type().cacheMaxFaces);
 	HashValue(digest, snapshot.free_type().cacheMaxSizes);
 	HashValue(digest, snapshot.free_type().cacheMaxBytes);
@@ -103,6 +106,12 @@ std::uint64_t PolicyDigest(const RendererPolicySnapshot& snapshot) noexcept
 	HashValue(digest, raster.loadColorFont);
 	HashValue(digest, raster.invertColor);
 	HashValue(digest, raster.gamma);
+	HashValue(digest, raster.renderWeight);
+	HashValue(digest, raster.contrast);
+	HashBytes(digest, raster.coverageTuning.data(), raster.coverageTuning.size());
+	HashBytes(digest, raster.coverageTuningR.data(), raster.coverageTuningR.size());
+	HashBytes(digest, raster.coverageTuningG.data(), raster.coverageTuningG.size());
+	HashBytes(digest, raster.coverageTuningB.data(), raster.coverageTuningB.size());
 	HashValue(digest, raster.shadowDarkColor);
 	HashValue(digest, raster.shadowLightColor);
 	const DirectWritePolicy& directWrite = snapshot.direct_write();
@@ -134,6 +143,47 @@ std::uint64_t PolicyDigest(const RendererPolicySnapshot& snapshot) noexcept
 	return digest;
 }
 
+unsigned char CoverageValue(
+	unsigned int input,
+	const std::array<unsigned char, 256>& tuning,
+	float renderWeight,
+	float contrast) noexcept
+{
+	if (input >= tuning.size() || !std::isfinite(renderWeight) ||
+		!std::isfinite(contrast) || renderWeight <= 0.0f || contrast <= 0.0f)
+		return static_cast<unsigned char>((std::min)(input, 255u));
+	double const tuned = static_cast<double>(tuning[input]) / 255.0;
+	double const weighted = std::pow(tuned, 1.0 / renderWeight);
+	double const adjusted = weighted < 0.5
+		? std::pow(weighted * 2.0, contrast) / 2.0
+		: 1.0 - std::pow((1.0 - weighted) * 2.0, contrast) / 2.0;
+	double const bounded = (std::max)(0.0, (std::min)(1.0, adjusted));
+	return static_cast<unsigned char>(bounded * 255.0 + 0.5);
+}
+
+UnityCoverageLut BuildUnityCoverageLut(
+	const RendererPolicyCandidate& candidate) noexcept
+{
+	UnityCoverageLut result;
+	const RasterPolicy& raster = candidate.raster;
+	const bool bgr = candidate.commonFontSettings.GetAntiAliasMode() == 3 ||
+		candidate.commonFontSettings.GetAntiAliasMode() == 5;
+	const std::array<unsigned char, 256>* channels[3] = {
+		bgr ? &raster.coverageTuningB : &raster.coverageTuningR,
+		&raster.coverageTuningG,
+		bgr ? &raster.coverageTuningR : &raster.coverageTuningB,
+	};
+	for (unsigned int value = 0; value < 256; ++value)
+	{
+		result.gray[value] = CoverageValue(
+			value, raster.coverageTuning, raster.renderWeight, raster.contrast);
+		for (unsigned int channel = 0; channel < 3; ++channel)
+			result.rgb[channel][value] = CoverageValue(
+				value, *channels[channel], raster.renderWeight, raster.contrast);
+	}
+	return result;
+}
+
 } // namespace
 
 RendererPolicySnapshot::RendererPolicySnapshot(
@@ -145,6 +195,7 @@ RendererPolicySnapshot::RendererPolicySnapshot(
 	  profileDigest_(std::move(candidate.profileDigest)), hooks_(candidate.hooks),
 	  freeType_(candidate.freeType), raster_(candidate.raster),
 	  directWrite_(candidate.directWrite),
+	  unityCoverage_(BuildUnityCoverageLut(candidate)),
 	  commonFontSettings_(candidate.commonFontSettings),
 	  individualFonts_(std::move(candidate.individualFonts)),
 	  substitutions_(std::move(substitutions)),

@@ -526,6 +526,12 @@
   "settings.font_substitutes.option.0": "사용 안 함",
   "settings.font_substitutes.option.1": "안전한 대체",
   "settings.font_substitutes.option.2": "모든 대체",
+  "settings.unity_font_hook.label": "Unity 글꼴 후킹",
+  "settings.unity_font_hook.description": "Unity의 사설 FreeType 글리프를 프로필에 맞게 보정합니다. 검증된 UnityPlayer 빌드만 후킹합니다.",
+  "settings.unity_font_hook.option.0": "끄기",
+  "settings.unity_font_hook.option.1": "선택한 게임에만",
+  "settings.unity_font_hook.option.2": "대부분의 게임에서",
+  "settings.unity_font_hook.option.3": "모든 게임에서",
   "settings.cache_max_faces.label": "글꼴 캐시 개수",
   "settings.cache_max_faces.description": "CacheMaxFaces 코어 설정을 프로필에 저장합니다.",
   "settings.cache_max_sizes.label": "크기 캐시 개수",
@@ -568,8 +574,14 @@
   "advanced.pixelLayoutHelp": "RGB 서브픽셀의 x·y 좌표 6개를 지정합니다.",
   "advanced.fontSubstitutes": "글꼴 대체 매핑",
   "advanced.fontSubstitutesHelp": "설치된 글꼴 목록에서 원본과 대체 글꼴을 선택합니다.",
+  "advanced.unityHookMostNotice": "Unity 게임에는 자동으로 적용하지만, 알려진 안티치트 파일이 있는 게임은 서비스가 전체 프로세스 주입에서 조용히 제외합니다.",
+  "advanced.unityHookAllWarning": "주의: 모든 Unity 게임에 적용을 시도합니다. 게임이 종료되거나 안티치트가 오탐할 수 있습니다. Windows 보호 정책과 검증되지 않은 Unity 빌드는 여전히 우회하지 않습니다.",
   "list.unloadDlls.label": "주입 해제 DLL",
   "list.unloadDlls.help": "주입에서 제외할 DLL을 추가합니다.",
   "list.excludeSubstitutionModules.label": "글꼴 대체 제외 모듈",
-  "list.excludeSubstitutionModules.help": "글꼴 대체를 비활성화할 모듈을 추가합니다."
+  "list.excludeSubstitutionModules.help": "글꼴 대체를 비활성화할 모듈을 추가합니다.",
+  "list.unityIncludeGames.label": "Unity 후킹 적용 게임",
+  "list.unityIncludeGames.help": "선택 모드에서 Unity 글꼴 후킹을 적용할 실행 파일 이름을 추가합니다.",
+  "list.unityExcludeGames.label": "Unity 후킹 제외 게임",
+  "list.unityExcludeGames.help": "모든 게임 모드에서도 Unity 글꼴 후킹을 적용하지 않을 실행 파일 이름을 추가합니다."
 }

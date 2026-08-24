@@ -132,6 +132,11 @@ public:
 #define SETTING_FONTSUBSTITUTE_SAFE		(1)
 #define SETTING_FONTSUBSTITUTE_ALL		(2)
 
+#define SETTING_UNITY_FONT_HOOK_OFF       (0)
+#define SETTING_UNITY_FONT_HOOK_SELECTED  (1)
+#define SETTING_UNITY_FONT_HOOK_MOST      (2)
+#define SETTING_UNITY_FONT_HOOK_ALL       (3)
+
 #define SETTING_WIDTHMODE_GDI32    (0)
 #define SETTING_WIDTHMODE_FREETYPE (1)
 
@@ -203,6 +208,7 @@ private:
 	int  m_nLcdFilter;
 	int  m_nShadow[4];
 	int  m_nFontSubstitutes;
+	int  m_nUnityFontHook;
 	int	 m_bFontLink;	//改为可以使用多种参数
 	int  m_nWidthMode;
 
@@ -251,6 +257,8 @@ private:
 	ModuleHashMap	m_arrIncludeModule;
 	ModuleHashMap	m_arrUnloadModule;
 	ModuleHashMap	m_arrUnFontSubModule;
+	ModuleHashMap	m_arrUnityIncludeGame;
+	ModuleHashMap	m_arrUnityExcludeGame;
 	IndividualArray	m_arrIndividual;
 
 	// 指定フォント
@@ -298,6 +306,7 @@ private:
 		, m_bUseMapping(false)
 		, m_bLoadOnDemand(false)
 		, m_bEnableShadow(false)
+		, m_nUnityFontHook(SETTING_UNITY_FONT_HOOK_OFF)
 		, m_bFontLink(0)
 //		, m_bEnableKerning(false)
 		, m_bRunFromGdiExe(false)
@@ -324,10 +333,7 @@ private:
 		, m_nScreenDpi(96)
 		, m_bUseCustomPixelLayout(false)
 	{
-		ZeroMemory(m_nTuneTable,		sizeof(m_nTuneTable));
-		ZeroMemory(m_nTuneTableR,		sizeof(m_nTuneTableR));
-		ZeroMemory(m_nTuneTableG,		sizeof(m_nTuneTableG));
-		ZeroMemory(m_nTuneTableB,		sizeof(m_nTuneTableB));
+		InitInitTuneTable();
 		ZeroMemory(&m_lfForceFont,		sizeof(LOGFONT));
 		ZeroMemory(m_nShadow,			sizeof(m_nShadow));
 		ZeroMemory(m_szFileName,		sizeof(m_szFileName));
@@ -385,6 +391,8 @@ public:
 	DWORD ShadowLightColor() const { return m_nShadowLightColor; }
 	DWORD ShadowDarkColor() const { return m_nShadowDarkColor; }
 	int FontSubstitutes() const { return m_nFontSubstitutes; }	//判断替换模式
+	renderer::UnityFontHookMode UnityFontHookMode() const noexcept;
+	bool UnityFontHookEnabledForProcess() const noexcept;
 	int CacheMaxFaces() const { return m_nCacheMaxFaces; }
 	int CacheMaxSizes() const { return m_nCacheMaxSizes; }
 	int CacheMaxBytes() const { return m_nCacheMaxBytes; }

@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "topLevelExact": [
+    "ace-base",
+    "anticheatexpert",
+    "battleye",
+    "easyanticheat",
+    "easyanticheat_eos",
+    "gameguard",
+    "nprotect",
+    "wellbia",
+    "x3.xem",
+    "xigncode",
+    "xigncode3"
+  ],
+  "topLevelPrefixes": [
+    "ace-",
+    "beclient",
+    "beservice",
+    "easyanticheat",
+    "gameguard",
+    "gamemon",
+    "mhyprot",
+    "xhunter"
+  ]
+}

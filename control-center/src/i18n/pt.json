@@ -526,6 +526,12 @@
   "settings.font_substitutes.option.0": "Desativada",
   "settings.font_substitutes.option.1": "Segura",
   "settings.font_substitutes.option.2": "Todas",
+  "settings.unity_font_hook.label": "Interceção de tipos de letra Unity",
+  "settings.unity_font_hook.description": "Ajusta a cobertura dos glifos do FreeType interno do Unity com este perfil. Só são intercetadas versões verificadas do UnityPlayer.",
+  "settings.unity_font_hook.option.0": "Desativado",
+  "settings.unity_font_hook.option.1": "Apenas jogos selecionados",
+  "settings.unity_font_hook.option.2": "A maioria dos jogos",
+  "settings.unity_font_hook.option.3": "Todos os jogos",
   "settings.cache_max_faces.label": "Tipos de letra em cache",
   "settings.cache_max_faces.description": "Guarda a definição principal CacheMaxFaces no perfil.",
   "settings.cache_max_sizes.label": "Tamanhos em cache",
@@ -568,8 +574,14 @@
   "advanced.pixelLayoutHelp": "Seis coordenadas x/y dos subpíxeis RGB.",
   "advanced.fontSubstitutes": "Mapeamentos de substituição de tipos de letra",
   "advanced.fontSubstitutesHelp": "Selecione os tipos de letra de origem e substituição entre os instalados.",
+  "advanced.unityHookMostNotice": "Os jogos Unity são ativados automaticamente, mas o serviço exclui silenciosamente todo o processo da injeção quando encontra ficheiros antitrapaça conhecidos.",
+  "advanced.unityHookAllWarning": "Aviso: o MacType tentará todos os jogos Unity. O jogo pode falhar ou o antitrapaça pode gerar um falso positivo. As proteções do Windows e versões Unity não verificadas nunca são contornadas.",
   "list.unloadDlls.label": "DLL excluídas da injeção",
   "list.unloadDlls.help": "Adicione as DLL excluídas da injeção.",
   "list.excludeSubstitutionModules.label": "Módulos sem substituição de tipos de letra",
-  "list.excludeSubstitutionModules.help": "Adicione os módulos que desativam a substituição."
+  "list.excludeSubstitutionModules.help": "Adicione os módulos que desativam a substituição.",
+  "list.unityIncludeGames.label": "Jogos Unity intercetados",
+  "list.unityIncludeGames.help": "Adicione executáveis que recebem a interceção de tipos de letra Unity no modo selecionado.",
+  "list.unityExcludeGames.label": "Exclusões do Unity",
+  "list.unityExcludeGames.help": "Adicione executáveis que permanecem sem interceção mesmo no modo de todos os jogos."
 }

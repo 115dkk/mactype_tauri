@@ -526,6 +526,12 @@
   "settings.font_substitutes.option.0": "Désactivée",
   "settings.font_substitutes.option.1": "Sûre",
   "settings.font_substitutes.option.2": "Toutes",
+  "settings.unity_font_hook.label": "Hook de police Unity",
+  "settings.unity_font_hook.description": "Ajuste la couverture des glyphes du FreeType interne de Unity avec ce profil. Seuls les builds UnityPlayer vérifiés sont hookés.",
+  "settings.unity_font_hook.option.0": "Désactivé",
+  "settings.unity_font_hook.option.1": "Jeux sélectionnés uniquement",
+  "settings.unity_font_hook.option.2": "La plupart des jeux",
+  "settings.unity_font_hook.option.3": "Tous les jeux",
   "settings.cache_max_faces.label": "Polices en cache",
   "settings.cache_max_faces.description": "Enregistre le réglage principal CacheMaxFaces dans le profil.",
   "settings.cache_max_sizes.label": "Tailles en cache",
@@ -568,8 +574,14 @@
   "advanced.pixelLayoutHelp": "Six coordonnées x/y pour les sous-pixels RVB.",
   "advanced.fontSubstitutes": "Substitutions de polices",
   "advanced.fontSubstitutesHelp": "Choisissez les polices source et de remplacement parmi les polices installées.",
+  "advanced.unityHookMostNotice": "Les jeux Unity sont activés automatiquement, mais le service exclut silencieusement tout le processus de l’injection lorsqu’il détecte des fichiers anti-triche connus.",
+  "advanced.unityHookAllWarning": "Avertissement : MacType essaiera tous les jeux Unity. Un jeu peut planter ou l’anti-triche peut produire un faux positif. Les protections Windows et les builds Unity non vérifiés ne sont jamais contournés.",
   "list.unloadDlls.label": "DLL exclues de l’injection",
   "list.unloadDlls.help": "Ajoutez les DLL exclues de l’injection.",
   "list.excludeSubstitutionModules.label": "Modules sans substitution de police",
-  "list.excludeSubstitutionModules.help": "Ajoutez les modules désactivant la substitution."
+  "list.excludeSubstitutionModules.help": "Ajoutez les modules désactivant la substitution.",
+  "list.unityIncludeGames.label": "Jeux Unity hookés",
+  "list.unityIncludeGames.help": "Ajoutez les noms d’exécutables qui reçoivent le hook de police Unity en mode sélectionné.",
+  "list.unityExcludeGames.label": "Exclusions du hook Unity",
+  "list.unityExcludeGames.help": "Ajoutez les noms d’exécutables qui restent non hookés même en mode tous les jeux."
 }

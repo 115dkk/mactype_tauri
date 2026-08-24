@@ -6,7 +6,7 @@ import { settingMessageKey, useI18n } from "../i18n/i18n";
 import { loadInstalledFontFamilies } from "../app/tauri";
 import { AdvancedSettings } from "./profiles/AdvancedSettings";
 import { IndividualSettings } from "./profiles/IndividualSettings";
-import { ListsEditor } from "./profiles/ListsEditor";
+import { ListsEditor, type ListDefinition } from "./profiles/ListsEditor";
 import { BasicSettings, LcdSettings, SearchSettings, ShapeSettings } from "./profiles/SchemaSettings";
 import { splitSubstitution } from "./profiles/profileEditorUtils";
 import { ProfilePreviewPanel, type PreviewVariant, type ProfilePreviewHandle } from "./profiles/ProfilePreviewPanel";
@@ -51,14 +51,6 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
     t("individual.hinting"), t("individual.aa"), t("individual.normalWeight"),
     t("individual.boldWeight"), t("individual.slant"), t("individual.kerning"),
   ], [t]);
-  const listDefinitions = useMemo(() => [
-    { kind: "excludeFonts", label: t("list.excludeFonts.label"), help: t("list.excludeFonts.help") },
-    { kind: "includeFonts", label: t("list.includeFonts.label"), help: t("list.includeFonts.help") },
-    { kind: "excludeModules", label: t("list.excludeModules.label"), help: t("list.excludeModules.help") },
-    { kind: "includeModules", label: t("list.includeModules.label"), help: t("list.includeModules.help") },
-    { kind: "unloadDlls", label: t("list.unloadDlls.label"), help: t("list.unloadDlls.help") },
-    { kind: "excludeSubstitutionModules", label: t("list.excludeSubstitutionModules.label"), help: t("list.excludeSubstitutionModules.help") },
-  ] as const, [t]);
   const {
     addIndividual,
     advanced,
@@ -90,6 +82,30 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
     updateList,
     values,
   } = useProfileDocument(t);
+  const listDefinitions = useMemo<ReadonlyArray<ListDefinition>>(() => {
+    const definitions: ListDefinition[] = [
+      { kind: "excludeFonts", label: t("list.excludeFonts.label"), help: t("list.excludeFonts.help") },
+      { kind: "includeFonts", label: t("list.includeFonts.label"), help: t("list.includeFonts.help") },
+      { kind: "excludeModules", label: t("list.excludeModules.label"), help: t("list.excludeModules.help") },
+      { kind: "includeModules", label: t("list.includeModules.label"), help: t("list.includeModules.help") },
+      { kind: "unloadDlls", label: t("list.unloadDlls.label"), help: t("list.unloadDlls.help") },
+      { kind: "excludeSubstitutionModules", label: t("list.excludeSubstitutionModules.label"), help: t("list.excludeSubstitutionModules.help") },
+    ];
+    if ((values.unity_font_hook ?? 0) === 1) {
+      definitions.push({
+        kind: "unityIncludeGames",
+        label: t("list.unityIncludeGames.label"),
+        help: t("list.unityIncludeGames.help"),
+      });
+    } else if ((values.unity_font_hook ?? 0) === 3) {
+      definitions.push({
+        kind: "unityExcludeGames",
+        label: t("list.unityExcludeGames.label"),
+        help: t("list.unityExcludeGames.help"),
+      });
+    }
+    return definitions;
+  }, [t, values.unity_font_hook]);
   const [activeGroup, setActiveGroup] = useState<GroupId>("basic");
   const [activeWizardStep, setActiveWizardStep] = useState<WizardStepId>("start");
   /* Step-scoped guided history. Advanced mode can rewrite the document

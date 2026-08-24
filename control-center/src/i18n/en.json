@@ -526,6 +526,12 @@
   "settings.font_substitutes.option.0": "Disabled",
   "settings.font_substitutes.option.1": "Safe",
   "settings.font_substitutes.option.2": "All",
+  "settings.unity_font_hook.label": "Unity font hooking",
+  "settings.unity_font_hook.description": "Adjusts Unity's private FreeType glyph coverage with this profile. Only verified UnityPlayer builds are hooked.",
+  "settings.unity_font_hook.option.0": "Off",
+  "settings.unity_font_hook.option.1": "Selected games only",
+  "settings.unity_font_hook.option.2": "Most games",
+  "settings.unity_font_hook.option.3": "All games",
   "settings.cache_max_faces.label": "Cached font faces",
   "settings.cache_max_faces.description": "Stores the CacheMaxFaces core setting in the profile.",
   "settings.cache_max_sizes.label": "Cached font sizes",
@@ -568,8 +574,14 @@
   "advanced.pixelLayoutHelp": "Six x/y coordinates for the RGB subpixels.",
   "advanced.fontSubstitutes": "Font substitution mappings",
   "advanced.fontSubstitutesHelp": "Choose the source and replacement from installed fonts.",
+  "advanced.unityHookMostNotice": "Unity games are enabled automatically, but the service quietly excludes the entire process when known anti-cheat files are present.",
+  "advanced.unityHookAllWarning": "Warning: MacType will try every Unity game. A game may crash or anti-cheat may report a false positive. Windows protection policies and unverified Unity builds are never bypassed.",
   "list.unloadDlls.label": "Injection-excluded DLLs",
   "list.unloadDlls.help": "Add DLLs to exclude from injection.",
   "list.excludeSubstitutionModules.label": "Font-substitution exclusions",
-  "list.excludeSubstitutionModules.help": "Add modules that disable font substitution."
+  "list.excludeSubstitutionModules.help": "Add modules that disable font substitution.",
+  "list.unityIncludeGames.label": "Unity-hooked games",
+  "list.unityIncludeGames.help": "Add executable names that receive Unity font hooking in selected-games mode.",
+  "list.unityExcludeGames.label": "Unity hook exclusions",
+  "list.unityExcludeGames.help": "Add executable names that remain unhooked even in all-games mode."
 }

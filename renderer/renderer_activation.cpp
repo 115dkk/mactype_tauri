@@ -55,6 +55,8 @@ std::uint64_t CapabilityBit(HookCapability capability) noexcept
 		return MACTYPE_RENDERER_CAPABILITY_GDI_PLUS;
 	case HookCapability::fontSubstitution:
 		return MACTYPE_RENDERER_CAPABILITY_FONT_SUBSTITUTION;
+	case HookCapability::unityFont:
+		return MACTYPE_RENDERER_CAPABILITY_UNITY_FONT;
 	}
 	return 0;
 }

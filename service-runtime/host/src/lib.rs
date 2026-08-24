@@ -1,5 +1,6 @@
 mod control;
 mod file_health;
+mod generated_unity_anticheat_catalog;
 mod helper_broker;
 mod injection_orchestrator;
 mod observer;
@@ -50,7 +51,9 @@ pub use observer::{
     ProcessArchitecture, ProcessEventSource, ProcessIdentity, MAX_BROKER_DIAGNOSTIC_CODE_BYTES,
     PROCESS_CREATION_QUERY,
 };
-pub use orchestration_runtime::initialize_process_orchestration;
+pub use orchestration_runtime::{
+    initialize_process_orchestration, initialize_process_orchestration_with_unity_font_hook,
+};
 pub use protected_renderer_runtime::ProtectedRendererRuntime;
 pub use runtime::{
     HealthPublisher, HostError, InitializedRuntime, RuntimeDriver, RuntimeHealthReporter,
@@ -62,7 +65,7 @@ pub use status::{ScmState, ServiceStatus, StatusReporter, SERVICE_STOP_WAIT_HINT
 pub use target_validation::{
     BinarySignaturePolicy, DynamicCodePolicy, InspectionEvidence, ProcessInspection,
     ProcessInspectionError, ProcessInspector, ProcessSkipReason, ProcessTargetDecision,
-    ProcessTargetValidator, TargetLiveness,
+    ProcessTargetValidator, TargetLiveness, UnityProcessClassification,
 };
 #[cfg(windows)]
 pub use windows_helper_launcher::WindowsHelperLauncher;

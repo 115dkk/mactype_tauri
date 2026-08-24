@@ -8,6 +8,10 @@ param(
 
     [string] $MacLoader,
 
+    [string] $UnityEvidenceProbe,
+
+    [switch] $RequireUnityRedirect,
+
     [string] $SteamAppId,
 
     [ValidateRange(5, 300)]
@@ -107,6 +111,14 @@ if (-not [string]::IsNullOrWhiteSpace($MacLoader)) {
         }
     }
 }
+if (-not [string]::IsNullOrWhiteSpace($UnityEvidenceProbe)) {
+    $UnityEvidenceProbe = (Resolve-Path -LiteralPath $UnityEvidenceProbe).Path
+    if (-not $loader) {
+        throw 'Unity font evidence requires the explicit product MacLoader runtime.'
+    }
+} elseif ($RequireUnityRedirect) {
+    throw 'RequireUnityRedirect requires UnityEvidenceProbe.'
+}
 
 if (@(Get-ExactGameProcesses $game).Count -ne 0) {
     throw "Refusing to mix evidence with an already running game: $game"
@@ -122,6 +134,7 @@ $privateRendererBoundary =
 
 $previousSteamAppId = $env:SteamAppId
 $previousSteamGameId = $env:SteamGameId
+$previousUnityEvidence = $env:MACTYPE_UNITY_EVIDENCE
 $startedAt = Get-Date
 $gameProcess = $null
 $launcherProcess = $null
@@ -132,6 +145,9 @@ try {
     if (-not [string]::IsNullOrWhiteSpace($SteamAppId)) {
         $env:SteamAppId = $SteamAppId
         $env:SteamGameId = $SteamAppId
+    }
+    if ($UnityEvidenceProbe) {
+        $env:MACTYPE_UNITY_EVIDENCE = '1'
     }
     $launchArguments = @("`"$game`"", '-logFile', "`"$playerLog`"")
     if ($loader) {
@@ -170,6 +186,7 @@ try {
 } finally {
     $env:SteamAppId = $previousSteamAppId
     $env:SteamGameId = $previousSteamGameId
+    $env:MACTYPE_UNITY_EVIDENCE = $previousUnityEvidence
 }
 
 $exited = $null
@@ -196,6 +213,29 @@ if ($gameProcess) {
         } else {
             $_.Exception.Message
         }
+    }
+}
+
+$unityFontEvidence = $null
+if ($UnityEvidenceProbe -and $gameProcess -and -not $gameProcess.HasExited) {
+    $evidenceOutput = @(& $UnityEvidenceProbe --evidence $gameProcess.Id 2>&1)
+    $evidenceExitCode = $LASTEXITCODE
+    $evidenceText = ($evidenceOutput | ForEach-Object { [string] $_ }) -join "`n"
+    $parsed = [regex]::Match(
+        $evidenceText,
+        '^pid=(?<pid>\d+) observed=(?<observed>\d+) attempts=(?<attempts>\d+) successes=(?<successes>\d+) fallbacks=(?<fallbacks>\d+) observed-path=(?<observedPath>.*?) source=(?<source>.*?) replacement=(?<replacement>.*)$'
+    )
+    $unityFontEvidence = [ordered]@{
+        exitCode = $evidenceExitCode
+        raw = $evidenceText
+        pid = if ($parsed.Success) { [int] $parsed.Groups['pid'].Value } else { $null }
+        observedFontOpens = if ($parsed.Success) { [int] $parsed.Groups['observed'].Value } else { $null }
+        redirectAttempts = if ($parsed.Success) { [int] $parsed.Groups['attempts'].Value } else { $null }
+        redirectSuccesses = if ($parsed.Success) { [int] $parsed.Groups['successes'].Value } else { $null }
+        redirectFallbacks = if ($parsed.Success) { [int] $parsed.Groups['fallbacks'].Value } else { $null }
+        observedPath = if ($parsed.Success) { $parsed.Groups['observedPath'].Value } else { $null }
+        sourcePath = if ($parsed.Success) { $parsed.Groups['source'].Value } else { $null }
+        replacementPath = if ($parsed.Success) { $parsed.Groups['replacement'].Value } else { $null }
     }
 }
 
@@ -284,6 +324,7 @@ $evidence = [ordered]@{
         expectedCoreStateObserved = $exactCoreLoaded
         error = $observationError
         werReports = $werReports
+        unityFontEvidence = $unityFontEvidence
     }
     cleanup = $cleanup
 }
@@ -294,7 +335,12 @@ $evidence = [ordered]@{
     [Text.UTF8Encoding]::new($false)
 )
 
-if ($observationError -or $exited -or -not $exactCoreLoaded -or $werReports.Count -ne 0) {
+if ($observationError -or $exited -or -not $exactCoreLoaded -or
+    $werReports.Count -ne 0 -or
+    ($RequireUnityRedirect -and
+        (-not $unityFontEvidence -or $unityFontEvidence.exitCode -ne 0 -or
+            $unityFontEvidence.redirectSuccesses -le 0 -or
+            $unityFontEvidence.redirectFallbacks -ne 0))) {
     throw "Unity compatibility evidence did not satisfy the survival contract: $output"
 }
 

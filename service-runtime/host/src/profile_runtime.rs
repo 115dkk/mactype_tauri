@@ -6,8 +6,8 @@ use std::path::Path;
 use mactype_service_contract::{
     parse_runtime_activation_receipt, validate_protected_renderer_profile, GenerationId,
     GenerationPointer, MachinePaths, ParsedRuntimeActivationReceipt, ProfileDigest,
-    RuntimeActivationPhase, RuntimeGenerationPointer, StructuredServiceError, MAX_PROFILE_BYTES,
-    MAX_RUNTIME_ACTIVATION_RECEIPT_BYTES,
+    RuntimeActivationPhase, RuntimeGenerationPointer, StructuredServiceError, UnityFontHookPolicy,
+    MAX_PROFILE_BYTES, MAX_RUNTIME_ACTIVATION_RECEIPT_BYTES,
 };
 
 use crate::protected_path::{has_reparse_ancestor, read_bounded_regular_file, MAX_POINTER_BYTES};
@@ -15,6 +15,7 @@ use crate::protected_path::{has_reparse_ancestor, read_bounded_regular_file, MAX
 pub(crate) struct ProtectedProfileSnapshot {
     digest: ProfileDigest,
     bytes: Vec<u8>,
+    unity_font_hook: UnityFontHookPolicy,
 }
 
 impl ProtectedProfileSnapshot {
@@ -58,13 +59,22 @@ impl ProtectedProfileSnapshot {
                 "the protected profile digest is not canonical",
             )
         })?;
-        let snapshot = Self { digest, bytes };
+        let unity_font_hook = UnityFontHookPolicy::from_profile_bytes(&bytes);
+        let snapshot = Self {
+            digest,
+            bytes,
+            unity_font_hook,
+        };
         snapshot.verify_runtime_copy(runtime_root)?;
         Ok(snapshot)
     }
 
     pub(crate) const fn digest(&self) -> ProfileDigest {
         self.digest
+    }
+
+    pub(crate) const fn unity_font_hook_policy(&self) -> &UnityFontHookPolicy {
+        &self.unity_font_hook
     }
 
     pub(crate) fn verify_runtime_copy(

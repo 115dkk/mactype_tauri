@@ -24,6 +24,7 @@ enum class HookCapability : unsigned char
     direct2D,
     gdiPlus,
     fontSubstitution,
+    unityFont,
 };
 
 enum class CapabilityState : unsigned char
@@ -45,6 +46,8 @@ enum class CapabilityReason : unsigned char
     transactionFailed,
     lifecycleStopping,
     initializationFailed,
+    antiCheatDetected,
+    safetyEvidenceUnavailable,
 };
 
 class HookAttempt

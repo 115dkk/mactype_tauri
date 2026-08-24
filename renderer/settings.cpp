@@ -377,6 +377,8 @@ bool CGdippSettings::PublishRendererPolicySnapshot(
 	candidate.hooks.childProcesses = m_bHookChildProcesses;
 	candidate.hooks.directWrite = m_bDirectWrite != FALSE;
 	candidate.hooks.fontSubstitution = m_nFontSubstitutes != 0;
+	candidate.hooks.unityFontMode = UnityFontHookMode();
+	candidate.hooks.unityFontEnabledForProcess = UnityFontHookEnabledForProcess();
 	candidate.freeType.cacheMaxFaces = m_nCacheMaxFaces;
 	candidate.freeType.cacheMaxSizes = m_nCacheMaxSizes;
 	candidate.freeType.cacheMaxBytes = m_nCacheMaxBytes;
@@ -391,6 +393,19 @@ bool CGdippSettings::PublishRendererPolicySnapshot(
 	candidate.raster.loadColorFont = m_bColorFont;
 	candidate.raster.invertColor = m_bInvertColor;
 	candidate.raster.gamma = m_fGammaValue;
+	candidate.raster.renderWeight = m_fRenderWeight;
+	candidate.raster.contrast = m_fContrast;
+	for (std::size_t index = 0; index < candidate.raster.coverageTuning.size(); ++index)
+	{
+		candidate.raster.coverageTuning[index] =
+			static_cast<unsigned char>(Bound(m_nTuneTable[index], 0, 255));
+		candidate.raster.coverageTuningR[index] =
+			static_cast<unsigned char>(Bound(m_nTuneTableR[index], 0, 255));
+		candidate.raster.coverageTuningG[index] =
+			static_cast<unsigned char>(Bound(m_nTuneTableG[index], 0, 255));
+		candidate.raster.coverageTuningB[index] =
+			static_cast<unsigned char>(Bound(m_nTuneTableB[index], 0, 255));
+	}
 	candidate.raster.shadowDarkColor = m_nShadowDarkColor;
 	candidate.raster.shadowLightColor = m_nShadowLightColor;
 	candidate.directWrite.enabled = m_bDirectWrite != FALSE;
@@ -755,7 +770,13 @@ SKIP:
 													 SETTING_FONTSUBSTITUTE_DISABLE,
 													 SETTING_FONTSUBSTITUTE_DISABLE,
 													 SETTING_FONTSUBSTITUTE_ALL,
-													 lpszFile);
+												 lpszFile);
+	m_nUnityFontHook = _GetFreeTypeProfileBoundInt(
+		_T("UnityFontHook"),
+		SETTING_UNITY_FONT_HOOK_OFF,
+		SETTING_UNITY_FONT_HOOK_OFF,
+		SETTING_UNITY_FONT_HOOK_ALL,
+		lpszFile);
 	m_nWidthMode = SETTING_WIDTHMODE_GDI32;
 
 
@@ -849,11 +870,15 @@ SKIP:
 	m_arrIncludeModule.clear();
 	m_arrUnloadModule.clear();
 	m_arrUnFontSubModule.clear();
+	m_arrUnityIncludeGame.clear();
+	m_arrUnityExcludeGame.clear();
 
 	AddListFromSection(_T("ExcludeModule"), lpszFile, m_arrExcludeModule);
 	AddListFromSection(_T("IncludeModule"), lpszFile, m_arrIncludeModule);
 	AddListFromSection(_T("UnloadDLL"), lpszFile, m_arrUnloadModule);
 	AddListFromSection(L"ExcludeSub", lpszFile, m_arrUnFontSubModule);
+	AddListFromSection(L"UnityInclude", lpszFile, m_arrUnityIncludeGame);
+	AddListFromSection(L"UnityExclude", lpszFile, m_arrUnityExcludeGame);
 	// A loaded ExcludeSub module disables substitution for this process.
 	if (m_nFontSubstitutes)
 	{
@@ -1219,6 +1244,68 @@ bool CGdippSettings::IsExeInclude(LPCTSTR lpApp) const	//紒E槭欠裨诎酌�
 		}
 	}
 	return false;
+}
+
+renderer::UnityFontHookMode CGdippSettings::UnityFontHookMode() const noexcept
+{
+	switch (m_nUnityFontHook)
+	{
+	case SETTING_UNITY_FONT_HOOK_SELECTED:
+		return renderer::UnityFontHookMode::selectedGames;
+	case SETTING_UNITY_FONT_HOOK_MOST:
+		return renderer::UnityFontHookMode::mostGames;
+	case SETTING_UNITY_FONT_HOOK_ALL:
+		return renderer::UnityFontHookMode::allGames;
+	case SETTING_UNITY_FONT_HOOK_OFF:
+	default:
+		return renderer::UnityFontHookMode::off;
+	}
+}
+
+bool CGdippSettings::UnityFontHookEnabledForProcess() const noexcept
+{
+	try
+	{
+		auto const matchesCurrentProcess = [this](const ModuleHashMap& entries) {
+			for (ModuleHashMap::const_iterator it = entries.begin();
+				it != entries.end(); ++it)
+			{
+				if (IsFolder(it->c_str()))
+				{
+					if (GetAppDir() == LowerCase(*it))
+						return true;
+				}
+				else
+				{
+					std::wstring::size_type const slash =
+						it->find_last_of(L"\\/");
+					const wchar_t* const fileName = slash == std::wstring::npos
+						? it->c_str()
+						: it->c_str() + slash + 1;
+					if (!lstrcmpi(m_szexeName, fileName))
+						return true;
+				}
+			}
+			return false;
+		};
+
+		switch (UnityFontHookMode())
+		{
+		case renderer::UnityFontHookMode::selectedGames:
+			return matchesCurrentProcess(m_arrUnityIncludeGame);
+		case renderer::UnityFontHookMode::mostGames:
+			return true;
+		case renderer::UnityFontHookMode::allGames:
+			return !matchesCurrentProcess(m_arrUnityExcludeGame);
+		case renderer::UnityFontHookMode::off:
+		default:
+			return false;
+		}
+	}
+	catch (...)
+	{
+		return false;
+	}
 }
 
 bool CGdippSettings::IsProcessExcluded() const

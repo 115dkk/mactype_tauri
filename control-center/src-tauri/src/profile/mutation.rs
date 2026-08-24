@@ -308,6 +308,8 @@ impl ProfileDocument {
             "includeModules" => "IncludeModule",
             "unloadDlls" => "UnloadDLL",
             "excludeSubstitutionModules" => "ExcludeSub",
+            "unityIncludeGames" => "UnityInclude",
+            "unityExcludeGames" => "UnityExclude",
             "fontSubstitutes" => "FontSubstitutes",
             _ => return Err(format!("unknown profile list: {kind}")),
         };

@@ -1,6 +1,7 @@
 use std::ffi::OsString;
 use std::mem::size_of;
 use std::os::windows::ffi::OsStringExt;
+use std::path::{Path, PathBuf};
 
 use mactype_service_contract::StructuredServiceError;
 use windows_sys::Win32::Foundation::{
@@ -21,10 +22,16 @@ use windows_sys::Win32::System::Threading::{
     PROTECTION_LEVEL_NONE,
 };
 
+use crate::generated_unity_anticheat_catalog::{
+    ANTI_CHEAT_TOP_LEVEL_EXACT, ANTI_CHEAT_TOP_LEVEL_PREFIXES,
+};
 use crate::{
     BinarySignaturePolicy, DynamicCodePolicy, InspectionEvidence, ProcessArchitecture,
     ProcessIdentity, ProcessInspection, ProcessInspectionError, ProcessInspector, TargetLiveness,
+    UnityProcessClassification,
 };
+
+const MAX_UNITY_INSTALLATION_ENTRIES: usize = 4_096;
 
 #[derive(Default)]
 pub struct WindowsProcessInspector;
@@ -72,6 +79,54 @@ impl ProcessInspector for WindowsProcessInspector {
     fn probe_target_liveness(&self, identity: &ProcessIdentity) -> TargetLiveness {
         probe_windows_target_liveness(identity)
     }
+
+    fn classify_unity_process(&self, identity: &ProcessIdentity) -> UnityProcessClassification {
+        let Ok(process) = OwnedHandle::open(identity.pid) else {
+            return UnityProcessClassification::Unavailable;
+        };
+        if process.creation_time().ok() != Some(identity.creation_time) {
+            return UnityProcessClassification::Unavailable;
+        }
+        let Ok(image_path) = process.image_path() else {
+            return UnityProcessClassification::Unavailable;
+        };
+        classify_unity_installation(&image_path)
+    }
+}
+
+fn classify_unity_installation(image_path: &Path) -> UnityProcessClassification {
+    let Some(directory) = image_path.parent() else {
+        return UnityProcessClassification::Unavailable;
+    };
+    match std::fs::metadata(directory.join("UnityPlayer.dll")) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => return UnityProcessClassification::Unavailable,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return UnityProcessClassification::NotUnity;
+        }
+        Err(_) => return UnityProcessClassification::Unavailable,
+    }
+
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return UnityProcessClassification::Unavailable;
+    };
+    for (index, entry) in entries.enumerate() {
+        if index >= MAX_UNITY_INSTALLATION_ENTRIES {
+            return UnityProcessClassification::Unavailable;
+        }
+        let Ok(entry) = entry else {
+            return UnityProcessClassification::Unavailable;
+        };
+        let name = entry.file_name().to_string_lossy().to_lowercase();
+        if ANTI_CHEAT_TOP_LEVEL_EXACT.contains(&name.as_str())
+            || ANTI_CHEAT_TOP_LEVEL_PREFIXES
+                .iter()
+                .any(|prefix| name.starts_with(prefix))
+        {
+            return UnityProcessClassification::UnityWithAntiCheat;
+        }
+    }
+    UnityProcessClassification::Unity
 }
 
 fn probe_windows_target_liveness(identity: &ProcessIdentity) -> TargetLiveness {
@@ -229,19 +284,30 @@ impl OwnedHandle {
     }
 
     fn image_name(&self) -> InspectionEvidence<String> {
+        self.image_path()
+            .ok()
+            .and_then(|path| {
+                path.file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            })
+            .map(InspectionEvidence::Known)
+            .unwrap_or(InspectionEvidence::Unavailable)
+    }
+
+    fn image_path(&self) -> Result<PathBuf, StructuredServiceError> {
         let mut buffer = vec![0u16; 32_768];
         let mut length = buffer.len() as u32;
         if unsafe {
             QueryFullProcessImageNameW(self.0, PROCESS_NAME_WIN32, buffer.as_mut_ptr(), &mut length)
         } == 0
         {
-            return InspectionEvidence::Unavailable;
+            return Err(last_error(
+                "process-image-path-unavailable",
+                "the observed process image path could not be read",
+            ));
         }
         let path = OsString::from_wide(&buffer[..length as usize]);
-        std::path::Path::new(&path)
-            .file_name()
-            .map(|name| InspectionEvidence::Known(name.to_string_lossy().into_owned()))
-            .unwrap_or(InspectionEvidence::Unavailable)
+        Ok(PathBuf::from(path))
     }
 }
 
@@ -291,6 +357,7 @@ fn service_error(code: &str, message: &str, win32_error: Option<i32>) -> Structu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use windows_sys::Win32::System::SystemInformation::IMAGE_FILE_MACHINE_ARM64;
 
     #[test]
@@ -304,6 +371,42 @@ mod tests {
             classify_process_architecture(IMAGE_FILE_MACHINE_UNKNOWN, IMAGE_FILE_MACHINE_ARM64)
                 .expect_err("native ARM64 has no fixed compatible helper");
         assert_eq!(error.code, "process-architecture-unsupported");
+    }
+
+    #[test]
+    fn unity_installation_classification_is_scoped_to_the_game_directory() {
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("game.exe");
+        fs::write(&executable, b"game").unwrap();
+        assert_eq!(
+            classify_unity_installation(&executable),
+            UnityProcessClassification::NotUnity
+        );
+
+        fs::write(directory.path().join("UnityPlayer.dll"), b"unity").unwrap();
+        assert_eq!(
+            classify_unity_installation(&executable),
+            UnityProcessClassification::Unity
+        );
+
+        fs::create_dir(directory.path().join("EasyAntiCheat")).unwrap();
+        assert_eq!(
+            classify_unity_installation(&executable),
+            UnityProcessClassification::UnityWithAntiCheat
+        );
+    }
+
+    #[test]
+    fn generated_anticheat_prefixes_detect_sibling_client_modules() {
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("game.exe");
+        fs::write(&executable, b"game").unwrap();
+        fs::write(directory.path().join("UnityPlayer.dll"), b"unity").unwrap();
+        fs::write(directory.path().join("BEClient_x64.dll"), b"anti-cheat").unwrap();
+        assert_eq!(
+            classify_unity_installation(&executable),
+            UnityProcessClassification::UnityWithAntiCheat
+        );
     }
 
     #[test]

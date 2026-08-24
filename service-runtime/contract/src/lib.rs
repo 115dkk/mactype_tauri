@@ -9,6 +9,7 @@ mod paths;
 mod profile;
 mod renderer_activation;
 mod runtime_activation;
+mod unity;
 
 pub use broker::{parse_broker_command, BrokerCommand, BrokerCommandError};
 pub use health::{
@@ -48,6 +49,7 @@ pub use runtime_activation::{
     MAX_RUNTIME_ACTIVATION_RECEIPT_BYTES, MAX_RUNTIME_POINTER_BYTES, RUNTIME_ACTIVATION_SCHEMA,
     RUNTIME_POINTER_SCHEMA, UNCOMMITTED_RUNTIME_ACTIVATION_SCHEMA,
 };
+pub use unity::{UnityFontHookMode, UnityFontHookPolicy};
 
 pub const SERVICE_NAME: &str = "MacTypeControlCenter";
 pub const CI_TEST_SERVICE_NAME: &str = "MacTypeControlCenterTest";

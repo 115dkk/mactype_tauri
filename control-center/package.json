@@ -11,6 +11,7 @@
     "lint": "eslint . --max-warnings 0",
     "test:i18n": "node ../scripts/ci/Test-I18n.mjs",
     "test:settings": "node ../scripts/ci/Test-SettingsCoverage.mjs",
+    "test:unity-catalog": "node ../scripts/generate-unity-anticheat-catalog.mjs --check",
     "test:gallery": "playwright test -c ../tests/frontend-gallery/playwright.config.ts",
     "tauri": "tauri"
   },

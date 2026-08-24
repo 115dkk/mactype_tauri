@@ -1,8 +1,8 @@
-use mactype_service_contract::StructuredServiceError;
+use mactype_service_contract::{StructuredServiceError, UnityFontHookPolicy};
 use mactype_service_host::{
     BinarySignaturePolicy, DynamicCodePolicy, InspectionEvidence, ProcessArchitecture,
     ProcessIdentity, ProcessInspection, ProcessInspectionError, ProcessInspector,
-    ProcessSkipReason, ProcessTargetDecision, ProcessTargetValidator,
+    ProcessSkipReason, ProcessTargetDecision, ProcessTargetValidator, UnityProcessClassification,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -41,6 +41,27 @@ fn ordinary_inspection(pid: u32) -> ProcessInspection {
     }
 }
 
+struct UnityInspector {
+    inspection: ProcessInspection,
+    classification: UnityProcessClassification,
+}
+
+impl ProcessInspector for UnityInspector {
+    fn inspect(&self, _pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
+        Ok(self.inspection.clone())
+    }
+
+    fn classify_unity_process(&self, _identity: &ProcessIdentity) -> UnityProcessClassification {
+        self.classification
+    }
+}
+
+fn unity_policy(mode: u8) -> UnityFontHookPolicy {
+    UnityFontHookPolicy::from_profile_bytes(
+        format!("[General]\r\nUnityFontHook={mode}\r\n").as_bytes(),
+    )
+}
+
 #[test]
 fn validator_returns_only_verified_eligible_identity() {
     let inspector = FixedInspector(Ok(ordinary_inspection(42)));
@@ -49,6 +70,67 @@ fn validator_returns_only_verified_eligible_identity() {
     assert_eq!(
         validator.validate(42).unwrap(),
         ProcessTargetDecision::Eligible(identity(42))
+    );
+}
+
+#[test]
+fn most_games_mode_quietly_skips_the_entire_anticheat_unity_process() {
+    for (classification, reason) in [
+        (
+            UnityProcessClassification::UnityWithAntiCheat,
+            ProcessSkipReason::UnityAntiCheatDetected,
+        ),
+        (
+            UnityProcessClassification::Unavailable,
+            ProcessSkipReason::UnitySafetyEvidenceUnavailable,
+        ),
+    ] {
+        let inspector = UnityInspector {
+            inspection: ordinary_inspection(42),
+            classification,
+        };
+        let validator =
+            ProcessTargetValidator::with_unity_font_hook_policy(900, &inspector, unity_policy(2));
+        assert_eq!(
+            validator.validate(42).unwrap(),
+            ProcessTargetDecision::Skipped {
+                identity: Some(identity(42)),
+                reason,
+            }
+        );
+    }
+}
+
+#[test]
+fn all_games_mode_does_not_bypass_os_guards_but_does_not_apply_the_anticheat_filter() {
+    let inspector = UnityInspector {
+        inspection: ordinary_inspection(42),
+        classification: UnityProcessClassification::UnityWithAntiCheat,
+    };
+    let validator =
+        ProcessTargetValidator::with_unity_font_hook_policy(900, &inspector, unity_policy(3));
+    assert_eq!(
+        validator.validate(42).unwrap(),
+        ProcessTargetDecision::Eligible(identity(42))
+    );
+
+    let mut blocked = ordinary_inspection(42);
+    blocked.dynamic_code = InspectionEvidence::Known(DynamicCodePolicy {
+        prohibit_dynamic_code: true,
+        allow_thread_opt_out: false,
+    });
+    let inspector = UnityInspector {
+        inspection: blocked,
+        classification: UnityProcessClassification::UnityWithAntiCheat,
+    };
+    let validator =
+        ProcessTargetValidator::with_unity_font_hook_policy(900, &inspector, unity_policy(3));
+    assert_eq!(
+        validator.validate(42).unwrap(),
+        ProcessTargetDecision::Skipped {
+            identity: Some(identity(42)),
+            reason: ProcessSkipReason::DynamicCodeProhibited,
+        }
     );
 }
 

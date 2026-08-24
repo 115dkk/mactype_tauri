@@ -526,6 +526,12 @@
   "settings.font_substitutes.option.0": "معطل",
   "settings.font_substitutes.option.1": "آمن",
   "settings.font_substitutes.option.2": "الكل",
+  "settings.unity_font_hook.label": "ربط خطوط Unity",
+  "settings.unity_font_hook.description": "يضبط تغطية المحارف في FreeType الداخلي لـ Unity وفق هذا الملف. لا يتم الربط إلا مع إصدارات UnityPlayer التي تم التحقق منها.",
+  "settings.unity_font_hook.option.0": "إيقاف",
+  "settings.unity_font_hook.option.1": "الألعاب المحددة فقط",
+  "settings.unity_font_hook.option.2": "معظم الألعاب",
+  "settings.unity_font_hook.option.3": "كل الألعاب",
   "settings.cache_max_faces.label": "الخطوط المخزنة مؤقتًا",
   "settings.cache_max_faces.description": "يحفظ إعداد النواة CacheMaxFaces في ملف التعريف.",
   "settings.cache_max_sizes.label": "الأحجام المخزنة مؤقتًا",
@@ -568,8 +574,14 @@
   "advanced.pixelLayoutHelp": "ستة إحداثيات x/y للبكسلات الفرعية RGB.",
   "advanced.fontSubstitutes": "خرائط استبدال الخطوط",
   "advanced.fontSubstitutesHelp": "اختر الخط الأصلي والخط البديل من الخطوط المثبّتة.",
+  "advanced.unityHookMostNotice": "تُفعّل ألعاب Unity تلقائيًا، لكن الخدمة تستبعد العملية بالكامل بصمت من الحقن عند العثور على ملفات معروفة لمكافحة الغش.",
+  "advanced.unityHookAllWarning": "تحذير: سيحاول MacType العمل مع كل ألعاب Unity. قد تتعطل اللعبة أو يصدر نظام مكافحة الغش إنذارًا كاذبًا. لا يتم تجاوز سياسات حماية Windows أو إصدارات Unity غير المتحقق منها.",
   "list.unloadDlls.label": "ملفات DLL المستبعدة من الحقن",
   "list.unloadDlls.help": "أضف ملفات DLL المستبعدة من الحقن.",
   "list.excludeSubstitutionModules.label": "وحدات مستبعدة من استبدال الخطوط",
-  "list.excludeSubstitutionModules.help": "أضف الوحدات التي تعطّل استبدال الخطوط."
+  "list.excludeSubstitutionModules.help": "أضف الوحدات التي تعطّل استبدال الخطوط.",
+  "list.unityIncludeGames.label": "ألعاب Unity المربوطة",
+  "list.unityIncludeGames.help": "أضف أسماء الملفات التنفيذية التي تستخدم ربط خطوط Unity في وضع الألعاب المحددة.",
+  "list.unityExcludeGames.label": "استثناءات ربط Unity",
+  "list.unityExcludeGames.help": "أضف أسماء الملفات التنفيذية التي تبقى بلا ربط حتى في وضع كل الألعاب."
 }

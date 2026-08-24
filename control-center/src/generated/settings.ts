@@ -697,6 +697,44 @@ export const settingsSchema = [
     "factory": 0
   },
   {
+    "id": "unity_font_hook",
+    "group": "advanced",
+    "section": "General",
+    "key": "UnityFontHook",
+    "type": "integer",
+    "control": "select",
+    "options": [
+      {
+        "value": 0,
+        "label": "끄기"
+      },
+      {
+        "value": 1,
+        "label": "선택한 게임에만"
+      },
+      {
+        "value": 2,
+        "label": "대부분의 게임에서"
+      },
+      {
+        "value": 3,
+        "label": "모든 게임에서"
+      }
+    ],
+    "min": 0,
+    "max": 3,
+    "default": 0,
+    "factory": 0,
+    "unit": null,
+    "advanced": true,
+    "previewable": false,
+    "apply": "restart_required",
+    "legacy_control_center_ordinal": -1,
+    "supported": true,
+    "label": "Unity 글꼴 후킹",
+    "description": "Unity의 사설 FreeType 글리프를 프로필에 맞게 보정합니다. 검증된 UnityPlayer 빌드만 후킹하며 기본값은 끄기입니다."
+  },
+  {
     "id": "cache_max_faces",
     "group": "advanced",
     "section": "General",

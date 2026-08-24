@@ -358,6 +358,18 @@ pub const SETTINGS: &[SettingDefinition] = &[
         ordinal: 22,
     },
     SettingDefinition {
+        id: "unity_font_hook",
+        section: "General",
+        key: "UnityFontHook",
+        value_type: SettingValueType::Integer,
+        min: 0.0,
+        max: 3.0,
+        default: 0.0,
+        factory: 0.0,
+        previewable: false,
+        ordinal: -1,
+    },
+    SettingDefinition {
         id: "cache_max_faces",
         section: "General",
         key: "CacheMaxFaces",

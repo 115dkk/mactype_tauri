@@ -109,6 +109,27 @@ add_executable(font-substitution-tests
 target_compile_features(font-substitution-tests PRIVATE cxx_std_20)
 target_compile_definitions(font-substitution-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
+add_executable(unity-font-hook-tests
+  tests/unity_font_hook_tests.cpp
+  ../../renderer/unity_font_catalog.cpp
+  ../../renderer/unity_font_evidence.cpp
+  ../../renderer/unity_font_hook_core.cpp
+  ../../renderer/renderer_policy.cpp
+  ../../renderer/font_substitution.cpp
+)
+target_compile_features(unity-font-hook-tests PRIVATE cxx_std_20)
+target_compile_definitions(unity-font-hook-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+
+add_executable(unity-font-catalog-probe
+  tests/unity_font_catalog_probe.cpp
+  ../../renderer/unity_font_catalog.cpp
+  ../../renderer/unity_font_evidence.cpp
+  ../../renderer/unity_font_hook_core.cpp
+  ../../renderer/font_substitution.cpp
+)
+target_compile_features(unity-font-catalog-probe PRIVATE cxx_std_20)
+target_compile_definitions(unity-font-catalog-probe PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+
 add_executable(renderer-profile-probe tests/renderer_profile_probe.cpp)
 target_compile_features(renderer-profile-probe PRIVATE cxx_std_20)
 target_compile_definitions(renderer-profile-probe PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
@@ -148,7 +169,7 @@ set_target_properties(relay-policy-probe PROPERTIES
 )
 
 if(MSVC)
-  foreach(target service-probe-common probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests freetype-runtime-tests pe-export-view-tests unload-lifecycle-tests renderer-policy-tests renderer-activation-tests font-substitution-tests renderer-profile-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe)
+  foreach(target service-probe-common probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests freetype-runtime-tests pe-export-view-tests unload-lifecycle-tests renderer-policy-tests renderer-activation-tests font-substitution-tests unity-font-hook-tests unity-font-catalog-probe renderer-profile-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe)
     target_compile_options(${target} PRIVATE /W4 /WX /permissive- /utf-8 /sdl)
   endforeach()
   foreach(target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-profile-probe browser-launch-gate dwritecore-contract-probe relay-policy-probe)
@@ -158,7 +179,7 @@ if(MSVC)
     )
   endforeach()
   if(MACTYPE_ENABLE_ASAN)
-    foreach(target renderer-raii-tests hook-lifecycle-tests freetype-runtime-tests pe-export-view-tests unload-lifecycle-tests renderer-policy-tests font-substitution-tests)
+    foreach(target renderer-raii-tests hook-lifecycle-tests freetype-runtime-tests pe-export-view-tests unload-lifecycle-tests renderer-policy-tests font-substitution-tests unity-font-hook-tests)
       target_compile_options(${target} PRIVATE /fsanitize=address /Zi)
       target_link_options(${target} PRIVATE /INCREMENTAL:NO)
     endforeach()

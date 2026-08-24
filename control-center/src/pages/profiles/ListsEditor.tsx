@@ -4,7 +4,7 @@ import { listManualLaunchCandidates } from "../../app/tauri";
 import { Hint } from "../../components/Hint";
 import type { I18nValue } from "../../i18n/i18n";
 
-export type ListKind = "excludeFonts" | "includeFonts" | "excludeModules" | "includeModules" | "unloadDlls" | "excludeSubstitutionModules";
+export type ListKind = "excludeFonts" | "includeFonts" | "excludeModules" | "includeModules" | "unloadDlls" | "excludeSubstitutionModules" | "unityIncludeGames" | "unityExcludeGames";
 
 export interface ListDefinition {
   kind: ListKind;

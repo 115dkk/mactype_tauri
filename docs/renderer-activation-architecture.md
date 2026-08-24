@@ -21,6 +21,7 @@ RendererActivation
      -> FreeTypeRuntime
      -> PeExportView
      -> DirectWriteLifecycle
+     -> UnityFontHookLifecycle
      -> font-substitution Adapters
   -> RendererUnloadLifecycle
 ```
@@ -76,7 +77,7 @@ The one-shot resource drain shared by `SafeUnload` and verified quiet skip
 only serializes destruction. It does not create a second runtime phase;
 `HookCoordinator` remains the sole owner of renderer admission and stop state.
 
-The same rule governs FreeType and DirectWrite owners. Supported explicit
+The same rule governs FreeType, DirectWrite, and Unity owners. Supported explicit
 teardown runs outside the loader lock in dependency order. `DLL_PROCESS_DETACH`
 then releases only the TLS slot and already-empty critical-section storage. An
 unsupported unmatched release receives best-effort hook containment but does
@@ -166,6 +167,8 @@ a separately versioned diagnostic Interface.
 | `CMemLoadDll` copied a disk DLL to RWX memory to obtain an RVA | read-only `PeExportView` |
 | `SafeUnload` used a plain static reentry flag and a balanced caller release could remove the only live-image reference | `RendererUnloadLifecycle` atomic admission plus active-image self-reference and outside-loader resource drain |
 | DirectWrite lifecycle declarations mixed with hook Implementation declarations | narrow lifecycle Interface with classic DirectWrite and DWriteCore Adapters |
+| SafeUnload knew every DirectWrite and Unity prepare/abort/commit state | one `RendererUnloadLifecycle` provider-drain transaction with two concrete Adapters |
+| Unity private FreeType bypassed GDI and DirectWrite substitution | exact `UnityFontHookLifecycle` adapter with UnityPlayer-local IAT substitution and checked glyph coverage |
 
 ## Required verification
 

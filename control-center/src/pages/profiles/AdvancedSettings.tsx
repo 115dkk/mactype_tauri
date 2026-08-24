@@ -183,6 +183,12 @@ export function AdvancedSettings({
   return (
     <>
       <SchemaSettings dirtyKeys={dirtyKeys} onChange={onSettingChange} onPreviewChange={onSettingPreview} savedValues={savedValues} settings={settings} t={t} values={values} />
+      {(values.unity_font_hook ?? 0) === 2 && (
+        <p className="unity-hook-notice" role="note">{t("advanced.unityHookMostNotice")}</p>
+      )}
+      {(values.unity_font_hook ?? 0) === 3 && (
+        <p className="unity-hook-notice warning-text" role="note">{t("advanced.unityHookAllWarning")}</p>
+      )}
       <div className="advanced-editor">
         <ShadowSettings {...sectionProps} />
         <LcdFilterSettings {...sectionProps} />

@@ -526,6 +526,12 @@
   "settings.font_substitutes.option.0": "Desactivada",
   "settings.font_substitutes.option.1": "Segura",
   "settings.font_substitutes.option.2": "Todas",
+  "settings.unity_font_hook.label": "Interceptación de fuentes de Unity",
+  "settings.unity_font_hook.description": "Ajusta la cobertura de glifos del FreeType interno de Unity con este perfil. Solo se interceptan compilaciones verificadas de UnityPlayer.",
+  "settings.unity_font_hook.option.0": "Desactivado",
+  "settings.unity_font_hook.option.1": "Solo juegos seleccionados",
+  "settings.unity_font_hook.option.2": "La mayoría de juegos",
+  "settings.unity_font_hook.option.3": "Todos los juegos",
   "settings.cache_max_faces.label": "Fuentes en caché",
   "settings.cache_max_faces.description": "Guarda el ajuste principal CacheMaxFaces en el perfil.",
   "settings.cache_max_sizes.label": "Tamaños en caché",
@@ -568,8 +574,14 @@
   "advanced.pixelLayoutHelp": "Seis coordenadas x/y de los subpíxeles RGB.",
   "advanced.fontSubstitutes": "Mapas de sustitución de fuentes",
   "advanced.fontSubstitutesHelp": "Seleccione las fuentes original y de sustitución entre las instaladas.",
+  "advanced.unityHookMostNotice": "Los juegos Unity se habilitan automáticamente, pero el servicio excluye silenciosamente todo el proceso de la inyección cuando detecta archivos antitrampas conocidos.",
+  "advanced.unityHookAllWarning": "Advertencia: MacType lo intentará con todos los juegos Unity. El juego puede bloquearse o el antitrampas puede producir un falso positivo. Nunca se omiten las protecciones de Windows ni las compilaciones Unity no verificadas.",
   "list.unloadDlls.label": "DLL excluidas de la inyección",
   "list.unloadDlls.help": "Añada las DLL excluidas de la inyección.",
   "list.excludeSubstitutionModules.label": "Módulos sin sustitución de fuentes",
-  "list.excludeSubstitutionModules.help": "Añada los módulos que desactivan la sustitución."
+  "list.excludeSubstitutionModules.help": "Añada los módulos que desactivan la sustitución.",
+  "list.unityIncludeGames.label": "Juegos Unity interceptados",
+  "list.unityIncludeGames.help": "Añada ejecutables que reciben la interceptación de fuentes Unity en el modo de juegos seleccionados.",
+  "list.unityExcludeGames.label": "Exclusiones de Unity",
+  "list.unityExcludeGames.help": "Añada ejecutables que no se interceptan ni siquiera en el modo de todos los juegos."
 }

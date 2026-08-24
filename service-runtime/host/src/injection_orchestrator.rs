@@ -6,7 +6,7 @@ use std::collections::{HashMap, VecDeque};
 
 use mactype_service_contract::{
     InjectionArchitecture, InjectionSuccess, InjectionTelemetry, RendererRuntimeBinding,
-    StructuredServiceError,
+    StructuredServiceError, UnityFontHookPolicy,
 };
 
 use crate::observer::{
@@ -53,6 +53,7 @@ impl<'a> InjectionOrchestrator<'a> {
             broker,
             RetryPolicy::default(),
             None,
+            UnityFontHookPolicy::default(),
         )
     }
 
@@ -71,6 +72,27 @@ impl<'a> InjectionOrchestrator<'a> {
             broker,
             retry_policy,
             Some(retry_scheduler),
+            UnityFontHookPolicy::default(),
+        )
+    }
+
+    pub fn with_retry_policy_and_unity_font_hook(
+        service_pid: u32,
+        binding: RendererRuntimeBinding,
+        inspector: &'a dyn ProcessInspector,
+        broker: &'a dyn InjectionBroker,
+        retry_policy: RetryPolicy,
+        retry_scheduler: &'a dyn RetryScheduler,
+        unity_font_hook: UnityFontHookPolicy,
+    ) -> Self {
+        Self::build(
+            service_pid,
+            binding,
+            inspector,
+            broker,
+            retry_policy,
+            Some(retry_scheduler),
+            unity_font_hook,
         )
     }
 
@@ -81,10 +103,15 @@ impl<'a> InjectionOrchestrator<'a> {
         broker: &'a dyn InjectionBroker,
         retry_policy: RetryPolicy,
         retry_scheduler: Option<&'a dyn RetryScheduler>,
+        unity_font_hook: UnityFontHookPolicy,
     ) -> Self {
         Self {
             binding,
-            target_validator: ProcessTargetValidator::new(service_pid, inspector),
+            target_validator: ProcessTargetValidator::with_unity_font_hook_policy(
+                service_pid,
+                inspector,
+                unity_font_hook,
+            ),
             inspector,
             broker,
             processed: HashMap::new(),

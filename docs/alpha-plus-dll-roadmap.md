@@ -196,9 +196,13 @@ implemented compatibility paths are tracked in
 
 Rebel Inc and Plague Inc remain local compatibility targets because their
 licensed binaries cannot be redistributed in CI. The repeatable lab script
-records exact process/module and WER evidence plus Unity renderer markers.
-Visual capture remains a separate manual artifact; Unity's private FreeType
-glyph atlas or pre-rendered assets are not a system-font hook surface.
+records exact process/module and WER evidence plus Unity renderer markers. The
+allowlisted Unity adapter now covers private FreeType render output and
+UnityPlayer-local system-font file opens; test-only shared-memory evidence keeps
+observed opens, successful redirects, fallbacks, and exact paths separate from
+visual identity. Visual capture remains a separate manual artifact when the
+Windows computer-use permission is unavailable, and pre-rendered assets remain
+outside the font-hook seam.
 
 ### 7. Diagnostics and field evidence
 

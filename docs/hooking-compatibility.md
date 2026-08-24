@@ -43,7 +43,7 @@ or executable-name workaround.
 | Windows App SDK / WinUI 3 uses app-local DWriteCore | [#882](https://github.com/snowie2000/mactype/issues/882) and the packaged-app reports above | Detect existing and future `DWriteCore.dll`, hook its concrete `DWriteCoreCreateFactory`, intercept immediate dynamic lookup, and cover direct `LdrLoadDll` loads beyond the bounded startup window. The same collection seam is installed on shared and isolated factories. x86 and x64 native-load probes are CI gates. |
 | Qt 6.8+ changed its default Windows text backend | [#884](https://github.com/snowie2000/mactype/issues/884), [#950](https://github.com/snowie2000/mactype/issues/950), [#1097](https://github.com/snowie2000/mactype/issues/1097) | A loaded MacType DLL is not proof of a GDI render delta. Qt 6.8 moved its default backend to DirectWrite, where upstream MacType behavior is a parameter/collection intervention rather than the FreeType GDI replacement. Exercise this as a rendering-adapter and pixel/face-identity contract; do not misclassify it as failed injection or force a protected process. |
 | Protected, critical, anti-cheat, antivirus, Secure Boot, or sandbox conflict | [#426](https://github.com/snowie2000/mactype/issues/426), [#1059](https://github.com/snowie2000/mactype/issues/1059), [#1106](https://github.com/snowie2000/mactype/issues/1106) | Keep the protection boundary. Protected/critical/session-0 or explicitly incompatible instances are quiet skips; external software that blocks injection remains external evidence, not a reason to weaken system policy. |
-| Application owns the renderer instead of using GDI/DirectWrite | [#607](https://github.com/snowie2000/mactype/issues/607), [#1112](https://github.com/snowie2000/mactype/issues/1112), [#1143](https://github.com/snowie2000/mactype/issues/1143) | Classify as a renderer boundary, not an injection failure. Blender's private FreeType/OpenGL path, Windows Terminal's Atlas/custom glyph path, and Unity's private FreeType glyph atlas cannot be corrected by forcing a Windows font API hook. |
+| Application owns the renderer instead of using GDI/DirectWrite | [#607](https://github.com/snowie2000/mactype/issues/607), [#1112](https://github.com/snowie2000/mactype/issues/1112), [#1143](https://github.com/snowie2000/mactype/issues/1143) | Classify as a renderer boundary, not an injection failure. Blender's private FreeType/OpenGL path and Windows Terminal's Atlas/custom glyph path still need their own adapters. Allowlisted UnityPlayer builds use `UnityFontHookLifecycle`: exact native FreeType render interception plus UnityPlayer-local font-file substitution, never a forced global Windows font hook. |
 | DLL presence or process-manager status but no verified visual change | [#1022](https://github.com/snowie2000/mactype/issues/1022), [#1054](https://github.com/snowie2000/mactype/issues/1054), [#1138](https://github.com/snowie2000/mactype/issues/1138), [#1139](https://github.com/snowie2000/mactype/issues/1139), [#1144](https://github.com/snowie2000/mactype/issues/1144), [#1146](https://github.com/snowie2000/mactype/issues/1146) | Keep module-loaded, hook-installed, rule-resolved, and pixel/face-substituted as separate claims. Several recent reports resolve to old or incompatible profiles, DirectWrite's narrower behavior, retained browser collections, ClearType state, or a private pixel layout rather than injection itself. The branch probes therefore require the active profile generation and semantic render evidence instead of treating a loaded module as success. |
 | Unsupported machine architecture | [#904](https://github.com/snowie2000/mactype/issues/904), [#1085](https://github.com/snowie2000/mactype/issues/1085) | Native ARM64 remains explicitly unsupported until a native core/helper exists. It is not sent to an x64 helper and does not degrade global health. |
 
@@ -82,17 +82,30 @@ stock or through the shipped `MacLoader`, verifies the exact MacType module,
 observes responsiveness for a bounded interval, checks WER, and terminates
 only the exact test process it launched.
 
-On 2026-08-24 the current branch survived the injected test for Rebel Inc
-Escalation 2022.3.62, including an observed Steam overlay run, and Plague Inc
-Evolved 2019.4.41. Both `UnityPlayer.dll` files contained `FT_Init_FreeType`,
-`TextRenderingPrivate`,
-`Gulim`, and `Malgun Gothic`, while the GDI/DirectWrite font entry-point markers
-were absent. Plague's lack of a MacType pixel change is therefore an
-application-private FreeType boundary, not failed module injection. Rebel's
-reported crash remains unreproduced on this machine; the new evidence lane and
-the service-stop relay retirement are the bounded fix and reporter-machine
-retest path. No executable-name blacklist or unsupported claim of Unity glyph
-replacement is added.
+The optional Unity adapter is off by default. Selected-games mode consumes
+`[UnityInclude]`; most-games mode admits Unity processes unless the 신식 서비스
+finds bounded anti-cheat evidence; all-games mode consumes `[UnityExclude]` and
+retains the existing protected-process and mitigation guards. Unknown Unity
+images and unsupported hook backends report the Unity capability unavailable.
+There is no wildcard code scan.
+
+On 2026-08-25 the exact Plague Inc Evolved 2019.4.41 adapter first reproduced a
+new read-only-IAT access violation. A focused test now proves that import targets
+are read without an interlocked write, and the corrected build remained
+responsive for the bounded survival run with the expected MacType64 module and
+no WER report. With the Pretendard Forever profile and most-games mode, the
+test-only shared-memory evidence observed 356 Unity font-file opens, five rule
+matches, five successful replacement opens, and zero fallbacks; the retained
+example included `malgunsl.ttf` to `PretendardVariable.ttf`. SFNT/TTC family-name
+parsing covers localized and style files that DirectWrite or registry labels do
+not enumerate consistently.
+
+Rebel Inc Escalation 2022.3.62 also remained responsive for the bounded injected
+run with no MacType WER failure. Its run did not cross the OS-font-file adapter,
+so this is crash/survival evidence, not a font-substitution claim. Screen capture
+remains a separate manual artifact when Windows denies the computer-use capture
+permission; module presence, redirect success, and visual face identity remain
+separate claims.
 
 ## Remaining platform boundary
 

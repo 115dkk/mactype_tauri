@@ -52,6 +52,8 @@ function profileLists(profile: ProfileSnapshot): Record<string, ReadonlyArray<st
     includeModules: [...profile.lists.includeModules],
     unloadDlls: [...profile.lists.unloadDlls],
     excludeSubstitutionModules: [...profile.lists.excludeSubstitutionModules],
+    unityIncludeGames: [...profile.lists.unityIncludeGames],
+    unityExcludeGames: [...profile.lists.unityExcludeGames],
   };
 }
 

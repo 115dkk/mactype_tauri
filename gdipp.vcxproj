@@ -849,7 +849,12 @@
     <ClCompile Include="renderer\renderer_policy.cpp" />
     <ClCompile Include="renderer\settings.cpp" />
     <ClCompile Include="renderer\unload_lifecycle.cpp" />
+    <ClCompile Include="renderer\unload_providers.cpp" />
     <ClCompile Include="renderer\unload_resources.cpp" />
+    <ClCompile Include="renderer\unity_font_catalog.cpp" />
+    <ClCompile Include="renderer\unity_font_evidence.cpp" />
+    <ClCompile Include="renderer\unity_font_hook.cpp" />
+    <ClCompile Include="renderer\unity_font_hook_core.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="renderer\expfunc.def" />
@@ -893,6 +898,10 @@
     <ClInclude Include="renderer\supinfo.h" />
     <ClInclude Include="renderer\tlsdata.h" />
     <ClInclude Include="renderer\unload_lifecycle.h" />
+    <ClInclude Include="renderer\unity_font_catalog.h" />
+    <ClInclude Include="renderer\unity_font_evidence.h" />
+    <ClInclude Include="renderer\unity_font_hook.h" />
+    <ClInclude Include="renderer\unity_font_hook_core.h" />
     <ClInclude Include="renderer\undocAPI.h" />
     <ClInclude Include="renderer\wow64ext.h" />
   </ItemGroup>

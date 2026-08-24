@@ -256,7 +256,7 @@ fn validate_profile(bytes: &[u8]) -> Result<(), ProfileError> {
     validate_ini_structure(&structure)
 }
 
-fn profile_structure_bytes(bytes: &[u8]) -> Result<Cow<'_, [u8]>, ProfileError> {
+pub(crate) fn profile_structure_bytes(bytes: &[u8]) -> Result<Cow<'_, [u8]>, ProfileError> {
     if bytes.is_empty() || bytes.len() > MAX_PROFILE_BYTES {
         return Err(ProfileError::InvalidSize);
     }
@@ -329,12 +329,14 @@ fn is_mactype_list_section(line: &[u8]) -> bool {
         b"IncludeModule".as_slice(),
         b"UnloadDLL".as_slice(),
         b"ExcludeSub".as_slice(),
+        b"UnityInclude".as_slice(),
+        b"UnityExclude".as_slice(),
     ]
     .iter()
     .any(|candidate| name.eq_ignore_ascii_case(candidate))
 }
 
-fn trim_ascii(mut bytes: &[u8]) -> &[u8] {
+pub(crate) fn trim_ascii(mut bytes: &[u8]) -> &[u8] {
     while bytes.first().is_some_and(u8::is_ascii_whitespace) {
         bytes = &bytes[1..];
     }

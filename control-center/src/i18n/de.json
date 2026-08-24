@@ -526,6 +526,12 @@
   "settings.font_substitutes.option.0": "Deaktiviert",
   "settings.font_substitutes.option.1": "Sicher",
   "settings.font_substitutes.option.2": "Alle",
+  "settings.unity_font_hook.label": "Unity-Schrifthook",
+  "settings.unity_font_hook.description": "Passt die Glyphendeckung von Unitys internem FreeType an dieses Profil an. Nur verifizierte UnityPlayer-Builds werden gehookt.",
+  "settings.unity_font_hook.option.0": "Aus",
+  "settings.unity_font_hook.option.1": "Nur ausgewählte Spiele",
+  "settings.unity_font_hook.option.2": "Die meisten Spiele",
+  "settings.unity_font_hook.option.3": "Alle Spiele",
   "settings.cache_max_faces.label": "Zwischengespeicherte Schriften",
   "settings.cache_max_faces.description": "Speichert die Kerneinstellung CacheMaxFaces im Profil.",
   "settings.cache_max_sizes.label": "Zwischengespeicherte Größen",
@@ -568,8 +574,14 @@
   "advanced.pixelLayoutHelp": "Sechs x/y-Koordinaten der RGB-Subpixel.",
   "advanced.fontSubstitutes": "Schriftersetzungen",
   "advanced.fontSubstitutesHelp": "Quell- und Ersatzschriftart aus den installierten Schriftarten auswählen.",
+  "advanced.unityHookMostNotice": "Unity-Spiele werden automatisch aktiviert. Bei bekannten Anti-Cheat-Dateien schließt der Dienst den gesamten Prozess still von der Injektion aus.",
+  "advanced.unityHookAllWarning": "Warnung: MacType versucht die Anwendung auf jedes Unity-Spiel. Das Spiel kann abstürzen oder Anti-Cheat kann einen Fehlalarm melden. Windows-Schutzrichtlinien und nicht verifizierte Unity-Builds werden nie umgangen.",
   "list.unloadDlls.label": "Von Injektion ausgeschlossene DLLs",
   "list.unloadDlls.help": "Von der Injektion auszuschließende DLLs hinzufügen.",
   "list.excludeSubstitutionModules.label": "Schriftersetzung ausgeschlossene Module",
-  "list.excludeSubstitutionModules.help": "Module hinzufügen, die Schriftersetzung deaktivieren."
+  "list.excludeSubstitutionModules.help": "Module hinzufügen, die Schriftersetzung deaktivieren.",
+  "list.unityIncludeGames.label": "Unity-Spiele mit Hook",
+  "list.unityIncludeGames.help": "Namen der ausführbaren Dateien hinzufügen, die im Auswahlmodus den Unity-Schrifthook erhalten.",
+  "list.unityExcludeGames.label": "Unity-Hook-Ausschlüsse",
+  "list.unityExcludeGames.help": "Namen der ausführbaren Dateien hinzufügen, die auch im Modus „Alle Spiele“ nicht gehookt werden."
 }

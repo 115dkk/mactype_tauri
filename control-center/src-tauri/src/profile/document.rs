@@ -163,6 +163,8 @@ impl ProfileDocument {
                 include_modules: self.list_entries("IncludeModule"),
                 unload_dlls: self.list_entries("UnloadDLL"),
                 exclude_substitution_modules: self.list_entries("ExcludeSub"),
+                unity_include_games: self.list_entries("UnityInclude"),
+                unity_exclude_games: self.list_entries("UnityExclude"),
             },
             advanced: self.advanced(),
         }

@@ -225,6 +225,7 @@ pub enum RendererCapability {
     Direct2d = 1_u64 << 4,
     GdiPlus = 1_u64 << 5,
     FontSubstitution = 1_u64 << 6,
+    UnityFont = 1_u64 << 7,
 }
 
 impl RendererCapability {
@@ -241,6 +242,7 @@ impl RendererCapability {
             Self::Direct2d => "direct2d",
             Self::GdiPlus => "gdi-plus",
             Self::FontSubstitution => "font-substitution",
+            Self::UnityFont => "unity-font",
         }
     }
 
@@ -253,6 +255,7 @@ impl RendererCapability {
             "direct2d" => Some(Self::Direct2d),
             "gdi-plus" => Some(Self::GdiPlus),
             "font-substitution" => Some(Self::FontSubstitution),
+            "unity-font" => Some(Self::UnityFont),
             _ => None,
         }
     }
@@ -264,7 +267,8 @@ pub const RENDERER_CAPABILITY_KNOWN_MASK: u64 = RendererCapability::Gdi as u64
     | RendererCapability::DirectWriteCore as u64
     | RendererCapability::Direct2d as u64
     | RendererCapability::GdiPlus as u64
-    | RendererCapability::FontSubstitution as u64;
+    | RendererCapability::FontSubstitution as u64
+    | RendererCapability::UnityFont as u64;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RendererCapabilitySet(u64);

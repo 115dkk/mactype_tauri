@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use mactype_service_contract::StructuredServiceError;
+use mactype_service_contract::{StructuredServiceError, UnityFontHookMode, UnityFontHookPolicy};
 
 use crate::observer::ProcessIdentity;
 
@@ -58,6 +58,14 @@ pub enum ProcessInspectionError {
     Infrastructure(StructuredServiceError),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnityProcessClassification {
+    NotUnity,
+    Unity,
+    UnityWithAntiCheat,
+    Unavailable,
+}
+
 pub trait ProcessInspector {
     fn inspect(&self, pid: u32) -> Result<ProcessInspection, ProcessInspectionError>;
 
@@ -67,6 +75,11 @@ pub trait ProcessInspector {
     fn probe_target_liveness(&self, identity: &ProcessIdentity) -> TargetLiveness {
         let _ = identity;
         TargetLiveness::Unknown
+    }
+
+    fn classify_unity_process(&self, identity: &ProcessIdentity) -> UnityProcessClassification {
+        let _ = identity;
+        UnityProcessClassification::NotUnity
     }
 }
 
@@ -84,6 +97,8 @@ pub enum ProcessSkipReason {
     ImageNameUnavailable,
     DynamicCodeProhibited,
     BinarySignatureRestricted,
+    UnityAntiCheatDetected,
+    UnitySafetyEvidenceUnavailable,
 }
 
 impl ProcessSkipReason {
@@ -101,6 +116,8 @@ impl ProcessSkipReason {
             Self::ImageNameUnavailable => "image-name-unavailable",
             Self::DynamicCodeProhibited => "dynamic-code-policy-blocks-hooks",
             Self::BinarySignatureRestricted => "binary-signature-policy-blocks-module",
+            Self::UnityAntiCheatDetected => "unity-anticheat-detected",
+            Self::UnitySafetyEvidenceUnavailable => "unity-safety-evidence-unavailable",
         }
     }
 }
@@ -117,13 +134,27 @@ pub enum ProcessTargetDecision {
 pub struct ProcessTargetValidator<'a> {
     service_pid: u32,
     inspector: &'a dyn ProcessInspector,
+    unity_font_hook: UnityFontHookPolicy,
 }
 
 impl<'a> ProcessTargetValidator<'a> {
-    pub const fn new(service_pid: u32, inspector: &'a dyn ProcessInspector) -> Self {
+    pub fn new(service_pid: u32, inspector: &'a dyn ProcessInspector) -> Self {
         Self {
             service_pid,
             inspector,
+            unity_font_hook: UnityFontHookPolicy::default(),
+        }
+    }
+
+    pub fn with_unity_font_hook_policy(
+        service_pid: u32,
+        inspector: &'a dyn ProcessInspector,
+        unity_font_hook: UnityFontHookPolicy,
+    ) -> Self {
+        Self {
+            service_pid,
+            inspector,
+            unity_font_hook,
         }
     }
 
@@ -215,6 +246,23 @@ impl<'a> ProcessTargetValidator<'a> {
                 &inspection,
                 ProcessSkipReason::DynamicCodeProhibited,
             ));
+        }
+        if self.unity_font_hook.mode() == UnityFontHookMode::MostGames {
+            match self.inspector.classify_unity_process(&inspection.identity) {
+                UnityProcessClassification::UnityWithAntiCheat => {
+                    return Ok(skipped(
+                        &inspection,
+                        ProcessSkipReason::UnityAntiCheatDetected,
+                    ));
+                }
+                UnityProcessClassification::Unavailable => {
+                    return Ok(skipped(
+                        &inspection,
+                        ProcessSkipReason::UnitySafetyEvidenceUnavailable,
+                    ));
+                }
+                UnityProcessClassification::NotUnity | UnityProcessClassification::Unity => {}
+            }
         }
         Ok(ProcessTargetDecision::Eligible(inspection.identity))
     }

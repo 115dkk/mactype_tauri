@@ -64,7 +64,8 @@
     { "name": "direct_write_core", "bit": 3, "code": "direct-write-core" },
     { "name": "direct2d", "bit": 4, "code": "direct2d" },
     { "name": "gdi_plus", "bit": 5, "code": "gdi-plus" },
-    { "name": "font_substitution", "bit": 6, "code": "font-substitution" }
+    { "name": "font_substitution", "bit": 6, "code": "font-substitution" },
+    { "name": "unity_font", "bit": 7, "code": "unity-font" }
   ],
   "structs": {
     "runtimeBinding": {

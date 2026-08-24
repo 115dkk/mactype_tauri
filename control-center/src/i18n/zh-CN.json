@@ -526,6 +526,12 @@
   "settings.font_substitutes.option.0": "禁用",
   "settings.font_substitutes.option.1": "安全替换",
   "settings.font_substitutes.option.2": "全部替换",
+  "settings.unity_font_hook.label": "Unity 字体挂钩",
+  "settings.unity_font_hook.description": "使用此配置调整 Unity 内置 FreeType 的字形覆盖率。仅挂钩已验证的 UnityPlayer 版本。",
+  "settings.unity_font_hook.option.0": "关闭",
+  "settings.unity_font_hook.option.1": "仅所选游戏",
+  "settings.unity_font_hook.option.2": "大多数游戏",
+  "settings.unity_font_hook.option.3": "所有游戏",
   "settings.cache_max_faces.label": "字体缓存数量",
   "settings.cache_max_faces.description": "在配置文件中保存 CacheMaxFaces 核心设置。",
   "settings.cache_max_sizes.label": "字号缓存数量",
@@ -568,8 +574,14 @@
   "advanced.pixelLayoutHelp": "设置 RGB 子像素的六个 x/y 坐标。",
   "advanced.fontSubstitutes": "字体替换映射",
   "advanced.fontSubstitutesHelp": "从已安装字体中选择原字体和替代字体。",
+  "advanced.unityHookMostNotice": "Unity 游戏会自动启用；检测到已知反作弊文件时，服务会静默地将整个进程排除在注入之外。",
+  "advanced.unityHookAllWarning": "警告：MacType 将尝试应用于所有 Unity 游戏。游戏可能崩溃，反作弊也可能误报。不会绕过 Windows 保护策略或未验证的 Unity 版本。",
   "list.unloadDlls.label": "不注入的 DLL",
   "list.unloadDlls.help": "添加不进行注入的 DLL。",
   "list.excludeSubstitutionModules.label": "禁用字体替换的模块",
-  "list.excludeSubstitutionModules.help": "添加要禁用字体替换的模块。"
+  "list.excludeSubstitutionModules.help": "添加要禁用字体替换的模块。",
+  "list.unityIncludeGames.label": "Unity 挂钩游戏",
+  "list.unityIncludeGames.help": "添加在“仅所选游戏”模式下启用 Unity 字体挂钩的可执行文件名。",
+  "list.unityExcludeGames.label": "Unity 挂钩排除项",
+  "list.unityExcludeGames.help": "添加即使在“所有游戏”模式下也不挂钩的可执行文件名。"
 }

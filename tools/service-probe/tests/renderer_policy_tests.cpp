@@ -33,11 +33,25 @@ renderer::RendererPolicyCandidate Candidate(
     candidate.profileDigest = "sha256:" + std::string(64, 'a');
     candidate.hooks.directWrite = true;
     candidate.hooks.fontSubstitution = true;
+    candidate.hooks.unityFontMode = renderer::UnityFontHookMode::mostGames;
+    candidate.hooks.unityFontEnabledForProcess = true;
     candidate.freeType.cacheMaxFaces = 64;
     candidate.freeType.cacheMaxSizes = 1200;
     candidate.freeType.cacheMaxBytes = 10 * 1024 * 1024;
     candidate.raster.fontLoader = 1;
     candidate.raster.gamma = gamma;
+    candidate.raster.renderWeight = 1.0f;
+    candidate.raster.contrast = 1.0f;
+    for (unsigned int value = 0; value < 256; ++value) {
+        candidate.raster.coverageTuning[value] =
+            static_cast<unsigned char>(value);
+        candidate.raster.coverageTuningR[value] =
+            static_cast<unsigned char>(value);
+        candidate.raster.coverageTuningG[value] =
+            static_cast<unsigned char>(value);
+        candidate.raster.coverageTuningB[value] =
+            static_cast<unsigned char>(value);
+    }
     candidate.raster.harmonyLcd = true;
     candidate.directWrite.gamma = gamma * gamma;
     candidate.substitutionsReady = true;
@@ -85,6 +99,14 @@ int main()
     Require(first.snapshot->raster().generation == first.generation &&
                 first.snapshot->raster().gamma == 1.25f,
             "the raster view must retain its root policy generation");
+    Require(first.snapshot->hooks().unityFontMode ==
+            renderer::UnityFontHookMode::mostGames &&
+            first.snapshot->hooks().unityFontEnabledForProcess,
+        "the Unity hook selection must belong to the immutable policy");
+    Require(first.snapshot->unity_coverage().gray[128] == 128 &&
+            first.snapshot->unity_coverage().rgb[0][192] == 192 &&
+            first.snapshot->unity_coverage().rgb[2][64] == 64,
+        "identity profile tuning must preserve Unity glyph coverage");
     Require(first.snapshot->font_substitutions()->generation() == first.revision,
             "font substitution must be tied to the root policy revision");
     Require(renderer::font_substitution::ProcessRegistry().Load()->generation() ==

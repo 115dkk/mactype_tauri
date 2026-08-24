@@ -192,6 +192,8 @@ export interface ProfileLists {
   includeModules: ReadonlyArray<string>;
   unloadDlls: ReadonlyArray<string>;
   excludeSubstitutionModules: ReadonlyArray<string>;
+  unityIncludeGames: ReadonlyArray<string>;
+  unityExcludeGames: ReadonlyArray<string>;
 }
 
 export interface ShadowSetting {

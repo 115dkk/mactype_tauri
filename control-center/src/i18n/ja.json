@@ -526,6 +526,12 @@
   "settings.font_substitutes.option.0": "無効",
   "settings.font_substitutes.option.1": "安全な置換",
   "settings.font_substitutes.option.2": "すべて置換",
+  "settings.unity_font_hook.label": "Unity フォントフック",
+  "settings.unity_font_hook.description": "Unity 内蔵 FreeType のグリフ濃度をこのプロファイルで補正します。検証済みの UnityPlayer ビルドだけをフックします。",
+  "settings.unity_font_hook.option.0": "オフ",
+  "settings.unity_font_hook.option.1": "選択したゲームのみ",
+  "settings.unity_font_hook.option.2": "ほとんどのゲーム",
+  "settings.unity_font_hook.option.3": "すべてのゲーム",
   "settings.cache_max_faces.label": "フォントキャッシュ数",
   "settings.cache_max_faces.description": "CacheMaxFaces コア設定をプロファイルに保存します。",
   "settings.cache_max_sizes.label": "サイズキャッシュ数",
@@ -568,8 +574,14 @@
   "advanced.pixelLayoutHelp": "RGB サブピクセルの 6 個の x/y 座標です。",
   "advanced.fontSubstitutes": "フォント置換マッピング",
   "advanced.fontSubstitutesHelp": "インストール済み一覧から置換元と置換先のフォントを選択します。",
+  "advanced.unityHookMostNotice": "Unity ゲームには自動で適用しますが、既知のアンチチートファイルがある場合、サービスはプロセス全体を通知なしで注入対象から外します。",
+  "advanced.unityHookAllWarning": "注意: すべての Unity ゲームで適用を試みます。ゲームのクラッシュやアンチチートの誤検知が起こる可能性があります。Windows の保護ポリシーと未検証の Unity ビルドは迂回しません。",
   "list.unloadDlls.label": "注入対象外 DLL",
   "list.unloadDlls.help": "注入から除外する DLL を追加します。",
   "list.excludeSubstitutionModules.label": "フォント置換除外モジュール",
-  "list.excludeSubstitutionModules.help": "フォント置換を無効にするモジュールを追加します。"
+  "list.excludeSubstitutionModules.help": "フォント置換を無効にするモジュールを追加します。",
+  "list.unityIncludeGames.label": "Unity フック対象ゲーム",
+  "list.unityIncludeGames.help": "選択モードで Unity フォントフックを適用する実行ファイル名を追加します。",
+  "list.unityExcludeGames.label": "Unity フック除外ゲーム",
+  "list.unityExcludeGames.help": "すべてのゲームモードでもフックしない実行ファイル名を追加します。"
 }

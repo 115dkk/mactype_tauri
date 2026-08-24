@@ -192,9 +192,9 @@ EXTERN_C DWORD WINAPI SafeUnload(LPVOID)
 	{
 		CCriticalSectionLock lock;
 		BOOL const last = InterlockedExchange(&g_bHookEnabled, FALSE);
-		DirectWriteLifecycleStopPreparation const preparation =
-			PrepareDirectWriteLifecycleStop();
-		if (preparation == DirectWriteLifecycleStopPreparation::unsafeToUnload)
+		renderer::RendererProviderDrainTransaction providerDrain =
+			renderer::MakeProcessRendererProviderDrainTransaction();
+		if (!providerDrain.Prepare())
 		{
 			if (last)
 				InterlockedExchange(&g_bHookEnabled, last);
@@ -205,19 +205,15 @@ EXTERN_C DWORD WINAPI SafeUnload(LPVOID)
 		}
 		if (last && hook_term()!=NOERROR)
 		{
-			if (preparation == DirectWriteLifecycleStopPreparation::prepared)
-				AbortDirectWriteLifecycleStop();
+			providerDrain.Abort();
 			InterlockedExchange(&g_bHookEnabled, last);
 			if (coordinatorStopStarted)
 				hookCoordinator.AbortStop();
 			unloadGate.EndForRetry();
 			return ERROR_ACCESS_DENIED;
 		}
-		if (preparation == DirectWriteLifecycleStopPreparation::prepared &&
-			!CommitDirectWriteLifecycleStop())
+		if (!providerDrain.Commit())
 		{
-			// Detours are already detached. Keep module references alive and
-			// reopen unload admission so a later thread can finish the drain.
 			unloadGate.EndForRetry();
 			return ERROR_BUSY;
 		}

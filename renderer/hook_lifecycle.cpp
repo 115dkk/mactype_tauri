@@ -10,7 +10,9 @@ bool IsUnavailable(CapabilityReason reason) noexcept
 {
     return reason == CapabilityReason::moduleMissing ||
            reason == CapabilityReason::interfaceUnsupported ||
-           reason == CapabilityReason::explicitlyDisabled;
+           reason == CapabilityReason::explicitlyDisabled ||
+           reason == CapabilityReason::antiCheatDetected ||
+           reason == CapabilityReason::safetyEvidenceUnavailable;
 }
 
 } // namespace

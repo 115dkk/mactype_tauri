@@ -185,6 +185,8 @@ pub struct ProfileLists {
     pub include_modules: Vec<String>,
     pub unload_dlls: Vec<String>,
     pub exclude_substitution_modules: Vec<String>,
+    pub unity_include_games: Vec<String>,
+    pub unity_exclude_games: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

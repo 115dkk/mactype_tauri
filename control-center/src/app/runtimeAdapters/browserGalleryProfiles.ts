@@ -30,6 +30,8 @@ const fallbackGalleryProfile: ProfileSnapshot = {
     includeModules: [],
     unloadDlls: [],
     excludeSubstitutionModules: [],
+    unityIncludeGames: [],
+    unityExcludeGames: [],
   },
   advanced: {
     shadow: null,

@@ -2,6 +2,7 @@
 
 #include "font_substitution.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -42,11 +43,21 @@ private:
 
 namespace renderer {
 
+enum class UnityFontHookMode : unsigned char
+{
+	off = 0,
+	selectedGames = 1,
+	mostGames = 2,
+	allGames = 3,
+};
+
 struct HookPolicy final
 {
 	bool childProcesses = false;
 	bool directWrite = false;
 	bool fontSubstitution = false;
+	UnityFontHookMode unityFontMode = UnityFontHookMode::off;
+	bool unityFontEnabledForProcess = false;
 };
 
 struct FreeTypeStartupPolicy final
@@ -70,8 +81,20 @@ struct RasterPolicy final
 	bool loadColorFont = false;
 	bool invertColor = false;
 	float gamma = 1.0f;
+	float renderWeight = 1.0f;
+	float contrast = 1.0f;
+	std::array<unsigned char, 256> coverageTuning{};
+	std::array<unsigned char, 256> coverageTuningR{};
+	std::array<unsigned char, 256> coverageTuningG{};
+	std::array<unsigned char, 256> coverageTuningB{};
 	std::uint32_t shadowDarkColor = 0;
 	std::uint32_t shadowLightColor = 0;
+};
+
+struct UnityCoverageLut final
+{
+	std::array<unsigned char, 256> gray{};
+	std::array<std::array<unsigned char, 256>, 3> rgb{};
 };
 
 struct DirectWritePolicy final
@@ -132,6 +155,10 @@ public:
 	{
 		return directWrite_;
 	}
+	[[nodiscard]] const UnityCoverageLut& unity_coverage() const noexcept
+	{
+		return unityCoverage_;
+	}
 	[[nodiscard]] bool substitutions_ready() const noexcept
 	{
 		return substitutionsReady_;
@@ -170,6 +197,7 @@ private:
 	FreeTypeStartupPolicy freeType_;
 	RasterPolicy raster_;
 	DirectWritePolicy directWrite_;
+	UnityCoverageLut unityCoverage_;
 	CFontSettings commonFontSettings_;
 	std::vector<FontIndividualPolicy> individualFonts_;
 	std::shared_ptr<const font_substitution::Snapshot> substitutions_;

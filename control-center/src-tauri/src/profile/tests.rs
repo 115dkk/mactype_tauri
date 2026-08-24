@@ -582,7 +582,7 @@ fn import_rejects_a_profile_larger_than_the_service_contract() {
 
 #[test]
 fn supported_advanced_edits_preserve_unsupported_profile_entries() {
-    let source = b"[FreeType]\r\nNormalWeight=3\r\nLcdFilterWeight=8,77,86,77,8\r\nPixelLayout=-21,0,0,0,21,0\r\n[General]\r\nNormalWeight=2\r\nShadow=1,2,4,112233,5,AABBCC\r\nDisplayAffinity=0,2\r\n[FontSubstitutes]\r\nArial=Segoe UI\r\n[Infinality]\r\nINFINALITY_FT_GAMMA_CORRECTION=0 100\r\nINFINALITY_FT_FILTER_PARAMS=11 22 38 22 11\r\n";
+    let source = b"[FreeType]\r\nNormalWeight=3\r\nLcdFilterWeight=8,77,86,77,8\r\nPixelLayout=-21,0,0,0,21,0\r\n[General]\r\nNormalWeight=2\r\nShadow=1,2,4,112233,5,AABBCC\r\nDisplayAffinity=0,2\r\n[FontSubstitutes]\r\nArial=Segoe UI\r\n[UnityInclude]\r\nselected-game.exe\r\n[UnityExclude]\r\nfragile-game.exe\r\n[Infinality]\r\nINFINALITY_FT_GAMMA_CORRECTION=0 100\r\nINFINALITY_FT_FILTER_PARAMS=11 22 38 22 11\r\n";
     let path = temp_profile(source);
     let mut document = ProfileDocument::open(&path).unwrap();
     let snapshot = document.snapshot();
@@ -596,6 +596,11 @@ fn supported_advanced_edits_preserve_unsupported_profile_entries() {
         Some(vec![-21, 0, 0, 0, 21, 0])
     );
     assert_eq!(snapshot.advanced.font_substitutes, vec!["Arial=Segoe UI"]);
+    assert_eq!(
+        snapshot.lists.unity_include_games,
+        vec!["selected-game.exe"]
+    );
+    assert_eq!(snapshot.lists.unity_exclude_games, vec!["fragile-game.exe"]);
     document.set_value("normal_weight", 7.0).unwrap();
     document
         .set_advanced(AdvancedProfile {
@@ -618,6 +623,12 @@ fn supported_advanced_edits_preserve_unsupported_profile_entries() {
     document
         .set_list("excludeSubstitutionModules", vec!["legacy.exe".to_owned()])
         .unwrap();
+    document
+        .set_list("unityIncludeGames", vec!["PlagueIncEvolved.exe".to_owned()])
+        .unwrap();
+    document
+        .set_list("unityExcludeGames", vec!["protected-game.exe".to_owned()])
+        .unwrap();
     let rendered = String::from_utf8(document.encoded().unwrap()).unwrap();
     assert!(rendered.contains("[FreeType]\r\nNormalWeight=7"));
     assert!(rendered.contains("NormalWeight=2"));
@@ -630,6 +641,8 @@ fn supported_advanced_edits_preserve_unsupported_profile_entries() {
     assert!(rendered.contains("INFINALITY_FT_FILTER_PARAMS=11 22 38 22 11"));
     assert!(rendered.contains("[UnloadDLL]\r\nexample.dll"));
     assert!(rendered.contains("[ExcludeSub]\r\nlegacy.exe"));
+    assert!(rendered.contains("[UnityInclude]\r\nPlagueIncEvolved.exe"));
+    assert!(rendered.contains("[UnityExclude]\r\nprotected-game.exe"));
     let _ = fs::remove_file(path);
 }
 

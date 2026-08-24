@@ -4,7 +4,7 @@ use std::{collections::VecDeque, time::Duration};
 
 use mactype_service_contract::{
     ComponentReadiness, HealthState, InjectionTelemetry, ReadinessReport, RendererRuntimeBinding,
-    StructuredServiceError,
+    StructuredServiceError, UnityFontHookPolicy,
 };
 
 use crate::injection_orchestrator::{
@@ -21,6 +21,24 @@ const MAX_TOLERATED_CONSECUTIVE_HEALTH_REPORT_FAILURES: usize = 20;
 pub fn initialize_process_orchestration(
     binding: RendererRuntimeBinding,
     service_pid: u32,
+    source: Box<dyn ProcessEventSource>,
+    inspector: Box<dyn ProcessInspector>,
+    broker: Box<dyn InjectionBroker>,
+) -> Result<InitializedRuntime, StructuredServiceError> {
+    initialize_process_orchestration_with_unity_font_hook(
+        binding,
+        UnityFontHookPolicy::default(),
+        service_pid,
+        source,
+        inspector,
+        broker,
+    )
+}
+
+pub fn initialize_process_orchestration_with_unity_font_hook(
+    binding: RendererRuntimeBinding,
+    unity_font_hook: UnityFontHookPolicy,
+    service_pid: u32,
     mut source: Box<dyn ProcessEventSource>,
     inspector: Box<dyn ProcessInspector>,
     broker: Box<dyn InjectionBroker>,
@@ -36,6 +54,7 @@ pub fn initialize_process_orchestration(
         Box::new(ProcessOrchestrationDriver {
             service_pid,
             binding,
+            unity_font_hook,
             snapshot_pids,
             source,
             inspector,
@@ -47,6 +66,7 @@ pub fn initialize_process_orchestration(
 struct ProcessOrchestrationDriver {
     service_pid: u32,
     binding: RendererRuntimeBinding,
+    unity_font_hook: UnityFontHookPolicy,
     snapshot_pids: VecDeque<u32>,
     source: Box<dyn ProcessEventSource>,
     inspector: Box<dyn ProcessInspector>,
@@ -60,13 +80,14 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
         health: &dyn RuntimeHealthReporter,
     ) -> Result<(), StructuredServiceError> {
         let scheduler = StopRetryScheduler(stop);
-        let mut orchestrator = InjectionOrchestrator::with_retry_policy(
+        let mut orchestrator = InjectionOrchestrator::with_retry_policy_and_unity_font_hook(
             self.service_pid,
             self.binding,
             self.inspector.as_ref(),
             self.broker.as_ref(),
             RetryPolicy::default(),
             &scheduler,
+            self.unity_font_hook.clone(),
         );
         let mut consecutive_health_report_failures = 0;
         loop {

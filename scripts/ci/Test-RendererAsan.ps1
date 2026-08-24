@@ -20,7 +20,8 @@ cmake --build $build --config RelWithDebInfo --target `
     pe-export-view-tests `
     unload-lifecycle-tests `
     renderer-policy-tests `
-    font-substitution-tests
+    font-substitution-tests `
+    unity-font-hook-tests
 
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) {
@@ -54,7 +55,8 @@ try {
         'pe-export-view-tests.exe',
         'unload-lifecycle-tests.exe',
         'renderer-policy-tests.exe',
-        'font-substitution-tests.exe'
+        'font-substitution-tests.exe',
+        'unity-font-hook-tests.exe'
     )) {
         & (Join-Path $build "RelWithDebInfo\$test")
         if ($LASTEXITCODE -ne 0) {

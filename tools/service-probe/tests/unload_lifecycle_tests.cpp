@@ -8,6 +8,41 @@
 
 namespace {
 
+struct FakeProvider final
+{
+    renderer::UnloadProviderPreparation preparation =
+        renderer::UnloadProviderPreparation::prepared;
+    unsigned int prepares = 0;
+    unsigned int aborts = 0;
+    unsigned int commits = 0;
+    bool commitResult = true;
+};
+
+renderer::UnloadProviderPreparation PrepareFake(
+    void* context,
+    DWORD) noexcept
+{
+    auto& fake = *static_cast<FakeProvider*>(context);
+    ++fake.prepares;
+    return fake.preparation;
+}
+
+void AbortFake(void* context) noexcept
+{
+    ++static_cast<FakeProvider*>(context)->aborts;
+}
+
+bool CommitFake(void* context, DWORD) noexcept
+{
+    ++static_cast<FakeProvider*>(context)->commits;
+    return static_cast<FakeProvider*>(context)->commitResult;
+}
+
+renderer::UnloadProviderAdapter Adapter(FakeProvider& fake)
+{
+    return {&fake, PrepareFake, AbortFake, CommitFake};
+}
+
 void Require(bool condition, const char* message)
 {
     if (!condition) {
@@ -20,6 +55,46 @@ void Require(bool condition, const char* message)
 
 int main()
 {
+    FakeProvider first;
+    FakeProvider unsafe;
+    unsafe.preparation = renderer::UnloadProviderPreparation::unsafeToUnload;
+    std::array<renderer::UnloadProviderAdapter, 2> providers{
+        Adapter(first), Adapter(unsafe)};
+    {
+        renderer::RendererProviderDrainTransaction drain(
+            providers.data(), providers.size());
+        Require(!drain.Prepare(),
+            "an unsafe provider must reject the whole renderer drain");
+    }
+    Require(first.prepares == 1 && first.aborts == 1 && first.commits == 0 &&
+        unsafe.prepares == 1 && unsafe.aborts == 0 && unsafe.commits == 0,
+        "provider preparation rollback did not preserve transactional order");
+
+    FakeProvider commitFailure;
+    commitFailure.commitResult = false;
+    FakeProvider notYetCommitted;
+    providers = {Adapter(commitFailure), Adapter(notYetCommitted)};
+    {
+        renderer::RendererProviderDrainTransaction drain(
+            providers.data(), providers.size());
+        Require(drain.Prepare() && !drain.Commit(),
+            "a provider commit failure must remain retryable");
+    }
+    Require(commitFailure.commits == 1 && commitFailure.aborts == 0 &&
+        notYetCommitted.commits == 0 && notYetCommitted.aborts == 1,
+        "commit failure did not retain the partial provider and abort later work");
+
+    FakeProvider abandonedFirst;
+    FakeProvider abandonedSecond;
+    providers = {Adapter(abandonedFirst), Adapter(abandonedSecond)};
+    {
+        renderer::RendererProviderDrainTransaction drain(
+            providers.data(), providers.size());
+        Require(drain.Prepare(), "valid providers did not prepare");
+    }
+    Require(abandonedFirst.aborts == 1 && abandonedSecond.aborts == 1,
+        "an abandoned prepared drain did not roll back every provider");
+
     renderer::UnloadAttemptGate gate;
     Require(gate.TryBegin(), "the first unload attempt must acquire admission");
     Require(gate.active(), "an acquired unload attempt must be observable");

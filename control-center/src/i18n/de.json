@@ -515,6 +515,8 @@
   "execution.launchedRegistered": "{count} registrierte Apps wurden mit MacType gestartet.",
   "group.advanced.label": "Erweitert und experimentell",
   "group.advanced.description": "Alle DirectWrite-, Cache- und experimentellen Einstellungen.",
+  "settings.hook_child_processes.label": "Kindprozesse einhaken",
+  "settings.hook_child_processes.description": "Speichert die Kerneinstellung HookChildProcesses im Profil.",
   "settings.use_mapping.label": "Schriftdateien abbilden",
   "settings.use_mapping.description": "Speichert die Kerneinstellung UseMapping im Profil.",
   "settings.use_include.label": "Einschlusslisten verwenden",

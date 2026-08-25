@@ -515,6 +515,8 @@
   "execution.launchedRegistered": "已使用 MacType 启动 {count} 个已登记程序。",
   "group.advanced.label": "高级与实验",
   "group.advanced.description": "DirectWrite、缓存和实验功能的全部设置。",
+  "settings.hook_child_processes.label": "挂钩子进程",
+  "settings.hook_child_processes.description": "在配置文件中保存 HookChildProcesses 核心设置。",
   "settings.use_mapping.label": "映射字体文件",
   "settings.use_mapping.description": "在配置文件中保存 UseMapping 核心设置。",
   "settings.use_include.label": "使用包含列表",

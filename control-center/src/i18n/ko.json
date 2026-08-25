@@ -515,6 +515,8 @@
   "execution.launchedRegistered": "등록 프로그램 {count}개를 MacType로 시작했습니다.",
   "group.advanced.label": "고급·실험",
   "group.advanced.description": "DirectWrite, 캐시 및 실험 기능의 전체 설정입니다.",
+  "settings.hook_child_processes.label": "자식 프로세스 후킹",
+  "settings.hook_child_processes.description": "HookChildProcesses 코어 설정을 프로필에 저장합니다.",
   "settings.use_mapping.label": "글꼴 메모리 매핑",
   "settings.use_mapping.description": "UseMapping 코어 설정을 프로필에 저장합니다.",
   "settings.use_include.label": "포함 목록 우선",

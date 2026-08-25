@@ -515,6 +515,8 @@
   "execution.launchedRegistered": "Foram iniciadas {count} aplicações registadas com o MacType.",
   "group.advanced.label": "Avançado e experimental",
   "group.advanced.description": "Todas as definições de DirectWrite, cache e experimentais.",
+  "settings.hook_child_processes.label": "Intercetar processos descendentes",
+  "settings.hook_child_processes.description": "Guarda a definição principal HookChildProcesses no perfil.",
   "settings.use_mapping.label": "Mapear ficheiros de tipos de letra",
   "settings.use_mapping.description": "Guarda a definição principal UseMapping no perfil.",
   "settings.use_include.label": "Usar listas de inclusão",

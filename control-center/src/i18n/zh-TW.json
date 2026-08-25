@@ -515,6 +515,8 @@
   "execution.launchedRegistered": "已使用 MacType 啟動 {count} 個已登錄程式。",
   "group.advanced.label": "進階與實驗",
   "group.advanced.description": "DirectWrite、快取與實驗功能的全部設定。",
+  "settings.hook_child_processes.label": "掛鉤子程序",
+  "settings.hook_child_processes.description": "將 HookChildProcesses 核心設定儲存在設定檔中。",
   "settings.use_mapping.label": "映射字型檔案",
   "settings.use_mapping.description": "將 UseMapping 核心設定儲存在設定檔中。",
   "settings.use_include.label": "使用包含清單",

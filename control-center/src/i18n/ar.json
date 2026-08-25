@@ -515,6 +515,8 @@
   "execution.launchedRegistered": "تم تشغيل {count} من التطبيقات المسجلة عبر MacType.",
   "group.advanced.label": "متقدم وتجريبي",
   "group.advanced.description": "جميع إعدادات DirectWrite والتخزين المؤقت والميزات التجريبية.",
+  "settings.hook_child_processes.label": "ربط العمليات الفرعية",
+  "settings.hook_child_processes.description": "يحفظ إعداد النواة HookChildProcesses في ملف التعريف.",
   "settings.use_mapping.label": "تعيين ملفات الخطوط",
   "settings.use_mapping.description": "يحفظ إعداد النواة UseMapping في ملف التعريف.",
   "settings.use_include.label": "استخدام قوائم التضمين",

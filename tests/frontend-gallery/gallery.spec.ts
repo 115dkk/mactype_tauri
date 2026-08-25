@@ -1144,7 +1144,7 @@ test("a verified legacy service funnels activation through Migrate until it is r
 
   await legacy.getByRole("button", { name: "Migrate" }).click();
   await page.getByRole("dialog", { name: "Migrate legacy MacTray?" }).getByRole("button", { name: "Continue migration" }).click();
-  await expect(page.getByText("Migration to the new service passed verification.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Migration to the new service completed.", { exact: true })).toBeVisible();
 
   await expect(legacy).toContainText("Stopped");
   await expect(openService.getByRole("button", { name: "Stop applying to new processes" })).toBeEnabled();
@@ -1170,7 +1170,7 @@ test("internal migration failures show only the localized diagnostics instructio
   }
 });
 
-test("legacy migration explains the verified transaction before it can continue", async ({ page }) => {
+test("legacy migration explains concrete actions and rollback before it can continue", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy=migration-available", { waitUntil: "networkidle" });
 
   const migrationTrigger = page.locator("[data-service-summary]").getByRole("button", { name: "Migrate" });
@@ -1181,14 +1181,14 @@ test("legacy migration explains the verified transaction before it can continue"
   const continueMigration = dialog.getByRole("button", { name: "Continue migration" });
   await expect(dialog).toBeVisible();
   await expect(cancel).toBeFocused();
-  await expect(dialog).toContainText("AppInit and the legacy service configuration and ownership");
+  await expect(dialog).toContainText("Reads the AppInit state and legacy service configuration");
   await expect(dialog).toContainText("current INI state");
-  await expect(dialog).toContainText("when a profile file exists");
+  await expect(dialog).toContainText("backs up the profile file when present");
   await expect(dialog).toContainText("Stops the legacy service");
-  await expect(dialog).toContainText("installs and starts the new service");
-  await expect(dialog).toContainText("Ready health, matching profile digest, and x86 and x64 smoke checks");
-  await expect(dialog).toContainText("rolls back");
-  await expect(dialog).toContainText("does not remove the legacy service");
+  await expect(dialog).toContainText("copies the current profile to the new service");
+  await expect(dialog).toContainText("installs and starts it");
+  await expect(dialog).toContainText("restores the services and profile to their previous state");
+  await expect(dialog).not.toContainText(/verif|safe|Ready|digest|smoke|does not remove/i);
 
   await page.keyboard.press("Shift+Tab");
   await expect(continueMigration).toBeFocused();
@@ -1197,7 +1197,7 @@ test("legacy migration explains the verified transaction before it can continue"
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(migrationTrigger).toBeFocused();
-  await expect(page.getByText("Migration to the new service passed verification.", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Migration to the new service completed.", { exact: true })).toHaveCount(0);
 
   await migrationTrigger.click();
   await cancel.click();
@@ -1205,7 +1205,7 @@ test("legacy migration explains the verified transaction before it can continue"
 
   await migrationTrigger.click();
   await continueMigration.click();
-  await expect(page.getByText("Migration to the new service passed verification.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Migration to the new service completed.", { exact: true })).toBeVisible();
   await expect(migrationTrigger).toHaveCount(0);
 });
 

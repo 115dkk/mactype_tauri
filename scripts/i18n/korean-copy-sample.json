@@ -230,18 +230,6 @@
       "requiredTokens": ["INI"]
     },
     {
-      "key": "execution.migrationConfirmVerify",
-      "reasoningProfile": "flow",
-      "category": "migration-contract",
-      "state": "confirmation",
-      "context": "마이그레이션 성공 확인 단계",
-      "ko": "Ready 상태, 프로필 다이제스트 일치, x86·x64 스모크 테스트 통과를 확인합니다.",
-      "en": "Require Ready health, a matching profile digest, and passing x86 and x64 smoke tests.",
-      "requiredFacts": ["Ready 상태 확인", "프로필 다이제스트 일치 확인", "x86과 x64 스모크 테스트 확인"],
-      "removableClaims": [],
-      "requiredTokens": ["Ready", "x86", "x64"]
-    },
-    {
       "key": "execution.migrationConfirmRollback",
       "reasoningProfile": "flow",
       "category": "migration-contract",

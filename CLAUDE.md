@@ -121,6 +121,12 @@ below wherever the two conflict.
   that can only fail during process initialization. Do not restore the
   historical implicit defaults. Feature and interface presence, not
   manifest-sensitive Windows version numbers, select modern rendering paths.
+- `HookChildProcesses` remains a supported alpha profile and frontend contract
+  because `ChildInjectionTransaction` implements it. Keep it as an editable,
+  non-advanced boolean in Tuner `All settings`, preserve it in generated
+  TypeScript/Rust settings and the default profile, and prove edit/save/discard
+  behavior in the browser gallery. Do not import main's retirement commit for
+  this setting into alpha.
 - Stopping the 신식 서비스 closes future injection; it does not remotely
   unload renderers from arbitrary live applications. Existing processes keep
   their immutable renderer/profile generation until supported per-process

@@ -619,8 +619,8 @@ export const settingsSchema = [
     "apply": "restart_required",
     "legacy_control_center_ordinal": 19,
     "supported": true,
-    "label": "HookChildProcesses",
-    "description": "General / HookChildProcesses"
+    "label": "자식 프로세스에도 적용",
+    "description": "이 프로그램이 새로 여는 자식 프로세스에도 같은 MacType 프로필을 적용합니다."
   },
   {
     "id": "use_mapping",

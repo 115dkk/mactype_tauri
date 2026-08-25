@@ -30,6 +30,19 @@ if (missing.length) throw new Error(`Settings schema is missing core settings: $
 if (schema.some((setting) => setting.section === "Infinality")) throw new Error("Unsupported Infinality settings must not be exposed by the editor");
 if (schema.length !== 39) throw new Error(`Expected 39 supported scalar settings, found ${schema.length}`);
 
+const childHook = schema.find((setting) => setting.section === "General" && setting.key === "HookChildProcesses");
+if (childHook?.id !== "hook_child_processes"
+  || childHook.group !== "basic"
+  || childHook.control !== "boolean"
+  || childHook.advanced !== false
+  || childHook.supported !== true) {
+  throw new Error("HookChildProcesses must remain an editable non-advanced boolean in All settings");
+}
+const defaultProfile = fs.readFileSync(path.join(root, "distribution/ini/Default.ini"), "utf8");
+if (!/^HookChildProcesses\s*=\s*1\s*$/m.test(defaultProfile)) {
+  throw new Error("The alpha default profile must keep child-process propagation enabled");
+}
+
 const rustRoot = path.join(root, "control-center/src-tauri/src");
 const profileSources = [
   path.join(rustRoot, "profile.rs"),

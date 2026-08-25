@@ -395,7 +395,7 @@
   "execution.legacyRemoved": "레거시 서비스를 제거했습니다.",
   "execution.health.unknown": "상태 확인 전",
   "execution.health.initializing": "초기화 중",
-  "execution.health.ready": "준비 완료",
+  "execution.health.ready": "정상",
   "execution.health.degraded": "일부 기능 저하",
   "execution.health.degradedStopped": "이전 실행에서 일부 기능 저하",
   "execution.health.failed": "준비 실패",

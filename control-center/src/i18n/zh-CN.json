@@ -395,7 +395,7 @@
   "execution.legacyRemoved": "旧版服务已删除。",
   "execution.health.unknown": "尚未检查",
   "execution.health.initializing": "正在初始化",
-  "execution.health.ready": "准备就绪",
+  "execution.health.ready": "正常",
   "execution.health.degraded": "部分功能受限",
   "execution.health.degradedStopped": "上次运行时部分功能受限",
   "execution.health.failed": "准备失败",

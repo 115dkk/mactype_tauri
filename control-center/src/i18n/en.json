@@ -395,7 +395,7 @@
   "execution.legacyRemoved": "The legacy service was removed.",
   "execution.health.unknown": "Not checked",
   "execution.health.initializing": "Initializing",
-  "execution.health.ready": "Ready",
+  "execution.health.ready": "Healthy",
   "execution.health.degraded": "Degraded",
   "execution.health.degradedStopped": "Degraded during the last run",
   "execution.health.failed": "Failed",

@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "protectedTokenRemoval": "explicit-exact-token-per-audit",
+  "changeRate": {
+    "warnAbove": 0.3,
+    "failAbove": 0.5,
+    "warningGrade": "C"
+  },
+  "blockingPatterns": [
+    {
+      "id": "translationese.through",
+      "pattern": "를 통해|을 통해|통하여"
+    },
+    {
+      "id": "translationese.empty-context",
+      "pattern": "에 있어서|에 있어"
+    },
+    {
+      "id": "translationese.have",
+      "pattern": "가지고 있다|가졌다"
+    },
+    {
+      "id": "grammar.double-passive",
+      "pattern": "되어진다|되어졌다"
+    },
+    {
+      "id": "structure.formulaic-pivot",
+      "pattern": "결론적으로|따라서|요약하면|정리하면"
+    },
+    {
+      "id": "claim.vague-significance",
+      "pattern": "시사하는 바가 크다|주목할 만하다"
+    },
+    {
+      "id": "structure.repeated-connector",
+      "pattern": "(^|\\n)\\s*(또한|따라서|즉|나아가|아울러|게다가|더욱이)"
+    },
+    {
+      "id": "ending.indirect-declaration",
+      "pattern": "인 것이다|한 것이다"
+    }
+  ],
+  "contextPatterns": [
+    {
+      "id": "punctuation.connective-comma",
+      "pattern": "(고|며|지만|아서|어서),"
+    },
+    {
+      "id": "punctuation.quotation-marks",
+      "pattern": "\"[^\"]{1,40}\""
+    }
+  ]
+}

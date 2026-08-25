@@ -168,7 +168,8 @@ a separately versioned diagnostic Interface.
 | `SafeUnload` used a plain static reentry flag and a balanced caller release could remove the only live-image reference | `RendererUnloadLifecycle` atomic admission plus active-image self-reference and outside-loader resource drain |
 | DirectWrite lifecycle declarations mixed with hook Implementation declarations | narrow lifecycle Interface with classic DirectWrite and DWriteCore Adapters |
 | SafeUnload knew every DirectWrite and Unity prepare/abort/commit state | one `RendererUnloadLifecycle` provider-drain transaction with two concrete Adapters |
-| Unity private FreeType bypassed GDI and DirectWrite substitution | exact `UnityFontHookLifecycle` adapter with UnityPlayer-local IAT substitution and checked glyph coverage |
+| Unity private FreeType bypassed GDI and DirectWrite substitution | exact `UnityFontHookLifecycle` render and face-open adapters with checked pathname/face-index substitution and glyph coverage |
+| Unity families shared one system font file | scoped `FontRef` selection context distinguishes native and mapped families before face-open redirection |
 
 ## Required verification
 

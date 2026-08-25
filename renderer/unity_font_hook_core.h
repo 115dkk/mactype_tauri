@@ -22,6 +22,31 @@ enum class RenderAbi : unsigned char
 	internalRender,
 };
 
+enum class FaceOpenAbi : unsigned char
+{
+	unavailable,
+	unityInternal,
+};
+
+enum class FontLoadAbi : unsigned char
+{
+	unavailable,
+	textCorePathSizeFace,
+};
+
+enum class CharacterLookupAbi : unsigned char
+{
+	unavailable,
+	legacyDynamicFont,
+};
+
+enum class FontSubstitutionBoundary : unsigned char
+{
+	unavailable,
+	textCoreFontLoad,
+	freeTypeFaceOpen,
+};
+
 struct AdapterDescriptor final
 {
 	const char* name = nullptr;
@@ -33,25 +58,48 @@ struct AdapterDescriptor final
 	DWORD targetRva = 0;
 	RenderAbi abi = RenderAbi::publicRender;
 	const std::array<unsigned char, 32>* targetPrefix = nullptr;
+	DWORD faceOpenRva = 0;
+	const std::array<unsigned char, 32>* faceOpenPrefix = nullptr;
+	FaceOpenAbi faceOpenAbi = FaceOpenAbi::unavailable;
+	DWORD fontLoadRva = 0;
+	const std::array<unsigned char, 32>* fontLoadPrefix = nullptr;
+	FontLoadAbi fontLoadAbi = FontLoadAbi::unavailable;
+	DWORD characterLookupRva = 0;
+	const std::array<unsigned char, 32>* characterLookupPrefix = nullptr;
+	CharacterLookupAbi characterLookupAbi = CharacterLookupAbi::unavailable;
+	DWORD osFaceResolverRva = 0;
+	const std::array<unsigned char, 32>* osFaceResolverPrefix = nullptr;
+	CharacterLookupAbi osFaceResolverAbi = CharacterLookupAbi::unavailable;
 };
 
 struct ResolvedAdapter final
 {
 	const char* name = nullptr;
 	DWORD targetRva = 0;
+	DWORD faceOpenRva = 0;
+	DWORD fontLoadRva = 0;
+	DWORD characterLookupRva = 0;
+	DWORD osFaceResolverRva = 0;
 	RenderAbi abi = RenderAbi::publicRender;
-};
-
-struct FileImportSlots final
-{
-	void** createFileA = nullptr;
-	void** createFileW = nullptr;
+	FaceOpenAbi faceOpenAbi = FaceOpenAbi::unavailable;
+	FontLoadAbi fontLoadAbi = FontLoadAbi::unavailable;
+	CharacterLookupAbi characterLookupAbi = CharacterLookupAbi::unavailable;
+	CharacterLookupAbi osFaceResolverAbi = CharacterLookupAbi::unavailable;
 };
 
 struct InstalledFontFace final
 {
 	std::wstring family;
 	std::wstring filePath;
+	long faceIndex = 0;
+};
+
+struct FaceOpenPathRedirect final
+{
+	std::wstring sourcePath;
+	std::wstring replacementPath;
+	std::string replacementUtf8;
+	long replacementFaceIndex = 0;
 };
 
 class FontFileRedirectTable final
@@ -64,16 +112,34 @@ public:
 	[[nodiscard]] bool Resolve(
 		const wchar_t* requestedPath,
 		std::wstring& replacementPath) const noexcept;
+	[[nodiscard]] bool ResolveFace(
+		const wchar_t* requestedPath,
+		long requestedFaceIndex,
+		std::wstring& replacementPath,
+		long& replacementFaceIndex) const noexcept;
+	[[nodiscard]] bool ResolveFamilyFace(
+		const wchar_t* requestedFamily,
+		std::wstring& replacementPath,
+		long& replacementFaceIndex) const noexcept;
 	[[nodiscard]] bool empty() const noexcept { return redirects_.empty(); }
 
 private:
+	struct Redirect final
+	{
+		std::wstring sourcePath;
+		long sourceFaceIndex = 0;
+		std::vector<std::wstring> sourceFamilies;
+		std::wstring replacementPath;
+		long replacementFaceIndex = 0;
+	};
+
 	explicit FontFileRedirectTable(
-		std::vector<std::pair<std::wstring, std::wstring>> redirects)
+		std::vector<Redirect> redirects)
 		: redirects_(std::move(redirects))
 	{
 	}
 
-	std::vector<std::pair<std::wstring, std::wstring>> redirects_;
+	std::vector<Redirect> redirects_;
 };
 
 bool ResolveAdapter(
@@ -83,14 +149,25 @@ bool ResolveAdapter(
 	std::size_t descriptorCount,
 	ResolvedAdapter* resolved) noexcept;
 
-bool ResolveFileImportSlots(
-	void* mappedImage,
-	std::size_t mappedSize,
-	FileImportSlots* slots) noexcept;
+bool ResolveFaceOpenPath(
+	const FontFileRedirectTable& redirects,
+	unsigned int openFlags,
+	const char* requestedUtf8,
+	long requestedFaceIndex,
+	FaceOpenPathRedirect& redirect) noexcept;
 
-bool ReadFileImportTarget(
-	void** slot,
-	void** target) noexcept;
+bool ResolveTextCoreFontLoadPath(
+	const FontFileRedirectTable& redirects,
+	const char* requestedUtf8,
+	long requestedFaceIndex,
+	FaceOpenPathRedirect& redirect) noexcept;
+
+bool ReadLegacyFontRefFamily(
+	const void* fontRef,
+	std::wstring& family) noexcept;
+
+FontSubstitutionBoundary SelectFontSubstitutionBoundary(
+	const ResolvedAdapter& adapter) noexcept;
 
 const AdapterDescriptor* ProductionAdapterDescriptors(
 	std::size_t* count) noexcept;

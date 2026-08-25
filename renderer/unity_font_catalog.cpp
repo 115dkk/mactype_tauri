@@ -209,16 +209,18 @@ bool AppendSfntFaceNames(
 bool AppendUnique(
 	std::vector<InstalledFontFace>& fonts,
 	const std::wstring& family,
-	const std::wstring& path)
+	const std::wstring& path,
+	long faceIndex = 0)
 {
 	if (family.empty() || path.empty())
 		return true;
 	if (std::any_of(fonts.begin(), fonts.end(), [&](const InstalledFontFace& font) {
 			return EqualOrdinalIgnoreCase(font.family, family) &&
-				EqualOrdinalIgnoreCase(font.filePath, path);
+				EqualOrdinalIgnoreCase(font.filePath, path) &&
+				font.faceIndex == faceIndex;
 		}))
 		return true;
-	fonts.push_back({family, path});
+	fonts.push_back({family, path, faceIndex});
 	return true;
 }
 
@@ -330,6 +332,9 @@ bool AppendFamilyFiles(
 		ComOwner<IDWriteFontFace> face;
 		if (FAILED(font->CreateFontFace(face.put())) || !face)
 			continue;
+		UINT32 const faceIndex = face->GetIndex();
+		if (faceIndex > static_cast<UINT32>((std::numeric_limits<long>::max)()))
+			continue;
 		UINT32 fileCount = 0;
 		if (FAILED(face->GetFiles(&fileCount, nullptr)) ||
 			fileCount == 0 || fileCount > 64)
@@ -350,7 +355,8 @@ bool AppendFamilyFiles(
 			if (!ReadLocalFilePath(file.get(), path))
 				continue;
 			for (const std::wstring& name : fontNames)
-				AppendUnique(fonts, name, path);
+				AppendUnique(
+					fonts, name, path, static_cast<long>(faceIndex));
 		}
 	}
 	return true;
@@ -500,13 +506,13 @@ void AppendSfntFile(
 		mapping.get(), FILE_MAP_READ, 0, 0, 0));
 	if (!view)
 		return;
-	std::vector<std::wstring> names;
-	if (!ParseSfntFamilyNames(
+	std::vector<SfntFamilyFace> faces;
+	if (!ParseSfntFamilyFaces(
 		static_cast<const unsigned char*>(view.get()),
-		static_cast<std::size_t>(size.QuadPart), names))
+		static_cast<std::size_t>(size.QuadPart), faces))
 		return;
-	for (const std::wstring& name : names)
-		AppendUnique(fonts, name, path);
+	for (const SfntFamilyFace& face : faces)
+		AppendUnique(fonts, face.family, path, face.faceIndex);
 }
 
 void AppendSfntCatalog(std::vector<InstalledFontFace>& fonts)
@@ -549,6 +555,60 @@ void AppendSfntCatalog(std::vector<InstalledFontFace>& fonts)
 
 } // namespace
 
+bool ParseSfntFamilyFaces(
+	const unsigned char* bytes,
+	std::size_t size,
+	std::vector<SfntFamilyFace>& familyFaces) noexcept
+{
+	familyFaces.clear();
+	try
+	{
+		std::uint32_t signature = 0;
+		if (!ReadBe32(bytes, size, 0, signature))
+			return false;
+		auto appendFace = [&](std::size_t faceOffset, long faceIndex) {
+			std::vector<std::wstring> names;
+			if (!AppendSfntFaceNames(bytes, size, faceOffset, names))
+				return false;
+			for (std::wstring& name : names)
+			{
+				if (std::none_of(
+					familyFaces.begin(), familyFaces.end(),
+					[&](const SfntFamilyFace& existing) {
+						return existing.faceIndex == faceIndex &&
+							EqualOrdinalIgnoreCase(existing.family, name);
+					}))
+					familyFaces.push_back({std::move(name), faceIndex});
+			}
+			return true;
+		};
+		if (signature != 0x74746366)
+			return appendFace(0, 0);
+		std::uint32_t faceCount = 0;
+		if (!ReadBe32(bytes, size, 8, faceCount) ||
+			faceCount == 0 || faceCount > 256 ||
+			12 > size || static_cast<std::size_t>(faceCount) * 4 > size - 12)
+			return false;
+		for (std::uint32_t index = 0; index < faceCount; ++index)
+		{
+			std::uint32_t faceOffset = 0;
+			if (!ReadBe32(
+				bytes, size, 12 + static_cast<std::size_t>(index) * 4,
+				faceOffset) || faceOffset >= size)
+				return false;
+			if (!appendFace(
+				faceOffset, static_cast<long>(index)))
+				return false;
+		}
+		return !familyFaces.empty();
+	}
+	catch (...)
+	{
+		familyFaces.clear();
+		return false;
+	}
+}
+
 bool ParseSfntFamilyNames(
 	const unsigned char* bytes,
 	std::size_t size,
@@ -557,28 +617,19 @@ bool ParseSfntFamilyNames(
 	familyNames.clear();
 	try
 	{
-		std::uint32_t signature = 0;
-		if (!ReadBe32(bytes, size, 0, signature))
+		std::vector<SfntFamilyFace> faces;
+		if (!ParseSfntFamilyFaces(bytes, size, faces))
 			return false;
-		if (signature != 0x74746366)
-			return AppendSfntFaceNames(bytes, size, 0, familyNames);
-		std::uint32_t faceCount = 0;
-		if (!ReadBe32(bytes, size, 8, faceCount) ||
-			faceCount == 0 || faceCount > 256 ||
-			12 > size || static_cast<std::size_t>(faceCount) * 4 > size - 12)
-			return false;
-		bool appended = false;
-		for (std::uint32_t index = 0; index < faceCount; ++index)
+		for (const SfntFamilyFace& face : faces)
 		{
-			std::uint32_t faceOffset = 0;
-			if (!ReadBe32(
-				bytes, size, 12 + static_cast<std::size_t>(index) * 4,
-				faceOffset) || faceOffset >= size)
-				return false;
-			appended = AppendSfntFaceNames(
-				bytes, size, faceOffset, familyNames) || appended;
+			if (std::none_of(
+				familyNames.begin(), familyNames.end(),
+				[&](const std::wstring& existing) {
+					return EqualOrdinalIgnoreCase(existing, face.family);
+				}))
+				familyNames.push_back(face.family);
 		}
-		return appended;
+		return !familyNames.empty();
 	}
 	catch (...)
 	{

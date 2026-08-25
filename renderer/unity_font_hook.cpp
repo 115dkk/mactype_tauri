@@ -10,6 +10,7 @@
 #include "unity_font_catalog.h"
 #include "unity_font_evidence.h"
 #include "unity_font_hook_core.h"
+#include "unity_font_selection_context.h"
 
 #include <algorithm>
 #include <atomic>
@@ -44,15 +45,20 @@ enum class UnityLifecyclePhase : unsigned char
 using PublicRenderFunction = FT_Error (*)(FT_GlyphSlot, FT_Render_Mode);
 using InternalRenderFunction = FT_Error (*)(
 	FT_Library, FT_GlyphSlot, FT_Render_Mode, const FT_Vector*);
+using FaceOpenFunction = FT_Error (__fastcall *)(
+	FT_Library, const FT_Open_Args*, FT_Long, FT_Face*, FT_Bool);
+using TextCoreFontLoadFunction = int (*)(const char*, int, int);
+using LegacyCharacterLookupFunction = FT_Face (*)(
+	void*, const void*, const void*, unsigned int);
+using LegacyOsFaceResolverFunction = FT_Face (*)(void*, const void*);
 #else
 using PublicRenderFunction = void*;
 using InternalRenderFunction = void*;
+using FaceOpenFunction = void*;
+using TextCoreFontLoadFunction = void*;
+using LegacyCharacterLookupFunction = void*;
+using LegacyOsFaceResolverFunction = void*;
 #endif
-
-using CreateFileAFunction = HANDLE (WINAPI*)(
-	LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
-using CreateFileWFunction = HANDLE (WINAPI*)(
-	LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
 
 struct UnityLifecycleState final
 {
@@ -66,15 +72,22 @@ struct UnityLifecycleState final
 	renderer::unity::RenderAbi abi = renderer::unity::RenderAbi::publicRender;
 	PublicRenderFunction publicRender = nullptr;
 	InternalRenderFunction internalRender = nullptr;
-	renderer::unity::FileImportSlots fileImports;
-	CreateFileAFunction createFileA = nullptr;
-	CreateFileWFunction createFileW = nullptr;
+	FaceOpenFunction faceOpen = nullptr;
+	TextCoreFontLoadFunction fontLoad = nullptr;
+	LegacyCharacterLookupFunction characterLookup = nullptr;
+	LegacyOsFaceResolverFunction osFaceResolver = nullptr;
 	std::shared_ptr<const renderer::unity::FontFileRedirectTable> redirects;
 	renderer_raii::UniqueHandle evidenceMapping;
 	renderer_raii::UniqueMappedView evidenceView;
 	bool renderAttached = false;
-	bool createFileAAttached = false;
-	bool createFileWAttached = false;
+	bool faceOpenAttached = false;
+	bool fontLoadAttached = false;
+	bool faceOpenFallbackRequired = false;
+	bool characterLookupAttached = false;
+	bool osFaceResolverAttached = false;
+	bool osFaceResolverRequired = false;
+	renderer::unity::FontSubstitutionBoundary substitutionBoundary =
+		renderer::unity::FontSubstitutionBoundary::unavailable;
 	bool startupSucceeded = false;
 };
 
@@ -84,6 +97,26 @@ UnityLifecycleState& ProcessUnityLifecycle()
 	// Process termination leaves the tiny state allocation to the OS.
 	static UnityLifecycleState* state = new UnityLifecycleState;
 	return *state;
+}
+
+bool IsSubstitutionBoundaryOperational(
+	const UnityLifecycleState& lifecycle) noexcept
+{
+	switch (lifecycle.substitutionBoundary)
+	{
+	case renderer::unity::FontSubstitutionBoundary::textCoreFontLoad:
+		return lifecycle.fontLoadAttached &&
+			(!lifecycle.faceOpenFallbackRequired || lifecycle.faceOpenAttached) &&
+			(!lifecycle.osFaceResolverRequired ||
+				lifecycle.osFaceResolverAttached);
+	case renderer::unity::FontSubstitutionBoundary::freeTypeFaceOpen:
+		return lifecycle.faceOpenAttached &&
+			(!lifecycle.osFaceResolverRequired ||
+				lifecycle.osFaceResolverAttached);
+	case renderer::unity::FontSubstitutionBoundary::unavailable:
+		return true;
+	}
+	return false;
 }
 
 renderer::unity::UnityFontEvidenceV1* UnityEvidence() noexcept
@@ -206,248 +239,266 @@ AntiCheatInspection InspectCurrentInstallationForAntiCheat()
 
 #ifdef USE_DETOURS
 
-bool LooksLikeFontFile(const wchar_t* path) noexcept
-{
-	if (path == nullptr)
-		return false;
-	const wchar_t* const extension = wcsrchr(path, L'.');
-	return extension != nullptr &&
-		(_wcsicmp(extension, L".ttf") == 0 ||
-		 _wcsicmp(extension, L".ttc") == 0 ||
-		 _wcsicmp(extension, L".otf") == 0);
-}
+thread_local bool g_skipUnityFaceOpenRedirect = false;
 
-bool PatchImportSlot(
-	void** slot,
-	void* expected,
-	void* replacement) noexcept
+class ScopedFaceOpenRedirectBypass final
 {
-	if (slot == nullptr || expected == nullptr || replacement == nullptr)
-		return false;
-	DWORD oldProtection = 0;
-	if (!VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &oldProtection))
-		return false;
-	void* const previous = InterlockedCompareExchangePointer(
-		reinterpret_cast<PVOID volatile*>(slot), replacement, expected);
-	DWORD ignored = 0;
-	if (previous != expected)
+public:
+	ScopedFaceOpenRedirectBypass() noexcept
+		: previous_(g_skipUnityFaceOpenRedirect)
 	{
-		VirtualProtect(slot, sizeof(void*), oldProtection, &ignored);
-		return false;
+		g_skipUnityFaceOpenRedirect = true;
 	}
-	if (VirtualProtect(slot, sizeof(void*), oldProtection, &ignored))
-		return true;
-	InterlockedCompareExchangePointer(
-		reinterpret_cast<PVOID volatile*>(slot), expected, replacement);
-	VirtualProtect(slot, sizeof(void*), oldProtection, &ignored);
-	return false;
-}
 
-void* ReadImportSlot(void** slot) noexcept
-{
-	void* target = nullptr;
-	return renderer::unity::ReadFileImportTarget(slot, &target)
-		? target
-		: nullptr;
-}
-
-HANDLE WINAPI HookUnityCreateFileW(
-	LPCWSTR fileName,
-	DWORD desiredAccess,
-	DWORD shareMode,
-	LPSECURITY_ATTRIBUTES securityAttributes,
-	DWORD creationDisposition,
-	DWORD flagsAndAttributes,
-	HANDLE templateFile) noexcept
-{
-	CThreadCounter callbackLease;
-	CreateFileWFunction const original = ProcessUnityLifecycle().createFileW;
-	if (original == nullptr)
+	~ScopedFaceOpenRedirectBypass()
 	{
-		SetLastError(ERROR_PROC_NOT_FOUND);
-		return INVALID_HANDLE_VALUE;
+		g_skipUnityFaceOpenRedirect = previous_;
 	}
+
+	ScopedFaceOpenRedirectBypass(const ScopedFaceOpenRedirectBypass&) = delete;
+	ScopedFaceOpenRedirectBypass& operator=(
+		const ScopedFaceOpenRedirectBypass&) = delete;
+
+private:
+	bool previous_;
+};
+
+void ReadUnityFaceFamilyName(FT_Face face, std::wstring& family) noexcept
+{
+	family.clear();
+	if (face == nullptr || face->family_name == nullptr)
+		return;
 	try
 	{
-		if (InterlockedCompareExchange(&g_bHookEnabled, 0, 0) != FALSE &&
+		constexpr std::size_t kMaximumFamilyBytes = 255;
+		std::size_t const length =
+			strnlen_s(face->family_name, kMaximumFamilyBytes);
+		if (length == 0 || length == kMaximumFamilyBytes ||
+			length > static_cast<std::size_t>((std::numeric_limits<int>::max)()))
+			return;
+		int const required = MultiByteToWideChar(
+			CP_UTF8, MB_ERR_INVALID_CHARS, face->family_name,
+			static_cast<int>(length), nullptr, 0);
+		if (required <= 0)
+			return;
+		family.resize(static_cast<std::size_t>(required));
+		if (MultiByteToWideChar(
+				CP_UTF8, MB_ERR_INVALID_CHARS, face->family_name,
+				static_cast<int>(length), &family[0], required) != required)
+			family.clear();
+	}
+	catch (...)
+	{
+		family.clear();
+	}
+}
+
+FT_Error __fastcall HookFaceOpen(
+	FT_Library library,
+	const FT_Open_Args* arguments,
+	FT_Long faceIndex,
+	FT_Face* face,
+	FT_Bool testMacFonts) noexcept
+{
+	CThreadCounter callbackLease;
+	FaceOpenFunction const original = ProcessUnityLifecycle().faceOpen;
+	if (original == nullptr)
+		return 0x06; // FT_Err_Invalid_Argument
+
+	try
+	{
+		auto const redirects = std::atomic_load_explicit(
+			&ProcessUnityLifecycle().redirects, std::memory_order_acquire);
+		renderer::unity::FaceOpenPathRedirect redirect;
+		if (!g_skipUnityFaceOpenRedirect &&
+			renderer::unity::CurrentFontRefAllowsFaceRedirect() &&
+			arguments != nullptr && redirects &&
+			InterlockedCompareExchange(&g_bHookEnabled, 0, 0) != FALSE &&
 			ProcessUnityLifecycle().operational.load(
-				std::memory_order_acquire))
+				std::memory_order_acquire) &&
+			renderer::unity::ResolveFaceOpenPath(
+				*redirects, arguments->flags, arguments->pathname,
+				faceIndex, redirect))
+		{
+			FT_Open_Args redirectedArguments = *arguments;
+			redirectedArguments.pathname = const_cast<FT_String*>(
+				redirect.replacementUtf8.c_str());
+			renderer::unity::UnityFontEvidenceV1* const evidence =
+				UnityEvidence();
+			if (evidence != nullptr)
+				renderer::unity::RecordUnityFontFileOpen(
+					*evidence, redirect.sourcePath.c_str());
+			FT_Error const redirectedResult = original(
+				library, &redirectedArguments,
+				static_cast<FT_Long>(redirect.replacementFaceIndex),
+				face, testMacFonts);
+			bool const redirected = redirectedResult == 0 &&
+				face != nullptr && *face != nullptr;
+			if (evidence != nullptr)
+			{
+				renderer::unity::RecordUnityFontRedirect(
+					*evidence, redirect.sourcePath.c_str(),
+					redirect.replacementPath.c_str(), redirected);
+				if (redirected)
+				{
+					FT_Face const redirectedFace = *face;
+					renderer::unity::RecordUnityFontFaceDetails(
+						*evidence,
+						redirectedFace->charmap != nullptr,
+						static_cast<LONG>(redirectedFace->num_glyphs),
+						FT_Get_Char_Index(redirectedFace, 0xC124));
+				}
+			}
+			if (redirected || face == nullptr || *face != nullptr)
+				return redirectedResult;
+		}
+	}
+	catch (...)
+	{
+	}
+	return original(library, arguments, faceIndex, face, testMacFonts);
+}
+
+int HookTextCoreFontLoad(
+	const char* requestedPath,
+	int pointSize,
+	int faceIndex) noexcept
+{
+	CThreadCounter callbackLease;
+	TextCoreFontLoadFunction const original = ProcessUnityLifecycle().fontLoad;
+	if (original == nullptr)
+		return 0x06; // FT_Err_Invalid_Argument
+
+	try
+	{
+		auto const redirects = std::atomic_load_explicit(
+			&ProcessUnityLifecycle().redirects, std::memory_order_acquire);
+		renderer::unity::FaceOpenPathRedirect redirect;
+		if (redirects &&
+			InterlockedCompareExchange(&g_bHookEnabled, 0, 0) != FALSE &&
+			ProcessUnityLifecycle().operational.load(
+				std::memory_order_acquire) &&
+			renderer::unity::ResolveTextCoreFontLoadPath(
+				*redirects, requestedPath, faceIndex, redirect))
 		{
 			renderer::unity::UnityFontEvidenceV1* const evidence =
 				UnityEvidence();
-			if (evidence != nullptr && LooksLikeFontFile(fileName))
-				renderer::unity::RecordUnityFontFileOpen(*evidence, fileName);
-			auto const redirects = std::atomic_load_explicit(
-				&ProcessUnityLifecycle().redirects, std::memory_order_acquire);
-			std::wstring replacement;
-			if (redirects && redirects->Resolve(fileName, replacement))
-			{
-				HANDLE const redirected = original(
-					replacement.c_str(), desiredAccess, shareMode,
-					securityAttributes, creationDisposition,
-					flagsAndAttributes, templateFile);
-				if (evidence != nullptr)
-					renderer::unity::RecordUnityFontRedirect(
-						*evidence, fileName, replacement.c_str(),
-						redirected != INVALID_HANDLE_VALUE);
-				if (redirected != INVALID_HANDLE_VALUE)
-					return redirected;
-			}
+			if (evidence != nullptr)
+				renderer::unity::RecordUnityFontFileOpen(
+					*evidence, redirect.sourcePath.c_str());
+			int const redirectedResult = original(
+				redirect.replacementUtf8.c_str(), pointSize,
+				static_cast<int>(redirect.replacementFaceIndex));
+			bool const redirected = redirectedResult == 0;
+			if (evidence != nullptr)
+				renderer::unity::RecordUnityFontRedirect(
+					*evidence, redirect.sourcePath.c_str(),
+					redirect.replacementPath.c_str(), redirected);
+			if (redirected)
+				return redirectedResult;
 		}
 	}
 	catch (...)
 	{
 	}
-	return original(
-		fileName, desiredAccess, shareMode, securityAttributes,
-		creationDisposition, flagsAndAttributes, templateFile);
+	ScopedFaceOpenRedirectBypass bypass;
+	return original(requestedPath, pointSize, faceIndex);
 }
 
-HANDLE WINAPI HookUnityCreateFileA(
-	LPCSTR fileName,
-	DWORD desiredAccess,
-	DWORD shareMode,
-	LPSECURITY_ATTRIBUTES securityAttributes,
-	DWORD creationDisposition,
-	DWORD flagsAndAttributes,
-	HANDLE templateFile) noexcept
+FT_Face HookLegacyCharacterLookup(
+	void* dynamicFontData,
+	const void* fontRef,
+	const void* fallbackFonts,
+	unsigned int character) noexcept
 {
 	CThreadCounter callbackLease;
-	CreateFileAFunction const originalA = ProcessUnityLifecycle().createFileA;
-	CreateFileWFunction const originalW = ProcessUnityLifecycle().createFileW;
-	if (originalA == nullptr)
+	LegacyCharacterLookupFunction const original =
+		ProcessUnityLifecycle().characterLookup;
+	if (original == nullptr)
+		return nullptr;
+	FT_Face face = original(
+		dynamicFontData, fontRef, fallbackFonts, character);
+	renderer::unity::UnityFontEvidenceV1* const evidence = UnityEvidence();
+	std::wstring requestedFamily;
+	bool mappedFamily = false;
+	std::wstring resolvedFaceFamily;
+	if (evidence != nullptr)
 	{
-		SetLastError(ERROR_PROC_NOT_FOUND);
-		return INVALID_HANDLE_VALUE;
+		renderer::unity::ReadLegacyFontRefFamily(fontRef, requestedFamily);
+		auto const redirects = std::atomic_load_explicit(
+			&ProcessUnityLifecycle().redirects, std::memory_order_acquire);
+		std::wstring replacementPath;
+		long replacementFaceIndex = 0;
+		mappedFamily = redirects && !requestedFamily.empty() &&
+			redirects->ResolveFamilyFace(
+				requestedFamily.c_str(), replacementPath,
+				replacementFaceIndex);
 	}
-	try
+	if (evidence != nullptr)
 	{
-		if (fileName != nullptr && originalW != nullptr &&
-			InterlockedCompareExchange(&g_bHookEnabled, 0, 0) != FALSE &&
-			ProcessUnityLifecycle().operational.load(
-				std::memory_order_acquire))
-		{
-			int const required = MultiByteToWideChar(
-				CP_ACP, MB_ERR_INVALID_CHARS, fileName, -1, nullptr, 0);
-			if (required > 1 && required <= 32768)
-			{
-				std::vector<wchar_t> requested(static_cast<std::size_t>(required));
-				if (MultiByteToWideChar(
-					CP_ACP, MB_ERR_INVALID_CHARS, fileName, -1,
-					requested.data(), required) == required)
-				{
-					renderer::unity::UnityFontEvidenceV1* const evidence =
-						UnityEvidence();
-					if (evidence != nullptr &&
-						LooksLikeFontFile(requested.data()))
-						renderer::unity::RecordUnityFontFileOpen(
-							*evidence, requested.data());
-					auto const redirects = std::atomic_load_explicit(
-						&ProcessUnityLifecycle().redirects,
-						std::memory_order_acquire);
-					std::wstring replacement;
-					if (redirects && redirects->Resolve(
-						requested.data(), replacement))
-					{
-						HANDLE const redirected = originalW(
-							replacement.c_str(), desiredAccess, shareMode,
-							securityAttributes, creationDisposition,
-							flagsAndAttributes, templateFile);
-						if (evidence != nullptr)
-							renderer::unity::RecordUnityFontRedirect(
-								*evidence, requested.data(), replacement.c_str(),
-								redirected != INVALID_HANDLE_VALUE);
-						if (redirected != INVALID_HANDLE_VALUE)
-							return redirected;
-					}
-				}
-			}
-		}
+		unsigned int const glyphIndex = face != nullptr
+			? FT_Get_Char_Index(face, character)
+			: 0;
+		unsigned int const sampleKoreanGlyph = face != nullptr
+			? FT_Get_Char_Index(face, 0xC124)
+			: 0;
+		ReadUnityFaceFamilyName(face, resolvedFaceFamily);
+		renderer::unity::RecordUnityFontFaceResolution(
+			*evidence, face != nullptr, glyphIndex, sampleKoreanGlyph);
+		renderer::unity::RecordUnityFontCharacterLookup(
+			*evidence,
+			requestedFamily.empty() ? nullptr : requestedFamily.c_str(),
+			mappedFamily, character, face != nullptr,
+			glyphIndex, sampleKoreanGlyph,
+			resolvedFaceFamily.empty() ? nullptr : resolvedFaceFamily.c_str());
 	}
-	catch (...)
-	{
-	}
-	return originalA(
-		fileName, desiredAccess, shareMode, securityAttributes,
-		creationDisposition, flagsAndAttributes, templateFile);
+	return face;
 }
 
-bool AttachUnityFileImports(
-	UnityLifecycleState& lifecycle,
-	void* mappedImage,
-	std::size_t mappedSize,
-	std::shared_ptr<const renderer::unity::FontFileRedirectTable> redirects) noexcept
+FT_Face HookLegacyOsFaceResolver(
+	void* dynamicFontData,
+	const void* fontRef) noexcept
 {
-	renderer::unity::FileImportSlots slots{};
-	if (!renderer::unity::ResolveFileImportSlots(
-		mappedImage, mappedSize, &slots))
-		return false;
-	void* const originalA = ReadImportSlot(slots.createFileA);
-	void* const originalW = ReadImportSlot(slots.createFileW);
-	if (originalA == nullptr || originalW == nullptr)
-		return false;
-	lifecycle.fileImports = slots;
-	std::memcpy(&lifecycle.createFileA, &originalA, sizeof(originalA));
-	std::memcpy(&lifecycle.createFileW, &originalW, sizeof(originalW));
-	std::atomic_store_explicit(
-		&lifecycle.redirects, std::move(redirects), std::memory_order_release);
-	if (!PatchImportSlot(
-		slots.createFileW, originalW,
-		reinterpret_cast<void*>(&HookUnityCreateFileW)))
+	CThreadCounter callbackLease;
+	LegacyOsFaceResolverFunction const original =
+		ProcessUnityLifecycle().osFaceResolver;
+	if (original == nullptr)
+		return nullptr;
+	std::wstring requestedFamily;
+	renderer::unity::ReadLegacyFontRefFamily(fontRef, requestedFamily);
+	bool mappedFamily = false;
+	if (!requestedFamily.empty())
 	{
-		lifecycle.fileImports = {};
-		lifecycle.createFileA = nullptr;
-		lifecycle.createFileW = nullptr;
-		std::atomic_store_explicit(
-			&lifecycle.redirects,
-			std::shared_ptr<const renderer::unity::FontFileRedirectTable>{},
-			std::memory_order_release);
-		return false;
+		auto const redirects = std::atomic_load_explicit(
+			&ProcessUnityLifecycle().redirects, std::memory_order_acquire);
+		std::wstring replacementPath;
+		long replacementFaceIndex = 0;
+		mappedFamily = redirects && redirects->ResolveFamilyFace(
+			requestedFamily.c_str(), replacementPath,
+			replacementFaceIndex);
 	}
-	lifecycle.createFileWAttached = true;
-	if (!PatchImportSlot(
-		slots.createFileA, originalA,
-		reinterpret_cast<void*>(&HookUnityCreateFileA)))
+	renderer::unity::ScopedFontRefSelectionContext familyContext(
+		mappedFamily
+			? renderer::unity::FontRefSelection::mappedFamily
+			: renderer::unity::FontRefSelection::nativeFamily);
+	FT_Face const face = original(dynamicFontData, fontRef);
+	renderer::unity::UnityFontEvidenceV1* const evidence = UnityEvidence();
+	if (evidence != nullptr)
 	{
-		if (PatchImportSlot(
-			slots.createFileW,
-			reinterpret_cast<void*>(&HookUnityCreateFileW), originalW))
-			lifecycle.createFileWAttached = false;
-		std::atomic_store_explicit(
-			&lifecycle.redirects,
-			std::shared_ptr<const renderer::unity::FontFileRedirectTable>{},
-			std::memory_order_release);
-		return false;
+		std::wstring resolvedFamily;
+		ReadUnityFaceFamilyName(face, resolvedFamily);
+		unsigned int const sampleKoreanGlyph = face != nullptr
+			? FT_Get_Char_Index(face, 0xC124)
+			: 0;
+		renderer::unity::RecordUnityFontOsFaceResolution(
+			*evidence,
+			requestedFamily.empty() ? nullptr : requestedFamily.c_str(),
+			mappedFamily,
+			face != nullptr,
+			sampleKoreanGlyph,
+			resolvedFamily.empty() ? nullptr : resolvedFamily.c_str());
 	}
-	lifecycle.createFileAAttached = true;
-	return true;
-}
-
-bool DetachUnityFileImports(UnityLifecycleState& lifecycle) noexcept
-{
-	if (!lifecycle.createFileAAttached && !lifecycle.createFileWAttached)
-		return true;
-	void* originalA = nullptr;
-	void* originalW = nullptr;
-	std::memcpy(&originalA, &lifecycle.createFileA, sizeof(originalA));
-	std::memcpy(&originalW, &lifecycle.createFileW, sizeof(originalW));
-	if (lifecycle.createFileAAttached)
-	{
-		if (!PatchImportSlot(
-			lifecycle.fileImports.createFileA,
-			reinterpret_cast<void*>(&HookUnityCreateFileA), originalA))
-			return false;
-		lifecycle.createFileAAttached = false;
-	}
-	if (lifecycle.createFileWAttached)
-	{
-		if (!PatchImportSlot(
-			lifecycle.fileImports.createFileW,
-			reinterpret_cast<void*>(&HookUnityCreateFileW), originalW))
-			return false;
-		lifecycle.createFileWAttached = false;
-	}
-	return true;
+	return face;
 }
 
 bool IsSupportedRenderMode(FT_Render_Mode mode) noexcept
@@ -482,6 +533,19 @@ void ApplyProfileCoverage(FT_GlyphSlot slot, FT_Render_Mode mode) noexcept
 	}
 }
 
+void RecordRenderEvidence(FT_Error result, FT_GlyphSlot slot) noexcept
+{
+	renderer::unity::UnityFontEvidenceV1* const evidence = UnityEvidence();
+	if (evidence == nullptr)
+		return;
+	renderer::unity::RecordUnityFontRender(
+		*evidence,
+		static_cast<LONG>(result),
+		slot != nullptr ? slot->glyph_index : 0,
+		slot != nullptr ? slot->bitmap.width : 0,
+		slot != nullptr ? slot->bitmap.rows : 0);
+}
+
 FT_Error HookPublicRender(FT_GlyphSlot slot, FT_Render_Mode mode) noexcept
 {
 	CThreadCounter callbackLease;
@@ -489,6 +553,7 @@ FT_Error HookPublicRender(FT_GlyphSlot slot, FT_Render_Mode mode) noexcept
 	if (original == nullptr)
 		return 0x06; // FT_Err_Invalid_Argument
 	FT_Error const result = original(slot, mode);
+	RecordRenderEvidence(result, slot);
 	if (result == 0)
 		ApplyProfileCoverage(slot, mode);
 	return result;
@@ -505,6 +570,7 @@ FT_Error __fastcall HookInternalRender(
 	if (original == nullptr)
 		return 0x06; // FT_Err_Invalid_Argument
 	FT_Error const result = original(library, slot, mode, origin);
+	RecordRenderEvidence(result, slot);
 	if (result == 0)
 		ApplyProfileCoverage(slot, mode);
 	return result;
@@ -514,7 +580,6 @@ bool AttachUnityRenderer(
 	UnityLifecycleState& lifecycle,
 	renderer_raii::UniqueModuleReference module,
 	const renderer::unity::ResolvedAdapter& adapter,
-	std::size_t mappedSize,
 	std::shared_ptr<const renderer::unity::FontFileRedirectTable> redirects) noexcept
 {
 	std::uintptr_t const base = reinterpret_cast<std::uintptr_t>(module.get());
@@ -523,6 +588,87 @@ bool AttachUnityRenderer(
 	void* const target = reinterpret_cast<void*>(base + adapter.targetRva);
 	if (!renderer::unity::IsExecutableMemoryRange(target, 32))
 		return false;
+	bool const substitutionRequired = redirects && !redirects->empty();
+	renderer::unity::FontSubstitutionBoundary const substitutionBoundary =
+		substitutionRequired
+			? renderer::unity::SelectFontSubstitutionBoundary(adapter)
+			: renderer::unity::FontSubstitutionBoundary::unavailable;
+	void* faceOpenTarget = nullptr;
+	void* fontLoadTarget = nullptr;
+	void* characterLookupTarget = nullptr;
+	void* osFaceResolverTarget = nullptr;
+	bool faceOpenFallbackRequired = false;
+	bool const characterLookupRequired =
+		UnityEvidence() != nullptr && adapter.characterLookupRva != 0 &&
+		 adapter.characterLookupAbi ==
+			renderer::unity::CharacterLookupAbi::legacyDynamicFont;
+	bool const osFaceResolverRequired = substitutionRequired &&
+		adapter.osFaceResolverRva != 0 &&
+		adapter.osFaceResolverAbi ==
+			renderer::unity::CharacterLookupAbi::legacyDynamicFont;
+	if (substitutionRequired)
+	{
+		if (substitutionBoundary ==
+			renderer::unity::FontSubstitutionBoundary::textCoreFontLoad)
+		{
+			if (adapter.fontLoadRva == 0 || adapter.fontLoadRva >
+					(std::numeric_limits<std::uintptr_t>::max)() - base)
+				return false;
+			fontLoadTarget = reinterpret_cast<void*>(base + adapter.fontLoadRva);
+			faceOpenFallbackRequired = adapter.faceOpenRva != 0 &&
+				adapter.faceOpenAbi == renderer::unity::FaceOpenAbi::unityInternal;
+			if (faceOpenFallbackRequired)
+			{
+				if (adapter.faceOpenRva >
+						(std::numeric_limits<std::uintptr_t>::max)() - base)
+					return false;
+				faceOpenTarget =
+					reinterpret_cast<void*>(base + adapter.faceOpenRva);
+			}
+		}
+		else if (substitutionBoundary ==
+			renderer::unity::FontSubstitutionBoundary::freeTypeFaceOpen)
+		{
+			if (adapter.faceOpenRva == 0 || adapter.faceOpenRva >
+					(std::numeric_limits<std::uintptr_t>::max)() - base)
+				return false;
+			faceOpenTarget =
+				reinterpret_cast<void*>(base + adapter.faceOpenRva);
+		}
+		else
+			return false;
+		if ((fontLoadTarget != nullptr &&
+			 !renderer::unity::IsExecutableMemoryRange(fontLoadTarget, 32)) ||
+			(faceOpenTarget != nullptr &&
+			 !renderer::unity::IsExecutableMemoryRange(faceOpenTarget, 32)))
+			return false;
+	}
+	if (characterLookupRequired)
+	{
+		if (adapter.characterLookupRva >
+				(std::numeric_limits<std::uintptr_t>::max)() - base)
+			return false;
+		characterLookupTarget =
+			reinterpret_cast<void*>(base + adapter.characterLookupRva);
+		if (!renderer::unity::IsExecutableMemoryRange(characterLookupTarget, 32))
+			return false;
+	}
+	if ((osFaceResolverRequired || UnityEvidence() != nullptr) &&
+		adapter.osFaceResolverRva != 0 &&
+		adapter.osFaceResolverAbi ==
+			renderer::unity::CharacterLookupAbi::legacyDynamicFont)
+	{
+		if (adapter.osFaceResolverRva >
+				(std::numeric_limits<std::uintptr_t>::max)() - base)
+			return false;
+		osFaceResolverTarget =
+			reinterpret_cast<void*>(base + adapter.osFaceResolverRva);
+		if (!renderer::unity::IsExecutableMemoryRange(osFaceResolverTarget, 32))
+			return false;
+		lifecycle.osFaceResolver =
+			reinterpret_cast<LegacyOsFaceResolverFunction>(osFaceResolverTarget);
+	}
+	lifecycle.osFaceResolverRequired = osFaceResolverRequired;
 
 	renderer_raii::DetourTransaction transaction;
 	LONG status = transaction.status();
@@ -543,6 +689,48 @@ bool AttachUnityRenderer(
 				reinterpret_cast<PVOID>(&HookInternalRender));
 		}
 	}
+	if (status == NOERROR && substitutionRequired)
+	{
+		if (substitutionBoundary ==
+			renderer::unity::FontSubstitutionBoundary::textCoreFontLoad)
+		{
+			lifecycle.fontLoad =
+				reinterpret_cast<TextCoreFontLoadFunction>(fontLoadTarget);
+			status = transaction.Attach(
+				reinterpret_cast<PVOID*>(&lifecycle.fontLoad),
+				reinterpret_cast<PVOID>(&HookTextCoreFontLoad));
+			if (status == NOERROR && faceOpenFallbackRequired)
+			{
+				lifecycle.faceOpen =
+					reinterpret_cast<FaceOpenFunction>(faceOpenTarget);
+				status = transaction.Attach(
+					reinterpret_cast<PVOID*>(&lifecycle.faceOpen),
+					reinterpret_cast<PVOID>(&HookFaceOpen));
+			}
+		}
+		else
+		{
+			lifecycle.faceOpen =
+				reinterpret_cast<FaceOpenFunction>(faceOpenTarget);
+			status = transaction.Attach(
+				reinterpret_cast<PVOID*>(&lifecycle.faceOpen),
+				reinterpret_cast<PVOID>(&HookFaceOpen));
+		}
+	}
+	if (status == NOERROR && characterLookupTarget != nullptr)
+	{
+		lifecycle.characterLookup =
+			reinterpret_cast<LegacyCharacterLookupFunction>(characterLookupTarget);
+		status = transaction.Attach(
+			reinterpret_cast<PVOID*>(&lifecycle.characterLookup),
+			reinterpret_cast<PVOID>(&HookLegacyCharacterLookup));
+	}
+	if (status == NOERROR && osFaceResolverTarget != nullptr)
+	{
+		status = transaction.Attach(
+			reinterpret_cast<PVOID*>(&lifecycle.osFaceResolver),
+			reinterpret_cast<PVOID>(&HookLegacyOsFaceResolver));
+	}
 	if (status == NOERROR)
 		status = transaction.Commit();
 	else
@@ -551,45 +739,30 @@ bool AttachUnityRenderer(
 	{
 		lifecycle.publicRender = nullptr;
 		lifecycle.internalRender = nullptr;
+		lifecycle.faceOpen = nullptr;
+		lifecycle.fontLoad = nullptr;
+		lifecycle.characterLookup = nullptr;
+		lifecycle.osFaceResolver = nullptr;
+		lifecycle.osFaceResolverRequired = false;
 		PublishUnityCapability(
 			false, renderer::CapabilityReason::transactionFailed, status,
 			reinterpret_cast<std::uintptr_t>(target), true);
 		return false;
 	}
 	lifecycle.renderAttached = true;
-	if (!AttachUnityFileImports(
-			lifecycle, module.get(), mappedSize, std::move(redirects)))
-	{
-		renderer_raii::DetourTransaction rollback;
-		LONG rollbackStatus = rollback.status();
-		if (rollbackStatus == NOERROR &&
-			adapter.abi == renderer::unity::RenderAbi::publicRender)
-			rollbackStatus = rollback.Detach(
-				reinterpret_cast<PVOID*>(&lifecycle.publicRender),
-				reinterpret_cast<PVOID>(&HookPublicRender));
-		else if (rollbackStatus == NOERROR)
-			rollbackStatus = rollback.Detach(
-				reinterpret_cast<PVOID*>(&lifecycle.internalRender),
-				reinterpret_cast<PVOID>(&HookInternalRender));
-		if (rollbackStatus == NOERROR)
-			rollbackStatus = rollback.Commit();
-		else
-			rollback.Commit();
-		if (rollbackStatus == NOERROR)
-		{
-			lifecycle.renderAttached = false;
-			lifecycle.publicRender = nullptr;
-			lifecycle.internalRender = nullptr;
-		}
-		if (lifecycle.renderAttached || lifecycle.createFileAAttached ||
-			lifecycle.createFileWAttached)
-			lifecycle.unityPlayer = std::move(module);
-		PublishUnityCapability(
-			false, renderer::CapabilityReason::interfaceUnsupported,
-			ERROR_PROC_NOT_FOUND,
-			reinterpret_cast<std::uintptr_t>(target), true);
-		return false;
-	}
+	lifecycle.faceOpenAttached = substitutionRequired &&
+		(substitutionBoundary ==
+			renderer::unity::FontSubstitutionBoundary::freeTypeFaceOpen ||
+		 faceOpenFallbackRequired);
+	lifecycle.fontLoadAttached = substitutionRequired &&
+		substitutionBoundary ==
+			renderer::unity::FontSubstitutionBoundary::textCoreFontLoad;
+	lifecycle.substitutionBoundary = substitutionBoundary;
+	lifecycle.faceOpenFallbackRequired = faceOpenFallbackRequired;
+	lifecycle.characterLookupAttached = characterLookupTarget != nullptr;
+	lifecycle.osFaceResolverAttached = osFaceResolverTarget != nullptr;
+	std::atomic_store_explicit(
+		&lifecycle.redirects, std::move(redirects), std::memory_order_release);
 
 	lifecycle.abi = adapter.abi;
 	lifecycle.unityPlayer = std::move(module);
@@ -669,11 +842,20 @@ bool InitializeUnityFontHook()
 			redirects = renderer::unity::FontFileRedirectTable::Build(
 				installedFonts, *policy->font_substitutions());
 	}
+	if (redirects && !redirects->empty() &&
+		renderer::unity::SelectFontSubstitutionBoundary(adapter) ==
+			renderer::unity::FontSubstitutionBoundary::unavailable)
+	{
+		PublishUnityCapability(
+			false, renderer::CapabilityReason::interfaceUnsupported,
+			ERROR_NOT_SUPPORTED, 0, true);
+		return false;
+	}
 	InitializeUnityEvidenceIfRequested(ProcessUnityLifecycle());
 	if (ProcessUnityLifecycle().stopping.load(std::memory_order_acquire))
 		return false;
 	return AttachUnityRenderer(
-		ProcessUnityLifecycle(), std::move(module), adapter, mappedSize,
+		ProcessUnityLifecycle(), std::move(module), adapter,
 		std::move(redirects));
 }
 
@@ -712,8 +894,7 @@ DWORD WINAPI StartUnityFontHookWorker(LPVOID moduleReference)
 				: UnityLifecyclePhase::failed;
 			lifecycle.operational.store(
 				succeeded && lifecycle.renderAttached &&
-					lifecycle.createFileAAttached &&
-					lifecycle.createFileWAttached,
+					IsSubstitutionBoundaryOperational(lifecycle),
 				std::memory_order_release);
 		}
 	}
@@ -732,8 +913,10 @@ void StartUnityFontHookLifecycle()
 	if (lifecycle.phase == UnityLifecyclePhase::starting ||
 		lifecycle.phase == UnityLifecyclePhase::active ||
 		lifecycle.phase == UnityLifecyclePhase::stopping ||
-		lifecycle.renderAttached || lifecycle.createFileAAttached ||
-		lifecycle.createFileWAttached || lifecycle.unityPlayer)
+		lifecycle.renderAttached || lifecycle.faceOpenAttached ||
+		lifecycle.fontLoadAttached || lifecycle.characterLookupAttached ||
+		lifecycle.osFaceResolverAttached ||
+		lifecycle.unityPlayer)
 		return;
 	if (GetModuleHandleW(L"UnityPlayer.dll") == nullptr)
 	{
@@ -838,7 +1021,7 @@ void AbortUnityFontHookLifecycleStop()
 		: lifecycle.phaseBeforeStop;
 	bool const operational = lifecycle.phase == UnityLifecyclePhase::active &&
 		lifecycle.startupSucceeded && lifecycle.renderAttached &&
-		lifecycle.createFileAAttached && lifecycle.createFileWAttached;
+		IsSubstitutionBoundaryOperational(lifecycle);
 	lifecycle.operational.store(operational, std::memory_order_release);
 	lifecycle.phaseBeforeStop = UnityLifecyclePhase::dormant;
 }
@@ -867,6 +1050,22 @@ bool CommitUnityFontHookLifecycleStop()
 			status = transaction.Detach(
 				reinterpret_cast<PVOID*>(&lifecycle.internalRender),
 				reinterpret_cast<PVOID>(&HookInternalRender));
+		if (status == NOERROR && lifecycle.faceOpenAttached)
+			status = transaction.Detach(
+				reinterpret_cast<PVOID*>(&lifecycle.faceOpen),
+				reinterpret_cast<PVOID>(&HookFaceOpen));
+		if (status == NOERROR && lifecycle.fontLoadAttached)
+			status = transaction.Detach(
+				reinterpret_cast<PVOID*>(&lifecycle.fontLoad),
+				reinterpret_cast<PVOID>(&HookTextCoreFontLoad));
+		if (status == NOERROR && lifecycle.characterLookupAttached)
+			status = transaction.Detach(
+				reinterpret_cast<PVOID*>(&lifecycle.characterLookup),
+				reinterpret_cast<PVOID>(&HookLegacyCharacterLookup));
+		if (status == NOERROR && lifecycle.osFaceResolverAttached)
+			status = transaction.Detach(
+				reinterpret_cast<PVOID*>(&lifecycle.osFaceResolver),
+				reinterpret_cast<PVOID>(&HookLegacyOsFaceResolver));
 		if (status == NOERROR)
 			status = transaction.Commit();
 		else
@@ -875,8 +1074,10 @@ bool CommitUnityFontHookLifecycleStop()
 	if (status != NOERROR)
 		return false;
 	lifecycle.renderAttached = false;
-	if (!DetachUnityFileImports(lifecycle))
-		return false;
+	lifecycle.faceOpenAttached = false;
+	lifecycle.fontLoadAttached = false;
+	lifecycle.characterLookupAttached = false;
+	lifecycle.osFaceResolverAttached = false;
 #endif
 
 	std::lock_guard<std::mutex> lock(lifecycle.mutex);
@@ -886,12 +1087,19 @@ bool CommitUnityFontHookLifecycleStop()
 	lifecycle.unityPlayer.reset();
 	lifecycle.publicRender = nullptr;
 	lifecycle.internalRender = nullptr;
-	lifecycle.fileImports = {};
-	lifecycle.createFileA = nullptr;
-	lifecycle.createFileW = nullptr;
+	lifecycle.faceOpen = nullptr;
+	lifecycle.fontLoad = nullptr;
+	lifecycle.characterLookup = nullptr;
+	lifecycle.osFaceResolver = nullptr;
 	lifecycle.renderAttached = false;
-	lifecycle.createFileAAttached = false;
-	lifecycle.createFileWAttached = false;
+	lifecycle.faceOpenAttached = false;
+	lifecycle.fontLoadAttached = false;
+	lifecycle.faceOpenFallbackRequired = false;
+	lifecycle.characterLookupAttached = false;
+	lifecycle.osFaceResolverAttached = false;
+	lifecycle.osFaceResolverRequired = false;
+	lifecycle.substitutionBoundary =
+		renderer::unity::FontSubstitutionBoundary::unavailable;
 	std::atomic_store_explicit(
 		&lifecycle.redirects,
 		std::shared_ptr<const renderer::unity::FontFileRedirectTable>{},

@@ -63,6 +63,79 @@ struct SymbolRecord final
 
 bool ContainsInsensitive(
 	const std::wstring& value,
+	const std::wstring& needle);
+
+void PrintTypeChildren(IDiaSymbol* type)
+{
+	ComOwner<IDiaEnumSymbols> children;
+	if (FAILED(type->findChildren(
+			SymTagNull, nullptr, nsNone, children.put())))
+		return;
+	for (;;)
+	{
+		ComOwner<IDiaSymbol> child;
+		ULONG fetched = 0;
+		if (children->Next(1, child.put(), &fetched) != S_OK || fetched != 1)
+			break;
+		DWORD tag = 0;
+		if (FAILED(child->get_symTag(&tag)) ||
+			(tag != SymTagData && tag != SymTagBaseClass))
+			continue;
+		BstrOwner name;
+		child->get_name(name.put());
+		LONG offset = 0;
+		HRESULT const offsetStatus = child->get_offset(&offset);
+		ComOwner<IDiaSymbol> childType;
+		DWORD childTypeTag = 0;
+		ULONGLONG childTypeLength = 0;
+		BstrOwner childTypeName;
+		if (SUCCEEDED(child->get_type(childType.put())) && childType.get() != nullptr)
+		{
+			childType->get_symTag(&childTypeTag);
+			childType->get_length(&childTypeLength);
+			childType->get_name(childTypeName.put());
+		}
+		std::wcout << L"  tag=" << tag << L" offset=";
+		if (SUCCEEDED(offsetStatus))
+			std::wcout << offset;
+		else
+			std::wcout << L"?";
+		std::wcout << L" size=" << childTypeLength
+			<< L" type-tag=" << childTypeTag << L" name=" << name.get();
+		if (*childTypeName.get() != L'\0')
+			std::wcout << L" type=" << childTypeName.get();
+		std::wcout << L"\n";
+	}
+}
+
+int DumpTypes(IDiaSymbol* global, const std::wstring& needle)
+{
+	ComOwner<IDiaEnumSymbols> types;
+	if (FAILED(global->findChildren(
+			SymTagUDT, nullptr, nsNone, types.put())))
+		return 1;
+	int matches = 0;
+	for (;;)
+	{
+		ComOwner<IDiaSymbol> type;
+		ULONG fetched = 0;
+		if (types->Next(1, type.put(), &fetched) != S_OK || fetched != 1)
+			break;
+		BstrOwner name;
+		if (FAILED(type->get_name(name.put())) ||
+			!ContainsInsensitive(name.get(), needle))
+			continue;
+		ULONGLONG length = 0;
+		type->get_length(&length);
+		std::wcout << name.get() << L" size=" << length << L"\n";
+		PrintTypeChildren(type.get());
+		++matches;
+	}
+	return matches == 0 ? 3 : 0;
+}
+
+bool ContainsInsensitive(
+	const std::wstring& value,
 	const std::wstring& needle)
 {
 	if (needle.empty())
@@ -110,13 +183,19 @@ void CollectSymbols(
 
 int wmain(int argc, wchar_t** argv)
 {
-	if (argc < 3 || argc > 4)
+	if (argc < 3 || argc > 5)
 	{
-		std::wcerr << L"usage: mactype-unity-symbol-probe <msdia.dll> <pdb> [needle]\n";
+		std::wcerr << L"usage: mactype-unity-symbol-probe <msdia.dll> <pdb> [needle]\n"
+			L"       mactype-unity-symbol-probe <msdia.dll> <pdb> --type <needle>\n";
 		return 2;
 	}
 
-	const std::wstring needle = argc == 4 ? argv[3] : L"FT_";
+	bool const typeMode = argc == 5 && wcscmp(argv[3], L"--type") == 0;
+	if (argc == 5 && !typeMode)
+		return 2;
+	const std::wstring needle = typeMode
+		? argv[4]
+		: argc == 4 ? argv[3] : L"FT_";
 	ComOwner<IDiaDataSource> source;
 	HRESULT status = NoRegCoCreate(
 		argv[1], CLSID_DiaSource, IID_IDiaDataSource,
@@ -147,6 +226,8 @@ int wmain(int argc, wchar_t** argv)
 		std::wcerr << L"global scope failed: 0x" << std::hex << status << L"\n";
 		return 1;
 	}
+	if (typeMode)
+		return DumpTypes(global.get(), needle);
 
 	std::vector<SymbolRecord> records;
 	CollectSymbols(global.get(), SymTagFunction, needle, records);

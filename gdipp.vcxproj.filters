@@ -63,6 +63,9 @@
     <ClCompile Include="renderer\unity_font_hook_core.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="renderer\unity_font_selection_context.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="renderer\unload_lifecycle.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -100,6 +103,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="renderer\directwrite_alias.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="renderer\directwrite_alias_policy.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="renderer\directwrite_virtual_font.cpp">
@@ -169,6 +175,9 @@
     <ClInclude Include="renderer\unity_font_hook_core.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="renderer\unity_font_selection_context.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="renderer\gdiPlusFlat2.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -227,6 +236,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="renderer\directwrite_alias.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="renderer\directwrite_alias_policy.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="renderer\directwrite_virtual_font.h">

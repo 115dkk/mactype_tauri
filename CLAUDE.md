@@ -43,16 +43,32 @@ below wherever the two conflict.
   runtime phase machine or read mutable profile maps from a render hot path.
 - Unity font hooking is startup policy owned by `UnityFontHookLifecycle`. It is
   off by default and accepts only exact PE timestamp/image-size, CodeView PDB
-  identity, render ABI, and target-prefix descriptors. Never replace this with
-  wildcard signature scanning. Font-file substitution patches only
-  UnityPlayer's own `CreateFileA/W` IAT slots, resolves installed families from
-  DirectWrite, registry, and bounded SFNT/TTC name parsing, and falls back to
-  the original file when the replacement cannot be opened. `Most games`
+  identity, render and face-open ABIs, and target-prefix descriptors. Never
+  replace this with wildcard signature scanning. Font substitution runs only
+  after Unity has selected its OS `FontRef`: the exact private FreeType
+  face-open target receives a copied pathname argument and the replacement's
+  checked TTC face index. Memory/stream faces remain untouched, and a failed
+  replacement face falls back to the original arguments. Do not restore
+  `CreateFileA/W` IAT patching. Installed families come from DirectWrite,
+  registry, and bounded per-face SFNT/TTC name parsing. `Most games`
   admission is an explicit process-local skip when the 신식 서비스 finds
   anti-cheat evidence or cannot prove the bounded installation scan; selected
   and all-games modes do not weaken existing protected-process or mitigation
   guards. The renderer's repeated anti-cheat scan is direct-injection defense,
   not a second service-admission authority.
+- Exact Unity builds that expose an OS `FontRef` resolver carry
+  `nativeFamily` or `mappedFamily` through `ScopedFontRefSelectionContext`.
+  A native family forbids a coincidental same-file redirect; a mapped family
+  permits it, and nested resolution must restore the preceding context. Older
+  exact adapters without that resolver retain the face-index-checked path
+  fallback. Diagnostic hooks observe only: they never replace a returned
+  `FT_Face`, retain a raw face pointer, or change cache lookup results.
+- A DirectWrite source face can expose localized, typographic, weight/style,
+  and Win32 family names. If any name selects a substitution, the immutable
+  alias collection must preserve every non-conflicting name for that same
+  face. Never collapse `Malgun Gothic`, `맑은 고딕`, and their Semilight names
+  into the one spelling that matched the profile; conflicting alias rules fail
+  closed to the native face.
 - `FreeTypeRuntime` is also the sole Interface for logical bitmap rows and
   one-based face IDs. Render Adapters must use `CheckedBitmapRow`; they never
   reconstruct signed-pitch pointer arithmetic. An `FT_Face` receives a
@@ -105,6 +121,12 @@ below wherever the two conflict.
   that can only fail during process initialization. Do not restore the
   historical implicit defaults. Feature and interface presence, not
   manifest-sensitive Windows version numbers, select modern rendering paths.
+- Stopping the 신식 서비스 closes future injection; it does not remotely
+  unload renderers from arbitrary live applications. Existing processes keep
+  their immutable renderer/profile generation until supported per-process
+  `SafeUnload` or process exit, so profile and Unity-policy changes are not
+  retroactive. Isolated field tests must stop the service first and accept
+  exactly one MacType module from the requested test directory.
 - The fixed setup broker materializes DLL-adjacent `MacType.ini` only for an
   active service. A supported stop and every maintenance or profile operation
   that ends stopped remove only the exact verified generated copy while

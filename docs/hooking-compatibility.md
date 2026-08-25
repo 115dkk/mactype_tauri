@@ -43,7 +43,7 @@ or executable-name workaround.
 | Windows App SDK / WinUI 3 uses app-local DWriteCore | [#882](https://github.com/snowie2000/mactype/issues/882) and the packaged-app reports above | Detect existing and future `DWriteCore.dll`, hook its concrete `DWriteCoreCreateFactory`, intercept immediate dynamic lookup, and cover direct `LdrLoadDll` loads beyond the bounded startup window. The same collection seam is installed on shared and isolated factories. x86 and x64 native-load probes are CI gates. |
 | Qt 6.8+ changed its default Windows text backend | [#884](https://github.com/snowie2000/mactype/issues/884), [#950](https://github.com/snowie2000/mactype/issues/950), [#1097](https://github.com/snowie2000/mactype/issues/1097) | A loaded MacType DLL is not proof of a GDI render delta. Qt 6.8 moved its default backend to DirectWrite, where upstream MacType behavior is a parameter/collection intervention rather than the FreeType GDI replacement. Exercise this as a rendering-adapter and pixel/face-identity contract; do not misclassify it as failed injection or force a protected process. |
 | Protected, critical, anti-cheat, antivirus, Secure Boot, or sandbox conflict | [#426](https://github.com/snowie2000/mactype/issues/426), [#1059](https://github.com/snowie2000/mactype/issues/1059), [#1106](https://github.com/snowie2000/mactype/issues/1106) | Keep the protection boundary. Protected/critical/session-0 or explicitly incompatible instances are quiet skips; external software that blocks injection remains external evidence, not a reason to weaken system policy. |
-| Application owns the renderer instead of using GDI/DirectWrite | [#607](https://github.com/snowie2000/mactype/issues/607), [#1112](https://github.com/snowie2000/mactype/issues/1112), [#1143](https://github.com/snowie2000/mactype/issues/1143) | Classify as a renderer boundary, not an injection failure. Blender's private FreeType/OpenGL path and Windows Terminal's Atlas/custom glyph path still need their own adapters. Allowlisted UnityPlayer builds use `UnityFontHookLifecycle`: exact native FreeType render interception plus UnityPlayer-local font-file substitution, never a forced global Windows font hook. |
+| Application owns the renderer instead of using GDI/DirectWrite | [#607](https://github.com/snowie2000/mactype/issues/607), [#1112](https://github.com/snowie2000/mactype/issues/1112), [#1143](https://github.com/snowie2000/mactype/issues/1143) | Classify as a renderer boundary, not an injection failure. Blender's private FreeType/OpenGL path and Windows Terminal's Atlas/custom glyph path still need their own adapters. Allowlisted UnityPlayer builds use `UnityFontHookLifecycle`: exact native FreeType render and face-open interception after Unity selects its OS font, never a forced global Windows file or font hook. |
 | DLL presence or process-manager status but no verified visual change | [#1022](https://github.com/snowie2000/mactype/issues/1022), [#1054](https://github.com/snowie2000/mactype/issues/1054), [#1138](https://github.com/snowie2000/mactype/issues/1138), [#1139](https://github.com/snowie2000/mactype/issues/1139), [#1144](https://github.com/snowie2000/mactype/issues/1144), [#1146](https://github.com/snowie2000/mactype/issues/1146) | Keep module-loaded, hook-installed, rule-resolved, and pixel/face-substituted as separate claims. Several recent reports resolve to old or incompatible profiles, DirectWrite's narrower behavior, retained browser collections, ClearType state, or a private pixel layout rather than injection itself. The branch probes therefore require the active profile generation and semantic render evidence instead of treating a loaded module as success. |
 | Unsupported machine architecture | [#904](https://github.com/snowie2000/mactype/issues/904), [#1085](https://github.com/snowie2000/mactype/issues/1085) | Native ARM64 remains explicitly unsupported until a native core/helper exists. It is not sent to an x64 helper and does not degrade global health. |
 
@@ -65,6 +65,15 @@ the x86/x64 CI matrix. Missing, empty, malformed, selected-missing, and
 oversized renderer profiles are rejected before a renderer can claim
 successful configuration; the positive minimal-profile case prevents an
 always-rejecting implementation from satisfying that gate.
+
+Windows Explorer and Steam exposed a separate alias-collection failure: one
+physical face can advertise `Malgun Gothic`, `맑은 고딕`, and weight-specific
+Win32 and typographic names, while the virtual font retained only the spelling
+that matched the profile. Callers using another valid name then received no
+face and rendered tofu. Alias resolution now preserves every case-insensitively
+distinct name for the face when all matching rules agree on one replacement;
+conflicting rules retain the native face. Focused x86/x64 tests cover the
+localized Semilight name set and the fail-closed conflict case.
 
 The supported setup stop also retires the exact generated DLL-adjacent
 profile. The existing early-injection tree test keeps a renderer loaded in a
@@ -89,23 +98,38 @@ retains the existing protected-process and mitigation guards. Unknown Unity
 images and unsupported hook backends report the Unity capability unavailable.
 There is no wildcard code scan.
 
-On 2026-08-25 the exact Plague Inc Evolved 2019.4.41 adapter first reproduced a
-new read-only-IAT access violation. A focused test now proves that import targets
-are read without an interlocked write, and the corrected build remained
-responsive for the bounded survival run with the expected MacType64 module and
-no WER report. With the Pretendard Forever profile and most-games mode, the
-test-only shared-memory evidence observed 356 Unity font-file opens, five rule
-matches, five successful replacement opens, and zero fallbacks; the retained
-example included `malgunsl.ttf` to `PretendardVariable.ttf`. SFNT/TTC family-name
-parsing covers localized and style files that DirectWrite or registry labels do
-not enumerate consistently.
+On 2026-08-25 Plague Inc and Rebel Inc disproved the original file-I/O adapter:
+replacement file handles succeeded while the selected face remained native or
+Rebel lost its text. The renderer no longer patches UnityPlayer's import table.
+Exact PE/PDB descriptors cover the private render function and
+`ft_open_face_internal`; only pathname-backed `FT_Open_Args` are copied and
+redirected, with source and replacement TTC face indices kept explicit. Rebel
+then exposed a second ambiguity: unrelated Unity `FontRef` families can share
+`malgunsl.ttf`. An exact OS resolver now establishes a nested native-or-mapped
+family context, so only the mapped family may redirect the shared file.
+Diagnostic lookup observes but never replaces Unity's returned face.
 
-Rebel Inc Escalation 2022.3.62 also remained responsive for the bounded injected
-run with no MacType WER failure. Its run did not cross the OS-font-file adapter,
-so this is crash/survival evidence, not a font-substitution claim. Screen capture
-remains a separate manual artifact when Windows denies the computer-use capture
-permission; module presence, redirect success, and visual face identity remain
-separate claims.
+The final isolated Rebel run loaded exactly one candidate MacType module,
+remained responsive with no WER report, redirected 2/2 face opens with zero
+fallbacks, produced 114 non-empty bitmaps, resolved 105/105 mapped character
+lookups, and reported `Malgun Gothic` backed by `Pretendard Variable`; the full
+window capture showed intact Korean menu text. The isolated Plague Inc
+2019.4.41 run redirected 5/5 face opens with zero fallbacks, produced 2,461
+non-empty bitmaps, and opened `malgunsl.ttf` as the Pretendard Variable file
+with a nonzero Korean sample glyph. Its current UI language was English, so the
+face-open and glyph evidence—not the screenshot—is the substitution claim.
+Synthetic TTC tests reject cross-face aliases, and every shipped descriptor is
+checked against its licensed local UnityPlayer binary without runtime signature
+scanning.
+
+Stopping the 신식 서비스 is deliberately non-retroactive: it blocks future
+injection and retires child propagation but does not force arbitrary live
+processes to unload hook code. During diagnosis, 127 live processes still held
+the stopped service generation. Restarting an application therefore removes
+that old immutable state, which explains why tofu sometimes vanished only
+after restart. The isolated Unity harness now refuses to run while the service
+can inject and fails unless the game contains exactly one MacType module from
+the requested test directory.
 
 ## Remaining platform boundary
 

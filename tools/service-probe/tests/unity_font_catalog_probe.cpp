@@ -60,15 +60,13 @@ int wmain(int argc, wchar_t** argv)
         auto const descriptors =
             renderer::unity::ProductionAdapterDescriptors(&descriptorCount);
         renderer::unity::ResolvedAdapter adapter{};
-        renderer::unity::FileImportSlots imports{};
         bool const resolved = mappedSize != 0 &&
             renderer::unity::ResolveAdapter(
-                module, mappedSize, descriptors, descriptorCount, &adapter) &&
-            renderer::unity::ResolveFileImportSlots(
-                module, mappedSize, &imports);
+                module, mappedSize, descriptors, descriptorCount, &adapter);
         if (resolved)
             std::cout << adapter.name << "\t0x" << std::hex
-                << adapter.targetRva << '\n';
+                << adapter.targetRva << "\tface=0x"
+                << adapter.faceOpenRva << '\n';
         FreeLibrary(module);
         return resolved ? 0 : 5;
     }
@@ -106,6 +104,50 @@ int wmain(int argc, wchar_t** argv)
                 << L" attempts=" << snapshot.redirectAttempts
                 << L" successes=" << snapshot.redirectSuccesses
                 << L" fallbacks=" << snapshot.redirectFallbacks
+                << L" renders=" << snapshot.renderCalls
+                << L" render-successes=" << snapshot.renderSuccesses
+                << L" bitmaps=" << snapshot.nonEmptyBitmaps
+                << L" last-error=" << snapshot.lastRenderError
+                << L" last-glyph=" << snapshot.lastGlyphIndex
+                << L" last-width=" << snapshot.lastBitmapWidth
+                << L" last-rows=" << snapshot.lastBitmapRows
+                << L" charmap=" << snapshot.redirectedFaceHasCharmap
+                << L" face-glyphs=" << snapshot.redirectedFaceGlyphs
+                << L" sample-glyph=" << snapshot.sampleKoreanGlyph
+                << L" lookups=" << snapshot.characterLookups
+                << L" lookup-hits=" << snapshot.characterLookupHits
+                << L" last-character=" << snapshot.lastCharacter
+                << L" last-lookup-glyph=" << snapshot.lastLookupGlyph
+                << L" face-resolutions=" << snapshot.faceResolutions
+                << L" face-resolution-hits=" << snapshot.faceResolutionHits
+                << L" face-glyph-hits=" << snapshot.faceResolutionGlyphHits
+                << L" last-face-glyph=" << snapshot.lastFaceResolutionGlyph
+                << L" last-face-sample="
+                << snapshot.lastFaceResolutionSampleKoreanGlyph
+                << L" family=" << snapshot.lastLookupFamily
+                << L" mapped-lookups=" << snapshot.mappedCharacterLookups
+                << L" mapped-hits=" << snapshot.mappedCharacterLookupHits
+                << L" mapped-character=" << snapshot.lastMappedCharacter
+                << L" mapped-glyph=" << snapshot.lastMappedGlyph
+                << L" mapped-sample="
+                << snapshot.lastMappedSampleKoreanGlyph
+                << L" mapped-family=" << snapshot.lastMappedFamily
+                << L" mapped-face-family="
+                << snapshot.lastMappedResolvedFaceFamily
+                << L" os-resolutions=" << snapshot.osFaceResolutions
+                << L" os-hits=" << snapshot.osFaceResolutionHits
+                << L" os-sample=" << snapshot.lastOsFaceSampleKoreanGlyph
+                << L" os-family=" << snapshot.lastOsFaceFamily
+                << L" os-face-family=" << snapshot.lastOsResolvedFaceFamily
+                << L" mapped-os-resolutions="
+                << snapshot.mappedOsFaceResolutions
+                << L" mapped-os-hits="
+                << snapshot.mappedOsFaceResolutionHits
+                << L" mapped-os-sample="
+                << snapshot.lastMappedOsFaceSampleKoreanGlyph
+                << L" mapped-os-family=" << snapshot.lastMappedOsFaceFamily
+                << L" mapped-os-face-family="
+                << snapshot.lastMappedOsResolvedFaceFamily
                 << L" observed-path=" << snapshot.observedPath
                 << L" source=" << snapshot.sourcePath
                 << L" replacement=" << snapshot.replacementPath << L'\n';
@@ -130,6 +172,25 @@ int wmain(int argc, wchar_t** argv)
         std::wcout << replacement << L'\n';
         return 0;
     }
+    if (argc == 6 && wcscmp(argv[1], L"--redirect-face") == 0)
+    {
+        wchar_t* end = nullptr;
+        long const sourceFaceIndex = wcstol(argv[5], &end, 10);
+        if (end == nullptr || *end != L'\0')
+            return 6;
+        auto substitutions = renderer::font_substitution::Snapshot::Build(
+            {{argv[2], argv[3]}}, 1);
+        auto redirects = renderer::unity::FontFileRedirectTable::Build(
+            fonts, *substitutions);
+        std::wstring replacement;
+        long replacementFaceIndex = 0;
+        if (!redirects || !redirects->ResolveFace(
+            argv[4], sourceFaceIndex,
+            replacement, replacementFaceIndex))
+            return 3;
+        std::wcout << replacement << L'\t' << replacementFaceIndex << L'\n';
+        return 0;
+    }
     bool allFound = true;
     for (int argument = 1; argument < argc; ++argument)
     {
@@ -138,7 +199,8 @@ int wmain(int argc, wchar_t** argv)
         {
             if (!EqualOrdinalIgnoreCase(font.family, argv[argument]))
                 continue;
-            std::wcout << font.family << L'\t' << font.filePath << L'\n';
+            std::wcout << font.family << L'\t' << font.filePath
+                << L'\t' << font.faceIndex << L'\n';
             found = true;
         }
         allFound = allFound && found;

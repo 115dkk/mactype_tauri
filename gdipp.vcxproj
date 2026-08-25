@@ -820,6 +820,7 @@
     <ClCompile Include="renderer\common.cpp" />
     <ClCompile Include="renderer\directwrite.cpp" />
     <ClCompile Include="renderer\directwrite_alias.cpp" />
+    <ClCompile Include="renderer\directwrite_alias_policy.cpp" />
     <ClCompile Include="renderer\directwrite_virtual_font.cpp" />
     <ClCompile Include="renderer\dll.cpp" />
     <ClCompile Include="renderer\dynCodeHelper.cpp" />
@@ -855,6 +856,7 @@
     <ClCompile Include="renderer\unity_font_evidence.cpp" />
     <ClCompile Include="renderer\unity_font_hook.cpp" />
     <ClCompile Include="renderer\unity_font_hook_core.cpp" />
+    <ClCompile Include="renderer\unity_font_selection_context.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="renderer\expfunc.def" />
@@ -867,6 +869,7 @@
     <ClInclude Include="renderer\crc32.h" />
     <ClInclude Include="renderer\directwrite.h" />
     <ClInclude Include="renderer\directwrite_alias.h" />
+    <ClInclude Include="renderer\directwrite_alias_policy.h" />
     <ClInclude Include="renderer\directwrite_virtual_font.h" />
     <ClInclude Include="renderer\dll.h" />
     <ClInclude Include="renderer\dynCodeHelper.h" />
@@ -902,6 +905,7 @@
     <ClInclude Include="renderer\unity_font_evidence.h" />
     <ClInclude Include="renderer\unity_font_hook.h" />
     <ClInclude Include="renderer\unity_font_hook_core.h" />
+    <ClInclude Include="renderer\unity_font_selection_context.h" />
     <ClInclude Include="renderer\undocAPI.h" />
     <ClInclude Include="renderer\wow64ext.h" />
   </ItemGroup>

@@ -1,5 +1,6 @@
 #include "directwrite_alias.h"
 
+#include "directwrite_alias_policy.h"
 #include "directwrite_virtual_font.h"
 #include "font_substitution.h"
 #include "settings.h"
@@ -72,14 +73,12 @@ bool ReadLocalizedString(
 	return true;
 }
 
-bool ResolveLocalizedFamily(
+void AppendLocalizedFamilies(
 	IDWriteLocalizedStrings* familyNames,
-	renderer::font_substitution::Snapshot const& snapshot,
-	std::wstring& sourceFamily,
-	std::wstring& replacementFamily)
+	std::vector<std::wstring>& families)
 {
 	if (familyNames == nullptr)
-		return false;
+		return;
 	for (UINT32 nameIndex = 0; nameIndex < familyNames->GetCount(); ++nameIndex)
 	{
 		std::wstring family;
@@ -87,25 +86,17 @@ bool ResolveLocalizedFamily(
 		if (!ReadLocalizedString(
 				familyNames, nameIndex, family, locale) || family.empty())
 			continue;
-
-		renderer::font_substitution::Resolution const resolution =
-			snapshot.Resolve({family, DEFAULT_CHARSET});
-		if (!resolution.matched)
-			continue;
-		sourceFamily = std::move(family);
-		replacementFamily = resolution.family;
-		return true;
+		families.push_back(std::move(family));
 	}
-	return false;
 }
 
 bool ResolveReplacementFamily(
 	IDWriteFontSet* systemFontSet,
 	UINT32 index,
 	renderer::font_substitution::Snapshot const& snapshot,
-	std::wstring& sourceFamily,
-	std::wstring& replacementFamily)
+	FamilyAliasResolution& resolution)
 {
+	std::vector<std::wstring> aliases;
 	for (DWRITE_FONT_PROPERTY_ID const familyProperty : kFamilyPropertyIds)
 	{
 		BOOL exists = FALSE;
@@ -114,11 +105,9 @@ bool ResolveReplacementFamily(
 				index, familyProperty, &exists, &familyNames)) ||
 			!exists || familyNames == nullptr)
 			continue;
-		if (ResolveLocalizedFamily(
-				familyNames, snapshot, sourceFamily, replacementFamily))
-			return true;
+		AppendLocalizedFamilies(familyNames, aliases);
 	}
-	return false;
+	return ResolveFamilyAliases(aliases, snapshot, resolution);
 }
 
 HRESULT FindReplacementReference(
@@ -198,10 +187,9 @@ BuildStatus Build(
 		if (FAILED(addResult) || sourceReference == nullptr)
 			return BuildStatus::addFontFailed;
 
-		std::wstring sourceFamily;
-		std::wstring replacementFamily;
+		FamilyAliasResolution familyResolution;
 		if (!ResolveReplacementFamily(
-			systemFontSet, index, *snapshot, sourceFamily, replacementFamily))
+			systemFontSet, index, *snapshot, familyResolution))
 		{
 			if (FAILED(builder->AddFontFaceReference(sourceReference)))
 				return BuildStatus::addFontFailed;
@@ -210,30 +198,43 @@ BuildStatus Build(
 		resolvedRule = true;
 
 		CComPtr<IDWriteFontFaceReference> replacementReference;
-		addResult = FindReplacementReference(
+		HRESULT substitutionResult = FindReplacementReference(
 			systemFontSet,
 			sourceReference,
-			replacementFamily.c_str(), replacementReference);
-		if (SUCCEEDED(addResult) && replacementReference != nullptr)
+			familyResolution.replacementFamily.c_str(), replacementReference);
+		bool complete = SUCCEEDED(substitutionResult) &&
+			replacementReference != nullptr;
+		if (complete)
 		{
-			CComPtr<IDWriteFontFaceReference> virtualReference;
-			directwrite_virtual_font::Identity identity;
-			addResult = directwrite_virtual_font::CreateAliasedReference(
-				factory3,
-				replacementReference,
-				sourceFamily.c_str(),
-				virtualReference,
-				identity);
-			if (FAILED(addResult))
-				emptyResultStatus = BuildStatus::virtualFontFailed;
-			else
+			for (const std::wstring& sourceAlias :
+				familyResolution.sourceAliases)
 			{
-				addResult = builder->AddFontFaceReference(virtualReference);
-				if (FAILED(addResult))
+				CComPtr<IDWriteFontFaceReference> virtualReference;
+				directwrite_virtual_font::Identity identity;
+				substitutionResult =
+					directwrite_virtual_font::CreateAliasedReference(
+						factory3,
+						replacementReference,
+						sourceAlias.c_str(),
+						virtualReference,
+						identity);
+				if (FAILED(substitutionResult))
+				{
+					emptyResultStatus = BuildStatus::virtualFontFailed;
+					complete = false;
+					break;
+				}
+				substitutionResult =
+					builder->AddFontFaceReference(virtualReference);
+				if (FAILED(substitutionResult))
+				{
 					emptyResultStatus = BuildStatus::aliasReferenceRejected;
+					complete = false;
+					break;
+				}
 			}
 		}
-		if (FAILED(addResult))
+		if (!complete)
 		{
 			missingReplacement = true;
 			if (FAILED(builder->AddFontFaceReference(sourceReference)))

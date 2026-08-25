@@ -21,6 +21,7 @@ cmake --build $build --config RelWithDebInfo --target `
     unload-lifecycle-tests `
     renderer-policy-tests `
     font-substitution-tests `
+    directwrite-alias-policy-tests `
     unity-font-hook-tests
 
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -56,6 +57,7 @@ try {
         'unload-lifecycle-tests.exe',
         'renderer-policy-tests.exe',
         'font-substitution-tests.exe',
+        'directwrite-alias-policy-tests.exe',
         'unity-font-hook-tests.exe'
     )) {
         & (Join-Path $build "RelWithDebInfo\$test")

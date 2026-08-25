@@ -197,12 +197,21 @@ implemented compatibility paths are tracked in
 Rebel Inc and Plague Inc remain local compatibility targets because their
 licensed binaries cannot be redistributed in CI. The repeatable lab script
 records exact process/module and WER evidence plus Unity renderer markers. The
-allowlisted Unity adapter now covers private FreeType render output and
-UnityPlayer-local system-font file opens; test-only shared-memory evidence keeps
-observed opens, successful redirects, fallbacks, and exact paths separate from
-visual identity. Visual capture remains a separate manual artifact when the
-Windows computer-use permission is unavailable, and pre-rendered assets remain
-outside the font-hook seam.
+allowlisted Unity adapter now covers private FreeType render output and the
+exact internal face-open boundary reached after Unity selects an OS `FontRef`.
+It copies pathname-backed arguments, substitutes the replacement file and TTC
+face index together, and retries the original face only when replacement
+creation fails. Test-only shared-memory evidence keeps observed face opens,
+successful redirects, fallbacks, and exact paths separate from visual identity.
+Visual capture remains a separate manual artifact when Windows denies capture,
+and pre-rendered assets remain outside the font-hook seam.
+
+For builds with an exact OS `FontRef` resolver, a scoped selection context
+distinguishes an explicitly mapped family from an unrelated family that merely
+shares the same system font file. The context restores correctly under nesting;
+diagnostics no longer substitute a resolver result or retain raw FreeType face
+pointers. Exact older adapters without that resolver keep the checked
+path-and-face-index fallback.
 
 ### 7. Diagnostics and field evidence
 
@@ -272,6 +281,13 @@ collection can locate `Cambria`, for example, while its name-table identity is
 consistently `Cambria` and its metrics, outlines, file, resource, and glyph data
 are consistently derived from `Courier New`. No COM proxy presents two
 different identities for the same object.
+
+A source face keeps every non-conflicting family spelling exposed by its
+localized, typographic, weight/style, and Win32 properties. One Korean rule
+may therefore select the replacement while the resulting collection still
+answers both `맑은 고딕` and `Malgun Gothic`, including their Semilight names.
+If two names for one physical face resolve to different replacements, that
+face remains native rather than publishing a partial alias family.
 
 This collection is installed only at the DirectWrite factory acquisition seam:
 `GetSystemFontCollection`, `IDWriteFactory3::GetSystemFontSet`, the modern

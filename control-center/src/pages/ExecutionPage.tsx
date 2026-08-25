@@ -542,10 +542,8 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
               <li>{t("execution.migrationConfirmStrictCheck")}</li>
               <li>{t("execution.migrationConfirmBackup")}</li>
               <li>{t("execution.migrationConfirmSwitch")}</li>
-              <li>{t("execution.migrationConfirmVerify")}</li>
               <li>{t("execution.migrationConfirmRollback")}</li>
             </ol>
-            <p className="migration-confirmation-note">{t("execution.migrationConfirmRemoval")}</p>
             <div className="migration-confirmation-actions">
               <button className="button secondary" onClick={closeMigrationConfirmation} ref={migrationCancelRef} type="button">{t("execution.migrationCancel")}</button>
               <button className="button primary" disabled={!executionView.canMigrateLegacy} onClick={() => void confirmMigration()} type="button">{t("execution.migrationContinue")}</button>

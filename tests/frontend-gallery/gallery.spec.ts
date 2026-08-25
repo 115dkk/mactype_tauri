@@ -512,6 +512,38 @@ test("settings navigation restores the legacy Wizard and Tuner hierarchy", async
   await expect(page.locator("body")).toHaveAttribute("data-view", "execution");
 });
 
+test("all settings exposes, edits, and saves child-process hooking", async ({ page }) => {
+  await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
+  await page.locator(".navigation").getByRole("button", { name: "전체 설정" }).click();
+
+  const childHook = page.getByRole("checkbox", { name: "자식 프로세스 후킹" });
+  const childHookRow = page.locator(".setting-row").filter({ has: childHook });
+  const save = page.getByRole("button", { name: "지금 저장" });
+  const discard = page.getByRole("button", { name: "변경 취소", exact: true });
+
+  await expect(childHook).toBeVisible();
+  await expect(childHook).toBeEnabled();
+  await expect(childHook).not.toBeChecked();
+  await expect(save).toBeDisabled();
+
+  await childHook.check();
+  await expect(childHook).toBeChecked();
+  await expect(childHookRow.locator(".dirty-mark")).toBeVisible();
+  await expect(save).toBeEnabled();
+
+  await save.click();
+  await expect(childHook).toBeChecked();
+  await expect(childHookRow.locator(".dirty-mark")).toHaveCount(0);
+  await expect(save).toBeDisabled();
+
+  // Saving updates the browser adapter's persisted snapshot: a later edit can
+  // be discarded back to the enabled state instead of the initial default.
+  await childHook.uncheck();
+  await expect(discard).toBeEnabled();
+  await discard.click();
+  await expect(childHook).toBeChecked();
+});
+
 test("guided step undo, redo, and discard stay scoped to the current step", async ({ page }) => {
   await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
   await page.locator(".navigation").getByRole("button", { name: "단계별 설정" }).click();

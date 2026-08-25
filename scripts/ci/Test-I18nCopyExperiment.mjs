@@ -9,6 +9,7 @@ import {
   selectEntries,
   validateProposals,
 } from "../i18n/copy-review.mjs";
+import { auditKoreanCopy } from "../i18n/korean-copy-audit.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sample = JSON.parse(fs.readFileSync(path.join(root, "scripts/i18n/korean-copy-sample.json"), "utf8"));
@@ -84,5 +85,50 @@ const tokenPayload = {
   }],
 };
 assert.throws(() => validateProposals(tokenPayload, [tokenEntry]), /Required token/u);
+
+const contextual = auditKoreanCopy(
+  "설정을 기록하고, 다음 단계로 이동합니다.",
+  "설정을 기록하고, 다음 단계로 이동합니다.",
+);
+assert.equal(contextual.ok, true);
+assert.equal(contextual.patterns.contextual.before["punctuation.connective-comma"], 1);
+assert.equal(contextual.patterns.contextual.after["punctuation.connective-comma"], 1);
+
+const unchangedBlocking = auditKoreanCopy(
+  "결론적으로, API를 통해 문서를 엽니다.",
+  "결론적으로, API를 통해 문서를 엽니다.",
+);
+assert.equal(unchangedBlocking.ok, false);
+assert.match(unchangedBlocking.problems.join(" "), /patterns were not reduced/u);
+
+const approvedRemoval = auditKoreanCopy(
+  "Ready 상태를 표시합니다.",
+  "상태를 표시합니다.",
+  { approvedRemovedProtected: ["Ready"] },
+);
+assert.equal(approvedRemoval.ok, true);
+assert.deepEqual(approvedRemoval.protectedTokens.allowedRemoved, ["Ready"]);
+assert.deepEqual(approvedRemoval.protectedTokens.missing, []);
+
+const unapprovedRemoval = auditKoreanCopy("Ready 상태를 표시합니다.", "상태를 표시합니다.");
+assert.equal(unapprovedRemoval.ok, false);
+assert.deepEqual(unapprovedRemoval.protectedTokens.missing, ["Ready"]);
+
+const unknownApproval = auditKoreanCopy(
+  "상태를 표시합니다.",
+  "상태를 표시합니다.",
+  { approvedRemovedProtected: ["Ready"] },
+);
+assert.equal(unknownApproval.ok, false);
+assert.match(unknownApproval.problems.join(" "), /not a protected source token/u);
+
+const warningChange = auditKoreanCopy(
+  "사용자는 문서를 빠르게 확인합니다.",
+  "사용자는 파일을 바로 검토합니다.",
+);
+assert.ok(warningChange.changeRate > 0.3 && warningChange.changeRate <= 0.5);
+assert.equal(warningChange.ok, true);
+assert.equal(warningChange.grade, "C");
+assert.deepEqual(warningChange.warnings, ["Change rate exceeds 30%"]);
 
 console.log(`Gemini copy experiment contract passed for ${sample.entries.length} samples (${local.length} local, ${flow.length} flow).`);

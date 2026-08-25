@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "targetLocales": ["zh-CN", "zh-TW", "ja", "fr", "de", "es", "pt", "ar"],
   "entries": [
     {
@@ -59,7 +59,7 @@
     },
     {
       "key": "execution.legacyServiceDescription",
-      "intent": "Identify old MacTray and state that removal is available after migration completes and is confirmed. Remove internal safe-read claims.",
+      "intent": "Identify old MacTray and state that removal is a separate action after migration. Do not mention verification or safety.",
       "requiredTokens": ["MacTray"]
     },
     {
@@ -69,8 +69,28 @@
     },
     {
       "key": "execution.migrationConfirmStrictCheck",
-      "intent": "State that AppInit, service configuration, and ownership are checked before changes. Remove strict/exact emphasis.",
+      "intent": "State only that the AppInit state and legacy service configuration are read. Do not describe this as checking, verification, validation, or safety.",
       "requiredTokens": ["AppInit"]
+    },
+    {
+      "key": "execution.migrationConfirmBackup",
+      "intent": "State that the legacy service registry and current INI state are recorded and an existing profile file is backed up. Do not call the backup exact, verified, or safe.",
+      "requiredTokens": ["INI"]
+    },
+    {
+      "key": "execution.migrationConfirmSwitch",
+      "intent": "State the concrete actions in order: stop the legacy service, copy the current profile to the new service, then install and start the new service.",
+      "requiredTokens": []
+    },
+    {
+      "key": "execution.migrationConfirmRollback",
+      "intent": "State the one user-relevant assurance: if migration fails, the services and profile are restored to their previous state. Do not add safety or verification language.",
+      "requiredTokens": []
+    },
+    {
+      "key": "execution.migrationComplete",
+      "intent": "State only that migration to the new service completed. Do not mention verification, validation, checks, or safety.",
+      "requiredTokens": []
     },
     {
       "key": "execution.health.ready",

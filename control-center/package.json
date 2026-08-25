@@ -10,6 +10,10 @@
     "build": "pnpm generate:settings && tsc -b && vite build",
     "lint": "eslint . --max-warnings 0",
     "test:i18n": "node ../scripts/ci/Test-I18n.mjs",
+    "test:i18n-experiment": "node ../scripts/ci/Test-I18nCopyExperiment.mjs",
+    "experiment:i18n": "node ../scripts/i18n/run-copy-experiment.mjs",
+    "experiment:i18n-multilingual": "node ../scripts/i18n/run-multilingual-copy-experiment.mjs",
+    "apply:i18n-multilingual": "node ../scripts/i18n/apply-multilingual-copy-experiment.mjs",
     "test:settings": "node ../scripts/ci/Test-SettingsCoverage.mjs",
     "test:gallery": "playwright test -c ../tests/frontend-gallery/playwright.config.ts",
     "tauri": "tauri"

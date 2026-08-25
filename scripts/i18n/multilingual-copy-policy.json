@@ -1,0 +1,81 @@
+{
+  "version": 2,
+  "targetLocales": ["zh-CN", "zh-TW", "ja", "fr", "de", "es", "pt", "ar"],
+  "entries": [
+    {
+      "key": "execution.systemDescription",
+      "intent": "Describe applying or pausing the current profile. Remove the unrelated claim that old MacTray is migration-only.",
+      "requiredTokens": ["Control Center"]
+    },
+    {
+      "key": "execution.systemNote",
+      "intent": "State the UAC requirement and that AppInit is detection-only. Do not advertise internal boot-safety reasoning.",
+      "requiredTokens": ["UAC", "AppInit"]
+    },
+    {
+      "key": "execution.systemActiveDescription",
+      "intent": "State that the running service applies the profile. Remove verified/broadly safety and marketing language.",
+      "requiredTokens": []
+    },
+    {
+      "key": "execution.serviceForeign",
+      "intent": "Explain that the same-named service has a different configuration and therefore is not changed. Avoid abstract safety claims.",
+      "requiredTokens": []
+    },
+    {
+      "key": "execution.systemRunningUnverifiedDescription",
+      "intent": "Preserve the degraded-state facts: service running, system-wide application unconfirmed, stop remains available. Remove abstract safe-recovery language.",
+      "requiredTokens": []
+    },
+    {
+      "key": "execution.systemProfileMismatchDescription",
+      "intent": "Use user-facing profile language instead of generation internals. Preserve mismatch, stop availability, and non-normal display status.",
+      "requiredTokens": ["Control Center"]
+    },
+    {
+      "key": "execution.systemLegacyServiceMigrateDescription",
+      "intent": "Preserve the installed legacy service, simultaneous-injection block, and migration action. Remove verified safety signaling.",
+      "requiredTokens": ["MacTray"]
+    },
+    {
+      "key": "execution.legacyServiceForeignDescription",
+      "intent": "Preserve the unexpected MacType/MacTray configuration, non-modification policy, and Windows Services action. Remove verified language.",
+      "requiredTokens": ["MacType", "MacTray", "Control Center", "Windows"]
+    },
+    {
+      "key": "execution.legacyServiceUncertainDescription",
+      "intent": "Preserve unreadable information, unknown service identity, and blocked system changes. Remove internal verified/foreign labels and abstract safety language.",
+      "requiredTokens": []
+    },
+    {
+      "key": "execution.legacyTrayRunningDescription",
+      "intent": "Only state that MacTray in the current user session must exit before using the new service. Remove safety signaling and the unsolicited file-deletion disclaimer.",
+      "requiredTokens": ["MacTray"]
+    },
+    {
+      "key": "execution.legacyTrayUnknownDescription",
+      "intent": "Preserve the unknown process/session and blocked system changes. Remove abstract safe-verification wording.",
+      "requiredTokens": []
+    },
+    {
+      "key": "execution.legacyServiceDescription",
+      "intent": "Identify old MacTray and state that removal is available after migration completes and is confirmed. Remove internal safe-read claims.",
+      "requiredTokens": ["MacTray"]
+    },
+    {
+      "key": "execution.migrationConfirmDescription",
+      "intent": "Introduce the ordered migration steps without abstract verified/reversible assurances that duplicate the concrete steps below.",
+      "requiredTokens": ["Control Center"]
+    },
+    {
+      "key": "execution.migrationConfirmStrictCheck",
+      "intent": "State that AppInit, service configuration, and ownership are checked before changes. Remove strict/exact emphasis.",
+      "requiredTokens": ["AppInit"]
+    },
+    {
+      "key": "execution.health.ready",
+      "intent": "Use the locale's concise, native software-health status equivalent of Healthy/normal. The adjacent runtime label already says the service is running, so do not translate this as ready, preparation complete, or available.",
+      "requiredTokens": []
+    }
+  ]
+}

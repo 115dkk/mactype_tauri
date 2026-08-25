@@ -279,10 +279,12 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
             }
             if (!rendered) continue;
             lines.push({ key: entry.key, label: entry.label, side: entry.side, result: rendered });
-            if (pending.batchId >= newestBatch.current) {
-              newestBatch.current = pending.batchId;
-              setPreviewStack([...lines]);
-              onError(null);
+            /* A newer value is already waiting. Stop spending helper work on
+               this obsolete batch and, crucially, never expose its partial
+               stack to the canvas. */
+            if (pending.batchId < batchCounter.current) {
+              aborted = true;
+              break;
             }
           } catch (caught: unknown) {
             if (isCurrentGeneration(pending.generation)) onError(errorMessage(caught));
@@ -298,6 +300,14 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
           pendingPreview.current = pending;
           continue;
         }
+        /* Saved/edited RGB comparison can contain eight helper renders. Keep
+           the last complete image visible until the entire newest batch is
+           ready, then swap it in once so the stack cannot flash through
+           incomplete 1..7-line layouts. */
+        if (pending.batchId < batchCounter.current) continue;
+        newestBatch.current = pending.batchId;
+        setPreviewStack(lines);
+        onError(null);
         if (ciSmoke) ciReadyRequestId.current = lines[lines.length - 1].result.requestId;
         else onPreviewReady?.();
       }
@@ -309,50 +319,50 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
   useEffect(() => {
     if (!profilePath || variants.length === 0 || sampleWidth === 0) return undefined;
     const requestGeneration = generation.current;
-    const timer = window.setTimeout(() => {
-      if (!isCurrentGeneration(requestGeneration)) return;
-      const displayScale = window.devicePixelRatio || 1;
-      const width = sampleWidth;
-      /* Comparing means rendering each variant twice, so the saved side is
-         only requested while the reader has comparison switched on. Captions
-         are resolved at render time; keeping them out of the batch means the
-         translator identity cannot retrigger a render round-trip. */
-      const sides: ReadonlyArray<{ suffix: string; overrides: Record<string, number>; side: CompareSide | null }> = compareOverrides
-        ? [{ suffix: ":saved", overrides: compareOverrides, side: "saved" },
-           { suffix: ":edited", overrides: values, side: "edited" }]
-        : [{ suffix: "", overrides: values, side: null }];
-      pendingPreview.current = {
-        generation: requestGeneration,
-        batchId: ++batchCounter.current,
-        requests: variants.flatMap((variant) => {
-          const text = wrapSample(variant.text ?? sampleText, fontFace, fontSize, width);
-          return sides.map((side) => ({
-            key: `${variant.key}${side.suffix}`,
-            label: variant.label,
-            side: side.side,
-            request: {
-              profilePath,
-              overrides: side.overrides,
-              displayScale,
-              sample: {
-                text,
-                fontFace,
-                fontSizePt: fontSize,
-                widthPx: Math.round(width * displayScale),
-                heightPx: Math.round(stripHeightFor(text, fontSize) * displayScale),
-                dpi: Math.round(96 * displayScale),
-                foreground: variant.foreground ?? previewPalette(darkPreview).foreground,
-                background: previewPalette(darkPreview).background,
-                bold: variant.bold ?? false,
-                italic: variant.italic ?? false,
-              },
+    if (!isCurrentGeneration(requestGeneration)) return undefined;
+    const displayScale = window.devicePixelRatio || 1;
+    const width = sampleWidth;
+    /* Comparing means rendering each variant twice, so the saved side is
+       only requested while the reader has comparison switched on. Captions
+       are resolved at render time; keeping them out of the batch means the
+       translator identity cannot retrigger a render round-trip. */
+    const sides: ReadonlyArray<{ suffix: string; overrides: Record<string, number>; side: CompareSide | null }> = compareOverrides
+      ? [{ suffix: ":saved", overrides: compareOverrides, side: "saved" },
+         { suffix: ":edited", overrides: values, side: "edited" }]
+      : [{ suffix: "", overrides: values, side: null }];
+    pendingPreview.current = {
+      generation: requestGeneration,
+      batchId: ++batchCounter.current,
+      requests: variants.flatMap((variant) => {
+        const text = wrapSample(variant.text ?? sampleText, fontFace, fontSize, width);
+        return sides.map((side) => ({
+          key: `${variant.key}${side.suffix}`,
+          label: variant.label,
+          side: side.side,
+          request: {
+            profilePath,
+            overrides: side.overrides,
+            displayScale,
+            sample: {
+              text,
+              fontFace,
+              fontSizePt: fontSize,
+              widthPx: Math.round(width * displayScale),
+              heightPx: Math.round(stripHeightFor(text, fontSize) * displayScale),
+              dpi: Math.round(96 * displayScale),
+              foreground: variant.foreground ?? previewPalette(darkPreview).foreground,
+              background: previewPalette(darkPreview).background,
+              bold: variant.bold ?? false,
+              italic: variant.italic ?? false,
             },
-          }));
-        }),
-      };
-      void drainPreviewQueue();
-    }, 40);
-    return () => window.clearTimeout(timer);
+          },
+        }));
+      }),
+    };
+    /* The queue itself coalesces in-flight work to the latest batch, so a
+       trailing timer only makes continuous wheel input feel unresponsive. */
+    void drainPreviewQueue();
+    return undefined;
   }, [compareOverrides, darkPreview, drainPreviewQueue, fontFace, fontSize, isCurrentGeneration, profilePath, sampleText, sampleWidth, values, variants]);
 
   const resizePreviewFromKeyboard = (event: KeyboardEvent<HTMLDivElement>) => {

@@ -52,19 +52,35 @@ async function waitForDevToolsPort(userDataDirectory, timeoutMs) {
   throw new Error('MacLoader Chromium did not publish DevToolsActivePort');
 }
 
-async function browserPid(browser) {
+async function browserProcessInfo(browser) {
   const session = await browser.newBrowserCDPSession();
   try {
     const result = await session.send('SystemInfo.getProcessInfo');
-    const processInfo = result.processInfo.find((entry) => entry.type === 'browser');
-    return Number.isInteger(processInfo?.id) && processInfo.id > 0
-      ? processInfo.id
-      : null;
-  } catch {
-    return null;
+    return Array.isArray(result.processInfo) ? result.processInfo : [];
   } finally {
-    await session.detach();
+    await session.detach().catch(() => undefined);
   }
+}
+
+export function processIdsForBrowserCleanup(processInfo, fallbackPid = null) {
+  const entries = Array.isArray(processInfo) ? processInfo : [];
+  const browserEntry = entries.find(
+    (entry) => entry?.type === 'browser'
+      && Number.isInteger(entry.id)
+      && entry.id > 0,
+  );
+  const ids = [];
+  const seen = new Set();
+  const append = (pid) => {
+    if (!Number.isInteger(pid) || pid <= 0 || seen.has(pid)) return;
+    seen.add(pid);
+    ids.push(pid);
+  };
+
+  if (browserEntry) append(browserEntry.id);
+  else append(fallbackPid);
+  for (const entry of entries) append(entry?.id);
+  return ids;
 }
 
 async function closeBrowserWithin(browser, timeoutMs) {
@@ -123,9 +139,15 @@ async function terminateWindowsProcessTree(pid) {
 
 async function closeBrowserProcess(browser, pid) {
   // Browser.close can let the root exit before Windows releases every child.
-  // Terminate the exact test-owned tree while its verified root PID still
-  // exists, so a detached utility process cannot retain the temporary profile.
-  if (pid && await terminateWindowsProcessTree(pid)) {
+  // Refresh the exact CDP-owned PIDs immediately before teardown. Chromium can
+  // detach a utility process from its original root tree while the proof runs.
+  const processInfo = await browserProcessInfo(browser).catch(() => []);
+  const ownedPids = processIdsForBrowserCleanup(processInfo, pid);
+  let terminated = false;
+  for (const ownedPid of ownedPids) {
+    terminated = await terminateWindowsProcessTree(ownedPid) || terminated;
+  }
+  if (terminated) {
     await closeBrowserWithin(browser, 2000);
     return;
   }
@@ -157,7 +179,7 @@ async function closeBrowserProcess(browser, pid) {
 async function removeUserDataDirectory(userDataDirectory) {
   await rm(userDataDirectory, {
     force: true,
-    maxRetries: 20,
+    maxRetries: 120,
     recursive: true,
     retryDelay: 250,
   });
@@ -208,7 +230,12 @@ export async function launchChromiumWithProductLoader({
     browser = await browserType.connectOverCDP(`http://127.0.0.1:${port}`, {
       timeout: timeoutMs,
     });
-    pid = await browserPid(browser);
+    const processInfo = await browserProcessInfo(browser).catch(() => []);
+    pid = processInfo.find(
+      (entry) => entry?.type === 'browser'
+        && Number.isInteger(entry.id)
+        && entry.id > 0,
+    )?.id ?? null;
     if (!Number.isInteger(pid) || pid <= 0) {
       throw new Error('MacLoader Chromium did not expose its browser PID');
     }

@@ -114,6 +114,48 @@ export function processTreeTerminationCommand(
   };
 }
 
+const profileProcessTerminationScript = [
+  "$target = [Environment]::GetEnvironmentVariable('MACTYPE_TEST_BROWSER_PROFILE')",
+  "if ([string]::IsNullOrWhiteSpace($target)) { exit 2 }",
+  '$currentProcessId = [Diagnostics.Process]::GetCurrentProcess().Id',
+  'Get-CimInstance Win32_Process | Where-Object { ' +
+    '$_.ProcessId -ne $currentProcessId -and $_.CommandLine -and ' +
+    '$_.CommandLine.IndexOf($target, [StringComparison]::OrdinalIgnoreCase) ' +
+    '-ge 0 } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force ' +
+    '-ErrorAction SilentlyContinue }',
+].join('; ');
+
+export function profileProcessTerminationCommand(
+  userDataDirectory,
+  platform = process.platform,
+  systemRoot = process.env.SystemRoot || 'C:\\Windows',
+) {
+  if (platform !== 'win32') return null;
+  if (typeof userDataDirectory !== 'string'
+      || !path.win32.isAbsolute(userDataDirectory)) {
+    throw new Error('Expected an absolute temporary Chromium profile path');
+  }
+  return {
+    executable: path.win32.join(
+      systemRoot,
+      'System32',
+      'WindowsPowerShell',
+      'v1.0',
+      'powershell.exe',
+    ),
+    arguments: [
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      profileProcessTerminationScript,
+    ],
+    environment: {
+      MACTYPE_TEST_BROWSER_PROFILE: userDataDirectory,
+    },
+  };
+}
+
 async function terminateWindowsProcessTree(pid) {
   const command = processTreeTerminationCommand(pid);
   if (!command || !isProcessRunning(pid)) return false;
@@ -137,7 +179,40 @@ async function terminateWindowsProcessTree(pid) {
   return true;
 }
 
-async function closeBrowserProcess(browser, pid) {
+async function terminateProfileProcesses(userDataDirectory) {
+  const command = profileProcessTerminationCommand(userDataDirectory);
+  if (!command) return;
+  await new Promise((resolve, reject) => {
+    const child = spawn(command.executable, command.arguments, {
+      env: { ...process.env, ...command.environment },
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    let settled = false;
+    const timeout = setTimeout(() => {
+      child.kill();
+      finish(() => reject(new Error(
+        'Exact Chromium profile process cleanup exceeded 10000 ms',
+      )));
+    }, 10000);
+    const finish = (action) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      action();
+    };
+    child.once('error', (error) => finish(() => reject(error)));
+    child.once('exit', (code, signal) => finish(() => {
+      if (code === 0) resolve();
+      else reject(new Error(
+        `Exact Chromium profile process cleanup exited with code ` +
+          `${code ?? 'none'} and signal ${signal ?? 'none'}`,
+      ));
+    }));
+  });
+}
+
+async function closeBrowserProcess(browser, pid, userDataDirectory) {
   // Browser.close can let the root exit before Windows releases every child.
   // Refresh the exact CDP-owned PIDs immediately before teardown. Chromium can
   // detach a utility process from its original root tree while the proof runs.
@@ -149,39 +224,45 @@ async function closeBrowserProcess(browser, pid) {
   }
   if (terminated) {
     await closeBrowserWithin(browser, 2000);
-    return;
-  }
-  try {
-    const session = await browser.newBrowserCDPSession();
-    await Promise.race([
-      session.send('Browser.close').catch(() => undefined),
-      delay(2000),
-    ]);
-  } catch {
-    // Continue to the PID-scoped fallback when the CDP connection is already gone.
-  }
-  await closeBrowserWithin(browser, 2000);
-  if (!pid) return;
-
-  const deadline = Date.now() + 3000;
-  while (isProcessRunning(pid) && Date.now() < deadline) {
-    await delay(25);
-  }
-  if (isProcessRunning(pid)) {
+  } else {
     try {
-      process.kill(pid);
-    } catch (error) {
-      if (error?.code !== 'ESRCH') throw error;
+      const session = await browser.newBrowserCDPSession();
+      await Promise.race([
+        session.send('Browser.close').catch(() => undefined),
+        delay(2000),
+      ]);
+    } catch {
+      // Continue to the PID-scoped fallback when the CDP connection is already gone.
+    }
+    await closeBrowserWithin(browser, 2000);
+    if (pid) {
+      const deadline = Date.now() + 3000;
+      while (isProcessRunning(pid) && Date.now() < deadline) {
+        await delay(25);
+      }
+      if (isProcessRunning(pid)) {
+        try {
+          process.kill(pid);
+        } catch (error) {
+          if (error?.code !== 'ESRCH') throw error;
+        }
+      }
     }
   }
+  await terminateProfileProcesses(userDataDirectory);
 }
+
+export const userDataRemovalRetryPolicy = Object.freeze({
+  maxRetries: 24,
+  retryDelay: 100,
+});
 
 async function removeUserDataDirectory(userDataDirectory) {
   await rm(userDataDirectory, {
     force: true,
-    maxRetries: 120,
+    maxRetries: userDataRemovalRetryPolicy.maxRetries,
     recursive: true,
-    retryDelay: 250,
+    retryDelay: userDataRemovalRetryPolicy.retryDelay,
   });
 }
 
@@ -246,13 +327,14 @@ export async function launchChromiumWithProductLoader({
       browserPid: pid,
       close: async () => {
         if (closed) return;
-        await closeBrowserProcess(browser, pid);
+        await closeBrowserProcess(browser, pid, userDataDirectory);
         await removeUserDataDirectory(userDataDirectory);
         closed = true;
       },
     };
   } catch (error) {
-    if (browser) await closeBrowserProcess(browser, pid);
+    if (browser) await closeBrowserProcess(browser, pid, userDataDirectory);
+    else await terminateProfileProcesses(userDataDirectory);
     await removeUserDataDirectory(userDataDirectory);
     throw error;
   }

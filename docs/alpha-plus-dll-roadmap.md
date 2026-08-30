@@ -40,7 +40,7 @@ deliberately narrower than “works everywhere”:
 | Windows feature detection | `IMPLEMENTED` | Manifest-sensitive OS-version guesses were removed from renderer decisions. Interface queries, module/export presence, and concrete mitigation facts now select capabilities. |
 | Sanitizer gate | `IMPLEMENTED`, `PROVED LOCAL`, `CI REQUIRED` | MSVC ASan instruments the new ownership, lifecycle, FreeType-policy, and substitution modules on x86/x64. A fully instrumented injected DLL remains unavailable because stock IniParser and other linked dependencies do not share ASan/STL annotations; CI must not mislabel module coverage as whole-process certification. |
 | Application Verifier/UMDH | `LAB ONLY`, not run | The current host lacks the complete `gflags`/UMDH toolchain and these tools mutate machine-global verifier state. The lane was reevaluated and intentionally not automated after the surrounding modules changed. Run it only in a disposable Windows lab with explicit cleanup evidence. |
-| Browser, WinUI, WPF, Qt, licensed games, soak and golden images | `LAB ONLY` | Native contracts establish the API seams. The local Unity lane now records hashed Rebel Inc and Plague Inc binaries, exact injected module identity, responsiveness, WER, and private-FreeType markers. Rebel's reporter-machine crash and product-specific pixel or performance claims remain `UNKNOWN` until retained artifacts reproduce them. They are compatibility evidence, not unfinished renderer ownership code. |
+| Browser, WinUI, WPF, Qt, licensed games, soak and golden images | `LAB ONLY` | Native contracts establish the API seams. Retained local Unity runs bind hashed Rebel Inc and Plague Inc binaries to exact injected module identity, responsiveness, WER, private-FreeType markers, nonzero Korean glyph lookup, and full-window captures. Portability to other game revisions and machines remains `UNKNOWN`; this is compatibility evidence, not unfinished renderer ownership code. |
 
 The classic-C++ upstream renderer branch is a separate contribution experiment.
 None of its no-RAII assumptions or commits are inputs to this record.
@@ -205,6 +205,14 @@ creation fails. Test-only shared-memory evidence keeps observed face opens,
 successful redirects, fallbacks, and exact paths separate from visual identity.
 Visual capture remains a separate manual artifact when Windows denies capture,
 and pre-rendered assets remain outside the font-hook seam.
+
+Unity 2019 adapters must also distinguish font discovery from font use. Its
+private system catalog opens every installed face to learn family metadata; a
+pathname substitution at that point erases the source family from fallback
+selection even though `FT_Open_Face` succeeds. The exact 2019.4.41 adapter
+therefore suppresses redirects only inside the catalog-entry loader and resumes
+them for the selected rendering face. A field run is not successful when it
+observes character lookups but every lookup resolves to glyph zero.
 
 For builds with an exact OS `FontRef` resolver, a scoped selection context
 distinguishes an explicitly mapped family from an unrelated family that merely

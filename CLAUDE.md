@@ -133,6 +133,12 @@ below wherever the two conflict.
   `SafeUnload` or process exit, so profile and Unity-policy changes are not
   retroactive. Isolated field tests must stop the service first and accept
   exactly one MacType module from the requested test directory.
+- Unity substitution must not rewrite private system-font discovery catalogs.
+  An exact adapter may suppress redirects only for its verified catalog-entry
+  boundary, then resume substitution when the selected face is opened for text.
+  A successful face open or non-empty `.notdef` bitmap is not proof of readable
+  text: when character lookups are observed, require at least one nonzero glyph
+  result and retain a full-window field capture for licensed local targets.
 - The fixed setup broker materializes DLL-adjacent `MacType.ini` only for an
   active service. A supported stop and every maintenance or profile operation
   that ends stopped remove only the exact verified generated copy while

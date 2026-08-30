@@ -87,9 +87,11 @@ the exact protected bytes before Ready.
 `scripts/lab/Test-UnityGameCompatibility.ps1` records licensed local game
 evidence without redistributing a game binary. It hashes the executable and
 `UnityPlayer.dll`, records Unity version and private-renderer markers, launches
-stock or through the shipped `MacLoader`, verifies the exact MacType module,
-observes responsiveness for a bounded interval, checks WER, and terminates
-only the exact test process it launched.
+stock, through the shipped `MacLoader`, or under an explicitly named running
+service core, verifies the exact MacType module, observes responsiveness for a
+bounded interval, checks WER, and terminates only the exact test process it
+launched. If an adapter exposes character-lookup evidence, redirects no longer
+count as success unless at least one observed lookup resolves to a real glyph.
 
 The optional Unity adapter is off by default. Selected-games mode consumes
 `[UnityInclude]`; most-games mode admits Unity processes unless the 신식 서비스
@@ -109,27 +111,35 @@ then exposed a second ambiguity: unrelated Unity `FontRef` families can share
 family context, so only the mapped family may redirect the shared file.
 Diagnostic lookup observes but never replaces Unity's returned face.
 
-The final isolated Rebel run loaded exactly one candidate MacType module,
-remained responsive with no WER report, redirected 2/2 face opens with zero
-fallbacks, produced 114 non-empty bitmaps, resolved 105/105 mapped character
-lookups, and reported `Malgun Gothic` backed by `Pretendard Variable`; the full
-window capture showed intact Korean menu text. The isolated Plague Inc
-2019.4.41 run redirected 5/5 face opens with zero fallbacks, produced 2,461
-non-empty bitmaps, and opened `malgunsl.ttf` as the Pretendard Variable file
-with a nonzero Korean sample glyph. Its current UI language was English, so the
-face-open and glyph evidence—not the screenshot—is the substitution claim.
-Synthetic TTC tests reject cross-face aliases, and every shipped descriptor is
-checked against its licensed local UnityPlayer binary without runtime signature
-scanning.
+Plague Inc then exposed why a successful face open is not a successful font
+substitution. Unity 2019 opens every installed font while building a private
+family catalog. Redirecting `malgun*.ttf` during that discovery pass relabelled
+the catalog entry as Pretendard and removed `Malgun Gothic` from Unity's own
+fallback search. The broken run redirected 5/5 opens and rendered thousands of
+bitmaps, yet all 59,762 observed Korean lookups returned glyph zero. Its exact
+2019.4.41 descriptor now also identifies the system-catalog entry loader. A
+scoped bypass keeps discovery opens native; face-open substitution resumes only
+after Unity selects a catalog entry for actual text.
+
+The final isolated Plague run remained responsive with no WER report,
+redirected 4/4 selected-face opens with zero fallbacks, rendered 7,533 non-empty
+bitmaps, and resolved 10,828 of 37,918 Korean fallback probes. Its last resolved
+Korean face was `Pretendard Variable`, and the full-window capture showed the
+complete Korean main menu. The final Rebel A/B regression run redirected 2/2
+face opens, resolved 286/286 mapped lookups, and again reported `Malgun Gothic`
+backed by `Pretendard Variable`. Synthetic TTC and descriptor-prefix tests
+reject cross-face aliases or an inexact catalog boundary; there is no runtime
+signature scan.
 
 Stopping the 신식 서비스 is deliberately non-retroactive: it blocks future
 injection and retires child propagation but does not force arbitrary live
 processes to unload hook code. During diagnosis, 127 live processes still held
 the stopped service generation. Restarting an application therefore removes
 that old immutable state, which explains why tofu sometimes vanished only
-after restart. The isolated Unity harness now refuses to run while the service
-can inject and fails unless the game contains exactly one MacType module from
-the requested test directory.
+after restart. Isolated `MacLoader` mode refuses to run while the service can
+inject and accepts exactly one MacType module from the requested test
+directory. Service mode instead requires the service to be running and binds
+evidence to the explicitly named protected core path.
 
 ## Remaining platform boundary
 

@@ -197,6 +197,14 @@ constexpr std::array<unsigned char, 32> kOsFaceResolverPrefix2022_3_62f3X64{{
 	0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x48,0x89,0x7C,0x24,0x20,0x55,
 	0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57,0x48,0x8D,0x6C,0x24,0xC9,0x48,0x81,0xEC,
 }};
+constexpr std::array<unsigned char, 32> kFreeTypeCharIndexPrefix2019_4_41X64{{
+	0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x20,0x33,0xFF,0x48,0x8B,0xD9,0x48,
+	0x85,0xC9,0x74,0x24,0x48,0x8B,0x89,0x88,0x00,0x00,0x00,0x48,0x85,0xC9,0x74,0x18,
+}};
+constexpr std::array<unsigned char, 32> kFontCatalogLoadPrefix2019_4_41X64{{
+	0x48,0x8B,0xC4,0x55,0x53,0x56,0x41,0x54,0x41,0x55,0x41,0x57,0x48,0x8D,0x68,0xB8,
+	0x48,0x81,0xEC,0x18,0x01,0x00,0x00,0x44,0x8B,0x7D,0x58,0x33,0xF6,0x48,0x89,0x78,
+}};
 
 constexpr AdapterDescriptor kProductionDescriptors[] = {
 	{"unity-2018.4.32-x64",0x8664,0x60240965,0x01731000,
@@ -207,7 +215,14 @@ constexpr AdapterDescriptor kProductionDescriptors[] = {
 	 0x00E2BEC0,&kFaceOpenPrefix2019X64,FaceOpenAbi::unityInternal},
 	{"unity-2019.4.41-x64",0x8664,0x68ED0247,0x019DB000,
 	 {{0xF2,0x4E,0x36,0x83,0xDD,0x88,0x07,0x4D,0xA6,0x7A,0xDF,0xF6,0xDF,0x4B,0x04,0xBF}},1,0x00E49DE0,RenderAbi::publicRender,&kPublicPrefixLegacy,
-	 0x00E4B040,&kFaceOpenPrefix2019X64,FaceOpenAbi::unityInternal},
+	 0x00E4B040,&kFaceOpenPrefix2019X64,FaceOpenAbi::unityInternal,
+	 0,nullptr,FontLoadAbi::unavailable,
+	 0,nullptr,CharacterLookupAbi::unavailable,
+	 0,nullptr,CharacterLookupAbi::unavailable,
+	 0x00E48FF0,&kFreeTypeCharIndexPrefix2019_4_41X64,
+	 FreeTypeCharIndexAbi::standard,
+	 0x00C28960,&kFontCatalogLoadPrefix2019_4_41X64,
+	 FontCatalogLoadAbi::systemCatalogEntry},
 	{"unity-2020.3.34-x64",0x8664,0x626E7CA6,0x01BE3000,
 	 {{0x7E,0x65,0x5B,0x3F,0x92,0xED,0x2D,0x4B,0xBA,0x7D,0xCC,0xE5,0x01,0x35,0x19,0x82}},1,0x00F5C220,RenderAbi::publicRender,&kPublicPrefix2020,
 	 0x00F5D4A0,&kFaceOpenPrefix2020_3_34X64,FaceOpenAbi::unityInternal},
@@ -947,6 +962,44 @@ bool ResolveAdapter(
 				osFaceResolverPrefix != *candidate.osFaceResolverPrefix)
 				return false;
 		}
+		bool const hasFreeTypeCharIndex = candidate.freeTypeCharIndexRva != 0;
+		if (hasFreeTypeCharIndex !=
+				(candidate.freeTypeCharIndexPrefix != nullptr) ||
+			hasFreeTypeCharIndex !=
+				(candidate.freeTypeCharIndexAbi != FreeTypeCharIndexAbi::unavailable))
+			return false;
+		if (hasFreeTypeCharIndex)
+		{
+			if (!image.IsExecutableRva(
+				candidate.freeTypeCharIndexRva,
+				candidate.freeTypeCharIndexPrefix->size()))
+				return false;
+			std::array<unsigned char, 32> freeTypeCharIndexPrefix{};
+			if (!image.CopyRva(
+				candidate.freeTypeCharIndexRva,
+				freeTypeCharIndexPrefix.data(), freeTypeCharIndexPrefix.size()) ||
+				freeTypeCharIndexPrefix != *candidate.freeTypeCharIndexPrefix)
+				return false;
+		}
+		bool const hasFontCatalogLoad = candidate.fontCatalogLoadRva != 0;
+		if (hasFontCatalogLoad !=
+				(candidate.fontCatalogLoadPrefix != nullptr) ||
+			hasFontCatalogLoad !=
+				(candidate.fontCatalogLoadAbi != FontCatalogLoadAbi::unavailable))
+			return false;
+		if (hasFontCatalogLoad)
+		{
+			if (!image.IsExecutableRva(
+				candidate.fontCatalogLoadRva,
+				candidate.fontCatalogLoadPrefix->size()))
+				return false;
+			std::array<unsigned char, 32> fontCatalogLoadPrefix{};
+			if (!image.CopyRva(
+				candidate.fontCatalogLoadRva,
+				fontCatalogLoadPrefix.data(), fontCatalogLoadPrefix.size()) ||
+				fontCatalogLoadPrefix != *candidate.fontCatalogLoadPrefix)
+				return false;
+		}
 		match = &candidate;
 	}
 	if (match == nullptr)
@@ -957,11 +1010,15 @@ bool ResolveAdapter(
 	resolved->fontLoadRva = match->fontLoadRva;
 	resolved->characterLookupRva = match->characterLookupRva;
 	resolved->osFaceResolverRva = match->osFaceResolverRva;
+	resolved->freeTypeCharIndexRva = match->freeTypeCharIndexRva;
+	resolved->fontCatalogLoadRva = match->fontCatalogLoadRva;
 	resolved->abi = match->abi;
 	resolved->faceOpenAbi = match->faceOpenAbi;
 	resolved->fontLoadAbi = match->fontLoadAbi;
 	resolved->characterLookupAbi = match->characterLookupAbi;
 	resolved->osFaceResolverAbi = match->osFaceResolverAbi;
+	resolved->freeTypeCharIndexAbi = match->freeTypeCharIndexAbi;
+	resolved->fontCatalogLoadAbi = match->fontCatalogLoadAbi;
 	return true;
 }
 

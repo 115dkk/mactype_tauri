@@ -8,6 +8,8 @@ param(
 
     [string] $MacLoader,
 
+    [string] $ServiceCore,
+
     [string] $UnityEvidenceProbe,
 
     [string] $ScreenshotPath,
@@ -17,7 +19,10 @@ param(
     [string] $SteamAppId,
 
     [ValidateRange(5, 300)]
-    [int] $ObserveSeconds = 30
+    [int] $ObserveSeconds = 30,
+
+    [ValidateRange(0, 5)]
+    [int] $EscapeBeforeCaptureCount = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -87,7 +92,8 @@ function Get-RelevantModules([System.Diagnostics.Process] $Process) {
 
 function Save-ExactWindowCapture(
     [System.Diagnostics.Process] $Process,
-    [string] $Path
+    [string] $Path,
+    [int] $EscapeCount
 ) {
     Add-Type -AssemblyName System.Drawing
     if (-not ('MacType.UnityWindowCapture' -as [type])) {
@@ -124,6 +130,15 @@ namespace MacType
         public static extern IntPtr GetForegroundWindow();
 
         [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool PostMessageW(
+            IntPtr window,
+            uint message,
+            IntPtr wParam,
+            IntPtr lParam
+        );
+
+        [DllImport("user32.dll")]
         public static extern IntPtr SetThreadDpiAwarenessContext(
             IntPtr dpiContext
         );
@@ -148,6 +163,21 @@ namespace MacType
     $null = [MacType.UnityWindowCapture]::ShowWindow($window, 9)
     $null = [MacType.UnityWindowCapture]::SetForegroundWindow($window)
     Start-Sleep -Milliseconds 750
+    for ($index = 0; $index -lt $EscapeCount; $index++) {
+        $null = [MacType.UnityWindowCapture]::PostMessageW(
+            $window,
+            0x0100,
+            [IntPtr]::new(0x1B),
+            [IntPtr]::Zero
+        )
+        $null = [MacType.UnityWindowCapture]::PostMessageW(
+            $window,
+            0x0101,
+            [IntPtr]::new(0x1B),
+            [IntPtr]::Zero
+        )
+        Start-Sleep -Milliseconds 750
+    }
     $null = [MacType.UnityWindowCapture]::SetThreadDpiAwarenessContext(
         [IntPtr]::new(-4)
     )
@@ -225,6 +255,9 @@ if (-not [string]::IsNullOrWhiteSpace($ScreenshotPath)) {
 $loader = $null
 $expectedCore = $null
 if (-not [string]::IsNullOrWhiteSpace($MacLoader)) {
+    if (-not [string]::IsNullOrWhiteSpace($ServiceCore)) {
+        throw 'MacLoader and ServiceCore are mutually exclusive launch modes.'
+    }
     $loader = (Resolve-Path -LiteralPath $MacLoader).Path
     $loaderRoot = Split-Path -Parent $loader
     $expectedCore = Join-Path $loaderRoot 'MacType64.dll'
@@ -237,11 +270,17 @@ if (-not [string]::IsNullOrWhiteSpace($MacLoader)) {
     if ($openService -and $openService.Status -ne 'Stopped') {
         throw 'Refusing an isolated MacLoader run while MacTypeControlCenter can inject another renderer generation.'
     }
+} elseif (-not [string]::IsNullOrWhiteSpace($ServiceCore)) {
+    $expectedCore = (Resolve-Path -LiteralPath $ServiceCore).Path
+    $openService = Get-Service -Name MacTypeControlCenter -ErrorAction Stop
+    if ($openService.Status -ne 'Running') {
+        throw 'ServiceCore evidence requires MacTypeControlCenter to be running.'
+    }
 }
 if (-not [string]::IsNullOrWhiteSpace($UnityEvidenceProbe)) {
     $UnityEvidenceProbe = (Resolve-Path -LiteralPath $UnityEvidenceProbe).Path
-    if (-not $loader) {
-        throw 'Unity font evidence requires the explicit product MacLoader runtime.'
+    if (-not $expectedCore) {
+        throw 'Unity font evidence requires an explicit MacLoader or ServiceCore runtime.'
     }
 } elseif ($RequireUnityRedirect) {
     throw 'RequireUnityRedirect requires UnityEvidenceProbe.'
@@ -309,7 +348,8 @@ try {
         $gameProcess.Refresh()
     } while ((Get-Date) -lt $observationDeadline)
     if ($screenshot -and -not $gameProcess.HasExited) {
-        Save-ExactWindowCapture -Process $gameProcess -Path $screenshot
+        Save-ExactWindowCapture -Process $gameProcess -Path $screenshot `
+            -EscapeCount $EscapeBeforeCaptureCount
     }
 } catch {
     $observationError = $_.Exception.Message
@@ -471,7 +511,13 @@ $evidence = [ordered]@{
         }
     }
     launch = [ordered]@{
-        mode = if ($loader) { 'product-macloader' } else { 'stock' }
+        mode = if ($loader) {
+            'product-macloader'
+        } elseif ($ServiceCore) {
+            'product-service'
+        } else {
+            'stock'
+        }
         loader = $loader
         expectedCore = $expectedCore
         launcherExitCode = if ($launcherProcess -and $launcherProcess.HasExited) {
@@ -503,12 +549,15 @@ $evidence = [ordered]@{
     [Text.UTF8Encoding]::new($false)
 )
 
-if ($observationError -or $exited -or -not $exactCoreLoaded -or
+if ($observationError -or $exited -or -not $responding -or
+    -not $exactCoreLoaded -or
     $werReports.Count -ne 0 -or
     ($RequireUnityRedirect -and
         (-not $unityFontEvidence -or $unityFontEvidence.exitCode -ne 0 -or
             $unityFontEvidence.redirectSuccesses -le 0 -or
-            $unityFontEvidence.redirectFallbacks -ne 0))) {
+            $unityFontEvidence.redirectFallbacks -ne 0 -or
+            ($unityFontEvidence.characterLookups -gt 0 -and
+                $unityFontEvidence.characterLookupHits -le 0)))) {
     throw "Unity compatibility evidence did not satisfy the survival contract: $output"
 }
 

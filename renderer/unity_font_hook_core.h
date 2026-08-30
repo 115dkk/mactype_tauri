@@ -40,6 +40,18 @@ enum class CharacterLookupAbi : unsigned char
 	legacyDynamicFont,
 };
 
+enum class FreeTypeCharIndexAbi : unsigned char
+{
+	unavailable,
+	standard,
+};
+
+enum class FontCatalogLoadAbi : unsigned char
+{
+	unavailable,
+	systemCatalogEntry,
+};
+
 enum class FontSubstitutionBoundary : unsigned char
 {
 	unavailable,
@@ -70,6 +82,12 @@ struct AdapterDescriptor final
 	DWORD osFaceResolverRva = 0;
 	const std::array<unsigned char, 32>* osFaceResolverPrefix = nullptr;
 	CharacterLookupAbi osFaceResolverAbi = CharacterLookupAbi::unavailable;
+	DWORD freeTypeCharIndexRva = 0;
+	const std::array<unsigned char, 32>* freeTypeCharIndexPrefix = nullptr;
+	FreeTypeCharIndexAbi freeTypeCharIndexAbi = FreeTypeCharIndexAbi::unavailable;
+	DWORD fontCatalogLoadRva = 0;
+	const std::array<unsigned char, 32>* fontCatalogLoadPrefix = nullptr;
+	FontCatalogLoadAbi fontCatalogLoadAbi = FontCatalogLoadAbi::unavailable;
 };
 
 struct ResolvedAdapter final
@@ -80,11 +98,15 @@ struct ResolvedAdapter final
 	DWORD fontLoadRva = 0;
 	DWORD characterLookupRva = 0;
 	DWORD osFaceResolverRva = 0;
+	DWORD freeTypeCharIndexRva = 0;
+	DWORD fontCatalogLoadRva = 0;
 	RenderAbi abi = RenderAbi::publicRender;
 	FaceOpenAbi faceOpenAbi = FaceOpenAbi::unavailable;
 	FontLoadAbi fontLoadAbi = FontLoadAbi::unavailable;
 	CharacterLookupAbi characterLookupAbi = CharacterLookupAbi::unavailable;
 	CharacterLookupAbi osFaceResolverAbi = CharacterLookupAbi::unavailable;
+	FreeTypeCharIndexAbi freeTypeCharIndexAbi = FreeTypeCharIndexAbi::unavailable;
+	FontCatalogLoadAbi fontCatalogLoadAbi = FontCatalogLoadAbi::unavailable;
 };
 
 struct InstalledFontFace final

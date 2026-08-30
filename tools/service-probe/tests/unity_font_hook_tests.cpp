@@ -42,6 +42,8 @@ struct Fixture final
     }};
     std::array<unsigned char, 32> prefix{};
     std::array<unsigned char, 32> faceOpenPrefix{};
+    std::array<unsigned char, 32> charIndexPrefix{};
+    std::array<unsigned char, 32> fontCatalogLoadPrefix{};
     renderer::unity::AdapterDescriptor descriptor{};
 
     Fixture()
@@ -50,6 +52,9 @@ struct Fixture final
         {
             prefix[index] = static_cast<unsigned char>(0x40 + index);
             faceOpenPrefix[index] = static_cast<unsigned char>(0x80 + index);
+            charIndexPrefix[index] = static_cast<unsigned char>(0xA0 + index);
+            fontCatalogLoadPrefix[index] =
+                static_cast<unsigned char>(0xC0 + index);
         }
 
         auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(image.data());
@@ -90,6 +95,10 @@ struct Fixture final
         std::memcpy(image.data() + 0x2000, prefix.data(), prefix.size());
         std::memcpy(image.data() + 0x2080,
             faceOpenPrefix.data(), faceOpenPrefix.size());
+        std::memcpy(image.data() + 0x2100,
+            charIndexPrefix.data(), charIndexPrefix.size());
+        std::memcpy(image.data() + 0x2180,
+            fontCatalogLoadPrefix.data(), fontCatalogLoadPrefix.size());
 
         descriptor = {
             "fixture", kNativeMachine, 0x12345678,
@@ -97,6 +106,14 @@ struct Fixture final
             renderer::unity::RenderAbi::publicRender, &prefix,
             0x2080, &faceOpenPrefix,
             renderer::unity::FaceOpenAbi::unityInternal};
+        descriptor.freeTypeCharIndexRva = 0x2100;
+        descriptor.freeTypeCharIndexPrefix = &charIndexPrefix;
+        descriptor.freeTypeCharIndexAbi =
+            renderer::unity::FreeTypeCharIndexAbi::standard;
+        descriptor.fontCatalogLoadRva = 0x2180;
+        descriptor.fontCatalogLoadPrefix = &fontCatalogLoadPrefix;
+        descriptor.fontCatalogLoadAbi =
+            renderer::unity::FontCatalogLoadAbi::systemCatalogEntry;
     }
 };
 
@@ -421,6 +438,8 @@ int main()
             "an exact PE/PDB identity did not resolve");
     Require(resolved.targetRva == 0x2000 &&
                 resolved.faceOpenRva == 0x2080 &&
+                resolved.freeTypeCharIndexRva == 0x2100 &&
+                resolved.fontCatalogLoadRva == 0x2180 &&
                 resolved.abi == renderer::unity::RenderAbi::publicRender &&
                 resolved.faceOpenAbi ==
                     renderer::unity::FaceOpenAbi::unityInternal,
@@ -450,6 +469,16 @@ int main()
                 fixture.image.data(), fixture.image.size(), &fixture.descriptor, 1, &resolved),
             "a mismatched face-open prologue resolved");
     fixture.image[0x2080] ^= 0xff;
+    fixture.image[0x2100] ^= 0xff;
+    Require(!renderer::unity::ResolveAdapter(
+                fixture.image.data(), fixture.image.size(), &fixture.descriptor, 1, &resolved),
+            "a mismatched FreeType character-index prologue resolved");
+    fixture.image[0x2100] ^= 0xff;
+    fixture.image[0x2180] ^= 0xff;
+    Require(!renderer::unity::ResolveAdapter(
+                fixture.image.data(), fixture.image.size(), &fixture.descriptor, 1, &resolved),
+            "a mismatched system-font catalog prologue resolved");
+    fixture.image[0x2180] ^= 0xff;
     Require(!renderer::unity::ResolveAdapter(
                 fixture.image.data(), 0x1800, &fixture.descriptor, 1, &resolved),
             "a truncated mapped image resolved");
@@ -485,6 +514,21 @@ int main()
         rebelAdapter->osFaceResolverAbi ==
             renderer::unity::CharacterLookupAbi::legacyDynamicFont,
         "Rebel's exact Unity adapter did not select the TextCore font-load boundary");
+
+    auto const plagueAdapter = std::find_if(
+        production, production + productionCount, [](const auto& adapter) {
+            return std::strcmp(adapter.name, "unity-2019.4.41-x64") == 0;
+        });
+    Require(plagueAdapter != production + productionCount &&
+        plagueAdapter->freeTypeCharIndexRva == 0x00E48FF0 &&
+        plagueAdapter->freeTypeCharIndexPrefix != nullptr &&
+        plagueAdapter->freeTypeCharIndexAbi ==
+            renderer::unity::FreeTypeCharIndexAbi::standard &&
+        plagueAdapter->fontCatalogLoadRva == 0x00C28960 &&
+        plagueAdapter->fontCatalogLoadPrefix != nullptr &&
+        plagueAdapter->fontCatalogLoadAbi ==
+            renderer::unity::FontCatalogLoadAbi::systemCatalogEntry,
+        "Plague's exact Unity adapter cannot preserve or verify its font catalog");
 
     renderer::UnityCoverageLut lut = IdentityLut();
     lut.gray[128] = 200;

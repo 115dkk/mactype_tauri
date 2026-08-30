@@ -51,6 +51,8 @@ using TextCoreFontLoadFunction = int (*)(const char*, int, int);
 using LegacyCharacterLookupFunction = FT_Face (*)(
 	void*, const void*, const void*, unsigned int);
 using LegacyOsFaceResolverFunction = FT_Face (*)(void*, const void*);
+using FreeTypeCharIndexFunction = FT_UInt (*)(FT_Face, FT_ULong);
+using FontCatalogLoadFunction = void (*)(void*);
 #else
 using PublicRenderFunction = void*;
 using InternalRenderFunction = void*;
@@ -58,6 +60,8 @@ using FaceOpenFunction = void*;
 using TextCoreFontLoadFunction = void*;
 using LegacyCharacterLookupFunction = void*;
 using LegacyOsFaceResolverFunction = void*;
+using FreeTypeCharIndexFunction = void*;
+using FontCatalogLoadFunction = void*;
 #endif
 
 struct UnityLifecycleState final
@@ -76,6 +80,8 @@ struct UnityLifecycleState final
 	TextCoreFontLoadFunction fontLoad = nullptr;
 	LegacyCharacterLookupFunction characterLookup = nullptr;
 	LegacyOsFaceResolverFunction osFaceResolver = nullptr;
+	FreeTypeCharIndexFunction freeTypeCharIndex = nullptr;
+	FontCatalogLoadFunction fontCatalogLoad = nullptr;
 	std::shared_ptr<const renderer::unity::FontFileRedirectTable> redirects;
 	renderer_raii::UniqueHandle evidenceMapping;
 	renderer_raii::UniqueMappedView evidenceView;
@@ -85,6 +91,9 @@ struct UnityLifecycleState final
 	bool faceOpenFallbackRequired = false;
 	bool characterLookupAttached = false;
 	bool osFaceResolverAttached = false;
+	bool freeTypeCharIndexAttached = false;
+	bool fontCatalogLoadAttached = false;
+	bool fontCatalogLoadRequired = false;
 	bool osFaceResolverRequired = false;
 	renderer::unity::FontSubstitutionBoundary substitutionBoundary =
 		renderer::unity::FontSubstitutionBoundary::unavailable;
@@ -107,10 +116,14 @@ bool IsSubstitutionBoundaryOperational(
 	case renderer::unity::FontSubstitutionBoundary::textCoreFontLoad:
 		return lifecycle.fontLoadAttached &&
 			(!lifecycle.faceOpenFallbackRequired || lifecycle.faceOpenAttached) &&
+			(!lifecycle.fontCatalogLoadRequired ||
+				lifecycle.fontCatalogLoadAttached) &&
 			(!lifecycle.osFaceResolverRequired ||
 				lifecycle.osFaceResolverAttached);
 	case renderer::unity::FontSubstitutionBoundary::freeTypeFaceOpen:
 		return lifecycle.faceOpenAttached &&
+			(!lifecycle.fontCatalogLoadRequired ||
+				lifecycle.fontCatalogLoadAttached) &&
 			(!lifecycle.osFaceResolverRequired ||
 				lifecycle.osFaceResolverAttached);
 	case renderer::unity::FontSubstitutionBoundary::unavailable:
@@ -262,6 +275,23 @@ public:
 private:
 	bool previous_;
 };
+
+void HookFontCatalogLoad(void* entry) noexcept
+{
+	CThreadCounter callbackLease;
+	FontCatalogLoadFunction const original =
+		ProcessUnityLifecycle().fontCatalogLoad;
+	if (original == nullptr)
+		return;
+	// Unity 2019 opens every installed font while building its private
+	// family catalog. Redirecting those discovery opens replaces the
+	// catalog identity itself (for example, Malgun becomes Pretendard), so
+	// the later fallback search can no longer select the configured source.
+	// Keep discovery native; pathname substitution resumes when Unity opens
+	// the face it selected for actual text.
+	ScopedFaceOpenRedirectBypass bypass;
+	original(entry);
+}
 
 void ReadUnityFaceFamilyName(FT_Face face, std::wstring& family) noexcept
 {
@@ -501,6 +531,44 @@ FT_Face HookLegacyOsFaceResolver(
 	return face;
 }
 
+bool IsKoreanCharacter(FT_ULong character) noexcept
+{
+	return (character >= 0x1100 && character <= 0x11FF) ||
+		(character >= 0x3130 && character <= 0x318F) ||
+		(character >= 0xA960 && character <= 0xA97F) ||
+		(character >= 0xAC00 && character <= 0xD7AF) ||
+		(character >= 0xD7B0 && character <= 0xD7FF);
+}
+
+FT_UInt HookFreeTypeCharIndex(FT_Face face, FT_ULong character) noexcept
+{
+	CThreadCounter callbackLease;
+	FreeTypeCharIndexFunction const original =
+		ProcessUnityLifecycle().freeTypeCharIndex;
+	if (original == nullptr)
+		return 0;
+	FT_UInt const glyphIndex = original(face, character);
+	if (IsKoreanCharacter(character))
+	{
+		renderer::unity::UnityFontEvidenceV1* const evidence = UnityEvidence();
+		if (evidence != nullptr)
+		{
+			std::wstring family;
+			ReadUnityFaceFamilyName(face, family);
+			renderer::unity::RecordUnityFontCharacterLookup(
+				*evidence,
+				family.empty() ? nullptr : family.c_str(),
+				false,
+				static_cast<unsigned int>(character),
+				glyphIndex != 0,
+				glyphIndex,
+				0,
+				family.empty() ? nullptr : family.c_str());
+		}
+	}
+	return glyphIndex;
+}
+
 bool IsSupportedRenderMode(FT_Render_Mode mode) noexcept
 {
 	return mode == FT_RENDER_MODE_NORMAL || mode == FT_RENDER_MODE_LIGHT ||
@@ -597,6 +665,8 @@ bool AttachUnityRenderer(
 	void* fontLoadTarget = nullptr;
 	void* characterLookupTarget = nullptr;
 	void* osFaceResolverTarget = nullptr;
+	void* freeTypeCharIndexTarget = nullptr;
+	void* fontCatalogLoadTarget = nullptr;
 	bool faceOpenFallbackRequired = false;
 	bool const characterLookupRequired =
 		UnityEvidence() != nullptr && adapter.characterLookupRva != 0 &&
@@ -669,6 +739,36 @@ bool AttachUnityRenderer(
 			reinterpret_cast<LegacyOsFaceResolverFunction>(osFaceResolverTarget);
 	}
 	lifecycle.osFaceResolverRequired = osFaceResolverRequired;
+	bool const fontCatalogLoadRequired = substitutionRequired &&
+		adapter.fontCatalogLoadRva != 0 &&
+		adapter.fontCatalogLoadAbi ==
+			renderer::unity::FontCatalogLoadAbi::systemCatalogEntry;
+	if (fontCatalogLoadRequired)
+	{
+		if (adapter.fontCatalogLoadRva >
+				(std::numeric_limits<std::uintptr_t>::max)() - base)
+			return false;
+		fontCatalogLoadTarget = reinterpret_cast<void*>(
+			base + adapter.fontCatalogLoadRva);
+		if (!renderer::unity::IsExecutableMemoryRange(
+			fontCatalogLoadTarget, 32))
+			return false;
+	}
+	lifecycle.fontCatalogLoadRequired = fontCatalogLoadRequired;
+	if (UnityEvidence() != nullptr &&
+		adapter.freeTypeCharIndexRva != 0 &&
+		adapter.freeTypeCharIndexAbi ==
+			renderer::unity::FreeTypeCharIndexAbi::standard)
+	{
+		if (adapter.freeTypeCharIndexRva >
+				(std::numeric_limits<std::uintptr_t>::max)() - base)
+			return false;
+		freeTypeCharIndexTarget = reinterpret_cast<void*>(
+			base + adapter.freeTypeCharIndexRva);
+		if (!renderer::unity::IsExecutableMemoryRange(
+			freeTypeCharIndexTarget, 32))
+			return false;
+	}
 
 	renderer_raii::DetourTransaction transaction;
 	LONG status = transaction.status();
@@ -731,6 +831,22 @@ bool AttachUnityRenderer(
 			reinterpret_cast<PVOID*>(&lifecycle.osFaceResolver),
 			reinterpret_cast<PVOID>(&HookLegacyOsFaceResolver));
 	}
+	if (status == NOERROR && freeTypeCharIndexTarget != nullptr)
+	{
+		lifecycle.freeTypeCharIndex =
+			reinterpret_cast<FreeTypeCharIndexFunction>(freeTypeCharIndexTarget);
+		status = transaction.Attach(
+			reinterpret_cast<PVOID*>(&lifecycle.freeTypeCharIndex),
+			reinterpret_cast<PVOID>(&HookFreeTypeCharIndex));
+	}
+	if (status == NOERROR && fontCatalogLoadTarget != nullptr)
+	{
+		lifecycle.fontCatalogLoad =
+			reinterpret_cast<FontCatalogLoadFunction>(fontCatalogLoadTarget);
+		status = transaction.Attach(
+			reinterpret_cast<PVOID*>(&lifecycle.fontCatalogLoad),
+			reinterpret_cast<PVOID>(&HookFontCatalogLoad));
+	}
 	if (status == NOERROR)
 		status = transaction.Commit();
 	else
@@ -743,7 +859,10 @@ bool AttachUnityRenderer(
 		lifecycle.fontLoad = nullptr;
 		lifecycle.characterLookup = nullptr;
 		lifecycle.osFaceResolver = nullptr;
+		lifecycle.freeTypeCharIndex = nullptr;
+		lifecycle.fontCatalogLoad = nullptr;
 		lifecycle.osFaceResolverRequired = false;
+		lifecycle.fontCatalogLoadRequired = false;
 		PublishUnityCapability(
 			false, renderer::CapabilityReason::transactionFailed, status,
 			reinterpret_cast<std::uintptr_t>(target), true);
@@ -761,6 +880,8 @@ bool AttachUnityRenderer(
 	lifecycle.faceOpenFallbackRequired = faceOpenFallbackRequired;
 	lifecycle.characterLookupAttached = characterLookupTarget != nullptr;
 	lifecycle.osFaceResolverAttached = osFaceResolverTarget != nullptr;
+	lifecycle.freeTypeCharIndexAttached = freeTypeCharIndexTarget != nullptr;
+	lifecycle.fontCatalogLoadAttached = fontCatalogLoadTarget != nullptr;
 	std::atomic_store_explicit(
 		&lifecycle.redirects, std::move(redirects), std::memory_order_release);
 
@@ -916,6 +1037,8 @@ void StartUnityFontHookLifecycle()
 		lifecycle.renderAttached || lifecycle.faceOpenAttached ||
 		lifecycle.fontLoadAttached || lifecycle.characterLookupAttached ||
 		lifecycle.osFaceResolverAttached ||
+		lifecycle.freeTypeCharIndexAttached ||
+		lifecycle.fontCatalogLoadAttached ||
 		lifecycle.unityPlayer)
 		return;
 	if (GetModuleHandleW(L"UnityPlayer.dll") == nullptr)
@@ -1066,6 +1189,14 @@ bool CommitUnityFontHookLifecycleStop()
 			status = transaction.Detach(
 				reinterpret_cast<PVOID*>(&lifecycle.osFaceResolver),
 				reinterpret_cast<PVOID>(&HookLegacyOsFaceResolver));
+		if (status == NOERROR && lifecycle.freeTypeCharIndexAttached)
+			status = transaction.Detach(
+				reinterpret_cast<PVOID*>(&lifecycle.freeTypeCharIndex),
+				reinterpret_cast<PVOID>(&HookFreeTypeCharIndex));
+		if (status == NOERROR && lifecycle.fontCatalogLoadAttached)
+			status = transaction.Detach(
+				reinterpret_cast<PVOID*>(&lifecycle.fontCatalogLoad),
+				reinterpret_cast<PVOID>(&HookFontCatalogLoad));
 		if (status == NOERROR)
 			status = transaction.Commit();
 		else
@@ -1078,6 +1209,8 @@ bool CommitUnityFontHookLifecycleStop()
 	lifecycle.fontLoadAttached = false;
 	lifecycle.characterLookupAttached = false;
 	lifecycle.osFaceResolverAttached = false;
+	lifecycle.freeTypeCharIndexAttached = false;
+	lifecycle.fontCatalogLoadAttached = false;
 #endif
 
 	std::lock_guard<std::mutex> lock(lifecycle.mutex);
@@ -1091,12 +1224,17 @@ bool CommitUnityFontHookLifecycleStop()
 	lifecycle.fontLoad = nullptr;
 	lifecycle.characterLookup = nullptr;
 	lifecycle.osFaceResolver = nullptr;
+	lifecycle.freeTypeCharIndex = nullptr;
+	lifecycle.fontCatalogLoad = nullptr;
 	lifecycle.renderAttached = false;
 	lifecycle.faceOpenAttached = false;
 	lifecycle.fontLoadAttached = false;
 	lifecycle.faceOpenFallbackRequired = false;
 	lifecycle.characterLookupAttached = false;
 	lifecycle.osFaceResolverAttached = false;
+	lifecycle.freeTypeCharIndexAttached = false;
+	lifecycle.fontCatalogLoadAttached = false;
+	lifecycle.fontCatalogLoadRequired = false;
 	lifecycle.osFaceResolverRequired = false;
 	lifecycle.substitutionBoundary =
 		renderer::unity::FontSubstitutionBoundary::unavailable;

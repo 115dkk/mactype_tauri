@@ -377,6 +377,7 @@ bool CGdippSettings::PublishRendererPolicySnapshot(
 	candidate.hooks.childProcesses = m_bHookChildProcesses;
 	candidate.hooks.directWrite = m_bDirectWrite != FALSE;
 	candidate.hooks.fontSubstitution = m_nFontSubstitutes != 0;
+	candidate.hooks.skipPrivateFreeType = m_bSkipPrivateFreeType;
 	candidate.hooks.unityFontMode = UnityFontHookMode();
 	candidate.hooks.unityFontEnabledForProcess = UnityFontHookEnabledForProcess();
 	candidate.freeType.cacheMaxFaces = m_nCacheMaxFaces;
@@ -738,6 +739,8 @@ SKIP:
 	}
 
 	m_bHookChildProcesses = !!_GetFreeTypeProfileInt(_T("HookChildProcesses"), false, lpszFile);
+	m_bSkipPrivateFreeType = !!_GetFreeTypeProfileInt(
+		_T("SkipPrivateFreeType"), false, lpszFile);
 	m_bUseMapping	= !!_GetFreeTypeProfileInt(_T("UseMapping"), false, lpszFile);
 	m_nBolderMode	= _GetFreeTypeProfileInt(_T("BolderMode"), 0, lpszFile);
 	m_nGammaMode	= _GetFreeTypeProfileInt(_T("GammaMode"), -1, lpszFile);
@@ -1266,23 +1269,52 @@ bool CGdippSettings::UnityFontHookEnabledForProcess() const noexcept
 {
 	try
 	{
-		auto const matchesCurrentProcess = [this](const ModuleHashMap& entries) {
+		std::vector<wchar_t> image(32'768, L'\0');
+		DWORD const length = GetModuleFileNameW(
+			nullptr, image.data(), static_cast<DWORD>(image.size()));
+		if (length == 0 || length >= static_cast<DWORD>(image.size()))
+			return false;
+		image[static_cast<std::size_t>(length)] = L'\0';
+		return UnityFontHookEnabledForExecutable(image.data());
+	}
+	catch (...)
+	{
+		return false;
+	}
+}
+
+bool CGdippSettings::UnityFontHookEnabledForExecutable(
+	LPCTSTR imagePath) const noexcept
+{
+	try
+	{
+		if (imagePath == nullptr || *imagePath == L'\0')
+			return false;
+		const std::wstring fullPath(imagePath);
+		const std::wstring::size_type slash = fullPath.find_last_of(L"\\/");
+		const wchar_t* const fileName = slash == std::wstring::npos
+			? fullPath.c_str()
+			: fullPath.c_str() + slash + 1;
+		const std::wstring directory = slash == std::wstring::npos
+			? std::wstring()
+			: LowerCase(fullPath.substr(0, slash + 1));
+		auto const matchesExecutable = [&](const ModuleHashMap& entries) {
 			for (ModuleHashMap::const_iterator it = entries.begin();
 				it != entries.end(); ++it)
 			{
 				if (IsFolder(it->c_str()))
 				{
-					if (GetAppDir() == LowerCase(*it))
+					if (!directory.empty() && directory == LowerCase(*it))
 						return true;
 				}
 				else
 				{
-					std::wstring::size_type const slash =
+					std::wstring::size_type const entrySlash =
 						it->find_last_of(L"\\/");
-					const wchar_t* const fileName = slash == std::wstring::npos
+					const wchar_t* const entryName = entrySlash == std::wstring::npos
 						? it->c_str()
-						: it->c_str() + slash + 1;
-					if (!lstrcmpi(m_szexeName, fileName))
+						: it->c_str() + entrySlash + 1;
+					if (!lstrcmpi(fileName, entryName))
 						return true;
 				}
 			}
@@ -1292,11 +1324,11 @@ bool CGdippSettings::UnityFontHookEnabledForProcess() const noexcept
 		switch (UnityFontHookMode())
 		{
 		case renderer::UnityFontHookMode::selectedGames:
-			return matchesCurrentProcess(m_arrUnityIncludeGame);
+			return matchesExecutable(m_arrUnityIncludeGame);
 		case renderer::UnityFontHookMode::mostGames:
 			return true;
 		case renderer::UnityFontHookMode::allGames:
-			return !matchesCurrentProcess(m_arrUnityExcludeGame);
+			return !matchesExecutable(m_arrUnityExcludeGame);
 		case renderer::UnityFontHookMode::off:
 		default:
 			return false;

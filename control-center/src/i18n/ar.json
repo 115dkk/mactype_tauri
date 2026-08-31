@@ -524,6 +524,8 @@
   "settings.font_substitutes.option.0": "معطل",
   "settings.font_substitutes.option.1": "آمن",
   "settings.font_substitutes.option.2": "الكل",
+  "settings.skip_private_freetype.label": "تخطي التطبيقات التي تستخدم FreeType خاصًا بها",
+  "settings.skip_private_freetype.description": "يتخطى ربط MacType العام بهدوء عندما يختار التطبيق محرك FreeType الخاص به صراحةً. لا يتأثر ربط خطوط Unity.",
   "settings.unity_font_hook.label": "ربط خطوط Unity",
   "settings.unity_font_hook.description": "يضبط تغطية المحارف في FreeType الداخلي لـ Unity وفق هذا الملف. لا يتم الربط إلا مع إصدارات UnityPlayer التي تم التحقق منها.",
   "settings.unity_font_hook.option.0": "إيقاف",

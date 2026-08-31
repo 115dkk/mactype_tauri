@@ -20,6 +20,7 @@ cmake --build $build --config RelWithDebInfo --target `
     pe-export-view-tests `
     unload-lifecycle-tests `
     renderer-policy-tests `
+    private-freetype-policy-tests `
     font-substitution-tests `
     directwrite-alias-policy-tests `
     unity-font-hook-tests
@@ -56,6 +57,7 @@ try {
         'pe-export-view-tests.exe',
         'unload-lifecycle-tests.exe',
         'renderer-policy-tests.exe',
+        'private-freetype-policy-tests.exe',
         'font-substitution-tests.exe',
         'directwrite-alias-policy-tests.exe',
         'unity-font-hook-tests.exe'

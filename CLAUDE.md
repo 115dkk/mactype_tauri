@@ -139,6 +139,13 @@ below wherever the two conflict.
   A successful face open or non-empty `.notdef` bitmap is not proof of readable
   text: when character lookups are observed, require at least one nonzero glyph
   result and retain a full-window field capture for licensed local targets.
+- `SkipPrivateFreeType` is an opt-in `PrivateFreeTypeAdmission` policy, off by
+  default. It recognizes only an explicit Qt `windows:fontengine=freetype`
+  selection in the exact target image, reads through a bounded fixed-size
+  buffer, and quietly skips that process before normal service or child-relay
+  injection. Unknown evidence remains eligible. A verified Unity installation
+  for which `UnityFontHook` is enabled is exempt; do not turn this option into
+  a broad Qt basename ban or disable `UnityFontHookLifecycle`.
 - Licensed Steam game evidence must come from a Steam-launched process with no
   explicit Steamworks initialization failure. A direct `MacLoader` launch is a
   renderer smoke test, not gameplay-compatibility proof. Bind every field run to

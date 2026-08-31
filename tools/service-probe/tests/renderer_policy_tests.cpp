@@ -33,6 +33,7 @@ renderer::RendererPolicyCandidate Candidate(
     candidate.profileDigest = "sha256:" + std::string(64, 'a');
     candidate.hooks.directWrite = true;
     candidate.hooks.fontSubstitution = true;
+    candidate.hooks.skipPrivateFreeType = true;
     candidate.hooks.unityFontMode = renderer::UnityFontHookMode::mostGames;
     candidate.hooks.unityFontEnabledForProcess = true;
     candidate.freeType.cacheMaxFaces = 64;
@@ -103,6 +104,8 @@ int main()
             renderer::UnityFontHookMode::mostGames &&
             first.snapshot->hooks().unityFontEnabledForProcess,
         "the Unity hook selection must belong to the immutable policy");
+    Require(first.snapshot->hooks().skipPrivateFreeType,
+        "private FreeType avoidance must belong to the immutable hook policy");
     Require(first.snapshot->unity_coverage().gray[128] == 128 &&
             first.snapshot->unity_coverage().rgb[0][192] == 192 &&
             first.snapshot->unity_coverage().rgb[2][64] == 64,

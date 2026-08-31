@@ -524,6 +524,8 @@
   "settings.font_substitutes.option.0": "無効",
   "settings.font_substitutes.option.1": "安全な置換",
   "settings.font_substitutes.option.2": "すべて置換",
+  "settings.skip_private_freetype.label": "独自 FreeType を使うアプリをスキップ",
+  "settings.skip_private_freetype.description": "アプリが独自の FreeType エンジンを明示的に選択した場合、通常の MacType フックを静かにスキップします。Unity フォントフックには影響しません。",
   "settings.unity_font_hook.label": "Unity フォントフック",
   "settings.unity_font_hook.description": "Unity 内蔵 FreeType のグリフ濃度をこのプロファイルで補正します。検証済みの UnityPlayer ビルドだけをフックします。",
   "settings.unity_font_hook.option.0": "オフ",

@@ -10,6 +10,7 @@ is owned after the alpha-plus refactor.
 ```text
 ProtectedRendererRuntime
   -> RendererRuntimeBinding
+  -> PrivateFreeTypeAdmission
   -> ProcessInjection
   -> HelperProtocol Adapter
   -> RendererActivation Adapter
@@ -34,6 +35,12 @@ identities as unrelated strings and recombine them later.
 retry, cancellation, bounded result history, telemetry, liveness recheck, and
 global health impact. The helper protocol is an Adapter. Its status text and
 diagnostic code are evidence, not policy inputs.
+
+`PrivateFreeTypeAdmission` runs only when the profile opts in. The service and
+pre-entry child relay recognize an explicit private FreeType selection from
+the exact image with the same bounded marker contract. A match becomes a
+process-local skip before injection. Unity targets selected by
+`UnityFontHookLifecycle` bypass this compatibility filter.
 
 `RendererActivation` owns renderer admission and produces one of three
 semantic results:
@@ -170,6 +177,7 @@ a separately versioned diagnostic Interface.
 | SafeUnload knew every DirectWrite and Unity prepare/abort/commit state | one `RendererUnloadLifecycle` provider-drain transaction with two concrete Adapters |
 | Unity private FreeType bypassed GDI and DirectWrite substitution | exact `UnityFontHookLifecycle` render and face-open adapters with checked pathname/face-index substitution, glyph coverage, and a Unity 2019 catalog-discovery bypass that preserves source-family fallback identity |
 | Unity families shared one system font file | scoped `FontRef` selection context distinguishes native and mapped families before face-open redirection |
+| An explicitly private Qt FreeType engine conflicted with normal hooks | opt-in `PrivateFreeTypeAdmission` shared by service and pre-entry child decisions, with a Unity exception |
 
 ## Required verification
 

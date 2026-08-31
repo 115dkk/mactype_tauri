@@ -524,6 +524,8 @@
   "settings.font_substitutes.option.0": "사용 안 함",
   "settings.font_substitutes.option.1": "안전한 대체",
   "settings.font_substitutes.option.2": "모든 대체",
+  "settings.skip_private_freetype.label": "자체 FreeType 사용 프로그램 건너뛰기",
+  "settings.skip_private_freetype.description": "자체 FreeType 사용을 명시한 프로그램은 일반 후킹에서 조용히 제외합니다. Unity 글꼴 후킹에는 적용하지 않습니다.",
   "settings.unity_font_hook.label": "Unity 글꼴 후킹",
   "settings.unity_font_hook.description": "Unity의 사설 FreeType 글리프를 프로필에 맞게 보정합니다. 검증된 UnityPlayer 빌드만 후킹합니다.",
   "settings.unity_font_hook.option.0": "끄기",

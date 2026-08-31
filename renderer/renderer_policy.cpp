@@ -89,6 +89,7 @@ std::uint64_t PolicyDigest(const RendererPolicySnapshot& snapshot) noexcept
 	HashValue(digest, snapshot.hooks().childProcesses);
 	HashValue(digest, snapshot.hooks().directWrite);
 	HashValue(digest, snapshot.hooks().fontSubstitution);
+	HashValue(digest, snapshot.hooks().skipPrivateFreeType);
 	HashValue(digest, snapshot.hooks().unityFontMode);
 	HashValue(digest, snapshot.hooks().unityFontEnabledForProcess);
 	HashValue(digest, snapshot.free_type().cacheMaxFaces);

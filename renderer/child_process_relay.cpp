@@ -1,7 +1,9 @@
 #include "child_process_relay.h"
 
 #include "detours.h"
+#include "private_freetype_policy.h"
 #include "renderer_raii.h"
+#include "settings.h"
 #include "../shared/hook_compatibility.h"
 
 #include <cstdio>
@@ -281,6 +283,23 @@ ChildRelayReason ClassifyTarget(
         if (IsPolicyExcludedImage(name) ||
             (applyProfileExclusions && IsExeUnload(name) != FALSE))
             return ChildRelayReason::excludedImage;
+        if (applyProfileExclusions)
+        {
+            const CGdippSettings* settings =
+                CGdippSettings::GetInstanceNoInit();
+            if (settings != nullptr && settings->SkipPrivateFreeType())
+            {
+                const bool unityHookTarget =
+                    renderer::private_freetype::HasUnityPlayerSibling(image.data()) &&
+                    settings->UnityFontHookEnabledForExecutable(image.data());
+                const bool privateFreeTypeDetected =
+                    renderer::private_freetype::ClassifyImage(image.data()) ==
+                    renderer::private_freetype::ImageClassification::detected;
+                if (renderer::private_freetype::ShouldSkipHooks(
+                        true, privateFreeTypeDetected, unityHookTarget))
+                    return ChildRelayReason::privateFreeTypeDetected;
+            }
+        }
     }
     catch (...)
     {

@@ -51,7 +51,7 @@ try {
         Join-Path (Join-Path $serviceRoot 'runtime-receipts') "$version.json"
     ) ($receipt | ConvertTo-Json -Depth 4 -Compress)
 
-    $profileText = "[General]`r`nUnityFontHook=2`r`nHookChildProcesses=1`r`n"
+    $profileText = "[General]`r`nUnityFontHook=2`r`nHookChildProcesses=1`r`nSkipPrivateFreeType=1`r`n"
     $profileFixture = Join-Path $testRoot 'profile-fixture.ini'
     Write-Utf8File $profileFixture $profileText
     $profileDigest = Get-Sha256 $profileFixture
@@ -85,7 +85,8 @@ try {
     }
     if (-not $result.profile.digestVerified -or
         $result.profile.unityFontHook -ne 2 -or
-        -not $result.profile.hookChildProcesses) {
+        -not $result.profile.hookChildProcesses -or
+        -not $result.profile.skipPrivateFreeType) {
         throw 'The diagnostic did not verify the active Unity profile generation.'
     }
     if (@($result.issues).Count -ne 0) {

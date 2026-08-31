@@ -524,6 +524,8 @@
   "settings.font_substitutes.option.0": "Disabled",
   "settings.font_substitutes.option.1": "Safe",
   "settings.font_substitutes.option.2": "All",
+  "settings.skip_private_freetype.label": "Skip apps with private FreeType",
+  "settings.skip_private_freetype.description": "Quietly skips general MacType hooking when an app explicitly selects its own FreeType engine. Unity font hooking is not affected.",
   "settings.unity_font_hook.label": "Unity font hooking",
   "settings.unity_font_hook.description": "Adjusts Unity's private FreeType glyph coverage with this profile. Only verified UnityPlayer builds are hooked.",
   "settings.unity_font_hook.option.0": "Off",

@@ -177,6 +177,8 @@ if ($null -ne $unityValue -and
 }
 $childValue = Get-GeneralSetting $profilePath 'HookChildProcesses'
 $hookChildProcesses = $childValue -eq '1'
+$privateFreeTypeValue = Get-GeneralSetting $profilePath 'SkipPrivateFreeType'
+$skipPrivateFreeType = $privateFreeTypeValue -eq '1'
 
 $serviceState = $null
 $serviceImagePath = $null
@@ -220,6 +222,7 @@ $evidence = [ordered]@{
         digestVerified = $profileDigestVerified
         unityFontHook = $unityMode
         hookChildProcesses = $hookChildProcesses
+        skipPrivateFreeType = $skipPrivateFreeType
     }
     issues = $issues.ToArray()
 }

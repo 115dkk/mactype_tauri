@@ -135,6 +135,18 @@ fn initializer_reports_the_verified_protected_active_profile_digest() {
 }
 
 #[test]
+fn initializer_carries_the_verified_private_freetype_policy() {
+    let (_base, paths) = paths();
+    let bytes = b"[General]\r\nSkipPrivateFreeType=1\r\n";
+    install_active_profile(&paths, bytes);
+    install_active_runtime(&paths, bytes);
+
+    let runtime = ProtectedRendererRuntime::load(paths).unwrap();
+
+    assert!(runtime.private_freetype_policy().skip_detected());
+}
+
+#[test]
 fn initializer_rejects_a_dll_adjacent_profile_that_differs_from_the_active_generation() {
     let (_base, paths) = paths();
     let bytes = b"[General]\r\nHintingMode=0\r\n";

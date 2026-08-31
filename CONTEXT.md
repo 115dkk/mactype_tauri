@@ -34,6 +34,9 @@ This file fixes the domain language used by code, tests, CI, and architecture do
 **ProcessTargetValidator**
 : The host module that consumes typed facts for one observed PID and returns a verified eligible identity or an explicit process-local skip. The Windows inspector owns fact collection only; the validator owns self, session-zero, protected, critical, image-name, mitigation, target-race, and PID-mismatch classification. It does not own generation binding, retry, result history, health, or notifications.
 
+**PrivateFreeTypeAdmission**
+: The opt-in process-admission policy selected by `SkipPrivateFreeType`. The Windows inspector and `ChildInjectionTransaction` read at most 64 MiB from the exact executable through a fixed-size streaming buffer and recognize only an explicit `windows:fontengine=freetype` marker in ASCII or UTF-16. A detected non-Unity process becomes an explicit process-local skip before injection; unavailable or ambiguous evidence remains eligible. A verified Unity installation selected by `UnityFontHookLifecycle` is exempt.
+
 **explicit process-local skip**
 : A normal `InjectionOrchestrator` result for one verified `(pid, creation time)` that cannot or must not receive hooks. Its exact reason is retained in the bounded process-result registry, repeat observation becomes `Duplicate`, and another process with the same executable name remains eligible. It never creates a global health error, warning notification, or health-protocol extension.
 

@@ -20,7 +20,7 @@ function listProductionRustSources(directory) {
 const schema = JSON.parse(fs.readFileSync(path.join(root, "shared/settings-schema.json"), "utf8"));
 const pairs = new Set(schema.map((setting) => `${setting.section}/${setting.key}`));
 const required = [
-  ["General", "HookChildProcesses"], ["General", "UseMapping"], ["General", "UseInclude"], ["General", "FontSubstitutes"], ["General", "UnityFontHook"],
+  ["General", "HookChildProcesses"], ["General", "UseMapping"], ["General", "UseInclude"], ["General", "FontSubstitutes"], ["General", "SkipPrivateFreeType"], ["General", "UnityFontHook"],
   ["General", "CacheMaxFaces"], ["General", "CacheMaxSizes"], ["General", "CacheMaxBytes"],
   ["DirectWrite", "GammaValue"], ["DirectWrite", "Contrast"], ["DirectWrite", "RenderingMode"], ["DirectWrite", "ClearTypeLevel"],
   ["Experimental", "ClipBoxFix"], ["Experimental", "ColorFont"], ["Experimental", "InvertColor"],
@@ -28,7 +28,7 @@ const required = [
 const missing = required.filter(([section, key]) => !pairs.has(`${section}/${key}`));
 if (missing.length) throw new Error(`Settings schema is missing core settings: ${missing.map((pair) => pair.join("/")).join(", ")}`);
 if (schema.some((setting) => setting.section === "Infinality")) throw new Error("Unsupported Infinality settings must not be exposed by the editor");
-if (schema.length !== 39) throw new Error(`Expected 39 supported scalar settings, found ${schema.length}`);
+if (schema.length !== 40) throw new Error(`Expected 40 supported scalar settings, found ${schema.length}`);
 
 const childHook = schema.find((setting) => setting.section === "General" && setting.key === "HookChildProcesses");
 if (childHook?.id !== "hook_child_processes"
@@ -41,6 +41,16 @@ if (childHook?.id !== "hook_child_processes"
 const defaultProfile = fs.readFileSync(path.join(root, "distribution/ini/Default.ini"), "utf8");
 if (!/^HookChildProcesses\s*=\s*1\s*$/m.test(defaultProfile)) {
   throw new Error("The alpha default profile must keep child-process propagation enabled");
+}
+const privateFreeType = schema.find((setting) => setting.section === "General" && setting.key === "SkipPrivateFreeType");
+if (privateFreeType?.control !== "boolean"
+  || privateFreeType.default !== 0
+  || privateFreeType.apply !== "restart_required"
+  || privateFreeType.supported !== true) {
+  throw new Error("SkipPrivateFreeType must remain an opt-in restart-required compatibility policy");
+}
+if (!/^SkipPrivateFreeType\s*=\s*0\s*$/m.test(defaultProfile)) {
+  throw new Error("The alpha default profile must keep private FreeType avoidance opt-in");
 }
 
 const rustRoot = path.join(root, "control-center/src-tauri/src");
@@ -59,4 +69,4 @@ if (!/\bbreak\s*;/.test(shadowOffset)) throw new Error("ATTR_ShadowOffset still 
 for (const attribute of ["ATTR_HookChildProcess", "ATTR_FontSubstitute", "ATTR_DirectWrite", "ATTR_PixelLayout"]) {
   if ((settingsHeader.match(new RegExp(`case ${attribute}:`, "g")) ?? []).length < 2) throw new Error(`${attribute} must support both SetIntAttribute and GetIntAttribute`);
 }
-console.log("Settings coverage gate passed for 39 supported scalar settings, structured INI settings, and IControlCenter fallthrough guards.");
+console.log("Settings coverage gate passed for 40 supported scalar settings, structured INI settings, and IControlCenter fallthrough guards.");

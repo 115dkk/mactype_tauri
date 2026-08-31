@@ -21,6 +21,8 @@ Codex and a development toolchain are not required on the test computer.
    - `release.matches` is `true`.
    - `profile.digestVerified` is `true`.
    - `profile.unityFontHook` is `2` for **Most games**.
+   - `profile.skipPrivateFreeType` records the independent non-Unity
+     compatibility option; either value is valid for this Unity test.
    - `issues` is empty.
 
 If any item differs, preserve the JSON and do not classify the result as a

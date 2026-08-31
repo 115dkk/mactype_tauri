@@ -524,6 +524,8 @@
   "settings.font_substitutes.option.0": "禁用",
   "settings.font_substitutes.option.1": "安全替换",
   "settings.font_substitutes.option.2": "全部替换",
+  "settings.skip_private_freetype.label": "跳过使用自带 FreeType 的程序",
+  "settings.skip_private_freetype.description": "当程序明确选择自带 FreeType 引擎时，静默跳过常规 MacType 挂钩。此选项不影响 Unity 字体挂钩。",
   "settings.unity_font_hook.label": "Unity 字体挂钩",
   "settings.unity_font_hook.description": "使用此配置调整 Unity 内置 FreeType 的字形覆盖率。仅挂钩已验证的 UnityPlayer 版本。",
   "settings.unity_font_hook.option.0": "关闭",

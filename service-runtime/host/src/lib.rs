@@ -52,7 +52,8 @@ pub use observer::{
     PROCESS_CREATION_QUERY,
 };
 pub use orchestration_runtime::{
-    initialize_process_orchestration, initialize_process_orchestration_with_unity_font_hook,
+    initialize_process_orchestration, initialize_process_orchestration_with_profile_policies,
+    initialize_process_orchestration_with_unity_font_hook,
 };
 pub use protected_renderer_runtime::ProtectedRendererRuntime;
 pub use runtime::{
@@ -63,9 +64,9 @@ pub use runtime_assets::ProtectedRuntimeAssets;
 pub use startup_safety::{LegacyServiceRuntimeState, StartupSafetySnapshot};
 pub use status::{ScmState, ServiceStatus, StatusReporter, SERVICE_STOP_WAIT_HINT_MS};
 pub use target_validation::{
-    BinarySignaturePolicy, DynamicCodePolicy, InspectionEvidence, ProcessInspection,
-    ProcessInspectionError, ProcessInspector, ProcessSkipReason, ProcessTargetDecision,
-    ProcessTargetValidator, TargetLiveness, UnityProcessClassification,
+    BinarySignaturePolicy, DynamicCodePolicy, InspectionEvidence, PrivateFreeTypeClassification,
+    ProcessInspection, ProcessInspectionError, ProcessInspector, ProcessSkipReason,
+    ProcessTargetDecision, ProcessTargetValidator, TargetLiveness, UnityProcessClassification,
 };
 #[cfg(windows)]
 pub use windows_helper_launcher::WindowsHelperLauncher;

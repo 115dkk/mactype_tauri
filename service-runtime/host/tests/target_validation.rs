@@ -1,8 +1,11 @@
-use mactype_service_contract::{StructuredServiceError, UnityFontHookPolicy};
+use mactype_service_contract::{
+    PrivateFreeTypePolicy, StructuredServiceError, UnityFontHookPolicy,
+};
 use mactype_service_host::{
-    BinarySignaturePolicy, DynamicCodePolicy, InspectionEvidence, ProcessArchitecture,
-    ProcessIdentity, ProcessInspection, ProcessInspectionError, ProcessInspector,
-    ProcessSkipReason, ProcessTargetDecision, ProcessTargetValidator, UnityProcessClassification,
+    BinarySignaturePolicy, DynamicCodePolicy, InspectionEvidence, PrivateFreeTypeClassification,
+    ProcessArchitecture, ProcessIdentity, ProcessInspection, ProcessInspectionError,
+    ProcessInspector, ProcessSkipReason, ProcessTargetDecision, ProcessTargetValidator,
+    UnityProcessClassification,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -62,10 +65,89 @@ fn unity_policy(mode: u8) -> UnityFontHookPolicy {
     )
 }
 
+fn private_freetype_policy(enabled: bool) -> PrivateFreeTypePolicy {
+    PrivateFreeTypePolicy::from_profile_bytes(
+        format!(
+            "[General]\r\nSkipPrivateFreeType={}\r\n",
+            if enabled { 1 } else { 0 }
+        )
+        .as_bytes(),
+    )
+}
+
+struct PrivateFreeTypeInspector(ProcessInspection);
+
+impl ProcessInspector for PrivateFreeTypeInspector {
+    fn inspect(&self, _pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
+        Ok(self.0.clone())
+    }
+
+    fn classify_private_freetype_process(
+        &self,
+        _identity: &ProcessIdentity,
+    ) -> PrivateFreeTypeClassification {
+        PrivateFreeTypeClassification::Detected
+    }
+}
+
+struct UnityPrivateFreeTypeInspector(ProcessInspection);
+
+impl ProcessInspector for UnityPrivateFreeTypeInspector {
+    fn inspect(&self, _pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
+        Ok(self.0.clone())
+    }
+
+    fn classify_unity_process(&self, _identity: &ProcessIdentity) -> UnityProcessClassification {
+        UnityProcessClassification::Unity
+    }
+
+    fn classify_private_freetype_process(
+        &self,
+        _identity: &ProcessIdentity,
+    ) -> PrivateFreeTypeClassification {
+        PrivateFreeTypeClassification::Detected
+    }
+}
+
 #[test]
 fn validator_returns_only_verified_eligible_identity() {
     let inspector = FixedInspector(Ok(ordinary_inspection(42)));
     let validator = ProcessTargetValidator::new(900, &inspector);
+
+    assert_eq!(
+        validator.validate(42).unwrap(),
+        ProcessTargetDecision::Eligible(identity(42))
+    );
+}
+
+#[test]
+fn enabled_private_freetype_policy_quietly_skips_the_detected_process() {
+    let inspector = PrivateFreeTypeInspector(ordinary_inspection(42));
+    let validator = ProcessTargetValidator::with_profile_policies(
+        900,
+        &inspector,
+        UnityFontHookPolicy::default(),
+        private_freetype_policy(true),
+    );
+
+    assert_eq!(
+        validator.validate(42).unwrap(),
+        ProcessTargetDecision::Skipped {
+            identity: Some(identity(42)),
+            reason: ProcessSkipReason::PrivateFreeTypeDetected,
+        }
+    );
+}
+
+#[test]
+fn private_freetype_skip_does_not_disable_an_enabled_unity_hook_target() {
+    let inspector = UnityPrivateFreeTypeInspector(ordinary_inspection(42));
+    let validator = ProcessTargetValidator::with_profile_policies(
+        900,
+        &inspector,
+        unity_policy(2),
+        private_freetype_policy(true),
+    );
 
     assert_eq!(
         validator.validate(42).unwrap(),

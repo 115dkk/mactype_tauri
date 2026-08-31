@@ -1,4 +1,6 @@
 use std::ffi::OsString;
+use std::fs::File;
+use std::io::{BufReader, Read};
 use std::mem::size_of;
 use std::os::windows::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
@@ -26,12 +28,15 @@ use crate::generated_unity_anticheat_catalog::{
     ANTI_CHEAT_TOP_LEVEL_EXACT, ANTI_CHEAT_TOP_LEVEL_PREFIXES,
 };
 use crate::{
-    BinarySignaturePolicy, DynamicCodePolicy, InspectionEvidence, ProcessArchitecture,
-    ProcessIdentity, ProcessInspection, ProcessInspectionError, ProcessInspector, TargetLiveness,
-    UnityProcessClassification,
+    BinarySignaturePolicy, DynamicCodePolicy, InspectionEvidence, PrivateFreeTypeClassification,
+    ProcessArchitecture, ProcessIdentity, ProcessInspection, ProcessInspectionError,
+    ProcessInspector, TargetLiveness, UnityProcessClassification,
 };
 
 const MAX_UNITY_INSTALLATION_ENTRIES: usize = 4_096;
+const MAX_PRIVATE_FREETYPE_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
+const QT_FREETYPE_ENGINE_MARKER: &[u8] = b"windows:fontengine=freetype";
+const PRIVATE_FREETYPE_SCAN_BYTES: usize = 64 * 1024;
 
 #[derive(Default)]
 pub struct WindowsProcessInspector;
@@ -91,6 +96,72 @@ impl ProcessInspector for WindowsProcessInspector {
             return UnityProcessClassification::Unavailable;
         };
         classify_unity_installation(&image_path)
+    }
+
+    fn classify_private_freetype_process(
+        &self,
+        identity: &ProcessIdentity,
+    ) -> PrivateFreeTypeClassification {
+        let Ok(process) = OwnedHandle::open(identity.pid) else {
+            return PrivateFreeTypeClassification::Unavailable;
+        };
+        if process.creation_time().ok() != Some(identity.creation_time) {
+            return PrivateFreeTypeClassification::Unavailable;
+        }
+        let Ok(image_path) = process.image_path() else {
+            return PrivateFreeTypeClassification::Unavailable;
+        };
+        classify_private_freetype_installation(&image_path)
+    }
+}
+
+fn classify_private_freetype_installation(image_path: &Path) -> PrivateFreeTypeClassification {
+    let Ok(metadata) = std::fs::metadata(image_path) else {
+        return PrivateFreeTypeClassification::Unavailable;
+    };
+    if !metadata.is_file()
+        || metadata.len() == 0
+        || metadata.len() > MAX_PRIVATE_FREETYPE_IMAGE_BYTES
+    {
+        return PrivateFreeTypeClassification::Unavailable;
+    }
+    let Ok(detected) = image_contains_private_freetype_marker(image_path) else {
+        return PrivateFreeTypeClassification::Unavailable;
+    };
+    if detected {
+        PrivateFreeTypeClassification::Detected
+    } else {
+        PrivateFreeTypeClassification::NotDetected
+    }
+}
+
+fn image_contains_private_freetype_marker(image_path: &Path) -> std::io::Result<bool> {
+    let utf16_marker: Vec<u8> = QT_FREETYPE_ENGINE_MARKER
+        .iter()
+        .flat_map(|byte| [*byte, 0])
+        .collect();
+    let overlap = utf16_marker.len() - 1;
+    let mut reader = BufReader::new(File::open(image_path)?);
+    let mut buffer = vec![0_u8; PRIVATE_FREETYPE_SCAN_BYTES + overlap];
+    let mut retained = 0;
+    loop {
+        let read = reader.read(&mut buffer[retained..])?;
+        if read == 0 {
+            return Ok(false);
+        }
+        let used = retained + read;
+        let bytes = &buffer[..used];
+        if bytes
+            .windows(QT_FREETYPE_ENGINE_MARKER.len())
+            .any(|window| window.eq_ignore_ascii_case(QT_FREETYPE_ENGINE_MARKER))
+            || bytes
+                .windows(utf16_marker.len())
+                .any(|window| window.eq_ignore_ascii_case(&utf16_marker))
+        {
+            return Ok(true);
+        }
+        retained = overlap.min(used);
+        buffer.copy_within(used - retained..used, 0);
     }
 }
 

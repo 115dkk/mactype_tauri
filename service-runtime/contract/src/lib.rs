@@ -6,6 +6,7 @@ mod health;
 mod manifest;
 mod migration_pin;
 mod paths;
+mod private_freetype;
 mod profile;
 mod renderer_activation;
 mod runtime_activation;
@@ -27,6 +28,7 @@ pub use migration_pin::{
     MAX_MIGRATION_RUNTIME_PIN_BYTES, MAX_PINNED_RUNTIMES, MIGRATION_RUNTIME_PIN_SCHEMA,
 };
 pub use paths::{MachinePathError, MachinePaths};
+pub use private_freetype::PrivateFreeTypePolicy;
 pub use profile::{
     validate_protected_renderer_profile, GenerationId, GenerationPointer, ProfileCatalog,
     ProfileError, ProtectedRendererProfileError, SourceMetadata, MAX_PROFILE_BYTES,

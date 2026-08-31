@@ -5,8 +5,8 @@ mod model;
 use std::collections::{HashMap, VecDeque};
 
 use mactype_service_contract::{
-    InjectionArchitecture, InjectionSuccess, InjectionTelemetry, RendererRuntimeBinding,
-    StructuredServiceError, UnityFontHookPolicy,
+    InjectionArchitecture, InjectionSuccess, InjectionTelemetry, PrivateFreeTypePolicy,
+    RendererRuntimeBinding, StructuredServiceError, UnityFontHookPolicy,
 };
 
 use crate::observer::{
@@ -25,6 +25,24 @@ pub use model::{
 /// The bounded target-result code recorded when an untrustworthy cleanup
 /// result was re-checked and the verified target provably no longer existed.
 pub const TARGET_VANISHED_RESULT_CODE: &str = "injection-target-vanished";
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ProcessAdmissionPolicies {
+    unity_font_hook: UnityFontHookPolicy,
+    private_freetype: PrivateFreeTypePolicy,
+}
+
+impl ProcessAdmissionPolicies {
+    pub(crate) const fn new(
+        unity_font_hook: UnityFontHookPolicy,
+        private_freetype: PrivateFreeTypePolicy,
+    ) -> Self {
+        Self {
+            unity_font_hook,
+            private_freetype,
+        }
+    }
+}
 
 pub struct InjectionOrchestrator<'a> {
     binding: RendererRuntimeBinding,
@@ -53,7 +71,7 @@ impl<'a> InjectionOrchestrator<'a> {
             broker,
             RetryPolicy::default(),
             None,
-            UnityFontHookPolicy::default(),
+            ProcessAdmissionPolicies::default(),
         )
     }
 
@@ -72,7 +90,7 @@ impl<'a> InjectionOrchestrator<'a> {
             broker,
             retry_policy,
             Some(retry_scheduler),
-            UnityFontHookPolicy::default(),
+            ProcessAdmissionPolicies::default(),
         )
     }
 
@@ -92,7 +110,46 @@ impl<'a> InjectionOrchestrator<'a> {
             broker,
             retry_policy,
             Some(retry_scheduler),
-            unity_font_hook,
+            ProcessAdmissionPolicies::new(unity_font_hook, PrivateFreeTypePolicy::default()),
+        )
+    }
+
+    pub fn with_profile_policies(
+        service_pid: u32,
+        binding: RendererRuntimeBinding,
+        inspector: &'a dyn ProcessInspector,
+        broker: &'a dyn InjectionBroker,
+        unity_font_hook: UnityFontHookPolicy,
+        private_freetype: PrivateFreeTypePolicy,
+    ) -> Self {
+        Self::build(
+            service_pid,
+            binding,
+            inspector,
+            broker,
+            RetryPolicy::default(),
+            None,
+            ProcessAdmissionPolicies::new(unity_font_hook, private_freetype),
+        )
+    }
+
+    pub(crate) fn with_retry_policy_and_profile_policies(
+        service_pid: u32,
+        binding: RendererRuntimeBinding,
+        inspector: &'a dyn ProcessInspector,
+        broker: &'a dyn InjectionBroker,
+        retry_policy: RetryPolicy,
+        retry_scheduler: &'a dyn RetryScheduler,
+        admission_policies: ProcessAdmissionPolicies,
+    ) -> Self {
+        Self::build(
+            service_pid,
+            binding,
+            inspector,
+            broker,
+            retry_policy,
+            Some(retry_scheduler),
+            admission_policies,
         )
     }
 
@@ -103,14 +160,15 @@ impl<'a> InjectionOrchestrator<'a> {
         broker: &'a dyn InjectionBroker,
         retry_policy: RetryPolicy,
         retry_scheduler: Option<&'a dyn RetryScheduler>,
-        unity_font_hook: UnityFontHookPolicy,
+        admission_policies: ProcessAdmissionPolicies,
     ) -> Self {
         Self {
             binding,
-            target_validator: ProcessTargetValidator::with_unity_font_hook_policy(
+            target_validator: ProcessTargetValidator::with_profile_policies(
                 service_pid,
                 inspector,
-                unity_font_hook,
+                admission_policies.unity_font_hook,
+                admission_policies.private_freetype,
             ),
             inspector,
             broker,

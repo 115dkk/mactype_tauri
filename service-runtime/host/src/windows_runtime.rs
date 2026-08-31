@@ -1,7 +1,7 @@
 use mactype_service_contract::{MachinePaths, StructuredServiceError};
 
 use crate::{
-    initialize_process_orchestration_with_unity_font_hook, FixedHelperBroker, InitializedRuntime,
+    initialize_process_orchestration_with_profile_policies, FixedHelperBroker, InitializedRuntime,
     ProtectedRendererRuntime, RuntimeInitializer, WindowsHelperLauncher, WindowsProcessInspector,
     WindowsStartupSafety, WmiProcessEventSource,
 };
@@ -25,9 +25,10 @@ impl RuntimeInitializer for WindowsOpenServiceInitializer {
         let inspector = WindowsProcessInspector::new();
         let launcher = WindowsHelperLauncher::new(crate::scm::stop_requested);
         let broker = FixedHelperBroker::new(&runtime, launcher);
-        initialize_process_orchestration_with_unity_font_hook(
+        initialize_process_orchestration_with_profile_policies(
             runtime.binding(),
             runtime.unity_font_hook_policy().clone(),
+            runtime.private_freetype_policy(),
             service_pid,
             Box::new(source),
             Box::new(inspector),

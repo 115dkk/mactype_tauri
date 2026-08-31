@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
-use mactype_service_contract::{StructuredServiceError, UnityFontHookMode, UnityFontHookPolicy};
+use mactype_service_contract::{
+    PrivateFreeTypePolicy, StructuredServiceError, UnityFontHookMode, UnityFontHookPolicy,
+};
 
 use crate::observer::ProcessIdentity;
 
@@ -66,6 +68,13 @@ pub enum UnityProcessClassification {
     Unavailable,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrivateFreeTypeClassification {
+    NotDetected,
+    Detected,
+    Unavailable,
+}
+
 pub trait ProcessInspector {
     fn inspect(&self, pid: u32) -> Result<ProcessInspection, ProcessInspectionError>;
 
@@ -80,6 +89,14 @@ pub trait ProcessInspector {
     fn classify_unity_process(&self, identity: &ProcessIdentity) -> UnityProcessClassification {
         let _ = identity;
         UnityProcessClassification::NotUnity
+    }
+
+    fn classify_private_freetype_process(
+        &self,
+        identity: &ProcessIdentity,
+    ) -> PrivateFreeTypeClassification {
+        let _ = identity;
+        PrivateFreeTypeClassification::NotDetected
     }
 }
 
@@ -97,6 +114,7 @@ pub enum ProcessSkipReason {
     ImageNameUnavailable,
     DynamicCodeProhibited,
     BinarySignatureRestricted,
+    PrivateFreeTypeDetected,
     UnityAntiCheatDetected,
     UnitySafetyEvidenceUnavailable,
 }
@@ -116,6 +134,7 @@ impl ProcessSkipReason {
             Self::ImageNameUnavailable => "image-name-unavailable",
             Self::DynamicCodeProhibited => "dynamic-code-policy-blocks-hooks",
             Self::BinarySignatureRestricted => "binary-signature-policy-blocks-module",
+            Self::PrivateFreeTypeDetected => "private-freetype-detected",
             Self::UnityAntiCheatDetected => "unity-anticheat-detected",
             Self::UnitySafetyEvidenceUnavailable => "unity-safety-evidence-unavailable",
         }
@@ -135,6 +154,7 @@ pub struct ProcessTargetValidator<'a> {
     service_pid: u32,
     inspector: &'a dyn ProcessInspector,
     unity_font_hook: UnityFontHookPolicy,
+    private_freetype: PrivateFreeTypePolicy,
 }
 
 impl<'a> ProcessTargetValidator<'a> {
@@ -143,6 +163,7 @@ impl<'a> ProcessTargetValidator<'a> {
             service_pid,
             inspector,
             unity_font_hook: UnityFontHookPolicy::default(),
+            private_freetype: PrivateFreeTypePolicy::default(),
         }
     }
 
@@ -155,6 +176,21 @@ impl<'a> ProcessTargetValidator<'a> {
             service_pid,
             inspector,
             unity_font_hook,
+            private_freetype: PrivateFreeTypePolicy::default(),
+        }
+    }
+
+    pub fn with_profile_policies(
+        service_pid: u32,
+        inspector: &'a dyn ProcessInspector,
+        unity_font_hook: UnityFontHookPolicy,
+        private_freetype: PrivateFreeTypePolicy,
+    ) -> Self {
+        Self {
+            service_pid,
+            inspector,
+            unity_font_hook,
+            private_freetype,
         }
     }
 
@@ -247,8 +283,15 @@ impl<'a> ProcessTargetValidator<'a> {
                 ProcessSkipReason::DynamicCodeProhibited,
             ));
         }
+        let unity_classification = if self.private_freetype.skip_detected()
+            || self.unity_font_hook.mode() == UnityFontHookMode::MostGames
+        {
+            self.inspector.classify_unity_process(&inspection.identity)
+        } else {
+            UnityProcessClassification::NotUnity
+        };
         if self.unity_font_hook.mode() == UnityFontHookMode::MostGames {
-            match self.inspector.classify_unity_process(&inspection.identity) {
+            match unity_classification {
                 UnityProcessClassification::UnityWithAntiCheat => {
                     return Ok(skipped(
                         &inspection,
@@ -263,6 +306,25 @@ impl<'a> ProcessTargetValidator<'a> {
                 }
                 UnityProcessClassification::NotUnity | UnityProcessClassification::Unity => {}
             }
+        }
+        let unity_hook_target = matches!(
+            unity_classification,
+            UnityProcessClassification::Unity | UnityProcessClassification::UnityWithAntiCheat
+        ) && matches!(
+            inspection.image_name,
+            InspectionEvidence::Known(ref name) if self.unity_font_hook.applies_to(name)
+        );
+        if self.private_freetype.skip_detected()
+            && !unity_hook_target
+            && self
+                .inspector
+                .classify_private_freetype_process(&inspection.identity)
+                == PrivateFreeTypeClassification::Detected
+        {
+            return Ok(skipped(
+                &inspection,
+                ProcessSkipReason::PrivateFreeTypeDetected,
+            ));
         }
         Ok(ProcessTargetDecision::Eligible(inspection.identity))
     }

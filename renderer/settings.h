@@ -181,6 +181,7 @@ private:
 	CFontSettings m_FontSettings;
 	static CParseIni m_Config;
 	bool m_bHookChildProcesses		: 1;
+	bool m_bSkipPrivateFreeType		: 1;
 	bool m_bUseMapping				: 1;
 	bool m_bLoadOnDemand			: 1;
 	bool m_bEnableShadow			: 1;
@@ -303,6 +304,7 @@ private:
 
 	CGdippSettings()
 		: m_bHookChildProcesses(false)
+		, m_bSkipPrivateFreeType(false)
 		, m_bUseMapping(false)
 		, m_bLoadOnDemand(false)
 		, m_bEnableShadow(false)
@@ -355,6 +357,7 @@ public:
 	//INI用
 	const CFontSettings& GetFontSettings() const { return m_FontSettings; }
 	bool HookChildProcesses() const { return m_bHookChildProcesses; }
+	bool SkipPrivateFreeType() const { return m_bSkipPrivateFreeType; }
 	bool UseMapping() const { return m_bUseMapping; }
 	bool LoadOnDemand() const { return m_bLoadOnDemand; }
 	char FontLink() const { return m_bFontLink; }
@@ -393,6 +396,7 @@ public:
 	int FontSubstitutes() const { return m_nFontSubstitutes; }	//判断替换模式
 	renderer::UnityFontHookMode UnityFontHookMode() const noexcept;
 	bool UnityFontHookEnabledForProcess() const noexcept;
+	bool UnityFontHookEnabledForExecutable(LPCTSTR imagePath) const noexcept;
 	int CacheMaxFaces() const { return m_nCacheMaxFaces; }
 	int CacheMaxSizes() const { return m_nCacheMaxSizes; }
 	int CacheMaxBytes() const { return m_nCacheMaxBytes; }

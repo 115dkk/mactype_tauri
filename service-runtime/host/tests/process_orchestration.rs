@@ -4,15 +4,17 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use mactype_service_contract::{
-    ProfileDigest, RendererRuntimeBinding, RuntimeGenerationId, StructuredServiceError,
+    PrivateFreeTypePolicy, ProfileDigest, RendererRuntimeBinding, RuntimeGenerationId,
+    StructuredServiceError, UnityFontHookPolicy,
 };
 use mactype_service_host::{
     initialize_process_orchestration, subscribe_process_creation, BinarySignaturePolicy,
     BrokerDisposition, BrokerResult, DynamicCodePolicy, InjectionBroker, InjectionRequest,
-    InspectionEvidence, ProcessArchitecture, ProcessEventSource, ProcessIdentity,
-    ProcessInspection, ProcessInspectionError, ProcessInspector, ProcessOrchestrator,
-    ProcessOutcome, RetryPolicy, RetryScheduler, SessionChange, TargetLiveness,
-    MAX_TRACKED_PROCESS_RESULTS, PROCESS_CREATION_QUERY, TARGET_VANISHED_RESULT_CODE,
+    InspectionEvidence, PrivateFreeTypeClassification, ProcessArchitecture, ProcessEventSource,
+    ProcessIdentity, ProcessInspection, ProcessInspectionError, ProcessInspector,
+    ProcessOrchestrator, ProcessOutcome, RetryPolicy, RetryScheduler, SessionChange,
+    TargetLiveness, MAX_TRACKED_PROCESS_RESULTS, PROCESS_CREATION_QUERY,
+    TARGET_VANISHED_RESULT_CODE,
 };
 
 const PROFILE_DIGEST: &str =
@@ -84,6 +86,24 @@ impl ProcessInspector for FixedInspector {
     }
 }
 
+struct PrivateFreeTypeInspector {
+    identity: ProcessIdentity,
+}
+
+impl ProcessInspector for PrivateFreeTypeInspector {
+    fn inspect(&self, pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
+        assert_eq!(pid, self.identity.pid);
+        Ok(ordinary_inspection(self.identity.clone()))
+    }
+
+    fn classify_private_freetype_process(
+        &self,
+        _identity: &ProcessIdentity,
+    ) -> PrivateFreeTypeClassification {
+        PrivateFreeTypeClassification::Detected
+    }
+}
+
 struct InspectionInspector(ProcessInspection);
 
 impl ProcessInspector for InspectionInspector {
@@ -134,6 +154,34 @@ fn process_identity_is_requeried_before_the_fixed_broker_request() {
             binding: binding(),
         }]
     );
+}
+
+#[test]
+fn process_orchestration_does_not_invoke_the_broker_for_detected_private_freetype() {
+    let identity = ProcessIdentity {
+        pid: 42,
+        creation_time: 133_967_890_123_456_789,
+        session_id: 2,
+        architecture: ProcessArchitecture::X64,
+    };
+    let inspector = PrivateFreeTypeInspector { identity };
+    let broker = RecordingBroker::default();
+    let private_freetype =
+        PrivateFreeTypePolicy::from_profile_bytes(b"[General]\r\nSkipPrivateFreeType=1\r\n");
+    let mut orchestrator = ProcessOrchestrator::with_profile_policies(
+        900,
+        binding(),
+        &inspector,
+        &broker,
+        UnityFontHookPolicy::default(),
+        private_freetype,
+    );
+
+    assert_eq!(
+        orchestrator.handle_pid(42).unwrap(),
+        ProcessOutcome::Skipped
+    );
+    assert!(broker.requests.lock().unwrap().is_empty());
 }
 
 #[test]

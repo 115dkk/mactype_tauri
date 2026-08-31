@@ -524,6 +524,8 @@
   "settings.font_substitutes.option.0": "Désactivée",
   "settings.font_substitutes.option.1": "Sûre",
   "settings.font_substitutes.option.2": "Toutes",
+  "settings.skip_private_freetype.label": "Ignorer les applications avec leur propre FreeType",
+  "settings.skip_private_freetype.description": "Ignore silencieusement le hook MacType général lorsqu’une application sélectionne explicitement son propre moteur FreeType. Le hook de police Unity n’est pas affecté.",
   "settings.unity_font_hook.label": "Hook de police Unity",
   "settings.unity_font_hook.description": "Ajuste la couverture des glyphes du FreeType interne de Unity avec ce profil. Seuls les builds UnityPlayer vérifiés sont hookés.",
   "settings.unity_font_hook.option.0": "Désactivé",

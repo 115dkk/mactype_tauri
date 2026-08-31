@@ -358,6 +358,18 @@ pub const SETTINGS: &[SettingDefinition] = &[
         ordinal: 22,
     },
     SettingDefinition {
+        id: "skip_private_freetype",
+        section: "General",
+        key: "SkipPrivateFreeType",
+        value_type: SettingValueType::Integer,
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        factory: 0.0,
+        previewable: false,
+        ordinal: -1,
+    },
+    SettingDefinition {
         id: "unity_font_hook",
         section: "General",
         key: "UnityFontHook",

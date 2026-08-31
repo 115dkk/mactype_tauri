@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
 use mactype_service_contract::{
-    GenerationPointer, MachinePaths, RendererRuntimeBinding, RuntimeGenerationPointer,
-    StructuredServiceError, UnityFontHookPolicy,
+    GenerationPointer, MachinePaths, PrivateFreeTypePolicy, RendererRuntimeBinding,
+    RuntimeGenerationPointer, StructuredServiceError, UnityFontHookPolicy,
 };
 
 use crate::profile_runtime::{
@@ -16,6 +16,7 @@ pub struct ProtectedRendererRuntime {
     assets: ProtectedRuntimeAssets,
     binding: RendererRuntimeBinding,
     unity_font_hook: UnityFontHookPolicy,
+    private_freetype: PrivateFreeTypePolicy,
 }
 
 impl ProtectedRendererRuntime {
@@ -73,10 +74,12 @@ impl ProtectedRendererRuntime {
             verified_profile.digest(),
         );
         let unity_font_hook = verified_profile.unity_font_hook_policy().clone();
+        let private_freetype = verified_profile.private_freetype_policy();
         Ok(Self {
             assets: verified_assets,
             binding,
             unity_font_hook,
+            private_freetype,
         })
     }
 
@@ -90,6 +93,10 @@ impl ProtectedRendererRuntime {
 
     pub const fn unity_font_hook_policy(&self) -> &UnityFontHookPolicy {
         &self.unity_font_hook
+    }
+
+    pub const fn private_freetype_policy(&self) -> PrivateFreeTypePolicy {
+        self.private_freetype
     }
 }
 

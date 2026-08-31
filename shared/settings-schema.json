@@ -684,6 +684,26 @@
     "description": "General / FontSubstitutes"
   },
   {
+    "id": "skip_private_freetype",
+    "group": "advanced",
+    "section": "General",
+    "key": "SkipPrivateFreeType",
+    "type": "integer",
+    "control": "boolean",
+    "min": 0,
+    "max": 1,
+    "default": 0,
+    "factory": 0,
+    "unit": null,
+    "advanced": true,
+    "previewable": false,
+    "apply": "restart_required",
+    "legacy_control_center_ordinal": -1,
+    "supported": true,
+    "label": "자체 FreeType 사용 프로그램 건너뛰기",
+    "description": "자체 FreeType 사용을 명시한 프로그램은 일반 후킹에서 조용히 제외합니다. Unity 글꼴 후킹에는 적용하지 않습니다."
+  },
+  {
     "id": "unity_font_hook",
     "group": "advanced",
     "section": "General",

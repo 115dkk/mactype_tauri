@@ -8,6 +8,9 @@
 
 namespace {
 
+constexpr wchar_t kExplicitPrivateFreeTypeMarker[] =
+    L"windows:fontengine=freetype";
+
 struct HandleCloser {
   void operator()(HANDLE handle) const noexcept {
     if (handle != nullptr && handle != INVALID_HANDLE_VALUE) {
@@ -123,10 +126,14 @@ int wmain(const int argc, wchar_t** argv) {
     const bool present = GetModuleHandleW(argv[3]) != nullptr;
     return present == expect_present ? 0 : 3;
   }
-  if (argc != 2) {
+  const bool expect_private_freetype_skip =
+      argc == 3 &&
+      std::wstring_view(argv[2]) == L"--expect-private-freetype-skip";
+  if (argc != 2 && !expect_private_freetype_skip) {
     std::wcerr << L"Usage: relay-policy-probe{32|64}.exe <MacType DLL>\n";
     return 64;
   }
+  GetEnvironmentVariableW(kExplicitPrivateFreeTypeMarker, nullptr, 0);
 
   const std::filesystem::path core =
       std::filesystem::absolute(std::filesystem::path(argv[1]));
@@ -152,7 +159,8 @@ int wmain(const int argc, wchar_t** argv) {
   if (!LaunchChild(self, module_name, true, false)) {
     return 4;
   }
-  if (!LaunchChild(self, module_name, false, true)) {
+  if (!LaunchChild(
+          self, module_name, false, !expect_private_freetype_skip)) {
     return 5;
   }
   return 0;

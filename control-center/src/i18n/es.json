@@ -524,6 +524,8 @@
   "settings.font_substitutes.option.0": "Desactivada",
   "settings.font_substitutes.option.1": "Segura",
   "settings.font_substitutes.option.2": "Todas",
+  "settings.skip_private_freetype.label": "Omitir aplicaciones con FreeType propio",
+  "settings.skip_private_freetype.description": "Omite silenciosamente la interceptación general de MacType cuando una aplicación selecciona explícitamente su propio motor FreeType. La interceptación de fuentes de Unity no se ve afectada.",
   "settings.unity_font_hook.label": "Interceptación de fuentes de Unity",
   "settings.unity_font_hook.description": "Ajusta la cobertura de glifos del FreeType interno de Unity con este perfil. Solo se interceptan compilaciones verificadas de UnityPlayer.",
   "settings.unity_font_hook.option.0": "Desactivado",

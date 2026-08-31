@@ -168,5 +168,62 @@ if ($LASTEXITCODE -ne 0) {
     throw "PID-local mitigation relay contract failed for $Architecture with exit code $LASTEXITCODE"
 }
 
+$privateRuntime = Join-Path $fullOutputRoot 'private-freetype-runtime'
+New-Item -ItemType Directory -Path $privateRuntime | Out-Null
+foreach ($packageName in $packageNames) {
+    Copy-Item -LiteralPath (Join-Path $resolvedCoreRoot $packageName) `
+        -Destination (Join-Path $privateRuntime $packageName)
+}
+$privateProfile = [IO.File]::ReadAllText($resolvedProfile)
+if ($privateProfile -notmatch '(?m)^SkipPrivateFreeType\s*=\s*0\s*$') {
+    throw 'Private FreeType relay fixture requires the opt-in default setting.'
+}
+$privateProfile = [regex]::Replace(
+    $privateProfile,
+    '(?m)^SkipPrivateFreeType\s*=\s*0\s*$',
+    'SkipPrivateFreeType=1'
+)
+[IO.File]::WriteAllText(
+    (Join-Path $privateRuntime 'MacType.ini'),
+    $privateProfile,
+    [Text.UTF8Encoding]::new($false)
+)
+$privateCore = Join-Path $privateRuntime $coreName
+& $policyProbe $privateCore '--expect-private-freetype-skip'
+if ($LASTEXITCODE -ne 0) {
+    throw "Private FreeType child relay was not quietly skipped for $Architecture with exit code $LASTEXITCODE"
+}
+
+$unityRuntime = Join-Path $fullOutputRoot 'unity-private-freetype-runtime'
+$unityTarget = Join-Path $fullOutputRoot 'unity-private-freetype-target'
+New-Item -ItemType Directory -Path $unityRuntime, $unityTarget | Out-Null
+foreach ($packageName in $packageNames) {
+    Copy-Item -LiteralPath (Join-Path $resolvedCoreRoot $packageName) `
+        -Destination (Join-Path $unityRuntime $packageName)
+}
+$unityProfile = [regex]::Replace(
+    $privateProfile,
+    '(?m)^UnityFontHook\s*=\s*0\s*$',
+    'UnityFontHook=2'
+)
+if ($unityProfile -ceq $privateProfile) {
+    throw 'Unity private FreeType relay fixture requires the off-by-default Unity setting.'
+}
+[IO.File]::WriteAllText(
+    (Join-Path $unityRuntime 'MacType.ini'),
+    $unityProfile,
+    [Text.UTF8Encoding]::new($false)
+)
+$unityPolicyProbe = Join-Path $unityTarget ([IO.Path]::GetFileName($policyProbe))
+Copy-Item -LiteralPath $policyProbe -Destination $unityPolicyProbe
+[IO.File]::WriteAllBytes(
+    (Join-Path $unityTarget 'UnityPlayer.dll'),
+    [Text.Encoding]::ASCII.GetBytes('Unity fixture')
+)
+& $unityPolicyProbe (Join-Path $unityRuntime $coreName)
+if ($LASTEXITCODE -ne 0) {
+    throw "Private FreeType avoidance disabled the Unity child hook for $Architecture with exit code $LASTEXITCODE"
+}
+
 $relayKind = if ($CrossArchitecture) { 'x64/x86 mixed' } else { $Architecture }
-Write-Host "Early child relay loaded the fixed generation in the $relayKind tree, stopped at a retired profile boundary, and quietly skipped only the explicitly blocked process."
+Write-Host "Early child relay loaded the fixed generation in the $relayKind tree, stopped at a retired profile boundary, and quietly skipped explicitly blocked or private-FreeType processes."

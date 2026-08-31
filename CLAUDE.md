@@ -139,6 +139,14 @@ below wherever the two conflict.
   A successful face open or non-empty `.notdef` bitmap is not proof of readable
   text: when character lookups are observed, require at least one nonzero glyph
   result and retain a full-window field capture for licensed local targets.
+- Licensed Steam game evidence must come from a Steam-launched process with no
+  explicit Steamworks initialization failure. A direct `MacLoader` launch is a
+  renderer smoke test, not gameplay-compatibility proof. Bind every field run to
+  the exact loader, renderer, and profile hashes; when claiming release parity,
+  require the renderer hash from the release payload manifest. Before blaming a
+  device, compare the installed protected runtime receipt and active profile
+  generation with that manifest. Never infer success from hook counters while
+  the game is stuck on a splash screen or its stock control run also fails.
 - The fixed setup broker materializes DLL-adjacent `MacType.ini` only for an
   active service. A supported stop and every maintenance or profile operation
   that ends stopped remove only the exact verified generated copy while

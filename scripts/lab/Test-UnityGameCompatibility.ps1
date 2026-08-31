@@ -14,6 +14,9 @@ param(
 
     [string] $ScreenshotPath,
 
+    [ValidatePattern('^[0-9A-Fa-f]{64}$')]
+    [string] $ExpectedCoreSha256,
+
     [switch] $RequireUnityRedirect,
 
     [string] $SteamAppId,
@@ -59,6 +62,66 @@ function Get-UnityMarkers([string] $UnityPlayer) {
         $markers[$marker] = $text.IndexOf($marker, [StringComparison]::Ordinal) -ge 0
     }
     return $markers
+}
+
+function Get-SteamRuntimeState([string] $LogPath, [bool] $Requested) {
+    if (-not $Requested) {
+        return 'not-requested'
+    }
+    if (-not (Test-Path -LiteralPath $LogPath -PathType Leaf)) {
+        return 'not-observed'
+    }
+    $stream = [IO.File]::Open(
+        $LogPath,
+        [IO.FileMode]::Open,
+        [IO.FileAccess]::Read,
+        [IO.FileShare]::ReadWrite
+    )
+    try {
+        $maximumTailBytes = 1MB
+        if ($stream.Length -gt $maximumTailBytes) {
+            $null = $stream.Seek(-$maximumTailBytes, [IO.SeekOrigin]::End)
+        }
+        $reader = [IO.StreamReader]::new(
+            $stream,
+            [Text.Encoding]::UTF8,
+            $true,
+            4096,
+            $true
+        )
+        try {
+            $text = $reader.ReadToEnd()
+        } finally {
+            $reader.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+    $positive = $text.LastIndexOf(
+        'SteamManager.Initialized:True',
+        [StringComparison]::OrdinalIgnoreCase
+    )
+    $negative = @(
+        $text.LastIndexOf(
+            'Steamworks is not initialized',
+            [StringComparison]::OrdinalIgnoreCase
+        ),
+        $text.LastIndexOf(
+            'SteamManager.Initialized:False',
+            [StringComparison]::OrdinalIgnoreCase
+        ),
+        $text.LastIndexOf(
+            'SteamAPI_Init() failed',
+            [StringComparison]::OrdinalIgnoreCase
+        )
+    ) | Measure-Object -Maximum | Select-Object -ExpandProperty Maximum
+    if ($negative -ge 0 -and $negative -gt $positive) {
+        return 'initialization-failed'
+    }
+    if ($positive -ge 0) {
+        return 'initialized'
+    }
+    return 'not-observed'
 }
 
 function Get-RelevantModules([System.Diagnostics.Process] $Process) {
@@ -254,6 +317,7 @@ if (-not [string]::IsNullOrWhiteSpace($ScreenshotPath)) {
 
 $loader = $null
 $expectedCore = $null
+$profilePath = $null
 if (-not [string]::IsNullOrWhiteSpace($MacLoader)) {
     if (-not [string]::IsNullOrWhiteSpace($ServiceCore)) {
         throw 'MacLoader and ServiceCore are mutually exclusive launch modes.'
@@ -261,7 +325,8 @@ if (-not [string]::IsNullOrWhiteSpace($MacLoader)) {
     $loader = (Resolve-Path -LiteralPath $MacLoader).Path
     $loaderRoot = Split-Path -Parent $loader
     $expectedCore = Join-Path $loaderRoot 'MacType64.dll'
-    foreach ($required in @($expectedCore, (Join-Path $loaderRoot 'MacType.ini'))) {
+    $profilePath = Join-Path $loaderRoot 'MacType.ini'
+    foreach ($required in @($expectedCore, $profilePath)) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
             throw "Injected Unity test input is missing: $required"
         }
@@ -272,9 +337,37 @@ if (-not [string]::IsNullOrWhiteSpace($MacLoader)) {
     }
 } elseif (-not [string]::IsNullOrWhiteSpace($ServiceCore)) {
     $expectedCore = (Resolve-Path -LiteralPath $ServiceCore).Path
+    $profilePath = Join-Path (Split-Path -Parent $expectedCore) 'MacType.ini'
     $openService = Get-Service -Name MacTypeControlCenter -ErrorAction Stop
     if ($openService.Status -ne 'Running') {
         throw 'ServiceCore evidence requires MacTypeControlCenter to be running.'
+    }
+}
+$loaderSha256 = if ($loader) {
+    (Get-FileHash -LiteralPath $loader -Algorithm SHA256).Hash.ToLowerInvariant()
+} else {
+    $null
+}
+$coreSha256 = if ($expectedCore) {
+    (Get-FileHash -LiteralPath $expectedCore -Algorithm SHA256).Hash.ToLowerInvariant()
+} else {
+    $null
+}
+$profileSha256 = if ($profilePath -and
+    (Test-Path -LiteralPath $profilePath -PathType Leaf)) {
+    (Get-FileHash -LiteralPath $profilePath -Algorithm SHA256).Hash.ToLowerInvariant()
+} else {
+    $null
+}
+if (-not [string]::IsNullOrWhiteSpace($ExpectedCoreSha256)) {
+    if (-not $coreSha256) {
+        throw 'ExpectedCoreSha256 requires an explicit MacLoader or ServiceCore runtime.'
+    }
+    if (-not $coreSha256.Equals(
+        $ExpectedCoreSha256,
+        [StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw "The selected MacType core SHA-256 $coreSha256 does not match the expected release SHA-256 $($ExpectedCoreSha256.ToLowerInvariant())."
     }
 }
 if (-not [string]::IsNullOrWhiteSpace($UnityEvidenceProbe)) {
@@ -477,6 +570,10 @@ if ($gameProcess -and -not $gameProcess.HasExited) {
     $cleanup = 'terminated-exact-test-process'
 }
 
+$steamRuntime = Get-SteamRuntimeState `
+    -LogPath $playerLog `
+    -Requested (-not [string]::IsNullOrWhiteSpace($SteamAppId))
+
 $mactypeModules = @($modules | Where-Object { $_.name -iin @('MacType.dll', 'MacType64.dll') })
 $exactCoreLoaded = if ($expectedCore) {
     $mactypeModules.Count -eq 1 -and @($mactypeModules | Where-Object {
@@ -519,7 +616,16 @@ $evidence = [ordered]@{
             'stock'
         }
         loader = $loader
+        loaderSha256 = $loaderSha256
         expectedCore = $expectedCore
+        coreSha256 = $coreSha256
+        expectedCoreSha256 = if ($ExpectedCoreSha256) {
+            $ExpectedCoreSha256.ToLowerInvariant()
+        } else {
+            $null
+        }
+        profile = $profilePath
+        profileSha256 = $profileSha256
         launcherExitCode = if ($launcherProcess -and $launcherProcess.HasExited) {
             $launcherProcess.ExitCode
         } else {
@@ -536,6 +642,8 @@ $evidence = [ordered]@{
         relevantModules = $modules
         expectedCoreStateObserved = $exactCoreLoaded
         error = $observationError
+        playerLogPath = $playerLog
+        steamRuntime = $steamRuntime
         werReports = $werReports
         unityFontEvidence = $unityFontEvidence
         screenshotPath = $screenshot
@@ -549,6 +657,9 @@ $evidence = [ordered]@{
     [Text.UTF8Encoding]::new($false)
 )
 
+if ($steamRuntime -eq 'initialization-failed') {
+    throw "Steam runtime initialization failed during Unity compatibility evidence: $output"
+}
 if ($observationError -or $exited -or -not $responding -or
     -not $exactCoreLoaded -or
     $werReports.Count -ne 0 -or

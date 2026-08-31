@@ -60,6 +60,15 @@ jobs:
       - name: Test open-service responsibility-scoped policy modules
         shell: pwsh
         run: '& ..\..\scripts\ci\Test-OpenServicePolicyModules.ps1'
+      - name: Test installed runtime provenance evidence
+        shell: pwsh
+        run: '& ..\..\scripts\ci\Test-InstalledRuntimeProvenance.ps1'
+      - name: Test Unity evidence release binding
+        shell: pwsh
+        run: '& ..\..\scripts\ci\Test-UnityEvidenceReleaseBinding.ps1'
+      - name: Test Unity evidence Steam runtime classification
+        shell: pwsh
+        run: '& ..\..\scripts\ci\Test-UnityEvidenceSteamRuntime.ps1'
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets --all-features -- -D warnings
       - run: cargo test --all-targets

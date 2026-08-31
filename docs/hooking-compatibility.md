@@ -86,12 +86,30 @@ the exact protected bytes before Ready.
 
 `scripts/lab/Test-UnityGameCompatibility.ps1` records licensed local game
 evidence without redistributing a game binary. It hashes the executable and
-`UnityPlayer.dll`, records Unity version and private-renderer markers, launches
-stock, through the shipped `MacLoader`, or under an explicitly named running
-service core, verifies the exact MacType module, observes responsiveness for a
-bounded interval, checks WER, and terminates only the exact test process it
-launched. If an adapter exposes character-lookup evidence, redirects no longer
-count as success unless at least one observed lookup resolves to a real glyph.
+`UnityPlayer.dll`, records Unity version and private-renderer markers, and also
+records the exact loader, renderer, and adjacent profile hashes. The optional
+`ExpectedCoreSha256` contract rejects a runtime before launch when it differs
+from the intended release payload. The command launches stock, through the
+shipped `MacLoader`, or under an explicitly named running service core, verifies
+the exact MacType module, observes responsiveness for a bounded interval,
+checks WER, and terminates only the exact test process it launched. If an
+adapter exposes character-lookup evidence, redirects no longer count as
+success unless at least one observed lookup resolves to a real glyph.
+
+A direct executable or `MacLoader` launch can leave Steamworks uninitialized.
+It is therefore only a renderer smoke test for a Steam title, not proof that
+the shipped game is playable. An explicit `Steamworks is not initialized`,
+`SteamManager.Initialized:False`, or later `SteamAPI_Init() failed` in the
+bounded Player log now makes the evidence fail. Full compatibility requires a
+Steam-launched process, a stock control that reaches the same UI boundary, and
+a full-window capture after injection. Hook counters and non-empty glyph
+bitmaps cannot promote a splash screen or a failed stock control to success.
+
+`scripts/lab/Get-InstalledRuntimeProvenance.ps1` provides the cross-device
+check without installing a development environment. It verifies the protected
+runtime pointer and receipt, hashes both renderer architectures and helpers,
+verifies the active profile digest and Unity mode, and optionally compares all
+of them with a release payload manifest.
 
 The optional Unity adapter is off by default. Selected-games mode consumes
 `[UnityInclude]`; most-games mode admits Unity processes unless the 신식 서비스
@@ -121,14 +139,26 @@ bitmaps, yet all 59,762 observed Korean lookups returned glyph zero. Its exact
 scoped bypass keeps discovery opens native; face-open substitution resumes only
 after Unity selects a catalog entry for actual text.
 
-The final isolated Plague run remained responsive with no WER report,
+The original isolated Plague run remained responsive with no WER report,
 redirected 4/4 selected-face opens with zero fallbacks, rendered 7,533 non-empty
 bitmaps, and resolved 10,828 of 37,918 Korean fallback probes. Its last resolved
-Korean face was `Pretendard Variable`, and the full-window capture showed the
-complete Korean main menu. The final Rebel A/B regression run redirected 2/2
-face opens, resolved 286/286 mapped lookups, and again reported `Malgun Gothic`
-backed by `Pretendard Variable`. Synthetic TTC and descriptor-prefix tests
-reject cross-face aliases or an inexact catalog boundary; there is no runtime
+Korean face was `Pretendard Variable`. That run nevertheless used a local core
+and a direct launch, so it did not prove either release identity or Steamworks
+health. On 2026-08-31 the final CI x64 core
+`b94f69c167e2f1880dc282ea7fb2344e188850939044cbf1a83ad2a4f119f760`
+was injected into a Steam-launched Plague process and the full-window capture
+showed the Korean main menu. The installed protected service still selected the
+older `f3f24daba65e` generation; under the same Steam session and profile, its
+core left the same menu text empty. This separated a stale installation from
+the final payload rather than treating a local build as release evidence.
+
+The earlier Rebel counters also remain useful adapter diagnostics: 2/2 face
+opens and mapped `Malgun Gothic` lookups resolved to `Pretendard Variable`.
+They are not a final gameplay pass. A later stock Rebel control remained on its
+background while its Player log reported repeated TLS certificate failures, so
+that field session could not distinguish renderer behavior from the game's own
+startup state. Synthetic TTC and descriptor-prefix tests still reject
+cross-face aliases or an inexact catalog boundary; there is no runtime
 signature scan.
 
 Stopping the 신식 서비스 is deliberately non-retroactive: it blocks future

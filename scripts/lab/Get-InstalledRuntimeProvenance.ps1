@@ -60,7 +60,7 @@ function Get-ManifestHashes($Manifest, [string] $Description) {
 
 function Get-GeneralSetting([string] $Path, [string] $Key) {
     $section = ''
-    foreach ($rawLine in [IO.File]::ReadLines($Path)) {
+    foreach ($rawLine in [IO.File]::ReadAllLines($Path)) {
         $line = $rawLine.Trim()
         if ($line.Length -eq 0 -or $line.StartsWith(';') -or $line.StartsWith('#')) {
             continue

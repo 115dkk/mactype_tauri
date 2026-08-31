@@ -403,6 +403,39 @@ function Assert-RequiredApplicationFiles {
     }
 }
 
+function Assert-OpenCorePayloadLineage {
+    param(
+        [Parameter(Mandatory)] [string] $ApplicationRoot,
+        [Parameter(Mandatory)] [string] $OpenCoreRoot
+    )
+
+    foreach ($name in @(
+        'MacType.dll',
+        'MacType64.dll',
+        'MacType.Core.dll',
+        'MacType64.Core.dll',
+        'MacLoader.exe',
+        'MacLoader64.exe'
+    )) {
+        $source = Join-Path $OpenCoreRoot $name
+        $installed = Join-Path $ApplicationRoot $name
+        $sourceHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+        $installedHash = (Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash
+        if ($sourceHash -cne $installedHash) {
+            throw "Installer embedded a stale or foreign open-core artifact: $name"
+        }
+    }
+    foreach ($name in @('MacType.dll', 'MacType64.dll')) {
+        $source = Join-Path $OpenCoreRoot $name
+        $payload = Join-Path $ApplicationRoot "service-runtime\payload\files\$name"
+        $sourceHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+        $payloadHash = (Get-FileHash -LiteralPath $payload -Algorithm SHA256).Hash
+        if ($sourceHash -cne $payloadHash) {
+            throw "Service payload embedded a stale or foreign open-core artifact: $name"
+        }
+    }
+}
+
 function Assert-CommonDesktopShortcut {
     param(
         [Parameter(Mandatory)] [string] $CommonDesktopShortcut,

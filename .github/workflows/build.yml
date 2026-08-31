@@ -293,7 +293,7 @@ jobs:
             installer\mactype-control-center.iss
       - name: Verify install, upgrade, launch, and uninstall
         shell: pwsh
-        run: scripts/ci/Test-InstallerWindows.ps1 -BaselineInstaller (Get-ChildItem artifacts/installer-baseline/*.exe | Select-Object -First 1).FullName -FailingUpgradeInstaller (Get-ChildItem artifacts/installer-failing-upgrade/*.exe | Select-Object -First 1).FullName -Installer (Get-ChildItem artifacts/installer/*.exe | Select-Object -First 1).FullName
+        run: scripts/ci/Test-InstallerWindows.ps1 -BaselineInstaller (Get-ChildItem artifacts/installer-baseline/*.exe | Select-Object -First 1).FullName -FailingUpgradeInstaller (Get-ChildItem artifacts/installer-failing-upgrade/*.exe | Select-Object -First 1).FullName -Installer (Get-ChildItem artifacts/installer/*.exe | Select-Object -First 1).FullName -OpenCoreRoot artifacts/open-core
       - name: Write installer checksum
         shell: pwsh
         run: |

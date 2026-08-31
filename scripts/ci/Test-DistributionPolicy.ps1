@@ -250,7 +250,9 @@ foreach ($installerTestToken in @(
     'foreign application-root contents',
     'Install retained foreign application-root contents',
     'CI legacy MacTray service',
-    'Assert-UserMarkers'
+    'Assert-UserMarkers',
+    'OpenCoreRoot',
+    'Assert-OpenCorePayloadLineage'
 )) {
     if (-not $installerTest.Contains($installerTestToken)) {
         throw "Installer E2E omits required machine integration scenario: $installerTestToken"

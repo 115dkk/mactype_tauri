@@ -5,7 +5,9 @@ param(
     [Parameter(Mandatory)]
     [string] $FailingUpgradeInstaller,
     [Parameter(Mandatory)]
-    [string] $Installer
+    [string] $Installer,
+    [Parameter(Mandatory)]
+    [string] $OpenCoreRoot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,6 +18,7 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $resolvedBaselineInstaller = (Resolve-Path -LiteralPath $BaselineInstaller).Path
 $resolvedFailingUpgradeInstaller = (Resolve-Path -LiteralPath $FailingUpgradeInstaller).Path
 $resolvedInstaller = (Resolve-Path -LiteralPath $Installer).Path
+$resolvedOpenCoreRoot = (Resolve-Path -LiteralPath $OpenCoreRoot).Path
 $applicationRoot = [IO.Path]::GetFullPath((Join-Path $env:ProgramFiles 'MacType Control Center')).TrimEnd('\')
 $serviceRoot = Join-Path $applicationRoot 'Service'
 $profileRoot = [IO.Path]::GetFullPath((Join-Path $env:ProgramData 'MacType\ControlCenter')).TrimEnd('\')
@@ -217,6 +220,9 @@ try {
 
     Invoke-InstallerExpectedSuccess -File $resolvedInstaller -Arguments ($silentArguments + '/TASKS=desktopicon') -Label 'Protected upgrade install'
     Assert-RequiredApplicationFiles -ApplicationRoot $applicationRoot
+    Assert-OpenCorePayloadLineage `
+        -ApplicationRoot $applicationRoot `
+        -OpenCoreRoot $resolvedOpenCoreRoot
     $payload = Assert-ServicePayload -ApplicationRoot $applicationRoot
     if (Test-Path -LiteralPath $obsoleteRuntimePath) {
         throw 'Successful upgrade retained an obsolete app-side service runtime file.'

@@ -2,11 +2,20 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  isTransientDevToolsPortReadError,
   profileProcessTerminationCommand,
   processIdsForBrowserCleanup,
   processTreeTerminationCommand,
   userDataRemovalRetryPolicy,
 } from '../chromium_product_loader.mjs';
+
+test('DevTools port publication retries Windows sharing violations', () => {
+  for (const code of ['ENOENT', 'EBUSY', 'EACCES', 'EPERM']) {
+    assert.equal(isTransientDevToolsPortReadError({ code }), true);
+  }
+  assert.equal(isTransientDevToolsPortReadError({ code: 'EIO' }), false);
+  assert.equal(isTransientDevToolsPortReadError(null), false);
+});
 
 test('cleanup binds every current CDP browser process with the browser root first', () => {
   assert.deepEqual(

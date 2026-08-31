@@ -8,6 +8,10 @@ function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+export function isTransientDevToolsPortReadError(error) {
+  return ['ENOENT', 'EBUSY', 'EACCES', 'EPERM'].includes(error?.code);
+}
+
 async function runMacLoader(loader, executable, arguments_, environment, timeoutMs) {
   await new Promise((resolve, reject) => {
     const child = spawn(loader, [executable, ...arguments_], {
@@ -45,7 +49,7 @@ async function waitForDevToolsPort(userDataDirectory, timeoutMs) {
       const port = Number(portText);
       if (Number.isInteger(port) && port > 0 && port <= 65535) return port;
     } catch (error) {
-      if (error?.code !== 'ENOENT') throw error;
+      if (!isTransientDevToolsPortReadError(error)) throw error;
     }
     await delay(25);
   } while (Date.now() < deadline);

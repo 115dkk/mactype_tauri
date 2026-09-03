@@ -31,17 +31,31 @@ fn current_process_invocation(executable: PathBuf, timeout: Duration) -> HelperI
     }
 }
 
-/// The launcher's last child must already have exited. A PID that can no
-/// longer be opened has left the process table, which is the same proof.
+fn forget_last_child() {
+    *LAST_TEST_CHILD
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+}
+
+/// The launcher's last child must be gone, and promptly. The launcher
+/// terminates the child's job and then waits up to TERMINATION_CONFIRMATION
+/// for the process object to signal, but that wait is bounded by the same
+/// absolute deadline, so on a loaded host the kernel can still be tearing the
+/// process down when the launcher returns. No user-mode code runs in the
+/// child after the terminate call, so the only thing left to prove is that
+/// the exact process object signals soon after: the bound here is well below
+/// the child's own five second sleep, so a helper the launcher failed to
+/// terminate would still fail this check.
 fn assert_last_child_exited() {
-    let pid = LAST_TEST_CHILD_PID.load(Ordering::Acquire);
-    assert_ne!(pid, 0);
-    if let Ok(child) = Process::open(pid, ProcessAccess::Synchronize) {
-        assert_eq!(
-            child.wait(Some(Duration::ZERO)).unwrap(),
-            WaitOutcome::Signaled
-        );
-    }
+    let child = LAST_TEST_CHILD
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .take()
+        .expect("the launcher recorded the child it created");
+    assert_eq!(
+        child.wait(Some(Duration::from_secs(2))).unwrap(),
+        WaitOutcome::Signaled
+    );
 }
 
 #[test]
@@ -59,7 +73,7 @@ fn in_flight_helper_is_cancelled_without_waiting_for_its_twenty_second_timeout()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     STOP_DURING_HELPER.store(false, Ordering::Release);
-    LAST_TEST_CHILD_PID.store(0, Ordering::Release);
+    forget_last_child();
     let launcher = WindowsHelperLauncher::new(stop_during_helper);
     let executable = PathBuf::from(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe");
     let invocation = current_process_invocation(executable, Duration::from_secs(20));
@@ -96,7 +110,7 @@ fn absolute_timeout_terminates_the_helper_job_without_an_orphan() {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     STOP_DURING_HELPER.store(false, Ordering::Release);
-    LAST_TEST_CHILD_PID.store(0, Ordering::Release);
+    forget_last_child();
     let launcher = WindowsHelperLauncher::new(stop_during_helper);
     let executable = PathBuf::from(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe");
     let invocation = current_process_invocation(executable, Duration::from_millis(700));

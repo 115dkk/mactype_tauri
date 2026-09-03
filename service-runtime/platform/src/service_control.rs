@@ -13,8 +13,9 @@ use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 use windows_sys::Win32::Foundation::ERROR_SUCCESS;
 use windows_sys::Win32::System::RemoteDesktop::WTSSESSION_NOTIFICATION;
 use windows_sys::Win32::System::Services::{
-    RegisterServiceCtrlHandlerExW, SetServiceStatus, StartServiceCtrlDispatcherW, SERVICE_STATUS,
-    SERVICE_STATUS_HANDLE, SERVICE_TABLE_ENTRYW, SERVICE_WIN32_OWN_PROCESS,
+    RegisterServiceCtrlHandlerExW, SetServiceStatus, StartServiceCtrlDispatcherW,
+    SERVICE_CONTROL_SESSIONCHANGE, SERVICE_STATUS, SERVICE_STATUS_HANDLE, SERVICE_TABLE_ENTRYW,
+    SERVICE_WIN32_OWN_PROCESS,
 };
 
 use crate::wide::wide_null;
@@ -153,7 +154,11 @@ unsafe extern "system" fn control_trampoline(
     // in `register_control_handler`, the sole way to install this trampoline.
     let callback: ServiceControlCallback =
         unsafe { std::mem::transmute::<usize, ServiceControlCallback>(callback) };
-    let session_id = if event_data.is_null() {
+    // Other controls (device, power, and time-change events) also pass event
+    // data, each with its own structure; only the session-change layout is
+    // decoded here, so a handler that accepts those controls never sees a
+    // foreign structure misread as a session.
+    let session_id = if control != SERVICE_CONTROL_SESSIONCHANGE || event_data.is_null() {
         None
     } else {
         // SAFETY: for SERVICE_CONTROL_SESSIONCHANGE the SCM passes a pointer to

@@ -129,10 +129,24 @@ impl RegistryKey {
         Ok(Some(value))
     }
 
+    /// Reads a `REG_SZ` or `REG_EXPAND_SZ` value as text without expansion.
+    /// The first NUL terminates the result; malformed UTF-16 is replaced.
+    pub fn read_string(&self, name: &str) -> io::Result<Option<String>> {
+        Ok(self.read_string_units(name)?.map(|mut units| {
+            units.truncate(
+                units
+                    .iter()
+                    .position(|unit| *unit == 0)
+                    .unwrap_or(units.len()),
+            );
+            String::from_utf16_lossy(&units)
+        }))
+    }
+
     /// Reads a `REG_SZ` or `REG_EXPAND_SZ` value as raw UTF-16 units without
-    /// expansion. `Ok(None)` when the value does not exist. The result is
-    /// bounded to one megabyte and keeps any embedded or trailing NULs so the
-    /// caller decides how strictly to parse it.
+    /// expansion. `Ok(None)` when the value does not exist. This is the string
+    /// accessor that keeps embedded and trailing NULs. The result is bounded to
+    /// one megabyte so the caller can decide how strictly to parse it.
     pub fn read_string_units(&self, name: &str) -> io::Result<Option<Vec<u16>>> {
         let name = wide_null(name);
         let mut kind = 0;
@@ -291,6 +305,7 @@ mod tests {
         .expect("the CurrentVersion key always exists");
         let product = key.read_string_units("ProductName").unwrap().unwrap();
         assert!(!product.is_empty());
+        assert!(!key.read_string("ProductName").unwrap().unwrap().is_empty());
         assert!(key
             .read_dword("CurrentMajorVersionNumber")
             .unwrap()

@@ -1,27 +1,33 @@
 //! Process handles and the identity queries the service makes on them.
 
+use std::ffi::OsStr;
 use std::io;
 use std::mem::size_of;
 use std::os::windows::ffi::OsStringExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use windows_sys::Win32::Foundation::{FILETIME, STILL_ACTIVE};
+use windows_sys::Win32::Foundation::{
+    DuplicateHandle, DUPLICATE_SAME_ACCESS, FILETIME, STILL_ACTIVE,
+};
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows_sys::Win32::System::SystemInformation::{
     IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_I386, IMAGE_FILE_MACHINE_UNKNOWN,
 };
 use windows_sys::Win32::System::Threading::{
-    GetCurrentProcess, GetExitCodeProcess, GetProcessInformation, GetProcessTimes,
+    GetCurrentProcess, GetExitCodeProcess, GetProcessId, GetProcessInformation, GetProcessTimes,
     IsProcessCritical, IsWow64Process2, OpenProcess, ProcessProtectionLevelInfo,
-    QueryFullProcessImageNameW, TerminateProcess, PROCESS_CREATE_THREAD, PROCESS_NAME_WIN32,
-    PROCESS_PROTECTION_LEVEL_INFORMATION, PROCESS_QUERY_INFORMATION,
+    QueryFullProcessImageNameW, TerminateProcess, PROCESS_ALL_ACCESS, PROCESS_CREATE_THREAD,
+    PROCESS_NAME_WIN32, PROCESS_PROTECTION_LEVEL_INFORMATION, PROCESS_QUERY_INFORMATION,
     PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE,
     PROTECTION_LEVEL_NONE,
 };
 
+use windows_sys::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
+
 use crate::handle::{OwnedHandle, WaitOutcome};
+use crate::wide::{wide_null, wide_path};
 
 const MAX_IMAGE_PATH_UNITS: usize = 32_768;
 
@@ -33,6 +39,10 @@ pub enum ProcessAccess {
     QueryLimited,
     /// `SYNCHRONIZE` only: waiting for exit.
     Synchronize,
+    /// The rights `CreateProcess` granted the spawning process: everything.
+    /// Only [`Process::from_child`] produces this; [`Process::open`] refuses
+    /// it, so a PID can never be reopened with full access.
+    AsSpawned,
     /// The rights the fixed injection helper needs on its target. The handle
     /// is opened inheritable because it reaches the helper through handle
     /// inheritance and never by PID.
@@ -44,6 +54,7 @@ impl ProcessAccess {
         match self {
             Self::QueryLimited => PROCESS_QUERY_LIMITED_INFORMATION,
             Self::Synchronize => SYNCHRONIZE,
+            Self::AsSpawned => PROCESS_ALL_ACCESS,
             Self::InjectionTarget => {
                 PROCESS_CREATE_THREAD
                     | PROCESS_QUERY_INFORMATION
@@ -100,6 +111,12 @@ impl Process {
     /// Opens `pid` with exactly `access`. The error carries the Win32 code; a
     /// PID that has left the process table reports `ERROR_INVALID_PARAMETER`.
     pub fn open(pid: u32, access: ProcessAccess) -> io::Result<Self> {
+        if access == ProcessAccess::AsSpawned {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "full access is only available on a process this one spawned",
+            ));
+        }
         // SAFETY: OpenProcess takes plain integers and returns a new handle or
         // null; no memory is shared with the callee.
         let handle = unsafe { OpenProcess(access.rights(), i32::from(access.inheritable()), pid) };
@@ -109,8 +126,78 @@ impl Process {
         })
     }
 
+    /// Duplicates the handle `std` holds for `child`, so the result keeps
+    /// every right `CreateProcess` granted (job assignment and termination
+    /// among them, which a reopen by PID would not get) and addresses the
+    /// same process object even after its PID is reused.
+    pub fn from_child(child: &std::process::Child) -> io::Result<Self> {
+        use std::os::windows::io::AsRawHandle;
+        let mut duplicate = std::ptr::null_mut();
+        // SAFETY: the source handle is the live one `child` owns for the
+        // duration of this call, both process arguments are the current
+        // process pseudo-handle, and `duplicate` is a local out value.
+        if unsafe {
+            DuplicateHandle(
+                GetCurrentProcess(),
+                child.as_raw_handle(),
+                GetCurrentProcess(),
+                &mut duplicate,
+                0,
+                0,
+                DUPLICATE_SAME_ACCESS,
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(Self {
+            handle: OwnedHandle::from_creation(duplicate)?,
+            access: ProcessAccess::AsSpawned,
+        })
+    }
+
+    /// Starts `executable` with `parameters` through the shell's `runas`
+    /// verb, which shows the elevation prompt, and returns the process the
+    /// shell created. The handle is the one `ShellExecuteExW` hands back, so
+    /// it carries the creator's rights. A user who declines the prompt makes
+    /// this fail with `ERROR_CANCELLED` as the Win32 code.
+    pub fn launch_elevated(executable: &Path, parameters: &OsStr) -> io::Result<Self> {
+        let verb = wide_null("runas");
+        let executable = wide_path(executable);
+        let parameters = wide_null(parameters);
+        let mut info = SHELLEXECUTEINFOW {
+            cbSize: size_of::<SHELLEXECUTEINFOW>() as u32,
+            fMask: SEE_MASK_NOCLOSEPROCESS,
+            lpVerb: verb.as_ptr(),
+            lpFile: executable.as_ptr(),
+            lpParameters: parameters.as_ptr(),
+            nShow: 0,
+            ..Default::default()
+        };
+        // SAFETY: `info` is a fully initialised structure whose string
+        // pointers address NUL-terminated buffers that outlive the call; the
+        // shell writes only `hProcess` and `hInstApp` back into it.
+        if unsafe { ShellExecuteExW(&mut info) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(Self {
+            handle: OwnedHandle::from_creation(info.hProcess)?,
+            access: ProcessAccess::AsSpawned,
+        })
+    }
+
     pub(crate) fn from_owned(handle: OwnedHandle, access: ProcessAccess) -> Self {
         Self { handle, access }
+    }
+
+    /// The process identifier behind the handle.
+    pub fn pid(&self) -> io::Result<u32> {
+        // SAFETY: the handle is live; the call takes no pointers.
+        let pid = unsafe { GetProcessId(self.handle.as_raw()) };
+        if pid == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(pid)
     }
 
     pub fn access(&self) -> ProcessAccess {
@@ -265,6 +352,33 @@ mod tests {
 
     use super::{process_session_id, MachineKind, Process, ProcessAccess};
     use crate::handle::WaitOutcome;
+    use crate::job::JobObject;
+
+    #[test]
+    fn a_spawned_child_keeps_the_rights_a_job_assignment_needs() {
+        let mut child = std::process::Command::new("cmd")
+            .args(["/c", "ping -n 6 127.0.0.1 > nul"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let process = Process::from_child(&child).unwrap();
+        assert_eq!(process.access(), ProcessAccess::AsSpawned);
+        assert_eq!(process.pid().unwrap(), child.id());
+        assert_eq!(process.exit_code().unwrap(), None);
+
+        let job = JobObject::kill_on_close().unwrap();
+        job.assign(&process).unwrap();
+        drop(job);
+
+        assert_eq!(
+            process.wait(Some(Duration::from_secs(2))).unwrap(),
+            WaitOutcome::Signaled
+        );
+        child.wait().unwrap();
+        assert!(Process::open(std::process::id(), ProcessAccess::AsSpawned).is_err());
+    }
 
     #[test]
     fn the_current_process_answers_every_identity_query() {

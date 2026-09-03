@@ -1,8 +1,9 @@
 use super::super::RuntimeState;
+use crate::machine_integration::scm_response::{ScmResponse, ScmResponseError};
 use mactype_service_contract::SERVICE_NAME;
-use std::{ffi::OsStr, os::windows::ffi::OsStrExt};
+use std::{ffi::OsStr, mem::size_of, os::windows::ffi::OsStrExt};
 use windows_sys::Win32::{
-    Foundation::{GetLastError, ERROR_INSUFFICIENT_BUFFER},
+    Foundation::GetLastError,
     System::Services::{
         CloseServiceHandle, OpenSCManagerW, OpenServiceW, QueryServiceConfigW,
         QueryServiceStatusEx, QUERY_SERVICE_CONFIGW, SC_HANDLE, SC_MANAGER_CONNECT,
@@ -10,6 +11,8 @@ use windows_sys::Win32::{
         SERVICE_START_PENDING, SERVICE_STATUS_PROCESS, SERVICE_STOPPED, SERVICE_STOP_PENDING,
     },
 };
+
+const MAX_DEPENDENCIES: usize = 256;
 
 pub(super) struct ServiceHandle(pub(super) SC_HANDLE);
 
@@ -32,56 +35,47 @@ pub(super) struct Configuration {
 }
 
 pub(super) fn query_configuration(service: SC_HANDLE) -> Result<Configuration, u32> {
-    let mut required = 0;
-    unsafe { QueryServiceConfigW(service, std::ptr::null_mut(), 0, &mut required) };
-    let error = unsafe { GetLastError() };
-    if error != ERROR_INSUFFICIENT_BUFFER || required == 0 {
-        return Err(error);
-    }
-    let mut buffer = vec![0_u8; required as usize];
-    let configuration = buffer.as_mut_ptr().cast::<QUERY_SERVICE_CONFIGW>();
-    if unsafe { QueryServiceConfigW(service, configuration, required, &mut required) } == 0 {
-        return Err(unsafe { GetLastError() });
-    }
-    let configuration = unsafe { &*configuration };
+    let response = ScmResponse::query(
+        size_of::<QUERY_SERVICE_CONFIGW>(),
+        |buffer, capacity, needed| {
+            // SAFETY: `service` is a live SCM handle; buffer and capacity
+            // describe the response allocation or the documented null probe.
+            unsafe { QueryServiceConfigW(service, buffer.cast(), capacity, needed) }
+        },
+    )
+    .map_err(ScmResponseError::win32_code)?;
+    let configuration = response
+        .header::<QUERY_SERVICE_CONFIGW>()
+        .map_err(ScmResponseError::win32_code)?;
+    let dependencies = response
+        .multi_units(configuration.lpDependencies, MAX_DEPENDENCIES)
+        .map_err(ScmResponseError::win32_code)?
+        .into_iter()
+        .map(String::from_utf16_lossy)
+        .collect();
     Ok(Configuration {
         service_type: configuration.dwServiceType,
         start_type: configuration.dwStartType,
         error_control: configuration.dwErrorControl,
-        binary_path: unsafe { wide_pointer(configuration.lpBinaryPathName) },
-        account: unsafe { wide_pointer(configuration.lpServiceStartName) },
-        display_name: unsafe { wide_pointer(configuration.lpDisplayName) },
-        load_order_group: unsafe { wide_pointer(configuration.lpLoadOrderGroup) },
+        binary_path: response
+            .wide_string_lossy(configuration.lpBinaryPathName)
+            .map_err(ScmResponseError::win32_code)?,
+        account: response
+            .wide_string_lossy(configuration.lpServiceStartName)
+            .map_err(ScmResponseError::win32_code)?,
+        display_name: response
+            .wide_string_lossy(configuration.lpDisplayName)
+            .map_err(ScmResponseError::win32_code)?,
+        load_order_group: response
+            .wide_string_lossy(configuration.lpLoadOrderGroup)
+            .map_err(ScmResponseError::win32_code)?,
         tag_id: configuration.dwTagId,
-        dependencies: unsafe { wide_multi_pointer(configuration.lpDependencies) },
+        dependencies,
     })
 }
 
-unsafe fn wide_multi_pointer(value: *const u16) -> Vec<String> {
-    if value.is_null() {
-        return Vec::new();
-    }
-    let mut entries = Vec::new();
-    let mut offset = 0usize;
-    loop {
-        let start = unsafe { value.add(offset) };
-        if unsafe { *start } == 0 {
-            break;
-        }
-        let mut length = 0usize;
-        while unsafe { *start.add(length) } != 0 {
-            length += 1;
-        }
-        entries.push(String::from_utf16_lossy(unsafe {
-            std::slice::from_raw_parts(start, length)
-        }));
-        offset += length + 1;
-    }
-    entries
-}
-
 pub(super) fn query_runtime(service: SC_HANDLE) -> Result<(RuntimeState, u32), u32> {
-    let mut status: SERVICE_STATUS_PROCESS = unsafe { std::mem::zeroed() };
+    let mut status = SERVICE_STATUS_PROCESS::default();
     let mut needed = 0;
     if unsafe {
         QueryServiceStatusEx(
@@ -125,17 +119,6 @@ pub(in crate::machine_integration::open_service) fn running_service_process_id(
         return Err("the new service has no stable running SCM process".to_owned());
     }
     Ok(process_id)
-}
-
-unsafe fn wide_pointer(value: *const u16) -> String {
-    if value.is_null() {
-        return String::new();
-    }
-    let mut length = 0;
-    while unsafe { *value.add(length) } != 0 {
-        length += 1;
-    }
-    String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(value, length) })
 }
 
 pub(in crate::machine_integration::open_service) fn wide(value: impl AsRef<OsStr>) -> Vec<u16> {

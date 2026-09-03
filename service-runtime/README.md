@@ -11,6 +11,10 @@ In product terminology, **신식 서비스** is this open-source runtime and **�
   fixed v1 health named pipe.
 - `setup` owns fixed broker dispatch, protected payload staging, SCM mutation, ACL
   hardening, profile publication, activation, and rollback.
+- `platform` owns every Win32 call the other crates make. It is the only crate in the
+  workspace that may contain `unsafe`; `host` and `setup` forbid it at their roots.
+  Callers receive owned handles, fixed rights sets, and bounds-checked values, and every
+  `unsafe` block names in a `SAFETY:` comment the invariant the surrounding type keeps.
 
 ## Safety contract
 
@@ -49,6 +53,10 @@ In product terminology, **신식 서비스** is this open-source runtime and **�
 - Existing services with a foreign ImagePath, account, service type, or start mode are
   never started, stopped, reconfigured, or removed.
 - This workspace contains no Tauri or WebView dependency.
+- Raw handles, pointers, and buffer lengths never leave `platform`. The service logic
+  in `host` and `setup` is written without `unsafe`, so a defect there cannot become
+  memory unsafety; the boundary is enforced by `#![forbid(unsafe_code)]` and by
+  clippy's undocumented-unsafe-block lint inside `platform`.
 
 ## Verification
 

@@ -1,75 +1,46 @@
-use std::io;
 use std::path::Path;
-use std::ptr;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use mactype_service_contract::{effective_service_name, HealthReport, HealthState};
+use mactype_service_platform::{
+    Process, ProcessAccess, ServiceAccess, ServiceConfig, ServiceHandle, ServiceState,
+    ServiceStatusSnapshot, WaitOutcome,
+};
 use windows_sys::Win32::Foundation::{
-    CloseHandle, GetLastError, ERROR_INVALID_PARAMETER, ERROR_SERVICE_ALREADY_RUNNING,
-    ERROR_SERVICE_MARKED_FOR_DELETE, ERROR_SERVICE_NOT_ACTIVE, HANDLE, WAIT_FAILED, WAIT_OBJECT_0,
-    WAIT_TIMEOUT,
+    ERROR_INVALID_PARAMETER, ERROR_SERVICE_MARKED_FOR_DELETE, WAIT_ABANDONED,
 };
-use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
-use windows_sys::Win32::System::Services::{
-    ChangeServiceConfigW, ControlService, CreateServiceW, DeleteService, QueryServiceStatusEx,
-    StartServiceW, SC_HANDLE, SC_STATUS_PROCESS_INFO, SERVICE_ALL_ACCESS, SERVICE_AUTO_START,
-    SERVICE_CHANGE_CONFIG, SERVICE_ERROR_NORMAL, SERVICE_NO_CHANGE, SERVICE_QUERY_CONFIG,
-    SERVICE_QUERY_STATUS, SERVICE_RUNNING, SERVICE_START, SERVICE_STATUS, SERVICE_STATUS_PROCESS,
-    SERVICE_STOP, SERVICE_STOPPED, SERVICE_WIN32_OWN_PROCESS,
-};
-use windows_sys::Win32::System::Threading::{OpenProcess, WaitForSingleObject};
 
-use super::configuration::{
-    configure_metadata, query_config, quoted_image_path, validate_service_binary, ServiceConfig,
-};
+use super::configuration::{configure_metadata, quoted_image_path, validate_service_binary};
 use super::health::wait_for_ready_health;
-use super::{wide, ServiceHandle, ServiceManager, DISPLAY_NAME, HEALTH_TIMEOUT, STATE_TIMEOUT};
+use super::{ServiceManager, DISPLAY_NAME, HEALTH_TIMEOUT, STATE_TIMEOUT};
 use crate::storage::read_bounded_regular_file;
 use crate::SetupError;
 
 const MAX_PERSISTED_HEALTH_BYTES: u64 = 16 * 1024;
-const RECONFIGURE_ACCESS: u32 =
-    SERVICE_CHANGE_CONFIG | SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG | SERVICE_START;
+/// Reconfiguration must also carry `SERVICE_START`, which the restart-on-failure
+/// metadata requires; the platform `Reconfigure` rights set includes it.
+const RECONFIGURE_ACCESS: ServiceAccess = ServiceAccess::Reconfigure;
 
-struct ProcessExitHandle(HANDLE);
-
-impl ProcessExitHandle {
-    fn open(pid: u32) -> io::Result<Self> {
-        let handle = unsafe { OpenProcess(SYNCHRONIZE, 0, pid) };
-        if handle.is_null() {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(Self(handle))
-        }
-    }
-}
-
-impl Drop for ProcessExitHandle {
-    fn drop(&mut self) {
-        unsafe {
-            CloseHandle(self.0);
-        }
-    }
-}
-
-fn wait_for_process_exit(process: &ProcessExitHandle, deadline: Instant) -> Result<(), SetupError> {
+fn wait_for_process_exit(process: &Process, deadline: Instant) -> Result<(), SetupError> {
     let remaining = deadline.saturating_duration_since(Instant::now());
-    let timeout_ms = remaining.as_millis().min(u128::from(u32::MAX - 1)) as u32;
-    let timeout_ms = if remaining.is_zero() {
-        0
+    // A deadline that already passed polls once; any remaining time waits at
+    // least one millisecond so a sub-millisecond remainder cannot degrade into
+    // a poll.
+    let timeout = if remaining.is_zero() {
+        Duration::ZERO
     } else {
-        timeout_ms.max(1)
+        remaining.max(Duration::from_millis(1))
     };
-    match unsafe { WaitForSingleObject(process.0, timeout_ms) } {
-        WAIT_OBJECT_0 => Ok(()),
-        WAIT_TIMEOUT => Err(SetupError::Runtime(
+    match process.wait(Some(timeout)) {
+        Ok(WaitOutcome::Signaled) => Ok(()),
+        Ok(WaitOutcome::TimedOut) => Err(SetupError::Runtime(
             "service process did not exit before the stop timeout".to_owned(),
         )),
-        WAIT_FAILED => Err(SetupError::Io(io::Error::last_os_error())),
-        result => Err(SetupError::Runtime(format!(
-            "service process exit wait returned unknown result {result}"
+        Ok(WaitOutcome::Abandoned) => Err(SetupError::Runtime(format!(
+            "service process exit wait returned unknown result {WAIT_ABANDONED}"
         ))),
+        Err(error) => Err(SetupError::Io(error)),
     }
 }
 
@@ -100,22 +71,22 @@ enum ProcessIdentityObservation {
 }
 
 fn process_capture_target(
-    status: &SERVICE_STATUS_PROCESS,
+    status: &ServiceStatusSnapshot,
 ) -> Result<ProcessCaptureTarget, SetupError> {
-    if status.dwCurrentState == SERVICE_STOPPED {
+    if status.state == ServiceState::Stopped {
         return Ok(ProcessCaptureTarget::AlreadyStopped);
     }
-    if status.dwProcessId == 0 {
+    if status.process_id == 0 {
         return Err(SetupError::Runtime(
             "SCM reported a non-stopped service without a process identity".to_owned(),
         ));
     }
-    Ok(ProcessCaptureTarget::Pid(status.dwProcessId))
+    Ok(ProcessCaptureTarget::Pid(status.process_id))
 }
 
 fn observe_process_identity(
     captured_pid: u32,
-    status: &SERVICE_STATUS_PROCESS,
+    status: &ServiceStatusSnapshot,
 ) -> Result<ProcessIdentityObservation, SetupError> {
     match process_capture_target(status)? {
         ProcessCaptureTarget::AlreadyStopped => Ok(ProcessIdentityObservation::Stopped),
@@ -130,7 +101,7 @@ fn observe_process_identity(
 
 fn stopping_process_is_complete(
     captured_pid: u32,
-    status: &SERVICE_STATUS_PROCESS,
+    status: &ServiceStatusSnapshot,
 ) -> Result<bool, SetupError> {
     match observe_process_identity(captured_pid, status)? {
         ProcessIdentityObservation::Stopped => Ok(true),
@@ -142,18 +113,18 @@ fn stopping_process_is_complete(
 }
 
 fn capture_service_process(
-    service: SC_HANDLE,
+    service: &ServiceHandle,
     deadline: Instant,
-) -> Result<Option<(u32, ProcessExitHandle)>, SetupError> {
+) -> Result<Option<(u32, Process)>, SetupError> {
     loop {
-        let status = query_status(service)?;
+        let status = service.status()?;
         let pid = match process_capture_target(&status)? {
             ProcessCaptureTarget::AlreadyStopped => return Ok(None),
             ProcessCaptureTarget::Pid(pid) => pid,
         };
 
-        match ProcessExitHandle::open(pid) {
-            Ok(process) => match observe_process_identity(pid, &query_status(service)?)? {
+        match Process::open(pid, ProcessAccess::Synchronize) {
+            Ok(process) => match observe_process_identity(pid, &service.status()?)? {
                 ProcessIdentityObservation::Stopped | ProcessIdentityObservation::Same => {
                     return Ok(Some((pid, process)))
                 }
@@ -162,7 +133,7 @@ fn capture_service_process(
                 }
             },
             Err(error) if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) => {
-                match observe_process_identity(pid, &query_status(service)?)? {
+                match observe_process_identity(pid, &service.status()?)? {
                     ProcessIdentityObservation::Stopped => return Ok(None),
                     ProcessIdentityObservation::Same | ProcessIdentityObservation::Changed(_) => {
                         wait_before_process_capture_retry(deadline)?
@@ -190,12 +161,12 @@ fn wait_before_process_capture_retry(deadline: Instant) -> Result<(), SetupError
 }
 
 fn wait_for_stopped_process(
-    service: SC_HANDLE,
+    service: &ServiceHandle,
     captured_pid: u32,
     deadline: Instant,
 ) -> Result<(), SetupError> {
     loop {
-        let status = query_status(service)?;
+        let status = service.status()?;
         if stopping_process_is_complete(captured_pid, &status)? {
             return Ok(());
         }
@@ -227,40 +198,22 @@ fn absence_poll_action(
 impl ServiceManager {
     pub fn install(&self, service_binary: &Path) -> Result<(), SetupError> {
         validate_service_binary(&self.protected_root, service_binary)?;
-        if self.open_service(SERVICE_QUERY_STATUS)?.is_some() {
+        if self.open_service(ServiceAccess::QueryStatus)?.is_some() {
             return Err(SetupError::Runtime(
                 "the fixed service name already exists; refusing to replace it".to_owned(),
             ));
         }
 
-        let service_name = wide(effective_service_name());
-        let display_name = wide(DISPLAY_NAME);
-        let image_path = wide(&quoted_image_path(service_binary)?);
-        let handle = unsafe {
-            CreateServiceW(
-                self.handle.0,
-                service_name.as_ptr(),
-                display_name.as_ptr(),
-                SERVICE_ALL_ACCESS,
-                SERVICE_WIN32_OWN_PROCESS,
-                SERVICE_AUTO_START,
-                SERVICE_ERROR_NORMAL,
-                image_path.as_ptr(),
-                ptr::null(),
-                ptr::null_mut(),
-                ptr::null(),
-                ptr::null(),
-                ptr::null(),
-            )
-        };
-        if handle.is_null() {
-            return Err(SetupError::Io(io::Error::last_os_error()));
-        }
-        let service = ServiceHandle(handle);
-        if let Err(error) = configure_metadata(service.0) {
-            unsafe {
-                DeleteService(service.0);
-            }
+        let image_path = quoted_image_path(service_binary)?;
+        let service = self.manager.create_own_process_auto_start(
+            effective_service_name(),
+            DISPLAY_NAME,
+            &image_path,
+        )?;
+        if let Err(error) = configure_metadata(&service) {
+            // The half-configured record is removed on a best-effort basis;
+            // the metadata failure is what the caller sees.
+            let _ = service.delete();
             return Err(error);
         }
         Ok(())
@@ -272,27 +225,9 @@ impl ServiceManager {
             .open_service(RECONFIGURE_ACCESS)?
             .ok_or_else(|| SetupError::Runtime("the open service is not installed".to_owned()))?;
         self.ensure_owned(&service)?;
-        let image_path = wide(&quoted_image_path(service_binary)?);
-        let display_name = wide(DISPLAY_NAME);
-        if unsafe {
-            ChangeServiceConfigW(
-                service.0,
-                SERVICE_NO_CHANGE,
-                SERVICE_AUTO_START,
-                SERVICE_NO_CHANGE,
-                image_path.as_ptr(),
-                ptr::null(),
-                ptr::null_mut(),
-                ptr::null(),
-                ptr::null(),
-                ptr::null(),
-                display_name.as_ptr(),
-            )
-        } == 0
-        {
-            return Err(SetupError::Io(io::Error::last_os_error()));
-        }
-        configure_metadata(service.0).map_err(|error| {
+        let image_path = quoted_image_path(service_binary)?;
+        service.set_image_and_display_name(&image_path, DISPLAY_NAME)?;
+        configure_metadata(&service).map_err(|error| {
             error.at_machine_path("configure service recovery metadata", service_binary)
         })
     }
@@ -313,39 +248,35 @@ impl ServiceManager {
         expected_profile_digest: Option<&str>,
     ) -> Result<(), SetupError> {
         let service = self
-            .open_service(SERVICE_START | SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG)?
+            .open_service(ServiceAccess::Start)?
             .ok_or_else(|| SetupError::Runtime("the open service is not installed".to_owned()))?;
         self.ensure_owned(&service)?;
-        if unsafe { StartServiceW(service.0, 0, ptr::null()) } == 0 {
-            let error = unsafe { GetLastError() };
-            if error != ERROR_SERVICE_ALREADY_RUNNING {
-                return Err(SetupError::Io(io::Error::from_raw_os_error(error as i32)));
-            }
-        }
+        // An already running service is not an error; the readiness wait
+        // below decides whether it is healthy.
+        service.start()?;
         let health_path = self.protected_root.join("health.json");
         let status = wait_for_state(
-            service.0,
-            SERVICE_RUNNING,
+            &service,
+            ServiceState::Running,
             STATE_TIMEOUT,
             Some(&health_path),
         )?;
-        if status.dwProcessId == 0 {
+        if status.process_id == 0 {
             return Err(SetupError::Runtime(
                 "SCM reported a running service without a process identity".to_owned(),
             ));
         }
-        wait_for_ready_health(status.dwProcessId, expected_profile_digest, HEALTH_TIMEOUT)
+        wait_for_ready_health(status.process_id, expected_profile_digest, HEALTH_TIMEOUT)
     }
 
     pub fn is_running(&self) -> Result<bool, SetupError> {
         let service = self
-            .open_service(SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG)?
+            .open_service(ServiceAccess::QueryStatusAndConfig)?
             .ok_or_else(|| SetupError::Runtime("the open service is not installed".to_owned()))?;
         self.ensure_owned(&service)?;
-        let state = query_status(service.0)?.dwCurrentState;
-        match state {
-            SERVICE_RUNNING => Ok(true),
-            SERVICE_STOPPED => Ok(false),
+        match service.status()?.state {
+            ServiceState::Running => Ok(true),
+            ServiceState::Stopped => Ok(false),
             _ => Err(SetupError::Runtime(
                 "the open service is transitioning and cannot be repaired".to_owned(),
             )),
@@ -353,46 +284,35 @@ impl ServiceManager {
     }
 
     pub fn stop(&self) -> Result<(), SetupError> {
-        let Some(service) =
-            self.open_service(SERVICE_STOP | SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG)?
-        else {
+        let Some(service) = self.open_service(ServiceAccess::Stop)? else {
             return Ok(());
         };
         self.ensure_owned(&service)?;
         let deadline = Instant::now() + STATE_TIMEOUT;
-        let Some((captured_pid, process)) = capture_service_process(service.0, deadline)? else {
+        let Some((captured_pid, process)) = capture_service_process(&service, deadline)? else {
             return Ok(());
         };
-        let mut status = SERVICE_STATUS::default();
-        if unsafe { ControlService(service.0, 1, &mut status) } == 0 {
-            let error = unsafe { GetLastError() };
-            if error != ERROR_SERVICE_NOT_ACTIVE {
-                return Err(SetupError::Io(io::Error::from_raw_os_error(error as i32)));
-            }
-        }
-        wait_for_stopped_process(service.0, captured_pid, deadline)?;
+        // A service that is no longer active has nothing left to stop; the
+        // identity checks below confirm the captured process is gone.
+        service.stop()?;
+        wait_for_stopped_process(&service, captured_pid, deadline)?;
         wait_for_process_exit(&process, deadline)
     }
 
     pub fn remove(&self) -> Result<(), SetupError> {
         let expected = {
-            let Some(service) = self.open_service(SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG)?
-            else {
+            let Some(service) = self.open_service(ServiceAccess::QueryStatusAndConfig)? else {
                 return Ok(());
             };
             self.ensure_owned(&service)?;
-            query_config(service.0)?
+            service.config()?
         };
         self.stop()?;
-        let Some(service) =
-            self.open_service(0x0001_0000 | SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG)?
-        else {
+        let Some(service) = self.open_service(ServiceAccess::Delete)? else {
             return Ok(());
         };
-        ensure_captured_configuration_unchanged(&expected, &query_config(service.0)?)?;
-        if unsafe { DeleteService(service.0) } == 0 {
-            return Err(SetupError::Io(io::Error::last_os_error()));
-        }
+        ensure_captured_configuration_unchanged(&expected, &service.config()?)?;
+        service.delete()?;
         drop(service);
         self.wait_until_absent(STATE_TIMEOUT)
     }
@@ -405,7 +325,7 @@ impl ServiceManager {
     fn wait_until_absent(&self, timeout: Duration) -> Result<(), SetupError> {
         let deadline = Instant::now() + timeout;
         loop {
-            let observation = match self.open_service(SERVICE_QUERY_STATUS) {
+            let observation = match self.open_service(ServiceAccess::QueryStatus) {
                 Ok(None) => AbsenceObservation::Absent,
                 Ok(Some(_)) => AbsenceObservation::Present,
                 Err(error)
@@ -497,37 +417,19 @@ fn describe_configuration_difference(
     }
 }
 
-pub(super) fn query_status(service: SC_HANDLE) -> Result<SERVICE_STATUS_PROCESS, SetupError> {
-    let mut status = SERVICE_STATUS_PROCESS::default();
-    let mut needed = 0;
-    if unsafe {
-        QueryServiceStatusEx(
-            service,
-            SC_STATUS_PROCESS_INFO,
-            (&raw mut status).cast(),
-            std::mem::size_of::<SERVICE_STATUS_PROCESS>() as u32,
-            &mut needed,
-        )
-    } == 0
-    {
-        return Err(SetupError::Io(io::Error::last_os_error()));
-    }
-    Ok(status)
-}
-
 fn wait_for_state(
-    service: SC_HANDLE,
-    expected: u32,
+    service: &ServiceHandle,
+    expected: ServiceState,
     timeout: Duration,
     failure_health_path: Option<&Path>,
-) -> Result<SERVICE_STATUS_PROCESS, SetupError> {
+) -> Result<ServiceStatusSnapshot, SetupError> {
     let deadline = Instant::now() + timeout;
     loop {
-        let status = query_status(service)?;
-        if status.dwCurrentState == expected {
+        let status = service.status()?;
+        if status.state == expected {
             return Ok(status);
         }
-        if status.dwCurrentState == SERVICE_STOPPED && expected != SERVICE_STOPPED {
+        if status.state == ServiceState::Stopped && expected != ServiceState::Stopped {
             return Err(stopped_before_expected_state_error(
                 &status,
                 expected,
@@ -536,7 +438,8 @@ fn wait_for_state(
         }
         if Instant::now() >= deadline {
             return Err(SetupError::Runtime(format!(
-                "service did not reach state {expected} before timeout"
+                "service did not reach state {} before timeout",
+                expected.as_raw()
             )));
         }
         thread::sleep(Duration::from_millis(100));
@@ -544,13 +447,15 @@ fn wait_for_state(
 }
 
 fn stopped_before_expected_state_error(
-    status: &SERVICE_STATUS_PROCESS,
-    expected: u32,
+    status: &ServiceStatusSnapshot,
+    expected: ServiceState,
     failure_health_path: Option<&Path>,
 ) -> SetupError {
     let mut message = format!(
-        "service stopped before reaching state {expected} (win32={}, service={})",
-        status.dwWin32ExitCode, status.dwServiceSpecificExitCode
+        "service stopped before reaching state {} (win32={}, service={})",
+        expected.as_raw(),
+        status.win32_exit_code,
+        status.service_specific_exit_code
     );
     if let Some(diagnostic) = failure_health_path.and_then(persisted_failure_diagnostic) {
         message.push_str("; persisted health failure: ");
@@ -587,31 +492,43 @@ mod tests {
         HealthReport, HealthState, InjectionTelemetry, ReadinessReport, StructuredServiceError,
         HEALTH_PROTOCOL_VERSION,
     };
+    use mactype_service_platform::{
+        Process, ProcessAccess, ServiceConfig, ServiceState, ServiceStatusSnapshot,
+    };
     use windows_sys::Win32::System::Services::{
-        SERVICE_RUNNING, SERVICE_START, SERVICE_STATUS_PROCESS, SERVICE_STOPPED,
+        SERVICE_AUTO_START, SERVICE_DEMAND_START, SERVICE_ERROR_NORMAL, SERVICE_START,
+        SERVICE_WIN32_OWN_PROCESS,
     };
 
     use super::{
         absence_poll_action, ensure_captured_configuration_unchanged, observe_process_identity,
         process_capture_target, stopped_before_expected_state_error, stopping_process_is_complete,
-        wait_for_process_exit, AbsenceObservation, AbsencePollAction, ProcessExitHandle,
-        ProcessIdentityObservation, RECONFIGURE_ACCESS,
+        wait_for_process_exit, AbsenceObservation, AbsencePollAction, ProcessIdentityObservation,
+        RECONFIGURE_ACCESS,
     };
-    use crate::windows::scm::configuration::ServiceConfig;
 
     const PROCESS_EXIT_CHILD_ENV: &str = "MACTYPE_SETUP_PROCESS_EXIT_CHILD";
 
     fn owned_configuration(image_path: &str) -> ServiceConfig {
         ServiceConfig {
-            service_type: windows_sys::Win32::System::Services::SERVICE_WIN32_OWN_PROCESS,
-            start_type: windows_sys::Win32::System::Services::SERVICE_AUTO_START,
-            error_control: windows_sys::Win32::System::Services::SERVICE_ERROR_NORMAL,
+            service_type: SERVICE_WIN32_OWN_PROCESS,
+            start_type: SERVICE_AUTO_START,
+            error_control: SERVICE_ERROR_NORMAL,
             image_path: image_path.to_owned(),
             account: "LocalSystem".to_owned(),
             display_name: "MacType Control Center Service".to_owned(),
             load_order_group: String::new(),
             tag_id: 0,
             dependencies: Vec::new(),
+        }
+    }
+
+    fn snapshot(state: ServiceState, process_id: u32) -> ServiceStatusSnapshot {
+        ServiceStatusSnapshot {
+            state,
+            process_id,
+            win32_exit_code: 0,
+            service_specific_exit_code: 0,
         }
     }
 
@@ -639,7 +556,7 @@ mod tests {
         );
         let mut changed = captured.clone();
         changed.display_name = "Foreign Service".to_owned();
-        changed.start_type = windows_sys::Win32::System::Services::SERVICE_DEMAND_START;
+        changed.start_type = SERVICE_DEMAND_START;
 
         let error = ensure_captured_configuration_unchanged(&captured, &changed).unwrap_err();
         let message = error.to_string();
@@ -647,9 +564,7 @@ mod tests {
         assert!(message
             .contains("the fixed service configuration changed after ownership was verified"));
         assert!(message.contains(&format!(
-            "start_type changed ({} -> {})",
-            windows_sys::Win32::System::Services::SERVICE_AUTO_START,
-            windows_sys::Win32::System::Services::SERVICE_DEMAND_START
+            "start_type changed ({SERVICE_AUTO_START} -> {SERVICE_DEMAND_START})"
         )));
         assert!(message.contains(
             "display_name changed ([MacType Control Center Service] -> [Foreign Service])"
@@ -675,7 +590,7 @@ mod tests {
             .env(PROCESS_EXIT_CHILD_ENV, "1")
             .spawn()
             .unwrap();
-        let process = ProcessExitHandle::open(child.id()).unwrap();
+        let process = Process::open(child.id(), ProcessAccess::Synchronize).unwrap();
 
         wait_for_process_exit(&process, Instant::now() + Duration::from_secs(5)).unwrap();
 
@@ -688,11 +603,7 @@ mod tests {
 
     #[test]
     fn non_stopped_service_without_a_pid_is_rejected_as_unknown_identity() {
-        let status = SERVICE_STATUS_PROCESS {
-            dwCurrentState: SERVICE_RUNNING,
-            dwProcessId: 0,
-            ..SERVICE_STATUS_PROCESS::default()
-        };
+        let status = snapshot(ServiceState::Running, 0);
 
         let error = process_capture_target(&status).unwrap_err();
 
@@ -701,15 +612,8 @@ mod tests {
 
     #[test]
     fn process_that_exits_before_capture_is_safe_only_after_scm_reports_stopped() {
-        let stopped = SERVICE_STATUS_PROCESS {
-            dwCurrentState: SERVICE_STOPPED,
-            ..SERVICE_STATUS_PROCESS::default()
-        };
-        let still_running = SERVICE_STATUS_PROCESS {
-            dwCurrentState: SERVICE_RUNNING,
-            dwProcessId: 42,
-            ..SERVICE_STATUS_PROCESS::default()
-        };
+        let stopped = snapshot(ServiceState::Stopped, 0);
+        let still_running = snapshot(ServiceState::Running, 42);
 
         assert_eq!(
             observe_process_identity(42, &stopped).unwrap(),
@@ -723,20 +627,9 @@ mod tests {
 
     #[test]
     fn captured_process_identity_is_discarded_if_scm_changes_pid() {
-        let same_process = SERVICE_STATUS_PROCESS {
-            dwCurrentState: SERVICE_RUNNING,
-            dwProcessId: 41,
-            ..SERVICE_STATUS_PROCESS::default()
-        };
-        let replaced_process = SERVICE_STATUS_PROCESS {
-            dwCurrentState: SERVICE_RUNNING,
-            dwProcessId: 42,
-            ..SERVICE_STATUS_PROCESS::default()
-        };
-        let stopped = SERVICE_STATUS_PROCESS {
-            dwCurrentState: SERVICE_STOPPED,
-            ..SERVICE_STATUS_PROCESS::default()
-        };
+        let same_process = snapshot(ServiceState::Running, 41);
+        let replaced_process = snapshot(ServiceState::Running, 42);
+        let stopped = snapshot(ServiceState::Stopped, 0);
 
         assert_eq!(
             observe_process_identity(41, &same_process).unwrap(),
@@ -754,11 +647,7 @@ mod tests {
 
     #[test]
     fn service_process_identity_change_after_stop_request_fails_closed() {
-        let replacement = SERVICE_STATUS_PROCESS {
-            dwCurrentState: SERVICE_RUNNING,
-            dwProcessId: 42,
-            ..SERVICE_STATUS_PROCESS::default()
-        };
+        let replacement = snapshot(ServiceState::Running, 42);
 
         let error = stopping_process_is_complete(41, &replacement).unwrap_err();
 
@@ -770,7 +659,7 @@ mod tests {
     #[test]
     fn service_reconfiguration_can_apply_restart_recovery_metadata() {
         assert_ne!(
-            RECONFIGURE_ACCESS & SERVICE_START,
+            RECONFIGURE_ACCESS.rights() & SERVICE_START,
             0,
             "SC_ACTION_RESTART metadata requires a service handle with SERVICE_START"
         );
@@ -814,15 +703,15 @@ mod tests {
             }),
         };
         std::fs::write(&health_path, serde_json::to_vec(&failure).unwrap()).unwrap();
-        let status = SERVICE_STATUS_PROCESS {
-            dwCurrentState: SERVICE_STOPPED,
-            dwWin32ExitCode: 1066,
-            dwServiceSpecificExitCode: 1,
-            ..SERVICE_STATUS_PROCESS::default()
+        let status = ServiceStatusSnapshot {
+            state: ServiceState::Stopped,
+            process_id: 0,
+            win32_exit_code: 1066,
+            service_specific_exit_code: 1,
         };
 
         let error =
-            stopped_before_expected_state_error(&status, SERVICE_RUNNING, Some(&health_path));
+            stopped_before_expected_state_error(&status, ServiceState::Running, Some(&health_path));
         let message = error.to_string();
 
         assert!(message.contains("win32=1066, service=1"));

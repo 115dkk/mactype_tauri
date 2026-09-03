@@ -15,38 +15,23 @@ path = "src/lib.rs"
 
 [features]
 default = []
-ci-test-adapter = ["mactype-service-contract/ci-test-adapter"]
+ci-test-adapter = ["mactype-service-contract/ci-test-adapter", "mactype-service-platform/ci-test-adapter"]
 
 [dependencies]
 mactype-service-contract = { path = "../contract" }
+
 serde_json.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
 
 [target.'cfg(windows)'.dependencies]
+mactype-service-platform = { path = "../platform" }
+# Constants only (error codes, service states, file attributes, machine
+# types); every Win32 call goes through mactype-service-platform.
 windows-sys = { workspace = true, features = [
   "Win32_Foundation",
-  "Win32_Security",
-  "Win32_Security_Authorization",
   "Win32_Storage_FileSystem",
-  "Win32_System_Com",
-  "Win32_System_IO",
-  "Win32_System_JobObjects",
-  "Win32_System_Pipes",
-  "Win32_System_RemoteDesktop",
-  "Win32_System_Registry",
   "Win32_System_Services",
   "Win32_System_SystemInformation",
-  "Win32_System_Threading",
-  "Win32_UI_Shell",
-] }
-windows = { workspace = true, features = [
-  "Win32_Foundation",
-  "Win32_Security",
-  "Win32_System_Com",
-  "Win32_System_Ole",
-  "Win32_System_Rpc",
-  "Win32_System_Variant",
-  "Win32_System_Wmi",
 ] }

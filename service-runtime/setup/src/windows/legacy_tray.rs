@@ -1,35 +1,14 @@
-use std::ffi::c_void;
 use std::fs;
-use std::os::windows::ffi::OsStrExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use windows::core::{IUnknown, Interface, PCWSTR};
-use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER,
-    COINIT_APARTMENTTHREADED, STGM_READ,
+use mactype_service_platform::{
+    interactive_processes, known_folder_path, process_session_id, read_shortcut, ComApartment,
+    ComThreading, KnownFolder, RegistryKey, RegistryRoot, RegistryValueData, RegistryView,
 };
-use windows::Win32::UI::Shell::{IShellLinkW, ShellLink, SLGP_RAWPATH};
-use windows_sys::core::GUID;
-use windows_sys::Win32::Foundation::{
-    ERROR_FILE_NOT_FOUND, ERROR_NO_MORE_ITEMS, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS,
-};
-use windows_sys::Win32::System::Com::CoTaskMemFree;
-use windows_sys::Win32::System::Registry::{
-    RegCloseKey, RegEnumValueW, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE,
-    KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY, REG_EXPAND_SZ, REG_SZ,
-};
-use windows_sys::Win32::System::RemoteDesktop::{
-    ProcessIdToSessionId, WTSEnumerateProcessesW, WTSFreeMemory, WTS_PROCESS_INFOW,
-};
-use windows_sys::Win32::UI::Shell::{FOLDERID_Startup, SHGetKnownFolderPath, KF_FLAG_DEFAULT};
 
 use crate::ConflictObservation;
 
 const RUN_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
-const MAX_PROCESS_NAME_UNITS: usize = 32_768;
-const MAX_REGISTRY_VALUE_NAME_UNITS: usize = 16_384;
-const MAX_REGISTRY_VALUE_BYTES: usize = 1_048_576;
-const MAX_SHORTCUT_TEXT_UNITS: usize = 32_768;
 const MAX_STARTUP_TEXT_BYTES: u64 = 1_048_576;
 
 pub(super) fn observe_conflict() -> ConflictObservation {
@@ -56,43 +35,22 @@ fn combine(observations: impl IntoIterator<Item = ConflictObservation>) -> Confl
     }
 }
 
-struct WtsProcessList(*mut WTS_PROCESS_INFOW);
-
-impl Drop for WtsProcessList {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe { WTSFreeMemory(self.0.cast()) };
-        }
-    }
-}
-
 fn observe_interactive_processes() -> ConflictObservation {
-    let mut processes = std::ptr::null_mut();
-    let mut count = 0_u32;
-    if unsafe { WTSEnumerateProcessesW(std::ptr::null_mut(), 0, 1, &mut processes, &mut count) }
-        == 0
-    {
-        return ConflictObservation::Unknown;
-    }
-    let list = WtsProcessList(processes);
-    if count == 0 {
-        return ConflictObservation::Clear;
-    }
-    if list.0.is_null() {
-        return ConflictObservation::Unknown;
-    }
-    let entries = unsafe { std::slice::from_raw_parts(list.0, count as usize) };
-    for entry in entries {
-        let Some(name) = bounded_wide_string(entry.pProcessName, MAX_PROCESS_NAME_UNITS) else {
+    let processes = match interactive_processes() {
+        Ok(processes) => processes,
+        Err(_) => return ConflictObservation::Unknown,
+    };
+    for entry in processes {
+        let Some(name) = entry.name else {
             return ConflictObservation::Unknown;
         };
         if !name.eq_ignore_ascii_case("MacTray.exe") {
             continue;
         }
-        let mut confirmed_session = 0_u32;
-        if unsafe { ProcessIdToSessionId(entry.ProcessId, &mut confirmed_session) } == 0
-            || confirmed_session != entry.SessionId
-        {
+        let Ok(confirmed_session) = process_session_id(entry.pid) else {
+            return ConflictObservation::Unknown;
+        };
+        if confirmed_session != entry.session_id {
             return ConflictObservation::Unknown;
         }
         if confirmed_session != 0 {
@@ -102,122 +60,66 @@ fn observe_interactive_processes() -> ConflictObservation {
     ConflictObservation::Clear
 }
 
-struct RegistryKey(HKEY);
-
-impl Drop for RegistryKey {
-    fn drop(&mut self) {
-        unsafe { RegCloseKey(self.0) };
-    }
-}
-
 fn observe_run_entries() -> ConflictObservation {
     combine([
-        observe_run_view(HKEY_CURRENT_USER, KEY_WOW64_32KEY),
-        observe_run_view(HKEY_CURRENT_USER, KEY_WOW64_64KEY),
-        observe_run_view(HKEY_LOCAL_MACHINE, KEY_WOW64_32KEY),
-        observe_run_view(HKEY_LOCAL_MACHINE, KEY_WOW64_64KEY),
+        observe_run_view(RegistryRoot::CurrentUser, RegistryView::Native32),
+        observe_run_view(RegistryRoot::CurrentUser, RegistryView::Native64),
+        observe_run_view(RegistryRoot::LocalMachine, RegistryView::Native32),
+        observe_run_view(RegistryRoot::LocalMachine, RegistryView::Native64),
     ])
 }
 
-fn observe_run_view(root: HKEY, view: u32) -> ConflictObservation {
-    let path = wide_null(RUN_KEY);
-    let mut raw_key = std::ptr::null_mut();
-    let result = unsafe { RegOpenKeyExW(root, path.as_ptr(), 0, KEY_READ | view, &mut raw_key) };
-    if matches!(result, ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND) {
-        return ConflictObservation::Clear;
-    }
-    if result != ERROR_SUCCESS || raw_key.is_null() {
-        return ConflictObservation::Unknown;
-    }
-    let key = RegistryKey(raw_key);
-    let mut index = 0_u32;
-    loop {
-        let mut name = vec![0_u16; MAX_REGISTRY_VALUE_NAME_UNITS + 1];
-        let mut name_length = MAX_REGISTRY_VALUE_NAME_UNITS as u32;
-        let mut value_type = 0_u32;
-        let mut data = vec![0_u8; MAX_REGISTRY_VALUE_BYTES];
-        let mut data_length = data.len() as u32;
-        let result = unsafe {
-            RegEnumValueW(
-                key.0,
-                index,
-                name.as_mut_ptr(),
-                &mut name_length,
-                std::ptr::null(),
-                &mut value_type,
-                data.as_mut_ptr(),
-                &mut data_length,
-            )
-        };
-        if result == ERROR_NO_MORE_ITEMS {
-            return ConflictObservation::Clear;
-        }
-        if result != ERROR_SUCCESS
-            || name_length as usize > MAX_REGISTRY_VALUE_NAME_UNITS
-            || data_length as usize > data.len()
-        {
-            return ConflictObservation::Unknown;
-        }
-        let Ok(name) = String::from_utf16(&name[..name_length as usize]) else {
-            return ConflictObservation::Unknown;
-        };
-        let command = matches!(value_type, REG_SZ | REG_EXPAND_SZ)
-            .then(|| decode_registry_string(&data[..data_length as usize]))
-            .flatten();
-        let observation = classify_run_value(value_type, &name, command.as_deref());
+fn observe_run_view(root: RegistryRoot, view: RegistryView) -> ConflictObservation {
+    let key = match RegistryKey::open(root, RUN_KEY, view) {
+        Ok(Some(key)) => key,
+        Ok(None) => return ConflictObservation::Clear,
+        Err(_) => return ConflictObservation::Unknown,
+    };
+    let values = match key.values() {
+        Ok(values) => values,
+        Err(_) => return ConflictObservation::Unknown,
+    };
+    for value in values {
+        let observation = classify_run_value(&value.name, &value.data);
         if observation != ConflictObservation::Clear {
             return observation;
         }
-        index += 1;
     }
+    ConflictObservation::Clear
 }
 
-fn classify_run_value(
-    value_type: u32,
-    value_name: &str,
-    decoded_command: Option<&str>,
-) -> ConflictObservation {
-    if matches!(value_type, REG_SZ | REG_EXPAND_SZ) {
-        return match decoded_command {
-            Some(command) if contains_mactray_target(command) => ConflictObservation::Detected,
-            Some(_) => ConflictObservation::Clear,
-            None => ConflictObservation::Unknown,
-        };
+fn classify_run_value(value_name: &str, data: &RegistryValueData) -> ConflictObservation {
+    match data {
+        RegistryValueData::String(Some(command)) => {
+            if contains_mactray_target(command) {
+                ConflictObservation::Detected
+            } else {
+                ConflictObservation::Clear
+            }
+        }
+        RegistryValueData::String(None) => ConflictObservation::Unknown,
+        RegistryValueData::Dword(_) | RegistryValueData::Other { .. } => {
+            if value_name.to_ascii_lowercase().contains("mactray") {
+                ConflictObservation::Unknown
+            } else {
+                ConflictObservation::Clear
+            }
+        }
     }
-
-    if value_name.to_ascii_lowercase().contains("mactray") {
-        ConflictObservation::Unknown
-    } else {
-        ConflictObservation::Clear
-    }
-}
-
-fn decode_registry_string(bytes: &[u8]) -> Option<String> {
-    if bytes.len() % 2 != 0 {
-        return None;
-    }
-    let mut units = bytes
-        .chunks_exact(2)
-        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
-        .collect::<Vec<_>>();
-    while units.last() == Some(&0) {
-        units.pop();
-    }
-    String::from_utf16(&units).ok()
 }
 
 fn observe_startup_folders() -> ConflictObservation {
-    let _apartment = match ComApartment::initialize() {
+    let _apartment = match ComApartment::initialize(ComThreading::Apartment) {
         Ok(apartment) => apartment,
-        Err(()) => return ConflictObservation::Unknown,
+        Err(_) => return ConflictObservation::Unknown,
     };
-    observe_startup_folder(&FOLDERID_Startup)
+    observe_startup_folder(KnownFolder::Startup)
 }
 
-fn observe_startup_folder(identifier: &GUID) -> ConflictObservation {
-    let folder = match known_folder(identifier) {
+fn observe_startup_folder(folder: KnownFolder) -> ConflictObservation {
+    let folder = match known_folder_path(folder) {
         Ok(folder) => folder,
-        Err(()) => return ConflictObservation::Unknown,
+        Err(_) => return ConflictObservation::Unknown,
     };
     let entries = match fs::read_dir(folder) {
         Ok(entries) => entries,
@@ -278,28 +180,14 @@ fn is_direct_mactray_executable_name(value: &str) -> bool {
 }
 
 fn inspect_shortcut(path: &Path) -> Result<bool, ()> {
-    let link: IShellLinkW =
-        unsafe { CoCreateInstance(&ShellLink, None::<&IUnknown>, CLSCTX_INPROC_SERVER) }
-            .map_err(|_| ())?;
-    let persist: IPersistFile = link.cast().map_err(|_| ())?;
-    let path_wide = wide_null(path.as_os_str());
-    unsafe { persist.Load(PCWSTR(path_wide.as_ptr()), STGM_READ) }.map_err(|_| ())?;
-
-    let mut target = vec![0_u16; MAX_SHORTCUT_TEXT_UNITS];
-    unsafe { link.GetPath(&mut target, std::ptr::null_mut(), SLGP_RAWPATH.0 as u32) }
-        .map_err(|_| ())?;
-    let target = nul_terminated_buffer(&target).ok_or(())?;
-    if target.trim().is_empty() {
+    let target = read_shortcut(path).ok_or(())?;
+    if target.path.trim().is_empty() {
         return Err(());
     }
-    if contains_mactray_target(&target) {
+    if contains_mactray_target(&target.path) {
         return Ok(true);
     }
-
-    let mut arguments = vec![0_u16; MAX_SHORTCUT_TEXT_UNITS];
-    unsafe { link.GetArguments(&mut arguments) }.map_err(|_| ())?;
-    let arguments = nul_terminated_buffer(&arguments).ok_or(())?;
-    Ok(contains_mactray_target(&arguments))
+    Ok(contains_mactray_target(&target.arguments))
 }
 
 fn startup_text_might_launch_mactray(path: &Path) -> ConflictObservation {
@@ -358,66 +246,6 @@ fn target_boundary(character: char) -> bool {
         )
 }
 
-fn nul_terminated_buffer(value: &[u16]) -> Option<String> {
-    let length = value.iter().position(|unit| *unit == 0)?;
-    String::from_utf16(&value[..length]).ok()
-}
-
-fn known_folder(identifier: &GUID) -> Result<PathBuf, ()> {
-    let mut raw = std::ptr::null_mut();
-    let result = unsafe {
-        SHGetKnownFolderPath(
-            identifier,
-            KF_FLAG_DEFAULT as u32,
-            std::ptr::null_mut(),
-            &mut raw,
-        )
-    };
-    if result < 0 || raw.is_null() {
-        return Err(());
-    }
-    let path = bounded_wide_string(raw, MAX_SHORTCUT_TEXT_UNITS)
-        .map(PathBuf::from)
-        .ok_or(());
-    unsafe { CoTaskMemFree(raw.cast::<c_void>()) };
-    path
-}
-
-fn bounded_wide_string(pointer: *const u16, maximum: usize) -> Option<String> {
-    if pointer.is_null() {
-        return None;
-    }
-    let mut length = 0_usize;
-    while length < maximum && unsafe { *pointer.add(length) } != 0 {
-        length += 1;
-    }
-    if length == maximum {
-        return None;
-    }
-    String::from_utf16(unsafe { std::slice::from_raw_parts(pointer, length) }).ok()
-}
-
-fn wide_null(value: impl AsRef<std::ffi::OsStr>) -> Vec<u16> {
-    value.as_ref().encode_wide().chain(Some(0)).collect()
-}
-
-struct ComApartment;
-
-impl ComApartment {
-    fn initialize() -> Result<Self, ()> {
-        unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
-            .ok()
-            .map(|()| Self)
-            .map_err(|_| ())
-    }
-}
-
-impl Drop for ComApartment {
-    fn drop(&mut self) {
-        unsafe { CoUninitialize() };
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -426,17 +254,19 @@ mod tests {
     fn run_value_name_alone_is_not_mactray_target_evidence() {
         assert_eq!(
             classify_run_value(
-                REG_SZ,
                 "MacTray",
-                Some(r#""C:\Program Files\Other\Helper.exe""#)
+                &RegistryValueData::String(Some(
+                    r#""C:\Program Files\Other\Helper.exe""#.to_owned()
+                ))
             ),
             ConflictObservation::Clear
         );
         assert_eq!(
             classify_run_value(
-                REG_SZ,
                 "Unrelated",
-                Some(r#""C:\Program Files\MacType\MacTray.exe""#),
+                &RegistryValueData::String(Some(
+                    r#""C:\Program Files\MacType\MacTray.exe""#.to_owned()
+                )),
             ),
             ConflictObservation::Detected
         );

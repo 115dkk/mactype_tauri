@@ -35,24 +35,25 @@ pub use com::{ComApartment, ComThreading};
 pub use event::ManualResetEvent;
 pub use file::{
     delay_delete_until_reboot, file_attributes, is_reparse_point, mark_open_file_for_deletion,
-    replace_file,
+    replace_file, replace_file_preserving_attributes,
 };
 pub use handle::{OwnedHandle, WaitOutcome};
 pub use job::{JobLimits, JobObject};
-pub use known_folders::{known_folder_path, KnownFolder};
+pub use known_folders::{known_folder_path, system_directory, KnownFolder};
 pub use launch::{
     anonymous_pipe, null_device, read_bounded, ProcessLaunch, StandardHandles, SuspendedChild,
 };
 pub use mutex::{MutexAcquisition, NamedMutex};
-pub use pipe::{ConnectOutcome, NamedPipeClient, NamedPipeServer};
+pub use pipe::{named_pipe_server_process_id, ConnectOutcome, NamedPipeClient, NamedPipeServer};
 pub use process::{
     process_session_id, terminate_current_process, MachineKind, Process, ProcessAccess,
     ProcessMachine,
 };
 pub use registry::{RegistryKey, RegistryRoot, RegistryValue, RegistryValueData, RegistryView};
 pub use scm::{
-    ServiceAccess, ServiceConfig, ServiceControlManager, ServiceHandle, ServiceManagerAccess,
-    ServiceState, ServiceStatusSnapshot, StartOutcome, StopOutcome,
+    FailureAction, FailureActionKind, FailureActions, ServiceAccess, ServiceConfig,
+    ServiceControlManager, ServiceHandle, ServiceManagerAccess, ServiceState,
+    ServiceStatusSnapshot, StartOutcome, StopOutcome, TriggerInfo,
 };
 pub use security::{
     current_token_is_member_of, AclValidationError, AllowedAce, LocalSecurityDescriptor, OwnedSid,

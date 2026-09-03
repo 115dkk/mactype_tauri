@@ -10,9 +10,10 @@ use std::path::Path;
 use std::ptr::null;
 
 use windows_sys::Win32::Storage::FileSystem::{
-    FileDispositionInfo, GetFileAttributesW, MoveFileExW, SetFileInformationByHandle,
+    FileDispositionInfo, GetFileAttributesW, MoveFileExW, ReplaceFileW, SetFileInformationByHandle,
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_DISPOSITION_INFO, INVALID_FILE_ATTRIBUTES,
     MOVEFILE_DELAY_UNTIL_REBOOT, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    REPLACEFILE_WRITE_THROUGH,
 };
 
 use crate::wide::wide_path;
@@ -33,8 +34,10 @@ pub fn is_reparse_point(path: &Path) -> io::Result<bool> {
     Ok(file_attributes(path)? & FILE_ATTRIBUTE_REPARSE_POINT != 0)
 }
 
-/// Moves `source` over `destination`, replacing it, with the move committed to
-/// disk before the call returns.
+/// Moves `source` over `destination` with `MoveFileExW`, replacing it and
+/// committing the move to disk before returning. Unlike
+/// [`replace_file_preserving_attributes`], this does not merge the replaced
+/// file's identity, attributes, and ACL into the replacement.
 pub fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
     let source = wide_path(source);
     let destination = wide_path(destination);
@@ -44,6 +47,38 @@ pub fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
             source.as_ptr(),
             destination.as_ptr(),
             MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// Replaces `replaced` with `replacement` while retaining the replaced file's
+/// identity, attributes, and ACL. The replacement path no longer exists after
+/// success; with `backup` the previous contents survive there, moved by the
+/// same call. [`replace_file`] uses `MoveFileExW` and does not provide this
+/// metadata-preserving contract.
+pub fn replace_file_preserving_attributes(
+    replaced: &Path,
+    replacement: &Path,
+    backup: Option<&Path>,
+) -> io::Result<()> {
+    let replaced = wide_path(replaced);
+    let replacement = wide_path(replacement);
+    let backup = backup.map(wide_path);
+    // SAFETY: every path is NUL-terminated and outlives the call; a null
+    // backup selects no backup, and the exclude and reserved arguments are
+    // null as the API requires.
+    if unsafe {
+        ReplaceFileW(
+            replaced.as_ptr(),
+            replacement.as_ptr(),
+            backup.as_ref().map_or(null(), |path| path.as_ptr()),
+            REPLACEFILE_WRITE_THROUGH,
+            null(),
+            null(),
         )
     } == 0
     {
@@ -87,7 +122,30 @@ pub fn mark_open_file_for_deletion(file: &File) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{file_attributes, is_reparse_point, mark_open_file_for_deletion, replace_file};
+    use super::{
+        file_attributes, is_reparse_point, mark_open_file_for_deletion, replace_file,
+        replace_file_preserving_attributes,
+    };
+
+    #[test]
+    fn preserving_replacement_keeps_the_destination_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let replaced = directory.path().join("replaced.txt");
+        let replacement = directory.path().join("replacement.txt");
+        std::fs::write(&replaced, b"old").unwrap();
+        std::fs::write(&replacement, b"new").unwrap();
+
+        replace_file_preserving_attributes(&replaced, &replacement, None).unwrap();
+        assert_eq!(std::fs::read(&replaced).unwrap(), b"new");
+        assert!(!replacement.exists());
+
+        let backup = directory.path().join("replaced.bak");
+        std::fs::write(&replacement, b"newer").unwrap();
+        replace_file_preserving_attributes(&replaced, &replacement, Some(&backup)).unwrap();
+        assert_eq!(std::fs::read(&replaced).unwrap(), b"newer");
+        assert_eq!(std::fs::read(&backup).unwrap(), b"new");
+        assert!(!replacement.exists());
+    }
 
     #[test]
     fn attributes_replacement_and_handle_deletion_act_on_real_files() {

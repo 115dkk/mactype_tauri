@@ -18,6 +18,10 @@ use crate::process::Process;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct JobLimits {
     pub active_process_limit: u32,
+    /// Whether `active_process_limit` is in force
+    /// (`JOB_OBJECT_LIMIT_ACTIVE_PROCESS`); without the flag the count is
+    /// ignored by the kernel.
+    pub active_process_limit_enabled: bool,
     pub kill_on_close: bool,
 }
 
@@ -91,6 +95,7 @@ impl JobObject {
         let flags = limits.BasicLimitInformation.LimitFlags;
         Ok(JobLimits {
             active_process_limit: limits.BasicLimitInformation.ActiveProcessLimit,
+            active_process_limit_enabled: flags & JOB_OBJECT_LIMIT_ACTIVE_PROCESS != 0,
             kill_on_close: flags & JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE != 0,
         })
     }
@@ -105,6 +110,7 @@ mod tests {
         let job = JobObject::single_process_kill_on_close().unwrap();
         let limits = job.limits().unwrap();
         assert_eq!(limits.active_process_limit, 1);
+        assert!(limits.active_process_limit_enabled);
         assert!(limits.kill_on_close);
     }
 }

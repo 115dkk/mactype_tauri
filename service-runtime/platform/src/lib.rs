@@ -62,5 +62,8 @@ pub use service_control::{
     ServiceControlCallback, ServiceStatusHandle,
 };
 pub use shell_link::{read_shortcut, ShortcutTarget};
-pub use wmi::{WmiConnection, WmiEnumerator, WmiError, WmiObject};
+pub use wmi::{
+    WmiConnection, WmiEnumerator, WmiError, WmiLocator, WmiNamespace, WmiObject, WmiPropertyError,
+    WmiPropertyStep,
+};
 pub use wts::{interactive_processes, SessionProcess};

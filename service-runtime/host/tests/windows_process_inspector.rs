@@ -1,6 +1,7 @@
 #![cfg(windows)]
 
 use mactype_service_host::{ProcessInspector, WindowsProcessInspector};
+use mactype_service_platform::process_session_id;
 
 #[test]
 fn windows_inspector_requeries_creation_time_session_and_architecture_from_the_process() {
@@ -11,16 +12,5 @@ fn windows_inspector_requeries_creation_time_session_and_architecture_from_the_p
 
     assert_eq!(identity.pid, pid);
     assert!(identity.creation_time > 0);
-    assert_eq!(identity.session_id, session_id(pid));
-}
-
-fn session_id(pid: u32) -> u32 {
-    let mut session = 0;
-    assert_ne!(
-        unsafe {
-            windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId(pid, &mut session)
-        },
-        0
-    );
-    session
+    assert_eq!(identity.session_id, process_session_id(pid).unwrap());
 }

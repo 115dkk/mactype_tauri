@@ -7,8 +7,7 @@ use std::mem::size_of;
 use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Foundation::{
-    ERROR_INSUFFICIENT_BUFFER, ERROR_SERVICE_ALREADY_RUNNING, ERROR_SERVICE_DOES_NOT_EXIST,
-    ERROR_SERVICE_NOT_ACTIVE,
+    ERROR_SERVICE_ALREADY_RUNNING, ERROR_SERVICE_DOES_NOT_EXIST, ERROR_SERVICE_NOT_ACTIVE,
 };
 use windows_sys::Win32::System::Services::{
     ChangeServiceConfig2W, ChangeServiceConfigW, CloseServiceHandle, ControlService,
@@ -24,9 +23,10 @@ use windows_sys::Win32::System::Services::{
     SERVICE_STOP_PENDING, SERVICE_WIN32_OWN_PROCESS,
 };
 
-use crate::wide::{bounded_string_lossy, bounded_units, multi_strings, wide_null};
+use crate::scm_response::ScmResponse;
+use crate::wide::wide_null;
 
-const MAX_CONFIG_TEXT_UNITS: usize = 32_768;
+const MAX_SERVICE_DEPENDENCIES: usize = 256;
 const SERVICE_DELETE: u32 = 0x0001_0000;
 
 /// What the manager connection may do.
@@ -243,50 +243,16 @@ impl ServiceHandle {
     }
 
     pub fn config(&self) -> io::Result<ServiceConfig> {
-        let mut needed = 0;
-        // SAFETY: a null buffer with zero length is the documented size probe;
-        // `needed` is a local out value.
-        unsafe { QueryServiceConfigW(self.0.as_raw(), null_mut(), 0, &mut needed) };
-        let error = io::Error::last_os_error();
-        if error.raw_os_error() != Some(ERROR_INSUFFICIENT_BUFFER as i32)
-            || (needed as usize) < size_of::<QUERY_SERVICE_CONFIGW>()
-        {
-            return Err(error);
-        }
-        let mut storage = vec![0_usize; (needed as usize).div_ceil(size_of::<usize>())];
-        // SAFETY: `storage` is word-aligned and at least `needed` bytes long,
-        // which is the capacity passed alongside it.
-        if unsafe {
-            QueryServiceConfigW(
-                self.0.as_raw(),
-                storage.as_mut_ptr().cast(),
-                needed,
-                &mut needed,
-            )
-        } == 0
-        {
-            return Err(io::Error::last_os_error());
-        }
-        // SAFETY: the API filled `storage` with a QUERY_SERVICE_CONFIGW whose
-        // string pointers point into the same buffer, which outlives the
-        // copies made below.
-        let config = unsafe { &*storage.as_ptr().cast::<QUERY_SERVICE_CONFIGW>() };
-        let text = |pointer: *const u16| {
-            // SAFETY: the pointer is null or points into `storage`, which is
-            // still alive; the read is bounded.
-            unsafe { bounded_string_lossy(pointer, MAX_CONFIG_TEXT_UNITS) }.unwrap_or_default()
-        };
-        Ok(ServiceConfig {
-            service_type: config.dwServiceType,
-            start_type: config.dwStartType,
-            error_control: config.dwErrorControl,
-            image_path: text(config.lpBinaryPathName),
-            account: text(config.lpServiceStartName),
-            display_name: text(config.lpDisplayName),
-            load_order_group: text(config.lpLoadOrderGroup),
-            tag_id: config.dwTagId,
-            dependencies: dependencies(config.lpDependencies, needed as usize),
-        })
+        let response = ScmResponse::query(
+            size_of::<QUERY_SERVICE_CONFIGW>(),
+            |buffer, capacity, needed| {
+                // SAFETY: the handle is live; `buffer` and `capacity` describe
+                // the response allocation or the documented null size probe,
+                // and `needed` is a local out value.
+                unsafe { QueryServiceConfigW(self.0.as_raw(), buffer.cast(), capacity, needed) }
+            },
+        )?;
+        parse_config(&response)
     }
 
     pub fn start(&self) -> io::Result<StartOutcome> {
@@ -416,12 +382,29 @@ impl ServiceHandle {
     }
 }
 
-fn dependencies(pointer: *const u16, buffer_bytes: usize) -> Vec<String> {
-    // SAFETY: the pointer is null or points into the live configuration
-    // buffer; the read is bounded by that buffer's length in units.
-    unsafe { bounded_units(pointer, buffer_bytes / 2) }
-        .map(multi_strings)
-        .unwrap_or_default()
+fn parse_config(response: &ScmResponse) -> io::Result<ServiceConfig> {
+    let config = response.header::<QUERY_SERVICE_CONFIGW>()?;
+    let text = |pointer| -> io::Result<String> {
+        Ok(response
+            .wide_units(pointer)?
+            .map(String::from_utf16_lossy)
+            .unwrap_or_default())
+    };
+    Ok(ServiceConfig {
+        service_type: config.dwServiceType,
+        start_type: config.dwStartType,
+        error_control: config.dwErrorControl,
+        image_path: text(config.lpBinaryPathName)?,
+        account: text(config.lpServiceStartName)?,
+        display_name: text(config.lpDisplayName)?,
+        load_order_group: text(config.lpLoadOrderGroup)?,
+        tag_id: config.dwTagId,
+        dependencies: response
+            .multi_units(config.lpDependencies, MAX_SERVICE_DEPENDENCIES)?
+            .into_iter()
+            .map(String::from_utf16_lossy)
+            .collect(),
+    })
 }
 
 /// An `SC_HANDLE` closed exactly once.
@@ -451,7 +434,115 @@ impl Drop for ScHandle {
 
 #[cfg(test)]
 mod tests {
-    use super::{ServiceAccess, ServiceControlManager, ServiceManagerAccess, ServiceState};
+    use std::mem::{size_of, size_of_val};
+    use std::ptr::{null_mut, write};
+
+    use windows_sys::Win32::System::Services::QUERY_SERVICE_CONFIGW;
+
+    use super::{
+        parse_config, ServiceAccess, ServiceControlManager, ServiceManagerAccess, ServiceState,
+    };
+    use crate::scm_response::ScmResponse;
+
+    fn append_units(storage: &mut [u16], cursor: &mut usize, units: &[u16]) -> *mut u16 {
+        let offset = *cursor;
+        storage[offset..offset + units.len()].copy_from_slice(units);
+        *cursor += units.len();
+        storage.as_mut_ptr().wrapping_add(offset)
+    }
+
+    fn synthetic_config_response(dependencies: &[u16]) -> ScmResponse {
+        let mut words = vec![0_usize; 64];
+        let capacity = size_of_val(words.as_slice());
+        // SAFETY: the slice covers the live word allocation as UTF-16 units;
+        // `usize` alignment satisfies `u16` alignment.
+        let storage = unsafe {
+            std::slice::from_raw_parts_mut(
+                words.as_mut_ptr().cast::<u16>(),
+                capacity / size_of::<u16>(),
+            )
+        };
+        let mut cursor = size_of::<QUERY_SERVICE_CONFIGW>().div_ceil(size_of::<u16>());
+        let image_path = append_units(
+            storage,
+            &mut cursor,
+            &"C:\\service.exe\0".encode_utf16().collect::<Vec<_>>(),
+        );
+        let account = append_units(
+            storage,
+            &mut cursor,
+            &"LocalSystem\0".encode_utf16().collect::<Vec<_>>(),
+        );
+        let display_name = append_units(
+            storage,
+            &mut cursor,
+            &"Synthetic Service\0".encode_utf16().collect::<Vec<_>>(),
+        );
+        let load_order_group = append_units(
+            storage,
+            &mut cursor,
+            &"NetworkProvider\0".encode_utf16().collect::<Vec<_>>(),
+        );
+        let dependencies = append_units(storage, &mut cursor, dependencies);
+        let header = QUERY_SERVICE_CONFIGW {
+            dwServiceType: 0x20,
+            dwStartType: 2,
+            dwErrorControl: 1,
+            lpBinaryPathName: image_path,
+            lpLoadOrderGroup: load_order_group,
+            dwTagId: 7,
+            lpDependencies: dependencies,
+            lpServiceStartName: account,
+            lpDisplayName: display_name,
+        };
+        // SAFETY: the word buffer is aligned for QUERY_SERVICE_CONFIGW and has
+        // enough space for the complete header at its start.
+        unsafe { write(words.as_mut_ptr().cast::<QUERY_SERVICE_CONFIGW>(), header) };
+        ScmResponse::from_words(words, cursor * size_of::<u16>())
+    }
+
+    #[test]
+    fn parse_config_reads_every_dependency_of_a_multi_string_block() {
+        let dependencies: Vec<u16> = "RPCSS\0http\0\0".encode_utf16().collect();
+        let response = synthetic_config_response(&dependencies);
+        let config = parse_config(&response).unwrap();
+
+        assert_eq!(config.dependencies, ["RPCSS", "http"]);
+        assert_eq!(config.image_path, "C:\\service.exe");
+        assert_eq!(config.account, "LocalSystem");
+        assert_eq!(config.display_name, "Synthetic Service");
+        assert_eq!(config.load_order_group, "NetworkProvider");
+    }
+
+    #[test]
+    fn parse_config_rejects_a_dependency_block_without_its_terminator() {
+        let dependencies: Vec<u16> = "RPCSS\0http\0".encode_utf16().collect();
+        let response = synthetic_config_response(&dependencies);
+        assert!(parse_config(&response).is_err());
+    }
+
+    #[test]
+    fn parse_config_rejects_a_string_pointer_outside_the_response() {
+        let mut words = vec![0_usize; 16];
+        let outside = words.as_mut_ptr().cast::<u16>().wrapping_sub(1);
+        let header = QUERY_SERVICE_CONFIGW {
+            dwServiceType: 0,
+            dwStartType: 0,
+            dwErrorControl: 0,
+            lpBinaryPathName: outside,
+            lpLoadOrderGroup: null_mut(),
+            dwTagId: 0,
+            lpDependencies: null_mut(),
+            lpServiceStartName: null_mut(),
+            lpDisplayName: null_mut(),
+        };
+        // SAFETY: the word buffer is aligned for QUERY_SERVICE_CONFIGW and has
+        // enough space for the complete header at its start.
+        unsafe { write(words.as_mut_ptr().cast::<QUERY_SERVICE_CONFIGW>(), header) };
+        let byte_length = size_of_val(words.as_slice());
+        let response = ScmResponse::from_words(words, byte_length);
+        assert!(parse_config(&response).is_err());
+    }
 
     #[test]
     fn a_well_known_service_reports_status_and_config_and_a_missing_one_is_none() {
@@ -475,5 +566,21 @@ mod tests {
             )
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn lanman_workstation_reports_all_of_its_dependencies() {
+        let manager = ServiceControlManager::connect(ServiceManagerAccess::Connect).unwrap();
+        let service = manager
+            .open("LanmanWorkstation", ServiceAccess::QueryConfig)
+            .unwrap()
+            .expect("the Workstation service exists");
+        let config = service.config().unwrap();
+
+        assert!(config.dependencies.len() >= 2);
+        assert!(config
+            .dependencies
+            .iter()
+            .any(|dependency| dependency.eq_ignore_ascii_case("NSI")));
     }
 }

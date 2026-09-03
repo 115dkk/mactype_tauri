@@ -23,6 +23,7 @@ mod pipe;
 mod process;
 mod registry;
 mod scm;
+mod scm_response;
 mod security;
 mod service_control;
 mod shell_link;

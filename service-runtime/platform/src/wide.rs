@@ -43,16 +43,6 @@ pub(crate) unsafe fn bounded_units<'a>(pointer: *const u16, maximum: usize) -> O
     Some(unsafe { std::slice::from_raw_parts(pointer, length) })
 }
 
-/// Converts a bounded UTF-16 read into a lossy `String`.
-///
-/// # Safety
-///
-/// Same contract as [`bounded_units`].
-pub(crate) unsafe fn bounded_string_lossy(pointer: *const u16, maximum: usize) -> Option<String> {
-    // SAFETY: forwarded verbatim to the caller's guarantee.
-    unsafe { bounded_units(pointer, maximum) }.map(String::from_utf16_lossy)
-}
-
 /// Converts a bounded UTF-16 read into a `String`, rejecting invalid UTF-16.
 ///
 /// # Safety
@@ -61,16 +51,6 @@ pub(crate) unsafe fn bounded_string_lossy(pointer: *const u16, maximum: usize) -
 pub(crate) unsafe fn bounded_string(pointer: *const u16, maximum: usize) -> Option<String> {
     // SAFETY: forwarded verbatim to the caller's guarantee.
     unsafe { bounded_units(pointer, maximum) }.and_then(|units| String::from_utf16(units).ok())
-}
-
-/// Splits a `REG_MULTI_SZ`-style double-NUL-terminated block, read from an
-/// already bounded slice, into its strings.
-pub(crate) fn multi_strings(units: &[u16]) -> Vec<String> {
-    units
-        .split(|unit| *unit == 0)
-        .take_while(|entry| !entry.is_empty())
-        .map(String::from_utf16_lossy)
-        .collect()
 }
 
 /// Truncates an owned buffer at its first NUL, for APIs that fill a caller
@@ -82,7 +62,7 @@ pub(crate) fn nul_terminated(units: &[u16]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{bounded_units, multi_strings, nul_terminated, wide_null};
+    use super::{bounded_units, nul_terminated, wide_null};
 
     #[test]
     fn bounded_reads_stop_at_the_terminator_and_reject_missing_ones() {
@@ -96,13 +76,6 @@ mod tests {
         assert!(unsafe { bounded_units(unterminated.as_ptr(), 4) }.is_none());
         // SAFETY: a null pointer is never dereferenced.
         assert!(unsafe { bounded_units(std::ptr::null(), 4) }.is_none());
-    }
-
-    #[test]
-    fn multi_string_blocks_split_on_single_nuls_and_stop_at_the_double_nul() {
-        let block: Vec<u16> = "one\0two\0\0ignored\0".encode_utf16().collect();
-        assert_eq!(multi_strings(&block), vec!["one", "two"]);
-        assert_eq!(multi_strings(&[0, 0]), Vec::<String>::new());
     }
 
     #[test]

@@ -970,7 +970,7 @@ test("execution and new system service controls remain interactive", async ({ pa
 
   await page.goto("/?view=execution&gallery=1&lang=ko", { waitUntil: "networkidle" });
   await openServiceDetails(page);
-  const autostart = page.getByRole("checkbox");
+  const autostart = page.getByRole("switch", { name: "로그인 시 트레이 시작" });
   await autostart.check();
   await expect(page.getByText("로그인할 때 트레이로 시작합니다.")).toBeVisible();
   await expect(page.getByRole("textbox", { name: "실행 파일의 전체 경로" })).toHaveCount(0);

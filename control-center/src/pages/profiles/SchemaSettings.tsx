@@ -140,8 +140,8 @@ function SettingControl({ setting, settingLabel, hintId, value, savedValue, onCo
         </select>
       ) : setting.control === "boolean" ? (
         <label className="switch-control">
-          <input aria-describedby={hintId} checked={value === 1} id={setting.id} onChange={(event) => onCommit(event.target.checked ? 1 : 0)} type="checkbox" />
-          <span>{value === 1 ? t("profiles.enabled") : t("profiles.disabled")}</span>
+          <input aria-describedby={hintId} checked={value === 1} id={setting.id} onChange={(event) => onCommit(event.target.checked ? 1 : 0)} role="switch" type="checkbox" />
+          <span aria-hidden="true">{value === 1 ? t("common.on") : t("common.off")}</span>
         </label>
       ) : setting.control === "number" ? exactValueInput : (
         <input

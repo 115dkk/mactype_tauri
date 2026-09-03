@@ -1,6 +1,7 @@
 //! Named mutexes used as machine-wide setup locks.
 
 use std::io;
+use std::ptr::null;
 use std::time::Duration;
 
 use windows_sys::Win32::System::Threading::{CreateMutexW, ReleaseMutex};
@@ -34,6 +35,15 @@ impl NamedMutex {
         // SAFETY: the attribute block and the descriptor it points at outlive
         // the call, and `name` is NUL-terminated.
         let handle = unsafe { CreateMutexW(attributes.as_ptr(), 0, name.as_ptr()) };
+        Ok(Self(OwnedHandle::from_creation(handle)?))
+    }
+
+    /// Creates or opens `name` with the process token's default security.
+    pub fn create_with_default_security(name: &str) -> io::Result<Self> {
+        let name = wide_null(name);
+        // SAFETY: the null security attributes select default security and
+        // `name` is NUL-terminated and outlives the call.
+        let handle = unsafe { CreateMutexW(null(), 0, name.as_ptr()) };
         Ok(Self(OwnedHandle::from_creation(handle)?))
     }
 

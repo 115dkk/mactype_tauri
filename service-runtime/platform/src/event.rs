@@ -29,6 +29,12 @@ impl ManualResetEvent {
         Ok(())
     }
 
+    /// The owned handle, for callers that hand the event to a wait that
+    /// takes a raw handle value.
+    pub fn handle(&self) -> &OwnedHandle {
+        &self.0
+    }
+
     pub fn wait(&self, timeout: Option<Duration>) -> io::Result<WaitOutcome> {
         self.0.wait(timeout)
     }

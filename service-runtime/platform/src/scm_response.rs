@@ -84,6 +84,43 @@ impl ScmResponse {
         Ok(unsafe { self.words.as_ptr().cast::<T>().read() })
     }
 
+    /// Copies a fixed-size array addressed inside this response.
+    pub(crate) fn array<T: Copy>(
+        &self,
+        pointer: *const T,
+        count: u32,
+        max_entries: usize,
+    ) -> io::Result<Vec<T>> {
+        if count == 0 {
+            return Ok(Vec::new());
+        }
+        let count = count as usize;
+        if pointer.is_null() || count > max_entries {
+            return Err(invalid_data("SCM response array is invalid"));
+        }
+        let address = pointer as usize;
+        if address < self.start() || address >= self.end() {
+            return Err(invalid_data(
+                "SCM response array pointer is outside the response",
+            ));
+        }
+        if address % align_of::<T>() != 0 {
+            return Err(invalid_data("SCM response array pointer is misaligned"));
+        }
+        let byte_length = size_of::<T>()
+            .checked_mul(count)
+            .ok_or_else(|| invalid_data("SCM response array size overflowed"))?;
+        let array_end = address
+            .checked_add(byte_length)
+            .ok_or_else(|| invalid_data("SCM response array range overflowed"))?;
+        if array_end > self.end() {
+            return Err(invalid_data("SCM response array extends past the response"));
+        }
+        // SAFETY: the pointer is aligned and lies inside `words`; the checked
+        // byte range for all `count` elements ends no later than `byte_length`.
+        Ok(unsafe { std::slice::from_raw_parts(pointer, count) }.to_vec())
+    }
+
     /// Returns a NUL-terminated UTF-16 string addressed inside this response.
     pub(crate) fn wide_units(&self, pointer: *const u16) -> io::Result<Option<&[u16]>> {
         if pointer.is_null() {
@@ -234,6 +271,34 @@ mod tests {
         let response = response_with_units(&units, units.len() * size_of::<u16>());
         let pointer = response.words.as_ptr().cast::<u16>();
         assert!(response.multi_units(pointer, 1).is_err());
+    }
+
+    #[test]
+    fn an_in_range_array_reads_back() {
+        let response = ScmResponse::from_words(vec![11, 22, 33], 3 * size_of::<usize>());
+        let pointer = response.words.as_ptr();
+        assert_eq!(response.array(pointer, 3, 3).unwrap(), [11, 22, 33]);
+        assert!(response
+            .array::<usize>(std::ptr::null(), 0, 0)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn outside_and_misaligned_array_pointers_fail() {
+        let response = ScmResponse::from_words(vec![11, 22], 2 * size_of::<usize>());
+        let start = response.start();
+        let end = response.end();
+
+        assert!(response
+            .array::<usize>((start - size_of::<usize>()) as *const usize, 1, 1)
+            .is_err());
+        assert!(response.array::<usize>(end as *const usize, 1, 1).is_err());
+        assert!(response
+            .array::<usize>((start + 1) as *const usize, 1, 1)
+            .is_err());
+        assert!(response.array(response.words.as_ptr(), 3, 3).is_err());
+        assert!(response.array(response.words.as_ptr(), 2, 1).is_err());
     }
 
     #[test]

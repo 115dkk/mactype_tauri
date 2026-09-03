@@ -3,6 +3,7 @@
 #include <psapi.h>
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cwchar>
@@ -51,6 +52,31 @@ constexpr std::size_t kMaxModulePathCharacters = 32'768U;
     }
 }
 
+// Runs `attempt` until it stops failing transiently. `failed` reports whether a
+// result is an inventory failure; the Win32 error of that failure is captured
+// before any wait can overwrite it and is restored as the last error when the
+// bound is exhausted, so callers keep reading `GetLastError()` as before.
+template <typename Attempt, typename Failed>
+[[nodiscard]] auto retry_transient_inventory(const HANDLE process, Attempt attempt,
+                                             Failed failed) noexcept {
+    const auto started = std::chrono::steady_clock::now();
+    for (;;) {
+        auto result = attempt();
+        if (!failed(result)) {
+            return result;
+        }
+        const DWORD error = GetLastError();
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - started);
+        const bool target_signaled = WaitForSingleObject(process, 0U) == WAIT_OBJECT_0;
+        if (inventory_retry_action(error, elapsed, target_signaled) == InventoryRetry::GiveUp) {
+            SetLastError(error);
+            return result;
+        }
+        Sleep(static_cast<DWORD>(kInventoryRetryStep.count()));
+    }
+}
+
 [[nodiscard]] std::optional<std::vector<HMODULE>> enumerate_modules(
     HANDLE process) noexcept {
     try {
@@ -81,7 +107,11 @@ constexpr std::size_t kMaxModulePathCharacters = 32'768U;
 
 [[nodiscard]] std::optional<std::uintptr_t> remote_module_base(
     HANDLE process, const std::wstring_view module_name) noexcept {
-    const auto inventory = enumerate_modules(process);
+    const auto inventory = retry_transient_inventory(
+        process, [process]() noexcept { return enumerate_modules(process); },
+        [](const std::optional<std::vector<HMODULE>>& modules) noexcept {
+            return !modules.has_value();
+        });
     if (!inventory) {
         return std::nullopt;
     }
@@ -103,17 +133,15 @@ constexpr std::size_t kMaxModulePathCharacters = 32'768U;
     return std::nullopt;
 }
 
-}  // namespace
-
-bool module_paths_equal(const std::wstring_view left,
-                        const std::wstring_view right) noexcept {
+bool module_paths_equal_impl(const std::wstring_view left,
+                             const std::wstring_view right) noexcept {
     const auto normalized_left = normalized_module_path(left);
     const auto normalized_right = normalized_module_path(right);
     return normalized_left && normalized_right &&
            _wcsicmp(normalized_left->c_str(), normalized_right->c_str()) == 0;
 }
 
-FixedModuleState fixed_module_state(
+[[nodiscard]] FixedModuleState fixed_module_state_once(
     HANDLE process, const std::filesystem::path& expected_path) noexcept {
     const auto normalized_expected = normalized_module_path(expected_path.native());
     if (!normalized_expected) {
@@ -158,6 +186,39 @@ FixedModuleState fixed_module_state(
     } catch (...) {
         return FixedModuleState::InventoryUnavailable;
     }
+}
+
+}  // namespace
+
+bool inventory_failure_is_transient(const DWORD error) noexcept {
+    return error == ERROR_PARTIAL_COPY;
+}
+
+InventoryRetry inventory_retry_action(const DWORD error,
+                                      const std::chrono::milliseconds elapsed,
+                                      const bool target_signaled) noexcept {
+    if (target_signaled || !inventory_failure_is_transient(error) ||
+        elapsed >= kInventoryRetryBudget) {
+        return InventoryRetry::GiveUp;
+    }
+    return InventoryRetry::Retry;
+}
+
+bool module_paths_equal(const std::wstring_view left,
+                        const std::wstring_view right) noexcept {
+    return module_paths_equal_impl(left, right);
+}
+
+FixedModuleState fixed_module_state(
+    HANDLE process, const std::filesystem::path& expected_path) noexcept {
+    return retry_transient_inventory(
+        process,
+        [process, &expected_path]() noexcept {
+            return fixed_module_state_once(process, expected_path);
+        },
+        [](const FixedModuleState state) noexcept {
+            return state == FixedModuleState::InventoryUnavailable;
+        });
 }
 
 std::optional<LPTHREAD_START_ROUTINE> remote_load_library(HANDLE process) noexcept {

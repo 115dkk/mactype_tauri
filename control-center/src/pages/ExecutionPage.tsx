@@ -447,8 +447,8 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
       <div className="service-row service-row-static" data-kind="autostart">
         <div className="service-row-head execution-option">
           <span className="service-row-icon"><Power aria-hidden="true" size={19} /></span>
-          <span className="service-row-copy"><h2>{t("execution.autostartTitle")}</h2><p>{t("execution.autostartDescription")}</p></span>
-          <label className="switch-control"><input checked={status?.autoStart ?? false} disabled={!status} onChange={(event) => void toggleAutostart(event.target.checked)} type="checkbox" /><span>{status?.autoStart ? t("profiles.enabled") : t("profiles.disabled")}</span></label>
+          <span className="service-row-copy"><h2 id="autostart-title">{t("execution.autostartTitle")}</h2><p>{t("execution.autostartDescription")}</p></span>
+          <label className="switch-control"><input aria-labelledby="autostart-title" checked={status?.autoStart ?? false} disabled={!status} onChange={(event) => void toggleAutostart(event.target.checked)} role="switch" type="checkbox" /><span aria-hidden="true">{status?.autoStart ? t("common.on") : t("common.off")}</span></label>
         </div>
       </div>
 

@@ -4,7 +4,7 @@ mod tests;
 use std::ffi::OsString;
 use std::io;
 #[cfg(test)]
-use std::sync::atomic::AtomicU32;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use mactype_service_platform::{
@@ -19,8 +19,12 @@ const TERMINATION_CONFIRMATION: Duration = Duration::from_millis(250);
 const WAIT_SLICE: Duration = Duration::from_millis(10);
 const MAX_HELPER_OUTPUT_BYTES: usize = 1024;
 
+/// The launcher's most recent child, held open with SYNCHRONIZE while it is
+/// still suspended so tests wait on that exact process object. A PID alone
+/// would not do: once the child's object is gone the kernel can hand the same
+/// PID to a process another test just spawned.
 #[cfg(test)]
-static LAST_TEST_CHILD_PID: AtomicU32 = AtomicU32::new(0);
+static LAST_TEST_CHILD: Mutex<Option<Process>> = Mutex::new(None);
 
 pub struct WindowsHelperLauncher {
     stop_requested: fn() -> bool,
@@ -79,7 +83,12 @@ impl WindowsHelperLauncher {
             },
         })?;
         #[cfg(test)]
-        LAST_TEST_CHILD_PID.store(child.pid(), std::sync::atomic::Ordering::Release);
+        {
+            let observer = Process::open(child.pid(), ProcessAccess::Synchronize).ok();
+            *LAST_TEST_CHILD
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = observer;
+        }
         if let Err(error) = job.assign(child.process()) {
             terminate_unassigned_child(&child.abandon(), deadline)?;
             return Err(error.into());

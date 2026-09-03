@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 mod install_bootstrap;
 mod profile_bridge;
 mod profile_store;

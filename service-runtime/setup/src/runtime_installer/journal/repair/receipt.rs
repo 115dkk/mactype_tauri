@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
-#[cfg(windows)]
-use std::{os::windows::ffi::OsStrExt, ptr};
 
 use mactype_service_contract::{
     sha256_digest, IMMUTABLE_RUNTIME_FILES, MAX_PROFILE_BYTES, MAX_RUNTIME_FILE_BYTES,
@@ -13,8 +11,6 @@ use crate::profile_bridge::GENERATED_PROFILE_NAME;
 use crate::storage::{
     read_bounded_directory, read_bounded_regular_file, reject_reparse_ancestors, SetupError,
 };
-#[cfg(windows)]
-use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_DELAY_UNTIL_REBOOT};
 
 pub(super) fn valid_runtime_directory_receipt(receipt: &RuntimeDirectoryReceipt) -> bool {
     !receipt.files.is_empty()
@@ -159,12 +155,7 @@ fn remove_or_defer_after_reboot(path: &Path, directory: bool) -> Result<(), Setu
 
 #[cfg(windows)]
 fn defer_delete_after_reboot(path: &Path) -> Result<(), std::io::Error> {
-    let mut wide = path.as_os_str().encode_wide().collect::<Vec<_>>();
-    wide.push(0);
-    if unsafe { MoveFileExW(wide.as_ptr(), ptr::null(), MOVEFILE_DELAY_UNTIL_REBOOT) } == 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
+    mactype_service_platform::delay_delete_until_reboot(path)
 }
 
 #[cfg(not(windows))]

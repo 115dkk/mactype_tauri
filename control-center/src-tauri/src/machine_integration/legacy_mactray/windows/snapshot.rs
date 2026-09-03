@@ -3,6 +3,7 @@ use super::{
     common::{open_for, query_configuration, query_runtime, ServiceHandle},
     control::query,
 };
+use crate::machine_integration::scm_response::{ScmResponse, ScmResponseError};
 use windows_sys::Win32::{
     Foundation::{GetLastError, ERROR_INSUFFICIENT_BUFFER},
     Security::{
@@ -24,146 +25,37 @@ use windows_sys::Win32::{
     },
 };
 
-const MAX_CONFIG2_BYTES: u32 = 64 * 1024;
 pub(super) const MAX_SECURITY_DESCRIPTOR_BYTES: u32 = 64 * 1024;
 pub(super) const MAX_FAILURE_ACTIONS: usize = 64;
 pub(super) const MAX_REQUIRED_PRIVILEGES: usize = 64;
 pub(super) const SERVICE_READ_CONTROL: u32 = 0x0002_0000;
 
-struct AlignedConfigBuffer {
-    words: Vec<usize>,
-    byte_length: usize,
-}
-
-impl AlignedConfigBuffer {
-    fn start(&self) -> usize {
-        self.words.as_ptr() as usize
-    }
-
-    fn end(&self) -> usize {
-        self.start() + self.byte_length
-    }
-
-    fn read<T: Copy>(&self) -> Result<T, String> {
-        if self.byte_length < std::mem::size_of::<T>() {
-            return Err("SCM Config2 response is smaller than its fixed header".to_owned());
-        }
-        Ok(unsafe { self.words.as_ptr().cast::<T>().read() })
-    }
-
-    fn wide_string(&self, pointer: *const u16) -> Result<Option<String>, String> {
-        if pointer.is_null() {
-            return Ok(None);
-        }
-        let start = pointer as usize;
-        if start < self.start() || start >= self.end() || start % 2 != 0 {
-            return Err("SCM Config2 response contains an out-of-buffer string".to_owned());
-        }
-        let available = (self.end() - start) / std::mem::size_of::<u16>();
-        let units = unsafe { std::slice::from_raw_parts(pointer, available) };
-        let length = units
-            .iter()
-            .position(|unit| *unit == 0)
-            .ok_or_else(|| "SCM Config2 string is not terminated".to_owned())?;
-        String::from_utf16(&units[..length])
-            .map(Some)
-            .map_err(|_| "SCM Config2 string contains invalid UTF-16".to_owned())
-    }
-
-    fn multi_string(&self, pointer: *const u16) -> Result<Vec<String>, String> {
-        if pointer.is_null() {
-            return Ok(Vec::new());
-        }
-        let mut current = pointer;
-        let mut values = Vec::new();
-        loop {
-            let value = self.wide_string(current)?;
-            let Some(value) = value else {
-                return Err("SCM Config2 MULTI_SZ contains a null pointer".to_owned());
-            };
-            if value.is_empty() {
-                return Ok(values);
-            }
-            if values.len() >= MAX_REQUIRED_PRIVILEGES {
-                return Err("SCM Config2 required privilege list is too large".to_owned());
-            }
-            let advance = value.encode_utf16().count() + 1;
-            current = unsafe { current.add(advance) };
-            values.push(value);
-        }
-    }
-
-    fn actions(&self, pointer: *const SC_ACTION, count: u32) -> Result<Vec<SC_ACTION>, String> {
-        let count = count as usize;
-        if count == 0 {
-            return Ok(Vec::new());
-        }
-        if pointer.is_null() || count > MAX_FAILURE_ACTIONS {
-            return Err("SCM failure action list is invalid or too large".to_owned());
-        }
-        let start = pointer as usize;
-        let byte_length = count
-            .checked_mul(std::mem::size_of::<SC_ACTION>())
-            .ok_or_else(|| "SCM failure action list size overflowed".to_owned())?;
-        let end = start
-            .checked_add(byte_length)
-            .ok_or_else(|| "SCM failure action list pointer overflowed".to_owned())?;
-        if start < self.start()
-            || end > self.end()
-            || start % std::mem::align_of::<SC_ACTION>() != 0
-        {
-            return Err("SCM failure action list points outside its response".to_owned());
-        }
-        Ok(unsafe { std::slice::from_raw_parts(pointer, count) }.to_vec())
-    }
-}
-
 fn query_config2_buffer(
     service: &ServiceHandle,
     information_level: u32,
     minimum_bytes: usize,
-) -> Result<AlignedConfigBuffer, String> {
-    let mut needed = 0;
-    let initial = unsafe {
-        QueryServiceConfig2W(
-            service.0,
-            information_level,
-            std::ptr::null_mut(),
-            0,
-            &mut needed,
-        )
-    };
-    let error = unsafe { GetLastError() };
-    if initial != 0
-        || error != ERROR_INSUFFICIENT_BUFFER
-        || needed < minimum_bytes as u32
-        || needed > MAX_CONFIG2_BYTES
-    {
-        return Err(format!(
-            "QueryServiceConfig2W({information_level}) size query failed with {error}"
-        ));
-    }
-    let word_size = std::mem::size_of::<usize>();
-    let mut words = vec![0usize; (needed as usize).div_ceil(word_size)];
-    if unsafe {
-        QueryServiceConfig2W(
-            service.0,
-            information_level,
-            words.as_mut_ptr().cast(),
-            needed,
-            &mut needed,
-        )
-    } == 0
-    {
-        return Err(format!(
-            "QueryServiceConfig2W({information_level}) failed with {}",
-            unsafe { GetLastError() }
-        ));
-    }
-    Ok(AlignedConfigBuffer {
-        words,
-        byte_length: needed as usize,
+) -> Result<ScmResponse, String> {
+    ScmResponse::query(minimum_bytes, |buffer, capacity, needed| {
+        // SAFETY: `service` holds a live SCM handle; buffer and capacity
+        // describe the response allocation or the documented null probe.
+        unsafe { QueryServiceConfig2W(service.0, information_level, buffer, capacity, needed) }
     })
+    .map_err(|error| match error {
+        ScmResponseError::Win32(code) => {
+            format!("QueryServiceConfig2W({information_level}) failed with {code}")
+        }
+        malformed => format!(
+            "QueryServiceConfig2W({information_level}) failed: {}",
+            malformed.describe()
+        ),
+    })
+}
+
+fn config2_error(information_level: u32, error: ScmResponseError) -> String {
+    format!(
+        "QueryServiceConfig2W({information_level}) failed: {}",
+        error.describe()
+    )
 }
 
 fn optional_nonempty(value: Option<String>) -> Option<String> {
@@ -234,7 +126,9 @@ pub(super) fn service_has_triggers(service: &ServiceHandle) -> Result<bool, Stri
         SERVICE_CONFIG_TRIGGER_INFO,
         std::mem::size_of::<SERVICE_TRIGGER_INFO>(),
     )?;
-    let trigger = buffer.read::<SERVICE_TRIGGER_INFO>()?;
+    let trigger = buffer
+        .header::<SERVICE_TRIGGER_INFO>()
+        .map_err(|error| config2_error(SERVICE_CONFIG_TRIGGER_INFO, error))?;
     Ok(trigger.cTriggers != 0 || !trigger.pTriggers.is_null() || !trigger.pReserved.is_null())
 }
 
@@ -246,14 +140,20 @@ pub(super) fn query_extended_configuration(
         SERVICE_CONFIG_DESCRIPTION,
         std::mem::size_of::<SERVICE_DESCRIPTIONW>(),
     )?;
-    let description = description_buffer.read::<SERVICE_DESCRIPTIONW>()?;
+    let description = description_buffer
+        .header::<SERVICE_DESCRIPTIONW>()
+        .map_err(|error| config2_error(SERVICE_CONFIG_DESCRIPTION, error))?;
     let failure_buffer = query_config2_buffer(
         service,
         SERVICE_CONFIG_FAILURE_ACTIONS,
         std::mem::size_of::<SERVICE_FAILURE_ACTIONSW>(),
     )?;
-    let failure = failure_buffer.read::<SERVICE_FAILURE_ACTIONSW>()?;
-    let raw_actions = failure_buffer.actions(failure.lpsaActions, failure.cActions)?;
+    let failure = failure_buffer
+        .header::<SERVICE_FAILURE_ACTIONSW>()
+        .map_err(|error| config2_error(SERVICE_CONFIG_FAILURE_ACTIONS, error))?;
+    let raw_actions = failure_buffer
+        .array::<SC_ACTION>(failure.lpsaActions, failure.cActions, MAX_FAILURE_ACTIONS)
+        .map_err(|error| config2_error(SERVICE_CONFIG_FAILURE_ACTIONS, error))?;
     let mut actions = Vec::with_capacity(raw_actions.len());
     for action in raw_actions {
         if !matches!(
@@ -276,19 +176,25 @@ pub(super) fn query_extended_configuration(
         SERVICE_CONFIG_FAILURE_ACTIONS_FLAG,
         std::mem::size_of::<SERVICE_FAILURE_ACTIONS_FLAG>(),
     )?;
-    let failure_flag = failure_flag_buffer.read::<SERVICE_FAILURE_ACTIONS_FLAG>()?;
+    let failure_flag = failure_flag_buffer
+        .header::<SERVICE_FAILURE_ACTIONS_FLAG>()
+        .map_err(|error| config2_error(SERVICE_CONFIG_FAILURE_ACTIONS_FLAG, error))?;
     let delayed_buffer = query_config2_buffer(
         service,
         SERVICE_CONFIG_DELAYED_AUTO_START_INFO,
         std::mem::size_of::<SERVICE_DELAYED_AUTO_START_INFO>(),
     )?;
-    let delayed = delayed_buffer.read::<SERVICE_DELAYED_AUTO_START_INFO>()?;
+    let delayed = delayed_buffer
+        .header::<SERVICE_DELAYED_AUTO_START_INFO>()
+        .map_err(|error| config2_error(SERVICE_CONFIG_DELAYED_AUTO_START_INFO, error))?;
     let sid_buffer = query_config2_buffer(
         service,
         SERVICE_CONFIG_SERVICE_SID_INFO,
         std::mem::size_of::<SERVICE_SID_INFO>(),
     )?;
-    let sid = sid_buffer.read::<SERVICE_SID_INFO>()?;
+    let sid = sid_buffer
+        .header::<SERVICE_SID_INFO>()
+        .map_err(|error| config2_error(SERVICE_CONFIG_SERVICE_SID_INFO, error))?;
     if !matches!(sid.dwServiceSidType, 0 | 1 | 3) {
         return Err("legacy service has an unsupported service SID type".to_owned());
     }
@@ -297,32 +203,64 @@ pub(super) fn query_extended_configuration(
         SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO,
         std::mem::size_of::<SERVICE_REQUIRED_PRIVILEGES_INFOW>(),
     )?;
-    let privileges = privileges_buffer.read::<SERVICE_REQUIRED_PRIVILEGES_INFOW>()?;
+    let privileges = privileges_buffer
+        .header::<SERVICE_REQUIRED_PRIVILEGES_INFOW>()
+        .map_err(|error| config2_error(SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO, error))?;
     let preshutdown_buffer = query_config2_buffer(
         service,
         SERVICE_CONFIG_PRESHUTDOWN_INFO,
         std::mem::size_of::<SERVICE_PRESHUTDOWN_INFO>(),
     )?;
-    let preshutdown = preshutdown_buffer.read::<SERVICE_PRESHUTDOWN_INFO>()?;
+    let preshutdown = preshutdown_buffer
+        .header::<SERVICE_PRESHUTDOWN_INFO>()
+        .map_err(|error| config2_error(SERVICE_CONFIG_PRESHUTDOWN_INFO, error))?;
     let trigger_buffer = query_config2_buffer(
         service,
         SERVICE_CONFIG_TRIGGER_INFO,
         std::mem::size_of::<SERVICE_TRIGGER_INFO>(),
     )?;
-    let trigger = trigger_buffer.read::<SERVICE_TRIGGER_INFO>()?;
+    let trigger = trigger_buffer
+        .header::<SERVICE_TRIGGER_INFO>()
+        .map_err(|error| config2_error(SERVICE_CONFIG_TRIGGER_INFO, error))?;
+
+    let required_privileges = privileges_buffer
+        .multi_units(privileges.pmszRequiredPrivileges, MAX_REQUIRED_PRIVILEGES)
+        .map_err(|error| config2_error(SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO, error))?
+        .into_iter()
+        .map(|units| {
+            String::from_utf16(units).map_err(|_| {
+                config2_error(
+                    SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO,
+                    ScmResponseError::InvalidUtf16,
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(ServiceExtendedConfiguration {
-        description: optional_nonempty(description_buffer.wide_string(description.lpDescription)?),
+        description: optional_nonempty(
+            description_buffer
+                .wide_string(description.lpDescription)
+                .map_err(|error| config2_error(SERVICE_CONFIG_DESCRIPTION, error))?,
+        ),
         failure_actions: FailureActionsConfiguration {
             reset_period_seconds: failure.dwResetPeriod,
-            reboot_message: optional_nonempty(failure_buffer.wide_string(failure.lpRebootMsg)?),
-            command: optional_nonempty(failure_buffer.wide_string(failure.lpCommand)?),
+            reboot_message: optional_nonempty(
+                failure_buffer
+                    .wide_string(failure.lpRebootMsg)
+                    .map_err(|error| config2_error(SERVICE_CONFIG_FAILURE_ACTIONS, error))?,
+            ),
+            command: optional_nonempty(
+                failure_buffer
+                    .wide_string(failure.lpCommand)
+                    .map_err(|error| config2_error(SERVICE_CONFIG_FAILURE_ACTIONS, error))?,
+            ),
             actions,
         },
         failure_actions_on_non_crash: failure_flag.fFailureActionsOnNonCrashFailures != 0,
         delayed_auto_start: delayed.fDelayedAutostart != 0,
         service_sid_type: sid.dwServiceSidType,
-        required_privileges: privileges_buffer.multi_string(privileges.pmszRequiredPrivileges)?,
+        required_privileges,
         preshutdown_timeout_ms: preshutdown.dwPreshutdownTimeout,
         triggers: snapshot_trigger_configuration(
             trigger.cTriggers,

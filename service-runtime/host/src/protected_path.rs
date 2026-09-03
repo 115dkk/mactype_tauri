@@ -4,6 +4,8 @@ use std::io::Read;
 use std::path::Path;
 
 use mactype_service_contract::{RuntimeGenerationPointer, MAX_RUNTIME_POINTER_BYTES};
+#[cfg(windows)]
+use mactype_service_platform::is_reparse_point;
 
 pub(crate) const MAX_POINTER_BYTES: u64 = MAX_RUNTIME_POINTER_BYTES;
 
@@ -47,24 +49,6 @@ pub(crate) fn has_reparse_ancestor(path: &Path) -> io::Result<bool> {
         }
     }
     Ok(false)
-}
-
-#[cfg(windows)]
-fn is_reparse_point(path: &Path) -> io::Result<bool> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::{
-        GetFileAttributesW, FILE_ATTRIBUTE_REPARSE_POINT, INVALID_FILE_ATTRIBUTES,
-    };
-    let path = path
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect::<Vec<_>>();
-    let attributes = unsafe { GetFileAttributesW(path.as_ptr()) };
-    if attributes == INVALID_FILE_ATTRIBUTES {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0)
 }
 
 #[cfg(not(windows))]

@@ -5,6 +5,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mactype_service_contract::HealthReport;
+#[cfg(windows)]
+use mactype_service_platform::replace_file;
 
 use crate::protected_path::{has_reparse_ancestor, read_bounded_contents};
 use crate::HealthPublisher;
@@ -176,35 +178,6 @@ fn temporary_nonce() -> String {
         .map_or(0, |duration| duration.as_nanos());
     let sequence = TEMPORARY_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     format!("{}-{timestamp}-{sequence}", std::process::id())
-}
-
-#[cfg(windows)]
-fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::{
-        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
-    };
-    let source = source
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect::<Vec<_>>();
-    let destination = destination
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect::<Vec<_>>();
-    if unsafe {
-        MoveFileExW(
-            source.as_ptr(),
-            destination.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    } == 0
-    {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
 }
 
 #[cfg(not(windows))]

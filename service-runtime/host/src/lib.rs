@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 mod control;
 mod file_health;
 mod helper_broker;

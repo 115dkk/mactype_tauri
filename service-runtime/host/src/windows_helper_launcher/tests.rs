@@ -1,11 +1,8 @@
 use super::*;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::thread;
-
-use windows_sys::Win32::System::JobObjects::{
-    JOB_OBJECT_LIMIT_ACTIVE_PROCESS, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-};
 
 use crate::HelperLaunchStage;
 
@@ -16,19 +13,13 @@ fn stop_during_helper() -> bool {
     STOP_DURING_HELPER.load(Ordering::Acquire)
 }
 
-fn current_process_invocation(
-    executable: std::path::PathBuf,
-    timeout: Duration,
-) -> HelperInvocation {
-    let process = OwnedHandle::new(unsafe {
-        OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, std::process::id())
-    })
-    .unwrap();
+fn current_process_invocation(executable: PathBuf, timeout: Duration) -> HelperInvocation {
+    let process = Process::open(std::process::id(), ProcessAccess::QueryLimited).unwrap();
     HelperInvocation {
         executable,
         target: crate::ProcessIdentity {
             pid: std::process::id(),
-            creation_time: process_creation_time(process.get()).unwrap(),
+            creation_time: process.creation_time().unwrap(),
             session_id: 1,
             architecture: crate::ProcessArchitecture::X64,
             protected: false,
@@ -40,19 +31,26 @@ fn current_process_invocation(
     }
 }
 
+/// The launcher's last child must already have exited. A PID that can no
+/// longer be opened has left the process table, which is the same proof.
+fn assert_last_child_exited() {
+    let pid = LAST_TEST_CHILD_PID.load(Ordering::Acquire);
+    assert_ne!(pid, 0);
+    if let Ok(child) = Process::open(pid, ProcessAccess::Synchronize) {
+        assert_eq!(
+            child.wait(Some(Duration::ZERO)).unwrap(),
+            WaitOutcome::Signaled
+        );
+    }
+}
+
 #[test]
 fn helper_job_enforces_single_process_and_kill_on_close() {
-    let job = JobObject::new().unwrap();
-    let limits = job.query_limits().unwrap();
-    assert_eq!(limits.BasicLimitInformation.ActiveProcessLimit, 1);
-    assert_ne!(
-        limits.BasicLimitInformation.LimitFlags & JOB_OBJECT_LIMIT_ACTIVE_PROCESS,
-        0
-    );
-    assert_ne!(
-        limits.BasicLimitInformation.LimitFlags & JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        0
-    );
+    let job = JobObject::single_process_kill_on_close().unwrap();
+    let limits = job.limits().unwrap();
+    assert_eq!(limits.active_process_limit, 1);
+    assert!(limits.active_process_limit_enabled);
+    assert!(limits.kill_on_close);
 }
 
 #[test]
@@ -63,8 +61,7 @@ fn in_flight_helper_is_cancelled_without_waiting_for_its_twenty_second_timeout()
     STOP_DURING_HELPER.store(false, Ordering::Release);
     LAST_TEST_CHILD_PID.store(0, Ordering::Release);
     let launcher = WindowsHelperLauncher::new(stop_during_helper);
-    let executable =
-        std::path::PathBuf::from(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe");
+    let executable = PathBuf::from(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe");
     let invocation = current_process_invocation(executable, Duration::from_secs(20));
     let stop = thread::spawn(|| {
         thread::sleep(Duration::from_millis(100));
@@ -90,16 +87,7 @@ fn in_flight_helper_is_cancelled_without_waiting_for_its_twenty_second_timeout()
     assert_eq!(error.stage(), HelperLaunchStage::AfterResume);
     assert!(started.elapsed() < Duration::from_secs(3));
 
-    let pid = LAST_TEST_CHILD_PID.load(Ordering::Acquire);
-    assert_ne!(pid, 0);
-    let child = unsafe { OpenProcess(SYNCHRONIZE, 0, pid) };
-    if !child.is_null() {
-        let child = OwnedHandle::new(child).unwrap();
-        assert_eq!(
-            unsafe { WaitForSingleObject(child.get(), 0) },
-            WAIT_OBJECT_0
-        );
-    }
+    assert_last_child_exited();
 }
 
 #[test]
@@ -110,8 +98,7 @@ fn absolute_timeout_terminates_the_helper_job_without_an_orphan() {
     STOP_DURING_HELPER.store(false, Ordering::Release);
     LAST_TEST_CHILD_PID.store(0, Ordering::Release);
     let launcher = WindowsHelperLauncher::new(stop_during_helper);
-    let executable =
-        std::path::PathBuf::from(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe");
+    let executable = PathBuf::from(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe");
     let invocation = current_process_invocation(executable, Duration::from_millis(700));
     let started = Instant::now();
     let error = launcher
@@ -136,23 +123,13 @@ fn absolute_timeout_terminates_the_helper_job_without_an_orphan() {
     assert!(started.elapsed() >= Duration::from_millis(400));
     assert!(started.elapsed() < Duration::from_secs(4));
 
-    let pid = LAST_TEST_CHILD_PID.load(Ordering::Acquire);
-    assert_ne!(pid, 0);
-    let child = unsafe { OpenProcess(SYNCHRONIZE, 0, pid) };
-    if !child.is_null() {
-        let child = OwnedHandle::new(child).unwrap();
-        assert_eq!(
-            unsafe { WaitForSingleObject(child.get(), 0) },
-            WAIT_OBJECT_0
-        );
-    }
+    assert_last_child_exited();
 }
 
 #[test]
 fn closing_the_service_owned_job_terminates_a_running_helper() {
-    let job = JobObject::new().unwrap();
-    let executable =
-        std::path::PathBuf::from(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe");
+    let job = JobObject::single_process_kill_on_close().unwrap();
+    let executable = PathBuf::from(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe");
     let arguments = [
         "-NoProfile",
         "-NonInteractive",
@@ -162,47 +139,29 @@ fn closing_the_service_owned_job_terminates_a_running_helper() {
     .into_iter()
     .map(OsString::from)
     .collect::<Vec<_>>();
-    let mut command = command_line(&executable, &arguments);
-    let application = executable
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect::<Vec<_>>();
-    let startup = windows_sys::Win32::System::Threading::STARTUPINFOW {
-        cb: size_of::<windows_sys::Win32::System::Threading::STARTUPINFOW>() as u32,
-        ..Default::default()
-    };
-    let mut process = PROCESS_INFORMATION::default();
-    assert_ne!(
-        unsafe {
-            CreateProcessW(
-                application.as_ptr(),
-                command.as_mut_ptr(),
-                null(),
-                null(),
-                0,
-                CREATE_NO_WINDOW | CREATE_SUSPENDED,
-                null(),
-                null(),
-                &startup,
-                &mut process,
-            )
+    let null = null_device().unwrap();
+    let child = SuspendedChild::create(&ProcessLaunch {
+        executable: &executable,
+        arguments: &arguments,
+        inherit: &[&null],
+        standard: StandardHandles {
+            input: &null,
+            output: &null,
+            error: &null,
         },
-        0
+    })
+    .unwrap();
+    job.assign(child.process()).unwrap();
+    let process = child.resume().unwrap();
+    assert_eq!(
+        process.wait(Some(Duration::ZERO)).unwrap(),
+        WaitOutcome::TimedOut
     );
-    let child = OwnedHandle::new(process.hProcess).unwrap();
-    let thread = OwnedHandle::new(process.hThread).unwrap();
-    assert_ne!(
-        unsafe { AssignProcessToJobObject(job.handle(), child.get()) },
-        0
-    );
-    assert_ne!(unsafe { ResumeThread(thread.get()) }, u32::MAX);
-    assert_eq!(unsafe { WaitForSingleObject(child.get(), 0) }, WAIT_TIMEOUT);
 
     drop(job);
 
     assert_eq!(
-        unsafe { WaitForSingleObject(child.get(), 2_000) },
-        WAIT_OBJECT_0
+        process.wait(Some(Duration::from_secs(2))).unwrap(),
+        WaitOutcome::Signaled
     );
 }

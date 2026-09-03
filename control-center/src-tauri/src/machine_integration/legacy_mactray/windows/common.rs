@@ -1,7 +1,8 @@
 use super::super::*;
-use std::{ffi::OsStr, os::windows::ffi::OsStrExt, path::PathBuf};
+use crate::machine_integration::scm_response::{ScmResponse, ScmResponseError};
+use std::{ffi::OsStr, mem::size_of, os::windows::ffi::OsStrExt, path::PathBuf};
 use windows_sys::Win32::{
-    Foundation::{GetLastError, ERROR_INSUFFICIENT_BUFFER},
+    Foundation::GetLastError,
     System::{
         Com::CoTaskMemFree,
         Services::{
@@ -35,33 +36,29 @@ pub(super) fn wide_multi(values: &[String]) -> Vec<u16> {
         .collect()
 }
 
-pub(super) unsafe fn wide_string(pointer: *const u16) -> String {
+/// Reads a NUL-terminated string with a fixed upper bound.
+///
+/// # Safety
+///
+/// `pointer` must be null or point to at least 32,768 readable `u16` values,
+/// unless a NUL occurs earlier.
+unsafe fn wide_string(pointer: *const u16) -> Option<String> {
     if pointer.is_null() {
-        return String::new();
+        return None;
     }
+    const MAX_UNITS: usize = 32_768;
     let mut length = 0;
-    while unsafe { *pointer.add(length) } != 0 {
+    while length < MAX_UNITS {
+        // SAFETY: the caller guarantees that values through `MAX_UNITS` are
+        // readable unless an earlier NUL terminates the string.
+        if unsafe { *pointer.add(length) } == 0 {
+            // SAFETY: the scan proved that all `length` units are readable.
+            let units = unsafe { std::slice::from_raw_parts(pointer, length) };
+            return Some(String::from_utf16_lossy(units));
+        }
         length += 1;
     }
-    String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(pointer, length) })
-}
-
-unsafe fn multi_string(pointer: *const u16) -> Vec<String> {
-    let mut result = Vec::new();
-    if pointer.is_null() {
-        return result;
-    }
-    let mut offset = 0;
-    loop {
-        let start = unsafe { pointer.add(offset) };
-        if unsafe { *start } == 0 {
-            break;
-        }
-        let value = unsafe { wide_string(start) };
-        offset += value.encode_utf16().count() + 1;
-        result.push(value);
-    }
-    result
+    None
 }
 
 fn program_files_root() -> Option<PathBuf> {
@@ -77,9 +74,11 @@ fn program_files_root() -> Option<PathBuf> {
     if result < 0 || pointer.is_null() {
         return None;
     }
+    // SAFETY: SHGetKnownFolderPath returned a CoTaskMem-allocated,
+    // NUL-terminated path string on success.
     let root = unsafe { wide_string(pointer) };
     unsafe { CoTaskMemFree(pointer.cast()) };
-    let root = std::fs::canonicalize(root).ok()?;
+    let root = std::fs::canonicalize(root?).ok()?;
     root.is_dir().then_some(root)
 }
 
@@ -126,34 +125,45 @@ pub(super) fn query_runtime(service: &ServiceHandle) -> Result<ServiceRuntimeSta
 }
 
 pub(super) fn query_configuration(service: &ServiceHandle) -> Result<ServiceConfiguration, u32> {
-    let mut needed = 0;
-    let initial_query =
-        unsafe { QueryServiceConfigW(service.0, std::ptr::null_mut(), 0, &mut needed) };
-    let initial_error = unsafe { GetLastError() };
-    if initial_query != 0
-        || initial_error != ERROR_INSUFFICIENT_BUFFER
-        || needed < std::mem::size_of::<QUERY_SERVICE_CONFIGW>() as u32
-    {
-        return Err(initial_error);
-    }
-    let word_size = std::mem::size_of::<usize>();
-    let mut buffer = vec![0usize; (needed as usize).div_ceil(word_size)];
-    let configuration = buffer.as_mut_ptr().cast::<QUERY_SERVICE_CONFIGW>();
-    if unsafe { QueryServiceConfigW(service.0, configuration, needed, &mut needed) } == 0 {
-        return Err(unsafe { GetLastError() });
-    }
-    let raw = unsafe { &*configuration };
-    let load_order_group = unsafe { wide_string(raw.lpLoadOrderGroup) };
+    const MAX_DEPENDENCIES: usize = 256;
+
+    let response = ScmResponse::query(
+        size_of::<QUERY_SERVICE_CONFIGW>(),
+        |buffer, capacity, needed| {
+            // SAFETY: `service` holds a live SCM handle; buffer and capacity
+            // describe the response allocation or the documented null probe.
+            unsafe { QueryServiceConfigW(service.0, buffer.cast(), capacity, needed) }
+        },
+    )
+    .map_err(ScmResponseError::win32_code)?;
+    let raw = response
+        .header::<QUERY_SERVICE_CONFIGW>()
+        .map_err(ScmResponseError::win32_code)?;
+    let load_order_group = response
+        .wide_string_lossy(raw.lpLoadOrderGroup)
+        .map_err(ScmResponseError::win32_code)?;
+    let dependencies = response
+        .multi_units(raw.lpDependencies, MAX_DEPENDENCIES)
+        .map_err(ScmResponseError::win32_code)?
+        .into_iter()
+        .map(String::from_utf16_lossy)
+        .collect();
     Ok(ServiceConfiguration {
-        display_name: unsafe { wide_string(raw.lpDisplayName) },
-        binary_path: unsafe { wide_string(raw.lpBinaryPathName) },
+        display_name: response
+            .wide_string_lossy(raw.lpDisplayName)
+            .map_err(ScmResponseError::win32_code)?,
+        binary_path: response
+            .wide_string_lossy(raw.lpBinaryPathName)
+            .map_err(ScmResponseError::win32_code)?,
         service_type: raw.dwServiceType,
         start_type: raw.dwStartType,
         error_control: raw.dwErrorControl,
         load_order_group: (!load_order_group.is_empty()).then_some(load_order_group),
         tag_id: raw.dwTagId,
-        account: unsafe { wide_string(raw.lpServiceStartName) },
-        dependencies: unsafe { multi_string(raw.lpDependencies) },
+        account: response
+            .wide_string_lossy(raw.lpServiceStartName)
+            .map_err(ScmResponseError::win32_code)?,
+        dependencies,
     })
 }
 

@@ -5,6 +5,7 @@ mod model;
 mod open_service;
 mod orchestrator;
 mod publish;
+mod scm_response;
 mod startup_coordination;
 mod status;
 mod system_backend;

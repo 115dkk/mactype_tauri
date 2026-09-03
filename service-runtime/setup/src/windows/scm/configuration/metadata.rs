@@ -1,14 +1,6 @@
-use std::ffi::c_void;
-use std::io;
-use std::ptr;
+use mactype_service_platform::ServiceHandle;
 
-use windows_sys::Win32::System::Services::{
-    ChangeServiceConfig2W, SC_ACTION, SC_ACTION_RESTART, SC_HANDLE, SERVICE_CONFIG_DESCRIPTION,
-    SERVICE_CONFIG_FAILURE_ACTIONS, SERVICE_CONFIG_FAILURE_ACTIONS_FLAG, SERVICE_DESCRIPTIONW,
-    SERVICE_FAILURE_ACTIONSW, SERVICE_FAILURE_ACTIONS_FLAG,
-};
-
-use super::super::{wide, DESCRIPTION};
+use super::super::DESCRIPTION;
 use crate::SetupError;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -45,66 +37,31 @@ fn apply_metadata_configuration(
     Ok(())
 }
 
-struct WindowsMetadataConfigurationAdapter {
-    service: SC_HANDLE,
+struct WindowsMetadataConfigurationAdapter<'a> {
+    service: &'a ServiceHandle,
 }
 
-impl MetadataConfigurationAdapter for WindowsMetadataConfigurationAdapter {
+impl MetadataConfigurationAdapter for WindowsMetadataConfigurationAdapter<'_> {
     fn apply(&mut self, operation: ServiceMetadataOperation) -> Result<(), SetupError> {
         match operation {
-            ServiceMetadataOperation::Description(text) => {
-                let mut description_text = wide(text);
-                let description = SERVICE_DESCRIPTIONW {
-                    lpDescription: description_text.as_mut_ptr(),
-                };
-                self.change(
-                    SERVICE_CONFIG_DESCRIPTION,
-                    &raw const description as *const c_void,
-                )
-            }
+            ServiceMetadataOperation::Description(text) => self.service.set_description(text),
             ServiceMetadataOperation::RestartOnFailure {
                 reset_period_seconds,
                 delays_milliseconds,
-            } => {
-                let mut actions = delays_milliseconds.map(|delay| SC_ACTION {
-                    Type: SC_ACTION_RESTART,
-                    Delay: delay,
-                });
-                let failure = SERVICE_FAILURE_ACTIONSW {
-                    dwResetPeriod: reset_period_seconds,
-                    lpRebootMsg: ptr::null_mut(),
-                    lpCommand: ptr::null_mut(),
-                    cActions: actions.len() as u32,
-                    lpsaActions: actions.as_mut_ptr(),
-                };
-                self.change(
-                    SERVICE_CONFIG_FAILURE_ACTIONS,
-                    &raw const failure as *const c_void,
-                )
-            }
-            ServiceMetadataOperation::IncludeNonCrashFailures(enabled) => {
-                let failure_flag = SERVICE_FAILURE_ACTIONS_FLAG {
-                    fFailureActionsOnNonCrashFailures: i32::from(enabled),
-                };
-                self.change(
-                    SERVICE_CONFIG_FAILURE_ACTIONS_FLAG,
-                    &raw const failure_flag as *const c_void,
-                )
-            }
+            } => self
+                .service
+                .set_restart_actions(reset_period_seconds, &delays_milliseconds),
+            ServiceMetadataOperation::IncludeNonCrashFailures(enabled) => self
+                .service
+                .set_failure_actions_on_non_crash_failures(enabled),
         }
+        .map_err(SetupError::Io)
     }
 }
 
-impl WindowsMetadataConfigurationAdapter {
-    fn change(&self, level: u32, data: *const c_void) -> Result<(), SetupError> {
-        if unsafe { ChangeServiceConfig2W(self.service, level, data) } == 0 {
-            return Err(SetupError::Io(io::Error::last_os_error()));
-        }
-        Ok(())
-    }
-}
-
-pub(in crate::windows::scm) fn configure_metadata(service: SC_HANDLE) -> Result<(), SetupError> {
+pub(in crate::windows::scm) fn configure_metadata(
+    service: &ServiceHandle,
+) -> Result<(), SetupError> {
     apply_metadata_configuration(&mut WindowsMetadataConfigurationAdapter { service })
 }
 

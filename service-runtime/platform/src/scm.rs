@@ -49,7 +49,10 @@ pub enum ServiceAccess {
 }
 
 impl ServiceAccess {
-    fn rights(self) -> u32 {
+    /// The Win32 access mask this variant opens the service with. Exposed so
+    /// callers can assert a policy about the rights they hold (for example
+    /// that reconfiguration also carries `SERVICE_START`).
+    pub fn rights(self) -> u32 {
         match self {
             Self::QueryStatus => SERVICE_QUERY_STATUS,
             Self::QueryConfig => SERVICE_QUERY_CONFIG,

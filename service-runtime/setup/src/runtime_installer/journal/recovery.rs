@@ -339,11 +339,11 @@ fn pointer_bytes(pointer: &RuntimePointer) -> Result<Vec<u8>, SetupError> {
 #[cfg(windows)]
 fn remove_exact_runtime_pointer(path: &Path, expected: &[u8]) -> Result<(), SetupError> {
     use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
-    use std::os::windows::io::AsRawHandle;
 
+    use mactype_service_platform::mark_open_file_for_deletion;
     use windows_sys::Win32::Storage::FileSystem::{
-        FileDispositionInfo, SetFileInformationByHandle, DELETE, FILE_ATTRIBUTE_REPARSE_POINT,
-        FILE_DISPOSITION_INFO, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ, FILE_SHARE_READ,
+        DELETE, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ,
+        FILE_SHARE_READ,
     };
 
     let mut file = OpenOptions::new()
@@ -384,21 +384,11 @@ fn remove_exact_runtime_pointer(path: &Path, expected: &[u8]) -> Result<(), Setu
             "owned runtime pointer changed before exact deletion".to_owned(),
         ));
     }
-    let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
-    if unsafe {
-        SetFileInformationByHandle(
-            file.as_raw_handle(),
-            FileDispositionInfo,
-            (&raw const disposition).cast(),
-            std::mem::size_of::<FILE_DISPOSITION_INFO>() as u32,
-        )
-    } == 0
-    {
-        return Err(SetupError::CleanupUnknown(format!(
-            "owned runtime pointer exact deletion result is unknown: {}",
-            std::io::Error::last_os_error()
-        )));
-    }
+    mark_open_file_for_deletion(&file).map_err(|error| {
+        SetupError::CleanupUnknown(format!(
+            "owned runtime pointer exact deletion result is unknown: {error}"
+        ))
+    })?;
     drop(file);
     Ok(())
 }

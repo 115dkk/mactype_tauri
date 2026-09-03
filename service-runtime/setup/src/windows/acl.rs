@@ -1,21 +1,14 @@
 use std::io;
 use std::path::{Path, PathBuf};
-use std::ptr;
 
+use mactype_service_platform::{
+    AclValidationError, AllowedAce, LocalSecurityDescriptor, OwnedSid, SecurityAclError,
+    SecurityDescriptor,
+};
 use windows_sys::Win32::Foundation::{
-    LocalFree, ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, GENERIC_EXECUTE,
-    GENERIC_READ,
+    ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, GENERIC_EXECUTE, GENERIC_READ,
 };
-use windows_sys::Win32::Security::Authorization::{
-    ConvertStringSecurityDescriptorToSecurityDescriptorW, ConvertStringSidToSidW,
-    GetNamedSecurityInfoW, TreeSetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
-    TREE_SEC_INFO_RESET,
-};
-use windows_sys::Win32::Security::{
-    AclSizeInformation, EqualSid, GetAce, GetAclInformation, GetSecurityDescriptorControl,
-    ACCESS_ALLOWED_ACE, ACL, ACL_SIZE_INFORMATION, DACL_SECURITY_INFORMATION, INHERIT_ONLY_ACE,
-    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED,
-};
+use windows_sys::Win32::Security::{INHERIT_ONLY_ACE, SE_DACL_PROTECTED};
 use windows_sys::Win32::Storage::FileSystem::{
     FILE_ALL_ACCESS, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ,
 };
@@ -28,7 +21,6 @@ const SYSTEM_SID: &str = "S-1-5-18";
 const ADMINISTRATORS_SID: &str = "S-1-5-32-544";
 const USERS_SID: &str = "S-1-5-32-545";
 const MAX_PROTECTED_TREE_ENTRIES: usize = 100_000;
-const ACCESS_ALLOWED_ACE_KIND: u8 = 0;
 
 pub fn harden_machine_directory(path: &Path) -> Result<(), SetupError> {
     harden_machine_directory_observed(path, |_, _| {})
@@ -46,31 +38,12 @@ fn harden_machine_directory_observed(
 ) -> Result<(), SetupError> {
     let paths = collect_protected_tree(path, &mut observe)
         .map_err(|error| error.at_machine_path("enumerate protected ACL tree", path))?;
-    let descriptor = OwnedSecurityDescriptor::from_sddl(MACHINE_TREE_SDDL)
-        .map_err(|error| error.at_machine_path("build protected ACL descriptor", path))?;
-    let dacl = descriptor
-        .dacl()
-        .map_err(|error| error.at_machine_path("read protected ACL descriptor", path))?;
-    let path_wide = wide_path(path);
-    let status = unsafe {
-        TreeSetNamedSecurityInfoW(
-            path_wide.as_ptr(),
-            SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-            ptr::null_mut(),
-            ptr::null_mut(),
-            dacl,
-            ptr::null_mut(),
-            TREE_SEC_INFO_RESET,
-            None,
-            0,
-            ptr::null(),
-        )
-    };
-    if status != ERROR_SUCCESS {
-        return Err(SetupError::Io(io::Error::from_raw_os_error(status as i32))
-            .at_machine_path("reset protected ACL tree", path));
-    }
+    let descriptor = SecurityDescriptor::from_sddl(MACHINE_TREE_SDDL).map_err(|error| {
+        SetupError::Io(error).at_machine_path("build protected ACL descriptor", path)
+    })?;
+    descriptor
+        .apply_to_tree(path, true)
+        .map_err(|error| SetupError::Io(error).at_machine_path("reset protected ACL tree", path))?;
 
     let sids = ExpectedSids::new()
         .map_err(|error| error.at_machine_path("build protected ACL trustees", path))?;
@@ -161,36 +134,10 @@ fn verify_protected_acl(
     sids: &ExpectedSids,
     require_protected: bool,
 ) -> Result<(), SetupError> {
-    let path_wide = wide_path(path);
-    let mut dacl = ptr::null_mut();
-    let mut descriptor = ptr::null_mut();
-    let status = unsafe {
-        GetNamedSecurityInfoW(
-            path_wide.as_ptr(),
-            SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION,
-            ptr::null_mut(),
-            ptr::null_mut(),
-            &mut dacl,
-            ptr::null_mut(),
-            &mut descriptor,
-        )
-    };
-    if status != ERROR_SUCCESS || descriptor.is_null() || dacl.is_null() {
-        if !descriptor.is_null() {
-            unsafe {
-                LocalFree(descriptor);
-            }
-        }
-        return Err(SetupError::Io(io::Error::from_raw_os_error(status as i32)));
-    }
-    let _descriptor = OwnedLocalMemory(descriptor);
+    let descriptor = LocalSecurityDescriptor::query_named_file(path)
+        .map_err(|status| SetupError::Io(io::Error::from_raw_os_error(status as i32)))?;
 
-    let mut control = 0u16;
-    let mut revision = 0u32;
-    if unsafe { GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) } == 0 {
-        return Err(SetupError::Io(io::Error::last_os_error()));
-    }
+    let control = descriptor.control().map_err(SetupError::Io)?;
     if require_protected && control & SE_DACL_PROTECTED == 0 {
         return Err(SetupError::Runtime(format!(
             "protected machine ACL still permits inheritance: {}",
@@ -198,60 +145,50 @@ fn verify_protected_acl(
         )));
     }
 
-    let mut size = ACL_SIZE_INFORMATION::default();
-    if unsafe {
-        GetAclInformation(
-            dacl,
-            &mut size as *mut _ as *mut std::ffi::c_void,
-            std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
-            AclSizeInformation,
-        )
-    } == 0
-    {
-        return Err(SetupError::Io(io::Error::last_os_error()));
-    }
-
-    let mut saw_system = false;
-    let mut saw_administrators = false;
-    let mut saw_users = false;
-    for index in 0..size.AceCount {
-        let mut raw_ace = ptr::null_mut();
-        if unsafe { GetAce(dacl, index, &mut raw_ace) } == 0 || raw_ace.is_null() {
-            return Err(SetupError::Io(io::Error::last_os_error()));
-        }
-        let ace = unsafe { &*(raw_ace as *const ACCESS_ALLOWED_ACE) };
-        if ace.Header.AceType != ACCESS_ALLOWED_ACE_KIND {
+    // The platform validates every ACE before any is exposed: a deny or
+    // audit entry anywhere in the DACL is the non-allow rejection, and any
+    // other malformed structure is treated as an ACL that does not match.
+    let dacl = match descriptor.dacl() {
+        Ok(dacl) => dacl,
+        Err(SecurityAclError::Io(error)) => return Err(SetupError::Io(error)),
+        Err(SecurityAclError::Invalid(AclValidationError::UnsupportedAceType)) => {
             return Err(SetupError::Runtime(format!(
                 "protected machine ACL contains a non-allow ACE: {}",
                 path.display()
             )));
         }
-        let sid = ptr::addr_of!(ace.SidStart) as PSID;
-        if unsafe { EqualSid(sid, sids.system.0) } != 0 {
-            if ace.Mask != FILE_ALL_ACCESS {
+        Err(SecurityAclError::Invalid(_)) => return Err(invalid_acl(path)),
+    };
+
+    let mut saw_system = false;
+    let mut saw_administrators = false;
+    let mut saw_users = false;
+    for ace in dacl.allowed_aces() {
+        if ace.trustee_matches(&sids.system) {
+            if ace.mask() != FILE_ALL_ACCESS {
                 return Err(invalid_acl(path));
             }
-            if ace_applies_to_current_object(ace.Header.AceFlags) {
+            if ace_applies_to_current_object(ace.flags()) {
                 if saw_system {
                     return Err(invalid_acl(path));
                 }
                 saw_system = true;
             }
-        } else if unsafe { EqualSid(sid, sids.administrators.0) } != 0 {
-            if ace.Mask != FILE_ALL_ACCESS {
+        } else if ace.trustee_matches(&sids.administrators) {
+            if ace.mask() != FILE_ALL_ACCESS {
                 return Err(invalid_acl(path));
             }
-            if ace_applies_to_current_object(ace.Header.AceFlags) {
+            if ace_applies_to_current_object(ace.flags()) {
                 if saw_administrators {
                     return Err(invalid_acl(path));
                 }
                 saw_administrators = true;
             }
-        } else if unsafe { EqualSid(sid, sids.users.0) } != 0 {
-            if !is_users_read_execute_mask(ace.Mask) {
+        } else if ace.trustee_matches(&sids.users) {
+            if !is_users_read_execute_mask(ace.mask()) {
                 return Err(invalid_acl_ace(path, "Users", ace));
             }
-            if ace_applies_to_current_object(ace.Header.AceFlags) {
+            if ace_applies_to_current_object(ace.flags()) {
                 saw_users = true;
             }
         } else {
@@ -275,11 +212,11 @@ fn ace_applies_to_current_object(flags: u8) -> bool {
     flags & INHERIT_ONLY_ACE as u8 == 0
 }
 
-fn invalid_acl_ace(path: &Path, trustee: &str, ace: &ACCESS_ALLOWED_ACE) -> SetupError {
+fn invalid_acl_ace(path: &Path, trustee: &str, ace: &AllowedAce) -> SetupError {
     SetupError::Runtime(format!(
         "protected machine ACL has invalid {trustee} rights (mask=0x{:08X}, flags=0x{:02X}, expected=0x{:08X} or 0x{:08X}): {}",
-        ace.Mask,
-        ace.Header.AceFlags,
+        ace.mask(),
+        ace.flags(),
         GENERIC_READ | GENERIC_EXECUTE,
         FILE_GENERIC_READ | FILE_GENERIC_EXECUTE,
         path.display()
@@ -302,102 +239,11 @@ struct ExpectedSids {
 impl ExpectedSids {
     fn new() -> Result<Self, SetupError> {
         Ok(Self {
-            system: OwnedSid::from_string(SYSTEM_SID)?,
-            administrators: OwnedSid::from_string(ADMINISTRATORS_SID)?,
-            users: OwnedSid::from_string(USERS_SID)?,
+            system: OwnedSid::from_string(SYSTEM_SID).map_err(SetupError::Io)?,
+            administrators: OwnedSid::from_string(ADMINISTRATORS_SID).map_err(SetupError::Io)?,
+            users: OwnedSid::from_string(USERS_SID).map_err(SetupError::Io)?,
         })
     }
-}
-
-struct OwnedSid(PSID);
-
-impl OwnedSid {
-    fn from_string(value: &str) -> Result<Self, SetupError> {
-        let value = wide(value);
-        let mut sid = ptr::null_mut();
-        if unsafe { ConvertStringSidToSidW(value.as_ptr(), &mut sid) } == 0 || sid.is_null() {
-            return Err(SetupError::Io(io::Error::last_os_error()));
-        }
-        Ok(Self(sid))
-    }
-}
-
-impl Drop for OwnedSid {
-    fn drop(&mut self) {
-        unsafe {
-            LocalFree(self.0);
-        }
-    }
-}
-
-struct OwnedSecurityDescriptor(PSECURITY_DESCRIPTOR);
-
-impl OwnedSecurityDescriptor {
-    fn from_sddl(sddl: &str) -> Result<Self, SetupError> {
-        let sddl = wide(sddl);
-        let mut descriptor = ptr::null_mut();
-        if unsafe {
-            ConvertStringSecurityDescriptorToSecurityDescriptorW(
-                sddl.as_ptr(),
-                SDDL_REVISION_1,
-                &mut descriptor,
-                ptr::null_mut(),
-            )
-        } == 0
-            || descriptor.is_null()
-        {
-            return Err(SetupError::Io(io::Error::last_os_error()));
-        }
-        Ok(Self(descriptor))
-    }
-
-    fn dacl(&self) -> Result<*mut ACL, SetupError> {
-        let mut present = 0;
-        let mut defaulted = 0;
-        let mut dacl = ptr::null_mut();
-        if unsafe {
-            windows_sys::Win32::Security::GetSecurityDescriptorDacl(
-                self.0,
-                &mut present,
-                &mut dacl,
-                &mut defaulted,
-            )
-        } == 0
-            || present == 0
-            || dacl.is_null()
-        {
-            return Err(SetupError::Io(io::Error::last_os_error()));
-        }
-        Ok(dacl)
-    }
-}
-
-impl Drop for OwnedSecurityDescriptor {
-    fn drop(&mut self) {
-        unsafe {
-            LocalFree(self.0);
-        }
-    }
-}
-
-struct OwnedLocalMemory(PSECURITY_DESCRIPTOR);
-
-impl Drop for OwnedLocalMemory {
-    fn drop(&mut self) {
-        unsafe {
-            LocalFree(self.0);
-        }
-    }
-}
-
-fn wide(value: &str) -> Vec<u16> {
-    value.encode_utf16().chain(Some(0)).collect()
-}
-
-fn wide_path(path: &Path) -> Vec<u16> {
-    use std::os::windows::ffi::OsStrExt;
-
-    path.as_os_str().encode_wide().chain(Some(0)).collect()
 }
 
 #[cfg(test)]
@@ -405,6 +251,9 @@ mod tests {
     use mactype_service_contract::BrokerCommand;
     #[cfg(feature = "ci-test-adapter")]
     use mactype_service_contract::{sha256_digest, MachinePaths};
+    #[cfg(feature = "ci-test-adapter")]
+    use mactype_service_platform::{current_token_is_member_of, OwnedSid};
+    use mactype_service_platform::{LocalSecurityDescriptor, SecurityDescriptor};
     #[cfg(feature = "ci-test-adapter")]
     use std::collections::BTreeMap;
     use std::path::{Path, PathBuf};
@@ -415,15 +264,13 @@ mod tests {
     #[cfg(feature = "ci-test-adapter")]
     use crate::{FixedPayload, RuntimeInstaller};
 
+    #[cfg(feature = "ci-test-adapter")]
+    use super::ADMINISTRATORS_SID;
     use super::{
         ace_applies_to_current_object, harden_machine_directory, harden_machine_directory_observed,
         is_users_read_execute_mask, verify_protected_acl, ExpectedSids, HardeningObservation,
-        OwnedSecurityDescriptor, DACL_SECURITY_INFORMATION, ERROR_SUCCESS, FILE_GENERIC_EXECUTE,
-        FILE_GENERIC_READ, GENERIC_EXECUTE, GENERIC_READ, INHERIT_ONLY_ACE,
-        PROTECTED_DACL_SECURITY_INFORMATION, SE_FILE_OBJECT, TREE_SEC_INFO_RESET,
+        FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, GENERIC_EXECUTE, GENERIC_READ, INHERIT_ONLY_ACE,
     };
-    #[cfg(feature = "ci-test-adapter")]
-    use super::{OwnedSid, ADMINISTRATORS_SID};
 
     const BASE_ACL: &str = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)";
 
@@ -643,10 +490,10 @@ mod tests {
     #[test]
     fn machine_root_with_inheritable_dacl_is_rejected() {
         let directory = tempfile::tempdir().unwrap();
-        apply_acl_with_security_information(
+        apply_acl_with_protection(
             directory.path(),
             "D:(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)",
-            DACL_SECURITY_INFORMATION,
+            false,
         );
 
         let error = verify_protected_acl(directory.path(), &ExpectedSids::new().unwrap(), true)
@@ -745,33 +592,12 @@ mod tests {
     }
 
     fn apply_acl(path: &Path, sddl: &str) {
-        apply_acl_with_security_information(
-            path,
-            sddl,
-            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-        );
+        apply_acl_with_protection(path, sddl, true);
     }
 
-    fn apply_acl_with_security_information(path: &Path, sddl: &str, security_info: u32) {
-        let descriptor = OwnedSecurityDescriptor::from_sddl(sddl).unwrap();
-        let dacl = descriptor.dacl().unwrap();
-        let path_wide = super::wide_path(path);
-        let status = unsafe {
-            super::TreeSetNamedSecurityInfoW(
-                path_wide.as_ptr(),
-                SE_FILE_OBJECT,
-                security_info,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                dacl,
-                std::ptr::null_mut(),
-                TREE_SEC_INFO_RESET,
-                None,
-                0,
-                std::ptr::null(),
-            )
-        };
-        assert_eq!(status, ERROR_SUCCESS);
+    fn apply_acl_with_protection(path: &Path, sddl: &str, protect: bool) {
+        let descriptor = SecurityDescriptor::from_sddl(sddl).unwrap();
+        descriptor.apply_to_tree(path, protect).unwrap();
     }
 
     fn grant_users_modify_with_icacls(path: &Path) {
@@ -821,19 +647,9 @@ mod tests {
 
     #[cfg(feature = "ci-test-adapter")]
     fn current_token_is_enabled_administrator() -> bool {
-        let administrators = match OwnedSid::from_string(ADMINISTRATORS_SID) {
-            Ok(sid) => sid,
-            Err(_) => return false,
-        };
-        let mut is_member = 0;
-        unsafe {
-            windows_sys::Win32::Security::CheckTokenMembership(
-                std::ptr::null_mut(),
-                administrators.0,
-                &mut is_member,
-            ) != 0
-                && is_member != 0
-        }
+        OwnedSid::from_string(ADMINISTRATORS_SID)
+            .map(|administrators| current_token_is_member_of(&administrators))
+            .unwrap_or(false)
     }
 
     #[cfg(feature = "ci-test-adapter")]
@@ -867,55 +683,24 @@ mod tests {
     }
 
     fn acl_snapshot(path: &Path) -> Vec<(&'static str, u32, u8)> {
-        let path_wide = super::wide_path(path);
-        let mut dacl = std::ptr::null_mut();
-        let mut descriptor = std::ptr::null_mut();
-        let status = unsafe {
-            super::GetNamedSecurityInfoW(
-                path_wide.as_ptr(),
-                SE_FILE_OBJECT,
-                DACL_SECURITY_INFORMATION,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                &mut dacl,
-                std::ptr::null_mut(),
-                &mut descriptor,
-            )
-        };
-        assert_eq!(status, ERROR_SUCCESS);
-        assert!(!descriptor.is_null());
-        assert!(!dacl.is_null());
-        let _descriptor = super::OwnedLocalMemory(descriptor);
-
-        let mut size = super::ACL_SIZE_INFORMATION::default();
-        assert_ne!(
-            unsafe {
-                super::GetAclInformation(
-                    dacl,
-                    &mut size as *mut _ as *mut std::ffi::c_void,
-                    std::mem::size_of::<super::ACL_SIZE_INFORMATION>() as u32,
-                    super::AclSizeInformation,
-                )
-            },
-            0
-        );
+        let descriptor = LocalSecurityDescriptor::query_named_file(path)
+            .expect("the fixture path has a readable DACL");
+        let dacl = descriptor
+            .dacl()
+            .expect("the fixture DACL holds only allow ACEs");
         let sids = ExpectedSids::new().unwrap();
-        (0..size.AceCount)
-            .map(|index| {
-                let mut raw_ace = std::ptr::null_mut();
-                assert_ne!(unsafe { super::GetAce(dacl, index, &mut raw_ace) }, 0);
-                let ace = unsafe { &*(raw_ace as *const super::ACCESS_ALLOWED_ACE) };
-                let sid = std::ptr::addr_of!(ace.SidStart) as super::PSID;
-                let trustee = if unsafe { super::EqualSid(sid, sids.system.0) } != 0 {
+        dacl.allowed_aces()
+            .map(|ace| {
+                let trustee = if ace.trustee_matches(&sids.system) {
                     "SYSTEM"
-                } else if unsafe { super::EqualSid(sid, sids.administrators.0) } != 0 {
+                } else if ace.trustee_matches(&sids.administrators) {
                     "Administrators"
-                } else if unsafe { super::EqualSid(sid, sids.users.0) } != 0 {
+                } else if ace.trustee_matches(&sids.users) {
                     "Users"
                 } else {
                     "Unknown"
                 };
-                (trustee, ace.Mask, ace.Header.AceFlags)
+                (trustee, ace.mask(), ace.flags())
             })
             .collect()
     }

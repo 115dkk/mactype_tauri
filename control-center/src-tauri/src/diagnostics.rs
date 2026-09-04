@@ -59,45 +59,8 @@ pub(crate) fn open_log_folder() -> Result<String, String> {
 
 #[cfg(windows)]
 pub fn copy_to_clipboard(report: &str) -> Result<(), String> {
-    use windows_sys::Win32::{
-        Foundation::{GlobalFree, HANDLE},
-        System::{
-            DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData},
-            Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE},
-            Ole::CF_UNICODETEXT,
-        },
-    };
-
-    let wide = report.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
-    unsafe {
-        if OpenClipboard(std::ptr::null_mut()) == 0 {
-            return Err("could not open the Windows clipboard".to_owned());
-        }
-        if EmptyClipboard() == 0 {
-            CloseClipboard();
-            return Err("could not clear the Windows clipboard".to_owned());
-        }
-        let handle = GlobalAlloc(GMEM_MOVEABLE, wide.len() * size_of::<u16>());
-        if handle.is_null() {
-            CloseClipboard();
-            return Err("could not allocate clipboard memory".to_owned());
-        }
-        let target = GlobalLock(handle).cast::<u16>();
-        if target.is_null() {
-            GlobalFree(handle);
-            CloseClipboard();
-            return Err("could not lock clipboard memory".to_owned());
-        }
-        std::ptr::copy_nonoverlapping(wide.as_ptr(), target, wide.len());
-        GlobalUnlock(handle);
-        if SetClipboardData(CF_UNICODETEXT as u32, handle as HANDLE).is_null() {
-            GlobalFree(handle);
-            CloseClipboard();
-            return Err("could not publish clipboard data".to_owned());
-        }
-        CloseClipboard();
-    }
-    Ok(())
+    mactype_service_platform::set_clipboard_unicode_text(report)
+        .map_err(|error| format!("clipboard: {error}"))
 }
 
 #[cfg(not(windows))]

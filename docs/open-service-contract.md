@@ -5,7 +5,7 @@ This document is the normative machine-runtime contract. In product language, **
 ## Responsibility and trust
 
 - Rust owns SCM lifecycle, protected installation, health, session/process observation, bounded retry, migration, repair, and rollback.
-- Inside the Rust workspace, `mactype-service-platform` is the only crate that may contain `unsafe`; `host` and `setup` forbid it. Win32 objects cross that boundary only as owned handles with fixed rights sets and as bounds-checked values.
+- Across both Rust trees, `mactype-service-platform` is the only crate that may contain `unsafe`; `host`, `setup`, and the Control Center crate forbid it at their roots. Win32 objects cross that boundary only as owned handles with fixed rights sets and as bounds-checked values.
 - The public C++ fixed helper owns remote injection. The existing MacType rendering and hook implementation remains untouched.
 - React consumes `ExecutionViewModel`; it never infers success from raw SCM `Running`.
 - LocalSystem executes only files below `%ProgramFiles%\MacType Control Center\Service` and reads active profiles only below `%ProgramData%\MacType\ControlCenter`.

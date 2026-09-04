@@ -4,40 +4,16 @@ use super::{
         ProfileTransferToken, BROKER_RESULT_HEADER_BYTES, BROKER_RESULT_MAGIC,
         BROKER_RESULT_VERSION, MAX_BROKER_RESULT_BYTES, PROFILE_TRANSFER_NONCE_BYTES,
     },
-    handle::OwnedKernelHandle,
     shared::*,
 };
-use std::{
-    fs,
-    os::windows::{fs::OpenOptionsExt, io::AsRawHandle},
-    ptr, thread,
-    time::{Duration, Instant},
+use mactype_service_platform::{
+    OverlappedPipeClient, OverlappedPipeServer, PipeAccess, PipeDirection, PipeError, Process,
+    SecurityDescriptor,
 };
-use windows_sys::Win32::{
-    Foundation::{
-        GetLastError, LocalFree, ERROR_FILE_NOT_FOUND, ERROR_IO_PENDING, ERROR_PIPE_BUSY,
-        ERROR_PIPE_CONNECTED, HANDLE, INVALID_HANDLE_VALUE,
-    },
-    Security::{
-        Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1},
-        SECURITY_ATTRIBUTES,
-    },
-    Storage::FileSystem::{
-        ReadFile, WriteFile, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED,
-        PIPE_ACCESS_INBOUND, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
-    },
-    System::{
-        Pipes::{
-            ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId,
-            GetNamedPipeServerProcessId, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS,
-            PIPE_TYPE_BYTE,
-        },
-        IO::OVERLAPPED,
-    },
-};
+use std::time::{Duration, Instant};
 
 pub(in crate::machine_integration::open_service) struct BrokerResultPipeServer {
-    handle: OwnedKernelHandle,
+    pipe: OverlappedPipeServer,
     token: ProfileTransferToken,
 }
 
@@ -53,51 +29,29 @@ impl BrokerResultPipeServer {
             server_pid: std::process::id(),
             nonce,
         };
-        let descriptor_text = wide(PROFILE_PIPE_SDDL);
-        let mut descriptor = ptr::null_mut();
-        if unsafe {
-            ConvertStringSecurityDescriptorToSecurityDescriptorW(
-                descriptor_text.as_ptr(),
-                SDDL_REVISION_1,
-                &mut descriptor,
-                ptr::null_mut(),
-            )
-        } == 0
-        {
-            return Err(format!(
+        let descriptor = SecurityDescriptor::from_sddl(PROFILE_PIPE_SDDL).map_err(|error| {
+            format!(
                 "creating the local broker result pipe ACL failed with {}",
-                unsafe { GetLastError() }
-            ));
-        }
-        let attributes = SECURITY_ATTRIBUTES {
-            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
-            lpSecurityDescriptor: descriptor,
-            bInheritHandle: 0,
-        };
-        let name = wide(result_pipe_name(&token));
-        let handle = unsafe {
-            CreateNamedPipeW(
-                name.as_ptr(),
-                PIPE_ACCESS_INBOUND | FILE_FLAG_FIRST_PIPE_INSTANCE | FILE_FLAG_OVERLAPPED,
-                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_REJECT_REMOTE_CLIENTS,
-                1,
-                0,
-                (BROKER_RESULT_HEADER_BYTES + MAX_BROKER_RESULT_BYTES) as u32,
-                PROFILE_PIPE_TIMEOUT.as_millis() as u32,
-                &attributes,
+                error.raw_os_error().unwrap_or(0)
             )
-        };
-        unsafe { LocalFree(descriptor) };
-        if handle == INVALID_HANDLE_VALUE {
-            return Err(format!(
+        })?;
+        let buffer_bytes = u32::try_from(BROKER_RESULT_HEADER_BYTES + MAX_BROKER_RESULT_BYTES)
+            .expect("broker result pipe buffer size fits in u32");
+        let pipe = OverlappedPipeServer::create_single_instance(
+            &result_pipe_name(&token),
+            PipeDirection::Inbound,
+            &descriptor,
+            0,
+            buffer_bytes,
+            PROFILE_PIPE_TIMEOUT,
+        )
+        .map_err(|error| {
+            format!(
                 "creating the first broker result pipe instance failed with {}",
-                unsafe { GetLastError() }
-            ));
-        }
-        Ok(Self {
-            handle: OwnedKernelHandle(handle),
-            token,
-        })
+                error.raw_os_error().unwrap_or(0)
+            )
+        })?;
+        Ok(Self { pipe, token })
     }
 
     pub(in crate::machine_integration::open_service) fn token(&self) -> &ProfileTransferToken {
@@ -107,41 +61,27 @@ impl BrokerResultPipeServer {
     pub(in crate::machine_integration::open_service) fn receive_from(
         self,
         expected_client_pid: u32,
-        broker_process: Option<HANDLE>,
+        broker: Option<&Process>,
         timeout: Duration,
     ) -> Result<BrokerResultMessage, String> {
         if expected_client_pid == 0 || timeout.is_zero() {
             return Err("the broker result pipe peer or timeout is invalid".to_owned());
         }
         let deadline = Instant::now() + timeout;
-        let connect_event = create_profile_pipe_event("result connect")?;
-        let mut connect_overlapped = OVERLAPPED {
-            hEvent: connect_event.raw(),
-            ..Default::default()
-        };
-        if unsafe { ConnectNamedPipe(self.handle.raw(), &mut connect_overlapped) } == 0 {
-            let error = unsafe { GetLastError() };
-            if error == ERROR_IO_PENDING {
-                wait_for_profile_pipe_operation(
-                    self.handle.raw(),
-                    &connect_overlapped,
-                    deadline,
-                    broker_process,
-                    "waiting for the broker result pipe client",
-                )?;
-            } else if error != ERROR_PIPE_CONNECTED {
-                return Err(format!(
-                    "connecting the broker result pipe failed with {error}"
-                ));
-            }
-        }
-        let mut actual_client_pid = 0;
-        if unsafe { GetNamedPipeClientProcessId(self.handle.raw(), &mut actual_client_pid) } == 0 {
-            return Err(format!(
+        let wait = pipe_wait(deadline, broker);
+        self.pipe.connect(&wait).map_err(|error| {
+            map_pipe_error(
+                error,
+                "waiting for the broker result pipe client",
+                "connecting the broker result pipe made no progress",
+            )
+        })?;
+        let actual_client_pid = self.pipe.client_process_id().map_err(|error| {
+            format!(
                 "querying the broker result pipe client failed with {}",
-                unsafe { GetLastError() }
-            ));
-        }
+                error.raw_os_error().unwrap_or(0)
+            )
+        })?;
         if actual_client_pid != expected_client_pid {
             return Err(
                 "the first broker result pipe client is not the elevated broker".to_owned(),
@@ -159,7 +99,13 @@ impl BrokerResultPipeServer {
                 return Err("the broker result frame exceeds the fixed size limit".to_owned());
             }
             let mut chunk = vec![0_u8; remaining.min(16 * 1024)];
-            let read = read_chunk(self.handle.raw(), &mut chunk, deadline, broker_process)?;
+            let read = self.pipe.read(&mut chunk, &wait).map_err(|error| {
+                map_pipe_error(
+                    error,
+                    "receiving the broker result frame",
+                    "reading the broker result pipe made no progress",
+                )
+            })?;
             if read == 0 {
                 return Err(
                     "the broker result pipe closed before sending a complete frame".to_owned(),
@@ -194,7 +140,7 @@ impl BrokerResultPipeServer {
 }
 
 pub(in crate::machine_integration::open_service) struct BrokerResultPipeWriter {
-    pipe: fs::File,
+    pipe: OverlappedPipeClient,
     nonce: [u8; PROFILE_TRANSFER_NONCE_BYTES],
 }
 
@@ -207,36 +153,27 @@ impl BrokerResultPipeWriter {
             return Err("the broker result pipe token or timeout is invalid".to_owned());
         }
         let deadline = Instant::now() + timeout;
-        let name = result_pipe_name(token);
-        let pipe = loop {
-            let mut options = fs::OpenOptions::new();
-            options.write(true).custom_flags(
-                FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION,
-            );
-            match options.open(&name) {
-                Ok(pipe) => break pipe,
-                Err(error)
-                    if matches!(
-                        error.raw_os_error().map(|value| value as u32),
-                        Some(ERROR_FILE_NOT_FOUND) | Some(ERROR_PIPE_BUSY)
-                    ) =>
-                {
-                    if Instant::now() >= deadline {
-                        return Err("connecting to the broker result pipe timed out".to_owned());
-                    }
-                    thread::sleep(PROFILE_PIPE_POLL);
-                }
-                Err(error) => return Err(error.to_string()),
-            }
-        };
-        let mut actual_server_pid = 0;
-        if unsafe { GetNamedPipeServerProcessId(pipe.as_raw_handle(), &mut actual_server_pid) } == 0
-        {
-            return Err(format!(
+        let pipe = OverlappedPipeClient::open(
+            &result_pipe_name(token),
+            PipeAccess::Write,
+            deadline,
+            PROFILE_PIPE_POLL,
+        )
+        .map_err(|error| match error {
+            PipeError::TimedOut => "connecting to the broker result pipe timed out".to_owned(),
+            PipeError::Io(error) => error.to_string(),
+            other => map_pipe_error(
+                other,
+                "connecting to the broker result pipe",
+                "connecting to the broker result pipe made no progress",
+            ),
+        })?;
+        let actual_server_pid = pipe.server_process_id().map_err(|error| {
+            format!(
                 "querying the broker result pipe server failed with {}",
-                unsafe { GetLastError() }
-            ));
-        }
+                error.raw_os_error().unwrap_or(0)
+            )
+        })?;
         if actual_server_pid != token.server_pid {
             return Err(
                 "the broker result pipe server PID does not match the broker token".to_owned(),
@@ -257,86 +194,15 @@ impl BrokerResultPipeWriter {
             return Err("the broker result pipe timeout is invalid".to_owned());
         }
         let frame = encode_broker_result_frame(message, &self.nonce)?;
-        let deadline = Instant::now() + timeout;
-        let mut written = 0;
-        while written < frame.len() {
-            let event = create_profile_pipe_event("result write")?;
-            let mut overlapped = OVERLAPPED {
-                hEvent: event.raw(),
-                ..Default::default()
-            };
-            let remaining = &frame[written..];
-            let mut transferred = 0;
-            if unsafe {
-                WriteFile(
-                    self.pipe.as_raw_handle(),
-                    remaining.as_ptr(),
-                    remaining.len() as u32,
-                    &mut transferred,
-                    &mut overlapped,
-                )
-            } == 0
-            {
-                let error = unsafe { GetLastError() };
-                if error != ERROR_IO_PENDING {
-                    return Err(format!(
-                        "writing the broker result pipe failed with {error}"
-                    ));
-                }
-                transferred = wait_for_profile_pipe_operation(
-                    self.pipe.as_raw_handle(),
-                    &overlapped,
-                    deadline,
-                    None,
-                    "sending the broker result frame",
-                )?;
-            }
-            if transferred == 0 {
-                return Err("writing the broker result pipe made no progress".to_owned());
-            }
-            written += transferred as usize;
-        }
-        Ok(())
+        let wait = pipe_wait(Instant::now() + timeout, None);
+        self.pipe.write_all(&frame, &wait).map_err(|error| {
+            map_pipe_error(
+                error,
+                "sending the broker result frame",
+                "writing the broker result pipe made no progress",
+            )
+        })
     }
-}
-
-fn read_chunk(
-    pipe: HANDLE,
-    buffer: &mut [u8],
-    deadline: Instant,
-    broker_process: Option<HANDLE>,
-) -> Result<usize, String> {
-    let event = create_profile_pipe_event("result read")?;
-    let mut overlapped = OVERLAPPED {
-        hEvent: event.raw(),
-        ..Default::default()
-    };
-    let mut transferred = 0;
-    if unsafe {
-        ReadFile(
-            pipe,
-            buffer.as_mut_ptr(),
-            buffer.len() as u32,
-            &mut transferred,
-            &mut overlapped,
-        )
-    } == 0
-    {
-        let error = unsafe { GetLastError() };
-        if error != ERROR_IO_PENDING {
-            return Err(format!(
-                "reading the broker result pipe failed with {error}"
-            ));
-        }
-        transferred = wait_for_profile_pipe_operation(
-            pipe,
-            &overlapped,
-            deadline,
-            broker_process,
-            "receiving the broker result frame",
-        )?;
-    }
-    Ok(transferred as usize)
 }
 
 fn result_pipe_name(token: &ProfileTransferToken) -> String {

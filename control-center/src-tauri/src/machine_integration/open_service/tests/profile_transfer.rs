@@ -1,5 +1,8 @@
 use super::super::*;
 
+#[cfg(windows)]
+static PROFILE_PIPE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[test]
 fn broker_result_frame_preserves_a_multistage_failure_chain() {
     let nonce = [0x2a; PROFILE_TRANSFER_NONCE_BYTES];
@@ -23,6 +26,9 @@ fn broker_result_frame_preserves_a_multistage_failure_chain() {
 #[cfg(windows)]
 #[test]
 fn broker_result_pipe_returns_the_child_failure_to_the_parent() {
+    let _serial = PROFILE_PIPE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let nonce = [0x39; PROFILE_TRANSFER_NONCE_BYTES];
     let server = windows::BrokerResultPipeServer::create_with_nonce(nonce).unwrap();
     let token = server.token().clone();
@@ -79,6 +85,9 @@ fn profile_transfer_frame_is_versioned_bounded_nonce_bound_and_hashed() {
 #[cfg(windows)]
 #[test]
 fn profile_pipe_is_first_instance_peer_bound_and_bounded_by_time() {
+    let _serial = PROFILE_PIPE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let payload = b"[General]\r\nGammaValue=1.3\r\n";
     // No Authenticated-Users ACE: only the elevated broker (SY/BA) and the pipe
     // owner (OW) may read, so a local process cannot first-connect and DoS the
@@ -145,6 +154,9 @@ fn profile_pipe_is_first_instance_peer_bound_and_bounded_by_time() {
 fn profile_pipe_send_times_out_when_the_expected_broker_never_reads() {
     use std::os::windows::fs::OpenOptionsExt;
 
+    let _serial = PROFILE_PIPE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let payload = vec![b'x'; mactype_service_contract::MAX_PROFILE_BYTES];
     let nonce = [0x91; PROFILE_TRANSFER_NONCE_BYTES];
     let server = windows::ProfilePipeServer::create_with_nonce(&payload, nonce).unwrap();
@@ -195,6 +207,12 @@ fn profile_pipe_send_times_out_when_the_expected_broker_never_reads() {
     client.join().unwrap();
     drop(windows::ProfilePipeServer::create_with_nonce(&payload, nonce).unwrap());
 
+    let mut exited_child = std::process::Command::new("cmd")
+        .args(["/d", "/c", "exit 0"])
+        .spawn()
+        .unwrap();
+    exited_child.wait().unwrap();
+    let exited = mactype_service_platform::Process::from_child(&exited_child).unwrap();
     let exit_nonce = [0x92; PROFILE_TRANSFER_NONCE_BYTES];
     let server = windows::ProfilePipeServer::create_with_nonce(&payload, exit_nonce).unwrap();
     let token = server.token().clone();
@@ -230,25 +248,18 @@ fn profile_pipe_send_times_out_when_the_expected_broker_never_reads() {
     connected_rx
         .recv_timeout(std::time::Duration::from_secs(2))
         .unwrap();
-    use std::sync::Arc;
-    let exited = Arc::new(mactype_service_platform::ManualResetEvent::new().unwrap());
-    let signal_event = Arc::clone(&exited);
-    let signal = std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(25));
-        signal_event.set().unwrap();
-    });
-    let exited_handle = exited.handle().raw_value() as windows_sys::Win32::Foundation::HANDLE;
+    windows::reset_profile_pipe_reap_count();
     let started = std::time::Instant::now();
     let error = server
         .send_to(
             std::process::id(),
-            Some(exited_handle),
+            Some(&exited),
             std::time::Duration::from_secs(2),
         )
         .unwrap_err();
     assert!(error.contains("broker exited"), "{error}");
     assert!(started.elapsed() < std::time::Duration::from_millis(200));
-    signal.join().unwrap();
+    assert_eq!(windows::profile_pipe_reap_count(), 1);
     client.join().unwrap();
     drop(windows::ProfilePipeServer::create_with_nonce(&payload, exit_nonce).unwrap());
 }
@@ -256,6 +267,9 @@ fn profile_pipe_send_times_out_when_the_expected_broker_never_reads() {
 #[cfg(windows)]
 #[test]
 fn profile_pipe_read_error_cancels_and_reaps_the_pending_operation() {
+    let _serial = PROFILE_PIPE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let payload = b"[General]\r\nGammaValue=1.3\r\n";
     let nonce = [0xa2; PROFILE_TRANSFER_NONCE_BYTES];
     let server = windows::ProfilePipeServer::create_with_nonce(payload, nonce).unwrap();
@@ -266,12 +280,10 @@ fn profile_pipe_read_error_cancels_and_reaps_the_pending_operation() {
             windows::receive_profile_from_pipe_bounded(&token, std::time::Duration::from_secs(2));
         (result, windows::profile_pipe_reap_count())
     });
-    std::thread::sleep(std::time::Duration::from_millis(100));
-    drop(server);
-
     let (result, reap_count) = client.join().unwrap();
     assert!(result.is_err());
     assert_eq!(reap_count, 1);
+    drop(server);
     drop(windows::ProfilePipeServer::create_with_nonce(payload, nonce).unwrap());
 }
 

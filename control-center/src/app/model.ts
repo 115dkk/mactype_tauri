@@ -284,6 +284,8 @@ export interface NativePreviewState {
   bold?: boolean;
   italic?: boolean;
   topmost?: boolean;
+  /** Skin id the window is drawing its chrome from; absent without chrome. */
+  skin?: string;
 }
 
 export interface PreviewResult {

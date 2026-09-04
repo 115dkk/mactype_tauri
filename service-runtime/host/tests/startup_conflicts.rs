@@ -16,7 +16,7 @@ fn only_stopped_or_absent_legacy_without_appinit_and_with_owned_image_is_safe() 
         .is_ok());
     }
 
-    for unsafe_snapshot in [
+    for conflicting_snapshot in [
         StartupSafetySnapshot {
             app_init32_enabled: true,
             app_init64_enabled: false,
@@ -48,6 +48,6 @@ fn only_stopped_or_absent_legacy_without_appinit_and_with_owned_image_is_safe() 
             open_service_image_owned: false,
         },
     ] {
-        assert!(unsafe_snapshot.validate().is_err());
+        assert!(conflicting_snapshot.validate().is_err());
     }
 }

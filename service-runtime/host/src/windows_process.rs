@@ -1,28 +1,10 @@
-use std::ffi::OsString;
 use std::fs::File;
 use std::io::{BufReader, Read};
-use std::mem::size_of;
-use std::os::windows::ffi::OsStringExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use mactype_service_contract::StructuredServiceError;
-use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_INVALID_PARAMETER, FILETIME, HANDLE, STILL_ACTIVE,
-};
-use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
-use windows_sys::Win32::System::SystemInformation::{
-    IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_I386, IMAGE_FILE_MACHINE_UNKNOWN,
-};
-use windows_sys::Win32::System::SystemServices::{
-    PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY, PROCESS_MITIGATION_DYNAMIC_CODE_POLICY,
-};
-use windows_sys::Win32::System::Threading::{
-    GetExitCodeProcess, GetProcessInformation, GetProcessMitigationPolicy, GetProcessTimes,
-    IsProcessCritical, IsWow64Process2, OpenProcess, ProcessDynamicCodePolicy,
-    ProcessProtectionLevelInfo, ProcessSignaturePolicy, QueryFullProcessImageNameW,
-    PROCESS_NAME_WIN32, PROCESS_PROTECTION_LEVEL_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION,
-    PROTECTION_LEVEL_NONE,
-};
+use mactype_service_platform::{process_session_id, MachineKind, Process, ProcessAccess};
+use windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER;
 
 use crate::generated_unity_anticheat_catalog::{
     ANTI_CHEAT_TOP_LEVEL_EXACT, ANTI_CHEAT_TOP_LEVEL_PREFIXES,
@@ -56,15 +38,29 @@ impl ProcessInspector for WindowsProcessInspector {
                 None,
             )));
         }
-        let process = OwnedHandle::open(pid).map_err(ProcessInspectionError::TargetUnavailable)?;
-        let creation_time = process
-            .creation_time()
-            .map_err(ProcessInspectionError::TargetUnavailable)?;
-        let session_id = process
-            .session_id(pid)
-            .map_err(ProcessInspectionError::TargetUnavailable)?;
-        let architecture = process
-            .architecture()
+        let process = open_for_identity(pid).map_err(ProcessInspectionError::TargetUnavailable)?;
+        let creation_time = process.creation_time().map_err(|error| {
+            ProcessInspectionError::TargetUnavailable(os_error(
+                "process-creation-time-unavailable",
+                "the observed process creation time could not be read",
+                &error,
+            ))
+        })?;
+        let session_id = process_session_id(pid).map_err(|error| {
+            ProcessInspectionError::TargetUnavailable(os_error(
+                "process-session-unavailable",
+                "the observed process session could not be read",
+                &error,
+            ))
+        })?;
+        let machine = process.machine().map_err(|error| {
+            ProcessInspectionError::TargetUnavailable(os_error(
+                "process-architecture-unavailable",
+                "the observed process architecture could not be read",
+                &error,
+            ))
+        })?;
+        let architecture = classify_process_architecture(machine.process, machine.native)
             .map_err(ProcessInspectionError::TargetUnavailable)?;
         Ok(ProcessInspection {
             identity: ProcessIdentity {
@@ -73,11 +69,42 @@ impl ProcessInspector for WindowsProcessInspector {
                 session_id,
                 architecture,
             },
-            image_name: process.image_name(),
-            protected: process.protection(),
-            critical: process.criticality(),
-            dynamic_code: process.dynamic_code_policy(),
-            binary_signature: process.binary_signature_policy(),
+            image_name: process
+                .image_path_checked()
+                .ok()
+                .and_then(|path| {
+                    path.file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                })
+                .map(InspectionEvidence::Known)
+                .unwrap_or(InspectionEvidence::Unavailable),
+            protected: process
+                .protection()
+                .map(InspectionEvidence::Known)
+                .unwrap_or(InspectionEvidence::Unavailable),
+            critical: process
+                .criticality()
+                .map(InspectionEvidence::Known)
+                .unwrap_or(InspectionEvidence::Unavailable),
+            dynamic_code: process
+                .dynamic_code_mitigation()
+                .map(|policy| {
+                    InspectionEvidence::Known(DynamicCodePolicy {
+                        prohibit_dynamic_code: policy.prohibit_dynamic_code,
+                        allow_thread_opt_out: policy.allow_thread_opt_out,
+                    })
+                })
+                .unwrap_or(InspectionEvidence::Unavailable),
+            binary_signature: process
+                .binary_signature_mitigation()
+                .map(|policy| {
+                    InspectionEvidence::Known(BinarySignaturePolicy {
+                        microsoft_signed_only: policy.microsoft_signed_only,
+                        store_signed_only: policy.store_signed_only,
+                        mitigation_opt_in: policy.mitigation_opt_in,
+                    })
+                })
+                .unwrap_or(InspectionEvidence::Unavailable),
         })
     }
 
@@ -86,13 +113,13 @@ impl ProcessInspector for WindowsProcessInspector {
     }
 
     fn classify_unity_process(&self, identity: &ProcessIdentity) -> UnityProcessClassification {
-        let Ok(process) = OwnedHandle::open(identity.pid) else {
+        let Ok(process) = Process::open(identity.pid, ProcessAccess::QueryLimited) else {
             return UnityProcessClassification::Unavailable;
         };
         if process.creation_time().ok() != Some(identity.creation_time) {
             return UnityProcessClassification::Unavailable;
         }
-        let Ok(image_path) = process.image_path() else {
+        let Ok(image_path) = process.image_path_checked() else {
             return UnityProcessClassification::Unavailable;
         };
         classify_unity_installation(&image_path)
@@ -102,13 +129,13 @@ impl ProcessInspector for WindowsProcessInspector {
         &self,
         identity: &ProcessIdentity,
     ) -> PrivateFreeTypeClassification {
-        let Ok(process) = OwnedHandle::open(identity.pid) else {
+        let Ok(process) = Process::open(identity.pid, ProcessAccess::QueryLimited) else {
             return PrivateFreeTypeClassification::Unavailable;
         };
         if process.creation_time().ok() != Some(identity.creation_time) {
             return PrivateFreeTypeClassification::Unavailable;
         }
-        let Ok(image_path) = process.image_path() else {
+        let Ok(image_path) = process.image_path_checked() else {
             return PrivateFreeTypeClassification::Unavailable;
         };
         classify_private_freetype_installation(&image_path)
@@ -201,196 +228,51 @@ fn classify_unity_installation(image_path: &Path) -> UnityProcessClassification 
 }
 
 fn probe_windows_target_liveness(identity: &ProcessIdentity) -> TargetLiveness {
-    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, identity.pid) };
-    if handle.is_null() {
+    let process = match Process::open(identity.pid, ProcessAccess::QueryLimited) {
+        Ok(process) => process,
         // A PID that has left the process table fails to open with
         // ERROR_INVALID_PARAMETER; every other failure (such as access
         // denied) leaves liveness undetermined.
-        return if std::io::Error::last_os_error().raw_os_error()
-            == Some(ERROR_INVALID_PARAMETER as i32)
-        {
-            TargetLiveness::Vanished
-        } else {
-            TargetLiveness::Unknown
-        };
-    }
-    let process = OwnedHandle(handle);
+        Err(error) => {
+            return if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) {
+                TargetLiveness::Vanished
+            } else {
+                TargetLiveness::Unknown
+            };
+        }
+    };
     match process.creation_time() {
         // The PID was reused by a different process; the verified target is gone.
         Ok(creation_time) if creation_time != identity.creation_time => TargetLiveness::Vanished,
-        Ok(_) => match process.has_exited() {
+        Ok(_) => match process.exit_code() {
             // An open handle can keep an exited process object observable.
-            Some(true) => TargetLiveness::Vanished,
-            Some(false) => TargetLiveness::Alive,
-            None => TargetLiveness::Unknown,
+            Ok(Some(_)) => TargetLiveness::Vanished,
+            Ok(None) => TargetLiveness::Alive,
+            Err(_) => TargetLiveness::Unknown,
         },
         Err(_) => TargetLiveness::Unknown,
     }
 }
 
-struct OwnedHandle(HANDLE);
-
-impl OwnedHandle {
-    fn open(pid: u32) -> Result<Self, StructuredServiceError> {
-        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
-        if handle.is_null() {
-            return Err(service_error(
-                "process-protected-or-inaccessible",
-                "the observed process cannot be opened for identity verification",
-                std::io::Error::last_os_error().raw_os_error(),
-            ));
-        }
-        Ok(Self(handle))
-    }
-
-    fn creation_time(&self) -> Result<u64, StructuredServiceError> {
-        let mut creation = FILETIME::default();
-        let mut exit = FILETIME::default();
-        let mut kernel = FILETIME::default();
-        let mut user = FILETIME::default();
-        if unsafe { GetProcessTimes(self.0, &mut creation, &mut exit, &mut kernel, &mut user) } == 0
-        {
-            return Err(last_error(
-                "process-creation-time-unavailable",
-                "the observed process creation time could not be read",
-            ));
-        }
-        Ok((u64::from(creation.dwHighDateTime) << 32) | u64::from(creation.dwLowDateTime))
-    }
-
-    fn session_id(&self, pid: u32) -> Result<u32, StructuredServiceError> {
-        let mut session_id = 0;
-        if unsafe { ProcessIdToSessionId(pid, &mut session_id) } == 0 {
-            return Err(last_error(
-                "process-session-unavailable",
-                "the observed process session could not be read",
-            ));
-        }
-        Ok(session_id)
-    }
-
-    fn architecture(&self) -> Result<ProcessArchitecture, StructuredServiceError> {
-        let mut process_machine = IMAGE_FILE_MACHINE_UNKNOWN;
-        let mut native_machine = IMAGE_FILE_MACHINE_UNKNOWN;
-        if unsafe { IsWow64Process2(self.0, &mut process_machine, &mut native_machine) } == 0 {
-            return Err(last_error(
-                "process-architecture-unavailable",
-                "the observed process architecture could not be read",
-            ));
-        }
-        classify_process_architecture(process_machine, native_machine)
-    }
-
-    fn has_exited(&self) -> Option<bool> {
-        let mut exit_code = 0_u32;
-        if unsafe { GetExitCodeProcess(self.0, &mut exit_code) } == 0 {
-            return None;
-        }
-        Some(exit_code != STILL_ACTIVE as u32)
-    }
-
-    fn protection(&self) -> InspectionEvidence<bool> {
-        let mut information = PROCESS_PROTECTION_LEVEL_INFORMATION::default();
-        if unsafe {
-            GetProcessInformation(
-                self.0,
-                ProcessProtectionLevelInfo,
-                (&mut information as *mut PROCESS_PROTECTION_LEVEL_INFORMATION).cast(),
-                size_of::<PROCESS_PROTECTION_LEVEL_INFORMATION>() as u32,
-            )
-        } == 0
-        {
-            return InspectionEvidence::Unavailable;
-        }
-        InspectionEvidence::Known(information.ProtectionLevel != PROTECTION_LEVEL_NONE)
-    }
-
-    fn criticality(&self) -> InspectionEvidence<bool> {
-        let mut critical = 0;
-        if unsafe { IsProcessCritical(self.0, &mut critical) } == 0 {
-            return InspectionEvidence::Unavailable;
-        }
-        InspectionEvidence::Known(critical != 0)
-    }
-
-    fn dynamic_code_policy(&self) -> InspectionEvidence<DynamicCodePolicy> {
-        let mut dynamic_code = PROCESS_MITIGATION_DYNAMIC_CODE_POLICY::default();
-        if unsafe {
-            GetProcessMitigationPolicy(
-                self.0,
-                ProcessDynamicCodePolicy,
-                (&mut dynamic_code as *mut PROCESS_MITIGATION_DYNAMIC_CODE_POLICY).cast(),
-                size_of::<PROCESS_MITIGATION_DYNAMIC_CODE_POLICY>(),
-            )
-        } == 0
-        {
-            return InspectionEvidence::Unavailable;
-        }
-        let flags = unsafe { dynamic_code.Anonymous.Flags };
-        InspectionEvidence::Known(DynamicCodePolicy {
-            prohibit_dynamic_code: flags & (1 << 0) != 0,
-            allow_thread_opt_out: flags & (1 << 1) != 0,
-        })
-    }
-
-    fn binary_signature_policy(&self) -> InspectionEvidence<BinarySignaturePolicy> {
-        let mut signature = PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY::default();
-        if unsafe {
-            GetProcessMitigationPolicy(
-                self.0,
-                ProcessSignaturePolicy,
-                (&mut signature as *mut PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY).cast(),
-                size_of::<PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY>(),
-            )
-        } == 0
-        {
-            return InspectionEvidence::Unavailable;
-        }
-        let flags = unsafe { signature.Anonymous.Flags };
-        InspectionEvidence::Known(BinarySignaturePolicy {
-            microsoft_signed_only: flags & (1 << 0) != 0,
-            store_signed_only: flags & (1 << 1) != 0,
-            mitigation_opt_in: flags & (1 << 2) != 0,
-        })
-    }
-
-    fn image_name(&self) -> InspectionEvidence<String> {
-        self.image_path()
-            .ok()
-            .and_then(|path| {
-                path.file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-            })
-            .map(InspectionEvidence::Known)
-            .unwrap_or(InspectionEvidence::Unavailable)
-    }
-
-    fn image_path(&self) -> Result<PathBuf, StructuredServiceError> {
-        let mut buffer = vec![0u16; 32_768];
-        let mut length = buffer.len() as u32;
-        if unsafe {
-            QueryFullProcessImageNameW(self.0, PROCESS_NAME_WIN32, buffer.as_mut_ptr(), &mut length)
-        } == 0
-        {
-            return Err(last_error(
-                "process-image-path-unavailable",
-                "the observed process image path could not be read",
-            ));
-        }
-        let path = OsString::from_wide(&buffer[..length as usize]);
-        Ok(PathBuf::from(path))
-    }
+fn open_for_identity(pid: u32) -> Result<Process, StructuredServiceError> {
+    Process::open(pid, ProcessAccess::QueryLimited).map_err(|error| {
+        os_error(
+            "process-protected-or-inaccessible",
+            "the observed process cannot be opened for identity verification",
+            &error,
+        )
+    })
 }
 
 fn classify_process_architecture(
-    process_machine: u16,
-    native_machine: u16,
+    process_machine: MachineKind,
+    native_machine: MachineKind,
 ) -> Result<ProcessArchitecture, StructuredServiceError> {
     match (process_machine, native_machine) {
-        (IMAGE_FILE_MACHINE_I386, _) | (IMAGE_FILE_MACHINE_UNKNOWN, IMAGE_FILE_MACHINE_I386) => {
+        (MachineKind::I386, _) | (MachineKind::Unknown, MachineKind::I386) => {
             Ok(ProcessArchitecture::X86)
         }
-        (IMAGE_FILE_MACHINE_AMD64, _) | (IMAGE_FILE_MACHINE_UNKNOWN, IMAGE_FILE_MACHINE_AMD64) => {
+        (MachineKind::Amd64, _) | (MachineKind::Unknown, MachineKind::Amd64) => {
             Ok(ProcessArchitecture::X64)
         }
         _ => Err(service_error(
@@ -401,20 +283,9 @@ fn classify_process_architecture(
     }
 }
 
-impl Drop for OwnedHandle {
-    fn drop(&mut self) {
-        unsafe {
-            CloseHandle(self.0);
-        }
-    }
-}
-
-fn last_error(code: &str, message: &str) -> StructuredServiceError {
-    service_error(
-        code,
-        message,
-        std::io::Error::last_os_error().raw_os_error(),
-    )
+/// A structured error carrying the Win32 code of the platform failure.
+fn os_error(code: &str, message: &str, error: &std::io::Error) -> StructuredServiceError {
+    service_error(code, message, error.raw_os_error())
 }
 
 fn service_error(code: &str, message: &str, win32_error: Option<i32>) -> StructuredServiceError {
@@ -433,14 +304,13 @@ mod tests {
 
     #[test]
     fn native_arm64_is_not_sent_to_the_x64_helper() {
+        let arm64 = MachineKind::Other(IMAGE_FILE_MACHINE_ARM64);
         assert_eq!(
-            classify_process_architecture(IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_ARM64)
-                .unwrap(),
+            classify_process_architecture(MachineKind::Amd64, arm64).unwrap(),
             ProcessArchitecture::X64
         );
-        let error =
-            classify_process_architecture(IMAGE_FILE_MACHINE_UNKNOWN, IMAGE_FILE_MACHINE_ARM64)
-                .expect_err("native ARM64 has no fixed compatible helper");
+        let error = classify_process_architecture(MachineKind::Unknown, arm64)
+            .expect_err("native ARM64 has no fixed compatible helper");
         assert_eq!(error.code, "process-architecture-unsupported");
     }
 

@@ -4,7 +4,7 @@ mod service_registry;
 use std::path::Path;
 
 use mactype_service_contract::{effective_service_name, StructuredServiceError};
-use windows_sys::Win32::System::Registry::{KEY_WOW64_32KEY, KEY_WOW64_64KEY};
+use mactype_service_platform::RegistryView;
 
 use crate::StartupSafetySnapshot;
 use service_registry::ServiceManager;
@@ -30,8 +30,8 @@ impl WindowsStartupSafety {
                 .eq_ignore_ascii_case(expected_image.as_str());
 
         Ok(StartupSafetySnapshot {
-            app_init32_enabled: appinit::mactype_enabled(KEY_WOW64_32KEY)?,
-            app_init64_enabled: appinit::mactype_enabled(KEY_WOW64_64KEY)?,
+            app_init32_enabled: appinit::mactype_enabled(RegistryView::Native32)?,
+            app_init64_enabled: appinit::mactype_enabled(RegistryView::Native64)?,
             legacy_state: manager.legacy_state()?,
             open_service_image_owned,
         })

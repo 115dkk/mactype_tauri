@@ -13,7 +13,7 @@ use super::{
 const BROKER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 use mactype_service_platform::{Process, WaitOutcome};
 use std::{ffi::OsStr, path::PathBuf, time::Duration};
-use windows_sys::Win32::Foundation::{ERROR_CANCELLED, HANDLE, STILL_ACTIVE};
+use windows_sys::Win32::Foundation::{ERROR_CANCELLED, STILL_ACTIVE};
 
 fn with_service_package_before_elevation(
     locate: impl FnOnce() -> Result<PathBuf, String>,
@@ -88,9 +88,8 @@ fn launch_elevated_broker(
     };
     // The pipe servers wait on the broker's own process object, so a broker
     // that dies mid-transfer ends the wait at once.
-    let broker_handle = process.handle().raw_value() as HANDLE;
     if let Some(server) = profile_transfer {
-        if let Err(error) = server.send_to(broker_pid, Some(broker_handle), PROFILE_PIPE_TIMEOUT) {
+        if let Err(error) = server.send_to(broker_pid, Some(&process), PROFILE_PIPE_TIMEOUT) {
             return Err(combine_broker_cleanup_error(
                 &error,
                 terminate_broker_process(&process),
@@ -98,7 +97,7 @@ fn launch_elevated_broker(
         }
     }
     let broker_result =
-        match result_transfer.receive_from(broker_pid, Some(broker_handle), BROKER_TIMEOUT) {
+        match result_transfer.receive_from(broker_pid, Some(&process), BROKER_TIMEOUT) {
             Ok(result) => Some(result),
             Err(error) => {
                 if let Some(exit_code) = finished_exit_code(&process) {

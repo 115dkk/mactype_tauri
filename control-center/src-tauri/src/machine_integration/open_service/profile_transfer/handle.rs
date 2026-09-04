@@ -1,25 +1,6 @@
 use mactype_service_platform::JobObject;
 #[cfg(test)]
 use mactype_service_platform::Process;
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
-
-pub(in crate::machine_integration::open_service) struct OwnedKernelHandle(
-    pub(in crate::machine_integration::open_service) HANDLE,
-);
-
-impl OwnedKernelHandle {
-    pub(in crate::machine_integration::open_service) fn raw(&self) -> HANDLE {
-        self.0
-    }
-}
-
-impl Drop for OwnedKernelHandle {
-    fn drop(&mut self) {
-        if !self.0.is_null() && self.0 != INVALID_HANDLE_VALUE {
-            unsafe { CloseHandle(self.0) };
-        }
-    }
-}
 
 pub(in crate::machine_integration::open_service) struct KillOnCloseJob(JobObject);
 

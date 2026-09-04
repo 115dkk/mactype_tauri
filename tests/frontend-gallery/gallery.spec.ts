@@ -550,7 +550,7 @@ test("all settings exposes, edits, and saves child-process hooking", async ({ pa
   await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
   await page.locator(".navigation").getByRole("button", { name: "전체 설정" }).click();
 
-  const childHook = page.getByRole("checkbox", { name: "자식 프로세스에도 적용" });
+  const childHook = page.getByRole("switch", { name: "자식 프로세스에도 적용" });
   const childHookRow = page.locator(".setting-row").filter({ has: childHook });
   const save = page.getByRole("button", { name: "지금 저장" });
   const discard = page.getByRole("button", { name: "변경 취소", exact: true });

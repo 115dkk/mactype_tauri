@@ -1,6 +1,7 @@
-import { AppWindow, ExternalLink, Eye, Pencil, RefreshCw } from "lucide-react";
+import { AppWindow, Contrast, ExternalLink, Eye, Pencil, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { openLogFolder } from "../../app/tauri";
+import { useAppTheme } from "../../app/useAppTheme";
 import { Segmented } from "../../components/Segmented";
 import { StatusDot } from "../../components/StatusDot";
 import { eventClock, eventTime, eventTitle } from "../../features/events/eventText";
@@ -24,7 +25,9 @@ export function ConsoleOverview() {
   const scriptFont = scriptUiFont(locale);
   const fontOptions = scriptFont ? [{ value: "Segoe UI", label: "Segoe UI" }, { value: scriptFont, label: scriptFont }] : [{ value: "Segoe UI", label: "Segoe UI" }];
   const [fontFace, setFontFace] = useState("Segoe UI");
-  const [dark, setDark] = useState(shell.theme === "dark");
+  const theme = useAppTheme();
+  const [inverted, setInverted] = useState(false);
+  const dark = (theme === "dark") !== inverted;
   const [sample, setSample] = useState(() => t("profiles.samplePangram"));
   const [editing, setEditing] = useState(false);
   const [folderMessage, setFolderMessage] = useState<string | null>(null);
@@ -71,7 +74,7 @@ export function ConsoleOverview() {
         icon={<Eye aria-hidden="true" size={14} />}
         right={<>
           <Segmented compact label={t("profiles.previewFont")} onChange={setFontFace} options={fontOptions} value={fontFace} />
-          <Segmented compact label={t("profiles.previewSize")} onChange={(value) => setDark(value === "dark")} options={[{ value: "light", label: t("profiles.lightBackground") }, { value: "dark", label: t("profiles.darkBackground") }]} value={dark ? "dark" : "light"} />
+          <button aria-pressed={inverted} className="button ghost" onClick={() => setInverted((value) => !value)} type="button"><Contrast aria-hidden="true" size={13} /> {t("profiles.invertColours")}</button>
         </>}
         scroll={false}
         title={t("overview.specimenTitle")}

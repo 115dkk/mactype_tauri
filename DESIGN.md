@@ -66,7 +66,7 @@ Base unit is 4px. Allowed tokens are `--space-1: 4px`, `--space-2: 8px`, `--spac
 - Field: 32px minimum height, 8px horizontal padding, 4px radius, 1px border. Focus uses a 2px focus outline and retains the border.
 - Setting row: no surrounding card. Rows use 12px vertical padding and a bottom hairline. Label and help occupy the flexible column; control uses a stable 220px column.
 - Status band: flat bordered row with state icon, concise message, and one action. It is never a decorative metric card.
-- Preview: 1px border, 4px radius, fixed backing-pixel-aware canvas. Never scale a preview image with CSS transforms.
+- Preview: 1px border, 4px radius, fixed backing-pixel-aware canvas. Never scale a preview image with CSS transforms. A preview canvas takes the window theme's polarity by default (dark window, dark canvas, light text) and offers one invert control; it never asks the reader to pick a background separately from the theme.
 
 ## 6. Motion
 

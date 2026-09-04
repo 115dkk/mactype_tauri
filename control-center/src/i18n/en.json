@@ -205,8 +205,6 @@
   "profiles.previewFont": "Preview font",
   "profiles.fontMalgun": "Malgun Gothic",
   "profiles.previewSize": "Preview size",
-  "profiles.lightBackground": "Light background",
-  "profiles.darkBackground": "Dark background",
   "profiles.sampleAria": "Preview sample text",
   "profiles.previewAria": "Text rendering preview for the current settings",
   "profiles.previewImageAlt": "Text preview rendered by MacType Helper",
@@ -693,8 +691,6 @@
   "studio.style.italic": "Italic",
   "studio.style.boldItalic": "Bold italic",
   "studio.palette": "Colours",
-  "studio.palette.light": "Light",
-  "studio.palette.dark": "Dark",
   "studio.palette.custom": "Custom colours",
   "studio.foreground": "Text colour",
   "studio.background": "Background colour",
@@ -725,5 +721,7 @@
   "studio.reset": "Reset",
   "studio.sourceLabel": "{label} · {profile}",
   "studio.sourceA": "A",
-  "studio.sourceB": "B"
+  "studio.sourceB": "B",
+  "profiles.invertColours": "Invert colours",
+  "studio.palette.auto": "Match theme"
 }

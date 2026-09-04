@@ -255,7 +255,8 @@ test("profile editor categories and collections remain interactive", async ({ pa
   await expect(page.getByText("제외 프로그램", { exact: true })).toBeVisible();
   await expect(page.getByText("주입 해제 DLL", { exact: true })).toBeVisible();
   await expect(page.getByText("글꼴 대체 제외 모듈", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "어두운 배경" }).click();
+  await expect(page.getByRole("img", { name: "현재 설정의 글자 렌더링 프리뷰" })).toHaveAttribute("data-dark", "false");
+  await page.getByRole("button", { name: "색 반전" }).click();
   await expect(page.getByRole("img", { name: "현재 설정의 글자 렌더링 프리뷰" })).toHaveAttribute("data-dark", "true");
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   expect(horizontalOverflow, "interactive profile editor must not have horizontal scrolling").toBe(false);
@@ -350,12 +351,12 @@ test("native preview display mode dropdown drives the runtime adapter", async ({
   await expect.poll(nativePreviewBackground).toBe("#EEF1F4");
   // The background choice reaches the open window without reopening it, and it
   // survives a display-mode change.
-  await page.getByRole("button", { name: "어두운 배경" }).click();
+  await page.getByRole("button", { name: "색 반전" }).click();
   await expect.poll(nativePreviewBackground).toBe("#171A1F");
   await modeSelect.selectOption("listing");
   await expect.poll(nativePreviewState).toBe("listing");
   await expect.poll(nativePreviewBackground).toBe("#171A1F");
-  await page.getByRole("button", { name: "밝은 배경" }).click();
+  await page.getByRole("button", { name: "색 반전" }).click();
   await expect.poll(nativePreviewBackground).toBe("#EEF1F4");
   await page.getByRole("button", { name: "실제 창 닫기" }).click();
   await expect.poll(nativePreviewState).toBe("hidden");
@@ -2008,4 +2009,20 @@ test("the Preview Studio renders a specimen board per source and offers export",
   await page.getByRole("button", { name: "PNG로 저장" }).click();
   await expect(page.locator(".studio-export-message")).toContainText("mactype-specimen");
   expect(await page.evaluate(() => window.sessionStorage.getItem("gallery-preview-export"))).toContain(".png");
+});
+
+test("the preview canvas follows the window theme and the invert control flips it", async ({ page }) => {
+  await page.goto("/?view=profiles&gallery=1&lang=ko&theme=dark", { waitUntil: "networkidle" });
+  const canvas = page.getByRole("img", { name: "현재 설정의 글자 렌더링 프리뷰" });
+  await expect(canvas).toHaveAttribute("data-dark", "true");
+  const invert = page.getByTestId("preview-invert");
+  await expect(invert).toHaveAttribute("aria-pressed", "false");
+  await invert.click();
+  await expect(canvas).toHaveAttribute("data-dark", "false");
+  await expect(invert).toHaveAttribute("aria-pressed", "true");
+  await page.goto("/?view=overview&gallery=1&lang=ko&skin=console&theme=light", { waitUntil: "networkidle" });
+  const board = page.locator(".console-specimen-panel .specimen-board");
+  await expect(board).toHaveAttribute("data-dark", "false");
+  await page.getByRole("button", { name: "색 반전" }).click();
+  await expect(board).toHaveAttribute("data-dark", "true");
 });

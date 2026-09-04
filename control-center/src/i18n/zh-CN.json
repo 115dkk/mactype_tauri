@@ -205,8 +205,6 @@
   "profiles.previewFont": "预览字体",
   "profiles.fontMalgun": "Malgun Gothic",
   "profiles.previewSize": "预览字号",
-  "profiles.lightBackground": "浅色背景",
-  "profiles.darkBackground": "深色背景",
   "profiles.sampleAria": "预览示例文本",
   "profiles.previewAria": "使用当前设置的文字渲染预览",
   "profiles.previewImageAlt": "由 MacType Helper 渲染的文字预览",
@@ -693,8 +691,6 @@
   "studio.style.italic": "斜体",
   "studio.style.boldItalic": "粗斜体",
   "studio.palette": "颜色",
-  "studio.palette.light": "浅色",
-  "studio.palette.dark": "深色",
   "studio.palette.custom": "自定义",
   "studio.foreground": "文字",
   "studio.background": "背景",
@@ -725,5 +721,7 @@
   "studio.reset": "重置",
   "studio.sourceLabel": "{label} · {profile}",
   "studio.sourceA": "A",
-  "studio.sourceB": "B"
+  "studio.sourceB": "B",
+  "profiles.invertColours": "反转颜色",
+  "studio.palette.auto": "跟随主题"
 }

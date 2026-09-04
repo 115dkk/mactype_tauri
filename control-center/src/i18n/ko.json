@@ -205,8 +205,6 @@
   "profiles.previewFont": "프리뷰 글꼴",
   "profiles.fontMalgun": "맑은 고딕",
   "profiles.previewSize": "프리뷰 크기",
-  "profiles.lightBackground": "밝은 배경",
-  "profiles.darkBackground": "어두운 배경",
   "profiles.sampleAria": "프리뷰 예시 문장",
   "profiles.previewAria": "현재 설정의 글자 렌더링 프리뷰",
   "profiles.previewImageAlt": "MacType Helper가 렌더링한 글자 프리뷰",
@@ -693,8 +691,6 @@
   "studio.style.italic": "기울임",
   "studio.style.boldItalic": "굵은 기울임",
   "studio.palette": "색",
-  "studio.palette.light": "밝게",
-  "studio.palette.dark": "어둡게",
   "studio.palette.custom": "직접 지정",
   "studio.foreground": "글자색",
   "studio.background": "배경색",
@@ -725,5 +721,7 @@
   "studio.reset": "기본값으로",
   "studio.sourceLabel": "{label} · {profile}",
   "studio.sourceA": "A",
-  "studio.sourceB": "B"
+  "studio.sourceB": "B",
+  "profiles.invertColours": "색 반전",
+  "studio.palette.auto": "테마에 맞춤"
 }

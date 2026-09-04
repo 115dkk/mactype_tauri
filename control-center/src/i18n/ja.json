@@ -205,8 +205,6 @@
   "profiles.previewFont": "プレビューフォント",
   "profiles.fontMalgun": "Malgun Gothic",
   "profiles.previewSize": "プレビューサイズ",
-  "profiles.lightBackground": "明るい背景",
-  "profiles.darkBackground": "暗い背景",
   "profiles.sampleAria": "プレビュー用サンプルテキスト",
   "profiles.previewAria": "現在の設定による文字描画プレビュー",
   "profiles.previewImageAlt": "MacType Helper で描画された文字プレビュー",
@@ -693,8 +691,6 @@
   "studio.style.italic": "斜体",
   "studio.style.boldItalic": "太字斜体",
   "studio.palette": "色",
-  "studio.palette.light": "ライト",
-  "studio.palette.dark": "ダーク",
   "studio.palette.custom": "カスタム",
   "studio.foreground": "文字",
   "studio.background": "背景",
@@ -725,5 +721,7 @@
   "studio.reset": "リセット",
   "studio.sourceLabel": "{label} · {profile}",
   "studio.sourceA": "A",
-  "studio.sourceB": "B"
+  "studio.sourceB": "B",
+  "profiles.invertColours": "色を反転",
+  "studio.palette.auto": "テーマに合わせる"
 }

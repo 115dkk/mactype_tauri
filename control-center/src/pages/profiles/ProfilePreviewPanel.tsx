@@ -1,4 +1,4 @@
-import { AlertTriangle, AppWindow, Columns2, Pencil, SlidersHorizontal } from "lucide-react";
+import { AlertTriangle, AppWindow, Columns2, Contrast, Pencil, SlidersHorizontal } from "lucide-react";
 import {
   forwardRef,
   useCallback,
@@ -10,6 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { NativePreviewMode, PreviewRequest, PreviewResult } from "../../app/model";
+import { useAppTheme } from "../../app/useAppTheme";
 import {
   forcePreviewCrashForCi,
   previewImageUrl,
@@ -172,7 +173,11 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
   variants,
 }, ref) {
   const [fontSize, setFontSize] = useState(14);
-  const [darkPreview, setDarkPreview] = useState(false);
+  /* The canvas follows the window theme; the invert control flips it so the
+     reader can judge the other polarity without changing the whole window. */
+  const theme = useAppTheme();
+  const [inverted, setInverted] = useState(false);
+  const darkPreview = (theme === "dark") !== inverted;
   const [sampleText, setSampleText] = useState(() => t("profiles.sampleText"));
   const [previewStack, setPreviewStack] = useState<ReadonlyArray<PreviewLine>>([]);
   const [nativeVisible, setNativeVisible] = useState(false);
@@ -421,12 +426,19 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
     if (nativeVisible) void applyNativePreview(true, mode, darkPreview);
   };
 
-  /* An open native window follows the background choice without reopening. */
-  const toggleDarkPreview = () => {
+  /* An open native window follows the polarity choice without reopening. */
+  const toggleInverted = () => {
     const dark = !darkPreview;
-    setDarkPreview(dark);
+    setInverted((value) => !value);
     if (nativeVisible) void applyNativePreview(true, nativeMode, dark);
   };
+
+  /* A theme change while the native window is open repaints it too. */
+  useEffect(() => {
+    if (nativeVisible) void applyNativePreview(true, nativeMode, darkPreview);
+    // Only the theme should retrigger this; the toggles call applyNativePreview themselves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [theme]);
 
   const verifyCiWorkflow = (line: PreviewLine) => {
     if (!ciSmoke || ciReadyRequestId.current !== line.result.requestId || ciWorkflowVerified.current) return;
@@ -470,7 +482,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
           <select aria-label={t("profiles.previewFont")} onChange={(event) => onFontFaceChange(event.target.value)} value={fontFace}>{fontFamilies.map((font) => <option key={font} value={font}>{fontOptionLabel(font)}</option>)}</select>
           <select aria-label={t("profiles.previewSize")} onChange={(event) => setFontSize(Number(event.target.value))} value={fontSize}><option value="12">12 pt</option><option value="14">14 pt</option><option value="18">18 pt</option></select>
           <button aria-expanded={sampleEditorOpen} className="text-action" onClick={() => setSampleEditorOpen((current) => !current)} type="button"><Pencil aria-hidden="true" size={14} /> {t("profiles.editSample")}</button>
-          <button className="text-action" onClick={toggleDarkPreview} type="button">{darkPreview ? t("profiles.lightBackground") : t("profiles.darkBackground")}</button>
+          <button aria-pressed={inverted} className="text-action" data-testid="preview-invert" onClick={toggleInverted} type="button"><Contrast aria-hidden="true" size={14} /> {t("profiles.invertColours")}</button>
         </div>
       </div>
       {sampleEditorOpen && <textarea className="sample-input" aria-label={t("profiles.sampleAria")} onChange={(event) => setSampleText(event.target.value)} rows={2} value={sampleText} />}

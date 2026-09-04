@@ -205,8 +205,6 @@
   "profiles.previewFont": "خط المعاينة",
   "profiles.fontMalgun": "Malgun Gothic",
   "profiles.previewSize": "حجم المعاينة",
-  "profiles.lightBackground": "خلفية فاتحة",
-  "profiles.darkBackground": "خلفية داكنة",
   "profiles.sampleAria": "نص عينة المعاينة",
   "profiles.previewAria": "معاينة عرض النص بالإعدادات الحالية",
   "profiles.previewImageAlt": "معاينة نص معروضة بواسطة MacType Helper",
@@ -693,8 +691,6 @@
   "studio.style.italic": "مائل",
   "studio.style.boldItalic": "غامق مائل",
   "studio.palette": "الألوان",
-  "studio.palette.light": "فاتح",
-  "studio.palette.dark": "داكن",
   "studio.palette.custom": "ألوان مخصصة",
   "studio.foreground": "لون النص",
   "studio.background": "لون الخلفية",
@@ -725,5 +721,7 @@
   "studio.reset": "إعادة تعيين",
   "studio.sourceLabel": "{label} · {profile}",
   "studio.sourceA": "A",
-  "studio.sourceB": "B"
+  "studio.sourceB": "B",
+  "profiles.invertColours": "عكس الألوان",
+  "studio.palette.auto": "حسب السمة"
 }

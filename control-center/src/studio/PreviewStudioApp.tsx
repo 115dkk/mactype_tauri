@@ -1,7 +1,8 @@
-import { AppWindow, Download, RotateCcw, Search } from "lucide-react";
+import { AppWindow, Contrast, Download, RotateCcw, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ProfileEntry } from "../app/model";
 import { listProfiles, loadInstalledFontFamilies, pickPngExportPath, setNativePreview, writePreviewExport } from "../app/tauri";
+import { useAppTheme } from "../app/useAppTheme";
 import { Segmented } from "../components/Segmented";
 import { SwitchControl } from "../components/SwitchControl";
 import { WindowTitleBar } from "../components/WindowTitleBar";
@@ -46,6 +47,7 @@ const BLINK_INTERVAL_MS = 700;
    integer zoom with a loupe. Nothing here scales a bitmap with CSS. */
 export function PreviewStudioApp() {
   const { locale, t } = useI18n();
+  const theme = useAppTheme();
   const [settings, setSettings] = useState<StudioSettings>(loadStudioSettings);
   const [document, setDocument] = useState<StudioDocument | null>(null);
   const [profiles, setProfiles] = useState<ReadonlyArray<ProfileEntry>>([]);
@@ -101,11 +103,11 @@ export function PreviewStudioApp() {
   const fallbackProfile = profiles[0]?.path ?? null;
   const sourceA = useMemo(() => resolveSource(settings.sourceA, document, fallbackProfile), [document, fallbackProfile, settings.sourceA]);
   const sourceB = useMemo(() => resolveSource(settings.sourceB, document, fallbackProfile), [document, fallbackProfile, settings.sourceB]);
-  const requestsA = useMemo(() => studioRequests(settings, sourceA, stripWidth, "A"), [settings, sourceA, stripWidth]);
-  const requestsB = useMemo(() => studioRequests(settings, sourceB, stripWidth, "B"), [settings, sourceB, stripWidth]);
+  const requestsA = useMemo(() => studioRequests(settings, sourceA, stripWidth, "A", theme), [settings, sourceA, stripWidth, theme]);
+  const requestsB = useMemo(() => studioRequests(settings, sourceB, stripWidth, "B", theme), [settings, sourceB, stripWidth, theme]);
   const rendersA = useSpecimenRenders(requestsA);
   const rendersB = useSpecimenRenders(requestsB, twoBoards);
-  const palette = studioPalette(settings);
+  const palette = studioPalette(settings, theme);
 
   useEffect(() => {
     if (!twoBoards || settings.compare !== "blink") return undefined;
@@ -276,7 +278,10 @@ export function PreviewStudioApp() {
 
           <section className="studio-section">
             <h2>{t("studio.palette")}</h2>
-            <Segmented compact label={t("studio.palette")} onChange={(value: "light" | "dark" | "custom") => update({ palette: value })} options={[{ value: "light", label: t("studio.palette.light") }, { value: "dark", label: t("studio.palette.dark") }, { value: "custom", label: t("studio.palette.custom") }]} value={settings.palette} />
+            <div className="studio-palette-row">
+              <Segmented compact label={t("studio.palette")} onChange={(value: "theme" | "custom") => update({ palette: value })} options={[{ value: "theme", label: t("studio.palette.auto") }, { value: "custom", label: t("studio.palette.custom") }]} value={settings.palette} />
+              <button aria-pressed={settings.inverted} className="button ghost" disabled={settings.palette === "custom"} onClick={() => update({ inverted: !settings.inverted })} type="button"><Contrast aria-hidden="true" size={14} /> {t("profiles.invertColours")}</button>
+            </div>
             {settings.palette === "custom" && (
               <div className="studio-colors">
                 <label><span>{t("studio.foreground")}</span><input onChange={(event) => update({ foreground: event.target.value })} type="color" value={settings.foreground} /></label>
@@ -324,5 +329,5 @@ export function PreviewStudioApp() {
 }
 
 function defaultsReset(): Partial<StudioSettings> {
-  return { fonts: ["Segoe UI"], sizes: [9, 10, 11, 12, 14, 18, 24], styles: ["regular"], preset: "mixed", customText: presetTexts.mixed, palette: "light", zoom: 1, dpi: 96 };
+  return { fonts: ["Segoe UI"], sizes: [9, 10, 11, 12, 14, 18, 24], styles: ["regular"], preset: "mixed", customText: presetTexts.mixed, palette: "theme", inverted: false, zoom: 1, dpi: 96 };
 }

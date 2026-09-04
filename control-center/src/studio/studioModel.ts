@@ -13,7 +13,7 @@ export type StudioZoom = (typeof STUDIO_ZOOMS)[number];
 export type StudioDpi = (typeof STUDIO_DPIS)[number];
 export type StudioPreset = "pangramKo" | "pangramEn" | "mixed" | "digits" | "code" | "paragraph" | "custom";
 export type StudioStyle = "regular" | "bold" | "italic" | "boldItalic";
-export type StudioPaletteMode = "light" | "dark" | "custom";
+export type StudioPaletteMode = "theme" | "custom";
 export type StudioCompare = "side" | "stack" | "blink" | "diff";
 export type StudioSourceKind = "none" | "edited" | "saved" | "profile" | "plain";
 
@@ -30,6 +30,8 @@ export interface StudioSettings {
   customText: string;
   styles: StudioStyle[];
   palette: StudioPaletteMode;
+  /* Flips the theme-following polarity; ignored for custom colours. */
+  inverted: boolean;
   foreground: string;
   background: string;
   sourceA: StudioSource;
@@ -97,7 +99,8 @@ export function defaultStudioSettings(): StudioSettings {
     preset: "mixed",
     customText: presetTexts.mixed,
     styles: ["regular"],
-    palette: "light",
+    palette: "theme",
+    inverted: false,
     foreground: "#181D23",
     background: "#FFFFFF",
     sourceA: { kind: "edited", profilePath: null },
@@ -127,7 +130,8 @@ export function loadStudioSettings(): StudioSettings {
       preset: parsed.preset && parsed.preset in presetLabelKeys ? parsed.preset : defaults.preset,
       customText: typeof parsed.customText === "string" ? parsed.customText : defaults.customText,
       styles: Array.isArray(parsed.styles) && parsed.styles.every((style) => style in styleLabelKeys) && parsed.styles.length > 0 ? parsed.styles : defaults.styles,
-      palette: parsed.palette === "dark" || parsed.palette === "custom" ? parsed.palette : "light",
+      palette: parsed.palette === "custom" ? "custom" : "theme",
+      inverted: typeof parsed.inverted === "boolean" ? parsed.inverted : false,
       foreground: typeof parsed.foreground === "string" && /^#[0-9a-f]{6}$/i.test(parsed.foreground) ? parsed.foreground : defaults.foreground,
       background: typeof parsed.background === "string" && /^#[0-9a-f]{6}$/i.test(parsed.background) ? parsed.background : defaults.background,
       sourceA: parsed.sourceA && parsed.sourceA.kind in sourceKindLabelKeys ? { kind: parsed.sourceA.kind, profilePath: typeof parsed.sourceA.profilePath === "string" ? parsed.sourceA.profilePath : null } : defaults.sourceA,
@@ -154,9 +158,11 @@ export function studioText(settings: StudioSettings): string {
   return settings.preset === "custom" ? settings.customText : presetTexts[settings.preset];
 }
 
-export function studioPalette(settings: StudioSettings): { foreground: string; background: string } {
+/* Custom colours win; otherwise the board follows the window theme, flipped
+   by the invert switch. */
+export function studioPalette(settings: StudioSettings, theme: "light" | "dark"): { foreground: string; background: string } {
   if (settings.palette === "custom") return { foreground: settings.foreground, background: settings.background };
-  return specimenPalette(settings.palette === "dark");
+  return specimenPalette((theme === "dark") !== settings.inverted);
 }
 
 export interface ResolvedSource {
@@ -212,10 +218,10 @@ export function studioStrips(settings: StudioSettings): ReadonlyArray<StudioStri
   return strips;
 }
 
-export function studioRequests(settings: StudioSettings, source: ResolvedSource, widthPx: number, sideKey: string): ReadonlyArray<SpecimenRequest> {
+export function studioRequests(settings: StudioSettings, source: ResolvedSource, widthPx: number, sideKey: string, theme: "light" | "dark"): ReadonlyArray<SpecimenRequest> {
   if (source.kind === "none" || source.unavailable || widthPx < 96) return [];
   const text = studioText(settings);
-  const palette = studioPalette(settings);
+  const palette = studioPalette(settings, theme);
   return studioStrips(settings).map((strip) => ({
     key: `${sideKey}|${strip.key}`,
     profilePath: source.profilePath ?? "",

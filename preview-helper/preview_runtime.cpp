@@ -1427,7 +1427,7 @@ void PreviewRuntime::rebuild_toolbar_layout() {
       case kModeListing: return labels_.mode_listing;
       case kInvert: return labels_.invert;
       case kLoupe: return labels_.loupe;
-      case kZoom: return labels_.zoom + L" " + std::to_wstring(zoom_) + L"x ▾";
+      case kZoom: return labels_.zoom + L" " + std::to_wstring(zoom_) + L"x";
       case kTopmost: return labels_.topmost;
       case kEditText: return labels_.edit_text;
       case kSavePng: return labels_.save_png;
@@ -1612,7 +1612,10 @@ std::unique_ptr<PreviewRuntime::CanvasBitmap> PreviewRuntime::render_native_canv
       TEXTMETRICW metrics{};
       GetTextMetricsW(bitmap->dc, &metrics);
       SelectObject(bitmap->dc, gutter_font);
-      RECT label_area{scaled(6, native_dpi_), y, gutter - scaled(4, native_dpi_), y + metrics.tmAscent};
+      /* The label sits on the sample's baseline; its box starts above the
+         line so a gutter font taller than a small sample is not clipped. */
+      RECT label_area{scaled(6, native_dpi_), y - line_height, gutter - scaled(4, native_dpi_),
+                      y + metrics.tmAscent};
       DrawTextW(bitmap->dc, label.c_str(), -1, &label_area, DT_RIGHT | DT_BOTTOM | DT_SINGLELINE);
       SelectObject(bitmap->dc, sample_font);
       SetTextColor(bitmap->dc, native_foreground_);

@@ -38,17 +38,7 @@ fn remove_or_defer(path: &Path, directory: bool) -> Result<(), SetupError> {
 
 #[cfg(windows)]
 fn defer_delete_after_reboot(path: &Path) -> Result<(), std::io::Error> {
-    use std::os::windows::ffi::OsStrExt;
-    use std::ptr;
-
-    use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_DELAY_UNTIL_REBOOT};
-
-    let mut wide = path.as_os_str().encode_wide().collect::<Vec<_>>();
-    wide.push(0);
-    if unsafe { MoveFileExW(wide.as_ptr(), ptr::null(), MOVEFILE_DELAY_UNTIL_REBOOT) } == 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
+    mactype_service_platform::delay_delete_until_reboot(path)
 }
 
 #[cfg(not(windows))]

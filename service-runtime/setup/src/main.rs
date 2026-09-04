@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use std::io::Read;
 
 use mactype_service_contract::{BrokerCommand, MAX_PROFILE_BYTES};

@@ -1,16 +1,9 @@
-use std::io;
-use std::ptr;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use mactype_service_contract::{effective_health_pipe_name, HealthReport, HealthState};
-use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
-use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, ReadFile, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING,
-};
-use windows_sys::Win32::System::Pipes::GetNamedPipeServerProcessId;
+use mactype_service_platform::NamedPipeClient;
 
-use super::wide;
 use crate::SetupError;
 
 fn health_server_matches_expected(expected_service_pid: u32, server_pid: u32) -> bool {
@@ -33,52 +26,22 @@ pub(super) fn wait_for_ready_health(
     timeout: Duration,
 ) -> Result<(), SetupError> {
     let deadline = Instant::now() + timeout;
-    let pipe_name = wide(effective_health_pipe_name());
+    let pipe_name = effective_health_pipe_name();
     while Instant::now() < deadline {
-        let handle = unsafe {
-            CreateFileW(
-                pipe_name.as_ptr(),
-                FILE_GENERIC_READ,
-                FILE_SHARE_READ,
-                ptr::null(),
-                OPEN_EXISTING,
-                FILE_ATTRIBUTE_NORMAL,
-                ptr::null_mut(),
-            )
-        };
-        if handle != INVALID_HANDLE_VALUE {
-            let mut server_pid = 0;
-            if unsafe { GetNamedPipeServerProcessId(handle, &mut server_pid) } == 0 {
-                let error = io::Error::last_os_error();
-                unsafe {
-                    CloseHandle(handle);
-                }
-                return Err(SetupError::Io(error));
-            }
+        // The pipe is absent until the service publishes it; every open
+        // failure is a reason to keep polling rather than an error.
+        if let Ok(client) = NamedPipeClient::open_read(pipe_name) {
+            let server_pid = client.server_process_id().map_err(SetupError::Io)?;
             if !health_server_matches_expected(expected_service_pid, server_pid) {
-                unsafe {
-                    CloseHandle(handle);
-                }
                 return Err(SetupError::Runtime(format!(
                     "health pipe server PID {server_pid} does not match SCM service PID {expected_service_pid}"
                 )));
             }
             let mut buffer = vec![0u8; 16 * 1024];
-            let mut read = 0;
-            let succeeded = unsafe {
-                ReadFile(
-                    handle,
-                    buffer.as_mut_ptr(),
-                    buffer.len() as u32,
-                    &mut read,
-                    ptr::null_mut(),
-                )
-            } != 0;
-            unsafe {
-                CloseHandle(handle);
-            }
-            if succeeded && read > 0 {
-                buffer.truncate(read as usize);
+            let read = client.read(&mut buffer).unwrap_or(0);
+            drop(client);
+            if read > 0 {
+                buffer.truncate(read);
                 if let Ok(report) = serde_json::from_slice::<HealthReport>(&buffer) {
                     if health_report_matches_expected_profile(&report, expected_profile_digest) {
                         return Ok(());

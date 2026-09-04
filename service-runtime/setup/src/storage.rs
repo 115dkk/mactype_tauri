@@ -209,23 +209,7 @@ pub(crate) fn temporary_nonce() -> String {
 
 #[cfg(windows)]
 fn replace_file(source: &Path, destination: &Path) -> Result<(), SetupError> {
-    use windows_sys::Win32::Storage::FileSystem::{
-        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
-    };
-
-    let source = wide_null(source);
-    let destination = wide_null(destination);
-    if unsafe {
-        MoveFileExW(
-            source.as_ptr(),
-            destination.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    } == 0
-    {
-        return Err(SetupError::Io(io::Error::last_os_error()));
-    }
-    Ok(())
+    mactype_service_platform::replace_file(source, destination).map_err(SetupError::Io)
 }
 
 #[cfg(not(windows))]
@@ -236,25 +220,10 @@ fn replace_file(source: &Path, destination: &Path) -> Result<(), SetupError> {
 
 #[cfg(windows)]
 fn is_reparse_point(path: &Path) -> Result<bool, SetupError> {
-    use windows_sys::Win32::Storage::FileSystem::{
-        GetFileAttributesW, FILE_ATTRIBUTE_REPARSE_POINT, INVALID_FILE_ATTRIBUTES,
-    };
-
-    let path = wide_null(path);
-    let attributes = unsafe { GetFileAttributesW(path.as_ptr()) };
-    if attributes == INVALID_FILE_ATTRIBUTES {
-        return Err(SetupError::Io(io::Error::last_os_error()));
-    }
-    Ok(attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+    mactype_service_platform::is_reparse_point(path).map_err(SetupError::Io)
 }
 
 #[cfg(not(windows))]
 fn is_reparse_point(path: &Path) -> Result<bool, SetupError> {
     Ok(fs::symlink_metadata(path)?.file_type().is_symlink())
-}
-
-#[cfg(windows)]
-fn wide_null(path: &Path) -> Vec<u16> {
-    use std::os::windows::ffi::OsStrExt;
-    path.as_os_str().encode_wide().chain(Some(0)).collect()
 }

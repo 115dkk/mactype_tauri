@@ -80,11 +80,12 @@ pub(crate) fn render_profile_preview(
 
 #[tauri::command]
 pub(crate) fn set_native_preview(
+    app: AppHandle,
     visible: bool,
     options: Option<NativePreviewOptions>,
     state: State<'_, PreviewState>,
 ) -> Result<NativePreviewState, String> {
-    commands::set_native_preview(visible, options, state.inner())
+    commands::set_native_preview(app, visible, options, state.inner())
 }
 
 #[tauri::command]

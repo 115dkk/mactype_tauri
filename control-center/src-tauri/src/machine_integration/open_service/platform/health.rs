@@ -1,7 +1,6 @@
 use super::super::{read_bounded_regular_file, HealthReport, LiveHealthReport};
 use mactype_service_contract::effective_health_pipe_name;
-use std::{fs, io::Read, os::windows::io::AsRawHandle, path::Path, time::Duration};
-use windows_sys::Win32::System::Pipes::GetNamedPipeServerProcessId;
+use std::{fs, io::Read, path::Path, time::Duration};
 
 const MAX_HEALTH_BYTES: u64 = 16 * 1024;
 const LIVE_HEALTH_ATTEMPTS: usize = 8;
@@ -16,10 +15,9 @@ pub(super) fn read_health() -> Result<LiveHealthReport, String> {
 fn read_health_once() -> Result<LiveHealthReport, String> {
     let mut file =
         fs::File::open(effective_health_pipe_name()).map_err(|error| error.to_string())?;
-    let mut server_pid = 0;
-    if unsafe { GetNamedPipeServerProcessId(file.as_raw_handle().cast(), &mut server_pid) } == 0
-        || server_pid == 0
-    {
+    let server_pid = mactype_service_platform::named_pipe_server_process_id(&file)
+        .map_err(|_| "service health pipe server PID is unavailable".to_owned())?;
+    if server_pid == 0 {
         return Err("service health pipe server PID is unavailable".to_owned());
     }
     let report = read_health_message(&mut file)?;

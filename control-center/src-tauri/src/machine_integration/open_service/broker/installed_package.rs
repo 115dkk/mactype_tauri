@@ -1,7 +1,6 @@
 use super::{
     super::{
         file_guard::read_bounded_regular_file,
-        platform::known_folder,
         runtime::{parse_bundled_runtime_manifest, MAX_BUNDLED_MANIFEST_BYTES},
         INSTALLATION_INCOMPLETE_PREFIX, INSTALLATION_REQUIRED_PREFIX,
         INSTALLATION_UNTRUSTED_PREFIX,
@@ -9,17 +8,13 @@ use super::{
     path_guard::reject_reparse_ancestors,
 };
 use crate::diagnostics::InstallationPreflightDiagnostics;
+use mactype_service_platform::{
+    known_folder_path, KnownFolder, RegistryKey, RegistryRoot, RegistryView,
+};
 use std::{
     collections::BTreeMap,
-    ffi::OsString,
     fs,
-    os::windows::ffi::OsStringExt,
     path::{Path, PathBuf},
-};
-use windows_sys::Win32::{
-    Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS},
-    System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY},
-    UI::Shell::FOLDERID_ProgramFiles,
 };
 
 const CONTROL_CENTER_FILE: &str = "MacType Control Center.exe";
@@ -498,7 +493,7 @@ pub(in crate::machine_integration::open_service) fn service_package(
         std::env::current_exe().map_err(|error| untrusted(error, diagnostics(None)))?;
     let installed = (|| {
         let mut initial = diagnostics(Some(current_executable.clone()));
-        let program_files = known_folder(&FOLDERID_ProgramFiles)
+        let program_files = known_folder_path(KnownFolder::ProgramFiles)
             .map_err(|error| untrusted(error, initial.clone()))?;
         let install_location = registered_install_location().map_err(|error| {
             initial.installed_control_center = "unknown".to_owned();
@@ -553,59 +548,34 @@ fn registered_install_location() -> Result<Option<PathBuf>, String> {
 }
 
 fn registered_install_location_from_key(registry_key: &str) -> Result<Option<PathBuf>, String> {
-    let subkey = super::path_guard::wide(registry_key);
-    let value = super::path_guard::wide(INSTALL_LOCATION_VALUE);
-    let flags = RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY;
-    let mut bytes = 0_u32;
-    let first = unsafe {
-        RegGetValueW(
-            HKEY_LOCAL_MACHINE,
-            subkey.as_ptr(),
-            value.as_ptr(),
-            flags,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            &mut bytes,
+    let Some(key) = RegistryKey::open(
+        RegistryRoot::LocalMachine,
+        registry_key,
+        RegistryView::Native64,
+    )
+    .map_err(|error| {
+        format!(
+            "the installer registration could not be read safely (Win32 {})",
+            error.raw_os_error().unwrap_or(0)
         )
-    };
-    if matches!(first, ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND) {
+    })?
+    else {
         return Ok(None);
-    }
-    if first != ERROR_SUCCESS
-        || !(2..=MAX_INSTALL_LOCATION_BYTES).contains(&bytes)
-        || bytes % 2 != 0
-    {
-        return Err(format!(
-            "the installer registration could not be read safely (Win32 {first})"
-        ));
-    }
-    let mut buffer = vec![0_u16; bytes as usize / 2];
-    let second = unsafe {
-        RegGetValueW(
-            HKEY_LOCAL_MACHINE,
-            subkey.as_ptr(),
-            value.as_ptr(),
-            flags,
-            std::ptr::null_mut(),
-            buffer.as_mut_ptr().cast(),
-            &mut bytes,
-        )
     };
-    if second != ERROR_SUCCESS
-        || !(2..=MAX_INSTALL_LOCATION_BYTES).contains(&bytes)
-        || bytes % 2 != 0
+    let Some(value) = key.read_string(INSTALL_LOCATION_VALUE).map_err(|error| {
+        format!(
+            "the installer registration changed while it was read (Win32 {})",
+            error.raw_os_error().unwrap_or(0)
+        )
+    })?
+    else {
+        return Ok(None);
+    };
+    if value.is_empty()
+        || value.encode_utf16().any(|unit| unit == 0)
+        || value.len() > MAX_INSTALL_LOCATION_BYTES as usize
     {
-        return Err(format!(
-            "the installer registration changed while it was read (Win32 {second})"
-        ));
-    }
-    buffer.truncate(bytes as usize / 2);
-    if buffer.last() != Some(&0) {
-        return Err("the installer registration is not NUL terminated".to_owned());
-    }
-    buffer.pop();
-    if buffer.is_empty() || buffer.contains(&0) {
         return Err("the installer registration contains an invalid path".to_owned());
     }
-    Ok(Some(PathBuf::from(OsString::from_wide(&buffer))))
+    Ok(Some(PathBuf::from(value)))
 }

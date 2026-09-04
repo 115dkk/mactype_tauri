@@ -1,108 +1,24 @@
 use super::{
     super::*,
-    common::{open_for, query_configuration, wide, wide_multi, ServiceHandle},
+    common::{open_for, query_configuration, win32_code},
     control::{create_service_configuration, query, stop},
     snapshot::{
         query_extended_configuration, service_has_triggers, MAX_FAILURE_ACTIONS,
-        MAX_REQUIRED_PRIVILEGES, MAX_SECURITY_DESCRIPTOR_BYTES, SERVICE_READ_CONTROL,
+        MAX_REQUIRED_PRIVILEGES, MAX_SECURITY_DESCRIPTOR_BYTES,
     },
 };
-use windows_sys::Win32::{
-    Foundation::{CloseHandle, GetLastError, ERROR_NOT_ALL_ASSIGNED, HANDLE, LUID},
-    Security::{
-        AdjustTokenPrivileges, GetSecurityDescriptorControl, GetSecurityDescriptorLength,
-        IsValidSecurityDescriptor, LookupPrivilegeValueW, DACL_SECURITY_INFORMATION,
-        GROUP_SECURITY_INFORMATION, LUID_AND_ATTRIBUTES, OWNER_SECURITY_INFORMATION,
-        PROTECTED_DACL_SECURITY_INFORMATION, SE_DACL_PROTECTED, SE_PRIVILEGE_ENABLED,
-        SE_SELF_RELATIVE, TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES, TOKEN_QUERY,
-        UNPROTECTED_DACL_SECURITY_INFORMATION,
-    },
-    System::{
-        Services::{
-            ChangeServiceConfig2W, ChangeServiceConfigW, SetServiceObjectSecurity, SC_ACTION,
-            SC_ACTION_NONE, SC_ACTION_OWN_RESTART, SC_ACTION_REBOOT, SC_ACTION_RESTART,
-            SC_ACTION_RUN_COMMAND, SERVICE_CHANGE_CONFIG, SERVICE_CONFIG_DELAYED_AUTO_START_INFO,
-            SERVICE_CONFIG_DESCRIPTION, SERVICE_CONFIG_FAILURE_ACTIONS,
-            SERVICE_CONFIG_FAILURE_ACTIONS_FLAG, SERVICE_CONFIG_PRESHUTDOWN_INFO,
-            SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO, SERVICE_CONFIG_SERVICE_SID_INFO,
-            SERVICE_CONFIG_TRIGGER_INFO, SERVICE_DELAYED_AUTO_START_INFO, SERVICE_DESCRIPTIONW,
-            SERVICE_FAILURE_ACTIONSW, SERVICE_FAILURE_ACTIONS_FLAG, SERVICE_PRESHUTDOWN_INFO,
-            SERVICE_QUERY_CONFIG, SERVICE_REQUIRED_PRIVILEGES_INFOW, SERVICE_SID_INFO,
-            SERVICE_TRIGGER_INFO,
-        },
-        Threading::{GetCurrentProcess, OpenProcessToken},
-    },
+use mactype_service_platform::{
+    FailureAction as PlatformFailureAction, FailureActionKind,
+    FailureActions as PlatformFailureActions, PrivilegeGuard, SelfRelativeSecurityDescriptor,
+    ServiceAccess, ServiceConfig, ServiceHandle,
 };
 
-const SERVICE_WRITE_DAC: u32 = 0x0004_0000;
-const SERVICE_WRITE_OWNER: u32 = 0x0008_0000;
-
-struct TokenHandle(HANDLE);
-
-impl Drop for TokenHandle {
-    fn drop(&mut self) {
-        unsafe { CloseHandle(self.0) };
-    }
-}
-
-// Restoring the saved service owner (typically LocalSystem for a legacy MacType
-// service) requires SeRestorePrivilege; without it SetServiceObjectSecurity
-// fails with ERROR_INVALID_OWNER (1307). The privilege is held but disabled by
-// default on an elevated token, so enable it narrowly around the security write.
-fn set_process_privilege(name: &str, enable: bool) -> Result<(), String> {
-    let mut raw_token: HANDLE = std::ptr::null_mut();
-    if unsafe {
-        OpenProcessToken(
-            GetCurrentProcess(),
-            TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
-            &mut raw_token,
-        )
-    } == 0
-    {
-        return Err(format!("OpenProcessToken failed with {}", unsafe {
-            GetLastError()
-        }));
-    }
-    let token = TokenHandle(raw_token);
-    let wide_name = wide(name);
-    let mut luid = LUID {
-        LowPart: 0,
-        HighPart: 0,
-    };
-    if unsafe { LookupPrivilegeValueW(std::ptr::null(), wide_name.as_ptr(), &mut luid) } == 0 {
-        return Err(format!(
-            "LookupPrivilegeValueW({name}) failed with {}",
-            unsafe { GetLastError() }
-        ));
-    }
-    let privileges = TOKEN_PRIVILEGES {
-        PrivilegeCount: 1,
-        Privileges: [LUID_AND_ATTRIBUTES {
-            Luid: luid,
-            Attributes: if enable { SE_PRIVILEGE_ENABLED } else { 0 },
-        }],
-    };
-    if unsafe {
-        AdjustTokenPrivileges(
-            token.0,
-            0,
-            &privileges,
-            0,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        )
-    } == 0
-    {
-        return Err(format!(
-            "AdjustTokenPrivileges({name}) failed with {}",
-            unsafe { GetLastError() }
-        ));
-    }
-    if enable && unsafe { GetLastError() } == ERROR_NOT_ALL_ASSIGNED {
-        return Err(format!("the current token does not hold {name}"));
-    }
-    Ok(())
-}
+use windows_sys::Win32::System::Services::{
+    SERVICE_CONFIG_DELAYED_AUTO_START_INFO, SERVICE_CONFIG_DESCRIPTION,
+    SERVICE_CONFIG_FAILURE_ACTIONS, SERVICE_CONFIG_FAILURE_ACTIONS_FLAG,
+    SERVICE_CONFIG_PRESHUTDOWN_INFO, SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO,
+    SERVICE_CONFIG_SERVICE_SID_INFO, SERVICE_CONFIG_TRIGGER_INFO,
+};
 
 fn validate_snapshot_string(name: &str, value: &str) -> Result<(), String> {
     if value.contains('\0') || value.encode_utf16().count() > 32_767 {
@@ -112,26 +28,25 @@ fn validate_snapshot_string(name: &str, value: &str) -> Result<(), String> {
     }
 }
 
-fn validate_security_descriptor_snapshot(
+fn validated_security_descriptor_snapshot(
     snapshot: &SecurityDescriptorSnapshot,
-) -> Result<(), String> {
+) -> Result<SelfRelativeSecurityDescriptor, String> {
     if snapshot.self_relative.is_empty()
-        || snapshot.self_relative.len() > MAX_SECURITY_DESCRIPTOR_BYTES as usize
+        || snapshot.self_relative.len() > MAX_SECURITY_DESCRIPTOR_BYTES
     {
         return Err("legacy SCM security descriptor size is invalid".to_owned());
     }
-    let descriptor = snapshot.self_relative.as_ptr().cast_mut().cast();
-    let mut control = 0u16;
-    let mut revision = 0u32;
-    if unsafe { IsValidSecurityDescriptor(descriptor) } == 0
-        || unsafe { GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) } == 0
-        || control & SE_SELF_RELATIVE == 0
-        || unsafe { GetSecurityDescriptorLength(descriptor) } as usize
-            != snapshot.self_relative.len()
-    {
-        return Err("legacy SCM security descriptor is invalid".to_owned());
-    }
-    Ok(())
+    SelfRelativeSecurityDescriptor::from_bytes(
+        snapshot.self_relative.clone(),
+        MAX_SECURITY_DESCRIPTOR_BYTES,
+    )
+    .map_err(|_| "legacy SCM security descriptor is invalid".to_owned())
+}
+
+fn validate_security_descriptor_snapshot(
+    snapshot: &SecurityDescriptorSnapshot,
+) -> Result<(), String> {
+    validated_security_descriptor_snapshot(snapshot).map(drop)
 }
 
 pub(super) fn validate_snapshot_for_restore(snapshot: &LegacyScmSnapshot) -> Result<(), String> {
@@ -176,16 +91,11 @@ pub(super) fn validate_snapshot_for_restore(snapshot: &LegacyScmSnapshot) -> Res
         }
     }
     if extended.failure_actions.actions.len() > MAX_FAILURE_ACTIONS
-        || extended.failure_actions.actions.iter().any(|action| {
-            !matches!(
-                action.action_type,
-                SC_ACTION_NONE
-                    | SC_ACTION_RESTART
-                    | SC_ACTION_REBOOT
-                    | SC_ACTION_RUN_COMMAND
-                    | SC_ACTION_OWN_RESTART
-            )
-        })
+        || extended
+            .failure_actions
+            .actions
+            .iter()
+            .any(|action| FailureActionKind::from_raw(action.action_type).is_none())
     {
         return Err("legacy SCM failure actions are not safely restorable".to_owned());
     }
@@ -200,26 +110,13 @@ pub(super) fn validate_snapshot_for_restore(snapshot: &LegacyScmSnapshot) -> Res
     validate_security_descriptor_snapshot(&extended.security_descriptor)
 }
 
-fn change_config2<T>(
-    service: &ServiceHandle,
-    information_level: u32,
-    information: &T,
-) -> Result<(), String> {
-    if unsafe {
-        ChangeServiceConfig2W(
-            service.0,
-            information_level,
-            (information as *const T).cast(),
-        )
-    } == 0
-    {
-        Err(format!(
+fn config2_result(result: std::io::Result<()>, information_level: u32) -> Result<(), String> {
+    result.map_err(|error| {
+        format!(
             "ChangeServiceConfig2W({information_level}) failed with {}",
-            unsafe { GetLastError() }
-        ))
-    } else {
-        Ok(())
-    }
+            win32_code(&error)
+        )
+    })
 }
 
 struct WindowsServiceConfigurationRestorer<'a> {
@@ -233,180 +130,104 @@ impl ServiceConfigurationRestorer for WindowsServiceConfigurationRestorer<'_> {
         let extended = &self.snapshot.extended;
         match step {
             ServiceRestoreStep::Core => {
-                let binary_path = wide(&configuration.binary_path);
-                let mut load_order_group = configuration.load_order_group.as_deref().map(wide);
-                let mut tag_id = 0;
-                let dependencies = wide_multi(&configuration.dependencies);
-                let account = wide(&configuration.account);
-                let display_name = wide(&configuration.display_name);
-                if unsafe {
-                    ChangeServiceConfigW(
-                        self.service.0,
-                        configuration.service_type,
-                        configuration.start_type,
-                        configuration.error_control,
-                        binary_path.as_ptr(),
-                        load_order_group
-                            .as_mut()
-                            .map_or(std::ptr::null(), |value| value.as_ptr()),
-                        load_order_group
-                            .as_ref()
-                            .map_or(std::ptr::null_mut(), |_| &mut tag_id),
-                        dependencies.as_ptr(),
-                        account.as_ptr(),
-                        std::ptr::null(),
-                        display_name.as_ptr(),
-                    )
-                } == 0
-                {
-                    Err(format!("ChangeServiceConfigW failed with {}", unsafe {
-                        GetLastError()
-                    }))
-                } else {
-                    Ok(())
-                }
-            }
-            ServiceRestoreStep::Description => {
-                let mut description = extended.description.as_deref().map(wide);
-                let information = SERVICE_DESCRIPTIONW {
-                    lpDescription: description
-                        .as_mut()
-                        .map_or(std::ptr::null_mut(), |value| value.as_mut_ptr()),
+                let configuration = ServiceConfig {
+                    service_type: configuration.service_type,
+                    start_type: configuration.start_type,
+                    error_control: configuration.error_control,
+                    image_path: configuration.binary_path.clone(),
+                    account: configuration.account.clone(),
+                    display_name: configuration.display_name.clone(),
+                    load_order_group: configuration.load_order_group.clone().unwrap_or_default(),
+                    tag_id: configuration.tag_id,
+                    dependencies: configuration.dependencies.clone(),
                 };
-                change_config2(self.service, SERVICE_CONFIG_DESCRIPTION, &information)
+                self.service.set_config(&configuration).map_err(|error| {
+                    format!("ChangeServiceConfigW failed with {}", win32_code(&error))
+                })
             }
+            ServiceRestoreStep::Description => config2_result(
+                self.service
+                    .set_optional_description(extended.description.as_deref()),
+                SERVICE_CONFIG_DESCRIPTION,
+            ),
             ServiceRestoreStep::FailureActions => {
-                let mut reboot_message =
-                    extended.failure_actions.reboot_message.as_deref().map(wide);
-                let mut command = extended.failure_actions.command.as_deref().map(wide);
-                let mut actions = extended
+                let actions = extended
                     .failure_actions
                     .actions
                     .iter()
-                    .map(|action| SC_ACTION {
-                        Type: action.action_type,
-                        Delay: action.delay_ms,
+                    .map(|action| {
+                        let kind =
+                            FailureActionKind::from_raw(action.action_type).ok_or_else(|| {
+                                "legacy service has an unsupported failure action".to_owned()
+                            })?;
+                        Ok(PlatformFailureAction {
+                            kind,
+                            delay_ms: action.delay_ms,
+                        })
                     })
-                    .collect::<Vec<_>>();
-                let information = SERVICE_FAILURE_ACTIONSW {
-                    dwResetPeriod: extended.failure_actions.reset_period_seconds,
-                    lpRebootMsg: reboot_message
-                        .as_mut()
-                        .map_or(std::ptr::null_mut(), |value| value.as_mut_ptr()),
-                    lpCommand: command
-                        .as_mut()
-                        .map_or(std::ptr::null_mut(), |value| value.as_mut_ptr()),
-                    cActions: actions.len() as u32,
-                    lpsaActions: if actions.is_empty() {
-                        std::ptr::null_mut()
-                    } else {
-                        actions.as_mut_ptr()
-                    },
+                    .collect::<Result<Vec<_>, String>>()?;
+                let actions = PlatformFailureActions {
+                    reset_period_seconds: extended.failure_actions.reset_period_seconds,
+                    reboot_message: extended.failure_actions.reboot_message.clone(),
+                    command: extended.failure_actions.command.clone(),
+                    actions,
                 };
-                change_config2(self.service, SERVICE_CONFIG_FAILURE_ACTIONS, &information)
-            }
-            ServiceRestoreStep::FailureActionsFlag => {
-                let information = SERVICE_FAILURE_ACTIONS_FLAG {
-                    fFailureActionsOnNonCrashFailures: i32::from(
-                        extended.failure_actions_on_non_crash,
-                    ),
-                };
-                change_config2(
-                    self.service,
-                    SERVICE_CONFIG_FAILURE_ACTIONS_FLAG,
-                    &information,
+                config2_result(
+                    self.service.set_failure_actions(&actions),
+                    SERVICE_CONFIG_FAILURE_ACTIONS,
                 )
             }
-            ServiceRestoreStep::DelayedAutoStart => {
-                let information = SERVICE_DELAYED_AUTO_START_INFO {
-                    fDelayedAutostart: i32::from(extended.delayed_auto_start),
-                };
-                change_config2(
-                    self.service,
-                    SERVICE_CONFIG_DELAYED_AUTO_START_INFO,
-                    &information,
-                )
-            }
-            ServiceRestoreStep::ServiceSidType => {
-                let information = SERVICE_SID_INFO {
-                    dwServiceSidType: extended.service_sid_type,
-                };
-                change_config2(self.service, SERVICE_CONFIG_SERVICE_SID_INFO, &information)
-            }
-            ServiceRestoreStep::RequiredPrivileges => {
-                let mut privileges = if extended.required_privileges.is_empty() {
-                    vec![0u16, 0]
-                } else {
-                    wide_multi(&extended.required_privileges)
-                };
-                let information = SERVICE_REQUIRED_PRIVILEGES_INFOW {
-                    pmszRequiredPrivileges: privileges.as_mut_ptr(),
-                };
-                change_config2(
-                    self.service,
-                    SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO,
-                    &information,
-                )
-            }
-            ServiceRestoreStep::PreshutdownTimeout => {
-                let information = SERVICE_PRESHUTDOWN_INFO {
-                    dwPreshutdownTimeout: extended.preshutdown_timeout_ms,
-                };
-                change_config2(self.service, SERVICE_CONFIG_PRESHUTDOWN_INFO, &information)
-            }
+            ServiceRestoreStep::FailureActionsFlag => config2_result(
+                self.service.set_failure_actions_on_non_crash_failures(
+                    extended.failure_actions_on_non_crash,
+                ),
+                SERVICE_CONFIG_FAILURE_ACTIONS_FLAG,
+            ),
+            ServiceRestoreStep::DelayedAutoStart => config2_result(
+                self.service
+                    .set_delayed_auto_start(extended.delayed_auto_start),
+                SERVICE_CONFIG_DELAYED_AUTO_START_INFO,
+            ),
+            ServiceRestoreStep::ServiceSidType => config2_result(
+                self.service.set_service_sid_type(extended.service_sid_type),
+                SERVICE_CONFIG_SERVICE_SID_INFO,
+            ),
+            ServiceRestoreStep::RequiredPrivileges => config2_result(
+                self.service
+                    .set_required_privileges(&extended.required_privileges),
+                SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO,
+            ),
+            ServiceRestoreStep::PreshutdownTimeout => config2_result(
+                self.service
+                    .set_preshutdown_timeout_ms(extended.preshutdown_timeout_ms),
+                SERVICE_CONFIG_PRESHUTDOWN_INFO,
+            ),
             ServiceRestoreStep::Triggers => {
                 // Clearing triggers on a service that has none returns
                 // ERROR_INVALID_PARAMETER (87) on Windows Server builds. The
                 // snapshot model only ever represents "no triggers", so only
                 // issue the clear when the live service actually has some.
                 if service_has_triggers(self.service)? {
-                    let information = SERVICE_TRIGGER_INFO::default();
-                    change_config2(self.service, SERVICE_CONFIG_TRIGGER_INFO, &information)
+                    config2_result(self.service.clear_triggers(), SERVICE_CONFIG_TRIGGER_INFO)
                 } else {
                     Ok(())
                 }
             }
             ServiceRestoreStep::SecurityDescriptor => {
-                validate_security_descriptor_snapshot(&extended.security_descriptor)?;
-                let descriptor = extended
-                    .security_descriptor
-                    .self_relative
-                    .as_ptr()
-                    .cast_mut()
-                    .cast();
-                let mut control = 0u16;
-                let mut revision = 0u32;
-                if unsafe { GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) }
-                    == 0
-                {
-                    return Err(format!(
-                        "GetSecurityDescriptorControl failed with {}",
-                        unsafe { GetLastError() }
-                    ));
-                }
-                let protection = if control & SE_DACL_PROTECTED != 0 {
-                    PROTECTED_DACL_SECURITY_INFORMATION
-                } else {
-                    UNPROTECTED_DACL_SECURITY_INFORMATION
-                };
-                let security_information = OWNER_SECURITY_INFORMATION
-                    | GROUP_SECURITY_INFORMATION
-                    | DACL_SECURITY_INFORMATION
-                    | protection;
+                let descriptor =
+                    validated_security_descriptor_snapshot(&extended.security_descriptor)?;
                 // Best-effort: if the owner is already a held SID the write
                 // succeeds without the privilege, and the real error still
                 // surfaces below when it is genuinely needed but unavailable.
-                let _ = set_process_privilege("SeRestorePrivilege", true);
-                let applied = unsafe {
-                    SetServiceObjectSecurity(self.service.0, security_information, descriptor)
-                };
-                let last_error = unsafe { GetLastError() };
-                let _ = set_process_privilege("SeRestorePrivilege", false);
-                if applied == 0 {
-                    Err(format!("SetServiceObjectSecurity failed with {last_error}"))
-                } else {
-                    Ok(())
-                }
+                let guard = PrivilegeGuard::enable("SeRestorePrivilege").ok();
+                let applied = self.service.set_object_security(&descriptor);
+                drop(guard);
+                applied.map_err(|error| {
+                    format!(
+                        "SetServiceObjectSecurity failed with {}",
+                        win32_code(&error)
+                    )
+                })
             }
         }
     }
@@ -419,7 +240,7 @@ pub(super) fn restore_service_configuration(snapshot: &LegacyScmSnapshot) -> Res
         ServicePresence::Absent => create_service_configuration(&snapshot.configuration)?,
         ServicePresence::Owned | ServicePresence::CompatibleUnquoted => {
             require_stable_migration_state(status.state)?;
-            let current = open_for(SERVICE_QUERY_CONFIG | SERVICE_READ_CONTROL)
+            let current = open_for(ServiceAccess::Inspect)
                 .map_err(|code| format!("OpenServiceW for restore preflight failed with {code}"))?;
             query_extended_configuration(&current)?;
             drop(current);
@@ -441,18 +262,12 @@ pub(super) fn restore_service_configuration(snapshot: &LegacyScmSnapshot) -> Res
     {
         return Err("legacy SCM service changed before configuration restore".to_owned());
     }
-    let preflight = open_for(SERVICE_QUERY_CONFIG | SERVICE_READ_CONTROL)
+    let preflight = open_for(ServiceAccess::Inspect)
         .map_err(|code| format!("OpenServiceW for final restore preflight failed with {code}"))?;
     query_extended_configuration(&preflight)?;
     drop(preflight);
-    let service = open_for(
-        SERVICE_CHANGE_CONFIG
-            | SERVICE_QUERY_CONFIG
-            | SERVICE_READ_CONTROL
-            | SERVICE_WRITE_DAC
-            | SERVICE_WRITE_OWNER,
-    )
-    .map_err(|code| format!("OpenServiceW for restore failed with {code}"))?;
+    let service = open_for(ServiceAccess::Restore)
+        .map_err(|code| format!("OpenServiceW for restore failed with {code}"))?;
     let mut restorer = WindowsServiceConfigurationRestorer {
         service: &service,
         snapshot,

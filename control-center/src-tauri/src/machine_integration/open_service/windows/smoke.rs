@@ -129,22 +129,24 @@ fn read_verified_health_with(
 }
 
 fn fixed_marker_executables() -> Result<[(InjectionArchitecture, PathBuf); 2], String> {
-    let mut process_machine = IMAGE_FILE_MACHINE_UNKNOWN;
-    let mut native_machine = IMAGE_FILE_MACHINE_UNKNOWN;
-    if unsafe {
-        IsWow64Process2(
-            GetCurrentProcess(),
-            &mut process_machine,
-            &mut native_machine,
-        )
-    } == 0
-    {
-        return Err(format!(
-            "could not determine the native architecture for migration smoke: {}",
-            std::io::Error::last_os_error()
-        ));
-    }
-    let windows = known_folder(&FOLDERID_Windows)?;
+    let machine = Process::open(std::process::id(), ProcessAccess::QueryLimited)
+        .and_then(|process| process.machine())
+        .map_err(|error| {
+            format!("could not determine the native architecture for migration smoke: {error}")
+        })?;
+    let process_machine = match machine.process {
+        MachineKind::I386 => IMAGE_FILE_MACHINE_I386,
+        MachineKind::Amd64 => IMAGE_FILE_MACHINE_AMD64,
+        MachineKind::Unknown => IMAGE_FILE_MACHINE_UNKNOWN,
+        MachineKind::Other(value) => value,
+    };
+    let native_machine = match machine.native {
+        MachineKind::I386 => IMAGE_FILE_MACHINE_I386,
+        MachineKind::Amd64 => IMAGE_FILE_MACHINE_AMD64,
+        MachineKind::Unknown => IMAGE_FILE_MACHINE_UNKNOWN,
+        MachineKind::Other(value) => value,
+    };
+    let windows = known_folder(KnownFolder::Windows)?;
     let x64_system = windows.join(marker_x64_system_directory(
         process_machine,
         native_machine,

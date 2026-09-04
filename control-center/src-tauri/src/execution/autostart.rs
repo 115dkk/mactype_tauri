@@ -1,74 +1,46 @@
 use std::env;
 
 #[cfg(windows)]
-fn wide(value: &str) -> Vec<u16> {
-    use std::os::windows::ffi::OsStrExt;
-    std::ffi::OsStr::new(value)
-        .encode_wide()
-        .chain(Some(0))
-        .collect()
+const RUN_SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+#[cfg(windows)]
+const VALUE_NAME: &str = "MacTypeControlCenter";
+#[cfg(windows)]
+const MAX_VALUE_BYTES: usize = 64 * 1024;
+
+#[cfg(windows)]
+fn read_registry_string() -> Option<String> {
+    use mactype_service_platform::{RegistryKey, RegistryRoot, RegistryView};
+    use windows_sys::Win32::System::Registry::REG_SZ;
+
+    let key = RegistryKey::open(
+        RegistryRoot::CurrentUser,
+        RUN_SUBKEY,
+        RegistryView::Native64,
+    )
+    .ok()??;
+    let value = key.read_raw(VALUE_NAME, MAX_VALUE_BYTES).ok()??;
+    if value.kind != REG_SZ {
+        return None;
+    }
+    let units = registry_wide_units(value.bytes.len())?;
+    let mut value = value
+        .bytes
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .collect::<Vec<_>>();
+    debug_assert_eq!(value.len(), units);
+    value.truncate(
+        value
+            .iter()
+            .position(|unit| *unit == 0)
+            .unwrap_or(value.len()),
+    );
+    Some(String::from_utf16_lossy(&value))
 }
 
 #[cfg(windows)]
-fn read_registry_string(
-    root: windows_sys::Win32::System::Registry::HKEY,
-    subkey: &str,
-    value: &str,
-    flags: u32,
-) -> Option<String> {
-    use windows_sys::Win32::{Foundation::ERROR_SUCCESS, System::Registry::RegGetValueW};
-    let subkey = wide(subkey);
-    let value = wide(value);
-    let mut bytes = 0u32;
-    // SAFETY: both names are NUL-terminated, the HKEY is borrowed for this
-    // call, and a null data pointer requests only the byte count.
-    let result = unsafe {
-        RegGetValueW(
-            root,
-            subkey.as_ptr(),
-            value.as_ptr(),
-            flags,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            &mut bytes,
-        )
-    };
-    let units = registry_wide_units(bytes)?;
-    if result != ERROR_SUCCESS {
-        return None;
-    }
-    let capacity_bytes = bytes;
-    let mut buffer = vec![0u16; units];
-    let mut read_bytes = capacity_bytes;
-    // SAFETY: registry_wide_units proved an even bounded byte count, so the
-    // UTF-16 allocation advertises exactly its initialized capacity.
-    let result = unsafe {
-        RegGetValueW(
-            root,
-            subkey.as_ptr(),
-            value.as_ptr(),
-            flags,
-            std::ptr::null_mut(),
-            buffer.as_mut_ptr().cast(),
-            &mut read_bytes,
-        )
-    };
-    if result != ERROR_SUCCESS || read_bytes > capacity_bytes {
-        return None;
-    }
-    buffer.truncate(registry_wide_units(read_bytes)?);
-    let length = buffer
-        .iter()
-        .position(|unit| *unit == 0)
-        .unwrap_or(buffer.len());
-    Some(String::from_utf16_lossy(&buffer[..length]))
-}
-
-#[cfg(windows)]
-fn registry_wide_units(bytes: u32) -> Option<usize> {
-    const MAX_REGISTRY_STRING_BYTES: u32 = 64 * 1024;
-    ((2..=MAX_REGISTRY_STRING_BYTES).contains(&bytes) && bytes % 2 == 0)
-        .then_some(bytes as usize / 2)
+fn registry_wide_units(bytes: usize) -> Option<usize> {
+    ((2..=MAX_VALUE_BYTES).contains(&bytes) && bytes % 2 == 0).then_some(bytes / 2)
 }
 
 #[cfg(all(test, windows))]
@@ -88,13 +60,7 @@ mod tests {
 
 #[cfg(windows)]
 pub(super) fn autostart_value() -> Option<String> {
-    use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_SZ};
-    read_registry_string(
-        HKEY_CURRENT_USER,
-        "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-        "MacTypeControlCenter",
-        RRF_RT_REG_SZ,
-    )
+    read_registry_string()
 }
 
 #[cfg(not(windows))]
@@ -104,34 +70,38 @@ pub(super) fn autostart_value() -> Option<String> {
 
 #[cfg(windows)]
 pub(super) fn set_autostart(enabled: bool) -> Result<bool, String> {
-    use windows_sys::Win32::{
-        Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS},
-        System::Registry::{RegDeleteKeyValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ},
-    };
-    let subkey = wide("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
-    let name = wide("MacTypeControlCenter");
-    let result = if enabled {
+    use mactype_service_platform::{DeleteValueOutcome, RegistryKey, RegistryRoot, RegistryView};
+
+    let key = RegistryKey::open_writable(
+        RegistryRoot::CurrentUser,
+        RUN_SUBKEY,
+        RegistryView::Native64,
+    )
+    .map_err(format_registry_error)?;
+    if enabled {
+        let key = key.ok_or_else(|| {
+            "autostart registry update failed because the Run key is absent".to_owned()
+        })?;
         let executable = env::current_exe().map_err(|error| error.to_string())?;
-        let command = wide(&format!("\"{}\" --tray", executable.display()));
-        unsafe {
-            RegSetKeyValueW(
-                HKEY_CURRENT_USER,
-                subkey.as_ptr(),
-                name.as_ptr(),
-                REG_SZ,
-                command.as_ptr().cast(),
-                (command.len() * 2) as u32,
-            )
+        let command = format!("\"{}\" --tray", executable.display());
+        key.set_string(VALUE_NAME, &command)
+            .map_err(format_registry_error)?;
+    } else if let Some(key) = key {
+        match key
+            .delete_value(VALUE_NAME)
+            .map_err(format_registry_error)?
+        {
+            DeleteValueOutcome::Deleted | DeleteValueOutcome::Absent => {}
         }
-    } else {
-        unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, subkey.as_ptr(), name.as_ptr()) }
-    };
-    if result == ERROR_SUCCESS || (!enabled && result == ERROR_FILE_NOT_FOUND) {
-        Ok(autostart_value().is_some())
-    } else {
-        Err(format!(
-            "autostart registry update failed with Windows error {result}"
-        ))
+    }
+    Ok(autostart_value().is_some())
+}
+
+#[cfg(windows)]
+fn format_registry_error(error: std::io::Error) -> String {
+    match error.raw_os_error() {
+        Some(win32) => format!("autostart registry update failed with Windows error {win32}"),
+        None => format!("autostart registry update failed: {error}"),
     }
 }
 

@@ -118,24 +118,23 @@ fn owned_windows(_pid: u32) -> Result<Vec<isize>, String> {
 fn request_official_exit(
     expected: &LegacyTrayExitRequest,
 ) -> Result<LegacyTrayExitOutcome, String> {
-    use super::tray_process::{process_session_id, trusted_mactray_process_path, ProcessHandle};
-    use windows_sys::Win32::{
-        Foundation::{GetLastError, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT},
-        System::Threading::{GetCurrentProcessId, GetProcessId, WaitForSingleObject},
-        UI::WindowsAndMessaging::{RegisterWindowMessageW, SendNotifyMessageW},
+    use super::tray_process::{
+        open_process, process_creation_time, process_image_path, process_session_id,
+        trusted_mactray_process_path,
     };
+    use mactype_service_platform::{register_window_message, send_notify_message, WaitOutcome};
+    use std::time::Duration;
 
-    const EXIT_WAIT_MS: u32 = 5_000;
-    let process = ProcessHandle::open(expected.pid).map_err(format_service_error)?;
-    let actual_pid = unsafe { GetProcessId(process.raw()) };
+    let process = open_process(expected.pid).map_err(format_service_error)?;
+    let actual_pid = process.pid().unwrap_or(0);
     if actual_pid != expected.pid
-        || process.creation_time().map_err(format_service_error)? != expected.creation_time
+        || process_creation_time(&process).map_err(format_service_error)? != expected.creation_time
         || process_session_id(actual_pid).map_err(format_service_error)?
-            != process_session_id(unsafe { GetCurrentProcessId() }).map_err(format_service_error)?
+            != process_session_id(std::process::id()).map_err(format_service_error)?
     {
         return Err("the opened MacTray process identity changed before graceful exit".to_owned());
     }
-    let path = process.image_path().map_err(format_service_error)?;
+    let path = process_image_path(&process).map_err(format_service_error)?;
     if !trusted_mactray_process_path(&path) || !paths_match(&path, &expected.path) {
         return Err("the opened MacTray process path is not the trusted installation".to_owned());
     }
@@ -144,60 +143,44 @@ fn request_official_exit(
     if windows.is_empty() {
         return Ok(LegacyTrayExitOutcome::ProtocolUnavailable);
     }
-    let message_name: Vec<u16> = "MacType_Exit_Notify\0".encode_utf16().collect();
-    let message = unsafe { RegisterWindowMessageW(message_name.as_ptr()) };
-    if message == 0 {
-        return Err(format!("RegisterWindowMessageW failed with {}", unsafe {
-            GetLastError()
-        }));
-    }
+    let message = register_window_message("MacType_Exit_Notify")
+        .map_err(|io| format!("RegisterWindowMessageW failed{}", format_win32_suffix(&io)))?;
     for window in windows {
-        if unsafe { SendNotifyMessageW(window, message, 0, 0) } == 0 {
-            return Err(format!("SendNotifyMessageW failed with {}", unsafe {
-                GetLastError()
-            }));
-        }
+        send_notify_message(window, message)
+            .map_err(|io| format!("SendNotifyMessageW failed{}", format_win32_suffix(&io)))?;
     }
-    match unsafe { WaitForSingleObject(process.raw(), EXIT_WAIT_MS) } {
-        WAIT_OBJECT_0 => Ok(LegacyTrayExitOutcome::Exited),
-        WAIT_TIMEOUT => Ok(LegacyTrayExitOutcome::TimedOut),
-        WAIT_FAILED => Err(format!("waiting for MacTray exit failed with {}", unsafe {
-            GetLastError()
-        })),
-        other => Err(format!("waiting for MacTray exit returned {other}")),
+    match process.wait(Some(Duration::from_secs(5))) {
+        Ok(WaitOutcome::Signaled) => Ok(LegacyTrayExitOutcome::Exited),
+        Ok(WaitOutcome::TimedOut) => Ok(LegacyTrayExitOutcome::TimedOut),
+        Ok(WaitOutcome::Abandoned) => {
+            Err("waiting for MacTray exit returned an abandoned wait".to_owned())
+        }
+        Err(io) => Err(format!(
+            "waiting for MacTray exit failed{}",
+            format_win32_suffix(&io)
+        )),
     }
 }
 
 #[cfg(windows)]
-fn owned_windows(pid: u32) -> Result<Vec<windows_sys::Win32::Foundation::HWND>, String> {
-    use windows_sys::Win32::{
-        Foundation::{HWND, LPARAM},
-        UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId},
-    };
+fn owned_windows(pid: u32) -> Result<Vec<mactype_service_platform::WindowHandle>, String> {
+    mactype_service_platform::top_level_windows(512)
+        .map(|windows| {
+            windows
+                .into_iter()
+                .filter(|entry| entry.process_id == pid)
+                .map(|entry| entry.window)
+                .collect()
+        })
+        .map_err(|_| "the MacTray window inventory could not be enumerated".to_owned())
+}
 
-    struct Context {
-        pid: u32,
-        windows: Vec<HWND>,
-    }
-
-    unsafe extern "system" fn collect(window: HWND, parameter: LPARAM) -> i32 {
-        let context = unsafe { &mut *(parameter as *mut Context) };
-        let mut owner_pid = 0;
-        unsafe { GetWindowThreadProcessId(window, &mut owner_pid) };
-        if owner_pid == context.pid {
-            context.windows.push(window);
-        }
-        1
-    }
-
-    let mut context = Context {
-        pid,
-        windows: Vec::new(),
-    };
-    if unsafe { EnumWindows(Some(collect), (&mut context as *mut Context) as LPARAM) } == 0 {
-        return Err("the MacTray window inventory could not be enumerated".to_owned());
-    }
-    Ok(context.windows)
+#[cfg(windows)]
+fn format_win32_suffix(error: &std::io::Error) -> String {
+    error
+        .raw_os_error()
+        .map(|win32| format!(" with {win32}"))
+        .unwrap_or_else(|| format!(": {error}"))
 }
 
 #[cfg(windows)]

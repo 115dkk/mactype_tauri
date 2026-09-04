@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod control;
+mod event_log;
 mod file_health;
 mod generated_unity_anticheat_catalog;
 mod helper_broker;

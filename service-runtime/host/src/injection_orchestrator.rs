@@ -14,7 +14,8 @@ use crate::observer::{
     ProcessIdentity,
 };
 use crate::target_validation::{
-    ProcessInspector, ProcessTargetDecision, ProcessTargetValidator, TargetLiveness,
+    InspectionEvidence, ProcessInspector, ProcessTargetDecision, ProcessTargetValidator,
+    TargetLiveness,
 };
 
 pub use model::{
@@ -198,6 +199,8 @@ impl<'a> InjectionOrchestrator<'a> {
                         0,
                         BrokerResult::new(BrokerDisposition::Skipped, reason.code(), None),
                     );
+                } else {
+                    crate::event_log::injection_skipped();
                 }
                 return Ok(ProcessOutcome::Skipped);
             }
@@ -348,6 +351,18 @@ impl<'a> InjectionOrchestrator<'a> {
         );
     }
 
+    fn process_basename(&self, identity: &ProcessIdentity) -> String {
+        self.inspector
+            .inspect(identity.pid)
+            .ok()
+            .filter(|inspection| inspection.identity == *identity)
+            .and_then(|inspection| match inspection.image_name {
+                InspectionEvidence::Known(name) => Some(name),
+                InspectionEvidence::Unavailable => None,
+            })
+            .unwrap_or_else(|| format!("pid-{}", identity.pid))
+    }
+
     fn record_result(
         &mut self,
         identity: ProcessIdentity,
@@ -365,18 +380,29 @@ impl<'a> InjectionOrchestrator<'a> {
             }
             self.process_order.push_back(key);
         }
-        self.processed.insert(
-            key,
-            ProcessAttemptRecord {
-                identity,
-                binding: self.binding,
-                outcome,
-                broker_disposition: result.disposition,
-                attempts,
-                code: result.code,
-                win32_error: result.win32_error,
-            },
+        let record = ProcessAttemptRecord {
+            identity,
+            binding: self.binding,
+            outcome,
+            broker_disposition: result.disposition,
+            attempts,
+            code: result.code,
+            win32_error: result.win32_error,
+        };
+        let process = if matches!(
+            outcome,
+            ProcessOutcome::Rejected | ProcessOutcome::RetryExhausted
+        ) {
+            self.process_basename(&record.identity)
+        } else {
+            String::new()
+        };
+        crate::event_log::injection_result(
+            &record,
+            process,
+            crate::event_log::diagnostic_detail(&record),
         );
+        self.processed.insert(key, record);
     }
 }
 

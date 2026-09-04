@@ -52,6 +52,8 @@ pub fn run() {
             preview::reconnect_preview,
             diagnostics::diagnostic_report,
             diagnostics::diagnostic_recent_logs,
+            diagnostics::list_events,
+            diagnostics::event_log_summary,
             diagnostics::recent_activity,
             diagnostics::export_diagnostics,
             diagnostics::copy_diagnostics,

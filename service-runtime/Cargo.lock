@@ -137,24 +137,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mactype-service-platform"
-version = "0.2.0"
-dependencies = [
- "tempfile",
- "windows",
- "windows-sys",
-]
-
-[[package]]
-name = "mactype-service-platform"
-version = "0.2.0"
-dependencies = [
- "tempfile",
- "windows",
- "windows-sys",
-]
-
-[[package]]
 name = "mactype-service-setup"
 version = "0.2.0"
 dependencies = [

@@ -523,37 +523,11 @@ fn timestamp_millis() -> Result<u64, String> {
 
 #[cfg(windows)]
 fn local_app_data_root() -> Result<PathBuf, String> {
-    use std::{ffi::OsString, os::windows::ffi::OsStringExt};
-    use windows_sys::Win32::{
-        System::Com::CoTaskMemFree,
-        UI::Shell::{FOLDERID_LocalAppData, SHGetKnownFolderPath},
-    };
-
-    let mut pointer = std::ptr::null_mut();
-    let result = unsafe {
-        SHGetKnownFolderPath(
-            &FOLDERID_LocalAppData,
-            0,
-            std::ptr::null_mut(),
-            &mut pointer,
-        )
-    };
-    if result < 0 || pointer.is_null() {
-        return Err(format!(
-            "SHGetKnownFolderPath(LocalAppData) failed with HRESULT {result}"
-        ));
-    }
-    let mut length = 0_usize;
-    while length < 32_768 && unsafe { *pointer.add(length) } != 0 {
-        length += 1;
-    }
-    if length == 32_768 {
-        unsafe { CoTaskMemFree(pointer.cast()) };
-        return Err("LocalAppData path exceeded its bound".to_owned());
-    }
-    let value = OsString::from_wide(unsafe { std::slice::from_raw_parts(pointer, length) });
-    unsafe { CoTaskMemFree(pointer.cast()) };
-    Ok(PathBuf::from(value))
+    mactype_service_platform::known_folder_path(mactype_service_platform::KnownFolder::LocalAppData)
+        .map_err(|error| {
+            let result = error.raw_os_error().unwrap_or(0);
+            format!("SHGetKnownFolderPath(LocalAppData) failed with HRESULT {result}")
+        })
 }
 
 #[cfg(not(windows))]

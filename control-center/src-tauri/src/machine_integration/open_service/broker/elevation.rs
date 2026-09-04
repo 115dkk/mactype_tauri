@@ -1,25 +1,19 @@
 use super::{
     super::{
         profile_transfer::{
-            profile_transfer_nonce_text, BrokerResultPipeServer, OwnedKernelHandle,
-            ProfilePipeServer, PROFILE_PIPE_TIMEOUT,
+            profile_transfer_nonce_text, BrokerResultPipeServer, ProfilePipeServer,
+            PROFILE_PIPE_TIMEOUT,
         },
         BrokerResultDisposition, SystemServiceAction, BROKER_SWITCH, BROKER_TRANSFER_SWITCH,
     },
     installed_package::service_package,
-    path_guard::wide,
     process::{combine_broker_cleanup_error, terminate_broker_process},
 };
 
-const BROKER_TIMEOUT_MS: u32 = 5 * 60 * 1000;
-const BROKER_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_millis(BROKER_TIMEOUT_MS as u64);
-use std::path::PathBuf;
-use windows_sys::Win32::{
-    Foundation::{GetLastError, ERROR_CANCELLED, WAIT_OBJECT_0, WAIT_TIMEOUT},
-    System::Threading::{GetExitCodeProcess, GetProcessId, WaitForSingleObject},
-    UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW},
-};
+const BROKER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+use mactype_service_platform::{Process, WaitOutcome};
+use std::{ffi::OsStr, path::PathBuf, time::Duration};
+use windows_sys::Win32::Foundation::{ERROR_CANCELLED, STILL_ACTIVE};
 
 fn with_service_package_before_elevation(
     locate: impl FnOnce() -> Result<PathBuf, String>,
@@ -66,84 +60,88 @@ fn launch_elevated_broker(
     if profile_transfer.is_some() != action.needs_profile_input() {
         return Err("the elevated broker has invalid profile transfer state".to_owned());
     }
-    let executable = wide(executable.as_os_str());
-    let verb = wide("runas");
-    let parameter_text = format!(
+    let parameters = format!(
         "{BROKER_SWITCH} {} {BROKER_TRANSFER_SWITCH} {} {}",
         action.broker_verb(),
         result_transfer.token().server_pid,
         profile_transfer_nonce_text(&result_transfer.token().nonce)
     );
-    let parameters = wide(parameter_text);
-    let mut info = SHELLEXECUTEINFOW {
-        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
-        fMask: SEE_MASK_NOCLOSEPROCESS,
-        lpVerb: verb.as_ptr(),
-        lpFile: executable.as_ptr(),
-        lpParameters: parameters.as_ptr(),
-        nShow: 0,
-        ..Default::default()
+    let process =
+        Process::launch_elevated(&executable, OsStr::new(&parameters)).map_err(|error| {
+            if error.raw_os_error() == Some(ERROR_CANCELLED as i32) {
+                "administrator approval was cancelled".to_owned()
+            } else {
+                format!(
+                    "ShellExecuteExW failed with {}",
+                    error.raw_os_error().unwrap_or(0)
+                )
+            }
+        })?;
+    let broker_pid = match process.pid() {
+        Ok(pid) => pid,
+        Err(_) => {
+            return Err(combine_broker_cleanup_error(
+                "could not identify the elevated service broker process",
+                terminate_broker_process(&process),
+            ));
+        }
     };
-    if unsafe { ShellExecuteExW(&mut info) } == 0 {
-        let error = unsafe { GetLastError() };
-        return if error == ERROR_CANCELLED {
-            Err("administrator approval was cancelled".to_owned())
-        } else {
-            Err(format!("ShellExecuteExW failed with {error}"))
-        };
-    }
-    if info.hProcess.is_null() {
-        return Err("elevated service broker did not return a process handle".to_owned());
-    }
-    let process = OwnedKernelHandle(info.hProcess);
-    let broker_pid = unsafe { GetProcessId(process.raw()) };
-    if broker_pid == 0 {
-        return Err(combine_broker_cleanup_error(
-            "could not identify the elevated service broker process",
-            terminate_broker_process(process.raw()),
-        ));
-    }
+    // The pipe servers wait on the broker's own process object, so a broker
+    // that dies mid-transfer ends the wait at once.
     if let Some(server) = profile_transfer {
-        if let Err(error) = server.send_to(broker_pid, Some(process.raw()), PROFILE_PIPE_TIMEOUT) {
+        if let Err(error) = server.send_to(broker_pid, Some(&process), PROFILE_PIPE_TIMEOUT) {
             return Err(combine_broker_cleanup_error(
                 &error,
-                terminate_broker_process(process.raw()),
+                terminate_broker_process(&process),
             ));
         }
     }
     let broker_result =
-        match result_transfer.receive_from(broker_pid, Some(process.raw()), BROKER_TIMEOUT) {
+        match result_transfer.receive_from(broker_pid, Some(&process), BROKER_TIMEOUT) {
             Ok(result) => Some(result),
             Err(error) => {
-                if let Some(exit_code) = finished_exit_code(process.raw()) {
+                if let Some(exit_code) = finished_exit_code(&process) {
                     return Err(broker_channel_failure(Some(exit_code), &error));
                 }
-                let cleanup = terminate_broker_process(process.raw());
+                let cleanup = terminate_broker_process(&process);
                 return Err(combine_broker_cleanup_error(
                     &broker_channel_failure(None, &error),
                     cleanup,
                 ));
             }
         };
-    let wait = unsafe { WaitForSingleObject(process.raw(), BROKER_TIMEOUT_MS) };
-    if wait == WAIT_TIMEOUT {
-        return Err(combine_broker_cleanup_error(
-            "elevated service broker timed out",
-            terminate_broker_process(process.raw()),
-        ));
+    match process.wait(Some(BROKER_TIMEOUT)) {
+        Ok(WaitOutcome::Signaled) => {}
+        Ok(WaitOutcome::TimedOut) => {
+            return Err(combine_broker_cleanup_error(
+                "elevated service broker timed out",
+                terminate_broker_process(&process),
+            ));
+        }
+        Ok(WaitOutcome::Abandoned) => {
+            return Err(combine_broker_cleanup_error(
+                "waiting for the elevated service broker returned an abandoned wait",
+                terminate_broker_process(&process),
+            ));
+        }
+        Err(error) => {
+            let error = format!(
+                "waiting for the elevated service broker failed with {}",
+                error.raw_os_error().unwrap_or(0)
+            );
+            return Err(combine_broker_cleanup_error(
+                &error,
+                terminate_broker_process(&process),
+            ));
+        }
     }
-    if wait != WAIT_OBJECT_0 {
-        let error = format!("waiting for the elevated service broker failed with {wait}");
-        return Err(combine_broker_cleanup_error(
-            &error,
-            terminate_broker_process(process.raw()),
-        ));
-    }
-    let mut exit_code = 0;
-    let ok = unsafe { GetExitCodeProcess(process.raw(), &mut exit_code) };
-    if ok == 0 {
-        return Err("could not read the elevated service broker exit code".to_owned());
-    }
+    let exit_code = match process.exit_code() {
+        Ok(Some(code)) => code,
+        // The process has signaled, so a STILL_ACTIVE code is the value it
+        // really exited with, exactly as the raw query reported it.
+        Ok(None) => STILL_ACTIVE as u32,
+        Err(_) => return Err("could not read the elevated service broker exit code".to_owned()),
+    };
     match (exit_code, broker_result) {
         (0, Some(result)) if result.disposition == BrokerResultDisposition::Success => Ok(()),
         (0, Some(result)) => Err(format!(
@@ -165,12 +163,14 @@ fn launch_elevated_broker(
     }
 }
 
-fn finished_exit_code(process: windows_sys::Win32::Foundation::HANDLE) -> Option<u32> {
-    if unsafe { WaitForSingleObject(process, 0) } != WAIT_OBJECT_0 {
+fn finished_exit_code(process: &Process) -> Option<u32> {
+    if process.wait(Some(Duration::ZERO)).ok()? != WaitOutcome::Signaled {
         return None;
     }
-    let mut exit_code = 0;
-    (unsafe { GetExitCodeProcess(process, &mut exit_code) } != 0).then_some(exit_code)
+    match process.exit_code().ok()? {
+        Some(code) => Some(code),
+        None => Some(STILL_ACTIVE as u32),
+    }
 }
 
 fn broker_channel_failure(exit_code: Option<u32>, channel_error: &str) -> String {

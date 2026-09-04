@@ -123,32 +123,12 @@ pub(super) fn replace_file(
     replacement: &Path,
     backup: &Path,
 ) -> Result<(), String> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::{ReplaceFileW, REPLACEFILE_WRITE_THROUGH};
-
-    let wide = |path: &Path| {
-        path.as_os_str()
-            .encode_wide()
-            .chain(Some(0))
-            .collect::<Vec<_>>()
-    };
-    let destination = wide(destination);
-    let replacement = wide(replacement);
-    let backup = wide(backup);
-    let result = unsafe {
-        ReplaceFileW(
-            destination.as_ptr(),
-            replacement.as_ptr(),
-            backup.as_ptr(),
-            REPLACEFILE_WRITE_THROUGH,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        )
-    };
-    if result == 0 {
-        return Err(std::io::Error::last_os_error().to_string());
-    }
-    Ok(())
+    mactype_service_platform::replace_file_preserving_attributes(
+        destination,
+        replacement,
+        Some(backup),
+    )
+    .map_err(|error| error.to_string())
 }
 
 #[cfg(not(windows))]
@@ -157,6 +137,5 @@ pub(super) fn replace_file(
     replacement: &Path,
     backup: &Path,
 ) -> Result<(), String> {
-    fs::copy(destination, backup).map_err(|error| error.to_string())?;
     fs::rename(replacement, destination).map_err(|error| error.to_string())
 }

@@ -265,33 +265,8 @@ fn validate_atomic_target(parent: &Path, path: &Path) -> Result<bool, String> {
 
 #[cfg(windows)]
 fn replace_existing(destination: &Path, replacement: &Path) -> Result<(), String> {
-    use std::{os::windows::ffi::OsStrExt, ptr};
-    use windows_sys::Win32::Storage::FileSystem::{ReplaceFileW, REPLACEFILE_WRITE_THROUGH};
-    let destination = destination
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect::<Vec<_>>();
-    let replacement = replacement
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect::<Vec<_>>();
-    let result = unsafe {
-        ReplaceFileW(
-            destination.as_ptr(),
-            replacement.as_ptr(),
-            ptr::null(),
-            REPLACEFILE_WRITE_THROUGH,
-            ptr::null_mut(),
-            ptr::null_mut(),
-        )
-    };
-    if result == 0 {
-        Err(std::io::Error::last_os_error().to_string())
-    } else {
-        Ok(())
-    }
+    mactype_service_platform::replace_file_preserving_attributes(destination, replacement, None)
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(not(windows))]

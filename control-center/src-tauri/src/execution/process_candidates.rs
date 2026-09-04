@@ -49,43 +49,34 @@ fn is_under_directory(path: &str, root: &str) -> bool {
 #[cfg(windows)]
 mod windows {
     use super::{is_under_directory, order_candidates, ManualLaunchCandidate};
-    use std::{collections::HashMap, env, ffi::OsString, os::windows::ffi::OsStringExt};
-    use windows_sys::Win32::{
-        Foundation::{CloseHandle, HANDLE, HWND, LPARAM},
-        System::{
-            RemoteDesktop::{
-                ProcessIdToSessionId, WTSEnumerateProcessesW, WTSFreeMemory, WTS_PROCESS_INFOW,
-            },
-            Threading::{
-                GetCurrentProcessId, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
-                PROCESS_QUERY_LIMITED_INFORMATION,
-            },
-        },
-        UI::WindowsAndMessaging::{
-            EnumWindows, GetWindowLongW, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
-            GWL_EXSTYLE, WS_EX_TOOLWINDOW,
-        },
+    use mactype_service_platform::{
+        interactive_processes, process_session_id, top_level_windows, Process, ProcessAccess,
     };
+    use std::{collections::HashMap, env};
 
     pub(super) fn list_candidates() -> Result<Vec<ManualLaunchCandidate>, String> {
-        let current_pid = unsafe { GetCurrentProcessId() };
-        let mut current_session = 0_u32;
-        if unsafe { ProcessIdToSessionId(current_pid, &mut current_session) } == 0 {
-            return Err("the current session could not be identified".to_owned());
-        }
+        let current_pid = std::process::id();
+        let current_session = process_session_id(current_pid)
+            .map_err(|_| "the current session could not be identified".to_owned())?;
         let window_titles = visible_window_titles();
         let windows_directory = env::var_os("WINDIR")
             .or_else(|| env::var_os("SystemRoot"))
             .map(|value| value.to_string_lossy().into_owned());
+        let processes = interactive_processes()
+            .map_err(|_| "the running process inventory could not be enumerated".to_owned())?;
         let mut candidates = Vec::new();
-        for process in enumerate_processes()? {
+        for process in processes {
             if process.pid == 0 || process.pid == 4 || process.pid == current_pid {
                 continue;
             }
             if process.session_id != current_session {
                 continue;
             }
-            let Some(path) = process_image_path(process.pid) else {
+            let Some(path) = Process::open(process.pid, ProcessAccess::QueryLimited)
+                .ok()
+                .and_then(|process| process.image_path())
+                .map(|path| path.to_string_lossy().into_owned())
+            else {
                 continue;
             };
             if windows_directory
@@ -112,116 +103,20 @@ mod windows {
     /// Maps each owning PID to the title of its topmost visible top-level
     /// window; tool windows and untitled windows never contribute a title.
     fn visible_window_titles() -> HashMap<u32, String> {
-        struct Context {
-            titles: HashMap<u32, String>,
-        }
-
-        unsafe extern "system" fn collect(window: HWND, parameter: LPARAM) -> i32 {
-            let context = unsafe { &mut *(parameter as *mut Context) };
-            if unsafe { IsWindowVisible(window) } == 0 {
-                return 1;
-            }
-            if unsafe { GetWindowLongW(window, GWL_EXSTYLE) } as u32 & WS_EX_TOOLWINDOW != 0 {
-                return 1;
-            }
-            let mut owner_pid = 0_u32;
-            unsafe { GetWindowThreadProcessId(window, &mut owner_pid) };
-            if owner_pid == 0 || context.titles.contains_key(&owner_pid) {
-                return 1;
-            }
-            let mut buffer = [0_u16; 512];
-            let length =
-                unsafe { GetWindowTextW(window, buffer.as_mut_ptr(), buffer.len() as i32) };
-            if length <= 0 {
-                return 1;
-            }
-            let title = String::from_utf16_lossy(&buffer[..length as usize]);
-            if title.trim().is_empty() {
-                return 1;
-            }
-            context.titles.insert(owner_pid, title);
-            1
-        }
-
-        let mut context = Context {
-            titles: HashMap::new(),
+        let Ok(windows) = top_level_windows(512) else {
+            return HashMap::new();
         };
-        unsafe { EnumWindows(Some(collect), (&mut context as *mut Context) as LPARAM) };
-        context.titles
-    }
-
-    struct EnumeratedProcess {
-        pid: u32,
-        session_id: u32,
-    }
-
-    struct WtsProcessList(*mut WTS_PROCESS_INFOW);
-
-    impl Drop for WtsProcessList {
-        fn drop(&mut self) {
-            if !self.0.is_null() {
-                unsafe { WTSFreeMemory(self.0.cast()) };
+        let mut titles = HashMap::new();
+        for window in windows {
+            if window.process_id == 0 || !window.visible || window.tool_window {
+                continue;
             }
+            let Some(title) = window.title.filter(|title| !title.trim().is_empty()) else {
+                continue;
+            };
+            titles.entry(window.process_id).or_insert(title);
         }
-    }
-
-    fn enumerate_processes() -> Result<Vec<EnumeratedProcess>, String> {
-        let mut processes = std::ptr::null_mut();
-        let mut count = 0_u32;
-        if unsafe { WTSEnumerateProcessesW(std::ptr::null_mut(), 0, 1, &mut processes, &mut count) }
-            == 0
-        {
-            return Err("the running process inventory could not be enumerated".to_owned());
-        }
-        let list = WtsProcessList(processes);
-        if count == 0 || list.0.is_null() {
-            return Ok(Vec::new());
-        }
-        let entries = unsafe { std::slice::from_raw_parts(list.0, count as usize) };
-        Ok(entries
-            .iter()
-            .map(|entry| EnumeratedProcess {
-                pid: entry.ProcessId,
-                session_id: entry.SessionId,
-            })
-            .collect())
-    }
-
-    struct ProcessHandle(HANDLE);
-
-    impl Drop for ProcessHandle {
-        fn drop(&mut self) {
-            unsafe { CloseHandle(self.0) };
-        }
-    }
-
-    fn process_image_path(pid: u32) -> Option<String> {
-        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
-        if handle.is_null() {
-            return None;
-        }
-        let handle = ProcessHandle(handle);
-        let mut buffer = vec![0_u16; 32_768];
-        let mut length = buffer.len() as u32;
-        if unsafe {
-            QueryFullProcessImageNameW(
-                handle.0,
-                PROCESS_NAME_WIN32,
-                buffer.as_mut_ptr(),
-                &mut length,
-            )
-        } == 0
-        {
-            return None;
-        }
-        if length == 0 || length as usize >= buffer.len() {
-            return None;
-        }
-        Some(
-            OsString::from_wide(&buffer[..length as usize])
-                .to_string_lossy()
-                .into_owned(),
-        )
+        titles
     }
 }
 

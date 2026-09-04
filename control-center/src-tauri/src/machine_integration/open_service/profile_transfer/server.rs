@@ -1,35 +1,12 @@
 use super::{
     super::{encode_profile_transfer_frame, ProfileTransferToken, PROFILE_TRANSFER_NONCE_BYTES},
-    handle::OwnedKernelHandle,
     shared::*,
 };
-use std::{
-    ptr,
-    time::{Duration, Instant},
-};
-use windows_sys::Win32::{
-    Foundation::{
-        GetLastError, LocalFree, ERROR_IO_PENDING, ERROR_PIPE_CONNECTED, HANDLE,
-        INVALID_HANDLE_VALUE,
-    },
-    Security::{
-        Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1},
-        SECURITY_ATTRIBUTES,
-    },
-    Storage::FileSystem::{
-        WriteFile, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, PIPE_ACCESS_OUTBOUND,
-    },
-    System::{
-        Pipes::{
-            ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, PIPE_READMODE_BYTE,
-            PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE,
-        },
-        IO::OVERLAPPED,
-    },
-};
+use mactype_service_platform::{OverlappedPipeServer, PipeDirection, Process, SecurityDescriptor};
+use std::time::{Duration, Instant};
 
 pub(in crate::machine_integration::open_service) struct ProfilePipeServer {
-    handle: OwnedKernelHandle,
+    pipe: OverlappedPipeServer,
     #[cfg(test)]
     token: ProfileTransferToken,
     frame: Vec<u8>,
@@ -52,49 +29,30 @@ impl ProfilePipeServer {
             nonce,
         };
         let frame = encode_profile_transfer_frame(profile, &token.nonce)?;
-        let descriptor_text = wide(PROFILE_PIPE_SDDL);
-        let mut descriptor = ptr::null_mut();
-        if unsafe {
-            ConvertStringSecurityDescriptorToSecurityDescriptorW(
-                descriptor_text.as_ptr(),
-                SDDL_REVISION_1,
-                &mut descriptor,
-                ptr::null_mut(),
-            )
-        } == 0
-        {
-            return Err(format!(
+        let descriptor = SecurityDescriptor::from_sddl(PROFILE_PIPE_SDDL).map_err(|error| {
+            format!(
                 "creating the local profile pipe ACL failed with {}",
-                unsafe { GetLastError() }
-            ));
-        }
-        let attributes = SECURITY_ATTRIBUTES {
-            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
-            lpSecurityDescriptor: descriptor,
-            bInheritHandle: 0,
-        };
-        let name = wide(profile_pipe_name(&token));
-        let handle = unsafe {
-            CreateNamedPipeW(
-                name.as_ptr(),
-                PIPE_ACCESS_OUTBOUND | FILE_FLAG_FIRST_PIPE_INSTANCE | FILE_FLAG_OVERLAPPED,
-                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_REJECT_REMOTE_CLIENTS,
-                1,
-                (frame.len() as u32).min(PROFILE_PIPE_BUFFER_BYTES),
-                0,
-                PROFILE_PIPE_TIMEOUT.as_millis() as u32,
-                &attributes,
+                error.raw_os_error().unwrap_or(0)
             )
-        };
-        let create_error = (handle == INVALID_HANDLE_VALUE).then(|| unsafe { GetLastError() });
-        unsafe { LocalFree(descriptor) };
-        if let Some(error) = create_error {
-            return Err(format!(
-                "creating the first profile pipe instance failed with {error}"
-            ));
-        }
+        })?;
+        let buffer_bytes = u32::try_from(frame.len().min(PROFILE_PIPE_BUFFER_BYTES as usize))
+            .expect("profile pipe buffer size is bounded to u32");
+        let pipe = OverlappedPipeServer::create_single_instance(
+            &profile_pipe_name(&token),
+            PipeDirection::Outbound,
+            &descriptor,
+            buffer_bytes,
+            0,
+            PROFILE_PIPE_TIMEOUT,
+        )
+        .map_err(|error| {
+            format!(
+                "creating the first profile pipe instance failed with {}",
+                error.raw_os_error().unwrap_or(0)
+            )
+        })?;
         Ok(Self {
-            handle: OwnedKernelHandle(handle),
+            pipe,
             #[cfg(test)]
             token,
             frame,
@@ -109,79 +67,37 @@ impl ProfilePipeServer {
     pub(in crate::machine_integration::open_service) fn send_to(
         self,
         expected_client_pid: u32,
-        broker_process: Option<HANDLE>,
+        broker: Option<&Process>,
         timeout: Duration,
     ) -> Result<(), String> {
         if expected_client_pid == 0 || timeout.is_zero() {
             return Err("the profile pipe peer or timeout is invalid".to_owned());
         }
         let deadline = Instant::now() + timeout;
-        let connect_event = create_profile_pipe_event("connect")?;
-        let mut connect_overlapped = OVERLAPPED {
-            hEvent: connect_event.raw(),
-            ..Default::default()
-        };
-        if unsafe { ConnectNamedPipe(self.handle.raw(), &mut connect_overlapped) } == 0 {
-            let error = unsafe { GetLastError() };
-            if error == ERROR_IO_PENDING {
-                wait_for_profile_pipe_operation(
-                    self.handle.raw(),
-                    &connect_overlapped,
-                    deadline,
-                    broker_process,
-                    "waiting for the profile pipe client",
-                )?;
-            } else if error != ERROR_PIPE_CONNECTED {
-                return Err(format!("connecting the profile pipe failed with {error}"));
-            }
-        }
+        let wait = pipe_wait(deadline, broker);
+        self.pipe.connect(&wait).map_err(|error| {
+            map_pipe_error(
+                error,
+                "waiting for the profile pipe client",
+                "connecting the profile pipe made no progress",
+            )
+        })?;
 
-        let mut actual_client_pid = 0;
-        if unsafe { GetNamedPipeClientProcessId(self.handle.raw(), &mut actual_client_pid) } == 0 {
-            return Err(format!(
+        let actual_client_pid = self.pipe.client_process_id().map_err(|error| {
+            format!(
                 "querying the profile pipe client failed with {}",
-                unsafe { GetLastError() }
-            ));
-        }
+                error.raw_os_error().unwrap_or(0)
+            )
+        })?;
         if actual_client_pid != expected_client_pid {
             return Err("the first profile pipe client is not the elevated broker".to_owned());
         }
-        let mut written = 0;
-        while written < self.frame.len() {
-            let event = create_profile_pipe_event("write")?;
-            let mut overlapped = OVERLAPPED {
-                hEvent: event.raw(),
-                ..Default::default()
-            };
-            let remaining = &self.frame[written..];
-            let mut transferred = 0;
-            if unsafe {
-                WriteFile(
-                    self.handle.raw(),
-                    remaining.as_ptr(),
-                    remaining.len() as u32,
-                    &mut transferred,
-                    &mut overlapped,
-                )
-            } == 0
-            {
-                let error = unsafe { GetLastError() };
-                if error != ERROR_IO_PENDING {
-                    return Err(format!("writing the profile pipe failed with {error}"));
-                }
-                transferred = wait_for_profile_pipe_operation(
-                    self.handle.raw(),
-                    &overlapped,
-                    deadline,
-                    broker_process,
-                    "sending the profile pipe frame",
-                )?;
-            }
-            if transferred == 0 {
-                return Err("writing the profile pipe made no progress".to_owned());
-            }
-            written += transferred as usize;
-        }
-        Ok(())
+        self.pipe.write_all(&self.frame, &wait).map_err(|error| {
+            map_pipe_error(
+                error,
+                "sending the profile pipe frame",
+                "writing the profile pipe made no progress",
+            )
+        })
     }
 }

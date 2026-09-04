@@ -3,27 +3,12 @@ use mactype_service_contract::StructuredServiceError;
 use std::path::PathBuf;
 
 #[cfg(windows)]
-use std::{
-    ffi::{OsStr, OsString},
-    os::windows::ffi::{OsStrExt, OsStringExt},
-    path::Path,
-};
+use std::path::Path;
 
 #[cfg(windows)]
-use windows_sys::Win32::{
-    Foundation::{CloseHandle, GetLastError, FILETIME, HANDLE},
-    Storage::FileSystem::{
-        GetFileAttributesW, FILE_ATTRIBUTE_REPARSE_POINT, INVALID_FILE_ATTRIBUTES, SYNCHRONIZE,
-    },
-    System::{
-        RemoteDesktop::{
-            ProcessIdToSessionId, WTSEnumerateProcessesW, WTSFreeMemory, WTS_PROCESS_INFOW,
-        },
-        Threading::{
-            GetCurrentProcessId, GetProcessId, GetProcessTimes, OpenProcess,
-            QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
-        },
-    },
+use mactype_service_platform::{
+    interactive_processes, is_reparse_point, process_session_id as platform_process_session_id,
+    Process, ProcessAccess,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -55,7 +40,7 @@ pub(crate) fn observe_tray_process() -> LegacyTrayProcessState {
 
 #[cfg(windows)]
 fn observe_windows_tray_process() -> LegacyTrayProcessState {
-    let current_session_id = match process_session_id(unsafe { GetCurrentProcessId() }) {
+    let current_session_id = match process_session_id(std::process::id()) {
         Ok(session_id) => session_id,
         Err(error) => return LegacyTrayProcessState::Unknown { error },
     };
@@ -92,173 +77,107 @@ struct EnumeratedProcess {
 }
 
 #[cfg(windows)]
-struct WtsProcessList(*mut WTS_PROCESS_INFOW);
-
-#[cfg(windows)]
-impl Drop for WtsProcessList {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe { WTSFreeMemory(self.0.cast()) };
-        }
-    }
-}
-
-#[cfg(windows)]
 fn enumerate_processes() -> Result<Vec<EnumeratedProcess>, StructuredServiceError> {
-    let mut processes = std::ptr::null_mut();
-    let mut count = 0_u32;
-    if unsafe { WTSEnumerateProcessesW(std::ptr::null_mut(), 0, 1, &mut processes, &mut count) }
-        == 0
-    {
-        return Err(last_error(
-            "legacy-tray-process-enumeration-unavailable",
-            "the running process inventory could not be enumerated",
-        ));
-    }
-    let list = WtsProcessList(processes);
-    if count == 0 {
-        return Ok(Vec::new());
-    }
-    if list.0.is_null() {
-        return Err(service_error(
-            "legacy-tray-process-enumeration-invalid",
-            "the running process inventory returned no process buffer",
-            None,
-        ));
-    }
-    let entries = unsafe { std::slice::from_raw_parts(list.0, count as usize) };
-    entries
-        .iter()
+    interactive_processes()
+        .map_err(|io| {
+            if io.kind() == std::io::ErrorKind::InvalidData {
+                service_error(
+                    "legacy-tray-process-enumeration-invalid",
+                    "the running process inventory returned no process buffer",
+                    None,
+                )
+            } else {
+                io_error(
+                    "legacy-tray-process-enumeration-unavailable",
+                    "the running process inventory could not be enumerated",
+                    io,
+                )
+            }
+        })?
+        .into_iter()
         .map(|entry| {
+            let image_name = entry.name.ok_or_else(|| {
+                service_error(
+                    "legacy-tray-process-name-invalid",
+                    "an enumerated process image name is not bounded",
+                    None,
+                )
+            })?;
             Ok(EnumeratedProcess {
-                image_name: process_name(entry.pProcessName)?,
-                pid: entry.ProcessId,
-                session_id: entry.SessionId,
+                image_name,
+                pid: entry.pid,
+                session_id: entry.session_id,
             })
         })
         .collect()
 }
 
 #[cfg(windows)]
-fn process_name(pointer: *const u16) -> Result<String, StructuredServiceError> {
-    const MAX_PROCESS_NAME_UNITS: usize = 32_768;
-    if pointer.is_null() {
+pub(super) fn open_process(pid: u32) -> Result<Process, StructuredServiceError> {
+    if pid == 0 {
         return Err(service_error(
-            "legacy-tray-process-name-unavailable",
-            "an enumerated process has no image name",
+            "legacy-tray-process-pid-invalid",
+            "the MacTray process ID is zero",
             None,
         ));
     }
-    let mut length = 0;
-    while length < MAX_PROCESS_NAME_UNITS && unsafe { *pointer.add(length) } != 0 {
-        length += 1;
-    }
-    if length == MAX_PROCESS_NAME_UNITS {
-        return Err(service_error(
-            "legacy-tray-process-name-invalid",
-            "an enumerated process image name is not bounded",
-            None,
-        ));
-    }
-    Ok(String::from_utf16_lossy(unsafe {
-        std::slice::from_raw_parts(pointer, length)
-    }))
+    Process::open(pid, ProcessAccess::QueryLimitedAndSynchronize).map_err(|io| {
+        io_error(
+            "legacy-tray-process-inaccessible",
+            "the MacTray process could not be opened for identity verification",
+            io,
+        )
+    })
 }
 
 #[cfg(windows)]
-pub(super) struct ProcessHandle(HANDLE);
+pub(super) fn process_creation_time(process: &Process) -> Result<u64, StructuredServiceError> {
+    let value = process.creation_time().map_err(|io| {
+        io_error(
+            "legacy-tray-process-creation-time-unavailable",
+            "the MacTray process creation time could not be read",
+            io,
+        )
+    })?;
+    if value == 0 {
+        return Err(service_error(
+            "legacy-tray-process-creation-time-invalid",
+            "the MacTray process creation time is zero",
+            None,
+        ));
+    }
+    Ok(value)
+}
 
 #[cfg(windows)]
-impl ProcessHandle {
-    pub(super) fn open(pid: u32) -> Result<Self, StructuredServiceError> {
-        if pid == 0 {
-            return Err(service_error(
-                "legacy-tray-process-pid-invalid",
-                "the MacTray process ID is zero",
-                None,
-            ));
-        }
-        let handle =
-            unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, 0, pid) };
-        if handle.is_null() {
-            Err(last_error(
-                "legacy-tray-process-inaccessible",
-                "the MacTray process could not be opened for identity verification",
-            ))
-        } else {
-            Ok(Self(handle))
-        }
-    }
-
-    pub(super) fn creation_time(&self) -> Result<u64, StructuredServiceError> {
-        let mut creation = FILETIME::default();
-        let mut exit = FILETIME::default();
-        let mut kernel = FILETIME::default();
-        let mut user = FILETIME::default();
-        if unsafe { GetProcessTimes(self.0, &mut creation, &mut exit, &mut kernel, &mut user) } == 0
-        {
-            return Err(last_error(
-                "legacy-tray-process-creation-time-unavailable",
-                "the MacTray process creation time could not be read",
-            ));
-        }
-        let value = (u64::from(creation.dwHighDateTime) << 32) | u64::from(creation.dwLowDateTime);
-        if value == 0 {
-            return Err(service_error(
-                "legacy-tray-process-creation-time-invalid",
-                "the MacTray process creation time is zero",
-                None,
-            ));
-        }
-        Ok(value)
-    }
-
-    pub(super) fn image_path(&self) -> Result<PathBuf, StructuredServiceError> {
-        let mut buffer = vec![0_u16; 32_768];
-        let mut length = buffer.len() as u32;
-        if unsafe {
-            QueryFullProcessImageNameW(self.0, PROCESS_NAME_WIN32, buffer.as_mut_ptr(), &mut length)
-        } == 0
-        {
-            return Err(last_error(
-                "legacy-tray-process-path-unavailable",
-                "the MacTray process image path could not be read",
-            ));
-        }
-        if length == 0 || length as usize >= buffer.len() {
-            return Err(service_error(
+pub(super) fn process_image_path(process: &Process) -> Result<PathBuf, StructuredServiceError> {
+    process.image_path_checked().map_err(|io| {
+        if io.kind() == std::io::ErrorKind::InvalidData {
+            service_error(
                 "legacy-tray-process-path-invalid",
                 "the MacTray process image path is invalid",
                 None,
-            ));
+            )
+        } else {
+            io_error(
+                "legacy-tray-process-path-unavailable",
+                "the MacTray process image path could not be read",
+                io,
+            )
         }
-        Ok(PathBuf::from(OsString::from_wide(
-            &buffer[..length as usize],
-        )))
-    }
-
-    pub(super) fn raw(&self) -> HANDLE {
-        self.0
-    }
-}
-
-#[cfg(windows)]
-impl Drop for ProcessHandle {
-    fn drop(&mut self) {
-        unsafe { CloseHandle(self.0) };
-    }
+    })
 }
 
 #[cfg(windows)]
 fn inspect_process(pid: u32) -> Result<LegacyTrayProcessIdentity, StructuredServiceError> {
-    let process = ProcessHandle::open(pid)?;
-    let actual_pid = unsafe { GetProcessId(process.0) };
-    if actual_pid == 0 {
-        return Err(last_error(
+    let process = open_process(pid)?;
+    let actual_pid = process.pid().map_err(|io| {
+        io_error(
             "legacy-tray-process-pid-unavailable",
             "the opened MacTray process ID could not be read",
-        ));
-    }
+            io,
+        )
+    })?;
     if actual_pid != pid {
         return Err(service_error(
             "legacy-tray-process-pid-changed",
@@ -266,9 +185,9 @@ fn inspect_process(pid: u32) -> Result<LegacyTrayProcessIdentity, StructuredServ
             None,
         ));
     }
-    let creation_time = process.creation_time()?;
+    let creation_time = process_creation_time(&process)?;
     let session_id = process_session_id(actual_pid)?;
-    let path = process.image_path()?;
+    let path = process_image_path(&process)?;
     Ok(LegacyTrayProcessIdentity {
         creation_time,
         session_id,
@@ -279,15 +198,13 @@ fn inspect_process(pid: u32) -> Result<LegacyTrayProcessIdentity, StructuredServ
 
 #[cfg(windows)]
 pub(super) fn process_session_id(pid: u32) -> Result<u32, StructuredServiceError> {
-    let mut session_id = 0;
-    if unsafe { ProcessIdToSessionId(pid, &mut session_id) } == 0 {
-        Err(last_error(
+    platform_process_session_id(pid).map_err(|io| {
+        io_error(
             "legacy-tray-process-session-unavailable",
             "the process session could not be read",
-        ))
-    } else {
-        Ok(session_id)
-    }
+            io,
+        )
+    })
 }
 
 #[cfg(windows)]
@@ -309,11 +226,8 @@ pub(super) fn trusted_mactray_process_path(path: &Path) -> bool {
 
 #[cfg(windows)]
 fn path_has_reparse_component(path: &Path) -> bool {
-    path.ancestors().any(|component| {
-        let wide = wide(component.as_os_str());
-        let attributes = unsafe { GetFileAttributesW(wide.as_ptr()) };
-        attributes == INVALID_FILE_ATTRIBUTES || attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
-    })
+    path.ancestors()
+        .any(|component| is_reparse_point(component).unwrap_or(true))
 }
 
 #[cfg(windows)]
@@ -331,13 +245,13 @@ fn normalize_windows_path(path: &Path) -> String {
 }
 
 #[cfg(windows)]
-fn wide(value: &OsStr) -> Vec<u16> {
-    value.encode_wide().chain(Some(0)).collect()
-}
-
-#[cfg(windows)]
-fn last_error(code: &str, message: &str) -> StructuredServiceError {
-    service_error(code, message, Some(unsafe { GetLastError() }))
+fn io_error(code: &str, message: &str, io: std::io::Error) -> StructuredServiceError {
+    service_error(
+        code,
+        message,
+        io.raw_os_error()
+            .and_then(|value| u32::try_from(value).ok()),
+    )
 }
 
 #[cfg(windows)]

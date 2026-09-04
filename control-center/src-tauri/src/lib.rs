@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 mod app;
 mod bounded_io;
 mod desktop_shell;

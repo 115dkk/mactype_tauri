@@ -2034,3 +2034,20 @@ test("the preview canvas follows the window theme and the invert control flips i
   await page.getByRole("button", { name: "색 반전" }).click();
   await expect(board).toHaveAttribute("data-dark", "true");
 });
+
+test("an event without parameters renders in the overview, the Console overview, and every diagnostics timeline", async ({ page }) => {
+  const failures: string[] = [];
+  page.on("pageerror", (error) => failures.push(error.message));
+  await page.goto("/?view=overview&gallery=1&lang=ko&system-service=ready", { waitUntil: "networkidle" });
+  await page.locator("[data-recent-activity]").getByRole("button", { name: "펼치기" }).click();
+  await expect(page.locator("[data-recent-activity]")).toContainText("서비스 시작을 마쳤습니다.");
+  await page.goto("/?view=overview&gallery=1&lang=ko&skin=console&system-service=ready", { waitUntil: "networkidle" });
+  await expect(page.locator("[data-recent-activity]")).toContainText("서비스 시작을 마쳤습니다.");
+  for (const skin of ["classic", "fluent", "console", "cupertino"] as const) {
+    await page.goto(`/?view=diagnostics&gallery=1&lang=ko&skin=${skin}`, { waitUntil: "networkidle" });
+    await expect(page.getByRole("heading", { level: 1, name: "진단" })).toBeVisible();
+    if (skin !== "classic") await expect(page.getByTestId("event-timeline")).toContainText("서비스 시작을 마쳤습니다.");
+  }
+  expect(failures).toEqual([]);
+  expect(await page.locator(".app-recovery").count()).toBe(0);
+});

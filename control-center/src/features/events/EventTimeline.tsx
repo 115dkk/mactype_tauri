@@ -43,7 +43,7 @@ function EventRow({ event, log }: { event: EventRecord; log: EventLogModel }) {
   const key = log.eventKey(event);
   const open = log.expanded === key;
   const detailId = `event-detail-${event.ts}-${event.code}`;
-  const technical = Object.entries(event.params).map(([name, value]) => `${name}=${value}`).join("  ");
+  const technical = Object.entries(event.params ?? {}).map(([name, value]) => `${name}=${value}`).join("  ");
   return (
     <li className="event-row" data-area={event.area} data-severity={event.severity} data-source={event.source}>
       <span aria-label={severityLabel(t, event.severity)} className="event-dot" role="img" />

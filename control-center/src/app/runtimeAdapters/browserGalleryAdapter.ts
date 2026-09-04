@@ -18,6 +18,7 @@ import {
   type SessionTarget,
 } from "../model";
 import type { ControlCenterRuntimeAdapter } from "../runtimeAdapter";
+import { normalizeEvents } from "../../features/events/normalizeEvent";
 import {
   galleryExecutionStatus,
   transitionGalleryLegacyTrayAutostartDisable,
@@ -93,11 +94,13 @@ function galleryEvents(): ReadonlyArray<EventRecord> {
     { v: 1, ts: now - 3 * 60 * minute, severity: "error", area: "setup", code: "operation-failed", params: { operation: "upgrade", stage: "installation-preflight", rollback: "not-applicable" }, detail: "installation-preflight: the installed Control Center does not match the running executable\nfinalState=legacy=Absent/Stopped/win32=None; modern=Current/Running/Ready/win32=None; receipt=unavailable", source: "control-center" },
     { v: 1, ts: now - 12 * minute, severity: "info", area: "preview", code: "preview-helper-connected", params: { architecture: "x86", coreVersion: "1.2025.6.9" }, detail: null, source: "control-center" },
     { v: 1, ts: now - 60_000, severity: "info", area: "profile", code: "profile-verified", params: { profile: "Default.ini" }, detail: null, source: "control-center" },
-    { v: 1, ts: now - 45_000, severity: "info", area: "service", code: "service-started", params: {}, detail: null, source: "control-center" },
+    /* The backend omits empty params and a missing detail on the wire; this
+       line arrives exactly like that so the UI proves it copes. */
+    { v: 1, ts: now - 45_000, severity: "info", area: "service", code: "service-started", source: "control-center" } as unknown as EventRecord,
     { v: 1, ts: now - 15_000, severity: "info", area: "profile", code: "profile-applied", params: { profile: "Default.ini" }, detail: null, source: "control-center" },
   ];
   if (query.has("events-empty")) return [];
-  return events;
+  return normalizeEvents(events);
 }
 
 export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {

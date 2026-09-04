@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
+import { AppErrorBoundary } from "./app/AppErrorBoundary";
 import { PreviewStudioApp } from "./studio/PreviewStudioApp";
 import { loadSkinPreference } from "./app/skinPreference";
 import { loadThemePreference } from "./app/themePreference";
@@ -30,6 +31,6 @@ document.documentElement.dataset.window = isStudio ? "preview-studio" : "main";
 
 createRoot(root).render(
   <StrictMode>
-    <I18nProvider>{isStudio ? <PreviewStudioApp /> : <App initialSkin={initialSkin} initialTheme={initialTheme} />}</I18nProvider>
+    <AppErrorBoundary><I18nProvider>{isStudio ? <PreviewStudioApp /> : <App initialSkin={initialSkin} initialTheme={initialTheme} />}</I18nProvider></AppErrorBoundary>
   </StrictMode>,
 );

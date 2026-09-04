@@ -6,8 +6,9 @@ import { catalogs, type I18nValue, type Locale, type MessageKey } from "../../i1
    itself with its parameters, so nothing is ever hidden. */
 export function eventTitle(t: I18nValue["t"], locale: Locale, event: EventRecord): string {
   const key = `event.${event.code}` as MessageKey;
-  if (key in catalogs[locale]) return t(key, localizedParams(t, locale, event.params));
-  const params = Object.entries(event.params).map(([name, value]) => `${name}=${value}`).join(" ");
+  const eventParams = event.params ?? {};
+  if (key in catalogs[locale]) return t(key, localizedParams(t, locale, eventParams));
+  const params = Object.entries(eventParams).map(([name, value]) => `${name}=${value}`).join(" ");
   return params ? `${event.code} (${params})` : event.code;
 }
 

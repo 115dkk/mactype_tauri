@@ -79,7 +79,7 @@ export function useEventLog() {
   const visible = useMemo(() => events.filter((event) =>
     severities.has(event.severity)
     && areas.has(event.area)
-    && (!needle || `${event.code} ${Object.values(event.params).join(" ")} ${event.detail ?? ""}`.toLocaleLowerCase().includes(needle))), [areas, events, needle, severities]);
+    && (!needle || `${event.code} ${Object.values(event.params ?? {}).join(" ")} ${event.detail ?? ""}`.toLocaleLowerCase().includes(needle))), [areas, events, needle, severities]);
   const filtered = visible.length !== events.length || needle.length > 0;
   const eventKey = (event: EventRecord) => `${event.source}:${event.ts}:${event.code}`;
 

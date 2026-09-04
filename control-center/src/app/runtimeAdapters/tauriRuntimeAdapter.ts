@@ -22,11 +22,11 @@ import type {
   ProfileSnapshot,
   EventFilter,
   EventLogSummary,
-  EventRecord,
   SessionTarget,
   ViewId,
 } from "../model";
 import type { ControlCenterRuntimeAdapter } from "../runtimeAdapter";
+import { normalizeEvents } from "../../features/events/normalizeEvent";
 
 export const tauriRuntimeAdapter: ControlCenterRuntimeAdapter = {
   loadLaunchContext: () => invoke<LaunchContext>("launch_context"),
@@ -80,8 +80,8 @@ export const tauriRuntimeAdapter: ControlCenterRuntimeAdapter = {
   reconnectPreview: () => invoke<InstallationStatus>("reconnect_preview"),
   loadDiagnosticReport: () => invoke<string>("diagnostic_report"),
   loadDiagnosticLogs: () => invoke<string[]>("diagnostic_recent_logs"),
-  loadRecentActivity: () => invoke<EventRecord[]>("recent_activity"),
-  listEvents: (filter?: EventFilter, limit?: number) => invoke<EventRecord[]>("list_events", { filter: filter ?? null, limit: limit ?? null }),
+  loadRecentActivity: () => invoke<unknown>("recent_activity").then(normalizeEvents),
+  listEvents: (filter?: EventFilter, limit?: number) => invoke<unknown>("list_events", { filter: filter ?? null, limit: limit ?? null }).then(normalizeEvents),
   loadEventLogSummary: () => invoke<EventLogSummary>("event_log_summary"),
   subscribeEventLog(listener: () => void): () => void {
     let disposed = false;

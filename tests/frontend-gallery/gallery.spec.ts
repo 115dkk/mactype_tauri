@@ -1697,7 +1697,7 @@ test("overview summarizes the active service and discloses at most five successf
   await expect(activity).toContainText("프로필 Default.ini 적용을 마쳤습니다.");
   await expect(activity.locator("ol")).toHaveCount(0);
   await activity.getByRole("button", { name: "펼치기" }).click();
-  await expect(activity.locator("ol li")).toHaveCount(3);
+  await expect(activity.locator("ol li")).toHaveCount(5);
   await expect(activity).not.toContainText("migrate-from-legacy");
   await activity.getByRole("button", { name: "접기" }).click();
   await expect(activity.locator("ol")).toHaveCount(0);

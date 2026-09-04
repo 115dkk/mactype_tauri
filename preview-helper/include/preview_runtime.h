@@ -10,9 +10,11 @@
 
 namespace mactype {
 
+enum class Engine { mactype, plain };
+
 class PreviewRuntime {
  public:
-  explicit PreviewRuntime(std::wstring install_root);
+  explicit PreviewRuntime(std::wstring install_root, Engine engine = Engine::mactype);
   ~PreviewRuntime();
   PreviewRuntime(const PreviewRuntime&) = delete;
   PreviewRuntime& operator=(const PreviewRuntime&) = delete;
@@ -34,6 +36,7 @@ class PreviewRuntime {
   void grow_native_window_for_listing();
   void apply_native_colors(const std::string& json);
 
+  Engine engine_;
   std::wstring install_root_;
   std::wstring dll_path_;
   HMODULE module_{};

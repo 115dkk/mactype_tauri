@@ -39,6 +39,7 @@ pub(super) fn rollback(context: &BrokerContext) -> Result<String, SetupError> {
     let generation = store.rollback()?;
     suspend_if_service_stopped(context, &store)?;
     harden_runtime_if_installed(context)?;
+    crate::event_log::rollback_completed("rollback");
     Ok(match generation {
         Some(generation) => format!(
             "{{\"ok\":true,\"verb\":\"rollback\",\"generation\":\"{}\"}}",

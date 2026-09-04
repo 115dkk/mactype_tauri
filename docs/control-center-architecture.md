@@ -14,6 +14,13 @@ The Helper validates an x86 PE image, `MacType.ini`, and `CreateControlCenter`. 
 
 Preview pixels are rendered into a top-down 32-bit DIB and encoded through WIC. PNG bytes cross only the binary frame section. Tauri writes them under app-local data and the WebView reads the narrowly scoped asset URL; no base64 image is retained in application state.
 
+The plain preview engine never loads MacType or reads its DLL, INI, profile, or setting overrides,
+and reports `coreVersion` 0. The parent keeps a second lazy Helper slot for this engine while
+installation checks and reconnect remain bound to the MacType slot. Preview Studio uses the
+`preview-studio` window label and loads `index.html?window=preview-studio`; closing the main window
+destroys it. `write_preview_export` accepts a strictly padded standard-base64 PNG and writes it
+atomically to a validated absolute `.png` path.
+
 ## Profile boundary
 
 Rust owns a line-preserving INI document. It retains BOM, encoding, line endings, blank lines, comments, unknown entries, and ordering. Only the value slice of a changed key is rewritten. Save compares the original SHA-256, flushes a same-directory temporary file, keeps one backup, and uses `ReplaceFileW` on Windows.
@@ -41,7 +48,15 @@ Changing the language updates visible text, the document title, accessibility la
 
 ## Skin boundary
 
-The React tree renders one DOM for every skin. `skinPreference.ts` resolves the skin like the locale (`?skin=` wins and is persisted, then the stored choice, then `classic`) and applies it as `html[data-skin]`; `themePreference.ts` accepts `?theme=` the same way. Each skin lives in `src/styles/skins/<id>.css`, scoped to its `data-skin` value, and overrides the token custom properties and the shared class names only. The `PreferenceMenu` component backs both the language and the skin pickers so a skin restyles one popup. The status bar element exists in every skin's DOM and is shown only by skins that draw one. The frontend gallery renders every skin in both themes at every viewport and asserts no horizontal overflow, that the pickers stay reachable, and that a chosen skin survives a reload.
+The React tree is split into headless page models and skin shells. `src/features/<page>/use<Page>Model.ts` owns a page's state, IPC calls, busy flags and messages; `src/features/execution/ExecutionParts.tsx` and `src/features/profiles/ProfileEditorParts.tsx` hold the bodies every skin shows the same way (the migration dialog, the manual launcher, the settings body, the docked preview). `src/app/App.tsx` owns navigation, preferences and the installation status and renders one shell per skin through `ShellProps` (`src/app/shell.ts`, which also fixes the six navigation entries and their groups). A shell (`src/skins/<id>/`) arranges the models in its own paradigm and never re-implements an action. `skinPreference.ts` resolves the skin like the locale (`?skin=` wins and is persisted, then the stored choice, then `classic`) and applies it as `html[data-skin]`; `themePreference.ts` accepts `?theme=` the same way. Each skin's stylesheet lives in `src/styles/skins/<id>.css`, scoped to its `data-skin` value. The `PreferenceMenu` component backs both the language and the skin pickers so a skin restyles one popup. The frontend gallery renders every skin in both themes at every viewport and asserts no horizontal overflow, that the pickers stay reachable, that a chosen skin survives a reload, and one paradigm-specific interaction per skin.
+
+## Preview Studio
+
+`index.html?window=preview-studio` boots the same bundle as the `preview-studio` Tauri window (`src/studio/`). The studio renders a sample through the helper for up to six fonts, any set of sizes, and four styles, and compares two sources: the Tuner's edits, the saved profile, any profile file (MacType engine), or Windows' own rendering (plain engine). Comparison is side by side, stacked, blinking, or a pixel difference computed on a canvas; zoom is integer nearest-neighbour on a canvas, never a CSS transform; a loupe magnifies eight times. The main window publishes the Tuner document over the `studio:document` event whenever it changes and answers `studio:request` from a studio that opened later; `src/studio/studioBridge.ts` is the only place either side names those channels. Export composes the visible boards on a canvas and hands the PNG to `write_preview_export`.
+
+## Event log
+
+The frontend reads the unified event log (`docs/event-log-policy.md`) through `list_events`, `event_log_summary` and `recent_activity`, refreshes on the `event-log:changed` event, and localises every code through `event.<code>` keys in `src/features/events/eventText.ts`. `EventTimeline` is the one timeline component; skins style it and decide where the filter chips sit.
 
 ## Execution boundary
 

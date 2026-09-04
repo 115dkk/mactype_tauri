@@ -17,6 +17,7 @@ pub(super) fn run(
 ) -> Result<String, SetupError> {
     let _setup_lock = machine_lock::MachineSetupLock::acquire()?;
     let paths = known_folders::machine_paths()?;
+    super::prepare_event_log_directory(&paths)?;
     prepare_machine_storage_for_command(command, paths.service_root())?;
     let manager =
         scm::ServiceManager::connect(paths.service_root().to_owned()).map_err(|error| {

@@ -71,7 +71,13 @@ This file fixes the domain language used by code, tests, CI, and architecture do
 : The frontend-facing model derived from MachineIntegration state. It chooses user-visible actions and explanations without teaching React about SCM flags, registry layouts, helper processes, or migration receipt internals.
 
 **Skin (스킨)**
-: One of four selectable presentations of the shared Control Center DOM, chosen from the navigation preference menu beside the language picker and persisted per user. Skin ids (`classic`, `fluent`, `console`, `cupertino`) are interface and appear as `html[data-skin]`; labels may change. A skin is a scoped stylesheet that overrides tokens and restyles shared class names; it never adds markup or behavior. The classic skin is the default and the gallery baseline.
+: One of four selectable presentations of the Control Center, chosen from the navigation preference menu beside the language picker and persisted per user. Skin ids (`classic`, `fluent`, `console`, `cupertino`) are interface and appear as `html[data-skin]`; labels may change. A skin is a shell that arranges the shared page models in its own paradigm plus a scoped stylesheet; it never owns an action, a message, or an IPC call. The classic skin is the default and the gallery baseline.
+
+**Preview Studio (프리뷰 스튜디오)**
+: The second window (`preview-studio`) that renders one sample through the preview helper across fonts, sizes and styles and compares two sources at integer zoom. Its sources are the Tuner's edits, the saved profile, a profile file, and Windows' own rendering from the plain helper engine. It follows the Tuner document over the studio bridge and never applies or saves anything.
+
+**Event (이벤트)**
+: One typed line of the unified event log (`docs/event-log-policy.md`): a severity, an area, a stable code, short parameters, optional technical detail, and the writing process. The Control Center, the 신식 서비스 host and the setup broker write events; the UI localises codes and shows detail only on request. Health, findings and the helper's diagnostic ring are separate evidence and never become events by themselves.
 
 **Wizard 영역**
 : The navigation area that answers "what runs, and how": profile selection and apply (view id `files`) plus 구동 방식 and service control (view id `execution`). It inherits the role of the legacy MacWizard. The Korean product term is always **위자드**; never write 마법사. View ids are frozen interface — labels may differ from ids.

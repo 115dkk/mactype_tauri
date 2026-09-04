@@ -4,6 +4,7 @@ use super::{
         HIDE_NATIVE_PREVIEW, NATIVE_PREVIEW_STATE, PREVIEW_RENDERED, RENDER_PREVIEW,
         SHOW_NATIVE_PREVIEW,
     },
+    PreviewEngine,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, path::Path};
@@ -44,6 +45,7 @@ struct RenderMetadata {
     dpi: u32,
     elapsed_ms: u64,
     core_version: u32,
+    engine: PreviewEngine,
 }
 
 #[derive(Serialize)]
@@ -56,6 +58,7 @@ pub(crate) struct PreviewResult {
     dpi: u32,
     elapsed_ms: u64,
     core_version: u32,
+    engine: PreviewEngine,
 }
 
 pub(super) fn render_preview(
@@ -65,8 +68,9 @@ pub(super) fn render_preview(
     profile_path: &str,
     overrides: &BTreeMap<String, f64>,
     sample: &PreviewSample,
+    engine: PreviewEngine,
 ) -> Result<PreviewResult, String> {
-    let response = manager.request_built(install_root, RENDER_PREVIEW, |request_id| {
+    let response = manager.request_built(install_root, engine, RENDER_PREVIEW, |request_id| {
         serde_json::to_vec(&RenderRequest {
             request_id,
             profile_path,
@@ -80,6 +84,9 @@ pub(super) fn render_preview(
     }
     let metadata: RenderMetadata =
         serde_json::from_slice(&response.json).map_err(|error| error.to_string())?;
+    if metadata.engine != engine {
+        return Err("preview helper returned a mismatched engine".to_owned());
+    }
     let directory = app
         .path()
         .app_local_data_dir()
@@ -96,6 +103,7 @@ pub(super) fn render_preview(
         dpi: metadata.dpi,
         elapsed_ms: metadata.elapsed_ms,
         core_version: metadata.core_version,
+        engine: metadata.engine,
     })
 }
 
@@ -138,7 +146,7 @@ pub(super) fn set_native_preview(
     } else {
         Vec::new()
     };
-    let response = manager.request(install_root, kind, body)?;
+    let response = manager.request(install_root, PreviewEngine::Mactype, kind, body)?;
     if response.kind != NATIVE_PREVIEW_STATE {
         return Err("preview helper returned an invalid native-window response".to_owned());
     }

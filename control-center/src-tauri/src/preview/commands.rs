@@ -1,7 +1,7 @@
 use super::{
     installation::{collect_installation, InstallationStatus},
     render::{render_preview, set_native_preview, PreviewResult, PreviewSample},
-    PreviewState,
+    PreviewEngine, PreviewState,
 };
 use crate::installation_root;
 use std::{collections::BTreeMap, env};
@@ -24,12 +24,23 @@ pub(super) fn render_profile_preview(
     profile_path: String,
     overrides: BTreeMap<String, f64>,
     sample: PreviewSample,
+    engine: PreviewEngine,
     state: &PreviewState,
 ) -> Result<PreviewResult, String> {
-    let root =
-        installation_root().ok_or_else(|| "MacType installation was not found".to_owned())?;
+    let root = installation_root().unwrap_or_default();
+    if engine == PreviewEngine::Mactype && root.as_os_str().is_empty() {
+        return Err("MacType installation was not found".to_owned());
+    }
     state.with_manager(|manager| {
-        render_preview(&app, manager, &root, &profile_path, &overrides, &sample)
+        render_preview(
+            &app,
+            manager,
+            &root,
+            &profile_path,
+            &overrides,
+            &sample,
+            engine,
+        )
     })
 }
 

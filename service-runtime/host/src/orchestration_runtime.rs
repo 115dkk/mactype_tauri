@@ -114,6 +114,7 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
         );
         let mut consecutive_health_report_failures = 0;
         loop {
+            crate::event_log::flush_elapsed_injection_summary();
             if stop.wait_timeout(Duration::ZERO)? {
                 return Ok(());
             }

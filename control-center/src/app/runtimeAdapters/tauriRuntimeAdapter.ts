@@ -1,4 +1,6 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { emit, listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type { Locale } from "../../i18n/i18n";
 import type {
@@ -17,7 +19,9 @@ import type {
   PreviewResult,
   ProfileEntry,
   ProfileSnapshot,
-  RecentActivity,
+  EventFilter,
+  EventLogSummary,
+  EventRecord,
   SessionTarget,
   ViewId,
 } from "../model";
@@ -75,7 +79,21 @@ export const tauriRuntimeAdapter: ControlCenterRuntimeAdapter = {
   reconnectPreview: () => invoke<InstallationStatus>("reconnect_preview"),
   loadDiagnosticReport: () => invoke<string>("diagnostic_report"),
   loadDiagnosticLogs: () => invoke<string[]>("diagnostic_recent_logs"),
-  loadRecentActivity: () => invoke<RecentActivity[]>("recent_activity"),
+  loadRecentActivity: () => invoke<EventRecord[]>("recent_activity"),
+  listEvents: (filter?: EventFilter, limit?: number) => invoke<EventRecord[]>("list_events", { filter: filter ?? null, limit: limit ?? null }),
+  loadEventLogSummary: () => invoke<EventLogSummary>("event_log_summary"),
+  subscribeEventLog(listener: () => void): () => void {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    void listen("event-log:changed", () => listener()).then((stop) => {
+      if (disposed) stop();
+      else unlisten = stop;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  },
   exportDiagnostics: () => invoke<string>("export_diagnostics"),
 
   async copyDiagnostics(): Promise<void> {
@@ -105,6 +123,7 @@ export const tauriRuntimeAdapter: ControlCenterRuntimeAdapter = {
     profilePath: request.profilePath,
     overrides: request.overrides,
     sample: request.sample,
+    engine: request.engine ?? "mactype",
   }),
   setNativePreview: (visible: boolean, options?: NativePreviewOptions) => invoke<boolean>("set_native_preview", {
     visible,
@@ -113,6 +132,42 @@ export const tauriRuntimeAdapter: ControlCenterRuntimeAdapter = {
     foreground: options?.foreground ?? null,
     background: options?.background ?? null,
   }),
+  async openPreviewStudio(): Promise<void> {
+    await invoke("open_preview_studio");
+  },
+
+  async closePreviewStudio(): Promise<void> {
+    await invoke("close_preview_studio");
+  },
+
+  async pickPngExportPath(filterName: string, defaultName: string): Promise<string | null> {
+    const selected = await save({
+      defaultPath: defaultName,
+      filters: [{ name: filterName, extensions: ["png"] }],
+    });
+    return typeof selected === "string" ? selected : null;
+  },
+
+  writePreviewExport: (path: string, pngBase64: string) => invoke<string>("write_preview_export", { path, pngBase64 }),
+
+  async emitStudioMessage(channel: string, payload: unknown): Promise<void> {
+    await emit(channel, payload);
+  },
+
+  subscribeStudioMessage<T>(channel: string, listener: (payload: T) => void): () => void {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    void listen<T>(channel, (event) => listener(event.payload)).then((stop) => {
+      if (disposed) stop();
+      else unlisten = stop;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  },
+
+  windowLabel: () => getCurrentWindow().label,
   previewImageUrl: (path: string) => convertFileSrc(path),
   loadPreviewDiagnostics: () => invoke<string[]>("preview_diagnostics"),
 

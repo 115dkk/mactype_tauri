@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod event_log;
 mod install_bootstrap;
 mod profile_bridge;
 mod profile_store;
@@ -32,25 +33,31 @@ pub fn run_broker_command(
     command: mactype_service_contract::BrokerCommand,
     profile_input: Option<&[u8]>,
 ) -> Result<String, SetupError> {
-    #[cfg(windows)]
-    {
-        windows::run(command, profile_input)
+    let result = {
+        #[cfg(windows)]
+        {
+            windows::run(command, profile_input)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = profile_input;
+            Err(SetupError::Runtime(
+                "the machine service broker requires Windows".to_owned(),
+            ))
+        }
+    };
+    if let Err(error) = &result {
+        event_log::command_failed(SetupCommand::Broker(command), error, profile_input);
     }
-    #[cfg(not(windows))]
-    {
-        let _ = (command, profile_input);
-        Err(SetupError::Runtime(
-            "the machine service broker requires Windows".to_owned(),
-        ))
-    }
+    result
 }
 
 pub fn run_setup_command(
     command: SetupCommand,
     profile_input: Option<&[u8]>,
 ) -> Result<String, SetupError> {
-    match command {
-        SetupCommand::Broker(command) => run_broker_command(command, profile_input),
+    let result = match command {
+        SetupCommand::Broker(command) => return run_broker_command(command, profile_input),
         SetupCommand::BootstrapInstall => {
             #[cfg(windows)]
             {
@@ -75,5 +82,9 @@ pub fn run_setup_command(
                 ))
             }
         }
+    };
+    if let Err(error) = &result {
+        event_log::command_failed(command, error, profile_input);
     }
+    result
 }

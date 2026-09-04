@@ -1,10 +1,13 @@
-/* Fluent skin: the Windows 11 Settings grammar. One Mica surface, settings
-   cards with a regular-weight title and a muted description, and a 3×16
-   accent pill as the only selection mark. Scoped to html[data-skin="fluent"]. */
+/* Fluent skin: the Windows 11 Settings grammar. One Mica surface for the
+   title bar and the navigation pane, 36-pixel navigation items marked by a
+   3×16 accent pill, a 28-pixel display title, and settings cards (icon,
+   regular-weight title, muted description, control on the right) in place of
+   tables. Hierarchy comes from size and colour, never from bold.
+   Scoped to html[data-skin="fluent"]. */
 html[data-skin="fluent"] {
   --color-canvas: #F0F2F5;
   --color-surface: #FBFBFC;
-  --color-surface-subtle: #EEF0F3;
+  --color-surface-subtle: #F4F5F7;
   --color-foreground: #1B1B1B;
   --color-muted: #5F646B;
   --color-border: rgba(0, 0, 0, 0.062);
@@ -15,22 +18,30 @@ html[data-skin="fluent"] {
   --color-success: #0F7B0F;
   --color-warning: #9D5D00;
   --color-destructive: #C42B1C;
-  --color-preview: #FCFCFD;
+  --color-preview: #FFFFFF;
+  --fluent-text-3: #8A9098;
   --fluent-hover: rgba(0, 0, 0, 0.035);
   --fluent-selected: rgba(0, 0, 0, 0.045);
+  --fluent-divider: rgba(0, 0, 0, 0.08);
   --fluent-control: #FFFFFF;
   --fluent-control-bottom: rgba(0, 0, 0, 0.16);
   --fluent-accent-bottom: rgba(0, 0, 0, 0.4);
+  --fluent-accent-text: #005FB8;
+  --fluent-accent-soft: rgba(0, 95, 184, 0.10);
+  --fluent-success-soft: #DFF6DD;
+  --fluent-thumb: #F6F7F9;
   --nav-width: 248px;
-  --settings-index-width: 176px;
+  --titlebar-height: 40px;
   --control-height: 32px;
   --radius-control: 4px;
+  --settings-index-width: 176px;
+  --settings-control-width: 220px;
 }
 html[data-skin="fluent"][data-theme="dark"] {
   --color-canvas: #202124;
   --color-surface: #2B2C30;
   --color-surface-subtle: #323337;
-  --color-foreground: #F5F5F7;
+  --color-foreground: #FFFFFF;
   --color-muted: #C4C8CE;
   --color-border: rgba(255, 255, 255, 0.08);
   --color-border-strong: rgba(255, 255, 255, 0.18);
@@ -41,114 +52,208 @@ html[data-skin="fluent"][data-theme="dark"] {
   --color-warning: #FCE100;
   --color-destructive: #FF99A4;
   --color-preview: #16171A;
+  --fluent-text-3: #8B9098;
   --fluent-hover: rgba(255, 255, 255, 0.05);
   --fluent-selected: rgba(255, 255, 255, 0.06);
+  --fluent-divider: rgba(255, 255, 255, 0.08);
   --fluent-control: rgba(255, 255, 255, 0.06);
   --fluent-control-bottom: rgba(255, 255, 255, 0.07);
   --fluent-accent-bottom: rgba(0, 0, 0, 0.4);
+  --fluent-accent-text: #99EBFF;
+  --fluent-accent-soft: rgba(96, 205, 255, 0.14);
+  --fluent-success-soft: #393D1B;
+  --fluent-thumb: #24262A;
 }
 
-/* Title bar and navigation pane share the canvas: no divider anywhere. */
+html[data-skin="fluent"] body { font-size: 14px; line-height: 20px; }
+html[data-skin="fluent"] h1 { font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif; font-size: 28px; font-weight: 600; line-height: 36px; letter-spacing: -0.2px; }
+html[data-skin="fluent"]:lang(ko) h1 { font-family: "Segoe UI Variable Display", "Segoe UI", "Pretendard KO UI", "Malgun Gothic", sans-serif; }
+html[data-skin="fluent"] h2 { font-size: 14px; font-weight: 600; line-height: 20px; }
+
+/* Title bar on the Mica canvas: no divider between it and the pane. */
 html[data-skin="fluent"] .window-titlebar { border-bottom: 0; background: var(--color-canvas); }
-html[data-skin="fluent"] .window-title { padding-inline: var(--space-4); font-weight: 400; }
-html[data-skin="fluent"] .navigation { padding: var(--space-1) var(--space-2) var(--space-3); border-right: 0; background: var(--color-canvas); }
-html[data-skin="fluent"][dir="rtl"] .navigation, html[data-skin="fluent"] [dir="rtl"] .navigation { border-left: 0; }
-html[data-skin="fluent"] .product-lockup { display: none; }
-html[data-skin="fluent"] .navigation nav { gap: 1px; }
-html[data-skin="fluent"] .nav-group { gap: 1px; margin-top: 0; }
-html[data-skin="fluent"] .nav-group-label { padding: 18px 12px 4px; font-size: 12px; letter-spacing: 0; text-transform: none; }
-html[data-skin="fluent"] .nav-group-items { gap: 1px; margin-inline-start: 0; padding-inline-start: 0; border-inline-start: 0; }
-html[data-skin="fluent"] .nav-item, html[data-skin="fluent"] .theme-toggle { min-height: 36px; padding: 0 12px; gap: 14px; border-radius: 4px; font-weight: 400; }
-html[data-skin="fluent"] .nav-item:hover, html[data-skin="fluent"] .theme-toggle:hover, html[data-skin="fluent"] .preference-control:hover { background: var(--fluent-hover); }
-html[data-skin="fluent"] .nav-item[data-selected="true"] { background: var(--fluent-selected); font-weight: 400; }
-html[data-skin="fluent"] .nav-item[data-selected="true"]::before { top: 10px; bottom: auto; height: 16px; width: 3px; border-radius: 2px; }
-html[data-skin="fluent"] .navigation-preferences { gap: 1px; padding-top: var(--space-2); border-top: 1px solid var(--color-border); }
-html[data-skin="fluent"] .preference-control { min-height: 36px; padding: 0 12px; gap: 14px; border-radius: 4px; }
-html[data-skin="fluent"] .preference-menu { border-radius: 8px; border-color: var(--color-border); box-shadow: 0 8px 16px rgba(0, 0, 0, 0.14); }
-html[data-skin="fluent"] .preference-option { border-radius: 4px; }
-html[data-skin="fluent"] .preference-option[aria-selected="true"]::before { top: 12px; bottom: auto; height: 16px; border-radius: 2px; }
+html[data-skin="fluent"] .window-title { padding-inline: var(--space-4); font-size: 12px; font-weight: 400; }
+html[data-skin="fluent"] .window-title img { width: 16px; height: 16px; }
 
-/* Pages: a 28px display title on the canvas, then cards. */
-html[data-skin="fluent"] .page { max-width: 1080px; padding: var(--space-6) var(--space-10) var(--space-8) var(--space-8); }
-html[data-skin="fluent"] h1 { font-family: "Segoe UI Variable Display", "Segoe UI", "Pretendard KO UI", "Malgun Gothic", sans-serif; font-size: 28px; line-height: 36px; letter-spacing: -0.2px; }
-html[data-skin="fluent"] h2 { font-size: 14px; font-weight: 600; }
-html[data-skin="fluent"] .page-header { padding-bottom: var(--space-4); border-bottom: 0; }
-html[data-skin="fluent"] .page-header.compact { padding-bottom: var(--space-3); }
-html[data-skin="fluent"] .section-block, html[data-skin="fluent"] .service-summary, html[data-skin="fluent"] .service-row, html[data-skin="fluent"] .status-band, html[data-skin="fluent"] .legacy-import-banner, html[data-skin="fluent"] .split-section { border-radius: 4px; background: var(--color-surface); }
-html[data-skin="fluent"] .section-block { margin-top: var(--space-5); border-color: var(--color-border); }
-html[data-skin="fluent"] .section-heading { padding: var(--space-3) var(--space-4); }
-html[data-skin="fluent"] .section-heading h2 { font-weight: 600; }
-html[data-skin="fluent"] .split-section { padding: var(--space-4); border: 1px solid var(--color-border); }
-html[data-skin="fluent"] .detail-list > div { padding: var(--space-3) var(--space-4); }
-html[data-skin="fluent"] .detail-list > div:last-child { border-bottom: 0; }
-
-/* The overview and service summaries become stacked rows instead of stat tiles. */
-html[data-skin="fluent"] .overview-service-heading { padding: var(--space-4); gap: var(--space-4); }
-html[data-skin="fluent"] .overview-service-heading h2 { font-size: 20px; line-height: 28px; }
-html[data-skin="fluent"] .overview-service-details { grid-template-columns: minmax(0, 1fr); }
-html[data-skin="fluent"] .overview-service-details > div { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: 48px; padding: var(--space-3) var(--space-4); border-inline-end: 0; border-bottom: 1px solid var(--color-border); }
-html[data-skin="fluent"] .overview-service-details > div:last-child { border-bottom: 0; }
-html[data-skin="fluent"] .overview-service-details dt { margin: 0; color: var(--color-foreground); }
-html[data-skin="fluent"] .overview-service-details dd { font-weight: 400; color: var(--color-muted); text-align: end; }
-html[data-skin="fluent"] .service-summary { margin-top: var(--space-5); border-color: var(--color-border); }
-html[data-skin="fluent"] .service-summary-grid { grid-template-columns: minmax(0, 1fr); }
-html[data-skin="fluent"] .service-summary-grid > div { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: 48px; padding: var(--space-3) var(--space-4); border-inline-end: 0; border-bottom: 1px solid var(--color-border); }
-html[data-skin="fluent"] .service-summary-grid > div:last-child { border-bottom: 0; }
-html[data-skin="fluent"] .service-summary-grid dt { font-size: 14px; color: var(--color-foreground); }
-html[data-skin="fluent"] .service-summary-grid dd { font-size: 14px; font-weight: 400; color: var(--color-muted); }
-html[data-skin="fluent"] .service-rows { gap: 3px; margin-top: var(--space-4); }
-html[data-skin="fluent"] .service-row { border-color: var(--color-border); }
-html[data-skin="fluent"] .service-row > summary, html[data-skin="fluent"] .service-row-head { min-height: 62px; padding: var(--space-3) var(--space-4); }
-html[data-skin="fluent"] .service-row-icon { width: 24px; height: 24px; border-radius: 0; background: transparent; color: var(--color-foreground); }
-html[data-skin="fluent"] .service-row-copy h2 { font-weight: 400; }
-html[data-skin="fluent"] .service-row-state { padding: 0; background: transparent; font-size: 14px; font-weight: 400; }
-html[data-skin="fluent"] .service-row-state[data-tone="normal"], html[data-skin="fluent"] .service-row-state[data-tone="neutral"] { color: var(--color-muted); }
-html[data-skin="fluent"] .system-injection-icon, html[data-skin="fluent"] .service-package-notice-icon, html[data-skin="fluent"] .legacy-tray-conflict-icon { border-radius: 4px; }
-
-/* Controls: 32px, 4px corners, a darker bottom edge instead of a heavy outline. */
-html[data-skin="fluent"] .button, html[data-skin="fluent"] .icon-button, html[data-skin="fluent"] select, html[data-skin="fluent"] textarea, html[data-skin="fluent"] input[type="text"], html[data-skin="fluent"] input[type="number"], html[data-skin="fluent"] input[type="search"] { border-color: var(--color-border); border-bottom-color: var(--fluent-control-bottom); border-radius: 4px; background: var(--fluent-control); }
-html[data-skin="fluent"] .button { font-weight: 400; }
-html[data-skin="fluent"] .button:hover { filter: none; background: var(--color-surface-subtle); }
-html[data-skin="fluent"] .button.primary { border-color: rgba(0, 0, 0, 0.08); border-bottom-color: var(--fluent-accent-bottom); background: var(--color-primary); color: var(--color-on-primary); font-weight: 400; }
-html[data-skin="fluent"] .button.primary:hover { background: var(--color-primary); filter: brightness(1.06); }
-html[data-skin="fluent"] .button.danger { border-color: var(--color-destructive); color: var(--color-destructive); }
-html[data-skin="fluent"] .text-action { font-weight: 400; }
-html[data-skin="fluent"] .search-field { border-color: var(--color-border); border-bottom-color: var(--color-muted); border-radius: 4px; background: var(--fluent-control); }
-/* The tuner keeps the full window: its docked preview needs the width the reading pages give away. */
-html[data-skin="fluent"] .profile-page { --control-height: 32px; max-width: none; padding: var(--space-4) var(--space-5) var(--space-5); }
-html[data-skin="fluent"] .switch-control input { border-color: var(--color-muted); background: transparent; }
+/* Controls: 32 px, 4 px corners, a darker bottom edge instead of a shadow. */
+html[data-skin="fluent"] .button { min-height: var(--control-height); height: var(--control-height); padding: 0 12px; gap: 8px; border: 1px solid var(--color-border); border-bottom-color: var(--fluent-control-bottom); border-radius: 4px; background: var(--fluent-control); color: var(--color-foreground); font-weight: 400; box-shadow: none; }
+html[data-skin="fluent"] .button:hover { background: var(--color-surface-subtle); }
+html[data-skin="fluent"] .button.primary { border-color: rgba(0, 0, 0, 0.08); border-bottom-color: var(--fluent-accent-bottom); background: var(--color-primary); color: var(--color-on-primary); }
+html[data-skin="fluent"] .button.danger { color: var(--color-destructive); }
+html[data-skin="fluent"] .button.ghost { border-color: transparent; background: transparent; color: var(--color-muted); }
+html[data-skin="fluent"] .icon-button { width: var(--control-height); min-height: var(--control-height); height: var(--control-height); border: 1px solid var(--color-border); border-bottom-color: var(--fluent-control-bottom); border-radius: 4px; background: var(--fluent-control); }
+html[data-skin="fluent"] .text-action, html[data-skin="fluent"] .fluent-link { color: var(--fluent-accent-text); font-size: 14px; }
+html[data-skin="fluent"] select, html[data-skin="fluent"] input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), html[data-skin="fluent"] textarea { border: 1px solid var(--color-border); border-bottom-color: var(--fluent-control-bottom); border-radius: 4px; background: var(--fluent-control); color: var(--color-foreground); }
+html[data-skin="fluent"] input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):focus-visible, html[data-skin="fluent"] textarea:focus-visible { outline: none; border-bottom: 2px solid var(--color-primary); }
+html[data-skin="fluent"] .fluent-field { height: var(--control-height); padding: 0 11px; }
+html[data-skin="fluent"] .switch-control input { width: 40px; height: 20px; border: 1px solid var(--color-muted); background: transparent; }
+html[data-skin="fluent"] .switch-control input::before { width: 12px; height: 12px; background: var(--color-muted); }
 html[data-skin="fluent"] .switch-control input:checked { border-color: var(--color-primary); background: var(--color-primary); }
-html[data-skin="fluent"] .profile-mode-title > span { border-color: var(--color-border-strong); }
+html[data-skin="fluent"] .switch-control input:checked::before { transform: translateX(19px); background: var(--color-on-primary); }
+html[data-skin="fluent"] .fluent-switch { display: inline-flex; align-items: center; gap: 12px; }
+html[data-skin="fluent"] .fluent-switch .switch-control > span { display: none; }
+html[data-skin="fluent"] .fluent-badge { display: inline-flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 8px; background: var(--color-primary); color: var(--color-on-primary); font-size: 11px; font-weight: 600; line-height: 16px; }
 
-/* Tuner: every setting is one card; the group heading sits on the canvas. */
-html[data-skin="fluent"] .settings-index li button { min-height: 36px; border-radius: 4px; font-weight: 400; }
-html[data-skin="fluent"] .settings-index li button[data-selected="true"] { position: relative; background: var(--fluent-selected); font-weight: 400; }
-html[data-skin="fluent"] .settings-index li button[data-selected="true"]::before { position: absolute; left: 0; top: 10px; width: 3px; height: 16px; border-radius: 2px; background: var(--color-primary); content: ""; }
-html[data-skin="fluent"] .settings-form { padding-top: var(--space-1); }
-html[data-skin="fluent"] .settings-form .section-heading { padding: var(--space-2) 0 var(--space-3); }
-html[data-skin="fluent"] .settings-form .section-heading h2 { font-size: 20px; line-height: 28px; }
-html[data-skin="fluent"] .setting-row { min-height: 56px; margin-bottom: 3px; padding: var(--space-2) var(--space-4); border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-surface); }
-html[data-skin="fluent"] .setting-row label { font-weight: 400; }
-html[data-skin="fluent"] .setting-row.guided-row { padding: var(--space-3) var(--space-4); }
-html[data-skin="fluent"] .guided-choice-option { border-radius: 4px; }
-html[data-skin="fluent"] .wizard-start-card, html[data-skin="fluent"] .wizard-apply-card { border-radius: 4px; background: var(--color-surface); }
-html[data-skin="fluent"] .wizard-progress { background: transparent; }
-html[data-skin="fluent"] .preview-canvas { border-radius: 4px; }
-html[data-skin="fluent"] .settings-workspace[data-preview-docked="true"] .preview-panel { padding: var(--space-3); border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-surface); }
-html[data-skin="fluent"] .advanced-editor fieldset, html[data-skin="fluent"] .individual-row, html[data-skin="fluent"] .list-editor ul, html[data-skin="fluent"] .list-editor li { border-radius: 4px; }
+/* Shell: navigation pane and work area on one canvas. */
+html[data-skin="fluent"] .fluent-shell { display: grid; grid-template-columns: var(--nav-width) minmax(0, 1fr); height: calc(100vh - var(--titlebar-height)); min-height: 0; overflow: hidden; }
+html[data-skin="fluent"] .fluent-nav { display: flex; flex-direction: column; width: var(--nav-width); min-width: var(--nav-width); height: auto; min-height: 0; padding: 4px 8px 12px; border: 0; background: var(--color-canvas); overflow: visible; }
+html[data-skin="fluent"] .fluent-nav-items { display: flex; flex-direction: column; }
+html[data-skin="fluent"] .fluent-nav-group { display: flex; flex-direction: column; }
+html[data-skin="fluent"] .fluent-nav-head { padding: 18px 12px 4px; color: var(--color-muted); font-size: 12px; font-weight: 600; }
+html[data-skin="fluent"] .fluent-nav-item { position: relative; display: flex; width: 100%; height: 36px; min-height: 36px; align-items: center; gap: 14px; margin: 1px 0; padding: 0 12px; border: 0; border-radius: 4px; background: transparent; color: var(--color-foreground); font-size: 14px; font-weight: 400; text-align: start; }
+html[data-skin="fluent"] .fluent-nav-item:hover { background: var(--fluent-hover); }
+html[data-skin="fluent"] .fluent-nav-item[data-selected="true"] { background: var(--fluent-selected); }
+html[data-skin="fluent"] .fluent-nav-item[data-selected="true"]::before { content: ""; position: absolute; top: 10px; left: 0; width: 3px; height: 16px; border-radius: 2px; background: var(--color-primary); }
+html[dir="rtl"][data-skin="fluent"] .fluent-nav-item[data-selected="true"]::before { left: auto; right: 0; }
+html[data-skin="fluent"] .fluent-nav-foot { display: flex; flex-direction: column; margin-top: auto; padding: 8px 0 0; border-top: 1px solid var(--fluent-divider); }
+html[data-skin="fluent"] .fluent-nav-foot .fluent-nav-item { color: var(--color-muted); }
+html[data-skin="fluent"] .fluent-nav .preference-control { display: flex; width: 100%; height: 36px; align-items: center; gap: 14px; margin: 1px 0; padding: 0 12px; border-radius: 4px; color: var(--color-muted); }
+html[data-skin="fluent"] .fluent-nav .preference-control:hover { background: var(--fluent-hover); }
+html[data-skin="fluent"] .fluent-nav .preference-picker { position: relative; flex: 1 1 auto; min-width: 0; }
+html[data-skin="fluent"] .fluent-nav .preference-trigger { width: 100%; min-height: 0; height: 36px; padding: 0; border: 0; background: transparent; color: inherit; font-size: 14px; text-align: start; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-skin="fluent"] .fluent-nav .preference-menu { position: absolute; z-index: 30; top: auto; right: auto; bottom: 40px; left: 0; width: 208px; padding: 4px; border: 1px solid var(--color-border-strong); border-radius: 8px; background: var(--color-surface); box-shadow: 0 8px 16px rgba(0, 0, 0, 0.14); }
+html[data-skin="fluent"] .fluent-nav .preference-option { min-height: 34px; padding: 0 10px; border-radius: 4px; }
+html[data-skin="fluent"] .fluent-nav .preference-option[aria-selected="true"] { background: var(--fluent-selected); }
+html[data-skin="fluent"] .fluent-work { display: block; min-width: 0; min-height: 0; overflow: auto; background: var(--color-canvas); }
 
-/* Profile files: cards with a 4px corner and a filled accent badge. */
-html[data-skin="fluent"] .profile-card { border-radius: 4px; }
-html[data-skin="fluent"] .profile-card[data-selected="true"] { box-shadow: inset 0 0 0 1px var(--color-primary); }
-html[data-skin="fluent"] .profile-card[data-selected="true"]::before { display: none; }
-html[data-skin="fluent"] .selected-file-summary, html[data-skin="fluent"] .target-selection, html[data-skin="fluent"] .process-picker-list, html[data-skin="fluent"] .process-picker-row { border-radius: 4px; }
-html[data-skin="fluent"] .migration-confirmation, html[data-skin="fluent"] .hint-popover { border-radius: 8px; }
+/* Page: display title, subtitle, actions, a content column. */
+html[data-skin="fluent"] .fluent-page { display: flex; flex-direction: column; min-height: 100%; padding: 24px 40px 32px 36px; }
+html[data-skin="fluent"] .fluent-page[data-wide="true"] { height: 100%; min-height: 0; padding-right: 32px; overflow: hidden; }
+html[data-skin="fluent"] .fluent-head-row { display: flex; flex: 0 0 auto; align-items: flex-start; justify-content: space-between; gap: 16px; }
+html[data-skin="fluent"] .fluent-title { display: flex; align-items: center; gap: 8px; }
+html[data-skin="fluent"] .fluent-title-dim { color: var(--fluent-text-3); }
+html[data-skin="fluent"] .fluent-title svg { color: var(--fluent-text-3); }
+html[data-skin="fluent"] .fluent-sub { margin-top: 2px; color: var(--color-muted); }
+html[data-skin="fluent"] .fluent-sub .profile-editing, html[data-skin="fluent"] .fluent-sub .profile-save-warning, html[data-skin="fluent"] .fluent-sub .profile-message { margin: 0; color: var(--color-muted); }
+html[data-skin="fluent"] .fluent-head-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 4px; }
+html[data-skin="fluent"] .fluent-col { max-width: 1000px; margin-top: 20px; }
+html[data-skin="fluent"] .fluent-page[data-wide="true"] .fluent-col { display: flex; flex: 1 1 auto; min-height: 0; max-width: none; flex-direction: column; }
+html[data-skin="fluent"] .fluent-sect { margin: 28px 0 8px; font-size: 14px; font-weight: 600; line-height: 20px; }
+html[data-skin="fluent"] .fluent-sect span { margin-left: 8px; font-weight: 400; color: var(--color-muted); }
+html[data-skin="fluent"] .fluent-col > .fluent-sect:first-child { margin-top: 0; }
+html[data-skin="fluent"] .fluent-cmd { display: flex; align-items: center; gap: 4px; }
+
+/* Settings cards. */
+html[data-skin="fluent"] .fluent-cards { display: grid; gap: 3px; }
+html[data-skin="fluent"] .fluent-cards > div[data-service-summary], html[data-skin="fluent"] .fluent-cards > div[data-recent-activity] { display: grid; gap: 3px; }
+html[data-skin="fluent"] .fluent-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 16px; min-height: 62px; padding: 12px 16px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-surface); }
+html[data-skin="fluent"] .fluent-card:not(:has(> .fluent-card-icon)) { grid-template-columns: minmax(0, 1fr) auto; }
+html[data-skin="fluent"] .fluent-card-icon { display: grid; width: 24px; place-items: center; color: var(--color-foreground); }
+html[data-skin="fluent"] .fluent-card-copy { min-width: 0; }
+html[data-skin="fluent"] .fluent-card-title { font-size: 14px; }
+html[data-skin="fluent"] .fluent-card-title code { font-size: 13px; }
+html[data-skin="fluent"] .fluent-card-desc { font-size: 12px; line-height: 16px; color: var(--color-muted); }
+html[data-skin="fluent"] .fluent-card-desc code { color: var(--color-muted); }
+html[data-skin="fluent"] .fluent-card-act { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 12px; }
+html[data-skin="fluent"] .fluent-state { color: var(--color-muted); font-size: 14px; }
+html[data-skin="fluent"] .fluent-state[data-tone="ok"] { color: var(--color-success); }
+html[data-skin="fluent"] .fluent-state[data-tone="warn"] { color: var(--color-warning); }
+html[data-skin="fluent"] .fluent-state[data-tone="bad"] { color: var(--color-destructive); }
+html[data-skin="fluent"] .fluent-state code { color: inherit; }
+html[data-skin="fluent"] .fluent-chev { display: grid; width: 32px; height: 32px; margin-right: -8px; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--color-foreground); transition: transform var(--motion-fast) var(--ease-standard); }
+html[data-skin="fluent"] .fluent-card[data-expanded="true"] .fluent-chev { transform: rotate(180deg); }
+html[data-skin="fluent"] .fluent-card[data-hero="true"] { padding: 16px; }
+html[data-skin="fluent"] .fluent-card[data-hero="true"] .fluent-card-icon { width: 28px; color: var(--color-success); }
+html[data-skin="fluent"] .fluent-card[data-hero="true"][data-tone="attention"] .fluent-card-icon, html[data-skin="fluent"] .fluent-card[data-hero="true"][data-tone="critical"] .fluent-card-icon { color: var(--color-warning); }
+html[data-skin="fluent"] .fluent-card[data-hero="true"][data-tone="neutral"] .fluent-card-icon { color: var(--color-muted); }
+html[data-skin="fluent"] .fluent-card[data-hero="true"] .fluent-card-title { font-size: 20px; line-height: 28px; font-weight: 600; }
+html[data-skin="fluent"] .fluent-card[data-hero="true"] .fluent-card-desc { margin-top: 2px; font-size: 14px; line-height: 20px; }
+html[data-skin="fluent"] .fluent-sub-rows { grid-column: 1 / -1; margin: 6px -16px -12px; border-top: 1px solid var(--fluent-divider); }
+html[data-skin="fluent"] .fluent-sub-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 12px 16px 12px 56px; border-bottom: 1px solid var(--fluent-divider); background: var(--color-surface-subtle); }
+html[data-skin="fluent"] .fluent-sub-row:last-child { border-bottom: 0; }
+html[data-skin="fluent"] .fluent-sub-row:not(:has(> div:first-child + *)) { grid-template-columns: minmax(0, 1fr); }
+html[data-skin="fluent"] .fluent-info { display: flex; align-items: center; gap: 6px; }
+html[data-skin="fluent"] .fluent-sub-rows > .service-controls, html[data-skin="fluent"] .fluent-sub-rows > .service-package-notice, html[data-skin="fluent"] .fluent-sub-rows > .registered-launchers, html[data-skin="fluent"] .fluent-sub-rows > .process-picker, html[data-skin="fluent"] .fluent-sub-rows > .manual-launcher { padding: 12px 16px 12px 56px; border-top: 0; border-bottom: 1px solid var(--fluent-divider); background: var(--color-surface-subtle); }
+html[data-skin="fluent"] .fluent-sub-rows > :last-child { border-bottom: 0; }
+html[data-skin="fluent"] .fluent-summary-actions { display: contents; }
+html[data-skin="fluent"] .fluent-summary-actions .service-summary-notice { display: none; }
+html[data-skin="fluent"] .fluent-summary-actions .service-summary-actions { padding: 0; border: 0; }
+html[data-skin="fluent"] .fluent-cards .legacy-tray-conflict { border: 1px solid var(--color-border); border-radius: 4px; }
+html[data-skin="fluent"] .fluent-activity-list { margin: 0; padding: 0; list-style: none; }
+html[data-skin="fluent"] .fluent-footer-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+
+/* Profiles: the card gallery with a rendered thumbnail. */
+html[data-skin="fluent"] .fluent-gallery { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
+html[data-skin="fluent"] .fluent-pcard { position: relative; display: grid; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-surface); }
+html[data-skin="fluent"] .fluent-pcard[data-selected="true"] { border-color: var(--color-primary); box-shadow: inset 0 0 0 1px var(--color-primary); }
+html[data-skin="fluent"] .fluent-pcard-select { display: grid; gap: 4px; min-width: 0; padding: 12px 12px 0; border: 0; background: transparent; text-align: start; }
+html[data-skin="fluent"] .fluent-thumb { display: block; height: 64px; overflow: hidden; border-radius: 3px; background: var(--fluent-thumb); outline: 1px solid rgba(0, 0, 0, 0.08); outline-offset: -1px; }
+html[data-skin="fluent"][data-theme="dark"] .fluent-thumb { outline-color: rgba(255, 255, 255, 0.08); }
+html[data-skin="fluent"] .fluent-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: left center; }
+html[data-skin="fluent"] .fluent-thumb-fallback { display: block; padding: 10px 12px; color: var(--color-muted); font-size: 12px; white-space: nowrap; }
+html[data-skin="fluent"] .fluent-pcard-name { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+html[data-skin="fluent"] .fluent-pcard-name strong { font-weight: 600; }
+html[data-skin="fluent"] .fluent-pcard-select code { overflow: hidden; color: var(--color-muted); text-overflow: ellipsis; white-space: nowrap; }
+html[data-skin="fluent"] .fluent-pcard-foot { display: flex; justify-content: flex-end; padding: 0 8px 4px; }
+html[data-skin="fluent"] .fluent-pcard-foot .text-action { min-height: 32px; font-size: 12px; }
+
+/* Tuner: index, cards, preview in three columns. */
+html[data-skin="fluent"] .fluent-two { display: grid; flex: 1 1 auto; grid-template-columns: var(--settings-index-width) minmax(0, 1fr); min-height: 0; gap: 20px; margin-top: 16px; }
+html[data-skin="fluent"] .fluent-index { display: flex; flex-direction: column; gap: 8px; padding: 0; border: 0; overflow-y: auto; }
+html[data-skin="fluent"] .fluent-search { width: 100%; }
+html[data-skin="fluent"] .fluent-index-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+html[data-skin="fluent"] .fluent-index-list button { position: relative; display: flex; width: 100%; height: 36px; align-items: center; gap: 10px; padding: 0 12px; border: 0; border-radius: 4px; background: transparent; color: var(--color-foreground); text-align: start; }
+html[data-skin="fluent"] .fluent-index-list button:hover { background: var(--fluent-hover); }
+html[data-skin="fluent"] .fluent-index-list button[data-selected="true"] { background: var(--fluent-selected); }
+html[data-skin="fluent"] .fluent-index-list button[data-selected="true"]::before { content: ""; position: absolute; top: 10px; left: 0; width: 3px; height: 16px; border-radius: 2px; background: var(--color-primary); }
+html[data-skin="fluent"] .fluent-step-num { display: grid; width: 20px; height: 20px; flex: 0 0 auto; place-items: center; border: 1px solid var(--color-border-strong); border-radius: 50%; color: var(--color-muted); font-size: 11px; }
+html[data-skin="fluent"] .fluent-step-num[data-done="true"] { border-color: transparent; background: var(--fluent-success-soft); color: var(--color-success); }
+html[data-skin="fluent"] .fluent-index-list button[data-selected="true"] .fluent-step-num { border-color: transparent; background: var(--color-primary); color: var(--color-on-primary); }
+html[data-skin="fluent"] .fluent-workspace { display: grid; min-width: 0; min-height: 0; grid-template-rows: minmax(0, 1fr) auto; gap: 16px; }
+html[data-skin="fluent"] .fluent-workspace[data-preview-docked="true"] { grid-template-rows: minmax(0, 1fr); grid-template-columns: minmax(0, 1fr) 340px; column-gap: 20px; }
+html[data-skin="fluent"] .fluent-main { padding: 0 4px 0 0; }
+html[data-skin="fluent"] .fluent-sub-title { font-size: 20px; font-weight: 600; line-height: 28px; }
+html[data-skin="fluent"] .fluent-desc { margin: 2px 0 12px; color: var(--color-muted); }
+html[data-skin="fluent"] .fluent-main .setting-row { min-height: 56px; margin-bottom: 3px; padding: 10px 14px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-surface); }
+html[data-skin="fluent"] .fluent-main .setting-row[data-dirty="true"] .setting-label { color: var(--color-foreground); }
+html[data-skin="fluent"] .fluent-main .wizard-start-card, html[data-skin="fluent"] .fluent-main .wizard-apply-card { border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-surface); }
+html[data-skin="fluent"] .fluent-workspace .preview-panel { margin: 0; padding: 0; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-surface); overflow: hidden; }
+html[data-skin="fluent"] .fluent-workspace[data-preview-docked="true"] .preview-panel { padding-inline-start: 0; border-inline-start: 1px solid var(--color-border); }
+html[data-skin="fluent"] .fluent-workspace .preview-toolbar { padding: 10px 12px; border-bottom: 1px solid var(--fluent-divider); }
+html[data-skin="fluent"] .fluent-workspace .preview-toolbar h2 { font-size: 14px; }
+html[data-skin="fluent"] .fluent-workspace .preview-controls select { height: 28px; }
+html[data-skin="fluent"] .fluent-workspace .preview-canvas { margin: 10px 12px; border: 1px solid var(--color-border); border-radius: 3px; }
+html[data-skin="fluent"] .fluent-workspace[data-preview-docked="true"] .preview-canvas[data-stack="true"] { flex: 1 1 auto; }
+html[data-skin="fluent"] .fluent-workspace .preview-footer { padding: 0 12px 10px; }
+html[data-skin="fluent"] .fluent-workspace .sample-input { margin: 10px 12px 0; }
+
+/* Diagnostics: the timeline sits in one card. */
+html[data-skin="fluent"] .fluent-timeline-card, html[data-skin="fluent"] .fluent-sources-card { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin-bottom: 3px; }
+html[data-skin="fluent"] .fluent-sources-card { justify-items: start; }
+html[data-skin="fluent"] .event-chip[aria-pressed="true"] { background: var(--fluent-accent-soft); }
+
+@media (max-width: 1023px) {
+  html[data-skin="fluent"] { --nav-width: 200px; }
+  html[data-skin="fluent"] .fluent-page { padding: 20px 24px 28px; }
+  html[data-skin="fluent"] .fluent-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  html[data-skin="fluent"] .fluent-two { grid-template-columns: minmax(0, 1fr); }
+  html[data-skin="fluent"] .fluent-index { flex-direction: row; flex-wrap: wrap; }
+  html[data-skin="fluent"] .fluent-index-list { grid-auto-flow: column; overflow-x: auto; }
+  html[data-skin="fluent"] .fluent-workspace[data-preview-docked="true"] { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+}
 
 @media (max-width: 767px) {
-  html[data-skin="fluent"] .navigation { border-bottom: 1px solid var(--color-border); }
-  html[data-skin="fluent"] .page { padding: var(--space-4); }
-}
-@media (min-width: 768px) and (max-width: 1023px) {
-  html[data-skin="fluent"] { --nav-width: 200px; }
-  html[data-skin="fluent"] .page { padding: var(--space-5) var(--space-6); }
+  html[data-skin="fluent"] .fluent-shell { display: block; height: auto; overflow: visible; }
+  html[data-skin="fluent"] .fluent-nav { position: sticky; z-index: 2; top: var(--titlebar-height); flex-direction: row; width: auto; min-width: 0; height: auto; padding: 4px 8px; border-bottom: 1px solid var(--fluent-divider); overflow-x: auto; }
+  html[data-skin="fluent"] .fluent-nav-items { flex-direction: row; gap: 4px; }
+  html[data-skin="fluent"] .fluent-nav-group { flex-direction: row; }
+  html[data-skin="fluent"] .fluent-nav-head { display: none; }
+  html[data-skin="fluent"] .fluent-nav-item { width: auto; white-space: nowrap; }
+  html[data-skin="fluent"] .fluent-nav-item span { display: none; }
+  html[data-skin="fluent"] .fluent-nav-foot { flex-direction: row; margin-top: 0; margin-left: auto; padding: 0; border: 0; }
+  html[data-skin="fluent"] .fluent-nav .preference-control { width: auto; }
+  html[data-skin="fluent"] .fluent-nav .preference-trigger { width: 72px; }
+  html[data-skin="fluent"] .fluent-nav .preference-menu { top: 40px; bottom: auto; right: 0; left: auto; }
+  html[data-skin="fluent"] .fluent-page, html[data-skin="fluent"] .fluent-page[data-wide="true"] { height: auto; padding: 16px; overflow: visible; }
+  html[data-skin="fluent"] .fluent-head-row { flex-direction: column; }
+  html[data-skin="fluent"] h1 { font-size: 22px; line-height: 28px; }
+  html[data-skin="fluent"] .fluent-card { grid-template-columns: auto minmax(0, 1fr); }
+  html[data-skin="fluent"] .fluent-card:not(:has(> .fluent-card-icon)) { grid-template-columns: minmax(0, 1fr); }
+  html[data-skin="fluent"] .fluent-card-act { grid-column: 1 / -1; justify-content: flex-start; }
+  html[data-skin="fluent"] .fluent-sub-row { padding-left: 16px; }
+  html[data-skin="fluent"] .fluent-sub-rows > .service-controls, html[data-skin="fluent"] .fluent-sub-rows > .service-package-notice, html[data-skin="fluent"] .fluent-sub-rows > .registered-launchers, html[data-skin="fluent"] .fluent-sub-rows > .process-picker, html[data-skin="fluent"] .fluent-sub-rows > .manual-launcher { padding-left: 16px; }
+  html[data-skin="fluent"] .fluent-gallery { grid-template-columns: minmax(0, 1fr); }
+  html[data-skin="fluent"] .fluent-footer-actions { flex-direction: column; }
+  html[data-skin="fluent"] .fluent-two { display: block; }
+  html[data-skin="fluent"] .fluent-workspace { display: block; }
 }

@@ -20,14 +20,6 @@ export interface DiagnosticEntry {
   severity: "info" | "warning" | "error";
 }
 
-export type ActivityKind = "profile-applied" | "profile-verified" | "service-started" | "service-installed" | "service-stopped";
-
-export interface RecentActivity {
-  timestampUnixMs: number;
-  activity: ActivityKind;
-  profile: string | null;
-}
-
 export interface ExecutionStatus {
   trayAvailable: boolean;
   autoStart: boolean;
@@ -226,11 +218,15 @@ export interface PreviewSample {
   italic?: boolean;
 }
 
+/** Which helper renders a sample: MacType's renderer, or Windows' own GDI. */
+export type PreviewEngine = "mactype" | "plain";
+
 export interface PreviewRequest {
   profilePath: string;
   overrides: Record<string, number>;
   sample: PreviewSample;
   displayScale: number;
+  engine?: PreviewEngine;
 }
 
 /** How the helper-owned native preview window renders its content. */
@@ -252,6 +248,44 @@ export interface PreviewResult {
   dpi: number;
   elapsedMs: number;
   coreVersion: number;
+  engine?: PreviewEngine;
+}
+
+export type EventSeverity = "info" | "notice" | "warning" | "error";
+export type EventArea = "service" | "setup" | "profile" | "preview" | "injection" | "control-center" | "tray";
+export type EventSource = "service-host" | "service-setup" | "control-center";
+
+/** One line of the unified event log; `code` is localised by the UI. */
+export interface EventRecord {
+  v: number;
+  ts: number;
+  severity: EventSeverity;
+  area: EventArea;
+  code: string;
+  params: Record<string, string>;
+  detail: string | null;
+  source: EventSource;
+}
+
+export interface EventFilter {
+  severities?: ReadonlyArray<EventSeverity>;
+  areas?: ReadonlyArray<EventArea>;
+  sinceUnixMs?: number;
+}
+
+export interface EventSourceStatus {
+  source: EventSource;
+  path: string;
+  readable: boolean;
+  bytes: number;
+}
+
+export interface EventLogSummary {
+  total: number;
+  warnings: number;
+  errors: number;
+  newestTs: number | null;
+  sources: ReadonlyArray<EventSourceStatus>;
 }
 
 export const fallbackStatus: InstallationStatus = {

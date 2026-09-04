@@ -561,3 +561,64 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 /* The status bar exists in every skin's DOM so a skin can show it without a
    layout change; only skins that draw one make it visible. */
 .app-statusbar { display: none; }
+
+/* Shared primitives introduced with the skin paradigms. Every skin restyles
+   them through its own scope; these are the neutral defaults. */
+.status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--color-border-strong); vertical-align: -1px; flex: 0 0 auto; }
+.status-dot[data-tone="ok"] { background: var(--color-success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-success) 18%, transparent); }
+.status-dot[data-tone="warn"] { background: var(--color-warning); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-warning) 18%, transparent); }
+.status-dot[data-tone="bad"] { background: var(--color-destructive); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-destructive) 18%, transparent); }
+.status-dot[data-tone="accent"] { background: var(--color-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 18%, transparent); }
+.segmented { display: inline-flex; height: var(--control-height); padding: 3px; border: 1px solid var(--color-border-strong); border-radius: var(--radius-control); background: var(--color-surface); }
+.segmented-option { display: grid; place-items: center; min-height: 0; padding: 0 10px; border: 0; border-radius: calc(var(--radius-control) - 1px); background: transparent; color: var(--color-muted); white-space: nowrap; }
+.segmented-option[aria-checked="true"] { background: var(--color-surface-subtle); color: var(--color-foreground); font-weight: 600; }
+.button.ghost { border-color: transparent; background: transparent; color: var(--color-muted); box-shadow: none; }
+.button.ghost:hover { color: var(--color-foreground); background: var(--color-surface-subtle); }
+.specimen-board { display: flex; flex-direction: column; gap: 6px; min-height: 96px; overflow: hidden; }
+.specimen-strip { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 10px; margin: 0; }
+.specimen-strip figcaption { padding-top: 6px; }
+.specimen-strip figcaption { color: var(--color-muted); font-family: Consolas, "Cascadia Mono", monospace; font-size: 10px; }
+.specimen-strip img { display: block; max-width: 100%; }
+.specimen-placeholder p { margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; opacity: 0.5; }
+.specimen-error { grid-column: 1 / -1; }
+.event-timeline { display: grid; gap: var(--space-3); }
+.event-filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.event-chip-row { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.event-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px; border: 1px solid var(--color-border-strong); border-radius: 999px; background: var(--color-surface); color: var(--color-muted); font-size: 12px; }
+.event-chip[aria-pressed="true"] { border-color: var(--color-primary); color: var(--color-foreground); }
+.event-chip .event-dot { width: 7px; height: 7px; }
+.event-search { flex: 1 1 180px; min-width: 160px; }
+.event-search input { flex: 1; min-width: 0; }
+.event-day-heading { margin: var(--space-2) 0 var(--space-1); color: var(--color-muted); font-size: 12px; font-weight: 600; }
+.event-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.event-row { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); min-height: 36px; padding: var(--space-1) 0; border-bottom: 1px solid var(--color-border); }
+.event-row:last-child { border-bottom: 0; }
+.event-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--color-border-strong); }
+.event-row[data-severity="notice"] .event-dot, .event-chip[data-severity="notice"] .event-dot { background: var(--color-primary); }
+.event-row[data-severity="warning"] .event-dot, .event-chip[data-severity="warning"] .event-dot { background: var(--color-warning); }
+.event-row[data-severity="error"] .event-dot, .event-chip[data-severity="error"] .event-dot { background: var(--color-destructive); }
+.event-time { color: var(--color-muted); font-variant-numeric: tabular-nums; font-size: 12px; white-space: nowrap; }
+.event-area { display: none; }
+.event-timeline[data-dense="true"] .event-area { display: inline; min-width: 64px; color: var(--color-muted); font-size: 11px; }
+.event-timeline[data-dense="true"] .event-row { grid-template-columns: auto auto auto minmax(0, 1fr) auto; min-height: 28px; }
+.event-title { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.event-disclosure { display: grid; width: 28px; height: 28px; place-items: center; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--color-muted); }
+.event-disclosure[aria-expanded="true"] svg { transform: rotate(180deg); }
+.event-detail { grid-column: 1 / -1; display: grid; gap: var(--space-2); padding: var(--space-2) 0 var(--space-3) 0; }
+.event-detail dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-1) var(--space-3); margin: 0; }
+.event-detail dl > div { display: contents; }
+.event-detail dt { color: var(--color-muted); font-size: 12px; }
+.event-detail dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.event-detail-text { margin: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface-subtle); font-family: Consolas, "Cascadia Mono", monospace; font-size: 11px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.event-empty { color: var(--color-muted); }
+.event-sources { display: grid; gap: var(--space-2); margin: 0; }
+.event-sources > div { display: grid; gap: 2px; }
+.event-sources dt { font-size: 12px; color: var(--color-muted); }
+.event-sources dd { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: 0; min-width: 0; }
+.event-sources code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.event-sources [data-readable="false"] span { color: var(--color-warning); }
+
+/* Docked preview footers hold four controls; they wrap as whole controls
+   rather than breaking a label across lines. */
+.settings-workspace[data-preview-docked="true"] .preview-footer { flex-wrap: wrap; justify-content: flex-start; gap: var(--space-2); }
+.settings-workspace[data-preview-docked="true"] .preview-footer > * { flex: 0 0 auto; white-space: nowrap; }

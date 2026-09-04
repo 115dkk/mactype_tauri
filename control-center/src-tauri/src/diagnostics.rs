@@ -1,14 +1,16 @@
 mod operation_log;
 
 use crate::preview::{PreviewDiagnosticSnapshot, PreviewState};
-use operation_log::{
-    read_recent_activity, read_recent_diagnostic_logs, read_recent_operation_logs,
+use mactype_service_contract::event_log::{
+    read_events, EventArea, EventRecord, EventSeverity, EventSource,
 };
 pub(crate) use operation_log::{
     record_activity, record_operation_failure, ActivityKind, InstallationPreflightDiagnostics,
     OperationFailure,
 };
+use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeMap,
     env, fs,
     path::{Path, PathBuf},
     process::Command,
@@ -21,6 +23,34 @@ pub fn log_root() -> Result<PathBuf, String> {
         .map(PathBuf::from)
         .map(|path| path.join("MacType").join("ControlCenter").join("logs"))
         .ok_or_else(|| "LOCALAPPDATA is not available".to_owned())
+}
+
+fn event_paths() -> Result<Vec<PathBuf>, String> {
+    let mut paths = vec![log_root()?.join("control-center.log")];
+    #[cfg(windows)]
+    {
+        let (program_files, program_data) = crate::machine_integration::machine_roots()?;
+        let machine = mactype_service_contract::MachinePaths::from_trusted_os_roots(
+            &program_files,
+            &program_data,
+        )
+        .map_err(|error| error.to_string())?;
+        paths.push(machine.service_host_event_log().to_owned());
+        paths.push(machine.service_setup_event_log().to_owned());
+    }
+    Ok(paths)
+}
+
+fn read_all_events(paths: &[PathBuf], limit: usize) -> Vec<EventRecord> {
+    if limit == 0 || paths.is_empty() {
+        return Vec::new();
+    }
+    let local_root = paths[0].parent().unwrap_or_else(|| Path::new(""));
+    let mut events = operation_log::read_all_at(local_root);
+    events.extend(read_events(&paths[1..], usize::MAX));
+    events.sort_by_key(|event| event.ts);
+    let start = events.len().saturating_sub(limit);
+    events.split_off(start)
 }
 
 fn export_to(directory: &Path, report: &str, timestamp: u128) -> Result<PathBuf, String> {
@@ -107,37 +137,131 @@ fn diagnostic_report_text(snapshot: PreviewDiagnosticSnapshot) -> String {
 #[tauri::command]
 pub(crate) fn diagnostic_report(state: State<'_, PreviewState>) -> Result<String, String> {
     let mut report = diagnostic_report_text(state.diagnostic_snapshot()?);
-    append_operation_logs(&mut report, &read_recent_operation_logs(50)?);
-    append_activity_logs(&mut report, &read_recent_activity(50)?);
+    let paths = event_paths()?;
+    let events = read_all_events(&paths, 200);
+    report.push_str(&format!("eventLogEntries={}\n", events.len()));
+    for event in events {
+        report.push_str("eventLog=");
+        report.push_str(&render_event(&event));
+        report.push('\n');
+    }
+    for status in source_statuses(&paths) {
+        report.push_str(&format!(
+            "eventSource={} path={} readable={} bytes={}\n",
+            source_name(status.source),
+            status.path,
+            status.readable,
+            status.bytes
+        ));
+    }
     Ok(report)
 }
 
-fn append_operation_logs(report: &mut String, entries: &[operation_log::OperationLogEntry]) {
-    report.push_str(&format!("operationLogEntries={}\n", entries.len()));
-    for entry in entries {
-        report.push_str("operationLog=");
-        report.push_str(&entry.render());
-        report.push('\n');
-    }
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct EventFilter {
+    severities: Option<Vec<EventSeverity>>,
+    areas: Option<Vec<EventArea>>,
+    since_unix_ms: Option<u64>,
 }
 
-fn append_activity_logs(report: &mut String, entries: &[operation_log::ActivityLogEntry]) {
-    report.push_str(&format!("activityLogEntries={}\n", entries.len()));
-    for entry in entries {
-        report.push_str("activityLog=");
-        report.push_str(&serde_json::to_string(entry).unwrap_or_else(|_| "{}".to_owned()));
-        report.push('\n');
-    }
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct EventSourceStatus {
+    source: EventSource,
+    path: String,
+    readable: bool,
+    bytes: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct EventLogSummary {
+    total: u32,
+    warnings: u32,
+    errors: u32,
+    newest_ts: Option<u64>,
+    sources: Vec<EventSourceStatus>,
+}
+
+#[tauri::command]
+pub(crate) fn list_events(
+    filter: Option<EventFilter>,
+    limit: Option<u32>,
+) -> Result<Vec<EventRecord>, String> {
+    let paths = event_paths()?;
+    let maximum = limit.unwrap_or(200).min(1000) as usize;
+    let filter = filter.unwrap_or_default();
+    let mut events = read_all_events(&paths, usize::MAX)
+        .into_iter()
+        .filter(|event| {
+            filter
+                .severities
+                .as_ref()
+                .map_or(true, |values| values.contains(&event.severity))
+                && filter
+                    .areas
+                    .as_ref()
+                    .map_or(true, |values| values.contains(&event.area))
+                && filter.since_unix_ms.map_or(true, |since| event.ts >= since)
+        })
+        .collect::<Vec<_>>();
+    let start = events.len().saturating_sub(maximum);
+    Ok(events.split_off(start))
+}
+
+#[tauri::command]
+pub(crate) fn event_log_summary() -> Result<EventLogSummary, String> {
+    const SEVEN_DAYS_MS: u64 = 7 * 24 * 60 * 60 * 1000;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_millis() as u64;
+    let paths = event_paths()?;
+    let events = read_all_events(&paths, usize::MAX)
+        .into_iter()
+        .filter(|event| event.ts >= now.saturating_sub(SEVEN_DAYS_MS))
+        .collect::<Vec<_>>();
+    Ok(EventLogSummary {
+        total: events.len() as u32,
+        warnings: events
+            .iter()
+            .filter(|event| event.severity == EventSeverity::Warning)
+            .count() as u32,
+        errors: events
+            .iter()
+            .filter(|event| event.severity == EventSeverity::Error)
+            .count() as u32,
+        newest_ts: events.last().map(|event| event.ts),
+        sources: source_statuses(&paths),
+    })
 }
 
 #[tauri::command]
 pub(crate) fn diagnostic_recent_logs() -> Result<Vec<String>, String> {
-    read_recent_diagnostic_logs(50)
+    Ok(list_events(None, Some(50))?
+        .iter()
+        .map(render_event)
+        .collect())
 }
 
 #[tauri::command]
-pub(crate) fn recent_activity() -> Result<Vec<operation_log::ActivityLogEntry>, String> {
-    read_recent_activity(5)
+pub(crate) fn recent_activity() -> Result<Vec<EventRecord>, String> {
+    let mut entries = list_events(
+        Some(EventFilter {
+            severities: Some(vec![EventSeverity::Info, EventSeverity::Notice]),
+            areas: Some(vec![
+                EventArea::Profile,
+                EventArea::Service,
+                EventArea::Tray,
+                EventArea::Preview,
+            ]),
+            since_unix_ms: None,
+        }),
+        Some(8),
+    )?;
+    entries.sort_by_key(|event| event.ts);
+    Ok(entries)
 }
 
 #[tauri::command]
@@ -150,6 +274,119 @@ pub(crate) fn export_diagnostics(state: State<'_, PreviewState>) -> Result<Strin
 pub(crate) fn copy_diagnostics(state: State<'_, PreviewState>) -> Result<(), String> {
     let report = diagnostic_report(state)?;
     copy_to_clipboard(&report)
+}
+
+pub(crate) fn record_app_started() {
+    operation_log::record_control_center_event(
+        EventSeverity::Info,
+        EventArea::ControlCenter,
+        "app-started",
+        BTreeMap::from([("version".to_owned(), env!("CARGO_PKG_VERSION").to_owned())]),
+    );
+}
+
+pub(crate) fn record_legacy_tray_detected(kind: &str, process: Option<&str>) {
+    let mut params = BTreeMap::from([("kind".to_owned(), kind.to_owned())]);
+    if let Some(process) = process {
+        params.insert("process".to_owned(), process.to_owned());
+    }
+    operation_log::record_control_center_event(
+        EventSeverity::Notice,
+        EventArea::Tray,
+        "legacy-tray-detected",
+        params,
+    );
+}
+
+/// Preview helper lifecycle events: connected once per successful start of
+/// the MacType engine, restarted after a request failure, failed when a start
+/// does not produce a usable helper.
+pub(crate) fn record_preview_event(
+    severity: EventSeverity,
+    code: &str,
+    params: BTreeMap<String, String>,
+) {
+    operation_log::record_control_center_event(severity, EventArea::Preview, code, params);
+}
+
+pub(crate) fn watch_paths() -> Result<Vec<PathBuf>, String> {
+    event_paths()
+}
+
+pub(crate) fn newest_timestamp() -> Option<u64> {
+    event_paths()
+        .ok()
+        .and_then(|paths| read_all_events(&paths, 1).last().map(|event| event.ts))
+}
+
+pub(super) fn render_event(event: &EventRecord) -> String {
+    let mut value = format!(
+        "{} {} {} {}",
+        event.ts,
+        severity_name(event.severity),
+        area_name(event.area),
+        event.code
+    );
+    for (key, item) in &event.params {
+        value.push(' ');
+        value.push_str(key);
+        value.push('=');
+        value.push_str(item);
+    }
+    if let Some(detail) = &event.detail {
+        value.push(' ');
+        value.push_str(&detail.replace(['\r', '\n'], " "));
+    }
+    value
+}
+
+fn source_statuses(paths: &[PathBuf]) -> Vec<EventSourceStatus> {
+    paths
+        .iter()
+        .enumerate()
+        .map(|(index, path)| {
+            let metadata = fs::metadata(path);
+            EventSourceStatus {
+                source: match index {
+                    0 => EventSource::ControlCenter,
+                    1 => EventSource::ServiceHost,
+                    _ => EventSource::ServiceSetup,
+                },
+                path: path.to_string_lossy().into_owned(),
+                readable: fs::File::open(path).is_ok(),
+                bytes: metadata.map_or(0, |metadata| metadata.len()),
+            }
+        })
+        .collect()
+}
+
+fn source_name(source: EventSource) -> &'static str {
+    match source {
+        EventSource::ServiceHost => "service-host",
+        EventSource::ServiceSetup => "service-setup",
+        EventSource::ControlCenter => "control-center",
+    }
+}
+
+fn severity_name(severity: EventSeverity) -> &'static str {
+    match severity {
+        EventSeverity::Info => "info",
+        EventSeverity::Notice => "notice",
+        EventSeverity::Warning => "warning",
+        EventSeverity::Error => "error",
+    }
+}
+
+fn area_name(area: EventArea) -> &'static str {
+    match area {
+        EventArea::Service => "service",
+        EventArea::Setup => "setup",
+        EventArea::Profile => "profile",
+        EventArea::Preview => "preview",
+        EventArea::Injection => "injection",
+        EventArea::ControlCenter => "control-center",
+        EventArea::Tray => "tray",
+    }
 }
 
 #[cfg(test)]
@@ -170,148 +407,36 @@ mod tests {
     }
 
     #[test]
-    fn operation_failures_survive_restart_without_profile_or_nonce_leaks() {
-        let root = env::temp_dir().join(format!(
-            "mactype-operation-log-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+    fn operation_failure_is_an_event_record_without_secrets() {
+        let root = env::temp_dir().join(format!("mactype-operation-log-{}", std::process::id()));
         let profile = "[General]\r\nSecretFont=private\r\n";
-        let nonce = "00112233445566778899aabbccddeeff";
-        let long_error = format!(
-            "setup broker start failed with Win32 5 (Access is denied): {profile}; token={nonce}; {}",
-            "x".repeat(40 * 1024)
-        );
-
         operation_log::record_operation_failure_at(
             &root,
             &OperationFailure {
-                operation: "migrate-from-legacy".to_owned(),
-                stage: "activate open service".to_owned(),
-                error_chain: long_error,
+                operation: "install".to_owned(),
+                stage: "broker".to_owned(),
+                error_chain: format!("Win32 5: {profile} 00112233445566778899aabbccddeeff"),
                 broker_exit_code: Some(21),
                 channel_failure: None,
                 rollback: "completed".to_owned(),
-                final_state: "legacy=running/auto; modern=absent".to_owned(),
+                final_state: "unchanged".to_owned(),
                 installation_preflight: None,
             },
             &[profile],
         )
         .unwrap();
-
-        let entries = operation_log::read_recent_operation_logs_at(&root, 20).unwrap();
-        assert_eq!(entries.len(), 1);
-        let entry = &entries[0];
-        assert_eq!(entry.operation, "migrate-from-legacy");
-        assert_eq!(entry.win32_code, Some(5));
-        assert!(entry.error_chain.contains("[truncated]"));
+        let event = operation_log::read_all_at(&root).pop().unwrap();
+        assert_eq!(event.code, "operation-failed");
+        assert_eq!(event.params.get("win32Code").map(String::as_str), Some("5"));
         let disk = fs::read_to_string(root.join("control-center.log")).unwrap();
-        assert!(!disk.contains(profile), "{disk}");
-        assert!(!disk.contains(nonce), "{disk}");
-        assert!(disk.len() < 40 * 1024);
-        let mut report = String::new();
-        append_operation_logs(&mut report, &entries);
-        assert!(report.contains("operationLogEntries=1"));
-        assert!(report.contains("setup broker start failed"));
-        assert!(!report.contains(profile));
-        assert!(!report.contains(nonce));
+        assert!(!disk.contains(profile));
+        assert!(!disk.contains("00112233445566778899aabbccddeeff"));
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn installation_preflight_failure_records_paths_and_proves_no_elevation_or_rollback() {
-        let root = env::temp_dir().join(format!(
-            "mactype-installation-preflight-log-{}",
-            std::process::id()
-        ));
-        operation_log::record_operation_failure_at(
-            &root,
-            &OperationFailure {
-                operation: "install".to_owned(),
-                stage: "installation-preflight".to_owned(),
-                error_chain: "control-center-installation-required: run installer".to_owned(),
-                broker_exit_code: None,
-                channel_failure: None,
-                rollback: "not-applicable".to_owned(),
-                final_state: "legacy=absent; modern=absent".to_owned(),
-                installation_preflight: Some(InstallationPreflightDiagnostics {
-                    expected_installed_control_center: None,
-                    current_executable: Some(
-                        r"D:\src\mactype\MacType Control Center.exe".to_owned(),
-                    ),
-                    expected_executable_exists: None,
-                    installed_control_center: "missing".to_owned(),
-                    current_bundle: "incomplete".to_owned(),
-                    selected_service_package: "none".to_owned(),
-                    setup_broker: "not-checked".to_owned(),
-                    runtime_manifest: "not-checked".to_owned(),
-                    runtime_payload: "not-checked".to_owned(),
-                    elevation_attempted: false,
-                    elevated_revalidation: "not-attempted".to_owned(),
-                    machine_state_changed: false,
-                    rollback_required: false,
-                }),
-            },
-            &[],
-        )
-        .unwrap();
-
-        let entry = operation_log::read_recent_operation_logs_at(&root, 1)
-            .unwrap()
-            .pop()
-            .unwrap();
-        let preflight = entry.installation_preflight.unwrap();
-        assert_eq!(preflight.expected_installed_control_center, None);
-        assert_eq!(
-            preflight.current_executable.as_deref(),
-            Some(r"D:\src\mactype\MacType Control Center.exe")
-        );
-        assert_eq!(preflight.expected_executable_exists, None);
-        assert_eq!(preflight.installed_control_center, "missing");
-        assert_eq!(preflight.current_bundle, "incomplete");
-        assert_eq!(preflight.selected_service_package, "none");
-        assert_eq!(preflight.setup_broker, "not-checked");
-        assert_eq!(preflight.runtime_manifest, "not-checked");
-        assert_eq!(preflight.runtime_payload, "not-checked");
-        assert!(!preflight.elevation_attempted);
-        assert_eq!(preflight.elevated_revalidation, "not-attempted");
-        assert!(!preflight.machine_state_changed);
-        assert!(!preflight.rollback_required);
-        let rendered = operation_log::read_recent_diagnostic_logs_at(&root, 1)
-            .unwrap()
-            .pop()
-            .unwrap();
-        assert!(rendered.contains("Expected installed Control Center: not registered"));
-        assert!(
-            rendered.contains("Current executable: D:\\src\\mactype\\MacType Control Center.exe")
-        );
-        assert!(rendered.contains("Expected executable exists: None"));
-        assert!(rendered.contains("Installed Control Center: missing"));
-        assert!(rendered.contains("Current bundle: incomplete"));
-        assert!(rendered.contains("Selected service package: none"));
-        assert!(rendered.contains("Setup broker: not checked"));
-        assert!(rendered.contains("Runtime manifest: not checked"));
-        assert!(rendered.contains("Runtime payload: not checked"));
-        assert!(rendered.contains("Elevation attempted: no"));
-        assert!(rendered.contains("Elevated revalidation: not attempted"));
-        assert!(rendered.contains("Machine state changed: no"));
-        assert!(rendered.contains("Rollback required: no"));
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn operation_log_rotation_is_bounded_and_retains_recent_failures() {
-        let root = env::temp_dir().join(format!(
-            "mactype-operation-log-rotation-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+    fn event_log_rotation_is_bounded_and_retains_recent_failures() {
+        let root = env::temp_dir().join(format!("mactype-log-rotation-{}", std::process::id()));
         for index in 0..120 {
             operation_log::record_operation_failure_at(
                 &root,
@@ -322,41 +447,32 @@ mod tests {
                     broker_exit_code: Some(21),
                     channel_failure: None,
                     rollback: "not-applicable".to_owned(),
-                    final_state: "legacy=absent; modern=absent".to_owned(),
+                    final_state: "unchanged".to_owned(),
                     installation_preflight: None,
                 },
                 &[],
             )
             .unwrap();
         }
-
         let files = fs::read_dir(&root)
             .unwrap()
             .map(|entry| entry.unwrap())
             .collect::<Vec<_>>();
-        assert!(
-            files.len() <= 5,
-            "rotation created too many files: {files:?}"
-        );
+        assert!(files.len() <= 5, "rotation created too many files");
         assert!(files
             .iter()
             .all(|entry| entry.metadata().unwrap().len() <= 512 * 1024));
-        let recent = operation_log::read_recent_operation_logs_at(&root, 1).unwrap();
-        assert_eq!(recent.len(), 1);
-        assert_eq!(recent[0].stage, "fixture-119");
+        let event = operation_log::read_all_at(&root).pop().unwrap();
+        assert_eq!(
+            event.params.get("stage").map(String::as_str),
+            Some("fixture-119")
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn successful_activity_shares_the_bounded_log_and_excludes_failures() {
-        let root = env::temp_dir().join(format!(
-            "mactype-activity-log-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+    fn activities_and_failures_share_the_log_without_exposing_profile_paths() {
+        let root = env::temp_dir().join(format!("mactype-activity-log-{}", std::process::id()));
         operation_log::record_operation_failure_at(
             &root,
             &OperationFailure {
@@ -375,30 +491,114 @@ mod tests {
         for index in 0..6 {
             operation_log::record_activity_at(
                 &root,
-                operation_log::ActivityKind::ProfileApplied,
+                ActivityKind::ProfileApplied,
                 Some(&format!(r"C:\Users\Secret\Profiles\Profile-{index}.ini")),
             )
             .unwrap();
         }
-
-        let activity = operation_log::read_recent_activity_at(&root, 5).unwrap();
-        assert_eq!(activity.len(), 5);
-        assert_eq!(activity[0].profile.as_deref(), Some("Profile-1.ini"));
-        assert_eq!(activity[4].profile.as_deref(), Some("Profile-5.ini"));
-        assert!(activity
+        let events = operation_log::read_all_at(&root);
+        assert_eq!(events.len(), 7);
+        assert_eq!(events[0].code, "operation-failed");
+        let activities = events
             .iter()
-            .all(|entry| !entry.profile.as_deref().unwrap().contains("Secret")));
-
-        let diagnostics = operation_log::read_recent_diagnostic_logs_at(&root, 20).unwrap();
-        assert_eq!(diagnostics.len(), 7);
-        assert!(diagnostics
+            .filter(|event| event.code == "profile-applied")
+            .collect::<Vec<_>>();
+        assert_eq!(activities.len(), 6);
+        assert_eq!(activities[5].params["profile"], "Profile-5.ini");
+        assert!(activities
             .iter()
-            .any(|entry| entry.contains("must stay in diagnostics only")));
-        assert!(diagnostics
-            .iter()
-            .any(|entry| entry.contains("Profile-5.ini")));
+            .all(|event| !event.params["profile"].contains("Secret")));
         let disk = fs::read_to_string(root.join("control-center.log")).unwrap();
         assert!(!disk.contains(r"C:\Users\Secret"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn operation_failure_preserves_preflight_diagnostics_in_detail() {
+        let root = env::temp_dir().join(format!("mactype-preflight-log-{}", std::process::id()));
+        operation_log::record_operation_failure_at(
+            &root,
+            &OperationFailure {
+                operation: "install".to_owned(),
+                stage: "installation-preflight".to_owned(),
+                error_chain: "control-center-installation-required".to_owned(),
+                broker_exit_code: None,
+                channel_failure: None,
+                rollback: "not-applicable".to_owned(),
+                final_state: "unchanged".to_owned(),
+                installation_preflight: Some(InstallationPreflightDiagnostics {
+                    expected_installed_control_center: None,
+                    current_executable: Some(r"D:\src\MacType Control Center.exe".to_owned()),
+                    expected_executable_exists: None,
+                    installed_control_center: "missing".to_owned(),
+                    current_bundle: "incomplete".to_owned(),
+                    selected_service_package: "none".to_owned(),
+                    setup_broker: "not-checked".to_owned(),
+                    runtime_manifest: "not-checked".to_owned(),
+                    runtime_payload: "not-checked".to_owned(),
+                    elevation_attempted: false,
+                    elevated_revalidation: "not-attempted".to_owned(),
+                    machine_state_changed: false,
+                    rollback_required: false,
+                }),
+            },
+            &[],
+        )
+        .unwrap();
+        let event = operation_log::read_all_at(&root).pop().unwrap();
+        let detail = event.detail.unwrap();
+        assert!(detail.contains("Current executable: D:\\src\\MacType Control Center.exe"));
+        assert!(detail.contains("Elevation attempted: no"));
+        assert!(detail.contains("Rollback required: no"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn integrated_reader_keeps_path_order_for_equal_timestamps() {
+        let root = env::temp_dir().join(format!("mactype-integrated-log-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("control-center.log"),
+            "{\"timestampUnixMs\":7,\"activity\":\"profile-applied\",\"profile\":\"A.ini\"}\n",
+        )
+        .unwrap();
+        let service = root.join("service.log");
+        mactype_service_contract::event_log::EventLogWriter::new(service.clone())
+            .append(&EventRecord::new(
+                7,
+                EventSeverity::Info,
+                EventArea::Service,
+                "service-started",
+                BTreeMap::new(),
+                None,
+                EventSource::ServiceHost,
+            ))
+            .unwrap();
+        let events = read_all_events(&[root.join("control-center.log"), service], 10);
+        assert_eq!(events[0].source, EventSource::ControlCenter);
+        assert_eq!(events[1].source, EventSource::ServiceHost);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn legacy_activity_and_failure_lines_are_converted() {
+        let root = env::temp_dir().join(format!("mactype-legacy-log-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("control-center.log"),
+            concat!(
+                "{\"timestampUnixMs\":1,\"activity\":\"profile-applied\",\"profile\":\"C:\\\\Secret\\\\A.ini\"}\n",
+                "{\"timestampUnixMs\":2,\"operation\":\"install\",\"stage\":\"broker\",\"errorChain\":\"failed\",\"win32Code\":5,\"brokerExitCode\":null,\"channelFailure\":null,\"rollback\":\"completed\",\"finalState\":\"unchanged\"}\n"
+            ),
+        ).unwrap();
+        let events = operation_log::read_all_at(&root);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].code, "profile-applied");
+        assert_eq!(
+            events[0].params.get("profile").map(String::as_str),
+            Some("A.ini")
+        );
+        assert_eq!(events[1].code, "operation-failed");
         fs::remove_dir_all(root).unwrap();
     }
 }

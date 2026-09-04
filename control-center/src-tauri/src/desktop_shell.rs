@@ -1,4 +1,4 @@
-use crate::{app, execution, single_instance};
+use crate::{app, execution, preview_studio, single_instance};
 use std::{env, error::Error, thread};
 use tauri::{
     menu::{Menu, MenuItem},
@@ -28,7 +28,16 @@ pub(crate) fn install(
 }
 
 pub(crate) fn handle_window_event(window: &Window<Wry>, event: &WindowEvent) {
+    if window.label() != "main" {
+        return;
+    }
     if let WindowEvent::CloseRequested { api, .. } = event {
+        if let Some(studio) = window
+            .app_handle()
+            .get_webview_window(preview_studio::STUDIO_WINDOW_LABEL)
+        {
+            let _ = studio.destroy();
+        }
         if env::var_os("MACTYPE_CI_SMOKE_FILE").is_none() {
             api.prevent_close();
             let _ = window.hide();

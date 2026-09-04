@@ -294,8 +294,10 @@ std::vector<std::uint8_t> encode_png(const std::uint8_t* pixels, std::uint32_t w
 
 }  // namespace
 
-PreviewRuntime::PreviewRuntime(std::wstring install_root)
-    : install_root_(full_path(install_root)), dll_path_(install_root_ + L"\\MacType.dll") {}
+PreviewRuntime::PreviewRuntime(std::wstring install_root, Engine engine)
+    : engine_(engine),
+      install_root_(engine == Engine::mactype ? full_path(install_root) : std::move(install_root)),
+      dll_path_(install_root_ + L"\\MacType.dll") {}
 
 PreviewRuntime::~PreviewRuntime() {
   if (control_center_) {
@@ -308,6 +310,14 @@ PreviewRuntime::~PreviewRuntime() {
 }
 
 bool PreviewRuntime::initialize(std::string& error) {
+  if (engine_ == Engine::plain) {
+    if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) {
+      error = "COM initialization failed";
+      return false;
+    }
+    com_initialized_ = true;
+    return create_windows(error);
+  }
   if (install_root_.empty() || !regular_file(dll_path_)) {
     error = "MacType.dll was not found in the selected installation root";
     return false;
@@ -378,33 +388,44 @@ bool PreviewRuntime::create_windows(std::string& error) {
 }
 
 std::string PreviewRuntime::hello_json() const {
+  if (engine_ == Engine::plain) {
+    return R"({"protocolVersion":1,"renderer":"gdi-plain","loadsMacType":false,"coreVersion":0,"dllGetVersion":false})";
+  }
   return std::string{"{\"protocolVersion\":1,\"renderer\":\"mactype-gdi\",\"loadsMacType\":true,\"coreVersion\":"} +
          std::to_string(core_version_) + ",\"dllGetVersion\":" +
          (has_dll_get_version_ ? "true" : "false") + "}";
 }
 
 bool PreviewRuntime::apply_request(const std::string& json, std::string& error) {
-  if (const auto profile = json_string(json, "profilePath"); profile && !profile->empty()) {
-    const std::wstring profile_path = full_path(utf8_to_wide(*profile));
-    if (profile_path.empty() || !regular_file(profile_path) ||
-        _wcsicmp(PathFindExtensionW(profile_path.c_str()), L".ini") != 0) {
-      error = "profilePath is not an existing INI file";
+  if (engine_ == Engine::mactype) {
+    if (!control_center_) {
+      error = "MacType control center is unavailable";
       return false;
     }
-    control_center_->LoadSetting(profile_path.c_str());
-  }
-  for (const auto& setting : kSettings) {
-    const auto value = json_number(json, setting.id);
-    if (!value) continue;
-    const BOOL applied = setting.is_float
-                             ? control_center_->SetFloatAttribute(setting.ordinal, static_cast<float>(*value))
-                             : control_center_->SetIntAttribute(setting.ordinal, static_cast<int>(*value));
-    if (!applied) {
-      error = std::string{"MacType rejected setting "} + setting.id;
-      return false;
+    if (const auto profile = json_string(json, "profilePath"); profile && !profile->empty()) {
+      const std::wstring profile_path = full_path(utf8_to_wide(*profile));
+      if (profile_path.empty() || !regular_file(profile_path) ||
+          _wcsicmp(PathFindExtensionW(profile_path.c_str()), L".ini") != 0) {
+        error = "profilePath is not an existing INI file";
+        return false;
+      }
+      control_center_->LoadSetting(profile_path.c_str());
     }
+    for (const auto& setting : kSettings) {
+      const auto value = json_number(json, setting.id);
+      if (!value) continue;
+      const BOOL applied = setting.is_float
+                               ? control_center_->SetFloatAttribute(setting.ordinal,
+                                                                    static_cast<float>(*value))
+                               : control_center_->SetIntAttribute(setting.ordinal,
+                                                                  static_cast<int>(*value));
+      if (!applied) {
+        error = std::string{"MacType rejected setting "} + setting.id;
+        return false;
+      }
+    }
+    control_center_->RefreshSetting();
   }
-  control_center_->RefreshSetting();
   if (const auto value = json_string(json, "text")) sample_text_ = utf8_to_wide(*value);
   if (const auto value = json_string(json, "fontFace")) font_face_ = utf8_to_wide(*value);
   if (const auto value = json_number(json, "fontSizePt")) font_size_pt_ = static_cast<float>(*value);
@@ -477,17 +498,22 @@ mtpc::Frame PreviewRuntime::render(const mtpc::Frame& request) {
   response.json = std::string{"{\"width\":"} + std::to_string(width) + ",\"height\":" +
                   std::to_string(height) + ",\"dpi\":" + std::to_string(dpi) +
                   ",\"elapsedMs\":" + std::to_string(elapsed.count()) +
-                  ",\"coreVersion\":" + std::to_string(core_version_) + "}";
+                  ",\"coreVersion\":" + std::to_string(core_version_) + ",\"engine\":\"" +
+                  (engine_ == Engine::mactype ? "mactype" : "plain") + "\"}";
   InvalidateRect(native_window_, nullptr, FALSE);
   return response;
 }
 
 mtpc::Frame PreviewRuntime::load_profile(const mtpc::Frame& request) {
-  std::string error;
-  if (!apply_request(request.json, error)) return error_frame(request.request_id, "load_failed", error);
   mtpc::Frame response;
   response.kind = mtpc::MessageKind::ack;
   response.request_id = request.request_id;
+  std::string error;
+  if (!apply_request(request.json, error)) return error_frame(request.request_id, "load_failed", error);
+  if (engine_ == Engine::plain) {
+    response.json = R"({"loaded":false,"engine":"plain"})";
+    return response;
+  }
   response.json = R"({"loaded":true})";
   return response;
 }

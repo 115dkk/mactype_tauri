@@ -1,4 +1,7 @@
-use super::protocol::{read_frame, write_frame, Frame, HELLO, HELLO_ACK, SHUTDOWN, VERSION};
+use super::{
+    protocol::{read_frame, write_frame, Frame, HELLO, HELLO_ACK, SHUTDOWN, VERSION},
+    PreviewEngine,
+};
 use serde::Deserialize;
 use std::{
     collections::VecDeque,
@@ -52,11 +55,13 @@ struct HelperProcess {
 }
 
 impl HelperProcess {
-    fn spawn(install_root: &Path) -> Result<Self, String> {
+    fn spawn(install_root: &Path, engine: PreviewEngine) -> Result<Self, String> {
         let mut command = Command::new(helper_path()?);
+        command.arg("--install-root").arg(install_root);
+        if engine == PreviewEngine::Plain {
+            command.arg("--engine").arg("plain");
+        }
         command
-            .arg("--install-root")
-            .arg(install_root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -145,29 +150,49 @@ impl HelperProcess {
 }
 
 #[derive(Default)]
-pub(super) struct PreviewManager {
+struct EngineProcess {
     helper: Option<HelperProcess>,
     install_root: Option<PathBuf>,
     core_version: Option<u32>,
+}
+
+#[derive(Default)]
+pub(super) struct PreviewManager {
+    mactype: EngineProcess,
+    plain: EngineProcess,
     next_request_id: u64,
-    diagnostics: VecDeque<String>,
+    diagnostics: VecDeque<(PreviewEngine, String)>,
 }
 
 impl PreviewManager {
+    fn slot(&self, engine: PreviewEngine) -> &EngineProcess {
+        match engine {
+            PreviewEngine::Mactype => &self.mactype,
+            PreviewEngine::Plain => &self.plain,
+        }
+    }
+
+    fn slot_mut(&mut self, engine: PreviewEngine) -> &mut EngineProcess {
+        match engine {
+            PreviewEngine::Mactype => &mut self.mactype,
+            PreviewEngine::Plain => &mut self.plain,
+        }
+    }
+
     fn next_id(&mut self) -> u64 {
         self.next_request_id = self.next_request_id.wrapping_add(1).max(1);
         self.next_request_id
     }
 
-    fn record_diagnostic(&mut self, message: String) {
+    fn record_diagnostic(&mut self, engine: PreviewEngine, message: String) {
         if self.diagnostics.len() == DIAGNOSTIC_LIMIT {
             self.diagnostics.pop_front();
         }
-        self.diagnostics.push_back(message);
+        self.diagnostics.push_back((engine, message));
     }
 
-    fn start(&mut self, install_root: &Path) -> Result<(), String> {
-        let mut helper = HelperProcess::spawn(install_root)?;
+    fn start(&mut self, install_root: &Path, engine: PreviewEngine) -> Result<(), String> {
+        let mut helper = HelperProcess::spawn(install_root, engine)?;
         let hello_request_id = self.next_id();
         let hello = match helper.request(Frame {
             kind: HELLO,
@@ -192,36 +217,45 @@ impl PreviewManager {
                 return Err(error.to_string());
             }
         };
-        if metadata.protocol_version != VERSION || metadata.core_version == 0 {
+        if !valid_hello(engine, &metadata) {
             helper.stop(self.next_id());
             return Err("preview helper returned invalid core metadata".to_owned());
         }
-        self.install_root = Some(install_root.to_path_buf());
-        self.core_version = Some(metadata.core_version);
-        self.helper = Some(helper);
+        let slot = self.slot_mut(engine);
+        slot.install_root = Some(install_root.to_path_buf());
+        slot.core_version = Some(metadata.core_version);
+        slot.helper = Some(helper);
         Ok(())
     }
 
-    fn stop(&mut self) {
+    pub(super) fn stop_engine(&mut self, engine: PreviewEngine) {
         let id = self.next_id();
-        if let Some(mut helper) = self.helper.take() {
-            let entries = helper
+        let mut helper = self.slot_mut(engine).helper.take();
+        if let Some(ref mut process) = helper {
+            let entries = process
                 .diagnostics
                 .lock()
                 .map(|entries| entries.iter().cloned().collect::<Vec<_>>())
                 .unwrap_or_default();
             for entry in entries {
-                self.record_diagnostic(entry);
+                self.record_diagnostic(engine, entry);
             }
-            helper.stop(id);
+            process.stop(id);
         }
-        self.install_root = None;
-        self.core_version = None;
+        let slot = self.slot_mut(engine);
+        slot.install_root = None;
+        slot.core_version = None;
+    }
+
+    fn stop(&mut self) {
+        self.stop_engine(PreviewEngine::Mactype);
+        self.stop_engine(PreviewEngine::Plain);
     }
 
     pub(super) fn request_built<F>(
         &mut self,
         install_root: &Path,
+        engine: PreviewEngine,
         kind: u16,
         mut build_json: F,
     ) -> Result<Frame, String>
@@ -229,13 +263,15 @@ impl PreviewManager {
         F: FnMut(u64) -> Result<Vec<u8>, String>,
     {
         for attempt in 0..2 {
-            if self.install_root.as_deref() != Some(install_root) || self.helper.is_none() {
-                self.stop();
-                self.start(install_root)?;
+            let slot = self.slot(engine);
+            if slot.install_root.as_deref() != Some(install_root) || slot.helper.is_none() {
+                self.stop_engine(engine);
+                self.start(install_root, engine)?;
             }
             let request_id = self.next_id();
             let json = build_json(request_id)?;
             let result = self
+                .slot_mut(engine)
                 .helper
                 .as_mut()
                 .ok_or_else(|| "preview helper is unavailable after startup".to_owned())?
@@ -248,10 +284,11 @@ impl PreviewManager {
             match result {
                 Ok(response) => return Ok(response),
                 Err(error) if attempt == 0 => {
-                    self.record_diagnostic(format!(
-                        "helper restart after request failure: {error}"
-                    ));
-                    self.stop();
+                    self.record_diagnostic(
+                        engine,
+                        format!("helper restart after request failure: {error}"),
+                    );
+                    self.stop_engine(engine);
                 }
                 Err(error) => return Err(error),
             }
@@ -262,38 +299,52 @@ impl PreviewManager {
     pub(super) fn request(
         &mut self,
         install_root: &Path,
+        engine: PreviewEngine,
         kind: u16,
         json: Vec<u8>,
     ) -> Result<Frame, String> {
-        self.request_built(install_root, kind, |_| Ok(json.clone()))
+        self.request_built(install_root, engine, kind, |_| Ok(json.clone()))
     }
 
     pub(super) fn diagnostics(&self) -> Vec<String> {
-        let mut result = self.diagnostics.iter().cloned().collect::<Vec<_>>();
-        if let Some(helper) = &self.helper {
-            if let Ok(entries) = helper.diagnostics.lock() {
-                result.extend(entries.iter().cloned());
+        let mut result = self
+            .diagnostics
+            .iter()
+            .map(|(engine, entry)| format!("[{}] {entry}", engine.as_str()))
+            .collect::<Vec<_>>();
+        for engine in [PreviewEngine::Mactype, PreviewEngine::Plain] {
+            if let Some(helper) = &self.slot(engine).helper {
+                if let Ok(entries) = helper.diagnostics.lock() {
+                    result.extend(
+                        entries
+                            .iter()
+                            .map(|entry| format!("[{}] {entry}", engine.as_str())),
+                    );
+                }
             }
         }
         result
     }
 
     pub(super) fn probe_core_version(&mut self, install_root: &Path) -> Result<u32, String> {
-        if self.install_root.as_deref() != Some(install_root) || self.helper.is_none() {
-            self.stop();
-            self.start(install_root)?;
+        let slot = self.slot(PreviewEngine::Mactype);
+        if slot.install_root.as_deref() != Some(install_root) || slot.helper.is_none() {
+            self.stop_engine(PreviewEngine::Mactype);
+            self.start(install_root, PreviewEngine::Mactype)?;
         }
-        self.core_version
+        self.mactype
+            .core_version
             .ok_or_else(|| "preview helper did not report a core version".to_owned())
     }
 
     pub(super) fn reconnect(&mut self, install_root: &Path) -> Result<u32, String> {
-        self.stop();
+        self.stop_engine(PreviewEngine::Mactype);
         self.probe_core_version(install_root)
     }
 
     pub(super) fn force_terminate_for_ci(&mut self) -> Result<(), String> {
         let helper = self
+            .mactype
             .helper
             .as_mut()
             .ok_or_else(|| "preview helper is not running".to_owned())?;
@@ -307,7 +358,16 @@ impl PreviewManager {
 #[serde(rename_all = "camelCase")]
 struct HelloMetadata {
     protocol_version: u16,
+    loads_mac_type: bool,
     core_version: u32,
+}
+
+fn valid_hello(engine: PreviewEngine, metadata: &HelloMetadata) -> bool {
+    metadata.protocol_version == VERSION
+        && match engine {
+            PreviewEngine::Mactype => metadata.core_version != 0,
+            PreviewEngine::Plain => !metadata.loads_mac_type && metadata.core_version == 0,
+        }
 }
 
 impl Drop for PreviewManager {
@@ -320,14 +380,31 @@ impl Drop for PreviewManager {
 mod tests {
     use super::*;
 
+    fn metadata(json: &[u8]) -> HelloMetadata {
+        serde_json::from_slice(json).unwrap()
+    }
+
     #[test]
-    fn hello_metadata_requires_the_real_core_version() {
-        let metadata: HelloMetadata = serde_json::from_slice(
-            br#"{"protocolVersion":1,"coreVersion":20220712,"dllGetVersion":true}"#,
-        )
-        .unwrap();
-        assert_eq!(metadata.protocol_version, VERSION);
-        assert_eq!(metadata.core_version, 20220712);
+    fn hello_metadata_requires_the_real_core_version_for_mactype() {
+        let valid = metadata(
+            br#"{"protocolVersion":1,"loadsMacType":true,"coreVersion":20220712,"dllGetVersion":true}"#,
+        );
+        assert!(valid_hello(PreviewEngine::Mactype, &valid));
+        assert!(!valid_hello(PreviewEngine::Plain, &valid));
         assert!(serde_json::from_slice::<HelloMetadata>(br#"{"protocolVersion":1}"#).is_err());
+    }
+
+    #[test]
+    fn plain_hello_requires_zero_core_and_no_mactype_load() {
+        let valid = metadata(
+            br#"{"protocolVersion":1,"renderer":"gdi-plain","loadsMacType":false,"coreVersion":0,"dllGetVersion":false}"#,
+        );
+        assert!(valid_hello(PreviewEngine::Plain, &valid));
+        assert!(!valid_hello(PreviewEngine::Mactype, &valid));
+
+        let nonzero = metadata(br#"{"protocolVersion":1,"loadsMacType":false,"coreVersion":1}"#);
+        assert!(!valid_hello(PreviewEngine::Plain, &nonzero));
+        let loaded = metadata(br#"{"protocolVersion":1,"loadsMacType":true,"coreVersion":0}"#);
+        assert!(!valid_hello(PreviewEngine::Plain, &loaded));
     }
 }

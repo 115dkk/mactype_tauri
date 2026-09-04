@@ -14,25 +14,34 @@ use std::mem::size_of;
 use std::path::Path;
 use std::ptr::{self, NonNull};
 
-use windows_sys::Win32::Foundation::{LocalFree, ERROR_SUCCESS};
+use windows_sys::Win32::Foundation::{
+    LocalFree, SetLastError, ERROR_INSUFFICIENT_BUFFER, ERROR_NOT_ALL_ASSIGNED, ERROR_SUCCESS, LUID,
+};
 use windows_sys::Win32::Security::Authorization::{
-    ConvertStringSecurityDescriptorToSecurityDescriptorW, GetNamedSecurityInfoW, GetSecurityInfo,
-    TreeSetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT, SE_KERNEL_OBJECT,
-    TREE_SEC_INFO_RESET,
+    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
+    GetNamedSecurityInfoW, GetSecurityInfo, TreeSetNamedSecurityInfoW, SDDL_REVISION_1,
+    SE_FILE_OBJECT, SE_KERNEL_OBJECT, TREE_SEC_INFO_RESET,
 };
 use windows_sys::Win32::Security::{
-    CheckTokenMembership, GetSecurityDescriptorControl, GetSecurityDescriptorDacl,
-    GetSecurityDescriptorLength, GetSecurityDescriptorOwner, DACL_SECURITY_INFORMATION,
-    OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
-    SECURITY_ATTRIBUTES,
+    AdjustTokenPrivileges, CheckTokenMembership, GetSecurityDescriptorControl,
+    GetSecurityDescriptorDacl, GetSecurityDescriptorLength, GetSecurityDescriptorOwner,
+    GetTokenInformation, IsValidSecurityDescriptor, LookupPrivilegeValueW, TokenUser,
+    DACL_SECURITY_INFORMATION, LUID_AND_ATTRIBUTES, OWNER_SECURITY_INFORMATION,
+    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES,
+    SE_DACL_PROTECTED, SE_PRIVILEGE_ENABLED, SE_SELF_RELATIVE, TOKEN_ADJUST_PRIVILEGES,
+    TOKEN_PRIVILEGES, TOKEN_QUERY, TOKEN_USER,
 };
+use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 pub use acl::{
     AclValidationError, AllowedAce, OwnedSid, SecurityAclError, ValidatedDacl, ValidatedSid,
 };
 
 use crate::handle::OwnedHandle;
-use crate::wide::{wide_null, wide_path};
+use crate::wide::{bounded_units, wide_null, wide_path};
+
+const MAX_TOKEN_INFORMATION_BYTES: usize = 64 * 1024;
+const MAX_SID_STRING_UNITS: usize = 32_768;
 
 /// A descriptor built from SDDL, used to create objects and to reset ACL
 /// trees. Windows consumes it whole; it is never read back field by field.
@@ -275,6 +284,239 @@ impl Drop for LocalSecurityDescriptor {
     }
 }
 
+/// An exactly sized, validated self-relative security descriptor.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SelfRelativeSecurityDescriptor {
+    bytes: Vec<u8>,
+}
+
+impl SelfRelativeSecurityDescriptor {
+    pub fn from_bytes(mut bytes: Vec<u8>, maximum_bytes: usize) -> io::Result<Self> {
+        if bytes.is_empty() || bytes.len() > maximum_bytes {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "security descriptor size is out of range",
+            ));
+        }
+        let pointer = bytes.as_mut_ptr().cast();
+        // SAFETY: `pointer` addresses the non-empty live buffer for this call.
+        if unsafe { IsValidSecurityDescriptor(pointer) } == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "security descriptor is invalid",
+            ));
+        }
+        let mut control = 0_u16;
+        let mut revision = 0_u32;
+        // SAFETY: `pointer` addresses a descriptor validated immediately above;
+        // both output pointers refer to live local values.
+        if unsafe { GetSecurityDescriptorControl(pointer, &mut control, &mut revision) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if control & SE_SELF_RELATIVE == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "security descriptor is not self-relative",
+            ));
+        }
+        // SAFETY: `pointer` addresses the validated descriptor.
+        let length = unsafe { GetSecurityDescriptorLength(pointer) } as usize;
+        if length != bytes.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "security descriptor length does not match its buffer",
+            ));
+        }
+        Ok(Self { bytes })
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    pub fn dacl_protected(&self) -> io::Result<bool> {
+        let mut control = 0_u16;
+        let mut revision = 0_u32;
+        // SAFETY: construction validated the live descriptor and exact buffer
+        // length; both output pointers refer to local values.
+        if unsafe {
+            GetSecurityDescriptorControl(self.as_ptr().cast_mut(), &mut control, &mut revision)
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(control & SE_DACL_PROTECTED != 0)
+    }
+
+    pub(crate) fn as_ptr(&self) -> *const c_void {
+        self.bytes.as_ptr().cast()
+    }
+}
+
+/// Formats the current process token's user SID.
+pub fn current_user_sid_string() -> io::Result<String> {
+    let mut token = ptr::null_mut();
+    // SAFETY: the process pseudo-handle is always valid and `token` is a local
+    // out pointer that transfers ownership to OwnedHandle.
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let token = OwnedHandle::from_creation(token)?;
+    let mut needed = 0_u32;
+    // SAFETY: the token is live; null data and zero capacity form the documented
+    // size probe, and `needed` is a local output.
+    let probed =
+        unsafe { GetTokenInformation(token.as_raw(), TokenUser, ptr::null_mut(), 0, &mut needed) };
+    let probe_error = io::Error::last_os_error();
+    if probed != 0 || probe_error.raw_os_error() != Some(ERROR_INSUFFICIENT_BUFFER as i32) {
+        return Err(probe_error);
+    }
+    if needed < size_of::<TOKEN_USER>() as u32 || needed as usize > MAX_TOKEN_INFORMATION_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "token user information size is out of range",
+        ));
+    }
+    let word_count = (needed as usize).div_ceil(size_of::<usize>());
+    let mut words = vec![0_usize; word_count];
+    let capacity = (words.len() * size_of::<usize>()) as u32;
+    // SAFETY: the token is live; word storage provides TOKEN_USER alignment and
+    // is writable for `capacity` bytes; `needed` is a local output.
+    if unsafe {
+        GetTokenInformation(
+            token.as_raw(),
+            TokenUser,
+            words.as_mut_ptr().cast(),
+            capacity,
+            &mut needed,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    if needed < size_of::<TOKEN_USER>() as u32 || needed > capacity {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "token user information changed during the read",
+        ));
+    }
+    // SAFETY: the successful call initialized a TOKEN_USER header in aligned
+    // storage and reported at least its complete size.
+    let user = unsafe { words.as_ptr().cast::<TOKEN_USER>().read() };
+    let mut string = ptr::null_mut();
+    // SAFETY: the SID pointer belongs to the live token-information buffer and
+    // `string` is a local output receiving a LocalAlloc allocation.
+    if unsafe { ConvertSidToStringSidW(user.User.Sid, &mut string) } == 0 || string.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: ConvertSidToStringSidW returned a readable NUL-terminated string;
+    // SID strings are bounded here before conversion.
+    let units = unsafe { bounded_units(string, MAX_SID_STRING_UNITS) };
+    let result = units
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "SID string exceeds the bound"))
+        .and_then(|units| {
+            String::from_utf16(units).map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "SID string is not valid UTF-16")
+            })
+        });
+    // SAFETY: the string was allocated by ConvertSidToStringSidW and is freed
+    // exactly once after the bounded copy.
+    unsafe { LocalFree(string.cast()) };
+    result
+}
+
+/// A process-token privilege enabled for this value's lifetime.
+pub struct PrivilegeGuard {
+    token: OwnedHandle,
+    luid: LUID,
+}
+
+impl PrivilegeGuard {
+    pub fn enable(name: &str) -> io::Result<PrivilegeGuard> {
+        if name.contains('\0') {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "privilege name contains a NUL",
+            ));
+        }
+        let mut token = ptr::null_mut();
+        // SAFETY: the process pseudo-handle is valid and `token` receives one
+        // newly opened handle owned by the guard.
+        if unsafe {
+            OpenProcessToken(
+                GetCurrentProcess(),
+                TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+                &mut token,
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        let token = OwnedHandle::from_creation(token)?;
+        let name_wide = wide_null(name);
+        let mut luid = LUID::default();
+        // SAFETY: `name_wide` is NUL-terminated and `luid` is a local output.
+        if unsafe { LookupPrivilegeValueW(ptr::null(), name_wide.as_ptr(), &mut luid) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let privileges = token_privileges(luid, SE_PRIVILEGE_ENABLED);
+        // SAFETY: clearing last-error is required because a successful
+        // AdjustTokenPrivileges reports partial assignment through last-error.
+        unsafe { SetLastError(ERROR_SUCCESS) };
+        // SAFETY: the token has adjust rights and `privileges` is a complete,
+        // live one-entry TOKEN_PRIVILEGES value; previous state is not requested.
+        if unsafe {
+            AdjustTokenPrivileges(
+                token.as_raw(),
+                0,
+                &privileges,
+                0,
+                ptr::null_mut(),
+                ptr::null_mut(),
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        let assignment = io::Error::last_os_error();
+        if assignment.raw_os_error() == Some(ERROR_NOT_ALL_ASSIGNED as i32) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("the current token does not hold {name}"),
+            ));
+        }
+        Ok(Self { token, luid })
+    }
+}
+
+impl Drop for PrivilegeGuard {
+    fn drop(&mut self) {
+        let privileges = token_privileges(self.luid, 0);
+        // SAFETY: the token remains live through drop and `privileges` is a
+        // complete one-entry value; disabling is best effort by contract.
+        unsafe {
+            AdjustTokenPrivileges(
+                self.token.as_raw(),
+                0,
+                &privileges,
+                0,
+                ptr::null_mut(),
+                ptr::null_mut(),
+            )
+        };
+    }
+}
+
+fn token_privileges(luid: LUID, attributes: u32) -> TOKEN_PRIVILEGES {
+    TOKEN_PRIVILEGES {
+        PrivilegeCount: 1,
+        Privileges: [LUID_AND_ATTRIBUTES {
+            Luid: luid,
+            Attributes: attributes,
+        }],
+    }
+}
+
 /// Whether the current token is an enabled member of `group`.
 pub fn current_token_is_member_of(group: &OwnedSid) -> bool {
     let mut is_member = 0;
@@ -286,15 +528,19 @@ pub fn current_token_is_member_of(group: &OwnedSid) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{LocalSecurityDescriptor, OwnedSid, SecurityDescriptor};
+    use super::{
+        current_user_sid_string, LocalSecurityDescriptor, OwnedSid, PrivilegeGuard,
+        SecurityDescriptor,
+    };
 
     #[test]
     fn a_tree_reset_from_sddl_is_read_back_as_the_same_allowed_aces() {
         let directory = tempfile::tempdir().unwrap();
         let child = directory.path().join("child");
         std::fs::create_dir(&child).unwrap();
-        let descriptor =
-            SecurityDescriptor::from_sddl("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)").unwrap();
+        let current_user = current_user_sid_string().unwrap();
+        let sddl = format!("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;{current_user})");
+        let descriptor = SecurityDescriptor::from_sddl(&sddl).unwrap();
         descriptor.apply_to_tree(directory.path(), true).unwrap();
 
         let system = OwnedSid::from_string("S-1-5-18").unwrap();
@@ -304,5 +550,19 @@ mod tests {
         assert!(
             LocalSecurityDescriptor::query_named_file(&directory.path().join("missing")).is_err()
         );
+    }
+
+    #[test]
+    fn current_user_sid_has_a_decimal_sid_shape() {
+        let sid = current_user_sid_string().unwrap();
+        assert!(sid.starts_with("S-1-"), "unexpected SID {sid}");
+        assert!(sid[4..].split('-').all(|component| !component.is_empty()
+            && component.bytes().all(|byte| byte.is_ascii_digit())));
+    }
+
+    #[test]
+    fn process_token_privileges_report_present_and_unknown_names() {
+        drop(PrivilegeGuard::enable("SeChangeNotifyPrivilege").unwrap());
+        assert!(PrivilegeGuard::enable("SeNotARealPrivilege").is_err());
     }
 }

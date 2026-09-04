@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 fn main() {
     if let Err(error) = mactype_service_host::validate_host_arguments(std::env::args().skip(1)) {
         eprintln!("{error}");

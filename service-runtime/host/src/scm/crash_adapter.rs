@@ -1,11 +1,11 @@
 use std::fs;
 use std::io::{self, Read};
-use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
 use mactype_service_contract::MachinePaths;
+use mactype_service_platform::{is_reparse_point, terminate_current_process};
 
 use super::stop_requested;
 
@@ -17,12 +17,7 @@ pub(super) fn spawn_crash_once_adapter(paths: MachinePaths) {
         let request = data_root.join("ci-test-adapter").join("crash-once.request");
         while !stop_requested() {
             if consume_crash_once_request(&request).unwrap_or(false) {
-                unsafe {
-                    windows_sys::Win32::System::Threading::TerminateProcess(
-                        windows_sys::Win32::System::Threading::GetCurrentProcess(),
-                        0x4d54_0001,
-                    );
-                }
+                let _ = terminate_current_process(0x4d54_0001);
                 return;
             }
             thread::sleep(Duration::from_millis(100));
@@ -64,16 +59,8 @@ pub(super) fn valid_crash_once_marker(bytes: &[u8]) -> bool {
 }
 
 fn reject_reparse_ancestors(path: &Path) -> io::Result<()> {
-    use windows_sys::Win32::Storage::FileSystem::{
-        GetFileAttributesW, FILE_ATTRIBUTE_REPARSE_POINT, INVALID_FILE_ATTRIBUTES,
-    };
     for ancestor in path.ancestors().filter(|candidate| candidate.exists()) {
-        let wide = wide_path(ancestor);
-        let attributes = unsafe { GetFileAttributesW(wide.as_ptr()) };
-        if attributes == INVALID_FILE_ATTRIBUTES {
-            return Err(io::Error::last_os_error());
-        }
-        if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        if is_reparse_point(ancestor)? {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "ci-test-adapter crash marker path contains a reparse point",
@@ -81,8 +68,4 @@ fn reject_reparse_ancestors(path: &Path) -> io::Result<()> {
         }
     }
     Ok(())
-}
-
-fn wide_path(path: &Path) -> Vec<u16> {
-    path.as_os_str().encode_wide().chain(Some(0)).collect()
 }

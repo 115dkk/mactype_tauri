@@ -13,7 +13,7 @@ use mactype_service_contract::{
     InjectionTelemetry, MachinePaths, ReadinessReport, StructuredServiceError,
     HEALTH_PROTOCOL_VERSION,
 };
-use windows_sys::Win32::System::Services::{StartServiceCtrlDispatcherW, SERVICE_TABLE_ENTRYW};
+use mactype_service_platform::run_service_dispatcher;
 
 use crate::named_pipe::NamedPipeHealthPublisher;
 use crate::service_version::service_runtime_version;
@@ -27,23 +27,11 @@ pub(crate) use win32_adapter::stop_requested;
 use win32_adapter::{ServiceControlContext, Win32StatusReporter, Win32StopSignal};
 
 pub fn run_dispatcher() -> io::Result<()> {
-    let mut service_name = wide_null(effective_service_name());
-    let table = [
-        SERVICE_TABLE_ENTRYW {
-            lpServiceName: service_name.as_mut_ptr(),
-            lpServiceProc: Some(service_main),
-        },
-        SERVICE_TABLE_ENTRYW::default(),
-    ];
-    if unsafe { StartServiceCtrlDispatcherW(table.as_ptr()) } == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
+    run_service_dispatcher(effective_service_name(), service_main)
 }
 
-unsafe extern "system" fn service_main(_argument_count: u32, _arguments: *mut *mut u16) {
-    let service_name = wide_null(effective_service_name());
-    let _control_context = match ServiceControlContext::register(&service_name) {
+fn service_main() {
+    let _control_context = match ServiceControlContext::register(effective_service_name()) {
         Ok(context) => context,
         Err(_) => return,
     };
@@ -142,8 +130,4 @@ fn failed_health_report(code: &str, message: &str, win32_error: Option<u32>) -> 
             win32_error,
         }),
     }
-}
-
-fn wide_null(value: &str) -> Vec<u16> {
-    value.encode_utf16().chain(Some(0)).collect()
 }

@@ -49,7 +49,8 @@ pub use handle::{OwnedHandle, WaitOutcome};
 pub use job::{JobLimits, JobObject};
 pub use known_folders::{known_folder_path, system_directory, KnownFolder};
 pub use launch::{
-    anonymous_pipe, null_device, read_bounded, ProcessLaunch, StandardHandles, SuspendedChild,
+    anonymous_pipe, null_device, read_bounded, write_all, ProcessLaunch, StandardHandles,
+    SuspendedChild,
 };
 pub use mutex::{MutexAcquisition, NamedMutex};
 pub use pipe::{
@@ -59,7 +60,7 @@ pub use pipe::{
 };
 pub use process::{
     process_session_id, terminate_current_process, MachineKind, Process, ProcessAccess,
-    ProcessMachine,
+    ProcessBinarySignatureMitigation, ProcessDynamicCodeMitigation, ProcessMachine,
 };
 pub use random::system_random_bytes;
 pub use registry::{

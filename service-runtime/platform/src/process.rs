@@ -15,9 +15,13 @@ use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows_sys::Win32::System::SystemInformation::{
     IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_I386, IMAGE_FILE_MACHINE_UNKNOWN,
 };
+use windows_sys::Win32::System::SystemServices::{
+    PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY, PROCESS_MITIGATION_DYNAMIC_CODE_POLICY,
+};
 use windows_sys::Win32::System::Threading::{
-    GetCurrentProcess, GetExitCodeProcess, GetProcessId, GetProcessInformation, GetProcessTimes,
-    IsProcessCritical, IsWow64Process2, OpenProcess, ProcessProtectionLevelInfo,
+    GetCurrentProcess, GetExitCodeProcess, GetProcessId, GetProcessInformation,
+    GetProcessMitigationPolicy, GetProcessTimes, IsProcessCritical, IsWow64Process2, OpenProcess,
+    ProcessDynamicCodePolicy, ProcessProtectionLevelInfo, ProcessSignaturePolicy,
     QueryFullProcessImageNameW, TerminateProcess, PROCESS_ALL_ACCESS, PROCESS_CREATE_THREAD,
     PROCESS_NAME_WIN32, PROCESS_PROTECTION_LEVEL_INFORMATION, PROCESS_QUERY_INFORMATION,
     PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE,
@@ -80,6 +84,21 @@ impl ProcessAccess {
 pub struct ProcessMachine {
     pub process: MachineKind,
     pub native: MachineKind,
+}
+
+/// The dynamic-code mitigation bits the service admission policy consumes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProcessDynamicCodeMitigation {
+    pub prohibit_dynamic_code: bool,
+    pub allow_thread_opt_out: bool,
+}
+
+/// The binary-signature mitigation bits the service admission policy consumes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProcessBinarySignatureMitigation {
+    pub microsoft_signed_only: bool,
+    pub store_signed_only: bool,
+    pub mitigation_opt_in: bool,
 }
 
 /// An image machine, reduced to the cases the service can act on.
@@ -260,6 +279,25 @@ impl Process {
         Ok((exit_code != STILL_ACTIVE as u32).then_some(exit_code))
     }
 
+    /// Whether the process runs at any protection level.
+    pub fn protection(&self) -> io::Result<bool> {
+        let mut information = PROCESS_PROTECTION_LEVEL_INFORMATION::default();
+        // SAFETY: the handle is live; the buffer pointer and length describe
+        // exactly the local `PROCESS_PROTECTION_LEVEL_INFORMATION`.
+        if unsafe {
+            GetProcessInformation(
+                self.handle.as_raw(),
+                ProcessProtectionLevelInfo,
+                (&mut information as *mut PROCESS_PROTECTION_LEVEL_INFORMATION).cast(),
+                size_of::<PROCESS_PROTECTION_LEVEL_INFORMATION>() as u32,
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(information.ProtectionLevel != PROTECTION_LEVEL_NONE)
+    }
+
     /// Whether the process runs at any protection level, or whether that
     /// cannot be determined. Both answers keep the service away from it.
     pub fn is_protected_or_unknown(&self) -> bool {
@@ -280,6 +318,16 @@ impl Process {
         information.ProtectionLevel != PROTECTION_LEVEL_NONE
     }
 
+    /// Whether the process is marked critical.
+    pub fn criticality(&self) -> io::Result<bool> {
+        let mut critical = 0;
+        // SAFETY: the handle is live; the out pointer is a local `BOOL`.
+        if unsafe { IsProcessCritical(self.handle.as_raw(), &mut critical) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(critical != 0)
+    }
+
     /// Whether the process is marked critical, or whether that cannot be
     /// determined. Both answers keep the service away from it.
     pub fn is_critical_or_unknown(&self) -> bool {
@@ -287,6 +335,57 @@ impl Process {
         // SAFETY: the handle is live; the out pointer is a local `BOOL`.
         let queried = unsafe { IsProcessCritical(self.handle.as_raw(), &mut critical) };
         queried == 0 || critical != 0
+    }
+
+    /// The dynamic-code mitigation bits, preserving a failed policy query.
+    pub fn dynamic_code_mitigation(&self) -> io::Result<ProcessDynamicCodeMitigation> {
+        let mut policy = PROCESS_MITIGATION_DYNAMIC_CODE_POLICY::default();
+        // SAFETY: the handle is live; the buffer pointer and length describe
+        // exactly the local mitigation policy structure.
+        if unsafe {
+            GetProcessMitigationPolicy(
+                self.handle.as_raw(),
+                ProcessDynamicCodePolicy,
+                (&mut policy as *mut PROCESS_MITIGATION_DYNAMIC_CODE_POLICY).cast(),
+                size_of::<PROCESS_MITIGATION_DYNAMIC_CODE_POLICY>(),
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: the binding exposes the policy bitfield through this union
+        // member, which was initialized by the successful query above.
+        let flags = unsafe { policy.Anonymous.Flags };
+        Ok(ProcessDynamicCodeMitigation {
+            prohibit_dynamic_code: flags & (1 << 0) != 0,
+            allow_thread_opt_out: flags & (1 << 1) != 0,
+        })
+    }
+
+    /// The binary-signature mitigation bits, preserving a failed policy query.
+    pub fn binary_signature_mitigation(&self) -> io::Result<ProcessBinarySignatureMitigation> {
+        let mut policy = PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY::default();
+        // SAFETY: the handle is live; the buffer pointer and length describe
+        // exactly the local mitigation policy structure.
+        if unsafe {
+            GetProcessMitigationPolicy(
+                self.handle.as_raw(),
+                ProcessSignaturePolicy,
+                (&mut policy as *mut PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY).cast(),
+                size_of::<PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY>(),
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: the binding exposes the policy bitfield through this union
+        // member, which was initialized by the successful query above.
+        let flags = unsafe { policy.Anonymous.Flags };
+        Ok(ProcessBinarySignatureMitigation {
+            microsoft_signed_only: flags & (1 << 0) != 0,
+            store_signed_only: flags & (1 << 1) != 0,
+            mitigation_opt_in: flags & (1 << 2) != 0,
+        })
     }
 
     /// The Win32 image path, or `None` when it cannot be read.

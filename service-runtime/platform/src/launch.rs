@@ -13,7 +13,7 @@ use windows_sys::Win32::Foundation::{
 };
 use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, ReadFile, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
+    CreateFileW, ReadFile, WriteFile, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
     FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows_sys::Win32::System::Pipes::CreatePipe;
@@ -248,6 +248,38 @@ pub fn null_device() -> io::Result<OwnedHandle> {
         )
     };
     OwnedHandle::from_creation(handle)
+}
+
+/// Writes the complete byte slice to an owned file or pipe handle.
+pub fn write_all(handle: &OwnedHandle, bytes: &[u8]) -> io::Result<()> {
+    let mut offset = 0;
+    while offset < bytes.len() {
+        let chunk_length = (bytes.len() - offset).min(u32::MAX as usize);
+        let chunk = &bytes[offset..offset + chunk_length];
+        let mut written = 0;
+        // SAFETY: the handle is live; `chunk` is readable for the byte count
+        // passed, and `written` is a local out value.
+        if unsafe {
+            WriteFile(
+                handle.as_raw(),
+                chunk.as_ptr().cast(),
+                chunk.len() as u32,
+                &mut written,
+                null_mut(),
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        if written == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::WriteZero,
+                "the handle accepted no bytes",
+            ));
+        }
+        offset += written as usize;
+    }
+    Ok(())
 }
 
 /// Reads `handle` to end-of-stream, keeping at most `maximum + 1` bytes so a

@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 mod control;
 mod file_health;
 mod generated_unity_anticheat_catalog;

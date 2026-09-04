@@ -3,6 +3,7 @@
 use mactype_service_host::{
     PrivateFreeTypeClassification, ProcessInspector, WindowsProcessInspector,
 };
+use mactype_service_platform::process_session_id;
 
 #[test]
 fn windows_inspector_requeries_creation_time_session_and_architecture_from_the_process() {
@@ -13,7 +14,7 @@ fn windows_inspector_requeries_creation_time_session_and_architecture_from_the_p
 
     assert_eq!(identity.pid, pid);
     assert!(identity.creation_time > 0);
-    assert_eq!(identity.session_id, session_id(pid));
+    assert_eq!(identity.session_id, process_session_id(pid).unwrap());
 }
 
 #[test]
@@ -27,15 +28,4 @@ fn windows_inspector_detects_an_explicit_qt_freetype_engine_marker() {
         inspector.classify_private_freetype_process(&identity),
         PrivateFreeTypeClassification::Detected
     );
-}
-
-fn session_id(pid: u32) -> u32 {
-    let mut session = 0;
-    assert_ne!(
-        unsafe {
-            windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId(pid, &mut session)
-        },
-        0
-    );
-    session
 }

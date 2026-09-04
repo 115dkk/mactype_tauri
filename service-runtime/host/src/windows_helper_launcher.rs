@@ -1,50 +1,29 @@
-mod command_line;
-mod native;
-
 #[cfg(test)]
 mod tests;
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::io;
-use std::mem::size_of;
-use std::os::windows::ffi::OsStrExt;
-use std::ptr::{null, null_mut};
 #[cfg(test)]
-use std::sync::atomic::AtomicU32;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use windows_sys::Win32::Foundation::{ERROR_CANCELLED, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT};
-use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
-use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, OPEN_EXISTING, SYNCHRONIZE,
+use mactype_service_platform::{
+    anonymous_pipe, null_device, read_bounded, JobObject, OwnedHandle, Process, ProcessAccess,
+    ProcessLaunch, StandardHandles, SuspendedChild, WaitOutcome,
 };
-use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
-use windows_sys::Win32::System::Threading::{
-    CreateProcessW, GetExitCodeProcess, OpenProcess, ResumeThread, WaitForSingleObject,
-    CREATE_NO_WINDOW, CREATE_SUSPENDED, EXTENDED_STARTUPINFO_PRESENT, PROCESS_CREATE_THREAD,
-    PROCESS_INFORMATION, PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION,
-    PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE, STARTF_USESTDHANDLES, STARTUPINFOEXW,
-};
+use windows_sys::Win32::Foundation::{ERROR_CANCELLED, STILL_ACTIVE};
 
 use crate::{HelperInvocation, HelperLaunchError, HelperLauncher, HelperOutput};
-use command_line::command_line;
-use native::{
-    confirm_terminated, inherited_pipe, process_creation_time, read_bounded_output,
-    terminate_unassigned_child, AttributeList, JobObject, OwnedHandle,
-};
 
 const TERMINATION_CONFIRMATION: Duration = Duration::from_millis(250);
-const TARGET_PROCESS_ACCESS: u32 = PROCESS_CREATE_THREAD
-    | PROCESS_QUERY_INFORMATION
-    | PROCESS_QUERY_LIMITED_INFORMATION
-    | PROCESS_VM_OPERATION
-    | PROCESS_VM_WRITE
-    | PROCESS_VM_READ
-    | SYNCHRONIZE;
+const WAIT_SLICE: Duration = Duration::from_millis(10);
 
+/// The launcher's most recent child, held open with SYNCHRONIZE while it is
+/// still suspended so tests wait on that exact process object. A PID alone
+/// would not do: once the child's object is gone the kernel can hand the same
+/// PID to a process another test just spawned.
 #[cfg(test)]
-static LAST_TEST_CHILD_PID: AtomicU32 = AtomicU32::new(0);
+static LAST_TEST_CHILD: Mutex<Option<Process>> = Mutex::new(None);
 
 pub struct WindowsHelperLauncher {
     stop_requested: fn() -> bool,
@@ -71,11 +50,9 @@ impl WindowsHelperLauncher {
             .into());
         }
         let deadline = Instant::now() + invocation.timeout;
-        let job = JobObject::new()?;
-        let target = OwnedHandle::new(unsafe {
-            OpenProcess(TARGET_PROCESS_ACCESS, 1, invocation.target.pid)
-        })?;
-        if process_creation_time(target.get())? != invocation.target.creation_time {
+        let job = JobObject::single_process_kill_on_close()?;
+        let target = Process::open(invocation.target.pid, ProcessAccess::InjectionTarget)?;
+        if target.creation_time()? != invocation.target.creation_time {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "target process creation time changed before helper launch",
@@ -83,42 +60,9 @@ impl WindowsHelperLauncher {
             .into());
         }
 
-        let security = SECURITY_ATTRIBUTES {
-            nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
-            lpSecurityDescriptor: null_mut(),
-            bInheritHandle: 1,
-        };
-        let (output_read, output_write) = inherited_pipe(&security)?;
-        let null_name: Vec<u16> = OsStr::new("NUL").encode_wide().chain(Some(0)).collect();
-        let null_device = OwnedHandle::new(unsafe {
-            CreateFileW(
-                null_name.as_ptr(),
-                FILE_GENERIC_READ | FILE_GENERIC_WRITE,
-                FILE_SHARE_READ | FILE_SHARE_WRITE,
-                &security,
-                OPEN_EXISTING,
-                FILE_ATTRIBUTE_NORMAL,
-                null_mut(),
-            )
-        })?;
-
-        let inherited = [target.get(), output_write.get(), null_device.get()];
-        let mut attributes = AttributeList::with_handles(&inherited)?;
-        let arguments = arguments_for_handle(target.get() as usize);
-        let mut command_line = command_line(&invocation.executable, &arguments);
-        let application: Vec<u16> = invocation
-            .executable
-            .as_os_str()
-            .encode_wide()
-            .chain(Some(0))
-            .collect();
-        let mut startup = STARTUPINFOEXW::default();
-        startup.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
-        startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-        startup.StartupInfo.hStdInput = null_device.get();
-        startup.StartupInfo.hStdOutput = output_write.get();
-        startup.StartupInfo.hStdError = null_device.get();
-        startup.lpAttributeList = attributes.as_mut_ptr();
+        let (output_read, output_write) = anonymous_pipe()?;
+        let null_device = null_device()?;
+        let arguments = arguments_for_handle(target.handle().raw_value());
         if (self.stop_requested)() {
             return Err(io::Error::new(
                 io::ErrorKind::Interrupted,
@@ -127,53 +71,47 @@ impl WindowsHelperLauncher {
             .into());
         }
 
-        let mut process = PROCESS_INFORMATION::default();
-        if unsafe {
-            CreateProcessW(
-                application.as_ptr(),
-                command_line.as_mut_ptr(),
-                null(),
-                null(),
-                1,
-                CREATE_NO_WINDOW | CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT,
-                null(),
-                null(),
-                &startup.StartupInfo,
-                &mut process,
-            )
-        } == 0
-        {
-            return Err(io::Error::last_os_error().into());
-        }
-        let child_process = OwnedHandle::new(process.hProcess)?;
-        let child_thread = OwnedHandle::new(process.hThread)?;
+        let child = SuspendedChild::create(&ProcessLaunch {
+            executable: &invocation.executable,
+            arguments: &arguments,
+            inherit: &[target.handle(), &output_write, &null_device],
+            standard: StandardHandles {
+                input: &null_device,
+                output: &output_write,
+                error: &null_device,
+            },
+        })?;
         #[cfg(test)]
-        LAST_TEST_CHILD_PID.store(process.dwProcessId, std::sync::atomic::Ordering::Release);
-        if unsafe { AssignProcessToJobObject(job.handle(), child_process.get()) } == 0 {
-            let error = io::Error::last_os_error();
-            terminate_unassigned_child(&child_process, deadline)?;
+        {
+            let observer = Process::open(child.pid(), ProcessAccess::Synchronize).ok();
+            *LAST_TEST_CHILD
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = observer;
+        }
+        if let Err(error) = job.assign(child.process()) {
+            terminate_unassigned_child(&child.abandon(), deadline)?;
             return Err(error.into());
         }
         if (self.stop_requested)() {
+            let child = child.abandon();
             job.terminate(ERROR_CANCELLED)?;
-            confirm_terminated(&child_process, deadline)?;
+            confirm_terminated(&child, deadline)?;
             return Err(io::Error::new(
                 io::ErrorKind::Interrupted,
                 "service stop was requested before helper resume",
             )
             .into());
         }
-        if unsafe { ResumeThread(child_thread.get()) } == u32::MAX {
-            let error = io::Error::last_os_error();
+        if let Err(error) = child.start() {
+            let child = child.abandon();
             job.terminate(error.raw_os_error().unwrap_or(1) as u32)?;
-            confirm_terminated(&child_process, deadline)?;
+            confirm_terminated(&child, deadline)?;
             return Err(error.into());
         }
+        let child_process = child.into_process();
         drop(output_write);
         drop(null_device);
         drop(target);
-        drop(attributes);
-        drop(child_thread);
 
         wait_for_helper(
             self.stop_requested,
@@ -197,7 +135,7 @@ impl HelperLauncher for WindowsHelperLauncher {
 fn wait_for_helper(
     stop_requested: fn() -> bool,
     job: &JobObject,
-    child_process: &OwnedHandle,
+    child_process: &Process,
     output_read: OwnedHandle,
     deadline: Instant,
     timeout: Duration,
@@ -227,25 +165,59 @@ fn wait_for_helper(
                 "helper exceeded its absolute launch timeout",
             )));
         }
-        let slice = remaining.min(Duration::from_millis(10)).as_millis() as u32;
-        match unsafe { WaitForSingleObject(child_process.get(), slice.max(1)) } {
-            WAIT_OBJECT_0 => break,
-            WAIT_TIMEOUT => continue,
-            WAIT_FAILED => return Err(HelperLaunchError::after_resume(io::Error::last_os_error())),
-            _ => {
+        match child_process.wait(Some(wait_slice(remaining))) {
+            Ok(WaitOutcome::Signaled) => break,
+            Ok(WaitOutcome::TimedOut) => continue,
+            Ok(WaitOutcome::Abandoned) => {
                 return Err(HelperLaunchError::after_resume(io::Error::other(
                     "unexpected helper wait result",
                 )))
             }
+            Err(error) => return Err(HelperLaunchError::after_resume(error)),
         }
     }
-    let mut exit_code = 3;
-    if unsafe { GetExitCodeProcess(child_process.get(), &mut exit_code) } == 0 {
-        return Err(HelperLaunchError::after_resume(io::Error::last_os_error()));
-    }
-    let stdout = read_bounded_output(output_read).map_err(HelperLaunchError::after_resume)?;
+    // A helper that exits with STILL_ACTIVE as its code looks like a running
+    // process to the OS; keep the raw value so the broker rejects it as an
+    // exit mismatch, exactly as the raw exit-code query did.
+    let exit_code = child_process
+        .exit_code()
+        .map_err(HelperLaunchError::after_resume)?
+        .unwrap_or(STILL_ACTIVE as u32);
+    let stdout = read_bounded(&output_read, crate::helper_broker::MAX_HELPER_OUTPUT_BYTES)
+        .map_err(HelperLaunchError::after_resume)?;
     Ok(HelperOutput {
         exit_code: exit_code as i32,
         stdout,
     })
+}
+
+/// The next poll slice: at most ten milliseconds, at least one, in the whole
+/// milliseconds the kernel wait counts in.
+fn wait_slice(remaining: Duration) -> Duration {
+    Duration::from_millis((remaining.min(WAIT_SLICE).as_millis() as u64).max(1))
+}
+
+fn terminate_unassigned_child(child: &Process, deadline: Instant) -> io::Result<()> {
+    child.terminate(1)?;
+    confirm_terminated(child, deadline)
+}
+
+fn confirm_terminated(child: &Process, deadline: Instant) -> io::Result<()> {
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "helper process termination could not be confirmed within the absolute bound",
+            ));
+        }
+        match child.wait(Some(wait_slice(remaining))) {
+            Ok(WaitOutcome::Signaled) => return Ok(()),
+            Ok(WaitOutcome::TimedOut) => continue,
+            Ok(WaitOutcome::Abandoned) => {
+                return Err(io::Error::other("unexpected helper cleanup wait result"))
+            }
+            Err(error) => return Err(error),
+        }
+    }
 }

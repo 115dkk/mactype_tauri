@@ -265,24 +265,12 @@ fn stop_requested_before_launch_prevents_a_new_helper_process() {
     use std::time::{Duration, Instant};
 
     use mactype_service_host::WindowsHelperLauncher;
-    use windows_sys::Win32::Foundation::{CloseHandle, FILETIME};
-    use windows_sys::Win32::System::Threading::{
-        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-    };
+    use mactype_service_platform::{Process, ProcessAccess};
 
-    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, std::process::id()) };
-    assert!(!process.is_null());
-    let mut created = FILETIME::default();
-    let mut exited = FILETIME::default();
-    let mut kernel = FILETIME::default();
-    let mut user = FILETIME::default();
-    assert_ne!(
-        unsafe { GetProcessTimes(process, &mut created, &mut exited, &mut kernel, &mut user) },
-        0
-    );
-    unsafe { CloseHandle(process) };
-    let creation_time =
-        (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime);
+    let creation_time = Process::open(std::process::id(), ProcessAccess::QueryLimited)
+        .unwrap()
+        .creation_time()
+        .unwrap();
 
     let launcher = WindowsHelperLauncher::new(stop_already_requested);
     let started = Instant::now();

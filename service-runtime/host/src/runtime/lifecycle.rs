@@ -87,6 +87,7 @@ impl ServiceRuntime<'_> {
             self.report_failure(status, health, &error);
             return Err(HostError::Runtime(error));
         }
+        crate::event_log::service_started(self.service_version);
 
         let runtime_health = RuntimeHealthAdapter {
             publisher: health,
@@ -115,6 +116,7 @@ impl ServiceRuntime<'_> {
             injection: InjectionTelemetry::default(),
             last_error: terminal_error,
         });
+        crate::event_log::service_stopped();
         if let Err(error) = status.report(ServiceStatus::stopped()) {
             return Err(self.report_io_failure(
                 status,
@@ -148,15 +150,20 @@ impl ServiceRuntime<'_> {
         health: &dyn HealthPublisher,
         error: &StructuredServiceError,
     ) {
-        let _ = health.publish(&HealthReport {
-            protocol_version: HEALTH_PROTOCOL_VERSION,
-            service_version: self.service_version.to_owned(),
-            health: HealthState::Failed,
-            active_profile_digest: None,
-            readiness: ReadinessReport::initializing(),
-            injection: InjectionTelemetry::default(),
-            last_error: Some(error.clone()),
-        });
+        if health
+            .publish(&HealthReport {
+                protocol_version: HEALTH_PROTOCOL_VERSION,
+                service_version: self.service_version.to_owned(),
+                health: HealthState::Failed,
+                active_profile_digest: None,
+                readiness: ReadinessReport::initializing(),
+                injection: InjectionTelemetry::default(),
+                last_error: Some(error.clone()),
+            })
+            .is_ok()
+        {
+            crate::event_log::health_changed(HealthState::Failed, Some(error));
+        }
         let _ = status.report(ServiceStatus::stopped_with_error(
             ERROR_SERVICE_SPECIFIC_ERROR,
             1,
@@ -198,6 +205,8 @@ impl RuntimeHealthReporter for RuntimeHealthAdapter<'_> {
                 code: "health-publish-failed".to_owned(),
                 message: error.to_string(),
                 win32_error: error.raw_os_error().map(|code| code as u32),
-            })
+            })?;
+        crate::event_log::health_changed(report.health, report.last_error.as_ref());
+        Ok(())
     }
 }

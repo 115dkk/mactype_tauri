@@ -11,6 +11,9 @@ pub struct MachinePaths {
     active_profile: PathBuf,
     previous_profile: PathBuf,
     profile_activation_journal: PathBuf,
+    event_log_dir: PathBuf,
+    service_host_event_log: PathBuf,
+    service_setup_event_log: PathBuf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,6 +37,7 @@ impl MachinePaths {
 
         let service_root = program_files.join("MacType Control Center").join("Service");
         let data_root = program_data.join("MacType").join("ControlCenter");
+        let event_log_dir = data_root.join("logs");
 
         Ok(Self {
             runtime_versions: service_root.join("bin"),
@@ -43,6 +47,9 @@ impl MachinePaths {
             active_profile: data_root.join("active.json"),
             previous_profile: data_root.join("previous.json"),
             profile_activation_journal: data_root.join("profile-activation.json"),
+            service_host_event_log: event_log_dir.join("service-host.log"),
+            service_setup_event_log: event_log_dir.join("service-setup.log"),
+            event_log_dir,
             service_root,
         })
     }
@@ -77,6 +84,18 @@ impl MachinePaths {
 
     pub fn profile_activation_journal(&self) -> &Path {
         &self.profile_activation_journal
+    }
+
+    pub fn event_log_dir(&self) -> &Path {
+        &self.event_log_dir
+    }
+
+    pub fn service_host_event_log(&self) -> &Path {
+        &self.service_host_event_log
+    }
+
+    pub fn service_setup_event_log(&self) -> &Path {
+        &self.service_setup_event_log
     }
 }
 

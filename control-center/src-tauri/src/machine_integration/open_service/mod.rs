@@ -69,6 +69,17 @@ fn management_package_state_from_error(
     }
 }
 
+pub(crate) fn machine_roots() -> Result<(PathBuf, PathBuf), String> {
+    #[cfg(windows)]
+    {
+        windows::machine_roots()
+    }
+    #[cfg(not(windows))]
+    {
+        Err("machine roots are available only on Windows".to_owned())
+    }
+}
+
 pub(crate) fn management_package_state() -> crate::service_contract::ServiceManagementPackageState {
     #[cfg(windows)]
     {
@@ -150,12 +161,7 @@ fn record_action_failure(
     let profile_text = profile.map(|bytes| String::from_utf8_lossy(bytes).into_owned());
     let failure = operation_failure(action, error, installation_preflight);
     let redactions = profile_text.as_deref().into_iter().collect::<Vec<_>>();
-    if let Err(log_error) = crate::diagnostics::record_operation_failure(&failure, &redactions) {
-        eprintln!(
-            "recording the bounded operation failure log failed: {}",
-            log_error.replace(['\r', '\n'], " ")
-        );
-    }
+    let _ = crate::diagnostics::record_operation_failure(&failure, &redactions);
 }
 
 const INTERNAL_OPERATION_FAILURE_PREFIX: &str = "control-center-internal-operation-failed:";

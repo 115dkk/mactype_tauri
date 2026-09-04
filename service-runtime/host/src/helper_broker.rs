@@ -163,6 +163,11 @@ where
         if helper.is_file() && helper.parent() == Some(self.assets.root()) {
             Ok(())
         } else {
+            crate::event_log::helper_broker_failed(
+                architecture,
+                "runtime-helper-unavailable",
+                Some(format!("helper={}", helper.display())),
+            );
             Err(mactype_service_contract::StructuredServiceError {
                 code: "runtime-helper-unavailable".to_owned(),
                 message: "the fixed helper is not ready in the protected runtime generation"
@@ -180,7 +185,7 @@ where
             return invalid_response("profile-digest-mismatch", None);
         }
         let invocation = self.invocation(request);
-        match self.launcher.launch(&invocation) {
+        let result = match self.launcher.launch(&invocation) {
             Ok(output) => parse_output(request, output),
             Err(error)
                 if error.stage() == HelperLaunchStage::BeforeResume
@@ -220,7 +225,21 @@ where
                     error.raw_os_error().map(|code| code as u32),
                 )
             }
+        };
+        if matches!(
+            result.disposition,
+            BrokerDisposition::UncertainCleanup | BrokerDisposition::UncertainIntegrity
+        ) {
+            crate::event_log::helper_broker_failed(
+                request.identity.architecture,
+                &result.code,
+                Some(format!(
+                    "pid={} creation_time={} win32={:?}",
+                    request.identity.pid, request.identity.creation_time, result.win32_error
+                )),
+            );
         }
+        result
     }
 }
 

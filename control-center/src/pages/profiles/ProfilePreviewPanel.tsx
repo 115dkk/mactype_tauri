@@ -1,4 +1,4 @@
-import { AlertTriangle, Columns2, Pencil, SlidersHorizontal } from "lucide-react";
+import { AlertTriangle, AppWindow, Columns2, Pencil, SlidersHorizontal } from "lucide-react";
 import {
   forwardRef,
   useCallback,
@@ -70,6 +70,7 @@ interface ProfilePreviewPanelProps {
   mode: "quick" | "advanced";
   onError: (message: string | null) => void;
   onFontFaceChange: (font: string) => void;
+  onOpenStudio?: () => void;
   onPreviewReady?: () => void;
   profilePath: string | null;
   savedValues?: Readonly<Record<string, number>>;
@@ -162,6 +163,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
   mode,
   onError,
   onFontFaceChange,
+  onOpenStudio,
   onPreviewReady,
   profilePath,
   savedValues,
@@ -494,6 +496,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
           <option value="listing">{t("profiles.nativeDisplayListing")}</option>
         </select>
         <button className="text-action" onClick={() => void toggleNativePreview()} type="button">{nativeVisible ? t("profiles.closeNative") : t("profiles.openNative")}</button>
+        {onOpenStudio && <button className="text-action" data-testid="open-preview-studio" onClick={onOpenStudio} type="button"><AppWindow aria-hidden="true" size={14} /> {t("profiles.openStudio")}</button>}
       </div>
     </section>
   );

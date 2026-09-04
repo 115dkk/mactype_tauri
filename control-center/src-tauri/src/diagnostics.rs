@@ -298,6 +298,17 @@ pub(crate) fn record_legacy_tray_detected(kind: &str, process: Option<&str>) {
     );
 }
 
+/// Preview helper lifecycle events: connected once per successful start of
+/// the MacType engine, restarted after a request failure, failed when a start
+/// does not produce a usable helper.
+pub(crate) fn record_preview_event(
+    severity: EventSeverity,
+    code: &str,
+    params: BTreeMap<String, String>,
+) {
+    operation_log::record_control_center_event(severity, EventArea::Preview, code, params);
+}
+
 pub(crate) fn watch_paths() -> Result<Vec<PathBuf>, String> {
     event_paths()
 }

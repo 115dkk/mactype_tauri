@@ -2,9 +2,10 @@ use super::{
     protocol::{read_frame, write_frame, Frame, HELLO, HELLO_ACK, SHUTDOWN, VERSION},
     PreviewEngine,
 };
+use mactype_service_contract::event_log::EventSeverity;
 use serde::Deserialize;
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, VecDeque},
     env,
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
@@ -225,6 +226,19 @@ impl PreviewManager {
         slot.install_root = Some(install_root.to_path_buf());
         slot.core_version = Some(metadata.core_version);
         slot.helper = Some(helper);
+        if engine == PreviewEngine::Mactype {
+            crate::diagnostics::record_preview_event(
+                EventSeverity::Info,
+                "preview-helper-connected",
+                BTreeMap::from([
+                    ("architecture".to_owned(), "x86".to_owned()),
+                    (
+                        "coreVersion".to_owned(),
+                        super::installation::format_core_version(metadata.core_version),
+                    ),
+                ]),
+            );
+        }
         Ok(())
     }
 
@@ -266,7 +280,10 @@ impl PreviewManager {
             let slot = self.slot(engine);
             if slot.install_root.as_deref() != Some(install_root) || slot.helper.is_none() {
                 self.stop_engine(engine);
-                self.start(install_root, engine)?;
+                if let Err(error) = self.start(install_root, engine) {
+                    record_helper_failure(engine, &error);
+                    return Err(error);
+                }
             }
             let request_id = self.next_id();
             let json = build_json(request_id)?;
@@ -288,6 +305,13 @@ impl PreviewManager {
                         engine,
                         format!("helper restart after request failure: {error}"),
                     );
+                    if engine == PreviewEngine::Mactype {
+                        crate::diagnostics::record_preview_event(
+                            EventSeverity::Warning,
+                            "preview-helper-restarted",
+                            BTreeMap::new(),
+                        );
+                    }
                     self.stop_engine(engine);
                 }
                 Err(error) => return Err(error),
@@ -330,7 +354,10 @@ impl PreviewManager {
         let slot = self.slot(PreviewEngine::Mactype);
         if slot.install_root.as_deref() != Some(install_root) || slot.helper.is_none() {
             self.stop_engine(PreviewEngine::Mactype);
-            self.start(install_root, PreviewEngine::Mactype)?;
+            if let Err(error) = self.start(install_root, PreviewEngine::Mactype) {
+                record_helper_failure(PreviewEngine::Mactype, &error);
+                return Err(error);
+            }
         }
         self.mactype
             .core_version
@@ -352,6 +379,19 @@ impl PreviewManager {
         helper.child.wait().map_err(|error| error.to_string())?;
         Ok(())
     }
+}
+
+/// A failed start of the MacType helper is an error the user should see in
+/// the timeline; the plain engine failing only removes the comparison.
+fn record_helper_failure(engine: PreviewEngine, error: &str) {
+    if engine != PreviewEngine::Mactype {
+        return;
+    }
+    crate::diagnostics::record_preview_event(
+        EventSeverity::Error,
+        "preview-helper-failed",
+        BTreeMap::from([("reason".to_owned(), error.to_owned())]),
+    );
 }
 
 #[derive(Deserialize)]

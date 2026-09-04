@@ -230,32 +230,19 @@ fn profile_pipe_send_times_out_when_the_expected_broker_never_reads() {
     connected_rx
         .recv_timeout(std::time::Duration::from_secs(2))
         .unwrap();
-    let exited = unsafe {
-        windows_sys::Win32::System::Threading::CreateEventW(
-            std::ptr::null(),
-            1,
-            0,
-            std::ptr::null(),
-        )
-    };
-    assert!(!exited.is_null());
-    let exited_value = exited as usize;
+    use std::sync::Arc;
+    let exited = Arc::new(mactype_service_platform::ManualResetEvent::new().unwrap());
+    let signal_event = Arc::clone(&exited);
     let signal = std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(25));
-        assert_ne!(
-            unsafe {
-                windows_sys::Win32::System::Threading::SetEvent(
-                    exited_value as windows_sys::Win32::Foundation::HANDLE,
-                )
-            },
-            0
-        );
+        signal_event.set().unwrap();
     });
+    let exited_handle = exited.handle().raw_value() as windows_sys::Win32::Foundation::HANDLE;
     let started = std::time::Instant::now();
     let error = server
         .send_to(
             std::process::id(),
-            Some(exited),
+            Some(exited_handle),
             std::time::Duration::from_secs(2),
         )
         .unwrap_err();
@@ -263,7 +250,6 @@ fn profile_pipe_send_times_out_when_the_expected_broker_never_reads() {
     assert!(started.elapsed() < std::time::Duration::from_millis(200));
     signal.join().unwrap();
     client.join().unwrap();
-    unsafe { windows_sys::Win32::Foundation::CloseHandle(exited) };
     drop(windows::ProfilePipeServer::create_with_nonce(&payload, exit_nonce).unwrap());
 }
 
@@ -295,64 +281,85 @@ fn broker_termination_distinguishes_exit_and_reports_unconfirmed_cleanup() {
     use std::collections::VecDeque;
 
     struct FakeBrokerProcessControl {
-        waits: VecDeque<u32>,
-        terminate_error: Option<u32>,
-        wait_timeouts: Vec<u32>,
+        waits: VecDeque<std::io::Result<mactype_service_platform::WaitOutcome>>,
+        terminate_error: Option<i32>,
+        wait_timeouts: Vec<std::time::Duration>,
     }
 
     impl windows::BrokerProcessControl for FakeBrokerProcessControl {
-        fn wait(&mut self, _process: windows_sys::Win32::Foundation::HANDLE, timeout: u32) -> u32 {
+        fn wait(
+            &mut self,
+            _process: &mactype_service_platform::Process,
+            timeout: std::time::Duration,
+        ) -> std::io::Result<mactype_service_platform::WaitOutcome> {
             self.wait_timeouts.push(timeout);
             self.waits.pop_front().unwrap()
         }
 
         fn terminate(
             &mut self,
-            _process: windows_sys::Win32::Foundation::HANDLE,
+            _process: &mactype_service_platform::Process,
             _exit_code: u32,
-        ) -> Result<(), u32> {
-            self.terminate_error.map_or(Ok(()), Err)
+        ) -> std::io::Result<()> {
+            self.terminate_error
+                .map_or(Ok(()), |code| Err(std::io::Error::from_raw_os_error(code)))
         }
     }
 
-    let process = 1_isize as windows_sys::Win32::Foundation::HANDLE;
+    let process = mactype_service_platform::Process::open(
+        std::process::id(),
+        mactype_service_platform::ProcessAccess::QueryLimited,
+    )
+    .unwrap();
     let mut already_exited = FakeBrokerProcessControl {
-        waits: VecDeque::from([windows_sys::Win32::Foundation::WAIT_OBJECT_0]),
+        waits: VecDeque::from([Ok(mactype_service_platform::WaitOutcome::Signaled)]),
         terminate_error: None,
         wait_timeouts: Vec::new(),
     };
     assert_eq!(
-        windows::terminate_broker_process_with(process, &mut already_exited).unwrap(),
+        windows::terminate_broker_process_with(&process, &mut already_exited).unwrap(),
         windows::BrokerTermination::AlreadyExited
     );
-    assert_eq!(already_exited.wait_timeouts, [0]);
+    assert_eq!(already_exited.wait_timeouts, [std::time::Duration::ZERO]);
 
     let mut terminated = FakeBrokerProcessControl {
         waits: VecDeque::from([
-            windows_sys::Win32::Foundation::WAIT_TIMEOUT,
-            windows_sys::Win32::Foundation::WAIT_OBJECT_0,
+            Ok(mactype_service_platform::WaitOutcome::TimedOut),
+            Ok(mactype_service_platform::WaitOutcome::Signaled),
         ]),
         terminate_error: None,
         wait_timeouts: Vec::new(),
     };
     assert_eq!(
-        windows::terminate_broker_process_with(process, &mut terminated).unwrap(),
+        windows::terminate_broker_process_with(&process, &mut terminated).unwrap(),
         windows::BrokerTermination::Terminated
     );
-    assert_eq!(terminated.wait_timeouts, [0, 5_000]);
+    assert_eq!(
+        terminated.wait_timeouts,
+        [
+            std::time::Duration::ZERO,
+            std::time::Duration::from_millis(5_000)
+        ]
+    );
 
     let mut unconfirmed = FakeBrokerProcessControl {
         waits: VecDeque::from([
-            windows_sys::Win32::Foundation::WAIT_TIMEOUT,
-            windows_sys::Win32::Foundation::WAIT_TIMEOUT,
+            Ok(mactype_service_platform::WaitOutcome::TimedOut),
+            Ok(mactype_service_platform::WaitOutcome::TimedOut),
         ]),
         terminate_error: None,
         wait_timeouts: Vec::new(),
     };
-    let cleanup = windows::terminate_broker_process_with(process, &mut unconfirmed);
+    let cleanup = windows::terminate_broker_process_with(&process, &mut unconfirmed);
     let error = windows::combine_broker_cleanup_error("profile transfer failed", cleanup);
     assert!(error.contains("profile transfer failed"), "{error}");
     assert!(error.contains("cleanup is unknown"), "{error}");
     assert!(error.contains("5000"), "{error}");
-    assert_eq!(unconfirmed.wait_timeouts, [0, 5_000]);
+    assert_eq!(
+        unconfirmed.wait_timeouts,
+        [
+            std::time::Duration::ZERO,
+            std::time::Duration::from_millis(5_000)
+        ]
+    );
 }

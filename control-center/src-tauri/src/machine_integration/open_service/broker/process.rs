@@ -1,7 +1,5 @@
-use windows_sys::Win32::{
-    Foundation::{GetLastError, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT},
-    System::Threading::{TerminateProcess, WaitForSingleObject},
-};
+use mactype_service_platform::{Process, WaitOutcome};
+use std::{io, time::Duration};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::machine_integration::open_service) enum BrokerTermination {
@@ -10,66 +8,71 @@ pub(in crate::machine_integration::open_service) enum BrokerTermination {
 }
 
 pub(in crate::machine_integration::open_service) trait BrokerProcessControl {
-    fn wait(&mut self, process: HANDLE, timeout: u32) -> u32;
-    fn terminate(&mut self, process: HANDLE, exit_code: u32) -> Result<(), u32>;
+    fn wait(&mut self, process: &Process, timeout: Duration) -> io::Result<WaitOutcome>;
+    fn terminate(&mut self, process: &Process, exit_code: u32) -> io::Result<()>;
 }
 
 struct WindowsBrokerProcessControl;
 
 impl BrokerProcessControl for WindowsBrokerProcessControl {
-    fn wait(&mut self, process: HANDLE, timeout: u32) -> u32 {
-        unsafe { WaitForSingleObject(process, timeout) }
+    fn wait(&mut self, process: &Process, timeout: Duration) -> io::Result<WaitOutcome> {
+        process.wait(Some(timeout))
     }
 
-    fn terminate(&mut self, process: HANDLE, exit_code: u32) -> Result<(), u32> {
-        if unsafe { TerminateProcess(process, exit_code) } == 0 {
-            Err(unsafe { GetLastError() })
-        } else {
-            Ok(())
-        }
+    fn terminate(&mut self, process: &Process, exit_code: u32) -> io::Result<()> {
+        process.terminate(exit_code)
     }
 }
 
 pub(in crate::machine_integration::open_service) fn terminate_broker_process_with(
-    process: HANDLE,
+    process: &Process,
     control: &mut impl BrokerProcessControl,
 ) -> Result<BrokerTermination, String> {
-    let initial = control.wait(process, 0);
-    if initial == WAIT_OBJECT_0 {
+    let initial = control.wait(process, Duration::ZERO).map_err(|error| {
+        format!(
+            "elevated broker cleanup is unknown: initial process wait failed with {}",
+            error.raw_os_error().unwrap_or(0)
+        )
+    })?;
+    if initial == WaitOutcome::Signaled {
         return Ok(BrokerTermination::AlreadyExited);
-    }
-    if initial != WAIT_TIMEOUT {
-        return Err(format!(
-            "elevated broker cleanup is unknown: initial process wait failed with {initial}"
-        ));
     }
 
     if let Err(error) = control.terminate(process, 21) {
-        let after_failure = control.wait(process, 0);
-        if after_failure == WAIT_OBJECT_0 {
+        let after_failure = control.wait(process, Duration::ZERO);
+        if matches!(after_failure, Ok(WaitOutcome::Signaled)) {
             return Ok(BrokerTermination::AlreadyExited);
         }
+        let state = match after_failure {
+            Ok(WaitOutcome::TimedOut) => "timed out".to_owned(),
+            Ok(WaitOutcome::Signaled) => unreachable!(),
+            Ok(WaitOutcome::Abandoned) => "abandoned".to_owned(),
+            Err(error) => error.raw_os_error().unwrap_or(0).to_string(),
+        };
         return Err(format!(
-            "elevated broker cleanup is unknown: TerminateProcess failed with {error} and the process state is {after_failure}"
+            "elevated broker cleanup is unknown: TerminateProcess failed with {} and the process state is {state}",
+            error.raw_os_error().unwrap_or(0)
         ));
     }
 
-    let confirmation = control.wait(process, 5_000);
-    if confirmation == WAIT_OBJECT_0 {
-        Ok(BrokerTermination::Terminated)
-    } else if confirmation == WAIT_TIMEOUT {
-        Err(
+    match control.wait(process, Duration::from_millis(5_000)) {
+        Ok(WaitOutcome::Signaled) => Ok(BrokerTermination::Terminated),
+        Ok(WaitOutcome::TimedOut) => Err(
             "elevated broker cleanup is unknown: termination was not confirmed within 5000 ms"
                 .to_owned(),
-        )
-    } else {
-        Err(format!(
-            "elevated broker cleanup is unknown: termination confirmation failed with {confirmation}"
-        ))
+        ),
+        Ok(WaitOutcome::Abandoned) => Err(
+            "elevated broker cleanup is unknown: termination confirmation returned abandoned"
+                .to_owned(),
+        ),
+        Err(error) => Err(format!(
+            "elevated broker cleanup is unknown: termination confirmation failed with {}",
+            error.raw_os_error().unwrap_or(0)
+        )),
     }
 }
 
-pub(super) fn terminate_broker_process(process: HANDLE) -> Result<BrokerTermination, String> {
+pub(super) fn terminate_broker_process(process: &Process) -> Result<BrokerTermination, String> {
     terminate_broker_process_with(process, &mut WindowsBrokerProcessControl)
 }
 

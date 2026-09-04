@@ -11,85 +11,51 @@ pub(super) fn appinit_view_conflict(
 }
 
 #[cfg(windows)]
-fn read_appinit_enabled(view: u32) -> Result<bool, ()> {
-    use windows_sys::Win32::{
-        Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS},
-        System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD},
+const APPINIT_SUBKEY: &str = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Windows";
+
+#[cfg(windows)]
+fn read_appinit_enabled(view: mactype_service_platform::RegistryView) -> Result<bool, ()> {
+    use mactype_service_platform::{RegistryKey, RegistryRoot};
+
+    let Some(key) =
+        RegistryKey::open(RegistryRoot::LocalMachine, APPINIT_SUBKEY, view).map_err(|_| ())?
+    else {
+        return Ok(false);
     };
-    let subkey = wide("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Windows");
-    let value = wide("LoadAppInit_DLLs");
-    let mut enabled = 0u32;
-    let mut bytes = std::mem::size_of::<u32>() as u32;
-    let result = unsafe {
-        RegGetValueW(
-            HKEY_LOCAL_MACHINE,
-            subkey.as_ptr(),
-            value.as_ptr(),
-            RRF_RT_REG_DWORD | view,
-            std::ptr::null_mut(),
-            (&mut enabled as *mut u32).cast(),
-            &mut bytes,
-        )
-    };
-    if result == ERROR_FILE_NOT_FOUND {
-        Ok(false)
-    } else if result == ERROR_SUCCESS && bytes == std::mem::size_of::<u32>() as u32 {
-        Ok(enabled != 0)
-    } else {
-        Err(())
-    }
+    Ok(key
+        .read_dword("LoadAppInit_DLLs")
+        .map_err(|_| ())?
+        .unwrap_or(0)
+        != 0)
 }
 
 #[cfg(windows)]
-fn read_appinit_dlls(view: u32) -> Result<Option<Vec<u16>>, ()> {
-    use windows_sys::Win32::{
-        Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS},
-        System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ},
-    };
-    const MAX_APPINIT_BYTES: u32 = 64 * 1024;
-    let subkey = wide("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Windows");
-    let value = wide("AppInit_DLLs");
-    let mut bytes = 0u32;
-    let first = unsafe {
-        RegGetValueW(
-            HKEY_LOCAL_MACHINE,
-            subkey.as_ptr(),
-            value.as_ptr(),
-            RRF_RT_REG_SZ | view,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            &mut bytes,
-        )
-    };
-    if first == ERROR_FILE_NOT_FOUND {
+fn read_appinit_dlls(view: mactype_service_platform::RegistryView) -> Result<Option<Vec<u16>>, ()> {
+    use mactype_service_platform::{RegistryKey, RegistryRoot};
+
+    let Some(key) =
+        RegistryKey::open(RegistryRoot::LocalMachine, APPINIT_SUBKEY, view).map_err(|_| ())?
+    else {
         return Ok(None);
-    }
-    if first != ERROR_SUCCESS || !(2..=MAX_APPINIT_BYTES).contains(&bytes) || bytes % 2 != 0 {
-        return Err(());
-    }
-    let mut buffer = vec![0u16; bytes as usize / 2];
-    let second = unsafe {
-        RegGetValueW(
-            HKEY_LOCAL_MACHINE,
-            subkey.as_ptr(),
-            value.as_ptr(),
-            RRF_RT_REG_SZ | view,
-            std::ptr::null_mut(),
-            buffer.as_mut_ptr().cast(),
-            &mut bytes,
-        )
     };
-    if second != ERROR_SUCCESS || !(2..=MAX_APPINIT_BYTES).contains(&bytes) || bytes % 2 != 0 {
-        return Err(());
-    }
-    buffer.truncate(bytes as usize / 2);
-    Ok(Some(buffer))
+    // RegGetValueW appended the terminator a stored REG_SZ may lack; the
+    // contract parser still requires it.
+    Ok(key
+        .read_string_units("AppInit_DLLs")
+        .map_err(|_| ())?
+        .map(|mut units| {
+            if units.last() != Some(&0) {
+                units.push(0);
+            }
+            units
+        }))
 }
 
 #[cfg(windows)]
 pub(super) fn appinit_conflict() -> Result<bool, String> {
-    use windows_sys::Win32::System::Registry::{RRF_SUBKEY_WOW6432KEY, RRF_SUBKEY_WOW6464KEY};
-    [RRF_SUBKEY_WOW6464KEY, RRF_SUBKEY_WOW6432KEY]
+    use mactype_service_platform::RegistryView;
+
+    [RegistryView::Native64, RegistryView::Native32]
         .into_iter()
         .try_fold(false, |conflict, view| {
             appinit_view_conflict(read_appinit_enabled(view), read_appinit_dlls(view))
@@ -105,13 +71,4 @@ pub(crate) fn registry_conflict_detected() -> bool {
 #[cfg(not(windows))]
 pub(super) fn appinit_conflict() -> Result<bool, String> {
     Ok(false)
-}
-
-#[cfg(windows)]
-fn wide(value: &str) -> Vec<u16> {
-    use std::os::windows::ffi::OsStrExt;
-    std::ffi::OsStr::new(value)
-        .encode_wide()
-        .chain(Some(0))
-        .collect()
 }

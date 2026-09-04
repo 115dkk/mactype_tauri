@@ -2,6 +2,7 @@
 //! read-only client in the setup broker.
 
 use std::io;
+use std::os::windows::io::AsRawHandle;
 use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Foundation::{ERROR_NO_DATA, ERROR_PIPE_CONNECTED, ERROR_PIPE_LISTENING};
@@ -121,9 +122,40 @@ impl Drop for NamedPipeServer {
     }
 }
 
+impl AsRawHandle for NamedPipeServer {
+    fn as_raw_handle(&self) -> std::os::windows::io::RawHandle {
+        self.0.as_raw()
+    }
+}
+
+/// Returns the PID of the process that created this named-pipe instance.
+pub fn named_pipe_server_process_id(
+    pipe: &impl std::os::windows::io::AsRawHandle,
+) -> io::Result<u32> {
+    let mut pid = 0;
+    // SAFETY: the caller lends a live named-pipe handle for this call; `pid` is
+    // a local out value.
+    if unsafe { GetNamedPipeServerProcessId(pipe.as_raw_handle(), &mut pid) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if pid == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "named pipe server returned process ID zero",
+        ));
+    }
+    Ok(pid)
+}
+
 /// A read-only client connection to a named pipe.
 #[derive(Debug)]
 pub struct NamedPipeClient(OwnedHandle);
+
+impl AsRawHandle for NamedPipeClient {
+    fn as_raw_handle(&self) -> std::os::windows::io::RawHandle {
+        self.0.as_raw()
+    }
+}
 
 impl NamedPipeClient {
     /// Opens `name` for reading. The error carries the Win32 code, so a
@@ -148,12 +180,7 @@ impl NamedPipeClient {
 
     /// The PID of the process serving the other end.
     pub fn server_process_id(&self) -> io::Result<u32> {
-        let mut pid = 0;
-        // SAFETY: the handle is live; the out pointer is a local `u32`.
-        if unsafe { GetNamedPipeServerProcessId(self.0.as_raw(), &mut pid) } == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(pid)
+        named_pipe_server_process_id(self)
     }
 
     /// Reads one message into `buffer`, returning the byte count.

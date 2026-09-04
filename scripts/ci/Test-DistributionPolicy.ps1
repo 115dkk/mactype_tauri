@@ -183,11 +183,11 @@ $installedPackage = Get-Content -LiteralPath (
     Join-Path $root 'control-center\src-tauri\src\machine_integration\open_service\broker\installed_package.rs'
 ) -Raw
 foreach ($installedPackageToken in @(
-    'HKEY_LOCAL_MACHINE',
-    'RRF_SUBKEY_WOW6464KEY',
+    'RegistryRoot::LocalMachine',
+    'RegistryView::Native64',
     'SOFTWARE\MacType\ControlCenter',
     'InstallLocation',
-    'FOLDERID_ProgramFiles',
+    'KnownFolder::ProgramFiles',
     'reject_reparse_ancestors',
     'service-runtime\mactype-service-setup.exe',
     'service-runtime\payload\manifest.json',

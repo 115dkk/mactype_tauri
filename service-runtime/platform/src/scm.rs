@@ -7,27 +7,43 @@ use std::mem::size_of;
 use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Foundation::{
-    ERROR_SERVICE_ALREADY_RUNNING, ERROR_SERVICE_DOES_NOT_EXIST, ERROR_SERVICE_NOT_ACTIVE,
+    ERROR_INSUFFICIENT_BUFFER, ERROR_SERVICE_ALREADY_RUNNING, ERROR_SERVICE_DOES_NOT_EXIST,
+    ERROR_SERVICE_NOT_ACTIVE,
+};
+use windows_sys::Win32::Security::{
+    GetSecurityDescriptorControl, GetSecurityDescriptorLength, IsValidSecurityDescriptor,
+    DACL_SECURITY_INFORMATION, GROUP_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
+    SE_SELF_RELATIVE,
 };
 use windows_sys::Win32::System::Services::{
     ChangeServiceConfig2W, ChangeServiceConfigW, CloseServiceHandle, ControlService,
-    CreateServiceW, DeleteService, OpenSCManagerW, OpenServiceW, QueryServiceConfigW,
-    QueryServiceStatusEx, StartServiceW, QUERY_SERVICE_CONFIGW, SC_ACTION, SC_ACTION_RESTART,
-    SC_HANDLE, SC_MANAGER_CONNECT, SC_MANAGER_CREATE_SERVICE, SC_STATUS_PROCESS_INFO,
-    SERVICE_ALL_ACCESS, SERVICE_AUTO_START, SERVICE_CHANGE_CONFIG, SERVICE_CONFIG_DESCRIPTION,
-    SERVICE_CONFIG_FAILURE_ACTIONS, SERVICE_CONFIG_FAILURE_ACTIONS_FLAG, SERVICE_CONTINUE_PENDING,
-    SERVICE_CONTROL_STOP, SERVICE_DESCRIPTIONW, SERVICE_ERROR_NORMAL, SERVICE_FAILURE_ACTIONSW,
-    SERVICE_FAILURE_ACTIONS_FLAG, SERVICE_NO_CHANGE, SERVICE_PAUSED, SERVICE_PAUSE_PENDING,
-    SERVICE_QUERY_CONFIG, SERVICE_QUERY_STATUS, SERVICE_RUNNING, SERVICE_START,
-    SERVICE_START_PENDING, SERVICE_STATUS, SERVICE_STATUS_PROCESS, SERVICE_STOP, SERVICE_STOPPED,
-    SERVICE_STOP_PENDING, SERVICE_WIN32_OWN_PROCESS,
+    CreateServiceW, DeleteService, OpenSCManagerW, OpenServiceW, QueryServiceConfig2W,
+    QueryServiceConfigW, QueryServiceObjectSecurity, QueryServiceStatusEx, StartServiceW,
+    QUERY_SERVICE_CONFIGW, SC_ACTION, SC_ACTION_NONE, SC_ACTION_OWN_RESTART, SC_ACTION_REBOOT,
+    SC_ACTION_RESTART, SC_ACTION_RUN_COMMAND, SC_HANDLE, SC_MANAGER_CONNECT,
+    SC_MANAGER_CREATE_SERVICE, SC_STATUS_PROCESS_INFO, SERVICE_ALL_ACCESS, SERVICE_AUTO_START,
+    SERVICE_CHANGE_CONFIG, SERVICE_CONFIG_DELAYED_AUTO_START_INFO, SERVICE_CONFIG_DESCRIPTION,
+    SERVICE_CONFIG_FAILURE_ACTIONS, SERVICE_CONFIG_FAILURE_ACTIONS_FLAG,
+    SERVICE_CONFIG_PRESHUTDOWN_INFO, SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO,
+    SERVICE_CONFIG_SERVICE_SID_INFO, SERVICE_CONFIG_TRIGGER_INFO, SERVICE_CONTINUE_PENDING,
+    SERVICE_CONTROL_STOP, SERVICE_DELAYED_AUTO_START_INFO, SERVICE_DESCRIPTIONW,
+    SERVICE_ERROR_NORMAL, SERVICE_FAILURE_ACTIONSW, SERVICE_FAILURE_ACTIONS_FLAG,
+    SERVICE_NO_CHANGE, SERVICE_PAUSED, SERVICE_PAUSE_PENDING, SERVICE_PRESHUTDOWN_INFO,
+    SERVICE_QUERY_CONFIG, SERVICE_QUERY_STATUS, SERVICE_REQUIRED_PRIVILEGES_INFOW, SERVICE_RUNNING,
+    SERVICE_SID_INFO, SERVICE_START, SERVICE_START_PENDING, SERVICE_STATUS, SERVICE_STATUS_PROCESS,
+    SERVICE_STOP, SERVICE_STOPPED, SERVICE_STOP_PENDING, SERVICE_TRIGGER_INFO,
+    SERVICE_WIN32_OWN_PROCESS,
 };
 
 use crate::scm_response::ScmResponse;
 use crate::wide::wide_null;
 
 const MAX_SERVICE_DEPENDENCIES: usize = 256;
+const MAX_FAILURE_ACTIONS: usize = 64;
+const MAX_REQUIRED_PRIVILEGES: usize = 64;
+const MAX_SECURITY_DESCRIPTOR_BYTES: u32 = 64 * 1024;
 const SERVICE_DELETE: u32 = 0x0001_0000;
+const READ_CONTROL: u32 = 0x0002_0000;
 
 /// What the manager connection may do.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -42,6 +58,7 @@ pub enum ServiceAccess {
     QueryStatus,
     QueryConfig,
     QueryStatusAndConfig,
+    Inspect,
     Start,
     Stop,
     Reconfigure,
@@ -57,6 +74,7 @@ impl ServiceAccess {
             Self::QueryStatus => SERVICE_QUERY_STATUS,
             Self::QueryConfig => SERVICE_QUERY_CONFIG,
             Self::QueryStatusAndConfig => SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG,
+            Self::Inspect => SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG | READ_CONTROL,
             Self::Start => SERVICE_START | SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG,
             Self::Stop => SERVICE_STOP | SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG,
             Self::Reconfigure => {
@@ -129,6 +147,59 @@ pub struct ServiceConfig {
     pub load_order_group: String,
     pub tag_id: u32,
     pub dependencies: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FailureActions {
+    pub reset_period_seconds: u32,
+    pub reboot_message: Option<String>,
+    pub command: Option<String>,
+    pub actions: Vec<FailureAction>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FailureAction {
+    pub kind: FailureActionKind,
+    pub delay_ms: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FailureActionKind {
+    None,
+    Restart,
+    Reboot,
+    RunCommand,
+    OwnRestart,
+}
+
+impl FailureActionKind {
+    pub fn from_raw(value: i32) -> Option<Self> {
+        match value {
+            SC_ACTION_NONE => Some(Self::None),
+            SC_ACTION_RESTART => Some(Self::Restart),
+            SC_ACTION_REBOOT => Some(Self::Reboot),
+            SC_ACTION_RUN_COMMAND => Some(Self::RunCommand),
+            SC_ACTION_OWN_RESTART => Some(Self::OwnRestart),
+            _ => None,
+        }
+    }
+
+    pub fn as_raw(self) -> i32 {
+        match self {
+            Self::None => SC_ACTION_NONE,
+            Self::Restart => SC_ACTION_RESTART,
+            Self::Reboot => SC_ACTION_REBOOT,
+            Self::RunCommand => SC_ACTION_RUN_COMMAND,
+            Self::OwnRestart => SC_ACTION_OWN_RESTART,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TriggerInfo {
+    pub count: u32,
+    pub has_trigger_data: bool,
+    pub has_reserved_data: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -253,6 +324,168 @@ impl ServiceHandle {
             },
         )?;
         parse_config(&response)
+    }
+
+    fn config2(&self, level: u32, minimum_bytes: usize) -> io::Result<ScmResponse> {
+        ScmResponse::query(minimum_bytes, |buffer, capacity, needed| {
+            // SAFETY: the handle is live; `buffer` and `capacity` describe the
+            // response allocation or the documented null size probe, and
+            // `needed` is a local out value.
+            unsafe { QueryServiceConfig2W(self.0.as_raw(), level, buffer, capacity, needed) }
+        })
+    }
+
+    pub fn description(&self) -> io::Result<Option<String>> {
+        let response = self.config2(
+            SERVICE_CONFIG_DESCRIPTION,
+            size_of::<SERVICE_DESCRIPTIONW>(),
+        )?;
+        let description = response.header::<SERVICE_DESCRIPTIONW>()?;
+        strict_optional_text(&response, description.lpDescription)
+    }
+
+    pub fn failure_actions(&self) -> io::Result<FailureActions> {
+        let response = self.config2(
+            SERVICE_CONFIG_FAILURE_ACTIONS,
+            size_of::<SERVICE_FAILURE_ACTIONSW>(),
+        )?;
+        let failure = response.header::<SERVICE_FAILURE_ACTIONSW>()?;
+        let actions = response
+            .array::<SC_ACTION>(failure.lpsaActions, failure.cActions, MAX_FAILURE_ACTIONS)?
+            .into_iter()
+            .map(|action| {
+                let kind = FailureActionKind::from_raw(action.Type).ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "unsupported failure action")
+                })?;
+                Ok(FailureAction {
+                    kind,
+                    delay_ms: action.Delay,
+                })
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+        Ok(FailureActions {
+            reset_period_seconds: failure.dwResetPeriod,
+            reboot_message: strict_optional_text(&response, failure.lpRebootMsg)?,
+            command: strict_optional_text(&response, failure.lpCommand)?,
+            actions,
+        })
+    }
+
+    pub fn failure_actions_on_non_crash_failures(&self) -> io::Result<bool> {
+        let response = self.config2(
+            SERVICE_CONFIG_FAILURE_ACTIONS_FLAG,
+            size_of::<SERVICE_FAILURE_ACTIONS_FLAG>(),
+        )?;
+        Ok(response
+            .header::<SERVICE_FAILURE_ACTIONS_FLAG>()?
+            .fFailureActionsOnNonCrashFailures
+            != 0)
+    }
+
+    pub fn delayed_auto_start(&self) -> io::Result<bool> {
+        let response = self.config2(
+            SERVICE_CONFIG_DELAYED_AUTO_START_INFO,
+            size_of::<SERVICE_DELAYED_AUTO_START_INFO>(),
+        )?;
+        Ok(response
+            .header::<SERVICE_DELAYED_AUTO_START_INFO>()?
+            .fDelayedAutostart
+            != 0)
+    }
+
+    pub fn service_sid_type(&self) -> io::Result<u32> {
+        let response = self.config2(
+            SERVICE_CONFIG_SERVICE_SID_INFO,
+            size_of::<SERVICE_SID_INFO>(),
+        )?;
+        Ok(response.header::<SERVICE_SID_INFO>()?.dwServiceSidType)
+    }
+
+    pub fn required_privileges(&self) -> io::Result<Vec<String>> {
+        let response = self.config2(
+            SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO,
+            size_of::<SERVICE_REQUIRED_PRIVILEGES_INFOW>(),
+        )?;
+        let privileges = response.header::<SERVICE_REQUIRED_PRIVILEGES_INFOW>()?;
+        response
+            .multi_units(privileges.pmszRequiredPrivileges, MAX_REQUIRED_PRIVILEGES)?
+            .into_iter()
+            .map(|units| {
+                String::from_utf16(units).map_err(|_| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "required privilege is not valid UTF-16",
+                    )
+                })
+            })
+            .collect()
+    }
+
+    pub fn preshutdown_timeout_ms(&self) -> io::Result<u32> {
+        let response = self.config2(
+            SERVICE_CONFIG_PRESHUTDOWN_INFO,
+            size_of::<SERVICE_PRESHUTDOWN_INFO>(),
+        )?;
+        Ok(response
+            .header::<SERVICE_PRESHUTDOWN_INFO>()?
+            .dwPreshutdownTimeout)
+    }
+
+    pub fn trigger_info(&self) -> io::Result<TriggerInfo> {
+        let response = self.config2(
+            SERVICE_CONFIG_TRIGGER_INFO,
+            size_of::<SERVICE_TRIGGER_INFO>(),
+        )?;
+        let trigger = response.header::<SERVICE_TRIGGER_INFO>()?;
+        Ok(TriggerInfo {
+            count: trigger.cTriggers,
+            has_trigger_data: !trigger.pTriggers.is_null(),
+            has_reserved_data: !trigger.pReserved.is_null(),
+        })
+    }
+
+    pub fn object_security(&self) -> io::Result<Vec<u8>> {
+        let information =
+            OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
+        let mut needed = 0_u32;
+        // SAFETY: the handle is live; a null descriptor and zero capacity form
+        // the documented size probe, and `needed` is a local out value.
+        let result = unsafe {
+            QueryServiceObjectSecurity(self.0.as_raw(), information, null_mut(), 0, &mut needed)
+        };
+        let error = io::Error::last_os_error();
+        if result != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "service security size probe succeeded without a buffer",
+            ));
+        }
+        if error.raw_os_error() != Some(ERROR_INSUFFICIENT_BUFFER as i32) {
+            return Err(error);
+        }
+        if needed == 0 || needed > MAX_SECURITY_DESCRIPTOR_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "service security descriptor size is out of range",
+            ));
+        }
+
+        let mut descriptor = vec![0_u8; needed as usize];
+        // SAFETY: the handle is live; `descriptor` is writable for the capacity
+        // passed with it, and `needed` is a local out value.
+        if unsafe {
+            QueryServiceObjectSecurity(
+                self.0.as_raw(),
+                information,
+                descriptor.as_mut_ptr().cast(),
+                descriptor.len() as u32,
+                &mut needed,
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        validate_security_descriptor(descriptor)
     }
 
     pub fn start(&self) -> io::Result<StartOutcome> {
@@ -382,6 +615,56 @@ impl ServiceHandle {
     }
 }
 
+fn strict_optional_text(response: &ScmResponse, pointer: *const u16) -> io::Result<Option<String>> {
+    let Some(units) = response.wide_units(pointer)? else {
+        return Ok(None);
+    };
+    if units.is_empty() {
+        return Ok(None);
+    }
+    String::from_utf16(units).map(Some).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "service configuration string is not valid UTF-16",
+        )
+    })
+}
+
+fn validate_security_descriptor(mut descriptor: Vec<u8>) -> io::Result<Vec<u8>> {
+    let pointer = descriptor.as_mut_ptr().cast();
+    // SAFETY: `pointer` addresses the non-empty descriptor buffer returned by
+    // the SCM and remains live for the call.
+    if unsafe { IsValidSecurityDescriptor(pointer) } == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "service security descriptor is invalid",
+        ));
+    }
+    let mut control = 0_u16;
+    let mut revision = 0_u32;
+    // SAFETY: `pointer` addresses the validated live descriptor; both out
+    // pointers refer to local values.
+    if unsafe { GetSecurityDescriptorControl(pointer, &mut control, &mut revision) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if control & SE_SELF_RELATIVE == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "service security descriptor is not self-relative",
+        ));
+    }
+    // SAFETY: `pointer` addresses the validated live security descriptor.
+    let length = unsafe { GetSecurityDescriptorLength(pointer) } as usize;
+    if length == 0 || length > descriptor.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "service security descriptor length is out of range",
+        ));
+    }
+    descriptor.truncate(length);
+    Ok(descriptor)
+}
+
 fn parse_config(response: &ScmResponse) -> io::Result<ServiceConfig> {
     let config = response.header::<QUERY_SERVICE_CONFIGW>()?;
     let text = |pointer| -> io::Result<String> {
@@ -440,7 +723,8 @@ mod tests {
     use windows_sys::Win32::System::Services::QUERY_SERVICE_CONFIGW;
 
     use super::{
-        parse_config, ServiceAccess, ServiceControlManager, ServiceManagerAccess, ServiceState,
+        parse_config, FailureActionKind, ServiceAccess, ServiceControlManager,
+        ServiceManagerAccess, ServiceState,
     };
     use crate::scm_response::ScmResponse;
 
@@ -542,6 +826,44 @@ mod tests {
         let byte_length = size_of_val(words.as_slice());
         let response = ScmResponse::from_words(words, byte_length);
         assert!(parse_config(&response).is_err());
+    }
+
+    #[test]
+    fn failure_action_kinds_round_trip() {
+        for kind in [
+            FailureActionKind::None,
+            FailureActionKind::Restart,
+            FailureActionKind::Reboot,
+            FailureActionKind::RunCommand,
+            FailureActionKind::OwnRestart,
+        ] {
+            assert_eq!(FailureActionKind::from_raw(kind.as_raw()), Some(kind));
+        }
+        assert_eq!(FailureActionKind::from_raw(i32::MAX), None);
+    }
+
+    #[test]
+    fn event_log_reports_every_optional_configuration_and_its_security() {
+        let manager = ServiceControlManager::connect(ServiceManagerAccess::Connect).unwrap();
+        let service = manager
+            .open("EventLog", ServiceAccess::Inspect)
+            .unwrap()
+            .expect("the Windows Event Log service exists");
+
+        assert!(service
+            .description()
+            .unwrap()
+            .is_some_and(|text| !text.is_empty()));
+        service.failure_actions().unwrap();
+        service.failure_actions_on_non_crash_failures().unwrap();
+        service.delayed_auto_start().unwrap();
+        service.service_sid_type().unwrap();
+        assert!(!service.required_privileges().unwrap().is_empty());
+        service.preshutdown_timeout_ms().unwrap();
+        service.trigger_info().unwrap();
+        let security = service.object_security().unwrap();
+        assert!(!security.is_empty());
+        assert!(security.len() < 64 * 1024);
     }
 
     #[test]

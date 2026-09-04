@@ -218,7 +218,7 @@
   "profiles.closeNative": "ネイティブウィンドウを閉じる",
   "profiles.openNative": "ネイティブウィンドウで開く",
   "profiles.nativeDisplayMode": "表示方式",
-  "profiles.nativeDisplayDefault": "標準表示",
+  "profiles.nativeDisplayDefault": "見本",
   "profiles.nativeDisplayListing": "一覧表示",
   "group.basic.label": "基本設定",
   "group.basic.description": "ヒンティング、カーニング、フォントの読み込みを設定します。",
@@ -723,5 +723,17 @@
   "studio.sourceA": "A",
   "studio.sourceB": "B",
   "profiles.invertColours": "色を反転",
-  "studio.palette.auto": "テーマに合わせる"
+  "studio.palette.auto": "テーマに合わせる",
+  "profiles.nativeDisplayLadder": "サイズの段階",
+  "profiles.nativeDisplayCompare": "Windows と比較",
+  "native.title": "MacType 実表示プレビュー",
+  "native.loupe": "ルーペ",
+  "native.topmost": "常に手前",
+  "native.copy": "コピー",
+  "native.compareMacType": "MacType",
+  "native.compareUnavailable": "このウィンドウでは Windows のレンダリングを表示できません。",
+  "native.engineMacType": "MacType 適用",
+  "native.coreVersion": "コア {version}",
+  "native.saved": "保存しました。",
+  "native.copied": "コピーしました。"
 }

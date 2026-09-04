@@ -10,6 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { NativePreviewMode, PreviewRequest, PreviewResult } from "../../app/model";
+import { nativePreviewLabels, NATIVE_LADDER_SIZES } from "../../features/preview/nativePreviewLabels";
 import { useAppTheme } from "../../app/useAppTheme";
 import {
   forcePreviewCrashForCi,
@@ -181,7 +182,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
   const [sampleText, setSampleText] = useState(() => t("profiles.sampleText"));
   const [previewStack, setPreviewStack] = useState<ReadonlyArray<PreviewLine>>([]);
   const [nativeVisible, setNativeVisible] = useState(false);
-  const [nativeMode, setNativeMode] = useState<NativePreviewMode>("default");
+  const [nativeMode, setNativeMode] = useState<NativePreviewMode>("sample");
   const [previewHeight, setPreviewHeight] = useState(DEFAULT_PREVIEW_HEIGHT);
   const [sampleWidth, setSampleWidth] = useState(0);
   const [sampleEditorOpen, setSampleEditorOpen] = useState(false);
@@ -407,16 +408,25 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
   const applyNativePreview = useCallback(async (visible: boolean, mode: NativePreviewMode, dark: boolean) => {
     const requestGeneration = generation.current;
     try {
-      const nowVisible = await setNativePreview(visible, {
-        mode,
+      const state = await setNativePreview(visible, {
+        displayMode: mode,
+        text: sampleText,
         listingText: t("profiles.samplePangram"),
+        fontFace,
+        fontSizePt: fontSize,
+        bold: false,
+        italic: false,
         ...previewPalette(dark),
+        theme,
+        inverted,
+        sizes: NATIVE_LADDER_SIZES,
+        labels: nativePreviewLabels(t),
       });
-      if (isCurrentGeneration(requestGeneration)) setNativeVisible(nowVisible);
+      if (isCurrentGeneration(requestGeneration)) setNativeVisible(state.visible);
     } catch (caught: unknown) {
       if (isCurrentGeneration(requestGeneration)) onError(errorMessage(caught));
     }
-  }, [isCurrentGeneration, onError, t]);
+  }, [fontFace, fontSize, inverted, isCurrentGeneration, onError, sampleText, t, theme]);
 
   const toggleNativePreview = () => applyNativePreview(!nativeVisible, nativeMode, darkPreview);
 
@@ -425,6 +435,14 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
     setNativeMode(mode);
     if (nativeVisible) void applyNativePreview(true, mode, darkPreview);
   };
+
+  /* An open native window follows the font, size and sample the reader is
+     looking at here; the window's own controls take over once they are used. */
+  useEffect(() => {
+    if (nativeVisible) void applyNativePreview(true, nativeMode, darkPreview);
+    // Font, size and sample changes only; the toggles call applyNativePreview themselves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fontFace, fontSize, sampleText]);
 
   /* An open native window follows the polarity choice without reopening. */
   const toggleInverted = () => {
@@ -503,8 +521,10 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
       {error && <p className="inline-error"><AlertTriangle aria-hidden="true" size={15} /> {error}</p>}
       <div className="preview-footer">
         <button aria-pressed={comparing} className="text-action" disabled={!hasUnsavedEdits} onClick={() => setComparing((current) => !current)} title={hasUnsavedEdits ? undefined : t("profiles.compareUnavailable")} type="button"><Columns2 aria-hidden="true" size={14} /> {t("profiles.compareToggle")}</button>
-        <select aria-label={t("profiles.nativeDisplayMode")} onChange={(event) => changeNativeMode(event.target.value === "listing" ? "listing" : "default")} value={nativeMode}>
-          <option value="default">{t("profiles.nativeDisplayDefault")}</option>
+        <select aria-label={t("profiles.nativeDisplayMode")} onChange={(event) => changeNativeMode(event.target.value as NativePreviewMode)} value={nativeMode}>
+          <option value="sample">{t("profiles.nativeDisplayDefault")}</option>
+          <option value="ladder">{t("profiles.nativeDisplayLadder")}</option>
+          <option value="compare">{t("profiles.nativeDisplayCompare")}</option>
           <option value="listing">{t("profiles.nativeDisplayListing")}</option>
         </select>
         <button className="text-action" onClick={() => void toggleNativePreview()} type="button">{nativeVisible ? t("profiles.closeNative") : t("profiles.openNative")}</button>

@@ -11,6 +11,7 @@ import type {
   LaunchContext,
   ManualLaunchCandidate,
   NativePreviewOptions,
+  NativePreviewState,
   PreviewRequest,
   PreviewResult,
   ProfileEntry,
@@ -219,7 +220,7 @@ export async function renderProfilePreview(request: PreviewRequest): Promise<Pre
   return getRuntimeAdapter().renderProfilePreview(request);
 }
 
-export async function setNativePreview(visible: boolean, options?: NativePreviewOptions): Promise<boolean> {
+export async function setNativePreview(visible: boolean, options?: NativePreviewOptions): Promise<NativePreviewState> {
   return getRuntimeAdapter().setNativePreview(visible, options);
 }
 

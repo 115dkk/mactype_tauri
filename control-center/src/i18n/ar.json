@@ -218,7 +218,7 @@
   "profiles.closeNative": "إغلاق النافذة الأصلية",
   "profiles.openNative": "فتح في نافذة أصلية",
   "profiles.nativeDisplayMode": "وضع العرض",
-  "profiles.nativeDisplayDefault": "العرض الافتراضي",
+  "profiles.nativeDisplayDefault": "عيّنة",
   "profiles.nativeDisplayListing": "عرض القائمة",
   "group.basic.label": "الإعدادات الأساسية",
   "group.basic.description": "اضبط تلميح الخطوط وتقارب الأحرف وتحميل الخطوط.",
@@ -723,5 +723,17 @@
   "studio.sourceA": "A",
   "studio.sourceB": "B",
   "profiles.invertColours": "عكس الألوان",
-  "studio.palette.auto": "حسب السمة"
+  "studio.palette.auto": "حسب السمة",
+  "profiles.nativeDisplayLadder": "سلّم الأحجام",
+  "profiles.nativeDisplayCompare": "مقارنة مع Windows",
+  "native.title": "معاينة MacType الحقيقية",
+  "native.loupe": "عدسة مكبّرة",
+  "native.topmost": "دائمًا في المقدمة",
+  "native.copy": "نسخ",
+  "native.compareMacType": "MacType",
+  "native.compareUnavailable": "لا يمكن عرض عرض Windows في هذه النافذة.",
+  "native.engineMacType": "تم تطبيق MacType",
+  "native.coreVersion": "النواة {version}",
+  "native.saved": "تم الحفظ.",
+  "native.copied": "تم النسخ."
 }

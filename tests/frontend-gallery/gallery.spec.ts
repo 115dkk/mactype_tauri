@@ -342,13 +342,21 @@ test("native preview display mode dropdown drives the runtime adapter", async ({
 
   const modeSelect = page.getByRole("combobox", { name: "표시 방식" });
   await expect(modeSelect).toBeVisible();
-  await expect(modeSelect.locator("option")).toHaveText(["기본 표시", "나열 표시"]);
+  await expect(modeSelect.locator("option")).toHaveText(["견본", "크기 사다리", "Windows와 비교", "나열 표시"]);
 
   const nativePreviewState = () => page.evaluate(() => window.sessionStorage.getItem("gallery-native-preview"));
   const nativePreviewBackground = () => page.evaluate(() => window.sessionStorage.getItem("gallery-native-preview-background"));
   await page.getByRole("button", { name: "실제 창에서 보기" }).click();
-  await expect.poll(nativePreviewState).toBe("default");
+  await expect.poll(nativePreviewState).toBe("sample");
   await expect.poll(nativePreviewBackground).toBe("#EEF1F4");
+  /* The window draws its own chrome from the strings the Control Center hands over. */
+  const nativeOptions = await page.evaluate(() => JSON.parse(window.sessionStorage.getItem("gallery-native-preview-options") ?? "{}") as { labels?: Record<string, string>; sizes?: number[]; fontFace?: string; theme?: string });
+  expect(nativeOptions.labels?.title).toBe("MacType 실제 미리보기");
+  expect(nativeOptions.labels?.invert).toBe("색 반전");
+  expect(nativeOptions.sizes?.length).toBeGreaterThan(5);
+  expect(nativeOptions.theme).toBe("light");
+  await modeSelect.selectOption("ladder");
+  await expect.poll(nativePreviewState).toBe("ladder");
   // The background choice reaches the open window without reopening it, and it
   // survives a display-mode change.
   await page.getByRole("button", { name: "색 반전" }).click();

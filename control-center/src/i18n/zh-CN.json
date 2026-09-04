@@ -218,7 +218,7 @@
   "profiles.closeNative": "关闭原生窗口",
   "profiles.openNative": "在原生窗口中打开",
   "profiles.nativeDisplayMode": "显示方式",
-  "profiles.nativeDisplayDefault": "默认显示",
+  "profiles.nativeDisplayDefault": "样张",
   "profiles.nativeDisplayListing": "列表显示",
   "group.basic.label": "基本设置",
   "group.basic.description": "配置字体微调、字距调整和字体加载方式。",
@@ -723,5 +723,17 @@
   "studio.sourceA": "A",
   "studio.sourceB": "B",
   "profiles.invertColours": "反转颜色",
-  "studio.palette.auto": "跟随主题"
+  "studio.palette.auto": "跟随主题",
+  "profiles.nativeDisplayLadder": "字号阶梯",
+  "profiles.nativeDisplayCompare": "与 Windows 比较",
+  "native.title": "MacType 实际预览",
+  "native.loupe": "放大镜",
+  "native.topmost": "总在最前",
+  "native.copy": "复制",
+  "native.compareMacType": "MacType",
+  "native.compareUnavailable": "此窗口无法显示 Windows 渲染。",
+  "native.engineMacType": "已应用 MacType",
+  "native.coreVersion": "核心 {version}",
+  "native.saved": "已保存。",
+  "native.copied": "已复制。"
 }

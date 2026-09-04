@@ -7,6 +7,7 @@ import {
   type LaunchContext,
   type ManualLaunchCandidate,
   type NativePreviewOptions,
+  type NativePreviewState,
   type ProfileEntry,
   type PreviewRequest,
   type PreviewResult,
@@ -370,10 +371,22 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
     return new Promise((resolve) => window.setTimeout(() => resolve(result), delay));
   },
 
-  setNativePreview(visible: boolean, options?: NativePreviewOptions): Promise<boolean> {
-    window.sessionStorage.setItem("gallery-native-preview", visible ? options?.mode ?? "default" : "hidden");
+  setNativePreview(visible: boolean, options?: NativePreviewOptions): Promise<NativePreviewState> {
+    const mode = options?.displayMode ?? "sample";
+    window.sessionStorage.setItem("gallery-native-preview", visible ? mode : "hidden");
     window.sessionStorage.setItem("gallery-native-preview-background", visible ? options?.background ?? "" : "hidden");
-    return Promise.resolve(visible);
+    window.sessionStorage.setItem("gallery-native-preview-options", JSON.stringify(options ?? {}));
+    return Promise.resolve({
+      visible,
+      displayMode: mode,
+      background: options?.background ?? "#EEF1F4",
+      foreground: options?.foreground ?? "#181D23",
+      inverted: options?.inverted ?? false,
+      zoom: options?.zoom ?? 1,
+      fontFace: options?.fontFace ?? "Segoe UI",
+      fontSizePt: options?.fontSizePt ?? 14,
+      topmost: false,
+    });
   },
 
   openPreviewStudio(): Promise<void> {

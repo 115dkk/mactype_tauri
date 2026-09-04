@@ -218,7 +218,7 @@
   "profiles.closeNative": "Close native window",
   "profiles.openNative": "Open in native window",
   "profiles.nativeDisplayMode": "Display mode",
-  "profiles.nativeDisplayDefault": "Default view",
+  "profiles.nativeDisplayDefault": "Sample",
   "profiles.nativeDisplayListing": "Listing view",
   "group.basic.label": "Basic settings",
   "group.basic.description": "Configure hinting, kerning, and font loading.",
@@ -723,5 +723,17 @@
   "studio.sourceA": "A",
   "studio.sourceB": "B",
   "profiles.invertColours": "Invert colours",
-  "studio.palette.auto": "Match theme"
+  "studio.palette.auto": "Match theme",
+  "profiles.nativeDisplayLadder": "Size ladder",
+  "profiles.nativeDisplayCompare": "Compare with Windows",
+  "native.title": "MacType live preview",
+  "native.loupe": "Loupe",
+  "native.topmost": "Always on top",
+  "native.copy": "Copy",
+  "native.compareMacType": "MacType",
+  "native.compareUnavailable": "Windows rendering cannot be shown in this window.",
+  "native.engineMacType": "MacType applied",
+  "native.coreVersion": "Core {version}",
+  "native.saved": "Saved.",
+  "native.copied": "Copied."
 }

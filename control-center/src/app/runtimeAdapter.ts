@@ -11,6 +11,7 @@ import type {
   LaunchContext,
   ManualLaunchCandidate,
   NativePreviewOptions,
+  NativePreviewState,
   PreviewRequest,
   PreviewResult,
   ProfileEntry,
@@ -75,7 +76,7 @@ export interface ControlCenterRuntimeAdapter {
   revealProfileFile(): Promise<string>;
   saveProfile(): Promise<ProfileSnapshot | null>;
   renderProfilePreview(request: PreviewRequest): Promise<PreviewResult | null>;
-  setNativePreview(visible: boolean, options?: NativePreviewOptions): Promise<boolean>;
+  setNativePreview(visible: boolean, options?: NativePreviewOptions): Promise<NativePreviewState>;
   openPreviewStudio(): Promise<void>;
   closePreviewStudio(): Promise<void>;
   pickPngExportPath(filterName: string, defaultName: string): Promise<string | null>;

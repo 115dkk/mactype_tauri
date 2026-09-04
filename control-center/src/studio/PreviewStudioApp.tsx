@@ -6,6 +6,7 @@ import { useAppTheme } from "../app/useAppTheme";
 import { Segmented } from "../components/Segmented";
 import { SwitchControl } from "../components/SwitchControl";
 import { WindowTitleBar } from "../components/WindowTitleBar";
+import { nativePreviewLabels } from "../features/preview/nativePreviewLabels";
 import { useSpecimenRenders } from "../features/preview/useSpecimenRenders";
 import { useI18n } from "../i18n/i18n";
 import { requestStudioDocument, subscribeStudioDocument } from "./studioBridge";
@@ -185,7 +186,18 @@ export function PreviewStudioApp() {
   };
   const showNative = async () => {
     try {
-      await setNativePreview(true, { mode: "default", listingText: studioText(settings), ...palette });
+      await setNativePreview(true, {
+        displayMode: "sample",
+        text: studioText(settings),
+        listingText: studioText(settings).split("\n")[0],
+        fontFace: settings.fonts[0],
+        fontSizePt: settings.sizes[0],
+        ...palette,
+        theme,
+        inverted: settings.inverted,
+        sizes: settings.sizes,
+        labels: nativePreviewLabels(t),
+      });
     } catch (caught: unknown) {
       setExportMessage(caught instanceof Error ? caught.message : String(caught));
     }

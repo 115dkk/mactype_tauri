@@ -218,7 +218,7 @@
   "profiles.closeNative": "Fechar janela nativa",
   "profiles.openNative": "Abrir numa janela nativa",
   "profiles.nativeDisplayMode": "Modo de exibição",
-  "profiles.nativeDisplayDefault": "Vista padrão",
+  "profiles.nativeDisplayDefault": "Amostra",
   "profiles.nativeDisplayListing": "Vista em lista",
   "group.basic.label": "Definições básicas",
   "group.basic.description": "Configure o hinting, o kerning e o carregamento de tipos de letra.",
@@ -723,5 +723,17 @@
   "studio.sourceA": "A",
   "studio.sourceB": "B",
   "profiles.invertColours": "Inverter cores",
-  "studio.palette.auto": "Conforme o tema"
+  "studio.palette.auto": "Conforme o tema",
+  "profiles.nativeDisplayLadder": "Escala de tamanhos",
+  "profiles.nativeDisplayCompare": "Comparar com o Windows",
+  "native.title": "Pré-visualização real do MacType",
+  "native.loupe": "Lupa",
+  "native.topmost": "Sempre visível",
+  "native.copy": "Copiar",
+  "native.compareMacType": "MacType",
+  "native.compareUnavailable": "A renderização do Windows não pode ser mostrada nesta janela.",
+  "native.engineMacType": "MacType aplicado",
+  "native.coreVersion": "Núcleo {version}",
+  "native.saved": "Guardado.",
+  "native.copied": "Copiado."
 }

@@ -229,15 +229,40 @@ export interface PreviewRequest {
   engine?: PreviewEngine;
 }
 
-/** How the helper-owned native preview window renders its content. */
-export type NativePreviewMode = "default" | "listing";
+/** How the helper-owned native preview window lays out its canvas. */
+export type NativePreviewMode = "sample" | "ladder" | "compare" | "listing";
 
-/** Presentation for the native window, independent of the rendered strips. */
+/** Everything the native window needs; omitted fields keep the window's previous value. */
 export interface NativePreviewOptions {
-  mode?: NativePreviewMode;
+  displayMode?: NativePreviewMode;
+  text?: string;
   listingText?: string;
+  fontFace?: string;
+  fontSizePt?: number;
+  bold?: boolean;
+  italic?: boolean;
   foreground?: string;
   background?: string;
+  theme?: "light" | "dark";
+  inverted?: boolean;
+  zoom?: 1 | 2 | 4;
+  sizes?: ReadonlyArray<number>;
+  labels?: Readonly<Record<string, string>>;
+}
+
+/** What the native window reports after a show or hide request. */
+export interface NativePreviewState {
+  visible: boolean;
+  displayMode: NativePreviewMode;
+  background: string;
+  foreground?: string;
+  inverted?: boolean;
+  zoom?: number;
+  fontFace?: string;
+  fontSizePt?: number;
+  bold?: boolean;
+  italic?: boolean;
+  topmost?: boolean;
 }
 
 export interface PreviewResult {

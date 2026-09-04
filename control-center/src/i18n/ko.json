@@ -218,7 +218,7 @@
   "profiles.closeNative": "실제 창 닫기",
   "profiles.openNative": "실제 창에서 보기",
   "profiles.nativeDisplayMode": "표시 방식",
-  "profiles.nativeDisplayDefault": "기본 표시",
+  "profiles.nativeDisplayDefault": "견본",
   "profiles.nativeDisplayListing": "나열 표시",
   "group.basic.label": "기본 설정",
   "group.basic.description": "힌팅, 커닝과 글꼴 로딩 방식을 설정합니다.",
@@ -723,5 +723,17 @@
   "studio.sourceA": "A",
   "studio.sourceB": "B",
   "profiles.invertColours": "색 반전",
-  "studio.palette.auto": "테마에 맞춤"
+  "studio.palette.auto": "테마에 맞춤",
+  "profiles.nativeDisplayLadder": "크기 사다리",
+  "profiles.nativeDisplayCompare": "Windows와 비교",
+  "native.title": "MacType 실제 미리보기",
+  "native.loupe": "확대경",
+  "native.topmost": "항상 위",
+  "native.copy": "복사",
+  "native.compareMacType": "MacType",
+  "native.compareUnavailable": "이 창에서는 Windows 렌더링을 끌 수 없습니다.",
+  "native.engineMacType": "MacType 적용",
+  "native.coreVersion": "코어 {version}",
+  "native.saved": "저장했습니다.",
+  "native.copied": "복사했습니다."
 }

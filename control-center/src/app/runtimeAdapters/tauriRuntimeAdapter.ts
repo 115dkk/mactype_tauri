@@ -15,6 +15,7 @@ import type {
   LaunchContext,
   ManualLaunchCandidate,
   NativePreviewOptions,
+  NativePreviewState,
   PreviewRequest,
   PreviewResult,
   ProfileEntry,
@@ -125,12 +126,9 @@ export const tauriRuntimeAdapter: ControlCenterRuntimeAdapter = {
     sample: request.sample,
     engine: request.engine ?? "mactype",
   }),
-  setNativePreview: (visible: boolean, options?: NativePreviewOptions) => invoke<boolean>("set_native_preview", {
+  setNativePreview: (visible: boolean, options?: NativePreviewOptions) => invoke<NativePreviewState>("set_native_preview", {
     visible,
-    mode: options?.mode ?? null,
-    listingText: options?.listingText ?? null,
-    foreground: options?.foreground ?? null,
-    background: options?.background ?? null,
+    options: options ?? null,
   }),
   async openPreviewStudio(): Promise<void> {
     await invoke("open_preview_studio");

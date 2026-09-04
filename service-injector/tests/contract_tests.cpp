@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
@@ -415,6 +416,30 @@ bool fixed_module_identity_is_an_exact_normalized_full_path() {
                                LR"(C:\Program Files\MacType\MacType64.dll)");
 }
 
+bool transient_inventory_failures_are_retried_only_within_the_bound() {
+    using mactype::injector::inventory_failure_is_transient;
+    using mactype::injector::inventory_retry_action;
+    using mactype::injector::kInventoryRetryBudget;
+    using mactype::injector::InventoryRetry;
+    using std::chrono::milliseconds;
+    constexpr milliseconds just_inside = kInventoryRetryBudget - milliseconds{1};
+    return inventory_failure_is_transient(ERROR_PARTIAL_COPY) &&
+           !inventory_failure_is_transient(ERROR_ACCESS_DENIED) &&
+           !inventory_failure_is_transient(ERROR_SUCCESS) &&
+           inventory_retry_action(ERROR_PARTIAL_COPY, milliseconds{0}, false) ==
+               InventoryRetry::Retry &&
+           inventory_retry_action(ERROR_PARTIAL_COPY, just_inside, false) ==
+               InventoryRetry::Retry &&
+           inventory_retry_action(ERROR_PARTIAL_COPY, kInventoryRetryBudget, false) ==
+               InventoryRetry::GiveUp &&
+           inventory_retry_action(ERROR_PARTIAL_COPY, milliseconds{0}, true) ==
+               InventoryRetry::GiveUp &&
+           inventory_retry_action(ERROR_ACCESS_DENIED, milliseconds{0}, false) ==
+               InventoryRetry::GiveUp &&
+           inventory_retry_action(ERROR_SUCCESS, milliseconds{0}, false) ==
+               InventoryRetry::GiveUp;
+}
+
 }  // namespace
 
 int wmain() {
@@ -465,6 +490,10 @@ int wmain() {
     if (!fixed_module_identity_is_an_exact_normalized_full_path()) {
         std::cerr << "fixed module identity accepted a basename or suffix match\n";
         return 9;
+    }
+    if (!transient_inventory_failures_are_retried_only_within_the_bound()) {
+        std::cerr << "transient module inventory failures were not retried within the bound\n";
+        return 13;
     }
     return 0;
 }

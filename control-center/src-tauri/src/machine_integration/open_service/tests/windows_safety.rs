@@ -28,12 +28,11 @@ fn marker_layout_explicitly_rejects_native_arm64() {
 #[cfg(windows)]
 #[test]
 fn privileged_descendant_job_kills_a_running_child_when_its_owner_disappears() {
-    use std::os::windows::{io::AsRawHandle, process::CommandExt};
+    use mactype_service_platform::{Process, WaitOutcome};
+    use std::os::windows::process::CommandExt;
     use std::process::{Command, Stdio};
-    use windows_sys::Win32::{
-        Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT},
-        System::Threading::{WaitForSingleObject, CREATE_NO_WINDOW},
-    };
+    use std::time::Duration;
+    use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
     let job = windows::KillOnCloseJob::new().unwrap();
     assert!(job.kill_on_close_enabled().unwrap());
@@ -45,17 +44,18 @@ fn privileged_descendant_job_kills_a_running_child_when_its_owner_disappears() {
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()
         .unwrap();
-    job.assign(child.as_raw_handle().cast()).unwrap();
+    let process = Process::from_child(&child).unwrap();
+    job.assign(&process).unwrap();
     assert_eq!(
-        unsafe { WaitForSingleObject(child.as_raw_handle().cast(), 0) },
-        WAIT_TIMEOUT
+        process.wait(Some(Duration::ZERO)).unwrap(),
+        WaitOutcome::TimedOut
     );
 
     drop(job);
 
     assert_eq!(
-        unsafe { WaitForSingleObject(child.as_raw_handle().cast(), 2_000) },
-        WAIT_OBJECT_0
+        process.wait(Some(Duration::from_secs(2))).unwrap(),
+        WaitOutcome::Signaled
     );
     child.wait().unwrap();
 }

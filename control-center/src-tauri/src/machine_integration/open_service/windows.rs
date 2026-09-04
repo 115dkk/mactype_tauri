@@ -4,6 +4,7 @@ use mactype_service_contract::{
     MigrationPinnedRuntime, MigrationRuntimePin, IMMUTABLE_RUNTIME_FILES,
     MAX_MIGRATION_RUNTIME_PIN_BYTES, MAX_PROFILE_BYTES, MAX_RUNTIME_FILE_BYTES,
 };
+use mactype_service_platform::{KnownFolder, MachineKind, Process, ProcessAccess};
 use serde::Deserialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -21,8 +22,7 @@ use windows_sys::Win32::{
         IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_ARM64, IMAGE_FILE_MACHINE_I386,
         IMAGE_FILE_MACHINE_UNKNOWN,
     },
-    System::Threading::{GetCurrentProcess, IsWow64Process2, CREATE_NO_WINDOW},
-    UI::Shell::{FOLDERID_ProgramData, FOLDERID_ProgramFiles, FOLDERID_Windows},
+    System::Threading::CREATE_NO_WINDOW,
 };
 
 #[cfg(test)]
@@ -80,6 +80,6 @@ use super::broker::{
 };
 pub(super) use super::broker::{run_elevated, run_elevated_at, run_privileged};
 use super::platform::{
-    known_folder, read_health_for_scm_process, running_service_process_id, safe_version, wide,
+    known_folder, read_health_for_scm_process, running_service_process_id, safe_version,
 };
 pub(super) use super::platform::{query, reveal_system_service};

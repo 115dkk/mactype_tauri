@@ -224,23 +224,7 @@ fn restore_optional_file(path: &Path, bytes: Option<&[u8]>) -> Result<(), String
 }
 
 fn replace_file_atomic(source: &Path, destination: &Path) -> Result<(), String> {
-    use windows_sys::Win32::Storage::FileSystem::{
-        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
-    };
-    let source = wide(source.as_os_str());
-    let destination = wide(destination.as_os_str());
-    if unsafe {
-        MoveFileExW(
-            source.as_ptr(),
-            destination.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    } == 0
-    {
-        Err(std::io::Error::last_os_error().to_string())
-    } else {
-        Ok(())
-    }
+    mactype_service_platform::replace_file(source, destination).map_err(|error| error.to_string())
 }
 
 fn remove_receipted_generation_directories(

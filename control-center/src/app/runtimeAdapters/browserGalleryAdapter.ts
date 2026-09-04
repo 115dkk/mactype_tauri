@@ -392,6 +392,18 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
     });
   },
 
+  /* The gallery stands in for the window: a test dispatches
+     `gallery-native-preview-state` with the state as `detail`. */
+  subscribeNativePreview(listener: (state: NativePreviewState) => void): () => void {
+    const handler = (event: Event) => {
+      const state = (event as CustomEvent<NativePreviewState>).detail;
+      if (!state.visible) window.sessionStorage.setItem("gallery-native-preview", "hidden");
+      listener(state);
+    };
+    window.addEventListener("gallery-native-preview-state", handler);
+    return () => window.removeEventListener("gallery-native-preview-state", handler);
+  },
+
   openPreviewStudio(): Promise<void> {
     window.sessionStorage.setItem("gallery-preview-studio", "open");
     return Promise.resolve();

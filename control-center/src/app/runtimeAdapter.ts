@@ -77,6 +77,8 @@ export interface ControlCenterRuntimeAdapter {
   saveProfile(): Promise<ProfileSnapshot | null>;
   renderProfilePreview(request: PreviewRequest): Promise<PreviewResult | null>;
   setNativePreview(visible: boolean, options?: NativePreviewOptions): Promise<NativePreviewState>;
+  /** Calls the listener when the native window changes state on its own (Escape, close); returns an unsubscribe. */
+  subscribeNativePreview(listener: (state: NativePreviewState) => void): () => void;
   openPreviewStudio(): Promise<void>;
   closePreviewStudio(): Promise<void>;
   pickPngExportPath(filterName: string, defaultName: string): Promise<string | null>;

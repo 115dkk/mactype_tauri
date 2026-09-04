@@ -224,6 +224,10 @@ export async function setNativePreview(visible: boolean, options?: NativePreview
   return getRuntimeAdapter().setNativePreview(visible, options);
 }
 
+export function subscribeNativePreview(listener: (state: NativePreviewState) => void): () => void {
+  return getRuntimeAdapter().subscribeNativePreview(listener);
+}
+
 export async function openPreviewStudio(): Promise<void> {
   return getRuntimeAdapter().openPreviewStudio();
 }

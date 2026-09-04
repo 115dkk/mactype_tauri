@@ -372,6 +372,13 @@ test("native preview display mode dropdown drives the runtime adapter", async ({
   await page.getByRole("button", { name: "색 반전" }).click();
   await expect.poll(async () => (await nativeOptions()).inverted).toBe(false);
   await expect.poll(nativePreviewBackground).toBe("#EEF1F4");
+  // The window hiding itself (Escape, close button) flips the toggle without a click.
+  await expect(page.getByRole("button", { name: "실제 창 닫기" })).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("gallery-native-preview-state", { detail: { visible: false, displayMode: "listing", background: "#EEF1F4" } })));
+  await expect(page.getByRole("button", { name: "실제 창에서 보기" })).toBeVisible();
+  await expect.poll(nativePreviewState).toBe("hidden");
+  await page.getByRole("button", { name: "실제 창에서 보기" }).click();
+  await expect.poll(nativePreviewState).toBe("listing");
   await page.getByRole("button", { name: "실제 창 닫기" }).click();
   await expect.poll(nativePreviewState).toBe("hidden");
   expect(await overflowingElements(page)).toEqual([]);

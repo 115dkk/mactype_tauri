@@ -130,6 +130,18 @@ export const tauriRuntimeAdapter: ControlCenterRuntimeAdapter = {
     visible,
     options: options ?? null,
   }),
+  subscribeNativePreview(listener: (state: NativePreviewState) => void): () => void {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    void listen<NativePreviewState>("native-preview:state", (event) => listener(event.payload)).then((stop) => {
+      if (disposed) stop();
+      else unlisten = stop;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  },
   async openPreviewStudio(): Promise<void> {
     await invoke("open_preview_studio");
   },

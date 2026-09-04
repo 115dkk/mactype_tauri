@@ -19,6 +19,7 @@ import {
   renderProfilePreview,
   reportFrontendFailure,
   setNativePreview,
+  subscribeNativePreview,
   verifyProfileWorkflowForCi,
 } from "../../app/tauri";
 import type { I18nValue } from "../../i18n/i18n";
@@ -184,6 +185,9 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
   const [previewStack, setPreviewStack] = useState<ReadonlyArray<PreviewLine>>([]);
   const [nativeVisible, setNativeVisible] = useState(false);
   const [nativeMode, setNativeMode] = useState<NativePreviewMode>("sample");
+  /* Escape or the close button hides the window on its own; the toggle
+     follows the state the window reports instead of waiting for a click. */
+  useEffect(() => subscribeNativePreview((state) => setNativeVisible(state.visible)), []);
   const [previewHeight, setPreviewHeight] = useState(DEFAULT_PREVIEW_HEIGHT);
   const [sampleWidth, setSampleWidth] = useState(0);
   const [sampleEditorOpen, setSampleEditorOpen] = useState(false);

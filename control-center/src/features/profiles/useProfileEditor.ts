@@ -8,6 +8,8 @@ import type { PreviewVariant, ProfilePreviewHandle } from "../../pages/profiles/
 import { useProfileDocument } from "../../pages/profiles/useProfileDocument";
 import { useStepHistory } from "../../pages/profiles/useStepHistory";
 import { stepSupportsHistory, wizardStepIds, type WizardStepId } from "../../pages/profiles/wizardModel";
+import { answerStudioRequests, publishStudioDocument } from "../../studio/studioBridge";
+import type { StudioDocument } from "../../studio/studioModel";
 
 export type GroupId = "basic" | "shape" | "lcd" | "advanced" | "individual" | "lists";
 export type ProfileMode = "quick" | "advanced";
@@ -197,6 +199,22 @@ export function useProfileEditor({ mode = "advanced" }: ProfileEditorOptions = {
   const showPreview = () => {
     previewPanelRef.current?.show();
   };
+
+  /* The Preview Studio window follows this document: every change is
+     published, and a studio that opens later asks for the current one. */
+  const studioDocument = useMemo<StudioDocument | null>(() => profile ? {
+    profilePath: profile.path,
+    profileName: profile.displayPath.split(/[/\\]/).pop() ?? profile.displayPath,
+    values: { ...values },
+    savedValues: { ...(profile.savedValues ?? {}) },
+    fontFace,
+  } : null, [fontFace, profile, values]);
+  const studioDocumentRef = useRef(studioDocument);
+  useEffect(() => {
+    studioDocumentRef.current = studioDocument;
+    if (studioDocument) publishStudioDocument(studioDocument);
+  }, [studioDocument]);
+  useEffect(() => answerStudioRequests(() => studioDocumentRef.current), []);
 
   /* Step-aware preview stacks, mirroring the legacy Tuner screens: the bold
      and italic screen compares the three styles and the LCD screen compares

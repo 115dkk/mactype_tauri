@@ -1972,11 +1972,13 @@ test("the Cupertino skin opens a detail page from a disclosure row and returns",
   await expect(page.locator('.cupertino-row[data-kind="system"]')).toBeVisible();
 });
 
-test("the Cupertino sidebar search filters the navigation", async ({ page }) => {
+test("the Cupertino sidebar search filters the navigation", async ({ page }, testInfo) => {
+  /* The phone layout folds the sidebar into a rail without the search field. */
+  test.skip(testInfo.project.name === "mobile-390", "the sidebar search exists only in the pane layout");
   await page.goto("/?view=overview&gallery=1&lang=ko&skin=cupertino", { waitUntil: "networkidle" });
-  await expect(page.locator(".cupertino-item")).toHaveCount(6);
+  await expect(page.locator(".cupertino-side-items .cupertino-item")).toHaveCount(6);
   await page.locator(".cupertino-side .cupertino-search input").fill("진단");
-  await expect(page.locator(".cupertino-item")).toHaveCount(1);
+  await expect(page.locator(".cupertino-side-items .cupertino-item")).toHaveCount(1);
   await page.locator(".cupertino-side .cupertino-search input").fill("없는 항목");
   await expect(page.locator(".cupertino-side-empty")).toBeVisible();
 });
@@ -1989,7 +1991,21 @@ test("the skin diagnostics timelines localise event codes and hide raw detail be
     await expect(timeline).not.toContainText("protected-process-light");
     await timeline.locator('.event-row[data-severity="warning"] .event-disclosure').first().click();
     await expect(timeline).toContainText("protected-process-light");
-    await timeline.locator('.event-chip[data-severity="warning"]').click();
+    await page.locator('.event-chip[data-severity="warning"]').click();
     await expect(timeline.locator('.event-row[data-severity="warning"]')).toHaveCount(0);
   }
+});
+
+test("the Preview Studio renders a specimen board per source and offers export", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name === "mobile-390", "the studio window is desktop-sized");
+  await page.goto("/?window=preview-studio&gallery=1&lang=ko&skin=fluent", { waitUntil: "networkidle" });
+  await expect(page.getByTestId("preview-studio")).toBeVisible();
+  await expect(page.locator(".studio-board")).toHaveCount(2);
+  await expect(page.locator(".studio-board").nth(1).locator(".studio-strip")).toHaveCount(7);
+  await expect(page.locator(".studio-board").first()).toContainText("튜너 편집본을 받지 못했습니다.");
+  await page.locator(".studio-chip", { hasText: /^36$/ }).click();
+  await expect(page.locator(".studio-board").nth(1).locator(".studio-strip")).toHaveCount(8);
+  await page.getByRole("button", { name: "PNG로 저장" }).click();
+  await expect(page.locator(".studio-export-message")).toContainText("mactype-specimen");
+  expect(await page.evaluate(() => window.sessionStorage.getItem("gallery-preview-export"))).toContain(".png");
 });

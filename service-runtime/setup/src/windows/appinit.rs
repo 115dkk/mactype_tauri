@@ -1,16 +1,13 @@
 use mactype_service_contract::appinit_mactype_conflict;
-use windows_sys::Win32::{
-    Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS},
-    System::Registry::{
-        RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6432KEY,
-        RRF_SUBKEY_WOW6464KEY,
-    },
-};
+use mactype_service_platform::{RegistryKey, RegistryRoot, RegistryView};
 
 use crate::ConflictObservation;
 
+const APPINIT_KEY: &str = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Windows";
+const MAX_APPINIT_BYTES: usize = 64 * 1024;
+
 pub fn observe_conflict() -> ConflictObservation {
-    match [RRF_SUBKEY_WOW6464KEY, RRF_SUBKEY_WOW6432KEY]
+    match [RegistryView::Native64, RegistryView::Native32]
         .into_iter()
         .try_fold(false, |conflict, view| {
             observe_view_with(read_enabled(view), || read_dlls(view))
@@ -34,74 +31,41 @@ where
     appinit_mactype_conflict(true, value.as_deref()).map_err(|_| ())
 }
 
-fn read_enabled(view: u32) -> Result<bool, ()> {
-    let subkey = wide("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Windows");
-    let value = wide("LoadAppInit_DLLs");
-    let mut enabled = 0u32;
-    let mut bytes = std::mem::size_of::<u32>() as u32;
-    let result = unsafe {
-        RegGetValueW(
-            HKEY_LOCAL_MACHINE,
-            subkey.as_ptr(),
-            value.as_ptr(),
-            RRF_RT_REG_DWORD | view,
-            std::ptr::null_mut(),
-            (&raw mut enabled).cast(),
-            &raw mut bytes,
-        )
+/// `Ok(None)` when the key is absent in this view, which reads as "AppInit is
+/// not configured" rather than as an unknown state.
+fn open_appinit_key(view: RegistryView) -> Result<Option<RegistryKey>, ()> {
+    RegistryKey::open(RegistryRoot::LocalMachine, APPINIT_KEY, view).map_err(|_| ())
+}
+
+fn read_enabled(view: RegistryView) -> Result<bool, ()> {
+    let Some(key) = open_appinit_key(view)? else {
+        return Ok(false);
     };
-    if result == ERROR_FILE_NOT_FOUND {
-        Ok(false)
-    } else if result == ERROR_SUCCESS && bytes == std::mem::size_of::<u32>() as u32 {
-        Ok(enabled != 0)
-    } else {
-        Err(())
+    match key.read_dword("LoadAppInit_DLLs") {
+        Ok(Some(enabled)) => Ok(enabled != 0),
+        Ok(None) => Ok(false),
+        Err(_) => Err(()),
     }
 }
 
-fn read_dlls(view: u32) -> Result<Option<Vec<u16>>, ()> {
-    const MAX_APPINIT_BYTES: u32 = 64 * 1024;
-    let subkey = wide("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Windows");
-    let value = wide("AppInit_DLLs");
-    let mut bytes = 0u32;
-    let first = unsafe {
-        RegGetValueW(
-            HKEY_LOCAL_MACHINE,
-            subkey.as_ptr(),
-            value.as_ptr(),
-            RRF_RT_REG_SZ | view,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            &raw mut bytes,
-        )
-    };
-    if first == ERROR_FILE_NOT_FOUND {
+fn read_dlls(view: RegistryView) -> Result<Option<Vec<u16>>, ()> {
+    let Some(key) = open_appinit_key(view)? else {
         return Ok(None);
-    }
-    if first != ERROR_SUCCESS || !(2..=MAX_APPINIT_BYTES).contains(&bytes) || bytes % 2 != 0 {
-        return Err(());
-    }
-    let mut buffer = vec![0u16; bytes as usize / 2];
-    let second = unsafe {
-        RegGetValueW(
-            HKEY_LOCAL_MACHINE,
-            subkey.as_ptr(),
-            value.as_ptr(),
-            RRF_RT_REG_SZ | view,
-            std::ptr::null_mut(),
-            buffer.as_mut_ptr().cast(),
-            &raw mut bytes,
-        )
     };
-    if second != ERROR_SUCCESS || !(2..=MAX_APPINIT_BYTES).contains(&bytes) || bytes % 2 != 0 {
+    let mut units = match key.read_string_units("AppInit_DLLs") {
+        Ok(Some(units)) => units,
+        Ok(None) => return Ok(None),
+        Err(_) => return Err(()),
+    };
+    // The contract parser expects the NUL terminator RegGetValueW used to
+    // guarantee; a raw registry string may have been stored without one.
+    if units.last() != Some(&0) {
+        units.push(0);
+    }
+    if units.len() * 2 > MAX_APPINIT_BYTES {
         return Err(());
     }
-    buffer.truncate(bytes as usize / 2);
-    Ok(Some(buffer))
-}
-
-fn wide(value: &str) -> Vec<u16> {
-    value.encode_utf16().chain(Some(0)).collect()
+    Ok(Some(units))
 }
 
 #[cfg(test)]

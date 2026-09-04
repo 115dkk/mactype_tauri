@@ -201,11 +201,11 @@ fn remove_exact_materialized_profile(
     expected: &[u8],
 ) -> Result<(), MaterializedProfileClearError> {
     use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
-    use std::os::windows::io::AsRawHandle;
 
+    use mactype_service_platform::mark_open_file_for_deletion;
     use windows_sys::Win32::Storage::FileSystem::{
-        FileDispositionInfo, SetFileInformationByHandle, DELETE, FILE_ATTRIBUTE_REPARSE_POINT,
-        FILE_DISPOSITION_INFO, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ, FILE_SHARE_READ,
+        DELETE, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ,
+        FILE_SHARE_READ,
     };
 
     let mut file = OpenOptions::new()
@@ -235,20 +235,8 @@ fn remove_exact_materialized_profile(
             ),
         ));
     }
-    let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
-    if unsafe {
-        SetFileInformationByHandle(
-            file.as_raw_handle(),
-            FileDispositionInfo,
-            (&raw const disposition).cast(),
-            std::mem::size_of::<FILE_DISPOSITION_INFO>() as u32,
-        )
-    } == 0
-    {
-        return Err(MaterializedProfileClearError::Unknown(cleanup_unknown_io(
-            std::io::Error::last_os_error(),
-        )));
-    }
+    mark_open_file_for_deletion(&file)
+        .map_err(|error| MaterializedProfileClearError::Unknown(cleanup_unknown_io(error)))?;
     drop(file);
     Ok(())
 }

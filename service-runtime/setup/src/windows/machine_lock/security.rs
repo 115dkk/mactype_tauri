@@ -1,74 +1,32 @@
 use std::io;
-use std::ptr;
 
-use windows_sys::Win32::Foundation::{LocalFree, ERROR_ACCESS_DENIED, HANDLE};
-use windows_sys::Win32::Security::Authorization::{
-    ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+use mactype_service_platform::{
+    AclValidationError, LocalSecurityDescriptor, OwnedHandle, OwnedSid, SecurityAclError,
+    SecurityDescriptor,
 };
-use windows_sys::Win32::Security::{PSECURITY_DESCRIPTOR, SE_DACL_PROTECTED};
+use windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED;
+use windows_sys::Win32::Security::SE_DACL_PROTECTED;
 use windows_sys::Win32::System::Threading::MUTEX_ALL_ACCESS;
 
-use super::super::security_acl::{LocalSecurityDescriptor, OwnedSid, SecurityAclError};
 use crate::SetupError;
 
 const MACHINE_SETUP_LOCK_SDDL: &str = "O:BAG:BAD:P(A;;0x001F0001;;;SY)(A;;0x001F0001;;;BA)";
 const SYSTEM_SID: &str = "S-1-5-18";
 const ADMINISTRATORS_SID: &str = "S-1-5-32-544";
 
-pub(super) struct OwnedSecurityDescriptor(PSECURITY_DESCRIPTOR);
-
-impl OwnedSecurityDescriptor {
-    pub(super) fn for_machine_setup_lock() -> Result<Self, SetupError> {
-        Self::from_sddl(MACHINE_SETUP_LOCK_SDDL)
-    }
-
-    #[cfg(test)]
-    pub(super) fn from_sddl_for_test(sddl: &str) -> Result<Self, SetupError> {
-        Self::from_sddl(sddl)
-    }
-
-    fn from_sddl(sddl: &str) -> Result<Self, SetupError> {
-        let sddl = wide(sddl);
-        let mut descriptor = ptr::null_mut();
-        if unsafe {
-            ConvertStringSecurityDescriptorToSecurityDescriptorW(
-                sddl.as_ptr(),
-                SDDL_REVISION_1,
-                &mut descriptor,
-                ptr::null_mut(),
-            )
-        } == 0
-            || descriptor.is_null()
-        {
-            return Err(SetupError::Io(io::Error::last_os_error()));
-        }
-        Ok(Self(descriptor))
-    }
-
-    pub(super) fn as_ptr(&self) -> PSECURITY_DESCRIPTOR {
-        self.0
-    }
+pub(super) fn machine_setup_lock_descriptor() -> Result<SecurityDescriptor, SetupError> {
+    SecurityDescriptor::from_sddl(MACHINE_SETUP_LOCK_SDDL).map_err(SetupError::Io)
 }
 
-impl Drop for OwnedSecurityDescriptor {
-    fn drop(&mut self) {
-        unsafe {
-            LocalFree(self.0);
-        }
-    }
-}
-
-pub(super) fn verify_machine_setup_lock(handle: HANDLE) -> Result<(), SetupError> {
+pub(super) fn verify_machine_setup_lock(handle: &OwnedHandle) -> Result<(), SetupError> {
     let descriptor = match LocalSecurityDescriptor::query_kernel_object(handle) {
         Ok(descriptor) => descriptor,
-        Err(status) => {
-            if status == ERROR_ACCESS_DENIED {
-                return Err(foreign_lock_error(
-                    "security metadata cannot be read from the named object",
-                ));
-            }
-            return Err(SetupError::Io(io::Error::from_raw_os_error(status as i32)));
+        Err(ERROR_ACCESS_DENIED) => {
+            return Err(foreign_lock_error(
+                "security metadata cannot be read from the named object",
+            ));
         }
+        Err(status) => return Err(SetupError::Io(io::Error::from_raw_os_error(status as i32))),
     };
     let expected = ExpectedSids::new()?;
 
@@ -124,15 +82,23 @@ pub(super) fn verify_machine_setup_lock(handle: HANDLE) -> Result<(), SetupError
 fn machine_owner_error(error: SecurityAclError) -> SetupError {
     match error {
         SecurityAclError::Io(error) => SetupError::Io(error),
-        SecurityAclError::Invalid(_) => foreign_lock_error("owner SID is missing or malformed"),
+        SecurityAclError::Invalid(error) => invalid_machine_owner(error),
     }
+}
+
+fn invalid_machine_owner(_error: AclValidationError) -> SetupError {
+    foreign_lock_error("owner SID is missing or malformed")
 }
 
 fn machine_dacl_error(error: SecurityAclError) -> SetupError {
     match error {
         SecurityAclError::Io(error) => SetupError::Io(error),
-        SecurityAclError::Invalid(_) => foreign_lock_error("DACL contains an unexpected ACE"),
+        SecurityAclError::Invalid(error) => invalid_machine_dacl(error),
     }
+}
+
+fn invalid_machine_dacl(_error: AclValidationError) -> SetupError {
+    foreign_lock_error("DACL contains an unexpected ACE")
 }
 
 fn foreign_lock_error(detail: &str) -> SetupError {
@@ -147,12 +113,8 @@ struct ExpectedSids {
 impl ExpectedSids {
     fn new() -> Result<Self, SetupError> {
         Ok(Self {
-            system: OwnedSid::from_string(SYSTEM_SID)?,
-            administrators: OwnedSid::from_string(ADMINISTRATORS_SID)?,
+            system: OwnedSid::from_string(SYSTEM_SID).map_err(SetupError::Io)?,
+            administrators: OwnedSid::from_string(ADMINISTRATORS_SID).map_err(SetupError::Io)?,
         })
     }
-}
-
-fn wide(value: &str) -> Vec<u16> {
-    value.encode_utf16().chain(Some(0)).collect()
 }

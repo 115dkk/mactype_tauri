@@ -116,20 +116,35 @@ impl SuspendedChild {
         &self.process
     }
 
-    /// Starts the child's initial thread. The thread handle is released here;
-    /// the process handle stays with the returned value.
-    pub fn resume(self) -> io::Result<Process> {
+    /// Starts the child's initial thread while keeping both handles with this
+    /// value. A failed start leaves the still-suspended child owned by the
+    /// caller, who can terminate it and confirm the exit through the process
+    /// handle that [`SuspendedChild::abandon`] hands over.
+    pub fn start(&self) -> io::Result<()> {
         // SAFETY: the thread handle is live and owned; the call takes no
         // pointers.
         if unsafe { ResumeThread(self.thread.as_raw()) } == u32::MAX {
             return Err(io::Error::last_os_error());
         }
-        Ok(self.process)
+        Ok(())
+    }
+
+    /// Starts the child's initial thread. The thread handle is released here;
+    /// the process handle stays with the returned value.
+    pub fn resume(self) -> io::Result<Process> {
+        self.start()?;
+        Ok(self.into_process())
     }
 
     /// Gives up the child without resuming it. The caller keeps the process
     /// handle to terminate and confirm it.
     pub fn abandon(self) -> Process {
+        self.into_process()
+    }
+
+    /// Releases the thread handle and hands over the process handle, whether
+    /// or not the child was started.
+    pub fn into_process(self) -> Process {
         self.process
     }
 }

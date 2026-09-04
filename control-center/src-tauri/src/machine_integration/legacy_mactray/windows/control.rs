@@ -2,22 +2,19 @@ use super::{
     super::*,
     common::{
         expected_mactray_path, open_for, query_configuration, query_runtime, trusted_mactray_path,
-        wide, wide_multi, ServiceHandle,
+        win32_code,
     },
+};
+use mactype_service_platform::{
+    ServiceAccess, ServiceControlManager, ServiceCreation, ServiceManagerAccess,
 };
 use std::{thread, time::Duration};
 use windows_sys::Win32::{
     Foundation::{
-        GetLastError, ERROR_DUPLICATE_SERVICE_NAME, ERROR_SERVICE_ALREADY_RUNNING,
-        ERROR_SERVICE_DOES_NOT_EXIST, ERROR_SERVICE_EXISTS, ERROR_SERVICE_MARKED_FOR_DELETE,
-        ERROR_SERVICE_NOT_ACTIVE,
+        ERROR_DUPLICATE_SERVICE_NAME, ERROR_SERVICE_DOES_NOT_EXIST, ERROR_SERVICE_EXISTS,
+        ERROR_SERVICE_MARKED_FOR_DELETE,
     },
-    System::Services::{
-        ChangeServiceConfigW, ControlService, CreateServiceW, DeleteService, OpenSCManagerW,
-        OpenServiceW, StartServiceW, SC_MANAGER_CONNECT, SC_MANAGER_CREATE_SERVICE,
-        SERVICE_CHANGE_CONFIG, SERVICE_CONTROL_STOP, SERVICE_DISABLED, SERVICE_NO_CHANGE,
-        SERVICE_QUERY_CONFIG, SERVICE_QUERY_STATUS, SERVICE_START, SERVICE_STATUS, SERVICE_STOP,
-    },
+    System::Services::SERVICE_DISABLED,
 };
 
 fn inaccessible(code: u32, trusted: bool, registry: bool) -> LegacyServiceStatus {
@@ -34,40 +31,41 @@ fn inaccessible(code: u32, trusted: bool, registry: bool) -> LegacyServiceStatus
 pub(super) fn query(registry_conflict: bool) -> LegacyServiceStatus {
     let expected = expected_mactray_path();
     let trusted_available = trusted_mactray_path().is_some();
-    let manager = unsafe { OpenSCManagerW(std::ptr::null(), std::ptr::null(), SC_MANAGER_CONNECT) };
-    if manager.is_null() {
-        return inaccessible(
-            unsafe { GetLastError() },
-            trusted_available,
-            registry_conflict,
-        );
-    }
-    let manager = ServiceHandle(manager);
-    let name = wide("MacType");
-    let service = unsafe {
-        OpenServiceW(
-            manager.0,
-            name.as_ptr(),
-            SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG,
-        )
+    let manager = match ServiceControlManager::connect(ServiceManagerAccess::Connect) {
+        Ok(manager) => manager,
+        Err(error) => {
+            return inaccessible(win32_code(&error), trusted_available, registry_conflict)
+        }
     };
-    if service.is_null() {
-        let code = unsafe { GetLastError() };
-        let presence = match code {
-            ERROR_SERVICE_DOES_NOT_EXIST => ServicePresence::Absent,
-            ERROR_SERVICE_MARKED_FOR_DELETE => ServicePresence::DeletePending,
-            _ => ServicePresence::Inaccessible,
-        };
-        return with_capabilities(
-            presence,
-            ServiceRuntimeState::Unknown,
-            None,
-            (presence == ServicePresence::Inaccessible).then_some(code),
-            trusted_available,
-            registry_conflict,
-        );
-    }
-    let service = ServiceHandle(service);
+    let service = match manager.open("MacType", ServiceAccess::QueryStatusAndConfig) {
+        Ok(Some(service)) => service,
+        Ok(None) => {
+            return with_capabilities(
+                ServicePresence::Absent,
+                ServiceRuntimeState::Unknown,
+                None,
+                None,
+                trusted_available,
+                registry_conflict,
+            )
+        }
+        Err(error) => {
+            let code = win32_code(&error);
+            let presence = if code == ERROR_SERVICE_MARKED_FOR_DELETE {
+                ServicePresence::DeletePending
+            } else {
+                ServicePresence::Inaccessible
+            };
+            return with_capabilities(
+                presence,
+                ServiceRuntimeState::Unknown,
+                None,
+                (presence == ServicePresence::Inaccessible).then_some(code),
+                trusted_available,
+                registry_conflict,
+            );
+        }
+    };
     let state = match query_runtime(&service) {
         Ok(state) => state,
         Err(code) => return inaccessible(code, trusted_available, registry_conflict),
@@ -123,28 +121,21 @@ fn wait_until_absent() -> Result<(), String> {
 }
 
 pub(super) fn start() -> Result<(), String> {
-    let service = open_for(SERVICE_START | SERVICE_QUERY_STATUS)
+    let service = open_for(ServiceAccess::Start)
         .map_err(|code| format!("OpenServiceW failed with {code}"))?;
-    if unsafe { StartServiceW(service.0, 0, std::ptr::null()) } == 0 {
-        let code = unsafe { GetLastError() };
-        if code != ERROR_SERVICE_ALREADY_RUNNING {
-            return Err(format!("StartServiceW failed with {code}"));
-        }
-    }
+    service
+        .start()
+        .map_err(|error| format!("StartServiceW failed with {}", win32_code(&error)))?;
     drop(service);
     wait_for(ServiceRuntimeState::Running)
 }
 
 pub(super) fn stop() -> Result<(), String> {
-    let service = open_for(SERVICE_STOP | SERVICE_QUERY_STATUS)
-        .map_err(|code| format!("OpenServiceW failed with {code}"))?;
-    let mut status = SERVICE_STATUS::default();
-    if unsafe { ControlService(service.0, SERVICE_CONTROL_STOP, &mut status) } == 0 {
-        let code = unsafe { GetLastError() };
-        if code != ERROR_SERVICE_NOT_ACTIVE {
-            return Err(format!("ControlService failed with {code}"));
-        }
-    }
+    let service =
+        open_for(ServiceAccess::Stop).map_err(|code| format!("OpenServiceW failed with {code}"))?;
+    service
+        .stop()
+        .map_err(|error| format!("ControlService failed with {}", win32_code(&error)))?;
     drop(service);
     wait_for(ServiceRuntimeState::Stopped)
 }
@@ -152,61 +143,43 @@ pub(super) fn stop() -> Result<(), String> {
 pub(super) fn create_service_configuration(
     configuration: &ServiceConfiguration,
 ) -> Result<(), String> {
-    let manager = unsafe {
-        OpenSCManagerW(
-            std::ptr::null(),
-            std::ptr::null(),
-            SC_MANAGER_CONNECT | SC_MANAGER_CREATE_SERVICE,
-        )
-    };
-    if manager.is_null() {
-        return Err(format!(
-            "OpenSCManagerW for service creation failed with {}",
-            unsafe { GetLastError() }
-        ));
-    }
-    let manager = ServiceHandle(manager);
-    let name = wide("MacType");
-    let display_name = wide(&configuration.display_name);
-    let binary_path = wide(&configuration.binary_path);
-    let mut load_order_group = configuration.load_order_group.as_deref().map(wide);
-    let mut tag_id = 0;
-    let dependencies = wide_multi(&configuration.dependencies);
-    let account = wide(&configuration.account);
-    let service = unsafe {
-        CreateServiceW(
-            manager.0,
-            name.as_ptr(),
-            display_name.as_ptr(),
-            SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_START | SERVICE_STOP,
-            configuration.service_type,
-            configuration.start_type,
-            configuration.error_control,
-            binary_path.as_ptr(),
-            load_order_group
-                .as_mut()
-                .map_or(std::ptr::null(), |value| value.as_ptr()),
-            load_order_group
-                .as_ref()
-                .map_or(std::ptr::null_mut(), |_| &mut tag_id),
-            dependencies.as_ptr(),
-            account.as_ptr(),
-            std::ptr::null(),
-        )
-    };
-    if service.is_null() {
-        let code = unsafe { GetLastError() };
-        if matches!(code, ERROR_SERVICE_EXISTS | ERROR_DUPLICATE_SERVICE_NAME)
-            && matches!(
-                query(false).presence,
-                ServicePresence::Owned | ServicePresence::CompatibleUnquoted
+    let manager = ServiceControlManager::connect(ServiceManagerAccess::ConnectAndCreate).map_err(
+        |error| {
+            format!(
+                "OpenSCManagerW for service creation failed with {}",
+                win32_code(&error)
             )
-        {
-            return Ok(());
+        },
+    )?;
+    let creation = ServiceCreation {
+        display_name: &configuration.display_name,
+        service_type: configuration.service_type,
+        start_type: configuration.start_type,
+        error_control: configuration.error_control,
+        image_path: &configuration.binary_path,
+        load_order_group: configuration.load_order_group.as_deref(),
+        dependencies: &configuration.dependencies,
+        account: &configuration.account,
+    };
+    // Start is the closest fixed platform rights set to the legacy
+    // QUERY_CONFIG | QUERY_STATUS | START | STOP creation handle. The handle is
+    // immediately dropped, so the missing STOP right is never exercised.
+    let service = match manager.create("MacType", &creation, ServiceAccess::Start) {
+        Ok(service) => service,
+        Err(error) => {
+            let code = win32_code(&error);
+            if matches!(code, ERROR_SERVICE_EXISTS | ERROR_DUPLICATE_SERVICE_NAME)
+                && matches!(
+                    query(false).presence,
+                    ServicePresence::Owned | ServicePresence::CompatibleUnquoted
+                )
+            {
+                return Ok(());
+            }
+            return Err(format!("CreateServiceW failed with {code}"));
         }
-        return Err(format!("CreateServiceW failed with {code}"));
-    }
-    drop(ServiceHandle(service));
+    };
+    drop(service);
     let created = query(false);
     if matches!(
         created.presence,
@@ -219,11 +192,15 @@ pub(super) fn create_service_configuration(
 }
 
 fn delete_owned_service() -> Result<(), String> {
-    const DELETE_ACCESS: u32 = 0x0001_0000;
-    let service = open_for(DELETE_ACCESS | SERVICE_QUERY_STATUS)
-        .map_err(|code| format!("OpenServiceW for deletion failed with {code}"))?;
-    if unsafe { DeleteService(service.0) } == 0 {
-        let code = unsafe { GetLastError() };
+    let service = match open_for(ServiceAccess::Delete) {
+        Ok(service) => service,
+        Err(ERROR_SERVICE_DOES_NOT_EXIST | ERROR_SERVICE_MARKED_FOR_DELETE) => {
+            return wait_until_absent()
+        }
+        Err(code) => return Err(format!("OpenServiceW for deletion failed with {code}")),
+    };
+    if let Err(error) = service.delete() {
+        let code = win32_code(&error);
         if !matches!(
             code,
             ERROR_SERVICE_DOES_NOT_EXIST | ERROR_SERVICE_MARKED_FOR_DELETE
@@ -239,30 +216,14 @@ fn delete_owned_service() -> Result<(), String> {
 // field untouched (SERVICE_NO_CHANGE). Used to park the legacy service disabled
 // between migration and its funeral, and to re-enable it on restore.
 fn set_start_type(start_type: u32) -> Result<(), String> {
-    let service = open_for(SERVICE_CHANGE_CONFIG | SERVICE_QUERY_STATUS)
+    let service = open_for(ServiceAccess::ChangeStartType)
         .map_err(|code| format!("OpenServiceW for start-type change failed with {code}"))?;
-    if unsafe {
-        ChangeServiceConfigW(
-            service.0,
-            SERVICE_NO_CHANGE,
-            start_type,
-            SERVICE_NO_CHANGE,
-            std::ptr::null(),
-            std::ptr::null(),
-            std::ptr::null_mut(),
-            std::ptr::null(),
-            std::ptr::null(),
-            std::ptr::null(),
-            std::ptr::null(),
-        )
-    } == 0
-    {
-        return Err(format!(
+    service.set_start_type(start_type).map_err(|error| {
+        format!(
             "ChangeServiceConfigW(start type {start_type}) failed with {}",
-            unsafe { GetLastError() }
-        ));
-    }
-    Ok(())
+            win32_code(&error)
+        )
+    })
 }
 
 pub(super) fn migration_stop() -> Result<(), String> {

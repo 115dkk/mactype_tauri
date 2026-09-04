@@ -1,57 +1,31 @@
 use super::*;
+use mactype_service_platform::{
+    current_user_sid_string, expand_environment_strings, file_attributes, known_folder_path,
+    read_shortcut, ComApartment, ComThreading, DeleteValueOutcome, KnownFolder, RegistryKey,
+    RegistryRoot, RegistryView,
+};
 use std::{
-    ffi::{c_void, OsStr},
+    ffi::OsStr,
     fs::{File, OpenOptions},
     io::{Read, Write},
-    os::windows::ffi::OsStrExt,
     time::{SystemTime, UNIX_EPOCH},
 };
-use windows_sys::{
-    core::{GUID, HRESULT},
-    Win32::{
-        Foundation::{
-            CloseHandle, GetLastError, LocalFree, ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA,
-            ERROR_NO_MORE_ITEMS, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, HANDLE, HLOCAL,
-        },
-        Security::{
-            Authorization::ConvertSidToStringSidW, GetTokenInformation, TokenUser, TOKEN_QUERY,
-            TOKEN_USER,
-        },
-        Storage::FileSystem::{
-            GetFileAttributesW, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
-            INVALID_FILE_ATTRIBUTES,
-        },
-        System::{
-            Com::{
-                CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize,
-                CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, STGM_READ,
-            },
-            Environment::ExpandEnvironmentStringsW,
-            Registry::{
-                RegCloseKey, RegDeleteValueW, RegEnumValueW, RegOpenKeyExW, RegQueryValueExW,
-                RegSetValueExW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_QUERY_VALUE,
-                KEY_READ, KEY_SET_VALUE, KEY_WOW64_32KEY, KEY_WOW64_64KEY, REG_EXPAND_SZ, REG_SZ,
-            },
-            Threading::{GetCurrentProcess, GetCurrentProcessId, OpenProcessToken},
-        },
-        UI::Shell::{FOLDERID_Startup, SHGetKnownFolderPath, ShellLink, SLGP_RAWPATH},
-    },
+use windows_sys::Win32::Storage::FileSystem::{
+    FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
 };
+use windows_sys::Win32::System::Registry::{REG_EXPAND_SZ, REG_SZ};
 
 const RUN_SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const MAX_REGISTRY_NAME_UNITS: usize = 16_384;
 const MAX_REGISTRY_VALUE_BYTES: usize = 65_536;
 const MAX_LINK_BYTES: u64 = 1_048_576;
 const MAX_WIDE_UNITS: usize = 32_768;
-const RPC_E_CHANGED_MODE: HRESULT = 0x8001_0106_u32 as i32;
-const IID_ISHELL_LINK_W: GUID = GUID::from_u128(0x000214f9_0000_0000_c000_000000000046);
-const IID_IPERSIST_FILE: GUID = GUID::from_u128(0x0000010b_0000_0000_c000_000000000046);
 
 struct RegistrySource {
-    root: HKEY,
+    root: RegistryRoot,
     hive: &'static str,
     view: u32,
-    access_view: u32,
+    access_view: RegistryView,
     source: LegacyTrayStartupSource,
 }
 
@@ -59,72 +33,6 @@ struct RegistryObservationContext<'a> {
     expected: &'a Path,
     user_sid: &'a str,
     recorded_at: u64,
-}
-
-struct RegistryKey(HKEY);
-
-impl Drop for RegistryKey {
-    fn drop(&mut self) {
-        unsafe { RegCloseKey(self.0) };
-    }
-}
-
-struct OwnedHandle(HANDLE);
-
-impl Drop for OwnedHandle {
-    fn drop(&mut self) {
-        unsafe { CloseHandle(self.0) };
-    }
-}
-
-struct ComApartment {
-    uninitialize: bool,
-}
-
-impl ComApartment {
-    fn initialize() -> Result<Self, StructuredServiceError> {
-        let result = unsafe { CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32) };
-        if result >= 0 {
-            Ok(Self { uninitialize: true })
-        } else if result == RPC_E_CHANGED_MODE {
-            Ok(Self {
-                uninitialize: false,
-            })
-        } else {
-            Err(error(
-                "legacy-tray-startup-com-unavailable",
-                &format!("COM initialization failed with HRESULT {result:#x}"),
-                None,
-            ))
-        }
-    }
-}
-
-impl Drop for ComApartment {
-    fn drop(&mut self) {
-        if self.uninitialize {
-            unsafe { CoUninitialize() };
-        }
-    }
-}
-
-struct ComPointer(*mut c_void);
-
-impl ComPointer {
-    fn as_ptr(&self) -> *mut c_void {
-        self.0
-    }
-}
-
-impl Drop for ComPointer {
-    fn drop(&mut self) {
-        if self.0.is_null() {
-            return;
-        }
-        type Release = unsafe extern "system" fn(*mut c_void) -> u32;
-        let release: Release = unsafe { com_method(self.0, 2) };
-        unsafe { release(self.0) };
-    }
 }
 
 pub(super) fn observe() -> LegacyTrayStartupState {
@@ -158,7 +66,6 @@ pub(super) fn observe() -> LegacyTrayStartupState {
         }
     }
     match observe_startup_folder(
-        &FOLDERID_Startup,
         LegacyTrayStartupSource::CurrentUserStartup,
         &expected,
         &user_sid,
@@ -191,9 +98,8 @@ pub(super) fn observe_owned(
     for source in registry_sources(scope) {
         observations.extend(observe_registry_source(&source, &registry_context)?);
     }
-    if let Some((folder_id, source)) = startup_folder_source(scope) {
+    if let Some(source) = startup_folder_source(scope) {
         observations.extend(observe_startup_folder(
-            folder_id,
             source,
             &expected,
             &user_sid,
@@ -226,10 +132,10 @@ pub(super) fn observe_owned(
 // physical keys and both must be probed.
 fn current_user_run_source() -> RegistrySource {
     RegistrySource {
-        root: HKEY_CURRENT_USER,
+        root: RegistryRoot::CurrentUser,
         hive: "HKCU",
         view: 64,
-        access_view: KEY_WOW64_64KEY,
+        access_view: RegistryView::Native64,
         source: LegacyTrayStartupSource::CurrentUserRun64,
     }
 }
@@ -237,17 +143,17 @@ fn current_user_run_source() -> RegistrySource {
 fn local_machine_run_sources() -> [RegistrySource; 2] {
     [
         RegistrySource {
-            root: HKEY_LOCAL_MACHINE,
+            root: RegistryRoot::LocalMachine,
             hive: "HKLM",
             view: 32,
-            access_view: KEY_WOW64_32KEY,
+            access_view: RegistryView::Native32,
             source: LegacyTrayStartupSource::LocalMachineRun32,
         },
         RegistrySource {
-            root: HKEY_LOCAL_MACHINE,
+            root: RegistryRoot::LocalMachine,
             hive: "HKLM",
             view: 64,
-            access_view: KEY_WOW64_64KEY,
+            access_view: RegistryView::Native64,
             source: LegacyTrayStartupSource::LocalMachineRun64,
         },
     ]
@@ -266,14 +172,9 @@ fn registry_sources(scope: LegacyTrayStartupScope) -> Vec<RegistrySource> {
     }
 }
 
-fn startup_folder_source(
-    scope: LegacyTrayStartupScope,
-) -> Option<(&'static GUID, LegacyTrayStartupSource)> {
+fn startup_folder_source(scope: LegacyTrayStartupScope) -> Option<LegacyTrayStartupSource> {
     match scope {
-        LegacyTrayStartupScope::CurrentUser => Some((
-            &FOLDERID_Startup,
-            LegacyTrayStartupSource::CurrentUserStartup,
-        )),
+        LegacyTrayStartupScope::CurrentUser => Some(LegacyTrayStartupSource::CurrentUserStartup),
         LegacyTrayStartupScope::LocalMachine => None,
     }
 }
@@ -289,12 +190,12 @@ pub(super) fn read_artifact_bytes(
             ..
         } => {
             let source = registry_source_for_artifact(artifact)?;
-            let Some(key) = open_registry_key(&source, KEY_QUERY_VALUE)? else {
+            let Some(key) = open_registry_key(&source, false)? else {
                 return Ok(None);
             };
             match read_registry_value(&key, value_name)? {
                 None => Ok(None),
-                Some((current_type, bytes)) if current_type == *value_type => Ok(Some(bytes)),
+                Some(current) if current.kind == *value_type => Ok(Some(current.bytes)),
                 Some(_) => Err(error(
                     "legacy-tray-startup-registry-type-changed",
                     "the receipt-named Run value type no longer matches the receipt",
@@ -319,18 +220,17 @@ pub(super) fn remove_artifact_exact(
             ..
         } => {
             let source = registry_source_for_artifact(artifact)?;
-            let key =
-                open_registry_key(&source, KEY_QUERY_VALUE | KEY_SET_VALUE)?.ok_or_else(|| {
-                    error(
-                        "legacy-tray-startup-changed",
-                        "the fixed Run key disappeared before removal",
-                        None,
-                    )
-                })?;
+            let key = open_registry_key(&source, true)?.ok_or_else(|| {
+                error(
+                    "legacy-tray-startup-changed",
+                    "the fixed Run key disappeared before removal",
+                    None,
+                )
+            })?;
             let current = read_registry_value(&key, value_name)?;
             if current
                 .as_ref()
-                .map(|(kind, bytes)| (*kind, bytes.as_slice()))
+                .map(|value| (value.kind, value.bytes.as_slice()))
                 != Some((*value_type, artifact.raw_bytes.as_slice()))
             {
                 return Err(error(
@@ -339,16 +239,19 @@ pub(super) fn remove_artifact_exact(
                     None,
                 ));
             }
-            let value_name = wide(value_name);
-            let status = unsafe { RegDeleteValueW(key.0, value_name.as_ptr()) };
-            if status != ERROR_SUCCESS {
-                return Err(error(
+            match key.delete_value(value_name) {
+                Ok(DeleteValueOutcome::Deleted) => Ok(()),
+                Ok(DeleteValueOutcome::Absent) => Err(error(
                     "legacy-tray-startup-registry-delete-failed",
                     "the verified Run value could not be removed",
-                    Some(status),
-                ));
+                    None,
+                )),
+                Err(io) => Err(io_error(
+                    "legacy-tray-startup-registry-delete-failed",
+                    "the verified Run value could not be removed",
+                    io,
+                )),
             }
-            Ok(())
         }
         LegacyTrayStartupLocator::File { startup_file_path } => {
             let current = read_link_if_present(artifact, startup_file_path)?;
@@ -381,14 +284,13 @@ pub(super) fn restore_artifact_if_absent(
             ..
         } => {
             let source = registry_source_for_artifact(artifact)?;
-            let key =
-                open_registry_key(&source, KEY_QUERY_VALUE | KEY_SET_VALUE)?.ok_or_else(|| {
-                    error(
-                        "legacy-tray-startup-registry-key-missing",
-                        "the fixed Run key is absent and will not be created during restore",
-                        None,
-                    )
-                })?;
+            let key = open_registry_key(&source, true)?.ok_or_else(|| {
+                error(
+                    "legacy-tray-startup-registry-key-missing",
+                    "the fixed Run key is absent and will not be created during restore",
+                    None,
+                )
+            })?;
             if read_registry_value(&key, value_name)?.is_some() {
                 return Err(error(
                     "legacy-tray-startup-changed",
@@ -396,28 +298,18 @@ pub(super) fn restore_artifact_if_absent(
                     None,
                 ));
             }
-            let value_name = wide(value_name);
-            let status = unsafe {
-                RegSetValueExW(
-                    key.0,
-                    value_name.as_ptr(),
-                    0,
-                    *value_type,
-                    artifact.raw_bytes.as_ptr(),
-                    artifact.raw_bytes.len() as u32,
-                )
-            };
-            if status != ERROR_SUCCESS {
-                return Err(error(
-                    "legacy-tray-startup-registry-restore-failed",
-                    "the original Run value bytes could not be restored",
-                    Some(status),
-                ));
-            }
+            key.set_raw(value_name, *value_type, &artifact.raw_bytes)
+                .map_err(|io| {
+                    io_error(
+                        "legacy-tray-startup-registry-restore-failed",
+                        "the original Run value bytes could not be restored",
+                        io,
+                    )
+                })?;
             let restored = read_registry_value(&key, artifact.entry.display_name.as_str())?;
             if restored
                 .as_ref()
-                .map(|(kind, bytes)| (*kind, bytes.as_slice()))
+                .map(|value| (value.kind, value.bytes.as_slice()))
                 != Some((*value_type, artifact.raw_bytes.as_slice()))
             {
                 return Err(error(
@@ -525,31 +417,31 @@ fn registry_source_for_artifact(
 ) -> Result<RegistrySource, StructuredServiceError> {
     let source = match artifact.entry.source_kind {
         LegacyTrayStartupSource::CurrentUserRun32 => RegistrySource {
-            root: HKEY_CURRENT_USER,
+            root: RegistryRoot::CurrentUser,
             hive: "HKCU",
             view: 32,
-            access_view: KEY_WOW64_32KEY,
+            access_view: RegistryView::Native32,
             source: LegacyTrayStartupSource::CurrentUserRun32,
         },
         LegacyTrayStartupSource::CurrentUserRun64 => RegistrySource {
-            root: HKEY_CURRENT_USER,
+            root: RegistryRoot::CurrentUser,
             hive: "HKCU",
             view: 64,
-            access_view: KEY_WOW64_64KEY,
+            access_view: RegistryView::Native64,
             source: LegacyTrayStartupSource::CurrentUserRun64,
         },
         LegacyTrayStartupSource::LocalMachineRun32 => RegistrySource {
-            root: HKEY_LOCAL_MACHINE,
+            root: RegistryRoot::LocalMachine,
             hive: "HKLM",
             view: 32,
-            access_view: KEY_WOW64_32KEY,
+            access_view: RegistryView::Native32,
             source: LegacyTrayStartupSource::LocalMachineRun32,
         },
         LegacyTrayStartupSource::LocalMachineRun64 => RegistrySource {
-            root: HKEY_LOCAL_MACHINE,
+            root: RegistryRoot::LocalMachine,
             hive: "HKLM",
             view: 64,
-            access_view: KEY_WOW64_64KEY,
+            access_view: RegistryView::Native64,
             source: LegacyTrayStartupSource::LocalMachineRun64,
         },
         LegacyTrayStartupSource::CurrentUserStartup => {
@@ -582,80 +474,54 @@ fn registry_source_for_artifact(
 
 fn open_registry_key(
     source: &RegistrySource,
-    access: u32,
+    writable: bool,
 ) -> Result<Option<RegistryKey>, StructuredServiceError> {
-    let subkey = wide(RUN_SUBKEY);
-    let mut raw_key = std::ptr::null_mut();
-    let status = unsafe {
-        RegOpenKeyExW(
-            source.root,
-            subkey.as_ptr(),
-            0,
-            access | source.access_view,
-            &mut raw_key,
-        )
+    let opened = if writable {
+        RegistryKey::open_writable(source.root, RUN_SUBKEY, source.access_view)
+    } else {
+        RegistryKey::open(source.root, RUN_SUBKEY, source.access_view)
     };
-    if status == ERROR_FILE_NOT_FOUND || status == ERROR_PATH_NOT_FOUND {
-        return Ok(None);
-    }
-    if status != ERROR_SUCCESS || raw_key.is_null() {
-        return Err(error(
+    opened.map_err(|io| {
+        io_error(
             "legacy-tray-startup-registry-inaccessible",
             &format!(
                 "{} {}-bit Run key cannot be opened with the required fixed access",
                 source.hive, source.view
             ),
-            Some(status),
-        ));
-    }
-    Ok(Some(RegistryKey(raw_key)))
+            io,
+        )
+    })
 }
 
 fn read_registry_value(
     key: &RegistryKey,
     value_name: &str,
-) -> Result<Option<(u32, Vec<u8>)>, StructuredServiceError> {
-    let value_name = wide(value_name);
-    let mut value_type = 0_u32;
-    let mut raw = vec![0_u8; MAX_REGISTRY_VALUE_BYTES];
-    let mut raw_length = raw.len() as u32;
-    let status = unsafe {
-        RegQueryValueExW(
-            key.0,
-            value_name.as_ptr(),
-            std::ptr::null_mut(),
-            &mut value_type,
-            raw.as_mut_ptr(),
-            &mut raw_length,
-        )
-    };
-    if status == ERROR_FILE_NOT_FOUND || status == ERROR_PATH_NOT_FOUND {
-        return Ok(None);
-    }
-    if status == ERROR_MORE_DATA {
-        return Err(error(
-            "legacy-tray-startup-registry-value-oversized",
-            "the Run value exceeds the bounded startup receipt",
-            Some(status),
-        ));
-    }
-    if status != ERROR_SUCCESS || raw_length as usize > raw.len() {
-        return Err(error(
-            "legacy-tray-startup-registry-read-failed",
-            "the receipt-named Run value cannot be read exactly",
-            Some(status),
-        ));
-    }
-    raw.truncate(raw_length as usize);
-    Ok(Some((value_type, raw)))
+) -> Result<Option<mactype_service_platform::RawRegistryValue>, StructuredServiceError> {
+    key.read_raw(value_name, MAX_REGISTRY_VALUE_BYTES)
+        .map_err(|io| {
+            if registry_bound_error(&io) {
+                error(
+                    "legacy-tray-startup-registry-value-oversized",
+                    "the Run value exceeds the bounded startup receipt",
+                    io.raw_os_error()
+                        .and_then(|value| u32::try_from(value).ok()),
+                )
+            } else {
+                io_error(
+                    "legacy-tray-startup-registry-read-failed",
+                    "the receipt-named Run value cannot be read exactly",
+                    io,
+                )
+            }
+        })
 }
 
 fn validate_link_locator(
     artifact: &LegacyTrayStartupArtifact,
     path: &Path,
 ) -> Result<PathBuf, StructuredServiceError> {
-    let folder_id = match artifact.entry.source_kind {
-        LegacyTrayStartupSource::CurrentUserStartup => &FOLDERID_Startup,
+    match artifact.entry.source_kind {
+        LegacyTrayStartupSource::CurrentUserStartup => {}
         LegacyTrayStartupSource::CurrentUserRun32
         | LegacyTrayStartupSource::CurrentUserRun64
         | LegacyTrayStartupSource::LocalMachineRun32
@@ -666,8 +532,8 @@ fn validate_link_locator(
                 None,
             ));
         }
-    };
-    let folder = known_folder(folder_id)?;
+    }
+    let folder = known_folder()?;
     require_regular_directory(&folder)?;
     if !matches!(path.parent(), Some(parent) if same_windows_path(parent, &folder))
         || !matches!(
@@ -719,7 +585,7 @@ fn restore_link_atomically(
             None,
         )
     })?;
-    let process_id = unsafe { GetCurrentProcessId() };
+    let process_id = std::process::id();
     let mut temporary = None;
     for attempt in 0..32_u32 {
         let candidate = parent.join(format!(
@@ -776,103 +642,42 @@ fn observe_registry_source(
     source: &RegistrySource,
     context: &RegistryObservationContext<'_>,
 ) -> Result<Vec<LegacyTrayStartupObservation>, StructuredServiceError> {
-    let subkey = wide(RUN_SUBKEY);
-    let mut raw_key = std::ptr::null_mut();
-    let open = unsafe {
-        RegOpenKeyExW(
-            source.root,
-            subkey.as_ptr(),
-            0,
-            KEY_READ | source.access_view,
-            &mut raw_key,
-        )
-    };
-    if open == ERROR_FILE_NOT_FOUND || open == ERROR_PATH_NOT_FOUND {
+    let Some(key) = open_registry_key(source, false)? else {
         return Ok(Vec::new());
-    }
-    if open != ERROR_SUCCESS {
-        return Err(error(
-            "legacy-tray-startup-registry-inaccessible",
-            &format!(
-                "{} {}-bit Run key is inaccessible",
-                source.hive, source.view
-            ),
-            Some(open),
-        ));
-    }
-    if raw_key.is_null() {
-        return Err(error(
-            "legacy-tray-startup-registry-invalid",
-            "the Run key returned an invalid handle",
-            None,
-        ));
-    }
-    let key = RegistryKey(raw_key);
-    let mut result = Vec::new();
-    let mut index = 0_u32;
-    loop {
-        let mut name = vec![0_u16; MAX_REGISTRY_NAME_UNITS];
-        let mut name_length = name.len() as u32;
-        let mut value_type = 0_u32;
-        let mut raw = vec![0_u8; MAX_REGISTRY_VALUE_BYTES];
-        let mut raw_length = raw.len() as u32;
-        let status = unsafe {
-            RegEnumValueW(
-                key.0,
-                index,
-                name.as_mut_ptr(),
-                &mut name_length,
-                std::ptr::null(),
-                &mut value_type,
-                raw.as_mut_ptr(),
-                &mut raw_length,
-            )
-        };
-        if status == ERROR_NO_MORE_ITEMS {
-            break;
-        }
-        if status == ERROR_MORE_DATA {
-            return Err(error(
-                "legacy-tray-startup-registry-value-oversized",
-                "a Run value exceeds the bounded startup inventory",
-                Some(status),
-            ));
-        }
-        if status != ERROR_SUCCESS {
-            return Err(error(
-                "legacy-tray-startup-registry-enumeration-failed",
-                "a Run value could not be read",
-                Some(status),
-            ));
-        }
-        if name_length as usize >= name.len() || raw_length as usize > raw.len() {
-            return Err(error(
-                "legacy-tray-startup-registry-value-invalid",
-                "a Run value returned invalid bounded lengths",
-                None,
-            ));
-        }
-        name.truncate(name_length as usize);
-        raw.truncate(raw_length as usize);
-        let display_name = String::from_utf16(&name).map_err(|_| {
-            error(
-                "legacy-tray-startup-registry-name-invalid",
-                "a Run value name is not valid UTF-16",
-                None,
-            )
+    };
+    let values = key
+        .values_raw(MAX_REGISTRY_NAME_UNITS, MAX_REGISTRY_VALUE_BYTES)
+        .map_err(|io| {
+            if registry_bound_error(&io) {
+                error(
+                    "legacy-tray-startup-registry-value-oversized",
+                    "a Run value exceeds the bounded startup inventory",
+                    io.raw_os_error()
+                        .and_then(|value| u32::try_from(value).ok()),
+                )
+            } else if io.kind() == std::io::ErrorKind::InvalidData
+                && io.to_string() == "registry value name is not valid UTF-16"
+            {
+                error(
+                    "legacy-tray-startup-registry-name-invalid",
+                    "a Run value name is not valid UTF-16",
+                    None,
+                )
+            } else {
+                io_error(
+                    "legacy-tray-startup-registry-enumeration-failed",
+                    "a Run value could not be read",
+                    io,
+                )
+            }
         })?;
+    let mut result = Vec::new();
+    for value in values {
         if let Some(observation) =
-            classify_registry_value(source, display_name, value_type, raw, context)?
+            classify_registry_value(source, value.name, value.kind, value.bytes, context)?
         {
             result.push(observation);
         }
-        index = index.checked_add(1).ok_or_else(|| {
-            error(
-                "legacy-tray-startup-registry-enumeration-overflow",
-                "the Run value inventory exceeded its index range",
-                None,
-            )
-        })?;
     }
     Ok(result)
 }
@@ -935,13 +740,12 @@ fn classify_registry_value(
 }
 
 fn observe_startup_folder(
-    folder_id: &GUID,
     source: LegacyTrayStartupSource,
     expected: &Path,
     user_sid: &str,
     recorded_at: u64,
 ) -> Result<Vec<LegacyTrayStartupObservation>, StructuredServiceError> {
-    let folder = known_folder(folder_id)?;
+    let folder = known_folder()?;
     if !folder.exists() {
         return Ok(Vec::new());
     }
@@ -953,7 +757,14 @@ fn observe_startup_folder(
             io.raw_os_error().map(|value| value as u32),
         )
     })?;
-    let _apartment = ComApartment::initialize()?;
+    let _apartment =
+        ComApartment::initialize_or_borrow(ComThreading::Apartment).map_err(|result| {
+            error(
+                "legacy-tray-startup-com-unavailable",
+                &format!("COM initialization failed with HRESULT {result:#x}"),
+                None,
+            )
+        })?;
     let mut result = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|io| {
@@ -980,16 +791,18 @@ fn observe_startup_folder(
             }
             continue;
         }
-        let resolution = resolve_shell_link(&path);
-        let (target, arguments) = match resolution {
-            Ok(value) => value,
-            Err(problem) => {
-                if suspicious_tray_name(&display_name) {
-                    result.push(LegacyTrayStartupObservation::Unknown(problem));
-                }
-                continue;
+        let Some(shortcut) = read_shortcut(&path) else {
+            if suspicious_tray_name(&display_name) {
+                result.push(LegacyTrayStartupObservation::Unknown(error(
+                    "legacy-tray-startup-link-resolution-failed",
+                    "the Startup shortcut cannot be read",
+                    None,
+                )));
             }
+            continue;
         };
+        let target = PathBuf::from(shortcut.path);
+        let arguments = shortcut.arguments;
         let is_mactray_target = target
             .file_name()
             .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("MacTray.exe"));
@@ -1054,94 +867,37 @@ fn decode_registry_string(raw: &[u8]) -> Result<String, StructuredServiceError> 
 }
 
 fn expand_environment(value: &str) -> Result<String, StructuredServiceError> {
-    let source = wide(value);
-    let required = unsafe { ExpandEnvironmentStringsW(source.as_ptr(), std::ptr::null_mut(), 0) };
-    if required == 0 || required as usize > MAX_WIDE_UNITS {
-        return Err(last_error(
+    expand_environment_strings(value, MAX_WIDE_UNITS).map_err(|io| {
+        io_error(
             "legacy-tray-startup-environment-expansion-failed",
             "a Run environment string cannot be expanded within the bound",
-        ));
-    }
-    let mut result = vec![0_u16; required as usize];
-    let written =
-        unsafe { ExpandEnvironmentStringsW(source.as_ptr(), result.as_mut_ptr(), required) };
-    if written == 0 || written > required {
-        return Err(last_error(
-            "legacy-tray-startup-environment-expansion-failed",
-            "a Run environment string changed during bounded expansion",
-        ));
-    }
-    decode_nul_terminated(&result)
+            io,
+        )
+    })
 }
 
 fn current_user_sid() -> Result<String, StructuredServiceError> {
-    let mut token = std::ptr::null_mut();
-    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
-        return Err(last_error(
-            "legacy-tray-startup-user-token-unavailable",
-            "the current user token cannot be opened",
-        ));
-    }
-    let token = OwnedHandle(token);
-    let mut needed = 0_u32;
-    unsafe { GetTokenInformation(token.0, TokenUser, std::ptr::null_mut(), 0, &mut needed) };
-    if needed < std::mem::size_of::<TOKEN_USER>() as u32
-        || needed as usize > MAX_REGISTRY_VALUE_BYTES
-    {
-        return Err(last_error(
-            "legacy-tray-startup-user-sid-unavailable",
-            "the current user SID has an invalid bounded length",
-        ));
-    }
-    let word = std::mem::size_of::<usize>();
-    let mut buffer = vec![0_usize; (needed as usize).div_ceil(word)];
-    if unsafe {
-        GetTokenInformation(
-            token.0,
-            TokenUser,
-            buffer.as_mut_ptr().cast(),
-            needed,
-            &mut needed,
-        )
-    } == 0
-    {
-        return Err(last_error(
+    current_user_sid_string().map_err(|io| {
+        io_error(
             "legacy-tray-startup-user-sid-unavailable",
             "the current user SID cannot be read",
-        ));
-    }
-    let token_user = unsafe { &*buffer.as_ptr().cast::<TOKEN_USER>() };
-    let mut sid_string = std::ptr::null_mut();
-    if unsafe { ConvertSidToStringSidW(token_user.User.Sid, &mut sid_string) } == 0
-        || sid_string.is_null()
-    {
-        return Err(last_error(
-            "legacy-tray-startup-user-sid-unavailable",
-            "the current user SID cannot be formatted",
-        ));
-    }
-    let value = decode_wide_pointer(sid_string);
-    unsafe { LocalFree(sid_string.cast::<c_void>() as HLOCAL) };
-    value
+            io,
+        )
+    })
 }
 
-fn known_folder(id: &GUID) -> Result<PathBuf, StructuredServiceError> {
-    let mut pointer = std::ptr::null_mut();
-    let result = unsafe { SHGetKnownFolderPath(id, 0, std::ptr::null_mut(), &mut pointer) };
-    if result < 0 || pointer.is_null() {
-        return Err(error(
+fn known_folder() -> Result<PathBuf, StructuredServiceError> {
+    known_folder_path(KnownFolder::Startup).map_err(|io| {
+        io_error(
             "legacy-tray-startup-known-folder-unavailable",
-            &format!("a fixed Startup folder is unavailable (HRESULT {result:#x})"),
-            None,
-        ));
-    }
-    let decoded = decode_wide_pointer(pointer);
-    unsafe { CoTaskMemFree(pointer.cast()) };
-    decoded.map(PathBuf::from)
+            "a fixed Startup folder is unavailable",
+            io,
+        )
+    })
 }
 
 fn require_regular_directory(path: &Path) -> Result<(), StructuredServiceError> {
-    let attributes = file_attributes(path)?;
+    let attributes = startup_file_attributes(path)?;
     if attributes & FILE_ATTRIBUTE_DIRECTORY == 0 || attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
     {
         Err(error(
@@ -1162,7 +918,7 @@ fn require_regular_link_under(folder: &Path, path: &Path) -> Result<(), Structur
             None,
         ));
     }
-    let attributes = file_attributes(path)?;
+    let attributes = startup_file_attributes(path)?;
     if attributes & FILE_ATTRIBUTE_DIRECTORY != 0 || attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
     {
         return Err(error(
@@ -1174,17 +930,14 @@ fn require_regular_link_under(folder: &Path, path: &Path) -> Result<(), Structur
     Ok(())
 }
 
-fn file_attributes(path: &Path) -> Result<u32, StructuredServiceError> {
-    let path = wide(path.as_os_str());
-    let attributes = unsafe { GetFileAttributesW(path.as_ptr()) };
-    if attributes == INVALID_FILE_ATTRIBUTES {
-        Err(last_error(
+fn startup_file_attributes(path: &Path) -> Result<u32, StructuredServiceError> {
+    file_attributes(path).map_err(|io| {
+        io_error(
             "legacy-tray-startup-path-inaccessible",
             "a fixed Startup path cannot be inspected",
-        ))
-    } else {
-        Ok(attributes)
-    }
+            io,
+        )
+    })
 }
 
 fn read_bounded_link(path: &Path) -> Result<Vec<u8>, StructuredServiceError> {
@@ -1230,104 +983,6 @@ fn read_bounded_link(path: &Path) -> Result<Vec<u8>, StructuredServiceError> {
     Ok(raw)
 }
 
-fn resolve_shell_link(path: &Path) -> Result<(PathBuf, String), StructuredServiceError> {
-    let mut shell_link = std::ptr::null_mut();
-    let created = unsafe {
-        CoCreateInstance(
-            &ShellLink,
-            std::ptr::null_mut(),
-            CLSCTX_INPROC_SERVER,
-            &IID_ISHELL_LINK_W,
-            &mut shell_link,
-        )
-    };
-    if created < 0 || shell_link.is_null() {
-        return Err(error(
-            "legacy-tray-startup-link-resolution-failed",
-            &format!("the ShellLink object cannot be created (HRESULT {created:#x})"),
-            None,
-        ));
-    }
-    let shell_link = ComPointer(shell_link);
-    type QueryInterface =
-        unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT;
-    let query_interface: QueryInterface = unsafe { com_method(shell_link.as_ptr(), 0) };
-    let mut persist_file = std::ptr::null_mut();
-    let queried =
-        unsafe { query_interface(shell_link.as_ptr(), &IID_IPERSIST_FILE, &mut persist_file) };
-    if queried < 0 || persist_file.is_null() {
-        return Err(error(
-            "legacy-tray-startup-link-resolution-failed",
-            &format!("IPersistFile is unavailable (HRESULT {queried:#x})"),
-            None,
-        ));
-    }
-    let persist_file = ComPointer(persist_file);
-    type Load = unsafe extern "system" fn(*mut c_void, *const u16, u32) -> HRESULT;
-    let load: Load = unsafe { com_method(persist_file.as_ptr(), 5) };
-    let wide_path = wide(path.as_os_str());
-    let loaded = unsafe { load(persist_file.as_ptr(), wide_path.as_ptr(), STGM_READ) };
-    if loaded < 0 {
-        return Err(error(
-            "legacy-tray-startup-link-resolution-failed",
-            &format!("the Startup shortcut cannot be loaded (HRESULT {loaded:#x})"),
-            None,
-        ));
-    }
-    type GetPath =
-        unsafe extern "system" fn(*mut c_void, *mut u16, i32, *mut c_void, u32) -> HRESULT;
-    let get_path: GetPath = unsafe { com_method(shell_link.as_ptr(), 3) };
-    let mut target = vec![0_u16; MAX_WIDE_UNITS];
-    let target_result = unsafe {
-        get_path(
-            shell_link.as_ptr(),
-            target.as_mut_ptr(),
-            target.len() as i32,
-            std::ptr::null_mut(),
-            SLGP_RAWPATH as u32,
-        )
-    };
-    if target_result < 0 {
-        return Err(error(
-            "legacy-tray-startup-link-resolution-failed",
-            &format!("the shortcut target cannot be read (HRESULT {target_result:#x})"),
-            None,
-        ));
-    }
-    type GetArguments = unsafe extern "system" fn(*mut c_void, *mut u16, i32) -> HRESULT;
-    let get_arguments: GetArguments = unsafe { com_method(shell_link.as_ptr(), 10) };
-    let mut arguments = vec![0_u16; MAX_WIDE_UNITS];
-    let arguments_result = unsafe {
-        get_arguments(
-            shell_link.as_ptr(),
-            arguments.as_mut_ptr(),
-            arguments.len() as i32,
-        )
-    };
-    if arguments_result < 0 {
-        return Err(error(
-            "legacy-tray-startup-link-resolution-failed",
-            &format!("the shortcut arguments cannot be read (HRESULT {arguments_result:#x})"),
-            None,
-        ));
-    }
-    let target = decode_nul_terminated(&target)?;
-    if target.is_empty() {
-        return Err(error(
-            "legacy-tray-startup-link-resolution-failed",
-            "the Startup shortcut has no target",
-            None,
-        ));
-    }
-    Ok((PathBuf::from(target), decode_nul_terminated(&arguments)?))
-}
-
-unsafe fn com_method<T>(object: *mut c_void, index: usize) -> T {
-    let vtable = unsafe { *(object.cast::<*const *const c_void>()) };
-    let method = unsafe { *vtable.add(index) };
-    unsafe { std::mem::transmute_copy(&method) }
-}
-
 fn startup_target_hint(command: &str) -> Option<PathBuf> {
     if let Some(target) = command.strip_prefix('"') {
         let end = target.find('"')?;
@@ -1359,57 +1014,18 @@ fn recorded_at() -> Result<u64, StructuredServiceError> {
     })
 }
 
-fn decode_wide_pointer(pointer: *const u16) -> Result<String, StructuredServiceError> {
-    if pointer.is_null() {
-        return Err(error(
-            "legacy-tray-startup-wide-string-invalid",
-            "a Windows string pointer is null",
-            None,
-        ));
-    }
-    let mut length = 0_usize;
-    while length < MAX_WIDE_UNITS && unsafe { *pointer.add(length) } != 0 {
-        length += 1;
-    }
-    if length == MAX_WIDE_UNITS {
-        return Err(error(
-            "legacy-tray-startup-wide-string-invalid",
-            "a Windows string is not bounded",
-            None,
-        ));
-    }
-    String::from_utf16(unsafe { std::slice::from_raw_parts(pointer, length) }).map_err(|_| {
-        error(
-            "legacy-tray-startup-wide-string-invalid",
-            "a Windows string is not valid UTF-16",
-            None,
-        )
-    })
+fn registry_bound_error(io: &std::io::Error) -> bool {
+    io.kind() == std::io::ErrorKind::InvalidData
+        && io.to_string() == "registry value exceeds the bound"
 }
 
-fn decode_nul_terminated(buffer: &[u16]) -> Result<String, StructuredServiceError> {
-    let Some(end) = buffer.iter().position(|unit| *unit == 0) else {
-        return Err(error(
-            "legacy-tray-startup-wide-string-invalid",
-            "a Windows string did not terminate within the bound",
-            None,
-        ));
-    };
-    String::from_utf16(&buffer[..end]).map_err(|_| {
-        error(
-            "legacy-tray-startup-wide-string-invalid",
-            "a Windows string is not valid UTF-16",
-            None,
-        )
-    })
-}
-
-fn wide(value: impl AsRef<OsStr>) -> Vec<u16> {
-    value.as_ref().encode_wide().chain(Some(0)).collect()
-}
-
-fn last_error(code: &str, message: &str) -> StructuredServiceError {
-    error(code, message, Some(unsafe { GetLastError() }))
+fn io_error(code: &str, message: &str, io: std::io::Error) -> StructuredServiceError {
+    error(
+        code,
+        message,
+        io.raw_os_error()
+            .and_then(|value| u32::try_from(value).ok()),
+    )
 }
 
 fn error(code: &str, message: &str, win32_error: Option<u32>) -> StructuredServiceError {

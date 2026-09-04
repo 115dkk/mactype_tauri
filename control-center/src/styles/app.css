@@ -617,3 +617,8 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .event-sources dd { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: 0; min-width: 0; }
 .event-sources code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .event-sources [data-readable="false"] span { color: var(--color-warning); }
+
+/* Docked preview footers hold four controls; they wrap as whole controls
+   rather than breaking a label across lines. */
+.settings-workspace[data-preview-docked="true"] .preview-footer { flex-wrap: wrap; justify-content: flex-start; gap: var(--space-2); }
+.settings-workspace[data-preview-docked="true"] .preview-footer > * { flex: 0 0 auto; white-space: nowrap; }

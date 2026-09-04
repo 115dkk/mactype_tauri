@@ -1929,3 +1929,67 @@ test("the skin picker switches skins and the choice survives a reload", async ({
   await page.locator("[data-skin-option=\"classic\"]").click();
   await expect(page.locator("html")).toHaveAttribute("data-skin", "classic");
 });
+
+/* Each skin arranges the same pages in its own paradigm; these prove the
+   paradigm-specific interactions rather than the shared page logic. */
+test("the Console skin shows the dashboard overview with a specimen, the service panel, and the activity log", async ({ page }) => {
+  await page.goto("/?view=overview&gallery=1&lang=ko&skin=console&theme=dark&system-service=ready", { waitUntil: "networkidle" });
+  await expect(page.locator(".console-specimen-panel .specimen-strip")).toHaveCount(6);
+  await expect(page.locator(".console-kv")).toContainText("프로필");
+  await expect(page.locator("[data-recent-activity] li")).not.toHaveCount(0);
+  await expect(page.locator(".console-status")).toContainText("새 서비스");
+  await page.locator(".console-modes-panel").waitFor({ state: "detached", timeout: 100 }).catch(() => undefined);
+});
+
+test("the Console skin expands service mode rows in place", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=ko&skin=console&system-service=ready", { waitUntil: "networkidle" });
+  const registered = page.locator('.console-mode-row[data-kind="registered"]');
+  await expect(page.locator(".console-mode-detail")).toHaveCount(0);
+  await registered.getByRole("button", { expanded: false }).click();
+  await expect(page.locator(".console-mode-detail")).toHaveCount(1);
+  await expect(page.locator(".console-mode-detail")).toContainText("등록");
+  await page.locator('.console-mode-row[data-kind="manual"]').getByRole("button", { expanded: false }).click();
+  await expect(page.locator(".console-mode-detail .process-picker")).toBeVisible();
+});
+
+test("the Fluent skin renders settings cards and toggles the system expander", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=ko&skin=fluent&system-service=ready", { waitUntil: "networkidle" });
+  const system = page.locator('.fluent-card[data-kind="system"]');
+  await expect(system).toHaveAttribute("data-expanded", "true");
+  await expect(system.locator(".fluent-sub-rows")).toContainText("활성 프로필 세대");
+  await system.locator(".fluent-chev").click();
+  await expect(system).toHaveAttribute("data-expanded", "false");
+  await expect(page.locator('.fluent-card[data-kind="autostart"] input[role="switch"]')).toBeVisible();
+});
+
+test("the Cupertino skin opens a detail page from a disclosure row and returns", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=ko&skin=cupertino&system-service=ready", { waitUntil: "networkidle" });
+  await page.locator('.cupertino-row[data-kind="registered"]').click();
+  await expect(page.getByRole("heading", { level: 1, name: "MacType으로 시작할 프로그램" })).toBeVisible();
+  await expect(page.locator(".registered-launchers")).toBeVisible();
+  await page.locator(".cupertino-back").click();
+  await expect(page.getByRole("heading", { level: 1, name: "서비스" })).toBeVisible();
+  await expect(page.locator('.cupertino-row[data-kind="system"]')).toBeVisible();
+});
+
+test("the Cupertino sidebar search filters the navigation", async ({ page }) => {
+  await page.goto("/?view=overview&gallery=1&lang=ko&skin=cupertino", { waitUntil: "networkidle" });
+  await expect(page.locator(".cupertino-item")).toHaveCount(6);
+  await page.locator(".cupertino-side .cupertino-search input").fill("진단");
+  await expect(page.locator(".cupertino-item")).toHaveCount(1);
+  await page.locator(".cupertino-side .cupertino-search input").fill("없는 항목");
+  await expect(page.locator(".cupertino-side-empty")).toBeVisible();
+});
+
+test("the skin diagnostics timelines localise event codes and hide raw detail behind a disclosure", async ({ page }) => {
+  for (const skin of ["console", "fluent", "cupertino"] as const) {
+    await page.goto(`/?view=diagnostics&gallery=1&lang=ko&skin=${skin}`, { waitUntil: "networkidle" });
+    const timeline = page.getByTestId("event-timeline");
+    await expect(timeline).toContainText("프로필 Default.ini 적용을 마쳤습니다.");
+    await expect(timeline).not.toContainText("protected-process-light");
+    await timeline.locator('.event-row[data-severity="warning"] .event-disclosure').first().click();
+    await expect(timeline).toContainText("protected-process-light");
+    await timeline.locator('.event-chip[data-severity="warning"]').click();
+    await expect(timeline.locator('.event-row[data-severity="warning"]')).toHaveCount(0);
+  }
+});

@@ -23,7 +23,8 @@ atomically to a validated absolute `.png` path.
 
 The native preview supports sample, ladder, compare, and listing modes. `set_native_preview`
 accepts `visible` and an optional options object containing text, listing text, font and style,
-colours, theme, inversion, zoom, sizes, and localised labels. It returns the native window's
+colours, theme, inversion, zoom, sizes, localised labels, and a skin-derived `chrome` object.
+The Helper draws the supplied palette and metrics and echoes its skin id with the native window's
 visibility, mode, colours, inversion, zoom, font, style, and topmost state. Older Helpers remain
 compatible because they ignore unknown show options, while Rust accepts their three-field state.
 

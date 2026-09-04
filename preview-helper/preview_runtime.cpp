@@ -50,22 +50,11 @@ enum Action {
   kCopy,
 };
 
-struct Palette {
-  COLORREF canvas;
-  COLORREF surface;
-  COLORREF hover;
-  COLORREF border;
-  COLORREF text;
-  COLORREF muted;
-  COLORREF accent;
-  COLORREF on_accent;
-};
-
-constexpr Palette kLightPalette{RGB(0xF3, 0xF5, 0xF7), RGB(0xFF, 0xFF, 0xFF),
+constexpr PreviewRuntime::Palette kLightPalette{RGB(0xF3, 0xF5, 0xF7), RGB(0xFF, 0xFF, 0xFF),
                                 RGB(0xE9, 0xED, 0xF1), RGB(0xC9, 0xD1, 0xD8),
                                 RGB(0x17, 0x21, 0x2B), RGB(0x5A, 0x67, 0x73),
                                 RGB(0x00, 0x67, 0xC0), RGB(0xFF, 0xFF, 0xFF)};
-constexpr Palette kDarkPalette{RGB(0x11, 0x16, 0x1B), RGB(0x19, 0x20, 0x27),
+constexpr PreviewRuntime::Palette kDarkPalette{RGB(0x11, 0x16, 0x1B), RGB(0x19, 0x20, 0x27),
                                RGB(0x22, 0x2B, 0x33), RGB(0x34, 0x41, 0x4C),
                                RGB(0xE8, 0xED, 0xF2), RGB(0x9A, 0xA8, 0xB5),
                                RGB(0x4C, 0xA6, 0xE8), RGB(0x07, 0x13, 0x1C)};
@@ -303,6 +292,14 @@ std::optional<double> json_root_number(const std::string& json, const std::strin
   return start ? json_number_at(json, *start) : std::nullopt;
 }
 
+std::optional<double> json_object_number(const std::string& json, const std::string& object,
+                                         const std::string& key) {
+  const auto range = json_object_range(json, object);
+  if (!range) return std::nullopt;
+  const auto start = json_value_start(json, key, range->first, range->second);
+  return start ? json_number_at(json, *start) : std::nullopt;
+}
+
 std::optional<bool> json_bool_at(const std::string& json, std::size_t start) {
   const auto valid_ending = [&](std::size_t position) {
     while (position < json.size() &&
@@ -323,6 +320,14 @@ std::optional<bool> json_bool(const std::string& json, const std::string& key) {
 
 std::optional<bool> json_root_bool(const std::string& json, const std::string& key) {
   const auto start = json_root_value_start(json, key);
+  return start ? json_bool_at(json, *start) : std::nullopt;
+}
+
+std::optional<bool> json_object_bool(const std::string& json, const std::string& object,
+                                     const std::string& key) {
+  const auto range = json_object_range(json, object);
+  if (!range) return std::nullopt;
+  const auto start = json_value_start(json, key, range->first, range->second);
   return start ? json_bool_at(json, *start) : std::nullopt;
 }
 
@@ -366,6 +371,15 @@ COLORREF parse_color(const std::string& value, COLORREF fallback) {
   std::istringstream input(value.substr(1));
   input >> std::hex >> color;
   if (!input || !input.eof()) return fallback;
+  return RGB((color >> 16U) & 0xFFU, (color >> 8U) & 0xFFU, color & 0xFFU);
+}
+
+std::optional<COLORREF> parse_color(const std::string& value) {
+  if (value.size() != 7 || value[0] != '#') return std::nullopt;
+  unsigned int color{};
+  std::istringstream input(value.substr(1));
+  input >> std::hex >> color;
+  if (!input || !input.eof()) return std::nullopt;
   return RGB((color >> 16U) & 0xFFU, (color >> 8U) & 0xFFU, color & 0xFFU);
 }
 
@@ -648,9 +662,10 @@ PreviewRuntime::~PreviewRuntime() {
   if (native_window_) DestroyWindow(native_window_);
   if (hidden_window_) DestroyWindow(hidden_window_);
   if (ui_font_) DeleteObject(ui_font_);
+  if (mono_font_) DeleteObject(mono_font_);
   if (surface_brush_) DeleteObject(surface_brush_);
   if (edit_brush_) DeleteObject(edit_brush_);
-  if (module_) FreeLibrary(module_);
+  // MacType installs process-wide hooks, so its module must remain mapped until process exit.
   if (com_initialized_) CoUninitialize();
 }
 
@@ -754,8 +769,8 @@ bool PreviewRuntime::create_windows(std::string& error) {
     error = "failed to create preview controls";
     return false;
   }
-  SetWindowTheme(face_combo_, L"", L"");
-  SetWindowTheme(size_combo_, L"", L"");
+  SendMessageW(edit_control_, EM_SETLIMITTEXT, 4096, 0);
+  apply_combo_theme();
   recreate_ui_font();
   edit_original_proc_ = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(
       edit_control_, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(edit_proc)));
@@ -850,6 +865,7 @@ mtpc::Frame PreviewRuntime::render(const mtpc::Frame& request) {
   const auto started = std::chrono::steady_clock::now();
   std::string error;
   if (!apply_request(request.json, error)) return error_frame(request.request_id, "invalid_request", error);
+  invalidate_canvas_cache();
   std::uint32_t width{};
   std::uint32_t height{};
   std::uint32_t dpi{};
@@ -901,10 +917,11 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
     COLORREF native_background;
     bool inverted;
     NativeLabels labels;
+    std::optional<NativeChrome> chrome;
   } pending{display_mode_,      sample_text_,       listing_text_, font_face_,
             font_size_pt_,      sample_bold_,       sample_italic_, topmost_,
             dark_theme_,        zoom_,              ladder_sizes_, native_foreground_,
-            native_background_, inverted_,          labels_};
+            native_background_, inverted_,          labels_,       std::nullopt};
 
   if (const auto mode = json_root_string(json, "displayMode")) {
     if (*mode == "sample" || *mode == "default") pending.display_mode = DisplayMode::sample;
@@ -916,8 +933,20 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
       return false;
     }
   }
-  if (const auto value = json_root_string(json, "text")) pending.sample_text = utf8_to_wide(*value);
-  if (const auto value = json_root_string(json, "listingText")) pending.listing_text = utf8_to_wide(*value);
+  if (const auto value = json_root_string(json, "text")) {
+    pending.sample_text = utf8_to_wide(*value);
+    if (pending.sample_text.size() > 4096) {
+      error = "text exceeds 4096 UTF-16 units";
+      return false;
+    }
+  }
+  if (const auto value = json_root_string(json, "listingText")) {
+    pending.listing_text = utf8_to_wide(*value);
+    if (pending.listing_text.size() > 4096) {
+      error = "listingText exceeds 4096 UTF-16 units";
+      return false;
+    }
+  }
   if (const auto value = json_root_string(json, "fontFace")) pending.font_face = utf8_to_wide(*value);
   const auto font_size_start = json_root_value_start(json, "fontSizePt");
   const auto font_size = json_root_number(json, "fontSizePt");
@@ -992,6 +1021,85 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
     pending.ladder_sizes = std::move(sizes);
   }
 
+  if (const auto chrome_range = json_object_range(json, "chrome")) {
+    (void)chrome_range;
+    const auto skin = json_object_string(json, "chrome", "skin");
+    if (!skin) {
+      error = "chrome.skin is required";
+      return false;
+    }
+    Skin parsed_skin{};
+    if (*skin == "classic") parsed_skin = Skin::classic;
+    else if (*skin == "fluent") parsed_skin = Skin::fluent;
+    else if (*skin == "console") parsed_skin = Skin::console;
+    else if (*skin == "cupertino") parsed_skin = Skin::cupertino;
+    else {
+      error = "chrome.skin is unsupported";
+      return false;
+    }
+    NativeChrome chrome{parsed_skin,
+                        {RGB(0xF3, 0xF5, 0xF7), RGB(0xFF, 0xFF, 0xFF),
+                         RGB(0xE9, 0xED, 0xF1), RGB(0xC9, 0xD1, 0xD8),
+                         RGB(0x17, 0x21, 0x2B), RGB(0x5A, 0x67, 0x73),
+                         RGB(0x00, 0x67, 0xC0), RGB(0xFF, 0xFF, 0xFF)},
+                        4, 32, 44, 28, 4, 18, false};
+    struct ColorBinding {
+      const char* key;
+      COLORREF Palette::*member;
+    };
+    constexpr ColorBinding color_bindings[] = {
+        {"canvas", &Palette::canvas}, {"surface", &Palette::surface},
+        {"surfaceSubtle", &Palette::hover}, {"border", &Palette::border},
+        {"text", &Palette::text}, {"muted", &Palette::muted},
+        {"accent", &Palette::accent}, {"onAccent", &Palette::on_accent},
+    };
+    for (const auto& binding : color_bindings) {
+      const auto value = json_object_string(json, "chrome", binding.key);
+      if (!value) {
+        error = std::string{"chrome."} + binding.key + " is required";
+        return false;
+      }
+      const auto color = parse_color(*value);
+      if (!color) {
+        error = std::string{"chrome."} + binding.key + " must be a #RRGGBB colour";
+        return false;
+      }
+      chrome.palette.*(binding.member) = *color;
+    }
+    struct MetricBinding {
+      const char* key;
+      int NativeChrome::*member;
+      int minimum;
+      int maximum;
+    };
+    constexpr MetricBinding metric_bindings[] = {
+        {"radius", &NativeChrome::radius, 0, 32},
+        {"controlHeight", &NativeChrome::control_height, 20, 64},
+        {"toolbarHeight", &NativeChrome::toolbar_height, 28, 96},
+        {"statusHeight", &NativeChrome::status_height, 18, 64},
+        {"canvasRadius", &NativeChrome::canvas_radius, 0, 32},
+        {"canvasInset", &NativeChrome::canvas_inset, 0, 64},
+    };
+    for (const auto& binding : metric_bindings) {
+      const auto value = json_object_number(json, "chrome", binding.key);
+      if (!value || *value != static_cast<double>(static_cast<int>(*value)) ||
+          *value < binding.minimum || *value > binding.maximum) {
+        error = std::string{"chrome."} + binding.key + " is outside the supported range";
+        return false;
+      }
+      chrome.*(binding.member) = static_cast<int>(*value);
+    }
+    const auto mono = json_object_bool(json, "chrome", "monoStatus");
+    if (!mono) {
+      error = "chrome.monoStatus must be a boolean";
+      return false;
+    }
+    chrome.mono_status = *mono;
+    pending.chrome = chrome;
+  } else {
+    pending.chrome.reset();
+  }
+
   const auto foreground = json_root_string(json, "foreground");
   const auto background = json_root_string(json, "background");
   const bool colors_supplied = foreground.has_value() || background.has_value();
@@ -1047,6 +1155,7 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
     }
   }
   const bool theme_changed = pending.dark_theme != dark_theme_;
+  const bool chrome_changed = pending.chrome.has_value() || chrome_.has_value();
   display_mode_ = pending.display_mode;
   sample_text_ = std::move(pending.sample_text);
   listing_text_ = std::move(pending.listing_text);
@@ -1062,8 +1171,14 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
   native_background_ = pending.native_background;
   inverted_ = pending.inverted;
   labels_ = std::move(pending.labels);
+  chrome_ = std::move(pending.chrome);
 
-  if (theme_changed) recreate_palette_brushes();
+  invalidate_canvas_cache();
+  if (theme_changed || chrome_changed) {
+    recreate_palette_brushes();
+    apply_combo_theme();
+  }
+  recreate_ui_font();
   SetWindowTextW(native_window_, labels_.title.c_str());
   sync_controls();
   relayout_controls();
@@ -1103,7 +1218,12 @@ std::string PreviewRuntime::native_state_json(bool visible) const {
          ",\"fontFace\":\"" + face + "\",\"fontSizePt\":" + size.str() +
          ",\"bold\":" + (sample_bold_ ? "true" : "false") + ",\"italic\":" +
          (sample_italic_ ? "true" : "false") + ",\"topmost\":" +
-         (topmost_ ? "true" : "false") + "}";
+         (topmost_ ? "true" : "false") +
+         (chrome_ ? std::string{",\"skin\":\""} +
+                        (chrome_->skin == Skin::classic ? "classic" :
+                         chrome_->skin == Skin::fluent ? "fluent" :
+                         chrome_->skin == Skin::console ? "console" : "cupertino") + "\"}"
+                  : "}");
 }
 
 void PreviewRuntime::show_native_window() {
@@ -1121,11 +1241,49 @@ void PreviewRuntime::hide_native_window() {
   ShowWindow(native_window_, SW_HIDE);
 }
 
+const PreviewRuntime::Palette& PreviewRuntime::palette() const {
+  return chrome_ ? chrome_->palette : (dark_theme_ ? kDarkPalette : kLightPalette);
+}
+
+int PreviewRuntime::chrome_metric(int NativeChrome::*member, int fallback) const {
+  return scaled(chrome_ ? (*chrome_).*member : fallback, native_dpi_);
+}
+
+void PreviewRuntime::invalidate_canvas_cache() {
+  canvas_cache_dirty_ = true;
+}
+
+PreviewRuntime::CanvasBitmap* PreviewRuntime::cached_native_canvas(int width, int minimum_height) {
+  if (canvas_cache_dirty_ || !canvas_cache_ || canvas_cache_width_ != width ||
+      canvas_cache_minimum_height_ != minimum_height) {
+    canvas_cache_ = render_native_canvas(width, minimum_height);
+    canvas_cache_width_ = width;
+    canvas_cache_minimum_height_ = minimum_height;
+    canvas_cache_dirty_ = false;
+  }
+  return canvas_cache_.get();
+}
+
+void PreviewRuntime::apply_combo_theme() {
+  const bool dark = chrome_ ? is_dark(chrome_->palette.canvas) : dark_theme_;
+  for (HWND combo : {face_combo_, size_combo_}) {
+    if (combo) SetWindowTheme(combo, dark ? L"DarkMode_CFD" : nullptr, nullptr);
+  }
+}
+
 void PreviewRuntime::recreate_ui_font() {
   if (ui_font_) DeleteObject(ui_font_);
+  if (mono_font_) DeleteObject(mono_font_);
   ui_font_ = CreateFontW(-MulDiv(9, static_cast<int>(native_dpi_), 72), 0, 0, 0, FW_NORMAL, FALSE,
                          FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                          CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+  const auto cascadia = std::find_if(font_names_.begin(), font_names_.end(), [](const auto& name) {
+    return _wcsicmp(name.c_str(), L"Cascadia Mono") == 0;
+  });
+  mono_font_ = CreateFontW(-MulDiv(10, static_cast<int>(native_dpi_), 72), 0, 0, 0, FW_NORMAL, FALSE,
+                           FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                           CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN,
+                           cascadia != font_names_.end() ? L"Cascadia Mono" : L"Consolas");
   const auto update_combo = [&](HWND combo) {
     if (!combo) return;
     SendMessageW(combo, WM_SETFONT, reinterpret_cast<WPARAM>(ui_font_), TRUE);
@@ -1141,9 +1299,9 @@ void PreviewRuntime::recreate_ui_font() {
 void PreviewRuntime::recreate_palette_brushes() {
   if (surface_brush_) DeleteObject(surface_brush_);
   if (edit_brush_) DeleteObject(edit_brush_);
-  const Palette& palette = dark_theme_ ? kDarkPalette : kLightPalette;
-  surface_brush_ = CreateSolidBrush(palette.surface);
-  edit_brush_ = CreateSolidBrush(palette.surface);
+  const Palette& colors = palette();
+  surface_brush_ = CreateSolidBrush(colors.surface);
+  edit_brush_ = CreateSolidBrush(colors.surface);
   if (native_window_) InvalidateRect(native_window_, nullptr, TRUE);
 }
 
@@ -1169,9 +1327,15 @@ void PreviewRuntime::enumerate_fonts() {
 
 void PreviewRuntime::sync_controls() {
   if (!face_combo_) return;
-  const LRESULT face_index = SendMessageW(face_combo_, CB_FINDSTRINGEXACT, static_cast<WPARAM>(-1),
-                                          reinterpret_cast<LPARAM>(font_face_.c_str()));
-  if (face_index != CB_ERR) SendMessageW(face_combo_, CB_SETCURSEL, static_cast<WPARAM>(face_index), 0);
+  LRESULT face_index = SendMessageW(face_combo_, CB_FINDSTRINGEXACT, static_cast<WPARAM>(-1),
+                                    reinterpret_cast<LPARAM>(font_face_.c_str()));
+  if (face_index == CB_ERR) {
+    face_index = SendMessageW(face_combo_, CB_INSERTSTRING, 0,
+                              reinterpret_cast<LPARAM>(font_face_.c_str()));
+  }
+  if (face_index != CB_ERR && face_index != CB_ERRSPACE) {
+    SendMessageW(face_combo_, CB_SETCURSEL, static_cast<WPARAM>(face_index), 0);
+  }
   const std::wstring size = std::to_wstring(static_cast<int>(std::lround(font_size_pt_)));
   const LRESULT size_index = SendMessageW(size_combo_, CB_FINDSTRINGEXACT, static_cast<WPARAM>(-1),
                                           reinterpret_cast<LPARAM>(size.c_str()));
@@ -1182,13 +1346,25 @@ void PreviewRuntime::sync_controls() {
   ShowWindow(edit_control_, edit_visible_ ? SW_SHOW : SW_HIDE);
 }
 
+std::wstring PreviewRuntime::selected_face_for_tests() const {
+  if (!face_combo_) return {};
+  const LRESULT selected = SendMessageW(face_combo_, CB_GETCURSEL, 0, 0);
+  if (selected == CB_ERR) return {};
+  const LRESULT length = SendMessageW(face_combo_, CB_GETLBTEXTLEN, selected, 0);
+  if (length == CB_ERR) return {};
+  std::wstring value(static_cast<std::size_t>(length) + 1, L'\0');
+  SendMessageW(face_combo_, CB_GETLBTEXT, selected, reinterpret_cast<LPARAM>(value.data()));
+  value.resize(static_cast<std::size_t>(length));
+  return value;
+}
+
 void PreviewRuntime::relayout_controls() {
   if (!native_window_ || !face_combo_) return;
   RECT client{};
   GetClientRect(native_window_, &client);
-  const int toolbar_height = scaled(40, native_dpi_);
-  const int control_height = scaled(28, native_dpi_);
-  const int top = scaled(6, native_dpi_);
+  const int toolbar_height = chrome_metric(&NativeChrome::toolbar_height, 40);
+  const int control_height = chrome_metric(&NativeChrome::control_height, 28);
+  const int top = std::max(0, (toolbar_height - control_height) / 2);
   const int face_label_width = scaled(32, native_dpi_);
   const int size_label_width = scaled(28, native_dpi_);
   const int face_width = std::clamp(static_cast<int>(client.right) / 7, scaled(110, native_dpi_),
@@ -1211,30 +1387,89 @@ void PreviewRuntime::relayout_controls() {
 
 void PreviewRuntime::rebuild_toolbar_layout() {
   toolbar_buttons_.clear();
+  toolbar_button_texts_.clear();
   toolbar_separators_.clear();
   RECT client{};
   GetClientRect(native_window_, &client);
   const int left = size_label_rect_.right + scaled(64, native_dpi_);
   const int right = static_cast<int>(client.right) - scaled(8, native_dpi_);
-  const int top = scaled(6, native_dpi_);
-  const int height = scaled(28, native_dpi_);
+  const int toolbar_height = chrome_metric(&NativeChrome::toolbar_height, 40);
+  const int height = chrome_metric(&NativeChrome::control_height, 28);
+  const int top = std::max(0, (toolbar_height - height) / 2);
   constexpr std::array<int, 13> actions{kBold, kItalic, kModeSample, kModeLadder, kModeCompare,
                                          kModeListing, kInvert, kLoupe, kZoom, kTopmost,
                                          kEditText, kSavePng, kCopy};
+  auto text_for = [&](int action) {
+    switch (action) {
+      case kBold: return labels_.bold;
+      case kItalic: return labels_.italic;
+      case kModeSample: return labels_.mode_sample;
+      case kModeLadder: return labels_.mode_ladder;
+      case kModeCompare: return labels_.mode_compare;
+      case kModeListing: return labels_.mode_listing;
+      case kInvert: return labels_.invert;
+      case kLoupe: return labels_.loupe;
+      case kZoom: return labels_.zoom + L" " + std::to_wstring(zoom_) + L"x ▾";
+      case kTopmost: return labels_.topmost;
+      case kEditText: return labels_.edit_text;
+      case kSavePng: return labels_.save_png;
+      case kCopy: return labels_.copy;
+      default: return std::wstring{};
+    }
+  };
+  for (int action : actions) toolbar_button_texts_.push_back(text_for(action));
   const int gap = scaled(2, native_dpi_);
-  const int available = std::max(1, right - left - gap * static_cast<int>(actions.size() - 1));
-  const int button_width = available / static_cast<int>(actions.size());
+  HDC dc = GetDC(native_window_);
+  HGDIOBJ previous = SelectObject(dc, ui_font_);
+  auto widths = [&] {
+    std::vector<int> result;
+    for (const auto& text : toolbar_button_texts_) {
+      SIZE extent{};
+      GetTextExtentPoint32W(dc, text.c_str(), static_cast<int>(text.size()), &extent);
+      result.push_back(std::max(scaled(40, native_dpi_), static_cast<int>(extent.cx) + scaled(20, native_dpi_)));
+    }
+    return result;
+  }();
+  auto total_width = [&] {
+    int total = gap * static_cast<int>(actions.size() - 1);
+    for (int width : widths) total += width;
+    return total;
+  };
+  if (total_width() > right - left) {
+    for (std::size_t index = 0; index <= 5; ++index) {
+      toolbar_button_texts_[index] = toolbar_button_texts_[index].empty()
+                                              ? L""
+                                              : toolbar_button_texts_[index].substr(0, 1);
+    }
+    widths = [&] {
+      std::vector<int> result;
+      for (const auto& text : toolbar_button_texts_) {
+        SIZE extent{};
+        GetTextExtentPoint32W(dc, text.c_str(), static_cast<int>(text.size()), &extent);
+        result.push_back(std::max(scaled(40, native_dpi_), static_cast<int>(extent.cx) + scaled(20, native_dpi_)));
+      }
+      return result;
+    }();
+  }
+  SelectObject(dc, previous);
+  ReleaseDC(native_window_, dc);
   int x = left;
   for (std::size_t index = 0; index < actions.size(); ++index) {
-    toolbar_buttons_.push_back({actions[index], RECT{x, top, x + button_width, top + height}});
-    x += button_width + gap;
+    toolbar_buttons_.push_back({actions[index], RECT{x, top, x + widths[index], top + height}});
+    const bool segmented_gap = chrome_ &&
+        (chrome_->skin == Skin::console || chrome_->skin == Skin::cupertino) &&
+        index >= 2 && index < 5;
+    x += widths[index] + (segmented_gap ? 0 : gap);
     if (index == 1 || index == 5 || index == 8) toolbar_separators_.push_back(x - gap / 2);
   }
+  minimum_client_width_ = std::max(scaled(720, native_dpi_), x + scaled(8, native_dpi_));
 }
 
 void PreviewRuntime::draw_toolbar(HDC dc, const RECT& area) {
-  const Palette& palette = dark_theme_ ? kDarkPalette : kLightPalette;
-  fill_solid(dc, area, palette.surface);
+  const Palette& palette = this->palette();
+  const bool toolbar_on_canvas = chrome_ &&
+      (chrome_->skin == Skin::fluent || chrome_->skin == Skin::cupertino);
+  fill_solid(dc, area, toolbar_on_canvas ? palette.canvas : palette.surface);
   HGDIOBJ previous_font = SelectObject(dc, ui_font_);
   SetBkMode(dc, TRANSPARENT);
   SetTextColor(dc, palette.muted);
@@ -1248,6 +1483,7 @@ void PreviewRuntime::draw_toolbar(HDC dc, const RECT& area) {
     SelectObject(dc, previous_pen);
     DeleteObject(pen);
   }
+  std::size_t button_index = 0;
   for (const auto& [action, rectangle] : toolbar_buttons_) {
     bool active = false;
     switch (action) {
@@ -1263,38 +1499,47 @@ void PreviewRuntime::draw_toolbar(HDC dc, const RECT& area) {
       case kEditText: active = edit_visible_; break;
       default: break;
     }
-    const COLORREF fill = active || pressed_action_ == action
-                              ? palette.accent
-                              : (hover_action_ == action ? palette.hover : palette.surface);
+    COLORREF fill = active || pressed_action_ == action
+                        ? palette.accent
+                        : (hover_action_ == action ? palette.hover : palette.surface);
+    if (chrome_ && chrome_->skin == Skin::cupertino && action >= kModeSample &&
+        action <= kModeListing && active) {
+      fill = palette.surface;
+    }
     HBRUSH brush = CreateSolidBrush(fill);
-    HPEN pen = CreatePen(PS_SOLID, 1, active ? palette.accent : palette.border);
+    COLORREF outline = active ? palette.accent : palette.border;
+    if (chrome_ && chrome_->skin == Skin::fluent && !active) outline = fill;
+    HPEN pen = CreatePen(PS_SOLID, 1, outline);
     HGDIOBJ previous_brush = SelectObject(dc, brush);
     HGDIOBJ previous_pen = SelectObject(dc, pen);
-    RoundRect(dc, rectangle.left, rectangle.top, rectangle.right, rectangle.bottom,
-              scaled(4, native_dpi_), scaled(4, native_dpi_));
+    const int radius = chrome_metric(&NativeChrome::radius, 4);
+    RoundRect(dc, rectangle.left, rectangle.top, rectangle.right, rectangle.bottom, radius, radius);
+    if (chrome_ && chrome_->skin == Skin::fluent) {
+      HPEN bottom = CreatePen(PS_SOLID, 1, blend_color(palette.border, RGB(0, 0, 0), 40));
+      HGDIOBJ old_bottom = SelectObject(dc, bottom);
+      MoveToEx(dc, rectangle.left + radius / 2, rectangle.bottom - 1, nullptr);
+      LineTo(dc, rectangle.right - radius / 2, rectangle.bottom - 1);
+      SelectObject(dc, old_bottom);
+      DeleteObject(bottom);
+    } else if (chrome_ && chrome_->skin == Skin::cupertino) {
+      HPEN shadow = CreatePen(PS_SOLID, 1, blend_color(RGB(0, 0, 0), palette.canvas, 5));
+      HGDIOBJ old_shadow = SelectObject(dc, shadow);
+      MoveToEx(dc, rectangle.left + radius / 2, rectangle.bottom, nullptr);
+      LineTo(dc, rectangle.right - radius / 2, rectangle.bottom);
+      SelectObject(dc, old_shadow);
+      DeleteObject(shadow);
+    }
     SelectObject(dc, previous_brush);
     SelectObject(dc, previous_pen);
     DeleteObject(brush);
     DeleteObject(pen);
-    std::wstring text;
-    switch (action) {
-      case kBold: text = labels_.bold; break;
-      case kItalic: text = labels_.italic; break;
-      case kModeSample: text = labels_.mode_sample; break;
-      case kModeLadder: text = labels_.mode_ladder; break;
-      case kModeCompare: text = labels_.mode_compare; break;
-      case kModeListing: text = labels_.mode_listing; break;
-      case kInvert: text = labels_.invert; break;
-      case kLoupe: text = labels_.loupe; break;
-      case kZoom: text = labels_.zoom + L" " + std::to_wstring(zoom_) + L"x ▾"; break;
-      case kTopmost: text = labels_.topmost; break;
-      case kEditText: text = labels_.edit_text; break;
-      case kSavePng: text = labels_.save_png; break;
-      case kCopy: text = labels_.copy; break;
-      default: break;
-    }
+    const std::wstring& text = toolbar_button_texts_[button_index++];
     RECT text_rect = rectangle;
-    SetTextColor(dc, active || pressed_action_ == action ? palette.on_accent : palette.text);
+    const bool cupertino_selected = chrome_ && chrome_->skin == Skin::cupertino &&
+                                      action >= kModeSample && action <= kModeListing && active;
+    SetTextColor(dc, (active || pressed_action_ == action) && !cupertino_selected
+                         ? palette.on_accent
+                         : palette.text);
     DrawTextW(dc, text.c_str(), -1, &text_rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
   }
   SelectObject(dc, previous_font);
@@ -1302,7 +1547,7 @@ void PreviewRuntime::draw_toolbar(HDC dc, const RECT& area) {
 
 void PreviewRuntime::draw_combo_item(const DRAWITEMSTRUCT& item) {
   if (item.itemID == static_cast<UINT>(-1)) return;
-  const Palette& palette = dark_theme_ ? kDarkPalette : kLightPalette;
+  const Palette& palette = this->palette();
   const bool selected = (item.itemState & ODS_SELECTED) != 0;
   fill_solid(item.hDC, item.rcItem, selected ? palette.accent : palette.surface);
   wchar_t text[LF_FACESIZE]{};
@@ -1336,16 +1581,21 @@ std::unique_ptr<PreviewRuntime::CanvasBitmap> PreviewRuntime::render_native_canv
   } else if (display_mode_ == DisplayMode::ladder) {
     int y = scaled(10, native_dpi_);
     const int gutter = scaled(50, native_dpi_);
-    HGDIOBJ ui_previous = SelectObject(bitmap->dc, ui_font_);
-    SetTextColor(bitmap->dc, (dark_theme_ ? kDarkPalette : kLightPalette).muted);
+    const HFONT gutter_font = chrome_ && chrome_->mono_status ? mono_font_ : ui_font_;
+    HGDIOBJ ui_previous = SelectObject(bitmap->dc, gutter_font);
+    SetTextColor(bitmap->dc, palette().muted);
     for (float size : ladder_sizes_) {
       const int line_height = std::max(scaled(24, native_dpi_), point_size_px(size, native_dpi_) * 3 / 2);
       const std::wstring label = std::to_wstring(static_cast<int>(std::lround(size))) + L" pt";
-      RECT label_area{scaled(6, native_dpi_), y, gutter - scaled(4, native_dpi_), y + line_height};
-      DrawTextW(bitmap->dc, label.c_str(), -1, &label_area, DT_RIGHT | DT_TOP | DT_SINGLELINE);
       SelectObject(bitmap->dc, ui_previous);
       HFONT sample_font = create_sample_font(font_face_, size, native_dpi_, sample_bold_, sample_italic_);
       HGDIOBJ previous_font = SelectObject(bitmap->dc, sample_font);
+      TEXTMETRICW metrics{};
+      GetTextMetricsW(bitmap->dc, &metrics);
+      SelectObject(bitmap->dc, gutter_font);
+      RECT label_area{scaled(6, native_dpi_), y, gutter - scaled(4, native_dpi_), y + metrics.tmAscent};
+      DrawTextW(bitmap->dc, label.c_str(), -1, &label_area, DT_RIGHT | DT_BOTTOM | DT_SINGLELINE);
+      SelectObject(bitmap->dc, sample_font);
       SetTextColor(bitmap->dc, native_foreground_);
       RECT line_area{gutter, y, content_width - scaled(8, native_dpi_), y + line_height};
       const std::size_t newline = sample_text_.find(L'\n');
@@ -1354,7 +1604,7 @@ std::unique_ptr<PreviewRuntime::CanvasBitmap> PreviewRuntime::render_native_canv
                   static_cast<UINT>(length), nullptr);
       SelectObject(bitmap->dc, previous_font);
       DeleteObject(sample_font);
-      ui_previous = SelectObject(bitmap->dc, ui_font_);
+      ui_previous = SelectObject(bitmap->dc, gutter_font);
       y += line_height;
     }
     SelectObject(bitmap->dc, ui_previous);
@@ -1363,7 +1613,7 @@ std::unique_ptr<PreviewRuntime::CanvasBitmap> PreviewRuntime::render_native_canv
     const int header = scaled(30, native_dpi_);
     const int half = (content_width - gap) / 2;
     HGDIOBJ previous_font = SelectObject(bitmap->dc, ui_font_);
-    SetTextColor(bitmap->dc, (dark_theme_ ? kDarkPalette : kLightPalette).muted);
+    SetTextColor(bitmap->dc, palette().muted);
     RECT left_header{scaled(10, native_dpi_), 0, half, header};
     RECT right_header{half + gap + scaled(10, native_dpi_), 0, content_width, header};
     DrawTextW(bitmap->dc, labels_.compare_mactype.c_str(), -1, &left_header,
@@ -1390,7 +1640,7 @@ std::unique_ptr<PreviewRuntime::CanvasBitmap> PreviewRuntime::render_native_canv
     } else {
       SelectObject(bitmap->dc, previous_font);
       HGDIOBJ unavailable_previous = SelectObject(bitmap->dc, ui_font_);
-      SetTextColor(bitmap->dc, (dark_theme_ ? kDarkPalette : kLightPalette).muted);
+      SetTextColor(bitmap->dc, palette().muted);
       DrawTextW(bitmap->dc, labels_.compare_unavailable.c_str(), -1, &right,
                 DT_CENTER | DT_VCENTER | DT_WORDBREAK);
       SelectObject(bitmap->dc, unavailable_previous);
@@ -1426,11 +1676,11 @@ void PreviewRuntime::paint_native(HWND window) {
     EndPaint(window, &paint);
     return;
   }
-  const Palette& palette = dark_theme_ ? kDarkPalette : kLightPalette;
+  const Palette& palette = this->palette();
   fill_solid(buffer.dc, client, palette.canvas);
-  const int toolbar_height = scaled(40, native_dpi_);
+  const int toolbar_height = chrome_metric(&NativeChrome::toolbar_height, 40);
   const int edit_height = edit_visible_ ? scaled(72, native_dpi_) : 0;
-  const int status_height = scaled(26, native_dpi_);
+  const int status_height = chrome_metric(&NativeChrome::status_height, 26);
   RECT toolbar{0, 0, client.right, toolbar_height};
   draw_toolbar(buffer.dc, toolbar);
   const int canvas_top = toolbar_height + edit_height;
@@ -1446,13 +1696,13 @@ void PreviewRuntime::paint_native(HWND window) {
     FrameRect(buffer.dc, &edit_rect, border_brush);
     DeleteObject(border_brush);
   }
-  const int padding = scaled(18, native_dpi_);
+  const int padding = chrome_metric(&NativeChrome::canvas_inset, 18);
   const int available_width = std::max(1, static_cast<int>(canvas_view.right) - 2 * padding);
   const int available_height = std::max(
       1, static_cast<int>(canvas_view.bottom - canvas_view.top) - 2 * padding);
   const int source_width = std::max(1, available_width / zoom_);
   const int source_min_height = std::max(1, available_height / zoom_);
-  auto canvas = render_native_canvas(source_width, source_min_height);
+  CanvasBitmap* canvas = cached_native_canvas(source_width, source_min_height);
   if (canvas) {
     const int drawn_width = canvas->width * zoom_;
     const int drawn_height = canvas->height * zoom_;
@@ -1460,6 +1710,16 @@ void PreviewRuntime::paint_native(HWND window) {
     SetStretchBltMode(buffer.dc, COLORONCOLOR);
     StretchBlt(buffer.dc, padding, canvas_top + padding - scroll_y_, drawn_width, drawn_height,
                canvas->dc, 0, 0, canvas->width, canvas->height, SRCCOPY);
+    RECT canvas_frame{padding - 1, canvas_top + padding - scroll_y_ - 1,
+                      padding + drawn_width + 1, canvas_top + padding - scroll_y_ + drawn_height + 1};
+    HRGN frame_region = CreateRoundRectRgn(canvas_frame.left, canvas_frame.top,
+                                            canvas_frame.right + 1, canvas_frame.bottom + 1,
+                                            chrome_metric(&NativeChrome::canvas_radius, 4),
+                                            chrome_metric(&NativeChrome::canvas_radius, 4));
+    HBRUSH frame_brush = CreateSolidBrush(palette.border);
+    FrameRgn(buffer.dc, frame_region, frame_brush, 1, 1);
+    DeleteObject(frame_brush);
+    DeleteObject(frame_region);
     if (zoom_ == 4) {
       const COLORREF grid = blend_color(native_foreground_, native_background_, 20);
       HPEN pen = CreatePen(PS_SOLID, 1, grid);
@@ -1497,9 +1757,14 @@ void PreviewRuntime::paint_native(HWND window) {
       StretchBlt(buffer.dc, loupe_x, loupe_y, loupe_side, loupe_side, canvas->dc,
                  source_x - source_side / 2, source_y - source_side / 2, source_side, source_side,
                  SRCCOPY);
-      HPEN red = CreatePen(PS_SOLID, 1, RGB(255, 0, 0));
-      HGDIOBJ previous_pen = SelectObject(buffer.dc, red);
+      HPEN frame = CreatePen(PS_SOLID, 1, palette.border);
+      HGDIOBJ previous_pen = SelectObject(buffer.dc, frame);
       HGDIOBJ previous_brush = SelectObject(buffer.dc, GetStockObject(NULL_BRUSH));
+      Rectangle(buffer.dc, loupe_x, loupe_y, loupe_x + loupe_side, loupe_y + loupe_side);
+      SelectObject(buffer.dc, previous_pen);
+      DeleteObject(frame);
+      HPEN marker = CreatePen(PS_SOLID, 1, palette.accent);
+      previous_pen = SelectObject(buffer.dc, marker);
       const int cell = loupe_side / source_side;
       Rectangle(buffer.dc, loupe_x + (source_side / 2) * cell,
                 loupe_y + (source_side / 2) * cell,
@@ -1507,14 +1772,26 @@ void PreviewRuntime::paint_native(HWND window) {
                 loupe_y + (source_side / 2 + 1) * cell + 1);
       SelectObject(buffer.dc, previous_brush);
       SelectObject(buffer.dc, previous_pen);
-      DeleteObject(red);
+      DeleteObject(marker);
     }
   }
   RECT status{0, client.bottom - status_height, client.right, client.bottom};
   fill_solid(buffer.dc, status, palette.surface);
+  const bool hairlines = !chrome_ || chrome_->skin == Skin::classic || chrome_->skin == Skin::console;
+  if (hairlines) {
+    HPEN pen = CreatePen(PS_SOLID, 1, palette.border);
+    HGDIOBJ previous_pen = SelectObject(buffer.dc, pen);
+    MoveToEx(buffer.dc, 0, toolbar_height - 1, nullptr);
+    LineTo(buffer.dc, client.right, toolbar_height - 1);
+    MoveToEx(buffer.dc, 0, status.top, nullptr);
+    LineTo(buffer.dc, client.right, status.top);
+    SelectObject(buffer.dc, previous_pen);
+    DeleteObject(pen);
+  }
   status.left += scaled(10, native_dpi_);
   status.right -= scaled(10, native_dpi_);
-  HGDIOBJ previous_font = SelectObject(buffer.dc, ui_font_);
+  HGDIOBJ previous_font = SelectObject(buffer.dc,
+                                       chrome_ && chrome_->mono_status ? mono_font_ : ui_font_);
   SetBkMode(buffer.dc, TRANSPARENT);
   SetTextColor(buffer.dc, palette.muted);
   const std::wstring text = temporary_status_.empty() ? status_text() : temporary_status_;
@@ -1561,22 +1838,25 @@ int PreviewRuntime::hit_test_toolbar(POINT point) const {
 }
 
 void PreviewRuntime::execute_toolbar_action(int action) {
+  bool canvas_changed = false;
   switch (action) {
-    case kBold: sample_bold_ = !sample_bold_; break;
-    case kItalic: sample_italic_ = !sample_italic_; break;
-    case kModeSample: display_mode_ = DisplayMode::sample; scroll_y_ = 0; break;
-    case kModeLadder: display_mode_ = DisplayMode::ladder; scroll_y_ = 0; break;
-    case kModeCompare: display_mode_ = DisplayMode::compare; scroll_y_ = 0; break;
-    case kModeListing: display_mode_ = DisplayMode::listing; scroll_y_ = 0; break;
+    case kBold: sample_bold_ = !sample_bold_; canvas_changed = true; break;
+    case kItalic: sample_italic_ = !sample_italic_; canvas_changed = true; break;
+    case kModeSample: display_mode_ = DisplayMode::sample; scroll_y_ = 0; canvas_changed = true; break;
+    case kModeLadder: display_mode_ = DisplayMode::ladder; scroll_y_ = 0; canvas_changed = true; break;
+    case kModeCompare: display_mode_ = DisplayMode::compare; scroll_y_ = 0; canvas_changed = true; break;
+    case kModeListing: display_mode_ = DisplayMode::listing; scroll_y_ = 0; canvas_changed = true; break;
     case kInvert:
       std::swap(native_foreground_, native_background_);
       inverted_ = !inverted_;
+      canvas_changed = true;
       break;
     case kLoupe: loupe_ = !loupe_; break;
     case kZoom:
       zoom_ = zoom_ == 1 ? 2 : (zoom_ == 2 ? 4 : 1);
       scroll_y_ = 0;
       rebuild_toolbar_layout();
+      canvas_changed = true;
       break;
     case kTopmost:
       topmost_ = !topmost_;
@@ -1592,6 +1872,7 @@ void PreviewRuntime::execute_toolbar_action(int action) {
     case kCopy: copy_canvas(); break;
     default: break;
   }
+  if (canvas_changed) invalidate_canvas_cache();
   InvalidateRect(native_window_, nullptr, FALSE);
 }
 
@@ -1611,10 +1892,12 @@ bool PreviewRuntime::handle_key(WPARAM key) {
   else if (key == 'B') execute_toolbar_action(kBold);
   else if (key == VK_ADD || key == VK_OEM_PLUS) {
     if (zoom_ < 4) zoom_ *= 2;
+    invalidate_canvas_cache();
     rebuild_toolbar_layout();
     InvalidateRect(native_window_, nullptr, FALSE);
   } else if (key == VK_SUBTRACT || key == VK_OEM_MINUS) {
     if (zoom_ > 1) zoom_ /= 2;
+    invalidate_canvas_cache();
     rebuild_toolbar_layout();
     InvalidateRect(native_window_, nullptr, FALSE);
   } else {
@@ -1739,7 +2022,8 @@ LRESULT CALLBACK PreviewRuntime::window_proc(HWND window, UINT message, WPARAM w
     case WM_GETMINMAXINFO:
       if (window == runtime->native_window_) {
         auto* minimum = reinterpret_cast<MINMAXINFO*>(lparam);
-        RECT desired{0, 0, scaled(720, runtime->native_dpi_), scaled(440, runtime->native_dpi_)};
+        RECT desired{0, 0, std::max(scaled(720, runtime->native_dpi_), runtime->minimum_client_width_),
+                     scaled(440, runtime->native_dpi_)};
         AdjustWindowRectExForDpi(&desired, WS_OVERLAPPEDWINDOW, FALSE, 0, runtime->native_dpi_);
         minimum->ptMinTrackSize.x = desired.right - desired.left;
         minimum->ptMinTrackSize.y = desired.bottom - desired.top;
@@ -1753,6 +2037,7 @@ LRESULT CALLBACK PreviewRuntime::window_proc(HWND window, UINT message, WPARAM w
                      suggested->right - suggested->left, suggested->bottom - suggested->top,
                      SWP_NOZORDER | SWP_NOACTIVATE);
         runtime->recreate_ui_font();
+        runtime->invalidate_canvas_cache();
         runtime->relayout_controls();
       }
       return 0;
@@ -1816,6 +2101,7 @@ LRESULT CALLBACK PreviewRuntime::window_proc(HWND window, UINT message, WPARAM w
         if (selected != CB_ERR) {
           SendMessageW(runtime->face_combo_, CB_GETLBTEXT, selected, reinterpret_cast<LPARAM>(value));
           runtime->font_face_ = value;
+          runtime->invalidate_canvas_cache();
           InvalidateRect(window, nullptr, FALSE);
         }
         return 0;
@@ -1826,6 +2112,7 @@ LRESULT CALLBACK PreviewRuntime::window_proc(HWND window, UINT message, WPARAM w
         if (selected != CB_ERR) {
           SendMessageW(runtime->size_combo_, CB_GETLBTEXT, selected, reinterpret_cast<LPARAM>(value));
           runtime->font_size_pt_ = static_cast<float>(_wtoi(value));
+          runtime->invalidate_canvas_cache();
           InvalidateRect(window, nullptr, FALSE);
         }
         return 0;
@@ -1836,6 +2123,7 @@ LRESULT CALLBACK PreviewRuntime::window_proc(HWND window, UINT message, WPARAM w
         GetWindowTextW(runtime->edit_control_, value.data(), length + 1);
         value.resize(static_cast<std::size_t>(length));
         runtime->sample_text_ = std::move(value);
+        runtime->invalidate_canvas_cache();
         InvalidateRect(window, nullptr, FALSE);
         return 0;
       }
@@ -1850,7 +2138,7 @@ LRESULT CALLBACK PreviewRuntime::window_proc(HWND window, UINT message, WPARAM w
     }
     case WM_CTLCOLORLISTBOX:
     case WM_CTLCOLOREDIT: {
-      const Palette& palette = runtime->dark_theme_ ? kDarkPalette : kLightPalette;
+      const Palette& palette = runtime->palette();
       HDC dc = reinterpret_cast<HDC>(wparam);
       SetTextColor(dc, palette.text);
       SetBkColor(dc, palette.surface);

@@ -107,6 +107,27 @@ pub(super) fn render_preview(
     })
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePreviewChrome {
+    pub(crate) skin: String,
+    pub(crate) canvas: String,
+    pub(crate) surface: String,
+    pub(crate) surface_subtle: String,
+    pub(crate) border: String,
+    pub(crate) text: String,
+    pub(crate) muted: String,
+    pub(crate) accent: String,
+    pub(crate) on_accent: String,
+    pub(crate) radius: u32,
+    pub(crate) control_height: u32,
+    pub(crate) toolbar_height: u32,
+    pub(crate) status_height: u32,
+    pub(crate) canvas_radius: u32,
+    pub(crate) canvas_inset: u32,
+    pub(crate) mono_status: bool,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativePreviewOptions {
@@ -138,6 +159,8 @@ pub struct NativePreviewOptions {
     pub(crate) sizes: Option<Vec<u32>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) labels: Option<BTreeMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) chrome: Option<NativePreviewChrome>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -162,6 +185,8 @@ pub struct NativePreviewState {
     pub(crate) italic: bool,
     #[serde(default)]
     pub(crate) topmost: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) skin: Option<String>,
 }
 
 pub(super) fn set_native_preview(
@@ -208,6 +233,24 @@ mod native_preview_tests {
             "inverted": false,
             "zoom": 1,
             "sizes": [8, 9, 10, 11, 12, 14, 16, 18, 20, 24],
+            "chrome": {
+                "skin": "classic",
+                "canvas": "#F3F5F7",
+                "surface": "#FFFFFF",
+                "surfaceSubtle": "#E9EDF1",
+                "border": "#C9D1D8",
+                "text": "#17212B",
+                "muted": "#5A6773",
+                "accent": "#0067C0",
+                "onAccent": "#FFFFFF",
+                "radius": 4,
+                "controlHeight": 32,
+                "toolbarHeight": 44,
+                "statusHeight": 28,
+                "canvasRadius": 4,
+                "canvasInset": 18,
+                "monoStatus": false
+            },
             "labels": {
                 "title": "…",
                 "fontFace": "…",
@@ -263,6 +306,7 @@ mod native_preview_tests {
         assert!(!state.bold);
         assert!(!state.italic);
         assert!(!state.topmost);
+        assert_eq!(state.skin, None);
     }
 
     #[test]
@@ -278,7 +322,8 @@ mod native_preview_tests {
             "fontSizePt": 14,
             "bold": false,
             "italic": false,
-            "topmost": false
+            "topmost": false,
+            "skin": "console"
         });
         let state: NativePreviewState = serde_json::from_value(documented.clone()).unwrap();
 

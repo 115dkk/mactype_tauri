@@ -62,6 +62,29 @@ int wmain(int argc, wchar_t** argv) {
     return 11;
   }
   runtime.pump_messages();
+  if (runtime.selected_face_for_tests() != L"Segoe UI") return 28;
+
+  for (const char* skin : {"classic", "fluent", "console", "cupertino"}) {
+    mtpc::Frame skin_request;
+    skin_request.kind = mtpc::MessageKind::show_native_preview;
+    skin_request.request_id = 49;
+    skin_request.json = std::string{R"({"chrome":{"skin":")"} + skin +
+        R"(","canvas":"#E4E8EC","surface":"#F4F6F8","surfaceSubtle":"#FFFFFF","border":"#D2D8DF","text":"#1B2129","muted":"#5A6673","accent":"#0B8E9F","onAccent":"#FFFFFF","radius":4,"controlHeight":26,"toolbarHeight":36,"statusHeight":24,"canvasRadius":4,"canvasInset":10,"monoStatus":true}})";
+    const mtpc::Frame skin_response = runtime.show_native_preview(skin_request, true);
+    if (skin_response.kind != mtpc::MessageKind::native_preview_state ||
+        skin_response.json.find(std::string{"\"skin\":\""} + skin + "\"") == std::string::npos) {
+      return 29;
+    }
+    runtime.pump_messages();
+  }
+
+  mtpc::Frame no_chrome;
+  no_chrome.kind = mtpc::MessageKind::show_native_preview;
+  no_chrome.request_id = 50;
+  no_chrome.json = R"({"theme":"light"})";
+  const mtpc::Frame fallback_response = runtime.show_native_preview(no_chrome, true);
+  if (fallback_response.json.find("\"skin\"") != std::string::npos) return 30;
+  runtime.pump_messages();
 
   for (const char* mode : {"ladder", "compare", "listing", "sample"}) {
     mtpc::Frame mode_request;
@@ -89,6 +112,27 @@ int wmain(int argc, wchar_t** argv) {
   }
   runtime.pump_messages();
 
+  mtpc::Frame inverted_colors;
+  inverted_colors.kind = mtpc::MessageKind::show_native_preview;
+  inverted_colors.request_id = 51;
+  inverted_colors.json = R"({"foreground":"#111111","background":"#EEEEEE","inverted":true})";
+  const mtpc::Frame inverted_colors_response = runtime.show_native_preview(inverted_colors, true);
+  if (inverted_colors_response.json.find("\"background\":\"#111111\"") == std::string::npos ||
+      inverted_colors_response.json.find("\"foreground\":\"#EEEEEE\"") == std::string::npos ||
+      inverted_colors_response.json.find("\"inverted\":true") == std::string::npos) {
+    return 31;
+  }
+  mtpc::Frame restore_colors;
+  restore_colors.kind = mtpc::MessageKind::show_native_preview;
+  restore_colors.request_id = 52;
+  restore_colors.json = R"({"inverted":false})";
+  const mtpc::Frame restore_colors_response = runtime.show_native_preview(restore_colors, true);
+  if (restore_colors_response.json.find("\"background\":\"#EEEEEE\"") == std::string::npos ||
+      restore_colors_response.json.find("\"foreground\":\"#111111\"") == std::string::npos ||
+      restore_colors_response.json.find("\"inverted\":false") == std::string::npos) {
+    return 32;
+  }
+
   mtpc::Frame escaped_face;
   escaped_face.kind = mtpc::MessageKind::show_native_preview;
   escaped_face.request_id = 47;
@@ -98,6 +142,20 @@ int wmain(int argc, wchar_t** argv) {
       escaped_face_response.json.find(R"("fontFace":"Path\\Face")") == std::string::npos) {
     return 25;
   }
+  if (runtime.selected_face_for_tests() != L"Path\\Face") return 33;
+
+  mtpc::Frame oversized_text;
+  oversized_text.kind = mtpc::MessageKind::show_native_preview;
+  oversized_text.request_id = 53;
+  oversized_text.json = std::string{"{\"text\":\""} + std::string(4097, 'a') + "\"}";
+  if (runtime.show_native_preview(oversized_text, true).kind != mtpc::MessageKind::error) return 34;
+
+  mtpc::Frame oversized_listing;
+  oversized_listing.kind = mtpc::MessageKind::show_native_preview;
+  oversized_listing.request_id = 54;
+  oversized_listing.json =
+      std::string{"{\"listingText\":\""} + std::string(4097, 'a') + "\"}";
+  if (runtime.show_native_preview(oversized_listing, true).kind != mtpc::MessageKind::error) return 35;
 
   mtpc::Frame transactional_invalid;
   transactional_invalid.kind = mtpc::MessageKind::show_native_preview;

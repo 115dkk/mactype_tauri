@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -28,10 +29,35 @@ class PreviewRuntime {
   mtpc::Frame show_native_preview(const mtpc::Frame& request, bool visible);
   std::string hello_json() const;
   void pump_messages();
+  std::wstring selected_face_for_tests() const;
+
+  enum class DisplayMode { sample, ladder, compare, listing };
+  enum class Skin { classic, fluent, console, cupertino };
+
+  struct Palette {
+    COLORREF canvas;
+    COLORREF surface;
+    COLORREF hover;
+    COLORREF border;
+    COLORREF text;
+    COLORREF muted;
+    COLORREF accent;
+    COLORREF on_accent;
+  };
+
+  struct NativeChrome {
+    Skin skin;
+    Palette palette;
+    int radius;
+    int control_height;
+    int toolbar_height;
+    int status_height;
+    int canvas_radius;
+    int canvas_inset;
+    bool mono_status;
+  };
 
  private:
-  enum class DisplayMode { sample, ladder, compare, listing };
-
   struct NativeLabels {
     std::wstring title{L"MacType Preview"};
     std::wstring font_face{L"Font"};
@@ -71,6 +97,11 @@ class PreviewRuntime {
   void paint_native(HWND window);
   void recreate_ui_font();
   void recreate_palette_brushes();
+  void apply_combo_theme();
+  const Palette& palette() const;
+  int chrome_metric(int NativeChrome::*member, int fallback) const;
+  void invalidate_canvas_cache();
+  CanvasBitmap* cached_native_canvas(int width, int minimum_height);
   void enumerate_fonts();
   void sync_controls();
   void relayout_controls();
@@ -103,6 +134,7 @@ class PreviewRuntime {
   HWND edit_control_{};
   WNDPROC edit_original_proc_{};
   HFONT ui_font_{};
+  HFONT mono_font_{};
   HBRUSH surface_brush_{};
   HBRUSH edit_brush_{};
   std::wstring sample_text_{L"MacType preview 123 ABC\nThe quick brown fox jumps over the lazy dog."};
@@ -118,6 +150,7 @@ class PreviewRuntime {
   COLORREF native_background_{RGB(238, 241, 244)};
   bool inverted_{false};
   bool dark_theme_{false};
+  std::optional<NativeChrome> chrome_;
   bool loupe_{false};
   bool mouse_inside_{false};
   bool topmost_{false};
@@ -128,11 +161,13 @@ class PreviewRuntime {
   int scroll_max_{};
   int hover_action_{};
   int pressed_action_{};
+  int minimum_client_width_{};
   POINT mouse_position_{};
   std::vector<float> ladder_sizes_{8, 9, 10, 11, 12, 14, 16, 18, 20, 24};
   NativeLabels labels_{};
   std::vector<std::wstring> font_names_;
   std::vector<std::pair<int, RECT>> toolbar_buttons_;
+  std::vector<std::wstring> toolbar_button_texts_;
   RECT face_label_rect_{};
   RECT size_label_rect_{};
   std::vector<int> toolbar_separators_;
@@ -144,6 +179,10 @@ class PreviewRuntime {
   std::uint32_t core_version_{};
   bool has_dll_get_version_{};
   bool com_initialized_{};
+  bool canvas_cache_dirty_{true};
+  int canvas_cache_width_{};
+  int canvas_cache_minimum_height_{};
+  std::unique_ptr<CanvasBitmap> canvas_cache_;
 };
 
 }  // namespace mactype

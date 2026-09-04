@@ -90,6 +90,28 @@ Add one row whenever a post-refactor main change is evaluated.
 | --- | --- | --- | --- | --- |
 | `a55ed9cfabd1b585f00a465169a0701e921c53ab` | patch-equivalent baseline at first-phase start | existing history | branch baseline | Re-fetch required after first phase because the requested main change had not merged yet. |
 | `2bca83fb53af241456c42e894b1ea1e6c83bea5f` | semantic partial port | `a9f1326` | i18n/settings and renderer relay gates | Ported the generic orphaned-setting translation gate. The setting removal is intentionally inapplicable because alpha's `ChildInjectionTransaction` actively consumes `HookChildProcesses`, and the default profile must keep it enabled for early child relay. |
+| `d949dace4a946f3a254dbbcc20e3d8c3da43e031` | patch-equivalence baseline at 2026-09-04 intake start (alpha `ff23cf3`, merge-base `14eba4f`) | existing history | branch baseline | 24 main commits already had equivalents; the 22 rows below are the remainder. |
+| `6e6dbded9b27cd50e2c6f4dccfb83f90235721af` | already present | `a4b0579` | i18n experiment gate | Alpha's copy of the Gemini harness differs only by alpha-only lint steps and the Unity catalog script; intentional non-pick. |
+| `2cdd76fb0a4c8ee626ffd534baa119214cb45e1e` | already present | `3a02db8` | i18n experiment gate | Same as above. |
+| `42955d90092d3fc2e557d781c370d6bb949039c3` | direct cherry-pick | `6d124c5` | frontend lint, i18n, settings, gallery 548/548 | Korean font subset regenerated from the merged catalog so alpha-only strings stay covered. |
+| `ad6cad73d3e392f7fb67fddf97fbd063ac93dd81` | direct cherry-pick | `539521c` | gallery | Alpha follow-up `65bd479` repoints the child-process hooking proof at the switch role. |
+| `7b6e38612123751106305957b8d461993f204470` | semantic port | `eccff44` (merge `ee663cd`) | x86 and x64 injector build and ctest, contract policy scripts | Alpha's inventory readers (`fixed_module_base`, path-name `remote_module_base`) were rewritten around main's retry driver instead of transplanted. |
+| `f1ec23fa2a5678cb934b5a2b3519e68989eae297` | direct cherry-pick | `3f7b9c4` | platform tests 58/58 | Platform crate introduced. |
+| `d66009428a85cd462467fcbf39658cb457db7286` | direct cherry-pick | `4664923` | platform tests | |
+| `80a361983b14f94a87d4a620478ad6499f143759` | direct cherry-pick | `269bfa3` | platform tests | |
+| `c15c3348db6aa7e8fe934ec6f9ddbf635103a184` | direct cherry-pick | `14237e7` | platform tests | |
+| `cfb6b97a3f9088c01a7115af30d53371c342ded8` | direct (tree snapshot) | `0b9c7c2` | platform tests | Alpha never edited `platform/`, so the remaining platform hunks were taken as one snapshot identical to main's tree. |
+| `92c941efb9b6915c0f495a33ade8b87e2751ddcf` | direct (tree snapshot) | `0b9c7c2` | platform tests | |
+| `1be0beefb0db31d22baa18c7d57df6a011ce368a` | semantic port | `99bb07b` (merge `fcbc8fd`) | workspace fmt, clippy, test; relay audit | Platform hunks live in `0b9c7c2`. Host keeps known-versus-unavailable mitigation evidence through new fallible platform queries and the 1536-byte helper bound. A WMI row returned without an object now reads as exhaustion, as on main. |
+| `870c1f487ba34113bafb28a84b19bd32c1e9125f` | semantic port | `99bb07b` | launcher tests | Exact-process-object wait ported with alpha's RendererRuntimeBinding fixtures. |
+| `ec3b9edc8900adef80879f4f1dded67cd8f88584` | semantic port | `9aebf6a` (merge `7dce6ce`) | workspace fmt, clippy, test; relay audit | Alpha-only `security_acl.rs` deleted in favour of the platform readers; bounded tree check, machine-lock DACL policy, and the profile liveness lease unchanged. |
+| `cbc05d3e5985015439a983196279180ebfade43f` | direct cherry-pick | `1f39eff` | docs | |
+| `112b7fdfb6d8f57e1763b3d7f7e7bdbc5be86646` | semantic port (end state) | `ea066df` (merge `17d4392`) | src-tauri fmt, clippy, test 239/239; policy scripts; relay audit | The crate-local `scm_response.rs` main later removed was never recreated; bounded reads use the platform `ScmResponse`. |
+| `8b5b2a3dbc2418772f8ef6048aa4cdb508738aef` | semantic port | `ea066df` | as above | |
+| `594fbcae25fc5c4cd24b1c3bcbbae851e87c3f3d` | direct (inside `ea066df`) | `ea066df` | distribution policy script | |
+| `c6044f35f9d350648c0cb66ae2b2ed26c11a5d55` | semantic port | `ea066df` | as above | Legacy MacTray control, snapshot, restore, and picker routed; alpha error classification kept. |
+| `449459d6bdbc7776f28cb3c255f2a3c894825985` | semantic port | `ea066df` | as above | Profile-transfer pipes, nonce, fonts, clipboard routed; `#![forbid(unsafe_code)]` on the Tauri crate. |
+| `44739a7081889703ea8bacc7600f9ab5354afc60` | direct cherry-pick | `852929c` | docs | |
 
 An intentional non-port needs a concrete reason, such as fork-only behavior,
 an invariant already satisfied by a stronger Module, or a change made obsolete

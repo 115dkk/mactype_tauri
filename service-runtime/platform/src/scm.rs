@@ -11,32 +11,32 @@ use windows_sys::Win32::Foundation::{
     ERROR_SERVICE_NOT_ACTIVE,
 };
 use windows_sys::Win32::Security::{
-    GetSecurityDescriptorControl, GetSecurityDescriptorLength, IsValidSecurityDescriptor,
     DACL_SECURITY_INFORMATION, GROUP_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
-    SE_SELF_RELATIVE,
+    PROTECTED_DACL_SECURITY_INFORMATION, UNPROTECTED_DACL_SECURITY_INFORMATION,
 };
 use windows_sys::Win32::System::Services::{
     ChangeServiceConfig2W, ChangeServiceConfigW, CloseServiceHandle, ControlService,
     CreateServiceW, DeleteService, OpenSCManagerW, OpenServiceW, QueryServiceConfig2W,
-    QueryServiceConfigW, QueryServiceObjectSecurity, QueryServiceStatusEx, StartServiceW,
-    QUERY_SERVICE_CONFIGW, SC_ACTION, SC_ACTION_NONE, SC_ACTION_OWN_RESTART, SC_ACTION_REBOOT,
-    SC_ACTION_RESTART, SC_ACTION_RUN_COMMAND, SC_HANDLE, SC_MANAGER_CONNECT,
-    SC_MANAGER_CREATE_SERVICE, SC_STATUS_PROCESS_INFO, SERVICE_ALL_ACCESS, SERVICE_AUTO_START,
-    SERVICE_CHANGE_CONFIG, SERVICE_CONFIG_DELAYED_AUTO_START_INFO, SERVICE_CONFIG_DESCRIPTION,
-    SERVICE_CONFIG_FAILURE_ACTIONS, SERVICE_CONFIG_FAILURE_ACTIONS_FLAG,
-    SERVICE_CONFIG_PRESHUTDOWN_INFO, SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO,
-    SERVICE_CONFIG_SERVICE_SID_INFO, SERVICE_CONFIG_TRIGGER_INFO, SERVICE_CONTINUE_PENDING,
-    SERVICE_CONTROL_STOP, SERVICE_DELAYED_AUTO_START_INFO, SERVICE_DESCRIPTIONW,
-    SERVICE_ERROR_NORMAL, SERVICE_FAILURE_ACTIONSW, SERVICE_FAILURE_ACTIONS_FLAG,
-    SERVICE_NO_CHANGE, SERVICE_PAUSED, SERVICE_PAUSE_PENDING, SERVICE_PRESHUTDOWN_INFO,
-    SERVICE_QUERY_CONFIG, SERVICE_QUERY_STATUS, SERVICE_REQUIRED_PRIVILEGES_INFOW, SERVICE_RUNNING,
-    SERVICE_SID_INFO, SERVICE_START, SERVICE_START_PENDING, SERVICE_STATUS, SERVICE_STATUS_PROCESS,
-    SERVICE_STOP, SERVICE_STOPPED, SERVICE_STOP_PENDING, SERVICE_TRIGGER_INFO,
-    SERVICE_WIN32_OWN_PROCESS,
+    QueryServiceConfigW, QueryServiceObjectSecurity, QueryServiceStatusEx,
+    SetServiceObjectSecurity, StartServiceW, QUERY_SERVICE_CONFIGW, SC_ACTION, SC_ACTION_NONE,
+    SC_ACTION_OWN_RESTART, SC_ACTION_REBOOT, SC_ACTION_RESTART, SC_ACTION_RUN_COMMAND, SC_HANDLE,
+    SC_MANAGER_CONNECT, SC_MANAGER_CREATE_SERVICE, SC_STATUS_PROCESS_INFO, SERVICE_ALL_ACCESS,
+    SERVICE_AUTO_START, SERVICE_CHANGE_CONFIG, SERVICE_CONFIG_DELAYED_AUTO_START_INFO,
+    SERVICE_CONFIG_DESCRIPTION, SERVICE_CONFIG_FAILURE_ACTIONS,
+    SERVICE_CONFIG_FAILURE_ACTIONS_FLAG, SERVICE_CONFIG_PRESHUTDOWN_INFO,
+    SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO, SERVICE_CONFIG_SERVICE_SID_INFO,
+    SERVICE_CONFIG_TRIGGER_INFO, SERVICE_CONTINUE_PENDING, SERVICE_CONTROL_STOP,
+    SERVICE_DELAYED_AUTO_START_INFO, SERVICE_DESCRIPTIONW, SERVICE_ERROR_NORMAL,
+    SERVICE_FAILURE_ACTIONSW, SERVICE_FAILURE_ACTIONS_FLAG, SERVICE_NO_CHANGE, SERVICE_PAUSED,
+    SERVICE_PAUSE_PENDING, SERVICE_PRESHUTDOWN_INFO, SERVICE_QUERY_CONFIG, SERVICE_QUERY_STATUS,
+    SERVICE_REQUIRED_PRIVILEGES_INFOW, SERVICE_RUNNING, SERVICE_SID_INFO, SERVICE_START,
+    SERVICE_START_PENDING, SERVICE_STATUS, SERVICE_STATUS_PROCESS, SERVICE_STOP, SERVICE_STOPPED,
+    SERVICE_STOP_PENDING, SERVICE_TRIGGER_INFO, SERVICE_WIN32_OWN_PROCESS,
 };
 
 use crate::scm_response::ScmResponse;
-use crate::wide::wide_null;
+use crate::security::SelfRelativeSecurityDescriptor;
+use crate::wide::{multi_string, wide_null};
 
 const MAX_SERVICE_DEPENDENCIES: usize = 256;
 const MAX_FAILURE_ACTIONS: usize = 64;
@@ -44,6 +44,8 @@ const MAX_REQUIRED_PRIVILEGES: usize = 64;
 const MAX_SECURITY_DESCRIPTOR_BYTES: u32 = 64 * 1024;
 const SERVICE_DELETE: u32 = 0x0001_0000;
 const READ_CONTROL: u32 = 0x0002_0000;
+const WRITE_DAC: u32 = 0x0004_0000;
+const WRITE_OWNER: u32 = 0x0008_0000;
 
 /// What the manager connection may do.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -62,6 +64,8 @@ pub enum ServiceAccess {
     Start,
     Stop,
     Reconfigure,
+    ChangeStartType,
+    Restore,
     Delete,
 }
 
@@ -79,6 +83,14 @@ impl ServiceAccess {
             Self::Stop => SERVICE_STOP | SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG,
             Self::Reconfigure => {
                 SERVICE_CHANGE_CONFIG | SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG | SERVICE_START
+            }
+            Self::ChangeStartType => SERVICE_CHANGE_CONFIG | SERVICE_QUERY_STATUS,
+            Self::Restore => {
+                SERVICE_CHANGE_CONFIG
+                    | SERVICE_QUERY_CONFIG
+                    | READ_CONTROL
+                    | WRITE_DAC
+                    | WRITE_OWNER
             }
             Self::Delete => SERVICE_DELETE | SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG,
         }
@@ -147,6 +159,17 @@ pub struct ServiceConfig {
     pub load_order_group: String,
     pub tag_id: u32,
     pub dependencies: Vec<String>,
+}
+
+pub struct ServiceCreation<'a> {
+    pub display_name: &'a str,
+    pub service_type: u32,
+    pub start_type: u32,
+    pub error_control: u32,
+    pub image_path: &'a str,
+    pub load_order_group: Option<&'a str>,
+    pub dependencies: &'a [String],
+    pub account: &'a str,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -246,6 +269,57 @@ impl ServiceControlManager {
             return Err(error);
         }
         Ok(Some(ServiceHandle(ScHandle(handle))))
+    }
+
+    /// Creates a service from the complete supplied configuration.
+    pub fn create(
+        &self,
+        name: &str,
+        creation: &ServiceCreation<'_>,
+        access: ServiceAccess,
+    ) -> io::Result<ServiceHandle> {
+        validate_strings(
+            [
+                name,
+                creation.display_name,
+                creation.image_path,
+                creation.account,
+            ]
+            .into_iter()
+            .chain(creation.load_order_group)
+            .chain(creation.dependencies.iter().map(String::as_str)),
+        )?;
+        let name = wide_null(name);
+        let display_name = wide_null(creation.display_name);
+        let image_path = wide_null(creation.image_path);
+        let load_order_group = creation.load_order_group.map(wide_null);
+        let dependencies = multi_string(creation.dependencies);
+        let account = wide_null(creation.account);
+        let mut tag_id = 0_u32;
+        // SAFETY: the manager handle is live; every non-null string pointer is
+        // NUL-terminated and all buffers and optional tag output outlive the call.
+        let handle = unsafe {
+            CreateServiceW(
+                self.0.as_raw(),
+                name.as_ptr(),
+                display_name.as_ptr(),
+                access.rights(),
+                creation.service_type,
+                creation.start_type,
+                creation.error_control,
+                image_path.as_ptr(),
+                load_order_group
+                    .as_ref()
+                    .map_or(null(), |group| group.as_ptr()),
+                load_order_group
+                    .as_ref()
+                    .map_or(null_mut(), |_| &mut tag_id),
+                dependencies.as_ptr(),
+                account.as_ptr(),
+                null(),
+            )
+        };
+        Ok(ServiceHandle(ScHandle::from_open(handle)?))
     }
 
     /// Creates an auto-start, own-process, LocalSystem service with full
@@ -444,7 +518,7 @@ impl ServiceHandle {
         })
     }
 
-    pub fn object_security(&self) -> io::Result<Vec<u8>> {
+    pub fn object_security(&self) -> io::Result<SelfRelativeSecurityDescriptor> {
         let information =
             OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
         let mut needed = 0_u32;
@@ -485,7 +559,17 @@ impl ServiceHandle {
         {
             return Err(io::Error::last_os_error());
         }
-        validate_security_descriptor(descriptor)
+        if needed as usize > descriptor.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "service security descriptor changed during the read",
+            ));
+        }
+        descriptor.truncate(needed as usize);
+        SelfRelativeSecurityDescriptor::from_bytes(
+            descriptor,
+            MAX_SECURITY_DESCRIPTOR_BYTES as usize,
+        )
     }
 
     pub fn start(&self) -> io::Result<StartOutcome> {
@@ -516,6 +600,75 @@ impl ServiceHandle {
     pub fn delete(&self) -> io::Result<()> {
         // SAFETY: the handle is live; the call takes no pointers.
         if unsafe { DeleteService(self.0.as_raw()) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    /// Restores every core service configuration field.
+    pub fn set_config(&self, config: &ServiceConfig) -> io::Result<()> {
+        validate_strings(
+            [
+                config.image_path.as_str(),
+                config.account.as_str(),
+                config.display_name.as_str(),
+                config.load_order_group.as_str(),
+            ]
+            .into_iter()
+            .chain(config.dependencies.iter().map(String::as_str)),
+        )?;
+        let image_path = wide_null(&config.image_path);
+        let load_order_group =
+            (!config.load_order_group.is_empty()).then(|| wide_null(&config.load_order_group));
+        let dependencies = multi_string(&config.dependencies);
+        let account = wide_null(&config.account);
+        let display_name = wide_null(&config.display_name);
+        let mut tag_id = 0_u32;
+        // SAFETY: the handle is live; every non-null string is NUL-terminated,
+        // the multi-string and optional tag output remain live for the call.
+        if unsafe {
+            ChangeServiceConfigW(
+                self.0.as_raw(),
+                config.service_type,
+                config.start_type,
+                config.error_control,
+                image_path.as_ptr(),
+                load_order_group
+                    .as_ref()
+                    .map_or(null(), |group| group.as_ptr()),
+                load_order_group
+                    .as_ref()
+                    .map_or(null_mut(), |_| &mut tag_id),
+                dependencies.as_ptr(),
+                account.as_ptr(),
+                null(),
+                display_name.as_ptr(),
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    pub fn set_start_type(&self, start_type: u32) -> io::Result<()> {
+        // SAFETY: the handle is live and every null pointer selects no change.
+        if unsafe {
+            ChangeServiceConfigW(
+                self.0.as_raw(),
+                SERVICE_NO_CHANGE,
+                start_type,
+                SERVICE_NO_CHANGE,
+                null(),
+                null(),
+                null_mut(),
+                null(),
+                null(),
+                null(),
+                null(),
+            )
+        } == 0
+        {
             return Err(io::Error::last_os_error());
         }
         Ok(())
@@ -553,7 +706,25 @@ impl ServiceHandle {
         Ok(())
     }
 
+    pub fn set_optional_description(&self, description: Option<&str>) -> io::Result<()> {
+        if let Some(description) = description {
+            validate_strings(std::iter::once(description))?;
+        }
+        let mut description = description.map(wide_null);
+        let information = SERVICE_DESCRIPTIONW {
+            lpDescription: description
+                .as_mut()
+                .map_or(null_mut(), |value| value.as_mut_ptr()),
+        };
+        // SAFETY: the structure and optional text buffer outlive the call.
+        self.change_config2(
+            SERVICE_CONFIG_DESCRIPTION,
+            (&information as *const SERVICE_DESCRIPTIONW).cast(),
+        )
+    }
+
     pub fn set_description(&self, text: &str) -> io::Result<()> {
+        validate_strings(std::iter::once(text))?;
         let mut text = wide_null(text);
         let description = SERVICE_DESCRIPTIONW {
             lpDescription: text.as_mut_ptr(),
@@ -594,6 +765,46 @@ impl ServiceHandle {
         )
     }
 
+    pub fn set_failure_actions(&self, actions: &FailureActions) -> io::Result<()> {
+        validate_strings(
+            actions
+                .reboot_message
+                .iter()
+                .chain(actions.command.iter())
+                .map(String::as_str),
+        )?;
+        let mut reboot_message = actions.reboot_message.as_deref().map(wide_null);
+        let mut command = actions.command.as_deref().map(wide_null);
+        let mut encoded_actions: Vec<SC_ACTION> = actions
+            .actions
+            .iter()
+            .map(|action| SC_ACTION {
+                Type: action.kind.as_raw(),
+                Delay: action.delay_ms,
+            })
+            .collect();
+        let information = SERVICE_FAILURE_ACTIONSW {
+            dwResetPeriod: actions.reset_period_seconds,
+            lpRebootMsg: reboot_message
+                .as_mut()
+                .map_or(null_mut(), |value| value.as_mut_ptr()),
+            lpCommand: command
+                .as_mut()
+                .map_or(null_mut(), |value| value.as_mut_ptr()),
+            cActions: encoded_actions.len() as u32,
+            lpsaActions: if encoded_actions.is_empty() {
+                null_mut()
+            } else {
+                encoded_actions.as_mut_ptr()
+            },
+        };
+        // SAFETY: the structure, optional strings, and action array outlive the call.
+        self.change_config2(
+            SERVICE_CONFIG_FAILURE_ACTIONS,
+            (&information as *const SERVICE_FAILURE_ACTIONSW).cast(),
+        )
+    }
+
     pub fn set_failure_actions_on_non_crash_failures(&self, enabled: bool) -> io::Result<()> {
         let flag = SERVICE_FAILURE_ACTIONS_FLAG {
             fFailureActionsOnNonCrashFailures: i32::from(enabled),
@@ -603,6 +814,86 @@ impl ServiceHandle {
             SERVICE_CONFIG_FAILURE_ACTIONS_FLAG,
             (&flag as *const SERVICE_FAILURE_ACTIONS_FLAG).cast(),
         )
+    }
+
+    pub fn set_delayed_auto_start(&self, enabled: bool) -> io::Result<()> {
+        let information = SERVICE_DELAYED_AUTO_START_INFO {
+            fDelayedAutostart: i32::from(enabled),
+        };
+        // SAFETY: the information structure outlives the call.
+        self.change_config2(
+            SERVICE_CONFIG_DELAYED_AUTO_START_INFO,
+            (&information as *const SERVICE_DELAYED_AUTO_START_INFO).cast(),
+        )
+    }
+
+    pub fn set_service_sid_type(&self, sid_type: u32) -> io::Result<()> {
+        let information = SERVICE_SID_INFO {
+            dwServiceSidType: sid_type,
+        };
+        // SAFETY: the information structure outlives the call.
+        self.change_config2(
+            SERVICE_CONFIG_SERVICE_SID_INFO,
+            (&information as *const SERVICE_SID_INFO).cast(),
+        )
+    }
+
+    pub fn set_required_privileges(&self, privileges: &[String]) -> io::Result<()> {
+        validate_strings(privileges.iter().map(String::as_str))?;
+        let mut privileges = multi_string(privileges);
+        let information = SERVICE_REQUIRED_PRIVILEGES_INFOW {
+            pmszRequiredPrivileges: privileges.as_mut_ptr(),
+        };
+        // SAFETY: the information structure and multi-string outlive the call.
+        self.change_config2(
+            SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO,
+            (&information as *const SERVICE_REQUIRED_PRIVILEGES_INFOW).cast(),
+        )
+    }
+
+    pub fn set_preshutdown_timeout_ms(&self, timeout_ms: u32) -> io::Result<()> {
+        let information = SERVICE_PRESHUTDOWN_INFO {
+            dwPreshutdownTimeout: timeout_ms,
+        };
+        // SAFETY: the information structure outlives the call.
+        self.change_config2(
+            SERVICE_CONFIG_PRESHUTDOWN_INFO,
+            (&information as *const SERVICE_PRESHUTDOWN_INFO).cast(),
+        )
+    }
+
+    pub fn clear_triggers(&self) -> io::Result<()> {
+        let information = SERVICE_TRIGGER_INFO::default();
+        // SAFETY: the zeroed information structure outlives the call.
+        self.change_config2(
+            SERVICE_CONFIG_TRIGGER_INFO,
+            (&information as *const SERVICE_TRIGGER_INFO).cast(),
+        )
+    }
+
+    pub fn set_object_security(
+        &self,
+        descriptor: &SelfRelativeSecurityDescriptor,
+    ) -> io::Result<()> {
+        let protection = if descriptor.dacl_protected()? {
+            PROTECTED_DACL_SECURITY_INFORMATION
+        } else {
+            UNPROTECTED_DACL_SECURITY_INFORMATION
+        };
+        let information = OWNER_SECURITY_INFORMATION
+            | GROUP_SECURITY_INFORMATION
+            | DACL_SECURITY_INFORMATION
+            | protection;
+        // SAFETY: the service handle and validated descriptor are live; the API
+        // consumes the descriptor only for the duration of this call.
+        let result = unsafe {
+            SetServiceObjectSecurity(self.0.as_raw(), information, descriptor.as_ptr().cast_mut())
+        };
+        let error = io::Error::last_os_error();
+        if result == 0 {
+            return Err(error);
+        }
+        Ok(())
     }
 
     fn change_config2(&self, level: u32, data: *const c_void) -> io::Result<()> {
@@ -630,39 +921,14 @@ fn strict_optional_text(response: &ScmResponse, pointer: *const u16) -> io::Resu
     })
 }
 
-fn validate_security_descriptor(mut descriptor: Vec<u8>) -> io::Result<Vec<u8>> {
-    let pointer = descriptor.as_mut_ptr().cast();
-    // SAFETY: `pointer` addresses the non-empty descriptor buffer returned by
-    // the SCM and remains live for the call.
-    if unsafe { IsValidSecurityDescriptor(pointer) } == 0 {
+fn validate_strings<'a>(values: impl IntoIterator<Item = &'a str>) -> io::Result<()> {
+    if values.into_iter().any(|value| value.contains('\0')) {
         return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "service security descriptor is invalid",
+            io::ErrorKind::InvalidInput,
+            "service configuration string contains a NUL",
         ));
     }
-    let mut control = 0_u16;
-    let mut revision = 0_u32;
-    // SAFETY: `pointer` addresses the validated live descriptor; both out
-    // pointers refer to local values.
-    if unsafe { GetSecurityDescriptorControl(pointer, &mut control, &mut revision) } == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    if control & SE_SELF_RELATIVE == 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "service security descriptor is not self-relative",
-        ));
-    }
-    // SAFETY: `pointer` addresses the validated live security descriptor.
-    let length = unsafe { GetSecurityDescriptorLength(pointer) } as usize;
-    if length == 0 || length > descriptor.len() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "service security descriptor length is out of range",
-        ));
-    }
-    descriptor.truncate(length);
-    Ok(descriptor)
+    Ok(())
 }
 
 fn parse_config(response: &ScmResponse) -> io::Result<ServiceConfig> {
@@ -829,6 +1095,30 @@ mod tests {
     }
 
     #[test]
+    fn set_config_rejects_embedded_nuls_before_calling_the_scm() {
+        let manager = ServiceControlManager::connect(ServiceManagerAccess::Connect).unwrap();
+        let service = manager
+            .open("EventLog", ServiceAccess::QueryStatus)
+            .unwrap()
+            .unwrap();
+        let config = super::ServiceConfig {
+            service_type: 0,
+            start_type: 0,
+            error_control: 0,
+            image_path: "bad\0path".to_owned(),
+            account: String::new(),
+            display_name: String::new(),
+            load_order_group: String::new(),
+            tag_id: 0,
+            dependencies: Vec::new(),
+        };
+        assert_eq!(
+            service.set_config(&config).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidInput
+        );
+    }
+
+    #[test]
     fn failure_action_kinds_round_trip() {
         for kind in [
             FailureActionKind::None,
@@ -862,8 +1152,8 @@ mod tests {
         service.preshutdown_timeout_ms().unwrap();
         service.trigger_info().unwrap();
         let security = service.object_security().unwrap();
-        assert!(!security.is_empty());
-        assert!(security.len() < 64 * 1024);
+        assert!(!security.as_bytes().is_empty());
+        assert!(security.as_bytes().len() < 64 * 1024);
     }
 
     #[test]

@@ -172,6 +172,30 @@ int wmain(int argc, wchar_t** argv) {
   runtime.pump_messages();
   if (runtime.show_native_preview(omitted, false).kind != mtpc::MessageKind::native_preview_state) return 14;
 
+  std::vector<mtpc::Frame> native_events;
+  runtime.set_state_sink([&](const mtpc::Frame& event) { native_events.push_back(event); });
+  runtime.show_native_preview(native, true);
+  runtime.pump_messages();
+  runtime.close_from_window_for_tests();
+  runtime.pump_messages();
+  if (native_events.size() != 1 ||
+      native_events.back().kind != mtpc::MessageKind::native_preview_state ||
+      native_events.back().request_id != 0 ||
+      native_events.back().json.find("\"visible\":false") == std::string::npos) {
+    return 37;
+  }
+  runtime.show_native_preview(omitted, false);
+  if (native_events.size() != 1) return 39;
+
+  runtime.set_save_in_progress_for_tests(true);
+  const std::uint32_t save_threads = runtime.save_thread_started_for_tests();
+  runtime.trigger_save_for_tests();
+  if (!runtime.save_in_progress_for_tests() ||
+      runtime.save_thread_started_for_tests() != save_threads) {
+    return 38;
+  }
+  runtime.set_save_in_progress_for_tests(false);
+
   for (const char* invalid_json : {"{\"zoom\":4.5}", "{\"zoom\":4junk}",
                                    "{\"sizes\":[8,10.5]}", "{\"bold\":truejunk}"}) {
     mtpc::Frame invalid;

@@ -29,6 +29,7 @@ namespace {
 
 constexpr wchar_t kWindowClass[] = L"MacTypePreview32Window";
 constexpr UINT_PTR kStatusTimer = 1;
+constexpr UINT kSaveComplete = WM_APP + 1;
 constexpr int kFaceCombo = 1001;
 constexpr int kSizeCombo = 1002;
 constexpr int kEditControl = 1003;
@@ -655,6 +656,10 @@ PreviewRuntime::PreviewRuntime(std::wstring install_root, Engine engine)
       dll_path_(install_root_ + L"\\MacType.dll") {}
 
 PreviewRuntime::~PreviewRuntime() {
+  if (save_thread_.joinable()) {
+    if (save_in_progress_) save_thread_.detach();
+    else save_thread_.join();
+  }
   if (control_center_) {
     control_center_->DestroyMessageWnd();
     control_center_->Release();
@@ -1253,10 +1258,40 @@ void PreviewRuntime::show_native_window() {
   UpdateWindow(native_window_);
 }
 
-void PreviewRuntime::hide_native_window() {
+void PreviewRuntime::hide_native_window(bool notify) {
   placement_.length = sizeof(placement_);
   has_placement_ = GetWindowPlacement(native_window_, &placement_) != FALSE;
   ShowWindow(native_window_, SW_HIDE);
+  if (notify) emit_native_state(false);
+}
+
+void PreviewRuntime::set_state_sink(std::function<void(const mtpc::Frame&)> sink) {
+  state_sink_ = std::move(sink);
+}
+
+void PreviewRuntime::emit_native_state(bool visible) {
+  if (!state_sink_) return;
+  mtpc::Frame event;
+  event.kind = mtpc::MessageKind::native_preview_state;
+  event.request_id = 0;
+  event.json = native_state_json(visible);
+  state_sink_(event);
+}
+
+void PreviewRuntime::close_from_window_for_tests() {
+  SendMessageW(native_window_, WM_CLOSE, 0, 0);
+}
+
+bool PreviewRuntime::save_in_progress_for_tests() const { return save_in_progress_; }
+
+void PreviewRuntime::set_save_in_progress_for_tests(bool in_progress) {
+  save_in_progress_ = in_progress;
+}
+
+void PreviewRuntime::trigger_save_for_tests() { execute_toolbar_action(kSavePng); }
+
+std::uint32_t PreviewRuntime::save_thread_started_for_tests() const {
+  return save_thread_started_;
 }
 
 const PreviewRuntime::Palette& PreviewRuntime::palette() const {
@@ -1903,7 +1938,7 @@ bool PreviewRuntime::handle_key(WPARAM key) {
   const bool control = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
   const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
   if (key == VK_ESCAPE) {
-    hide_native_window();
+    hide_native_window(true);
     return true;
   }
   if (control && key == 'S') return save_canvas_png();
@@ -1935,11 +1970,19 @@ void PreviewRuntime::set_temporary_status(const std::wstring& text) {
 }
 
 bool PreviewRuntime::save_canvas_png() {
+  if (save_in_progress_) return false;
+  if (save_thread_.joinable()) save_thread_.join();
+
   RECT client{};
   GetClientRect(native_window_, &client);
   const int width = std::max(1, (static_cast<int>(client.right) - 2 * scaled(18, native_dpi_)) / zoom_);
   auto canvas = render_native_canvas(width, scaled(300, native_dpi_));
   if (!canvas) return false;
+  std::string error;
+  auto png = encode_png(static_cast<const std::uint8_t*>(canvas->bits), canvas->width,
+                        canvas->height, error);
+  if (png.empty()) return false;
+
   std::wstring filter = labels_.png_filter;
   std::replace(filter.begin(), filter.end(), L'|', L'\0');
   filter.push_back(L'\0');
@@ -1947,23 +1990,29 @@ bool PreviewRuntime::save_canvas_png() {
   if (filter.size() < 3 || filter[filter.size() - 3] == L'\0') {
     filter = std::wstring(L"PNG files (*.png)\0*.png\0\0", 25);
   }
-  wchar_t file[MAX_PATH] = L"mactype-preview.png";
-  OPENFILENAMEW dialog{sizeof(dialog)};
-  dialog.hwndOwner = native_window_;
-  dialog.lpstrFilter = filter.c_str();
-  dialog.lpstrFile = file;
-  dialog.nMaxFile = MAX_PATH;
-  dialog.lpstrDefExt = L"png";
-  dialog.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
-  if (!GetSaveFileNameW(&dialog)) return false;
-  std::string error;
-  const auto png = encode_png(static_cast<const std::uint8_t*>(canvas->bits), canvas->width,
-                              canvas->height, error);
-  if (png.empty()) return false;
-  std::ofstream output(std::filesystem::path(file), std::ios::binary | std::ios::trunc);
-  output.write(reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));
-  if (!output) return false;
-  set_temporary_status(labels_.saved);
+  const HWND owner = native_window_;
+  save_in_progress_ = true;
+  ++save_thread_started_;
+  save_thread_ = std::thread([owner, filter = std::move(filter), png = std::move(png)]() mutable {
+    const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    wchar_t file[MAX_PATH] = L"mactype-preview.png";
+    OPENFILENAMEW dialog{sizeof(dialog)};
+    dialog.hwndOwner = owner;
+    dialog.lpstrFilter = filter.c_str();
+    dialog.lpstrFile = file;
+    dialog.nMaxFile = MAX_PATH;
+    dialog.lpstrDefExt = L"png";
+    dialog.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+    bool succeeded = false;
+    if (GetSaveFileNameW(&dialog)) {
+      std::ofstream output(std::filesystem::path(file), std::ios::binary | std::ios::trunc);
+      output.write(reinterpret_cast<const char*>(png.data()),
+                   static_cast<std::streamsize>(png.size()));
+      succeeded = static_cast<bool>(output);
+    }
+    if (SUCCEEDED(com)) CoUninitialize();
+    PostMessageW(owner, kSaveComplete, succeeded ? TRUE : FALSE, 0);
+  });
   return true;
 }
 
@@ -2038,8 +2087,15 @@ LRESULT CALLBACK PreviewRuntime::window_proc(HWND window, UINT message, WPARAM w
       return 0;
     case WM_ERASEBKGND: return 1;
     case WM_CLOSE:
-      if (window == runtime->native_window_) runtime->hide_native_window();
+      if (window == runtime->native_window_) runtime->hide_native_window(true);
       else ShowWindow(window, SW_HIDE);
+      return 0;
+    case kSaveComplete:
+      if (window == runtime->native_window_) {
+        runtime->save_in_progress_ = false;
+        if (runtime->save_thread_.joinable()) runtime->save_thread_.join();
+        if (wparam != FALSE) runtime->set_temporary_status(runtime->labels_.saved);
+      }
       return 0;
     case WM_GETMINMAXINFO:
       if (window == runtime->native_window_) {

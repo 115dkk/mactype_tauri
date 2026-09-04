@@ -35,6 +35,7 @@ pub(super) fn render_profile_preview(
         return Err("MacType installation was not found".to_owned());
     }
     state.with_manager(|manager| {
+        manager.attach_app(app.clone());
         render_preview(
             &app,
             manager,
@@ -48,13 +49,17 @@ pub(super) fn render_profile_preview(
 }
 
 pub(super) fn set_native_preview(
+    app: AppHandle,
     visible: bool,
     options: Option<NativePreviewOptions>,
     state: &PreviewState,
 ) -> Result<NativePreviewState, String> {
     let root =
         installation_root().ok_or_else(|| "MacType installation was not found".to_owned())?;
-    state.with_manager(|manager| send_native_preview(manager, &root, visible, options))
+    state.with_manager(|manager| {
+        manager.attach_app(app);
+        send_native_preview(manager, &root, visible, options)
+    })
 }
 
 pub(super) fn preview_diagnostics(state: &PreviewState) -> Result<Vec<String>, String> {

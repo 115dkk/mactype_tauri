@@ -1,5 +1,8 @@
 use super::{
-    protocol::{read_frame, write_frame, Frame, HELLO, HELLO_ACK, SHUTDOWN, VERSION},
+    protocol::{
+        read_frame, write_frame, Frame, HELLO, HELLO_ACK, NATIVE_PREVIEW_STATE, SHUTDOWN, VERSION,
+    },
+    render::NativePreviewState,
     PreviewEngine,
 };
 use mactype_service_contract::event_log::EventSeverity;
@@ -14,6 +17,7 @@ use std::{
     thread,
     time::Duration,
 };
+use tauri::{AppHandle, Emitter};
 
 const DIAGNOSTIC_LIMIT: usize = 100;
 
@@ -48,6 +52,32 @@ fn helper_path() -> Result<PathBuf, String> {
     )
 }
 
+type EventCallback = Box<dyn Fn(Frame) + Send + 'static>;
+
+fn route_frame(
+    frame: Frame,
+    responses: &mpsc::Sender<Result<Frame, String>>,
+    on_event: &dyn Fn(Frame),
+) -> bool {
+    if frame.request_id == 0 {
+        on_event(frame);
+        true
+    } else {
+        responses.send(Ok(frame)).is_ok()
+    }
+}
+
+fn parse_native_preview_event(frame: &Frame) -> Result<NativePreviewState, String> {
+    if frame.kind != NATIVE_PREVIEW_STATE {
+        return Err(format!(
+            "ignored unsolicited preview frame with kind {}",
+            frame.kind
+        ));
+    }
+    serde_json::from_slice(&frame.json)
+        .map_err(|error| format!("ignored malformed unsolicited native preview state: {error}"))
+}
+
 struct HelperProcess {
     child: Child,
     input: ChildStdin,
@@ -56,7 +86,11 @@ struct HelperProcess {
 }
 
 impl HelperProcess {
-    fn spawn(install_root: &Path, engine: PreviewEngine) -> Result<Self, String> {
+    fn spawn(
+        install_root: &Path,
+        engine: PreviewEngine,
+        event_callback: EventCallback,
+    ) -> Result<Self, String> {
         let mut command = Command::new(helper_path()?);
         command.arg("--install-root").arg(install_root);
         if engine == PreviewEngine::Plain {
@@ -84,18 +118,24 @@ impl HelperProcess {
             .stderr
             .take()
             .ok_or_else(|| "preview helper stderr is unavailable".to_owned())?;
+        let diagnostics = Arc::new(Mutex::new(VecDeque::with_capacity(DIAGNOSTIC_LIMIT)));
         let (sender, responses) = mpsc::channel();
         thread::spawn(move || {
             let mut reader = BufReader::new(output);
             loop {
-                let response = read_frame(&mut reader);
-                let finished = response.is_err();
-                if sender.send(response).is_err() || finished {
-                    break;
+                match read_frame(&mut reader) {
+                    Ok(frame) => {
+                        if !route_frame(frame, &sender, event_callback.as_ref()) {
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        let _ = sender.send(Err(error));
+                        break;
+                    }
                 }
             }
         });
-        let diagnostics = Arc::new(Mutex::new(VecDeque::with_capacity(DIAGNOSTIC_LIMIT)));
         let diagnostic_target = Arc::clone(&diagnostics);
         thread::spawn(move || {
             for line in BufReader::new(stderr).lines().map_while(Result::ok) {
@@ -162,7 +202,8 @@ pub(super) struct PreviewManager {
     mactype: EngineProcess,
     plain: EngineProcess,
     next_request_id: u64,
-    diagnostics: VecDeque<(PreviewEngine, String)>,
+    diagnostics: Arc<Mutex<VecDeque<(PreviewEngine, String)>>>,
+    app: Arc<Mutex<Option<AppHandle>>>,
 }
 
 impl PreviewManager {
@@ -186,14 +227,46 @@ impl PreviewManager {
     }
 
     fn record_diagnostic(&mut self, engine: PreviewEngine, message: String) {
-        if self.diagnostics.len() == DIAGNOSTIC_LIMIT {
-            self.diagnostics.pop_front();
+        if let Ok(mut diagnostics) = self.diagnostics.lock() {
+            if diagnostics.len() == DIAGNOSTIC_LIMIT {
+                diagnostics.pop_front();
+            }
+            diagnostics.push_back((engine, message));
         }
-        self.diagnostics.push_back((engine, message));
+    }
+
+    pub(super) fn attach_app(&mut self, app: AppHandle) {
+        if let Ok(mut attached) = self.app.lock() {
+            if attached.is_none() {
+                *attached = Some(app);
+            }
+        }
+    }
+
+    fn event_callback(&self, engine: PreviewEngine) -> EventCallback {
+        let app = Arc::clone(&self.app);
+        let diagnostics = Arc::clone(&self.diagnostics);
+        Box::new(move |frame| match parse_native_preview_event(&frame) {
+            Ok(state) => {
+                if let Ok(attached) = app.lock() {
+                    if let Some(app) = attached.as_ref() {
+                        let _ = app.emit("native-preview:state", state);
+                    }
+                }
+            }
+            Err(line) => {
+                if let Ok(mut entries) = diagnostics.lock() {
+                    if entries.len() == DIAGNOSTIC_LIMIT {
+                        entries.pop_front();
+                    }
+                    entries.push_back((engine, line));
+                }
+            }
+        })
     }
 
     fn start(&mut self, install_root: &Path, engine: PreviewEngine) -> Result<(), String> {
-        let mut helper = HelperProcess::spawn(install_root, engine)?;
+        let mut helper = HelperProcess::spawn(install_root, engine, self.event_callback(engine))?;
         let hello_request_id = self.next_id();
         let hello = match helper.request(Frame {
             kind: HELLO,
@@ -333,9 +406,14 @@ impl PreviewManager {
     pub(super) fn diagnostics(&self) -> Vec<String> {
         let mut result = self
             .diagnostics
-            .iter()
-            .map(|(engine, entry)| format!("[{}] {entry}", engine.as_str()))
-            .collect::<Vec<_>>();
+            .lock()
+            .map(|entries| {
+                entries
+                    .iter()
+                    .map(|(engine, entry)| format!("[{}] {entry}", engine.as_str()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         for engine in [PreviewEngine::Mactype, PreviewEngine::Plain] {
             if let Some(helper) = &self.slot(engine).helper {
                 if let Ok(entries) = helper.diagnostics.lock() {
@@ -432,6 +510,67 @@ mod tests {
         assert!(valid_hello(PreviewEngine::Mactype, &valid));
         assert!(!valid_hello(PreviewEngine::Plain, &valid));
         assert!(serde_json::from_slice::<HelloMetadata>(br#"{"protocolVersion":1}"#).is_err());
+    }
+
+    #[test]
+    fn route_frame_sends_unsolicited_native_state_only_to_event_callback() {
+        let (sender, responses) = mpsc::channel();
+        let events = Mutex::new(Vec::new());
+        assert!(route_frame(
+            Frame {
+                kind: NATIVE_PREVIEW_STATE,
+                request_id: 0,
+                json: br##"{"visible":false,"displayMode":"sample","background":"#FFFFFF"}"##
+                    .to_vec(),
+                binary: Vec::new(),
+            },
+            &sender,
+            &|frame| events.lock().unwrap().push(frame),
+        ));
+        assert!(responses.try_recv().is_err());
+        let events = events.into_inner().unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(!parse_native_preview_event(&events[0]).unwrap().visible);
+    }
+
+    #[test]
+    fn unsolicited_wrong_kind_is_dropped_with_one_diagnostic() {
+        let (sender, responses) = mpsc::channel();
+        let diagnostics = Mutex::new(Vec::new());
+        assert!(route_frame(
+            Frame {
+                kind: HELLO_ACK,
+                request_id: 0,
+                json: Vec::new(),
+                binary: Vec::new(),
+            },
+            &sender,
+            &|frame| {
+                if let Err(line) = parse_native_preview_event(&frame) {
+                    diagnostics.lock().unwrap().push(line);
+                }
+            },
+        ));
+        assert!(responses.try_recv().is_err());
+        assert_eq!(diagnostics.into_inner().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn route_frame_sends_normal_response_to_response_channel() {
+        let (sender, responses) = mpsc::channel();
+        let events = Mutex::new(Vec::new());
+        assert!(route_frame(
+            Frame {
+                kind: HELLO_ACK,
+                request_id: 7,
+                json: Vec::new(),
+                binary: Vec::new(),
+            },
+            &sender,
+            &|frame| events.lock().unwrap().push(frame),
+        ));
+        assert_eq!(responses.recv().unwrap().unwrap().request_id, 7);
+        assert!(events.into_inner().unwrap().is_empty());
     }
 
     #[test]

@@ -27,6 +27,9 @@ colours, theme, inversion, zoom, sizes, localised labels, and a skin-derived `ch
 The Helper draws the supplied palette and metrics and echoes its skin id with the native window's
 visibility, mode, colours, inversion, zoom, font, style, and topmost state. Older Helpers remain
 compatible because they ignore unknown show options, while Rust accepts their three-field state.
+Closing the native window or pressing Escape emits an unsolicited `native_preview_state` frame with request id 0; request-driven hides return only their normal response.
+The Helper renders and PNG-encodes on its main thread, while a separate STA thread owns the save dialog and file write so IPC remains responsive.
+The main thread invokes the state sink between request dispatches, so event frames and response frames cannot interleave; Rust emits valid state as `native-preview:state` and keeps every unsolicited frame out of the response channel.
 
 ## Profile boundary
 

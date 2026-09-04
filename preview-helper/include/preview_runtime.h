@@ -6,9 +6,11 @@
 #include <Windows.h>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -29,7 +31,13 @@ class PreviewRuntime {
   mtpc::Frame show_native_preview(const mtpc::Frame& request, bool visible);
   std::string hello_json() const;
   void pump_messages();
+  void set_state_sink(std::function<void(const mtpc::Frame&)> sink);
   std::wstring selected_face_for_tests() const;
+  void close_from_window_for_tests();
+  bool save_in_progress_for_tests() const;
+  void set_save_in_progress_for_tests(bool in_progress);
+  void trigger_save_for_tests();
+  std::uint32_t save_thread_started_for_tests() const;
 
   enum class DisplayMode { sample, ladder, compare, listing };
   enum class Skin { classic, fluent, console, cupertino };
@@ -112,8 +120,9 @@ class PreviewRuntime {
   void execute_toolbar_action(int action);
   bool handle_key(WPARAM key);
   int hit_test_toolbar(POINT point) const;
-  void hide_native_window();
+  void hide_native_window(bool notify = false);
   void show_native_window();
+  void emit_native_state(bool visible);
   void update_scroll_bounds(int canvas_height);
   void set_temporary_status(const std::wstring& text);
   bool save_canvas_png();
@@ -186,6 +195,10 @@ class PreviewRuntime {
   int canvas_cache_width_{};
   int canvas_cache_minimum_height_{};
   std::unique_ptr<CanvasBitmap> canvas_cache_;
+  std::function<void(const mtpc::Frame&)> state_sink_;
+  std::thread save_thread_;
+  bool save_in_progress_{};
+  std::uint32_t save_thread_started_{};
 };
 
 }  // namespace mactype

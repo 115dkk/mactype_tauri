@@ -62,6 +62,14 @@ int wmain(int argc, wchar_t** argv) {
   std::deque<mtpc::Frame> queue;
   std::atomic<bool> input_closed{false};
   std::atomic<bool> protocol_failed{false};
+  // Window messages and requests both run on this thread, so event and response writes cannot interleave.
+  runtime.set_state_sink([&](const mtpc::Frame& event) {
+    if (!mtpc::write_frame(std::cout, event)) {
+      std::cerr << "failed to write protocol event\n";
+      protocol_failed = true;
+      SetEvent(work_event);
+    }
+  });
 
   std::thread reader([&] {
     for (;;) {

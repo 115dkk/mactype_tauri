@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
-import { galleryLocales, galleryViews } from "./windows";
+import { galleryLocales, gallerySkins, galleryViews } from "./windows";
 
 const galleryRoot = path.resolve(__dirname, "../../artifacts/frontend-gallery");
 /* The docked preview is a property of the shipped window size, so the gallery
@@ -1806,7 +1806,7 @@ test("dark language menu and custom titlebar follow the application theme", asyn
   const menu = page.getByRole("listbox", { name: "표시 언어" });
   await expect(menu).toBeVisible();
   const themeColors = await page.evaluate(() => ({
-    menu: getComputedStyle(document.querySelector<HTMLElement>(".language-menu")!).backgroundColor,
+    menu: getComputedStyle(document.querySelector<HTMLElement>(".preference-menu")!).backgroundColor,
     titlebar: getComputedStyle(document.querySelector<HTMLElement>(".window-titlebar")!).backgroundColor,
   }));
   expect(themeColors).toEqual({ menu: "rgb(25, 32, 39)", titlebar: "rgb(25, 32, 39)" });
@@ -1891,3 +1891,41 @@ test("settings files present profile cards with thumbnails, apply ownership, and
   await expect(page.locator("body")).toHaveAttribute("data-profile-mode", "advanced");
 });
 
+
+/* Every skin renders every view in both themes without horizontal overflow,
+   keeps the shared navigation and preference controls, and persists through
+   a reload. The classic skin stays the default so the locale gallery above
+   keeps proving the shipped layout. */
+for (const skin of gallerySkins) {
+  for (const theme of ["light", "dark"] as const) {
+    test(`skin ${skin} renders every view in the ${theme} theme`, async ({ page }, testInfo) => {
+      for (const view of galleryViews) {
+        await page.goto(`/?view=${view.id}&gallery=1&lang=ko&skin=${skin}&theme=${theme}`, { waitUntil: "networkidle" });
+        await expect(page.locator("html")).toHaveAttribute("data-skin", skin);
+        await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+        await expect(page.getByRole("heading", { level: 1, name: view.title.ko })).toBeVisible();
+        await expect(page.getByTestId("skin-picker-trigger")).toBeVisible();
+        await expect(page.getByTestId("language-picker-trigger")).toBeVisible();
+        expect(await overflowingElements(page), `${skin}/${theme}/${view.id} must not overflow horizontally`).toEqual([]);
+        await page.screenshot({
+          path: path.join(galleryRoot, `${testInfo.project.name}-skin-${skin}-${theme}-${view.id}-ko.png`),
+          fullPage: true,
+        });
+      }
+    });
+  }
+}
+
+test("the skin picker switches skins and the choice survives a reload", async ({ page }) => {
+  await page.goto("/?view=overview&gallery=1&lang=ko", { waitUntil: "networkidle" });
+  await expect(page.locator("html")).toHaveAttribute("data-skin", "classic");
+  await page.getByTestId("skin-picker-trigger").click();
+  await page.locator("[data-skin-option=\"cupertino\"]").click();
+  await expect(page.locator("html")).toHaveAttribute("data-skin", "cupertino");
+  await expect(page.getByTestId("skin-picker-trigger")).toHaveText("Cupertino");
+  await page.reload({ waitUntil: "networkidle" });
+  await expect(page.locator("html")).toHaveAttribute("data-skin", "cupertino");
+  await page.getByTestId("skin-picker-trigger").click();
+  await page.locator("[data-skin-option=\"classic\"]").click();
+  await expect(page.locator("html")).toHaveAttribute("data-skin", "classic");
+});

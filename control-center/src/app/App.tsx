@@ -9,13 +9,16 @@ import { fallbackStatus, type InstallationStatus, type ViewId } from "./model";
 import { loadLaunchContext, reconnectPreview, rediscoverInstallation, reportFrontendFailure, reportFrontendReady, scanInstallation, verifyTrayModeForCi } from "./tauri";
 import { useI18n } from "../i18n/i18n";
 import { LanguagePicker } from "../components/LanguagePicker";
+import { SkinPicker } from "../components/SkinPicker";
 import { WindowTitleBar } from "../components/WindowTitleBar";
+import { applySkinPreference, loadSkinPreference, type SkinPreference } from "./skinPreference";
 import { applyThemePreference, loadThemePreference, type ThemePreference } from "./themePreference";
 
 interface State {
   view: ViewId;
   profileMode: ProfileMode;
   theme: ThemePreference;
+  skin: SkinPreference;
   status: InstallationStatus;
   ready: boolean;
   ciSmoke: boolean;
@@ -27,6 +30,7 @@ type ProfileMode = "quick" | "advanced";
 type Action =
   | { type: "navigate"; view: ViewId; profileMode?: ProfileMode }
   | { type: "toggle-theme" }
+  | { type: "skin"; skin: SkinPreference }
   | { type: "launched"; view: ViewId; ciSmoke: boolean; trayStart: boolean }
   | { type: "status"; status: InstallationStatus };
 
@@ -40,6 +44,8 @@ function reducer(state: State, action: Action): State {
       };
     case "toggle-theme":
       return { ...state, theme: state.theme === "light" ? "dark" : "light" };
+    case "skin":
+      return { ...state, skin: action.skin };
     case "launched":
       return { ...state, view: action.view, ciSmoke: action.ciSmoke, trayStart: action.trayStart, ready: true };
     case "status":
@@ -49,14 +55,16 @@ function reducer(state: State, action: Action): State {
 
 interface AppProps {
   initialTheme?: ThemePreference;
+  initialSkin?: SkinPreference;
 }
 
-export function App({ initialTheme = loadThemePreference() }: AppProps) {
+export function App({ initialTheme = loadThemePreference(), initialSkin = loadSkinPreference() }: AppProps) {
   const { t } = useI18n();
   const [state, dispatch] = useReducer(reducer, {
     view: "overview",
     profileMode: "advanced",
     theme: initialTheme,
+    skin: initialSkin,
     status: fallbackStatus,
     ready: false,
     ciSmoke: false,
@@ -78,6 +86,10 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
   useEffect(() => {
     applyThemePreference(state.theme);
   }, [state.theme]);
+
+  useEffect(() => {
+    applySkinPreference(state.skin);
+  }, [state.skin]);
 
   useEffect(() => {
     if (!state.ready) return;
@@ -113,6 +125,27 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
     return <OverviewPage onOpenService={() => dispatch({ type: "navigate", view: "execution" })} />;
   }, [state.ciSmoke, state.profileMode, state.status, state.view]);
 
+  /* The status bar reads the same installation findings as the diagnostics
+     page and names them the same way. */
+  const findingLabel = (label: string, value: string) => {
+    if (value === "MacType.dll") return t("finding.core32");
+    if (value === "MacType64.dll") return t("finding.core64");
+    if (value === "MacLoader.exe") return t("finding.loader");
+    if (label === "preview") return t("finding.preview");
+    return label;
+  };
+  const findingValue = (value: string) => (value === "waiting" ? t("finding.waiting") : value === "connected" ? t("overview.checked") : value);
+
+  const viewLabel = state.view === "files"
+    ? t("nav.profiles")
+    : state.view === "profiles"
+      ? (state.profileMode === "quick" ? t("nav.guidedSetup") : t("nav.allSettings"))
+      : state.view === "execution"
+        ? t("nav.execution")
+        : state.view === "diagnostics"
+          ? t("nav.diagnostics")
+          : t("nav.overview");
+
   return (
     <>
       <WindowTitleBar />
@@ -126,18 +159,18 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
           </div>
         </div>
         <nav>
-          <button className="nav-item" data-selected={state.view === "overview"} onClick={() => dispatch({ type: "navigate", view: "overview" })} type="button">
+          <button className="nav-item" data-nav="overview" data-selected={state.view === "overview"} onClick={() => dispatch({ type: "navigate", view: "overview" })} type="button">
             <Home aria-hidden="true" size={18} strokeWidth={1.8} />
             <span>{t("nav.overview")}</span>
           </button>
           <div aria-labelledby="nav-group-wizard" className="nav-group" role="group">
             <span className="nav-group-label" id="nav-group-wizard">{t("nav.wizardGroup")}</span>
             <div className="nav-group-items">
-              <button className="nav-item nav-subitem" data-selected={state.view === "files"} onClick={() => dispatch({ type: "navigate", view: "files" })} type="button">
+              <button className="nav-item nav-subitem" data-nav="files" data-selected={state.view === "files"} onClick={() => dispatch({ type: "navigate", view: "files" })} type="button">
                 <FileCog aria-hidden="true" size={17} strokeWidth={1.8} />
                 <span>{t("nav.profiles")}</span>
               </button>
-              <button className="nav-item nav-subitem" data-selected={state.view === "execution"} onClick={() => dispatch({ type: "navigate", view: "execution" })} type="button">
+              <button className="nav-item nav-subitem" data-nav="execution" data-selected={state.view === "execution"} onClick={() => dispatch({ type: "navigate", view: "execution" })} type="button">
                 <ServerCog aria-hidden="true" size={17} strokeWidth={1.8} />
                 <span>{t("nav.execution")}</span>
               </button>
@@ -146,23 +179,24 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
           <div aria-labelledby="nav-group-tuner" className="nav-group" role="group">
             <span className="nav-group-label" id="nav-group-tuner">{t("nav.tunerGroup")}</span>
             <div className="nav-group-items">
-              <button className="nav-item nav-subitem" data-selected={state.view === "profiles" && state.profileMode === "quick"} onClick={() => dispatch({ type: "navigate", view: "profiles", profileMode: "quick" })} type="button">
+              <button className="nav-item nav-subitem" data-nav="guided" data-selected={state.view === "profiles" && state.profileMode === "quick"} onClick={() => dispatch({ type: "navigate", view: "profiles", profileMode: "quick" })} type="button">
                 <Sparkles aria-hidden="true" size={17} strokeWidth={1.8} />
                 <span>{t("nav.guidedSetup")}</span>
               </button>
-              <button className="nav-item nav-subitem" data-selected={state.view === "profiles" && state.profileMode === "advanced"} onClick={() => dispatch({ type: "navigate", view: "profiles", profileMode: "advanced" })} type="button">
+              <button className="nav-item nav-subitem" data-nav="all" data-selected={state.view === "profiles" && state.profileMode === "advanced"} onClick={() => dispatch({ type: "navigate", view: "profiles", profileMode: "advanced" })} type="button">
                 <SlidersHorizontal aria-hidden="true" size={17} strokeWidth={1.8} />
                 <span>{t("nav.allSettings")}</span>
               </button>
             </div>
           </div>
-          <button className="nav-item" data-selected={state.view === "diagnostics"} onClick={() => dispatch({ type: "navigate", view: "diagnostics" })} type="button">
+          <button className="nav-item" data-nav="diagnostics" data-selected={state.view === "diagnostics"} onClick={() => dispatch({ type: "navigate", view: "diagnostics" })} type="button">
             <Activity aria-hidden="true" size={18} strokeWidth={1.8} />
             <span>{t("nav.diagnostics")}</span>
           </button>
         </nav>
         <div className="navigation-preferences">
           <LanguagePicker />
+          <SkinPicker onChange={(skin) => dispatch({ type: "skin", skin })} skin={state.skin} />
           <button
             aria-label={state.theme === "light" ? t("app.themeDark") : t("app.themeLight")}
             className="theme-toggle"
@@ -178,6 +212,14 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
         {page}
       </main>
       </div>
+      <footer className="app-statusbar" data-testid="app-statusbar">
+        <span className="app-statusbar-item">{viewLabel}</span>
+        {state.status.findings.map((finding) => (
+          <span className="app-statusbar-item" data-ok={finding.ok} key={finding.label}>{findingLabel(finding.label, finding.value)} · {findingValue(finding.value)}</span>
+        ))}
+        <span className="app-statusbar-spacer" />
+        {state.status.coreVersion && <span className="app-statusbar-item"><code>{state.status.coreVersion}</code></span>}
+      </footer>
     </>
   );
 }

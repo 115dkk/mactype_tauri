@@ -1227,7 +1227,25 @@ std::string PreviewRuntime::native_state_json(bool visible) const {
 }
 
 void PreviewRuntime::show_native_window() {
-  if (has_placement_) SetWindowPlacement(native_window_, &placement_);
+  if (has_placement_) {
+    SetWindowPlacement(native_window_, &placement_);
+  } else {
+    /* First show: widen the window until every toolbar label fits, within
+       the monitor's work area; a reader who later resizes it keeps that. */
+    RECT client{};
+    RECT window_rect{};
+    if (GetClientRect(native_window_, &client) && GetWindowRect(native_window_, &window_rect) &&
+        client.right < full_labels_client_width_) {
+      MONITORINFO monitor{sizeof(MONITORINFO)};
+      GetMonitorInfoW(MonitorFromWindow(native_window_, MONITOR_DEFAULTTONEAREST), &monitor);
+      const int frame = (window_rect.right - window_rect.left) - client.right;
+      const int wanted = full_labels_client_width_ + frame;
+      const int limit = monitor.rcWork.right - monitor.rcWork.left;
+      SetWindowPos(native_window_, nullptr, 0, 0, std::min(wanted, limit),
+                   window_rect.bottom - window_rect.top,
+                   SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+  }
   SetWindowPos(native_window_, topmost_ ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
   ShowWindow(native_window_, SW_SHOWNORMAL);
@@ -1435,6 +1453,7 @@ void PreviewRuntime::rebuild_toolbar_layout() {
     for (int width : widths) total += width;
     return total;
   };
+  full_labels_client_width_ = left + total_width() + scaled(16, native_dpi_);
   if (total_width() > right - left) {
     for (std::size_t index = 0; index <= 5; ++index) {
       toolbar_button_texts_[index] = toolbar_button_texts_[index].empty()

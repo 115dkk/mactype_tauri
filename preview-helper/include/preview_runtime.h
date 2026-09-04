@@ -162,6 +162,9 @@ class PreviewRuntime {
   int hover_action_{};
   int pressed_action_{};
   int minimum_client_width_{};
+  /// Client width at which every toolbar label fits unabbreviated; the first
+  /// show grows the window to it so the labels are the words, not initials.
+  int full_labels_client_width_{};
   POINT mouse_position_{};
   std::vector<float> ladder_sizes_{8, 9, 10, 11, 12, 14, 16, 18, 20, 24};
   NativeLabels labels_{};

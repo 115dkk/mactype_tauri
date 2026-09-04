@@ -31,7 +31,20 @@ int wmain(int argc, wchar_t** argv) {
     return 2;
   }
 
-  mactype::PreviewRuntime runtime(argument_value(argc, argv, L"--install-root"));
+  const std::wstring engine_value = argument_value(argc, argv, L"--engine");
+  mactype::Engine engine = mactype::Engine::mactype;
+  if (!engine_value.empty()) {
+    if (_wcsicmp(engine_value.c_str(), L"mactype") == 0) {
+      engine = mactype::Engine::mactype;
+    } else if (_wcsicmp(engine_value.c_str(), L"plain") == 0) {
+      engine = mactype::Engine::plain;
+    } else {
+      std::cerr << "unsupported engine\n";
+      return 2;
+    }
+  }
+
+  mactype::PreviewRuntime runtime(argument_value(argc, argv, L"--install-root"), engine);
   std::string initialization_error;
   if (!runtime.initialize(initialization_error)) {
     std::cerr << "preview initialization failed: " << initialization_error << '\n';

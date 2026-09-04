@@ -14,6 +14,13 @@ The Helper validates an x86 PE image, `MacType.ini`, and `CreateControlCenter`. 
 
 Preview pixels are rendered into a top-down 32-bit DIB and encoded through WIC. PNG bytes cross only the binary frame section. Tauri writes them under app-local data and the WebView reads the narrowly scoped asset URL; no base64 image is retained in application state.
 
+The plain preview engine never loads MacType or reads its DLL, INI, profile, or setting overrides,
+and reports `coreVersion` 0. The parent keeps a second lazy Helper slot for this engine while
+installation checks and reconnect remain bound to the MacType slot. Preview Studio uses the
+`preview-studio` window label and loads `index.html?window=preview-studio`; closing the main window
+destroys it. `write_preview_export` accepts a strictly padded standard-base64 PNG and writes it
+atomically to a validated absolute `.png` path.
+
 ## Profile boundary
 
 Rust owns a line-preserving INI document. It retains BOM, encoding, line endings, blank lines, comments, unknown entries, and ordering. Only the value slice of a changed key is rewritten. Save compares the original SHA-256, flushes a same-directory temporary file, keeps one backup, and uses `ReplaceFileW` on Windows.

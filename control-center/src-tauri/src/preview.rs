@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Mutex};
 use tauri::{AppHandle, State};
 
@@ -11,6 +12,23 @@ mod state;
 use helper::PreviewManager;
 pub(crate) use installation::InstallationStatus;
 pub(crate) use render::{PreviewResult, PreviewSample};
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum PreviewEngine {
+    #[default]
+    Mactype,
+    Plain,
+}
+
+impl PreviewEngine {
+    pub(super) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Mactype => "mactype",
+            Self::Plain => "plain",
+        }
+    }
+}
 
 #[derive(Default)]
 pub(crate) struct PreviewState(Mutex<PreviewManager>);
@@ -47,9 +65,17 @@ pub(crate) fn render_profile_preview(
     profile_path: String,
     overrides: BTreeMap<String, f64>,
     sample: PreviewSample,
+    engine: Option<PreviewEngine>,
     state: State<'_, PreviewState>,
 ) -> Result<PreviewResult, String> {
-    commands::render_profile_preview(app, profile_path, overrides, sample, state.inner())
+    commands::render_profile_preview(
+        app,
+        profile_path,
+        overrides,
+        sample,
+        engine.unwrap_or_default(),
+        state.inner(),
+    )
 }
 
 #[tauri::command]

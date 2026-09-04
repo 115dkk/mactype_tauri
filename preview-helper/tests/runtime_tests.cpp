@@ -89,5 +89,34 @@ int wmain(int argc, wchar_t** argv) {
   }
   runtime.pump_messages();
   if (runtime.show_native_preview(light, false).kind != mtpc::MessageKind::native_preview_state) return 18;
+
+  mactype::PreviewRuntime plain_runtime(LR"(Z:\missing\arbitrary-root)", mactype::Engine::plain);
+  error.clear();
+  if (!plain_runtime.initialize(error)) return 19;
+  if (plain_runtime.hello_json() !=
+      R"({"protocolVersion":1,"renderer":"gdi-plain","loadsMacType":false,"coreVersion":0,"dllGetVersion":false})") {
+    return 20;
+  }
+  mtpc::Frame plain_render;
+  plain_render.kind = mtpc::MessageKind::render_preview;
+  plain_render.request_id = 48;
+  plain_render.json = R"({"profilePath":"Z:\\missing\\arbitrary.ini","overrides":{"normal_weight":999,"gamma_value":99.0},"sample":{"text":"Plain GDI preview","fontFace":"Segoe UI","fontSizePt":13,"widthPx":512,"heightPx":128,"dpi":120,"foreground":"#112233","background":"#F0F0F0","bold":true,"italic":true}})";
+  const mtpc::Frame plain_response = plain_runtime.render(plain_render);
+  if (plain_response.kind != mtpc::MessageKind::preview_rendered || plain_response.request_id != 48) {
+    return 21;
+  }
+  if (plain_response.binary.size() <= signature.size() ||
+      !std::equal(signature.begin(), signature.end(), plain_response.binary.begin())) {
+    return 22;
+  }
+  if (plain_response.json.find("\"engine\":\"plain\"") == std::string::npos ||
+      plain_response.json.find("\"coreVersion\":0") == std::string::npos) {
+    return 23;
+  }
+  const mtpc::Frame load_response = plain_runtime.load_profile(plain_render);
+  if (load_response.kind != mtpc::MessageKind::ack ||
+      load_response.json != R"({"loaded":false,"engine":"plain"})") {
+    return 24;
+  }
   return 0;
 }

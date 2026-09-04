@@ -17,6 +17,21 @@ pub(crate) fn wide_path(path: &Path) -> Vec<u16> {
     wide_null(path.as_os_str())
 }
 
+/// Encodes strings as a double-NUL-terminated Win32 multi-string. Windows
+/// accepts two NUL units as the canonical empty block.
+pub(crate) fn multi_string(values: &[String]) -> Vec<u16> {
+    if values.is_empty() {
+        return vec![0, 0];
+    }
+    let mut units = Vec::new();
+    for value in values {
+        units.extend(value.encode_utf16());
+        units.push(0);
+    }
+    units.push(0);
+    units
+}
+
 /// Reads a NUL-terminated UTF-16 string of at most `maximum` units from
 /// `pointer`. Returns `None` for a null pointer or when no terminator appears
 /// inside the bound, so callers see "unreadable" rather than a truncated value.
@@ -62,7 +77,7 @@ pub(crate) fn nul_terminated(units: &[u16]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{bounded_units, nul_terminated, wide_null};
+    use super::{bounded_units, multi_string, nul_terminated, wide_null};
 
     #[test]
     fn bounded_reads_stop_at_the_terminator_and_reject_missing_ones() {
@@ -86,5 +101,14 @@ mod tests {
         }
         assert_eq!(nul_terminated(&buffer).as_deref(), Some("hi"));
         assert_eq!(wide_null("x").as_slice(), &[b'x' as u16, 0]);
+    }
+
+    #[test]
+    fn multi_strings_have_the_required_final_empty_entry() {
+        assert_eq!(multi_string(&[]), [0, 0]);
+        assert_eq!(
+            multi_string(&["one".to_owned(), "two".to_owned()]),
+            "one\0two\0\0".encode_utf16().collect::<Vec<_>>()
+        );
     }
 }

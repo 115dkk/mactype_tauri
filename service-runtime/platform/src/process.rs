@@ -39,6 +39,8 @@ pub enum ProcessAccess {
     QueryLimited,
     /// `SYNCHRONIZE` only: waiting for exit.
     Synchronize,
+    /// Identity and liveness queries together with waiting for exit.
+    QueryLimitedAndSynchronize,
     /// The rights `CreateProcess` granted the spawning process: everything.
     /// Only [`Process::from_child`] produces this; [`Process::open`] refuses
     /// it, so a PID can never be reopened with full access.
@@ -54,6 +56,7 @@ impl ProcessAccess {
         match self {
             Self::QueryLimited => PROCESS_QUERY_LIMITED_INFORMATION,
             Self::Synchronize => SYNCHRONIZE,
+            Self::QueryLimitedAndSynchronize => PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
             Self::AsSpawned => PROCESS_ALL_ACCESS,
             Self::InjectionTarget => {
                 PROCESS_CREATE_THREAD
@@ -310,6 +313,33 @@ impl Process {
         )))
     }
 
+    /// The Win32 image path, preserving query and bounds failures.
+    pub fn image_path_checked(&self) -> io::Result<PathBuf> {
+        let mut buffer = vec![0_u16; MAX_IMAGE_PATH_UNITS];
+        let mut length = buffer.len() as u32;
+        // SAFETY: the handle is live; `buffer` is writable for `length` units,
+        // and the API updates `length` with the number of units written.
+        if unsafe {
+            QueryFullProcessImageNameW(
+                self.handle.as_raw(),
+                PROCESS_NAME_WIN32,
+                buffer.as_mut_ptr(),
+                &mut length,
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        if length == 0 || length as usize >= buffer.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "process image path length is out of range",
+            ));
+        }
+        buffer.truncate(length as usize);
+        Ok(PathBuf::from(std::ffi::OsString::from_wide(&buffer)))
+    }
+
     /// Terminates the process with `exit_code`.
     pub fn terminate(&self, exit_code: u32) -> io::Result<()> {
         // SAFETY: the handle is live; the call takes no pointers.
@@ -394,6 +424,7 @@ mod tests {
         ));
         let image = process.image_path().unwrap();
         assert!(image.file_name().is_some());
+        assert_eq!(process.image_path_checked().unwrap(), image);
         assert_eq!(
             process_session_id(std::process::id()).unwrap(),
             process_session_id(std::process::id()).unwrap()

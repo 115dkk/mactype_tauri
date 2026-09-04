@@ -12,6 +12,7 @@
 #![deny(clippy::undocumented_unsafe_blocks)]
 
 mod com;
+mod environment;
 mod event;
 mod file;
 mod handle;
@@ -28,10 +29,12 @@ mod security;
 mod service_control;
 mod shell_link;
 mod wide;
+mod window;
 mod wmi;
 mod wts;
 
 pub use com::{ComApartment, ComThreading};
+pub use environment::expand_environment_strings;
 pub use event::ManualResetEvent;
 pub use file::{
     delay_delete_until_reboot, file_attributes, is_reparse_point, mark_open_file_for_deletion,
@@ -49,21 +52,28 @@ pub use process::{
     process_session_id, terminate_current_process, MachineKind, Process, ProcessAccess,
     ProcessMachine,
 };
-pub use registry::{RegistryKey, RegistryRoot, RegistryValue, RegistryValueData, RegistryView};
+pub use registry::{
+    DeleteValueOutcome, RawRegistryValue, RegistryKey, RegistryRoot, RegistryValue,
+    RegistryValueData, RegistryView,
+};
 pub use scm::{
     FailureAction, FailureActionKind, FailureActions, ServiceAccess, ServiceConfig,
-    ServiceControlManager, ServiceHandle, ServiceManagerAccess, ServiceState,
+    ServiceControlManager, ServiceCreation, ServiceHandle, ServiceManagerAccess, ServiceState,
     ServiceStatusSnapshot, StartOutcome, StopOutcome, TriggerInfo,
 };
 pub use security::{
-    current_token_is_member_of, AclValidationError, AllowedAce, LocalSecurityDescriptor, OwnedSid,
-    SecurityAclError, SecurityDescriptor, ValidatedDacl, ValidatedSid,
+    current_token_is_member_of, current_user_sid_string, AclValidationError, AllowedAce,
+    LocalSecurityDescriptor, OwnedSid, PrivilegeGuard, SecurityAclError, SecurityDescriptor,
+    SelfRelativeSecurityDescriptor, ValidatedDacl, ValidatedSid,
 };
 pub use service_control::{
     register_control_handler, report_status, run_service_dispatcher, RawServiceStatus,
     ServiceControlCallback, ServiceStatusHandle,
 };
 pub use shell_link::{read_shortcut, ShortcutTarget};
+pub use window::{
+    register_window_message, send_notify_message, top_level_windows, TopLevelWindow, WindowHandle,
+};
 pub use wmi::{
     WmiConnection, WmiEnumerator, WmiError, WmiLocator, WmiNamespace, WmiObject, WmiPropertyError,
     WmiPropertyStep,

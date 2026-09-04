@@ -406,7 +406,9 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
   /* The native window carries its own colours rather than inheriting them from
      whichever strip the helper rendered last; otherwise the window silently
      shows the final variant's style (bold, or a channel-pure colour). */
-  const applyNativePreview = useCallback(async (visible: boolean, mode: NativePreviewMode, dark: boolean) => {
+  /* The colours are the theme's base polarity; the window applies `inverted`
+     itself, so its invert toggle and this one agree on what "inverted" means. */
+  const applyNativePreview = useCallback(async (visible: boolean, mode: NativePreviewMode, invertedNow: boolean) => {
     const requestGeneration = generation.current;
     try {
       const state = await setNativePreview(visible, {
@@ -417,9 +419,9 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
         fontSizePt: fontSize,
         bold: false,
         italic: false,
-        ...previewPalette(dark),
+        ...previewPalette(theme === "dark"),
         theme,
-        inverted,
+        inverted: invertedNow,
         sizes: NATIVE_LADDER_SIZES,
         labels: nativePreviewLabels(t),
         chrome: nativeChrome(currentSkin(), theme),
@@ -428,34 +430,34 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
     } catch (caught: unknown) {
       if (isCurrentGeneration(requestGeneration)) onError(errorMessage(caught));
     }
-  }, [fontFace, fontSize, inverted, isCurrentGeneration, onError, sampleText, t, theme]);
+  }, [fontFace, fontSize, isCurrentGeneration, onError, sampleText, t, theme]);
 
-  const toggleNativePreview = () => applyNativePreview(!nativeVisible, nativeMode, darkPreview);
+  const toggleNativePreview = () => applyNativePreview(!nativeVisible, nativeMode, inverted);
 
   /* The legacy-listing choice repaints an already-open native window in place. */
   const changeNativeMode = (mode: NativePreviewMode) => {
     setNativeMode(mode);
-    if (nativeVisible) void applyNativePreview(true, mode, darkPreview);
+    if (nativeVisible) void applyNativePreview(true, mode, inverted);
   };
 
   /* An open native window follows the font, size and sample the reader is
      looking at here; the window's own controls take over once they are used. */
   useEffect(() => {
-    if (nativeVisible) void applyNativePreview(true, nativeMode, darkPreview);
+    if (nativeVisible) void applyNativePreview(true, nativeMode, inverted);
     // Font, size and sample changes only; the toggles call applyNativePreview themselves.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fontFace, fontSize, sampleText]);
 
   /* An open native window follows the polarity choice without reopening. */
   const toggleInverted = () => {
-    const dark = !darkPreview;
-    setInverted((value) => !value);
-    if (nativeVisible) void applyNativePreview(true, nativeMode, dark);
+    const next = !inverted;
+    setInverted(next);
+    if (nativeVisible) void applyNativePreview(true, nativeMode, next);
   };
 
   /* A theme change while the native window is open repaints it too. */
   useEffect(() => {
-    if (nativeVisible) void applyNativePreview(true, nativeMode, darkPreview);
+    if (nativeVisible) void applyNativePreview(true, nativeMode, inverted);
     // Only the theme should retrigger this; the toggles call applyNativePreview themselves.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [theme]);

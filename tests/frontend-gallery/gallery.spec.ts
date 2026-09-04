@@ -350,21 +350,27 @@ test("native preview display mode dropdown drives the runtime adapter", async ({
   await expect.poll(nativePreviewState).toBe("sample");
   await expect.poll(nativePreviewBackground).toBe("#EEF1F4");
   /* The window draws its own chrome from the strings the Control Center hands over. */
-  const nativeOptions = await page.evaluate(() => JSON.parse(window.sessionStorage.getItem("gallery-native-preview-options") ?? "{}") as { labels?: Record<string, string>; sizes?: number[]; fontFace?: string; theme?: string });
-  expect(nativeOptions.labels?.title).toBe("MacType 실제 미리보기");
-  expect(nativeOptions.labels?.invert).toBe("색 반전");
-  expect(nativeOptions.sizes?.length).toBeGreaterThan(5);
-  expect(nativeOptions.theme).toBe("light");
+  type NativeOptions = { labels?: Record<string, string>; sizes?: number[]; fontFace?: string; theme?: string; inverted?: boolean; chrome?: { skin?: string } };
+  const nativeOptions = () => page.evaluate(() => JSON.parse(window.sessionStorage.getItem("gallery-native-preview-options") ?? "{}") as NativeOptions);
+  const options = await nativeOptions();
+  expect(options.labels?.title).toBe("MacType 실제 미리보기");
+  expect(options.labels?.invert).toBe("색 반전");
+  expect(options.sizes?.length).toBeGreaterThan(5);
+  expect(options.theme).toBe("light");
+  expect(options.inverted).toBe(false);
+  expect(options.chrome?.skin).toBe("classic");
   await modeSelect.selectOption("ladder");
   await expect.poll(nativePreviewState).toBe("ladder");
-  // The background choice reaches the open window without reopening it, and it
-  // survives a display-mode change.
+  // The invert choice reaches the open window as a flag over the theme's base
+  // colours (the window swaps them itself), and it survives a display-mode change.
   await page.getByRole("button", { name: "색 반전" }).click();
-  await expect.poll(nativePreviewBackground).toBe("#171A1F");
+  await expect.poll(async () => (await nativeOptions()).inverted).toBe(true);
+  await expect.poll(nativePreviewBackground).toBe("#EEF1F4");
   await modeSelect.selectOption("listing");
   await expect.poll(nativePreviewState).toBe("listing");
-  await expect.poll(nativePreviewBackground).toBe("#171A1F");
+  await expect.poll(async () => (await nativeOptions()).inverted).toBe(true);
   await page.getByRole("button", { name: "색 반전" }).click();
+  await expect.poll(async () => (await nativeOptions()).inverted).toBe(false);
   await expect.poll(nativePreviewBackground).toBe("#EEF1F4");
   await page.getByRole("button", { name: "실제 창 닫기" }).click();
   await expect.poll(nativePreviewState).toBe("hidden");

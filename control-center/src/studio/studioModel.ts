@@ -165,6 +165,13 @@ export function studioPalette(settings: StudioSettings, theme: "light" | "dark")
   return specimenPalette((theme === "dark") !== settings.inverted);
 }
 
+/* The native window applies `inverted` itself, so it receives the theme's base
+   polarity plus the flag; custom colours go through as they are. */
+export function nativePalette(settings: StudioSettings, theme: "light" | "dark"): { foreground: string; background: string; inverted: boolean } {
+  if (settings.palette === "custom") return { foreground: settings.foreground, background: settings.background, inverted: false };
+  return { ...specimenPalette(theme === "dark"), inverted: settings.inverted };
+}
+
 export interface ResolvedSource {
   kind: StudioSourceKind;
   profilePath: string | null;

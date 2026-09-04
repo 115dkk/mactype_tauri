@@ -1,83 +1,98 @@
 mod health;
-mod scm;
 
 pub(super) use health::read_health_for_scm_process;
 use health::{read_health, read_persisted_health};
-use scm::{query_configuration, query_runtime, ServiceHandle};
-pub(super) use scm::{running_service_process_id, wide};
 
 use super::{
     windows::{machine_roots, RuntimePointer},
     *,
 };
 use mactype_service_contract::{HealthState as ContractHealthState, SERVICE_NAME};
-use windows_sys::Win32::{
-    Foundation::{GetLastError, ERROR_SERVICE_DOES_NOT_EXIST, ERROR_SERVICE_MARKED_FOR_DELETE},
-    System::Services::{
-        OpenSCManagerW, OpenServiceW, SC_MANAGER_CONNECT, SERVICE_QUERY_CONFIG,
-        SERVICE_QUERY_STATUS,
-    },
-    UI::Shell::{FOLDERID_Windows, SHGetKnownFolderPath},
+use mactype_service_platform::{
+    known_folder_path, KnownFolder, ServiceAccess, ServiceControlManager, ServiceManagerAccess,
+    ServiceState,
 };
+use windows_sys::Win32::Foundation::ERROR_SERVICE_MARKED_FOR_DELETE;
 
-pub(super) fn known_folder(id: *const windows_sys::core::GUID) -> Result<PathBuf, String> {
-    let mut value = std::ptr::null_mut();
-    let result = unsafe { SHGetKnownFolderPath(id, 0, std::ptr::null_mut(), &mut value) };
-    if result < 0 || value.is_null() {
-        return Err(format!(
-            "SHGetKnownFolderPath failed with HRESULT {result:#x}"
-        ));
+pub(super) fn known_folder(folder: KnownFolder) -> Result<PathBuf, String> {
+    known_folder_path(folder).map_err(|error| {
+        format!(
+            "SHGetKnownFolderPath failed with HRESULT {:#x}",
+            error.raw_os_error().unwrap_or(0)
+        )
+    })
+}
+
+fn runtime_state(state: ServiceState) -> RuntimeState {
+    match state {
+        ServiceState::Stopped => RuntimeState::Stopped,
+        ServiceState::StartPending => RuntimeState::StartPending,
+        ServiceState::Running => RuntimeState::Running,
+        ServiceState::StopPending => RuntimeState::StopPending,
+        ServiceState::Paused => RuntimeState::Paused,
+        _ => RuntimeState::Unknown,
     }
-    let mut length = 0;
-    while unsafe { *value.add(length) } != 0 {
-        length += 1;
+}
+
+pub(in crate::machine_integration::open_service) fn running_service_process_id(
+) -> Result<u32, String> {
+    let manager = ServiceControlManager::connect(ServiceManagerAccess::Connect)
+        .map_err(|error| error.to_string())?;
+    let service = manager
+        .open(SERVICE_NAME, ServiceAccess::QueryStatus)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "the new service has no stable running SCM process".to_owned())?;
+    let status = service.status().map_err(|error| {
+        format!(
+            "QueryServiceStatusEx failed with {}",
+            error.raw_os_error().unwrap_or(0)
+        )
+    })?;
+    if runtime_state(status.state) != RuntimeState::Running || status.process_id == 0 {
+        return Err("the new service has no stable running SCM process".to_owned());
     }
-    let path = PathBuf::from(String::from_utf16_lossy(unsafe {
-        std::slice::from_raw_parts(value, length)
-    }));
-    unsafe { windows_sys::Win32::System::Com::CoTaskMemFree(value.cast()) };
-    Ok(path)
+    Ok(status.process_id)
 }
 
 pub(super) fn query() -> SystemServiceStatus {
-    let manager = unsafe { OpenSCManagerW(std::ptr::null(), std::ptr::null(), SC_MANAGER_CONNECT) };
-    if manager.is_null() {
-        return inaccessible(unsafe { GetLastError() }, None);
-    }
-    let manager = ServiceHandle(manager);
-    let service_name = wide(SERVICE_NAME);
-    let service = unsafe {
-        OpenServiceW(
-            manager.0,
-            service_name.as_ptr(),
-            SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS,
-        )
+    let manager = match ServiceControlManager::connect(ServiceManagerAccess::Connect) {
+        Ok(manager) => manager,
+        Err(error) => {
+            return inaccessible(error.raw_os_error().unwrap_or(0) as u32, None);
+        }
     };
-    if service.is_null() {
-        let error = unsafe { GetLastError() };
-        return match error {
-            ERROR_SERVICE_DOES_NOT_EXIST => absent_status(),
-            ERROR_SERVICE_MARKED_FOR_DELETE => SystemServiceStatus {
-                backend: ServiceBackend::OpenSource,
-                installation: InstallationState::DeletePending,
-                runtime: RuntimeState::Unknown,
-                win32_error: Some(error),
-                can_install: false,
-                ..absent_status()
-            },
-            _ => inaccessible(error, None),
-        };
-    }
-    let service = ServiceHandle(service);
-    let configuration = match query_configuration(service.0) {
+    let service = match manager.open(SERVICE_NAME, ServiceAccess::QueryStatusAndConfig) {
+        Ok(Some(service)) => service,
+        Ok(None) => return absent_status(),
+        Err(error) => {
+            let code = error.raw_os_error().unwrap_or(0) as u32;
+            return if error.raw_os_error() == Some(ERROR_SERVICE_MARKED_FOR_DELETE as i32) {
+                SystemServiceStatus {
+                    backend: ServiceBackend::OpenSource,
+                    installation: InstallationState::DeletePending,
+                    runtime: RuntimeState::Unknown,
+                    win32_error: Some(code),
+                    can_install: false,
+                    ..absent_status()
+                }
+            } else {
+                inaccessible(code, None)
+            };
+        }
+    };
+    let configuration = match service.config() {
         Ok(configuration) => configuration,
-        Err(error) => return inaccessible(error, None),
+        Err(error) => return inaccessible(error.raw_os_error().unwrap_or(0) as u32, None),
     };
-    let binary_path = Some(configuration.binary_path.clone());
-    let (runtime, service_process_id) = match query_runtime(service.0) {
-        Ok(state) => state,
-        Err(error) => return inaccessible(error, binary_path),
+    let binary_path = Some(configuration.image_path.clone());
+    let status = match service.status() {
+        Ok(status) => status,
+        Err(error) => {
+            return inaccessible(error.raw_os_error().unwrap_or(0) as u32, binary_path);
+        }
     };
+    let runtime = runtime_state(status.state);
+    let service_process_id = status.process_id;
     let (program_files, _) = match machine_roots() {
         Ok(roots) => roots,
         Err(_) => return inaccessible(3, binary_path),
@@ -85,7 +100,7 @@ pub(super) fn query() -> SystemServiceStatus {
     let service_root = program_files.join("MacType Control Center").join("Service");
     let expected = current_service_binary(&service_root);
     let bundled = bundled_service_binary(&service_root);
-    let configured = configured_service_binary(&configuration.binary_path);
+    let configured = configured_service_binary(&configuration.image_path);
     let protected = configured
         .as_deref()
         .is_some_and(|path| is_protected_service_binary(&service_root, path));
@@ -205,7 +220,7 @@ pub(super) fn reveal_system_service() -> Result<(), String> {
     if !metadata.is_file() {
         return Err("the protected system service binary is missing".to_owned());
     }
-    let explorer = known_folder(&FOLDERID_Windows)?.join("explorer.exe");
+    let explorer = known_folder(KnownFolder::Windows)?.join("explorer.exe");
     reject_reparse_chain(&explorer)?;
     if !explorer.is_file() {
         return Err("the fixed Windows Explorer executable is unavailable".to_owned());

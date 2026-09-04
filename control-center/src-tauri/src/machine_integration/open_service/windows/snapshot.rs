@@ -52,8 +52,8 @@ pub(super) struct ProtectedMutationReceipt {
 
 pub(super) fn machine_roots_impl() -> Result<(PathBuf, PathBuf), String> {
     Ok((
-        known_folder(&FOLDERID_ProgramFiles)?,
-        known_folder(&FOLDERID_ProgramData)?,
+        known_folder(KnownFolder::ProgramFiles)?,
+        known_folder(KnownFolder::ProgramData)?,
     ))
 }
 

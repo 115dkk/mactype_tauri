@@ -7,26 +7,17 @@ use std::{
 };
 
 #[cfg(windows)]
-fn known_folder(id: &windows_sys::core::GUID) -> Result<PathBuf, String> {
-    use std::os::windows::ffi::OsStringExt;
-    use windows_sys::Win32::{System::Com::CoTaskMemFree, UI::Shell::SHGetKnownFolderPath};
-    let mut pointer = std::ptr::null_mut();
-    let result = unsafe { SHGetKnownFolderPath(id, 0, std::ptr::null_mut(), &mut pointer) };
-    if result < 0 || pointer.is_null() {
-        return Err(format!("SHGetKnownFolderPath failed with HRESULT {result}"));
-    }
-    let mut length = 0;
-    while unsafe { *pointer.add(length) } != 0 {
-        length += 1;
-    }
-    let value = OsString::from_wide(unsafe { std::slice::from_raw_parts(pointer, length) });
-    unsafe { CoTaskMemFree(pointer.cast()) };
+fn known_folder(folder: mactype_service_platform::KnownFolder) -> Result<PathBuf, String> {
+    let value = mactype_service_platform::known_folder_path(folder).map_err(|error| {
+        let result = error.raw_os_error().unwrap_or(0);
+        format!("SHGetKnownFolderPath failed with HRESULT {result}")
+    })?;
     fs::canonicalize(value).map_err(|error| error.to_string())
 }
 
 #[cfg(windows)]
 fn program_data_root() -> Result<PathBuf, String> {
-    known_folder(&windows_sys::Win32::UI::Shell::FOLDERID_ProgramData)
+    known_folder(mactype_service_platform::KnownFolder::ProgramData)
 }
 
 #[cfg(not(windows))]
@@ -37,7 +28,7 @@ fn program_data_root() -> Result<PathBuf, String> {
 #[cfg(windows)]
 pub(in crate::machine_integration::legacy_migration) fn expected_installation_root(
 ) -> Result<PathBuf, String> {
-    let program_files = known_folder(&windows_sys::Win32::UI::Shell::FOLDERID_ProgramFiles)?;
+    let program_files = known_folder(mactype_service_platform::KnownFolder::ProgramFiles)?;
     Ok(program_files.join("MacType"))
 }
 
@@ -108,15 +99,7 @@ pub(in crate::machine_integration::legacy_migration) fn registry_export_invocati
 
 #[cfg(windows)]
 fn system_directory() -> Result<PathBuf, String> {
-    use std::os::windows::ffi::OsStringExt;
-    use windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW;
-    let mut buffer = vec![0u16; 32_768];
-    let length = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) };
-    if length == 0 || length as usize >= buffer.len() {
-        return Err(std::io::Error::last_os_error().to_string());
-    }
-    buffer.truncate(length as usize);
-    Ok(PathBuf::from(OsString::from_wide(&buffer)))
+    mactype_service_platform::system_directory().map_err(|error| error.to_string())
 }
 
 #[cfg(windows)]

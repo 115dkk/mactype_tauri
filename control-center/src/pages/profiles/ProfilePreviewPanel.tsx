@@ -10,6 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { NativePreviewMode, PreviewRequest, PreviewResult } from "../../app/model";
+import { currentSkin, nativeChrome } from "../../features/preview/nativeChrome";
 import { nativePreviewLabels, NATIVE_LADDER_SIZES } from "../../features/preview/nativePreviewLabels";
 import { useAppTheme } from "../../app/useAppTheme";
 import {
@@ -421,6 +422,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
         inverted,
         sizes: NATIVE_LADDER_SIZES,
         labels: nativePreviewLabels(t),
+        chrome: nativeChrome(currentSkin(), theme),
       });
       if (isCurrentGeneration(requestGeneration)) setNativeVisible(state.visible);
     } catch (caught: unknown) {

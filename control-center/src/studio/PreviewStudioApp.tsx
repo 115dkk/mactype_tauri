@@ -6,6 +6,7 @@ import { useAppTheme } from "../app/useAppTheme";
 import { Segmented } from "../components/Segmented";
 import { SwitchControl } from "../components/SwitchControl";
 import { WindowTitleBar } from "../components/WindowTitleBar";
+import { currentSkin, nativeChrome } from "../features/preview/nativeChrome";
 import { nativePreviewLabels } from "../features/preview/nativePreviewLabels";
 import { useSpecimenRenders } from "../features/preview/useSpecimenRenders";
 import { useI18n } from "../i18n/i18n";
@@ -197,6 +198,7 @@ export function PreviewStudioApp() {
         inverted: settings.inverted,
         sizes: settings.sizes,
         labels: nativePreviewLabels(t),
+        chrome: nativeChrome(currentSkin(), theme),
       });
     } catch (caught: unknown) {
       setExportMessage(caught instanceof Error ? caught.message : String(caught));

@@ -248,6 +248,27 @@ export interface NativePreviewOptions {
   zoom?: 1 | 2 | 4;
   sizes?: ReadonlyArray<number>;
   labels?: Readonly<Record<string, string>>;
+  /** Colours and metrics of the active skin; the window draws its chrome from these. */
+  chrome?: NativePreviewChrome;
+}
+
+export interface NativePreviewChrome {
+  skin: string;
+  canvas: string;
+  surface: string;
+  surfaceSubtle: string;
+  border: string;
+  text: string;
+  muted: string;
+  accent: string;
+  onAccent: string;
+  radius: number;
+  controlHeight: number;
+  toolbarHeight: number;
+  statusHeight: number;
+  canvasRadius: number;
+  canvasInset: number;
+  monoStatus: boolean;
 }
 
 /** What the native window reports after a show or hide request. */

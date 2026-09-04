@@ -30,7 +30,7 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .nav-group { display: grid; gap: var(--space-1); margin-top: var(--space-2); }
 .nav-group-label { padding: 0 var(--space-2); color: var(--color-muted); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
 .nav-item, .theme-toggle { position: relative; display: flex; align-items: center; gap: var(--space-3); min-height: 40px; padding: var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent; text-align: left; transition: background-color var(--motion-fast) var(--ease-standard); }
-.nav-item:hover, .theme-toggle:hover, .language-control:hover { background: var(--color-surface-subtle); }
+.nav-item:hover, .theme-toggle:hover, .preference-control:hover { background: var(--color-surface-subtle); }
 .nav-item[data-selected="true"] { background: var(--color-surface-subtle); font-weight: 600; }
 .nav-item[data-selected="true"]::before { position: absolute; inset-block: var(--space-2); left: 0; width: 3px; border-radius: var(--radius-control); background: var(--color-primary); content: ""; }
 [dir="rtl"] .nav-item, [dir="rtl"] .theme-toggle { text-align: right; }
@@ -40,18 +40,18 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .nav-subitem > span { min-width: 0; line-height: 1.2; }
 .navigation-preferences { display: grid; gap: var(--space-1); margin-top: auto; flex-shrink: 0; }
 .theme-toggle { width: 100%; color: var(--color-muted); }
-.language-control { display: grid; position: relative; grid-template-columns: 17px minmax(0, 1fr); align-items: center; gap: var(--space-3); min-height: 40px; padding: 0 var(--space-2); border-radius: var(--radius-control); color: var(--color-muted); }
-.language-picker { min-width: 0; }
-.language-picker-trigger { width: 100%; min-height: 32px; overflow: hidden; padding: 0 var(--space-2); border: 0; background: transparent; color: inherit; text-align: start; text-overflow: ellipsis; white-space: nowrap; }
-.language-menu { display: grid; position: fixed; z-index: 30; bottom: 60px; left: var(--space-3); width: calc(var(--nav-width) - var(--space-6)); max-height: min(280px, calc(100vh - var(--titlebar-height) - 84px)); overflow-y: auto; border: 1px solid var(--color-border-strong); background: var(--color-surface); box-shadow: var(--shadow-window); color: var(--color-foreground); scrollbar-color: var(--color-border-strong) var(--color-surface-subtle); scrollbar-width: thin; }
-[dir="rtl"] .language-menu { right: var(--space-3); left: auto; }
-.language-menu::-webkit-scrollbar { width: 10px; }
-.language-menu::-webkit-scrollbar-track { background: var(--color-surface-subtle); }
-.language-menu::-webkit-scrollbar-thumb { border: 2px solid var(--color-surface-subtle); border-radius: 5px; background: var(--color-border-strong); }
-.language-option { position: relative; min-height: 40px; padding: var(--space-2) var(--space-3); border: 0; background: var(--color-surface); color: var(--color-foreground); text-align: start; }
-.language-option:hover, .language-option[aria-selected="true"] { background: var(--color-surface-subtle); }
-.language-option[aria-selected="true"]::before { position: absolute; inset-block: var(--space-2); left: 0; width: 3px; background: var(--color-primary); content: ""; }
-[dir="rtl"] .language-option[aria-selected="true"]::before { right: 0; left: auto; }
+.preference-control { display: grid; position: relative; grid-template-columns: 17px minmax(0, 1fr); align-items: center; gap: var(--space-3); min-height: 40px; padding: 0 var(--space-2); border-radius: var(--radius-control); color: var(--color-muted); }
+.preference-picker { min-width: 0; }
+.preference-trigger { width: 100%; min-height: 32px; overflow: hidden; padding: 0 var(--space-2); border: 0; background: transparent; color: inherit; text-align: start; text-overflow: ellipsis; white-space: nowrap; }
+.preference-menu { display: grid; position: fixed; z-index: 30; bottom: 60px; left: var(--space-3); width: calc(var(--nav-width) - var(--space-6)); max-height: min(280px, calc(100vh - var(--titlebar-height) - 84px)); overflow-y: auto; border: 1px solid var(--color-border-strong); background: var(--color-surface); box-shadow: var(--shadow-window); color: var(--color-foreground); scrollbar-color: var(--color-border-strong) var(--color-surface-subtle); scrollbar-width: thin; }
+[dir="rtl"] .preference-menu { right: var(--space-3); left: auto; }
+.preference-menu::-webkit-scrollbar { width: 10px; }
+.preference-menu::-webkit-scrollbar-track { background: var(--color-surface-subtle); }
+.preference-menu::-webkit-scrollbar-thumb { border: 2px solid var(--color-surface-subtle); border-radius: 5px; background: var(--color-border-strong); }
+.preference-option { position: relative; min-height: 40px; padding: var(--space-2) var(--space-3); border: 0; background: var(--color-surface); color: var(--color-foreground); text-align: start; }
+.preference-option:hover, .preference-option[aria-selected="true"] { background: var(--color-surface-subtle); }
+.preference-option[aria-selected="true"]::before { position: absolute; inset-block: var(--space-2); left: 0; width: 3px; background: var(--color-primary); content: ""; }
+[dir="rtl"] .preference-option[aria-selected="true"]::before { right: 0; left: auto; }
 .work-area { min-width: 0; }
 .page { max-width: 1180px; min-height: calc(100vh - var(--titlebar-height)); padding: var(--space-8); }
 .view-enter { animation: view-enter var(--motion-normal) var(--ease-standard) both; }
@@ -466,9 +466,9 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
   .navigation-preferences { display: flex; flex: 0 0 auto; margin: 0; }
   .theme-toggle { width: 40px; padding: 0; justify-content: center; }
   .theme-toggle span { display: none; }
-  .language-control { width: 112px; padding-inline: var(--space-2); }
-  .language-menu, [dir="rtl"] .language-menu { top: calc(var(--titlebar-height) + 52px); right: var(--space-2); bottom: auto; left: auto; width: 180px; max-height: min(280px, calc(100vh - var(--titlebar-height) - 60px)); }
-  [dir="rtl"] .language-menu { right: auto; left: var(--space-2); }
+  .preference-control { width: 112px; padding-inline: var(--space-2); }
+  .preference-menu, [dir="rtl"] .preference-menu { top: calc(var(--titlebar-height) + 52px); right: var(--space-2); bottom: auto; left: auto; width: 180px; max-height: min(280px, calc(100vh - var(--titlebar-height) - 60px)); }
+  [dir="rtl"] .preference-menu { right: auto; left: var(--space-2); }
   .page { min-height: calc(100vh - var(--titlebar-height) - 53px); padding: var(--space-4); }
   .page-header, .split-section { align-items: stretch; flex-direction: column; }
   .header-actions { flex-wrap: wrap; }
@@ -557,3 +557,7 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 1ms !important; transition-duration: 1ms !important; }
 }
+
+/* The status bar exists in every skin's DOM so a skin can show it without a
+   layout change; only skins that draw one make it visible. */
+.app-statusbar { display: none; }

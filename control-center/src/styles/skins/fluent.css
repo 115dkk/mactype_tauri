@@ -1,0 +1,154 @@
+/* Fluent skin: the Windows 11 Settings grammar. One Mica surface, settings
+   cards with a regular-weight title and a muted description, and a 3×16
+   accent pill as the only selection mark. Scoped to html[data-skin="fluent"]. */
+html[data-skin="fluent"] {
+  --color-canvas: #F0F2F5;
+  --color-surface: #FBFBFC;
+  --color-surface-subtle: #EEF0F3;
+  --color-foreground: #1B1B1B;
+  --color-muted: #5F646B;
+  --color-border: rgba(0, 0, 0, 0.062);
+  --color-border-strong: rgba(0, 0, 0, 0.16);
+  --color-primary: #005FB8;
+  --color-on-primary: #FFFFFF;
+  --color-focus: #005FB8;
+  --color-success: #0F7B0F;
+  --color-warning: #9D5D00;
+  --color-destructive: #C42B1C;
+  --color-preview: #FCFCFD;
+  --fluent-hover: rgba(0, 0, 0, 0.035);
+  --fluent-selected: rgba(0, 0, 0, 0.045);
+  --fluent-control: #FFFFFF;
+  --fluent-control-bottom: rgba(0, 0, 0, 0.16);
+  --fluent-accent-bottom: rgba(0, 0, 0, 0.4);
+  --nav-width: 248px;
+  --settings-index-width: 176px;
+  --control-height: 32px;
+  --radius-control: 4px;
+}
+html[data-skin="fluent"][data-theme="dark"] {
+  --color-canvas: #202124;
+  --color-surface: #2B2C30;
+  --color-surface-subtle: #323337;
+  --color-foreground: #F5F5F7;
+  --color-muted: #C4C8CE;
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-strong: rgba(255, 255, 255, 0.18);
+  --color-primary: #60CDFF;
+  --color-on-primary: #06202C;
+  --color-focus: #99EBFF;
+  --color-success: #6CCB5F;
+  --color-warning: #FCE100;
+  --color-destructive: #FF99A4;
+  --color-preview: #16171A;
+  --fluent-hover: rgba(255, 255, 255, 0.05);
+  --fluent-selected: rgba(255, 255, 255, 0.06);
+  --fluent-control: rgba(255, 255, 255, 0.06);
+  --fluent-control-bottom: rgba(255, 255, 255, 0.07);
+  --fluent-accent-bottom: rgba(0, 0, 0, 0.4);
+}
+
+/* Title bar and navigation pane share the canvas: no divider anywhere. */
+html[data-skin="fluent"] .window-titlebar { border-bottom: 0; background: var(--color-canvas); }
+html[data-skin="fluent"] .window-title { padding-inline: var(--space-4); font-weight: 400; }
+html[data-skin="fluent"] .navigation { padding: var(--space-1) var(--space-2) var(--space-3); border-right: 0; background: var(--color-canvas); }
+html[data-skin="fluent"][dir="rtl"] .navigation, html[data-skin="fluent"] [dir="rtl"] .navigation { border-left: 0; }
+html[data-skin="fluent"] .product-lockup { display: none; }
+html[data-skin="fluent"] .navigation nav { gap: 1px; }
+html[data-skin="fluent"] .nav-group { gap: 1px; margin-top: 0; }
+html[data-skin="fluent"] .nav-group-label { padding: 18px 12px 4px; font-size: 12px; letter-spacing: 0; text-transform: none; }
+html[data-skin="fluent"] .nav-group-items { gap: 1px; margin-inline-start: 0; padding-inline-start: 0; border-inline-start: 0; }
+html[data-skin="fluent"] .nav-item, html[data-skin="fluent"] .theme-toggle { min-height: 36px; padding: 0 12px; gap: 14px; border-radius: 4px; font-weight: 400; }
+html[data-skin="fluent"] .nav-item:hover, html[data-skin="fluent"] .theme-toggle:hover, html[data-skin="fluent"] .preference-control:hover { background: var(--fluent-hover); }
+html[data-skin="fluent"] .nav-item[data-selected="true"] { background: var(--fluent-selected); font-weight: 400; }
+html[data-skin="fluent"] .nav-item[data-selected="true"]::before { top: 10px; bottom: auto; height: 16px; width: 3px; border-radius: 2px; }
+html[data-skin="fluent"] .navigation-preferences { gap: 1px; padding-top: var(--space-2); border-top: 1px solid var(--color-border); }
+html[data-skin="fluent"] .preference-control { min-height: 36px; padding: 0 12px; gap: 14px; border-radius: 4px; }
+html[data-skin="fluent"] .preference-menu { border-radius: 8px; border-color: var(--color-border); box-shadow: 0 8px 16px rgba(0, 0, 0, 0.14); }
+html[data-skin="fluent"] .preference-option { border-radius: 4px; }
+html[data-skin="fluent"] .preference-option[aria-selected="true"]::before { top: 12px; bottom: auto; height: 16px; border-radius: 2px; }
+
+/* Pages: a 28px display title on the canvas, then cards. */
+html[data-skin="fluent"] .page { max-width: 1080px; padding: var(--space-6) var(--space-10) var(--space-8) var(--space-8); }
+html[data-skin="fluent"] h1 { font-family: "Segoe UI Variable Display", "Segoe UI", "Pretendard KO UI", "Malgun Gothic", sans-serif; font-size: 28px; line-height: 36px; letter-spacing: -0.2px; }
+html[data-skin="fluent"] h2 { font-size: 14px; font-weight: 600; }
+html[data-skin="fluent"] .page-header { padding-bottom: var(--space-4); border-bottom: 0; }
+html[data-skin="fluent"] .page-header.compact { padding-bottom: var(--space-3); }
+html[data-skin="fluent"] .section-block, html[data-skin="fluent"] .service-summary, html[data-skin="fluent"] .service-row, html[data-skin="fluent"] .status-band, html[data-skin="fluent"] .legacy-import-banner, html[data-skin="fluent"] .split-section { border-radius: 4px; background: var(--color-surface); }
+html[data-skin="fluent"] .section-block { margin-top: var(--space-5); border-color: var(--color-border); }
+html[data-skin="fluent"] .section-heading { padding: var(--space-3) var(--space-4); }
+html[data-skin="fluent"] .section-heading h2 { font-weight: 600; }
+html[data-skin="fluent"] .split-section { padding: var(--space-4); border: 1px solid var(--color-border); }
+html[data-skin="fluent"] .detail-list > div { padding: var(--space-3) var(--space-4); }
+html[data-skin="fluent"] .detail-list > div:last-child { border-bottom: 0; }
+
+/* The overview and service summaries become stacked rows instead of stat tiles. */
+html[data-skin="fluent"] .overview-service-heading { padding: var(--space-4); gap: var(--space-4); }
+html[data-skin="fluent"] .overview-service-heading h2 { font-size: 20px; line-height: 28px; }
+html[data-skin="fluent"] .overview-service-details { grid-template-columns: minmax(0, 1fr); }
+html[data-skin="fluent"] .overview-service-details > div { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: 48px; padding: var(--space-3) var(--space-4); border-inline-end: 0; border-bottom: 1px solid var(--color-border); }
+html[data-skin="fluent"] .overview-service-details > div:last-child { border-bottom: 0; }
+html[data-skin="fluent"] .overview-service-details dt { margin: 0; color: var(--color-foreground); }
+html[data-skin="fluent"] .overview-service-details dd { font-weight: 400; color: var(--color-muted); text-align: end; }
+html[data-skin="fluent"] .service-summary { margin-top: var(--space-5); border-color: var(--color-border); }
+html[data-skin="fluent"] .service-summary-grid { grid-template-columns: minmax(0, 1fr); }
+html[data-skin="fluent"] .service-summary-grid > div { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: 48px; padding: var(--space-3) var(--space-4); border-inline-end: 0; border-bottom: 1px solid var(--color-border); }
+html[data-skin="fluent"] .service-summary-grid > div:last-child { border-bottom: 0; }
+html[data-skin="fluent"] .service-summary-grid dt { font-size: 14px; color: var(--color-foreground); }
+html[data-skin="fluent"] .service-summary-grid dd { font-size: 14px; font-weight: 400; color: var(--color-muted); }
+html[data-skin="fluent"] .service-rows { gap: 3px; margin-top: var(--space-4); }
+html[data-skin="fluent"] .service-row { border-color: var(--color-border); }
+html[data-skin="fluent"] .service-row > summary, html[data-skin="fluent"] .service-row-head { min-height: 62px; padding: var(--space-3) var(--space-4); }
+html[data-skin="fluent"] .service-row-icon { width: 24px; height: 24px; border-radius: 0; background: transparent; color: var(--color-foreground); }
+html[data-skin="fluent"] .service-row-copy h2 { font-weight: 400; }
+html[data-skin="fluent"] .service-row-state { padding: 0; background: transparent; font-size: 14px; font-weight: 400; }
+html[data-skin="fluent"] .service-row-state[data-tone="normal"], html[data-skin="fluent"] .service-row-state[data-tone="neutral"] { color: var(--color-muted); }
+html[data-skin="fluent"] .system-injection-icon, html[data-skin="fluent"] .service-package-notice-icon, html[data-skin="fluent"] .legacy-tray-conflict-icon { border-radius: 4px; }
+
+/* Controls: 32px, 4px corners, a darker bottom edge instead of a heavy outline. */
+html[data-skin="fluent"] .button, html[data-skin="fluent"] .icon-button, html[data-skin="fluent"] select, html[data-skin="fluent"] textarea, html[data-skin="fluent"] input[type="text"], html[data-skin="fluent"] input[type="number"], html[data-skin="fluent"] input[type="search"] { border-color: var(--color-border); border-bottom-color: var(--fluent-control-bottom); border-radius: 4px; background: var(--fluent-control); }
+html[data-skin="fluent"] .button { font-weight: 400; }
+html[data-skin="fluent"] .button:hover { filter: none; background: var(--color-surface-subtle); }
+html[data-skin="fluent"] .button.primary { border-color: rgba(0, 0, 0, 0.08); border-bottom-color: var(--fluent-accent-bottom); background: var(--color-primary); color: var(--color-on-primary); font-weight: 400; }
+html[data-skin="fluent"] .button.primary:hover { background: var(--color-primary); filter: brightness(1.06); }
+html[data-skin="fluent"] .button.danger { border-color: var(--color-destructive); color: var(--color-destructive); }
+html[data-skin="fluent"] .text-action { font-weight: 400; }
+html[data-skin="fluent"] .search-field { border-color: var(--color-border); border-bottom-color: var(--color-muted); border-radius: 4px; background: var(--fluent-control); }
+/* The tuner keeps the full window: its docked preview needs the width the reading pages give away. */
+html[data-skin="fluent"] .profile-page { --control-height: 32px; max-width: none; padding: var(--space-4) var(--space-5) var(--space-5); }
+html[data-skin="fluent"] .switch-control input { border-color: var(--color-muted); background: transparent; }
+html[data-skin="fluent"] .switch-control input:checked { border-color: var(--color-primary); background: var(--color-primary); }
+html[data-skin="fluent"] .profile-mode-title > span { border-color: var(--color-border-strong); }
+
+/* Tuner: every setting is one card; the group heading sits on the canvas. */
+html[data-skin="fluent"] .settings-index li button { min-height: 36px; border-radius: 4px; font-weight: 400; }
+html[data-skin="fluent"] .settings-index li button[data-selected="true"] { position: relative; background: var(--fluent-selected); font-weight: 400; }
+html[data-skin="fluent"] .settings-index li button[data-selected="true"]::before { position: absolute; left: 0; top: 10px; width: 3px; height: 16px; border-radius: 2px; background: var(--color-primary); content: ""; }
+html[data-skin="fluent"] .settings-form { padding-top: var(--space-1); }
+html[data-skin="fluent"] .settings-form .section-heading { padding: var(--space-2) 0 var(--space-3); }
+html[data-skin="fluent"] .settings-form .section-heading h2 { font-size: 20px; line-height: 28px; }
+html[data-skin="fluent"] .setting-row { min-height: 56px; margin-bottom: 3px; padding: var(--space-2) var(--space-4); border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-surface); }
+html[data-skin="fluent"] .setting-row label { font-weight: 400; }
+html[data-skin="fluent"] .setting-row.guided-row { padding: var(--space-3) var(--space-4); }
+html[data-skin="fluent"] .guided-choice-option { border-radius: 4px; }
+html[data-skin="fluent"] .wizard-start-card, html[data-skin="fluent"] .wizard-apply-card { border-radius: 4px; background: var(--color-surface); }
+html[data-skin="fluent"] .wizard-progress { background: transparent; }
+html[data-skin="fluent"] .preview-canvas { border-radius: 4px; }
+html[data-skin="fluent"] .settings-workspace[data-preview-docked="true"] .preview-panel { padding: var(--space-3); border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-surface); }
+html[data-skin="fluent"] .advanced-editor fieldset, html[data-skin="fluent"] .individual-row, html[data-skin="fluent"] .list-editor ul, html[data-skin="fluent"] .list-editor li { border-radius: 4px; }
+
+/* Profile files: cards with a 4px corner and a filled accent badge. */
+html[data-skin="fluent"] .profile-card { border-radius: 4px; }
+html[data-skin="fluent"] .profile-card[data-selected="true"] { box-shadow: inset 0 0 0 1px var(--color-primary); }
+html[data-skin="fluent"] .profile-card[data-selected="true"]::before { display: none; }
+html[data-skin="fluent"] .selected-file-summary, html[data-skin="fluent"] .target-selection, html[data-skin="fluent"] .process-picker-list, html[data-skin="fluent"] .process-picker-row { border-radius: 4px; }
+html[data-skin="fluent"] .migration-confirmation, html[data-skin="fluent"] .hint-popover { border-radius: 8px; }
+
+@media (max-width: 767px) {
+  html[data-skin="fluent"] .navigation { border-bottom: 1px solid var(--color-border); }
+  html[data-skin="fluent"] .page { padding: var(--space-4); }
+}
+@media (min-width: 768px) and (max-width: 1023px) {
+  html[data-skin="fluent"] { --nav-width: 200px; }
+  html[data-skin="fluent"] .page { padding: var(--space-5) var(--space-6); }
+}

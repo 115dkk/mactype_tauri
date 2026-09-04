@@ -1,6 +1,18 @@
 # MacType Control Center Design Contract
 
-## 1. Atmosphere and signature
+## 0. Skins
+
+The Control Center ships four skins over one DOM. A skin is a stylesheet in `control-center/src/styles/skins/<id>.css` scoped to `html[data-skin="<id>"]`; it overrides the colour, spacing, and component tokens and restyles the shared class names, and it never introduces its own markup. Skin ids are interface: `classic` (the contract below, the default and the gallery baseline), `fluent`, `console`, and `cupertino`. Labels may change; ids may not.
+
+The user picks a skin from the preference menu at the bottom of the navigation, the same control that picks the language, so every skin restyles one component and the choice looks and behaves the same in all of them. The choice persists per user (`mactype-control-center.skin`), and the browser gallery opens a skin with `?skin=` and a theme with `?theme=`, exactly like `?lang=`. Every skin carries a light and a dark theme, and the frontend gallery proves every skin in both themes at every viewport without horizontal overflow.
+
+Colour restraint applies to all four: one accent hue, semantic colours reserved for meaning, no pure black or white surfaces, and no saturated primaries in decorative positions. The Cupertino sidebar tiles are the one place a skin colours navigation, and they are deliberately desaturated so the tiles read as a family and the selected row keeps the only saturated colour.
+
+- **Fluent** follows the Windows 11 Settings grammar: one Mica-like canvas that the title bar and navigation share, 36px navigation items with a 3×16 accent pill, settings cards whose title is regular weight and whose description is muted, stacked key-value rows instead of stat tiles, and 32px controls with a darker bottom edge.
+- **Console** is an instrument panel: a 32px title bar, a 64px icon rail with the label under the icon, a title strip over each page, bordered 6px panels with a small muted header, 26px controls, monospace values, 32px setting rows with an accent bar on edited rows, and a 24px status bar that names the view and the installation findings.
+- **Cupertino** follows the macOS System Settings grammar: a tinted sidebar with muted icon tiles and a filled accent row for the selection, a bold 24px title, 10px rounded groups whose 44px rows are separated by inset hairlines, right-aligned values, switches, and popup buttons, and 26px push buttons with a soft shadow.
+
+## 1. Atmosphere and signature (classic skin)
 
 This interface is a precise Windows control surface for people who care about text rendering. It should feel engineered, calm, and inspectable: dense rows, hairline separators, stable alignment, and one cyan-blue accent used only for selection and action. It must not resemble a marketing dashboard. Cards, gradients, decorative statistics, oversized headings, and ornamental status dots are prohibited.
 
@@ -8,7 +20,7 @@ Design dials: `DESIGN_VARIANCE=4`, `MOTION_INTENSITY=3`, `VISUAL_DENSITY=8`.
 
 ## 2. Color
 
-All UI colors are declared here and mirrored as CSS custom properties.
+The classic skin's colors are declared here and mirrored as CSS custom properties; the other skins override the same custom properties in their own stylesheets.
 
 | Token | Light | Dark | Role |
 | --- | --- | --- | --- |

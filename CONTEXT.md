@@ -70,6 +70,9 @@ This file fixes the domain language used by code, tests, CI, and architecture do
 **ExecutionViewModel**
 : The frontend-facing model derived from MachineIntegration state. It chooses user-visible actions and explanations without teaching React about SCM flags, registry layouts, helper processes, or migration receipt internals.
 
+**Skin (스킨)**
+: One of four selectable presentations of the shared Control Center DOM, chosen from the navigation preference menu beside the language picker and persisted per user. Skin ids (`classic`, `fluent`, `console`, `cupertino`) are interface and appear as `html[data-skin]`; labels may change. A skin is a scoped stylesheet that overrides tokens and restyles shared class names; it never adds markup or behavior. The classic skin is the default and the gallery baseline.
+
 **Wizard 영역**
 : The navigation area that answers "what runs, and how": profile selection and apply (view id `files`) plus 구동 방식 and service control (view id `execution`). It inherits the role of the legacy MacWizard. The Korean product term is always **위자드**; never write 마법사. View ids are frozen interface — labels may differ from ids.
 

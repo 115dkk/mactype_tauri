@@ -33,3 +33,5 @@ export const galleryLocales = [
   { id: "pt", direction: "ltr", script: /[A-Za-zÀ-ÿ]/u },
   { id: "ar", direction: "rtl", script: /[ء-ي]/u },
 ] as const;
+
+export const gallerySkins = ["classic", "fluent", "console", "cupertino"] as const;

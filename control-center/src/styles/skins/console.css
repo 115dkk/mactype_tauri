@@ -1,0 +1,188 @@
+/* Console skin: an instrument panel. 12px body, 26px controls, bordered
+   panels with a small muted header, a 64px icon rail, and a status bar that
+   runs along the bottom edge. Both themes share the structure; the dark one
+   is the reference. Scoped to html[data-skin="console"]. */
+html[data-skin="console"] {
+  --color-canvas: #E4E8EC;
+  --color-surface: #F4F6F8;
+  --color-surface-subtle: #FAFBFC;
+  --color-foreground: #1B2129;
+  --color-muted: #5A6673;
+  --color-border: #D2D8DF;
+  --color-border-strong: #B4BDC7;
+  --color-primary: #0B8E9F;
+  --color-on-primary: #FFFFFF;
+  --color-focus: #0B8E9F;
+  --color-success: #1E8A4E;
+  --color-warning: #9A6700;
+  --color-destructive: #C6382A;
+  --color-preview: #FCFDFE;
+  --console-accent-soft: rgba(11, 142, 159, 0.12);
+  --console-success-soft: rgba(30, 138, 78, 0.14);
+  --console-led-halo: rgba(30, 138, 78, 0.18);
+  --nav-width: 64px;
+  --titlebar-height: 32px;
+  --statusbar-height: 24px;
+  --control-height: 26px;
+  --settings-index-width: 168px;
+  --settings-control-width: 220px;
+  --radius-control: 4px;
+}
+html[data-skin="console"][data-theme="dark"] {
+  --color-canvas: #15181C;
+  --color-surface: #1C2025;
+  --color-surface-subtle: #23282E;
+  --color-foreground: #DDE2E7;
+  --color-muted: #8C97A3;
+  --color-border: #2B3138;
+  --color-border-strong: #3B434C;
+  --color-primary: #3FC8D8;
+  --color-on-primary: #06262B;
+  --color-focus: #7FE0EA;
+  --color-success: #48CF82;
+  --color-warning: #E6B54A;
+  --color-destructive: #F26A57;
+  --color-preview: #0D1013;
+  --console-accent-soft: rgba(63, 200, 216, 0.14);
+  --console-success-soft: rgba(72, 207, 130, 0.14);
+  --console-led-halo: rgba(72, 207, 130, 0.18);
+}
+html[data-skin="console"] body { font-size: 12px; line-height: 16px; }
+html[data-skin="console"] h1 { font-size: 15px; line-height: 20px; letter-spacing: 0; }
+html[data-skin="console"] h2 { font-size: 12px; line-height: 16px; }
+html[data-skin="console"] code { font-size: 11px; }
+
+/* Compact title bar and the bottom status bar. */
+html[data-skin="console"] .window-titlebar { background: var(--color-canvas); }
+html[data-skin="console"] .window-title { font-size: 11px; font-weight: 400; color: var(--color-muted); }
+html[data-skin="console"] .window-controls button { width: 40px; color: var(--color-muted); }
+html[data-skin="console"] .app-shell { min-height: calc(100vh - var(--titlebar-height) - var(--statusbar-height)); }
+html[data-skin="console"] .app-statusbar { display: flex; position: sticky; bottom: 0; z-index: 5; align-items: center; gap: var(--space-4); height: var(--statusbar-height); padding: 0 var(--space-3); border-top: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-muted); font-size: 11px; white-space: nowrap; overflow: hidden; }
+html[data-skin="console"] .app-statusbar-item { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+html[data-skin="console"] .app-statusbar-item[data-ok="true"]::before, html[data-skin="console"] .app-statusbar-item[data-ok="false"]::before { width: 8px; height: 8px; border-radius: 50%; background: var(--color-warning); content: ""; }
+html[data-skin="console"] .app-statusbar-item[data-ok="true"]::before { background: var(--color-success); box-shadow: 0 0 0 3px var(--console-led-halo); }
+html[data-skin="console"] .app-statusbar-spacer { flex: 1; }
+
+/* Icon rail: label under the icon, one accent bar for the selected entry. */
+@media (min-width: 768px) {
+  html[data-skin="console"] .navigation { height: calc(100vh - var(--titlebar-height) - var(--statusbar-height)); gap: 0; padding: var(--space-1) 0 var(--space-2); }
+  html[data-skin="console"] .product-lockup { display: none; }
+  html[data-skin="console"] .navigation nav { gap: 0; }
+  html[data-skin="console"] .nav-group { gap: 0; margin: var(--space-1) 12px 0; padding-top: var(--space-1); border-top: 1px solid var(--color-border); }
+  html[data-skin="console"] .nav-group-label { display: none; }
+  html[data-skin="console"] .nav-group-items { gap: 0; margin: 0 -12px; padding: 0; border: 0; }
+  html[data-skin="console"] .nav-item, html[data-skin="console"] .theme-toggle, html[data-skin="console"] .preference-control { display: grid; grid-template-columns: 1fr; justify-items: center; align-content: center; gap: 3px; width: auto; min-height: 56px; padding: 0 2px; border-radius: 0; color: var(--color-muted); font-size: 10px; line-height: 12px; text-align: center; }
+  html[data-skin="console"] .nav-item span, html[data-skin="console"] .theme-toggle span, html[data-skin="console"] .nav-subitem > span { min-width: 0; line-height: 12px; white-space: normal; }
+  html[data-skin="console"] .nav-item:hover, html[data-skin="console"] .theme-toggle:hover, html[data-skin="console"] .preference-control:hover { background: transparent; color: var(--color-foreground); }
+  html[data-skin="console"] .nav-item[data-selected="true"] { background: transparent; color: var(--color-primary); font-weight: 400; }
+  html[data-skin="console"] .nav-item[data-selected="true"]::before { top: 14px; bottom: auto; width: 2px; height: 28px; border-radius: 0; }
+  html[data-skin="console"] .navigation-preferences { gap: 0; }
+  html[data-skin="console"] .preference-picker { width: 100%; }
+  html[data-skin="console"] .preference-trigger { min-height: 0; padding: 0; font-size: 10px; line-height: 12px; text-align: center; white-space: normal; }
+  html[data-skin="console"] .preference-menu { left: calc(var(--nav-width) + 4px); bottom: var(--statusbar-height); width: 200px; border-radius: 6px; }
+  html[data-skin="console"][dir="rtl"] .preference-menu { right: calc(var(--nav-width) + 4px); left: auto; }
+  html[data-skin="console"] .preference-option { min-height: 30px; padding: var(--space-1) var(--space-3); }
+}
+
+/* Work area: a toolbar strip for the title, then panels. */
+html[data-skin="console"] .page { max-width: none; min-height: calc(100vh - var(--titlebar-height) - var(--statusbar-height)); padding: 0 var(--space-3) var(--space-3); }
+html[data-skin="console"] .page-header { align-items: center; min-height: 40px; margin: 0 calc(-1 * var(--space-3)); padding: var(--space-1) var(--space-3); border-bottom: 1px solid var(--color-border); background: var(--color-surface); }
+html[data-skin="console"] .page-header > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); min-width: 0; }
+html[data-skin="console"] .page-header h1 { flex: 0 0 auto; white-space: nowrap; }
+html[data-skin="console"] .page-header p { margin: 0; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+html[data-skin="console"] .page-header.compact { padding-bottom: var(--space-1); }
+html[data-skin="console"] .header-actions, html[data-skin="console"] .profile-history-actions { gap: var(--space-1); }
+html[data-skin="console"] .section-block, html[data-skin="console"] .service-summary, html[data-skin="console"] .service-row, html[data-skin="console"] .status-band, html[data-skin="console"] .legacy-import-banner { margin-top: var(--space-3); border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface); }
+html[data-skin="console"] .section-heading { min-height: 30px; padding: var(--space-1) var(--space-3); }
+html[data-skin="console"] .section-heading h2, html[data-skin="console"] .overview-service-heading h2 { font-size: 11px; font-weight: 600; color: var(--color-muted); }
+html[data-skin="console"] .section-heading p { font-size: 11px; }
+html[data-skin="console"] .split-section { margin-top: var(--space-3); padding: var(--space-3) 0; }
+html[data-skin="console"] .detail-list > div { grid-template-columns: 120px minmax(0, 1fr); padding: var(--space-1) var(--space-3); min-height: 28px; align-items: center; }
+html[data-skin="console"] .detail-list > div:last-child { border-bottom: 0; }
+html[data-skin="console"] .overview-service-heading { padding: var(--space-2) var(--space-3); }
+html[data-skin="console"] .overview-service-heading h2 { font-size: 14px; color: var(--color-foreground); }
+html[data-skin="console"] .overview-service-details { grid-template-columns: minmax(0, 1fr); }
+html[data-skin="console"] .overview-service-details > div { display: grid; grid-template-columns: 110px minmax(0, 1fr); align-items: center; min-height: 28px; padding: var(--space-1) var(--space-3); border-inline-end: 0; border-bottom: 1px solid var(--color-border); }
+html[data-skin="console"] .overview-service-details > div:last-child { border-bottom: 0; }
+html[data-skin="console"] .overview-service-details dt { margin: 0; font-size: 11px; }
+html[data-skin="console"] .overview-service-details dd { font-weight: 400; }
+html[data-skin="console"] .activity-latest { min-height: 0; padding: var(--space-2) var(--space-3); font-family: Consolas, "Cascadia Mono", monospace; font-size: 11px; }
+html[data-skin="console"] .recent-activity li { padding: var(--space-1) var(--space-3); font-family: Consolas, "Cascadia Mono", monospace; font-size: 11px; }
+html[data-skin="console"] .disclosure-actions { padding: var(--space-1) var(--space-2); }
+
+/* Service page: summary panel with a state line and key-value rows. */
+html[data-skin="console"] .service-summary-grid { grid-template-columns: minmax(0, 1fr); }
+html[data-skin="console"] .service-summary-grid > div { display: grid; grid-template-columns: 110px minmax(0, 1fr); align-items: center; gap: var(--space-2); min-height: 28px; padding: var(--space-1) var(--space-3); border-inline-end: 0; border-bottom: 1px solid var(--color-border); }
+html[data-skin="console"] .service-summary-grid > div:last-child { border-bottom: 0; }
+html[data-skin="console"] .service-summary-grid dt { font-size: 11px; }
+html[data-skin="console"] .service-summary-grid dd { font-size: 12px; font-weight: 600; }
+html[data-skin="console"] .service-summary-notice, html[data-skin="console"] .service-summary-actions { padding: var(--space-2) var(--space-3); }
+html[data-skin="console"] .service-rows { gap: var(--space-2); margin-top: var(--space-3); }
+html[data-skin="console"] .service-row > summary, html[data-skin="console"] .service-row-head { min-height: 44px; padding: var(--space-2) var(--space-3); }
+html[data-skin="console"] .service-row-icon { width: 24px; height: 24px; border-radius: 4px; background: transparent; }
+html[data-skin="console"] .service-row-copy h2 { font-size: 12px; }
+html[data-skin="console"] .service-row-copy p { font-size: 11px; }
+html[data-skin="console"] .service-row-state { padding: 1px var(--space-2); border-radius: 3px; background: var(--console-accent-soft); color: var(--color-primary); font-size: 10px; }
+html[data-skin="console"] .service-row-state[data-tone="normal"] { background: var(--console-success-soft); color: var(--color-success); }
+html[data-skin="console"] .service-row-state[data-tone="neutral"] { background: var(--color-surface-subtle); color: var(--color-muted); }
+html[data-skin="console"] .service-controls, html[data-skin="console"] .system-injection-control, html[data-skin="console"] .execution-option, html[data-skin="console"] .registered-launchers, html[data-skin="console"] .manual-launcher, html[data-skin="console"] .process-picker, html[data-skin="console"] .system-mode-note { padding: var(--space-2) var(--space-3); }
+html[data-skin="console"] .system-injection-icon, html[data-skin="console"] .service-package-notice-icon, html[data-skin="console"] .legacy-tray-conflict-icon { width: 28px; height: 28px; flex-basis: 28px; border-radius: 4px; }
+
+/* Controls: 26px, monospace values, a thin accent slider. */
+html[data-skin="console"] .button, html[data-skin="console"] .icon-button, html[data-skin="console"] select, html[data-skin="console"] textarea, html[data-skin="console"] input[type="text"], html[data-skin="console"] input[type="number"], html[data-skin="console"] input[type="search"] { border-color: var(--color-border-strong); border-radius: 4px; background: var(--color-surface-subtle); font-size: 12px; }
+html[data-skin="console"] .button { padding: 0 var(--space-3); font-weight: 400; }
+html[data-skin="console"] .button.primary { border-color: var(--color-primary); background: var(--color-primary); color: var(--color-on-primary); font-weight: 600; }
+html[data-skin="console"] .button.danger { border-color: var(--color-destructive); color: var(--color-destructive); }
+html[data-skin="console"] .text-action { min-height: var(--control-height); font-size: 12px; font-weight: 400; }
+html[data-skin="console"] .icon-button { width: var(--control-height); }
+html[data-skin="console"] input[type="number"] { font-family: Consolas, "Cascadia Mono", monospace; font-size: 11px; }
+html[data-skin="console"] .search-field { border-radius: 4px; background: var(--color-surface-subtle); }
+html[data-skin="console"] .switch-control input { width: 30px; height: 16px; border: 0; background: var(--color-border-strong); }
+html[data-skin="console"] .switch-control input::before, html[data-skin="console"] .switch-control input:disabled::before { top: 2px; inset-inline-start: 2px; width: 12px; height: 12px; background: var(--color-surface-subtle); }
+html[data-skin="console"] .switch-control input:hover::before { top: 2px; inset-inline-start: 2px; width: 12px; height: 12px; background: var(--color-surface); }
+html[data-skin="console"] .switch-control input:checked { background: var(--color-primary); }
+html[data-skin="console"] .switch-control input:checked::before, html[data-skin="console"] .switch-control input:checked:hover::before, html[data-skin="console"] .switch-control input:checked:disabled::before { inset-inline-start: 16px; background: var(--color-on-primary); }
+html[data-skin="console"] .profile-mode-title > span { font-size: 10px; }
+html[data-skin="console"] .profile-header h1 { font-size: 15px; }
+html[data-skin="console"] .profile-editing { font-size: 11px; }
+html[data-skin="console"] .compact-action { min-height: 24px; font-size: 11px; }
+
+/* Tuner: index and settings panels with 32px rows, an accent bar for edits. */
+html[data-skin="console"] .profile-page { --control-height: 24px; height: calc(100vh - var(--titlebar-height) - var(--statusbar-height)); padding: 0 var(--space-3) var(--space-3); }
+html[data-skin="console"] .profile-layout { margin-top: var(--space-3); border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface); }
+html[data-skin="console"] .settings-index { padding: var(--space-2) var(--space-2) 0; }
+html[data-skin="console"] .settings-index li button { min-height: 28px; border-radius: 0; font-size: 12px; }
+html[data-skin="console"] .settings-index li button[data-selected="true"] { background: var(--console-accent-soft); box-shadow: inset 2px 0 var(--color-primary); font-weight: 400; }
+html[data-skin="console"] .settings-step { width: 20px; height: 20px; flex-basis: 20px; font-family: Consolas, "Cascadia Mono", monospace; font-size: 10px; }
+html[data-skin="console"] .settings-form { padding: var(--space-1) var(--space-3) 0; }
+html[data-skin="console"] .settings-form .section-heading { padding: var(--space-2) 0; }
+html[data-skin="console"] .settings-form .section-heading h2 { font-size: 13px; color: var(--color-foreground); }
+html[data-skin="console"] .setting-row { min-height: 32px; padding: var(--space-1) 0; }
+html[data-skin="console"] .setting-row label { font-weight: 400; }
+html[data-skin="console"] .setting-row p { font-size: 11px; }
+html[data-skin="console"] .setting-row:has(.dirty-mark) { box-shadow: inset 2px 0 var(--color-primary); padding-inline-start: var(--space-2); }
+html[data-skin="console"] .dirty-mark { padding: 0 4px; border-radius: 3px; background: var(--console-accent-soft); font-size: 10px; font-weight: 600; }
+html[data-skin="console"] .guided-choice-option { min-height: 32px; border-radius: 4px; }
+html[data-skin="console"] .wizard-start-card, html[data-skin="console"] .wizard-apply-card { padding: var(--space-3); border-radius: 6px; }
+html[data-skin="console"] .settings-workspace[data-preview-docked="true"] .preview-panel { padding: var(--space-2) var(--space-3); }
+html[data-skin="console"] .preview-toolbar, html[data-skin="console"] .preview-footer { padding: var(--space-1) 0; }
+html[data-skin="console"] .preview-canvas { border-radius: 4px; }
+html[data-skin="console"] .preview-canvas p { font-size: 18px; line-height: 1.6; }
+html[data-skin="console"] .preview-strip figcaption { font-family: Consolas, "Cascadia Mono", monospace; font-size: 10px; }
+
+/* Profile files: a table-like list with an accent-tinted selected row. */
+html[data-skin="console"] .profile-grid { gap: var(--space-2); padding: var(--space-2) var(--space-3) var(--space-3); }
+html[data-skin="console"] .profile-card { border-radius: 4px; }
+html[data-skin="console"] .profile-card[data-selected="true"] { background: var(--console-accent-soft); }
+html[data-skin="console"] .profile-card-badge { border-radius: 3px; background: var(--console-success-soft); color: var(--color-success); font-size: 10px; }
+html[data-skin="console"] .profile-card-select { padding: var(--space-2); }
+html[data-skin="console"] .selected-file-area, html[data-skin="console"] .file-primary-actions { padding: var(--space-2) var(--space-3); }
+html[data-skin="console"] .selected-file-summary, html[data-skin="console"] .target-selection { min-height: 56px; padding: var(--space-2); border-radius: 4px; }
+html[data-skin="console"] .compact-details > div { padding: var(--space-1) var(--space-3); }
+html[data-skin="console"] .log-view > div { grid-template-columns: 64px 100px minmax(0, 1fr); padding: var(--space-1) var(--space-3); font-family: Consolas, "Cascadia Mono", monospace; font-size: 11px; }
+html[data-skin="console"] .migration-confirmation, html[data-skin="console"] .hint-popover { border-radius: 6px; }
+
+@media (max-width: 767px) {
+  html[data-skin="console"] .page, html[data-skin="console"] .profile-page { min-height: 0; height: auto; }
+  html[data-skin="console"] .app-statusbar { position: static; }
+}

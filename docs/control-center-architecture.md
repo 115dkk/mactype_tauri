@@ -39,6 +39,10 @@ The React frontend owns ten complete runtime catalogs: Korean, English, Simplifi
 
 Changing the language updates visible text, the document title, accessibility labels, the HTML language and direction, and the native Tauri tray menu without restarting. Arabic sets native right-to-left document direction and direction-aware navigation and editor borders. CI requires exact catalog key and placeholder parity, coverage for all generated settings, native tray-menu tests, and real browser rendering of every view, viewport, and locale.
 
+## Skin boundary
+
+The React tree renders one DOM for every skin. `skinPreference.ts` resolves the skin like the locale (`?skin=` wins and is persisted, then the stored choice, then `classic`) and applies it as `html[data-skin]`; `themePreference.ts` accepts `?theme=` the same way. Each skin lives in `src/styles/skins/<id>.css`, scoped to its `data-skin` value, and overrides the token custom properties and the shared class names only. The `PreferenceMenu` component backs both the language and the skin pickers so a skin restyles one popup. The status bar element exists in every skin's DOM and is shown only by skins that draw one. The frontend gallery renders every skin in both themes at every viewport and asserts no horizontal overflow, that the pickers stay reachable, and that a chosen skin survives a reload.
+
 ## Execution boundary
 
 The open Tauri executable owns the notification icon and close-to-tray lifecycle. Its optional login startup entry is user-scoped. The GUI remains `asInvoker`; machine mutation is isolated in a one-shot fixed-verb broker dispatched before Tauri starts. AppInit registry mode remains read-only in normal UI flows. Manual mode invokes the public `MacLoader.exe` directly with an executable path and argument vector; no shell string is accepted.

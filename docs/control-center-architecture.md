@@ -21,6 +21,12 @@ installation checks and reconnect remain bound to the MacType slot. Preview Stud
 destroys it. `write_preview_export` accepts a strictly padded standard-base64 PNG and writes it
 atomically to a validated absolute `.png` path.
 
+The native preview supports sample, ladder, compare, and listing modes. `set_native_preview`
+accepts `visible` and an optional options object containing text, listing text, font and style,
+colours, theme, inversion, zoom, sizes, and localised labels. It returns the native window's
+visibility, mode, colours, inversion, zoom, font, style, and topmost state. Older Helpers remain
+compatible because they ignore unknown show options, while Rust accepts their three-field state.
+
 ## Profile boundary
 
 Rust owns a line-preserving INI document. It retains BOM, encoding, line endings, blank lines, comments, unknown entries, and ordering. Only the value slice of a changed key is rewritten. Save compares the original SHA-256, flushes a same-directory temporary file, keeps one backup, and uses `ReplaceFileW` on Windows.

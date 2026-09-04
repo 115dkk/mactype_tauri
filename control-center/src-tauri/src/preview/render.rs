@@ -107,42 +107,76 @@ pub(super) fn render_preview(
     })
 }
 
-/// Show-request body; older helpers ignore unknown fields, so this stays
-/// backward compatible with helpers that predate the display mode.
-#[derive(Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct NativePreviewRequest<'a> {
-    display_mode: &'a str,
+pub struct NativePreviewOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
-    listing_text: Option<&'a str>,
+    pub(crate) display_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    foreground: Option<&'a str>,
+    pub(crate) text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    background: Option<&'a str>,
+    pub(crate) listing_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) font_face: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) font_size_pt: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) bold: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) italic: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) foreground: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) background: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) theme: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) inverted: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) zoom: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) sizes: Option<Vec<u32>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) labels: Option<BTreeMap<String, String>>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePreviewState {
+    pub(crate) visible: bool,
+    pub(crate) display_mode: String,
+    pub(crate) background: String,
+    #[serde(default)]
+    pub(crate) foreground: String,
+    #[serde(default)]
+    pub(crate) inverted: bool,
+    #[serde(default)]
+    pub(crate) zoom: u32,
+    #[serde(default)]
+    pub(crate) font_face: String,
+    #[serde(default)]
+    pub(crate) font_size_pt: u32,
+    #[serde(default)]
+    pub(crate) bold: bool,
+    #[serde(default)]
+    pub(crate) italic: bool,
+    #[serde(default)]
+    pub(crate) topmost: bool,
 }
 
 pub(super) fn set_native_preview(
     manager: &mut PreviewManager,
     install_root: &Path,
     visible: bool,
-    display_mode: Option<&str>,
-    listing_text: Option<&str>,
-    foreground: Option<&str>,
-    background: Option<&str>,
-) -> Result<bool, String> {
+    options: Option<NativePreviewOptions>,
+) -> Result<NativePreviewState, String> {
     let kind = if visible {
         SHOW_NATIVE_PREVIEW
     } else {
         HIDE_NATIVE_PREVIEW
     };
     let body = if visible {
-        serde_json::to_vec(&NativePreviewRequest {
-            display_mode: display_mode.unwrap_or("default"),
-            listing_text,
-            foreground,
-            background,
-        })
-        .map_err(|error| error.to_string())?
+        serde_json::to_vec(&options.unwrap_or_default()).map_err(|error| error.to_string())?
     } else {
         Vec::new()
     };
@@ -150,10 +184,104 @@ pub(super) fn set_native_preview(
     if response.kind != NATIVE_PREVIEW_STATE {
         return Err("preview helper returned an invalid native-window response".to_owned());
     }
-    let value: serde_json::Value =
-        serde_json::from_slice(&response.json).map_err(|error| error.to_string())?;
-    Ok(value
-        .get("visible")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false))
+    serde_json::from_slice(&response.json).map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod native_preview_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn native_preview_options_round_trip_full_json_and_omit_absent_fields() {
+        let documented = json!({
+            "displayMode": "sample",
+            "text": r"sample text, may contain \n",
+            "listingText": "pangram for listing mode",
+            "fontFace": "Segoe UI",
+            "fontSizePt": 14,
+            "bold": false,
+            "italic": false,
+            "foreground": "#181D23",
+            "background": "#EEF1F4",
+            "theme": "light",
+            "inverted": false,
+            "zoom": 1,
+            "sizes": [8, 9, 10, 11, 12, 14, 16, 18, 20, 24],
+            "labels": {
+                "title": "…",
+                "fontFace": "…",
+                "fontSize": "…",
+                "bold": "…",
+                "italic": "…",
+                "modeSample": "…",
+                "modeLadder": "…",
+                "modeCompare": "…",
+                "modeListing": "…",
+                "invert": "…",
+                "loupe": "…",
+                "zoom": "…",
+                "topmost": "…",
+                "editText": "…",
+                "savePng": "…",
+                "copy": "…",
+                "compareMacType": "…",
+                "compareWindows": "…",
+                "compareUnavailable": "…",
+                "engineMacType": "…",
+                "coreVersion": "코어 {version}",
+                "pngFilter": "…",
+                "saved": "…",
+                "copied": "…"
+            }
+        });
+        let options: NativePreviewOptions = serde_json::from_value(documented.clone()).unwrap();
+        assert_eq!(serde_json::to_value(options).unwrap(), documented);
+        assert_eq!(
+            serde_json::to_value(NativePreviewOptions::default()).unwrap(),
+            json!({})
+        );
+    }
+
+    #[test]
+    fn native_preview_state_parses_old_three_field_response() {
+        let state: NativePreviewState = serde_json::from_value(json!({
+            "visible": true,
+            "displayMode": "sample",
+            "background": "#EEF1F4"
+        }))
+        .unwrap();
+
+        assert!(state.visible);
+        assert_eq!(state.display_mode, "sample");
+        assert_eq!(state.background, "#EEF1F4");
+        assert_eq!(state.foreground, "");
+        assert!(!state.inverted);
+        assert_eq!(state.zoom, 0);
+        assert_eq!(state.font_face, "");
+        assert_eq!(state.font_size_pt, 0);
+        assert!(!state.bold);
+        assert!(!state.italic);
+        assert!(!state.topmost);
+    }
+
+    #[test]
+    fn native_preview_state_parses_complete_response() {
+        let documented = json!({
+            "visible": true,
+            "displayMode": "sample",
+            "background": "#EEF1F4",
+            "foreground": "#181D23",
+            "inverted": false,
+            "zoom": 1,
+            "fontFace": "Segoe UI",
+            "fontSizePt": 14,
+            "bold": false,
+            "italic": false,
+            "topmost": false
+        });
+        let state: NativePreviewState = serde_json::from_value(documented.clone()).unwrap();
+
+        assert_eq!(serde_json::to_value(state).unwrap(), documented);
+    }
 }

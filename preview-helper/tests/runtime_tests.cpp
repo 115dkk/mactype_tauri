@@ -42,53 +42,86 @@ int wmain(int argc, wchar_t** argv) {
   runtime.pump_messages();
   if (runtime.show_native_preview(request, false).kind != mtpc::MessageKind::native_preview_state) return 7;
 
-  mtpc::Frame listing;
-  listing.kind = mtpc::MessageKind::show_native_preview;
-  listing.request_id = 44;
-  listing.json = R"({"displayMode":"listing","listingText":"The quick brown fox jumps over the lazy dog."})";
-  const mtpc::Frame listingResponse = runtime.show_native_preview(listing, true);
-  if (listingResponse.kind != mtpc::MessageKind::native_preview_state) return 10;
-  if (listingResponse.json.find("\"visible\":true") == std::string::npos) return 11;
-  if (listingResponse.json.find("\"displayMode\":\"listing\"") == std::string::npos) return 12;
+  mtpc::Frame native;
+  native.kind = mtpc::MessageKind::show_native_preview;
+  native.request_id = 44;
+  native.json = R"({"displayMode":"sample","text":"Native preview 한글 ABC","listingText":"Listing text","fontFace":"Segoe UI","fontSizePt":16,"bold":true,"italic":true,"foreground":"#112233","background":"#EEDDCC","theme":"dark","inverted":true,"zoom":4,"sizes":[8,10,12,16,24],"labels":{"title":"Preview Tool","fontFace":"Face","fontSize":"Size","bold":"Bold","italic":"Italic","modeSample":"Sample","modeLadder":"Ladder","modeCompare":"Compare","modeListing":"Listing","invert":"Invert","loupe":"Loupe","zoom":"Zoom","topmost":"Topmost","editText":"Edit","savePng":"Save PNG","copy":"Copy","compareMacType":"MacType","compareWindows":"Windows","compareUnavailable":"Unavailable","engineMacType":"MacType","coreVersion":"Core {version}","pngFilter":"PNG files (*.png)|*.png","saved":"Saved","copied":"Copied"}})";
+  const mtpc::Frame native_response = runtime.show_native_preview(native, true);
+  if (native_response.kind != mtpc::MessageKind::native_preview_state) return 10;
+  if (native_response.json.find("\"visible\":true") == std::string::npos ||
+      native_response.json.find("\"displayMode\":\"sample\"") == std::string::npos ||
+      native_response.json.find("\"background\":\"#112233\"") == std::string::npos ||
+      native_response.json.find("\"foreground\":\"#EEDDCC\"") == std::string::npos ||
+      native_response.json.find("\"inverted\":true") == std::string::npos ||
+      native_response.json.find("\"zoom\":4") == std::string::npos ||
+      native_response.json.find("\"fontFace\":\"Segoe UI\"") == std::string::npos ||
+      native_response.json.find("\"fontSizePt\":16") == std::string::npos ||
+      native_response.json.find("\"bold\":true") == std::string::npos ||
+      native_response.json.find("\"italic\":true") == std::string::npos ||
+      native_response.json.find("\"topmost\":false") == std::string::npos) {
+    return 11;
+  }
   runtime.pump_messages();
 
-  mtpc::Frame plain;
-  plain.kind = mtpc::MessageKind::show_native_preview;
-  plain.request_id = 45;
-  plain.json = R"({"displayMode":"default"})";
-  if (runtime.show_native_preview(plain, true).json.find("\"displayMode\":\"default\"") ==
-      std::string::npos) {
+  for (const char* mode : {"ladder", "compare", "listing", "sample"}) {
+    mtpc::Frame mode_request;
+    mode_request.kind = mtpc::MessageKind::show_native_preview;
+    mode_request.request_id = 45;
+    mode_request.json = std::string{"{\"displayMode\":\""} + mode + "\"}";
+    const mtpc::Frame mode_response = runtime.show_native_preview(mode_request, true);
+    if (mode_response.json.find(std::string{"\"displayMode\":\""} + mode + "\"") ==
+        std::string::npos) {
+      return 12;
+    }
+    runtime.pump_messages();
+  }
+
+  mtpc::Frame omitted;
+  omitted.kind = mtpc::MessageKind::show_native_preview;
+  omitted.request_id = 46;
+  omitted.json = "{}";
+  const mtpc::Frame preserved = runtime.show_native_preview(omitted, true);
+  if (preserved.json.find("\"background\":\"#112233\"") == std::string::npos ||
+      preserved.json.find("\"foreground\":\"#EEDDCC\"") == std::string::npos ||
+      preserved.json.find("\"zoom\":4") == std::string::npos ||
+      preserved.json.find("\"fontSizePt\":16") == std::string::npos) {
     return 13;
   }
   runtime.pump_messages();
-  if (runtime.show_native_preview(plain, false).kind != mtpc::MessageKind::native_preview_state) return 14;
 
-  /* The native window keeps its own colours: the show request sets them, and
-     an omitted field leaves the previous choice in place. */
-  mtpc::Frame dark;
-  dark.kind = mtpc::MessageKind::show_native_preview;
-  dark.request_id = 46;
-  dark.json = R"({"displayMode":"default","foreground":"#F1F3F5","background":"#171A1F"})";
-  if (runtime.show_native_preview(dark, true).json.find("\"background\":\"#171A1F\"") ==
-      std::string::npos) {
-    return 15;
+  mtpc::Frame escaped_face;
+  escaped_face.kind = mtpc::MessageKind::show_native_preview;
+  escaped_face.request_id = 47;
+  escaped_face.json = R"({"fontFace":"Path\\Face"})";
+  const mtpc::Frame escaped_face_response = runtime.show_native_preview(escaped_face, true);
+  if (escaped_face_response.kind != mtpc::MessageKind::native_preview_state ||
+      escaped_face_response.json.find(R"("fontFace":"Path\\Face")") == std::string::npos) {
+    return 25;
+  }
+
+  mtpc::Frame transactional_invalid;
+  transactional_invalid.kind = mtpc::MessageKind::show_native_preview;
+  transactional_invalid.request_id = 48;
+  transactional_invalid.json = R"({"displayMode":"ladder","zoom":3})";
+  if (runtime.show_native_preview(transactional_invalid, true).kind != mtpc::MessageKind::error) {
+    return 26;
+  }
+  const mtpc::Frame after_transactional_error = runtime.show_native_preview(omitted, true);
+  if (after_transactional_error.kind != mtpc::MessageKind::native_preview_state ||
+      after_transactional_error.json != escaped_face_response.json) {
+    return 27;
   }
   runtime.pump_messages();
-  if (runtime.show_native_preview(plain, true).json.find("\"background\":\"#171A1F\"") ==
-      std::string::npos) {
-    return 16;
+  if (runtime.show_native_preview(omitted, false).kind != mtpc::MessageKind::native_preview_state) return 14;
+
+  for (const char* invalid_json : {"{\"zoom\":4.5}", "{\"zoom\":4junk}",
+                                   "{\"sizes\":[8,10.5]}", "{\"bold\":truejunk}"}) {
+    mtpc::Frame invalid;
+    invalid.kind = mtpc::MessageKind::show_native_preview;
+    invalid.request_id = 47;
+    invalid.json = invalid_json;
+    if (runtime.show_native_preview(invalid, true).kind != mtpc::MessageKind::error) return 15;
   }
-  runtime.pump_messages();
-  mtpc::Frame light;
-  light.kind = mtpc::MessageKind::show_native_preview;
-  light.request_id = 47;
-  light.json = R"({"displayMode":"listing","background":"#EEF1F4"})";
-  if (runtime.show_native_preview(light, true).json.find("\"background\":\"#EEF1F4\"") ==
-      std::string::npos) {
-    return 17;
-  }
-  runtime.pump_messages();
-  if (runtime.show_native_preview(light, false).kind != mtpc::MessageKind::native_preview_state) return 18;
 
   mactype::PreviewRuntime plain_runtime(LR"(Z:\missing\arbitrary-root)", mactype::Engine::plain);
   error.clear();

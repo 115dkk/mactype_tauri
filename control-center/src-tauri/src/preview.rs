@@ -11,7 +11,7 @@ mod state;
 
 use helper::PreviewManager;
 pub(crate) use installation::InstallationStatus;
-pub(crate) use render::{PreviewResult, PreviewSample};
+pub(crate) use render::{NativePreviewOptions, NativePreviewState, PreviewResult, PreviewSample};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -81,20 +81,10 @@ pub(crate) fn render_profile_preview(
 #[tauri::command]
 pub(crate) fn set_native_preview(
     visible: bool,
-    mode: Option<String>,
-    listing_text: Option<String>,
-    foreground: Option<String>,
-    background: Option<String>,
+    options: Option<NativePreviewOptions>,
     state: State<'_, PreviewState>,
-) -> Result<bool, String> {
-    commands::set_native_preview_visible(
-        visible,
-        mode,
-        listing_text,
-        foreground,
-        background,
-        state.inner(),
-    )
+) -> Result<NativePreviewState, String> {
+    commands::set_native_preview(visible, options, state.inner())
 }
 
 #[tauri::command]

@@ -1,6 +1,9 @@
 use super::{
     installation::{collect_installation, InstallationStatus},
-    render::{render_preview, set_native_preview, PreviewResult, PreviewSample},
+    render::{
+        render_preview, set_native_preview as send_native_preview, NativePreviewOptions,
+        NativePreviewState, PreviewResult, PreviewSample,
+    },
     PreviewEngine, PreviewState,
 };
 use crate::installation_root;
@@ -44,27 +47,14 @@ pub(super) fn render_profile_preview(
     })
 }
 
-pub(super) fn set_native_preview_visible(
+pub(super) fn set_native_preview(
     visible: bool,
-    mode: Option<String>,
-    listing_text: Option<String>,
-    foreground: Option<String>,
-    background: Option<String>,
+    options: Option<NativePreviewOptions>,
     state: &PreviewState,
-) -> Result<bool, String> {
+) -> Result<NativePreviewState, String> {
     let root =
         installation_root().ok_or_else(|| "MacType installation was not found".to_owned())?;
-    state.with_manager(|manager| {
-        set_native_preview(
-            manager,
-            &root,
-            visible,
-            mode.as_deref(),
-            listing_text.as_deref(),
-            foreground.as_deref(),
-            background.as_deref(),
-        )
-    })
+    state.with_manager(|manager| send_native_preview(manager, &root, visible, options))
 }
 
 pub(super) fn preview_diagnostics(state: &PreviewState) -> Result<Vec<String>, String> {

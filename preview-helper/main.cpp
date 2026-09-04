@@ -26,6 +26,8 @@ std::wstring argument_value(int argc, wchar_t** argv, const wchar_t* name) {
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
+  SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
   if (_setmode(_fileno(stdin), _O_BINARY) == -1 || _setmode(_fileno(stdout), _O_BINARY) == -1) {
     std::cerr << "failed to set binary IPC mode\n";
     return 2;

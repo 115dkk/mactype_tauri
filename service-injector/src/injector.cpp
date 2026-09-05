@@ -2,6 +2,7 @@
 
 #include "fixed_module.h"
 #include "module_inventory.h"
+#include "process_lifecycle.h"
 #include "remote_injection.h"
 #include "safety_policy.h"
 #include "renderer_evidence.h"
@@ -192,6 +193,16 @@ Result inject_fixed_adjacent_module(const BrokerRequest& request) noexcept {
                            kFixedModuleNameUtf8, mitigation_error);
     }
 
+    const auto lifecycle = query_process_lifecycle(process.get());
+    if (lifecycle && lifecycle->deleting) {
+        return make_result(request, ResultStatus::skipped, "process-exiting",
+                           kFixedModuleNameUtf8);
+    }
+    if (lifecycle && lifecycle->frozen) {
+        return make_result(request, ResultStatus::skipped, "process-frozen",
+                           kFixedModuleNameUtf8);
+    }
+
     const auto module_path = fixed_module_path();
     std::error_code module_error;
     if (!module_path || !std::filesystem::is_regular_file(*module_path, module_error)) {
@@ -207,7 +218,7 @@ Result inject_fixed_adjacent_module(const BrokerRequest& request) noexcept {
             load_origin = RendererLoadOrigin::already_loaded;
             break;
         case FixedModuleState::SameBasenameDifferentPath:
-            return make_result(request, ResultStatus::rejected,
+            return make_result(request, ResultStatus::skipped,
                                "conflicting-mactype-module-loaded",
                                kFixedModuleNameUtf8);
         case FixedModuleState::InventoryUnavailable:

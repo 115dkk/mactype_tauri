@@ -13,7 +13,8 @@ use mactype_service_host::{
     DynamicCodePolicy, HealthPublisher, InitializedRuntime, InjectionBroker, InjectionRequest,
     InspectionEvidence, ProcessArchitecture, ProcessEventSource, ProcessIdentity,
     ProcessInspection, ProcessInspectionError, ProcessInspector, RuntimeInitializer,
-    ServiceRuntime, ServiceStatus, SessionChange, StatusReporter, StopSignal, TargetLiveness,
+    ServiceRuntime, ServiceStatus, SessionChange, StatusReporter, StopSignal, TargetLifecycle,
+    TargetLiveness,
 };
 
 const PROFILE_DIGEST: &str =
@@ -222,6 +223,101 @@ fn ready_driver_consumes_process_events_until_stop() {
             .unwrap()
             .runtime_generation_id,
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    );
+}
+
+struct FrozenThenRunningInspector {
+    lifecycle_probes: AtomicUsize,
+}
+
+impl ProcessInspector for FrozenThenRunningInspector {
+    fn inspect(&self, pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
+        Ok(ordinary_inspection(ProcessIdentity {
+            pid,
+            creation_time: 100,
+            session_id: 2,
+            architecture: ProcessArchitecture::X64,
+        }))
+    }
+
+    fn probe_target_lifecycle(&self, _identity: &ProcessIdentity) -> TargetLifecycle {
+        if self.lifecycle_probes.fetch_add(1, Ordering::AcqRel) < 1 {
+            TargetLifecycle::Frozen
+        } else {
+            TargetLifecycle::Running
+        }
+    }
+}
+
+struct FrozenInitializer {
+    requests: Arc<Mutex<Vec<InjectionRequest>>>,
+}
+
+impl RuntimeInitializer for FrozenInitializer {
+    fn initialize(&self) -> Result<InitializedRuntime, StructuredServiceError> {
+        initialize_process_orchestration(
+            binding(),
+            900,
+            Box::new(QueueSource {
+                snapshot: Vec::new(),
+                pids: VecDeque::from([Some(42)]),
+            }),
+            Box::new(FrozenThenRunningInspector {
+                lifecycle_probes: AtomicUsize::new(0),
+            }),
+            Box::new(SharedBroker {
+                requests: self.requests.clone(),
+            }),
+        )
+    }
+}
+
+struct AdvancingStop {
+    polls: AtomicUsize,
+}
+
+impl StopSignal for AdvancingStop {
+    fn wait(&self) -> Result<(), StructuredServiceError> {
+        Ok(())
+    }
+
+    fn wait_timeout(&self, _timeout: Duration) -> Result<bool, StructuredServiceError> {
+        std::thread::sleep(Duration::from_millis(250));
+        Ok(self.polls.fetch_add(1, Ordering::AcqRel) >= 9)
+    }
+}
+
+#[test]
+fn frozen_runtime_target_waits_without_broker_or_degraded_health_then_injects_once() {
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let recorder = Recorder::default();
+
+    ServiceRuntime::new("0.2.0")
+        .run(
+            &recorder,
+            &recorder,
+            &FrozenInitializer {
+                requests: requests.clone(),
+            },
+            &AdvancingStop {
+                polls: AtomicUsize::new(0),
+            },
+        )
+        .unwrap();
+
+    assert_eq!(requests.lock().unwrap().len(), 1);
+    let reports = recorder.reports.lock().unwrap();
+    assert!(reports
+        .iter()
+        .all(|report| report.health != HealthState::Degraded));
+    assert_eq!(
+        reports
+            .iter()
+            .filter(|report| {
+                report.health == HealthState::Ready && report.injection.x64.success_count == 1
+            })
+            .count(),
+        1
     );
 }
 

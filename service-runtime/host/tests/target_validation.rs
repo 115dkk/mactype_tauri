@@ -2,10 +2,10 @@ use mactype_service_contract::{
     PrivateFreeTypePolicy, StructuredServiceError, UnityFontHookPolicy,
 };
 use mactype_service_host::{
-    BinarySignaturePolicy, DynamicCodePolicy, InspectionEvidence, PrivateFreeTypeClassification,
-    ProcessArchitecture, ProcessIdentity, ProcessInspection, ProcessInspectionError,
-    ProcessInspector, ProcessSkipReason, ProcessTargetDecision, ProcessTargetValidator,
-    UnityProcessClassification,
+    BinarySignaturePolicy, DeferralReason, DynamicCodePolicy, InspectionEvidence,
+    PrivateFreeTypeClassification, ProcessArchitecture, ProcessIdentity, ProcessInspection,
+    ProcessInspectionError, ProcessInspector, ProcessSkipReason, ProcessTargetDecision,
+    ProcessTargetValidator, TargetLifecycle, UnityProcessClassification,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -118,6 +118,52 @@ fn validator_returns_only_verified_eligible_identity() {
         validator.validate(42).unwrap(),
         ProcessTargetDecision::Eligible(identity(42))
     );
+}
+
+struct LifecycleInspector {
+    inspection: ProcessInspection,
+    lifecycle: TargetLifecycle,
+}
+
+impl ProcessInspector for LifecycleInspector {
+    fn inspect(&self, _pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
+        Ok(self.inspection.clone())
+    }
+
+    fn probe_target_lifecycle(&self, _identity: &ProcessIdentity) -> TargetLifecycle {
+        self.lifecycle
+    }
+}
+
+#[test]
+fn validator_defers_frozen_and_quietly_skips_exiting_targets() {
+    for (lifecycle, expected) in [
+        (
+            TargetLifecycle::Frozen,
+            ProcessTargetDecision::Deferred {
+                identity: identity(42),
+                reason: DeferralReason::Frozen,
+            },
+        ),
+        (
+            TargetLifecycle::Exiting,
+            ProcessTargetDecision::Skipped {
+                identity: Some(identity(42)),
+                reason: ProcessSkipReason::TargetExiting,
+            },
+        ),
+    ] {
+        let inspector = LifecycleInspector {
+            inspection: ordinary_inspection(42),
+            lifecycle,
+        };
+        assert_eq!(
+            ProcessTargetValidator::new(900, &inspector)
+                .validate(42)
+                .unwrap(),
+            expected
+        );
+    }
 }
 
 #[test]

@@ -43,8 +43,9 @@ pub use helper_broker::{
     HelperOutput,
 };
 pub use injection_orchestrator::{
-    InjectionOrchestrator, ProcessAttemptRecord, ProcessOutcome, RetryPolicy, RetryScheduler,
-    SessionChange, MAX_TRACKED_PROCESS_RESULTS, TARGET_VANISHED_RESULT_CODE,
+    DeferralPolicy, DeferredTarget, InjectionOrchestrator, ProcessAttemptRecord, ProcessOutcome,
+    RetryPolicy, RetryScheduler, SessionChange, MAX_DEFERRED_TARGETS, MAX_TRACKED_PROCESS_RESULTS,
+    TARGET_VANISHED_RESULT_CODE,
 };
 #[cfg(windows)]
 pub use named_pipe::{NamedPipeHealthPublisher, HEALTH_PIPE_SECURITY_SDDL};
@@ -67,9 +68,10 @@ pub use runtime_assets::ProtectedRuntimeAssets;
 pub use startup_safety::{LegacyServiceRuntimeState, StartupSafetySnapshot};
 pub use status::{ScmState, ServiceStatus, StatusReporter, SERVICE_STOP_WAIT_HINT_MS};
 pub use target_validation::{
-    BinarySignaturePolicy, DynamicCodePolicy, InspectionEvidence, PrivateFreeTypeClassification,
-    ProcessInspection, ProcessInspectionError, ProcessInspector, ProcessSkipReason,
-    ProcessTargetDecision, ProcessTargetValidator, TargetLiveness, UnityProcessClassification,
+    BinarySignaturePolicy, DeferralReason, DynamicCodePolicy, InspectionEvidence,
+    PrivateFreeTypeClassification, ProcessInspection, ProcessInspectionError, ProcessInspector,
+    ProcessSkipReason, ProcessTargetDecision, ProcessTargetValidator, TargetLifecycle,
+    TargetLiveness, UnityProcessClassification,
 };
 #[cfg(windows)]
 pub use windows_helper_launcher::WindowsHelperLauncher;

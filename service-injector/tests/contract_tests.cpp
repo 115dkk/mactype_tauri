@@ -1,5 +1,6 @@
 #include "broker_request.h"
 #include "module_inventory.h"
+#include "process_lifecycle.h"
 #include "remote_injection_verdict.h"
 #include "result.h"
 #include "safety_policy.h"
@@ -312,6 +313,36 @@ bool incompatible_process_mitigations_are_classified_before_injection() {
                HookCompatibility::binary_signature_restricted;
 }
 
+bool process_lifecycle_flags_are_decoded_independently() {
+    struct Case final {
+        std::uint32_t flags;
+        bool frozen;
+        bool deleting;
+    };
+    constexpr std::array cases{
+        Case{0x00U, false, false},
+        Case{0x04U, false, true},
+        Case{0x10U, true, false},
+        Case{0x14U, true, true},
+        Case{0x58U, true, false},
+        Case{0x48U, false, false},
+    };
+    for (const auto& item : cases) {
+        const auto lifecycle =
+            mactype::injector::decode_process_lifecycle_flags(item.flags);
+        if (lifecycle.frozen != item.frozen || lifecycle.deleting != item.deleting) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool current_process_lifecycle_is_queryable_and_active() {
+    const auto lifecycle =
+        mactype::injector::query_process_lifecycle(GetCurrentProcess());
+    return lifecycle.has_value() && !lifecycle->frozen && !lifecycle->deleting;
+}
+
 bool completed_remote_execution_is_cross_checked_against_module_inventory() {
     using mactype::injector::ModuleInventoryEvidence;
     using mactype::injector::RemoteCompletion;
@@ -478,6 +509,14 @@ int wmain() {
     if (!malformed_or_missing_process_handle_is_rejected()) {
         std::cerr << "malformed or missing inherited process handle was accepted\n";
         return 6;
+    }
+    if (!process_lifecycle_flags_are_decoded_independently()) {
+        std::cerr << "process lifecycle flags were decoded incorrectly\n";
+        return 14;
+    }
+    if (!current_process_lifecycle_is_queryable_and_active()) {
+        std::cerr << "current process lifecycle was unavailable or inactive\n";
+        return 15;
     }
     if (!completed_remote_execution_is_cross_checked_against_module_inventory()) {
         std::cerr << "completed remote execution was not cross-checked\n";

@@ -186,7 +186,7 @@ impl HostEventLogger {
                     );
                 }
             }
-            ProcessOutcome::Duplicate | ProcessOutcome::Cancelled => {}
+            ProcessOutcome::Deferred | ProcessOutcome::Duplicate | ProcessOutcome::Cancelled => {}
         }
     }
 

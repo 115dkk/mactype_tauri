@@ -1,6 +1,9 @@
 #![forbid(unsafe_code)]
 
-use std::{collections::VecDeque, time::Duration};
+use std::{
+    collections::VecDeque,
+    time::{Duration, Instant},
+};
 
 use mactype_service_contract::{
     ComponentReadiness, HealthState, InjectionTelemetry, PrivateFreeTypePolicy, ReadinessReport,
@@ -8,7 +11,8 @@ use mactype_service_contract::{
 };
 
 use crate::injection_orchestrator::{
-    InjectionOrchestrator, ProcessAdmissionPolicies, ProcessOutcome, RetryPolicy, RetryScheduler,
+    DeferralPolicy, InjectionOrchestrator, ProcessAdmissionPolicies, ProcessOutcome, RetryPolicy,
+    RetryScheduler,
 };
 use crate::observer::{
     subscribe_process_creation, InjectionBroker, ProcessArchitecture, ProcessEventSource,
@@ -111,6 +115,7 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
             RetryPolicy::default(),
             &scheduler,
             ProcessAdmissionPolicies::new(self.unity_font_hook.clone(), self.private_freetype),
+            DeferralPolicy::default(),
         );
         let mut consecutive_health_report_failures = 0;
         loop {
@@ -127,11 +132,8 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
                 Duration::ZERO
             };
             let pid = match self.source.next_pid(event_wait) {
-                Ok(Some(pid)) => pid,
-                Ok(None) => match self.snapshot_pids.pop_front() {
-                    Some(pid) => pid,
-                    None => continue,
-                },
+                Ok(Some(pid)) => Some(pid),
+                Ok(None) => self.snapshot_pids.pop_front(),
                 Err(error) => {
                     let _ = report_runtime_health(
                         health,
@@ -147,44 +149,70 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
                     return Err(error);
                 }
             };
-            match orchestrator.handle_pid(pid) {
-                Ok(ProcessOutcome::Injected) => {
-                    report_runtime_health(
-                        health,
-                        &mut consecutive_health_report_failures,
-                        HealthState::Ready,
-                        ReadinessReport::ready(),
-                        orchestrator.injection_telemetry(),
-                        None,
-                    )?;
+            if let Some(pid) = pid {
+                if apply_orchestration_outcome(
+                    orchestrator.handle_pid(pid).map(Some),
+                    &orchestrator,
+                    health,
+                    &mut consecutive_health_report_failures,
+                )? {
+                    return Ok(());
                 }
-                Ok(ProcessOutcome::Rejected | ProcessOutcome::RetryExhausted) => {
-                    if let Some(error) = orchestrator.generation_health_error() {
-                        report_runtime_health(
-                            health,
-                            &mut consecutive_health_report_failures,
-                            HealthState::Degraded,
-                            ReadinessReport::ready(),
-                            orchestrator.injection_telemetry(),
-                            Some(error),
-                        )?;
-                    }
-                }
-                Ok(ProcessOutcome::Cancelled) => return Ok(()),
-                Ok(_) => {}
-                Err(error) => {
-                    report_runtime_health(
-                        health,
-                        &mut consecutive_health_report_failures,
-                        HealthState::Degraded,
-                        ReadinessReport::ready(),
-                        orchestrator.injection_telemetry(),
-                        Some(error),
-                    )?;
-                }
+            }
+            if apply_orchestration_outcome(
+                orchestrator.poll_deferred(Instant::now()),
+                &orchestrator,
+                health,
+                &mut consecutive_health_report_failures,
+            )? {
+                return Ok(());
             }
         }
     }
+}
+
+fn apply_orchestration_outcome(
+    result: Result<Option<ProcessOutcome>, StructuredServiceError>,
+    orchestrator: &InjectionOrchestrator<'_>,
+    health: &dyn RuntimeHealthReporter,
+    consecutive_health_report_failures: &mut usize,
+) -> Result<bool, StructuredServiceError> {
+    match result {
+        Ok(Some(ProcessOutcome::Injected)) => report_runtime_health(
+            health,
+            consecutive_health_report_failures,
+            HealthState::Ready,
+            ReadinessReport::ready(),
+            orchestrator.injection_telemetry(),
+            None,
+        )?,
+        Ok(Some(ProcessOutcome::Rejected | ProcessOutcome::RetryExhausted)) => {
+            if let Some(error) = orchestrator.generation_health_error() {
+                report_runtime_health(
+                    health,
+                    consecutive_health_report_failures,
+                    HealthState::Degraded,
+                    ReadinessReport::ready(),
+                    orchestrator.injection_telemetry(),
+                    Some(error),
+                )?;
+            }
+        }
+        Ok(Some(ProcessOutcome::Cancelled)) => return Ok(true),
+        Ok(Some(
+            ProcessOutcome::Deferred | ProcessOutcome::Skipped | ProcessOutcome::Duplicate,
+        ))
+        | Ok(None) => {}
+        Err(error) => report_runtime_health(
+            health,
+            consecutive_health_report_failures,
+            HealthState::Degraded,
+            ReadinessReport::ready(),
+            orchestrator.injection_telemetry(),
+            Some(error),
+        )?,
+    }
+    Ok(false)
 }
 
 fn report_runtime_health(

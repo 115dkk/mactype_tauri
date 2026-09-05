@@ -145,14 +145,16 @@ fn fixed_helper_broker_selects_architecture_and_emits_only_the_strict_cli_contra
 struct ErrorLauncher {
     kind: std::io::ErrorKind,
     stage: HelperLaunchStage,
+    raw_os_error: Option<i32>,
 }
 
 impl HelperLauncher for ErrorLauncher {
     fn launch(&self, _invocation: &HelperInvocation) -> Result<HelperOutput, HelperLaunchError> {
-        Err(HelperLaunchError::new(
-            self.stage,
-            std::io::Error::new(self.kind, "synthetic launcher failure"),
-        ))
+        let error = self
+            .raw_os_error
+            .map(std::io::Error::from_raw_os_error)
+            .unwrap_or_else(|| std::io::Error::new(self.kind, "synthetic launcher failure"));
+        Err(HelperLaunchError::new(self.stage, error))
     }
 }
 
@@ -164,6 +166,7 @@ fn interrupted_helper_is_a_service_stop_cancellation() {
         ErrorLauncher {
             kind: std::io::ErrorKind::Interrupted,
             stage: HelperLaunchStage::BeforeResume,
+            raw_os_error: None,
         },
     );
     let result = broker.inject(&InjectionRequest {
@@ -181,6 +184,24 @@ fn interrupted_helper_is_a_service_stop_cancellation() {
 }
 
 #[test]
+fn before_resume_permission_denied_preserves_launch_failure_and_win32_code() {
+    let (_base, runtime) = runtime();
+    let broker = FixedHelperBroker::new(
+        &runtime,
+        ErrorLauncher {
+            kind: std::io::ErrorKind::PermissionDenied,
+            stage: HelperLaunchStage::BeforeResume,
+            raw_os_error: Some(5),
+        },
+    );
+    let result = broker.inject(&x64_request(&runtime));
+
+    assert_eq!(result.disposition, BrokerDisposition::LaunchFailed);
+    assert_eq!(result.code, "helper-launch-failed-before-resume");
+    assert_eq!(result.win32_error, Some(5));
+}
+
+#[test]
 fn before_resume_launch_failure_never_claims_unknown_target_cleanup() {
     let (_base, runtime) = runtime();
     let broker = FixedHelperBroker::new(
@@ -188,6 +209,7 @@ fn before_resume_launch_failure_never_claims_unknown_target_cleanup() {
         ErrorLauncher {
             kind: std::io::ErrorKind::InvalidInput,
             stage: HelperLaunchStage::BeforeResume,
+            raw_os_error: None,
         },
     );
     let result = broker.inject(&InjectionRequest {
@@ -200,7 +222,7 @@ fn before_resume_launch_failure_never_claims_unknown_target_cleanup() {
         binding: runtime.binding(),
     });
 
-    assert_eq!(result.disposition, BrokerDisposition::Rejected);
+    assert_eq!(result.disposition, BrokerDisposition::LaunchFailed);
     assert_eq!(result.code, "helper-launch-failed-before-resume");
     assert!(!result.code.ends_with("-cleanup-unknown"));
 }
@@ -213,6 +235,7 @@ fn post_resume_service_stop_is_terminal_cleanup_unknown() {
         ErrorLauncher {
             kind: std::io::ErrorKind::Interrupted,
             stage: HelperLaunchStage::AfterResume,
+            raw_os_error: None,
         },
     );
     let result = broker.inject(&InjectionRequest {
@@ -237,6 +260,7 @@ fn absolute_helper_timeout_is_terminal_cleanup_unknown() {
         ErrorLauncher {
             kind: std::io::ErrorKind::TimedOut,
             stage: HelperLaunchStage::AfterResume,
+            raw_os_error: None,
         },
     );
     let result = broker.inject(&InjectionRequest {
@@ -599,6 +623,27 @@ fn verified_renderer_quiet_skip_stays_process_local() {
 
     assert_eq!(result.disposition, BrokerDisposition::Skipped);
     assert_eq!(result.code, "process-excluded");
+}
+
+#[test]
+fn process_frozen_skip_is_typed_for_deferral_but_other_skips_remain_terminal() {
+    let (_base, runtime) = runtime();
+    let request = x64_request(&runtime);
+    for (code, expected) in [
+        ("process-frozen", BrokerDisposition::TargetFrozen),
+        ("process-exiting", BrokerDisposition::Skipped),
+    ] {
+        let result = inject_static_response(
+            &runtime,
+            &request,
+            0,
+            format!(
+                "{{\"schemaVersion\":2,\"status\":\"skipped\",\"code\":\"{code}\",\"pid\":42,\"sessionId\":2,\"generationId\":\"{}\",\"module\":\"MacType64.dll\",\"windowsError\":0,\"cleanupComplete\":true,\"rendererEvidence\":null}}",
+                request.binding.runtime_generation_id(),
+            ),
+        );
+        assert_eq!(result.disposition, expected, "{code}");
+    }
 }
 
 #[test]

@@ -40,6 +40,10 @@ pub struct InjectionRequest {
 pub enum BrokerDisposition {
     Injected,
     Skipped,
+    /// The launcher failed before the helper resumed, leaving the target untouched.
+    LaunchFailed,
+    /// The helper found a frozen target and made no changes.
+    TargetFrozen,
     Rejected,
     Retryable,
     UncertainCleanup,

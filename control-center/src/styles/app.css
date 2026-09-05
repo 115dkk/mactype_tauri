@@ -285,7 +285,7 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .list-add-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .list-add-row input { flex: 1; min-width: 0; padding-inline: var(--space-2); font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .list-add-row .button { flex: 0 0 auto; white-space: nowrap; }
-.preview-footer { justify-content: flex-end; color: var(--color-muted); font-size: 12px; }
+.preview-footer { flex-wrap: wrap; justify-content: flex-end; color: var(--color-muted); font-size: 12px; }
 .preview-footer select { min-width: 0; padding: 0 var(--space-2); }
 .hint { cursor: help; }
 .hint-term { text-decoration-line: underline; text-decoration-style: dotted; text-decoration-color: var(--color-border-strong); text-decoration-thickness: 1px; text-underline-offset: 3px; }

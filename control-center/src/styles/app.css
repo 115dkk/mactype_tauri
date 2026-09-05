@@ -40,9 +40,10 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .nav-subitem > span { min-width: 0; line-height: 1.2; }
 .navigation-preferences { display: grid; gap: var(--space-1); margin-top: auto; flex-shrink: 0; }
 .theme-toggle { width: 100%; color: var(--color-muted); }
-.preference-control { display: grid; position: relative; grid-template-columns: 17px minmax(0, 1fr); align-items: center; gap: var(--space-3); min-height: 40px; padding: 0 var(--space-2); border-radius: var(--radius-control); color: var(--color-muted); }
+.preference-control { display: grid; position: relative; min-height: 40px; padding: 0; border-radius: var(--radius-control); color: var(--color-muted); }
 .preference-picker { min-width: 0; }
-.preference-trigger { width: 100%; min-height: 32px; overflow: hidden; padding: 0 var(--space-2); border: 0; background: transparent; color: inherit; text-align: start; text-overflow: ellipsis; white-space: nowrap; }
+.preference-trigger { display: grid; grid-template-columns: 17px minmax(0, 1fr); align-items: center; gap: var(--space-3); width: 100%; min-height: 40px; padding: 0 var(--space-2); border: 0; background: transparent; color: inherit; text-align: start; text-overflow: ellipsis; white-space: nowrap; }
+.preference-trigger > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .preference-menu { display: grid; position: fixed; z-index: 30; bottom: 60px; left: var(--space-3); width: calc(var(--nav-width) - var(--space-6)); max-height: min(280px, calc(100vh - var(--titlebar-height) - 84px)); overflow-y: auto; border: 1px solid var(--color-border-strong); background: var(--color-surface); box-shadow: var(--shadow-window); color: var(--color-foreground); scrollbar-color: var(--color-border-strong) var(--color-surface-subtle); scrollbar-width: thin; }
 [dir="rtl"] .preference-menu { right: var(--space-3); left: auto; }
 .preference-menu::-webkit-scrollbar { width: 10px; }
@@ -467,7 +468,7 @@ input[type="range"] { min-width: 0; height: var(--control-height); margin: 0; pa
   .navigation-preferences { display: flex; flex: 0 0 auto; margin: 0; }
   .theme-toggle { width: 40px; padding: 0; justify-content: center; }
   .theme-toggle span { display: none; }
-  .preference-control { width: 112px; padding-inline: var(--space-2); }
+  .preference-control { width: 112px; }
   .preference-menu, [dir="rtl"] .preference-menu { top: calc(var(--titlebar-height) + 52px); right: var(--space-2); bottom: auto; left: auto; width: 180px; max-height: min(280px, calc(100vh - var(--titlebar-height) - 60px)); }
   [dir="rtl"] .preference-menu { right: auto; left: var(--space-2); }
   .page { min-height: calc(100vh - var(--titlebar-height) - 53px); padding: var(--space-4); }

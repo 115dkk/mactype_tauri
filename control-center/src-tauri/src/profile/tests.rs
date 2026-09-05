@@ -36,9 +36,11 @@ fn preview_substitutes_read_saved_profile_without_replacing_dirty_editor() {
     assert_eq!(after.values, before.values);
     assert_eq!(after.dirty_keys, before.dirty_keys);
     assert!(after.can_undo);
-    assert!(preview_font_substitutes(edited_path.to_string_lossy().into_owned())
-        .unwrap()
-        .is_empty());
+    assert!(
+        preview_font_substitutes(edited_path.to_string_lossy().into_owned())
+            .unwrap()
+            .is_empty()
+    );
     let _ = fs::remove_file(edited_path);
     let _ = fs::remove_file(preview_path);
 }

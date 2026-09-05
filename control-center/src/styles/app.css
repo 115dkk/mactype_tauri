@@ -630,3 +630,19 @@ input[type="range"] { min-width: 0; height: var(--control-height); margin: 0; pa
 .app-recovery p { color: var(--color-muted); }
 .app-recovery pre { max-height: 200px; margin: 0; padding: var(--space-3); overflow: auto; border-radius: var(--radius-control); background: var(--color-surface-subtle); font-size: 12px; white-space: pre-wrap; }
 .app-recovery-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+/* Keep the native popup and keyboard model; size only its closed-state marker. */
+html[data-skin] select:not([multiple]):not([size]) {
+  appearance: none;
+  padding-inline-end: calc(var(--select-marker-size) + 2 * var(--select-marker-inset));
+  background-image: linear-gradient(45deg, transparent 50%, var(--select-marker-color) 50%), linear-gradient(135deg, var(--select-marker-color) 50%, transparent 50%), linear-gradient(var(--select-badge-color), var(--select-badge-color));
+  background-size: calc(var(--select-marker-size) / 2) calc(var(--select-marker-size) / 2), calc(var(--select-marker-size) / 2) calc(var(--select-marker-size) / 2), var(--select-badge-size) var(--select-badge-size);
+  background-position: right calc(var(--select-marker-inset) + var(--select-marker-size) / 2) center, right var(--select-marker-inset) center, right 3px center;
+  background-repeat: no-repeat;
+}
+html[data-skin][dir="rtl"] select:not([multiple]):not([size]) {
+  background-position: left var(--select-marker-inset) center, left calc(var(--select-marker-inset) + var(--select-marker-size) / 2) center, left 3px center;
+}
+@media (forced-colors: active) {
+  html[data-skin] select:not([multiple]):not([size]) { appearance: auto; background-image: none; }
+}

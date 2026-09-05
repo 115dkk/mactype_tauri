@@ -48,6 +48,11 @@
   --switch-inset: 3px;
   --switch-border: 1px;
   --selection-size: 16px;
+  --select-marker-size: 8px;
+  --select-marker-inset: 8px;
+  --select-marker-color: currentColor;
+  --select-badge-size: 0px;
+  --select-badge-color: transparent;
   --settings-index-width: 196px;
   --settings-control-width: 232px;
   --opacity-disabled: 0.46;

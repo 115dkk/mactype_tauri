@@ -10,7 +10,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$views = @('overview', 'files', 'profiles', 'execution', 'diagnostics')
+$views = @('overview', 'files', 'profiles', 'execution', 'diagnostics', 'preview-studio')
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $resolvedExecutable = (Resolve-Path -LiteralPath $Executable).Path
 $resolvedPreviewHelper = (Resolve-Path -LiteralPath $PreviewHelper).Path
@@ -52,7 +52,8 @@ try {
     foreach ($view in $views) {
         $marker = Join-Path $markerRoot "$view.ready"
         $env:MACTYPE_CI_SMOKE_FILE = $marker
-        $process = Start-Process -FilePath $resolvedExecutable -ArgumentList @('--ci-view', $view) -PassThru -WindowStyle Hidden
+        $arguments = if ($view -eq 'preview-studio') { @('--ci-preview-studio') } else { @('--ci-view', $view) }
+        $process = Start-Process -FilePath $resolvedExecutable -ArgumentList $arguments -PassThru -WindowStyle Hidden
         $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
         while (-not $process.HasExited -and -not (Test-Path -LiteralPath $marker) -and [DateTime]::UtcNow -lt $deadline) {
             Start-Sleep -Milliseconds 200

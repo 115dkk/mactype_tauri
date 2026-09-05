@@ -73,3 +73,20 @@ AppInit conflict, a foreign service configuration, an invalid protected path, mi
 | M22 | Existing AppInit injection | `UNKNOWN` | `IMPLEMENTED` | `UNKNOWN` |
 
 The 레거시 서비스 PASS entries are backed by three trials per architecture under `evidence/mactray-service/1.0.2023.7`. The 신식 서비스 hosted lifecycle and manual disposable-VM interfaces live in `scripts/ci/Test-OpenServiceWindows.ps1` and `scripts/ci/Test-OpenServiceDisposableVm.ps1`. No manual dispatch result is claimed until its JSON artifact is retained and reviewed.
+
+
+## Process lifecycle and event recording
+
+The host prefers the immediate process-start WMI trace and falls back to the
+intrinsic creation subscription only when the trace is inaccessible or absent.
+Eligible frozen processes are deferred by exact PID and creation time. A helper
+launch failure before resume can also be deferred with bounded backoff; a helper
+that has resumed keeps the existing conservative cleanup rules. Neither deferral
+changes global service health. Package-token read/execute permissions on the
+protected runtime/profile trees do not grant write access.
+
+The host and setup broker record bounded rotating JSON Lines below the protected
+log root. Control Center merges these with its own activity log, localizes stable
+codes for display, and discloses diagnostic detail on demand. Normal process-local
+skips are summarized; repeated failures are throttled. See
+[the extraction record](main-service-preview-port.md) for scope and source commits.

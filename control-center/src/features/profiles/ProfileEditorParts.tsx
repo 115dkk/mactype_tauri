@@ -92,7 +92,7 @@ export function ProfileEditorPreview({ editor, ciSmoke, onPreviewReady, onOpenSt
       fontFamilies={editor.fontFamilies}
       fontOptionLabel={editor.fontOptionLabel}
       mode={editor.mode}
-      onError={editor.setError}
+      onError={editor.setPreviewError}
       onFontFaceChange={editor.setFontFace}
       onOpenStudio={onOpenStudio}
       onPreviewReady={onPreviewReady}

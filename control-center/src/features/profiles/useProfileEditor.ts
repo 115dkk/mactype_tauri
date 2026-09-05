@@ -54,6 +54,7 @@ export function useProfileEditor({ mode = "advanced" }: ProfileEditorOptions = {
     t("individual.boldWeight"), t("individual.slant"), t("individual.kerning"),
   ], [t]);
   const document = useProfileDocument(t);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const {
     advanced,
     busy,
@@ -63,7 +64,6 @@ export function useProfileEditor({ mode = "advanced" }: ProfileEditorOptions = {
     lists,
     profile,
     recoveryRequired,
-    setError: setPreviewError,
     values,
   } = document;
   const listDefinitions = useMemo<ReadonlyArray<ListDefinition>>(() => {
@@ -262,6 +262,8 @@ export function useProfileEditor({ mode = "advanced" }: ProfileEditorOptions = {
 
   return {
     ...document,
+    error: document.error ?? previewError,
+    setPreviewError,
     activeDefinition,
     activeGroup,
     activeWizardLabel,

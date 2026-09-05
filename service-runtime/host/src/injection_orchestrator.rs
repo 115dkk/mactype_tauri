@@ -532,11 +532,7 @@ impl<'a> InjectionOrchestrator<'a> {
         } else {
             String::new()
         };
-        crate::event_log::injection_result(
-            &record,
-            process,
-            crate::event_log::diagnostic_detail(&record),
-        );
+        crate::event_log::injection_result(&record, process);
         self.processed.insert(key, record);
     }
 }

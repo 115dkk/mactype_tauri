@@ -46,8 +46,18 @@ pub(crate) fn health_changed(state: HealthState, error: Option<&StructuredServic
     with_logger(|logger| logger.health_changed(state, error));
 }
 
-pub(crate) fn injection_result(record: &ProcessAttemptRecord, process: String, detail: String) {
-    with_logger(|logger| logger.injection_result(record, process, detail, Instant::now()));
+pub(crate) fn injection_result(record: &ProcessAttemptRecord, process: String) {
+    with_logger(|logger| {
+        let detail = if matches!(
+            record.outcome,
+            ProcessOutcome::Rejected | ProcessOutcome::RetryExhausted
+        ) {
+            diagnostic_detail(record)
+        } else {
+            String::new()
+        };
+        logger.injection_result(record, process, detail, Instant::now());
+    });
 }
 
 pub(crate) fn injection_skipped() {
@@ -281,7 +291,7 @@ fn health_name(state: HealthState) -> &'static str {
     }
 }
 
-pub(crate) fn diagnostic_detail(record: &ProcessAttemptRecord) -> String {
+fn diagnostic_detail(record: &ProcessAttemptRecord) -> String {
     let detail = format!(
         "pid={} creation_time={} session_id={} disposition={:?} attempts={} reason={} win32={:?}",
         record.identity.pid,

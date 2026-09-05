@@ -105,10 +105,10 @@ html[data-skin="fluent"] .fluent-nav-item[data-selected="true"]::before { conten
 html[dir="rtl"][data-skin="fluent"] .fluent-nav-item[data-selected="true"]::before { left: auto; right: 0; }
 html[data-skin="fluent"] .fluent-nav-foot { display: flex; flex-direction: column; margin-top: auto; padding: 8px 0 0; border-top: 1px solid var(--fluent-divider); }
 html[data-skin="fluent"] .fluent-nav-foot .fluent-nav-item { color: var(--color-muted); }
-html[data-skin="fluent"] .fluent-nav .preference-control { display: flex; width: 100%; height: 36px; align-items: center; gap: 14px; margin: 1px 0; padding: 0 12px; border-radius: 4px; color: var(--color-muted); }
+html[data-skin="fluent"] .fluent-nav .preference-control { display: block; width: 100%; height: 40px; margin: 1px 0; padding: 0; border-radius: 4px; color: var(--color-muted); }
 html[data-skin="fluent"] .fluent-nav .preference-control:hover { background: var(--fluent-hover); }
 html[data-skin="fluent"] .fluent-nav .preference-picker { position: relative; flex: 1 1 auto; min-width: 0; }
-html[data-skin="fluent"] .fluent-nav .preference-trigger { width: 100%; min-height: 0; height: 36px; padding: 0; border: 0; background: transparent; color: inherit; font-size: 14px; text-align: start; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-skin="fluent"] .fluent-nav .preference-trigger { width: 100%; min-height: 40px; height: 40px; gap: 14px; padding: 0 12px; border: 0; background: transparent; color: inherit; font-size: 14px; text-align: start; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-skin="fluent"] .fluent-nav .preference-menu { position: absolute; z-index: 30; top: auto; right: auto; bottom: 40px; left: 0; width: 208px; padding: 4px; border: 1px solid var(--color-border-strong); border-radius: 8px; background: var(--color-surface); box-shadow: 0 8px 16px rgba(0, 0, 0, 0.14); }
 html[data-skin="fluent"] .fluent-nav .preference-option { min-height: 34px; padding: 0 10px; border-radius: 4px; }
 html[data-skin="fluent"] .fluent-nav .preference-option[aria-selected="true"] { background: var(--fluent-selected); }
@@ -240,7 +240,7 @@ html[data-skin="fluent"] .event-chip[aria-pressed="true"] { background: var(--fl
   html[data-skin="fluent"] .fluent-nav-item span { display: none; }
   html[data-skin="fluent"] .fluent-nav-foot { flex-direction: row; margin-top: 0; margin-left: auto; padding: 0; border: 0; }
   html[data-skin="fluent"] .fluent-nav .preference-control { width: auto; }
-  html[data-skin="fluent"] .fluent-nav .preference-trigger { width: 72px; }
+  html[data-skin="fluent"] .fluent-nav .preference-trigger { width: 96px; }
   html[data-skin="fluent"] .fluent-nav .preference-menu { top: 40px; bottom: auto; right: 0; left: auto; }
   html[data-skin="fluent"] .fluent-page, html[data-skin="fluent"] .fluent-page[data-wide="true"] { height: auto; padding: 16px; overflow: visible; }
   html[data-skin="fluent"] .fluent-head-row { flex-direction: column; }

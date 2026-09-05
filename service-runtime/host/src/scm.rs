@@ -47,6 +47,7 @@ fn service_main() {
             return;
         }
     };
+    crate::event_log::initialize(paths.service_host_event_log().to_owned());
     let persisted = FileHealthPublisher::new(paths.service_root().join("health.json"));
     match catch_unwind(AssertUnwindSafe(|| {
         run_registered_service(paths, &persisted)

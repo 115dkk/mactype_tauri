@@ -1,8 +1,8 @@
 import { AlertTriangle, Check, ChevronDown, ChevronUp, Copy, Download, ExternalLink, FolderSearch, LoaderCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { EventSourceList, EventTimeline } from "../features/events/EventTimeline";
+import { useEventLog } from "../features/events/useEventLog";
 import type { InstallationStatus } from "../app/model";
-import { copyDiagnostics, exportDiagnostics, loadDiagnosticLogs, openLogFolder } from "../app/tauri";
-import { useI18n } from "../i18n/i18n";
+import { useDiagnosticsModel } from "../features/diagnostics/useDiagnosticsModel";
 
 interface DiagnosticsPageProps {
   status: InstallationStatus;
@@ -10,58 +10,10 @@ interface DiagnosticsPageProps {
   onRelocate: () => Promise<InstallationStatus>;
 }
 
-type Operation = "export" | "copy" | "folder" | "relocate" | "reconnect";
-
 export function DiagnosticsPage({ status, onReconnect, onRelocate }: DiagnosticsPageProps) {
-  const { t } = useI18n();
-  const [operationLogs, setOperationLogs] = useState<ReadonlyArray<string>>([]);
-  const [logsExpanded, setLogsExpanded] = useState(false);
-  const [operation, setOperation] = useState<Operation | null>(null);
-  const [completed, setCompleted] = useState<{ kind: Operation; detail: string } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const run = async (kind: Operation) => {
-    setOperation(kind);
-    setCompleted(null);
-    setError(null);
-    try {
-      if (kind === "export") setCompleted({ kind, detail: await exportDiagnostics() });
-      if (kind === "copy") {
-        await copyDiagnostics();
-        setCompleted({ kind, detail: t("diagnostics.copy") });
-      }
-      if (kind === "folder") setCompleted({ kind, detail: await openLogFolder() });
-      if (kind === "relocate") {
-        await onRelocate();
-        setCompleted({ kind, detail: t("overview.relocate") });
-      }
-      if (kind === "reconnect") {
-        await onReconnect();
-        setCompleted({ kind, detail: t("overview.reconnect") });
-      }
-    } catch (caught: unknown) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setOperation(null);
-    }
-  };
-  const findingLabel = (label: string, value: string) => {
-    if (value === "MacType.dll") return t("finding.core32");
-    if (value === "MacType64.dll") return t("finding.core64");
-    if (value === "MacLoader.exe") return t("finding.loader");
-    if (label === "preview") return t("finding.preview");
-    return label;
-  };
-
-  useEffect(() => {
-    let active = true;
-    void loadDiagnosticLogs().then((entries) => {
-      if (active) setOperationLogs(entries);
-    }).catch((caught: unknown) => {
-      if (active) setError(caught instanceof Error ? caught.message : String(caught));
-    });
-    return () => { active = false; };
-  }, []);
+  const log = useEventLog();
+  const model = useDiagnosticsModel({ status, onReconnect, onRelocate });
+  const { t, operation, operationLogs, logsExpanded, setLogsExpanded, completed, error, run } = model;
 
   return (
     <section className="page view-enter" aria-labelledby="diagnostics-title">
@@ -79,7 +31,7 @@ export function DiagnosticsPage({ status, onReconnect, onRelocate }: Diagnostics
           </div>
         </div>
         <dl className="detail-list">
-          {status.findings.map((finding) => <div key={finding.label}><dt>{findingLabel(finding.label, finding.value)}</dt><dd>{finding.ok ? <Check className="success" aria-label={t("overview.checked")} size={17} /> : <AlertTriangle className="warning" aria-label={t("overview.attention")} size={17} />}<span>{finding.value === "waiting" ? t("finding.waiting") : finding.value === "connected" ? t("overview.checked") : finding.value}</span></dd></div>)}
+          {model.findings.map((finding) => <div key={finding.key}><dt>{finding.label}</dt><dd>{finding.ok ? <Check className="success" aria-label={t("overview.checked")} size={17} /> : <AlertTriangle className="warning" aria-label={t("overview.attention")} size={17} />}<span>{finding.value}</span></dd></div>)}
         </dl>
       </section>
 
@@ -93,10 +45,14 @@ export function DiagnosticsPage({ status, onReconnect, onRelocate }: Diagnostics
 
       <section className="section-block" aria-labelledby="log-title">
         <div className="section-heading"><div><h2 id="log-title">{t("diagnostics.logs")}</h2><p>{t("diagnostics.logsDescription")}</p></div></div>
-        {logsExpanded && <div className="log-view" id="diagnostic-log-view" role="log" aria-label={t("diagnostics.logAria")}>
+        {logsExpanded && <div className="diagnostic-events" id="diagnostic-log-view" role="log" aria-label={t("diagnostics.logAria")}>
+          <EventTimeline log={log} />
+          <details className="event-source-disclosure"><summary>{t("events.source")}</summary><EventSourceList log={log} /></details>
+          <details className="event-legacy-disclosure"><summary>{t("diagnostics.logAria")}</summary><div className="log-view">
           {operationLogs.length === 0
             ? <div><time>{t("diagnostics.now")}</time><span>{t("diagnostics.logs")}</span><p>{t("diagnostics.noOperationLogs")}</p></div>
             : operationLogs.slice(-20).map((entry, index) => <div key={`${index}-${entry}`}><time>{t("diagnostics.recent")}</time><span>{t("diagnostics.logs")}</span><p>{entry}</p></div>)}
+          </div></details>
         </div>}
         <div className="disclosure-actions" data-log-disclosure-actions>
           <button aria-busy={operation === "folder"} className="text-action" disabled={operation !== null} onClick={() => void run("folder")} type="button">{operation === "folder" ? <LoaderCircle aria-hidden="true" className="spin" size={15} /> : <ExternalLink aria-hidden="true" size={15} />}{t("diagnostics.openFolder")}</button>

@@ -6,7 +6,7 @@ import { ProfilesPage } from "../pages/ProfilesPage";
 import { ExecutionPage } from "../pages/ExecutionPage";
 import { FileSettingsPage } from "../pages/FileSettingsPage";
 import { fallbackStatus, type InstallationStatus, type ViewId } from "./model";
-import { loadLaunchContext, reconnectPreview, rediscoverInstallation, reportFrontendFailure, reportFrontendReady, scanInstallation, verifyTrayModeForCi } from "./tauri";
+import { loadLaunchContext, openPreviewStudio, reconnectPreview, rediscoverInstallation, reportFrontendFailure, reportFrontendReady, scanInstallation, verifyTrayModeForCi } from "./tauri";
 import { useI18n } from "../i18n/i18n";
 import { LanguagePicker } from "../components/LanguagePicker";
 import { WindowTitleBar } from "../components/WindowTitleBar";
@@ -20,6 +20,7 @@ interface State {
   ready: boolean;
   ciSmoke: boolean;
   trayStart: boolean;
+  previewStudioSmoke: boolean;
 }
 
 type ProfileMode = "quick" | "advanced";
@@ -27,7 +28,7 @@ type ProfileMode = "quick" | "advanced";
 type Action =
   | { type: "navigate"; view: ViewId; profileMode?: ProfileMode }
   | { type: "toggle-theme" }
-  | { type: "launched"; view: ViewId; ciSmoke: boolean; trayStart: boolean }
+  | { type: "launched"; view: ViewId; ciSmoke: boolean; trayStart: boolean; previewStudioSmoke: boolean }
   | { type: "status"; status: InstallationStatus };
 
 function reducer(state: State, action: Action): State {
@@ -41,7 +42,7 @@ function reducer(state: State, action: Action): State {
     case "toggle-theme":
       return { ...state, theme: state.theme === "light" ? "dark" : "light" };
     case "launched":
-      return { ...state, view: action.view, ciSmoke: action.ciSmoke, trayStart: action.trayStart, ready: true };
+      return { ...state, view: action.view, ciSmoke: action.ciSmoke, trayStart: action.trayStart, previewStudioSmoke: action.previewStudioSmoke, ready: true };
     case "status":
       return { ...state, status: action.status };
   }
@@ -61,13 +62,15 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
     ready: false,
     ciSmoke: false,
     trayStart: false,
+    previewStudioSmoke: false,
   });
 
   useEffect(() => {
     let active = true;
     void Promise.all([loadLaunchContext(), scanInstallation()]).then(([context, status]) => {
       if (!active) return;
-      dispatch({ type: "launched", view: context.view, ciSmoke: context.ciSmoke, trayStart: context.trayStart });
+      dispatch({ type: "launched", view: context.view, ciSmoke: context.ciSmoke, trayStart: context.trayStart, previewStudioSmoke: context.previewStudioSmoke ?? false });
+      if (context.ciSmoke && context.previewStudioSmoke) void openPreviewStudio().catch((error: unknown) => reportFrontendFailure("overview", String(error)));
       if (status) dispatch({ type: "status", status });
     });
     return () => {
@@ -80,7 +83,7 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
   }, [state.theme]);
 
   useEffect(() => {
-    if (!state.ready) return;
+    if (!state.ready || state.previewStudioSmoke) return;
     document.body.dataset.view = state.view;
     document.body.dataset.profileMode = state.profileMode;
     document.body.dataset.rendered = "true";
@@ -91,7 +94,7 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
     } else if (!state.ciSmoke || (state.view !== "profiles" && state.view !== "execution")) {
       void reportFrontendReady(state.view);
     }
-  }, [state.ciSmoke, state.profileMode, state.ready, state.trayStart, state.view]);
+  }, [state.ciSmoke, state.previewStudioSmoke, state.profileMode, state.ready, state.trayStart, state.view]);
 
   const page = useMemo(() => {
     if (state.view === "files") return <FileSettingsPage onEditInTuner={() => dispatch({ type: "navigate", view: "profiles", profileMode: "advanced" })} />;

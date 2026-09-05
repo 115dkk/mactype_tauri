@@ -2,7 +2,8 @@ use std::time::Duration;
 
 use mactype_service_contract::StructuredServiceError;
 
-pub const PROCESS_CREATION_QUERY: &str =
+pub const PROCESS_CREATION_QUERY: &str = "SELECT ProcessID FROM Win32_ProcessStartTrace";
+pub const FALLBACK_PROCESS_CREATION_QUERY: &str =
     "SELECT * FROM __InstanceCreationEvent WITHIN 1 WHERE TargetInstance ISA 'Win32_Process'";
 pub trait ProcessEventSource {
     fn subscribe(&mut self, query: &str) -> Result<(), StructuredServiceError>;
@@ -44,7 +45,25 @@ pub enum TargetLiveness {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetLifecycle {
+    Running,
+    Frozen,
+    Exiting,
+    Unknown,
+}
+
 pub trait ProcessInspector {
+    fn probe_target_lifecycle(&self, identity: &ProcessIdentity) -> TargetLifecycle {
+        let _ = identity;
+        TargetLifecycle::Unknown
+    }
+
+    fn process_basename(&self, identity: &ProcessIdentity) -> Option<String> {
+        let _ = identity;
+        None
+    }
+
     fn inspect(&self, pid: u32) -> Result<ProcessIdentity, StructuredServiceError>;
 
     /// Re-checks whether the exact verified identity still exists after a
@@ -68,6 +87,8 @@ pub enum BrokerDisposition {
     Skipped,
     Rejected,
     RetryableFailure,
+    LaunchFailed,
+    TargetFrozen,
     Cancelled,
 }
 

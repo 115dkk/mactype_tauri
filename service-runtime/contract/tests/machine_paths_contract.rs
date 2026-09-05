@@ -43,6 +43,18 @@ fn machine_paths_are_derived_only_below_protected_windows_roots() {
         paths.profile_activation_journal(),
         Path::new(r"C:\ProgramData\MacType\ControlCenter\profile-activation.json")
     );
+    assert_eq!(
+        paths.event_log_dir(),
+        Path::new(r"C:\ProgramData\MacType\ControlCenter\logs")
+    );
+    assert_eq!(
+        paths.service_host_event_log(),
+        Path::new(r"C:\ProgramData\MacType\ControlCenter\logs\service-host.log")
+    );
+    assert_eq!(
+        paths.service_setup_event_log(),
+        Path::new(r"C:\ProgramData\MacType\ControlCenter\logs\service-setup.log")
+    );
 }
 
 #[test]

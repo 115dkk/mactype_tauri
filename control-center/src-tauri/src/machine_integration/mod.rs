@@ -16,15 +16,19 @@ use appinit::appinit_view_conflict;
 
 pub(crate) use appinit::registry_conflict_detected;
 #[cfg(test)]
-use legacy_mactray::{disable_legacy_tray_startup_with, LegacyTrayStartupCoordinator};
-pub(crate) use legacy_mactray::{LegacyTrayConflictState, LegacyTrayExitRequest, LegacyTrayStatus};
+pub(crate) use legacy_mactray::LegacyTrayStartupState;
 #[cfg(test)]
-pub(crate) use legacy_mactray::{LegacyTrayProcessState, LegacyTrayStartupState};
+use legacy_mactray::{disable_legacy_tray_startup_with, LegacyTrayStartupCoordinator};
+pub(crate) use legacy_mactray::{
+    LegacyTrayConflictState, LegacyTrayExitRequest, LegacyTrayProcessState, LegacyTrayStatus,
+};
 pub(crate) use model::{
     MachineAction, MachineBackend, MachineStatus, PublicMachineAction, TrayLoginState,
 };
-pub(crate) use open_service::management_package_state as service_management_package_state;
 pub(crate) use open_service::LegacyMacTrayStatus as LegacyServiceStatus;
+pub(crate) use open_service::{
+    machine_roots, management_package_state as service_management_package_state,
+};
 use orchestrator::{execute_machine_action_with, tray_apply_with, tray_login_with};
 pub(crate) use publish::publish_profile_transaction_with;
 pub(crate) use status::status;

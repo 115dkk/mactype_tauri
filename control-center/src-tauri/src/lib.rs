@@ -9,6 +9,7 @@ mod fonts;
 mod generated_settings;
 mod machine_integration;
 mod preview;
+mod preview_studio;
 mod profile;
 mod service_contract;
 mod single_instance;
@@ -52,6 +53,8 @@ pub fn run() {
             preview::reconnect_preview,
             diagnostics::diagnostic_report,
             diagnostics::diagnostic_recent_logs,
+            diagnostics::list_events,
+            diagnostics::event_log_summary,
             diagnostics::recent_activity,
             diagnostics::export_diagnostics,
             diagnostics::copy_diagnostics,
@@ -91,6 +94,10 @@ pub fn run() {
             preview::set_native_preview,
             preview::preview_diagnostics,
             preview::ci_force_preview_crash,
+            preview_studio::open_preview_studio,
+            preview_studio::preview_studio_ready,
+            preview_studio::close_preview_studio,
+            preview_studio::write_preview_export,
             profile::ci_verify_profile_workflow,
             execution::ci_verify_injection_workflow,
             app::ci_verify_tray_mode,

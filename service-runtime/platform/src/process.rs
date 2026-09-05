@@ -7,17 +7,24 @@ use std::os::windows::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use windows_sys::Wdk::System::SystemServices::PROCESS_EXTENDED_BASIC_INFORMATION;
+use windows_sys::Wdk::System::Threading::{NtQueryInformationProcess, ProcessBasicInformation};
 use windows_sys::Win32::Foundation::{
-    DuplicateHandle, DUPLICATE_SAME_ACCESS, FILETIME, STILL_ACTIVE,
+    DuplicateHandle, RtlNtStatusToDosError, DUPLICATE_SAME_ACCESS, ERROR_ACCESS_DENIED,
+    ERROR_INVALID_DATA, ERROR_MR_MID_NOT_FOUND, FILETIME, STATUS_ACCESS_DENIED, STILL_ACTIVE,
 };
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows_sys::Win32::System::SystemInformation::{
     IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_I386, IMAGE_FILE_MACHINE_UNKNOWN,
 };
+use windows_sys::Win32::System::SystemServices::{
+    PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY, PROCESS_MITIGATION_DYNAMIC_CODE_POLICY,
+};
 use windows_sys::Win32::System::Threading::{
-    GetCurrentProcess, GetExitCodeProcess, GetProcessId, GetProcessInformation, GetProcessTimes,
-    IsProcessCritical, IsWow64Process2, OpenProcess, ProcessProtectionLevelInfo,
+    GetCurrentProcess, GetExitCodeProcess, GetProcessId, GetProcessInformation,
+    GetProcessMitigationPolicy, GetProcessTimes, IsProcessCritical, IsWow64Process2, OpenProcess,
+    ProcessDynamicCodePolicy, ProcessProtectionLevelInfo, ProcessSignaturePolicy,
     QueryFullProcessImageNameW, TerminateProcess, PROCESS_ALL_ACCESS, PROCESS_CREATE_THREAD,
     PROCESS_NAME_WIN32, PROCESS_PROTECTION_LEVEL_INFORMATION, PROCESS_QUERY_INFORMATION,
     PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE,
@@ -80,6 +87,37 @@ impl ProcessAccess {
 pub struct ProcessMachine {
     pub process: MachineKind,
     pub native: MachineKind,
+}
+
+/// The dynamic-code mitigation bits the service admission policy consumes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProcessDynamicCodeMitigation {
+    pub prohibit_dynamic_code: bool,
+    pub allow_thread_opt_out: bool,
+}
+
+/// The binary-signature mitigation bits the service admission policy consumes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProcessBinarySignatureMitigation {
+    pub microsoft_signed_only: bool,
+    pub store_signed_only: bool,
+    pub mitigation_opt_in: bool,
+}
+
+/// The lifecycle facts `NtQueryInformationProcess` exposes beyond the
+/// basic block: whether Process Lifecycle Management has frozen the
+/// process and whether the kernel has started deleting it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProcessLifecycleFlags {
+    pub frozen: bool,
+    pub deleting: bool,
+}
+
+fn decode_lifecycle_flags(flags: u32) -> ProcessLifecycleFlags {
+    ProcessLifecycleFlags {
+        deleting: flags & 0x4 != 0,
+        frozen: flags & 0x10 != 0,
+    }
 }
 
 /// An image machine, reduced to the cases the service can act on.
@@ -250,6 +288,50 @@ impl Process {
         })
     }
 
+    /// Returns whether the process is frozen or is being deleted.
+    ///
+    /// This query works with `PROCESS_QUERY_LIMITED_INFORMATION`.
+    pub fn lifecycle_flags(&self) -> io::Result<ProcessLifecycleFlags> {
+        let mut information = PROCESS_EXTENDED_BASIC_INFORMATION {
+            Size: size_of::<PROCESS_EXTENDED_BASIC_INFORMATION>(),
+            ..Default::default()
+        };
+        let mut returned = 0_u32;
+        // SAFETY: the handle is live; `information` is zeroed with its required
+        // Size set, and both writable pointers describe local values that
+        // outlive the native query.
+        let status = unsafe {
+            NtQueryInformationProcess(
+                self.handle.as_raw(),
+                ProcessBasicInformation,
+                (&mut information as *mut PROCESS_EXTENDED_BASIC_INFORMATION).cast(),
+                size_of::<PROCESS_EXTENDED_BASIC_INFORMATION>() as u32,
+                &mut returned,
+            )
+        };
+        if status < 0 {
+            // SAFETY: the conversion accepts the status value returned by the
+            // immediately preceding native query and has no pointer arguments.
+            let mut code = unsafe { RtlNtStatusToDosError(status) };
+            if code == 0 || code == ERROR_MR_MID_NOT_FOUND || code == u32::MAX {
+                code = if status == STATUS_ACCESS_DENIED {
+                    ERROR_ACCESS_DENIED
+                } else {
+                    ERROR_INVALID_DATA
+                };
+            }
+            return Err(io::Error::from_raw_os_error(code as i32));
+        }
+        if returned < size_of::<PROCESS_EXTENDED_BASIC_INFORMATION>() as u32 {
+            return Err(io::Error::from_raw_os_error(ERROR_INVALID_DATA as i32));
+        }
+        // SAFETY: the successful native query initialized the union storage,
+        // and the binding exposes the lifecycle bitfield as `Flags`.
+        Ok(decode_lifecycle_flags(unsafe {
+            information.Anonymous.Flags
+        }))
+    }
+
     /// `Some(code)` once the process has exited, `None` while it still runs.
     pub fn exit_code(&self) -> io::Result<Option<u32>> {
         let mut exit_code = 0_u32;
@@ -258,6 +340,25 @@ impl Process {
             return Err(io::Error::last_os_error());
         }
         Ok((exit_code != STILL_ACTIVE as u32).then_some(exit_code))
+    }
+
+    /// Whether the process runs at any protection level.
+    pub fn protection(&self) -> io::Result<bool> {
+        let mut information = PROCESS_PROTECTION_LEVEL_INFORMATION::default();
+        // SAFETY: the handle is live; the buffer pointer and length describe
+        // exactly the local `PROCESS_PROTECTION_LEVEL_INFORMATION`.
+        if unsafe {
+            GetProcessInformation(
+                self.handle.as_raw(),
+                ProcessProtectionLevelInfo,
+                (&mut information as *mut PROCESS_PROTECTION_LEVEL_INFORMATION).cast(),
+                size_of::<PROCESS_PROTECTION_LEVEL_INFORMATION>() as u32,
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(information.ProtectionLevel != PROTECTION_LEVEL_NONE)
     }
 
     /// Whether the process runs at any protection level, or whether that
@@ -280,6 +381,16 @@ impl Process {
         information.ProtectionLevel != PROTECTION_LEVEL_NONE
     }
 
+    /// Whether the process is marked critical.
+    pub fn criticality(&self) -> io::Result<bool> {
+        let mut critical = 0;
+        // SAFETY: the handle is live; the out pointer is a local `BOOL`.
+        if unsafe { IsProcessCritical(self.handle.as_raw(), &mut critical) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(critical != 0)
+    }
+
     /// Whether the process is marked critical, or whether that cannot be
     /// determined. Both answers keep the service away from it.
     pub fn is_critical_or_unknown(&self) -> bool {
@@ -287,6 +398,57 @@ impl Process {
         // SAFETY: the handle is live; the out pointer is a local `BOOL`.
         let queried = unsafe { IsProcessCritical(self.handle.as_raw(), &mut critical) };
         queried == 0 || critical != 0
+    }
+
+    /// The dynamic-code mitigation bits, preserving a failed policy query.
+    pub fn dynamic_code_mitigation(&self) -> io::Result<ProcessDynamicCodeMitigation> {
+        let mut policy = PROCESS_MITIGATION_DYNAMIC_CODE_POLICY::default();
+        // SAFETY: the handle is live; the buffer pointer and length describe
+        // exactly the local mitigation policy structure.
+        if unsafe {
+            GetProcessMitigationPolicy(
+                self.handle.as_raw(),
+                ProcessDynamicCodePolicy,
+                (&mut policy as *mut PROCESS_MITIGATION_DYNAMIC_CODE_POLICY).cast(),
+                size_of::<PROCESS_MITIGATION_DYNAMIC_CODE_POLICY>(),
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: the binding exposes the policy bitfield through this union
+        // member, which was initialized by the successful query above.
+        let flags = unsafe { policy.Anonymous.Flags };
+        Ok(ProcessDynamicCodeMitigation {
+            prohibit_dynamic_code: flags & (1 << 0) != 0,
+            allow_thread_opt_out: flags & (1 << 1) != 0,
+        })
+    }
+
+    /// The binary-signature mitigation bits, preserving a failed policy query.
+    pub fn binary_signature_mitigation(&self) -> io::Result<ProcessBinarySignatureMitigation> {
+        let mut policy = PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY::default();
+        // SAFETY: the handle is live; the buffer pointer and length describe
+        // exactly the local mitigation policy structure.
+        if unsafe {
+            GetProcessMitigationPolicy(
+                self.handle.as_raw(),
+                ProcessSignaturePolicy,
+                (&mut policy as *mut PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY).cast(),
+                size_of::<PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY>(),
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: the binding exposes the policy bitfield through this union
+        // member, which was initialized by the successful query above.
+        let flags = unsafe { policy.Anonymous.Flags };
+        Ok(ProcessBinarySignatureMitigation {
+            microsoft_signed_only: flags & (1 << 0) != 0,
+            store_signed_only: flags & (1 << 1) != 0,
+            mitigation_opt_in: flags & (1 << 2) != 0,
+        })
     }
 
     /// The Win32 image path, or `None` when it cannot be read.
@@ -380,7 +542,10 @@ mod tests {
 
     use windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER;
 
-    use super::{process_session_id, MachineKind, Process, ProcessAccess};
+    use super::{
+        decode_lifecycle_flags, process_session_id, MachineKind, Process, ProcessAccess,
+        ProcessLifecycleFlags,
+    };
     use crate::handle::WaitOutcome;
     use crate::job::JobObject;
 
@@ -411,9 +576,59 @@ mod tests {
     }
 
     #[test]
+    fn lifecycle_flag_decoder_uses_the_documented_bits_only() {
+        for (raw, expected) in [
+            (
+                0,
+                ProcessLifecycleFlags {
+                    frozen: false,
+                    deleting: false,
+                },
+            ),
+            (
+                0x4,
+                ProcessLifecycleFlags {
+                    frozen: false,
+                    deleting: true,
+                },
+            ),
+            (
+                0x10,
+                ProcessLifecycleFlags {
+                    frozen: true,
+                    deleting: false,
+                },
+            ),
+            (
+                0x14,
+                ProcessLifecycleFlags {
+                    frozen: true,
+                    deleting: true,
+                },
+            ),
+            (
+                0x58,
+                ProcessLifecycleFlags {
+                    frozen: true,
+                    deleting: false,
+                },
+            ),
+        ] {
+            assert_eq!(decode_lifecycle_flags(raw), expected);
+        }
+    }
+
+    #[test]
     fn the_current_process_answers_every_identity_query() {
         let process = Process::open(std::process::id(), ProcessAccess::QueryLimited).unwrap();
         assert!(process.creation_time().unwrap() > 0);
+        assert_eq!(
+            process.lifecycle_flags().unwrap(),
+            ProcessLifecycleFlags {
+                frozen: false,
+                deleting: false,
+            }
+        );
         assert_eq!(process.exit_code().unwrap(), None);
         assert!(!process.is_critical_or_unknown());
         assert!(!process.is_protected_or_unknown());

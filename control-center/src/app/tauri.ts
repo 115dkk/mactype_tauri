@@ -11,11 +11,14 @@ import type {
   LaunchContext,
   ManualLaunchCandidate,
   NativePreviewOptions,
+  NativePreviewState,
   PreviewRequest,
   PreviewResult,
   ProfileEntry,
   ProfileSnapshot,
-  RecentActivity,
+  EventFilter,
+  EventLogSummary,
+  EventRecord,
   SessionTarget,
   ViewId,
 } from "./model";
@@ -113,8 +116,20 @@ export async function loadDiagnosticLogs(): Promise<ReadonlyArray<string>> {
   return getRuntimeAdapter().loadDiagnosticLogs();
 }
 
-export async function loadRecentActivity(): Promise<ReadonlyArray<RecentActivity>> {
+export async function loadRecentActivity(): Promise<ReadonlyArray<EventRecord>> {
   return getRuntimeAdapter().loadRecentActivity();
+}
+
+export async function listEvents(filter?: EventFilter, limit?: number): Promise<ReadonlyArray<EventRecord>> {
+  return getRuntimeAdapter().listEvents(filter, limit);
+}
+
+export async function loadEventLogSummary(): Promise<EventLogSummary> {
+  return getRuntimeAdapter().loadEventLogSummary();
+}
+
+export function subscribeEventLog(listener: () => void): () => void {
+  return getRuntimeAdapter().subscribeEventLog(listener);
 }
 
 export async function exportDiagnostics(): Promise<string> {
@@ -205,8 +220,44 @@ export async function renderProfilePreview(request: PreviewRequest): Promise<Pre
   return getRuntimeAdapter().renderProfilePreview(request);
 }
 
-export async function setNativePreview(visible: boolean, options?: NativePreviewOptions): Promise<boolean> {
+export async function setNativePreview(visible: boolean, options?: NativePreviewOptions): Promise<NativePreviewState> {
   return getRuntimeAdapter().setNativePreview(visible, options);
+}
+
+export function subscribeNativePreview(listener: (state: NativePreviewState) => void): () => void {
+  return getRuntimeAdapter().subscribeNativePreview(listener);
+}
+
+export async function openPreviewStudio(): Promise<void> {
+  return getRuntimeAdapter().openPreviewStudio();
+}
+
+export async function reportPreviewStudioReady(): Promise<void> {
+  return getRuntimeAdapter().reportPreviewStudioReady();
+}
+
+export async function closePreviewStudio(): Promise<void> {
+  return getRuntimeAdapter().closePreviewStudio();
+}
+
+export async function pickPngExportPath(filterName: string, defaultName: string): Promise<string | null> {
+  return getRuntimeAdapter().pickPngExportPath(filterName, defaultName);
+}
+
+export async function writePreviewExport(path: string, pngBase64: string): Promise<string> {
+  return getRuntimeAdapter().writePreviewExport(path, pngBase64);
+}
+
+export async function emitStudioMessage(channel: string, payload: unknown): Promise<void> {
+  return getRuntimeAdapter().emitStudioMessage(channel, payload);
+}
+
+export function subscribeStudioMessage<T>(channel: string, listener: (payload: T) => void): () => void {
+  return getRuntimeAdapter().subscribeStudioMessage(channel, listener);
+}
+
+export function windowLabel(): string {
+  return getRuntimeAdapter().windowLabel();
 }
 
 export function previewImageUrl(path: string): string {

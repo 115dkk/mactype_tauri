@@ -6,13 +6,20 @@ use mactype_service_platform::{
     WmiPropertyStep,
 };
 
-use crate::ProcessEventSource;
+use crate::{ProcessEventSource, FALLBACK_PROCESS_CREATION_QUERY};
 
 const PROCESS_SNAPSHOT_QUERY: &str = "SELECT ProcessID FROM Win32_Process";
 const SNAPSHOT_ROW_TIMEOUT: Duration = Duration::from_millis(5_000);
 
+#[derive(Clone, Copy)]
+enum ProcessEventKind {
+    StartTrace,
+    IntrinsicCreation,
+}
+
 pub struct WmiProcessEventSource {
     enumerator: Option<WmiEnumerator>,
+    event_kind: Option<ProcessEventKind>,
     connection: WmiConnection,
     _apartment: ComApartment,
 }
@@ -56,6 +63,7 @@ impl WmiProcessEventSource {
         })?;
         Ok(Self {
             enumerator: None,
+            event_kind: None,
             connection,
             _apartment: apartment,
         })
@@ -64,14 +72,32 @@ impl WmiProcessEventSource {
 
 impl ProcessEventSource for WmiProcessEventSource {
     fn subscribe(&mut self, query: &str) -> Result<(), StructuredServiceError> {
-        let enumerator = self.connection.notification_query(query).map_err(|error| {
-            wmi_error(
-                "wmi-subscription-failed",
-                "the temporary Win32_Process creation subscription failed",
-                error,
-            )
-        })?;
+        let trace = self.connection.notification_query(query);
+        let (enumerator, event_kind) = match trace {
+            Ok(enumerator) => (enumerator, ProcessEventKind::StartTrace),
+            Err(error) if error.permits_intrinsic_process_fallback() => {
+                let fallback = self
+                    .connection
+                    .notification_query(FALLBACK_PROCESS_CREATION_QUERY)
+                    .map_err(|fallback_error| {
+                        wmi_error(
+                            "wmi-subscription-failed",
+                            "both immediate and fallback process creation subscriptions failed",
+                            fallback_error,
+                        )
+                    })?;
+                (fallback, ProcessEventKind::IntrinsicCreation)
+            }
+            Err(error) => {
+                return Err(wmi_error(
+                    "wmi-subscription-failed",
+                    "the immediate process creation subscription failed",
+                    error,
+                ));
+            }
+        };
         self.enumerator = Some(enumerator);
+        self.event_kind = Some(event_kind);
         Ok(())
     }
 
@@ -128,17 +154,39 @@ impl ProcessEventSource for WmiProcessEventSource {
                 ))
             }
         };
-        extract_process_id(&event).map(Some)
+        match self.event_kind {
+            Some(ProcessEventKind::StartTrace) => extract_process_id(&event).map(Some),
+            Some(ProcessEventKind::IntrinsicCreation) => {
+                extract_intrinsic_process_id(&event).map(Some)
+            }
+            None => Err(service_error(
+                "wmi-not-subscribed",
+                "the WMI process observer has no event shape",
+                None,
+            )),
+        }
     }
 }
 
 fn extract_process_id(event: &WmiObject) -> Result<u32, StructuredServiceError> {
+    let pid = extract_process_id_property(event)?;
+    if pid == 0 {
+        return Err(service_error(
+            "wmi-event-invalid",
+            "the WMI process event ProcessID is zero",
+            None,
+        ));
+    }
+    Ok(pid)
+}
+
+fn extract_intrinsic_process_id(event: &WmiObject) -> Result<u32, StructuredServiceError> {
     let target = event.target_instance_with_step().map_err(|failure| {
         let message = match failure.step {
-            WmiPropertyStep::Get => "the WMI process event has no TargetInstance",
-            WmiPropertyStep::Convert => "the WMI process event TargetInstance is not an object",
+            WmiPropertyStep::Get => "the fallback WMI process event has no TargetInstance",
+            WmiPropertyStep::Convert => "the fallback WMI TargetInstance is not an object",
             WmiPropertyStep::Cast => {
-                "the WMI process event TargetInstance is not a Win32_Process object"
+                "the fallback WMI TargetInstance is not a Win32_Process object"
             }
         };
         wmi_error("wmi-event-invalid", message, failure.error)
@@ -147,7 +195,7 @@ fn extract_process_id(event: &WmiObject) -> Result<u32, StructuredServiceError> 
     if pid == 0 {
         return Err(service_error(
             "wmi-event-invalid",
-            "the WMI process event ProcessID is zero",
+            "the fallback WMI process event ProcessID is zero",
             None,
         ));
     }

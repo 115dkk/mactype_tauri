@@ -44,9 +44,14 @@ export function PreferenceMenu<T extends string>({ icon, label, options, value, 
   }, [open]);
 
   const choose = (next: T) => {
+    const trigger = triggerRef.current;
     onChange(next);
     setOpen(false);
-    triggerRef.current?.focus();
+    trigger?.focus();
+    // Switching skins replaces the shell, including this trigger.
+    requestAnimationFrame(() => {
+      if (!trigger?.isConnected) document.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`)?.focus();
+    });
   };
 
   const navigateOptions = (event: KeyboardEvent<HTMLDivElement>) => {

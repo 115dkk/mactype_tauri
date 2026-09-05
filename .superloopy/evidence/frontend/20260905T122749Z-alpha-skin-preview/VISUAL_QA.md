@@ -47,8 +47,10 @@ Animation-frame audits check visible intermediate frames, not just screenshots.
 
 - Local production build, ESLint, i18n (10 locales), and generated-setting
   validation passed.
-- Focused browser regressions: 34 passed, 2 skipped. The skipped cases avoid
+- Focused preview/switch regressions: 34 passed, 2 skipped. The skipped cases avoid
   repeating an explicit 880x560 / 192-DPI test in unrelated viewport projects.
+- Select-marker/range regression: 12 passed across all four skins; keyboard
+  selection, exact slider stepping, LTR/RTL label clearance, and forced colours.
 - Broader skin/view and Studio selection: 79 passed, 5 skipped (viewport
   duplicates guarded by existing tests). The full gallery remains an
   exact-commit CI requirement.
@@ -60,3 +62,12 @@ Animation-frame audits check visible intermediate frames, not just screenshots.
   GitHub Actions. Verify the exact branch HEAD, not an earlier green run.
   Where the local workspace lacks `gh`, use the connected GitHub Actions API
   to inspect the same head SHA, jobs, and completion results.
+
+## CI follow-up
+
+The first push (`caecfd6bb7fc24453cd778ff4ae524ba2c67d584`) exposed one
+Rustfmt assertion-layout difference. The follow-up applies the formatter's
+reported layout. It also removes duplicate native select markers while
+retaining Cupertino's accent badge; all 12 added control regressions pass.
+After captures are refreshed from this follow-up build. Exact-HEAD CI must
+finish again before delivery; the earlier failed commit is not a green gate.

@@ -21,7 +21,7 @@ renderer compatibility. SEO is not applicable to this embedded desktop UI.
 | Invariant | Owner | Acceptance and evidence |
 | --- | --- | --- |
 | A switch thumb remains inside its track when on/off, hovered, disabled, or RTL | shared CSS primitive and skin tokens | `skin-preview.spec.ts`: all four skins, LTR/RTL, state bounds, keyboard Space and focus |
-| Native selection inputs retain square metrics and ranges retain keyboard editing | shared CSS and browser controls | gallery control captures and Tuner keyboard regression |
+| Native selection inputs retain square metrics and ranges retain keyboard editing | shared CSS and browser controls | all-skin select/range regression: marker bounds, RTL, forced colours, exact keyboard stepping |
 | Console's large text fits the bitmap without CSS scaling; every size stays reachable | `SpecimenBoard`, `wrapSample`, `specimenStripHeight` | 880x560 at 192 DPI, six strips, text bounds and scrolling; desktop/mobile gallery |
 | Enabled localized font substitutions select the replacement family; disabled mappings do not | profile read command and `previewFonts` | Korean alias-to-Pretendard gallery fixture, switch back to Segoe UI, disabled-mode case; Rust dirty-document isolation test |
 | Canvas gaps and raster backgrounds match before, during, and after inversion | decoded preview batch and its palette | animation-frame palette audit with delayed helper simulation, skin theme changes, Console and Studio inversion |

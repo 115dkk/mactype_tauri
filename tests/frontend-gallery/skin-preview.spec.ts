@@ -89,17 +89,54 @@ for (const skin of gallerySkins) {
     await expect(canvas).toHaveAttribute("data-dark", "false");
     await finishPaletteAudit(page);
     await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-preview-palette.png`), fullPage: true });
-    const ranges = page.locator('input[type="range"]:visible');
-    if (await ranges.count()) {
-      const slider = ranges.first();
-      const value = await slider.inputValue();
-      await slider.focus();
-      await page.keyboard.press("Home");
-      await page.keyboard.press("ArrowRight");
-      expect(Number(await slider.inputValue())).toBeGreaterThanOrEqual(Number(await slider.getAttribute("min")));
-      expect(value).not.toBe("");
-    }
+
   });
+  test(`${skin} select markers fit and range controls retain keyboard editing`, async ({ page }, testInfo) => {
+    await page.goto(`/?view=profiles&gallery=1&lang=ko&skin=${skin}&theme=light`);
+    const select = page.locator("#hinting_mode");
+    await expect(select).toBeVisible();
+    for (const direction of ["ltr", "rtl"]) {
+      await page.locator("html").evaluate((element, direction) => { element.dir = direction; }, direction);
+      const metrics = await select.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          appearance: style.appearance,
+          padding: parseFloat(style.paddingInlineEnd),
+          marker: parseFloat(style.getPropertyValue("--select-marker-size")),
+          inset: parseFloat(style.getPropertyValue("--select-marker-inset")),
+          height: element.clientHeight,
+          background: style.backgroundImage,
+        };
+      });
+      expect(metrics.appearance).toBe("none");
+      expect(metrics.background).toContain("linear-gradient");
+      expect(metrics.marker).toBeLessThan(metrics.height);
+      expect(metrics.padding).toBeGreaterThanOrEqual(metrics.marker + metrics.inset);
+    }
+    await select.focus();
+    await select.press("Home");
+    const first = await select.inputValue();
+    await select.press("ArrowDown");
+    await select.press("Enter");
+    await expect(select).not.toHaveValue(first);
+    await page.locator("html").evaluate((element) => { element.dir = "ltr"; });
+    await page.getByRole("button", { name: "글자 모양", exact: true }).click();
+    const slider = page.locator("#normal_weight");
+    await expect(slider).toBeVisible();
+    await slider.focus();
+    await slider.press("Home");
+    const minimum = Number(await slider.getAttribute("min"));
+    const step = Number(await slider.getAttribute("step"));
+    await expect(slider).toHaveValue(String(minimum));
+    await slider.press("ArrowRight");
+    await expect(slider).toHaveValue(String(minimum + step));
+    const heights = await slider.evaluate((element) => [element.getBoundingClientRect().height, document.getElementById("normal_weight-value")!.getBoundingClientRect().height]);
+    expect(Math.abs(heights[0] - heights[1])).toBeLessThanOrEqual(2);
+    await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-select-range.png`) });
+    await page.emulateMedia({ forcedColors: "active" });
+    await expect(page.locator(".preview-controls select").first()).toHaveCSS("appearance", "auto");
+  });
+
 }
 
 test("Console uses the localized replacement without opening that profile in the editor", async ({ page }) => {

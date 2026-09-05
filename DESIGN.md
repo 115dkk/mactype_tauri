@@ -17,6 +17,12 @@ derives both thumb positions from these metrics in LTR and RTL, including
 hover and disabled states. Skins must not add another transform or offset.
 Ranges retain browser keyboard semantics and use the skin control height
 and accent; native checkboxes and radios keep fixed, non-shrinking squares.
+Closed select markers use `--select-marker-size` (8 px, Console 6 px),
+`--select-marker-inset` (8 px, Cupertino 7 px), and a skin foreground colour.
+Cupertino retains its 16 px accent badge with an on-primary marker; other
+skins have no badge. Shared CSS reserves label space and mirrors the marker
+in RTL. The native popup, keyboard model, and forced-colour marker remain
+browser-owned.
 
 The bitmap request owns a preview canvas's colours. Canvas backgrounds must
 not inherit an unrelated skin surface colour. Keep the displayed batch and

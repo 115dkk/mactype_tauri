@@ -198,7 +198,7 @@ try {
         }
     }
     $decoyResponse = Invoke-Broker -Executable $Injector -Identity $decoy.Identity
-    Assert-Response $decoyResponse 2 'rejected' 'conflicting-mactype-module-loaded'
+    Assert-Response $decoyResponse 0 'skipped' 'conflicting-mactype-module-loaded'
     $decoy.Process.Refresh()
     if ($decoy.Process.HasExited) {
         throw 'Injector damaged the target after detecting a same-basename conflict.'

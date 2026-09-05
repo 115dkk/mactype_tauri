@@ -13,7 +13,7 @@ This document is the normative machine-runtime contract. In product language, **
 
 ## Runtime and profile generations
 
-A runtime generation is immutable and selected by `current.json`. A profile generation is the SHA-256-addressed `generations\<digest>\profile.ini` selected by `active.json`. Setup validates fixed filenames and hashes before activation, writes a durable recovery journal, switches the pointer atomically, and clears the journal only after success. Startup fails closed while recovery is pending or the generated DLL-adjacent `MacType.ini` differs from the active profile bytes.
+A runtime generation is immutable and selected by `current.json`. A profile generation is the SHA-256-addressed `generations\<digest>\profile.ini` selected by `active.json`. Setup validates fixed filenames and hashes before activation, writes a durable recovery journal, switches the pointer atomically, and clears the journal only after success. Startup fails closed while recovery is pending or the generated DLL-adjacent `MacType.ini` differs from the active profile bytes. The protected DACL grants ALL APPLICATION PACKAGES and ALL RESTRICTED APPLICATION PACKAGES read+execute only, so AppContainer and LPAC processes can map the fixed DLL and read its adjacent profile.
 
 ## Observation and injection
 

@@ -6,7 +6,7 @@ const galleryRoot = path.join(repositoryRoot, "artifacts", "frontend-gallery");
 
 export default defineConfig({
   testDir: ".",
-  testMatch: "gallery.spec.ts",
+  testMatch: ["gallery.spec.ts", "skin-preview.spec.ts"],
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,

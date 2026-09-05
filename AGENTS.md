@@ -59,6 +59,15 @@ architecture rationale to the named canonical document. Remove progress
 narration, commented-out code, model provenance, and untracked
 TODO/FIXME/HACK/XXX markers before delivery.
 
+## Skin and preview changes
+
+All four skins follow the shared Superloopy UX, embedded-Web, desktop,
+hybrid, and claim-selected layout contracts mapped in
+`docs/frontend-skin-validation.md`. `DESIGN.md` and `docs/skin-designs.md`
+remain the visual authority. Run the affected client regression cases and
+retain rendered evidence; native window claims additionally require the
+Windows Tauri smoke gate. A gallery mock is not native window proof.
+
 ## `codex/alpha-plus-dll` exception
 
 `codex/alpha-plus-dll` is the long-lived delivery branch and must never be

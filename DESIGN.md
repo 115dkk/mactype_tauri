@@ -8,6 +8,23 @@ The user picks a skin from the preference menu at the bottom of the navigation, 
 
 Each skin's own rules (palette, metrics, components, page paradigms, and the chrome of the native preview window) are recorded in `docs/skin-designs.md`; add a page or a control to a skin from that record.
 
+Every skin uses the validation contract in `docs/frontend-skin-validation.md`.
+Selection geometry uses shared `--switch-width`, `--switch-height`,
+`--switch-thumb`, `--switch-inset`, `--switch-border`, and `--selection-size`
+tokens. Classic and Fluent use 40/20/12/3/1/16 px respectively; Console uses
+30/16/12/1/1/14 px; Cupertino uses 26/15/13/1/0/16 px. The shared primitive
+derives both thumb positions from these metrics in LTR and RTL, including
+hover and disabled states. Skins must not add another transform or offset.
+Ranges retain browser keyboard semantics and use the skin control height
+and accent; native checkboxes and radios keep fixed, non-shrinking squares.
+
+The bitmap request owns a preview canvas's colours. Canvas backgrounds must
+not inherit an unrelated skin surface colour. Keep the displayed batch and
+its palette together until all replacement images have decoded, then publish
+them together. Never CSS-invert, fade, stretch, or resample a renderer sample
+to mask a pending render. Specimens wrap at the available width, reserve the
+helper's inset and line advance, and scroll when taller than their panel.
+
 Colour restraint applies to all four: one accent hue, semantic colours reserved for meaning, no pure black or white surfaces, and no saturated primaries in decorative positions. The Cupertino sidebar tiles are the one place a skin colours navigation, and they are deliberately desaturated so the tiles read as a family and the selected row keeps the only saturated colour.
 
 - **Fluent** follows the Windows 11 Settings grammar. One Mica-like canvas that the title bar and navigation share, 36px navigation items with a 3×16 accent pill and section headings, a 28px display title with a muted subtitle, and settings cards (icon, regular-weight title, muted description, control at the trailing edge). The overview is a hero card followed by one card per fact; the service page is a hero card and expander cards whose sub-rows hold the details; profiles are a card gallery with a rendered thumbnail; the Tuner is an index of numbered circles, setting cards and a preview card.

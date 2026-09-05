@@ -71,3 +71,11 @@ reported layout. It also removes duplicate native select markers while
 retaining Cupertino's accent badge; all 12 added control regressions pass.
 After captures are refreshed from this follow-up build. Exact-HEAD CI must
 finish again before delivery; the earlier failed commit is not a green gate.
+
+The full gallery at `ca9d78319971ed8d167c2c1db2957835b96fb0a2` exposed a
+shared-error race in all three viewports: a decoded preview success cleared
+a rejected document mutation's message. Preview errors now have their own
+state, and document errors take display precedence. The existing recovery
+test additionally completes an inverted preview before rechecking the error
+and blocked save/apply controls. This regression plus the skin-preview suite
+passes locally: 49 passed, 2 viewport duplicates skipped; build and lint pass.

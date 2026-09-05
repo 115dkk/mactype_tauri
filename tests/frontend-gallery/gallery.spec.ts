@@ -821,6 +821,9 @@ test("a rejected profile mutation requires an explicit snapshot recovery before 
   await normalWeight.fill("12");
   await normalWeight.press("Tab");
   await expect(page.getByText("Gallery profile mutation failed.", { exact: true })).toBeVisible();
+  await page.getByTestId("preview-invert").click();
+  await expect(page.locator(".preview-canvas")).toHaveAttribute("data-dark", "true");
+  await expect(page.getByText("Gallery profile mutation failed.", { exact: true })).toBeVisible();
   await expect(save).toBeDisabled();
   await expect(apply).toBeDisabled();
 

@@ -200,7 +200,7 @@ where
             Err(error) => {
                 let (disposition, code) = if error.stage() == HelperLaunchStage::BeforeResume {
                     (
-                        BrokerDisposition::Rejected,
+                        BrokerDisposition::LaunchFailed,
                         "helper-launch-failed-before-resume",
                     )
                 } else if error.kind() == io::ErrorKind::Interrupted {
@@ -448,6 +448,7 @@ fn classify_renderer_result(
         ) if code == "renderer-reference-release-cleanup-unknown" => {
             Ok(BrokerDisposition::UncertainCleanup)
         }
+        ("skipped", true, None) if code == "process-frozen" => Ok(BrokerDisposition::TargetFrozen),
         ("skipped", true, None) => Ok(BrokerDisposition::Skipped),
         ("rejected", true, None) => Ok(BrokerDisposition::Rejected),
         ("failed", true, None) if safe_to_retry(code) => Ok(BrokerDisposition::Retryable),

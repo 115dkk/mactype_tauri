@@ -12,7 +12,7 @@ use crate::generated_unity_anticheat_catalog::{
 use crate::{
     BinarySignaturePolicy, DynamicCodePolicy, InspectionEvidence, PrivateFreeTypeClassification,
     ProcessArchitecture, ProcessIdentity, ProcessInspection, ProcessInspectionError,
-    ProcessInspector, TargetLiveness, UnityProcessClassification,
+    ProcessInspector, TargetLifecycle, TargetLiveness, UnityProcessClassification,
 };
 
 const MAX_UNITY_INSTALLATION_ENTRIES: usize = 4_096;
@@ -110,6 +110,37 @@ impl ProcessInspector for WindowsProcessInspector {
 
     fn probe_target_liveness(&self, identity: &ProcessIdentity) -> TargetLiveness {
         probe_windows_target_liveness(identity)
+    }
+
+    fn probe_target_lifecycle(&self, identity: &ProcessIdentity) -> TargetLifecycle {
+        let process = match Process::open(identity.pid, ProcessAccess::QueryLimited) {
+            Ok(process) => process,
+            Err(error) => {
+                return if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) {
+                    TargetLifecycle::Exiting
+                } else {
+                    TargetLifecycle::Unknown
+                };
+            }
+        };
+        match process.creation_time() {
+            // The PID was reused by a different process; the verified target is gone.
+            Ok(creation_time) if creation_time != identity.creation_time => {
+                return TargetLifecycle::Exiting;
+            }
+            Ok(_) => {}
+            Err(_) => return TargetLifecycle::Unknown,
+        }
+        let Ok(flags) = process.lifecycle_flags() else {
+            return TargetLifecycle::Unknown;
+        };
+        if flags.deleting {
+            TargetLifecycle::Exiting
+        } else if flags.frozen {
+            TargetLifecycle::Frozen
+        } else {
+            TargetLifecycle::Running
+        }
     }
 
     fn classify_unity_process(&self, identity: &ProcessIdentity) -> UnityProcessClassification {

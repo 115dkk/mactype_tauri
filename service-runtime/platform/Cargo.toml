@@ -27,6 +27,7 @@ windows-sys = { workspace = true, features = [
   "Win32_System_Environment",
   "Win32_System_IO",
   "Win32_System_JobObjects",
+  "Win32_System_Kernel",
   "Win32_System_Memory",
   "Win32_System_Ole",
   "Win32_System_Pipes",
@@ -38,6 +39,8 @@ windows-sys = { workspace = true, features = [
   "Win32_System_Threading",
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
+  "Wdk_System_SystemServices",
+  "Wdk_System_Threading",
 ] }
 windows = { workspace = true, features = [
   "Win32_Foundation",

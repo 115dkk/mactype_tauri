@@ -7,8 +7,11 @@ use std::os::windows::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use windows_sys::Wdk::System::SystemServices::PROCESS_EXTENDED_BASIC_INFORMATION;
+use windows_sys::Wdk::System::Threading::{NtQueryInformationProcess, ProcessBasicInformation};
 use windows_sys::Win32::Foundation::{
-    DuplicateHandle, DUPLICATE_SAME_ACCESS, FILETIME, STILL_ACTIVE,
+    DuplicateHandle, RtlNtStatusToDosError, DUPLICATE_SAME_ACCESS, ERROR_ACCESS_DENIED,
+    ERROR_INVALID_DATA, ERROR_MR_MID_NOT_FOUND, FILETIME, STATUS_ACCESS_DENIED, STILL_ACTIVE,
 };
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
@@ -99,6 +102,22 @@ pub struct ProcessBinarySignatureMitigation {
     pub microsoft_signed_only: bool,
     pub store_signed_only: bool,
     pub mitigation_opt_in: bool,
+}
+
+/// The lifecycle facts `NtQueryInformationProcess` exposes beyond the
+/// basic block: whether Process Lifecycle Management has frozen the
+/// process and whether the kernel has started deleting it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProcessLifecycleFlags {
+    pub frozen: bool,
+    pub deleting: bool,
+}
+
+fn decode_lifecycle_flags(flags: u32) -> ProcessLifecycleFlags {
+    ProcessLifecycleFlags {
+        deleting: flags & 0x4 != 0,
+        frozen: flags & 0x10 != 0,
+    }
 }
 
 /// An image machine, reduced to the cases the service can act on.
@@ -267,6 +286,50 @@ impl Process {
             process: MachineKind::from_raw(process),
             native: MachineKind::from_raw(native),
         })
+    }
+
+    /// Returns whether the process is frozen or is being deleted.
+    ///
+    /// This query works with `PROCESS_QUERY_LIMITED_INFORMATION`.
+    pub fn lifecycle_flags(&self) -> io::Result<ProcessLifecycleFlags> {
+        let mut information = PROCESS_EXTENDED_BASIC_INFORMATION {
+            Size: size_of::<PROCESS_EXTENDED_BASIC_INFORMATION>(),
+            ..Default::default()
+        };
+        let mut returned = 0_u32;
+        // SAFETY: the handle is live; `information` is zeroed with its required
+        // Size set, and both writable pointers describe local values that
+        // outlive the native query.
+        let status = unsafe {
+            NtQueryInformationProcess(
+                self.handle.as_raw(),
+                ProcessBasicInformation,
+                (&mut information as *mut PROCESS_EXTENDED_BASIC_INFORMATION).cast(),
+                size_of::<PROCESS_EXTENDED_BASIC_INFORMATION>() as u32,
+                &mut returned,
+            )
+        };
+        if status < 0 {
+            // SAFETY: the conversion accepts the status value returned by the
+            // immediately preceding native query and has no pointer arguments.
+            let mut code = unsafe { RtlNtStatusToDosError(status) };
+            if code == 0 || code == ERROR_MR_MID_NOT_FOUND || code == u32::MAX {
+                code = if status == STATUS_ACCESS_DENIED {
+                    ERROR_ACCESS_DENIED
+                } else {
+                    ERROR_INVALID_DATA
+                };
+            }
+            return Err(io::Error::from_raw_os_error(code as i32));
+        }
+        if returned < size_of::<PROCESS_EXTENDED_BASIC_INFORMATION>() as u32 {
+            return Err(io::Error::from_raw_os_error(ERROR_INVALID_DATA as i32));
+        }
+        // SAFETY: the successful native query initialized the union storage,
+        // and the binding exposes the lifecycle bitfield as `Flags`.
+        Ok(decode_lifecycle_flags(unsafe {
+            information.Anonymous.Flags
+        }))
     }
 
     /// `Some(code)` once the process has exited, `None` while it still runs.
@@ -479,7 +542,10 @@ mod tests {
 
     use windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER;
 
-    use super::{process_session_id, MachineKind, Process, ProcessAccess};
+    use super::{
+        decode_lifecycle_flags, process_session_id, MachineKind, Process, ProcessAccess,
+        ProcessLifecycleFlags,
+    };
     use crate::handle::WaitOutcome;
     use crate::job::JobObject;
 
@@ -510,9 +576,59 @@ mod tests {
     }
 
     #[test]
+    fn lifecycle_flag_decoder_uses_the_documented_bits_only() {
+        for (raw, expected) in [
+            (
+                0,
+                ProcessLifecycleFlags {
+                    frozen: false,
+                    deleting: false,
+                },
+            ),
+            (
+                0x4,
+                ProcessLifecycleFlags {
+                    frozen: false,
+                    deleting: true,
+                },
+            ),
+            (
+                0x10,
+                ProcessLifecycleFlags {
+                    frozen: true,
+                    deleting: false,
+                },
+            ),
+            (
+                0x14,
+                ProcessLifecycleFlags {
+                    frozen: true,
+                    deleting: true,
+                },
+            ),
+            (
+                0x58,
+                ProcessLifecycleFlags {
+                    frozen: true,
+                    deleting: false,
+                },
+            ),
+        ] {
+            assert_eq!(decode_lifecycle_flags(raw), expected);
+        }
+    }
+
+    #[test]
     fn the_current_process_answers_every_identity_query() {
         let process = Process::open(std::process::id(), ProcessAccess::QueryLimited).unwrap();
         assert!(process.creation_time().unwrap() > 0);
+        assert_eq!(
+            process.lifecycle_flags().unwrap(),
+            ProcessLifecycleFlags {
+                frozen: false,
+                deleting: false,
+            }
+        );
         assert_eq!(process.exit_code().unwrap(), None);
         assert!(!process.is_critical_or_unknown());
         assert!(!process.is_protected_or_unknown());

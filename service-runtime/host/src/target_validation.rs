@@ -13,6 +13,29 @@ pub enum TargetLiveness {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetLifecycle {
+    Running,
+    Frozen,
+    Exiting,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeferralReason {
+    Frozen,
+    HelperLaunchFailed,
+}
+
+impl DeferralReason {
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Frozen => "target-frozen",
+            Self::HelperLaunchFailed => "helper-launch-failed-before-resume",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InspectionEvidence<T> {
     Known(T),
@@ -86,6 +109,13 @@ pub trait ProcessInspector {
         TargetLiveness::Unknown
     }
 
+    /// Whether the verified identity can run a remote thread right now.
+    /// The default assumes it can.
+    fn probe_target_lifecycle(&self, identity: &ProcessIdentity) -> TargetLifecycle {
+        let _ = identity;
+        TargetLifecycle::Running
+    }
+
     fn classify_unity_process(&self, identity: &ProcessIdentity) -> UnityProcessClassification {
         let _ = identity;
         UnityProcessClassification::NotUnity
@@ -103,6 +133,7 @@ pub trait ProcessInspector {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProcessSkipReason {
     TargetUnavailable,
+    TargetExiting,
     ServiceSelf,
     SessionZero,
     Protected,
@@ -123,6 +154,7 @@ impl ProcessSkipReason {
     pub const fn code(self) -> &'static str {
         match self {
             Self::TargetUnavailable => "target-unavailable",
+            Self::TargetExiting => "target-exiting",
             Self::ServiceSelf => "service-self",
             Self::SessionZero => "session-zero",
             Self::Protected => "protected-process",
@@ -144,6 +176,10 @@ impl ProcessSkipReason {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProcessTargetDecision {
     Eligible(ProcessIdentity),
+    Deferred {
+        identity: ProcessIdentity,
+        reason: DeferralReason,
+    },
     Skipped {
         identity: Option<ProcessIdentity>,
         reason: ProcessSkipReason,
@@ -326,7 +362,16 @@ impl<'a> ProcessTargetValidator<'a> {
                 ProcessSkipReason::PrivateFreeTypeDetected,
             ));
         }
-        Ok(ProcessTargetDecision::Eligible(inspection.identity))
+        match self.inspector.probe_target_lifecycle(&inspection.identity) {
+            TargetLifecycle::Exiting => Ok(skipped(&inspection, ProcessSkipReason::TargetExiting)),
+            TargetLifecycle::Frozen => Ok(ProcessTargetDecision::Deferred {
+                identity: inspection.identity,
+                reason: DeferralReason::Frozen,
+            }),
+            TargetLifecycle::Running | TargetLifecycle::Unknown => {
+                Ok(ProcessTargetDecision::Eligible(inspection.identity))
+            }
+        }
     }
 }
 

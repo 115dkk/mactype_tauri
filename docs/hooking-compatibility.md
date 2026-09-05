@@ -24,6 +24,7 @@ or executable-name workaround.
 - `ProhibitDynamicCode` without thread opt-out, and any active Microsoft-only,
   Store-only, or mitigation-opt-in image signature policy, are explicit blocks.
 - A failed or unavailable mitigation query is not an implicit global refusal.
+- A frozen (PLM-suspended) target or a helper launch that fails before resume is a deferred target: the host re-checks it from a bounded deferred set, it is neither a failure nor a health condition, and it becomes a normal attempt when the target runs again. A deferred target that exits becomes a quiet skip.
 - MacType never calls `SetProcessMitigationPolicy` to weaken a target and never
   disables a browser sandbox, Code Integrity Guard, or Arbitrary Code Guard.
 - Names such as `chrome.exe`, `firefox.exe`, and `RuntimeBroker.exe` are not
@@ -47,6 +48,8 @@ or executable-name workaround.
 | Application owns the renderer instead of using GDI/DirectWrite | [#607](https://github.com/snowie2000/mactype/issues/607), [#1112](https://github.com/snowie2000/mactype/issues/1112), [#1143](https://github.com/snowie2000/mactype/issues/1143) | Classify as a renderer boundary, not an injection failure. Explicit Qt FreeType selection can opt into `PrivateFreeTypeAdmission`; unknown private renderers remain eligible rather than becoming broad name bans. Allowlisted UnityPlayer builds use `UnityFontHookLifecycle`, so the private-FreeType skip never disables an enabled Unity adapter. |
 | DLL presence or process-manager status but no verified visual change | [#1022](https://github.com/snowie2000/mactype/issues/1022), [#1054](https://github.com/snowie2000/mactype/issues/1054), [#1138](https://github.com/snowie2000/mactype/issues/1138), [#1139](https://github.com/snowie2000/mactype/issues/1139), [#1144](https://github.com/snowie2000/mactype/issues/1144), [#1146](https://github.com/snowie2000/mactype/issues/1146) | Keep module-loaded, hook-installed, rule-resolved, and pixel/face-substituted as separate claims. Several recent reports resolve to old or incompatible profiles, DirectWrite's narrower behavior, retained browser collections, ClearType state, or a private pixel layout rather than injection itself. The branch probes therefore require the active profile generation and semantic render evidence instead of treating a loaded module as success. |
 | Unsupported machine architecture | [#904](https://github.com/snowie2000/mactype/issues/904), [#1085](https://github.com/snowie2000/mactype/issues/1085) | Native ARM64 remains explicitly unsupported until a native core/helper exists. It is not sent to an x64 helper and does not degrade global health. |
+| Frozen packaged process | field log of this branch, 2026-09-05 | Retain the exact identity in the bounded deferred set and re-check its PLM lifecycle without logging or counting a failure. |
+| Transient helper launch failure at logon | field log of this branch, 2026-09-05 | Defer only failures before helper resume, retry with bounded backoff, and preserve the launch error if the deferral limit is reached. |
 
 ## Implemented evidence
 

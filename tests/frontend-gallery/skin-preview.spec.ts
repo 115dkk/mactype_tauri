@@ -200,3 +200,90 @@ test("Studio open failure is visible and allows retry and dismissal", async ({ p
   await error.getByRole("button").last().click();
   await expect(error).toHaveCount(0);
 });
+
+for (const locale of ["ko", "ar"]) {
+  test(`Console preference tiles expose the whole target and keyboard selection in ${locale}`, async ({ page }, testInfo) => {
+    await page.goto(`/?view=overview&gallery=1&skin=console&lang=${locale}&theme=light`);
+    const language = page.getByTestId("language-picker-trigger");
+    const skin = page.getByTestId("skin-picker-trigger");
+    for (const trigger of [language, skin]) {
+      await trigger.scrollIntoViewIfNeeded();
+      const geometry = await trigger.evaluate((button) => {
+        const box = button.getBoundingClientRect();
+        const tile = button.closest(".preference-control")!.getBoundingClientRect();
+        const icon = button.querySelector("svg")!.getBoundingClientRect();
+        const label = button.querySelector("span")!.getBoundingClientRect();
+        return { width: box.width, height: box.height, tileWidth: tile.width, tileHeight: tile.height,
+          iconBottom: icon.bottom, labelTop: label.top, centreOffset: Math.abs(icon.x + icon.width / 2 - (box.x + box.width / 2)) };
+      });
+      expect(geometry.width).toBeCloseTo(geometry.tileWidth, 0);
+      expect(geometry.height).toBeCloseTo(geometry.tileHeight, 0);
+      expect(geometry.height).toBeGreaterThanOrEqual(44);
+      expect(geometry.labelTop).toBeGreaterThan(geometry.iconBottom);
+      expect(geometry.centreOffset).toBeLessThan(1);
+      for (const position of [{ x: 3, y: 3 }, { x: geometry.width - 3, y: geometry.height - 3 }]) {
+        await trigger.click({ position });
+        await expect(trigger).toHaveAttribute("aria-expanded", "true");
+        const menu = page.getByRole("listbox");
+        await expect(menu).toBeVisible();
+        await expect(menu.locator('[aria-selected="true"]')).toBeFocused();
+        const box = await menu.boundingBox();
+        expect(box!.x).toBeGreaterThanOrEqual(0);
+        expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+        await page.keyboard.press("Escape");
+        await expect(menu).toHaveCount(0);
+        await expect(trigger).toBeFocused();
+      }
+    }
+    await language.focus();
+    await page.keyboard.press("ArrowDown");
+    const menu = page.getByRole("listbox");
+    await page.keyboard.press("Home");
+    await expect(menu.getByRole("option").first()).toBeFocused();
+    await page.keyboard.press("End");
+    await expect(menu.getByRole("option").last()).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(menu.getByRole("option").first()).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(menu.locator('[data-locale-option="en"]')).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(language).toBeFocused();
+    await page.keyboard.press("Space");
+    await page.keyboard.press("Tab");
+    await expect(menu).toHaveCount(0);
+    await expect(skin).toBeFocused();
+    await page.keyboard.press("Enter");
+    await page.locator(".console-work").click({ position: { x: 20, y: 20 } });
+    await expect(menu).toHaveCount(0);
+    await page.locator(".theme-toggle").click({ position: { x: 3, y: 3 } });
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await skin.click();
+    await menu.locator('[data-skin-option="cupertino"]').click();
+    await expect(page.locator("html")).toHaveAttribute("data-skin", "cupertino");
+    await expect(page.getByTestId("skin-picker-trigger")).toHaveText("Cupertino");
+    await expect(page.getByTestId("skin-picker-trigger")).toBeFocused();
+    await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-preference-journey-${locale}.png`) });
+  });
+}
+
+for (const skin of gallerySkins) {
+  test(`${skin} shared preference button fills its tile`, async ({ page }) => {
+    await page.goto(`/?view=overview&gallery=1&skin=${skin}&lang=en`);
+    for (const testId of ["language-picker-trigger", "skin-picker-trigger"]) {
+      const trigger = page.getByTestId(testId);
+      await trigger.scrollIntoViewIfNeeded();
+      const bounds = await trigger.evaluate((button) => {
+        const tile = button.closest(".preference-control")!.getBoundingClientRect();
+        const box = button.getBoundingClientRect();
+        return { width: box.width, height: box.height, tileWidth: tile.width, tileHeight: tile.height };
+      });
+      expect(bounds.width).toBeCloseTo(bounds.tileWidth, 0);
+      expect(bounds.height).toBeCloseTo(bounds.tileHeight, 0);
+      await trigger.click({ position: { x: 2, y: 2 } });
+      await expect(page.getByRole("listbox")).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(trigger).toBeFocused();
+    }
+  });
+}

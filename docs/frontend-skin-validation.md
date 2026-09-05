@@ -27,6 +27,25 @@ renderer compatibility. SEO is not applicable to this embedded desktop UI.
 | Canvas gaps and raster backgrounds match before, during, and after inversion | decoded preview batch and its palette | animation-frame palette audit with delayed helper simulation, skin theme changes, Console and Studio inversion |
 | Opening Studio never blocks the Windows UI thread, reuses a live window, and releases a closed window | asynchronous Tauri lifecycle owner | `Test-TauriWindows.ps1`: actual secondary-window render, hide/restore, destroy/recreate, second render and clean process exit |
 | An open failure is visible and supports retry/dismissal | shared app shell | gallery failed-IPC fixture; no unhandled promise rejection |
+| Language and skin tiles have one full-size button, with the Console icon above its label | `PreferenceMenu` and skin CSS | all-skin tile bounds and edge clicks; Console Korean/Arabic at three widths |
+| Preference menus support selection, dismissal, and keyboard return paths | `PreferenceMenu` | arrows, Home/End, Enter/Space, Escape, Tab, outside click, and focus restoration after the skin shell is replaced |
+
+## User-facing copy
+
+All ten catalogs explain what a setting changes and what users can do next.
+Avoid implementation provenance, registry/storage mechanics, and generic
+“stores this setting” descriptions. Keep useful technical option names when
+they identify a real compatibility choice, and explain the visible effect.
+Preserve save/apply distinctions, app-restart requirements, administrator
+approval, supported-game limitations, and actionable recovery instructions.
+Diagnostic event codes and parameters remain available for troubleshooting.
+
+DirectWrite rendering choices map to the existing values 0–6; their labels
+describe spacing and smoothing instead of “Mode N”. The enum mapping follows
+[Microsoft's DWRITE_RENDERING_MODE reference](https://learn.microsoft.com/en-us/windows/win32/api/dwrite/ne-dwrite-dwrite_rendering_mode).
+The catalog and Korean font-subset gates cover all localized keys and
+placeholders. Gallery assertions must follow reviewed copy without removing
+the corresponding interaction or state assertion.
 
 ## Required workflow
 

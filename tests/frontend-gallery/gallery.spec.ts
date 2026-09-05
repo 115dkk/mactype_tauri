@@ -67,7 +67,7 @@ const executionStateGallery = [
   { id: "legacy-uncertain", query: "system-service=migration-available&legacy=inaccessible", expected: "Legacy MacTray service status could not be verified" },
   { id: "mactray-current-session", query: "system-service=migration-available&legacy-tray=trusted-current", expected: "Existing MacTray is running" },
   { id: "mactray-other-session", query: "system-service=migration-available&legacy-tray=trusted-other", expected: "MacTray is running in another user session" },
-  { id: "mactray-untrusted-process", query: "system-service=migration-available&legacy-tray=untrusted", expected: "A same-named process could not be trusted" },
+  { id: "mactray-untrusted-process", query: "system-service=migration-available&legacy-tray=untrusted", expected: "Check this copy of MacTray" },
   { id: "mactray-process-unknown", query: "system-service=migration-available&legacy-tray=unknown", expected: "MacTray tray mode status is unavailable" },
   { id: "mactray-autostart", query: "system-service=migration-available&legacy-startup=hkcu-run", expected: "MacTray autostart must be disabled" },
   { id: "mactray-autostart-untrusted", query: "system-service=migration-available&legacy-startup=untrusted", expected: "A MacTray autostart entry could not be trusted" },
@@ -91,9 +91,9 @@ for (const state of executionStateGallery) {
 }
 
 for (const wording of [
-  { locale: "ko", expected: "새 서비스", forbidden: "신식 서비스" },
-  { locale: "zh-CN", expected: "新服务", forbidden: "新式服务" },
-  { locale: "zh-TW", expected: "新服務", forbidden: "新式服務" },
+  { locale: "ko", expected: "Control Center 서비스", forbidden: "신식 서비스" },
+  { locale: "zh-CN", expected: "Control Center 服务", forbidden: "新式服务" },
+  { locale: "zh-TW", expected: "Control Center 服務", forbidden: "新式服務" },
 ] as const) {
   test(`service terminology is natural in ${wording.locale}`, async ({ page }) => {
     await page.goto(`/?view=execution&gallery=1&lang=${wording.locale}&system-service=ready`, { waitUntil: "networkidle" });
@@ -107,7 +107,7 @@ test("copy review gallery captures the Korean ready service", async ({ page }, t
   await page.goto("/?view=execution&gallery=1&lang=ko&system-service=ready", { waitUntil: "networkidle" });
   const system = page.locator('details.service-row[data-kind="system"]');
   await system.locator("summary").click();
-  await expect(system).toContainText("현재 프로필");
+  await expect(system).toContainText("새로 여는 앱에 프로파일을 적용하고 있습니다.");
   await page.screenshot({
     path: path.join(galleryRoot, `${testInfo.project.name}-copy-review-ready-ko.png`),
     fullPage: true,
@@ -192,7 +192,7 @@ test("profile editor categories and collections remain interactive", async ({ pa
   await expect(page.locator(".profile-message")).toContainText("지금 저장했습니다");
   await expect(page.getByRole("button", { name: "지금 적용" })).toBeEnabled();
   await page.getByRole("button", { name: "지금 적용" }).click();
-  await expect(page.locator(".profile-message")).toContainText("실제 MacType 시스템 범위에 적용했습니다");
+  await expect(page.locator(".profile-message")).toContainText("프로파일을 MacType에 적용했습니다");
   await firstSelect.selectOption(initialOption);
   await expect(discard).toBeEnabled();
   await discard.click();
@@ -231,7 +231,7 @@ test("profile editor categories and collections remain interactive", async ({ pa
 
   await page.getByRole("button", { name: "고급·실험" }).click();
   await expect(page.getByText("DirectWrite 감마", { exact: true })).toBeVisible();
-  const shadow = page.getByRole("group", { name: "그림자 버퍼" });
+  const shadow = page.getByRole("group", { name: "글자 그림자" });
   await shadow.getByRole("checkbox").check();
   await shadow.getByRole("spinbutton", { name: "가로 위치" }).fill("-2");
   await shadow.getByRole("spinbutton", { name: "세로 위치" }).fill("3");
@@ -253,7 +253,7 @@ test("profile editor categories and collections remain interactive", async ({ pa
   await page.getByRole("combobox", { name: "제외 글꼴 · 목록에 글꼴 추가" }).selectOption("Calibri");
   await expect(page.locator(".list-editor li > code").filter({ hasText: "Calibri" })).toBeVisible();
   await expect(page.getByText("제외 프로그램", { exact: true })).toBeVisible();
-  await expect(page.getByText("주입 해제 DLL", { exact: true })).toBeVisible();
+  await expect(page.getByText("DLL로 앱 제외", { exact: true })).toBeVisible();
   await expect(page.getByText("글꼴 대체 제외 모듈", { exact: true })).toBeVisible();
   await expect(page.getByRole("img", { name: "현재 설정의 글자 렌더링 프리뷰" })).toHaveAttribute("data-dark", "false");
   await page.getByRole("button", { name: "색 반전" }).click();
@@ -288,7 +288,7 @@ test("structured list editors add typed entries, reject duplicates, and suggest 
   await expect(entryInput).toHaveAttribute("list", "list-process-suggestions");
   await expect(page.locator("#list-process-suggestions option[value='code.exe']")).toHaveCount(1);
 
-  const unloadDlls = page.locator(".list-editor").filter({ hasText: "주입 해제 DLL" });
+  const unloadDlls = page.locator(".list-editor").filter({ hasText: "DLL로 앱 제외" });
   await expect(unloadDlls.getByText("아직 항목이 없습니다.", { exact: true })).toBeVisible();
 
   expect(await overflowingElements(page)).toEqual([]);
@@ -346,7 +346,7 @@ test("native preview display mode dropdown drives the runtime adapter", async ({
 
   const nativePreviewState = () => page.evaluate(() => window.sessionStorage.getItem("gallery-native-preview"));
   const nativePreviewBackground = () => page.evaluate(() => window.sessionStorage.getItem("gallery-native-preview-background"));
-  await page.getByRole("button", { name: "실제 창에서 보기" }).click();
+  await page.getByRole("button", { name: "실시간 미리보기 창 열기" }).click();
   await expect.poll(nativePreviewState).toBe("sample");
   await expect.poll(nativePreviewBackground).toBe("#EEF1F4");
   /* The window draws its own chrome from the strings the Control Center hands over. */
@@ -373,13 +373,13 @@ test("native preview display mode dropdown drives the runtime adapter", async ({
   await expect.poll(async () => (await nativeOptions()).inverted).toBe(false);
   await expect.poll(nativePreviewBackground).toBe("#EEF1F4");
   // The window hiding itself (Escape, close button) flips the toggle without a click.
-  await expect(page.getByRole("button", { name: "실제 창 닫기" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "실시간 미리보기 창 닫기" })).toBeVisible();
   await page.evaluate(() => window.dispatchEvent(new CustomEvent("gallery-native-preview-state", { detail: { visible: false, displayMode: "listing", background: "#EEF1F4" } })));
-  await expect(page.getByRole("button", { name: "실제 창에서 보기" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "실시간 미리보기 창 열기" })).toBeVisible();
   await expect.poll(nativePreviewState).toBe("hidden");
-  await page.getByRole("button", { name: "실제 창에서 보기" }).click();
+  await page.getByRole("button", { name: "실시간 미리보기 창 열기" }).click();
   await expect.poll(nativePreviewState).toBe("listing");
-  await page.getByRole("button", { name: "실제 창 닫기" }).click();
+  await page.getByRole("button", { name: "실시간 미리보기 창 닫기" }).click();
   await expect.poll(nativePreviewState).toBe("hidden");
   expect(await overflowingElements(page)).toEqual([]);
 });
@@ -572,7 +572,7 @@ test("all settings exposes, edits, and saves child-process hooking", async ({ pa
   await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
   await page.locator(".navigation").getByRole("button", { name: "전체 설정" }).click();
 
-  const childHook = page.getByRole("switch", { name: "자식 프로세스에도 적용" });
+  const childHook = page.getByRole("switch", { name: "다른 앱에서 실행한 프로그램에도 적용" });
   const childHookRow = page.locator(".setting-row").filter({ has: childHook });
   const save = page.getByRole("button", { name: "지금 저장" });
   const discard = page.getByRole("button", { name: "변경 취소", exact: true });
@@ -714,7 +714,7 @@ test("slider drags and exact number edits create one undo revision per interacti
   await expect(exactWeight).toHaveValue(draggedValue);
 
   await page.getByRole("button", { name: "고급·실험", exact: true }).click();
-  const cacheRow = page.locator(".setting-row").filter({ hasText: "CacheMaxFaces" });
+  const cacheRow = page.locator(".setting-row").filter({ hasText: "글꼴 캐시 개수" });
   const cacheValue = cacheRow.locator('input[type="number"]');
   await expect(cacheRow.locator('input[type="range"]')).toHaveCount(0);
   await expect(cacheValue).toHaveValue("64");
@@ -933,7 +933,7 @@ test("writable profiles save to the original and apply by portable identity", as
   await expect(page.locator(".profile-message")).toContainText("Saved Default.ini");
   await expect(apply).toBeEnabled();
   await apply.click();
-  await expect(page.locator(".profile-message")).toContainText("Applied Default.ini");
+  await expect(page.locator(".profile-message")).toContainText("Applied the Default.ini profile to MacType.");
 
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-profile-direct-save-apply-en.png`), fullPage: true });
 });
@@ -1006,11 +1006,11 @@ test("execution and new system service controls remain interactive", async ({ pa
   await page.getByRole("button", { name: "등록 프로그램 실행" }).click();
   await expect(page.getByText(/등록 프로그램 1개를 MacType로 시작/)).toBeVisible();
   await page.getByRole("button", { name: "MacType로 실행" }).click();
-  await expect(page.getByText(/MacLoader로 프로세스 4242/)).toBeVisible();
+  await expect(page.getByText(/MacType을 적용해 앱을 실행했습니다\(PID 4242\)/)).toBeVisible();
   await expect(page.getByRole("heading", { name: "시스템 범위 모드" })).toBeVisible();
 
   await expect(page.getByText("MacType 시스템 적용 중", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "새 프로세스 적용 중지" }).click();
+  await page.getByRole("button", { name: "새로 여는 앱에 적용 중지" }).click();
   await expect(page.getByText("MacType 시스템 적용 꺼짐", { exact: true })).toBeVisible();
   await expect(page.getByText("MacType 시스템 적용을 잠시 껐습니다.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "현재 프로필 적용" }).click();
@@ -1030,7 +1030,7 @@ test("manual launch offers running processes first and file browsing second", as
   const manualRow = page.locator('details.service-row[data-kind="manual"]');
   await manualRow.locator("summary").click();
 
-  await expect(manualRow.getByText("실행 중인 프로세스", { exact: true })).toBeVisible();
+  await expect(manualRow.getByText("실행 중인 앱", { exact: true })).toBeVisible();
   const rows = manualRow.locator(".process-picker-row");
   await expect(rows).toHaveCount(5);
   await expect(rows.nth(0)).toContainText("code.exe");
@@ -1042,7 +1042,7 @@ test("manual launch offers running processes first and file browsing second", as
   const register = manualRow.getByRole("button", { name: "트레이에 등록" });
   await expect(register).toBeDisabled();
 
-  await manualRow.getByLabel("프로세스 필터").fill("note");
+  await manualRow.getByLabel("앱 필터").fill("note");
   await expect(rows).toHaveCount(1);
   await expect(rows.first()).toContainText("notepad.exe");
 
@@ -1071,7 +1071,7 @@ test("a running legacy service is never claimed as verified system application",
   await expect(legacy.getByRole("button", { name: "마이그레이션" })).toBeEnabled();
   await expect(legacy.getByRole("button", { name: "레거시 서비스 제거" })).toBeDisabled();
 
-  await page.getByRole("button", { name: "새 프로세스 적용 중지" }).click();
+  await page.getByRole("button", { name: "새로 여는 앱에 적용 중지" }).click();
   await expect(openService.locator('[data-state="legacy-service-migrate"]')).toBeVisible();
   await expect(openService).toContainText("레거시 MacTray 서비스를 먼저 정리해야 합니다");
   await expect(page.getByRole("button", { name: "현재 프로필 적용" })).toBeDisabled();
@@ -1137,7 +1137,7 @@ test("a foreign legacy MacType service blocks activation and offers no migration
   const openService = page.locator('[data-service-backend="open-source"]');
   await expect(openService.locator('[data-state="legacy-service-migrate"]')).toBeVisible();
   await expect(openService).toContainText("A foreign legacy MacTray service was detected");
-  await expect(openService).toContainText("does not match the expected MacTray configuration");
+  await expect(openService).toContainText("A different service is using the MacType name");
   await expect(openService).not.toContainText("Use Migrate below");
   await expect(openService.getByRole("button", { name: "Apply current profile" })).toBeDisabled();
   await expect(openService.getByRole("button", { name: "Install service" })).toBeDisabled();
@@ -1156,7 +1156,7 @@ test("a verified legacy service funnels activation through Migrate until it is r
   const openService = page.locator('[data-service-backend="open-source"]');
   await expect(openService.locator('[data-state="legacy-service-migrate"]')).toBeVisible();
   await expect(openService).toContainText("A legacy MacTray service must be resolved first");
-  await expect(openService).toContainText("A legacy MacTray service is installed");
+  await expect(openService).toContainText("An older MacTray service is installed");
   await expect(openService).not.toContainText("foreign legacy MacTray service");
   await expect(openService).not.toContainText("status could not be verified");
   await expect(openService.getByRole("button", { name: "Apply current profile" })).toBeDisabled();
@@ -1172,7 +1172,7 @@ test("a verified legacy service funnels activation through Migrate until it is r
   await expect(page.getByText("Migration to the new service completed.", { exact: true })).toBeVisible();
 
   await expect(legacy).toContainText("Stopped");
-  await expect(openService.getByRole("button", { name: "Stop applying to new processes" })).toBeEnabled();
+  await expect(openService.getByRole("button", { name: "Stop applying to new apps" })).toBeEnabled();
   await expect(openService.getByRole("button", { name: "Install service" })).toBeDisabled();
 
   await legacy.getByRole("button", { name: "Remove legacy service" }).click();
@@ -1206,9 +1206,8 @@ test("legacy migration explains concrete actions and rollback before it can cont
   const continueMigration = dialog.getByRole("button", { name: "Continue migration" });
   await expect(dialog).toBeVisible();
   await expect(cancel).toBeFocused();
-  await expect(dialog).toContainText("Reads the AppInit state and legacy service configuration");
-  await expect(dialog).toContainText("current INI state");
-  await expect(dialog).toContainText("backs up the profile file when present");
+  await expect(dialog).toContainText("Checks whether another MacType mode must be turned off first");
+  await expect(dialog).toContainText("Backs up the current settings and profile before switching");
   await expect(dialog).toContainText("Stops the legacy service");
   await expect(dialog).toContainText("copies the current profile to the new service");
   await expect(dialog).toContainText("installs and starts it");
@@ -1268,7 +1267,7 @@ test("the service page keeps its normal state to one summary and one action", as
   const summary = page.locator("[data-service-summary]");
   await expect(summary).toContainText("Profile");
   await expect(summary).toContainText("Default.ini");
-  await expect(summary).toContainText("Native service");
+  await expect(summary).toContainText("Control Center service");
   await expect(summary).toContainText("Running");
   await expect(summary.getByRole("button", { name: "Stop" })).toBeEnabled();
   await expect(summary.getByRole("button")).toHaveCount(1);
@@ -1284,7 +1283,7 @@ test("small degraded states stay in Details while failed configuration is action
   await expect(summary).toContainText("Running");
   await expect(summary).not.toContainText("Degraded");
   await expect(summary.getByRole("button", { name: "Repair service" })).toHaveCount(0);
-  await expect(page.getByText("Service running without verified system application", { exact: true })).toBeHidden();
+  await expect(page.getByText("Could not confirm that MacType is applying", { exact: true })).toBeHidden();
   await openServiceDetails(page);
   await expect(page.locator('[data-service-backend="open-source"]')).toContainText("Degraded");
 
@@ -1321,11 +1320,11 @@ test("a running unverified service remains stoppable without claiming it is inac
   await openServiceDetails(page);
 
   const openService = page.locator('[data-service-backend="open-source"]');
-  await expect(openService.getByRole("button", { name: "Stop applying to new processes" })).toBeEnabled();
-  await expect(openService).toContainText("Service running without verified system application");
-  await expect(openService).toContainText("The service is running, but system-wide application could not be confirmed. Stop remains available.");
+  await expect(openService.getByRole("button", { name: "Stop applying to new apps" })).toBeEnabled();
+  await expect(openService).toContainText("Could not confirm that MacType is applying");
+  await expect(openService).toContainText("The service is running, but its effect on apps could not be checked. You can still stop it.");
   await expect(openService).not.toContainText("Reopen the target app in this state to compare rendering without the applied settings.");
-  await openService.getByRole("button", { name: "Stop applying to new processes" }).click();
+  await openService.getByRole("button", { name: "Stop applying to new apps" }).click();
   await expect(page.getByText("MacType system application is temporarily off.", { exact: true })).toBeVisible();
 });
 
@@ -1333,14 +1332,14 @@ test("a running profile mismatch remains stoppable and identifies the selected p
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=profile-mismatch", { waitUntil: "networkidle" });
   const summary = page.locator("[data-service-summary]");
   await expect(summary).toContainText("Service running with a different profile");
-  await expect(summary).toContainText("The profile running in the service does not match the profile selected in Control Center.");
+  await expect(summary).toContainText("The service is using a different profile from the one selected here.");
   await expect(summary.getByRole("button", { name: "Stop" })).toBeEnabled();
   await openServiceDetails(page);
 
   const openService = page.locator('[data-service-backend="open-source"]');
-  await expect(openService.getByRole("button", { name: "Stop applying to new processes" })).toBeEnabled();
+  await expect(openService.getByRole("button", { name: "Stop applying to new apps" })).toBeEnabled();
   await expect(openService).toContainText("Service running with a different profile");
-  await expect(openService).toContainText("The profile running in the service does not match the profile selected in Control Center. Stop remains available, and this is not shown as normal system-wide application.");
+  await expect(openService).toContainText("The service is using a different profile from the one selected here. You can stop it before applying your chosen profile.");
   await expect(openService).toContainText("Profile mismatch");
   await expect(openService).not.toContainText("or not yet verified");
 });
@@ -1349,16 +1348,16 @@ test("AppInit conflict preserves the backend-authorized recovery stop", async ({
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=legacy-conflict&legacy=migration-available&raw-active=1", { waitUntil: "networkidle" });
   const summary = page.locator("[data-service-summary]");
   await expect(summary).toContainText("Service running while AppInit conflicts");
-  await expect(summary).toContainText("AppInit registry mode prevents a verified system state");
+  await expect(summary).toContainText("AppInit mode is also enabled.");
   await expect(summary.getByRole("button", { name: "Stop" })).toBeEnabled();
   await openServiceDetails(page);
 
   const openService = page.locator('[data-service-backend="open-source"]');
-  await expect(openService.getByRole("button", { name: "Stop applying to new processes" })).toBeEnabled();
+  await expect(openService.getByRole("button", { name: "Stop applying to new apps" })).toBeEnabled();
   await expect(openService).toContainText("Service running while AppInit conflicts");
-  await expect(openService).toContainText("The new service is running, but AppInit registry mode prevents a verified system state. Stop remains available; other mutations stay blocked.");
+  await expect(openService).toContainText("AppInit mode is also enabled. Turn it off in your previous MacType setup before changing this service. You can still stop the service.");
   await expect(openService).not.toContainText("MacType system-wide rendering active");
-  const statusRow = openService.locator(".detail-list > div").filter({ hasText: "New service status" });
+  const statusRow = openService.locator(".detail-list > div").filter({ hasText: "Service status" });
   await expect(statusRow.locator(".warning")).toBeVisible();
   await expect(statusRow.locator(".success")).toHaveCount(0);
   for (const name of ["Install service", "Start service", "Remove service"]) {
@@ -1402,7 +1401,7 @@ test("trusted MacTray and autostart conflicts are resolved in the required order
 
 for (const fixture of [
   ["trusted-other", "MacTray is running in another user session"],
-  ["untrusted", "A same-named process could not be trusted"],
+  ["untrusted", "Check this copy of MacTray"],
   ["unknown", "MacTray tray mode status is unavailable"],
 ] as const) {
   test(`${fixture[0]} MacTray state remains fail-closed without an exit action`, async ({ page }) => {
@@ -1450,7 +1449,7 @@ test("a running new service with a legacy tray conflict offers only the verified
   await expect(openService.locator('[data-state="running-legacy-tray-conflict"]')).toBeVisible();
   await expect(openService).toContainText("Service running while MacTray conflicts");
   await expect(openService).not.toContainText("MacType system-wide rendering active");
-  await expect(openService.getByRole("button", { name: "Stop applying to new processes" })).toBeEnabled();
+  await expect(openService.getByRole("button", { name: "Stop applying to new apps" })).toBeEnabled();
   for (const name of ["Install service", "Start service", "Repair service", "Upgrade service", "Remove service"]) {
     const button = openService.getByRole("button", { name });
     if (await button.count()) await expect(button).toBeDisabled();
@@ -1484,7 +1483,7 @@ test("a foreign same-name service is prominent without exposing an unsafe action
   await expect(summary).toContainText("A service with the same name has a different configuration");
   await expect(summary.locator("[data-prominent-exception]")).toHaveAttribute("data-kind", "foreign-service");
   await expect(summary.getByRole("button")).toHaveCount(0);
-  await expect(page.getByText("Manage the new service", { exact: true })).toBeHidden();
+  await expect(page.getByText("Manage service", { exact: true })).toBeHidden();
 });
 
 test("a foreign legacy service and pending removal cannot hide in Details", async ({ page }) => {
@@ -1507,7 +1506,7 @@ const legacyServiceIdentityCases = [
     query: "legacy=migration-available",
     kind: "migration",
     title: "Legacy MacTray was detected.",
-    description: "A legacy MacTray service is installed.",
+    description: "An older MacTray service is installed.",
     detailWarning: null,
   },
   {
@@ -1515,16 +1514,16 @@ const legacyServiceIdentityCases = [
     query: "legacy=foreign",
     kind: "legacy-service-foreign",
     title: "A foreign legacy MacTray service was detected",
-    description: "does not match the expected MacTray configuration",
-    detailWarning: "does not match the expected MacTray configuration",
+    description: "A different service is using the MacType name",
+    detailWarning: "A different service is using the MacType name",
   },
   {
     id: "uncertain",
     query: "legacy=inaccessible",
     kind: "legacy-service-uncertain",
     title: "Legacy MacTray service status could not be verified",
-    description: "Not enough service information could be read to identify the service",
-    detailWarning: "Not enough service information could be read to identify the service",
+    description: "The existing service could not be identified",
+    detailWarning: "The existing service could not be identified",
   },
 ] as const;
 
@@ -1548,8 +1547,8 @@ for (const identity of legacyServiceIdentityCases) {
     const legacy = page.locator('[data-service-backend="legacy-mactray"]');
     if (identity.detailWarning) await expect(legacy).toContainText(identity.detailWarning);
     else {
-      await expect(legacy).not.toContainText("does not match the expected MacTray configuration");
-      await expect(legacy).not.toContainText("Not enough service information could be read to identify the service");
+      await expect(legacy).not.toContainText("A different service is using the MacType name");
+      await expect(legacy).not.toContainText("The existing service could not be identified");
     }
     await page.screenshot({
       path: path.join(galleryRoot, `${testInfo.project.name}-execution-detail-legacy-identity-${identity.id}-en.png`),
@@ -1642,13 +1641,13 @@ test("a deliberately stopped service reports neutrally instead of claiming degra
   await openServiceDetails(page);
 
   const openService = page.locator('[data-service-backend="open-source"]');
-  const statusRow = openService.locator(".detail-list > div").filter({ hasText: "New service status" });
+  const statusRow = openService.locator(".detail-list > div").filter({ hasText: "Service status" });
   await expect(statusRow).toContainText("Current installation · Stopped");
   await expect(statusRow).not.toContainText("Not checked");
   await expect(statusRow.locator(".neutral-status")).toBeVisible();
   await expect(statusRow.locator(".warning")).toHaveCount(0);
 
-  const profileRow = openService.locator(".detail-list > div").filter({ hasText: "Active profile generation" });
+  const profileRow = openService.locator(".detail-list > div").filter({ hasText: "Profile application status" });
   await expect(profileRow).toContainText("Service is off");
   await expect(profileRow).not.toContainText("mismatch");
   await expect(profileRow.locator(".neutral-status")).toBeVisible();
@@ -1663,9 +1662,9 @@ test("a stopped service surfaces a persisted degradation as a last-run record", 
   await openServiceDetails(page);
 
   const openService = page.locator('[data-service-backend="open-source"]');
-  const statusRow = openService.locator(".detail-list > div").filter({ hasText: "New service status" });
+  const statusRow = openService.locator(".detail-list > div").filter({ hasText: "Service status" });
   await expect(statusRow).toContainText("Degraded during the last run");
-  const profileRow = openService.locator(".detail-list > div").filter({ hasText: "Active profile generation" });
+  const profileRow = openService.locator(".detail-list > div").filter({ hasText: "Profile application status" });
   await expect(profileRow).toContainText("Service is off");
 });
 
@@ -1712,7 +1711,7 @@ test("overview summarizes the active service and discloses at most five successf
   await expect(page.getByRole("heading", { name: "MacType가 실행 중입니다" })).toBeVisible();
   const summary = page.locator("[data-overview-service]");
   await expect(summary).toContainText("ini\\Default.ini");
-  await expect(summary).toContainText("새 서비스");
+  await expect(summary).toContainText("Control Center 서비스");
   await expect(summary).toContainText("정상");
   await expect(summary.getByRole("button", { name: "서비스" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "설치 구성" })).toHaveCount(0);
@@ -1962,7 +1961,7 @@ test("the Console skin shows the dashboard overview with a specimen, the service
   await expect(page.locator(".console-specimen-panel .specimen-strip")).toHaveCount(6);
   await expect(page.locator(".console-kv")).toContainText("프로필");
   await expect(page.locator("[data-recent-activity] li")).not.toHaveCount(0);
-  await expect(page.locator(".console-status")).toContainText("새 서비스");
+  await expect(page.locator(".console-status")).toContainText("Control Center 서비스");
   await page.locator(".console-modes-panel").waitFor({ state: "detached", timeout: 100 }).catch(() => undefined);
 });
 
@@ -1981,7 +1980,7 @@ test("the Fluent skin renders settings cards and toggles the system expander", a
   await page.goto("/?view=execution&gallery=1&lang=ko&skin=fluent&system-service=ready", { waitUntil: "networkidle" });
   const system = page.locator('.fluent-card[data-kind="system"]');
   await expect(system).toHaveAttribute("data-expanded", "true");
-  await expect(system.locator(".fluent-sub-rows")).toContainText("활성 프로필 세대");
+  await expect(system.locator(".fluent-sub-rows")).toContainText("프로파일 적용 상태");
   await system.locator(".fluent-chev").click();
   await expect(system).toHaveAttribute("data-expanded", "false");
   await expect(page.locator('.fluent-card[data-kind="autostart"] input[role="switch"]')).toBeVisible();
@@ -2027,7 +2026,7 @@ test("the Preview Studio renders a specimen board per source and offers export",
   await expect(page.getByTestId("preview-studio")).toBeVisible();
   await expect(page.locator(".studio-board")).toHaveCount(2);
   await expect(page.locator(".studio-board").nth(1).locator(".studio-strip")).toHaveCount(7);
-  await expect(page.locator(".studio-board").first()).toContainText("튜너 편집본을 받지 못했습니다.");
+  await expect(page.locator(".studio-board").first()).toContainText("Control Center에서 프로파일을 열면 편집 중인 내용과 저장된 설정을 비교할 수 있습니다.");
   await page.locator(".studio-chip", { hasText: /^36$/ }).click();
   await expect(page.locator(".studio-board").nth(1).locator(".studio-strip")).toHaveCount(8);
   await page.getByRole("button", { name: "PNG로 저장" }).click();

@@ -161,6 +161,7 @@ impl WindowsInstallerBackend {
             }
         }
         if failures.is_empty() {
+            crate::event_log::rollback_completed("bootstrap-install");
             Ok(())
         } else {
             Err(SetupError::CleanupUnknown(failures.join("; ")))

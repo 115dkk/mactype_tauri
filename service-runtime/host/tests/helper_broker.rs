@@ -171,7 +171,7 @@ fn before_resume_launch_failure_never_claims_unknown_target_cleanup() {
         generation_id: assets.generation_id().to_owned(),
     });
 
-    assert_eq!(result.disposition, BrokerDisposition::Rejected);
+    assert_eq!(result.disposition, BrokerDisposition::LaunchFailed);
     assert_eq!(result.code, "helper-launch-failed-before-resume");
     assert!(!result.code.ends_with("-cleanup-unknown"));
 }

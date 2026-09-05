@@ -1,5 +1,6 @@
 mod appinit;
 mod broker;
+pub mod event_log;
 mod health;
 mod manifest;
 mod migration_pin;

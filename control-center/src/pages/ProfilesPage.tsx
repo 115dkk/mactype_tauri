@@ -1,9 +1,11 @@
+import { answerStudioRequests, publishStudioDocument } from "../studio/studioBridge";
+import type { StudioDocument } from "../studio/studioModel";
 import { ListRestart, Play, Redo2, RotateCcw, Save, SaveAll, Search, Undo2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Hint } from "../components/Hint";
 import { settingsSchema } from "../generated/settings";
 import { settingMessageKey, useI18n } from "../i18n/i18n";
-import { loadInstalledFontFamilies } from "../app/tauri";
+import { loadInstalledFontFamilies, openPreviewStudio } from "../app/tauri";
 import { AdvancedSettings } from "./profiles/AdvancedSettings";
 import { IndividualSettings } from "./profiles/IndividualSettings";
 import { ListsEditor } from "./profiles/ListsEditor";
@@ -71,7 +73,7 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
     dirtyCount,
     dirtyKeys,
     discard,
-    error: previewError,
+    error: documentError,
     individuals,
     lists,
     loading,
@@ -85,11 +87,12 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
     saveCurrentProfile,
     saveProfileAs,
     setAdvanced,
-    setError: setPreviewError,
     undo,
     updateList,
     values,
   } = useProfileDocument(t);
+  const [renderError, setPreviewError] = useState<string | null>(null);
+  const previewError = documentError ?? renderError;
   const [activeGroup, setActiveGroup] = useState<GroupId>("basic");
   const [activeWizardStep, setActiveWizardStep] = useState<WizardStepId>("start");
   /* Step-scoped guided history. Advanced mode can rewrite the document
@@ -203,6 +206,20 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
       return !needle || localized.toLocaleLowerCase().includes(needle);
     });
   }, [activeGroup, query, t]);
+
+  const studioDocument = useMemo<StudioDocument | null>(() => profile ? {
+    profilePath: profile.path,
+    profileName: profile.displayPath.split(/[/\\]/).pop() ?? profile.displayPath,
+    values: { ...values },
+    savedValues: { ...(profile.savedValues ?? {}) },
+    fontFace,
+  } : null, [fontFace, profile, values]);
+  const studioDocumentRef = useRef(studioDocument);
+  useEffect(() => {
+    studioDocumentRef.current = studioDocument;
+    if (studioDocument) publishStudioDocument(studioDocument);
+  }, [studioDocument]);
+  useEffect(() => answerStudioRequests(() => studioDocumentRef.current), []);
 
   const showPreview = () => {
     previewPanelRef.current?.show();
@@ -342,6 +359,7 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
             fontOptionLabel={fontOptionLabel}
             mode={mode}
             onError={setPreviewError}
+            onOpenStudio={() => { void openPreviewStudio().catch((error: unknown) => setPreviewError(error instanceof Error ? error.message : String(error))); }}
             onFontFaceChange={setFontFace}
             onPreviewReady={onPreviewReady}
             profilePath={profile?.path ?? null}

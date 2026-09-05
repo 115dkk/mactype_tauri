@@ -47,6 +47,33 @@ pub struct ExecutionStatus {
     pub session_targets: Vec<SessionTarget>,
 }
 
+fn record_legacy_tray_observation(
+    service: Option<&crate::machine_integration::LegacyServiceStatus>,
+    tray: &crate::machine_integration::LegacyTrayStatus,
+) {
+    use crate::machine_integration::LegacyTrayProcessState;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static OBSERVED: AtomicBool = AtomicBool::new(false);
+    let observation = match &tray.process {
+        LegacyTrayProcessState::TrustedCurrentSession { path, .. } => Some((
+            "process",
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned()),
+        )),
+        _ if service.is_some() => Some(("service", None)),
+        _ => None,
+    };
+    if let Some((kind, process)) = observation {
+        if OBSERVED
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            crate::diagnostics::record_legacy_tray_detected(kind, process.as_deref());
+        }
+    }
+}
+
 enum LocalProfileObservation {
     Missing,
     Ready {
@@ -154,6 +181,7 @@ pub fn status(installation_root: Option<&Path>) -> ExecutionStatus {
     let system_injection_active = machine.system_injection_active;
     let legacy_mac_tray = machine.legacy_service;
     let legacy_tray = machine.legacy_tray;
+    record_legacy_tray_observation(legacy_mac_tray.as_ref(), &legacy_tray);
     let system_modes_supported = service_management_package
         == crate::service_contract::ServiceManagementPackageState::Ready
         && profile_publish_supported_for(&system_service, registry_mode_detected);

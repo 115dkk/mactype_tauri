@@ -35,6 +35,7 @@ pub(super) fn publish(
 pub(super) fn rollback(context: &BrokerContext) -> Result<String, SetupError> {
     let generation = ProfileStore::new(context.paths.clone()).rollback()?;
     harden_runtime_if_installed(context)?;
+    crate::event_log::rollback_completed("profile");
     Ok(match generation {
         Some(generation) => format!(
             "{{\"ok\":true,\"verb\":\"rollback\",\"generation\":\"{}\"}}",

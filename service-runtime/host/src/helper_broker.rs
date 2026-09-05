@@ -150,6 +150,11 @@ where
         if helper.is_file() && helper.parent() == Some(self.assets.root()) {
             Ok(())
         } else {
+            crate::event_log::helper_broker_failed(
+                architecture,
+                "runtime-helper-unavailable",
+                Some(format!("helper={}", helper.display())),
+            );
             Err(mactype_service_contract::StructuredServiceError {
                 code: "runtime-helper-unavailable".to_owned(),
                 message: "the fixed helper is not ready in the protected runtime generation"
@@ -164,7 +169,7 @@ where
             return invalid_response("runtime-generation-mismatch", None);
         }
         let invocation = self.invocation(request);
-        match self.launcher.launch(&invocation) {
+        let result = match self.launcher.launch(&invocation) {
             Ok(output) => parse_output(request, output),
             Err(error)
                 if error.stage() == HelperLaunchStage::BeforeResume
@@ -177,7 +182,11 @@ where
                 }
             }
             Err(error) => BrokerResult {
-                disposition: BrokerDisposition::Rejected,
+                disposition: if error.stage() == HelperLaunchStage::BeforeResume {
+                    BrokerDisposition::LaunchFailed
+                } else {
+                    BrokerDisposition::Rejected
+                },
                 code: if error.stage() == HelperLaunchStage::BeforeResume {
                     "helper-launch-failed-before-resume"
                 } else if error.kind() == io::ErrorKind::Interrupted {
@@ -190,7 +199,23 @@ where
                 .to_owned(),
                 win32_error: error.raw_os_error().map(|code| code as u32),
             },
+        };
+        if result.code.ends_with("-cleanup-unknown")
+            || matches!(
+                result.code.as_str(),
+                "helper-response-invalid" | "helper-response-too-large" | "helper-exit-mismatch"
+            )
+        {
+            crate::event_log::helper_broker_failed(
+                request.identity.architecture,
+                &result.code,
+                Some(format!(
+                    "pid={} creation_time={} win32={:?}",
+                    request.identity.pid, request.identity.creation_time, result.win32_error
+                )),
+            );
         }
+        result
     }
 }
 
@@ -246,6 +271,7 @@ fn parse_output(request: &InjectionRequest, output: HelperOutput) -> BrokerResul
 
     let (mut disposition, expected_exit) = match status {
         Some("injected") => (BrokerDisposition::Injected, 0),
+        Some("skipped") if code == "process-frozen" => (BrokerDisposition::TargetFrozen, 0),
         Some("skipped") => (BrokerDisposition::Skipped, 0),
         Some("rejected") => (BrokerDisposition::Rejected, 2),
         Some("failed") => (BrokerDisposition::RetryableFailure, 3),

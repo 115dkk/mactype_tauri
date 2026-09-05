@@ -2,6 +2,7 @@
 
 #include "fixed_module.h"
 #include "module_inventory.h"
+#include "process_lifecycle.h"
 #include "remote_injection_verdict.h"
 #include "unique_handle.h"
 
@@ -51,10 +52,18 @@ private:
     void* address_{};
 };
 
-[[nodiscard]] Result make_verdict_result(const BrokerRequest& request,
+[[nodiscard]] Result make_verdict_result(HANDLE process,
+                                         const BrokerRequest& request,
                                          const RemoteInjectionEvidence& evidence,
                                          const DWORD windows_error) noexcept {
     const auto verdict = adjudicate_remote_injection(evidence);
+    if (verdict.code == "module-load-failed") {
+        const auto lifecycle = query_process_lifecycle(process);
+        if (lifecycle && lifecycle->deleting) {
+            return make_result(request, ResultStatus::skipped, "process-exiting",
+                               kFixedModuleNameUtf8, windows_error, true);
+        }
+    }
     return make_result(request, verdict.status, verdict.code, kFixedModuleNameUtf8,
                        windows_error, verdict.cleanup_complete);
 }
@@ -122,7 +131,7 @@ Result inject_module(HANDLE process, const BrokerRequest& request,
             const DWORD error = wait == WAIT_FAILED ? GetLastError() : 0U;
             allocation.abandon();
             return make_verdict_result(
-                request,
+                process, request,
                 {RemoteCompletion::grace_exhausted, ThreadResultEvidence::unavailable,
                  ModuleInventoryEvidence::unavailable, false},
                 error);
@@ -132,7 +141,7 @@ Result inject_module(HANDLE process, const BrokerRequest& request,
         const DWORD error = GetLastError();
         allocation.abandon();
         return make_verdict_result(
-            request,
+            process, request,
             {RemoteCompletion::wait_failed, ThreadResultEvidence::unavailable,
              ModuleInventoryEvidence::unavailable, false},
             error);
@@ -153,12 +162,12 @@ Result inject_module(HANDLE process, const BrokerRequest& request,
                                                        : ThreadResultEvidence::loaded;
     if (inventory_state == FixedModuleState::SameBasenameDifferentPath &&
         memory_released) {
-        return make_result(request, ResultStatus::rejected,
+        return make_result(request, ResultStatus::skipped,
                            "conflicting-mactype-module-loaded", kFixedModuleNameUtf8,
                            evidence_error, true);
     }
     return make_verdict_result(
-        request,
+        process, request,
         {completion, thread_result, inventory, memory_released},
         evidence_error);
 }

@@ -1,6 +1,9 @@
 mod model;
 
+use crate::target_validation::DeferralReason;
+use crate::TargetLifecycle;
 use std::collections::{HashMap, VecDeque};
+use std::time::Instant;
 
 use mactype_service_contract::{
     InjectionArchitecture, InjectionSuccess, InjectionTelemetry, StructuredServiceError,
@@ -12,13 +15,15 @@ use crate::{
 };
 
 pub use model::{
-    ProcessAttemptRecord, ProcessOutcome, RetryPolicy, RetryScheduler, SessionChange,
-    MAX_TRACKED_PROCESS_RESULTS,
+    DeferralPolicy, DeferredTarget, ProcessAttemptRecord, ProcessOutcome, RetryPolicy,
+    RetryScheduler, SessionChange, MAX_DEFERRED_TARGETS, MAX_TRACKED_PROCESS_RESULTS,
 };
 
 /// The bounded target-result code recorded when an untrustworthy cleanup
 /// result was re-checked and the verified target provably no longer existed.
 pub const TARGET_VANISHED_RESULT_CODE: &str = "injection-target-vanished";
+
+const DEFERRAL_CAPACITY_EXHAUSTED_CODE: &str = "deferral-capacity-exhausted";
 
 pub struct InjectionOrchestrator<'a> {
     generation_id: String,
@@ -28,6 +33,9 @@ pub struct InjectionOrchestrator<'a> {
     broker: &'a dyn InjectionBroker,
     processed: HashMap<(u32, u64), ProcessAttemptRecord>,
     process_order: VecDeque<(u32, u64)>,
+    deferred: HashMap<(u32, u64), DeferredTarget>,
+    deferred_order: VecDeque<(u32, u64)>,
+    deferral_policy: DeferralPolicy,
     retry_policy: RetryPolicy,
     retry_scheduler: Option<&'a dyn RetryScheduler>,
     last_injected_identity: Option<ProcessIdentity>,
@@ -106,6 +114,9 @@ impl<'a> InjectionOrchestrator<'a> {
             broker,
             processed: HashMap::new(),
             process_order: VecDeque::new(),
+            deferred: HashMap::new(),
+            deferred_order: VecDeque::new(),
+            deferral_policy: DeferralPolicy::default(),
             retry_policy,
             retry_scheduler,
             last_injected_identity: None,
@@ -114,16 +125,119 @@ impl<'a> InjectionOrchestrator<'a> {
     }
 
     pub fn handle_pid(&mut self, pid: u32) -> Result<ProcessOutcome, StructuredServiceError> {
-        let identity = match self.target_validator.validate(pid)? {
-            ProcessTargetDecision::Eligible(identity) => identity,
-            ProcessTargetDecision::Skipped => return Ok(ProcessOutcome::Skipped),
-        };
-        if self
-            .processed
-            .contains_key(&(identity.pid, identity.creation_time))
-        {
-            return Ok(ProcessOutcome::Duplicate);
+        self.handle_pid_at(pid, Instant::now())
+    }
+
+    pub fn handle_pid_at(
+        &mut self,
+        pid: u32,
+        now: Instant,
+    ) -> Result<ProcessOutcome, StructuredServiceError> {
+        match self.target_validator.validate(pid)? {
+            ProcessTargetDecision::Eligible(identity) => {
+                if self.contains_identity(&identity) {
+                    return Ok(ProcessOutcome::Duplicate);
+                }
+                self.attempt_injection(identity, 0, now)
+            }
+            ProcessTargetDecision::Deferred { identity, reason } => {
+                if self.contains_identity(&identity) {
+                    return Ok(ProcessOutcome::Duplicate);
+                }
+                let not_before = now + self.deferral_policy.frozen_recheck;
+                self.insert_deferred(DeferredTarget {
+                    identity,
+                    reason,
+                    deferrals: 0,
+                    not_before,
+                });
+                Ok(ProcessOutcome::Deferred)
+            }
+            ProcessTargetDecision::Skipped => {
+                crate::event_log::injection_skipped();
+                Ok(ProcessOutcome::Skipped)
+            }
         }
+    }
+
+    pub fn poll_deferred(
+        &mut self,
+        now: Instant,
+    ) -> Result<Option<ProcessOutcome>, StructuredServiceError> {
+        let Some(index) = self.deferred_order.iter().position(|key| {
+            self.deferred
+                .get(key)
+                .is_some_and(|target| target.not_before <= now)
+        }) else {
+            return Ok(None);
+        };
+        let key = self
+            .deferred_order
+            .remove(index)
+            .expect("the located deferred key exists");
+        let Some(target) = self.deferred.remove(&key) else {
+            return Ok(None);
+        };
+
+        if target.reason == DeferralReason::Frozen {
+            match self.inspector.probe_target_lifecycle(&target.identity) {
+                TargetLifecycle::Frozen | TargetLifecycle::Unknown => {
+                    self.insert_deferred(DeferredTarget {
+                        not_before: now + self.deferral_policy.frozen_recheck,
+                        ..target
+                    });
+                    return Ok(Some(ProcessOutcome::Deferred));
+                }
+                TargetLifecycle::Exiting => {
+                    self.record_skip(target.identity, "process-exiting", None);
+                    return Ok(Some(ProcessOutcome::Skipped));
+                }
+                TargetLifecycle::Running => {}
+            }
+        }
+
+        Ok(Some(self.revalidate_deferred(target, now)?))
+    }
+
+    fn revalidate_deferred(
+        &mut self,
+        target: DeferredTarget,
+        now: Instant,
+    ) -> Result<ProcessOutcome, StructuredServiceError> {
+        match self.target_validator.validate(target.identity.pid)? {
+            ProcessTargetDecision::Eligible(identity) if identity == target.identity => {
+                self.attempt_injection(identity, target.deferrals, now)
+            }
+            ProcessTargetDecision::Eligible(_) => {
+                self.record_skip(target.identity, TARGET_VANISHED_RESULT_CODE, None);
+                Ok(ProcessOutcome::Skipped)
+            }
+            ProcessTargetDecision::Deferred { identity, reason } if identity == target.identity => {
+                self.insert_deferred(DeferredTarget {
+                    identity,
+                    reason,
+                    deferrals: target.deferrals,
+                    not_before: now + self.deferral_policy.frozen_recheck,
+                });
+                Ok(ProcessOutcome::Deferred)
+            }
+            ProcessTargetDecision::Deferred { .. } => {
+                self.record_skip(target.identity, TARGET_VANISHED_RESULT_CODE, None);
+                Ok(ProcessOutcome::Skipped)
+            }
+            ProcessTargetDecision::Skipped => {
+                self.record_skip(target.identity, "process-no-longer-eligible", None);
+                Ok(ProcessOutcome::Skipped)
+            }
+        }
+    }
+
+    fn attempt_injection(
+        &mut self,
+        identity: ProcessIdentity,
+        deferrals: u8,
+        now: Instant,
+    ) -> Result<ProcessOutcome, StructuredServiceError> {
         let request = InjectionRequest {
             identity,
             generation_id: self.generation_id.clone(),
@@ -136,6 +250,27 @@ impl<'a> InjectionOrchestrator<'a> {
                 && !safe_to_retry_same_identity(&result.code)
             {
                 result.disposition = BrokerDisposition::Rejected;
+            }
+            match result.disposition {
+                BrokerDisposition::LaunchFailed => {
+                    return Ok(self.handle_launch_failure(
+                        request.identity.clone(),
+                        deferrals,
+                        now,
+                        result,
+                        attempt,
+                    ));
+                }
+                BrokerDisposition::TargetFrozen => {
+                    self.insert_deferred(DeferredTarget {
+                        identity: request.identity.clone(),
+                        reason: DeferralReason::Frozen,
+                        deferrals,
+                        not_before: now + self.deferral_policy.frozen_recheck,
+                    });
+                    return Ok(ProcessOutcome::Deferred);
+                }
+                _ => {}
             }
             if let Some(outcome) = terminal_outcome(result.disposition, attempt == attempts) {
                 if outcome == ProcessOutcome::Injected {
@@ -166,10 +301,86 @@ impl<'a> InjectionOrchestrator<'a> {
         unreachable!("the bounded attempt loop always returns")
     }
 
+    fn handle_launch_failure(
+        &mut self,
+        identity: ProcessIdentity,
+        deferrals: u8,
+        now: Instant,
+        result: BrokerResult,
+        attempt: u8,
+    ) -> ProcessOutcome {
+        if self.inspector.probe_target_liveness(&identity) == TargetLiveness::Vanished {
+            self.record_skip(identity, TARGET_VANISHED_RESULT_CODE, result.win32_error);
+            return ProcessOutcome::Skipped;
+        }
+        if deferrals >= self.deferral_policy.launch_max_deferrals {
+            self.record_result(identity, ProcessOutcome::Rejected, attempt, result);
+            return ProcessOutcome::Rejected;
+        }
+        let multiplier = 1_u32.checked_shl(u32::from(deferrals)).unwrap_or(u32::MAX);
+        let delay = self
+            .deferral_policy
+            .launch_initial_delay
+            .saturating_mul(multiplier)
+            .min(self.deferral_policy.launch_max_delay);
+        self.insert_deferred(DeferredTarget {
+            identity,
+            reason: DeferralReason::HelperLaunchFailed,
+            deferrals: deferrals.saturating_add(1),
+            not_before: now + delay,
+        });
+        ProcessOutcome::Deferred
+    }
+
+    fn contains_identity(&self, identity: &ProcessIdentity) -> bool {
+        let key = (identity.pid, identity.creation_time);
+        self.processed.contains_key(&key) || self.deferred.contains_key(&key)
+    }
+
+    fn insert_deferred(&mut self, target: DeferredTarget) {
+        let key = (target.identity.pid, target.identity.creation_time);
+        self.deferred_order.retain(|candidate| *candidate != key);
+        if !self.deferred.contains_key(&key) {
+            while self.deferred.len() >= MAX_DEFERRED_TARGETS {
+                let Some(oldest) = self.deferred_order.pop_front() else {
+                    break;
+                };
+                if let Some(evicted) = self.deferred.remove(&oldest) {
+                    self.record_skip(evicted.identity, DEFERRAL_CAPACITY_EXHAUSTED_CODE, None);
+                    break;
+                }
+            }
+        }
+        self.deferred.insert(key, target);
+        self.deferred_order.push_back(key);
+    }
+
+    fn record_skip(&mut self, identity: ProcessIdentity, code: &str, win32_error: Option<u32>) {
+        self.record_result(
+            identity,
+            ProcessOutcome::Skipped,
+            0,
+            BrokerResult {
+                disposition: BrokerDisposition::Skipped,
+                code: code.to_owned(),
+                win32_error,
+            },
+        );
+    }
+
+    pub fn deferred_targets(&self) -> Vec<DeferredTarget> {
+        self.deferred_order
+            .iter()
+            .filter_map(|key| self.deferred.get(key).cloned())
+            .collect()
+    }
+
     pub fn handle_session_change(&mut self, change: SessionChange) {
         if change.is_overflow() {
             self.processed.clear();
             self.process_order.clear();
+            self.deferred.clear();
+            self.deferred_order.clear();
             return;
         }
         if matches!(change.event_type, 2 | 4 | 6 | 11) {
@@ -177,6 +388,10 @@ impl<'a> InjectionOrchestrator<'a> {
                 .retain(|_, record| record.identity.session_id != change.session_id);
             self.process_order
                 .retain(|identity| self.processed.contains_key(identity));
+            self.deferred
+                .retain(|_, target| target.identity.session_id != change.session_id);
+            self.deferred_order
+                .retain(|identity| self.deferred.contains_key(identity));
         }
     }
 
@@ -299,22 +514,36 @@ impl<'a> InjectionOrchestrator<'a> {
             }
             self.process_order.push_back(key);
         }
-        self.processed.insert(
-            key,
-            ProcessAttemptRecord {
-                identity,
-                runtime_generation_id: self.generation_id.clone(),
-                outcome,
-                attempts,
-                code: result.code,
-                win32_error: result.win32_error,
-            },
+        let record = ProcessAttemptRecord {
+            identity,
+            runtime_generation_id: self.generation_id.clone(),
+            outcome,
+            attempts,
+            code: result.code,
+            win32_error: result.win32_error,
+        };
+        let process = if matches!(
+            outcome,
+            ProcessOutcome::Rejected | ProcessOutcome::RetryExhausted
+        ) {
+            self.inspector
+                .process_basename(&record.identity)
+                .unwrap_or_else(|| format!("pid-{}", record.identity.pid))
+        } else {
+            String::new()
+        };
+        crate::event_log::injection_result(
+            &record,
+            process,
+            crate::event_log::diagnostic_detail(&record),
         );
+        self.processed.insert(key, record);
     }
 }
 
 fn terminal_outcome(disposition: BrokerDisposition, final_attempt: bool) -> Option<ProcessOutcome> {
     match disposition {
+        BrokerDisposition::LaunchFailed | BrokerDisposition::TargetFrozen => None,
         BrokerDisposition::Cancelled => Some(ProcessOutcome::Cancelled),
         BrokerDisposition::Injected => Some(ProcessOutcome::Injected),
         BrokerDisposition::Skipped => Some(ProcessOutcome::Skipped),

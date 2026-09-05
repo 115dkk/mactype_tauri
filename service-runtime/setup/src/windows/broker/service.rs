@@ -70,6 +70,7 @@ pub(super) fn install(context: &BrokerContext) -> Result<String, SetupError> {
             if let Err(restoration) = runtime_recovery::recover(&context.paths, &context.manager) {
                 return Err(combine_operation_and_restore_error(operation, restoration));
             }
+            crate::event_log::rollback_completed("service");
             return Err(operation);
         }
     };
@@ -107,6 +108,7 @@ pub(super) fn upgrade(context: &BrokerContext) -> Result<String, SetupError> {
             if let Err(restoration) = restore_upgrade_state(context, &previous, &recovery_plan) {
                 return Err(combine_operation_and_restore_error(operation, restoration));
             }
+            crate::event_log::rollback_completed("upgrade");
             return Err(operation);
         }
     };
@@ -167,6 +169,7 @@ pub(super) fn repair(context: &BrokerContext) -> Result<String, SetupError> {
                 return Err(combine_operation_and_restore_error(operation, restoration));
             }
         }
+        crate::event_log::rollback_completed("service");
         return Err(operation);
     }
     Ok("{\"ok\":true,\"verb\":\"repair\"}".to_owned())

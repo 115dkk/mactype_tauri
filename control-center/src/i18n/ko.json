@@ -382,7 +382,7 @@
   "execution.migrateLegacy": "마이그레이션",
   "execution.migrationConfirmTitle": "레거시 MacTray를 마이그레이션할까요?",
   "execution.migrationConfirmDescription": "Control Center가 다음 순서로 마이그레이션을 수행합니다.",
-  "execution.migrationConfirmStrictCheck": "기존 서비스를 안전하게 교체할 수 있는지 확인합니다.",
+  "execution.migrationConfirmStrictCheck": "다른 MacType 실행 방식을 먼저 꺼야 하는지 확인합니다.",
   "execution.migrationConfirmBackup": "바꾸기 전에 현재 설정과 프로파일을 백업합니다.",
   "execution.migrationConfirmSwitch": "레거시 서비스를 중지하고 현재 프로필을 새 서비스에 복사한 뒤 새 서비스를 설치하고 시작합니다.",
   "execution.migrationConfirmRollback": "마이그레이션에 실패하면 서비스와 프로필을 시작 전 상태로 복구합니다.",

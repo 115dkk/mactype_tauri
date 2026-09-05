@@ -382,7 +382,7 @@
   "execution.migrateLegacy": "移行",
   "execution.migrationConfirmTitle": "従来の MacTray を移行しますか？",
   "execution.migrationConfirmDescription": "Control Center は次の順序で移行を実行します。",
-  "execution.migrationConfirmStrictCheck": "既存のサービスを安全に置き換えられるか確認します。",
+  "execution.migrationConfirmStrictCheck": "別のMacType起動方式を先に無効にする必要があるか確認します。",
   "execution.migrationConfirmBackup": "切り替える前に現在の設定とプロファイルをバックアップします。",
   "execution.migrationConfirmSwitch": "レガシーサービスを停止し、現在のプロファイルを新しいサービス用にコピーしてから、新しいサービスをインストールして起動します。",
   "execution.migrationConfirmRollback": "移行に失敗した場合、Control Center はサービスとプロファイルを以前の状態に復元します。",

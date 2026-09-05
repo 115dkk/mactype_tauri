@@ -382,7 +382,7 @@
   "execution.migrateLegacy": "ترحيل",
   "execution.migrationConfirmTitle": "هل تريد ترحيل MacTray القديم؟",
   "execution.migrationConfirmDescription": "يقوم Control Center بإجراء الترحيل بهذا الترتيب.",
-  "execution.migrationConfirmStrictCheck": "يتحقق من إمكانية استبدال الخدمة القديمة بأمان.",
+  "execution.migrationConfirmStrictCheck": "يتحقق مما إذا كان يجب إيقاف وضع MacType آخر أولًا.",
   "execution.migrationConfirmBackup": "ينسخ الإعدادات والملف الحالي احتياطيًا قبل التبديل.",
   "execution.migrationConfirmSwitch": "يوقف الخدمة القديمة، وينسخ ملف التعريف الحالي إلى الخدمة الجديدة، ثم يثبّت الخدمة الجديدة ويشغّلها.",
   "execution.migrationConfirmRollback": "إذا فشل الترحيل، يستعيد Control Center الخدمات وملف التعريف إلى حالتها السابقة.",

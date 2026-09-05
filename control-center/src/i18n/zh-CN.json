@@ -382,7 +382,7 @@
   "execution.migrateLegacy": "迁移",
   "execution.migrationConfirmTitle": "要迁移旧版 MacTray 吗？",
   "execution.migrationConfirmDescription": "Control Center 将按以下顺序执行迁移。",
-  "execution.migrationConfirmStrictCheck": "检查是否可以安全替换旧服务。",
+  "execution.migrationConfirmStrictCheck": "检查是否需要先关闭其他 MacType 运行模式。",
   "execution.migrationConfirmBackup": "切换前备份当前设置和配置。",
   "execution.migrationConfirmSwitch": "停止旧版服务，将当前配置复制到新服务，然后安装并启动新服务。",
   "execution.migrationConfirmRollback": "如果迁移失败，Control Center 会将服务和配置恢复到之前的状态。",

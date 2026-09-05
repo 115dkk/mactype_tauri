@@ -382,7 +382,7 @@
   "execution.migrateLegacy": "Migrate",
   "execution.migrationConfirmTitle": "Migrate legacy MacTray?",
   "execution.migrationConfirmDescription": "Control Center performs the migration in this order.",
-  "execution.migrationConfirmStrictCheck": "Checks that the old service can be replaced safely.",
+  "execution.migrationConfirmStrictCheck": "Checks whether another MacType mode must be turned off first.",
   "execution.migrationConfirmBackup": "Backs up the current settings and profile before switching.",
   "execution.migrationConfirmSwitch": "Stops the legacy service, copies the current profile to the new service, then installs and starts it.",
   "execution.migrationConfirmRollback": "If migration fails, Control Center restores the services and profile to their previous state.",

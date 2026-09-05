@@ -21,6 +21,10 @@ fn record(ts: u64, code: &str) -> EventRecord {
 }
 
 #[test]
+#[cfg_attr(
+    all(miri, windows),
+    ignore = "Windows Miri does not implement CreateDirectoryW"
+)]
 fn three_hundred_writes_keep_bounded_rotation() {
     let root = tempfile_root("rotation");
     let path = root.join("service-host.log");
@@ -57,6 +61,10 @@ fn sanitization_redacts_profiles_nonces_and_truncates_on_utf8_boundary() {
 }
 
 #[test]
+#[cfg_attr(
+    all(miri, windows),
+    ignore = "Windows Miri does not implement CreateDirectoryW"
+)]
 fn two_paths_merge_by_timestamp_then_file_order() {
     let root = tempfile_root("merge");
     let first = root.join("first.log");
@@ -75,6 +83,10 @@ fn two_paths_merge_by_timestamp_then_file_order() {
 }
 
 #[test]
+#[cfg_attr(
+    all(miri, windows),
+    ignore = "Windows Miri does not implement CreateDirectoryW"
+)]
 fn reader_skips_unknown_and_malformed_lines() {
     let root = tempfile_root("unknown");
     let path = root.join("events.log");
@@ -120,6 +132,10 @@ fn throttle_obeys_window_and_evicts_the_oldest_key() {
 }
 
 #[test]
+#[cfg_attr(
+    all(miri, windows),
+    ignore = "Windows Miri does not implement CreateDirectoryW"
+)]
 fn record_validates_code_and_bounds_params() {
     let root = tempfile_root("record");
     let path = root.join("events.log");

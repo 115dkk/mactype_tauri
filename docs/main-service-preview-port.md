@@ -97,3 +97,8 @@ Vite still reports the existing large-chunk advisory; its threshold is unchanged
 Local build/test evidence is retained under `build/port-evidence/`, and rendered
 screenshots under `artifacts/frontend-gallery/`. These results describe local verification before GitHub delivery; Windows CI
 is the remaining integration gate.
+
+Windows Miri cannot call `CreateDirectoryW` (run 33993243900). Eight new
+file-backed log tests therefore skip only under `all(miri, windows)`. They remain
+enabled in native Windows test jobs; pure sanitization and throttle contracts
+still run in Miri. This CI-only annotation fix is separate from the product pick.

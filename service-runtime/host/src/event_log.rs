@@ -320,6 +320,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        all(miri, windows),
+        ignore = "Windows Miri does not implement CreateDirectoryW"
+    )]
     fn injectable_clock_flushes_summary_and_resets_window() {
         let root = std::env::temp_dir().join(format!("host-summary-{}", std::process::id()));
         let path = root.join("host.log");
@@ -356,6 +360,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        all(miri, windows),
+        ignore = "Windows Miri does not implement CreateDirectoryW"
+    )]
     fn quiet_skip_is_counted_without_a_warning_event() {
         let root = std::env::temp_dir().join(format!("host-quiet-skip-{}", std::process::id()));
         let path = root.join("host.log");
@@ -378,6 +386,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        all(miri, windows),
+        ignore = "Windows Miri does not implement CreateDirectoryW"
+    )]
     fn helper_failures_are_deduplicated_per_architecture() {
         let root = std::env::temp_dir().join(format!("host-helper-dedupe-{}", std::process::id()));
         let path = root.join("host.log");
@@ -409,6 +421,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        all(miri, windows),
+        ignore = "Windows Miri does not implement CreateDirectoryW"
+    )]
     fn injectable_clock_deduplicates_failures_for_ten_minutes() {
         let root = std::env::temp_dir().join(format!("host-dedupe-{}", std::process::id()));
         let path = root.join("host.log");

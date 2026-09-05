@@ -26,12 +26,27 @@ std::wstring argument_value(int argc, wchar_t** argv, const wchar_t* name) {
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
+  SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
   if (_setmode(_fileno(stdin), _O_BINARY) == -1 || _setmode(_fileno(stdout), _O_BINARY) == -1) {
     std::cerr << "failed to set binary IPC mode\n";
     return 2;
   }
 
-  mactype::PreviewRuntime runtime(argument_value(argc, argv, L"--install-root"));
+  const std::wstring engine_value = argument_value(argc, argv, L"--engine");
+  mactype::Engine engine = mactype::Engine::mactype;
+  if (!engine_value.empty()) {
+    if (_wcsicmp(engine_value.c_str(), L"mactype") == 0) {
+      engine = mactype::Engine::mactype;
+    } else if (_wcsicmp(engine_value.c_str(), L"plain") == 0) {
+      engine = mactype::Engine::plain;
+    } else {
+      std::cerr << "unsupported engine\n";
+      return 2;
+    }
+  }
+
+  mactype::PreviewRuntime runtime(argument_value(argc, argv, L"--install-root"), engine);
   std::string initialization_error;
   if (!runtime.initialize(initialization_error)) {
     std::cerr << "preview initialization failed: " << initialization_error << '\n';
@@ -47,6 +62,14 @@ int wmain(int argc, wchar_t** argv) {
   std::deque<mtpc::Frame> queue;
   std::atomic<bool> input_closed{false};
   std::atomic<bool> protocol_failed{false};
+  // Window messages and requests both run on this thread, so event and response writes cannot interleave.
+  runtime.set_state_sink([&](const mtpc::Frame& event) {
+    if (!mtpc::write_frame(std::cout, event)) {
+      std::cerr << "failed to write protocol event\n";
+      protocol_failed = true;
+      SetEvent(work_event);
+    }
+  });
 
   std::thread reader([&] {
     for (;;) {

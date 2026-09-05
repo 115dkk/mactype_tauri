@@ -80,33 +80,42 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
             while let Some(change) = stop.take_session_change() {
                 orchestrator.handle_session_change(change);
             }
-            let event_wait = if self.snapshot_pids.is_empty() {
-                Duration::from_millis(250)
-            } else {
-                Duration::ZERO
-            };
-            let pid = match self.source.next_pid(event_wait) {
-                Ok(Some(pid)) => pid,
-                Ok(None) => match self.snapshot_pids.pop_front() {
-                    Some(pid) => pid,
-                    None => continue,
-                },
-                Err(error) => {
-                    let _ = report_runtime_health(
-                        health,
-                        &mut consecutive_health_report_failures,
-                        HealthState::Failed,
-                        ReadinessReport {
-                            observer: ComponentReadiness::Failed,
-                            ..ReadinessReport::ready()
+            crate::event_log::flush_elapsed_injection_summary();
+            let deferred = orchestrator.poll_deferred(std::time::Instant::now());
+            let outcome = match deferred {
+                Ok(Some(outcome)) if outcome != crate::ProcessOutcome::Deferred => Ok(outcome),
+                Err(error) => Err(error),
+                _ => {
+                    let event_wait = if self.snapshot_pids.is_empty() {
+                        Duration::from_millis(250)
+                    } else {
+                        Duration::ZERO
+                    };
+                    let pid = match self.source.next_pid(event_wait) {
+                        Ok(Some(pid)) => pid,
+                        Ok(None) => match self.snapshot_pids.pop_front() {
+                            Some(pid) => pid,
+                            None => continue,
                         },
-                        orchestrator.injection_telemetry(),
-                        Some(error.clone()),
-                    );
-                    return Err(error);
+                        Err(error) => {
+                            let _ = report_runtime_health(
+                                health,
+                                &mut consecutive_health_report_failures,
+                                HealthState::Failed,
+                                ReadinessReport {
+                                    observer: ComponentReadiness::Failed,
+                                    ..ReadinessReport::ready()
+                                },
+                                orchestrator.injection_telemetry(),
+                                Some(error.clone()),
+                            );
+                            return Err(error);
+                        }
+                    };
+                    orchestrator.handle_pid(pid)
                 }
             };
-            match orchestrator.handle_pid(pid) {
+            match outcome {
                 Ok(crate::ProcessOutcome::Injected) => {
                     report_runtime_health(
                         health,

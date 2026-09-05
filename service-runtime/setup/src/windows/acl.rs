@@ -16,10 +16,12 @@ use windows_sys::Win32::Storage::FileSystem::{
 use crate::storage::reject_reparse_ancestors;
 use crate::SetupError;
 
-const MACHINE_TREE_SDDL: &str = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)";
+const MACHINE_TREE_SDDL: &str = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)(A;OICI;GRGX;;;AC)(A;OICI;GRGX;;;S-1-15-2-2)";
 const SYSTEM_SID: &str = "S-1-5-18";
 const ADMINISTRATORS_SID: &str = "S-1-5-32-544";
 const USERS_SID: &str = "S-1-5-32-545";
+const ALL_APPLICATION_PACKAGES_SID: &str = "S-1-15-2-1";
+const ALL_RESTRICTED_APPLICATION_PACKAGES_SID: &str = "S-1-15-2-2";
 const MAX_PROTECTED_TREE_ENTRIES: usize = 100_000;
 
 pub fn harden_machine_directory(path: &Path) -> Result<(), SetupError> {
@@ -163,6 +165,8 @@ fn verify_protected_acl(
     let mut saw_system = false;
     let mut saw_administrators = false;
     let mut saw_users = false;
+    let mut saw_all_application_packages = false;
+    let mut saw_all_restricted_application_packages = false;
     for ace in dacl.allowed_aces() {
         if ace.trustee_matches(&sids.system) {
             if ace.mask() != FILE_ALL_ACCESS {
@@ -185,11 +189,29 @@ fn verify_protected_acl(
                 saw_administrators = true;
             }
         } else if ace.trustee_matches(&sids.users) {
-            if !is_users_read_execute_mask(ace.mask()) {
+            if !is_read_execute_mask(ace.mask()) {
                 return Err(invalid_acl_ace(path, "Users", ace));
             }
             if ace_applies_to_current_object(ace.flags()) {
                 saw_users = true;
+            }
+        } else if ace.trustee_matches(&sids.all_application_packages) {
+            if !is_read_execute_mask(ace.mask()) {
+                return Err(invalid_acl_ace(path, "AllApplicationPackages", ace));
+            }
+            if ace_applies_to_current_object(ace.flags()) {
+                saw_all_application_packages = true;
+            }
+        } else if ace.trustee_matches(&sids.all_restricted_application_packages) {
+            if !is_read_execute_mask(ace.mask()) {
+                return Err(invalid_acl_ace(
+                    path,
+                    "AllRestrictedApplicationPackages",
+                    ace,
+                ));
+            }
+            if ace_applies_to_current_object(ace.flags()) {
+                saw_all_restricted_application_packages = true;
             }
         } else {
             return Err(SetupError::Runtime(format!(
@@ -198,13 +220,18 @@ fn verify_protected_acl(
             )));
         }
     }
-    if !saw_system || !saw_administrators || !saw_users {
+    if !saw_system
+        || !saw_administrators
+        || !saw_users
+        || !saw_all_application_packages
+        || !saw_all_restricted_application_packages
+    {
         return Err(invalid_acl(path));
     }
     Ok(())
 }
 
-fn is_users_read_execute_mask(mask: u32) -> bool {
+fn is_read_execute_mask(mask: u32) -> bool {
     mask == (GENERIC_READ | GENERIC_EXECUTE) || mask == (FILE_GENERIC_READ | FILE_GENERIC_EXECUTE)
 }
 
@@ -225,7 +252,7 @@ fn invalid_acl_ace(path: &Path, trustee: &str, ace: &AllowedAce) -> SetupError {
 
 fn invalid_acl(path: &Path) -> SetupError {
     SetupError::Runtime(format!(
-        "protected machine ACL does not match SYSTEM/Admin Full and Users Read+Execute: {}",
+        "protected machine ACL does not match SYSTEM/Admin Full, Users Read+Execute, ALL APPLICATION PACKAGES Read+Execute, and ALL RESTRICTED APPLICATION PACKAGES Read+Execute: {}",
         path.display()
     ))
 }
@@ -234,6 +261,8 @@ struct ExpectedSids {
     system: OwnedSid,
     administrators: OwnedSid,
     users: OwnedSid,
+    all_application_packages: OwnedSid,
+    all_restricted_application_packages: OwnedSid,
 }
 
 impl ExpectedSids {
@@ -242,6 +271,12 @@ impl ExpectedSids {
             system: OwnedSid::from_string(SYSTEM_SID).map_err(SetupError::Io)?,
             administrators: OwnedSid::from_string(ADMINISTRATORS_SID).map_err(SetupError::Io)?,
             users: OwnedSid::from_string(USERS_SID).map_err(SetupError::Io)?,
+            all_application_packages: OwnedSid::from_string(ALL_APPLICATION_PACKAGES_SID)
+                .map_err(SetupError::Io)?,
+            all_restricted_application_packages: OwnedSid::from_string(
+                ALL_RESTRICTED_APPLICATION_PACKAGES_SID,
+            )
+            .map_err(SetupError::Io)?,
         })
     }
 }
@@ -268,11 +303,18 @@ mod tests {
     use super::ADMINISTRATORS_SID;
     use super::{
         ace_applies_to_current_object, harden_machine_directory, harden_machine_directory_observed,
-        is_users_read_execute_mask, verify_protected_acl, ExpectedSids, HardeningObservation,
+        is_read_execute_mask, verify_protected_acl, ExpectedSids, HardeningObservation,
         FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, GENERIC_EXECUTE, GENERIC_READ, INHERIT_ONLY_ACE,
+        MACHINE_TREE_SDDL,
     };
 
-    const BASE_ACL: &str = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)";
+    const BASE_ACL: &str = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)(A;OICI;GRGX;;;AC)(A;OICI;GRGX;;;S-1-15-2-2)";
+    const OLD_ACL: &str = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)";
+
+    #[test]
+    fn machine_tree_sddl_builds_a_security_descriptor() {
+        SecurityDescriptor::from_sddl(MACHINE_TREE_SDDL).unwrap();
+    }
 
     #[test]
     fn hardening_accepts_the_generic_read_execute_ace_emitted_for_the_root() {
@@ -375,6 +417,28 @@ mod tests {
                     (OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE | INHERIT_ONLY_ACE | INHERITED_ACE)
                         as u8,
                 ),
+                (
+                    "AllApplicationPackages",
+                    FILE_GENERIC_READ | FILE_GENERIC_EXECUTE,
+                    INHERITED_ACE as u8,
+                ),
+                (
+                    "AllApplicationPackages",
+                    GENERIC_READ | GENERIC_EXECUTE,
+                    (OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE | INHERIT_ONLY_ACE | INHERITED_ACE)
+                        as u8,
+                ),
+                (
+                    "AllRestrictedApplicationPackages",
+                    FILE_GENERIC_READ | FILE_GENERIC_EXECUTE,
+                    INHERITED_ACE as u8,
+                ),
+                (
+                    "AllRestrictedApplicationPackages",
+                    GENERIC_READ | GENERIC_EXECUTE,
+                    (OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE | INHERIT_ONLY_ACE | INHERITED_ACE)
+                        as u8,
+                ),
             ]
         );
         assert_eq!(
@@ -391,8 +455,37 @@ mod tests {
                     FILE_GENERIC_READ | FILE_GENERIC_EXECUTE,
                     INHERITED_ACE as u8,
                 ),
+                (
+                    "AllApplicationPackages",
+                    FILE_GENERIC_READ | FILE_GENERIC_EXECUTE,
+                    INHERITED_ACE as u8,
+                ),
+                (
+                    "AllRestrictedApplicationPackages",
+                    FILE_GENERIC_READ | FILE_GENERIC_EXECUTE,
+                    INHERITED_ACE as u8,
+                ),
             ]
         );
+    }
+
+    #[test]
+    fn hardening_repairs_a_tree_that_predates_package_read_access() {
+        let directory = tempfile::tempdir().unwrap();
+        let nested = directory.path().join("payload");
+        std::fs::create_dir(&nested).unwrap();
+        let file = nested.join("manifest.json");
+        std::fs::write(&file, b"{}").unwrap();
+        apply_acl(directory.path(), OLD_ACL);
+        let sids = ExpectedSids::new().unwrap();
+
+        verify_protected_acl(directory.path(), &sids, true)
+            .expect_err("the old ACL must omit application package read access");
+
+        harden_machine_directory(directory.path()).unwrap();
+
+        verify_protected_acl(directory.path(), &sids, true).unwrap();
+        verify_protected_acl(&file, &sids, false).unwrap();
     }
 
     #[test]
@@ -531,8 +624,8 @@ mod tests {
     #[test]
     fn inherit_only_trusted_writer_aces_do_not_replace_current_object_access() {
         for sddl in [
-            "D:P(A;OICIIO;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)",
-            "D:P(A;OICI;FA;;;SY)(A;OICIIO;FA;;;BA)(A;OICI;GRGX;;;BU)",
+            "D:P(A;OICIIO;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)(A;OICI;GRGX;;;AC)(A;OICI;GRGX;;;S-1-15-2-2)",
+            "D:P(A;OICI;FA;;;SY)(A;OICIIO;FA;;;BA)(A;OICI;GRGX;;;BU)(A;OICI;GRGX;;;AC)(A;OICI;GRGX;;;S-1-15-2-2)",
         ] {
             let error = verify_acl_fixture(sddl)
                 .expect_err("inherit-only trusted writer ACE must not satisfy root access");
@@ -551,8 +644,8 @@ mod tests {
 
     #[test]
     fn hosted_root_and_mapped_child_read_execute_masks_are_safe() {
-        assert!(is_users_read_execute_mask(0xA000_0000));
-        assert!(is_users_read_execute_mask(0x0012_00A9));
+        assert!(is_read_execute_mask(0xA000_0000));
+        assert!(is_read_execute_mask(0x0012_00A9));
         assert_eq!(GENERIC_READ | GENERIC_EXECUTE, 0xA000_0000);
         assert_eq!(FILE_GENERIC_READ | FILE_GENERIC_EXECUTE, 0x0012_00A9);
         assert!(!ace_applies_to_current_object(
@@ -567,6 +660,16 @@ mod tests {
             .expect_err("Users write access must fail closed");
 
         assert!(error.to_string().contains("invalid Users rights"));
+    }
+
+    #[test]
+    fn verification_rejects_package_modify_rights() {
+        let error = verify_acl_fixture(
+            "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)(A;OICI;FA;;;AC)(A;OICI;GRGX;;;S-1-15-2-2)",
+        )
+        .expect_err("application package write access must fail closed");
+
+        assert!(error.to_string().contains("AllApplicationPackages"));
     }
 
     #[test]
@@ -697,6 +800,10 @@ mod tests {
                     "Administrators"
                 } else if ace.trustee_matches(&sids.users) {
                     "Users"
+                } else if ace.trustee_matches(&sids.all_application_packages) {
+                    "AllApplicationPackages"
+                } else if ace.trustee_matches(&sids.all_restricted_application_packages) {
+                    "AllRestrictedApplicationPackages"
                 } else {
                     "Unknown"
                 };

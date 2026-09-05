@@ -11,11 +11,14 @@ import type {
   LaunchContext,
   ManualLaunchCandidate,
   NativePreviewOptions,
+  NativePreviewState,
   PreviewRequest,
   PreviewResult,
   ProfileEntry,
   ProfileSnapshot,
-  RecentActivity,
+  EventFilter,
+  EventLogSummary,
+  EventRecord,
   SessionTarget,
   ViewId,
 } from "./model";
@@ -46,7 +49,11 @@ export interface ControlCenterRuntimeAdapter {
   reconnectPreview(): Promise<InstallationStatus>;
   loadDiagnosticReport(): Promise<string>;
   loadDiagnosticLogs(): Promise<ReadonlyArray<string>>;
-  loadRecentActivity(): Promise<ReadonlyArray<RecentActivity>>;
+  loadRecentActivity(): Promise<ReadonlyArray<EventRecord>>;
+  listEvents(filter?: EventFilter, limit?: number): Promise<ReadonlyArray<EventRecord>>;
+  loadEventLogSummary(): Promise<EventLogSummary>;
+  /** Calls the listener when the backend reports new log lines; returns an unsubscribe. */
+  subscribeEventLog(listener: () => void): () => void;
   exportDiagnostics(): Promise<string>;
   copyDiagnostics(): Promise<void>;
   openLogFolder(): Promise<string>;
@@ -69,7 +76,18 @@ export interface ControlCenterRuntimeAdapter {
   revealProfileFile(): Promise<string>;
   saveProfile(): Promise<ProfileSnapshot | null>;
   renderProfilePreview(request: PreviewRequest): Promise<PreviewResult | null>;
-  setNativePreview(visible: boolean, options?: NativePreviewOptions): Promise<boolean>;
+  setNativePreview(visible: boolean, options?: NativePreviewOptions): Promise<NativePreviewState>;
+  /** Calls the listener when the native window changes state on its own (Escape, close); returns an unsubscribe. */
+  subscribeNativePreview(listener: (state: NativePreviewState) => void): () => void;
+  openPreviewStudio(): Promise<void>;
+  reportPreviewStudioReady(): Promise<void>;
+  closePreviewStudio(): Promise<void>;
+  pickPngExportPath(filterName: string, defaultName: string): Promise<string | null>;
+  writePreviewExport(path: string, pngBase64: string): Promise<string>;
+  /** Cross-window messages between the main window and the preview studio. */
+  emitStudioMessage(channel: string, payload: unknown): Promise<void>;
+  subscribeStudioMessage<T>(channel: string, listener: (payload: T) => void): () => void;
+  windowLabel(): string;
   previewImageUrl(path: string): string;
   loadPreviewDiagnostics(): Promise<ReadonlyArray<string>>;
   forcePreviewCrashForCi(): Promise<void>;

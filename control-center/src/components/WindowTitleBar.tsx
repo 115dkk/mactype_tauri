@@ -1,5 +1,6 @@
 import { Minus, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import type { ReactNode } from "react";
 import { useI18n } from "../i18n/i18n";
 
 function withTauriWindow(action: (window: ReturnType<typeof getCurrentWindow>) => Promise<void>) {
@@ -7,14 +8,21 @@ function withTauriWindow(action: (window: ReturnType<typeof getCurrentWindow>) =
   void action(getCurrentWindow());
 }
 
-export function WindowTitleBar() {
+interface WindowTitleBarProps {
+  /* Replaces the product name in standalone windows. */
+  title?: ReactNode;
+  icon?: boolean;
+  className?: string;
+}
+
+export function WindowTitleBar({ title, icon = true, className }: WindowTitleBarProps = {}) {
   const { t } = useI18n();
 
   return (
-    <header className="window-titlebar" data-tauri-drag-region>
+    <header className={className ? `window-titlebar ${className}` : "window-titlebar"} data-tauri-drag-region>
       <div className="window-title" data-tauri-drag-region onDoubleClick={() => withTauriWindow((appWindow) => appWindow.toggleMaximize())}>
-        <img alt="" data-tauri-drag-region height="18" src="/mactype-icon.png" width="18" />
-        <span data-tauri-drag-region>{t("app.title")}</span>
+        {icon && <img alt="" data-tauri-drag-region height="18" src="/mactype-icon.png" width="18" />}
+        <span data-tauri-drag-region>{title ?? t("app.title")}</span>
       </div>
       <div className="window-controls">
         <button aria-label={t("app.windowMinimize")} onClick={() => withTauriWindow((appWindow) => appWindow.minimize())} type="button">

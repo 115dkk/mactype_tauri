@@ -17,7 +17,8 @@ use windows::Win32::System::Rpc::{RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE};
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::System::Wmi::{
     IEnumWbemClassObject, IWbemClassObject, IWbemLocator, IWbemServices, WbemLocator,
-    WBEM_FLAG_FORWARD_ONLY, WBEM_FLAG_RETURN_IMMEDIATELY, WBEM_S_TIMEDOUT,
+    WBEM_E_ACCESS_DENIED, WBEM_E_INVALID_CLASS, WBEM_FLAG_FORWARD_ONLY,
+    WBEM_FLAG_RETURN_IMMEDIATELY, WBEM_S_TIMEDOUT,
 };
 
 /// A COM failure, reduced to its `HRESULT`.
@@ -31,6 +32,14 @@ impl From<windows::core::Error> for WmiError {
         Self {
             hresult: error.code().0,
         }
+    }
+}
+
+impl WmiError {
+    /// Whether an immediate process-start trace is unavailable and the host
+    /// should use its bounded intrinsic creation-event fallback.
+    pub fn permits_intrinsic_process_fallback(self) -> bool {
+        self.hresult == WBEM_E_ACCESS_DENIED.0 || self.hresult == WBEM_E_INVALID_CLASS.0
     }
 }
 

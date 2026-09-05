@@ -21,6 +21,7 @@ set(_injector_sources
   src/fixed_module.cpp
   src/injector.cpp
   src/module_inventory.cpp
+  src/process_lifecycle.cpp
   src/remote_injection.cpp
   src/remote_injection_verdict.cpp
   src/result.cpp
@@ -40,6 +41,7 @@ target_include_directories(${_injector_target} PRIVATE include)
 add_executable(injector-contract-tests
   src/broker_request.cpp
   src/module_inventory.cpp
+  src/process_lifecycle.cpp
   src/remote_injection_verdict.cpp
   src/result.cpp
   src/safety_policy.cpp

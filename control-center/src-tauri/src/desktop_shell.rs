@@ -1,5 +1,13 @@
-use crate::{app, execution, single_instance};
-use std::{env, error::Error, thread};
+use crate::{app, execution, preview_studio, single_instance};
+use serde::Serialize;
+use std::{
+    env,
+    error::Error,
+    fs,
+    path::Path,
+    thread,
+    time::{Duration, SystemTime},
+};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
@@ -16,6 +24,8 @@ pub(crate) fn install(
     startup_gate: single_instance::StartupGate,
 ) -> Result<(), Box<dyn Error>> {
     install_tray(app)?;
+    crate::diagnostics::record_app_started();
+    start_event_log_watcher(app.handle().clone());
     if app::starts_in_tray() {
         if let Some(window) = app.get_webview_window("main") {
             window.hide()?;
@@ -28,7 +38,16 @@ pub(crate) fn install(
 }
 
 pub(crate) fn handle_window_event(window: &Window<Wry>, event: &WindowEvent) {
+    if window.label() != "main" {
+        return;
+    }
     if let WindowEvent::CloseRequested { api, .. } = event {
+        if let Some(studio) = window
+            .app_handle()
+            .get_webview_window(preview_studio::STUDIO_WINDOW_LABEL)
+        {
+            let _ = studio.destroy();
+        }
         if env::var_os("MACTYPE_CI_SMOKE_FILE").is_none() {
             api.prevent_close();
             let _ = window.hide();
@@ -65,6 +84,53 @@ fn install_tray(app: &mut App<Wry>) -> tauri::Result<()> {
     }
     tray.build(app)?;
     Ok(())
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EventLogChanged {
+    newest_ts: Option<u64>,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+struct FileStamp {
+    length: u64,
+    modified: Option<SystemTime>,
+}
+
+fn start_event_log_watcher(app: AppHandle<Wry>) {
+    let Ok(paths) = crate::diagnostics::watch_paths() else {
+        return;
+    };
+    thread::spawn(move || {
+        let mut stamps = paths.iter().map(|path| stamp(path)).collect::<Vec<_>>();
+        loop {
+            thread::sleep(Duration::from_secs(2));
+            let current = paths.iter().map(|path| stamp(path)).collect::<Vec<_>>();
+            if current != stamps {
+                stamps = current;
+                let _ = app.emit(
+                    "event-log:changed",
+                    EventLogChanged {
+                        newest_ts: crate::diagnostics::newest_timestamp(),
+                    },
+                );
+            }
+        }
+    });
+}
+
+fn stamp(path: &Path) -> FileStamp {
+    fs::metadata(path).map_or(
+        FileStamp {
+            length: 0,
+            modified: None,
+        },
+        |metadata| FileStamp {
+            length: metadata.len(),
+            modified: metadata.modified().ok(),
+        },
+    )
 }
 
 fn spawn_background(app: AppHandle<Wry>, action: TrayBackgroundAction) {

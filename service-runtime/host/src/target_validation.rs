@@ -1,11 +1,21 @@
 use mactype_service_contract::StructuredServiceError;
 
-use crate::{ProcessIdentity, ProcessInspector};
+use crate::{ProcessIdentity, ProcessInspector, TargetLifecycle};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProcessTargetDecision {
     Eligible(ProcessIdentity),
     Skipped,
+    Deferred {
+        identity: ProcessIdentity,
+        reason: DeferralReason,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeferralReason {
+    Frozen,
+    HelperLaunchFailed,
 }
 
 pub struct ProcessTargetValidator<'a> {
@@ -42,7 +52,16 @@ impl<'a> ProcessTargetValidator<'a> {
         {
             return Ok(ProcessTargetDecision::Skipped);
         }
-        Ok(ProcessTargetDecision::Eligible(identity))
+        match self.inspector.probe_target_lifecycle(&identity) {
+            TargetLifecycle::Exiting => Ok(ProcessTargetDecision::Skipped),
+            TargetLifecycle::Frozen => Ok(ProcessTargetDecision::Deferred {
+                identity,
+                reason: DeferralReason::Frozen,
+            }),
+            TargetLifecycle::Running | TargetLifecycle::Unknown => {
+                Ok(ProcessTargetDecision::Eligible(identity))
+            }
+        }
     }
 }
 

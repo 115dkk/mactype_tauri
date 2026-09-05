@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod control;
+mod event_log;
 mod file_health;
 mod helper_broker;
 mod injection_orchestrator;
@@ -34,22 +35,22 @@ mod windows_startup_safety;
 mod windows_wmi;
 
 pub use file_health::{CompositeHealthPublisher, FileHealthPublisher};
-#[cfg(windows)]
 pub use helper_broker::{
     FixedHelperBroker, HelperInvocation, HelperLaunchError, HelperLaunchStage, HelperLauncher,
     HelperOutput,
 };
 pub use injection_orchestrator::{
-    InjectionOrchestrator, ProcessAttemptRecord, ProcessOutcome, RetryPolicy, RetryScheduler,
-    SessionChange, MAX_TRACKED_PROCESS_RESULTS, TARGET_VANISHED_RESULT_CODE,
+    DeferralPolicy, DeferredTarget, InjectionOrchestrator, ProcessAttemptRecord, ProcessOutcome,
+    RetryPolicy, RetryScheduler, SessionChange, MAX_DEFERRED_TARGETS, MAX_TRACKED_PROCESS_RESULTS,
+    TARGET_VANISHED_RESULT_CODE,
 };
 #[cfg(windows)]
 pub use named_pipe::{NamedPipeHealthPublisher, HEALTH_PIPE_SECURITY_SDDL};
 pub type ProcessOrchestrator<'a> = InjectionOrchestrator<'a>;
 pub use observer::{
     subscribe_process_creation, BrokerDisposition, BrokerResult, InjectionBroker, InjectionRequest,
-    ProcessArchitecture, ProcessEventSource, ProcessIdentity, ProcessInspector, TargetLiveness,
-    PROCESS_CREATION_QUERY,
+    ProcessArchitecture, ProcessEventSource, ProcessIdentity, ProcessInspector, TargetLifecycle,
+    TargetLiveness, FALLBACK_PROCESS_CREATION_QUERY, PROCESS_CREATION_QUERY,
 };
 pub use orchestration_runtime::initialize_process_orchestration;
 pub use profile_runtime::ProtectedProfileInitializer;
@@ -60,7 +61,7 @@ pub use runtime::{
 pub use runtime_assets::ProtectedRuntimeAssets;
 pub use startup_safety::{LegacyServiceRuntimeState, StartupSafetySnapshot};
 pub use status::{ScmState, ServiceStatus, StatusReporter, SERVICE_STOP_WAIT_HINT_MS};
-pub use target_validation::{ProcessTargetDecision, ProcessTargetValidator};
+pub use target_validation::{DeferralReason, ProcessTargetDecision, ProcessTargetValidator};
 #[cfg(windows)]
 pub use windows_helper_launcher::WindowsHelperLauncher;
 #[cfg(windows)]

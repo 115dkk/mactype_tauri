@@ -75,11 +75,11 @@ const servicePackageCopy = {
   en: en["execution.servicePackageIncompleteDescription"],
   ko: ko["execution.servicePackageIncompleteDescription"],
 };
-if (!servicePackageCopy.en.includes("complete Integration/Developer bundle")
+if (!servicePackageCopy.en.includes("complete ZIP")
   || servicePackageCopy.en.includes("standalone development executable")) {
   throw new Error("English service package guidance must allow the complete development bundle");
 }
-if (!servicePackageCopy.ko.includes("전체 개발용 파일")
+if (!servicePackageCopy.ko.includes("ZIP 전체")
   || servicePackageCopy.ko.includes("단독 개발용 실행 파일에서 사용할 수 없습니다")) {
   throw new Error("Korean service package guidance must allow the complete development bundle");
 }

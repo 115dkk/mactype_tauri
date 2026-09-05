@@ -29,14 +29,14 @@ impl ProcessEventSource for RecordingEventSource {
 }
 
 #[test]
-fn observer_subscribes_with_the_exact_observed_temporary_wmi_query() {
+fn observer_subscribes_to_immediate_process_start_events() {
     let mut source = RecordingEventSource::default();
 
     subscribe_process_creation(&mut source).unwrap();
 
     assert_eq!(
         PROCESS_CREATION_QUERY,
-        "SELECT * FROM __InstanceCreationEvent WITHIN 1 WHERE TargetInstance ISA 'Win32_Process'"
+        "SELECT ProcessID FROM Win32_ProcessStartTrace"
     );
     assert_eq!(source.query.as_deref(), Some(PROCESS_CREATION_QUERY));
 }

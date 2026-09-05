@@ -4,7 +4,9 @@ use mactype_service_contract::StructuredServiceError;
 use mactype_service_platform::{process_session_id, MachineKind, Process, ProcessAccess};
 use windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER;
 
-use crate::{ProcessArchitecture, ProcessIdentity, ProcessInspector, TargetLiveness};
+use crate::{
+    ProcessArchitecture, ProcessIdentity, ProcessInspector, TargetLifecycle, TargetLiveness,
+};
 
 pub struct WindowsProcessInspector {
     service_pid: u32,
@@ -60,6 +62,38 @@ impl ProcessInspector for WindowsProcessInspector {
         })
     }
 
+    fn probe_target_lifecycle(&self, identity: &ProcessIdentity) -> TargetLifecycle {
+        let process = match Process::open(identity.pid, ProcessAccess::QueryLimited) {
+            Ok(process) => process,
+            Err(error) if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) => {
+                return TargetLifecycle::Exiting
+            }
+            Err(_) => return TargetLifecycle::Unknown,
+        };
+        match process.creation_time() {
+            Ok(created) if created != identity.creation_time => return TargetLifecycle::Exiting,
+            Ok(_) => {}
+            Err(_) => return TargetLifecycle::Unknown,
+        }
+        if matches!(process.exit_code(), Ok(Some(_))) {
+            return TargetLifecycle::Exiting;
+        }
+        match process.lifecycle_flags() {
+            Ok(flags) if flags.deleting => TargetLifecycle::Exiting,
+            Ok(flags) if flags.frozen => TargetLifecycle::Frozen,
+            Ok(_) => TargetLifecycle::Running,
+            Err(_) => TargetLifecycle::Unknown,
+        }
+    }
+
+    fn process_basename(&self, identity: &ProcessIdentity) -> Option<String> {
+        let process = Process::open(identity.pid, ProcessAccess::QueryLimited).ok()?;
+        if process.creation_time().ok()? != identity.creation_time {
+            return None;
+        }
+        image_name(&process)
+    }
+
     fn probe_target_liveness(&self, identity: &ProcessIdentity) -> TargetLiveness {
         probe_windows_target_liveness(identity)
     }
@@ -104,6 +138,15 @@ fn open_for_identity(pid: u32) -> Result<Process, StructuredServiceError> {
 
 fn must_skip_injection(process: &Process) -> bool {
     if process.is_critical_or_unknown() {
+        return true;
+    }
+    if process
+        .dynamic_code_mitigation()
+        .is_ok_and(|policy| policy.prohibit_dynamic_code && !policy.allow_thread_opt_out)
+        || process.binary_signature_mitigation().is_ok_and(|policy| {
+            policy.microsoft_signed_only || policy.store_signed_only || policy.mitigation_opt_in
+        })
+    {
         return true;
     }
     image_name(process).as_deref().map_or(true, |name| {

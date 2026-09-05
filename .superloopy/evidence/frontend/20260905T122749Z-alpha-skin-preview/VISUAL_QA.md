@@ -79,3 +79,13 @@ state, and document errors take display precedence. The existing recovery
 test additionally completes an inverted preview before rechecking the error
 and blocked save/apply controls. This regression plus the skin-preview suite
 passes locally: 49 passed, 2 viewport duplicates skipped; build and lint pass.
+
+A complete local run under Linux's DejaVu fallback font produced 640 passes,
+20 viewport skips, and 6 layout failures. Baseline comparison reproduces the
+service-row overflow without this patch. The German preview footer already
+overflowed at baseline and its select-marker padding increased the overhang;
+the footer now wraps whole controls. Its targeted German/default-window/theme
+checks pass (7 passed, 2 viewport skips). Five existing local service-layout
+cases remain outside this preview change; the standard CI font environment
+is the delivery gallery gate. Local before/after measurements were made at
+390 CSS pixels, below the production Windows minimum window width.

@@ -16,6 +16,8 @@
 .studio-controls select { height: 30px; }
 .studio-follow { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
 .studio-follow .switch-control > span { display: none; }
+.studio-open-error { position: fixed; z-index: 40; inset-inline: var(--space-4); bottom: var(--space-4); display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--color-destructive); border-radius: var(--radius-control); background: var(--color-surface); color: var(--color-foreground); }
+.studio-open-error > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .studio-hint { margin: 0; color: var(--color-muted); font-size: 12px; line-height: 1.45; }
 .studio-hint-warn { color: var(--color-warning); }
 .studio-search { display: flex; align-items: center; gap: var(--space-2); min-height: 30px; padding-inline: var(--space-2); border: 1px solid var(--color-border-strong); border-radius: var(--radius-control); background: var(--color-surface); }

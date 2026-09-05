@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useReducer, type ReactElement } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState, type ReactElement } from "react";
+import { useI18n } from "../i18n/i18n";
 import { fallbackStatus, type InstallationStatus, type ViewId } from "./model";
 import type { ProfileMode, ShellProps } from "./shell";
 import { loadLaunchContext, openPreviewStudio, reconnectPreview, rediscoverInstallation, reportFrontendFailure, reportFrontendReady, scanInstallation, verifyTrayModeForCi } from "./tauri";
@@ -18,13 +19,14 @@ interface State {
   ready: boolean;
   ciSmoke: boolean;
   trayStart: boolean;
+  previewStudioSmoke: boolean;
 }
 
 type Action =
   | { type: "navigate"; view: ViewId; profileMode?: ProfileMode }
   | { type: "toggle-theme" }
   | { type: "skin"; skin: SkinPreference }
-  | { type: "launched"; view: ViewId; ciSmoke: boolean; trayStart: boolean }
+  | { type: "launched"; view: ViewId; ciSmoke: boolean; trayStart: boolean; previewStudioSmoke: boolean }
   | { type: "status"; status: InstallationStatus };
 
 function reducer(state: State, action: Action): State {
@@ -40,7 +42,7 @@ function reducer(state: State, action: Action): State {
     case "skin":
       return { ...state, skin: action.skin };
     case "launched":
-      return { ...state, view: action.view, ciSmoke: action.ciSmoke, trayStart: action.trayStart, ready: true };
+      return { ...state, view: action.view, ciSmoke: action.ciSmoke, trayStart: action.trayStart, previewStudioSmoke: action.previewStudioSmoke, ready: true };
     case "status":
       return { ...state, status: action.status };
   }
@@ -62,6 +64,9 @@ const shells: Record<SkinPreference, (props: ShellProps) => ReactElement> = {
    the active skin's shell owns how they are arranged. Switching skins swaps
    the shell and keeps every piece of state. */
 export function App({ initialTheme = loadThemePreference(), initialSkin = loadSkinPreference() }: AppProps) {
+  const { t } = useI18n();
+  const [studioError, setStudioError] = useState<string | null>(null);
+  const studioOpening = useRef(false);
   const [state, dispatch] = useReducer(reducer, {
     view: "overview",
     profileMode: "advanced",
@@ -71,13 +76,15 @@ export function App({ initialTheme = loadThemePreference(), initialSkin = loadSk
     ready: false,
     ciSmoke: false,
     trayStart: false,
+    previewStudioSmoke: false,
   });
 
   useEffect(() => {
     let active = true;
     void Promise.all([loadLaunchContext(), scanInstallation()]).then(([context, status]) => {
       if (!active) return;
-      dispatch({ type: "launched", view: context.view, ciSmoke: context.ciSmoke, trayStart: context.trayStart });
+      dispatch({ type: "launched", view: context.view, ciSmoke: context.ciSmoke, trayStart: context.trayStart, previewStudioSmoke: context.previewStudioSmoke ?? false });
+      if (context.ciSmoke && context.previewStudioSmoke) void openPreviewStudio().catch((error: unknown) => reportFrontendFailure("overview", String(error)));
       if (status) dispatch({ type: "status", status });
     });
     return () => {
@@ -94,7 +101,7 @@ export function App({ initialTheme = loadThemePreference(), initialSkin = loadSk
   }, [state.skin]);
 
   useEffect(() => {
-    if (!state.ready) return;
+    if (!state.ready || state.previewStudioSmoke) return;
     document.body.dataset.view = state.view;
     document.body.dataset.profileMode = state.profileMode;
     document.body.dataset.rendered = "true";
@@ -105,15 +112,21 @@ export function App({ initialTheme = loadThemePreference(), initialSkin = loadSk
     } else if (!state.ciSmoke || (state.view !== "profiles" && state.view !== "execution")) {
       void reportFrontendReady(state.view);
     }
-  }, [state.ciSmoke, state.profileMode, state.ready, state.trayStart, state.view]);
+  }, [state.ciSmoke, state.previewStudioSmoke, state.profileMode, state.ready, state.trayStart, state.view]);
 
   const navigate = useCallback((view: ViewId, profileMode?: ProfileMode) => dispatch({ type: "navigate", view, profileMode }), []);
   const setStatus = useCallback((status: InstallationStatus) => dispatch({ type: "status", status }), []);
   const reportReady = useCallback((view: ViewId) => { void reportFrontendReady(view); }, []);
-  const studio = useCallback(() => { void openPreviewStudio(); }, []);
+  const studio = useCallback(() => {
+    if (studioOpening.current) return;
+    studioOpening.current = true;
+    setStudioError(null);
+    void openPreviewStudio().catch((error: unknown) => setStudioError(error instanceof Error ? error.message : String(error))).finally(() => { studioOpening.current = false; });
+  }, []);
 
   const Shell = shells[state.skin];
   return (
+    <>
     <Shell
       ciSmoke={state.ciSmoke}
       navigate={navigate}
@@ -130,5 +143,11 @@ export function App({ initialTheme = loadThemePreference(), initialSkin = loadSk
       toggleTheme={() => dispatch({ type: "toggle-theme" })}
       view={state.view}
     />
+    {studioError && <div className="studio-open-error" role="alert">
+      <span>{studioError}</span>
+      <button className="button secondary" onClick={studio} type="button">{t("profiles.openStudio")}</button>
+      <button aria-label={t("app.windowClose")} className="icon-button" onClick={() => setStudioError(null)} type="button">×</button>
+    </div>}
+    </>
   );
 }

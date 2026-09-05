@@ -8,6 +8,8 @@ import { eventClock, eventTime, eventTitle } from "../../features/events/eventTe
 import { useRecentActivity } from "../../features/events/useEventLog";
 import { useAppliedProfileEntry } from "../../features/files/useAppliedProfileEntry";
 import { scriptUiFont } from "../../features/preview/scriptUiFont";
+import { previewFontOptions } from "../../features/preview/previewFonts";
+import { usePreviewFontSubstitutes } from "../../features/preview/usePreviewFontSubstitutes";
 import { SpecimenBoard } from "../../features/preview/SpecimenBoard";
 import { useI18n } from "../../i18n/i18n";
 import { ConsoleFrame, ConsoleKv, ConsolePanel } from "./ConsoleFrame";
@@ -23,8 +25,11 @@ export function ConsoleOverview() {
   const activity = useRecentActivity();
   const applied = useAppliedProfileEntry(execution.status?.activeProfile ?? null);
   const scriptFont = scriptUiFont(locale);
-  const fontOptions = scriptFont ? [{ value: "Segoe UI", label: "Segoe UI" }, { value: scriptFont, label: scriptFont }] : [{ value: "Segoe UI", label: "Segoe UI" }];
-  const [fontFace, setFontFace] = useState("Segoe UI");
+  const substitutes = usePreviewFontSubstitutes(applied?.path ?? null, execution.status?.expectedProfileDigest);
+  const fontOptions = previewFontOptions(locale, substitutes.mappings);
+  const [fontSource, setFontSource] = useState<string | null>(null);
+  const selectedFont = fontOptions.find((option) => option.value === (fontSource ?? scriptFont)) ?? fontOptions[0];
+  const fontFace = selectedFont.label;
   const theme = useAppTheme();
   const [inverted, setInverted] = useState(false);
   const dark = (theme === "dark") !== inverted;
@@ -73,7 +78,7 @@ export function ConsoleOverview() {
         </>}
         icon={<Eye aria-hidden="true" size={14} />}
         right={<>
-          <Segmented compact label={t("profiles.previewFont")} onChange={setFontFace} options={fontOptions} value={fontFace} />
+          <Segmented compact label={t("profiles.previewFont")} onChange={setFontSource} options={fontOptions} value={selectedFont.value} />
           <button aria-pressed={inverted} className="button ghost" onClick={() => setInverted((value) => !value)} type="button"><Contrast aria-hidden="true" size={13} /> {t("profiles.invertColours")}</button>
         </>}
         scroll={false}
@@ -81,6 +86,7 @@ export function ConsoleOverview() {
       >
         {editing && <textarea aria-label={t("profiles.sampleAria")} className="sample-input console-sample-input" onChange={(event) => setSample(event.target.value)} rows={2} value={sample} />}
         <SpecimenBoard className="specimen-board console-canvas" dark={dark} fontFace={fontFace} profilePath={applied?.path ?? null} sizes={SPECIMEN_SIZES} text={sample} />
+        {substitutes.error && <p className="inline-error" role="alert">{substitutes.error}</p>}
       </ConsolePanel>
 
       <div className="console-stack">

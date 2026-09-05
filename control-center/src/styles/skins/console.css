@@ -81,9 +81,7 @@ html[data-skin="console"] .text-action { min-height: var(--control-height); padd
 html[data-skin="console"] .text-action:hover { color: var(--color-foreground); }
 html[data-skin="console"] select, html[data-skin="console"] input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), html[data-skin="console"] textarea { border: 1px solid var(--color-border-strong); border-radius: 4px; background: var(--color-surface-subtle); color: var(--color-foreground); font-size: 12px; }
 html[data-skin="console"] select, html[data-skin="console"] input:not([type="range"]):not([type="checkbox"]):not([type="radio"]) { height: var(--control-height); padding-inline: 8px; }
-html[data-skin="console"] .switch-control input { width: 30px; height: 16px; }
-html[data-skin="console"] .switch-control input::before { width: 12px; height: 12px; }
-html[data-skin="console"] .switch-control input:checked::before { transform: translateX(14px); }
+html[data-skin="console"] { --switch-width: 30px; --switch-height: 16px; --switch-inset: 1px; --selection-size: 14px; }
 html[data-skin="console"] .switch-control > span { display: none; }
 html[data-skin="console"] .status-dot { width: 8px; height: 8px; }
 html[data-skin="console"] .segmented { height: 24px; padding: 2px; border: 1px solid var(--color-border-strong); border-radius: 4px; background: var(--color-surface-subtle); }
@@ -174,7 +172,7 @@ html[data-skin="console"] .console-log li { display: flex; gap: 10px; min-width:
 html[data-skin="console"] .console-log time { flex: 0 0 auto; color: var(--console-text-3); }
 html[data-skin="console"] .console-log li[data-severity="warning"] { color: var(--color-warning); }
 html[data-skin="console"] .console-log li[data-severity="error"] { color: var(--color-destructive); }
-html[data-skin="console"] .console-canvas { flex: 1 1 auto; margin: 10px; padding: 18px 22px; border: 1px solid var(--color-border); border-radius: 4px; overflow: hidden; }
+html[data-skin="console"] .console-canvas { flex: 1 1 auto; margin: 10px; padding: 18px 22px; border: 1px solid var(--color-border); border-radius: 4px; overflow: auto; }
 html[data-skin="console"] .console-canvas-fixed { flex: 0 0 150px; height: 150px; padding: 12px 14px; }
 html[data-skin="console"] .console-sample-input { margin: 10px 10px 0; }
 html[data-skin="console"] .specimen-strip figcaption { width: 28px; font-family: var(--console-mono); font-size: 10px; color: var(--console-text-3); }

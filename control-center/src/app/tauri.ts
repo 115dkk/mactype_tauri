@@ -232,6 +232,14 @@ export async function openPreviewStudio(): Promise<void> {
   return getRuntimeAdapter().openPreviewStudio();
 }
 
+export async function loadPreviewFontSubstitutes(path: string): Promise<ReadonlyArray<string>> {
+  return getRuntimeAdapter().loadPreviewFontSubstitutes(path);
+}
+
+export async function reportPreviewStudioReady(): Promise<void> {
+  return getRuntimeAdapter().reportPreviewStudioReady();
+}
+
 export async function closePreviewStudio(): Promise<void> {
   return getRuntimeAdapter().closePreviewStudio();
 }

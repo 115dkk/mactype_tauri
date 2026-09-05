@@ -3,6 +3,7 @@ import type { PreviewEngine } from "../../app/model";
 import { previewImageUrl } from "../../app/tauri";
 import { useI18n } from "../../i18n/i18n";
 import { specimenPalette } from "./specimenPalette";
+import { wrapSample } from "./wrapSample";
 import { specimenStripHeight, useSpecimenRenders, type SpecimenRequest } from "./useSpecimenRenders";
 
 interface SpecimenBoardProps {
@@ -44,32 +45,36 @@ export function SpecimenBoard({ profilePath, overrides, engine, fontFace, sizes,
   const requests = useMemo<ReadonlyArray<SpecimenRequest>>(() => {
     if (!profilePath || width < 120) return [];
     const dpi = Math.round(96 * displayScale);
-    return sizes.map((size) => ({
-      key: `${size}`,
-      profilePath,
-      overrides: overrides ?? {},
-      engine,
-      text,
-      fontFace,
-      fontSizePt: size,
-      widthPx: width * displayScale,
-      heightPx: specimenStripHeight(text, size, dpi),
-      dpi,
-      foreground: palette.foreground,
-      background: palette.background,
-      bold,
-      italic,
-    }));
+    return sizes.map((size) => {
+      const wrappedText = wrapSample(text, fontFace, size, width);
+      return {
+        key: `${size}`,
+        profilePath,
+        overrides: overrides ?? {},
+        engine,
+        text: wrappedText,
+        fontFace,
+        fontSizePt: size,
+        widthPx: width * displayScale,
+        heightPx: specimenStripHeight(wrappedText, size, dpi),
+        dpi,
+        foreground: palette.foreground,
+        background: palette.background,
+        bold,
+        italic,
+      };
+    });
   }, [bold, displayScale, engine, fontFace, italic, overrides, palette.background, palette.foreground, profilePath, sizes, text, width]);
 
   const { lines, error } = useSpecimenRenders(requests);
+  const displayedPalette = lines[0]?.request ?? palette;
 
   return (
-    <div aria-label={t("profiles.previewAria")} className={className ?? "specimen-board"} data-dark={dark} data-empty={lines.length === 0} ref={canvasRef} role="img" style={{ background: palette.background, color: palette.foreground }}>
+    <div aria-label={t("profiles.previewAria")} className={className ?? "specimen-board"} data-dark={displayedPalette.background === specimenPalette(true).background} data-empty={lines.length === 0} ref={canvasRef} role="img" tabIndex={0} style={{ background: displayedPalette.background, color: displayedPalette.foreground }}>
       {lines.length > 0 ? lines.map((line) => (
         <figure className="specimen-strip" data-size={line.request.fontSizePt} key={line.key}>
           {labelled && <figcaption>{line.request.fontSizePt}</figcaption>}
-          <img alt={t("profiles.previewImageAlt")} height={line.result.height / displayScale} src={previewImageUrl(line.result.imagePath)} width={line.result.width / displayScale} />
+          <img alt={t("profiles.previewImageAlt")} height={line.result.height / displayScale} key={line.result.requestId} src={previewImageUrl(line.result.imagePath)} width={line.result.width / displayScale} />
         </figure>
       )) : sizes.map((size) => (
         <figure className="specimen-strip specimen-placeholder" data-size={size} key={size}>

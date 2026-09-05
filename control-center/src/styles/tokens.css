@@ -42,6 +42,12 @@
   --nav-width: 220px;
   --titlebar-height: 40px;
   --control-height: 40px;
+  --switch-width: 40px;
+  --switch-height: 20px;
+  --switch-thumb: 12px;
+  --switch-inset: 3px;
+  --switch-border: 1px;
+  --selection-size: 16px;
   --settings-index-width: 196px;
   --settings-control-width: 232px;
   --opacity-disabled: 0.46;

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PreviewEngine, PreviewResult } from "../../app/model";
 import { renderProfilePreview } from "../../app/tauri";
+import { preparePreviewImage } from "./preparePreviewImage";
 
 export interface SpecimenRequest {
   key: string;
@@ -38,9 +39,12 @@ const MAX_WIDTH = 4096;
 
 export function specimenStripHeight(text: string, fontSizePt: number, dpi: number): number {
   const lines = Math.max(1, text.split("\n").length);
-  const pixelSize = (fontSizePt * dpi) / 72;
-  const spacing = Math.max(18, Math.round(pixelSize * 1.3));
-  return Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, lines * spacing + 10));
+  const pixelSize = Math.max(8, Math.round((fontSizePt * dpi) / 72));
+  // Reserve the helper's top inset and 1.5-em line advance, including descenders.
+  const inset = Math.max(8, Math.ceil(pixelSize * 0.75));
+  const spacing = Math.max(22, Math.ceil(pixelSize * 1.5));
+  const bottom = Math.max(8, Math.ceil(pixelSize * 0.25));
+  return Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, inset + lines * spacing + bottom));
 }
 
 function clamp(value: number, low: number, high: number): number {
@@ -99,7 +103,10 @@ export function useSpecimenRenders(requests: ReadonlyArray<SpecimenRequest>, ena
               },
             });
             if (!mounted.current) return;
-            if (result) rendered.push({ key: request.key, request, result });
+            if (!result) throw new Error("Preview renderer returned no image");
+            await preparePreviewImage(result.imagePath);
+            if (!mounted.current) return;
+            rendered.push({ key: request.key, request, result });
             if (batch.id < batchCounter.current) {
               aborted = true;
               break;

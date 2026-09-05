@@ -199,16 +199,16 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
    action ("check to disable"). Drawing the control as a toggle keeps the word
    a readout of the current position, as Windows Settings does. */
 .switch-control { display: flex; align-items: center; gap: var(--space-2); font-weight: 400 !important; cursor: pointer; }
-.switch-control input { display: inline-block; position: relative; flex: 0 0 auto; width: 40px; height: 20px; margin: 0; border: 1px solid var(--color-border-strong); border-radius: 10px; background: var(--color-surface); appearance: none; cursor: pointer; transition: background-color var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard); }
-.switch-control input::before { position: absolute; top: 3px; inset-inline-start: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--color-muted); content: ""; transition: inset-inline-start var(--motion-fast) var(--ease-standard), background-color var(--motion-fast) var(--ease-standard), width var(--motion-fast) var(--ease-standard), height var(--motion-fast) var(--ease-standard), top var(--motion-fast) var(--ease-standard); }
-.switch-control input:hover::before { top: 2px; inset-inline-start: 2px; width: 14px; height: 14px; background: var(--color-foreground); }
+.switch-control input { display: inline-block; position: relative; flex: 0 0 auto; width: var(--switch-width); height: var(--switch-height); padding: 0; margin: 0; border: var(--switch-border) solid var(--color-border-strong); border-radius: var(--switch-height); background: var(--color-surface); appearance: none; cursor: pointer; }
+.switch-control input::before { position: absolute; top: calc((var(--switch-height) - 2 * var(--switch-border) - var(--switch-thumb)) / 2); inset-inline-start: var(--switch-inset); width: var(--switch-thumb); height: var(--switch-thumb); border-radius: 50%; background: var(--color-muted); content: ""; }
+.switch-control input:hover:not(:disabled)::before { background: var(--color-foreground); }
 .switch-control input:checked { border-color: var(--color-primary); background: var(--color-primary); }
-.switch-control input:checked::before { inset-inline-start: 23px; background: var(--color-on-primary); }
-.switch-control input:checked:hover::before { inset-inline-start: 22px; background: var(--color-on-primary); }
+.switch-control input:checked::before { inset-inline-start: calc(var(--switch-width) - 2 * var(--switch-border) - var(--switch-thumb) - var(--switch-inset)); background: var(--color-on-primary); }
+.switch-control input:checked:hover::before { background: var(--color-on-primary); }
 .switch-control input:disabled { cursor: default; opacity: var(--opacity-disabled); }
-.switch-control input:disabled::before { top: 3px; inset-inline-start: 3px; width: 12px; height: 12px; background: var(--color-muted); }
-.switch-control input:checked:disabled::before { inset-inline-start: 23px; background: var(--color-on-primary); }
 .switch-control input:disabled + span { opacity: var(--opacity-disabled); }
+input[type="checkbox"]:not([role="switch"]), input[type="radio"] { flex: 0 0 auto; width: var(--selection-size); height: var(--selection-size); margin: 0; padding: 0; accent-color: var(--color-primary); vertical-align: middle; }
+input[type="range"] { min-width: 0; height: var(--control-height); margin: 0; padding: 0; accent-color: var(--color-primary); }
 .setting-row select { width: 100%; padding: 0 var(--space-2); }
 /* min-width: 0 keeps the toolbar's min-content width (a font-family select is
    wide) from inflating the workspace column past the window. */
@@ -575,10 +575,10 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .button.ghost { border-color: transparent; background: transparent; color: var(--color-muted); box-shadow: none; }
 .button.ghost:hover { color: var(--color-foreground); background: var(--color-surface-subtle); }
 .specimen-board { display: flex; flex-direction: column; gap: 6px; min-height: 96px; overflow: hidden; }
-.specimen-strip { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 10px; margin: 0; }
+.specimen-strip { display: grid; flex: 0 0 auto; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 10px; margin: 0; }
 .specimen-strip figcaption { padding-top: 6px; }
 .specimen-strip figcaption { color: var(--color-muted); font-family: Consolas, "Cascadia Mono", monospace; font-size: 10px; }
-.specimen-strip img { display: block; max-width: 100%; }
+.specimen-strip img { display: block; max-width: none; }
 .specimen-placeholder p { margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; opacity: 0.5; }
 .specimen-error { grid-column: 1 / -1; }
 .event-timeline { display: grid; gap: var(--space-3); }

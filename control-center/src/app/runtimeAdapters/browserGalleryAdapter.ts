@@ -405,9 +405,15 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
   },
 
   openPreviewStudio(): Promise<void> {
+    if (new URLSearchParams(window.location.search).has("studio-open-error")) return Promise.reject(new Error("Preview Studio could not open"));
     window.sessionStorage.setItem("gallery-preview-studio", "open");
     return Promise.resolve();
   },
+
+  loadPreviewFontSubstitutes(path: string): Promise<ReadonlyArray<string>> {
+    return Promise.resolve(galleryProfiles.previewFontSubstitutes(path));
+  },
+  reportPreviewStudioReady: () => Promise.resolve(),
 
   closePreviewStudio(): Promise<void> {
     window.sessionStorage.setItem("gallery-preview-studio", "closed");

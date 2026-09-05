@@ -158,6 +158,7 @@ function stripKey(key: string): string {
 export function StudioBoard({ label, lines, against, zoom, dpi, background, foreground, rendering, error, message, onLoupe, boardRef }: StudioBoardProps) {
   const { t } = useI18n();
   const scale = dpi / 96;
+  const palette = !against && lines[0] ? lines[0].request : { background, foreground };
   const paired = useMemo(() => {
     if (!against) return null;
     const byKey = new Map(against.map((line) => [stripKey(line.key), line]));
@@ -165,7 +166,7 @@ export function StudioBoard({ label, lines, against, zoom, dpi, background, fore
   }, [against, lines]);
 
   return (
-    <section aria-label={label} className="studio-board" data-rendering={rendering} ref={boardRef} style={{ background, color: foreground }}>
+    <section aria-label={label} className="studio-board" data-rendering={rendering} ref={boardRef} style={{ background: palette.background, color: palette.foreground }}>
       <header className="studio-board-head"><span>{label}</span>{rendering && <span className="studio-board-busy">{t("studio.rendering")}</span>}</header>
       {message && <p className="studio-board-message">{message}</p>}
       {error && <p className="inline-error studio-board-message">{error}</p>}
@@ -180,7 +181,7 @@ export function StudioBoard({ label, lines, against, zoom, dpi, background, fore
           : lines.map((line) => (
             <figure className="studio-strip" key={line.key}>
               <figcaption><span>{line.request.fontFace}{line.request.bold ? " · B" : ""}{line.request.italic ? " · I" : ""}</span><span>{line.request.fontSizePt}</span></figcaption>
-              <StripImage line={line} onLoupe={onLoupe} scale={scale} zoom={zoom} />
+              <StripImage key={line.result.requestId} line={line} onLoupe={onLoupe} scale={scale} zoom={zoom} />
             </figure>
           ))}
       </div>

@@ -51,6 +51,7 @@ const recentGalleryProfile: ProfileSnapshot = {
 const cloneProfile = (profile: ProfileSnapshot): ProfileSnapshot => structuredClone(profile);
 
 interface BrowserGalleryProfileState {
+  previewFontSubstitutes(path: string): ReadonlyArray<string>;
   current(): ProfileSnapshot;
   discard(): ProfileSnapshot;
   resetDefaults(): ProfileSnapshot;
@@ -70,8 +71,16 @@ interface BrowserGalleryProfileState {
 }
 
 export function createBrowserGalleryProfileState(): BrowserGalleryProfileState {
-  let profile = cloneProfile(fallbackGalleryProfile);
-  let savedProfile = cloneProfile(fallbackGalleryProfile);
+  const initial = cloneProfile(fallbackGalleryProfile);
+  const query = new URLSearchParams(window.location.search);
+  const substitutes = query.get("preview-substitutes");
+  if (substitutes) {
+    initial.advanced.fontSubstitutes = substitutes.split(";");
+    initial.values.font_substitutes = query.get("preview-substitution-mode") === "0" ? 0 : 1;
+    initial.savedValues = { ...initial.values };
+  }
+  let profile = cloneProfile(initial);
+  let savedProfile = cloneProfile(initial);
   const undoHistory: ProfileSnapshot[] = [];
   const redoHistory: ProfileSnapshot[] = [];
 
@@ -125,6 +134,11 @@ export function createBrowserGalleryProfileState(): BrowserGalleryProfileState {
   }
 
   return {
+    previewFontSubstitutes: (path) => {
+      const saved = path === savedProfile.path ? savedProfile : profileForPath(path);
+      if (saved.values.font_substitutes === 0) return [];
+      return [...saved.advanced.fontSubstitutes];
+    },
     current: () => snapshot(),
     discard: () => open(savedProfile),
     resetDefaults: () => {

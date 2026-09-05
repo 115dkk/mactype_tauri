@@ -2,6 +2,8 @@ import { AlertTriangle, Check, FileInput, FileOutput, FolderOpen, Play, Save, Sa
 import { useState } from "react";
 import { matchesAppliedProfile, useFileSettingsModel } from "../../features/files/useFileSettingsModel";
 import { SpecimenBoard } from "../../features/preview/SpecimenBoard";
+import { substitutedPreviewFont } from "../../features/preview/previewFonts";
+import { scriptUiFont } from "../../features/preview/scriptUiFont";
 import { useI18n } from "../../i18n/i18n";
 import { ConsoleFrame, ConsoleKv, ConsolePanel } from "./ConsoleFrame";
 import { useConsole } from "./consoleContext";
@@ -10,7 +12,7 @@ import { ConsoleServiceStatus } from "./ConsoleStatus";
 const SPECIMEN_SIZES = [18, 14, 11] as const;
 
 export function ConsoleFiles() {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const { shell } = useConsole();
   const model = useFileSettingsModel({ onEditInTuner: () => shell.navigate("profiles", "advanced") });
   const { profile, profiles, appliedProfile, legacy, busy, message, error } = model;
@@ -18,6 +20,7 @@ export function ConsoleFiles() {
   const needle = filter.trim().toLocaleLowerCase();
   const visible = profiles.filter((entry) => !needle || entry.name.toLocaleLowerCase().includes(needle) || entry.displayPath.toLocaleLowerCase().includes(needle));
   const applied = profile ? matchesAppliedProfile({ name: "", path: profile.path, displayPath: profile.displayPath }, appliedProfile) : false;
+  const fontFace = substitutedPreviewFont(scriptUiFont(locale) ?? "Segoe UI", profile?.values.font_substitutes === 0 ? [] : profile?.advanced.fontSubstitutes ?? []);
 
   return (
     <ConsoleFrame
@@ -77,7 +80,7 @@ export function ConsoleFiles() {
         scroll={false}
         title={t("files.selectedTitle")}
       >
-        <SpecimenBoard className="specimen-board console-canvas console-canvas-fixed" dark={shell.theme === "dark"} fontFace="Segoe UI" profilePath={profile?.path ?? null} sizes={SPECIMEN_SIZES} text={t("profiles.samplePangram")} />
+        <SpecimenBoard className="specimen-board console-canvas console-canvas-fixed" dark={shell.theme === "dark"} fontFace={fontFace} profilePath={profile?.path ?? null} sizes={SPECIMEN_SIZES} text={t("profiles.samplePangram")} />
         <ConsoleKv rows={[
           { key: "file", label: t("files.columnFile"), value: <code title={profile?.path}>{profile?.displayPath ?? t("profiles.none")}</code> },
           { key: "unsaved", label: t("files.unsaved"), value: model.unsavedText },

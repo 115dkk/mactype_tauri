@@ -145,6 +145,8 @@ export const tauriRuntimeAdapter: ControlCenterRuntimeAdapter = {
   async openPreviewStudio(): Promise<void> {
     await invoke("open_preview_studio");
   },
+  loadPreviewFontSubstitutes: (path: string) => invoke<ReadonlyArray<string>>("preview_font_substitutes", { path }),
+  reportPreviewStudioReady: () => invoke<void>("preview_studio_ready"),
 
   async closePreviewStudio(): Promise<void> {
     await invoke("close_preview_studio");

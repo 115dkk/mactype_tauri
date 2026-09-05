@@ -17,6 +17,33 @@ fn temp_profile(bytes: &[u8]) -> PathBuf {
 }
 
 #[test]
+fn preview_substitutes_read_saved_profile_without_replacing_dirty_editor() {
+    let edited_path = temp_profile(
+        b"[General]\nFontSubstitutes=0\n[FreeType]\nNormalWeight=1\n[FontSubstitutes]\nSegoe UI=Pretendard\n",
+    );
+    let preview_path = temp_profile(
+        "[General]\nFontSubstitutes=1\n[FontSubstitutes]\n맑은 고딕=Pretendard\n".as_bytes(),
+    );
+    let state = ProfileState::default();
+    commands::open_profile(edited_path.to_string_lossy().into_owned(), &state).unwrap();
+    let before = commands::update_profile_setting("normal_weight".to_owned(), 2.0, &state).unwrap();
+    assert_eq!(
+        preview_font_substitutes(preview_path.to_string_lossy().into_owned()).unwrap(),
+        vec!["맑은 고딕=Pretendard"]
+    );
+    let after = state.snapshot().unwrap().unwrap();
+    assert_eq!(after.path, before.path);
+    assert_eq!(after.values, before.values);
+    assert_eq!(after.dirty_keys, before.dirty_keys);
+    assert!(after.can_undo);
+    assert!(preview_font_substitutes(edited_path.to_string_lossy().into_owned())
+        .unwrap()
+        .is_empty());
+    let _ = fs::remove_file(edited_path);
+    let _ = fs::remove_file(preview_path);
+}
+
+#[test]
 fn legacy_alternative_file_can_be_parsed_from_already_verified_bytes() {
     let bytes = b"[General]\r\nAlternativeFile=ini\\Community.ini\r\n";
 

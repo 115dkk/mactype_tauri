@@ -12,6 +12,8 @@ import {
 import type { NativePreviewMode, PreviewRequest, PreviewResult } from "../../app/model";
 import { currentSkin, nativeChrome } from "../../features/preview/nativeChrome";
 import { nativePreviewLabels, NATIVE_LADDER_SIZES } from "../../features/preview/nativePreviewLabels";
+import { wrapSample } from "../../features/preview/wrapSample";
+import { preparePreviewImage } from "../../features/preview/preparePreviewImage";
 import { useAppTheme } from "../../app/useAppTheme";
 import {
   forcePreviewCrashForCi,
@@ -52,6 +54,7 @@ interface PreviewLine {
   label: string | null;
   side: CompareSide | null;
   result: PreviewResult;
+  background: string;
 }
 
 interface PendingBatch {
@@ -104,52 +107,8 @@ const MAX_STRIP_HEIGHT = 1000;
    instead keeps every layout at true size, and because the helper draws with
    ETO_CLIPPED rather than wrapping, the sample is broken into fitting lines
    here. */
-const SAMPLE_INSET = 18;
-/* Browser metrics and the helper's GDI metrics disagree by a little, so the
-   last word keeps a margin rather than risking the clip. */
-const SAMPLE_RIGHT_MARGIN = 12;
 const MIN_SAMPLE_WIDTH = 220;
-/* Follow the canvas in steps so a drag across the window edge does not churn
-   state on every pixel. */
 const SAMPLE_WIDTH_STEP = 8;
-/* Latin breaks at spaces; CJK writes without them, so every syllable or
-   ideograph is its own break opportunity. */
-const CJK = "\\u1100-\\u11FF\\u2E80-\\u303F\\u3040-\\u30FF\\u3400-\\u4DBF\\u4E00-\\u9FFF\\uA960-\\uA97F\\uAC00-\\uD7FF\\uF900-\\uFAFF\\uFF00-\\uFF60";
-const SAMPLE_TOKENS = new RegExp(`[${CJK}]\\s*|[^\\s${CJK}]+\\s*|\\s+`, "gu");
-
-let sampleMeasureContext: CanvasRenderingContext2D | null | undefined;
-
-function sampleMeasurer(fontFace: string, fontSizePt: number): ((text: string) => number) | null {
-  if (sampleMeasureContext === undefined) sampleMeasureContext = document.createElement("canvas").getContext("2d");
-  const context = sampleMeasureContext;
-  if (!context) return null;
-  context.font = `${(fontSizePt * 96) / 72}px "${fontFace}", sans-serif`;
-  return (text: string) => context.measureText(text).width;
-}
-
-function wrapSampleLine(line: string, measure: (text: string) => number, room: number): ReadonlyArray<string> {
-  const tokens = line.match(SAMPLE_TOKENS);
-  if (!tokens) return [line];
-  const wrapped: string[] = [];
-  let current = "";
-  for (const token of tokens) {
-    if (current && measure((current + token).trimEnd()) > room) {
-      wrapped.push(current.trimEnd());
-      current = token.trimStart();
-    } else {
-      current += token;
-    }
-  }
-  wrapped.push(current.trimEnd());
-  return wrapped;
-}
-
-function wrapSample(text: string, fontFace: string, fontSizePt: number, widthPx: number): string {
-  const room = widthPx - SAMPLE_INSET - SAMPLE_RIGHT_MARGIN;
-  const measure = room > 0 ? sampleMeasurer(fontFace, fontSizePt) : null;
-  if (!measure) return text;
-  return text.split("\n").flatMap((line) => wrapSampleLine(line, measure, room)).join("\n");
-}
 
 function stripHeightFor(text: string, fontSize: number): number {
   const lines = Math.max(1, text.split("\n").length);
@@ -291,7 +250,9 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
               break;
             }
             if (!rendered) continue;
-            lines.push({ key: entry.key, label: entry.label, side: entry.side, result: rendered });
+            await preparePreviewImage(rendered.imagePath);
+            if (!isCurrentGeneration(pending.generation)) { aborted = true; break; }
+            lines.push({ key: entry.key, label: entry.label, side: entry.side, result: rendered, background: entry.request.sample.background });
             /* A newer value is already waiting. Stop spending helper work on
                this obsolete batch and, crucially, never expose its partial
                stack to the canvas. */
@@ -484,6 +445,8 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
 
   const displayScale = window.devicePixelRatio || 1;
   const fallbackSample = t("profiles.sampleText").split("\n");
+  const displayedDark = previewStack[0] ? previewStack[0].background === previewPalette(true).background : darkPreview;
+  const displayedPalette = previewPalette(displayedDark);
 
   return (
     <section className="preview-panel" aria-labelledby="preview-title" data-compact={!docked && previewHeight < 220} ref={previewPanelRef} style={docked ? undefined : { height: previewHeight }} tabIndex={-1}>
@@ -512,13 +475,14 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
         </div>
       </div>
       {sampleEditorOpen && <textarea className="sample-input" aria-label={t("profiles.sampleAria")} onChange={(event) => setSampleText(event.target.value)} rows={2} value={sampleText} />}
-      <div className="preview-canvas" data-dark={darkPreview} data-stack={previewStack.length > 0} ref={canvasRef} role="img" aria-label={t("profiles.previewAria")}>
+      <div className="preview-canvas" data-dark={displayedDark} data-stack={previewStack.length > 0} ref={canvasRef} role="img" aria-label={t("profiles.previewAria")} style={{ background: displayedPalette.background, color: displayedPalette.foreground }}>
         {previewStack.length > 0 ? previewStack.map((line) => (
           <figure className="preview-strip" data-variant={line.key} key={line.key}>
             {(line.label || line.side) && <figcaption>{[line.label, line.side && t(line.side === "saved" ? "profiles.compareSaved" : "profiles.compareEdited")].filter(Boolean).join(" · ")}</figcaption>}
             <img
               alt={t("profiles.previewImageAlt")}
               height={line.result.height / displayScale}
+              key={line.result.requestId}
               onLoad={() => verifyCiWorkflow(line)}
               src={previewImageUrl(line.result.imagePath)}
               width={line.result.width / displayScale}

@@ -215,6 +215,15 @@ pub(crate) fn list_profiles() -> Result<Vec<ProfileEntry>, String> {
 }
 
 #[tauri::command]
+pub(crate) fn preview_font_substitutes(path: String) -> Result<Vec<String>, String> {
+    let snapshot = ProfileDocument::open(PathBuf::from(path))?.snapshot();
+    if snapshot.values.get("font_substitutes") == Some(&0.0) {
+        return Ok(Vec::new());
+    }
+    Ok(snapshot.advanced.font_substitutes)
+}
+
+#[tauri::command]
 pub(crate) fn open_profile(
     path: String,
     state: State<'_, ProfileState>,

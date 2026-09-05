@@ -1,7 +1,7 @@
 import { AppWindow, Contrast, Download, RotateCcw, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ProfileEntry } from "../app/model";
-import { listProfiles, loadInstalledFontFamilies, pickPngExportPath, setNativePreview, writePreviewExport } from "../app/tauri";
+import { listProfiles, loadInstalledFontFamilies, pickPngExportPath, reportPreviewStudioReady, setNativePreview, writePreviewExport } from "../app/tauri";
 import { useAppTheme } from "../app/useAppTheme";
 import { Segmented } from "../components/Segmented";
 import { SwitchControl } from "../components/SwitchControl";
@@ -110,6 +110,12 @@ export function PreviewStudioApp() {
   const requestsB = useMemo(() => studioRequests(settings, sourceB, stripWidth, "B", theme), [settings, sourceB, stripWidth, theme]);
   const rendersA = useSpecimenRenders(requestsA);
   const rendersB = useSpecimenRenders(requestsB, twoBoards);
+  const readyReported = useRef(false);
+  useEffect(() => {
+    if (readyReported.current || rendersA.lines.length + rendersB.lines.length === 0) return;
+    readyReported.current = true;
+    void reportPreviewStudioReady();
+  }, [rendersA.lines.length, rendersB.lines.length]);
   const palette = studioPalette(settings, theme);
 
   useEffect(() => {

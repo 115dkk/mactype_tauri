@@ -2,15 +2,31 @@ use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Mutex,
+    },
 };
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 pub(crate) const STUDIO_WINDOW_LABEL: &str = "preview-studio";
 const MAX_EXPORT_SIZE: usize = 32 * 1024 * 1024;
 const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
+static STUDIO_LIFECYCLE: Mutex<()> = Mutex::new(());
+static STUDIO_SMOKE_READY_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 #[tauri::command]
-pub(crate) fn open_preview_studio(app: AppHandle) -> Result<(), String> {
+pub(crate) async fn open_preview_studio(app: AppHandle) -> Result<(), String> {
+    // WebView2 creation deadlocks in a synchronous Windows IPC command.
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = STUDIO_LIFECYCLE.lock().map_err(|error| error.to_string())?;
+        open_studio_window(&app)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn open_studio_window(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(STUDIO_WINDOW_LABEL) {
         window.show().map_err(|error| error.to_string())?;
         window.unminimize().map_err(|error| error.to_string())?;
@@ -18,7 +34,7 @@ pub(crate) fn open_preview_studio(app: AppHandle) -> Result<(), String> {
     }
 
     WebviewWindowBuilder::new(
-        &app,
+        app,
         STUDIO_WINDOW_LABEL,
         WebviewUrl::App("index.html?window=preview-studio".into()),
     )
@@ -34,11 +50,54 @@ pub(crate) fn open_preview_studio(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub(crate) fn close_preview_studio(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window(STUDIO_WINDOW_LABEL) {
-        window.destroy().map_err(|error| error.to_string())?;
+pub(crate) async fn close_preview_studio(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = STUDIO_LIFECYCLE.lock().map_err(|error| error.to_string())?;
+        if let Some(window) = app.get_webview_window(STUDIO_WINDOW_LABEL) {
+            let (destroyed, receiver) = std::sync::mpsc::channel();
+            window.on_window_event(move |event| {
+                if matches!(event, tauri::WindowEvent::Destroyed) {
+                    let _ = destroyed.send(());
+                }
+            });
+            window.destroy().map_err(|error| error.to_string())?;
+            receiver
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .map_err(|error| format!("Preview Studio did not finish closing: {error}"))?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub(crate) async fn preview_studio_ready(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<(), String> {
+    if !crate::app::preview_studio_smoke() || window.label() != STUDIO_WINDOW_LABEL {
+        return Ok(());
     }
-    Ok(())
+    if !window.is_visible().map_err(|error| error.to_string())? {
+        return Err("Preview Studio rendered in a hidden window".to_owned());
+    }
+    match STUDIO_SMOKE_READY_COUNT.fetch_add(1, Ordering::SeqCst) {
+        0 => {
+            window.hide().map_err(|error| error.to_string())?;
+            open_preview_studio(app.clone()).await?;
+            if !window.is_visible().map_err(|error| error.to_string())? {
+                return Err("Preview Studio did not restore its existing window".to_owned());
+            }
+            close_preview_studio(app.clone()).await?;
+            open_preview_studio(app).await
+        }
+        1 => {
+            close_preview_studio(app.clone()).await?;
+            crate::app::frontend_ready(app, "preview-studio".to_owned())
+        }
+        _ => Ok(()),
+    }
 }
 
 #[tauri::command]

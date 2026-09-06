@@ -5,6 +5,7 @@ mod event_log;
 mod file_health;
 mod generated_unity_anticheat_catalog;
 mod helper_broker;
+pub mod image_subsystem;
 mod injection_orchestrator;
 mod observer;
 mod orchestration_runtime;
@@ -50,6 +51,7 @@ pub use injection_orchestrator::{
 #[cfg(windows)]
 pub use named_pipe::{NamedPipeHealthPublisher, HEALTH_PIPE_SECURITY_SDDL};
 pub type ProcessOrchestrator<'a> = InjectionOrchestrator<'a>;
+pub use image_subsystem::ImageSubsystem;
 pub use observer::{
     subscribe_process_creation, BrokerDisposition, BrokerResult, InjectionBroker, InjectionRequest,
     ProcessArchitecture, ProcessEventSource, ProcessIdentity, MAX_BROKER_DIAGNOSTIC_CODE_BYTES,

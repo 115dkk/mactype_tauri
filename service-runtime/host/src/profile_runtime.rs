@@ -4,10 +4,11 @@ use std::io;
 use std::path::Path;
 
 use mactype_service_contract::{
-    parse_runtime_activation_receipt, validate_protected_renderer_profile, GenerationId,
-    GenerationPointer, MachinePaths, ParsedRuntimeActivationReceipt, PrivateFreeTypePolicy,
-    ProfileDigest, RuntimeActivationPhase, RuntimeGenerationPointer, StructuredServiceError,
-    UnityFontHookPolicy, MAX_PROFILE_BYTES, MAX_RUNTIME_ACTIVATION_RECEIPT_BYTES,
+    parse_runtime_activation_receipt, validate_protected_renderer_profile, ConsoleProcessPolicy,
+    GenerationId, GenerationPointer, MachinePaths, ParsedRuntimeActivationReceipt,
+    PrivateFreeTypePolicy, ProfileDigest, RuntimeActivationPhase, RuntimeGenerationPointer,
+    StructuredServiceError, UnityFontHookPolicy, MAX_PROFILE_BYTES,
+    MAX_RUNTIME_ACTIVATION_RECEIPT_BYTES,
 };
 
 use crate::protected_path::{has_reparse_ancestor, read_bounded_regular_file, MAX_POINTER_BYTES};
@@ -17,6 +18,7 @@ pub(crate) struct ProtectedProfileSnapshot {
     bytes: Vec<u8>,
     unity_font_hook: UnityFontHookPolicy,
     private_freetype: PrivateFreeTypePolicy,
+    console_process: ConsoleProcessPolicy,
 }
 
 impl ProtectedProfileSnapshot {
@@ -62,11 +64,13 @@ impl ProtectedProfileSnapshot {
         })?;
         let unity_font_hook = UnityFontHookPolicy::from_profile_bytes(&bytes);
         let private_freetype = PrivateFreeTypePolicy::from_profile_bytes(&bytes);
+        let console_process = ConsoleProcessPolicy::from_profile_bytes(&bytes);
         let snapshot = Self {
             digest,
             bytes,
             unity_font_hook,
             private_freetype,
+            console_process,
         };
         snapshot.verify_runtime_copy(runtime_root)?;
         Ok(snapshot)
@@ -82,6 +86,10 @@ impl ProtectedProfileSnapshot {
 
     pub(crate) const fn private_freetype_policy(&self) -> PrivateFreeTypePolicy {
         self.private_freetype
+    }
+
+    pub(crate) const fn console_process_policy(&self) -> ConsoleProcessPolicy {
+        self.console_process
     }
 
     pub(crate) fn verify_runtime_copy(

@@ -4,16 +4,16 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use mactype_service_contract::{
-    PrivateFreeTypePolicy, ProfileDigest, RendererRuntimeBinding, RuntimeGenerationId,
-    StructuredServiceError, UnityFontHookPolicy,
+    ConsoleProcessPolicy, PrivateFreeTypePolicy, ProfileDigest, RendererRuntimeBinding,
+    RuntimeGenerationId, StructuredServiceError, UnityFontHookPolicy,
 };
 use mactype_service_host::{
     initialize_process_orchestration, subscribe_process_creation, BinarySignaturePolicy,
-    BrokerDisposition, BrokerResult, DynamicCodePolicy, InjectionBroker, InjectionRequest,
-    InspectionEvidence, PrivateFreeTypeClassification, ProcessArchitecture, ProcessEventSource,
-    ProcessIdentity, ProcessInspection, ProcessInspectionError, ProcessInspector,
-    ProcessOrchestrator, ProcessOutcome, RetryPolicy, RetryScheduler, SessionChange,
-    TargetLiveness, MAX_TRACKED_PROCESS_RESULTS, PROCESS_CREATION_QUERY,
+    BrokerDisposition, BrokerResult, DynamicCodePolicy, ImageSubsystem, InjectionBroker,
+    InjectionRequest, InspectionEvidence, PrivateFreeTypeClassification, ProcessArchitecture,
+    ProcessEventSource, ProcessIdentity, ProcessInspection, ProcessInspectionError,
+    ProcessInspector, ProcessOrchestrator, ProcessOutcome, RetryPolicy, RetryScheduler,
+    SessionChange, TargetLiveness, MAX_TRACKED_PROCESS_RESULTS, PROCESS_CREATION_QUERY,
     TARGET_VANISHED_RESULT_CODE,
 };
 
@@ -104,6 +104,21 @@ impl ProcessInspector for PrivateFreeTypeInspector {
     }
 }
 
+struct ConsolePolicyInspector {
+    identity: ProcessIdentity,
+}
+
+impl ProcessInspector for ConsolePolicyInspector {
+    fn inspect(&self, pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
+        assert_eq!(pid, self.identity.pid);
+        Ok(ordinary_inspection(self.identity.clone()))
+    }
+
+    fn probe_image_subsystem(&self, _identity: &ProcessIdentity) -> ImageSubsystem {
+        ImageSubsystem::Console
+    }
+}
+
 struct InspectionInspector(ProcessInspection);
 
 impl ProcessInspector for InspectionInspector {
@@ -175,6 +190,7 @@ fn process_orchestration_does_not_invoke_the_broker_for_detected_private_freetyp
         &broker,
         UnityFontHookPolicy::default(),
         private_freetype,
+        ConsoleProcessPolicy::default(),
     );
 
     assert_eq!(
@@ -182,6 +198,43 @@ fn process_orchestration_does_not_invoke_the_broker_for_detected_private_freetyp
         ProcessOutcome::Skipped
     );
     assert!(broker.requests.lock().unwrap().is_empty());
+}
+
+#[test]
+fn console_policy_skip_records_the_process_local_code_without_invoking_the_broker() {
+    let identity = ProcessIdentity {
+        pid: 42,
+        creation_time: 100,
+        session_id: 2,
+        architecture: ProcessArchitecture::X64,
+    };
+    let inspector = ConsolePolicyInspector {
+        identity: identity.clone(),
+    };
+    let broker = RecordingBroker::default();
+    let console_process =
+        ConsoleProcessPolicy::from_profile_bytes(b"[General]\r\nSkipConsoleProcesses=1\r\n");
+    let mut orchestrator = ProcessOrchestrator::with_profile_policies(
+        900,
+        binding(),
+        &inspector,
+        &broker,
+        UnityFontHookPolicy::default(),
+        PrivateFreeTypePolicy::default(),
+        console_process,
+    );
+
+    assert_eq!(
+        orchestrator.handle_pid(identity.pid).unwrap(),
+        ProcessOutcome::Skipped
+    );
+    assert!(broker.requests.lock().unwrap().is_empty());
+    let result = orchestrator
+        .last_result(identity.pid, identity.creation_time)
+        .unwrap();
+    assert_eq!(result.code, "console-process-policy");
+    assert_eq!(result.attempts, 0);
+    assert!(orchestrator.generation_health_error().is_none());
 }
 
 #[test]

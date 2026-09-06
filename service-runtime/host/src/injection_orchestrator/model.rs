@@ -27,6 +27,7 @@ impl Default for RetryPolicy {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DeferralPolicy {
+    pub console_grace: Duration,
     /// How long a frozen target waits before its lifecycle is probed again.
     pub frozen_recheck: Duration,
     /// First wait after a pre-resume launch failure; doubles per deferral.
@@ -39,6 +40,7 @@ pub struct DeferralPolicy {
 impl Default for DeferralPolicy {
     fn default() -> Self {
         Self {
+            console_grace: Duration::from_secs(2),
             frozen_recheck: Duration::from_secs(2),
             launch_initial_delay: Duration::from_secs(2),
             launch_max_delay: Duration::from_secs(32),

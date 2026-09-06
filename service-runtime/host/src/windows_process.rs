@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::Path;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mactype_service_contract::StructuredServiceError;
 use mactype_service_platform::{process_session_id, MachineKind, Process, ProcessAccess};
@@ -9,6 +10,7 @@ use windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER;
 use crate::generated_unity_anticheat_catalog::{
     ANTI_CHEAT_TOP_LEVEL_EXACT, ANTI_CHEAT_TOP_LEVEL_PREFIXES,
 };
+use crate::image_subsystem::{read_image_subsystem, ImageSubsystem};
 use crate::{
     BinarySignaturePolicy, DynamicCodePolicy, InspectionEvidence, PrivateFreeTypeClassification,
     ProcessArchitecture, ProcessIdentity, ProcessInspection, ProcessInspectionError,
@@ -19,6 +21,7 @@ const MAX_UNITY_INSTALLATION_ENTRIES: usize = 4_096;
 const MAX_PRIVATE_FREETYPE_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
 const QT_FREETYPE_ENGINE_MARKER: &[u8] = b"windows:fontengine=freetype";
 const PRIVATE_FREETYPE_SCAN_BYTES: usize = 64 * 1024;
+const WINDOWS_TO_UNIX_FILETIME_TICKS: u64 = 116_444_736_000_000_000;
 
 #[derive(Default)]
 pub struct WindowsProcessInspector;
@@ -171,6 +174,42 @@ impl ProcessInspector for WindowsProcessInspector {
         };
         classify_private_freetype_installation(&image_path)
     }
+
+    fn probe_image_subsystem(&self, identity: &ProcessIdentity) -> ImageSubsystem {
+        let Some(image_path) = verified_image_path(identity) else {
+            return ImageSubsystem::Unavailable;
+        };
+        read_image_subsystem(&image_path)
+    }
+
+    fn probe_process_age(&self, identity: &ProcessIdentity) -> Option<Duration> {
+        let process = Process::open(identity.pid, ProcessAccess::QueryLimited).ok()?;
+        if process.creation_time().ok()? != identity.creation_time {
+            return None;
+        }
+        process_age_from_filetime(identity.creation_time, SystemTime::now())
+    }
+}
+
+fn verified_image_path(identity: &ProcessIdentity) -> Option<std::path::PathBuf> {
+    let process = Process::open(identity.pid, ProcessAccess::QueryLimited).ok()?;
+    if process.creation_time().ok()? != identity.creation_time {
+        return None;
+    }
+    process.image_path_checked().ok()
+}
+
+fn process_age_from_filetime(creation_time: u64, now: SystemTime) -> Option<Duration> {
+    let since_unix = now.duration_since(UNIX_EPOCH).ok()?;
+    let seconds = since_unix.as_secs().checked_mul(10_000_000)?;
+    let subsecond_ticks = u64::from(since_unix.subsec_nanos()) / 100;
+    let now_filetime = WINDOWS_TO_UNIX_FILETIME_TICKS
+        .checked_add(seconds)?
+        .checked_add(subsecond_ticks)?;
+    let age_ticks = now_filetime.saturating_sub(creation_time);
+    let seconds = age_ticks / 10_000_000;
+    let nanos = ((age_ticks % 10_000_000) * 100) as u32;
+    Some(Duration::new(seconds, nanos))
 }
 
 fn classify_private_freetype_installation(image_path: &Path) -> PrivateFreeTypeClassification {
@@ -378,6 +417,20 @@ mod tests {
         assert_eq!(
             classify_unity_installation(&executable),
             UnityProcessClassification::UnityWithAntiCheat
+        );
+    }
+
+    #[test]
+    fn process_age_converts_filetime_ticks_and_saturates_future_creation_to_zero() {
+        let now = UNIX_EPOCH + Duration::from_secs(10);
+        let creation = WINDOWS_TO_UNIX_FILETIME_TICKS + 75_000_000;
+        assert_eq!(
+            process_age_from_filetime(creation, now),
+            Some(Duration::from_millis(2_500))
+        );
+        assert_eq!(
+            process_age_from_filetime(WINDOWS_TO_UNIX_FILETIME_TICKS + 110_000_000, now),
+            Some(Duration::ZERO)
         );
     }
 

@@ -2,13 +2,16 @@ use std::collections::VecDeque;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use mactype_service_contract::{ProfileDigest, RendererRuntimeBinding, RuntimeGenerationId};
+use mactype_service_contract::{
+    ConsoleProcessPolicy, PrivateFreeTypePolicy, ProfileDigest, RendererRuntimeBinding,
+    RuntimeGenerationId, UnityFontHookPolicy,
+};
 use mactype_service_host::{
     BinarySignaturePolicy, BrokerDisposition, BrokerResult, DeferralReason, DynamicCodePolicy,
-    InjectionBroker, InjectionRequest, InspectionEvidence, ProcessArchitecture, ProcessIdentity,
-    ProcessInspection, ProcessInspectionError, ProcessInspector, ProcessOrchestrator,
-    ProcessOutcome, SessionChange, TargetLifecycle, TargetLiveness, MAX_DEFERRED_TARGETS,
-    TARGET_VANISHED_RESULT_CODE,
+    ImageSubsystem, InjectionBroker, InjectionRequest, InspectionEvidence, ProcessArchitecture,
+    ProcessIdentity, ProcessInspection, ProcessInspectionError, ProcessInspector,
+    ProcessOrchestrator, ProcessOutcome, SessionChange, TargetLifecycle, TargetLiveness,
+    MAX_DEFERRED_TARGETS, TARGET_VANISHED_RESULT_CODE,
 };
 
 fn binding() -> RendererRuntimeBinding {
@@ -77,6 +80,55 @@ impl ProcessInspector for MutableInspector {
     }
 }
 
+struct ConsoleGraceInspector {
+    identities: Mutex<VecDeque<ProcessIdentity>>,
+    subsystem: ImageSubsystem,
+    age: Option<Duration>,
+    liveness: Mutex<TargetLiveness>,
+    liveness_probes: Mutex<usize>,
+}
+
+impl ConsoleGraceInspector {
+    fn new(
+        identities: impl IntoIterator<Item = ProcessIdentity>,
+        subsystem: ImageSubsystem,
+        age: Option<Duration>,
+    ) -> Self {
+        Self {
+            identities: Mutex::new(identities.into_iter().collect()),
+            subsystem,
+            age,
+            liveness: Mutex::new(TargetLiveness::Alive),
+            liveness_probes: Mutex::new(0),
+        }
+    }
+
+    fn set_liveness(&self, liveness: TargetLiveness) {
+        *self.liveness.lock().unwrap() = liveness;
+    }
+}
+
+impl ProcessInspector for ConsoleGraceInspector {
+    fn inspect(&self, pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
+        let identity = self.identities.lock().unwrap().pop_front().unwrap();
+        assert_eq!(identity.pid, pid);
+        Ok(inspection(identity))
+    }
+
+    fn probe_image_subsystem(&self, _identity: &ProcessIdentity) -> ImageSubsystem {
+        self.subsystem
+    }
+
+    fn probe_process_age(&self, _identity: &ProcessIdentity) -> Option<Duration> {
+        self.age
+    }
+
+    fn probe_target_liveness(&self, _identity: &ProcessIdentity) -> TargetLiveness {
+        *self.liveness_probes.lock().unwrap() += 1;
+        *self.liveness.lock().unwrap()
+    }
+}
+
 struct SequenceBroker {
     results: Mutex<VecDeque<BrokerResult>>,
     requests: Mutex<Vec<InjectionRequest>>,
@@ -104,6 +156,135 @@ impl InjectionBroker for SequenceBroker {
 
 fn broker_result(disposition: BrokerDisposition, code: &str) -> BrokerResult {
     BrokerResult::new(disposition, code, None)
+}
+
+#[test]
+fn fresh_console_target_waits_only_for_the_remaining_grace_then_injects() {
+    let target = identity(42);
+    let inspector = ConsoleGraceInspector::new(
+        [target.clone(), target.clone(), target.clone()],
+        ImageSubsystem::Console,
+        Some(Duration::from_millis(750)),
+    );
+    let broker = SequenceBroker::new([broker_result(
+        BrokerDisposition::Injected,
+        "renderer-active",
+    )]);
+    let mut orchestrator = ProcessOrchestrator::with_profile_policies(
+        900,
+        binding(),
+        &inspector,
+        &broker,
+        UnityFontHookPolicy::default(),
+        PrivateFreeTypePolicy::default(),
+        ConsoleProcessPolicy::default(),
+    );
+    let start = Instant::now();
+
+    assert_eq!(
+        orchestrator.handle_pid_at(42, start).unwrap(),
+        ProcessOutcome::Deferred
+    );
+    assert_eq!(
+        orchestrator.handle_pid_at(42, start).unwrap(),
+        ProcessOutcome::Duplicate
+    );
+    let deferred = orchestrator.deferred_targets().pop().unwrap();
+    assert_eq!(deferred.reason, DeferralReason::ConsoleGrace);
+    assert_eq!(deferred.not_before, start + Duration::from_millis(1_250));
+    assert_eq!(
+        orchestrator.poll_deferred(deferred.not_before).unwrap(),
+        Some(ProcessOutcome::Injected)
+    );
+    assert_eq!(broker.request_count(), 1);
+    assert_eq!(*inspector.liveness_probes.lock().unwrap(), 1);
+    assert!(orchestrator.deferred_targets().is_empty());
+}
+
+#[test]
+fn console_grace_does_not_defer_old_non_console_or_unknown_age_targets() {
+    for (subsystem, age) in [
+        (ImageSubsystem::Console, Some(Duration::from_secs(2))),
+        (ImageSubsystem::Gui, Some(Duration::ZERO)),
+        (ImageSubsystem::Other, Some(Duration::ZERO)),
+        (ImageSubsystem::Unavailable, Some(Duration::ZERO)),
+        (ImageSubsystem::Console, None),
+    ] {
+        let target = identity(42);
+        let inspector = ConsoleGraceInspector::new([target], subsystem, age);
+        let broker = SequenceBroker::new([broker_result(
+            BrokerDisposition::Injected,
+            "renderer-active",
+        )]);
+        let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
+
+        assert_eq!(
+            orchestrator.handle_pid(42).unwrap(),
+            ProcessOutcome::Injected,
+            "subsystem={subsystem:?} age={age:?}"
+        );
+        assert_eq!(broker.request_count(), 1);
+        assert!(orchestrator.deferred_targets().is_empty());
+    }
+}
+
+#[test]
+fn console_grace_checks_liveness_before_revalidation_and_records_vanished() {
+    let target = identity(42);
+    let inspector =
+        ConsoleGraceInspector::new([target], ImageSubsystem::Console, Some(Duration::ZERO));
+    inspector.set_liveness(TargetLiveness::Vanished);
+    let broker = SequenceBroker::new([]);
+    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
+    let start = Instant::now();
+
+    assert_eq!(
+        orchestrator.handle_pid_at(42, start).unwrap(),
+        ProcessOutcome::Deferred
+    );
+    assert_eq!(
+        orchestrator
+            .poll_deferred(start + Duration::from_secs(2))
+            .unwrap(),
+        Some(ProcessOutcome::Skipped)
+    );
+    assert_eq!(broker.request_count(), 0);
+    let result = orchestrator.last_result(42, 142).unwrap();
+    assert_eq!(result.code, TARGET_VANISHED_RESULT_CODE);
+    assert_eq!(result.outcome, ProcessOutcome::Skipped);
+}
+
+#[test]
+fn changed_identity_during_console_grace_is_recorded_as_vanished_without_injection() {
+    let original = identity(42);
+    let reused = ProcessIdentity {
+        creation_time: original.creation_time + 1,
+        ..original.clone()
+    };
+    let inspector = ConsoleGraceInspector::new(
+        [original, reused],
+        ImageSubsystem::Console,
+        Some(Duration::ZERO),
+    );
+    let broker = SequenceBroker::new([]);
+    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
+    let start = Instant::now();
+
+    assert_eq!(
+        orchestrator.handle_pid_at(42, start).unwrap(),
+        ProcessOutcome::Deferred
+    );
+    assert_eq!(
+        orchestrator
+            .poll_deferred(start + Duration::from_secs(2))
+            .unwrap(),
+        Some(ProcessOutcome::Skipped)
+    );
+    assert_eq!(broker.request_count(), 0);
+    assert_eq!(
+        orchestrator.last_result(42, 142).unwrap().code,
+        TARGET_VANISHED_RESULT_CODE
+    );
 }
 
 #[test]

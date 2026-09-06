@@ -147,6 +147,18 @@ fn initializer_carries_the_verified_private_freetype_policy() {
 }
 
 #[test]
+fn initializer_carries_the_verified_console_process_policy() {
+    let (_base, paths) = paths();
+    let bytes = b"[General]\r\nSkipConsoleProcesses=1\r\n";
+    install_active_profile(&paths, bytes);
+    install_active_runtime(&paths, bytes);
+
+    let runtime = ProtectedRendererRuntime::load(paths).unwrap();
+
+    assert!(runtime.console_process_policy().skip_console());
+}
+
+#[test]
 fn initializer_rejects_a_dll_adjacent_profile_that_differs_from_the_active_generation() {
     let (_base, paths) = paths();
     let bytes = b"[General]\r\nHintingMode=0\r\n";

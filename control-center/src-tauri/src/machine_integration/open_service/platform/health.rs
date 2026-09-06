@@ -42,7 +42,8 @@ fn read_health_with_retry(
             wait();
         }
     }
-    Err(last_error.expect("at least one live health observation"))
+    Err(last_error
+        .unwrap_or_else(|| "service health query failed without an observation".to_owned()))
 }
 
 fn read_health_message(reader: &mut impl Read) -> Result<HealthReport, String> {
@@ -103,6 +104,25 @@ mod tests {
                 "the message-mode server disconnected after one response",
             ))
         }
+    }
+
+    #[test]
+    fn persisted_health_rejects_missing_and_malformed_snapshot() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        let root = std::env::temp_dir().join(format!(
+            "mactype-persisted-health-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+
+        assert!(read_persisted_health(&root).is_err());
+        fs::write(root.join("health.json"), b"{not-json").unwrap();
+        assert!(read_persisted_health(&root).is_err());
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

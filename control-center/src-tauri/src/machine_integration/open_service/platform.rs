@@ -251,3 +251,28 @@ fn inaccessible(error: u32, binary_path: Option<String>) -> SystemServiceStatus 
         can_upgrade: false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn current_service_binary_rejects_missing_and_malformed_pointer() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        let root = std::env::temp_dir().join(format!(
+            "mactype-current-pointer-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+
+        assert!(current_service_binary(&root).is_err());
+        fs::write(root.join("current.json"), b"{not-json").unwrap();
+        assert!(current_service_binary(&root).is_err());
+
+        let _ = fs::remove_dir_all(root);
+    }
+}

@@ -11,7 +11,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-const LOG_FILE_NAME: &str = "control-center.log";
+pub(super) const LOG_FILE_NAME: &str = "control-center.log";
 static WRITE_ERROR_REPORTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]

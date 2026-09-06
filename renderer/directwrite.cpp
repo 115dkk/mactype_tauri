@@ -1693,6 +1693,11 @@ bool CaptureFactoryAliasSource(IDWriteFactory* factory)
 		FAILED(systemCollection1->GetFontSet(&systemSet)) || systemSet == nullptr)
 		return false;
 	PublishFactoryAliasSource(factory, systemSet);
+
+	directwrite_alias::AliasFontSet aliases;
+	directwrite_alias::BuildStatus const status =
+		directwrite_alias::GetOrCreate(factory, systemSet, aliases);
+	SignalDirectWriteDiagnostic(directwrite_alias::StatusName(status));
 	return true;
 }
 

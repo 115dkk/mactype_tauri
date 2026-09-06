@@ -11,6 +11,7 @@ is owned after the alpha-plus refactor.
 ProtectedRendererRuntime
   -> RendererRuntimeBinding
   -> PrivateFreeTypeAdmission
+  -> ConsoleProcessAdmission
   -> ProcessInjection
   -> HelperProtocol Adapter
   -> RendererActivation Adapter
@@ -41,6 +42,8 @@ pre-entry child relay recognize an explicit private FreeType selection from
 the exact image with the same bounded marker contract. A match becomes a
 process-local skip before injection. Unity targets selected by
 `UnityFontHookLifecycle` bypass this compatibility filter.
+
+`ConsoleProcessAdmission` reads the bounded PE subsystem of the exact target image. A fresh console-subsystem target receives one fixed grace deferral so a millisecond-lived tool can exit before injection; a vanished target becomes a quiet process-local skip. `SkipConsoleProcesses=1` opts verified console targets out entirely, and the pre-entry child relay repeats that decision. Unknown subsystem or age evidence remains eligible, and neither outcome extends or degrades health-v1.
 
 `RendererActivation` owns renderer admission and produces one of three
 semantic results:

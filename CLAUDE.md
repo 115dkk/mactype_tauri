@@ -146,6 +146,17 @@ below wherever the two conflict.
   injection. Unknown evidence remains eligible. A verified Unity installation
   for which `UnityFontHook` is enabled is exempt; do not turn this option into
   a broad Qt basename ban or disable `UnityFontHookLifecycle`.
+- `SkipConsoleProcesses` is an opt-in `ConsoleProcessAdmission` policy, off by
+  default. It classifies only the exact target image's PE subsystem: a
+  console-subsystem image is an explicit process-local skip before service or
+  child-relay injection; GUI images, terminal hosts, and unreadable headers stay
+  eligible. Never turn it into an executable-name list. With the option off the
+  service still defers console images for a short grace period and injects only
+  survivors. The renderer never creates DirectWrite factories or builds the
+  alias collection eagerly in a process that has not mapped DirectWrite; the
+  alias collection is built at the application's first system-collection
+  acquisition. The 2026-09-06 field incident (a console-tool storm exhausting
+  64 GB) is the reason.
 - Licensed Steam game evidence must come from a Steam-launched process with no
   explicit Steamworks initialization failure. A direct `MacLoader` launch is a
   renderer smoke test, not gameplay-compatibility proof. Bind every field run to

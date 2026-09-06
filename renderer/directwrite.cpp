@@ -1693,11 +1693,6 @@ bool CaptureFactoryAliasSource(IDWriteFactory* factory)
 		FAILED(systemCollection1->GetFontSet(&systemSet)) || systemSet == nullptr)
 		return false;
 	PublishFactoryAliasSource(factory, systemSet);
-
-	directwrite_alias::AliasFontSet aliases;
-	directwrite_alias::BuildStatus const status =
-		directwrite_alias::GetOrCreate(factory, systemSet, aliases);
-	SignalDirectWriteDiagnostic(directwrite_alias::StatusName(status));
 	return true;
 }
 
@@ -2386,6 +2381,9 @@ static bool InitializeDirectWriteLifecycle()
 		const D2D1_FACTORY_OPTIONS* pFactoryOptions,
 		void** ppIFactory
 		);
+	bool const directWriteWasMapped = GetModuleHandleW(L"dwrite.dll") != nullptr;
+	bool const directWriteCoreWasMapped =
+		GetModuleHandleW(L"DWriteCore.dll") != nullptr;
 	renderer_raii::BorrowedModule d2d1 = PinOrLoadRendererModule(
 		L"d2d1.dll", lifecycle.d2d1);
 	renderer_raii::BorrowedModule dw = PinOrLoadRendererModule(
@@ -2444,11 +2442,16 @@ static bool InitializeDirectWriteLifecycle()
 	InstallDemandHook(
 		renderer::HookCapability::direct2D, D2D1Context,
 		hook_demand_D2D1CreateDeviceContext);
-	if (DWFactory) {
-		// Service injection can happen after a browser has created its shared
-		// factory. Hook that implementation once the loader lock is released.
-		// The worker publishes hook-ready only after the factory boundary exists.
+	// A factory can pre-exist only when DirectWrite was mapped before injection;
+	// eager creation in every process exhausted field memory.
+	if (DWFactory != nullptr &&
+		(directWriteWasMapped || directWriteCoreWasMapped))
+	{
 		ScheduleExistingDirectWriteFactoryHook();
+	}
+	else
+	{
+		SignalDirectWriteDiagnostic(L"hook-ready");
 	}
 	return directWriteStatus == NOERROR;
 }

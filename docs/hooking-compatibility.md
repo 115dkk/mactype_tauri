@@ -50,6 +50,7 @@ or executable-name workaround.
 | Unsupported machine architecture | [#904](https://github.com/snowie2000/mactype/issues/904), [#1085](https://github.com/snowie2000/mactype/issues/1085) | Native ARM64 remains explicitly unsupported until a native core/helper exists. It is not sent to an x64 helper and does not degrade global health. |
 | Frozen packaged process | field log of this branch, 2026-09-05 | Retain the exact identity in the bounded deferred set and re-check its PLM lifecycle without logging or counting a failure. |
 | Transient helper launch failure at logon | field log of this branch, 2026-09-05 | Defer only failures before helper resume, retry with bounded backoff, and preserve the launch error if the deferral limit is reached. |
+| Console tool storm / eager per-process DirectWrite work | field log of this branch, 2026-09-06 | Build the alias collection at the application's first acquisition, and run the post-loader-lock worker only when DirectWrite was mapped before injection. |
 
 ## Implemented evidence
 

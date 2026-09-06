@@ -1,4 +1,5 @@
 mod operation_log;
+mod panic_log;
 
 use crate::preview::{PreviewDiagnosticSnapshot, PreviewState};
 use mactype_service_contract::event_log::{
@@ -274,6 +275,10 @@ pub(crate) fn export_diagnostics(state: State<'_, PreviewState>) -> Result<Strin
 pub(crate) fn copy_diagnostics(state: State<'_, PreviewState>) -> Result<(), String> {
     let report = diagnostic_report(state)?;
     copy_to_clipboard(&report)
+}
+
+pub(crate) fn install_panic_hook() {
+    panic_log::install();
 }
 
 pub(crate) fn record_app_started() {

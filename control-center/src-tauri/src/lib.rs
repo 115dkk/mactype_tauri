@@ -34,6 +34,8 @@ pub fn dispatch_privileged_command() -> Option<i32> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Release uses panic = "abort", so install logging first or panics leave no trace.
+    diagnostics::install_panic_hook();
     let startup_gate = single_instance::StartupGate::acquire()
         .expect("failed to acquire the single-instance startup gate");
     tauri::Builder::default()

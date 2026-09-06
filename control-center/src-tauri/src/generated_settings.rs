@@ -370,6 +370,18 @@ pub const SETTINGS: &[SettingDefinition] = &[
         ordinal: -1,
     },
     SettingDefinition {
+        id: "skip_console_processes",
+        section: "General",
+        key: "SkipConsoleProcesses",
+        value_type: SettingValueType::Integer,
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        factory: 0.0,
+        previewable: false,
+        ordinal: -1,
+    },
+    SettingDefinition {
         id: "unity_font_hook",
         section: "General",
         key: "UnityFontHook",

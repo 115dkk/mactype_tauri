@@ -530,6 +530,8 @@
   "settings.font_substitutes.option.2": "모든 대체",
   "settings.skip_private_freetype.label": "자체 FreeType 사용 프로그램 건너뛰기",
   "settings.skip_private_freetype.description": "자체 방식으로 글자를 그리는 앱에는 적용하지 않아 호환성 문제를 줄입니다. Unity 게임 설정은 별도로 적용됩니다.",
+  "settings.skip_console_processes.label": "터미널 프로그램 건너뛰기",
+  "settings.skip_console_processes.description": "cmd, PowerShell, git, gh처럼 터미널에서 실행되는 프로그램에는 적용하지 않습니다. 터미널 창 자체의 글자는 그대로 적용됩니다.",
   "settings.unity_font_hook.label": "Unity 게임 글씨",
   "settings.unity_font_hook.description": "지원되는 Unity 게임에 글씨 모양 설정을 적용합니다.",
   "settings.unity_font_hook.option.0": "끄기",

@@ -530,6 +530,8 @@
   "settings.font_substitutes.option.2": "الكل",
   "settings.skip_private_freetype.label": "تخطي التطبيقات التي تستخدم FreeType خاصًا بها",
   "settings.skip_private_freetype.description": "اترك التطبيقات التي ترسم خطوطها بنفسها دون تغيير لتقليل مشكلات التوافق. إعدادات ألعاب Unity منفصلة.",
+  "settings.skip_console_processes.label": "تخطي برامج سطر الأوامر",
+  "settings.skip_console_processes.description": "اترك برامج سطر الأوامر مثل cmd وPowerShell وgit وgh دون تغيير. يستمر MacType في عرض النص داخل نافذة الطرفية نفسها.",
   "settings.unity_font_hook.label": "النص في ألعاب Unity",
   "settings.unity_font_hook.description": "طبّق إعدادات مظهر النص على ألعاب Unity المدعومة.",
   "settings.unity_font_hook.option.0": "إيقاف",

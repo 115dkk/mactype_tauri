@@ -28,7 +28,7 @@ const required = [
 const missing = required.filter(([section, key]) => !pairs.has(`${section}/${key}`));
 if (missing.length) throw new Error(`Settings schema is missing core settings: ${missing.map((pair) => pair.join("/")).join(", ")}`);
 if (schema.some((setting) => setting.section === "Infinality")) throw new Error("Unsupported Infinality settings must not be exposed by the editor");
-if (schema.length !== 40) throw new Error(`Expected 40 supported scalar settings, found ${schema.length}`);
+if (schema.length !== 41) throw new Error(`Expected 41 supported scalar settings, found ${schema.length}`);
 
 const childHook = schema.find((setting) => setting.section === "General" && setting.key === "HookChildProcesses");
 if (childHook?.id !== "hook_child_processes"
@@ -52,6 +52,17 @@ if (privateFreeType?.control !== "boolean"
 if (!/^SkipPrivateFreeType\s*=\s*0\s*$/m.test(defaultProfile)) {
   throw new Error("The alpha default profile must keep private FreeType avoidance opt-in");
 }
+const consoleProcesses = schema.find((setting) => setting.section === "General" && setting.key === "SkipConsoleProcesses");
+if (consoleProcesses?.control !== "boolean"
+  || consoleProcesses.default !== 0
+  || consoleProcesses.apply !== "restart_required"
+  || consoleProcesses.advanced !== false
+  || consoleProcesses.supported !== true) {
+  throw new Error("SkipConsoleProcesses must remain an opt-in, non-advanced, restart-required admission policy");
+}
+if (!/^SkipConsoleProcesses\s*=\s*0\s*$/m.test(defaultProfile)) {
+  throw new Error("The alpha default profile must keep console-process skipping opt-in");
+}
 
 const rustRoot = path.join(root, "control-center/src-tauri/src");
 const profileSources = [
@@ -69,4 +80,4 @@ if (!/\bbreak\s*;/.test(shadowOffset)) throw new Error("ATTR_ShadowOffset still 
 for (const attribute of ["ATTR_HookChildProcess", "ATTR_FontSubstitute", "ATTR_DirectWrite", "ATTR_PixelLayout"]) {
   if ((settingsHeader.match(new RegExp(`case ${attribute}:`, "g")) ?? []).length < 2) throw new Error(`${attribute} must support both SetIntAttribute and GetIntAttribute`);
 }
-console.log("Settings coverage gate passed for 40 supported scalar settings, structured INI settings, and IControlCenter fallthrough guards.");
+console.log("Settings coverage gate passed for 41 supported scalar settings, structured INI settings, and IControlCenter fallthrough guards.");

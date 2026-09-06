@@ -568,37 +568,55 @@ test("settings navigation restores the legacy Wizard and Tuner hierarchy", async
   await expect(page.locator("body")).toHaveAttribute("data-view", "execution");
 });
 
-test("all settings exposes, edits, and saves child-process hooking", async ({ page }) => {
-  await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
-  await page.locator(".navigation").getByRole("button", { name: "전체 설정" }).click();
+for (const skin of gallerySkins) {
+  for (const locale of galleryLocales) {
+    test(`all settings edits, saves, and discards process policies ${skin} ${locale.id}`, async ({ page }, testInfo) => {
+      const messages = JSON.parse(fs.readFileSync(path.resolve(__dirname, `../../control-center/src/i18n/${locale.id}.json`), "utf8"));
+      await page.goto(`/?view=profiles&gallery=1&lang=${locale.id}&skin=${skin}`, { waitUntil: "networkidle" });
+      await expect(page.locator("html")).toHaveAttribute("data-skin", skin);
+      await expect(page.locator("html")).toHaveAttribute("dir", locale.direction);
 
-  const childHook = page.getByRole("switch", { name: "다른 앱에서 실행한 프로그램에도 적용" });
-  const childHookRow = page.locator(".setting-row").filter({ has: childHook });
-  const save = page.getByRole("button", { name: "지금 저장" });
-  const discard = page.getByRole("button", { name: "변경 취소", exact: true });
+      const save = page.getByRole("button", { name: messages["profiles.saveNow"], exact: true });
+      const discard = page.getByRole("button", { name: messages["profiles.discard"], exact: true });
+      for (const id of ["hook_child_processes", "skip_console_processes"]) {
+        const control = page.getByRole("switch", { name: messages[`settings.${id}.label`], exact: true });
+        const row = page.locator(".setting-row").filter({ has: control });
+        await expect(control).toHaveAttribute("id", id);
+        await expect(control).toBeVisible();
+        await expect(control).toBeEnabled();
+        await expect(control).not.toBeChecked();
+        await expect(save).toBeDisabled();
 
-  await expect(childHook).toBeVisible();
-  await expect(childHook).toBeEnabled();
-  await expect(childHook).not.toBeChecked();
-  await expect(save).toBeDisabled();
+        await control.check();
+        await expect(control).toBeChecked();
+        await expect(row.locator(".dirty-mark")).toBeVisible();
+        await expect(save).toBeEnabled();
+        await save.click();
+        await expect(control).toBeChecked();
+        await expect(row.locator(".dirty-mark")).toHaveCount(0);
+        await expect(save).toBeDisabled();
 
-  await childHook.check();
-  await expect(childHook).toBeChecked();
-  await expect(childHookRow.locator(".dirty-mark")).toBeVisible();
-  await expect(save).toBeEnabled();
+        // Discard must restore the saved value, not the initial default.
+        await control.uncheck();
+        await expect(row.locator(".dirty-mark")).toBeVisible();
+        await expect(discard).toBeEnabled();
+        await discard.click();
+        await expect(control).toBeChecked();
+        await expect(row.locator(".dirty-mark")).toHaveCount(0);
+        await expect(save).toBeDisabled();
+      }
 
-  await save.click();
-  await expect(childHook).toBeChecked();
-  await expect(childHookRow.locator(".dirty-mark")).toHaveCount(0);
-  await expect(save).toBeDisabled();
-
-  // Saving updates the browser adapter's persisted snapshot: a later edit can
-  // be discarded back to the enabled state instead of the initial default.
-  await childHook.uncheck();
-  await expect(discard).toBeEnabled();
-  await discard.click();
-  await expect(childHook).toBeChecked();
-});
+      const consoleRow = page.locator(".setting-row").filter({ has: page.locator("#skip_console_processes") });
+      await consoleRow.scrollIntoViewIfNeeded();
+      await consoleRow.locator("label[for='skip_console_processes']").hover();
+      const hint = consoleRow.getByRole("tooltip");
+      await expect(hint).toHaveAttribute("data-open", "true");
+      await expect(hint).toContainText(messages["settings.skip_console_processes.description"]);
+      await expect.poll(() => overflowingElements(page)).toEqual([]);
+      await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-process-policies-${skin}-${locale.id}.png`), fullPage: true });
+    });
+  }
+}
 
 test("guided step undo, redo, and discard stay scoped to the current step", async ({ page }) => {
   await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });

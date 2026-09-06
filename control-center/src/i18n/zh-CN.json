@@ -530,6 +530,8 @@
   "settings.font_substitutes.option.2": "全部替换",
   "settings.skip_private_freetype.label": "跳过使用自带 FreeType 的程序",
   "settings.skip_private_freetype.description": "不修改使用自身字体绘制方式的应用，以减少兼容性问题。Unity 游戏使用独立设置。",
+  "settings.skip_console_processes.label": "跳过控制台程序",
+  "settings.skip_console_processes.description": "不修改 cmd、PowerShell、git、gh 等控制台程序。终端窗口本身的文字仍由 MacType 渲染。",
   "settings.unity_font_hook.label": "Unity 游戏文字",
   "settings.unity_font_hook.description": "向受支持的 Unity 游戏应用文字外观设置。",
   "settings.unity_font_hook.option.0": "关闭",

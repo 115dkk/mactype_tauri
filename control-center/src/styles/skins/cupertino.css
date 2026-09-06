@@ -149,7 +149,7 @@ html[data-skin="cupertino"] .cupertino-sect { margin: 18px 0 6px 2px; font-size:
 html[data-skin="cupertino"] .cupertino-col > .cupertino-sect:first-child { margin-top: 0; }
 html[data-skin="cupertino"] .cupertino-footnote { margin: 8px 2px 0; color: var(--color-muted); font-size: 11px; line-height: 14px; }
 html[data-skin="cupertino"] .cupertino-toolbar { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
-html[data-skin="cupertino"] .cupertino-cmd { display: flex; align-items: center; gap: 6px; }
+html[data-skin="cupertino"] .cupertino-cmd { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 html[data-skin="cupertino"] .cupertino-cmd .compact-action { height: var(--control-height); }
 
 /* Groups and rows. */

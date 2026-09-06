@@ -530,6 +530,8 @@
   "settings.font_substitutes.option.2": "Todas",
   "settings.skip_private_freetype.label": "Ignorar aplicações com FreeType próprio",
   "settings.skip_private_freetype.description": "Mantenha inalterados os aplicativos que desenham suas próprias fontes para reduzir problemas de compatibilidade. Jogos Unity têm ajustes separados.",
+  "settings.skip_console_processes.label": "Ignorar programas de linha de comando",
+  "settings.skip_console_processes.description": "Mantenha inalterados os programas de linha de comando como cmd, PowerShell, git e gh. O MacType continua a renderizar o texto na própria janela do terminal.",
   "settings.unity_font_hook.label": "Texto em jogos Unity",
   "settings.unity_font_hook.description": "Aplique seus ajustes de texto aos jogos Unity compatíveis.",
   "settings.unity_font_hook.option.0": "Desativado",

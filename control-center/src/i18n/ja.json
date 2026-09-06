@@ -530,6 +530,8 @@
   "settings.font_substitutes.option.2": "すべて置換",
   "settings.skip_private_freetype.label": "独自 FreeType を使うアプリをスキップ",
   "settings.skip_private_freetype.description": "独自に文字を描画するアプリには適用せず、互換性の問題を抑えます。Unityゲームは別設定です。",
+  "settings.skip_console_processes.label": "コンソールプログラムを対象外にする",
+  "settings.skip_console_processes.description": "cmd、PowerShell、git、ghなどのコンソールプログラムには適用しません。ターミナルウィンドウ自体の文字には引き続きMacTypeを適用します。",
   "settings.unity_font_hook.label": "Unityゲームの文字",
   "settings.unity_font_hook.description": "対応するUnityゲームに文字の見た目の設定を適用します。",
   "settings.unity_font_hook.option.0": "オフ",

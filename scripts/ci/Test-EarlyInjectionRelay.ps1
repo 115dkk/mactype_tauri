@@ -168,6 +168,37 @@ if ($LASTEXITCODE -ne 0) {
     throw "PID-local mitigation relay contract failed for $Architecture with exit code $LASTEXITCODE"
 }
 
+$consoleRuntime = Join-Path $fullOutputRoot 'console-skip-runtime'
+New-Item -ItemType Directory -Path $consoleRuntime | Out-Null
+foreach ($packageName in $packageNames) {
+    Copy-Item -LiteralPath (Join-Path $resolvedCoreRoot $packageName) `
+        -Destination (Join-Path $consoleRuntime $packageName)
+}
+$consoleProfile = [IO.File]::ReadAllText($resolvedProfile)
+if ([regex]::Matches(
+        $consoleProfile,
+        '(?m)^SkipConsoleProcesses=0\r?$'
+    ).Count -ne 1) {
+    throw 'Console relay fixture requires exactly one SkipConsoleProcesses=0 default.'
+}
+$consoleProfile = $consoleProfile.Replace(
+    'SkipConsoleProcesses=0',
+    'SkipConsoleProcesses=1'
+)
+if ($consoleProfile -notmatch '(?m)^SkipConsoleProcesses=1\r?$') {
+    throw 'Console relay fixture did not enable SkipConsoleProcesses.'
+}
+[IO.File]::WriteAllText(
+    (Join-Path $consoleRuntime 'MacType.ini'),
+    $consoleProfile,
+    [Text.UTF8Encoding]::new($false)
+)
+$consoleCore = Join-Path $consoleRuntime $coreName
+& $policyProbe $consoleCore '--expect-console-skip'
+if ($LASTEXITCODE -ne 0) {
+    throw "Console child relay was not quietly skipped for $Architecture with exit code $LASTEXITCODE"
+}
+
 $privateRuntime = Join-Path $fullOutputRoot 'private-freetype-runtime'
 New-Item -ItemType Directory -Path $privateRuntime | Out-Null
 foreach ($packageName in $packageNames) {
@@ -226,4 +257,4 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $relayKind = if ($CrossArchitecture) { 'x64/x86 mixed' } else { $Architecture }
-Write-Host "Early child relay loaded the fixed generation in the $relayKind tree, stopped at a retired profile boundary, and quietly skipped explicitly blocked or private-FreeType processes."
+Write-Host "Early child relay loaded the fixed generation in the $relayKind tree, stopped at a retired profile boundary, and quietly skipped explicitly blocked, console, or private-FreeType processes."

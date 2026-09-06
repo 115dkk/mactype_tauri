@@ -129,8 +129,12 @@ int wmain(const int argc, wchar_t** argv) {
   const bool expect_private_freetype_skip =
       argc == 3 &&
       std::wstring_view(argv[2]) == L"--expect-private-freetype-skip";
-  if (argc != 2 && !expect_private_freetype_skip) {
-    std::wcerr << L"Usage: relay-policy-probe{32|64}.exe <MacType DLL>\n";
+  const bool expect_console_skip =
+      argc == 3 &&
+      std::wstring_view(argv[2]) == L"--expect-console-skip";
+  if (argc != 2 && !expect_private_freetype_skip && !expect_console_skip) {
+    std::wcerr << L"Usage: relay-policy-probe{32|64}.exe <MacType DLL> "
+                  L"[--expect-private-freetype-skip|--expect-console-skip]\n";
     return 64;
   }
   GetEnvironmentVariableW(kExplicitPrivateFreeTypeMarker, nullptr, 0);
@@ -160,7 +164,8 @@ int wmain(const int argc, wchar_t** argv) {
     return 4;
   }
   if (!LaunchChild(
-          self, module_name, false, !expect_private_freetype_skip)) {
+          self, module_name, false,
+          !expect_private_freetype_skip && !expect_console_skip)) {
     return 5;
   }
   return 0;

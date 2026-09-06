@@ -1,6 +1,7 @@
 #include "child_process_relay.h"
 
 #include "detours.h"
+#include "image_subsystem.h"
 #include "private_freetype_policy.h"
 #include "renderer_raii.h"
 #include "settings.h"
@@ -299,6 +300,11 @@ ChildRelayReason ClassifyTarget(
                         true, privateFreeTypeDetected, unityHookTarget))
                     return ChildRelayReason::privateFreeTypeDetected;
             }
+            // GUI terminal hosts remain eligible, and unavailable evidence fails open.
+            if (settings != nullptr && settings->SkipConsoleProcesses() &&
+                renderer::image_subsystem::Classify(image.data()) ==
+                    renderer::image_subsystem::ImageSubsystem::console)
+                return ChildRelayReason::consoleProcessSkipped;
         }
     }
     catch (...)

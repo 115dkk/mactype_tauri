@@ -57,6 +57,7 @@ struct HookPolicy final
 	bool directWrite = false;
 	bool fontSubstitution = false;
 	bool skipPrivateFreeType = false;
+	bool skipConsoleProcesses = false;
 	UnityFontHookMode unityFontMode = UnityFontHookMode::off;
 	bool unityFontEnabledForProcess = false;
 };

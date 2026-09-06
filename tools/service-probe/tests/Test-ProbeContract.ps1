@@ -31,7 +31,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "CMake configure failed with exit code $LASTEXITCODE"
 }
 
-& cmake --build $buildDirectory --config Release --target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests freetype-runtime-tests pe-export-view-tests unload-lifecycle-tests renderer-policy-tests private-freetype-policy-tests renderer-activation-tests font-substitution-tests renderer-profile-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe
+& cmake --build $buildDirectory --config Release --target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests freetype-runtime-tests pe-export-view-tests unload-lifecycle-tests renderer-policy-tests private-freetype-policy-tests image-subsystem-tests renderer-activation-tests font-substitution-tests renderer-profile-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe
 if ($LASTEXITCODE -ne 0) {
     throw "CMake build failed with exit code $LASTEXITCODE"
 }
@@ -76,6 +76,12 @@ $privateFreeTypePolicyTestPath = Join-Path $buildDirectory 'Release\private-free
 & $privateFreeTypePolicyTestPath
 if ($LASTEXITCODE -ne 0) {
     throw "Private FreeType admission tests failed with exit code $LASTEXITCODE"
+}
+
+$imageSubsystemTestPath = Join-Path $buildDirectory 'Release\image-subsystem-tests.exe'
+& $imageSubsystemTestPath
+if ($LASTEXITCODE -ne 0) {
+    throw "Image subsystem classification tests failed with exit code $LASTEXITCODE"
 }
 
 $rendererActivationTestPath = Join-Path $buildDirectory 'Release\renderer-activation-tests.exe'

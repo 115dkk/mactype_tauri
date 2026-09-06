@@ -152,11 +152,11 @@ below wherever the two conflict.
   child-relay injection; GUI images, terminal hosts, and unreadable headers stay
   eligible. Never turn it into an executable-name list. With the option off the
   service still defers console images for a short grace period and injects only
-  survivors. The renderer never creates DirectWrite factories or builds the
-  alias collection eagerly in a process that has not mapped DirectWrite; the
-  alias collection is built at the application's first system-collection
-  acquisition. The 2026-09-06 field incident (a console-tool storm exhausting
-  64 GB) is the reason.
+  survivors. The renderer never creates DirectWrite factories, and therefore
+  never prepares the alias collection, in a process that has not mapped
+  DirectWrite; hooking happens only for a factory that already existed at
+  injection or that the application creates itself. The 2026-09-06 field
+  incident (a console-tool storm exhausting 64 GB) is the reason.
 - Licensed Steam game evidence must come from a Steam-launched process with no
   explicit Steamworks initialization failure. A direct `MacLoader` launch is a
   renderer smoke test, not gameplay-compatibility proof. Bind every field run to

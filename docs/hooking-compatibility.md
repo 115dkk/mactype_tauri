@@ -51,7 +51,7 @@ or executable-name workaround.
 | Unsupported machine architecture | [#904](https://github.com/snowie2000/mactype/issues/904), [#1085](https://github.com/snowie2000/mactype/issues/1085) | Native ARM64 remains explicitly unsupported until a native core/helper exists. It is not sent to an x64 helper and does not degrade global health. |
 | Frozen packaged process | field log of this branch, 2026-09-05 | Retain the exact identity in the bounded deferred set and re-check its PLM lifecycle without logging or counting a failure. |
 | Transient helper launch failure at logon | field log of this branch, 2026-09-05 | Defer only failures before helper resume, retry with bounded backoff, and preserve the launch error if the deferral limit is reached. |
-| Console tool storm / eager per-process DirectWrite work | field log of this branch, 2026-09-06 | Build the alias collection at the application's first acquisition, and run the post-loader-lock worker only when DirectWrite was mapped before injection. |
+| Console tool storm / eager per-process DirectWrite work | field log of this branch, 2026-09-06 | Run the post-loader-lock existing-factory worker only when DirectWrite was mapped before injection, so a process that never touches DirectWrite creates no factory and prepares no alias collection. |
 | Millisecond-lived console tools receiving the renderer | field log of this branch, 2026-09-06 | Read the bounded PE subsystem of the exact image. Defer a fresh console target until it is two seconds old and record it quietly as vanished if it exits first; with `SkipConsoleProcesses=1` skip the exact console process instead. GUI, other, and unavailable classifications stay eligible. |
 
 ## Implemented evidence

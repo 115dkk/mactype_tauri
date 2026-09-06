@@ -29,6 +29,7 @@ impl RuntimeInitializer for WindowsOpenServiceInitializer {
             runtime.binding(),
             runtime.unity_font_hook_policy().clone(),
             runtime.private_freetype_policy(),
+            runtime.console_process_policy(),
             service_pid,
             Box::new(source),
             Box::new(inspector),

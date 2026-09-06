@@ -2,6 +2,7 @@
 
 mod appinit;
 mod broker;
+mod console_process;
 pub mod event_log;
 mod health;
 mod manifest;
@@ -14,6 +15,7 @@ mod runtime_activation;
 mod unity;
 
 pub use broker::{parse_broker_command, BrokerCommand, BrokerCommandError};
+pub use console_process::ConsoleProcessPolicy;
 pub use health::{
     ArchitectureInjectionTelemetry, ComponentReadiness, HealthContractError, HealthReport,
     HealthState, InjectionArchitecture, InjectionSuccess, InjectionTelemetry, ReadinessReport,

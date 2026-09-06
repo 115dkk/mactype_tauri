@@ -25,6 +25,7 @@ or executable-name workaround.
   Store-only, or mitigation-opt-in image signature policy, are explicit blocks.
 - A failed or unavailable mitigation query is not an implicit global refusal.
 - A frozen (PLM-suspended) target or a helper launch that fails before resume is a deferred target: the host re-checks it from a bounded deferred set, it is neither a failure nor a health condition, and it becomes a normal attempt when the target runs again. A deferred target that exits becomes a quiet skip.
+- A newly observed console-subsystem target (PE optional header `IMAGE_SUBSYSTEM_WINDOWS_CUI`) younger than the console grace period (2 s) is deferred until the remainder of that grace expires. A target that exits during the grace becomes a quiet `injection-target-vanished` skip; a survivor is revalidated once and proceeds without another grace deferral. `SkipConsoleProcesses=1` instead quietly skips the exact verified console process (`console-process-policy`); GUI images, terminal hosts, and unavailable subsystem or age evidence remain eligible, and neither decision changes health-v1.
 - MacType never calls `SetProcessMitigationPolicy` to weaken a target and never
   disables a browser sandbox, Code Integrity Guard, or Arbitrary Code Guard.
 - Names such as `chrome.exe`, `firefox.exe`, and `RuntimeBroker.exe` are not
@@ -50,6 +51,8 @@ or executable-name workaround.
 | Unsupported machine architecture | [#904](https://github.com/snowie2000/mactype/issues/904), [#1085](https://github.com/snowie2000/mactype/issues/1085) | Native ARM64 remains explicitly unsupported until a native core/helper exists. It is not sent to an x64 helper and does not degrade global health. |
 | Frozen packaged process | field log of this branch, 2026-09-05 | Retain the exact identity in the bounded deferred set and re-check its PLM lifecycle without logging or counting a failure. |
 | Transient helper launch failure at logon | field log of this branch, 2026-09-05 | Defer only failures before helper resume, retry with bounded backoff, and preserve the launch error if the deferral limit is reached. |
+| Console tool storm / eager per-process DirectWrite work | field log of this branch, 2026-09-06 | Build the alias collection at the application's first acquisition, and run the post-loader-lock worker only when DirectWrite was mapped before injection. |
+| Millisecond-lived console tools receiving the renderer | field log of this branch, 2026-09-06 | Read the bounded PE subsystem of the exact image. Defer a fresh console target until it is two seconds old and record it quietly as vanished if it exits first; with `SkipConsoleProcesses=1` skip the exact console process instead. GUI, other, and unavailable classifications stay eligible. |
 
 ## Implemented evidence
 

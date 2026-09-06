@@ -182,6 +182,7 @@ private:
 	static CParseIni m_Config;
 	bool m_bHookChildProcesses		: 1;
 	bool m_bSkipPrivateFreeType		: 1;
+	bool m_bSkipConsoleProcesses		: 1;
 	bool m_bUseMapping				: 1;
 	bool m_bLoadOnDemand			: 1;
 	bool m_bEnableShadow			: 1;
@@ -305,6 +306,7 @@ private:
 	CGdippSettings()
 		: m_bHookChildProcesses(false)
 		, m_bSkipPrivateFreeType(false)
+		, m_bSkipConsoleProcesses(false)
 		, m_bUseMapping(false)
 		, m_bLoadOnDemand(false)
 		, m_bEnableShadow(false)
@@ -358,6 +360,7 @@ public:
 	const CFontSettings& GetFontSettings() const { return m_FontSettings; }
 	bool HookChildProcesses() const { return m_bHookChildProcesses; }
 	bool SkipPrivateFreeType() const { return m_bSkipPrivateFreeType; }
+	bool SkipConsoleProcesses() const { return m_bSkipConsoleProcesses; }
 	bool UseMapping() const { return m_bUseMapping; }
 	bool LoadOnDemand() const { return m_bLoadOnDemand; }
 	char FontLink() const { return m_bFontLink; }

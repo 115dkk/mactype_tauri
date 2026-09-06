@@ -6,8 +6,9 @@ use std::{
 };
 
 use mactype_service_contract::{
-    ComponentReadiness, HealthState, InjectionTelemetry, PrivateFreeTypePolicy, ReadinessReport,
-    RendererRuntimeBinding, StructuredServiceError, UnityFontHookPolicy,
+    ComponentReadiness, ConsoleProcessPolicy, HealthState, InjectionTelemetry,
+    PrivateFreeTypePolicy, ReadinessReport, RendererRuntimeBinding, StructuredServiceError,
+    UnityFontHookPolicy,
 };
 
 use crate::injection_orchestrator::{
@@ -33,6 +34,7 @@ pub fn initialize_process_orchestration(
         binding,
         UnityFontHookPolicy::default(),
         PrivateFreeTypePolicy::default(),
+        ConsoleProcessPolicy::default(),
         service_pid,
         source,
         inspector,
@@ -52,6 +54,7 @@ pub fn initialize_process_orchestration_with_unity_font_hook(
         binding,
         unity_font_hook,
         PrivateFreeTypePolicy::default(),
+        ConsoleProcessPolicy::default(),
         service_pid,
         source,
         inspector,
@@ -59,10 +62,12 @@ pub fn initialize_process_orchestration_with_unity_font_hook(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn initialize_process_orchestration_with_profile_policies(
     binding: RendererRuntimeBinding,
     unity_font_hook: UnityFontHookPolicy,
     private_freetype: PrivateFreeTypePolicy,
+    console_process: ConsoleProcessPolicy,
     service_pid: u32,
     mut source: Box<dyn ProcessEventSource>,
     inspector: Box<dyn ProcessInspector>,
@@ -81,6 +86,7 @@ pub fn initialize_process_orchestration_with_profile_policies(
             binding,
             unity_font_hook,
             private_freetype,
+            console_process,
             snapshot_pids,
             source,
             inspector,
@@ -94,6 +100,7 @@ struct ProcessOrchestrationDriver {
     binding: RendererRuntimeBinding,
     unity_font_hook: UnityFontHookPolicy,
     private_freetype: PrivateFreeTypePolicy,
+    console_process: ConsoleProcessPolicy,
     snapshot_pids: VecDeque<u32>,
     source: Box<dyn ProcessEventSource>,
     inspector: Box<dyn ProcessInspector>,
@@ -114,7 +121,11 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
             self.broker.as_ref(),
             RetryPolicy::default(),
             &scheduler,
-            ProcessAdmissionPolicies::new(self.unity_font_hook.clone(), self.private_freetype),
+            ProcessAdmissionPolicies::new(
+                self.unity_font_hook.clone(),
+                self.private_freetype,
+                self.console_process,
+            ),
             DeferralPolicy::default(),
         );
         let mut consecutive_health_report_failures = 0;

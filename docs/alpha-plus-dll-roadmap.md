@@ -297,10 +297,12 @@ answers both `맑은 고딕` and `Malgun Gothic`, including their Semilight name
 If two names for one physical face resolve to different replacements, that
 face remains native rather than publishing a partial alias family.
 
-This collection is installed only at the DirectWrite factory acquisition seam:
-`GetSystemFontCollection`, `IDWriteFactory3::GetSystemFontSet`, the modern
-`IDWriteFactory3::GetSystemFontCollection`, and the null-collection
-`CreateTextFormat` path. The post-loader-lock worker covers a shared factory
+The alias collection is built lazily at the application's first DirectWrite
+factory acquisition through `GetSystemFontCollection`,
+`IDWriteFactory3::GetSystemFontSet`, or the modern
+`IDWriteFactory3::GetSystemFontCollection`. The null-collection
+`CreateTextFormat` path only resolves settings. The post-loader-lock worker runs
+only when DirectWrite was mapped before injection and covers a shared factory
 created before injection. The core does not patch family, font, face,
 face-reference, file, index, informational-string, or font-table objects, and
 does not carry alias state in thread-local storage. A collection already

@@ -1,9 +1,13 @@
 #![forbid(unsafe_code)]
 
+use std::time::Duration;
+
 use mactype_service_contract::{
-    PrivateFreeTypePolicy, StructuredServiceError, UnityFontHookMode, UnityFontHookPolicy,
+    ConsoleProcessPolicy, PrivateFreeTypePolicy, StructuredServiceError, UnityFontHookMode,
+    UnityFontHookPolicy,
 };
 
+use crate::image_subsystem::ImageSubsystem;
 use crate::observer::ProcessIdentity;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,6 +29,7 @@ pub enum TargetLifecycle {
 pub enum DeferralReason {
     Frozen,
     HelperLaunchFailed,
+    ConsoleGrace,
 }
 
 impl DeferralReason {
@@ -32,6 +37,7 @@ impl DeferralReason {
         match self {
             Self::Frozen => "target-frozen",
             Self::HelperLaunchFailed => "helper-launch-failed-before-resume",
+            Self::ConsoleGrace => "console-grace-period",
         }
     }
 }
@@ -128,6 +134,16 @@ pub trait ProcessInspector {
         let _ = identity;
         PrivateFreeTypeClassification::NotDetected
     }
+
+    fn probe_image_subsystem(&self, identity: &ProcessIdentity) -> ImageSubsystem {
+        let _ = identity;
+        ImageSubsystem::Unavailable
+    }
+
+    fn probe_process_age(&self, identity: &ProcessIdentity) -> Option<Duration> {
+        let _ = identity;
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,6 +162,7 @@ pub enum ProcessSkipReason {
     DynamicCodeProhibited,
     BinarySignatureRestricted,
     PrivateFreeTypeDetected,
+    ConsoleProcess,
     UnityAntiCheatDetected,
     UnitySafetyEvidenceUnavailable,
 }
@@ -167,6 +184,7 @@ impl ProcessSkipReason {
             Self::DynamicCodeProhibited => "dynamic-code-policy-blocks-hooks",
             Self::BinarySignatureRestricted => "binary-signature-policy-blocks-module",
             Self::PrivateFreeTypeDetected => "private-freetype-detected",
+            Self::ConsoleProcess => "console-process-policy",
             Self::UnityAntiCheatDetected => "unity-anticheat-detected",
             Self::UnitySafetyEvidenceUnavailable => "unity-safety-evidence-unavailable",
         }
@@ -191,6 +209,7 @@ pub struct ProcessTargetValidator<'a> {
     inspector: &'a dyn ProcessInspector,
     unity_font_hook: UnityFontHookPolicy,
     private_freetype: PrivateFreeTypePolicy,
+    console_process: ConsoleProcessPolicy,
 }
 
 impl<'a> ProcessTargetValidator<'a> {
@@ -200,6 +219,7 @@ impl<'a> ProcessTargetValidator<'a> {
             inspector,
             unity_font_hook: UnityFontHookPolicy::default(),
             private_freetype: PrivateFreeTypePolicy::default(),
+            console_process: ConsoleProcessPolicy::default(),
         }
     }
 
@@ -213,6 +233,7 @@ impl<'a> ProcessTargetValidator<'a> {
             inspector,
             unity_font_hook,
             private_freetype: PrivateFreeTypePolicy::default(),
+            console_process: ConsoleProcessPolicy::default(),
         }
     }
 
@@ -221,12 +242,14 @@ impl<'a> ProcessTargetValidator<'a> {
         inspector: &'a dyn ProcessInspector,
         unity_font_hook: UnityFontHookPolicy,
         private_freetype: PrivateFreeTypePolicy,
+        console_process: ConsoleProcessPolicy,
     ) -> Self {
         Self {
             service_pid,
             inspector,
             unity_font_hook,
             private_freetype,
+            console_process,
         }
     }
 
@@ -361,6 +384,11 @@ impl<'a> ProcessTargetValidator<'a> {
                 &inspection,
                 ProcessSkipReason::PrivateFreeTypeDetected,
             ));
+        }
+        if self.console_process.skip_console()
+            && self.inspector.probe_image_subsystem(&inspection.identity) == ImageSubsystem::Console
+        {
+            return Ok(skipped(&inspection, ProcessSkipReason::ConsoleProcess));
         }
         match self.inspector.probe_target_lifecycle(&inspection.identity) {
             TargetLifecycle::Exiting => Ok(skipped(&inspection, ProcessSkipReason::TargetExiting)),

@@ -704,6 +704,26 @@
     "description": "자체 FreeType 사용을 명시한 프로그램은 일반 후킹에서 조용히 제외합니다. Unity 글꼴 후킹에는 적용하지 않습니다."
   },
   {
+    "id": "skip_console_processes",
+    "group": "basic",
+    "section": "General",
+    "key": "SkipConsoleProcesses",
+    "type": "integer",
+    "control": "boolean",
+    "min": 0,
+    "max": 1,
+    "default": 0,
+    "factory": 0,
+    "unit": null,
+    "advanced": false,
+    "previewable": false,
+    "apply": "restart_required",
+    "legacy_control_center_ordinal": -1,
+    "supported": true,
+    "label": "터미널 프로그램 건너뛰기",
+    "description": "cmd, PowerShell, git, gh처럼 콘솔로 실행되는 프로그램에는 적용하지 않습니다. 터미널 창 자체의 글자는 그대로 적용됩니다."
+  },
+  {
     "id": "unity_font_hook",
     "group": "advanced",
     "section": "General",

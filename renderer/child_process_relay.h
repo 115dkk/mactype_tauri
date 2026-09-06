@@ -57,6 +57,7 @@ enum class ChildRelayReason : unsigned char
     dynamicCodeProhibited,
     binarySignatureRestricted,
     privateFreeTypeDetected,
+    consoleProcessSkipped,
     fixedGenerationUnavailable,
     sameArchitectureInjectionFailed,
     mixedArchitectureHelperFailed,

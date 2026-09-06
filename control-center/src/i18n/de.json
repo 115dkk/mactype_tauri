@@ -530,6 +530,8 @@
   "settings.font_substitutes.option.2": "Alle",
   "settings.skip_private_freetype.label": "Apps mit eigenem FreeType überspringen",
   "settings.skip_private_freetype.description": "Lässt Apps mit eigener Schriftdarstellung unverändert, um Kompatibilitätsprobleme zu verringern. Für Unity-Spiele gelten separate Einstellungen.",
+  "settings.skip_console_processes.label": "Konsolenprogramme überspringen",
+  "settings.skip_console_processes.description": "Lässt Konsolenprogramme wie cmd, PowerShell, git und gh unverändert. Der Text im Terminalfenster selbst wird weiterhin von MacType dargestellt.",
   "settings.unity_font_hook.label": "Schrift in Unity-Spielen",
   "settings.unity_font_hook.description": "Wendet Ihre Schrifteinstellungen auf unterstützte Unity-Spiele an.",
   "settings.unity_font_hook.option.0": "Aus",

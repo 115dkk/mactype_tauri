@@ -6,10 +6,11 @@ use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
 use mactype_service_contract::{
-    InjectionArchitecture, InjectionSuccess, InjectionTelemetry, PrivateFreeTypePolicy,
-    RendererRuntimeBinding, StructuredServiceError, UnityFontHookPolicy,
+    ConsoleProcessPolicy, InjectionArchitecture, InjectionSuccess, InjectionTelemetry,
+    PrivateFreeTypePolicy, RendererRuntimeBinding, StructuredServiceError, UnityFontHookPolicy,
 };
 
+use crate::image_subsystem::ImageSubsystem;
 use crate::observer::{
     BrokerDisposition, BrokerResult, InjectionBroker, InjectionRequest, ProcessArchitecture,
     ProcessIdentity,
@@ -33,16 +34,19 @@ const DEFERRAL_CAPACITY_EXHAUSTED_CODE: &str = "deferral-capacity-exhausted";
 pub(crate) struct ProcessAdmissionPolicies {
     unity_font_hook: UnityFontHookPolicy,
     private_freetype: PrivateFreeTypePolicy,
+    console_process: ConsoleProcessPolicy,
 }
 
 impl ProcessAdmissionPolicies {
     pub(crate) const fn new(
         unity_font_hook: UnityFontHookPolicy,
         private_freetype: PrivateFreeTypePolicy,
+        console_process: ConsoleProcessPolicy,
     ) -> Self {
         Self {
             unity_font_hook,
             private_freetype,
+            console_process,
         }
     }
 }
@@ -133,6 +137,7 @@ impl<'a> InjectionOrchestrator<'a> {
                 admission_policies: ProcessAdmissionPolicies::new(
                     unity_font_hook,
                     PrivateFreeTypePolicy::default(),
+                    ConsoleProcessPolicy::default(),
                 ),
                 deferral_policy: DeferralPolicy::default(),
             },
@@ -146,6 +151,7 @@ impl<'a> InjectionOrchestrator<'a> {
         broker: &'a dyn InjectionBroker,
         unity_font_hook: UnityFontHookPolicy,
         private_freetype: PrivateFreeTypePolicy,
+        console_process: ConsoleProcessPolicy,
     ) -> Self {
         Self::build(
             service_pid,
@@ -158,6 +164,7 @@ impl<'a> InjectionOrchestrator<'a> {
                 admission_policies: ProcessAdmissionPolicies::new(
                     unity_font_hook,
                     private_freetype,
+                    console_process,
                 ),
                 deferral_policy: DeferralPolicy::default(),
             },
@@ -203,6 +210,7 @@ impl<'a> InjectionOrchestrator<'a> {
                 inspector,
                 configuration.admission_policies.unity_font_hook,
                 configuration.admission_policies.private_freetype,
+                configuration.admission_policies.console_process,
             ),
             inspector,
             broker,
@@ -231,6 +239,19 @@ impl<'a> InjectionOrchestrator<'a> {
             ProcessTargetDecision::Eligible(identity) => {
                 if self.contains_identity(&identity) {
                     return Ok(ProcessOutcome::Duplicate);
+                }
+                if self.inspector.probe_image_subsystem(&identity) == ImageSubsystem::Console {
+                    if let Some(age) = self.inspector.probe_process_age(&identity) {
+                        if age < self.deferral_policy.console_grace {
+                            self.insert_deferred(DeferredTarget {
+                                identity,
+                                reason: DeferralReason::ConsoleGrace,
+                                deferrals: 0,
+                                not_before: now + self.deferral_policy.console_grace - age,
+                            });
+                            return Ok(ProcessOutcome::Deferred);
+                        }
+                    }
                 }
                 self.attempt_injection(identity, 0, now)
             }
@@ -279,6 +300,13 @@ impl<'a> InjectionOrchestrator<'a> {
         let Some(target) = self.deferred.remove(&key) else {
             return Ok(None);
         };
+
+        if target.reason == DeferralReason::ConsoleGrace
+            && self.inspector.probe_target_liveness(&target.identity) == TargetLiveness::Vanished
+        {
+            self.record_skip(target.identity, TARGET_VANISHED_RESULT_CODE, None);
+            return Ok(Some(ProcessOutcome::Skipped));
+        }
 
         if target.reason == DeferralReason::Frozen {
             match self.inspector.probe_target_lifecycle(&target.identity) {

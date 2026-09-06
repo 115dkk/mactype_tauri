@@ -1,7 +1,8 @@
 #![cfg(windows)]
 
 use mactype_service_host::{
-    PrivateFreeTypeClassification, ProcessInspector, TargetLifecycle, WindowsProcessInspector,
+    ImageSubsystem, PrivateFreeTypeClassification, ProcessInspector, TargetLifecycle,
+    WindowsProcessInspector,
 };
 use mactype_service_platform::process_session_id;
 
@@ -18,6 +19,21 @@ fn windows_inspector_requeries_creation_time_session_and_architecture_from_the_p
     assert_eq!(
         inspector.probe_target_lifecycle(&identity),
         TargetLifecycle::Running
+    );
+    assert!(inspector.probe_process_age(&identity).is_some());
+    assert_eq!(
+        inspector.probe_image_subsystem(&identity),
+        ImageSubsystem::Console
+    );
+
+    let reused = mactype_service_host::ProcessIdentity {
+        creation_time: identity.creation_time.wrapping_add(1),
+        ..identity
+    };
+    assert_eq!(inspector.probe_process_age(&reused), None);
+    assert_eq!(
+        inspector.probe_image_subsystem(&reused),
+        ImageSubsystem::Unavailable
     );
 }
 

@@ -378,6 +378,7 @@ bool CGdippSettings::PublishRendererPolicySnapshot(
 	candidate.hooks.directWrite = m_bDirectWrite != FALSE;
 	candidate.hooks.fontSubstitution = m_nFontSubstitutes != 0;
 	candidate.hooks.skipPrivateFreeType = m_bSkipPrivateFreeType;
+	candidate.hooks.skipConsoleProcesses = m_bSkipConsoleProcesses;
 	candidate.hooks.unityFontMode = UnityFontHookMode();
 	candidate.hooks.unityFontEnabledForProcess = UnityFontHookEnabledForProcess();
 	candidate.freeType.cacheMaxFaces = m_nCacheMaxFaces;
@@ -741,6 +742,8 @@ SKIP:
 	m_bHookChildProcesses = !!_GetFreeTypeProfileInt(_T("HookChildProcesses"), false, lpszFile);
 	m_bSkipPrivateFreeType = !!_GetFreeTypeProfileInt(
 		_T("SkipPrivateFreeType"), false, lpszFile);
+	m_bSkipConsoleProcesses = !!_GetFreeTypeProfileInt(
+		_T("SkipConsoleProcesses"), false, lpszFile);
 	m_bUseMapping	= !!_GetFreeTypeProfileInt(_T("UseMapping"), false, lpszFile);
 	m_nBolderMode	= _GetFreeTypeProfileInt(_T("BolderMode"), 0, lpszFile);
 	m_nGammaMode	= _GetFreeTypeProfileInt(_T("GammaMode"), -1, lpszFile);

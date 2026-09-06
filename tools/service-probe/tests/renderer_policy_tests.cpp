@@ -34,6 +34,7 @@ renderer::RendererPolicyCandidate Candidate(
     candidate.hooks.directWrite = true;
     candidate.hooks.fontSubstitution = true;
     candidate.hooks.skipPrivateFreeType = true;
+    candidate.hooks.skipConsoleProcesses = true;
     candidate.hooks.unityFontMode = renderer::UnityFontHookMode::mostGames;
     candidate.hooks.unityFontEnabledForProcess = true;
     candidate.freeType.cacheMaxFaces = 64;
@@ -106,6 +107,8 @@ int main()
         "the Unity hook selection must belong to the immutable policy");
     Require(first.snapshot->hooks().skipPrivateFreeType,
         "private FreeType avoidance must belong to the immutable hook policy");
+    Require(first.snapshot->hooks().skipConsoleProcesses,
+        "console avoidance must belong to the immutable hook policy");
     Require(first.snapshot->unity_coverage().gray[128] == 128 &&
             first.snapshot->unity_coverage().rgb[0][192] == 192 &&
             first.snapshot->unity_coverage().rgb[2][64] == 64,
@@ -127,6 +130,19 @@ int main()
             "vertical fonts must reuse their horizontal policy");
     Require(first.snapshot->font_settings_for(L"Missing").GetHintingMode() == 1,
             "unknown fonts must use the immutable common policy");
+
+    renderer::ProfileRuntime digestRuntime;
+    renderer::RendererPolicyCandidate consoleEnabled =
+        Candidate(1.25f, L"Courier New");
+    renderer::RendererPolicyCandidate consoleDisabled = consoleEnabled;
+    consoleDisabled.hooks.skipConsoleProcesses = false;
+    const renderer::ProfilePublication enabledPolicy =
+        digestRuntime.Publish(std::move(consoleEnabled));
+    const renderer::ProfilePublication disabledPolicy =
+        digestRuntime.Publish(std::move(consoleDisabled));
+    Require(enabledPolicy.published() && disabledPolicy.published() &&
+                enabledPolicy.snapshot->digest() != disabledPolicy.snapshot->digest(),
+            "console avoidance must contribute to the root policy digest");
 
     renderer::RendererPolicyRef retained = first.snapshot;
     renderer::RendererPolicyCandidate invalid = Candidate(9.0f, L"Invalid");

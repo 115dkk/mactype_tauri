@@ -1,8 +1,8 @@
 use mactype_service_contract::{
-    PrivateFreeTypePolicy, StructuredServiceError, UnityFontHookPolicy,
+    ConsoleProcessPolicy, PrivateFreeTypePolicy, StructuredServiceError, UnityFontHookPolicy,
 };
 use mactype_service_host::{
-    BinarySignaturePolicy, DeferralReason, DynamicCodePolicy, InspectionEvidence,
+    BinarySignaturePolicy, DeferralReason, DynamicCodePolicy, ImageSubsystem, InspectionEvidence,
     PrivateFreeTypeClassification, ProcessArchitecture, ProcessIdentity, ProcessInspection,
     ProcessInspectionError, ProcessInspector, ProcessSkipReason, ProcessTargetDecision,
     ProcessTargetValidator, TargetLifecycle, UnityProcessClassification,
@@ -65,6 +65,16 @@ fn unity_policy(mode: u8) -> UnityFontHookPolicy {
     )
 }
 
+fn console_process_policy(enabled: bool) -> ConsoleProcessPolicy {
+    ConsoleProcessPolicy::from_profile_bytes(
+        format!(
+            "[General]\r\nSkipConsoleProcesses={}\r\n",
+            if enabled { 1 } else { 0 }
+        )
+        .as_bytes(),
+    )
+}
+
 fn private_freetype_policy(enabled: bool) -> PrivateFreeTypePolicy {
     PrivateFreeTypePolicy::from_profile_bytes(
         format!(
@@ -73,6 +83,26 @@ fn private_freetype_policy(enabled: bool) -> PrivateFreeTypePolicy {
         )
         .as_bytes(),
     )
+}
+
+struct ConsoleInspector {
+    inspection: ProcessInspection,
+    classification: ImageSubsystem,
+    lifecycle: TargetLifecycle,
+}
+
+impl ProcessInspector for ConsoleInspector {
+    fn inspect(&self, _pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
+        Ok(self.inspection.clone())
+    }
+
+    fn probe_image_subsystem(&self, _identity: &ProcessIdentity) -> ImageSubsystem {
+        self.classification
+    }
+
+    fn probe_target_lifecycle(&self, _identity: &ProcessIdentity) -> TargetLifecycle {
+        self.lifecycle
+    }
 }
 
 struct PrivateFreeTypeInspector(ProcessInspection);
@@ -167,6 +197,90 @@ fn validator_defers_frozen_and_quietly_skips_exiting_targets() {
 }
 
 #[test]
+fn enabled_console_policy_quietly_skips_only_detected_console_images() {
+    for (classification, expected) in [
+        (
+            ImageSubsystem::Console,
+            ProcessTargetDecision::Skipped {
+                identity: Some(identity(42)),
+                reason: ProcessSkipReason::ConsoleProcess,
+            },
+        ),
+        (
+            ImageSubsystem::Gui,
+            ProcessTargetDecision::Eligible(identity(42)),
+        ),
+        (
+            ImageSubsystem::Other,
+            ProcessTargetDecision::Eligible(identity(42)),
+        ),
+        (
+            ImageSubsystem::Unavailable,
+            ProcessTargetDecision::Eligible(identity(42)),
+        ),
+    ] {
+        let inspector = ConsoleInspector {
+            inspection: ordinary_inspection(42),
+            classification,
+            lifecycle: TargetLifecycle::Running,
+        };
+        let validator = ProcessTargetValidator::with_profile_policies(
+            900,
+            &inspector,
+            UnityFontHookPolicy::default(),
+            PrivateFreeTypePolicy::default(),
+            console_process_policy(true),
+        );
+        assert_eq!(validator.validate(42).unwrap(), expected);
+    }
+}
+
+#[test]
+fn console_policy_runs_after_image_checks_and_before_frozen_lifecycle() {
+    let mut missing_image = ordinary_inspection(42);
+    missing_image.image_name = InspectionEvidence::Unavailable;
+    let inspector = ConsoleInspector {
+        inspection: missing_image,
+        classification: ImageSubsystem::Console,
+        lifecycle: TargetLifecycle::Frozen,
+    };
+    let validator = ProcessTargetValidator::with_profile_policies(
+        900,
+        &inspector,
+        UnityFontHookPolicy::default(),
+        PrivateFreeTypePolicy::default(),
+        console_process_policy(true),
+    );
+    assert_eq!(
+        validator.validate(42).unwrap(),
+        ProcessTargetDecision::Skipped {
+            identity: Some(identity(42)),
+            reason: ProcessSkipReason::ImageNameUnavailable,
+        }
+    );
+
+    let inspector = ConsoleInspector {
+        inspection: ordinary_inspection(42),
+        classification: ImageSubsystem::Console,
+        lifecycle: TargetLifecycle::Frozen,
+    };
+    let validator = ProcessTargetValidator::with_profile_policies(
+        900,
+        &inspector,
+        UnityFontHookPolicy::default(),
+        PrivateFreeTypePolicy::default(),
+        console_process_policy(true),
+    );
+    assert_eq!(
+        validator.validate(42).unwrap(),
+        ProcessTargetDecision::Skipped {
+            identity: Some(identity(42)),
+            reason: ProcessSkipReason::ConsoleProcess,
+        }
+    );
+}
+
+#[test]
 fn enabled_private_freetype_policy_quietly_skips_the_detected_process() {
     let inspector = PrivateFreeTypeInspector(ordinary_inspection(42));
     let validator = ProcessTargetValidator::with_profile_policies(
@@ -174,6 +288,7 @@ fn enabled_private_freetype_policy_quietly_skips_the_detected_process() {
         &inspector,
         UnityFontHookPolicy::default(),
         private_freetype_policy(true),
+        ConsoleProcessPolicy::default(),
     );
 
     assert_eq!(
@@ -193,6 +308,7 @@ fn private_freetype_skip_does_not_disable_an_enabled_unity_hook_target() {
         &inspector,
         unity_policy(2),
         private_freetype_policy(true),
+        ConsoleProcessPolicy::default(),
     );
 
     assert_eq!(

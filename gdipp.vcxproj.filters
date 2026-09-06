@@ -51,6 +51,9 @@
     <ClCompile Include="renderer\hook_lifecycle.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="renderer\image_subsystem.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="renderer\unity_font_catalog.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -188,6 +191,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="renderer\hooklist.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="renderer\image_subsystem.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="renderer\ivs_otft.h">

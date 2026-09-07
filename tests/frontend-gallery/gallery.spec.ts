@@ -342,7 +342,7 @@ test("native preview display mode dropdown drives the runtime adapter", async ({
 
   const modeSelect = page.getByRole("combobox", { name: "표시 방식" });
   await expect(modeSelect).toBeVisible();
-  await expect(modeSelect.locator("option")).toHaveText(["견본", "크기 사다리", "Windows와 비교", "나열 표시"]);
+  await expect(modeSelect.locator("option")).toHaveText(["견본", "크기 사다리", "윈도우", "나열 표시"]);
 
   const nativePreviewState = () => page.evaluate(() => window.sessionStorage.getItem("gallery-native-preview"));
   const nativePreviewBackground = () => page.evaluate(() => window.sessionStorage.getItem("gallery-native-preview-background"));

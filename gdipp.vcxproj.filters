@@ -54,6 +54,9 @@
     <ClCompile Include="renderer\image_subsystem.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="renderer\module_name.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="renderer\unity_font_catalog.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -194,6 +197,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="renderer\image_subsystem.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="renderer\module_name.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="renderer\ivs_otft.h">

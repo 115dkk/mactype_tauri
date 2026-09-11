@@ -836,6 +836,7 @@
     <ClCompile Include="renderer\hook.cpp" />
     <ClCompile Include="renderer\hook_lifecycle.cpp" />
     <ClCompile Include="renderer\image_subsystem.cpp" />
+    <ClCompile Include="renderer\module_name.cpp" />
     <ClCompile Include="renderer\hookCounter.cpp" />
     <ClCompile Include="renderer\misc.cpp" />
     <ClCompile Include="renderer\override.cpp">
@@ -889,6 +890,7 @@
     <ClInclude Include="renderer\hook_lifecycle.h" />
     <ClInclude Include="renderer\hooklist.h" />
     <ClInclude Include="renderer\image_subsystem.h" />
+    <ClInclude Include="renderer\module_name.h" />
     <ClInclude Include="renderer\ivs_otft.h" />
     <ClInclude Include="renderer\json.hpp" />
     <ClInclude Include="renderer\override.h" />

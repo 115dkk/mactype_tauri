@@ -22,6 +22,7 @@ cmake --build $build --config RelWithDebInfo --target `
     renderer-policy-tests `
     private-freetype-policy-tests `
     image-subsystem-tests `
+    module-name-tests `
     font-substitution-tests `
     directwrite-alias-policy-tests `
     unity-font-hook-tests
@@ -60,6 +61,7 @@ try {
         'renderer-policy-tests.exe',
         'private-freetype-policy-tests.exe',
         'image-subsystem-tests.exe',
+        'module-name-tests.exe',
         'font-substitution-tests.exe',
         'directwrite-alias-policy-tests.exe',
         'unity-font-hook-tests.exe'

@@ -68,6 +68,10 @@ fn assert_last_child_exited() {
 }
 
 #[test]
+#[cfg_attr(
+    all(miri, windows),
+    ignore = "Windows Miri does not implement CreatePipe"
+)]
 fn helper_output_reader_preserves_schema2_evidence_and_bounds_growth() {
     for (payload_bytes, expected_bytes) in [
         (

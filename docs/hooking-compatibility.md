@@ -34,6 +34,16 @@ or executable-name workaround.
   schema. This preserves rollback compatibility and prevents a normal target
   policy from becoming a global warning, `lastError`, or “performance
   degradation” notification.
+- Hook and loader-notification code runs on whichever thread calls the
+  hooked API, including driver and engine worker threads that own only
+  64 KB stacks. No first-party renderer function may reserve more than 16 KB
+  of stack in one frame; `scripts/ci/Test-RendererStackFrames.ps1` reads every
+  `__chkstk` probe in the built x86 and x64 modules, attributes each frame to
+  its object file through the program database, and fails the open-core build
+  above that budget. The pinned FreeType fork's CFF interpreter, hinter, and
+  rasterizer frames (up to about 26 KB) are a documented dependency boundary
+  held under a separate 32 KB ceiling; they run only on text-rendering
+  threads. Large path and file buffers belong on the heap.
 
 ## Upstream report inventory
 
@@ -53,6 +63,7 @@ or executable-name workaround.
 | Transient helper launch failure at logon | field log of this branch, 2026-09-05 | Defer only failures before helper resume, retry with bounded backoff, and preserve the launch error if the deferral limit is reached. |
 | Console tool storm / eager per-process DirectWrite work | field log of this branch, 2026-09-06 | Run the post-loader-lock existing-factory worker only when DirectWrite was mapped before injection, so a process that never touches DirectWrite creates no factory and prepares no alias collection. |
 | Millisecond-lived console tools receiving the renderer | field log of this branch, 2026-09-06 | Read the bounded PE subsystem of the exact image. Defer a fresh console target until it is two seconds old and record it quietly as vanished if it exits first; with `SkipConsoleProcesses=1` skip the exact console process instead. GUI, other, and unavailable classifications stay eligible. |
+| Loader hook ran on a 64 KB driver worker thread | field log of this branch, 2026-09-11: Rebel Inc. Escalation (Unity 2022.3.62f3, IL2CPP) died with `STATUS_STACK_OVERFLOW` inside `MacType64.dll` while an NVIDIA D3D11 worker thread loaded `tzres.dll` through the hooked `LoadLibraryExW` | The `DWriteCore.dll` module check no longer places a 32,768-character path on the stack. Module base names resolve through a bounded heap query, the virtual font comparison chunk moved to the heap, and the open-core build rejects any first-party renderer frame above 16 KB. |
 
 ## Implemented evidence
 

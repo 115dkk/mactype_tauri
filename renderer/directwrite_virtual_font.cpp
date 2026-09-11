@@ -19,6 +19,10 @@
 namespace directwrite_virtual_font {
 namespace {
 
+// FileMatches runs behind DirectWrite factory hooks on application threads,
+// so its comparison chunk lives on the heap rather than in a 64 KB frame.
+constexpr std::size_t kCompareChunkBytes = 64 * 1024;
+
 constexpr UINT32 MakeTag(char a, char b, char c, char d) noexcept
 {
 	return (static_cast<UINT32>(static_cast<unsigned char>(a)) << 24) |
@@ -862,7 +866,7 @@ HRESULT FileMatches(
 	if (size.QuadPart != static_cast<LONGLONG>(expected.size()))
 		return S_OK;
 
-	std::array<BYTE, 64 * 1024> buffer = {};
+	std::vector<BYTE> buffer(kCompareChunkBytes);
 	size_t offset = 0;
 	while (offset < expected.size())
 	{

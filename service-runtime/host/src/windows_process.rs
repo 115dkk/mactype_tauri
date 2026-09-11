@@ -385,6 +385,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        all(miri, windows),
+        ignore = "Windows Miri does not implement CreateDirectoryW"
+    )]
     fn unity_installation_classification_is_scoped_to_the_game_directory() {
         let directory = tempfile::tempdir().unwrap();
         let executable = directory.path().join("game.exe");
@@ -408,6 +412,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        all(miri, windows),
+        ignore = "Windows Miri does not implement CreateDirectoryW"
+    )]
     fn generated_anticheat_prefixes_detect_sibling_client_modules() {
         let directory = tempfile::tempdir().unwrap();
         let executable = directory.path().join("game.exe");

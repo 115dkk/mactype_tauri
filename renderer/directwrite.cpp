@@ -3,6 +3,7 @@
 #include "dynCodeHelper.h"
 #include "hookCounter.h"
 #include "hook_lifecycle.h"
+#include "module_name.h"
 #include "settings.h"
 
 #include <array>
@@ -1931,16 +1932,9 @@ static bool HookKnownDirectWriteFactories(
 
 static bool IsDWriteCoreModule(HMODULE module)
 {
-	if (module == nullptr)
-		return false;
-	WCHAR modulePath[32'768]{};
-	DWORD const length = GetModuleFileNameW(
-		module, modulePath, static_cast<DWORD>(_countof(modulePath)));
-	if (length == 0 || length >= _countof(modulePath))
-		return false;
-	WCHAR const* const slash = wcsrchr(modulePath, L'\\');
-	WCHAR const* const name = slash == nullptr ? modulePath : slash + 1;
-	return _wcsicmp(name, L"DWriteCore.dll") == 0;
+	// Reached from the LoadLibraryExW, GetProcAddress, and LdrLoadDll hooks on
+	// the loading thread, which may own only a 64 KB stack.
+	return renderer::module_name::BaseNameEquals(module, L"DWriteCore.dll");
 }
 
 static bool HookDWriteCoreFactoryEntry(FARPROC factoryProcedure)

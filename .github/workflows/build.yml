@@ -25,6 +25,18 @@ jobs:
           name: mactype-open-core
           path: artifacts/open-core
           if-no-files-found: error
+      - name: Reject renderer stack frames above the foreign-thread budget
+        shell: pwsh
+        run: scripts/ci/Test-RendererStackFrames.ps1
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mactype-open-core-symbols
+          path: |
+            Rel+Detours/*.pdb
+            x64/Rel+Detours/*.pdb
+            artifacts/stack-frames
+          if-no-files-found: error
 
   open-core-cppcheck:
     name: Alpha rendering core / Cppcheck x86+x64

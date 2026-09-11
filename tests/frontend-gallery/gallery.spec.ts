@@ -1716,13 +1716,46 @@ test("service migration gallery remains usable at low window height", async ({ p
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy=migration-available", { waitUntil: "networkidle" });
   await openServiceDetails(page);
 
-  expect(await page.evaluate(() => document.documentElement.scrollHeight > document.documentElement.clientHeight)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollHeight - document.documentElement.clientHeight), "The window itself must not scroll").toBe(0);
+  expect(await page.locator(".work-area").evaluate((element) => element.scrollHeight > element.clientHeight), "The work area must scroll instead of the document").toBe(true);
   expect(await overflowingElements(page)).toEqual([]);
   const legacy = page.locator('[data-service-backend="legacy-mactray"]');
   await legacy.scrollIntoViewIfNeeded();
   await expect(legacy.getByRole("button", { name: "Migrate" })).toBeEnabled();
   await page.screenshot({ path: path.join(galleryRoot, "desktop-execution-migration-low-height-en.png"), fullPage: true });
 });
+
+/* The window is an application surface. Every shell grows from the root flex
+   column and every scroll container is positioned, so neither long content nor
+   an assistive-only label placed below the fold can lengthen the document. */
+for (const skin of gallerySkins) {
+  test(`the window never scrolls as a document in ${skin}`, async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name === "mobile-390", "Narrow windows scroll the document by design");
+    const measure = () => page.evaluate(() => ({
+      document: document.documentElement.scrollHeight - document.documentElement.clientHeight,
+      body: document.body.scrollHeight - document.body.clientHeight,
+    }));
+    for (const view of galleryViews) {
+      await page.goto(`/?view=${view.id}&gallery=1&lang=ko&skin=${skin}`, { waitUntil: "networkidle" });
+      await expect(page.locator("html")).toHaveAttribute("data-skin", skin);
+      expect(await measure(), `${skin} ${view.id} must keep the window unscrollable`).toEqual({ document: 0, body: 0 });
+    }
+
+    /* At 1000x700 the diagnostics search label sits below the fold. Its
+       screen-reader-only span is absolutely positioned; before the scroll
+       containers were positioned it escaped the work area and gave the
+       document 24 px of scroll. */
+    await page.setViewportSize({ width: 1000, height: 700 });
+    await page.goto(`/?view=diagnostics&gallery=1&lang=ko&skin=${skin}`, { waitUntil: "networkidle" });
+    expect(await measure(), `${skin} diagnostics at 1000x700 must keep the window unscrollable`).toEqual({ document: 0, body: 0 });
+    const search = page.locator(".event-search").first();
+    if (await search.count()) {
+      await search.scrollIntoViewIfNeeded();
+      await expect(search).toBeInViewport();
+      expect(await measure(), `${skin} diagnostics must reach its search field without moving the window`).toEqual({ document: 0, body: 0 });
+    }
+  });
+}
 
 test("overview summarizes the active service and discloses at most five successful activities", async ({ page }) => {
   await page.goto("/?view=overview&gallery=1&lang=ko&system-service=ready", { waitUntil: "networkidle" });

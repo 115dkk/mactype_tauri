@@ -1,6 +1,6 @@
 /* The Preview Studio window: a control column and a board area. It inherits
    the active skin's tokens, so it looks like the window that opened it. */
-.studio-app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; background: var(--color-canvas); }
+.studio-app { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow: hidden; background: var(--color-canvas); }
 .studio-frame { display: grid; flex: 1 1 auto; grid-template-columns: 300px minmax(0, 1fr); min-height: 0; }
 .studio-controls { display: flex; flex-direction: column; gap: var(--space-4); min-height: 0; padding: var(--space-4); border-inline-end: 1px solid var(--color-border); background: var(--color-surface); overflow-y: auto; }
 .studio-section { display: grid; gap: var(--space-2); }

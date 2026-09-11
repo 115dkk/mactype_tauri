@@ -1,6 +1,13 @@
 * { box-sizing: border-box; }
-html, body, #root { min-width: 320px; min-height: 100%; margin: 0; }
-body { min-height: 100vh; overflow-x: hidden; background: var(--color-canvas); color: var(--color-foreground); font-size: 14px; line-height: 1.5; }
+/* The window is an application surface: the document never scrolls. Every
+   viewport-sized box grows from the root flex column instead of restating
+   100vh, so the shells cannot add up to more than the window, and each scroll
+   container is positioned so an absolutely placed descendant cannot escape it
+   and lengthen the document. Narrow windows switch to document scrolling. */
+html, body, #root { min-width: 320px; margin: 0; }
+html, body { height: 100%; }
+#root { display: flex; flex-direction: column; height: 100%; }
+body { overflow: hidden; background: var(--color-canvas); color: var(--color-foreground); font-size: 14px; line-height: 1.5; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: default; opacity: var(--opacity-disabled); }
@@ -10,7 +17,7 @@ h1 { font-size: 24px; font-weight: 600; line-height: 1.25; letter-spacing: -0.2p
 h2 { font-size: 16px; font-weight: 600; line-height: 1.4; }
 code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-.window-titlebar { display: grid; position: sticky; z-index: 10; top: 0; height: var(--titlebar-height); grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; border-bottom: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-foreground); user-select: none; }
+.window-titlebar { display: grid; position: sticky; z-index: 10; top: 0; flex: 0 0 auto; height: var(--titlebar-height); grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; border-bottom: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-foreground); user-select: none; }
 .window-title { display: flex; min-width: 0; align-items: center; gap: var(--space-2); padding-inline: var(--space-3); font-size: 12px; font-weight: 600; }
 .window-title img { flex: 0 0 auto; }
 .window-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -18,8 +25,8 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .window-controls button { display: grid; width: 46px; height: var(--titlebar-height); min-height: 0; place-items: center; padding: 0; border: 0; border-radius: 0; background: transparent; color: inherit; transition: background-color var(--motion-fast) var(--ease-standard); }
 .window-controls button:hover { background: var(--color-surface-subtle); }
 .window-controls .window-close:hover { background: var(--color-destructive); color: #FFFFFF; }
-.app-shell { display: grid; grid-template-columns: var(--nav-width) minmax(0, 1fr); min-height: calc(100vh - var(--titlebar-height)); }
-.navigation { display: flex; position: sticky; top: var(--titlebar-height); height: calc(100vh - var(--titlebar-height)); min-height: 0; align-self: start; flex-direction: column; gap: var(--space-5); padding: var(--space-4) var(--space-3); background: var(--color-surface); border-right: 1px solid var(--color-border); overflow-y: auto; overscroll-behavior: contain; }
+.app-shell { display: grid; position: relative; flex: 1 1 auto; grid-template-columns: var(--nav-width) minmax(0, 1fr); min-height: 0; }
+.navigation { display: flex; position: relative; min-height: 0; flex-direction: column; gap: var(--space-5); padding: var(--space-4) var(--space-3); background: var(--color-surface); border-right: 1px solid var(--color-border); overflow-y: auto; overscroll-behavior: contain; }
 [dir="rtl"] .navigation { border-right: 0; border-left: 1px solid var(--color-border); }
 .product-lockup { display: flex; align-items: center; gap: var(--space-3); padding: 0 var(--space-2) var(--space-3); flex-shrink: 0; }
 .product-lockup img { width: 32px; height: 32px; }
@@ -54,10 +61,12 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .preference-option:hover, .preference-option[aria-selected="true"] { background: var(--color-surface-subtle); }
 .preference-option[aria-selected="true"]::before { position: absolute; inset-block: var(--space-2); left: 0; width: 3px; background: var(--color-primary); content: ""; }
 [dir="rtl"] .preference-option[aria-selected="true"]::before { right: 0; left: auto; }
-.work-area { min-width: 0; }
-.page { max-width: 1180px; min-height: calc(100vh - var(--titlebar-height)); padding: var(--space-8); }
+.work-area { position: relative; min-width: 0; min-height: 0; overflow: auto; }
+.page { max-width: 1180px; min-height: 100%; padding: var(--space-8); }
+/* The page settles downward from above the work area, so the transient offset
+   never lengthens the scroll range while the animation runs. */
 .view-enter { animation: view-enter var(--motion-normal) var(--ease-standard) both; }
-@keyframes view-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes view-enter { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
 .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-6); padding-bottom: var(--space-6); border-bottom: 1px solid var(--color-border); }
 .page-header.compact { padding-bottom: var(--space-4); }
 .page-header p, .section-heading p { margin-top: var(--space-1); color: var(--color-muted); }
@@ -118,7 +127,7 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 /* Tighter side padding than the reading pages: this one spends its width on a
    settings table and a docked preview, and every pixel here decides whether
    the preview docks at all. */
-.profile-page { --control-height: 28px; display: flex; max-width: 1440px; height: calc(100vh - var(--titlebar-height)); overflow: hidden; flex-direction: column; padding-block: var(--space-5); padding-inline: var(--space-6); }
+.profile-page { --control-height: 28px; display: flex; max-width: 1440px; height: 100%; overflow: hidden; flex-direction: column; padding-block: var(--space-5); padding-inline: var(--space-6); }
 .profile-header { align-items: center; padding-bottom: var(--space-3); }
 .profile-header h1 { font-size: 20px; }
 .profile-editing { font-size: 12px; }
@@ -138,7 +147,7 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .profile-actions select { max-width: 180px; padding-inline: var(--space-2); }
 .profile-actions input { width: 150px; padding-inline: var(--space-2); }
 .profile-layout { display: grid; grid-template-columns: var(--settings-index-width) minmax(0, 1fr); min-height: 0; flex: 1; }
-.settings-index { padding: var(--space-4) var(--space-4) 0 0; border-right: 1px solid var(--color-border); overflow-y: auto; }
+.settings-index { position: relative; padding: var(--space-4) var(--space-4) 0 0; border-right: 1px solid var(--color-border); overflow-y: auto; }
 [dir="rtl"] .settings-index { padding: var(--space-4) 0 0 var(--space-4); border-right: 0; border-left: 1px solid var(--color-border); }
 .search-field { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-2); border: 1px solid var(--color-border-strong); border-radius: var(--radius-control); background: var(--color-surface); }
 .search-field input { width: 100%; min-width: 0; padding: 0; border: 0; outline: 0; }
@@ -151,7 +160,7 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .wizard-substitution { padding-bottom: 0; }
 .profile-page[data-mode="quick"] .settings-form { display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
 .wizard-layout { display: grid; min-height: 0; grid-template-rows: minmax(0, 1fr) auto; }
-.wizard-step-content { min-height: 0; overflow-y: auto; }
+.wizard-step-content { position: relative; min-height: 0; overflow-y: auto; }
 .wizard-step-tools { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0 var(--space-1); padding: var(--space-2) 0; }
 .wizard-step-tools .text-action { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 32px; }
 .wizard-start-card { display: grid; gap: var(--space-4); margin-top: var(--space-4); padding: var(--space-5); border: 1px solid var(--color-border); background: var(--color-surface-subtle); }
@@ -183,7 +192,7 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 [dir="rtl"] .wizard-progress svg { transform: rotate(180deg); }
 .checkbox-row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) 0; color: var(--color-muted); }
 .settings-workspace { display: grid; grid-template-rows: minmax(160px, 1fr) auto; min-width: 0; min-height: 0; overflow: hidden; }
-.settings-form { min-width: 0; min-height: 0; padding: var(--space-2) 0 0 var(--space-5); overflow-x: hidden; overflow-y: auto; }
+.settings-form { position: relative; min-width: 0; min-height: 0; padding: var(--space-2) 0 0 var(--space-5); overflow-x: hidden; overflow-y: auto; }
 .settings-form .section-heading { padding: var(--space-2) 0; }
 .setting-row { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) var(--settings-control-width); align-items: center; gap: var(--space-6); padding: var(--space-2) 0; border-bottom: 1px solid var(--color-border); }
 .setting-row > * { min-width: 0; }
@@ -358,7 +367,7 @@ input[type="range"] { min-width: 0; height: var(--control-height); margin: 0; pa
 .process-picker-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); }
 .process-picker-tools { display: flex; align-items: center; gap: var(--space-2); }
 .process-picker-filter { min-width: 220px; padding-inline: var(--space-2); }
-.process-picker-list { display: grid; gap: var(--space-1); max-height: 240px; margin: 0; padding: var(--space-2); overflow-y: auto; border: 1px solid var(--color-border-strong); border-radius: var(--radius-control); background: var(--color-surface-subtle); list-style: none; }
+.process-picker-list { display: grid; position: relative; gap: var(--space-1); max-height: 240px; margin: 0; padding: var(--space-2); overflow-y: auto; border: 1px solid var(--color-border-strong); border-radius: var(--radius-control); background: var(--color-surface-subtle); list-style: none; }
 .process-picker-row { display: flex; min-height: 40px; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface); cursor: pointer; }
 .process-picker-row:hover { border-color: var(--color-border-strong); }
 .process-picker-row:has(input:checked) { border-color: var(--color-primary); }
@@ -458,7 +467,11 @@ input[type="range"] { min-width: 0; height: var(--control-height); margin: 0; pa
 .log-view [data-severity="warning"] { box-shadow: inset 3px 0 var(--color-warning); }
 
 @media (max-width: 767px) {
-  .app-shell { display: block; min-height: calc(100vh - var(--titlebar-height)); }
+  html, body { height: auto; }
+  body { overflow: hidden auto; }
+  #root { height: auto; min-height: 100vh; }
+  .app-shell { display: block; min-height: 0; }
+  .work-area { overflow: visible; }
   .navigation { position: sticky; z-index: 2; top: var(--titlebar-height); height: auto; min-height: auto; flex-direction: row; align-items: center; gap: var(--space-2); padding: var(--space-2); border-right: 0; border-bottom: 1px solid var(--color-border); overflow-x: hidden; overflow-y: visible; }
   [dir="rtl"] .navigation { border-left: 0; }
   .product-lockup { padding: 0 var(--space-2) 0 0; }
@@ -474,7 +487,7 @@ input[type="range"] { min-width: 0; height: var(--control-height); margin: 0; pa
   .preference-control { width: 112px; }
   .preference-menu, [dir="rtl"] .preference-menu { top: calc(var(--titlebar-height) + 52px); right: var(--space-2); bottom: auto; left: auto; width: 180px; max-height: min(280px, calc(100vh - var(--titlebar-height) - 60px)); }
   [dir="rtl"] .preference-menu { right: auto; left: var(--space-2); }
-  .page { min-height: calc(100vh - var(--titlebar-height) - 53px); padding: var(--space-4); }
+  .page { min-height: 0; padding: var(--space-4); }
   .page-header, .split-section { align-items: stretch; flex-direction: column; }
   .header-actions { flex-wrap: wrap; }
   .profile-history-actions { justify-content: flex-start; }

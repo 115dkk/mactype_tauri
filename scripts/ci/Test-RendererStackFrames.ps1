@@ -243,6 +243,12 @@ for ($moduleIndex = 0; $moduleIndex -lt $Module.Count; $moduleIndex++) {
     if ($ownership.Contributions.Count -eq 0) {
         throw "The program database carries no section contributions: $symbolPath"
     }
+    # A healthy first-party build has no probed frame of its own, so the
+    # ownership map is validated against the module table rather than against
+    # the frames it happens to own.
+    if (-not ($ownership.Modules | Where-Object { $_.Object -match $FirstPartyObjectPattern })) {
+        throw "No module in the program database matches the first-party object pattern; the ownership map cannot be trusted: $symbolPath"
+    }
 
     $probeRva = -1
     foreach ($range in $ranges) {
@@ -283,8 +289,8 @@ for ($moduleIndex = 0; $moduleIndex -lt $Module.Count; $moduleIndex++) {
     if ($frames.Count -eq 0) {
         throw "No __chkstk caller was found; the frame inventory cannot be trusted: $path"
     }
-    if (-not ($frames | Where-Object FirstParty)) {
-        throw "No frame resolved to a first-party object file; the ownership map cannot be trusted: $symbolPath"
+    if ($frames | Where-Object { $_.Unit -eq '(unknown)' }) {
+        throw "A probed frame has no owning object file in the program database: $symbolPath"
     }
 
     $name = [System.IO.Path]::GetFileName($path)
@@ -294,8 +300,8 @@ for ($moduleIndex = 0; $moduleIndex -lt $Module.Count; $moduleIndex++) {
     }
     $evidence = Join-Path $root (Join-Path $EvidenceRoot ("$name.txt"))
     Set-Content -LiteralPath $evidence -Value $report -Encoding utf8
-    $largestFirstParty = ($frames | Where-Object FirstParty | Measure-Object Bytes -Maximum).Maximum
-    $largestDependency = ($frames | Where-Object { -not $_.FirstParty } | Measure-Object Bytes -Maximum).Maximum
+    $largestFirstParty = [int64] ($frames | Where-Object FirstParty | Measure-Object Bytes -Maximum).Maximum
+    $largestDependency = [int64] ($frames | Where-Object { -not $_.FirstParty } | Measure-Object Bytes -Maximum).Maximum
     Write-Host ("{0}: {1} probed frames; largest first-party {2} bytes (budget {3}); largest dependency {4} bytes (ceiling {5})" -f `
         $name, $frames.Count, $largestFirstParty, $FirstPartyFrameBudget, $largestDependency, $DependencyFrameCeiling)
     foreach ($frame in ($frames | Sort-Object Bytes -Descending)) {

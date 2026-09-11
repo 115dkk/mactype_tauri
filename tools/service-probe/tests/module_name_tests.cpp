@@ -55,7 +55,7 @@ int main()
             "a missing extension must not match");
     Require(!BaseNameEquals(kernel32, L"ntdll.dll"),
             "a different module name must not match");
-    Require(!BaseNameEquals(kernel32, L"System32\kernel32.dll"),
+    Require(!BaseNameEquals(kernel32, L"System32\\kernel32.dll"),
             "a directory prefix must not match the base name");
     Require(!BaseNameEquals(self, L"kernel32.dll"),
             "the test image must not match another module's name");

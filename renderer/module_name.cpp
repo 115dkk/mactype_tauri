@@ -16,7 +16,7 @@ const wchar_t* BaseName(const wchar_t* path) noexcept
     const wchar_t* name = path;
     for (const wchar_t* cursor = path; *cursor != L'\0'; ++cursor)
     {
-        if (*cursor == L'\' || *cursor == L'/')
+        if (*cursor == L'\\' || *cursor == L'/')
             name = cursor + 1;
     }
     return name;

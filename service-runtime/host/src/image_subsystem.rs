@@ -120,6 +120,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        all(miri, windows),
+        ignore = "Windows Miri does not implement CreateDirectoryW"
+    )]
     fn reads_console_gui_and_other_subsystems_from_pe32_and_pe32_plus() {
         for magic in [PE32_MAGIC, PE32_PLUS_MAGIC] {
             assert_eq!(classify(&pe_image(magic, 3)), ImageSubsystem::Console);
@@ -129,6 +133,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        all(miri, windows),
+        ignore = "Windows Miri does not implement CreateDirectoryW"
+    )]
     fn invalid_missing_and_out_of_bound_images_are_unavailable() {
         assert_eq!(
             classify(b"random temporary bytes"),
@@ -150,6 +158,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        all(miri, windows),
+        ignore = "Windows Miri does not implement CreateDirectoryW"
+    )]
     fn rejects_invalid_pe_structure_and_truncated_optional_headers() {
         let valid = pe_image(PE32_MAGIC, 3);
 

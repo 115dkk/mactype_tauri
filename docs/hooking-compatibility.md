@@ -36,10 +36,14 @@ or executable-name workaround.
   degradation” notification.
 - Hook and loader-notification code runs on whichever thread calls the
   hooked API, including driver and engine worker threads that own only
-  64 KB stacks. No renderer function may reserve more than 16 KB of stack in
-  one frame; `scripts/ci/Test-RendererStackFrames.ps1` reads every `__chkstk`
-  probe in the built x86 and x64 modules and fails the open-core build above
-  that budget. Large path and file buffers belong on the heap.
+  64 KB stacks. No first-party renderer function may reserve more than 16 KB
+  of stack in one frame; `scripts/ci/Test-RendererStackFrames.ps1` reads every
+  `__chkstk` probe in the built x86 and x64 modules, attributes each frame to
+  its object file through the program database, and fails the open-core build
+  above that budget. The pinned FreeType fork's CFF interpreter, hinter, and
+  rasterizer frames (up to about 26 KB) are a documented dependency boundary
+  held under a separate 32 KB ceiling; they run only on text-rendering
+  threads. Large path and file buffers belong on the heap.
 
 ## Upstream report inventory
 

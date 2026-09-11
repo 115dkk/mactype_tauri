@@ -189,9 +189,11 @@ below wherever the two conflict.
   a developer or hosted runner's machine-global verifier state merely to claim
   a pass.
 - Renderer hooks execute on foreign threads with stacks as small as 64 KB.
-  Keep every renderer stack frame under the 16 KB budget enforced by
-  `scripts/ci/Test-RendererStackFrames.ps1`; a large path or file buffer
-  belongs on the heap, never in a hook frame. The 2026-09-11 Rebel Inc.
+  Keep every first-party renderer stack frame under the 16 KB budget enforced
+  by `scripts/ci/Test-RendererStackFrames.ps1`; FreeType's own interpreter
+  and rasterizer frames are a documented dependency boundary under a 32 KB
+  ceiling. A large path or file buffer belongs on the heap, never in a hook
+  frame. The 2026-09-11 Rebel Inc.
   Escalation stack overflow (an NVIDIA driver worker thread loading
   `tzres.dll` through the `LoadLibraryExW` hook) is the reason.
 - Aggressive core work must not weaken the service, installer, elevation,

@@ -20,14 +20,14 @@ jobs:
       - name: Build official dependencies and MacType x86/x64 core
         shell: pwsh
         run: .github/scripts/Build-OpenCore.ps1
-      - name: Reject renderer stack frames above the foreign-thread budget
-        shell: pwsh
-        run: scripts/ci/Test-RendererStackFrames.ps1
       - uses: actions/upload-artifact@v7
         with:
           name: mactype-open-core
           path: artifacts/open-core
           if-no-files-found: error
+      - name: Reject renderer stack frames above the foreign-thread budget
+        shell: pwsh
+        run: scripts/ci/Test-RendererStackFrames.ps1
       - uses: actions/upload-artifact@v7
         if: always()
         with:

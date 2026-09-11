@@ -267,7 +267,6 @@ html[data-skin="console"] .event-sources code { font-size: 10px; }
 
 @media (max-width: 767px) {
   html[data-skin="console"] .console-shell { display: block; height: auto; overflow: visible; }
-  html[data-skin="console"] .console-work { overflow: visible; }
   html[data-skin="console"] .console-rail { position: sticky; z-index: 2; top: var(--titlebar-height); flex-direction: row; width: auto; min-width: 0; height: auto; padding: 0 4px; border-right: 0; border-bottom: 1px solid var(--color-border); overflow-x: auto; }
   html[data-skin="console"] .console-rail-items { flex-direction: row; }
   html[data-skin="console"] .console-rail-items > div { display: flex; }

@@ -243,7 +243,6 @@ html[data-skin="cupertino"] .event-row { border-bottom-color: var(--cupertino-se
 
 @media (max-width: 767px) {
   html[data-skin="cupertino"] .cupertino-frame { display: block; height: auto; overflow: visible; }
-  html[data-skin="cupertino"] .cupertino-work { overflow: visible; }
   html[data-skin="cupertino"] .cupertino-side { position: sticky; z-index: 20; top: 0; flex-direction: row; flex-wrap: wrap; width: auto; min-width: 0; height: auto; padding: 4px 8px; border-right: 0; border-bottom: 1px solid var(--color-border); }
   html[data-skin="cupertino"] .cupertino-side-pad, html[data-skin="cupertino"] .cupertino-search, html[data-skin="cupertino"] .cupertino-side-head { display: none; }
   html[data-skin="cupertino"] .cupertino-side-items { flex: 1 1 auto; flex-direction: row; overflow-x: auto; }

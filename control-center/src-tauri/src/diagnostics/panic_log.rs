@@ -66,6 +66,24 @@ fn record_at_default_root(
     record_at(&root, message, location, thread, backtrace)
 }
 
+pub(super) fn record_session_ending() -> Option<PathBuf> {
+    let root = super::log_root().ok()?;
+    record_session_ending_at(&root)
+}
+
+fn record_session_ending_at(root: &Path) -> Option<PathBuf> {
+    let record = EventRecord::new(
+        timestamp_unix_ms()?,
+        EventSeverity::Info,
+        EventArea::ControlCenter,
+        "session-ending",
+        BTreeMap::from([("reason".to_owned(), "wm-endsession".to_owned())]),
+        None,
+        EventSource::ControlCenter,
+    );
+    append_record_at(root, &record)
+}
+
 fn record_at(
     root: &Path,
     message: &str,
@@ -90,12 +108,8 @@ fn record_at(
     let mut detail = BoundedText::new(MAX_EVENT_DETAIL_BYTES);
     let _ = detail.write_str("Backtrace:\n");
     let _ = fmt::write(&mut detail, format_args!("{backtrace}"));
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()?
-        .as_millis();
     let record = EventRecord::new(
-        u64::try_from(timestamp).ok()?,
+        timestamp_unix_ms()?,
         EventSeverity::Error,
         EventArea::ControlCenter,
         "panic",
@@ -104,11 +118,23 @@ fn record_at(
         EventSource::ControlCenter,
     );
 
-    let mut line = format_record_line(&record)?;
+    append_record_at(root, &record)
+}
+
+fn timestamp_unix_ms() -> Option<u64> {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_millis();
+    u64::try_from(timestamp).ok()
+}
+
+fn append_record_at(root: &Path, record: &EventRecord) -> Option<PathBuf> {
+    let mut line = format_record_line(record)?;
     line.prepend_newline()?;
     let path = root.join(operation_log::LOG_FILE_NAME);
 
-    // Bypass EventLogWriter because a panic may already hold its process-wide append mutex.
+    // Bypass EventLogWriter because its process-wide append mutex may already be held.
     fs::create_dir_all(root).ok()?;
     let mut file = OpenOptions::new()
         .create(true)
@@ -254,6 +280,30 @@ mod tests {
             .map(|duration| duration.as_nanos())
             .unwrap_or_default();
         env::temp_dir().join(format!("mactype-{name}-{}-{unique}", std::process::id()))
+    }
+
+    #[test]
+    fn session_ending_record_is_synced_as_an_info_event() {
+        let root = unique_root("session-ending-log");
+
+        record_session_ending_at(&root).unwrap();
+
+        let events = operation_log::read_all_at(&root);
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        assert_eq!(event.severity, EventSeverity::Info);
+        assert_eq!(event.area, EventArea::ControlCenter);
+        assert_eq!(event.code, "session-ending");
+        assert_eq!(event.source, EventSource::ControlCenter);
+        assert_eq!(
+            event.params.get("reason").map(String::as_str),
+            Some("wm-endsession")
+        );
+        let disk = fs::read_to_string(root.join(operation_log::LOG_FILE_NAME)).unwrap();
+        assert_eq!(disk.lines().count(), 1);
+        let decoded: EventRecord = serde_json::from_str(disk.trim_end()).unwrap();
+        assert_eq!(decoded, *event);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

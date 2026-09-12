@@ -333,6 +333,7 @@ impl MachineBackend for RealLegacyProbeBackend {
             binary_path: None,
             win32_error: None,
             active_profile_digest: None,
+            configuration_drift: false,
             can_install: true,
             can_remove: false,
             can_start: true,

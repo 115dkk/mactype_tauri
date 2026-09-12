@@ -13,6 +13,8 @@ use crate::protected_path::{
 };
 use crate::{InitializedRuntime, RuntimeInitializer};
 
+pub const ACTIVE_PROFILE_ABSENT_CODE: &str = "active-profile-absent";
+
 pub struct ProtectedProfileInitializer {
     paths: MachinePaths,
 }
@@ -30,18 +32,27 @@ impl RuntimeInitializer for ProtectedProfileInitializer {
             return Err(activation_recovery_required());
         }
         validate_runtime_activation_receipt(&self.paths)?;
-        let pointer_bytes = read_bounded_protected_file(
-            self.paths.active_profile(),
-            MAX_POINTER_BYTES,
-            (
-                "active-profile-unavailable",
-                "the protected active profile pointer could not be read",
-            ),
-            (
-                "active-profile-invalid",
-                "the protected active profile pointer is not a bounded regular file",
-            ),
-        )?;
+        let active_profile = self.paths.active_profile();
+        reject_reparse(active_profile)?;
+        let pointer_bytes =
+            read_bounded_regular_file(active_profile, MAX_POINTER_BYTES).map_err(|error| {
+                if error.kind() == io::ErrorKind::NotFound {
+                    service_error(
+                        ACTIVE_PROFILE_ABSENT_CODE,
+                        "no profile has been published yet, so the service stays stopped until setup publishes one",
+                    )
+                } else if error.kind() == io::ErrorKind::InvalidData {
+                    service_error(
+                        "active-profile-invalid",
+                        "the protected active profile pointer is not a bounded regular file",
+                    )
+                } else {
+                    service_error(
+                        "active-profile-unavailable",
+                        "the protected active profile pointer could not be read",
+                    )
+                }
+            })?;
         let pointer: GenerationPointer = serde_json::from_slice(&pointer_bytes).map_err(|_| {
             service_error(
                 "active-profile-invalid",
@@ -87,6 +98,14 @@ impl RuntimeInitializer for ProtectedProfileInitializer {
             ));
         }
         let runtime_profile = active_runtime_profile_path(&self.paths)?;
+        if let Some(runtime_root) = runtime_profile.parent() {
+            match crate::runtime_assets::validate_runtime_file_set(runtime_root) {
+                Err(error) if error.code == crate::runtime_assets::RUNTIME_PROFILE_ABSENT_CODE => {
+                    return Err(error);
+                }
+                _ => {}
+            }
+        }
         let runtime_bytes = read_bounded_protected_file(
             &runtime_profile,
             MAX_PROFILE_BYTES as u64,

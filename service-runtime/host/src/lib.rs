@@ -53,12 +53,12 @@ pub use observer::{
     TargetLiveness, FALLBACK_PROCESS_CREATION_QUERY, PROCESS_CREATION_QUERY,
 };
 pub use orchestration_runtime::initialize_process_orchestration;
-pub use profile_runtime::ProtectedProfileInitializer;
+pub use profile_runtime::{ProtectedProfileInitializer, ACTIVE_PROFILE_ABSENT_CODE};
 pub use runtime::{
     HealthPublisher, HostError, InitializedRuntime, RuntimeDriver, RuntimeHealthReporter,
     RuntimeInitializer, ServiceRuntime, StopSignal,
 };
-pub use runtime_assets::ProtectedRuntimeAssets;
+pub use runtime_assets::{ProtectedRuntimeAssets, RUNTIME_PROFILE_ABSENT_CODE};
 pub use startup_safety::{LegacyServiceRuntimeState, StartupSafetySnapshot};
 pub use status::{ScmState, ServiceStatus, StatusReporter, SERVICE_STOP_WAIT_HINT_MS};
 pub use target_validation::{DeferralReason, ProcessTargetDecision, ProcessTargetValidator};

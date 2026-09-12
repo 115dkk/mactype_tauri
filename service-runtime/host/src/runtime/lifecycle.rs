@@ -7,9 +7,18 @@ use super::{
     HealthPublisher, HostError, RuntimeHealthReporter, RuntimeInitializer, ServiceRuntime,
     StopSignal,
 };
-use crate::{ServiceStatus, StatusReporter};
+use crate::{
+    ServiceStatus, StatusReporter, ACTIVE_PROFILE_ABSENT_CODE, RUNTIME_PROFILE_ABSENT_CODE,
+};
 
 const ERROR_SERVICE_SPECIFIC_ERROR: u32 = 1066;
+
+fn is_supported_stopped_state(error: &StructuredServiceError) -> bool {
+    matches!(
+        error.code.as_str(),
+        ACTIVE_PROFILE_ABSENT_CODE | RUNTIME_PROFILE_ABSENT_CODE
+    )
+}
 
 impl ServiceRuntime<'_> {
     pub fn run(
@@ -46,6 +55,9 @@ impl ServiceRuntime<'_> {
 
         let mut initialized = match initializer.initialize() {
             Ok(initialized) => initialized,
+            Err(error) if is_supported_stopped_state(&error) => {
+                return self.report_supported_stop(status, health, &error);
+            }
             Err(error) => {
                 self.report_failure(status, health, &error);
                 return Err(HostError::Runtime(error));
@@ -117,6 +129,33 @@ impl ServiceRuntime<'_> {
             last_error: terminal_error,
         });
         crate::event_log::service_stopped();
+        if let Err(error) = status.report(ServiceStatus::stopped()) {
+            return Err(self.report_io_failure(
+                status,
+                health,
+                "stopped-status-report-failed",
+                error,
+            ));
+        }
+        Ok(())
+    }
+
+    fn report_supported_stop(
+        &self,
+        status: &dyn StatusReporter,
+        health: &dyn HealthPublisher,
+        error: &StructuredServiceError,
+    ) -> Result<(), HostError> {
+        let _ = health.publish(&HealthReport {
+            protocol_version: HEALTH_PROTOCOL_VERSION,
+            service_version: self.service_version.to_owned(),
+            health: HealthState::Unknown,
+            active_profile_digest: None,
+            readiness: ReadinessReport::not_required(),
+            injection: InjectionTelemetry::default(),
+            last_error: Some(error.clone()),
+        });
+        crate::event_log::service_start_skipped(error);
         if let Err(error) = status.report(ServiceStatus::stopped()) {
             return Err(self.report_io_failure(
                 status,

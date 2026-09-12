@@ -61,6 +61,7 @@ pub use orchestration_runtime::{
     initialize_process_orchestration, initialize_process_orchestration_with_profile_policies,
     initialize_process_orchestration_with_unity_font_hook,
 };
+pub use profile_runtime::ACTIVE_PROFILE_ABSENT_CODE;
 pub use protected_renderer_runtime::ProtectedRendererRuntime;
 pub use runtime::{
     HealthPublisher, HostError, InitializedRuntime, RuntimeDriver, RuntimeHealthReporter,

@@ -13,6 +13,8 @@ use mactype_service_contract::{
 
 use crate::protected_path::{has_reparse_ancestor, read_bounded_regular_file, MAX_POINTER_BYTES};
 
+pub const ACTIVE_PROFILE_ABSENT_CODE: &str = "active-profile-absent";
+
 pub(crate) struct ProtectedProfileSnapshot {
     digest: ProfileDigest,
     bytes: Vec<u8>,
@@ -132,18 +134,26 @@ pub(crate) fn ensure_activation_state_is_stable(
 pub(crate) fn read_active_profile_pointer(
     paths: &MachinePaths,
 ) -> Result<(Vec<u8>, GenerationPointer), StructuredServiceError> {
-    let bytes = read_bounded_protected_file(
-        paths.active_profile(),
-        MAX_POINTER_BYTES,
-        (
-            "active-profile-unavailable",
-            "the protected active profile pointer could not be read",
-        ),
-        (
-            "active-profile-invalid",
-            "the protected active profile pointer is not a bounded regular file",
-        ),
-    )?;
+    let path = paths.active_profile();
+    reject_reparse(path)?;
+    let bytes = read_bounded_regular_file(path, MAX_POINTER_BYTES).map_err(|error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            service_error(
+                ACTIVE_PROFILE_ABSENT_CODE,
+                "no profile has been published yet, so the service stays stopped until setup publishes one",
+            )
+        } else if error.kind() == io::ErrorKind::InvalidData {
+            service_error(
+                "active-profile-invalid",
+                "the protected active profile pointer is not a bounded regular file",
+            )
+        } else {
+            service_error(
+                "active-profile-unavailable",
+                "the protected active profile pointer could not be read",
+            )
+        }
+    })?;
     let pointer = serde_json::from_slice(&bytes).map_err(|_| {
         service_error(
             "active-profile-invalid",

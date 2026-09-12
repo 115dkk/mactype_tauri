@@ -39,6 +39,7 @@ export interface ServiceSummaryAction {
 
 export type ServiceSummaryNoticeKind =
   | "appinit-conflict"
+  | "configuration-drift"
   | "foreign-service"
   | "legacy-service"
   | "legacy-service-foreign"
@@ -156,6 +157,7 @@ function projectServiceSummary(
   );
   const foreignService = service?.backend === "foreign" || service?.installation === "invalid";
   const inaccessibleService = service?.installation === "inaccessible";
+  const driftedService = service?.backend === "open-source" && service.configurationDrift === true;
   const serviceRemovalPending = service?.installation === "delete-pending";
   const modeKey: MessageKey = status?.registryModeDetected
     ? "execution.modeAppInit"
@@ -177,6 +179,7 @@ function projectServiceSummary(
     || profileMismatch
     || foreignService
     || inaccessibleService
+    || driftedService
     || serviceRemovalPending
     || service?.installation === "outdated"
   ) {
@@ -237,6 +240,12 @@ function projectServiceSummary(
       kind: "foreign-service",
       titleKey: inaccessibleService ? "execution.installation.inaccessible" : "execution.serviceForeign",
     };
+  } else if (!legacyTrayConflict && driftedService) {
+    notice = {
+      kind: "configuration-drift",
+      titleKey: "execution.serviceConfigurationDriftTitle",
+      descriptionKey: "execution.serviceConfigurationDriftDescription",
+    };
   } else if (!legacyTrayConflict && serviceRemovalPending) {
     notice = {
       kind: "removal-pending",
@@ -275,6 +284,13 @@ function projectServiceSummary(
   } else if (status?.registryModeDetected || legacyBlocksActivation) {
     if (service?.runtime === "running") {
       actions = [action("stop", "execution.serviceStop", service.canStop, "secondary")];
+    }
+  } else if (driftedService) {
+    actions = service.installation === "outdated"
+      ? [action("upgrade", "execution.serviceUpgrade", canUpgrade)]
+      : [action("repair", "execution.serviceRepair", canRepair)];
+    if (service.runtime === "running") {
+      actions = [...actions, action("stop", "execution.serviceStop", service.canStop, "secondary")];
     }
   } else if (service?.health === "failed") {
     if (canRepair) actions = [action("repair", "execution.serviceRepair", true)];
@@ -500,6 +516,7 @@ export function projectExecutionView(
   serviceBusy: string | null,
 ): ExecutionViewModel {
   const service = status?.systemService;
+  const driftedService = service?.backend === "open-source" && service.configurationDrift === true;
   const legacy = status?.legacyMacTray;
   const idle = serviceBusy === null;
   const legacyTrayConflict = Boolean(status && status.legacyTray.conflict !== "clear");
@@ -535,7 +552,8 @@ export function projectExecutionView(
     profileIndicator: projectProfileIndicator(status, profileMatches),
     serviceStatusLine: service ? projectServiceStatusLine(service) : null,
     serviceNeedsUpgrade: service?.installation === "outdated",
-    serviceNeedsRepair: service?.installation === "current" && service.health === "failed",
+    serviceNeedsRepair: (service?.installation === "current" && service.health === "failed")
+      || (driftedService && service.installation !== "outdated"),
     serviceBinaryPath: service?.installation === "absent" ? null : service?.binaryPath ?? null,
     serviceSummary: projectServiceSummary(
       status,

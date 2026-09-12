@@ -1,7 +1,11 @@
 use std::fs;
 
-use mactype_service_contract::{GenerationPointer, MachinePaths, ProfileCatalog, SourceMetadata};
-use mactype_service_host::{ProtectedRendererRuntime, RUNTIME_PROFILE_ABSENT_CODE};
+use mactype_service_contract::{
+    GenerationId, GenerationPointer, MachinePaths, ProfileCatalog, SourceMetadata,
+};
+use mactype_service_host::{
+    ProtectedRendererRuntime, ACTIVE_PROFILE_ABSENT_CODE, RUNTIME_PROFILE_ABSENT_CODE,
+};
 
 fn paths() -> (tempfile::TempDir, MachinePaths) {
     let base = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
@@ -300,11 +304,52 @@ fn initializer_refuses_legacy_uncommitted_and_rollback_required_receipts() {
 }
 
 #[test]
-fn initializer_does_not_claim_ready_without_an_active_generation() {
+fn initializer_reports_an_absent_active_profile_pointer_without_changing_runtime_selection() {
     let (_base, paths) = paths();
+    let runtime_pointer = br#"{"schema":1,"version":"0.2.0"}"#;
+    install_active_runtime(&paths, b"[General]\r\nHintingMode=0\r\n");
+
+    let error = ProtectedRendererRuntime::load(paths.clone())
+        .expect_err("missing active profile pointer must keep the service stopped");
+
+    assert_eq!(error.code, ACTIVE_PROFILE_ABSENT_CODE);
+    assert_eq!(
+        error.message,
+        "no profile has been published yet, so the service stays stopped until setup publishes one"
+    );
+    assert_eq!(fs::read(paths.runtime_pointer()).unwrap(), runtime_pointer);
+}
+
+#[test]
+fn initializer_keeps_a_dangling_active_profile_pointer_unavailable() {
+    let (_base, paths) = paths();
+    let bytes = b"[General]\r\nHintingMode=0\r\n";
+    install_active_profile(&paths, bytes);
+    install_active_runtime(&paths, bytes);
+    fs::remove_file(
+        paths
+            .profile_generations()
+            .join(GenerationId::from_profile_bytes(bytes).directory_name())
+            .join("profile.ini"),
+    )
+    .unwrap();
+
     let error = ProtectedRendererRuntime::load(paths)
-        .expect_err("missing active profile must fail initialization");
+        .expect_err("a dangling profile generation must require repair");
+
     assert_eq!(error.code, "active-profile-unavailable");
+}
+
+#[test]
+fn profile_activation_journal_takes_priority_over_an_absent_active_pointer() {
+    let (_base, paths) = paths();
+    fs::create_dir_all(paths.profile_activation_journal().parent().unwrap()).unwrap();
+    fs::write(paths.profile_activation_journal(), b"pending").unwrap();
+
+    let error = ProtectedRendererRuntime::load(paths)
+        .expect_err("pending profile activation recovery must take priority");
+
+    assert_eq!(error.code, "activation-recovery-required");
 }
 
 #[test]

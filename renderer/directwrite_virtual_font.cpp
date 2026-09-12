@@ -11,6 +11,7 @@
 #include <memory>
 #include <new>
 #include <string>
+#include <strsafe.h>
 #include <utility>
 #include <vector>
 

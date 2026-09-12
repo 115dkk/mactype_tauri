@@ -1,6 +1,13 @@
 #pragma once
 
-#include "common.h"
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
+#include <Windows.h>
+#include <dwrite_3.h>
+#include <atlbase.h>
+#include <atlcomcli.h>
 
 #include <string>
 

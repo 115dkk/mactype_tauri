@@ -31,12 +31,19 @@ if ($LASTEXITCODE -ne 0) {
     throw "CMake configure failed with exit code $LASTEXITCODE"
 }
 
-& cmake --build $buildDirectory --config Release --target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests freetype-runtime-tests pe-export-view-tests unload-lifecycle-tests renderer-policy-tests private-freetype-policy-tests image-subsystem-tests renderer-activation-tests font-substitution-tests renderer-profile-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe
+& cmake --build $buildDirectory --config Release --target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests freetype-runtime-tests pe-export-view-tests unload-lifecycle-tests renderer-policy-tests private-freetype-policy-tests image-subsystem-tests module-name-tests directwrite-font-cache-tests renderer-activation-tests font-substitution-tests renderer-profile-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe
 if ($LASTEXITCODE -ne 0) {
     throw "CMake build failed with exit code $LASTEXITCODE"
 }
 
 $raiiTestPath = Join-Path $buildDirectory 'Release\renderer-raii-tests.exe'
+foreach ($stackTest in @('module-name-tests', 'directwrite-font-cache-tests')) {
+    & (Join-Path $buildDirectory "Release\$stackTest.exe")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Small-stack regression test failed: $stackTest (exit $LASTEXITCODE)"
+    }
+}
+
 & $raiiTestPath
 if ($LASTEXITCODE -ne 0) {
     throw "Renderer RAII fault-injection tests failed with exit code $LASTEXITCODE"

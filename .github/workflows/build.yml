@@ -38,6 +38,80 @@ jobs:
             artifacts/stack-frames
           if-no-files-found: error
 
+  sokudakun-startup:
+    name: SokudaKun startup / ${{ matrix.os }} / ${{ matrix.architecture }}
+    if: github.ref == 'refs/heads/codex/alpha-plus-dll' || github.base_ref == 'codex/alpha-plus-dll'
+    needs: open-core
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+        architecture: [x86, x64]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: MasakazuTobeta/SokudaKun
+          ref: 864a624091fa3d7a66d2f65b26473190bd427f5c
+          path: build/sokudakun-source
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: mactype-open-core
+          path: artifacts/open-core
+      - uses: actions/download-artifact@v8
+        with:
+          name: mactype-open-core
+          path: artifacts/reported-core
+          run-id: 33859821530
+          github-token: ${{ github.token }}
+      - name: Build unchanged pinned .NET 6 WPF application and startup debugger
+        shell: pwsh
+        run: |
+          dotnet publish build/sokudakun-source/SokudaKun.csproj -c Release -r win-${{ matrix.architecture }} --self-contained true -p:RuntimeFrameworkVersion=6.0.36 -o build/sokudakun-app
+          cmake -S tools/service-probe -B build/startup-debugger -A x64
+          cmake --build build/startup-debugger --config Release --target startup-debug-probe startup-stack-fixture
+      - name: Verify the debugger captures a real small-stack overflow
+        shell: pwsh
+        run: |
+          & build/startup-debugger/Release/startup-debug-probe.exe build/startup-debugger/Release/startup-stack-fixture.exe stock artifacts/startup-debugger-control
+          if ($LASTEXITCODE -ne 0) { throw 'Debugger failed its negative control' }
+          $proof = Get-Content artifacts/startup-debugger-control/observation.json -Raw | ConvertFrom-Json
+          $faults = @($proof.processes | Where-Object target | ForEach-Object exceptions)
+          if (-not ($faults | Where-Object { $_.code -eq 3221225725 -and $_.dumpWritten })) {
+            throw 'Negative control did not capture STATUS_STACK_OVERFLOW and a dump'
+          }
+      - name: Compare stock, reported, and current DLL startup with cold and warm caches
+        shell: pwsh
+        run: |
+          scripts/ci/Test-SokudaKunStartup.ps1 `
+            -ApplicationRoot build/sokudakun-app `
+            -Probe build/startup-debugger/Release/startup-debug-probe.exe `
+            -ReportedCore artifacts/reported-core `
+            -CurrentCore artifacts/open-core `
+            -Architecture ${{ matrix.architecture }} `
+            -OutputRoot "$env:GITHUB_WORKSPACE/artifacts/sokudakun-startup"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: sokudakun-startup-${{ matrix.os }}-${{ matrix.architecture }}
+          path: |
+            artifacts/sokudakun-startup/metadata.json
+            artifacts/sokudakun-startup/results.json
+            artifacts/sokudakun-startup/summary.json
+            artifacts/sokudakun-startup/**/observation.json
+            artifacts/sokudakun-startup/**/*.bmp
+            artifacts/sokudakun-startup/**/*.dmp
+            artifacts/sokudakun-startup/**/MacType.ini
+            artifacts/startup-debugger-control
+          if-no-files-found: error
+          retention-days: 14
+
   open-core-cppcheck:
     name: Alpha rendering core / Cppcheck x86+x64
     if: github.ref == 'refs/heads/codex/alpha-plus-dll' || github.base_ref == 'codex/alpha-plus-dll'

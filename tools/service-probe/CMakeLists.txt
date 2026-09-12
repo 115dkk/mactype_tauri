@@ -94,6 +94,17 @@ target_compile_features(directwrite-font-cache-tests PRIVATE cxx_std_20)
 target_compile_definitions(directwrite-font-cache-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(directwrite-font-cache-tests PRIVATE bcrypt)
 
+add_executable(startup-debug-probe tests/startup_debug_probe.cpp)
+target_compile_features(startup-debug-probe PRIVATE cxx_std_20)
+target_compile_definitions(startup-debug-probe PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_compile_options(startup-debug-probe PRIVATE /W4 /WX /permissive- /utf-8 /sdl)
+target_link_libraries(startup-debug-probe PRIVATE dbghelp user32 gdi32)
+
+add_executable(startup-stack-fixture tests/startup_stack_fixture.cpp)
+target_compile_features(startup-stack-fixture PRIVATE cxx_std_20)
+target_compile_definitions(startup-stack-fixture PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_compile_options(startup-stack-fixture PRIVATE /W4 /WX /permissive- /utf-8 /sdl)
+
 add_executable(pe-export-view-tests
   tests/pe_export_view_tests.cpp
   ../../renderer/dll.cpp

@@ -17,6 +17,12 @@ Because of that flag, a requested stop must never report a nonzero exit code, or
 
 The generated DLL-adjacent `MacType.ini` is also the child-relay liveness lease. The fixed setup broker removes only the byte-for-byte verified active generation after `stop`, and after any install, repair, upgrade, restore, profile change, or rollback that intentionally ends stopped. The protected active pointer and immutable profile generation remain available. `start` restores the exact copy before SCM launch. An older renderer already mapped into Steam or another long-lived parent therefore remains safely mapped but cannot inject another child after the supported stop. Use the Control Center or fixed setup broker for this transition; a raw external `sc stop` does not perform the protected profile transaction.
 
+## Service identity and configuration drift
+
+Ownership requires three facts: ImagePath is the quoted fixed service binary below the protected `Service\bin\<version>\` layout followed by ` --service`, the service type is `SERVICE_WIN32_OWN_PROCESS`, and the account is LocalSystem (case-insensitive). Start type, error control, display name, load order group, tag, and dependencies are configuration, not identity.
+
+A change to those configuration fields leaves the service owned. Control Center shows 복구 필요 for a current installation or 업데이트 필요 for an outdated installation, keeps stop available for a running service, and blocks start until the configuration is restored. `repair` and `upgrade` call `reconfigure` to restore the fixed configuration and verify it by reading SCM back. A raw `sc config`, such as changing the start type to demand, no longer strands the installation as foreign or makes the next installer upgrade skip it. A foreign image, service type, or account still prevents ownership. If SCM retains a nonzero tag after the group is cleared, read-back rejects the repair and names `tag`; `ChangeServiceConfigW` has no input parameter that assigns an explicit tag value.
+
 ## Build and local non-mutating checks
 
 ```powershell
@@ -52,7 +58,7 @@ Reboot, multi-session, AppInit, and migration remain `UNKNOWN` until their dispa
 - `rollback` changes the active profile generation and keeps the displaced generation as the next rollback target.
 - `restore-runtime` uses the protected migration runtime pin; it is not a general version selector.
 - If an activation or repair journal exists, every mutating verb first runs durable recovery. Do not delete journals manually.
-- A foreign SCM configuration is not repairable by this program. Preserve it and report the exact mismatch.
+- A foreign SCM identity is not repairable by this program. Preserve it and report the exact mismatch; configuration drift on an owned service is repairable.
 
 ## Incident handling
 

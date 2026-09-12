@@ -1,7 +1,7 @@
 use std::fs;
 
 use mactype_service_contract::{GenerationPointer, MachinePaths, ProfileCatalog, SourceMetadata};
-use mactype_service_host::ProtectedRendererRuntime;
+use mactype_service_host::{ProtectedRendererRuntime, RUNTIME_PROFILE_ABSENT_CODE};
 
 fn paths() -> (tempfile::TempDir, MachinePaths) {
     let base = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
@@ -156,6 +156,20 @@ fn initializer_carries_the_verified_console_process_policy() {
     let runtime = ProtectedRendererRuntime::load(paths).unwrap();
 
     assert!(runtime.console_process_policy().skip_console());
+}
+
+#[test]
+fn initializer_reports_an_absent_generated_runtime_profile() {
+    let (_base, paths) = paths();
+    let bytes = b"[General]\r\nHintingMode=0\r\n";
+    install_active_profile(&paths, bytes);
+    let runtime = install_active_runtime(&paths, bytes);
+    fs::remove_file(runtime.join("MacType.ini")).unwrap();
+
+    let error = ProtectedRendererRuntime::load(paths)
+        .expect_err("the supported stopped runtime has no generated profile");
+
+    assert_eq!(error.code, RUNTIME_PROFILE_ABSENT_CODE);
 }
 
 #[test]

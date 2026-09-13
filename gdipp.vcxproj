@@ -815,6 +815,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="renderer\activation_repaint.cpp" />
     <ClCompile Include="renderer\cache.cpp" />
     <ClCompile Include="renderer\child_process_relay.cpp" />
     <ClCompile Include="renderer\common.cpp" />
@@ -865,6 +866,7 @@
     <None Include="renderer\expfunc.def" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="renderer\activation_repaint.h" />
     <ClInclude Include="renderer\array.h" />
     <ClInclude Include="renderer\cache.h" />
     <ClInclude Include="renderer\child_process_relay.h" />

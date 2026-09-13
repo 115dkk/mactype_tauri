@@ -49,6 +49,11 @@ enum class DirectWriteLifecycleStopPreparation : unsigned char
 };
 
 void StartDirectWriteLifecycle();
+// Blocks until the DirectWrite lifecycle has left its starting phase and any
+// pre-existing-factory hook worker has hooked the known factories, or until
+// timeoutMs passes. Returns immediately when the lifecycle never started or
+// is already stopping.
+void WaitForDirectWriteHooksSettled(DWORD timeoutMs);
 DirectWriteLifecycleStopPreparation PrepareDirectWriteLifecycleStop(
 	DWORD timeoutMilliseconds = 3000);
 void AbortDirectWriteLifecycleStop();

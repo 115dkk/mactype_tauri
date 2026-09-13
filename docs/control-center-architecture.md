@@ -62,8 +62,26 @@ PNG save/copy. The save dialog does not block helper IPC. Unsolicited self-hide
 state uses its reserved response kind and cannot satisfy an outstanding render
 request. Main and detached windows share main's existing light/dark appearance.
 
-Diagnostics displays the common service/setup/Control Center event schema with
-localized summaries and expandable technical detail. Document errors and preview
-render errors have separate ownership: a good redraw does not recover a failed
-profile mutation. Native window lifecycle tests run in the Windows Tauri smoke
-gate in addition to the browser gallery.
+Diagnostics always displays the common service/setup/Control Center event timeline
+with localized summaries and expandable technical detail. It also localizes the
+`panic` and `end-session-hook-failed` event codes. The log-file disclosure omits a
+source whose `present` field is false; a missing field from an older backend is
+treated as present. An existing unreadable file still appears with its status.
+
+Three view options hide apply summaries (`injection-summary`), collapse repeated
+apply failures, or hide routine app and preview events (`app-started`,
+`preview-helper-connected`, `profile-verified`). All default to off and persist per
+user under `mactype-control-center.event-view`. They affect only the display and
+never change log files. Collapsing keeps the newest failure for each matching
+process name (case-insensitive) and reason, with a repeat-count badge. Counts
+include only events matching the severity, area, and search filters. Resetting
+those filters does not reset the view options.
+
+Titles localize the `reason` of `injection-failed` and the `code` of
+`helper-broker-failed` through `event.reason.*` catalog keys. Unknown values retain
+the backend spelling, and raw parameters and detail remain in each row's
+disclosure.
+
+Document errors and preview render errors have separate ownership: a good redraw
+does not recover a failed profile mutation. Native window lifecycle tests run in
+the Windows Tauri smoke gate in addition to the browser gallery.

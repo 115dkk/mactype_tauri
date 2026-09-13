@@ -52,7 +52,10 @@ pub use observer::{
     ProcessArchitecture, ProcessEventSource, ProcessIdentity, ProcessInspector, TargetLifecycle,
     TargetLiveness, FALLBACK_PROCESS_CREATION_QUERY, PROCESS_CREATION_QUERY,
 };
-pub use orchestration_runtime::initialize_process_orchestration;
+pub use orchestration_runtime::{
+    initialize_process_orchestration, initialize_process_orchestration_with_observer_recovery,
+    ObserverRecoveryPolicy,
+};
 pub use profile_runtime::{ProtectedProfileInitializer, ACTIVE_PROFILE_ABSENT_CODE};
 pub use runtime::{
     HealthPublisher, HostError, InitializedRuntime, RuntimeDriver, RuntimeHealthReporter,

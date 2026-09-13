@@ -8,7 +8,8 @@ One design record per skin, so a page, a control or the native preview window ca
 - The six navigation entries and their groups come from `src/app/shell.ts` in a fixed order: 개요, then 위자드 (프로필, 서비스), then 튜너 (단계별 설정, 전체 설정), then 도구 (진단).
 - The language, skin and theme controls sit at the bottom of the navigation in every skin, built on `PreferenceMenu`, in that order.
 - Preview canvases take the window theme's polarity by default and offer one invert control. They never ask for a background separately.
-- Bitmaps rendered by the helper are shown at device pixels or at integer nearest-neighbour zoom, never scaled by CSS.
+- Bitmaps rendered by the helper are shown at device pixels or at integer nearest-neighbour zoom, never scaled by CSS. A specimen placeholder shown while the helper renders keeps the strip's eventual height and its own line box, so a skin's fixed body line-height never clips it.
+- The Tuner's collection editors (font-specific rows, include/exclude lists, the font picker) follow the width of the settings column through a container query on `.settings-form`, not the window: with a docked preview that column is about 500px in every skin, so the six-field row stacks into two rows of three and the list editors go single-column there.
 - The event timeline (`EventTimeline`) is one component; a skin styles it and chooses where the filter chips sit.
 - One accent hue per skin. Success, warning and danger are reserved for meaning. No pure `#000000`/`#FFFFFF` surfaces except the light preview canvas.
 - The native preview window (`mactype-preview32.exe`) draws its own chrome from a `chrome` object the Control Center computes from the active skin (`src/features/preview/nativeChrome.ts`), so the window matches the skin that opened it without the helper knowing skins.
@@ -32,7 +33,7 @@ Windows 11 Settings grammar. One Mica-like canvas shared by the title bar and th
 
 Palette (light / dark): canvas `#F0F2F5` / `#202124`, surface `#FBFBFC` / `#2B2C30`, subtle `#F4F5F7` / `#323337`, border `rgba(0,0,0,.062)` / `rgba(255,255,255,.08)` (solid stand-ins `#E6E8EB` / `#3A3B40` where alpha is unavailable), text `#1B1B1B` / `#FFFFFF`, muted `#5F646B` / `#C4C8CE`, accent `#005FB8` / `#60CDFF`, on-accent `#FFFFFF` / `#06202C`, success `#0F7B0F` / `#6CCB5F`, preview `#FCFCFD` / `#16171A`.
 
-Metrics: title bar 40 without a divider, navigation 248, navigation items 36 with a 3×16 accent pill, section headings 12/600 muted, page title 28/600 (Segoe UI Variable Display), subtitle muted, content column 1000, controls 32 with a darker bottom edge, radius 4, cards 62 minimum with a 24px icon column, sub-rows on the subtle surface indented 56.
+Metrics: title bar 40 without a divider, navigation 248, navigation items 36 with a 3×16 accent pill, section headings 12/600 muted, page title 28/600 (Segoe UI Variable Display), subtitle muted, content column 1000, controls 32 with a darker bottom edge, radius 4, cards 62 minimum with a 24px icon column, sub-rows on the subtle surface indented 56. The Tuner page (the only wide page) uses 24px side padding and a 168px settings index so that the shipped 1340px window still leaves the 840px workspace the docked preview needs.
 
 Components: `FluentCard` (icon, regular-weight title, muted description, trailing control), hero variant (28px icon, 20px title), expander variant (chevron, sub-rows), `FluentState` (muted value, tone colours), badge (accent pill), profile card gallery with a 64px thumbnail.
 

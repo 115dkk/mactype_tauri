@@ -79,9 +79,9 @@ html[data-skin="cupertino"] .button.danger { color: var(--color-destructive); }
 html[data-skin="cupertino"] .button.icon { width: var(--control-height); padding: 0; }
 html[data-skin="cupertino"] .icon-button { width: var(--control-height); min-height: var(--control-height); height: var(--control-height); border: 1px solid var(--color-border-strong); border-radius: 6px; background: var(--color-surface); box-shadow: 0 1px 1px rgba(0, 0, 0, 0.05); }
 html[data-skin="cupertino"] .text-action, html[data-skin="cupertino"] .cupertino-link { min-height: 0; padding: 0; border: 0; background: transparent; color: var(--color-primary); font-size: 13px; }
-html[data-skin="cupertino"] select, html[data-skin="cupertino"] input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), html[data-skin="cupertino"] textarea { border: 1px solid var(--color-border-strong); border-radius: 6px; background: var(--color-surface); color: var(--color-foreground); font-size: 13px; }
+html[data-skin="cupertino"] select, html[data-skin="cupertino"] input:where(:not([type="range"]):not([type="checkbox"]):not([type="radio"])), html[data-skin="cupertino"] textarea { border: 1px solid var(--color-border-strong); border-radius: 6px; background: var(--color-surface); color: var(--color-foreground); font-size: 13px; }
 html[data-skin="cupertino"] select { height: 24px; padding-block: 0; padding-inline-start: 10px; box-shadow: 0 1px 1px rgba(0, 0, 0, 0.05); }
-html[data-skin="cupertino"] input:not([type="range"]):not([type="checkbox"]):not([type="radio"]) { height: 24px; padding-inline: 8px; }
+html[data-skin="cupertino"] input:where(:not([type="range"]):not([type="checkbox"]):not([type="radio"])) { height: 24px; padding-inline: 8px; }
 html[data-skin="cupertino"] .cupertino-field { width: 160px; }
 html[data-skin="cupertino"] { --switch-width: 26px; --switch-height: 15px; --switch-thumb: 13px; --switch-inset: 1px; --switch-border: 0px; --select-marker-inset: 7px; --select-marker-color: var(--color-on-primary); --select-badge-size: 16px; --select-badge-color: var(--color-primary); }
 html[data-skin="cupertino"] .switch-control input { background: var(--cupertino-track); }

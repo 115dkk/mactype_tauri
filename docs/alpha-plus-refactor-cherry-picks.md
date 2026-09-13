@@ -112,6 +112,9 @@ Add one row whenever a post-refactor main change is evaluated.
 | `c6044f35f9d350648c0cb66ae2b2ed26c11a5d55` | semantic port | `ea066df` | as above | Legacy MacTray control, snapshot, restore, and picker routed; alpha error classification kept. |
 | `449459d6bdbc7776f28cb3c255f2a3c894825985` | semantic port | `ea066df` | as above | Profile-transfer pipes, nonce, fonts, clipboard routed; `#![forbid(unsafe_code)]` on the Tauri crate. |
 | `44739a7081889703ea8bacc7600f9ab5354afc60` | direct cherry-pick | `852929c` | docs | |
+| `f84999b7a958f6daa74e91a8cd98d54c7d4d2d25` | intentional non-port | (none) | n/a | The Preview Studio (`src/studio/*`, `preview_studio.rs`, the `preview-studio` capability, `studio.*` catalog keys) left `main` on 2026-09-13 (fork PR #60, merge `678720d`) by user decision; alpha keeps the Studio as an experiment. The `nativePreview.*` key renames are not needed here because the Studio keys stay. |
+| `b706ac59cb0e79435ebbfa5493f07d9baffc76bf` | intentional non-port | (none) | n/a | Fork-only Studio gallery tests dropped on `main`; alpha keeps them with the Studio. |
+| `54cf411a88cf446c6f9e4b0685f84c251930c123` | intentional non-port | (none) | n/a | The Tauri smoke gate on `main` no longer launches the Studio; alpha's gate keeps the `preview-studio` view. |
 
 An intentional non-port needs a concrete reason, such as fork-only behavior,
 an invariant already satisfied by a stronger Module, or a change made obsolete

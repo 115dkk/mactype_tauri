@@ -10,6 +10,7 @@ One design record per skin, so a page, a control or the native preview window ca
 - Preview canvases take the window theme's polarity by default and offer one invert control. They never ask for a background separately.
 - Bitmaps rendered by the helper are shown at device pixels or at integer nearest-neighbour zoom, never scaled by CSS.
 - The event timeline (`EventTimeline`) is one component; a skin styles it and chooses where the filter chips sit.
+- The timeline's view options share one `EventViewOptions` component: Classic places it in the section heading, Console under the chips, and Fluent and Cupertino inside the timeline.
 - One accent hue per skin. Success, warning and danger are reserved for meaning. No pure `#000000`/`#FFFFFF` surfaces except the light preview canvas.
 - The native preview window (`mactype-preview32.exe`) draws its own chrome from a `chrome` object the Control Center computes from the active skin (`src/features/preview/nativeChrome.ts`), so the window matches the skin that opened it without the helper knowing skins.
 - Shared switch/selection metrics and atomic bitmap/palette publication are defined in `DESIGN.md`; every skin follows `frontend-skin-validation.md` for evidence. Console's locale-specific specimen choice displays and requests the enabled profile replacement (including localized source aliases), with the source choice retained when profiles change. The overview reads saved substitution metadata without replacing the Tuner document or its undo history.

@@ -28,6 +28,8 @@ The host summarises injection once per sixty seconds (`injection-summary` with i
 | code | severity | area | params | writer |
 |---|---|---|---|---|
 | `app-started` | info | control-center | `version` | control-center |
+| `panic` | error | control-center | `thread`, `message`, `location` | control-center |
+| `end-session-hook-failed` | warning | control-center | `window`, `stage`, `error` | control-center |
 | `profile-applied` | info | profile | `profile` | control-center |
 | `profile-verified` | info | profile | `profile` | control-center |
 | `service-installed` | info | service | | control-center |
@@ -52,7 +54,9 @@ A new code needs a row here, an `event.<code>` string in all ten catalogs, and a
 The user never reads a raw line unless they ask for it.
 
 - The **overview** shows the recent activity feed: the last eight `info` and `notice` events from the profile, service, tray and preview areas, localised, newest first, collapsed to the latest entry. Errors do not appear there.
-- The **diagnostics** page shows the event timeline: every event of the last three hundred, grouped by day, with severity as a filled dot, the area as a caption, and the localised title as the line. Chips filter by severity and area; a search box matches codes, parameters and detail. A disclosure on each row reveals the source, the code, the parameters and the technical detail. The page also lists the three log files with their size and whether the Control Center could read them.
+- The **diagnostics** page shows the event timeline: every event of the last three hundred, grouped by day, with severity as a filled dot, the area as a caption, and the localised title as the line. Chips filter by severity and area; a search box matches codes, parameters and detail. A disclosure on each row reveals the source, the code, the parameters and the technical detail. The page lists log files with their size and whether the Control Center could read them. A source whose `present` field is false is not listed: a file that has never been written is not an unreadable file. A missing `present` field from an older backend is treated as present.
+- **View options** hide apply summaries (`injection-summary`), collapse repeated apply failures, or hide routine app and preview lines (`app-started`, `preview-helper-connected`, `profile-verified`). All three default to off and persist per user; they only change the display and never touch the files. Collapsing retains the newest matching process name (case-insensitive) and reason, with a repeat-count badge. Counts include only events matching the severity, area, and search filters. Resetting those filters does not reset the view options.
+- **Reasons** use `event.reason.*` catalog keys for the `reason` parameter and for the `code` parameter of `helper-broker-failed` only. Unknown values retain the backend spelling. Raw parameters and details remain available in the disclosure.
 - **Operations** that fail report inline where the user acted, through the existing coded prefixes; the same failure is recorded as an event so the diagnostics page keeps it.
 - **Live refresh**: the Control Center polls the three files every two seconds and emits `event-log:changed`; the feed and the timeline refresh without a reload.
 - **Export and copy** render the last two hundred events as text lines with their detail, after the installation and component report.

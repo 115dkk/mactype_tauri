@@ -217,6 +217,7 @@ html[data-skin="fluent"] .fluent-workspace .sample-input { margin: 10px 12px 0; 
 
 /* Diagnostics: the timeline sits in one card. */
 html[data-skin="fluent"] .fluent-timeline-card, html[data-skin="fluent"] .fluent-sources-card { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin-bottom: 3px; }
+html[data-skin="fluent"] .fluent-timeline-card .event-view-options { gap: 16px; margin-top: 4px; }
 html[data-skin="fluent"] .fluent-sources-card { justify-items: start; }
 html[data-skin="fluent"] .event-chip[aria-pressed="true"] { background: var(--fluent-accent-soft); }
 

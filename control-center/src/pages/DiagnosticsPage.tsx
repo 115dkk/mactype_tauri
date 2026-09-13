@@ -1,6 +1,8 @@
-import { AlertTriangle, Check, ChevronDown, ChevronUp, Copy, Download, ExternalLink, FolderSearch, LoaderCircle } from "lucide-react";
+import { AlertTriangle, Check, Copy, Download, ExternalLink, FolderSearch, LoaderCircle } from "lucide-react";
 import type { InstallationStatus } from "../app/model";
 import { useDiagnosticsModel } from "../features/diagnostics/useDiagnosticsModel";
+import { EventSourceList, EventTimeline, EventViewOptions } from "../features/events/EventTimeline";
+import { useEventLog } from "../features/events/useEventLog";
 
 interface DiagnosticsPageProps {
   status: InstallationStatus;
@@ -10,7 +12,8 @@ interface DiagnosticsPageProps {
 
 export function DiagnosticsPage({ status, onReconnect, onRelocate }: DiagnosticsPageProps) {
   const model = useDiagnosticsModel({ status, onReconnect, onRelocate });
-  const { t, operation, operationLogs, logsExpanded, setLogsExpanded, completed, error, run } = model;
+  const { t, operation, completed, error, run } = model;
+  const log = useEventLog();
 
   return (
     <section className="page view-enter" aria-labelledby="diagnostics-title">
@@ -41,15 +44,11 @@ export function DiagnosticsPage({ status, onReconnect, onRelocate }: Diagnostics
       </section>
 
       <section className="section-block" aria-labelledby="log-title">
-        <div className="section-heading"><div><h2 id="log-title">{t("diagnostics.logs")}</h2><p>{t("diagnostics.logsDescription")}</p></div></div>
-        {logsExpanded && <div className="log-view" id="diagnostic-log-view" role="log" aria-label={t("diagnostics.logAria")}>
-          {operationLogs.length === 0
-            ? <div><time>{t("diagnostics.now")}</time><span>{t("diagnostics.logs")}</span><p>{t("diagnostics.noOperationLogs")}</p></div>
-            : operationLogs.slice(-20).map((entry, index) => <div key={`${index}-${entry}`}><time>{t("diagnostics.recent")}</time><span>{t("diagnostics.logs")}</span><p>{entry}</p></div>)}
-        </div>}
+        <div className="section-heading"><div><h2 id="log-title">{t("diagnostics.logs")}</h2><p>{t("diagnostics.logsDescription")}</p></div><EventViewOptions log={log} /></div>
+        <div className="diagnostic-events" id="diagnostic-log-view" role="log" aria-label={t("diagnostics.logAria")}><EventTimeline log={log} viewOptions={false} /></div>
+        <details className="event-source-disclosure"><summary>{t("events.logFiles")}</summary><EventSourceList log={log} /></details>
         <div className="disclosure-actions" data-log-disclosure-actions>
           <button aria-busy={operation === "folder"} className="text-action" disabled={operation !== null} onClick={() => void run("folder")} type="button">{operation === "folder" ? <LoaderCircle aria-hidden="true" className="spin" size={15} /> : <ExternalLink aria-hidden="true" size={15} />}{t("diagnostics.openFolder")}</button>
-          <button aria-controls="diagnostic-log-view" aria-expanded={logsExpanded} className="text-action" onClick={() => setLogsExpanded((value) => !value)} type="button">{logsExpanded ? t("common.collapse") : t("common.expand")}{logsExpanded ? <ChevronUp aria-hidden="true" size={15} /> : <ChevronDown aria-hidden="true" size={15} />}</button>
         </div>
       </section>
       <div aria-live="polite">

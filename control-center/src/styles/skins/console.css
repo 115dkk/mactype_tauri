@@ -248,6 +248,8 @@ html[data-skin="console"] .console-workspace .sample-input { margin: 10px 10px 0
 
 /* Diagnostics: the event timeline in one dense panel. */
 html[data-skin="console"] .console-events-panel .event-filters { padding: 8px 12px; border-bottom: 1px solid var(--color-border); }
+html[data-skin="console"] .console-events-panel .event-view-options { padding: 4px 12px 6px; border-bottom: 1px solid var(--color-border); }
+html[data-skin="console"] .console-events-panel .event-view-option .switch-control span { display: inline; font-size: 11px; }
 html[data-skin="console"] .console-events-panel .event-timeline { padding: 0; }
 html[data-skin="console"] .event-row { padding: 0 12px; border-bottom: 1px solid var(--color-border); font-size: 11px; }
 html[data-skin="console"] .event-time { font-family: var(--console-mono); color: var(--console-text-3); }

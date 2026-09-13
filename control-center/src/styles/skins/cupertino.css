@@ -228,6 +228,8 @@ html[data-skin="cupertino"] .cupertino-workspace .sample-input { margin: 8px 12p
 
 /* Diagnostics: the timeline lives inside one group. */
 html[data-skin="cupertino"] .cupertino-events { padding: 12px 16px; }
+html[data-skin="cupertino"] .cupertino-events .event-view-options { padding: 0 16px 8px; font-size: 12px; }
+html[data-skin="cupertino"] .cupertino-events .event-view-option .switch-control span { display: inline; }
 html[data-skin="cupertino"] .event-chip { height: 24px; border-radius: 12px; font-size: 12px; }
 html[data-skin="cupertino"] .event-chip[aria-pressed="true"] { background: var(--cupertino-accent-soft); }
 html[data-skin="cupertino"] .event-row { border-bottom-color: var(--cupertino-sep); }

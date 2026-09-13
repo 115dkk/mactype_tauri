@@ -87,6 +87,8 @@ gate; browser-gallery renders are not native-window proof.
   main workflow definitions have no changes. The existing Windows smoke script
   additionally exercises Studio hide, restore, destroy and reopen.
 
+The Preview Studio was removed from `main` on 2026-09-13 while the alpha branch keeps it; the native helper window is unaffected.
+
 The full Windows Rust test suites, MSVC C++ builds, actual service injection,
 installer/rollback integration and Tauri native-window smoke tests still need
 Windows CI. Linux execution of Windows path-contract tests is not treated as

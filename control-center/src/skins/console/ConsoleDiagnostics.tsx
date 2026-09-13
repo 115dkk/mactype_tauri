@@ -1,7 +1,7 @@
 import { AlertTriangle, Check, Copy, Download, ExternalLink, FolderSearch, LoaderCircle } from "lucide-react";
 import { StatusDot } from "../../components/StatusDot";
 import { useDiagnosticsModel } from "../../features/diagnostics/useDiagnosticsModel";
-import { EventFilters, EventSourceList, EventTimeline } from "../../features/events/EventTimeline";
+import { EventFilters, EventSourceList, EventTimeline, EventViewOptions } from "../../features/events/EventTimeline";
 import { useEventLog } from "../../features/events/useEventLog";
 import { useI18n } from "../../i18n/i18n";
 import { ConsoleFrame, ConsoleKv, ConsolePanel } from "./ConsoleFrame";
@@ -75,7 +75,8 @@ export function ConsoleDiagnostics() {
       </div>
       <ConsolePanel className="console-events-panel" right={<span className="console-muted">{log.visible.length} / {log.events.length}</span>} title={t("events.title")}>
         <EventFilters log={log} />
-        <EventTimeline dense filters={false} log={log} />
+        <EventViewOptions dense log={log} />
+        <EventTimeline dense filters={false} viewOptions={false} log={log} />
       </ConsolePanel>
     </ConsoleFrame>
   );

@@ -326,6 +326,7 @@ export interface EventFilter {
 export interface EventSourceStatus {
   source: EventSource;
   path: string;
+  present: boolean;
   readable: boolean;
   bytes: number;
 }

@@ -77,9 +77,12 @@ export function SpecimenBoard({ profilePath, overrides, engine, fontFace, sizes,
           <img alt={t("profiles.previewImageAlt")} height={line.result.height / displayScale} key={line.result.requestId} src={previewImageUrl(line.result.imagePath)} width={line.result.width / displayScale} />
         </figure>
       )) : sizes.map((size) => (
+        /* The placeholder keeps the strip's eventual height, and its own line
+           box, so a skin's fixed body line-height never clips the glyphs
+           while the helper is still rendering. */
         <figure className="specimen-strip specimen-placeholder" data-size={size} key={size}>
           {labelled && <figcaption>{size}</figcaption>}
-          <p style={{ fontFamily: `"${fontFace}", sans-serif`, fontSize: `${size}pt` }}>{text.split("\n")[0]}</p>
+          <p style={{ fontFamily: `"${fontFace}", sans-serif`, fontSize: `${size}pt`, minHeight: `${specimenStripHeight(text.split("\n")[0], size, Math.round(96 * displayScale)) / displayScale}px` }}>{text.split("\n")[0]}</p>
         </figure>
       ))}
       {error && <p className="inline-error specimen-error">{error}</p>}

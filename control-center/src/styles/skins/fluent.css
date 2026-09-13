@@ -34,7 +34,7 @@ html[data-skin="fluent"] {
   --titlebar-height: 40px;
   --control-height: 32px;
   --radius-control: 4px;
-  --settings-index-width: 176px;
+  --settings-index-width: 168px;
   --settings-control-width: 220px;
 }
 html[data-skin="fluent"][data-theme="dark"] {
@@ -116,7 +116,7 @@ html[data-skin="fluent"] .fluent-work { display: block; position: relative; min-
 
 /* Page: display title, subtitle, actions, a content column. */
 html[data-skin="fluent"] .fluent-page { display: flex; flex-direction: column; min-height: 100%; padding: 24px 40px 32px 36px; }
-html[data-skin="fluent"] .fluent-page[data-wide="true"] { height: 100%; min-height: 0; padding-right: 32px; overflow: hidden; }
+html[data-skin="fluent"] .fluent-page[data-wide="true"] { height: 100%; min-height: 0; padding-right: 24px; padding-left: 24px; overflow: hidden; }
 html[data-skin="fluent"] .fluent-head-row { display: flex; flex: 0 0 auto; align-items: flex-start; justify-content: space-between; gap: 16px; }
 html[data-skin="fluent"] .fluent-title { display: flex; align-items: center; gap: 8px; }
 html[data-skin="fluent"] .fluent-title-dim { color: var(--fluent-text-3); }

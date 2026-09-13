@@ -4,10 +4,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use mactype_service_contract::{HealthReport, HealthState, StructuredServiceError};
+use mactype_service_contract::{
+    ComponentReadiness, HealthReport, HealthState, StructuredServiceError,
+};
 use mactype_service_host::{
-    initialize_process_orchestration, BrokerDisposition, BrokerResult, HealthPublisher,
-    InitializedRuntime, InjectionBroker, InjectionRequest, ProcessArchitecture, ProcessEventSource,
+    initialize_process_orchestration, initialize_process_orchestration_with_observer_recovery,
+    BrokerDisposition, BrokerResult, HealthPublisher, InitializedRuntime, InjectionBroker,
+    InjectionRequest, ObserverRecoveryPolicy, ProcessArchitecture, ProcessEventSource,
     ProcessIdentity, ProcessInspector, RuntimeInitializer, ServiceRuntime, ServiceStatus,
     SessionChange, StatusReporter, StopSignal, TargetLiveness,
 };
@@ -32,6 +35,116 @@ impl ProcessEventSource for QueueSource {
 
     fn next_pid(&mut self, _timeout: Duration) -> Result<Option<u32>, StructuredServiceError> {
         Ok(self.pids.pop_front().unwrap_or(None))
+    }
+}
+
+fn observer_error(code: &str) -> StructuredServiceError {
+    StructuredServiceError {
+        code: code.to_owned(),
+        message: "the process observer failed".to_owned(),
+        win32_error: Some(0x8004_1032),
+    }
+}
+
+#[derive(Clone)]
+struct ScriptedSourceHandle {
+    state: Arc<Mutex<ScriptedSourceState>>,
+}
+
+struct ScriptedSourceState {
+    subscribe_results: VecDeque<Result<(), StructuredServiceError>>,
+    snapshots: VecDeque<Result<Vec<u32>, StructuredServiceError>>,
+    next_results: VecDeque<Result<Option<u32>, StructuredServiceError>>,
+    subscribe_calls: usize,
+}
+
+struct ScriptedSource {
+    handle: ScriptedSourceHandle,
+}
+
+impl ProcessEventSource for ScriptedSource {
+    fn subscribe(&mut self, _query: &str) -> Result<(), StructuredServiceError> {
+        let mut state = self.handle.state.lock().unwrap();
+        state.subscribe_calls += 1;
+        state.subscribe_results.pop_front().unwrap_or(Ok(()))
+    }
+
+    fn snapshot_pids(&mut self) -> Result<Vec<u32>, StructuredServiceError> {
+        self.handle
+            .state
+            .lock()
+            .unwrap()
+            .snapshots
+            .pop_front()
+            .unwrap_or(Ok(Vec::new()))
+    }
+
+    fn next_pid(&mut self, _timeout: Duration) -> Result<Option<u32>, StructuredServiceError> {
+        self.handle
+            .state
+            .lock()
+            .unwrap()
+            .next_results
+            .pop_front()
+            .unwrap_or(Ok(None))
+    }
+}
+
+fn scripted_source(
+    subscribe_results: impl IntoIterator<Item = Result<(), StructuredServiceError>>,
+    snapshots: impl IntoIterator<Item = Result<Vec<u32>, StructuredServiceError>>,
+    next_results: impl IntoIterator<Item = Result<Option<u32>, StructuredServiceError>>,
+) -> (ScriptedSource, ScriptedSourceHandle) {
+    let handle = ScriptedSourceHandle {
+        state: Arc::new(Mutex::new(ScriptedSourceState {
+            subscribe_results: subscribe_results.into_iter().collect(),
+            snapshots: snapshots.into_iter().collect(),
+            next_results: next_results.into_iter().collect(),
+            subscribe_calls: 0,
+        })),
+    };
+    (
+        ScriptedSource {
+            handle: handle.clone(),
+        },
+        handle,
+    )
+}
+
+fn recovery_policy() -> ObserverRecoveryPolicy {
+    ObserverRecoveryPolicy {
+        initial_delay: Duration::from_millis(1),
+        max_delay: Duration::from_millis(2),
+        max_attempts: 3,
+    }
+}
+
+fn initialize_with_recovery_source(
+    source: ScriptedSource,
+    requests: Arc<Mutex<Vec<InjectionRequest>>>,
+) -> Result<InitializedRuntime, StructuredServiceError> {
+    initialize_process_orchestration_with_observer_recovery(
+        Some(PROFILE_DIGEST.to_owned()),
+        recovery_policy(),
+        900,
+        RUNTIME_GENERATION,
+        Box::new(source),
+        Box::new(FixedInspector),
+        Box::new(SharedBroker { requests }),
+    )
+}
+
+struct RecoveryInitializer {
+    source: Mutex<Option<ScriptedSource>>,
+    requests: Arc<Mutex<Vec<InjectionRequest>>>,
+}
+
+impl RuntimeInitializer for RecoveryInitializer {
+    fn initialize(&self) -> Result<InitializedRuntime, StructuredServiceError> {
+        initialize_with_recovery_source(
+            self.source.lock().unwrap().take().unwrap(),
+            self.requests.clone(),
+        )
     }
 }
 
@@ -147,6 +260,158 @@ impl StopSignal for StopAfterOnePoll {
     fn take_session_change(&self) -> Option<SessionChange> {
         None
     }
+}
+
+struct StopAfterRecoveryWork {
+    polls: AtomicUsize,
+}
+
+impl StopSignal for StopAfterRecoveryWork {
+    fn wait(&self) -> Result<(), StructuredServiceError> {
+        Ok(())
+    }
+
+    fn wait_timeout(&self, _timeout: Duration) -> Result<bool, StructuredServiceError> {
+        Ok(self.polls.fetch_add(1, Ordering::AcqRel) >= 5)
+    }
+}
+
+struct NeverStop;
+
+impl StopSignal for NeverStop {
+    fn wait(&self) -> Result<(), StructuredServiceError> {
+        Ok(())
+    }
+
+    fn wait_timeout(&self, _timeout: Duration) -> Result<bool, StructuredServiceError> {
+        Ok(false)
+    }
+}
+
+struct StopDuringRecoveryWait;
+
+impl StopSignal for StopDuringRecoveryWait {
+    fn wait(&self) -> Result<(), StructuredServiceError> {
+        Ok(())
+    }
+
+    fn wait_timeout(&self, timeout: Duration) -> Result<bool, StructuredServiceError> {
+        Ok(!timeout.is_zero())
+    }
+}
+
+#[test]
+fn observer_failure_resubscribes_and_reconciles_the_missed_snapshot() {
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let recorder = Recorder::default();
+    let (source, source_handle) = scripted_source(
+        [Ok(()), Ok(())],
+        [Ok(Vec::new()), Ok(vec![43, 44])],
+        [Ok(Some(42)), Err(observer_error("observer-wait-failed"))],
+    );
+
+    ServiceRuntime::new("0.2.0")
+        .run(
+            &recorder,
+            &recorder,
+            &RecoveryInitializer {
+                source: Mutex::new(Some(source)),
+                requests: requests.clone(),
+            },
+            &StopAfterRecoveryWork {
+                polls: AtomicUsize::new(0),
+            },
+        )
+        .unwrap();
+
+    assert_eq!(source_handle.state.lock().unwrap().subscribe_calls, 2);
+    assert_eq!(
+        requests
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|request| request.identity.pid)
+            .collect::<Vec<_>>(),
+        [42, 43, 44]
+    );
+    let reports = recorder.reports.lock().unwrap();
+    let degraded_index = reports
+        .iter()
+        .position(|report| {
+            report.health == HealthState::Degraded
+                && report.readiness.observer == ComponentReadiness::Failed
+        })
+        .unwrap();
+    assert!(reports[degraded_index + 1..]
+        .iter()
+        .any(|report| report.health == HealthState::Ready));
+}
+
+#[test]
+fn observer_recovery_gives_up_after_the_configured_attempts() {
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let recorder = Recorder::default();
+    let (source, source_handle) = scripted_source(
+        [
+            Ok(()),
+            Err(observer_error("observer-resubscribe-1")),
+            Err(observer_error("observer-resubscribe-2")),
+            Err(observer_error("observer-resubscribe-3")),
+        ],
+        [Ok(Vec::new())],
+        [Err(observer_error("observer-wait-failed"))],
+    );
+
+    let error = ServiceRuntime::new("0.2.0")
+        .run(
+            &recorder,
+            &recorder,
+            &RecoveryInitializer {
+                source: Mutex::new(Some(source)),
+                requests,
+            },
+            &NeverStop,
+        )
+        .expect_err("exhausted observer recovery must fail the service");
+
+    assert!(error.to_string().contains("observer-resubscribe-3"));
+    assert_eq!(source_handle.state.lock().unwrap().subscribe_calls, 4);
+    let reports = recorder.reports.lock().unwrap();
+    let terminal_runtime_health = reports
+        .iter()
+        .rev()
+        .find(|report| report.active_profile_digest.is_some())
+        .unwrap();
+    assert_eq!(terminal_runtime_health.health, HealthState::Failed);
+    assert_eq!(
+        terminal_runtime_health.readiness.observer,
+        ComponentReadiness::Failed
+    );
+}
+
+#[test]
+fn observer_recovery_stops_when_the_service_stops() {
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let recorder = Recorder::default();
+    let (source, source_handle) = scripted_source(
+        [Ok(())],
+        [Ok(Vec::new())],
+        [Err(observer_error("observer-wait-failed"))],
+    );
+
+    ServiceRuntime::new("0.2.0")
+        .run(
+            &recorder,
+            &recorder,
+            &RecoveryInitializer {
+                source: Mutex::new(Some(source)),
+                requests,
+            },
+            &StopDuringRecoveryWait,
+        )
+        .unwrap();
+
+    assert_eq!(source_handle.state.lock().unwrap().subscribe_calls, 1);
 }
 
 #[test]

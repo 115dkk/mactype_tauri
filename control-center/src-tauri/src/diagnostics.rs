@@ -373,9 +373,7 @@ fn source_statuses(paths: &[PathBuf]) -> Vec<EventSourceStatus> {
         .enumerate()
         .map(|(index, path)| {
             let metadata = fs::metadata(path);
-            let present = metadata
-                .as_ref()
-                .is_ok_and(|metadata| metadata.is_file());
+            let present = metadata.as_ref().is_ok_and(|metadata| metadata.is_file());
             EventSourceStatus {
                 source: match index {
                     0 => EventSource::ControlCenter,

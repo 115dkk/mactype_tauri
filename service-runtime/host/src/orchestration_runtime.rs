@@ -23,6 +23,26 @@ use crate::target_validation::ProcessInspector;
 
 const MAX_TOLERATED_CONSECUTIVE_HEALTH_REPORT_FAILURES: usize = 20;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ObserverRecoveryPolicy {
+    /// Delay before the first resubscription attempt.
+    pub initial_delay: Duration,
+    /// Cap for the doubling delay between attempts.
+    pub max_delay: Duration,
+    /// Attempts before the driver gives up and fails the service.
+    pub max_attempts: u32,
+}
+
+impl Default for ObserverRecoveryPolicy {
+    fn default() -> Self {
+        Self {
+            initial_delay: Duration::from_secs(1),
+            max_delay: Duration::from_secs(30),
+            max_attempts: 12,
+        }
+    }
+}
+
 pub fn initialize_process_orchestration(
     binding: RendererRuntimeBinding,
     service_pid: u32,
@@ -35,6 +55,7 @@ pub fn initialize_process_orchestration(
         UnityFontHookPolicy::default(),
         PrivateFreeTypePolicy::default(),
         ConsoleProcessPolicy::default(),
+        ObserverRecoveryPolicy::default(),
         service_pid,
         source,
         inspector,
@@ -55,6 +76,7 @@ pub fn initialize_process_orchestration_with_unity_font_hook(
         unity_font_hook,
         PrivateFreeTypePolicy::default(),
         ConsoleProcessPolicy::default(),
+        ObserverRecoveryPolicy::default(),
         service_pid,
         source,
         inspector,
@@ -68,6 +90,7 @@ pub fn initialize_process_orchestration_with_profile_policies(
     unity_font_hook: UnityFontHookPolicy,
     private_freetype: PrivateFreeTypePolicy,
     console_process: ConsoleProcessPolicy,
+    observer_recovery: ObserverRecoveryPolicy,
     service_pid: u32,
     mut source: Box<dyn ProcessEventSource>,
     inspector: Box<dyn ProcessInspector>,
@@ -87,8 +110,11 @@ pub fn initialize_process_orchestration_with_profile_policies(
             unity_font_hook,
             private_freetype,
             console_process,
-            snapshot_pids,
-            source,
+            observer: ObserverState {
+                recovery: observer_recovery,
+                snapshot_pids,
+                source,
+            },
             inspector,
             broker,
         }),
@@ -101,10 +127,87 @@ struct ProcessOrchestrationDriver {
     unity_font_hook: UnityFontHookPolicy,
     private_freetype: PrivateFreeTypePolicy,
     console_process: ConsoleProcessPolicy,
-    snapshot_pids: VecDeque<u32>,
-    source: Box<dyn ProcessEventSource>,
+    observer: ObserverState,
     inspector: Box<dyn ProcessInspector>,
     broker: Box<dyn InjectionBroker>,
+}
+
+struct ObserverState {
+    recovery: ObserverRecoveryPolicy,
+    snapshot_pids: VecDeque<u32>,
+    source: Box<dyn ProcessEventSource>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ObserverRecovery {
+    Resubscribed,
+    Stopped,
+}
+
+impl ObserverState {
+    fn recover_observer(
+        &mut self,
+        error: StructuredServiceError,
+        stop: &dyn StopSignal,
+        health: &dyn RuntimeHealthReporter,
+        scheduler: &StopRetryScheduler<'_>,
+        consecutive_health_report_failures: &mut usize,
+        injection: InjectionTelemetry,
+    ) -> Result<ObserverRecovery, StructuredServiceError> {
+        let observer_failed = ReadinessReport {
+            observer: ComponentReadiness::Failed,
+            ..ReadinessReport::ready()
+        };
+        report_runtime_health(
+            health,
+            consecutive_health_report_failures,
+            HealthState::Degraded,
+            observer_failed.clone(),
+            injection.clone(),
+            Some(error.clone()),
+        )?;
+
+        let mut latest_error = error;
+        let mut delay = self.recovery.initial_delay;
+        for _attempt in 1..=self.recovery.max_attempts {
+            if !scheduler.wait(delay) || stop.stop_requested() {
+                return Ok(ObserverRecovery::Stopped);
+            }
+            match subscribe_process_creation(self.source.as_mut()) {
+                Ok(()) => match self.source.snapshot_pids() {
+                    Ok(pids) => {
+                        for pid in pids {
+                            if !self.snapshot_pids.contains(&pid) {
+                                self.snapshot_pids.push_back(pid);
+                            }
+                        }
+                        report_runtime_health(
+                            health,
+                            consecutive_health_report_failures,
+                            HealthState::Ready,
+                            ReadinessReport::ready(),
+                            injection,
+                            None,
+                        )?;
+                        return Ok(ObserverRecovery::Resubscribed);
+                    }
+                    Err(error) => latest_error = error,
+                },
+                Err(error) => latest_error = error,
+            }
+            delay = delay.saturating_mul(2).min(self.recovery.max_delay);
+        }
+
+        report_runtime_health(
+            health,
+            consecutive_health_report_failures,
+            HealthState::Failed,
+            observer_failed,
+            injection,
+            Some(latest_error.clone()),
+        )?;
+        Err(latest_error)
+    }
 }
 
 impl RuntimeDriver for ProcessOrchestrationDriver {
@@ -137,28 +240,26 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
             while let Some(change) = stop.take_session_change() {
                 orchestrator.handle_session_change(change);
             }
-            let event_wait = if self.snapshot_pids.is_empty() {
+            let event_wait = if self.observer.snapshot_pids.is_empty() {
                 Duration::from_millis(250)
             } else {
                 Duration::ZERO
             };
-            let pid = match self.source.next_pid(event_wait) {
+            let pid = match self.observer.source.next_pid(event_wait) {
                 Ok(Some(pid)) => Some(pid),
-                Ok(None) => self.snapshot_pids.pop_front(),
-                Err(error) => {
-                    let _ = report_runtime_health(
-                        health,
-                        &mut consecutive_health_report_failures,
-                        HealthState::Failed,
-                        ReadinessReport {
-                            observer: ComponentReadiness::Failed,
-                            ..ReadinessReport::ready()
-                        },
-                        orchestrator.injection_telemetry(),
-                        Some(error.clone()),
-                    );
-                    return Err(error);
-                }
+                Ok(None) => self.observer.snapshot_pids.pop_front(),
+                Err(error) => match self.observer.recover_observer(
+                    error,
+                    stop,
+                    health,
+                    &scheduler,
+                    &mut consecutive_health_report_failures,
+                    orchestrator.injection_telemetry(),
+                ) {
+                    Ok(ObserverRecovery::Resubscribed) => continue,
+                    Ok(ObserverRecovery::Stopped) => return Ok(()),
+                    Err(error) => return Err(error),
+                },
             };
             if let Some(pid) = pid {
                 if apply_orchestration_outcome(

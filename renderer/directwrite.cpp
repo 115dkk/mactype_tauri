@@ -699,11 +699,13 @@ HRESULT WINAPI IMPL_GetGdiInterop(
 	)
 {
 	HRESULT hr = ORIG_GetGdiInterop(This, gdiInterop);
-	static bool loaded = [&] {
-		CComPtr<IDWriteGdiInterop> gdip = *gdiInterop;
-		HOOK(gdip, CreateBitmapRenderTarget, 7);
-		return true;
-	}();
+	if (SUCCEEDED(hr) && gdiInterop != nullptr && *gdiInterop != nullptr) {
+		static bool loaded = [&] {
+			CComPtr<IDWriteGdiInterop> gdip = *gdiInterop;
+			HOOK(gdip, CreateBitmapRenderTarget, 7);
+			return true;
+		}();
+	}
 	MyDebug(L"IMPL_GetGdiInterop hooked");
 	return hr;
 }
@@ -1751,6 +1753,22 @@ static bool HookDirectWriteAliasCollection(CComPtr<IDWriteFactory>& factory)
 		PatchFactoryAliasVtables(factory, factory3);
 }
 
+static void SeedGdiInteropHooks(CComPtr<IDWriteFactory>& factory)
+{
+	if (ISHOOKED(BitmapRenderTarget_DrawGlyphRun))
+		return;
+
+	CComPtr<IDWriteGdiInterop> interop;
+	HRESULT const interopStatus = factory->GetGdiInterop(&interop);
+	// A process injected after acquiring its interop may never call
+	// GetGdiInterop again, so seed the downstream vtable hooks here.
+	if (SUCCEEDED(interopStatus) && interop != nullptr)
+	{
+		CComPtr<IDWriteBitmapRenderTarget> target;
+		interop->CreateBitmapRenderTarget(nullptr, 1, 1, &target);
+	}
+}
+
 bool hookDirectWrite(IUnknown** factory)
 {
 	if (factory == nullptr || *factory == nullptr)
@@ -1763,6 +1781,7 @@ bool hookDirectWrite(IUnknown** factory)
 
 	HOOK(writeFactory, CreateGlyphRunAnalysis, 23);
 	HOOK(writeFactory, GetGdiInterop, 17);
+	SeedGdiInteropHooks(writeFactory);
 
 	CGdippSettings const* settings = CGdippSettings::GetInstance();
 	bool aliasCollectionReady = true;
@@ -1882,6 +1901,9 @@ struct DirectWriteLifecycleState
 	std::mutex stateMutex;
 	std::mutex dwriteCoreHookMutex;
 	std::atomic<bool> dwriteCoreWorkerScheduled{false};
+	// Set once the pre-existing-factory worker has hooked the known
+	// factories; the worker itself stays alive for the DWriteCore watch.
+	std::atomic<bool> existingFactoryHooksSettled{false};
 	std::atomic<bool> stopping{false};
 	DirectWriteLifecyclePhase phase = DirectWriteLifecyclePhase::dormant;
 	DirectWriteLifecyclePhase phaseBeforeStop = DirectWriteLifecyclePhase::dormant;
@@ -2056,11 +2078,12 @@ static DWORD WINAPI HookExistingDirectWriteFactory(LPVOID moduleReference)
 	// The launch gate may release the image-entry thread only after the
 	// shared factory's collection boundary is installed.
 	HookKnownDirectWriteFactories(ORIG_DWriteCreateFactory, L"hook-ready");
+	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
+	lifecycle.existingFactoryHooksSettled.store(true, std::memory_order_release);
 
 	// DWriteCore can be an app-local Windows App SDK dependency loaded just
 	// before user entry. Keep a short startup watch in addition to the
 	// LoadLibraryExW hook so import-driven loads are covered too.
-	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
 	bool dwriteCoreHooked = false;
 	for (unsigned int attempt = 0;
 		 attempt != 100 && !HookLoadedDWriteCoreModule(); ++attempt)
@@ -2113,6 +2136,7 @@ static void ScheduleExistingDirectWriteFactoryHook()
 				 lifecycle.existingFactoryWorker.get(), 0) == WAIT_TIMEOUT))
 			return;
 		lifecycle.existingFactoryWorker.reset();
+		lifecycle.existingFactoryHooksSettled.store(false, std::memory_order_release);
 		auto thread = renderer_raii::AdoptHandle(CreateThread(
 			nullptr, 0, HookExistingDirectWriteFactory, selfReference.get(),
 			CREATE_SUSPENDED, nullptr));
@@ -2242,6 +2266,35 @@ static bool WaitForLifecycleWorker(HANDLE worker, ULONGLONG deadline)
 	ULONGLONG const now = GetTickCount64();
 	DWORD const remaining = now >= deadline ? 0 : static_cast<DWORD>(deadline - now);
 	return WaitForSingleObject(worker, remaining) == WAIT_OBJECT_0;
+}
+
+void WaitForDirectWriteHooksSettled(DWORD timeoutMs)
+{
+	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
+	ULONGLONG const deadline = GetTickCount64() + timeoutMs;
+	for (;;)
+	{
+		bool settled = false;
+		{
+			std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
+			// The worker handle outlives the factory hooks by up to five
+			// seconds of DWriteCore watching, so wait on the hook flag, not
+			// on the thread.
+			settled = lifecycle.stopping.load(std::memory_order_acquire) ||
+				(lifecycle.phase != DirectWriteLifecyclePhase::starting &&
+				 (!lifecycle.existingFactoryWorker ||
+				  lifecycle.existingFactoryHooksSettled.load(
+					  std::memory_order_acquire)));
+		}
+		if (settled)
+			return;
+
+		ULONGLONG const now = GetTickCount64();
+		if (now >= deadline)
+			return;
+		DWORD const remaining = static_cast<DWORD>(deadline - now);
+		Sleep(remaining < 25 ? remaining : 25);
+	}
 }
 
 DirectWriteLifecycleStopPreparation PrepareDirectWriteLifecycleStop(

@@ -2,8 +2,8 @@ use mactype_service_contract::{MachinePaths, StructuredServiceError};
 
 use crate::{
     initialize_process_orchestration_with_profile_policies, FixedHelperBroker, InitializedRuntime,
-    ProtectedRendererRuntime, RuntimeInitializer, WindowsHelperLauncher, WindowsProcessInspector,
-    WindowsStartupSafety, WmiProcessEventSource,
+    ObserverRecoveryPolicy, ProtectedRendererRuntime, RuntimeInitializer, WindowsHelperLauncher,
+    WindowsProcessInspector, WindowsStartupSafety, WmiProcessEventSource,
 };
 
 pub struct WindowsOpenServiceInitializer {
@@ -30,6 +30,7 @@ impl RuntimeInitializer for WindowsOpenServiceInitializer {
             runtime.unity_font_hook_policy().clone(),
             runtime.private_freetype_policy(),
             runtime.console_process_policy(),
+            ObserverRecoveryPolicy::default(),
             service_pid,
             Box::new(source),
             Box::new(inspector),

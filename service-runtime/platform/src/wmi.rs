@@ -18,7 +18,7 @@ use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::System::Wmi::{
     IEnumWbemClassObject, IWbemClassObject, IWbemLocator, IWbemServices, WbemLocator,
     WBEM_E_ACCESS_DENIED, WBEM_E_INVALID_CLASS, WBEM_FLAG_FORWARD_ONLY,
-    WBEM_FLAG_RETURN_IMMEDIATELY, WBEM_S_TIMEDOUT,
+    WBEM_FLAG_RETURN_IMMEDIATELY, WBEM_S_FALSE, WBEM_S_TIMEDOUT,
 };
 
 /// A COM failure, reduced to its `HRESULT`.
@@ -202,6 +202,20 @@ impl WmiNamespace {
     }
 }
 
+/// How one `IEnumWbemClassObject::Next` call ended: `Ok(true)` when an object
+/// was returned, `Ok(false)` when the timeout passed or the enumeration is
+/// exhausted, `Err` when WMI reported a failure (a cancelled subscription
+/// reports `WBEM_E_CALL_CANCELLED` here with zero objects).
+fn interpret_next_result(hresult: i32, returned: u32) -> Result<bool, WmiError> {
+    if hresult < 0 {
+        return Err(WmiError { hresult });
+    }
+    if hresult == WBEM_S_TIMEDOUT.0 || hresult == WBEM_S_FALSE.0 || returned == 0 {
+        return Ok(false);
+    }
+    Ok(true)
+}
+
 /// An enumerator over query results or events.
 pub struct WmiEnumerator {
     enumerator: IEnumWbemClassObject,
@@ -220,10 +234,9 @@ impl WmiEnumerator {
             self.enumerator
                 .Next(timeout_ms, &mut objects, &mut returned)
         };
-        if result.0 == WBEM_S_TIMEDOUT.0 || returned == 0 {
+        if !interpret_next_result(result.0, returned)? {
             return Ok(None);
         }
-        result.ok()?;
         Ok(objects[0].take().map(|object| WmiObject { object }))
     }
 }
@@ -271,5 +284,46 @@ impl WmiObject {
         unsafe { self.object.Get(name, 0, &mut value, None, None) }
             .map_err(|error| WmiPropertyError::at(WmiPropertyStep::Get, error))?;
         Ok(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use windows::Win32::Foundation::{RPC_E_DISCONNECTED, S_OK};
+    use windows::Win32::System::Wmi::{WBEM_E_CALL_CANCELLED, WBEM_S_FALSE, WBEM_S_TIMEDOUT};
+
+    use super::{interpret_next_result, WmiError};
+
+    #[test]
+    fn next_result_distinguishes_objects_timeouts_and_failures() {
+        for (hresult, returned, expected) in [
+            (S_OK.0, 1, Ok(true)),
+            (S_OK.0, 0, Ok(false)),
+            (WBEM_S_FALSE.0, 0, Ok(false)),
+            (WBEM_S_TIMEDOUT.0, 0, Ok(false)),
+            (
+                WBEM_E_CALL_CANCELLED.0,
+                0,
+                Err(WmiError {
+                    hresult: WBEM_E_CALL_CANCELLED.0,
+                }),
+            ),
+            (
+                RPC_E_DISCONNECTED.0,
+                0,
+                Err(WmiError {
+                    hresult: RPC_E_DISCONNECTED.0,
+                }),
+            ),
+            (
+                WBEM_E_CALL_CANCELLED.0,
+                1,
+                Err(WmiError {
+                    hresult: WBEM_E_CALL_CANCELLED.0,
+                }),
+            ),
+        ] {
+            assert_eq!(interpret_next_result(hresult, returned), expected);
+        }
     }
 }

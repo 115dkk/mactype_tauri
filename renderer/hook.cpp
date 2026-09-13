@@ -11,6 +11,7 @@
 //
 
 #include "override.h"
+#include "activation_repaint.h"
 #include "child_process_relay.h"
 #include "ft.h"
 #include "fteng.h"
@@ -29,6 +30,7 @@
 #include <vector>
 
 bool RestoreDirectWriteVtableHooks(DWORD timeoutMilliseconds = 3000);
+void WaitForDirectWriteHooksSettled(DWORD timeoutMs);
 
 #ifdef STATIC_LIB
 #include <aux_ulib.h>
@@ -96,6 +98,39 @@ void PublishUnavailableCapability(
 		capability, target, modulePresent);
 	if (attempt.valid())
 		coordinator.CompleteAttempt(attempt, false, reason, status);
+}
+
+static DWORD WINAPI ActivationRepaintWorker(LPVOID moduleReference)
+{
+	renderer_raii::UniqueModuleReference selfReference(
+		static_cast<HMODULE>(moduleReference));
+	WaitForDirectWriteHooksSettled(3000);
+	if (renderer::ProcessHookCoordinator().phase() == renderer::RuntimePhase::active)
+		renderer::RepaintOwnedWindows(GetCurrentProcessId());
+	HMODULE const rawSelfReference = selfReference.release();
+	FreeLibraryAndExitThread(rawSelfReference, 0);
+	return 0;
+}
+
+static void ScheduleActivationRepaint()
+{
+	HMODULE moduleReference = nullptr;
+	if (!GetModuleHandleEx(
+			GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+			reinterpret_cast<LPCTSTR>(&ActivationRepaintWorker),
+			&moduleReference))
+	{
+		return;
+	}
+	renderer_raii::UniqueModuleReference selfReference(moduleReference);
+	auto thread = renderer_raii::AdoptHandle(CreateThread(
+		nullptr, 0, ActivationRepaintWorker, selfReference.get(),
+		CREATE_SUSPENDED, nullptr));
+	if (!thread)
+		return;
+	HMODULE const rawSelfReference = selfReference.release();
+	if (ResumeThread(thread.get()) == static_cast<DWORD>(-1))
+		FreeLibrary(rawSelfReference);
 }
 
 LONG InstallTrackedDemandHook(
@@ -775,6 +810,7 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 			{
 				renderer::PublishRendererAdmission(
 					renderer::RendererAdmission::active);
+				ScheduleActivationRepaint();
 			}
 			break;
 		}

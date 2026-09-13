@@ -310,6 +310,27 @@ does not carry alias state in thread-local storage. A collection already
 returned before injection remains an honest older immutable generation;
 diagnostics report that timing instead of mutating retained objects.
 
+An injection that lands after the first frame (the open service's remote
+`LoadLibrary`, every elevated target, any child of a parent that was not
+hooked) leaves that stock frame on screen until the application repaints on
+its own, which is why text used to change only under the mouse. The renderer
+therefore schedules one activation repaint after it publishes active
+admission: a fire-and-forget worker waits up to three seconds for the
+DirectWrite lifecycle to leave its starting phase and for the
+pre-existing-factory worker to hook the known factories, then invalidates
+every visible top-level window of the process (`RepaintOwnedWindows` in
+`renderer/activation_repaint.cpp`: `RDW_INVALIDATE | RDW_ERASE | RDW_FRAME |
+RDW_ALLCHILDREN`, never `RDW_UPDATENOW`, so no foreign thread is painted
+synchronously). Pre-entry injection reaches the worker before any window
+exists and does nothing. Because a process that acquired its
+`IDWriteGdiInterop` before injection never calls `GetGdiInterop` again,
+`hookDirectWrite` also seeds the interop and bitmap-render-target hooks once
+per process through a 1x1 render target; a sandboxed process whose GDI calls
+fail ends up exactly as before. Measured 2026-09-14 with a GDI probe injected
+1.5 s after its first paint: the frame was replaced within about one second
+without any application repaint, where the previous renderer left it
+untouched until a forced invalidation.
+
 The native x86/x64 contract proves both sides of that generation boundary. A
 font retained while substitution is disabled remains the native source after a
 new aliased collection is published. A source lookup in the active collection

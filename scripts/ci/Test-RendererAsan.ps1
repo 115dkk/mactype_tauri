@@ -16,6 +16,7 @@ cmake -S $source -B $build -A $Architecture -DMACTYPE_ENABLE_ASAN=ON
 cmake --build $build --config RelWithDebInfo --target `
     renderer-raii-tests `
     hook-lifecycle-tests `
+    activation-repaint-tests `
     freetype-runtime-tests `
     pe-export-view-tests `
     unload-lifecycle-tests `
@@ -56,6 +57,7 @@ try {
     foreach ($test in @(
         'renderer-raii-tests.exe',
         'hook-lifecycle-tests.exe',
+        'activation-repaint-tests.exe',
         'freetype-runtime-tests.exe',
         'pe-export-view-tests.exe',
         'unload-lifecycle-tests.exe',

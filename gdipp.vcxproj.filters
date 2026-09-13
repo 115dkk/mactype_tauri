@@ -15,6 +15,9 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="renderer\activation_repaint.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="renderer\cache.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -139,6 +142,9 @@
     </None>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="renderer\activation_repaint.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="renderer\array.h">
       <Filter>Header Files</Filter>
     </ClInclude>

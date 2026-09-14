@@ -19,16 +19,8 @@ param(
     [string] $EvidenceRoot = 'artifacts/stack-frames'
 )
 
-# Renderer hooks execute on whichever application, driver, or engine thread
-# calls the hooked API. Field evidence from 2026-09-11 (Rebel Inc. Escalation,
-# Unity 2022.3.62f3) shows such threads owning 64 KB stacks, so one frame
-# above the budget is a process crash. MSVC routes every frame larger than a
-# page through __chkstk with the size in EAX, which makes the frame inventory
-# of a Release image recoverable without symbols. The PDB's section
-# contributions then name the object file that owns each frame: first-party
-# translation units keep the 16 KB budget, while the pinned FreeType fork's
-# interpreter, hinter, and rasterizer frames are a documented dependency
-# boundary held under a separate ceiling.
+# The budget, the two limits, and the way a Release image is measured without
+# symbols are described in docs/renderer-stack-budget.md.
 
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path

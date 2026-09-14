@@ -8,6 +8,8 @@ of how the code was written.
 
 - `SAFETY:` immediately before an `unsafe` operation, stating the concrete
   validity, bounds, alignment, ownership, and lifetime facts that make it safe.
+  A `SAFETY:` comment that no longer matches the operation it guards is worse
+  than none, so it is corrected rather than left in place.
 - A local platform or compatibility trap that a nearby edit could violate,
   such as loader-lock restrictions, ABI layout, borrowed-versus-owned handles,
   or a required cleanup order.
@@ -19,6 +21,10 @@ of how the code was written.
 These comments explain why the code has its present shape. They do not restate
 the next statement or narrate execution step by step.
 
+Doc comments on a public item (`///` in Rust, `/** */` in TypeScript) are
+documentation rather than commentary. A short one that only names the item's
+contract is kept, because the generated reference is the reason it exists.
+
 ## Put repeated contracts in documentation
 
 Rationale shared by more than one Module has one canonical home:
@@ -28,6 +34,7 @@ Rationale shared by more than one Module has one canonical home:
 | Renderer/service binding, activation evidence, quiet skip, and health impact | `docs/renderer-activation-architecture.md` |
 | Hook compatibility classes and explicit process-local exclusions | `docs/hooking-compatibility.md` |
 | FreeType ownership, cache policy, and loader-lock teardown | `docs/freetype-runtime.md` |
+| Renderer thread stack budget and how a Release image is measured | `docs/renderer-stack-budget.md` |
 | Control Center profile selection, service state, preview, and UI projection | `docs/control-center-architecture.md` |
 | Branch delivery, merge, and exact-SHA CI completion | `AGENTS.md` and `CLAUDE.md` |
 
@@ -38,6 +45,8 @@ but it must not reproduce the cross-module design.
 
 - progress narration such as “now”, “next”, or a numbered implementation
   diary when the code already expresses the sequence;
+- anything that describes the work rather than the code: a branch name, a pull
+  request, a review round, or what an earlier revision used to do;
 - commented-out code, debug calls, abandoned alternatives, and speculative
   optimization notes;
 - `TODO`, `FIXME`, `HACK`, or `XXX` task markers without a tracked design or
@@ -46,8 +55,10 @@ but it must not reproduce the cross-module design.
 - model, prompt, conversation, or authoring-history commentary.
 
 Generated and third-party files retain their upstream notices and are not
-rewritten to satisfy first-party prose style. Test fixtures preserve their
-source bytes. New first-party comments are English and use the established
+rewritten to satisfy first-party prose style. The inherited MacType renderer
+sources are third-party for this purpose: their original Japanese and Chinese
+commentary is the only documentation that code has, and it stays. Test fixtures
+preserve their source bytes. New first-party comments are English and use the established
 domain terms from `CONTEXT.md`.
 
 ## Review gate

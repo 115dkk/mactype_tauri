@@ -117,33 +117,6 @@ impl<'a> InjectionOrchestrator<'a> {
         )
     }
 
-    pub fn with_retry_policy_and_unity_font_hook(
-        service_pid: u32,
-        binding: RendererRuntimeBinding,
-        inspector: &'a dyn ProcessInspector,
-        broker: &'a dyn InjectionBroker,
-        retry_policy: RetryPolicy,
-        retry_scheduler: &'a dyn RetryScheduler,
-        unity_font_hook: UnityFontHookPolicy,
-    ) -> Self {
-        Self::build(
-            service_pid,
-            binding,
-            inspector,
-            broker,
-            OrchestratorConfiguration {
-                retry_policy,
-                retry_scheduler: Some(retry_scheduler),
-                admission_policies: ProcessAdmissionPolicies::new(
-                    unity_font_hook,
-                    PrivateFreeTypePolicy::default(),
-                    ConsoleProcessPolicy::default(),
-                ),
-                deferral_policy: DeferralPolicy::default(),
-            },
-        )
-    }
-
     pub fn with_profile_policies(
         service_pid: u32,
         binding: RendererRuntimeBinding,

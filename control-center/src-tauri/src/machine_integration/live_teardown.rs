@@ -1,9 +1,8 @@
 // Hosted-CI live proof for the legacy MacTray teardown paths. These tests
 // exercise the production guard against a real MacType installation staged
-// from the official installer on a disposable GitHub-hosted runner. The
-// module lives only on codex/hosted-teardown-proof and must not be merged
-// onward; every test refuses to run without the workflow's environment gate
-// because it mutates the running machine.
+// from the official installer on a disposable GitHub-hosted runner. Every
+// test mutates the running machine, so each one refuses to run without the
+// workflow's environment gate.
 
 use super::legacy_mactray::{
     self, LegacyTrayConflictState, LegacyTrayExitRequest, LegacyTrayProcessState,
@@ -241,9 +240,9 @@ fn legacy_service_funeral_through_backup_receipt_transaction() {
     // product's real retirement transaction — the same backup receipt, stop,
     // verified removal, and rollback the control center drives — against the
     // staged real-shape MacType service. The RemovalVerification is the
-    // caller's certification that the replacement is healthy; the upstream
-    // computation of that certification is covered by the open-service CI, so
-    // here we prove the transaction honours the gate and is fully reversible.
+    // caller's certification that the replacement is healthy. Open-service CI
+    // covers production of that certification; this test covers enforcement
+    // and reversible teardown.
     let before = legacy_mactray::status(false);
     println!("legacy service before funeral: {before:?}");
     assert!(

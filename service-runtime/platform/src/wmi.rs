@@ -102,13 +102,6 @@ impl WmiConnection {
         }
     }
 
-    /// Creates the locator, opens `ROOT\CIMV2`, and sets the proxy blanket
-    /// in one call. A caller that reports the three steps separately drives
-    /// [`WmiLocator`] itself.
-    pub fn connect_cimv2() -> Result<Self, WmiError> {
-        WmiLocator::create()?.open_cimv2()?.with_service_blanket()
-    }
-
     /// A forward-only event subscription for `wql`.
     pub fn notification_query(&self, wql: &str) -> Result<WmiEnumerator, WmiError> {
         let flags = WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY;

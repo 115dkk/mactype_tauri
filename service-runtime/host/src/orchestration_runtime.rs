@@ -112,6 +112,18 @@ enum ObserverRecovery {
 }
 
 impl ObserverState {
+    /// Takes the subscription again and folds every process that started while
+    /// it was down into the backlog, so a recovery misses no injection target.
+    fn resubscribe(&mut self) -> Result<(), StructuredServiceError> {
+        subscribe_process_creation(self.source.as_mut())?;
+        for pid in self.source.snapshot_pids()? {
+            if !self.snapshot_pids.contains(&pid) {
+                self.snapshot_pids.push_back(pid);
+            }
+        }
+        Ok(())
+    }
+
     fn recover_observer(
         &mut self,
         error: StructuredServiceError,
@@ -140,26 +152,18 @@ impl ObserverState {
             if !scheduler.wait(delay) || stop.stop_requested() {
                 return Ok(ObserverRecovery::Stopped);
             }
-            match subscribe_process_creation(self.source.as_mut()) {
-                Ok(()) => match self.source.snapshot_pids() {
-                    Ok(pids) => {
-                        for pid in pids {
-                            if !self.snapshot_pids.contains(&pid) {
-                                self.snapshot_pids.push_back(pid);
-                            }
-                        }
-                        report_runtime_health(
-                            health,
-                            consecutive_health_report_failures,
-                            HealthState::Ready,
-                            ReadinessReport::ready(),
-                            injection,
-                            None,
-                        )?;
-                        return Ok(ObserverRecovery::Resubscribed);
-                    }
-                    Err(error) => latest_error = error,
-                },
+            match self.resubscribe() {
+                Ok(()) => {
+                    report_runtime_health(
+                        health,
+                        consecutive_health_report_failures,
+                        HealthState::Ready,
+                        ReadinessReport::ready(),
+                        injection,
+                        None,
+                    )?;
+                    return Ok(ObserverRecovery::Resubscribed);
+                }
                 Err(error) => latest_error = error,
             }
             delay = delay.saturating_mul(2).min(self.recovery.max_delay);

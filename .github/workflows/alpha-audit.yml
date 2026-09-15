@@ -1,0 +1,479 @@
+# Alpha Architecture & Tech Debt Audit
+#
+# Runs /improve-codebase-architecture and /tech-debt-audit against
+# codex/alpha-plus-dll in a single Claude Code session, and files the two
+# deliverables as a GitHub issue. Skips a scheduled run when no code changed
+# on that branch since the last audit tag.
+#
+# This file is the only part of the audit that lives on main. GitHub schedules
+# workflows from the default branch and nowhere else, so an alpha-only file
+# would never fire. Everything the audit touches is on codex/alpha-plus-dll:
+# the tree it checks out, the three vendored skills under
+# .github/audit-skills, and the change-detection list in
+# .github/audit-pathspecs.txt. Nothing here analyses main.
+#
+# Like every other fork CI workflow, this file must never be cherry-picked
+# onto codex/upstream-pr-prep.
+#
+# Requirements:
+#   1. CLAUDE_CODE_OAUTH_TOKEN under repository Actions secrets, from
+#      `claude setup-token`.
+#   2. Actions workflow permissions set to "Read and write permissions".
+#   3. The three skills kept vendored on codex/alpha-plus-dll. See
+#      .github/audit-skills/README.md on that branch for why all three are
+#      needed and which one must stay unlocked.
+#
+# The session gets Rust, Node and MSBuild, so it can build and test the
+# fork-authored C++ (service-injector, preview-helper, tools/service-probe)
+# and the Rust service workspace. It does not build the inherited renderer:
+# that needs .github/scripts/Build-OpenCore.ps1 to clone and build four pinned
+# dependencies first, which is a long and failure-prone preamble to put in
+# front of an analysis job. The prompt tells the session so, and tells it not
+# to claim it verified anything it could not run.
+
+name: Alpha Audit
+
+on:
+  schedule:
+    # Monthly on the 22nd. Deliberately away from the 1st and the 15th, which
+    # is when the audits in the other repositories run, and off the hour.
+    - cron: '37 9 22 * *'
+  workflow_dispatch:
+    inputs:
+      force_run:
+        description: 'Run even if no relevant code changed'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  issues: write
+
+env:
+  AUDIT_REF: codex/alpha-plus-dll
+
+jobs:
+  check-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      should_audit: ${{ steps.detect.outputs.should_audit }}
+      last_audit_ref: ${{ steps.detect.outputs.last_audit_ref }}
+      changed_files_count: ${{ steps.detect.outputs.changed_files_count }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: codex/alpha-plus-dll
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Detect code changes since last audit
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t code_pathspecs < .github/audit-pathspecs.txt
+
+          if [ "${{ inputs.force_run }}" = "true" ]; then
+            echo "Force run requested."
+            echo "should_audit=true" >> "$GITHUB_OUTPUT"
+            echo "last_audit_ref=HEAD~50" >> "$GITHUB_OUTPUT"
+            echo "changed_files_count=forced" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          mapfile -t audit_tags < <(git tag -l 'audit/alpha-*' --sort=-creatordate)
+          LAST_AUDIT="${audit_tags[0]:-}"
+
+          if [ -z "$LAST_AUDIT" ]; then
+            echo "Initial audit."
+            echo "should_audit=true" >> "$GITHUB_OUTPUT"
+            echo "last_audit_ref=" >> "$GITHUB_OUTPUT"
+            echo "changed_files_count=initial" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Last audit: $LAST_AUDIT"
+          echo "last_audit_ref=$LAST_AUDIT" >> "$GITHUB_OUTPUT"
+
+          CODE_CHANGES=$(git diff --name-only "$LAST_AUDIT"..HEAD -- "${code_pathspecs[@]}" | wc -l | tr -d ' ')
+
+          echo "Code files changed: $CODE_CHANGES"
+          echo "changed_files_count=$CODE_CHANGES" >> "$GITHUB_OUTPUT"
+
+          if [ "$CODE_CHANGES" -eq 0 ]; then
+            echo "No relevant code changes. Skipping audit."
+            echo "should_audit=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_audit=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  audit:
+    needs: check-changes
+    if: needs.check-changes.outputs.should_audit == 'true'
+    # Same image the rest of this repository's Windows jobs use, so the
+    # toolchain the session finds is the toolchain CI builds with.
+    runs-on: windows-2022
+    timeout-minutes: 240
+    defaults:
+      run:
+        # Git Bash, which is also what Claude Code's own shell tool reaches
+        # for on Windows. Every run step below stays POSIX-shaped.
+        shell: bash
+    env:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: codex/alpha-plus-dll
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: control-center/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: microsoft/setup-msbuild@v3
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Install frontend dependencies
+        working-directory: control-center
+        run: pnpm install --frozen-lockfile
+
+      - name: Install audit skills
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$HOME/.claude/skills"
+          for skill in improve-codebase-architecture tech-debt-audit codebase-design; do
+            cp -R ".github/audit-skills/$skill" "$HOME/.claude/skills/"
+            test -f "$HOME/.claude/skills/$skill/SKILL.md"
+          done
+
+          # Both audit skills are vendored with disable-model-invocation so an
+          # interactive session never starts a whole-repo audit by accident.
+          # This run's prompt says to run them, and the model can only do that
+          # through the Skill tool, which is exactly what the lock blocks.
+          # Unlock the installed copies; the copies on the branch stay locked.
+          for locked in improve-codebase-architecture tech-debt-audit; do
+            sed -i '/^disable-model-invocation:/d' "$HOME/.claude/skills/$locked/SKILL.md"
+            if grep -q "disable-model-invocation" "$HOME/.claude/skills/$locked/SKILL.md"; then
+              echo "::error::$locked SKILL.md still carries disable-model-invocation after the unlock"
+              exit 1
+            fi
+          done
+
+          # codebase-design holds the architecture vocabulary that
+          # improve-codebase-architecture reaches for through the Skill tool,
+          # so a lock here would silently strip Part 1 of its terms.
+          if grep -q "^disable-model-invocation:" "$HOME/.claude/skills/codebase-design/SKILL.md"; then
+            echo "::error::codebase-design must stay invocable; improve-codebase-architecture calls it."
+            exit 1
+          fi
+
+          echo "Installed Claude audit skills:"
+          find "$HOME/.claude/skills" -maxdepth 2 -name SKILL.md -print
+
+      - name: Verify Claude subscription credentials
+        run: |
+          if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+            echo "::error::CLAUDE_CODE_OAUTH_TOKEN secret is not configured."
+            echo "Generate a subscription OAuth token with 'claude setup-token'."
+            echo "Add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+          if [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then
+            echo "::warning::Ignoring ANTHROPIC_* credentials so Claude Code uses CLAUDE_CODE_OAUTH_TOKEN."
+          fi
+
+      - name: Generate change summary
+        id: changes
+        run: |
+          set -euo pipefail
+
+          mapfile -t code_pathspecs < .github/audit-pathspecs.txt
+
+          LAST_REF="${{ needs.check-changes.outputs.last_audit_ref }}"
+          if [ -n "$LAST_REF" ]; then
+            echo "## Changed files" > change-summary.txt
+            echo "" >> change-summary.txt
+            git diff --stat "$LAST_REF"..HEAD -- "${code_pathspecs[@]}" >> change-summary.txt 2>/dev/null || true
+          else
+            echo "Initial audit run." > change-summary.txt
+          fi
+
+      - name: Run combined audit
+        run: |
+          unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN
+
+          # Fable 5.1's safety classifiers can silently re-run a flagged
+          # request on Opus 4.8 and keep the session there. Restricting
+          # availableModels to Fable 5.1 blocks that fallback target, so a
+          # flagged request ends with an explicit refusal error instead of a
+          # quiet model switch, and no Opus tokens are spent. Availability
+          # fallback is opt-in through --fallback-model and stays unset.
+          set +e
+          claude \
+            --model claude-fable-5-1 \
+            --effort xhigh \
+            --settings '{"availableModels": ["claude-fable-5-1"]}' \
+            --permission-mode auto \
+            --max-turns 100 \
+            -p "
+          You will perform two analyses in sequence within this single
+          session. Each part writes its deliverable to its own Markdown
+          file in the repository root (do not commit them). Print only a
+          short completion summary to stdout: in this non-interactive
+          session only the final message reaches stdout, so anything not
+          written to a file is lost.
+
+          ENVIRONMENT:
+          - This checkout is the codex/alpha-plus-dll branch of the
+            115dkk/mactype_tauri fork, not main. main is a narrower tree
+            that feeds an upstream pull request; alpha is where the work
+            happens. Audit what is in front of you and do not reason about
+            what main does or does not carry.
+          - You are on a Windows runner with Git Bash as your shell.
+            MSBuild, the stable Rust toolchain with clippy and rustfmt,
+            Node 24 and pnpm are on PATH, and the Control Center's
+            dependencies are already installed.
+          - You MAY build and test the fork-authored code to check a
+            finding: the Rust workspace under service-runtime (cargo
+            clippy, cargo test), the Control Center under control-center,
+            and the CMake C++ in service-injector, preview-helper and
+            tools/service-probe.
+          - You may NOT build the inherited renderer. gdipp.sln needs four
+            pinned dependencies that this job does not provision. Read it
+            instead, and say plainly when a renderer finding is unverified
+            rather than implying you ran something.
+
+          GLOBAL RULES:
+          - The renderer sources this fork inherited from snowie2000/mactype
+            are third-party. docs/source-comment-policy.md says so and names
+            the consequence: their Japanese and Chinese commentary is the
+            only documentation that code has, and it is out of scope. Their
+            style, naming and comments are not findings. Fork-authored
+            changes inside that tree are in scope like any other code.
+          - Treat docs/, doc/, evidence/, assets/, and generated files as
+            out of scope unless they expose a code or build-system problem.
+            The generated settings files (control-center/src/generated,
+            generated_settings.rs, generated_settings.h) come from a
+            generator; report the generator, not its output.
+          - View ids (files, profiles, execution) are interface and are
+            never renamed. Domain terms are frozen in CONTEXT.md. Do not
+            propose renaming either.
+          - Cite file paths for every finding.
+          - Do not suggest full rewrites.
+          - Do not pad categories with filler findings.
+
+          PART 1: Architecture Analysis
+          Run /improve-codebase-architecture.
+          That skill holds no glossary of its own any more. It will tell
+          you to call the codebase-design skill for the architecture
+          vocabulary (module, interface, depth, seam, adapter, leverage,
+          locality) and for the deletion test. Do call it, and phrase every
+          candidate in those exact terms rather than drifting into
+          component, service, API, or boundary.
+          Identify specific consolidation and deepening opportunities.
+          Instead of the skill's HTML report, write the full deliverable as
+          Markdown to ARCHITECTURE_AUDIT.md in the repository root: every
+          candidate with files, problem, solution, benefits, and
+          recommendation strength, plus the closing top recommendation. Do
+          not write to the OS temp directory and do not open a browser.
+          Stop there. The skill's step 3 is a grilling loop that asks the
+          user which candidate to pursue, and this session has no user, so
+          do not ask, do not call the grilling or domain-modeling skills,
+          and do not let that step's side effects happen: leave CONTEXT.md
+          and docs/adr/ untouched.
+          When the file is complete, proceed immediately to Part 2.
+
+          PART 2: Tech Debt Audit
+          Run /tech-debt-audit.
+          Write the deliverable to TECH_DEBT_AUDIT.md in the repository
+          root as the skill specifies, with severity, effort estimates, and
+          the required 'looks bad but is actually fine' section.
+          " > combined-audit-report.md 2>&1
+          CLAUDE_EXIT=$?
+          set -e
+
+          if [ ! -s combined-audit-report.md ]; then
+            echo "Audit produced no output." > combined-audit-report.md
+            cat combined-audit-report.md
+            exit 1
+          fi
+
+          if [ "$CLAUDE_EXIT" -ne 0 ]; then
+            echo "Claude audit failed with exit code $CLAUDE_EXIT."
+            cat combined-audit-report.md
+            exit "$CLAUDE_EXIT"
+          fi
+
+          # -p prints only the session's final message, so any part not
+          # written to its own file never reaches the issue. Both
+          # deliverables are therefore files, and a missing one is a hard
+          # failure rather than a quiet gap.
+          for deliverable in ARCHITECTURE_AUDIT.md TECH_DEBT_AUDIT.md; do
+            if [ ! -s "$deliverable" ]; then
+              echo "::error::The audit session did not produce ${deliverable}."
+              cat combined-audit-report.md
+              exit 1
+            fi
+          done
+
+      - name: Create GitHub Issue or summary
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DATE=$(date +%Y-%m-%d)
+          COUNT="${{ needs.check-changes.outputs.changed_files_count }}"
+          HEAD_SHA=$(git rev-parse HEAD)
+
+          {
+            echo "# Alpha Audit: ${DATE}"
+            echo ""
+            echo "Branch: \`codex/alpha-plus-dll\` at \`${HEAD_SHA}\`"
+            echo "Changed relevant files: **${COUNT}**"
+            echo "Model: Fable 5.1 - Effort: xhigh"
+            echo ""
+            echo "The inherited renderer was read, not built: this job does not provision the pinned dependencies gdipp.sln needs."
+            echo ""
+            echo "Files readable from this issue:"
+            echo "- \`issue-body.md\` - this issue body"
+            echo "- \`change-summary.txt\` - comments"
+            echo "- \`ARCHITECTURE_AUDIT.md\` - comments (Part 1)"
+            echo "- \`TECH_DEBT_AUDIT.md\` - comments (Part 2)"
+            echo "- \`combined-audit-report.md\` - comments (session log)"
+          } > issue-body.md
+
+          post_file_comments() {
+            local issue_number="$1"
+            local file_path="$2"
+            local title="$3"
+
+            if [ ! -s "$file_path" ]; then
+              echo "Skipping empty or missing file: $file_path"
+              return 0
+            fi
+
+            local comment_dir
+            comment_dir=$(mktemp -d)
+            awk -v prefix="$comment_dir/part-" -v limit=18000 '
+              BEGIN {
+                part = 0
+                size = 0
+                file = sprintf("%s%04d", prefix, part)
+              }
+              {
+                line = $0 ORS
+                line_size = length(line)
+                if (size > 0 && size + line_size > limit) {
+                  close(file)
+                  part++
+                  file = sprintf("%s%04d", prefix, part)
+                  size = 0
+                }
+                printf "%s", line >> file
+                size += line_size
+              }
+            ' "$file_path"
+
+            local total
+            total=$(find "$comment_dir" -type f -name 'part-*' | wc -l | tr -d ' ')
+            local index=1
+
+            for part in "$comment_dir"/part-*; do
+              {
+                echo "## ${title} (${index}/${total})"
+                echo ""
+                echo "Source file: \`${file_path}\`"
+                echo ""
+                echo '````markdown'
+                cat "$part"
+                echo ""
+                echo '````'
+              } > "$comment_dir/comment.md"
+
+              gh issue comment "$issue_number" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --body-file "$comment_dir/comment.md"
+
+              index=$((index + 1))
+            done
+          }
+
+          gh label create audit \
+            --repo "${GITHUB_REPOSITORY}" \
+            --color "5319e7" \
+            --description "Architecture and tech debt audit" \
+            >/dev/null 2>&1 || true
+
+          gh label create alpha \
+            --repo "${GITHUB_REPOSITORY}" \
+            --color "0e8a16" \
+            --description "codex/alpha-plus-dll only" \
+            >/dev/null 2>&1 || true
+
+          set +e
+          ISSUE_ERROR=$(mktemp)
+          ISSUE_URL=$(gh issue create \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "Alpha Audit: ${DATE}" \
+            --body-file issue-body.md \
+            --label audit \
+            --label alpha 2>"${ISSUE_ERROR}")
+          ISSUE_EXIT=$?
+          set -e
+
+          if [ "${ISSUE_EXIT}" -eq 0 ]; then
+            echo "Created issue: ${ISSUE_URL}"
+            ISSUE_NUMBER="${ISSUE_URL##*/}"
+
+            post_file_comments "$ISSUE_NUMBER" change-summary.txt "Change summary"
+            post_file_comments "$ISSUE_NUMBER" ARCHITECTURE_AUDIT.md "Architecture audit"
+            post_file_comments "$ISSUE_NUMBER" TECH_DEBT_AUDIT.md "Tech debt audit"
+            post_file_comments "$ISSUE_NUMBER" combined-audit-report.md "Audit session log"
+          else
+            echo "::warning::Could not create a GitHub issue. Writing the audit body to the job summary instead."
+            cat "${ISSUE_ERROR}"
+            {
+              echo "## Alpha Audit report"
+              echo ""
+              echo "GitHub issue creation failed:"
+              echo '```'
+              cat "${ISSUE_ERROR}"
+              echo '```'
+              echo ""
+              cat issue-body.md
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: "alpha-audit-report-${{ github.run_id }}"
+          path: |
+            combined-audit-report.md
+            change-summary.txt
+            ARCHITECTURE_AUDIT.md
+            TECH_DEBT_AUDIT.md
+            issue-body.md
+          retention-days: 90
+
+      - name: Tag audit checkpoint
+        run: |
+          AUDIT_TAG="audit/alpha-$(date +%Y%m%d-%H%M%S)"
+          git tag "$AUDIT_TAG"
+          git push origin "$AUDIT_TAG"
+          echo "Tagged: $AUDIT_TAG"

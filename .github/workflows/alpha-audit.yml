@@ -23,13 +23,18 @@
 #      .github/audit-skills/README.md on that branch for why all three are
 #      needed and which one must stay unlocked.
 #
-# The session gets Rust, Node and MSBuild, so it can build and test the
-# fork-authored C++ (service-injector, preview-helper, tools/service-probe)
-# and the Rust service workspace. It does not build the inherited renderer:
-# that needs .github/scripts/Build-OpenCore.ps1 to clone and build four pinned
-# dependencies first, which is a long and failure-prone preamble to put in
-# front of an analysis job. The prompt tells the session so, and tells it not
-# to claim it verified anything it could not run.
+# The job provisions the whole buildable surface, renderer included, because
+# on this branch the renderer is a modified fork rather than an inherited
+# import: the DirectWrite work, the hook coverage, the stack budget and the
+# FreeType ownership rules all live in it. Auditing it by reading alone would
+# leave the largest body of fork-authored C++ unverified.
+#
+# .github/scripts/Build-OpenCore.ps1 on codex/alpha-plus-dll does that in one
+# call. It clones the four pinned dependencies, asserts the FreeType fork's
+# private glyph ABI and subpixel option are present, builds MacType x86 and
+# x64 in Rel+Detours, and builds and ctests both service injectors. The same
+# script runs in that branch's Build and package workflow under a 60 minute
+# timeout, so it fits inside this job's budget with room to spare.
 
 name: Alpha Audit
 
@@ -144,6 +149,14 @@ jobs:
 
       - uses: microsoft/setup-msbuild@v3
 
+      # Gives the session a built renderer to reason against instead of a
+      # source tree it can only read. Also leaves the pinned dependencies and
+      # the Rel+Detours object trees in place, so a targeted rebuild of one
+      # project costs seconds rather than another full provision.
+      - name: Build the open core, renderer included
+        shell: pwsh
+        run: .github/scripts/Build-OpenCore.ps1
+
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code
 
@@ -249,23 +262,46 @@ jobs:
             MSBuild, the stable Rust toolchain with clippy and rustfmt,
             Node 24 and pnpm are on PATH, and the Control Center's
             dependencies are already installed.
-          - You MAY build and test the fork-authored code to check a
-            finding: the Rust workspace under service-runtime (cargo
-            clippy, cargo test), the Control Center under control-center,
-            and the CMake C++ in service-injector, preview-helper and
-            tools/service-probe.
-          - You may NOT build the inherited renderer. gdipp.sln needs four
-            pinned dependencies that this job does not provision. Read it
-            instead, and say plainly when a renderer finding is unverified
-            rather than implying you ran something.
+          - The open core is already built. A previous step ran
+            .github/scripts/Build-OpenCore.ps1, so the four pinned
+            dependencies are cloned and built under
+            build/core-dependencies, their import libraries are in
+            deps/lib, MacType x86 and x64 are built in Rel+Detours and
+            x64/Rel+Detours, and both service injectors are built and
+            their ctest suites have passed.
+          - You MAY build and test anything here to check a finding. The
+            renderer rebuilds through gdipp.sln with
+            /p:Configuration=Rel+Detours and /p:PlatformToolset=v143, and
+            because the object trees are warm a targeted project rebuild
+            is quick. The Rust workspace under service-runtime takes cargo
+            clippy and cargo test, the Control Center is under
+            control-center, and service-injector, preview-helper and
+            tools/service-probe are CMake.
+          - The renderer-specific gates on this branch are available and
+            are the fastest way to check a claim about it:
+            scripts/ci/Test-RendererStackFrames.ps1 for the foreign-thread
+            stack budget, Test-RendererAsan.ps1, Test-OpenCoreCppcheck.ps1,
+            Test-RendererActivationContract.ps1 and
+            Test-RendererProfileContract.ps1. Run the ones a finding needs
+            rather than all of them.
+          - Say plainly when a finding is unverified. Do not imply you ran
+            something you did not.
 
           GLOBAL RULES:
-          - The renderer sources this fork inherited from snowie2000/mactype
-            are third-party. docs/source-comment-policy.md says so and names
-            the consequence: their Japanese and Chinese commentary is the
-            only documentation that code has, and it is out of scope. Their
-            style, naming and comments are not findings. Fork-authored
-            changes inside that tree are in scope like any other code.
+          - The renderer on this branch is a modified fork, not an
+            inherited import, and it is in scope like the rest of the
+            code. Audit its architecture, its lifetimes, its hook and
+            FreeType ownership, and its tests.
+            docs/source-comment-policy.md calls the inherited sources
+            third-party for one narrow purpose only: their original
+            Japanese and Chinese commentary is the only documentation that
+            code has, so it stays and is never a finding. That exemption
+            covers comment prose and nothing else. The contracts those
+            files answer to are written down in
+            docs/renderer-activation-architecture.md,
+            docs/freetype-runtime.md, docs/hooking-compatibility.md and
+            docs/renderer-stack-budget.md; read them before calling
+            something in that tree a defect.
           - Treat docs/, doc/, evidence/, assets/, and generated files as
             out of scope unless they expose a code or build-system problem.
             The generated settings files (control-center/src/generated,
@@ -347,7 +383,7 @@ jobs:
             echo "Changed relevant files: **${COUNT}**"
             echo "Model: Fable 5.1 - Effort: xhigh"
             echo ""
-            echo "The inherited renderer was read, not built: this job does not provision the pinned dependencies gdipp.sln needs."
+            echo "The open core was built before the session started, renderer included, so findings about it could be checked against a build rather than a reading."
             echo ""
             echo "Files readable from this issue:"
             echo "- \`issue-body.md\` - this issue body"

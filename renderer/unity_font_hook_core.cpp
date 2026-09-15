@@ -447,6 +447,23 @@ private:
 		return true;
 	}
 
+	template <typename OptionalHeader>
+	bool ReadOptionalHeader(
+		std::size_t optionalOffset, WORD sizeOfOptionalHeader,
+		DWORD* sizeOfHeaders) noexcept
+	{
+		if (sizeOfOptionalHeader < sizeof(OptionalHeader))
+			return false;
+		OptionalHeader optional{};
+		if (!Read(optionalOffset, &optional, sizeof(optional)) ||
+			optional.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_DEBUG)
+			return false;
+		imageSize_ = optional.SizeOfImage;
+		*sizeOfHeaders = optional.SizeOfHeaders;
+		debugDirectory_ = optional.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
+		return true;
+	}
+
 	bool Initialize() noexcept
 	{
 		IMAGE_DOS_HEADER dos{};
@@ -475,34 +492,15 @@ private:
 		if (!Read(optionalOffset, &magic, sizeof(magic)))
 			return false;
 		DWORD sizeOfHeaders = 0;
+		bool optionalHeaderRead = false;
 		if (magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
-		{
-			if (file.SizeOfOptionalHeader < sizeof(IMAGE_OPTIONAL_HEADER32))
-				return false;
-			IMAGE_OPTIONAL_HEADER32 optional{};
-			if (!Read(optionalOffset, &optional, sizeof(optional)) ||
-				optional.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_DEBUG)
-				return false;
-			imageSize_ = optional.SizeOfImage;
-			sizeOfHeaders = optional.SizeOfHeaders;
-			debugDirectory_ = optional.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
-		}
+			optionalHeaderRead = ReadOptionalHeader<IMAGE_OPTIONAL_HEADER32>(
+				optionalOffset, file.SizeOfOptionalHeader, &sizeOfHeaders);
 		else if (magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
-		{
-			if (file.SizeOfOptionalHeader < sizeof(IMAGE_OPTIONAL_HEADER64))
-				return false;
-			IMAGE_OPTIONAL_HEADER64 optional{};
-			if (!Read(optionalOffset, &optional, sizeof(optional)) ||
-				optional.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_DEBUG)
-				return false;
-			imageSize_ = optional.SizeOfImage;
-			sizeOfHeaders = optional.SizeOfHeaders;
-			debugDirectory_ = optional.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
-		}
-		else
-		{
+			optionalHeaderRead = ReadOptionalHeader<IMAGE_OPTIONAL_HEADER64>(
+				optionalOffset, file.SizeOfOptionalHeader, &sizeOfHeaders);
+		if (!optionalHeaderRead)
 			return false;
-		}
 		if (imageSize_ == 0 || imageSize_ > size_ || sizeOfHeaders == 0 ||
 			sizeOfHeaders > imageSize_)
 			return false;
@@ -737,40 +735,6 @@ bool FontFileRedirectTable::ResolveFamilyFace(
 	}
 }
 
-bool ResolveFaceOpenPath(
-	const FontFileRedirectTable& redirects,
-	unsigned int openFlags,
-	const char* requestedUtf8,
-	long requestedFaceIndex,
-	FaceOpenPathRedirect& redirect) noexcept
-{
-	try
-	{
-		FaceOpenPathRedirect candidate;
-		constexpr unsigned int kOpenSourceMask = 0x07;
-		constexpr unsigned int kOpenPathname = 0x04;
-		if ((openFlags & kOpenSourceMask) != kOpenPathname ||
-			!Utf8PathToWide(requestedUtf8, candidate.sourcePath) ||
-			!redirects.ResolveFace(
-				candidate.sourcePath.c_str(), requestedFaceIndex,
-				candidate.replacementPath,
-				candidate.replacementFaceIndex) ||
-			!WidePathToUtf8(
-				candidate.replacementPath, candidate.replacementUtf8))
-		{
-			redirect = {};
-			return false;
-		}
-		redirect = std::move(candidate);
-		return true;
-	}
-	catch (...)
-	{
-		redirect = {};
-		return false;
-	}
-}
-
 bool ResolveTextCoreFontLoadPath(
 	const FontFileRedirectTable& redirects,
 	const char* requestedUtf8,
@@ -799,6 +763,27 @@ bool ResolveTextCoreFontLoadPath(
 		redirect = {};
 		return false;
 	}
+}
+
+// A private FreeType face open only carries a pathname when its flags select
+// that source; everything after that check is the same resolution the
+// TextCore font load performs.
+bool ResolveFaceOpenPath(
+	const FontFileRedirectTable& redirects,
+	unsigned int openFlags,
+	const char* requestedUtf8,
+	long requestedFaceIndex,
+	FaceOpenPathRedirect& redirect) noexcept
+{
+	constexpr unsigned int kOpenSourceMask = 0x07;
+	constexpr unsigned int kOpenPathname = 0x04;
+	if ((openFlags & kOpenSourceMask) != kOpenPathname)
+	{
+		redirect = {};
+		return false;
+	}
+	return ResolveTextCoreFontLoadPath(
+		redirects, requestedUtf8, requestedFaceIndex, redirect);
 }
 
 bool ReadLegacyFontRefFamily(

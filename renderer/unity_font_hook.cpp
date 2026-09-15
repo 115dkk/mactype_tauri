@@ -98,6 +98,20 @@ struct UnityLifecycleState final
 	renderer::unity::FontSubstitutionBoundary substitutionBoundary =
 		renderer::unity::FontSubstitutionBoundary::unavailable;
 	bool startupSucceeded = false;
+
+	// The eight trampolines Detours writes into. They are cleared together on
+	// a failed attach and on teardown, never one at a time.
+	void ClearHookTargets() noexcept
+	{
+		publicRender = nullptr;
+		internalRender = nullptr;
+		faceOpen = nullptr;
+		fontLoad = nullptr;
+		characterLookup = nullptr;
+		osFaceResolver = nullptr;
+		freeTypeCharIndex = nullptr;
+		fontCatalogLoad = nullptr;
+	}
 };
 
 UnityLifecycleState& ProcessUnityLifecycle()
@@ -853,14 +867,7 @@ bool AttachUnityRenderer(
 		transaction.Commit();
 	if (status != NOERROR)
 	{
-		lifecycle.publicRender = nullptr;
-		lifecycle.internalRender = nullptr;
-		lifecycle.faceOpen = nullptr;
-		lifecycle.fontLoad = nullptr;
-		lifecycle.characterLookup = nullptr;
-		lifecycle.osFaceResolver = nullptr;
-		lifecycle.freeTypeCharIndex = nullptr;
-		lifecycle.fontCatalogLoad = nullptr;
+		lifecycle.ClearHookTargets();
 		lifecycle.osFaceResolverRequired = false;
 		lifecycle.fontCatalogLoadRequired = false;
 		PublishUnityCapability(
@@ -1218,14 +1225,7 @@ bool CommitUnityFontHookLifecycleStop()
 	lifecycle.evidenceView.reset();
 	lifecycle.evidenceMapping.reset();
 	lifecycle.unityPlayer.reset();
-	lifecycle.publicRender = nullptr;
-	lifecycle.internalRender = nullptr;
-	lifecycle.faceOpen = nullptr;
-	lifecycle.fontLoad = nullptr;
-	lifecycle.characterLookup = nullptr;
-	lifecycle.osFaceResolver = nullptr;
-	lifecycle.freeTypeCharIndex = nullptr;
-	lifecycle.fontCatalogLoad = nullptr;
+	lifecycle.ClearHookTargets();
 	lifecycle.renderAttached = false;
 	lifecycle.faceOpenAttached = false;
 	lifecycle.fontLoadAttached = false;

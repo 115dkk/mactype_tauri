@@ -10,6 +10,7 @@ param(
     [string] $InstallationRoot,
     [string] $OutputRoot = 'artifacts/window-move-probe',
     [string] $Skins = 'classic,console,fluent,cupertino',
+    [string] $Views = 'overview',
     [int] $Steps = 240,
     [int] $IntervalMs = 8,
     [int] $Amplitude = 120,
@@ -80,7 +81,7 @@ try {
     if (-not $endpoint) { throw "WebView2 remote debugging did not answer on port $CdpPort within $TimeoutSeconds seconds." }
     Write-Host "Attached to $($endpoint.Browser) (pid $($process.Id))"
 
-    $arguments = @((Join-Path $root 'scripts\ci\window-move-probe.mjs'), '--cdp', "http://127.0.0.1:$CdpPort", '--pid', $process.Id, '--out', $outputRoot, '--skins', $Skins, '--steps', $Steps, '--interval', $IntervalMs, '--amplitude', $Amplitude, '--rounds', $Rounds)
+    $arguments = @((Join-Path $root 'scripts\ci\window-move-probe.mjs'), '--cdp', "http://127.0.0.1:$CdpPort", '--pid', $process.Id, '--out', $outputRoot, '--skins', $Skins, '--views', $Views, '--steps', $Steps, '--interval', $IntervalMs, '--amplitude', $Amplitude, '--rounds', $Rounds)
     if ($Drag) { $arguments += '--drag' }
     & node @arguments
     if ($LASTEXITCODE -ne 0) { throw "window-move-probe.mjs failed with exit code $LASTEXITCODE." }

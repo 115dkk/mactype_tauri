@@ -33,6 +33,11 @@ const cdpUrl = argument("cdp", "http://127.0.0.1:9333");
 const pid = Number(argument("pid", "0"));
 const outDir = path.resolve(argument("out", path.join(root, "artifacts", "window-move-probe")));
 const skins = argument("skins", "classic,console,fluent,cupertino").split(",").map((skin) => skin.trim()).filter(Boolean);
+/* Views to measure under every skin; the overview alone by default. A view
+   is reached through its navigation entry, so the app itself drives the
+   change of page. */
+const views = argument("views", "overview").split(",").map((view) => view.trim()).filter(Boolean);
+const navigationIds = { overview: "overview", files: "files", profiles: "all", execution: "execution", diagnostics: "diagnostics" };
 const steps = Number(argument("steps", "240"));
 const interval = Number(argument("interval", "8"));
 const amplitude = Number(argument("amplitude", "120"));
@@ -171,36 +176,54 @@ async function findMainPage(browser) {
   throw new Error("the main window page did not appear over CDP");
 }
 
-async function showSkin(page, skin) {
-  const url = new URL(page.url());
-  url.search = `?skin=${skin}`;
-  await page.goto(url.toString(), { waitUntil: "load", timeout: 60_000 });
-  await page.waitForSelector(`html[data-skin="${skin}"]`, { timeout: 30_000 });
-  await page.waitForSelector('body[data-rendered="true"]', { timeout: 60_000 });
-  /* Let the overview settle: specimen strips arrive from the helper and the
+async function settle(page) {
+  /* Let the page settle: specimen strips arrive from the helper and the
      status polls answer; a move measured during that would blame the skin
      for start-up work. */
   await page.waitForSelector(".specimen-board img, .preview-strip img", { timeout: 15_000 }).catch(() => undefined);
   await sleep(2500);
 }
 
+async function showSkin(page, skin) {
+  const url = new URL(page.url());
+  url.search = `?skin=${skin}`;
+  await page.goto(url.toString(), { waitUntil: "load", timeout: 60_000 });
+  await page.waitForSelector(`html[data-skin="${skin}"]`, { timeout: 30_000 });
+  await page.waitForSelector('body[data-rendered="true"]', { timeout: 60_000 });
+  await settle(page);
+}
+
+async function showView(page, view) {
+  const current = await page.evaluate(() => document.body.dataset.view);
+  if (current === view) return;
+  const id = navigationIds[view];
+  if (!id) throw new Error(`unknown view ${view}`);
+  await page.click(`button[data-nav="${id}"]`);
+  await page.waitForSelector(`body[data-view="${view}"]`, { timeout: 30_000 });
+  await settle(page);
+}
+
 const browser = await connect();
 const page = await findMainPage(browser);
-const report = { startedAt: new Date().toISOString(), pid, cdpUrl, steps, interval, amplitude, rounds, withDrag, skins: {} };
+const report = { startedAt: new Date().toISOString(), pid, cdpUrl, steps, interval, amplitude, rounds, withDrag, views, cases: {} };
 
 for (const skin of skins) {
   await showSkin(page, skin);
-  const entry = { push: [], drag: [] };
-  for (let roundIndex = 0; roundIndex < rounds; roundIndex++) {
-    entry.push.push(await measure(page, "push", path.join(outDir, `trace-${skin}-push-${roundIndex}.json`)));
-    await sleep(500);
-    if (withDrag) {
-      entry.drag.push(await measure(page, "drag", path.join(outDir, `trace-${skin}-drag-${roundIndex}.json`)));
+  for (const view of views) {
+    await showView(page, view);
+    const name = `${skin}/${view}`;
+    const entry = { skin, view, push: [], drag: [] };
+    for (let roundIndex = 0; roundIndex < rounds; roundIndex++) {
+      entry.push.push(await measure(page, "push", path.join(outDir, `trace-${skin}-${view}-push-${roundIndex}.json`)));
       await sleep(500);
+      if (withDrag) {
+        entry.drag.push(await measure(page, "drag", path.join(outDir, `trace-${skin}-${view}-drag-${roundIndex}.json`)));
+        await sleep(500);
+      }
     }
+    report.cases[name] = entry;
+    console.log(`measured ${name}`);
   }
-  report.skins[skin] = entry;
-  console.log(`measured ${skin}`);
 }
 await browser.close().catch(() => undefined);
 
@@ -227,28 +250,33 @@ function summarise(entry) {
     dragGapP95Ms: worstDrag ? worstDrag.page.gapP95Ms : null,
   };
 }
-const summary = Object.fromEntries(Object.entries(report.skins).map(([skin, entry]) => [skin, summarise(entry)]));
-const control = summary.classic ?? summary[skins[0]];
+const summary = Object.fromEntries(Object.entries(report.cases).map(([name, entry]) => [name, { skin: entry.skin, view: entry.view, ...summarise(entry) }]));
 const ratio = (value, base) => (base > 0 && value !== null ? round(value / base, 2) : null);
-for (const [skin, values] of Object.entries(summary)) {
+for (const [name, values] of Object.entries(summary)) {
+  /* The control is the classic skin on the same view, or the first case measured on that view. */
+  const control = summary[`classic/${values.view}`] ?? Object.values(summary).find((candidate) => candidate.view === values.view);
+  values.control = control === values;
   values.pushP95Ratio = ratio(values.pushP95Ms, control.pushP95Ms);
   values.gapP95Ratio = ratio(values.gapP95Ms, control.gapP95Ms);
   values.dragLagRatio = values.dragP95LagPx === null ? null : ratio(values.dragP95LagPx, control.dragP95LagPx);
-  values.notSmooth = skin !== "classic" && ((values.pushP95Ratio ?? 0) > 1.5 || (values.gapP95Ratio ?? 0) > 1.5 || values.gapsOver33 > Math.max(3, values.frames * 0.1) || (values.dragLagRatio ?? 0) > 1.5);
+  values.notSmooth = !values.control && ((values.pushP95Ratio ?? 0) > 1.5 || (values.gapP95Ratio ?? 0) > 1.5 || values.gapsOver33 > Math.max(3, values.frames * 0.1) || (values.dragLagRatio ?? 0) > 1.5);
+  if (values.control && (values.pushP95Ms > 16 || values.gapsOver33 > Math.max(3, values.frames * 0.1))) values.notSmooth = true;
+  void name;
 }
 report.summary = summary;
 fs.writeFileSync(path.join(outDir, "report.json"), JSON.stringify(report, null, 2));
 
 const lines = [
-  "| skin | push p95 ms | push max ms | steps > 16 ms | rAF gap p95 ms | gap max ms | gaps > 33 ms / frames | long tasks ms | compositor drawn / dropped | drag p95 lag px | drag max lag px | ratio push / gap / drag | verdict |",
+  "| skin / view | push p95 ms | push max ms | steps > 16 ms | rAF gap p95 ms | gap max ms | gaps > 33 ms / frames | long tasks ms | compositor drawn / dropped | drag p95 lag px | drag max lag px | ratio push / gap / drag | verdict |",
   "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
 ];
-for (const [skin, v] of Object.entries(summary)) {
+for (const [name, v] of Object.entries(summary)) {
   const drag = v.dragSupported === null ? "n/a | n/a" : v.dragSupported ? `${v.dragP95LagPx} | ${v.dragMaxLagPx}` : "input not accepted | -";
   const compositor = v.drawn === null ? "n/a" : `${v.drawn} / ${v.dropped}`;
-  lines.push(`| ${skin} | ${v.pushP95Ms} | ${v.pushMaxMs} | ${v.pushOver16} | ${v.gapP95Ms} | ${v.gapMaxMs} | ${v.gapsOver33} / ${v.frames} | ${v.longTaskMs} | ${compositor} | ${drag} | ${v.pushP95Ratio ?? "-"} / ${v.gapP95Ratio ?? "-"} / ${v.dragLagRatio ?? "-"} | ${skin === "classic" ? "control" : v.notSmooth ? "NOT SMOOTH" : "smooth"} |`);
+  const verdict = v.control ? (v.notSmooth ? "control, NOT SMOOTH" : "control") : v.notSmooth ? "NOT SMOOTH" : "smooth";
+  lines.push(`| ${name} | ${v.pushP95Ms} | ${v.pushMaxMs} | ${v.pushOver16} | ${v.gapP95Ms} | ${v.gapMaxMs} | ${v.gapsOver33} / ${v.frames} | ${v.longTaskMs} | ${compositor} | ${drag} | ${v.pushP95Ratio ?? "-"} / ${v.gapP95Ratio ?? "-"} / ${v.dragLagRatio ?? "-"} | ${verdict} |`);
 }
-const markdown = `## Window move probe\n\nsteps ${steps} × ${interval} ms, amplitude ${amplitude} px, rounds ${rounds}, worst round reported.\n\n${lines.join("\n")}\n`;
+const markdown = `## Window move probe\n\nsteps ${steps} × ${interval} ms, amplitude ${amplitude} px, rounds ${rounds}, worst round reported; the control is the classic skin on the same view.\n\n${lines.join("\n")}\n`;
 fs.writeFileSync(path.join(outDir, "summary.md"), markdown);
 console.log(markdown);
 if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, markdown);

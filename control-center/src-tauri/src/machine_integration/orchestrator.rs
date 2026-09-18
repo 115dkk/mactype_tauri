@@ -39,6 +39,7 @@ pub(super) fn execute_machine_action_with(
     let profile_contract_is_valid = match action {
         MachineAction::Start
         | MachineAction::PublishProfile
+        | MachineAction::DesignateProfile
         | MachineAction::MigrateFromLegacy
         | MachineAction::RemoveLegacy => profile.is_some(),
         _ => profile.is_none(),
@@ -142,6 +143,7 @@ pub(super) fn native_action_authorized(
         MachineAction::Start => Some(status.can_start),
         MachineAction::Stop => Some(status.can_stop),
         MachineAction::PublishProfile
+        | MachineAction::DesignateProfile
         | MachineAction::MigrateFromLegacy
         | MachineAction::Rollback
         | MachineAction::RemoveLegacy => None,

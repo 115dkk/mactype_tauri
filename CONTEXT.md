@@ -88,6 +88,9 @@ This file fixes the domain language used by code, tests, CI, and architecture do
 **Wizard 영역**
 : The navigation area that answers "what runs, and how": profile selection and apply (view id `files`) plus 구동 방식 and service control (view id `execution`). It inherits the role of the legacy MacWizard. The Korean product term is always **위자드**; never write 마법사. View ids are frozen interface — labels may differ from ids.
 
+**실행 프로필 (run profile)**
+: The profile the 신식 서비스 uses whenever it runs: the current user's applied pointer, published to the protected profile store. Setting it never starts or stops the service: a running service switches to it live, a stopped one holds it for its next start, and an absent service receives it when it is installed and started. The bundled `ini\Default.ini` is the run profile until another is set. The Korean product term is always **실행 프로필**; do not write 활성 프로필 or 적용 프로필 for this concept.
+
 **Tuner 영역**
 : The navigation area that answers "how the profile content is shaped": profile editing (view id `profiles`, modes guided/all). It inherits the role of the legacy MacTuner. The Korean product term is always **튜너**.
 

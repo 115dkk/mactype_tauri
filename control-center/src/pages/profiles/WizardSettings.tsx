@@ -143,7 +143,7 @@ export function WizardSettings({
             <div>
               <button className="button secondary" onClick={onPreview} type="button"><Eye aria-hidden="true" size={16} /> {t("profiles.preview")}</button>
               <button className="button secondary" disabled={busy || dirtyCount === 0 || !canSave} onClick={onSave} type="button"><Save aria-hidden="true" size={16} /> {t("wizard.saveProfile")}</button>
-              <button className="button primary" disabled={busy || dirtyCount > 0} onClick={onApply} title={dirtyCount > 0 ? t("profiles.saveBeforeApply") : undefined} type="button"><Play aria-hidden="true" size={16} /> {t("wizard.applyMacType")}</button>
+              <button className="button primary" disabled={busy || dirtyCount > 0} onClick={onApply} title={dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button"><Play aria-hidden="true" size={16} /> {t("wizard.designateMacType")}</button>
             </div>
           </section>
         )}

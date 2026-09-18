@@ -22,11 +22,21 @@ pub(super) struct ActiveRuntime {
     pub(super) source_profile: PathBuf,
 }
 
+/// How far a run-profile designation reached: a running service switched to
+/// it at once, or the choice is held until the service next starts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DesignationEffect {
+    Live,
+    NextStart,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppliedProfile {
     pub source_profile: String,
     pub runtime_root: String,
+    pub effect: DesignationEffect,
 }
 
 pub(super) fn runtime_root() -> Result<PathBuf, String> {
@@ -215,5 +225,6 @@ pub fn apply_profile(
     Ok(AppliedProfile {
         source_profile: active.source_profile.to_string_lossy().into_owned(),
         runtime_root: active.runtime_root.to_string_lossy().into_owned(),
+        effect: DesignationEffect::NextStart,
     })
 }

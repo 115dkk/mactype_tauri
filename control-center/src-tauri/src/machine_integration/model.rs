@@ -12,6 +12,7 @@ pub(crate) enum MachineAction {
     Start,
     Stop,
     PublishProfile,
+    DesignateProfile,
     MigrateFromLegacy,
     Rollback,
     RemoveLegacy,

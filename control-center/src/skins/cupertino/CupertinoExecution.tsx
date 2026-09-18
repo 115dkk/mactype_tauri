@@ -30,7 +30,7 @@ export function CupertinoExecution({ shell }: { shell: ShellProps }) {
             <CupertinoGroup dataKind="system-detail">
               <ServicePackageNotice model={model} />
               <CupertinoRow
-                description={t(systemInjectionAction.descriptionKey)}
+                description={t(systemInjectionAction.descriptionKey, { name: model.activeProfileName })}
                 hero
                 leading={<span className="cupertino-okc" data-tone={systemInjectionAction.state === "active" ? "ok" : "neutral"}>{systemInjectionAction.state === "active" ? <Check aria-hidden="true" size={16} strokeWidth={3} /> : <PowerOff aria-hidden="true" size={15} strokeWidth={2.4} />}</span>}
                 title={t(systemInjectionAction.titleKey)}

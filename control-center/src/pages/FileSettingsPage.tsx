@@ -41,7 +41,7 @@ export function FileSettingsPage({ onEditInTuner }: FileSettingsPageProps) {
             const applied = matchesAppliedProfile(entry, appliedProfile);
             const thumbnail = thumbnails.get(entry.path) ?? null;
             return (
-              <li className="profile-card" data-applied={applied} data-selected={selected} key={entry.path}>
+              <li className="profile-card" data-applied={applied} data-run-profile={applied} data-selected={selected} key={entry.path}>
                 <button aria-pressed={selected} className="profile-card-select" disabled={busy !== null} onClick={() => void model.chooseProfile(entry.path)} type="button">
                   <span className="profile-card-thumb">
                     {thumbnail
@@ -50,7 +50,7 @@ export function FileSettingsPage({ onEditInTuner }: FileSettingsPageProps) {
                   </span>
                   <span className="profile-card-title">
                     <strong>{entry.name}</strong>
-                    {applied && <span className="profile-card-badge">{t("files.appliedBadge")}</span>}
+                    {applied && <span className="profile-card-badge">{t("files.runProfileBadge")}</span>}
                   </span>
                   <code title={entry.path}>{entry.displayPath}</code>
                 </button>
@@ -84,11 +84,16 @@ export function FileSettingsPage({ onEditInTuner }: FileSettingsPageProps) {
           <button className="button secondary" disabled={!model.canSave} onClick={() => void model.save()} type="button"><Save aria-hidden="true" size={17} /> {busy === "save" ? t("profiles.saving") : t("profiles.save")}</button>
           <div className="file-save-as"><input aria-label={t("profiles.copyName")} disabled={!profile || busy !== null} onChange={(event) => model.setCopyName(event.target.value)} placeholder={t("files.saveAsName")} value={copyName} /><button className="button secondary" disabled={!model.canDuplicate} onClick={() => void model.duplicate()} type="button"><SaveAll aria-hidden="true" size={16} /> {t("files.saveAs")}</button></div>
           <button className="button secondary" disabled={!profile || busy !== null} onClick={() => void model.exportIni()} type="button"><FileOutput aria-hidden="true" size={17} /> {busy === "export" ? t("files.exporting") : t("files.chooseExport")}</button>
-          <button className="button primary" disabled={!model.canApply} onClick={() => void model.apply()} title={dirtyCount > 0 ? t("profiles.saveBeforeApply") : undefined} type="button"><Play aria-hidden="true" size={17} /> {busy === "apply" ? t("profiles.applying") : t("profiles.apply")}</button>
+          <button className="button primary" disabled={!model.canDesignate} onClick={() => void model.designate()} title={dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button"><Play aria-hidden="true" size={17} /> {busy === "designate" ? t("profiles.designating") : t("profiles.designate")}</button>
         </div>
       </section>
 
-      {message && <p aria-live="polite" className="success-message" data-operation="file-settings"><Check aria-hidden="true" size={16} /> {message}</p>}
+      {message && (
+        <p aria-live="polite" className="success-message" data-operation="file-settings">
+          <Check aria-hidden="true" size={16} /> {message}
+          {model.offerStart && <button className="text-action" disabled={busy !== null} onClick={() => void model.startServiceNow()} type="button"><Play aria-hidden="true" size={14} /> {busy === "start" ? t("execution.serviceWorking") : t("files.startServiceNow")}</button>}
+        </p>
+      )}
       {error && <p className="inline-error"><AlertTriangle aria-hidden="true" size={15} /> {error}</p>}
     </section>
   );

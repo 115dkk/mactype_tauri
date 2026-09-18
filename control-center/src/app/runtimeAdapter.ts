@@ -40,7 +40,7 @@ export interface ControlCenterRuntimeAdapter {
   setSessionAutostart(enabled: boolean): Promise<boolean>;
   launchTargetWithMactype(target: string, arguments_: ReadonlyArray<string>): Promise<number>;
   scanInstallation(): Promise<InstallationStatus | null>;
-  applyOpenProfile(): Promise<AppliedProfile>;
+  designateOpenProfile(): Promise<AppliedProfile>;
   registerSessionTarget(target: string, arguments_: ReadonlyArray<string>): Promise<ReadonlyArray<SessionTarget>>;
   removeSessionTarget(target: string): Promise<ReadonlyArray<SessionTarget>>;
   launchRegisteredTargets(): Promise<ReadonlyArray<number>>;

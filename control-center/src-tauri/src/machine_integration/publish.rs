@@ -79,6 +79,35 @@ pub(crate) fn publish_profile_transaction_with(
     Ok(())
 }
 
+/// Makes `profile` the run profile without changing whether the service runs:
+/// a running service switches to it live through the full publish transaction,
+/// a stopped one only receives the published generation so its next start, at
+/// boot or by hand, uses it.
+pub(crate) fn designate_profile_transaction_with(
+    backend: &mut impl MachineBackend,
+    profile: &[u8],
+) -> Result<(), String> {
+    if profile.is_empty() || profile.len() > mactype_service_contract::MAX_PROFILE_BYTES {
+        return Err("the designated profile payload is outside the allowed range".to_owned());
+    }
+    let before = backend.new_service_status();
+    if before.runtime == crate::service_contract::RuntimeState::Running {
+        return publish_profile_transaction_with(backend, profile);
+    }
+    if before.backend == crate::service_contract::ServiceBackend::Foreign
+        || !matches!(
+            before.installation,
+            crate::service_contract::InstallationState::Absent
+                | crate::service_contract::InstallationState::Current
+                | crate::service_contract::InstallationState::Outdated
+        )
+        || before.runtime != crate::service_contract::RuntimeState::Stopped
+    {
+        return Err("the new service is foreign, transitioning, or unsafe".to_owned());
+    }
+    backend.execute(MachineAction::PublishProfile, Some(profile))
+}
+
 fn wait_for_published_profile_with(
     expected_digest: &str,
     maximum_attempts: usize,

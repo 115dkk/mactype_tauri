@@ -38,6 +38,7 @@ impl From<MachineAction> for open_service::SystemServiceAction {
             MachineAction::Start => Self::Start,
             MachineAction::Stop => Self::Stop,
             MachineAction::PublishProfile => Self::PublishProfile,
+            MachineAction::DesignateProfile => Self::DesignateProfile,
             MachineAction::MigrateFromLegacy => Self::MigrateFromLegacy,
             MachineAction::Rollback => Self::Rollback,
             MachineAction::RemoveLegacy => Self::RemoveLegacy,

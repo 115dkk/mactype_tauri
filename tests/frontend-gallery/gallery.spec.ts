@@ -1064,7 +1064,7 @@ test("execution and new system service controls remain interactive", async ({ pa
   await page.getByRole("button", { name: "새로 여는 앱에 적용 중지" }).click();
   await expect(page.getByText("MacType 시스템 적용 꺼짐", { exact: true })).toBeVisible();
   await expect(page.getByText("MacType 시스템 적용을 잠시 껐습니다.", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "실행 프로필로 시작" }).click();
+  await page.locator(".system-injection-action").click();
   await expect(page.getByText("MacType 시스템 적용 중", { exact: true })).toBeVisible();
   await expect(page.getByText("실행 프로필로 서비스를 시작했습니다.", { exact: true })).toBeVisible();
 
@@ -1125,7 +1125,7 @@ test("a running legacy service is never claimed as verified system application",
   await page.getByRole("button", { name: "새로 여는 앱에 적용 중지" }).click();
   await expect(openService.locator('[data-state="legacy-service-migrate"]')).toBeVisible();
   await expect(openService).toContainText("레거시 MacTray 서비스를 먼저 정리해야 합니다");
-  await expect(page.getByRole("button", { name: "실행 프로필로 시작" })).toBeDisabled();
+  await expect(page.locator(".system-injection-action")).toBeDisabled();
   await expect(legacy.getByRole("button", { name: "마이그레이션" })).toBeEnabled();
 
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
@@ -1253,9 +1253,9 @@ test("a foreign legacy MacType service blocks activation and offers no migration
   await expect(openService).toContainText("A foreign legacy MacTray service was detected");
   await expect(openService).toContainText("A different service is using the MacType name");
   await expect(openService).not.toContainText("Use Migrate below");
-  await expect(openService.getByRole("button", { name: "Start with the run profile" })).toBeDisabled();
-  await expect(openService.getByRole("button", { name: "Install service" })).toBeDisabled();
-  await expect(openService.getByRole("button", { name: "Start service" })).toBeDisabled();
+  await expect(openService.locator(".system-injection-action")).toBeDisabled();
+  await expect(openService.locator(".service-actions").getByRole("button", { name: "Install service" })).toBeDisabled();
+  await expect(openService.locator(".service-actions").getByRole("button", { name: "Start service" })).toBeDisabled();
 
   const legacy = page.locator('[data-service-backend="legacy-mactray"]');
   await expect(legacy).toBeVisible();
@@ -1273,9 +1273,9 @@ test("a verified legacy service funnels activation through Migrate until it is r
   await expect(openService).toContainText("An older MacTray service is installed");
   await expect(openService).not.toContainText("foreign legacy MacTray service");
   await expect(openService).not.toContainText("status could not be verified");
-  await expect(openService.getByRole("button", { name: "Start with the run profile" })).toBeDisabled();
-  await expect(openService.getByRole("button", { name: "Install service" })).toBeDisabled();
-  await expect(openService.getByRole("button", { name: "Start service" })).toBeDisabled();
+  await expect(openService.locator(".system-injection-action")).toBeDisabled();
+  await expect(openService.locator(".service-actions").getByRole("button", { name: "Install service" })).toBeDisabled();
+  await expect(openService.locator(".service-actions").getByRole("button", { name: "Start service" })).toBeDisabled();
 
   const legacy = page.locator('[data-service-backend="legacy-mactray"]');
   await expect(legacy).toContainText("Verified MacTray service");
@@ -1475,7 +1475,7 @@ test("AppInit conflict preserves the backend-authorized recovery stop", async ({
   await expect(statusRow.locator(".warning")).toBeVisible();
   await expect(statusRow.locator(".success")).toHaveCount(0);
   for (const name of ["Install service", "Start service", "Remove service"]) {
-    await expect(openService.getByRole("button", { name })).toBeDisabled();
+    await expect(openService.locator(".service-actions").getByRole("button", { name })).toBeDisabled();
   }
   const legacy = page.locator('[data-service-backend="legacy-mactray"]');
   await expect(legacy.getByRole("button", { name: "Migrate" })).toBeDisabled();
@@ -1565,7 +1565,7 @@ test("a running new service with a legacy tray conflict offers only the verified
   await expect(openService).not.toContainText("MacType system-wide rendering active");
   await expect(openService.getByRole("button", { name: "Stop applying to new apps" })).toBeEnabled();
   for (const name of ["Install service", "Start service", "Repair service", "Upgrade service", "Remove service"]) {
-    const button = openService.getByRole("button", { name });
+    const button = openService.locator(".service-actions").getByRole("button", { name });
     if (await button.count()) await expect(button).toBeDisabled();
   }
 });

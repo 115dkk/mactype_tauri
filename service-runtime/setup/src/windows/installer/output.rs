@@ -6,9 +6,15 @@ impl BootstrapOutcome {
             Self::Applied {
                 active_profile_digest,
                 preserved_existing_profile,
-            } => format!(
-                "{{\"ok\":true,\"verb\":\"{verb}\",\"outcome\":\"applied\",\"activeProfileDigest\":\"{active_profile_digest}\",\"preservedExistingProfile\":{preserved_existing_profile}}}"
-            ),
+                service_started,
+            } => {
+                let digest = active_profile_digest
+                    .as_ref()
+                    .map_or_else(|| "null".to_owned(), |digest| format!("\"{digest}\""));
+                format!(
+                    "{{\"ok\":true,\"verb\":\"{verb}\",\"outcome\":\"applied\",\"activeProfileDigest\":{digest},\"preservedExistingProfile\":{preserved_existing_profile},\"serviceStarted\":{service_started}}}"
+                )
+            }
             Self::SkippedBlocked { reason } => format!(
                 "{{\"ok\":true,\"verb\":\"{verb}\",\"outcome\":\"skipped-blocked\",\"reason\":\"{}\"}}",
                 reason.code()

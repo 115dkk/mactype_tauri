@@ -12,10 +12,10 @@ mod windows;
 
 pub use install_bootstrap::{
     parse_setup_command, protected_installer_broker_layout, run_install_bootstrap_with,
-    run_uninstall_owned_with, BootstrapBlocker, BootstrapMode, BootstrapOutcome,
-    BootstrapPreflight, ConflictObservation, InstallBootstrapBackend, OpenServiceObservation,
-    ProtectedProfileObservation, ProtectedRuntimeObservation, SetupCommand, UninstallBackend,
-    UninstallOutcome,
+    run_uninstall_owned_with, BootstrapBlocker, BootstrapOutcome, BootstrapPlan,
+    BootstrapPreflight, BootstrapProfileMode, BootstrapStartPolicy, ConflictObservation,
+    InstallBootstrapBackend, OpenServiceObservation, ProtectedProfileObservation,
+    ProtectedRuntimeObservation, SetupCommand, UninstallBackend, UninstallOutcome,
 };
 pub use profile_store::ProfileStore;
 pub use runtime_installer::{
@@ -59,13 +59,14 @@ pub fn run_setup_command(
 ) -> Result<String, SetupError> {
     let result = match command {
         SetupCommand::Broker(command) => return run_broker_command(command, profile_input),
-        SetupCommand::BootstrapInstall => {
+        SetupCommand::BootstrapInstall(policy) => {
             #[cfg(windows)]
             {
-                windows::run_installer_bootstrap()
+                windows::run_installer_bootstrap(policy)
             }
             #[cfg(not(windows))]
             {
+                let _ = policy;
                 Err(SetupError::Runtime(
                     "installer bootstrap requires Windows".to_owned(),
                 ))

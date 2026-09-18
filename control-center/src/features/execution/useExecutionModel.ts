@@ -33,6 +33,13 @@ export function useExecutionModel({ ciSmoke = false, onReady }: ExecutionModelOp
   const [migrationConfirmationOpen, setMigrationConfirmationOpen] = useState(false);
   const migrationTriggerRef = useRef<HTMLButtonElement>(null);
   const migrationCancelRef = useRef<HTMLButtonElement>(null);
+  /* Callers pass onReady as an inline closure, so it changes on every render.
+     Reading it through a ref keeps refresh stable; otherwise each status
+     answer re-rendered the caller, replaced refresh, and re-ran the status
+     command without end, which kept the window thread busy (the Console
+     skin, whose shell owns this model, moved with a 47 ms stall per step). */
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
 
   useEffect(() => {
     if (migrationConfirmationOpen) migrationCancelRef.current?.focus();
@@ -48,14 +55,14 @@ export function useExecutionModel({ ciSmoke = false, onReady }: ExecutionModelOp
           throw new Error("CI profile application did not produce an active injection runtime");
         }
         await verifyInjectionWorkflowForCi();
-        onReady?.();
+        onReadyRef.current?.();
       }
     } catch (caught: unknown) {
       const message = caught instanceof Error ? caught.message : String(caught);
       setError(message);
       if (ciSmoke) void reportFrontendFailure("execution", message);
     }
-  }, [ciSmoke, onReady]);
+  }, [ciSmoke]);
 
   useEffect(() => {
     void refresh();

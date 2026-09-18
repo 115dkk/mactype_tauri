@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -504,7 +505,7 @@ bool cjk_break_character(wchar_t character) {
 }
 
 int wrapped_text_height(HDC dc, const RECT& area, const std::wstring& text, int line_height,
-                        COLORREF color) {
+                        COLORREF color, bool draw = true) {
   SetTextColor(dc, color);
   SetBkMode(dc, TRANSPARENT);
   int y = area.top;
@@ -532,14 +533,27 @@ int wrapped_text_height(HDC dc, const RECT& area, const std::wstring& text, int 
     if (best == line_start) best = std::min(line_start + 1, text.size());
     std::size_t end = candidate > line_start && best < text.size() ? candidate : best;
     while (end > line_start && text[end - 1] == L' ') --end;
-    ExtTextOutW(dc, area.left, y, ETO_CLIPPED, &area, text.data() + line_start,
-                static_cast<UINT>(end - line_start), nullptr);
+    if (draw) {
+      ExtTextOutW(dc, area.left, y, ETO_CLIPPED, &area, text.data() + line_start,
+                  static_cast<UINT>(end - line_start), nullptr);
+    }
     y += line_height;
     line_start = candidate > line_start && best < text.size() ? candidate : best;
     while (line_start < text.size() && text[line_start] == L' ') ++line_start;
     if (line_start < text.size() && text[line_start] == L'\n') ++line_start;
   }
   return y - area.top;
+}
+
+int measure_wrapped_text(HFONT font, int width, const std::wstring& text, int line_height) {
+  HDC dc = CreateCompatibleDC(nullptr);
+  if (!dc) return line_height;
+  HGDIOBJ previous = SelectObject(dc, font);
+  const RECT area{0, 0, std::max(1, width), std::numeric_limits<LONG>::max() / 2};
+  const int height = wrapped_text_height(dc, area, text, line_height, RGB(0, 0, 0), false);
+  SelectObject(dc, previous);
+  DeleteDC(dc);
+  return height;
 }
 
 std::vector<std::uint8_t> encode_png(const std::uint8_t* pixels, std::uint32_t width,
@@ -741,8 +755,9 @@ bool PreviewRuntime::create_windows(std::string& error) {
   RegisterClassW(&window_class);
   hidden_window_ = CreateWindowExW(0, kWindowClass, L"", WS_OVERLAPPED, 0, 0, 1, 1, nullptr,
                                    nullptr, window_class.hInstance, this);
-  native_window_ = CreateWindowExW(0, kWindowClass, labels_.title.c_str(), WS_OVERLAPPEDWINDOW,
-                                   CW_USEDEFAULT, CW_USEDEFAULT, 960, 560, nullptr, nullptr,
+  native_window_ = CreateWindowExW(0, kWindowClass, labels_.title.c_str(),
+                                   WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT,
+                                   CW_USEDEFAULT, 960, 560, nullptr, nullptr,
                                    window_class.hInstance, this);
   if (!hidden_window_ || !native_window_) {
     error = "failed to create preview windows";
@@ -1157,7 +1172,11 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
     }
   }
   const bool theme_changed = pending.dark_theme != dark_theme_;
-  const bool chrome_changed = pending.chrome.has_value() || chrome_.has_value();
+  const bool chrome_changed = pending.chrome != chrome_;
+  const bool labels_changed = pending.labels != labels_;
+  const bool title_changed = pending.labels.title != labels_.title;
+  const bool layout_changed = theme_changed || chrome_changed || labels_changed ||
+                              pending.zoom != zoom_;
   display_mode_ = pending.display_mode;
   sample_text_ = std::move(pending.sample_text);
   listing_text_ = std::move(pending.listing_text);
@@ -1180,10 +1199,10 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
     recreate_palette_brushes();
     apply_combo_theme();
   }
-  recreate_ui_font();
-  SetWindowTextW(native_window_, labels_.title.c_str());
+  if (title_changed) SetWindowTextW(native_window_, labels_.title.c_str());
   sync_controls();
-  relayout_controls();
+  if (layout_changed) relayout_controls();
+  else InvalidateRect(native_window_, nullptr, FALSE);
   return true;
 }
 
@@ -1227,6 +1246,15 @@ std::string PreviewRuntime::native_state_json(bool visible) const {
 }
 
 void PreviewRuntime::show_native_window() {
+  if (IsWindowVisible(native_window_) && !IsIconic(native_window_)) {
+    /* An open window takes new options in place: the z-order follows the
+       topmost flag and the canvas repaints, without activating the window
+       again and pulling focus away from the editor that sent the change. */
+    SetWindowPos(native_window_, topmost_ ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    InvalidateRect(native_window_, nullptr, FALSE);
+    return;
+  }
   if (has_placement_) {
     SetWindowPlacement(native_window_, &placement_);
   } else {
@@ -1278,6 +1306,17 @@ void PreviewRuntime::close_from_window_for_tests() {
 }
 
 bool PreviewRuntime::save_in_progress_for_tests() const { return save_in_progress_; }
+
+int PreviewRuntime::scroll_max_for_tests() {
+  RedrawWindow(native_window_, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW);
+  return scroll_max_;
+}
+
+int PreviewRuntime::wheel_for_tests(int delta) {
+  SendMessageW(native_window_, WM_MOUSEWHEEL,
+               MAKEWPARAM(0, static_cast<WORD>(static_cast<short>(delta))), 0);
+  return scroll_y_;
+}
 
 void PreviewRuntime::set_save_in_progress_for_tests(bool in_progress) {
   save_in_progress_ = in_progress;
@@ -1381,17 +1420,33 @@ void PreviewRuntime::sync_controls() {
     face_index = SendMessageW(face_combo_, CB_INSERTSTRING, 0,
                               reinterpret_cast<LPARAM>(font_face_.c_str()));
   }
-  if (face_index != CB_ERR && face_index != CB_ERRSPACE) {
+  if (face_index != CB_ERR && face_index != CB_ERRSPACE &&
+      SendMessageW(face_combo_, CB_GETCURSEL, 0, 0) != face_index) {
     SendMessageW(face_combo_, CB_SETCURSEL, static_cast<WPARAM>(face_index), 0);
   }
   const std::wstring size = std::to_wstring(static_cast<int>(std::lround(font_size_pt_)));
   const LRESULT size_index = SendMessageW(size_combo_, CB_FINDSTRINGEXACT, static_cast<WPARAM>(-1),
                                           reinterpret_cast<LPARAM>(size.c_str()));
-  if (size_index != CB_ERR) SendMessageW(size_combo_, CB_SETCURSEL, static_cast<WPARAM>(size_index), 0);
-  updating_edit_ = true;
-  SetWindowTextW(edit_control_, sample_text_.c_str());
-  updating_edit_ = false;
-  ShowWindow(edit_control_, edit_visible_ ? SW_SHOW : SW_HIDE);
+  if (size_index != CB_ERR && SendMessageW(size_combo_, CB_GETCURSEL, 0, 0) != size_index) {
+    SendMessageW(size_combo_, CB_SETCURSEL, static_cast<WPARAM>(size_index), 0);
+  }
+  /* The edit control keeps its caret unless the sample really changed; it
+     stores line breaks as CR LF, so the comparison ignores the CR. */
+  const int length = GetWindowTextLengthW(edit_control_);
+  std::wstring current(static_cast<std::size_t>(length) + 1, L'\0');
+  GetWindowTextW(edit_control_, current.data(), length + 1);
+  current.resize(static_cast<std::size_t>(length));
+  std::erase(current, L'\r');
+  std::wstring wanted = sample_text_;
+  std::erase(wanted, L'\r');
+  if (current != wanted) {
+    updating_edit_ = true;
+    SetWindowTextW(edit_control_, sample_text_.c_str());
+    updating_edit_ = false;
+  }
+  if ((IsWindowVisible(edit_control_) != FALSE) != edit_visible_) {
+    ShowWindow(edit_control_, edit_visible_ ? SW_SHOW : SW_HIDE);
+  }
 }
 
 std::wstring PreviewRuntime::selected_face_for_tests() const {
@@ -1600,6 +1655,27 @@ std::unique_ptr<PreviewRuntime::CanvasBitmap> PreviewRuntime::render_native_canv
     for (float size : ladder_sizes_) ladder_height += std::max(scaled(24, native_dpi_), point_size_px(size, native_dpi_) * 3 / 2);
     height = std::max(height, ladder_height);
   }
+  const int sample_line_height =
+      std::max(scaled(20, native_dpi_), point_size_px(font_size_pt_, native_dpi_) * 3 / 2);
+  const int sample_margin = scaled(18, native_dpi_);
+  const int compare_gap = scaled(1, native_dpi_);
+  const int compare_header = scaled(30, native_dpi_);
+  const int compare_half = (content_width - compare_gap) / 2;
+  if (display_mode_ == DisplayMode::sample || display_mode_ == DisplayMode::compare) {
+    /* The canvas grows to hold every wrapped line, so a zoomed view scrolls
+       through the sample instead of clipping it at the window's height. */
+    HFONT measure_font = create_sample_font(font_face_, font_size_pt_, native_dpi_, sample_bold_,
+                                            sample_italic_);
+    const int column_width = display_mode_ == DisplayMode::sample
+                                 ? content_width - 2 * sample_margin
+                                 : compare_half - 2 * scaled(10, native_dpi_);
+    const int text_height =
+        measure_wrapped_text(measure_font, column_width, sample_text_, sample_line_height);
+    DeleteObject(measure_font);
+    height = std::max(height, display_mode_ == DisplayMode::sample
+                                  ? text_height + 2 * sample_margin
+                                  : compare_header + text_height + scaled(10, native_dpi_));
+  }
   auto bitmap = std::make_unique<CanvasBitmap>(native_window_, content_width, height);
   if (!bitmap->valid()) return nullptr;
   const RECT area{0, 0, content_width, height};
@@ -1641,24 +1717,22 @@ std::unique_ptr<PreviewRuntime::CanvasBitmap> PreviewRuntime::render_native_canv
     }
     SelectObject(bitmap->dc, ui_previous);
   } else if (display_mode_ == DisplayMode::compare) {
-    const int gap = scaled(1, native_dpi_);
-    const int header = scaled(30, native_dpi_);
-    const int half = (content_width - gap) / 2;
     HGDIOBJ previous_font = SelectObject(bitmap->dc, ui_font_);
     SetTextColor(bitmap->dc, palette().muted);
-    RECT left_header{scaled(10, native_dpi_), 0, half, header};
-    RECT right_header{half + gap + scaled(10, native_dpi_), 0, content_width, header};
+    RECT left_header{scaled(10, native_dpi_), 0, compare_half, compare_header};
+    RECT right_header{compare_half + compare_gap + scaled(10, native_dpi_), 0, content_width,
+                      compare_header};
     DrawTextW(bitmap->dc, labels_.compare_mactype.c_str(), -1, &left_header,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     DrawTextW(bitmap->dc, labels_.compare_windows.c_str(), -1, &right_header,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     SelectObject(bitmap->dc, previous_font);
-    RECT left{scaled(10, native_dpi_), header, half - scaled(10, native_dpi_), height};
-    RECT right{half + gap + scaled(10, native_dpi_), header, content_width - scaled(10, native_dpi_), height};
+    RECT left{scaled(10, native_dpi_), compare_header, compare_half - scaled(10, native_dpi_), height};
+    RECT right{compare_half + compare_gap + scaled(10, native_dpi_), compare_header,
+               content_width - scaled(10, native_dpi_), height};
     HFONT sample_font = create_sample_font(font_face_, font_size_pt_, native_dpi_, sample_bold_, sample_italic_);
     previous_font = SelectObject(bitmap->dc, sample_font);
-    const int line_height = std::max(scaled(20, native_dpi_), point_size_px(font_size_pt_, native_dpi_) * 3 / 2);
-    wrapped_text_height(bitmap->dc, left, sample_text_, line_height, native_foreground_);
+    wrapped_text_height(bitmap->dc, left, sample_text_, sample_line_height, native_foreground_);
     const BOOL disabled = control_center_ ? control_center_->EnableRender(FALSE) : FALSE;
     struct RenderRestore {
       IControlCenter* control_center;
@@ -1668,7 +1742,7 @@ std::unique_ptr<PreviewRuntime::CanvasBitmap> PreviewRuntime::render_native_canv
       }
     } restore{control_center_, disabled};
     if (disabled) {
-      wrapped_text_height(bitmap->dc, right, sample_text_, line_height, native_foreground_);
+      wrapped_text_height(bitmap->dc, right, sample_text_, sample_line_height, native_foreground_);
     } else {
       SelectObject(bitmap->dc, previous_font);
       HGDIOBJ unavailable_previous = SelectObject(bitmap->dc, ui_font_);
@@ -1681,12 +1755,10 @@ std::unique_ptr<PreviewRuntime::CanvasBitmap> PreviewRuntime::render_native_canv
     SelectObject(bitmap->dc, previous_font);
     DeleteObject(sample_font);
   } else {
-    const int margin = scaled(18, native_dpi_);
-    RECT text_area{margin, margin, content_width - margin, height - margin};
+    RECT text_area{sample_margin, sample_margin, content_width - sample_margin, height - sample_margin};
     HFONT sample_font = create_sample_font(font_face_, font_size_pt_, native_dpi_, sample_bold_, sample_italic_);
     HGDIOBJ previous_font = SelectObject(bitmap->dc, sample_font);
-    const int line_height = std::max(scaled(20, native_dpi_), point_size_px(font_size_pt_, native_dpi_) * 3 / 2);
-    wrapped_text_height(bitmap->dc, text_area, sample_text_, line_height, native_foreground_);
+    wrapped_text_height(bitmap->dc, text_area, sample_text_, sample_line_height, native_foreground_);
     SelectObject(bitmap->dc, previous_font);
     DeleteObject(sample_font);
   }
@@ -1931,6 +2003,14 @@ bool PreviewRuntime::handle_key(WPARAM key) {
     invalidate_canvas_cache();
     rebuild_toolbar_layout();
     InvalidateRect(native_window_, nullptr, FALSE);
+  } else if (key == VK_HOME || key == VK_END) {
+    scroll_y_ = key == VK_HOME ? 0 : scroll_max_;
+    InvalidateRect(native_window_, nullptr, FALSE);
+  } else if (key == VK_DOWN || key == VK_UP || key == VK_NEXT || key == VK_PRIOR) {
+    const int step = scaled(key == VK_NEXT || key == VK_PRIOR ? 240 : 48, native_dpi_);
+    const int direction = key == VK_DOWN || key == VK_NEXT ? 1 : -1;
+    scroll_y_ = std::clamp(scroll_y_ + direction * step, 0, scroll_max_);
+    InvalidateRect(native_window_, nullptr, FALSE);
   } else {
     return false;
   }
@@ -2141,8 +2221,9 @@ LRESULT CALLBACK PreviewRuntime::window_proc(HWND window, UINT message, WPARAM w
     case WM_MOUSEWHEEL:
       if (window == runtime->native_window_) {
         const int delta = GET_WHEEL_DELTA_WPARAM(wparam);
-        runtime->scroll_y_ = std::clamp(runtime->scroll_y_ - delta / WHEEL_DELTA * scaled(48, runtime->native_dpi_),
-                                        0, runtime->scroll_max_);
+        runtime->scroll_y_ = std::clamp(
+            runtime->scroll_y_ - MulDiv(delta, scaled(48, runtime->native_dpi_), WHEEL_DELTA), 0,
+            runtime->scroll_max_);
         InvalidateRect(window, nullptr, FALSE);
       }
       return 0;
@@ -2194,14 +2275,9 @@ LRESULT CALLBACK PreviewRuntime::window_proc(HWND window, UINT message, WPARAM w
       HDC dc = reinterpret_cast<HDC>(wparam);
       SetTextColor(dc, palette.text);
       SetBkColor(dc, palette.surface);
-      if (message == WM_CTLCOLOREDIT) {
-        RECT edit_rect{};
-        GetWindowRect(runtime->edit_control_, &edit_rect);
-        MapWindowPoints(HWND_DESKTOP, runtime->native_window_,
-                        reinterpret_cast<POINT*>(&edit_rect), 2);
-        InflateRect(&edit_rect, 1, 1);
-        InvalidateRect(runtime->native_window_, &edit_rect, FALSE);
-      }
+      /* The frame around the edit control belongs to the parent's own paint;
+         invalidating the parent from here would repaint under the edit, which
+         repaints the edit, which sends this message again without end. */
       return reinterpret_cast<LRESULT>(message == WM_CTLCOLOREDIT ? runtime->edit_brush_
                                                                   : runtime->surface_brush_);
     }

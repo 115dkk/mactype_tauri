@@ -36,6 +36,8 @@ class PreviewRuntime {
   std::wstring selected_face_for_tests() const;
   void close_from_window_for_tests();
   bool save_in_progress_for_tests() const;
+  int scroll_max_for_tests();
+  int wheel_for_tests(int delta);
   void set_save_in_progress_for_tests(bool in_progress);
   void trigger_save_for_tests();
   std::uint32_t save_thread_started_for_tests() const;
@@ -52,6 +54,7 @@ class PreviewRuntime {
     COLORREF muted;
     COLORREF accent;
     COLORREF on_accent;
+    bool operator==(const Palette&) const = default;
   };
 
   struct NativeChrome {
@@ -64,6 +67,7 @@ class PreviewRuntime {
     int canvas_radius;
     int canvas_inset;
     bool mono_status;
+    bool operator==(const NativeChrome&) const = default;
   };
 
  private:
@@ -92,6 +96,7 @@ class PreviewRuntime {
     std::wstring png_filter{L"PNG files (*.png)|*.png"};
     std::wstring saved{L"Saved"};
     std::wstring copied{L"Copied"};
+    bool operator==(const NativeLabels&) const = default;
   };
 
   struct CanvasBitmap;

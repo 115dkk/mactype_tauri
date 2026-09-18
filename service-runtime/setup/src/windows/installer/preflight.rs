@@ -3,9 +3,9 @@ use mactype_service_contract::{GenerationId, MachinePaths};
 use super::WindowsInstallerBackend;
 use crate::storage::reject_reparse_ancestors;
 use crate::{
-    protected_installer_broker_layout, BootstrapMode, BootstrapPreflight, OpenServiceObservation,
-    ProfileStore, ProtectedProfileObservation, ProtectedRuntimeObservation, RuntimeInstaller,
-    SetupError,
+    protected_installer_broker_layout, BootstrapPreflight, BootstrapProfileMode,
+    OpenServiceObservation, ProfileStore, ProtectedProfileObservation, ProtectedRuntimeObservation,
+    RuntimeInstaller, SetupError,
 };
 
 impl WindowsInstallerBackend {
@@ -53,12 +53,15 @@ impl WindowsInstallerBackend {
 }
 
 pub(super) fn validate_mode_matches_profile(
-    mode: &BootstrapMode,
+    mode: &BootstrapProfileMode,
     active: Option<&GenerationId>,
 ) -> Result<(), SetupError> {
     match (mode, active) {
-        (BootstrapMode::FreshBundledDefault, None) => Ok(()),
-        (BootstrapMode::PreserveExistingProfile { generation }, Some(active))
+        (
+            BootstrapProfileMode::PublishBundledDefault | BootstrapProfileMode::LeaveUnpublished,
+            None,
+        ) => Ok(()),
+        (BootstrapProfileMode::PreserveExisting { generation }, Some(active))
             if active.directory_name() == generation =>
         {
             Ok(())

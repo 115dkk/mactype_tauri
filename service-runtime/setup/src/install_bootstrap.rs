@@ -4,10 +4,27 @@ use mactype_service_contract::{parse_broker_command, BrokerCommand, BrokerComman
 
 use crate::SetupError;
 
+/// Whether the installer bootstrap must leave the service running or may
+/// leave a stopped or absent service alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BootstrapStartPolicy {
+    EnsureRunning,
+    PreserveObservedState,
+}
+
+impl BootstrapStartPolicy {
+    pub const fn verb(self) -> &'static str {
+        match self {
+            Self::EnsureRunning => "bootstrap-install",
+            Self::PreserveObservedState => "bootstrap-install-preserve-run-state",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SetupCommand {
     Broker(BrokerCommand),
-    BootstrapInstall,
+    BootstrapInstall(BootstrapStartPolicy),
     UninstallOwned,
 }
 
@@ -21,8 +38,13 @@ where
     if arguments.next().is_some() {
         return Err(BrokerCommandError);
     }
-    if verb.as_ref() == "bootstrap-install" {
-        return Ok(SetupCommand::BootstrapInstall);
+    for policy in [
+        BootstrapStartPolicy::EnsureRunning,
+        BootstrapStartPolicy::PreserveObservedState,
+    ] {
+        if verb.as_ref() == policy.verb() {
+            return Ok(SetupCommand::BootstrapInstall(policy));
+        }
     }
     if verb.as_ref() == "uninstall-owned" {
         return Ok(SetupCommand::UninstallOwned);
@@ -90,9 +112,19 @@ pub struct BootstrapPreflight {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum BootstrapMode {
-    FreshBundledDefault,
-    PreserveExistingProfile { generation: String },
+pub enum BootstrapProfileMode {
+    PublishBundledDefault,
+    PreserveExisting { generation: String },
+    LeaveUnpublished,
+}
+
+/// A profile is published only when the service will start: an install that
+/// stays stopped keeps the protected store empty, which the host reports as
+/// its supported stopped state at every boot until a profile is published.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BootstrapPlan {
+    pub profile: BootstrapProfileMode,
+    pub start_service: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -108,8 +140,9 @@ pub enum BootstrapBlocker {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BootstrapOutcome {
     Applied {
-        active_profile_digest: String,
+        active_profile_digest: Option<String>,
         preserved_existing_profile: bool,
+        service_started: bool,
     },
     SkippedBlocked {
         reason: BootstrapBlocker,
@@ -119,7 +152,7 @@ pub enum BootstrapOutcome {
 pub trait InstallBootstrapBackend {
     fn inspect(&mut self) -> BootstrapPreflight;
 
-    fn apply_atomically(&mut self, mode: &BootstrapMode) -> Result<String, SetupError>;
+    fn apply_atomically(&mut self, plan: &BootstrapPlan) -> Result<Option<String>, SetupError>;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -168,7 +201,10 @@ where
     }
 }
 
-pub fn run_install_bootstrap_with<B>(backend: &mut B) -> Result<BootstrapOutcome, SetupError>
+pub fn run_install_bootstrap_with<B>(
+    backend: &mut B,
+    policy: BootstrapStartPolicy,
+) -> Result<BootstrapOutcome, SetupError>
 where
     B: InstallBootstrapBackend,
 {
@@ -216,25 +252,56 @@ where
             reason: BootstrapBlocker::InconsistentOwnedState,
         });
     }
-    let (mode, preserved_existing_profile) = match preflight.protected_profile {
-        ProtectedProfileObservation::Active(generation) => {
-            (BootstrapMode::PreserveExistingProfile { generation }, true)
-        }
-        ProtectedProfileObservation::Absent | ProtectedProfileObservation::Unknown => {
-            (BootstrapMode::FreshBundledDefault, false)
+    let start_service = match policy {
+        BootstrapStartPolicy::EnsureRunning => true,
+        BootstrapStartPolicy::PreserveObservedState => {
+            preflight.open_service == OpenServiceObservation::OwnedRunning
         }
     };
-    let digest = backend.apply_atomically(&mode)?;
-    if let BootstrapMode::PreserveExistingProfile { generation } = &mode {
-        let expected = format!("sha256:{generation}");
-        if digest != expected {
+    let (profile, preserved_existing_profile) = match preflight.protected_profile {
+        ProtectedProfileObservation::Active(generation) => {
+            (BootstrapProfileMode::PreserveExisting { generation }, true)
+        }
+        ProtectedProfileObservation::Absent | ProtectedProfileObservation::Unknown => {
+            if start_service {
+                (BootstrapProfileMode::PublishBundledDefault, false)
+            } else {
+                (BootstrapProfileMode::LeaveUnpublished, false)
+            }
+        }
+    };
+    let plan = BootstrapPlan {
+        profile,
+        start_service,
+    };
+    let digest = backend.apply_atomically(&plan)?;
+    let active_profile_digest = match (&plan.profile, digest) {
+        (BootstrapProfileMode::PreserveExisting { generation }, Some(digest)) => {
+            let expected = format!("sha256:{generation}");
+            if digest != expected {
+                return Err(SetupError::Runtime(format!(
+                    "Ready profile digest mismatch: expected {expected}, received {digest}"
+                )));
+            }
+            Some(digest)
+        }
+        (BootstrapProfileMode::PublishBundledDefault, Some(digest)) => Some(digest),
+        (BootstrapProfileMode::LeaveUnpublished, None) => None,
+        (BootstrapProfileMode::LeaveUnpublished, Some(digest)) => {
             return Err(SetupError::Runtime(format!(
-                "Ready profile digest mismatch: expected {expected}, received {digest}"
+                "bootstrap left the profile unpublished but reported digest {digest}"
             )));
         }
-    }
+        (BootstrapProfileMode::PreserveExisting { .. }, None)
+        | (BootstrapProfileMode::PublishBundledDefault, None) => {
+            return Err(SetupError::Runtime(
+                "bootstrap published a profile but reported no Ready digest".to_owned(),
+            ));
+        }
+    };
     Ok(BootstrapOutcome::Applied {
-        active_profile_digest: digest,
+        active_profile_digest,
         preserved_existing_profile,
+        service_started: plan.start_service,
     })
 }

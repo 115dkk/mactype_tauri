@@ -29,8 +29,8 @@ pub(crate) fn prepare_event_log_directory(paths: &MachinePaths) -> Result<(), Se
     acl::harden_machine_directory(data_root)
 }
 
-pub fn run_installer_bootstrap() -> Result<String, SetupError> {
-    installer::run_bootstrap().map(|outcome| outcome.to_json("bootstrap-install"))
+pub fn run_installer_bootstrap(policy: crate::BootstrapStartPolicy) -> Result<String, SetupError> {
+    installer::run_bootstrap(policy).map(|outcome| outcome.to_json(policy.verb()))
 }
 
 pub fn run_owned_uninstall() -> Result<String, SetupError> {

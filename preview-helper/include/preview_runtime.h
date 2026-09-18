@@ -36,6 +36,8 @@ class PreviewRuntime {
   std::wstring selected_face_for_tests() const;
   void close_from_window_for_tests();
   bool save_in_progress_for_tests() const;
+  int scroll_max_for_tests();
+  int wheel_for_tests(int delta);
   void set_save_in_progress_for_tests(bool in_progress);
   void trigger_save_for_tests();
   std::uint32_t save_thread_started_for_tests() const;

@@ -259,7 +259,13 @@ for (const [name, values] of Object.entries(summary)) {
   values.pushP95Ratio = ratio(values.pushP95Ms, control.pushP95Ms);
   values.gapP95Ratio = ratio(values.gapP95Ms, control.gapP95Ms);
   values.dragLagRatio = values.dragP95LagPx === null ? null : ratio(values.dragP95LagPx, control.dragP95LagPx);
-  values.notSmooth = !values.control && ((values.pushP95Ratio ?? 0) > 1.5 || (values.gapP95Ratio ?? 0) > 1.5 || values.gapsOver33 > Math.max(3, values.frames * 0.1) || (values.dragLagRatio ?? 0) > 1.5);
+  /* A ratio alone flags noise between two fast skins (2.6 ms against 1.5 ms
+     on a hosted runner), so a slow case must also cost a real fraction of a
+     frame: more than 8 ms per step, more than half the rAF budget in gaps. */
+  const pushSlow = (values.pushP95Ratio ?? 0) > 1.5 && values.pushP95Ms > 8;
+  const gapSlow = (values.gapP95Ratio ?? 0) > 1.5 && values.gapP95Ms > 25;
+  const dragSlow = (values.dragLagRatio ?? 0) > 1.5 && (values.dragP95LagPx ?? 0) > 8;
+  values.notSmooth = !values.control && (pushSlow || gapSlow || values.gapsOver33 > Math.max(3, values.frames * 0.1) || dragSlow);
   if (values.control && (values.pushP95Ms > 16 || values.gapsOver33 > Math.max(3, values.frames * 0.1))) values.notSmooth = true;
   void name;
 }

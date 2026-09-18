@@ -1,5 +1,5 @@
 import { Moon, Sun } from "lucide-react";
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { isNavSelected, navEntries, type ShellProps } from "../../app/shell";
 import { LanguagePicker } from "../../components/LanguagePicker";
 import { SkinPicker } from "../../components/SkinPicker";
@@ -19,13 +19,14 @@ import { ConsoleTuner } from "./ConsoleTuner";
 export function ConsoleShell(props: ShellProps) {
   const { t } = useI18n();
   const { view, profileMode, navigate } = props;
+  const { ciSmoke, openPreviewStudio, reconnectPreview, rediscoverInstallation, reportReady, setSkin, setStatus, skin, status, theme, toggleTheme } = props;
   /* One service model for the whole shell: the overview dashboard, the
      service page and every status bar read and act on the same status. */
+  const onExecutionReady = useCallback(() => reportReady("execution"), [reportReady]);
   const execution = useExecutionModel({
-    ciSmoke: props.ciSmoke && view === "execution",
-    onReady: () => props.reportReady("execution"),
+    ciSmoke: ciSmoke && view === "execution",
+    onReady: onExecutionReady,
   });
-  const { ciSmoke, openPreviewStudio, reconnectPreview, rediscoverInstallation, reportReady, setSkin, setStatus, skin, status, theme, toggleTheme } = props;
   const shell = useMemo<ShellProps>(() => ({ ciSmoke, navigate, openPreviewStudio, profileMode, reconnectPreview, rediscoverInstallation, reportReady, setSkin, setStatus, skin, status, theme, toggleTheme, view }), [ciSmoke, navigate, openPreviewStudio, profileMode, reconnectPreview, rediscoverInstallation, reportReady, setSkin, setStatus, skin, status, theme, toggleTheme, view]);
   const context = useMemo(() => ({ shell, execution }), [shell, execution]);
 

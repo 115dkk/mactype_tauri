@@ -65,6 +65,16 @@ int wmain(int argc, wchar_t** argv) {
   runtime.pump_messages();
   if (runtime.selected_face_for_tests() != L"Segoe UI") return 28;
 
+  mtpc::Frame tall;
+  tall.kind = mtpc::MessageKind::show_native_preview;
+  tall.request_id = 55;
+  tall.json = R"({"displayMode":"sample","zoom":4,"fontSizePt":16,"text":"Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\nLine 7\nLine 8\nLine 9\nLine 10\nLine 11\nLine 12"})";
+  if (runtime.show_native_preview(tall, true).kind != mtpc::MessageKind::native_preview_state) return 40;
+  runtime.pump_messages();
+  if (runtime.scroll_max_for_tests() <= 0) return 41;
+  if (runtime.wheel_for_tests(-WHEEL_DELTA) <= 0) return 42;
+  if (runtime.wheel_for_tests(WHEEL_DELTA * 64) != 0) return 43;
+
   for (const char* skin : {"classic", "fluent", "console", "cupertino"}) {
     mtpc::Frame skin_request;
     skin_request.kind = mtpc::MessageKind::show_native_preview;

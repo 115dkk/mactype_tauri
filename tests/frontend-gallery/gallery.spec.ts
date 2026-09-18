@@ -46,7 +46,7 @@ const executionStateGallery = [
   { id: "initializing", query: "system-service=initializing", expected: "Running" },
   { id: "health-unknown", query: "system-service=unknown-health", expected: "Running" },
   { id: "stopped", query: "system-service=ready&service-runtime=stopped", expected: "Stopped" },
-  { id: "stopped-no-profile", query: "system-service=ready&service-runtime=stopped&profile-unapplied=1", expected: "No profile has been applied yet" },
+  { id: "stopped-no-profile", query: "system-service=ready&service-runtime=stopped&profile-unapplied=1", expected: "No run profile" },
   { id: "starting", query: "system-service=ready&service-runtime=start-pending", expected: "Starting" },
   { id: "stopping", query: "system-service=ready&service-runtime=stop-pending", expected: "Stopping" },
   { id: "paused", query: "system-service=ready&service-runtime=paused", expected: "Paused" },
@@ -187,12 +187,12 @@ test("profile editor categories and collections remain interactive", async ({ pa
   await undo.click();
   await expect(redo).toBeEnabled();
   await redo.click();
-  await expect(page.getByRole("button", { name: "지금 적용" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "실행 프로필로 지정", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "지금 저장" }).click();
   await expect(page.locator(".profile-message")).toContainText("지금 저장했습니다");
-  await expect(page.getByRole("button", { name: "지금 적용" })).toBeEnabled();
-  await page.getByRole("button", { name: "지금 적용" }).click();
-  await expect(page.locator(".profile-message")).toContainText("프로파일을 MacType에 적용했습니다");
+  await expect(page.getByRole("button", { name: "실행 프로필로 지정", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "실행 프로필로 지정", exact: true }).click();
+  await expect(page.locator(".profile-message")).toContainText("실행 프로필로 지정했습니다");
   await firstSelect.selectOption(initialOption);
   await expect(discard).toBeEnabled();
   await discard.click();
@@ -549,9 +549,9 @@ test("settings navigation restores the legacy Wizard and Tuner hierarchy", async
 
   await page.locator(".settings-index").getByRole("button", { name: "힌팅" }).click();
   await expect(page.getByRole("heading", { level: 2, name: "힌팅" })).toBeVisible();
-  await page.locator(".settings-index").getByRole("button", { name: "적용 및 미리보기" }).click();
+  await page.locator(".settings-index").getByRole("button", { name: "실행 프로필 지정", exact: true }).click();
   await expect(page.getByRole("button", { name: "진행" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "MacType에 적용" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "실행 프로필로 지정", exact: true })).toBeVisible();
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-guided-apply-ko.png`), fullPage: true });
 
   await tunerGroup.getByRole("button", { name: "전체 설정" }).click();
@@ -784,7 +784,7 @@ test("a rejected profile mutation requires an explicit snapshot recovery before 
   const normalWeight = page.locator(".setting-row").filter({ hasText: "Normal weight" }).locator('input[type="number"]');
   const boldWeight = page.locator(".setting-row").filter({ hasText: "Bold weight" }).locator('input[type="number"]');
   const save = page.getByRole("button", { name: "Save now", exact: true });
-  const apply = page.getByRole("button", { name: "Apply now", exact: true });
+  const apply = page.getByRole("button", { name: "Set as run profile", exact: true });
 
   await normalWeight.fill("12");
   await normalWeight.press("Tab");
@@ -838,8 +838,8 @@ test("settings files support import, save as, export, reveal, and apply without 
   await expect(page.locator('[data-operation="file-settings"]')).toContainText("파일 위치를 열었습니다");
   await page.getByRole("button", { name: "내보낼 위치 선택" }).click();
   await expect(page.locator('[data-operation="file-settings"]')).toContainText("내보냈습니다");
-  await page.getByRole("button", { name: "실제 적용" }).click();
-  await expect(page.locator('[data-operation="file-settings"]')).toContainText("시스템 프로필로 적용");
+  await page.getByRole("button", { name: "실행 프로필로 지정", exact: true }).click();
+  await expect(page.locator('[data-operation="file-settings"]')).toContainText("실행 프로필로 지정했습니다. 실행 중인 서비스에 바로 반영했습니다.");
 
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   expect(horizontalOverflow, "settings-file controls must not have horizontal scrolling").toBe(false);
@@ -894,14 +894,14 @@ test("writable profiles save to the original and apply by portable identity", as
   await setting.selectOption(alternate);
 
   const save = page.getByRole("button", { name: "Save now", exact: true });
-  const apply = page.getByRole("button", { name: "Apply now", exact: true });
+  const apply = page.getByRole("button", { name: "Set as run profile", exact: true });
   await expect(save).toBeEnabled();
   await expect(apply).toBeDisabled();
   await save.click();
   await expect(page.locator(".profile-message")).toContainText("Saved Default.ini");
   await expect(apply).toBeEnabled();
   await apply.click();
-  await expect(page.locator(".profile-message")).toContainText("Applied the Default.ini profile to MacType.");
+  await expect(page.locator(".profile-message")).toContainText("Default.ini is now the run profile.");
 
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-profile-direct-save-apply-en.png`), fullPage: true });
 });
@@ -921,7 +921,7 @@ test("read-only profiles require Save as before apply", async ({ page }, testInf
   await setting.selectOption(alternate);
 
   await expect(page.getByRole("button", { name: "Save now", exact: true })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Apply now", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Set as run profile", exact: true })).toBeDisabled();
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-profile-read-only-save-as-required-en.png`), fullPage: true });
   await page.getByRole("button", { name: "Save as", exact: true }).click();
   await page.getByRole("textbox", { name: "New profile name" }).fill("Review copy");
@@ -929,7 +929,7 @@ test("read-only profiles require Save as before apply", async ({ page }, testInf
 
   await expect(page.locator(".profile-editing code")).toHaveText("Profiles\\Review copy.ini");
   await expect(page.locator(".profile-message")).toContainText("Saved as Profiles\\Review copy.ini");
-  await expect(page.getByRole("button", { name: "Apply now", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Set as run profile", exact: true })).toBeEnabled();
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-profile-read-only-save-as-en.png`), fullPage: true });
 });
 
@@ -981,9 +981,9 @@ test("execution and new system service controls remain interactive", async ({ pa
   await page.getByRole("button", { name: "새로 여는 앱에 적용 중지" }).click();
   await expect(page.getByText("MacType 시스템 적용 꺼짐", { exact: true })).toBeVisible();
   await expect(page.getByText("MacType 시스템 적용을 잠시 껐습니다.", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "현재 프로필 적용" }).click();
+  await page.getByRole("button", { name: "실행 프로필로 시작" }).click();
   await expect(page.getByText("MacType 시스템 적용 중", { exact: true })).toBeVisible();
-  await expect(page.getByText("현재 프로필을 시스템 범위에 적용했습니다.", { exact: true })).toBeVisible();
+  await expect(page.getByText("실행 프로필로 서비스를 시작했습니다.", { exact: true })).toBeVisible();
 
   await expect(page.locator('[data-service-backend="open-source"]')).toContainText("MacType Control Center 서비스");
   await expect(page.locator('[data-service-backend="legacy-mactray"]')).toHaveCount(0);
@@ -1042,7 +1042,7 @@ test("a running legacy service is never claimed as verified system application",
   await page.getByRole("button", { name: "새로 여는 앱에 적용 중지" }).click();
   await expect(openService.locator('[data-state="legacy-service-migrate"]')).toBeVisible();
   await expect(openService).toContainText("레거시 MacTray 서비스를 먼저 정리해야 합니다");
-  await expect(page.getByRole("button", { name: "현재 프로필 적용" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "실행 프로필로 시작" })).toBeDisabled();
   await expect(legacy.getByRole("button", { name: "마이그레이션" })).toBeEnabled();
 
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
@@ -1073,25 +1073,88 @@ test("a retired stopped legacy service leaves new-service recovery available", a
   await expect(legacy.getByRole("button", { name: "마이그레이션" })).toBeDisabled();
 });
 
-test("applying from Settings files and Execution converges on the same verified state", async ({ page }) => {
+test("designating a run profile with no service holds the choice until the service page starts it", async ({ page }) => {
   await page.goto("/?view=files&gallery=1&lang=en&system-service=migration-available", { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "Apply to MacType" }).click();
-  await expect(page.getByText(/Applied .* as the system-wide MacType profile/)).toBeVisible();
+  await page.getByRole("button", { name: "Set as run profile", exact: true }).click();
+  await expect(page.getByText(/is now the run profile\. The service will use it when it starts\./)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start the service now" })).toHaveCount(0);
 
   await page.getByRole("button", { name: "Service" }).click();
   await openServiceDetails(page);
   const openService = page.locator('[data-service-backend="open-source"]');
+  await expect(openService.locator('[data-state="unavailable"], [data-state="inactive"]').first()).toBeVisible();
+  await expect(openService).not.toContainText("MacType system-wide rendering active");
+  await page.locator("[data-service-summary]").getByRole("button", { name: "Install service" }).click();
   await expect(openService.locator('[data-state="active"]')).toBeVisible();
   await expect(openService).toContainText("MacType system-wide rendering active");
 });
 
+test("designating a run profile while the service is stopped keeps it stopped and offers one explicit start", async ({ page }, testInfo) => {
+  await page.goto("/?view=files&gallery=1&lang=ko&system-service=stopped", { waitUntil: "networkidle" });
+  const pretendardCard = page.locator(".profile-card").filter({ hasText: "Pretendard forever" });
+  await expect(page.locator('.profile-card[data-run-profile="true"] .profile-card-title strong')).toHaveText("Default");
+  await pretendardCard.locator(".profile-card-select").click();
+  await page.getByRole("button", { name: "실행 프로필로 지정", exact: true }).click();
+
+  const message = page.locator('[data-operation="file-settings"]');
+  await expect(message).toContainText("서비스를 시작하면 이 프로필로 실행됩니다.");
+  await expect(pretendardCard).toHaveAttribute("data-run-profile", "true");
+  await expect(pretendardCard.locator(".profile-card-badge")).toHaveText("실행 프로필");
+  const startNow = message.getByRole("button", { name: "지금 서비스 시작" });
+  await expect(startNow).toBeVisible();
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-run-profile-held-ko.png`), fullPage: true });
+
+  const wizardGroup = page.locator(".navigation").getByRole("group", { name: "위자드" });
+  await wizardGroup.getByRole("button", { name: "서비스" }).click();
+  const summary = page.locator("[data-service-summary]");
+  await expect(summary).toContainText("중지됨");
+  await expect(summary).toContainText("실행 프로필");
+  await expect(summary).toContainText("pretendard forever.ini");
+  await openServiceDetails(page);
+  await expect(page.getByText("MacType 시스템 적용 꺼짐", { exact: true })).toBeVisible();
+  await expect(page.locator(".system-injection-control")).toContainText("실행 프로필(pretendard forever.ini)");
+
+  // The page remounts on return, so the held designation is repeated before
+  // the one explicit start it offers is taken.
+  await wizardGroup.getByRole("button", { name: "프로필" }).click();
+  await expect(page.locator('.profile-card[data-run-profile="true"] .profile-card-title strong')).toHaveText("Pretendard forever");
+  await page.getByRole("button", { name: "실행 프로필로 지정", exact: true }).click();
+  await page.locator('[data-operation="file-settings"]').getByRole("button", { name: "지금 서비스 시작" }).click();
+  await expect(page.locator('[data-operation="file-settings"]')).toContainText("서비스를 시작했습니다.");
+  await expect(page.locator('[data-operation="file-settings"]').getByRole("button", { name: "지금 서비스 시작" })).toHaveCount(0);
+  await wizardGroup.getByRole("button", { name: "서비스" }).click();
+  await expect(summary).toContainText("실행 중");
+  await openServiceDetails(page);
+  await expect(page.getByText("MacType 시스템 적용 중", { exact: true })).toBeVisible();
+});
+
+test("designating a run profile while the service runs switches it live", async ({ page }, testInfo) => {
+  await page.goto("/?view=files&gallery=1&lang=ko&system-service=ready", { waitUntil: "networkidle" });
+  const pretendardCard = page.locator(".profile-card").filter({ hasText: "Pretendard forever" });
+  await pretendardCard.locator(".profile-card-select").click();
+  await page.getByRole("button", { name: "실행 프로필로 지정", exact: true }).click();
+
+  const message = page.locator('[data-operation="file-settings"]');
+  await expect(message).toContainText("실행 중인 서비스에 바로 반영했습니다.");
+  await expect(message.getByRole("button", { name: "지금 서비스 시작" })).toHaveCount(0);
+  await expect(pretendardCard).toHaveAttribute("data-run-profile", "true");
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-run-profile-live-ko.png`), fullPage: true });
+
+  await page.locator(".navigation").getByRole("group", { name: "위자드" }).getByRole("button", { name: "서비스" }).click();
+  await expect(page.locator("[data-service-summary]")).toContainText("실행 중");
+  await expect(page.locator("[data-service-summary]")).toContainText("pretendard forever.ini");
+  await openServiceDetails(page);
+  await expect(page.getByText("MacType 시스템 적용 중", { exact: true })).toBeVisible();
+});
+
 for (const entry of [
-  { view: "files", button: "Apply to MacType" },
-  { view: "profiles", button: "Apply now" },
+  { view: "files", failing: "designate-profile" },
+  { view: "files", failing: "publish-profile" },
+  { view: "profiles", failing: "publish-profile" },
 ] as const) {
-  test(`${entry.view} hides internal profile-application details behind the diagnostics message`, async ({ page }) => {
-    await page.goto(`/?view=${entry.view}&gallery=1&lang=en&service-fail=publish-profile`, { waitUntil: "networkidle" });
-    await page.getByRole("button", { name: entry.button }).first().click();
+  test(`${entry.view} hides internal ${entry.failing} details behind the diagnostics message`, async ({ page }) => {
+    await page.goto(`/?view=${entry.view}&gallery=1&lang=en&service-fail=${entry.failing}`, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "Set as run profile", exact: true }).first().click();
 
     await expect(page.getByText("The operation failed. Check the diagnostics log for details.", { exact: true })).toBeVisible();
     await expect(page.getByText(/control-center-internal-operation-failed/)).toHaveCount(0);
@@ -1107,7 +1170,7 @@ test("a foreign legacy MacType service blocks activation and offers no migration
   await expect(openService).toContainText("A foreign legacy MacTray service was detected");
   await expect(openService).toContainText("A different service is using the MacType name");
   await expect(openService).not.toContainText("Use Migrate below");
-  await expect(openService.getByRole("button", { name: "Apply current profile" })).toBeDisabled();
+  await expect(openService.getByRole("button", { name: "Start with the run profile" })).toBeDisabled();
   await expect(openService.getByRole("button", { name: "Install service" })).toBeDisabled();
   await expect(openService.getByRole("button", { name: "Start service" })).toBeDisabled();
 
@@ -1127,7 +1190,7 @@ test("a verified legacy service funnels activation through Migrate until it is r
   await expect(openService).toContainText("An older MacTray service is installed");
   await expect(openService).not.toContainText("foreign legacy MacTray service");
   await expect(openService).not.toContainText("status could not be verified");
-  await expect(openService.getByRole("button", { name: "Apply current profile" })).toBeDisabled();
+  await expect(openService.getByRole("button", { name: "Start with the run profile" })).toBeDisabled();
   await expect(openService.getByRole("button", { name: "Install service" })).toBeDisabled();
   await expect(openService.getByRole("button", { name: "Start service" })).toBeDisabled();
 
@@ -1233,7 +1296,7 @@ test("the service page keeps its normal state to one summary and one action", as
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=ready", { waitUntil: "networkidle" });
 
   const summary = page.locator("[data-service-summary]");
-  await expect(summary).toContainText("Profile");
+  await expect(summary).toContainText("Run profile");
   await expect(summary).toContainText("Default.ini");
   await expect(summary).toContainText("Control Center service");
   await expect(summary).toContainText("Running");
@@ -1291,7 +1354,7 @@ test("a running unverified service remains stoppable without claiming it is inac
   await expect(openService.getByRole("button", { name: "Stop applying to new apps" })).toBeEnabled();
   await expect(openService).toContainText("Could not confirm that MacType is applying");
   await expect(openService).toContainText("The service is running, but its effect on apps could not be checked. You can still stop it.");
-  await expect(openService).not.toContainText("Reopen the target app in this state to compare rendering without the applied settings.");
+  await expect(openService).not.toContainText("Start it to apply the run profile");
   await openService.getByRole("button", { name: "Stop applying to new apps" }).click();
   await expect(page.getByText("MacType system application is temporarily off.", { exact: true })).toBeVisible();
 });
@@ -1300,14 +1363,14 @@ test("a running profile mismatch remains stoppable and identifies the selected p
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=profile-mismatch", { waitUntil: "networkidle" });
   const summary = page.locator("[data-service-summary]");
   await expect(summary).toContainText("Service running with a different profile");
-  await expect(summary).toContainText("The service is using a different profile from the one selected here.");
+  await expect(summary).toContainText("The service is running with a profile other than the run profile.");
   await expect(summary.getByRole("button", { name: "Stop" })).toBeEnabled();
   await openServiceDetails(page);
 
   const openService = page.locator('[data-service-backend="open-source"]');
   await expect(openService.getByRole("button", { name: "Stop applying to new apps" })).toBeEnabled();
   await expect(openService).toContainText("Service running with a different profile");
-  await expect(openService).toContainText("The service is using a different profile from the one selected here. You can stop it before applying your chosen profile.");
+  await expect(openService).toContainText("The service is running with a profile other than the run profile. Setting the run profile again on the Profiles page switches it immediately.");
   await expect(openService).toContainText("Profile mismatch");
   await expect(openService).not.toContainText("or not yet verified");
 });
@@ -1639,13 +1702,13 @@ test("a stopped service surfaces a persisted degradation as a last-run record", 
 test("starting with no applied profile applies the bundled default and says so", async ({ page }) => {
   await page.goto("/?view=execution&gallery=1&lang=en&system-service=ready&service-runtime=stopped&profile-unapplied=1", { waitUntil: "networkidle" });
   const summary = page.locator("[data-service-summary]");
-  await expect(summary).toContainText("No profile has been applied yet");
+  await expect(summary).toContainText("No run profile");
 
   await openServiceDetails(page);
-  await expect(page.locator(".system-injection-control")).toContainText("applies the bundled default profile (Default.ini) first");
+  await expect(page.locator(".system-injection-control")).toContainText("Starting uses the bundled default profile (Default.ini)");
 
   await summary.getByRole("button", { name: "Start service" }).click();
-  await expect(page.locator(".success-message")).toContainText("the default profile (Default.ini) was applied before starting the service");
+  await expect(page.locator(".success-message")).toContainText("the service started with the default profile (Default.ini)");
   await expect(summary).toContainText("Default.ini");
 });
 
@@ -1905,7 +1968,7 @@ test("settings files present profile cards with thumbnails, apply ownership, and
   const appliedCard = page.locator('.profile-card[data-applied="true"]');
   await expect(appliedCard).toHaveCount(1);
   await expect(appliedCard.locator(".profile-card-title strong")).toHaveText("Default");
-  await expect(appliedCard.locator(".profile-card-badge")).toHaveText("적용 중");
+  await expect(appliedCard.locator(".profile-card-badge")).toHaveText("실행 프로필");
 
   const pretendardCard = cards.filter({ hasText: "Pretendard forever" });
   await pretendardCard.locator(".profile-card-select").click();
@@ -1920,8 +1983,8 @@ test("settings files present profile cards with thumbnails, apply ownership, and
   await expect(details.locator(".detail-list")).toBeVisible();
   await expect(details).toContainText("문자 인코딩");
 
-  await page.getByRole("button", { name: "실제 적용" }).click();
-  await expect(page.locator('[data-operation="file-settings"]')).toContainText("시스템 프로필로 적용했습니다");
+  await page.getByRole("button", { name: "실행 프로필로 지정", exact: true }).click();
+  await expect(page.locator('[data-operation="file-settings"]')).toContainText("실행 프로필로 지정했습니다");
   await expect(appliedCard).toHaveCount(1);
   await expect(appliedCard.locator(".profile-card-title strong")).toHaveText("Pretendard forever");
 

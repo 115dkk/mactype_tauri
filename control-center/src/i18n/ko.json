@@ -328,7 +328,7 @@
   "execution.systemUnavailableTitle": "서비스 작업을 기다려 주세요",
   "execution.systemUnavailableDescription": "현재 작업이 끝난 뒤 상태를 새로고침하세요.",
   "execution.systemPause": "새로 여는 앱에 적용 중지",
-  "execution.systemApply": "실행 프로필로 시작",
+  "execution.systemApply": "서비스 시작",
   "execution.systemPaused": "MacType 시스템 적용을 잠시 껐습니다.",
   "execution.systemResumed": "MacType 시스템 적용을 다시 시작했습니다.",
   "execution.systemActivated": "실행 프로필로 서비스를 시작했습니다.",

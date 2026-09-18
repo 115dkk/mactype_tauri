@@ -16,7 +16,7 @@ static WRITE_ERROR_REPORTED: AtomicBool = AtomicBool::new(false);
 pub(crate) fn command_verb(command: SetupCommand) -> &'static str {
     match command {
         SetupCommand::Broker(command) => broker_verb(command),
-        SetupCommand::BootstrapInstall => "bootstrap-install",
+        SetupCommand::BootstrapInstall(policy) => policy.verb(),
         SetupCommand::UninstallOwned => "uninstall-owned",
     }
 }

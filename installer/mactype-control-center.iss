@@ -75,6 +75,14 @@ korean.VerifiedReinstallButton=다시 설치
 korean.ForeignContentsTitle=설치 폴더의 기존 내용을 정리하시겠습니까?
 korean.ForeignContentsMessage=고정 설치 폴더에 확인된 MacType Control Center 설치가 소유하지 않은 내용이 있습니다.%n%n이 폴더의 기존 파일과 하위 폴더를 모두 제거한 뒤 새 설치 파일로 덮어씁니다. 이 작업을 원하지 않으면 취소하십시오.
 korean.ForeignContentsButton=계속
+english.StartServicePageCaption=Start the MacType service now?
+english.StartServicePageDescription=Choose whether MacType starts applying fonts as soon as setup finishes.
+english.StartServicePageSubCaption=The service is installed either way. Leave the box unchecked to install it without starting it; you can start it later from MacType Control Center.
+english.StartServiceOption=Start the service right after installation. The bundled default profile (Default.ini) is applied to newly opened apps immediately.
+korean.StartServicePageCaption=MacType 서비스를 바로 시작할까요?
+korean.StartServicePageDescription=설치가 끝나자마자 MacType가 글꼴 적용을 시작할지 정합니다.
+korean.StartServicePageSubCaption=서비스는 어느 쪽이든 설치됩니다. 선택하지 않으면 서비스를 설치만 하고 시작하지 않으며, 나중에 MacType Control Center에서 시작할 수 있습니다.
+korean.StartServiceOption=설치 직후 서비스를 시작합니다. 새로 여는 앱에 기본 프로필(Default.ini)이 바로 적용됩니다.
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
@@ -137,6 +145,7 @@ var
   DeferredRuntimeCleanup: Boolean;
   ExistingInstallState: Integer;
   ExistingInstallPage: TOutputMsgWizardPage;
+  StartServicePage: TInputOptionWizardPage;
   ExistingInstallNextCaption: String;
   ExistingInstallClassified: Boolean;
   RootCleanupPreservedUninstaller: String;
@@ -365,8 +374,38 @@ begin
   Result := WizardSilent or (ExistingInstallState = ExistingInstallFresh);
 end;
 
+{ The question is asked only where a fresh service would otherwise start on
+  its own; a verified update or reinstall keeps the run state the user already
+  chose, so the broker preserves it instead of asking again. }
+function SkipStartServicePage(Sender: TWizardPage): Boolean;
+begin
+  EnsureExistingInstallClassified;
+  Result := WizardSilent or
+    (ExistingInstallState = ExistingInstallVerifiedUpdate) or
+    (ExistingInstallState = ExistingInstallVerifiedReinstall);
+end;
+
+function BootstrapVerb: String;
+begin
+  if StartServicePage.Values[0] then
+    Result := 'bootstrap-install'
+  else
+    Result := 'bootstrap-install-preserve-run-state';
+end;
+
 procedure InitializeWizard;
 begin
+  StartServicePage := CreateInputOptionPage(
+    wpSelectTasks,
+    CustomMessage('StartServicePageCaption'),
+    CustomMessage('StartServicePageDescription'),
+    CustomMessage('StartServicePageSubCaption'),
+    False,
+    False
+  );
+  StartServicePage.Add(CustomMessage('StartServiceOption'));
+  StartServicePage.Values[0] := ExpandConstant('{param:STARTSERVICE|0}') = '1';
+  StartServicePage.OnShouldSkipPage := @SkipStartServicePage;
   ExistingInstallPage := CreateOutputMsgPage(
     wpReady,
     '',
@@ -455,12 +494,15 @@ end;
 function RunStagedBootstrap(const Broker: String): String;
 var
   ResultCode: Integer;
+  Verb: String;
 begin
   ResetBrokerCapture;
   ResultCode := -1;
+  Verb := BootstrapVerb;
+  Log('Machine service bootstrap verb: ' + Verb);
   if not ExecAndLogOutput(
     Broker,
-    'bootstrap-install',
+    Verb,
     ExtractFileDir(Broker),
     SW_HIDE,
     ewWaitUntilTerminated,

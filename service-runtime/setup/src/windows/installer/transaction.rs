@@ -4,8 +4,8 @@ use super::preflight::validate_mode_matches_profile;
 use super::WindowsInstallerBackend;
 use crate::storage::create_protected_directory;
 use crate::{
-    BootstrapMode, BootstrapPreflight, FixedPayload, OpenServiceObservation, ProfileStore,
-    RuntimeInstaller, SetupError,
+    BootstrapPlan, BootstrapPreflight, BootstrapProfileMode, FixedPayload, OpenServiceObservation,
+    ProfileStore, RuntimeInstaller, SetupError,
 };
 
 const BUNDLED_DEFAULT_PROFILE: &[u8] =
@@ -19,13 +19,13 @@ impl WindowsInstallerBackend {
     pub(super) fn apply_transaction(
         &self,
         snapshot: &BootstrapPreflight,
-        mode: &BootstrapMode,
-    ) -> Result<String, SetupError> {
+        plan: &BootstrapPlan,
+    ) -> Result<Option<String>, SetupError> {
         let installer = RuntimeInstaller::new(self.paths.clone());
         let store = ProfileStore::new(self.paths.clone());
         let previous_runtime = installer.inspect_current_stable()?;
         let previous_profile = store.inspect_active_generation_stable()?;
-        validate_mode_matches_profile(mode, previous_profile.as_ref())?;
+        validate_mode_matches_profile(&plan.profile, previous_profile.as_ref())?;
 
         create_protected_directory(self.paths.service_root())?;
         super::super::acl::harden_machine_directory(self.paths.service_root())?;
@@ -44,8 +44,8 @@ impl WindowsInstallerBackend {
         let activation = installer.deploy_with_prepare_and_health_check(
             &payload,
             |binary| {
-                let generation = match mode {
-                    BootstrapMode::FreshBundledDefault => {
+                let generation = match &plan.profile {
+                    BootstrapProfileMode::PublishBundledDefault => {
                         if store.inspect_active_generation_stable()?.is_some() {
                             return Err(SetupError::Runtime(
                                 "an active profile appeared after fresh-install preflight"
@@ -64,9 +64,9 @@ impl WindowsInstallerBackend {
                             },
                         )?;
                         published_default = true;
-                        generation
+                        Some(generation)
                     }
-                    BootstrapMode::PreserveExistingProfile { generation } => {
+                    BootstrapProfileMode::PreserveExisting { generation } => {
                         let generation = GenerationId::parse(format!("sha256:{generation}"))?;
                         if store.inspect_active_generation_stable()?.as_ref() != Some(&generation) {
                             return Err(SetupError::Runtime(
@@ -74,13 +74,24 @@ impl WindowsInstallerBackend {
                             ));
                         }
                         store.synchronize_active_runtime()?;
-                        generation
+                        Some(generation)
+                    }
+                    BootstrapProfileMode::LeaveUnpublished => {
+                        if store.inspect_active_generation_stable()?.is_some() {
+                            return Err(SetupError::Runtime(
+                                "a protected profile appeared after fresh-install preflight"
+                                    .to_owned(),
+                            ));
+                        }
+                        None
                     }
                 };
-                let data_root = self.paths.active_profile().parent().ok_or_else(|| {
-                    SetupError::Runtime("protected profile root is unavailable".to_owned())
-                })?;
-                super::super::acl::harden_machine_directory(data_root)?;
+                if generation.is_some() {
+                    let data_root = self.paths.active_profile().parent().ok_or_else(|| {
+                        SetupError::Runtime("protected profile root is unavailable".to_owned())
+                    })?;
+                    super::super::acl::harden_machine_directory(data_root)?;
+                }
                 super::super::acl::harden_machine_directory(self.paths.service_root())?;
 
                 match snapshot.open_service {
@@ -97,6 +108,14 @@ impl WindowsInstallerBackend {
                 Ok(generation)
             },
             |_, generation| {
+                if !plan.start_service {
+                    return Ok(());
+                }
+                let generation = generation.as_ref().ok_or_else(|| {
+                    SetupError::Runtime(
+                        "bootstrap cannot start the service without a published profile".to_owned(),
+                    )
+                })?;
                 self.manager
                     .start_and_wait_ready_for_profile(generation.as_str())?;
                 if preserve_stopped_state(snapshot.open_service) {
@@ -108,7 +127,7 @@ impl WindowsInstallerBackend {
         );
 
         match activation {
-            Ok((_, generation)) => Ok(generation.as_str().to_owned()),
+            Ok((_, generation)) => Ok(generation.map(|generation| generation.as_str().to_owned())),
             Err(operation) => {
                 let restoration = self.restore_after_failure(
                     snapshot,

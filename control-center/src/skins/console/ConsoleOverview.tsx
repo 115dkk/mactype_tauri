@@ -85,7 +85,7 @@ export function ConsoleOverview() {
         title={t("overview.specimenTitle")}
       >
         {editing && <textarea aria-label={t("profiles.sampleAria")} className="sample-input console-sample-input" onChange={(event) => setSample(event.target.value)} rows={2} value={sample} />}
-        <SpecimenBoard className="specimen-board console-canvas" dark={dark} fontFace={fontFace} profilePath={applied?.path ?? null} sizes={SPECIMEN_SIZES} text={sample} />
+        <SpecimenBoard className="specimen-board console-canvas" dark={dark} fontFace={fontFace} profilePath={substitutes.ready ? applied?.path ?? null : null} revision={execution.status?.expectedProfileDigest ?? undefined} sizes={SPECIMEN_SIZES} text={sample} />
         {substitutes.error && <p className="inline-error" role="alert">{substitutes.error}</p>}
       </ConsolePanel>
 

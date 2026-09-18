@@ -117,6 +117,8 @@ export function App({ initialTheme = loadThemePreference(), initialSkin = loadSk
   const navigate = useCallback((view: ViewId, profileMode?: ProfileMode) => dispatch({ type: "navigate", view, profileMode }), []);
   const setStatus = useCallback((status: InstallationStatus) => dispatch({ type: "status", status }), []);
   const reportReady = useCallback((view: ViewId) => { void reportFrontendReady(view); }, []);
+  const setSkin = useCallback((skin: SkinPreference) => dispatch({ type: "skin", skin }), []);
+  const toggleTheme = useCallback(() => dispatch({ type: "toggle-theme" }), []);
   const studio = useCallback(() => {
     if (studioOpening.current) return;
     studioOpening.current = true;
@@ -135,12 +137,12 @@ export function App({ initialTheme = loadThemePreference(), initialSkin = loadSk
       reconnectPreview={reconnectPreview}
       rediscoverInstallation={rediscoverInstallation}
       reportReady={reportReady}
-      setSkin={(skin) => dispatch({ type: "skin", skin })}
+      setSkin={setSkin}
       setStatus={setStatus}
       skin={state.skin}
       status={state.status}
       theme={state.theme}
-      toggleTheme={() => dispatch({ type: "toggle-theme" })}
+      toggleTheme={toggleTheme}
       view={state.view}
     />
     {studioError && <div className="studio-open-error" role="alert">

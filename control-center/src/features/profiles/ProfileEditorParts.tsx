@@ -40,11 +40,14 @@ export function ProfileEditorBody({ editor }: EditorPartProps) {
           fontOptionLabel={editor.fontOptionLabel}
           onAdvancedChange={editor.setAdvanced}
           onAdvancedCommit={(next) => void editor.commitAdvanced(next)}
+          onOpenList={(kind) => editor.chooseGroup("lists", kind)}
           onSettingChange={editor.changeSetting}
           onSettingPreview={editor.previewSetting}
+          onUnityGamesChange={(games) => void editor.updateList("unityIncludeGames", games)}
           savedValues={editor.savedValues}
           settings={editor.filteredSettings}
           t={t}
+          unityGames={editor.lists.unityIncludeGames ?? []}
           values={editor.values}
         />
       )}
@@ -65,9 +68,11 @@ export function ProfileEditorBody({ editor }: EditorPartProps) {
         <ListsEditor
           definitions={editor.listDefinitions}
           entries={editor.lists}
+          focusKind={editor.listFocus}
           fontFamilies={editor.fontFamilies}
           fontOptionLabel={editor.fontOptionLabel}
           installedFontKeys={editor.installedFontKeys}
+          onFocusHandled={editor.clearListFocus}
           onUpdateList={(kind, entries) => void editor.updateList(kind, entries)}
           t={t}
         />

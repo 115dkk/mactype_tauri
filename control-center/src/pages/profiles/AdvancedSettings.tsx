@@ -3,7 +3,9 @@ import { Hint } from "../../components/Hint";
 import type { SettingDefinition } from "../../generated/settings";
 import type { I18nValue } from "../../i18n/i18n";
 import { FontSubstitutionEditor } from "./FontSubstitutionEditor";
+import type { ListKind } from "./ListsEditor";
 import { SchemaSettings } from "./SchemaSettings";
+import { UnityGamePicker } from "./UnityGamePicker";
 
 interface AdvancedSettingsProps {
   settings: ReadonlyArray<SettingDefinition>;
@@ -17,6 +19,11 @@ interface AdvancedSettingsProps {
   onSettingPreview: (settingId: string, value: number) => void;
   onAdvancedChange: (profile: AdvancedProfile) => void;
   onAdvancedCommit: (profile: AdvancedProfile) => void;
+  /* The games "selected games only" applies to, and the way to the
+     exclusion list "all games" consults; both live in the profile's lists. */
+  unityGames: ReadonlyArray<string>;
+  onUnityGamesChange: (games: ReadonlyArray<string>) => void;
+  onOpenList: (kind: ListKind) => void;
   t: I18nValue["t"];
 }
 
@@ -177,17 +184,28 @@ export function AdvancedSettings({
   onSettingPreview,
   onAdvancedChange,
   onAdvancedCommit,
+  unityGames,
+  onUnityGamesChange,
+  onOpenList,
   t,
 }: AdvancedSettingsProps) {
   const sectionProps = { advanced, onChange: onAdvancedChange, onCommit: onAdvancedCommit, t };
+  const unityMode = values.unity_font_hook ?? 0;
   return (
     <>
       <SchemaSettings dirtyKeys={dirtyKeys} onChange={onSettingChange} onPreviewChange={onSettingPreview} savedValues={savedValues} settings={settings} t={t} values={values} />
-      {(values.unity_font_hook ?? 0) === 2 && (
+      {unityMode === 1 && <UnityGamePicker games={unityGames} onChange={onUnityGamesChange} t={t} />}
+      {unityMode === 2 && (
         <p className="unity-hook-notice" role="note">{t("advanced.unityHookMostNotice")}</p>
       )}
-      {(values.unity_font_hook ?? 0) === 3 && (
-        <p className="unity-hook-notice warning-text" role="note">{t("advanced.unityHookAllWarning")}</p>
+      {unityMode === 3 && (
+        <div className="unity-hook-notice warning-text" role="note">
+          <p>{t("advanced.unityHookAllWarning")}</p>
+          <p className="unity-hook-actions">
+            <span>{t("advanced.unityExcludeHint", { group: t("group.lists.label"), list: t("list.unityExcludeGames.label") })}</span>
+            <button className="button secondary" onClick={() => onOpenList("unityExcludeGames")} type="button">{t("advanced.unityOpenExcludeList")}</button>
+          </p>
+        </div>
       )}
       <div className="advanced-editor">
         <ShadowSettings {...sectionProps} />

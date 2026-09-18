@@ -1,5 +1,5 @@
 import { Plus, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listManualLaunchCandidates } from "../../app/tauri";
 import { Hint } from "../../components/Hint";
 import type { I18nValue } from "../../i18n/i18n";
@@ -17,6 +17,10 @@ const processSuggestionsId = "list-process-suggestions";
 interface ListsEditorProps {
   definitions: ReadonlyArray<ListDefinition>;
   entries: Readonly<Record<string, ReadonlyArray<string>>>;
+  /* The list another group sent the reader to: scrolled into view and given
+     focus once, then reported handled. */
+  focusKind?: ListKind | null;
+  onFocusHandled?: () => void;
   fontFamilies: ReadonlyArray<string>;
   installedFontKeys: ReadonlySet<string>;
   fontOptionLabel: (font: string) => string;
@@ -24,10 +28,21 @@ interface ListsEditorProps {
   t: I18nValue["t"];
 }
 
-export function ListsEditor({ definitions, entries, fontFamilies, installedFontKeys, fontOptionLabel, onUpdateList, t }: ListsEditorProps) {
+export function ListsEditor({ definitions, entries, focusKind, onFocusHandled, fontFamilies, installedFontKeys, fontOptionLabel, onUpdateList, t }: ListsEditorProps) {
   const [processNames, setProcessNames] = useState<ReadonlyArray<string>>([]);
   const [pending, setPending] = useState<Record<string, string>>({});
   const [rejections, setRejections] = useState<Record<string, string>>({});
+  const gridRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!focusKind) return;
+    const section = gridRef.current?.querySelector<HTMLElement>(`[data-kind="${focusKind}"]`);
+    if (section) {
+      section.scrollIntoView({ block: "start" });
+      section.querySelector<HTMLElement>("input, select")?.focus({ preventScroll: true });
+    }
+    onFocusHandled?.();
+  }, [focusKind, onFocusHandled]);
 
   useEffect(() => {
     let active = true;
@@ -66,7 +81,7 @@ export function ListsEditor({ definitions, entries, fontFamilies, installedFontK
   };
 
   return (
-    <div className="list-grid">
+    <div className="list-grid" ref={gridRef}>
       {definitions.map((definition) => {
         const kind = definition.kind;
         const listEntries = entries[kind] ?? [];
@@ -76,7 +91,7 @@ export function ListsEditor({ definitions, entries, fontFamilies, installedFontK
           : [];
         const rejection = rejections[kind] ?? "";
         return (
-          <section className="list-editor" key={kind}>
+          <section className="list-editor" data-kind={kind} key={kind}>
             <strong><Hint content={definition.help}>{definition.label}</Hint></strong>
             {listEntries.length > 0
               ? <ul>{listEntries.map((entry) => <li key={entry}><code>{isFontList ? fontOptionLabel(entry) : entry}</code><button aria-label={t("profiles.remove", { name: entry })} className="icon-button" onClick={() => removeEntry(kind, entry)} type="button"><Trash2 aria-hidden="true" size={14} /></button></li>)}</ul>

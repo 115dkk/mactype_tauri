@@ -122,6 +122,18 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .warning-text { color: var(--color-warning); font-weight: 600; }
 .unity-hook-notice { margin-block: var(--space-3); padding: var(--space-3); border-inline-start: 3px solid var(--color-border); background: var(--color-surface-subtle); }
 .unity-hook-notice.warning-text { border-inline-start-color: var(--color-warning); }
+.unity-hook-notice p { margin: 0; }
+.unity-hook-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin-top: var(--space-2); color: var(--color-muted); }
+.unity-hook-actions .button { flex: 0 0 auto; }
+/* The picker for "selected games only": the chosen games, the running apps
+   to choose from, and the file picker and typed name for the rest. */
+.unity-games { display: grid; gap: var(--space-3); margin-block: var(--space-3); padding: var(--space-3); border: 1px solid var(--color-border); background: var(--color-surface); }
+.unity-games-head p { margin-top: var(--space-1); color: var(--color-muted); font-size: 12px; }
+.unity-games-list { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.unity-games-list li { display: inline-flex; align-items: center; gap: var(--space-1); min-height: var(--control-height); padding-inline-start: var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface-subtle); }
+.unity-games-empty { margin: 0; color: var(--color-muted); font-size: 12px; }
+.unity-games .process-picker { padding: 0; border-bottom: 0; }
+.unity-games-add input { font-family: inherit; font-size: inherit; }
 .split-section { display: flex; align-items: center; justify-content: space-between; gap: var(--space-6); margin-top: var(--space-8); padding: var(--space-5) 0; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
 .split-section p { max-width: 680px; margin-top: var(--space-2); color: var(--color-muted); }
 /* Tighter side padding than the reading pages: this one spends its width on a

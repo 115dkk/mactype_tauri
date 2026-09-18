@@ -6,6 +6,28 @@
 #include <iostream>
 #include <string>
 
+namespace {
+
+mtpc::Frame omitted_probe() {
+  mtpc::Frame probe;
+  probe.kind = mtpc::MessageKind::show_native_preview;
+  probe.request_id = 46;
+  probe.json = "{}";
+  return probe;
+}
+
+std::string json_path(const wchar_t* root, const char* file) {
+  const std::filesystem::path path = std::filesystem::path(root) / file;
+  std::string escaped;
+  for (const char character : path.string()) {
+    if (character == '\\') escaped += "\\\\";
+    else escaped.push_back(character);
+  }
+  return escaped;
+}
+
+}  // namespace
+
 int wmain(int argc, wchar_t** argv) {
   if (argc != 2) return 1;
   mactype::PreviewRuntime runtime(std::filesystem::path(argv[1]).wstring());
@@ -64,6 +86,34 @@ int wmain(int argc, wchar_t** argv) {
   }
   runtime.pump_messages();
   if (runtime.selected_face_for_tests() != L"Segoe UI") return 28;
+
+  /* A strip rendered for another caller leaves the window's sample alone. */
+  mtpc::Frame foreign_strip;
+  foreign_strip.kind = mtpc::MessageKind::render_preview;
+  foreign_strip.request_id = 56;
+  foreign_strip.json = R"({"overrides":{"normal_weight":2},"sample":{"text":"Studio strip · one line","fontFace":"Arial","fontSizePt":9,"widthPx":320,"heightPx":64,"dpi":96,"foreground":"#000000","background":"#FFFFFF"}})";
+  if (runtime.render(foreign_strip).kind != mtpc::MessageKind::preview_rendered) return 44;
+  if (runtime.native_sample_text_for_tests() != L"Native preview 한글 ABC") return 45;
+  if (runtime.strip_text_for_tests() != L"Studio strip · one line") return 46;
+  const mtpc::Frame after_strip = runtime.show_native_preview(omitted_probe(), true);
+  if (after_strip.json.find("\"fontFace\":\"Segoe UI\"") == std::string::npos ||
+      after_strip.json.find("\"fontSizePt\":16") == std::string::npos) {
+    return 47;
+  }
+  runtime.pump_messages();
+
+  /* The window keeps its own profile and overrides; a bad path is refused. */
+  mtpc::Frame native_settings;
+  native_settings.kind = mtpc::MessageKind::show_native_preview;
+  native_settings.request_id = 57;
+  native_settings.json = R"({"profilePath":"Z:\\missing\\profile.ini","overrides":{"normal_weight":3}})";
+  if (runtime.show_native_preview(native_settings, true).kind != mtpc::MessageKind::error) return 48;
+  native_settings.json = std::string{R"({"profilePath":")"} + json_path(argv[1], "MacType.ini") +
+                         R"(","overrides":{"normal_weight":3,"gamma_value":1.4}})";
+  if (runtime.show_native_preview(native_settings, true).kind != mtpc::MessageKind::native_preview_state) return 49;
+  runtime.pump_messages();
+  if (runtime.render(foreign_strip).kind != mtpc::MessageKind::preview_rendered) return 50;
+  if (runtime.scroll_max_for_tests() < 0) return 51;
 
   mtpc::Frame tall;
   tall.kind = mtpc::MessageKind::show_native_preview;

@@ -377,6 +377,8 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
     const requestGeneration = generation.current;
     try {
       const state = await setNativePreview(visible, {
+        profilePath: profilePath ?? undefined,
+        overrides: values,
         displayMode: mode,
         text: sampleText,
         listingText: t("profiles.samplePangram"),
@@ -395,7 +397,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
     } catch (caught: unknown) {
       if (isCurrentGeneration(requestGeneration)) onError(errorMessage(caught));
     }
-  }, [fontFace, fontSize, isCurrentGeneration, onError, sampleText, t, theme]);
+  }, [fontFace, fontSize, isCurrentGeneration, onError, profilePath, sampleText, t, theme, values]);
 
   const toggleNativePreview = () => applyNativePreview(!nativeVisible, nativeMode, inverted);
 
@@ -405,13 +407,14 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
     if (nativeVisible) void applyNativePreview(true, mode, inverted);
   };
 
-  /* An open native window follows the font, size and sample the reader is
-     looking at here; the window's own controls take over once they are used. */
+  /* An open native window follows the font, size, sample, profile and edits
+     the reader is looking at here; the window's own controls take over once
+     they are used. */
   useEffect(() => {
     if (nativeVisible) void applyNativePreview(true, nativeMode, inverted);
-    // Font, size and sample changes only; the toggles call applyNativePreview themselves.
+    // Font, size, sample, profile and value changes only; the toggles call applyNativePreview themselves.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fontFace, fontSize, sampleText]);
+  }, [fontFace, fontSize, profilePath, sampleText, values]);
 
   /* An open native window follows the polarity choice without reopening. */
   const toggleInverted = () => {

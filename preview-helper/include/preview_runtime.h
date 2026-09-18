@@ -38,6 +38,8 @@ class PreviewRuntime {
   bool save_in_progress_for_tests() const;
   int scroll_max_for_tests();
   int wheel_for_tests(int delta);
+  std::wstring native_sample_text_for_tests() const;
+  std::wstring strip_text_for_tests() const;
   void set_save_in_progress_for_tests(bool in_progress);
   void trigger_save_for_tests();
   std::uint32_t save_thread_started_for_tests() const;
@@ -101,6 +103,25 @@ class PreviewRuntime {
 
   struct CanvasBitmap;
 
+  /// The sample a render_preview request draws; separate from the native
+  /// window's sample so strips rendered for one caller never change what
+  /// the window shows.
+  struct StripSample {
+    std::wstring text{L"MacType preview 123 ABC\nThe quick brown fox jumps over the lazy dog."};
+    std::wstring font_face{L"Segoe UI"};
+    float font_size_pt{14.0F};
+    std::uint32_t dpi{96};
+    COLORREF foreground{RGB(24, 29, 35)};
+    COLORREF background{RGB(238, 241, 244)};
+    bool bold{false};
+    bool italic{false};
+  };
+
+  /// Whose profile and overrides MacType currently holds. The core keeps one
+  /// set of settings per process, so the window re-applies its own before
+  /// drawing whenever a strip render applied someone else's.
+  enum class SettingsOwner { none, strip, native };
+
   static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
   static LRESULT CALLBACK edit_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
   bool create_windows(std::string& error);
@@ -115,6 +136,7 @@ class PreviewRuntime {
   const Palette& palette() const;
   int chrome_metric(int NativeChrome::*member, int fallback) const;
   void invalidate_canvas_cache();
+  void apply_native_settings();
   CanvasBitmap* cached_native_canvas(int width, int minimum_height);
   void enumerate_fonts();
   void sync_controls();
@@ -152,6 +174,7 @@ class PreviewRuntime {
   HFONT mono_font_{};
   HBRUSH surface_brush_{};
   HBRUSH edit_brush_{};
+  StripSample strip_{};
   std::wstring sample_text_{L"MacType preview 123 ABC\nThe quick brown fox jumps over the lazy dog."};
   std::wstring font_face_{L"Segoe UI"};
   float font_size_pt_{14.0F};
@@ -159,8 +182,9 @@ class PreviewRuntime {
   bool sample_italic_{false};
   DisplayMode display_mode_{DisplayMode::sample};
   std::wstring listing_text_{L"The quick brown fox jumps over the lazy dog."};
-  COLORREF foreground_{RGB(24, 29, 35)};
-  COLORREF background_{RGB(238, 241, 244)};
+  std::wstring native_profile_path_;
+  std::vector<std::pair<std::string, double>> native_overrides_;
+  SettingsOwner settings_owner_{SettingsOwner::none};
   COLORREF native_foreground_{RGB(24, 29, 35)};
   COLORREF native_background_{RGB(238, 241, 244)};
   bool inverted_{false};
@@ -193,7 +217,6 @@ class PreviewRuntime {
   std::wstring temporary_status_;
   WINDOWPLACEMENT placement_{sizeof(WINDOWPLACEMENT)};
   bool has_placement_{false};
-  std::uint32_t dpi_{96};
   std::uint32_t native_dpi_{96};
   std::uint32_t core_version_{};
   bool has_dll_get_version_{};

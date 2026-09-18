@@ -844,15 +844,16 @@ bool PreviewRuntime::apply_request(const std::string& json, std::string& error) 
       }
     }
     control_center_->RefreshSetting();
+    settings_owner_ = SettingsOwner::strip;
   }
-  if (const auto value = json_string(json, "text")) sample_text_ = utf8_to_wide(*value);
-  if (const auto value = json_string(json, "fontFace")) font_face_ = utf8_to_wide(*value);
-  if (const auto value = json_number(json, "fontSizePt")) font_size_pt_ = static_cast<float>(*value);
-  if (const auto value = json_number(json, "dpi")) dpi_ = static_cast<std::uint32_t>(*value);
-  if (const auto value = json_string(json, "foreground")) foreground_ = parse_color(*value, foreground_);
-  if (const auto value = json_string(json, "background")) background_ = parse_color(*value, background_);
-  if (const auto value = json_bool(json, "bold")) sample_bold_ = *value;
-  if (const auto value = json_bool(json, "italic")) sample_italic_ = *value;
+  if (const auto value = json_string(json, "text")) strip_.text = utf8_to_wide(*value);
+  if (const auto value = json_string(json, "fontFace")) strip_.font_face = utf8_to_wide(*value);
+  if (const auto value = json_number(json, "fontSizePt")) strip_.font_size_pt = static_cast<float>(*value);
+  if (const auto value = json_number(json, "dpi")) strip_.dpi = static_cast<std::uint32_t>(*value);
+  if (const auto value = json_string(json, "foreground")) strip_.foreground = parse_color(*value, strip_.foreground);
+  if (const auto value = json_string(json, "background")) strip_.background = parse_color(*value, strip_.background);
+  if (const auto value = json_bool(json, "bold")) strip_.bold = *value;
+  if (const auto value = json_bool(json, "italic")) strip_.italic = *value;
   return true;
 }
 
@@ -861,7 +862,7 @@ std::vector<std::uint8_t> PreviewRuntime::render_png(const std::string& json, st
                                                      std::string& error) {
   width = static_cast<std::uint32_t>(json_number(json, "widthPx").value_or(1000));
   height = static_cast<std::uint32_t>(json_number(json, "heightPx").value_or(280));
-  dpi = static_cast<std::uint32_t>(json_number(json, "dpi").value_or(dpi_));
+  dpi = static_cast<std::uint32_t>(json_number(json, "dpi").value_or(strip_.dpi));
   if (width < 64 || width > 4096 || height < 64 || height > 2048 || dpi < 72 || dpi > 768) {
     error = "preview dimensions or DPI are outside the supported range";
     return {};
@@ -872,8 +873,8 @@ std::vector<std::uint8_t> PreviewRuntime::render_png(const std::string& json, st
     return {};
   }
   const RECT area{0, 0, static_cast<LONG>(width), static_cast<LONG>(height)};
-  draw_sample(bitmap.dc, area, sample_text_, font_face_, font_size_pt_, dpi, foreground_, background_,
-              sample_bold_, sample_italic_);
+  draw_sample(bitmap.dc, area, strip_.text, strip_.font_face, strip_.font_size_pt, dpi,
+              strip_.foreground, strip_.background, strip_.bold, strip_.italic);
   auto* pixels = static_cast<std::uint8_t*>(bitmap.bits);
   for (std::size_t index = 3; index < static_cast<std::size_t>(width) * height * 4U; index += 4) {
     pixels[index] = 0xFF;
@@ -885,7 +886,6 @@ mtpc::Frame PreviewRuntime::render(const mtpc::Frame& request) {
   const auto started = std::chrono::steady_clock::now();
   std::string error;
   if (!apply_request(request.json, error)) return error_frame(request.request_id, "invalid_request", error);
-  invalidate_canvas_cache();
   std::uint32_t width{};
   std::uint32_t height{};
   std::uint32_t dpi{};
@@ -902,7 +902,6 @@ mtpc::Frame PreviewRuntime::render(const mtpc::Frame& request) {
                   ",\"elapsedMs\":" + std::to_string(elapsed.count()) +
                   ",\"coreVersion\":" + std::to_string(core_version_) + ",\"engine\":\"" +
                   (engine_ == Engine::mactype ? "mactype" : "plain") + "\"}";
-  InvalidateRect(native_window_, nullptr, FALSE);
   return response;
 }
 
@@ -938,10 +937,39 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
     bool inverted;
     NativeLabels labels;
     std::optional<NativeChrome> chrome;
+    std::wstring profile_path;
+    std::vector<std::pair<std::string, double>> overrides;
   } pending{display_mode_,      sample_text_,       listing_text_, font_face_,
             font_size_pt_,      sample_bold_,       sample_italic_, topmost_,
             dark_theme_,        zoom_,              ladder_sizes_, native_foreground_,
-            native_background_, inverted_,          labels_,       std::nullopt};
+            native_background_, inverted_,          labels_,       std::nullopt,
+            native_profile_path_, native_overrides_};
+
+  if (const auto profile = json_root_string(json, "profilePath")) {
+    if (profile->empty()) {
+      pending.profile_path.clear();
+    } else {
+      const std::wstring profile_path = full_path(utf8_to_wide(*profile));
+      if (profile_path.empty() || !regular_file(profile_path) ||
+          _wcsicmp(PathFindExtensionW(profile_path.c_str()), L".ini") != 0) {
+        error = "profilePath is not an existing INI file";
+        return false;
+      }
+      pending.profile_path = profile_path;
+    }
+  }
+  if (json_root_value_start(json, "overrides")) {
+    if (!json_object_range(json, "overrides")) {
+      error = "overrides must be an object";
+      return false;
+    }
+    pending.overrides.clear();
+    for (const auto& setting : kSettings) {
+      if (const auto value = json_object_number(json, "overrides", setting.id)) {
+        pending.overrides.emplace_back(setting.id, *value);
+      }
+    }
+  }
 
   if (const auto mode = json_root_string(json, "displayMode")) {
     if (*mode == "sample" || *mode == "default") pending.display_mode = DisplayMode::sample;
@@ -1180,6 +1208,11 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
   const bool title_changed = pending.labels.title != labels_.title;
   const bool layout_changed = theme_changed || chrome_changed || labels_changed ||
                               pending.zoom != zoom_;
+  if (pending.profile_path != native_profile_path_ || pending.overrides != native_overrides_) {
+    native_profile_path_ = std::move(pending.profile_path);
+    native_overrides_ = std::move(pending.overrides);
+    if (settings_owner_ == SettingsOwner::native) settings_owner_ = SettingsOwner::none;
+  }
   display_mode_ = pending.display_mode;
   sample_text_ = std::move(pending.sample_text);
   listing_text_ = std::move(pending.listing_text);
@@ -1312,6 +1345,10 @@ void PreviewRuntime::close_from_window_for_tests() {
 
 bool PreviewRuntime::save_in_progress_for_tests() const { return save_in_progress_; }
 
+std::wstring PreviewRuntime::native_sample_text_for_tests() const { return sample_text_; }
+
+std::wstring PreviewRuntime::strip_text_for_tests() const { return strip_.text; }
+
 int PreviewRuntime::scroll_max_for_tests() {
   RedrawWindow(native_window_, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW);
   return scroll_max_;
@@ -1343,6 +1380,25 @@ int PreviewRuntime::chrome_metric(int NativeChrome::*member, int fallback) const
 
 void PreviewRuntime::invalidate_canvas_cache() {
   canvas_cache_dirty_ = true;
+}
+
+void PreviewRuntime::apply_native_settings() {
+  if (!control_center_ || settings_owner_ == SettingsOwner::native) return;
+  if (native_profile_path_.empty() && native_overrides_.empty()) return;
+  if (!native_profile_path_.empty()) control_center_->LoadSetting(native_profile_path_.c_str());
+  for (const auto& [id, value] : native_overrides_) {
+    for (const auto& setting : kSettings) {
+      if (id != setting.id) continue;
+      if (setting.is_float) {
+        control_center_->SetFloatAttribute(setting.ordinal, static_cast<float>(value));
+      } else {
+        control_center_->SetIntAttribute(setting.ordinal, static_cast<int>(value));
+      }
+      break;
+    }
+  }
+  control_center_->RefreshSetting();
+  settings_owner_ = SettingsOwner::native;
 }
 
 PreviewRuntime::CanvasBitmap* PreviewRuntime::cached_native_canvas(int width, int minimum_height) {
@@ -1679,6 +1735,7 @@ void PreviewRuntime::draw_combo_item(const DRAWITEMSTRUCT& item) {
 
 std::unique_ptr<PreviewRuntime::CanvasBitmap> PreviewRuntime::render_native_canvas(int width,
                                                                                    int minimum_height) {
+  apply_native_settings();
   const int content_width = std::max(1, width);
   int height = minimum_height;
   if (display_mode_ == DisplayMode::listing) height = std::max(height, listing_content_height(native_dpi_));

@@ -62,7 +62,7 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
   const {
     addIndividual,
     advanced,
-    applyProfile,
+    designateProfile,
     busy,
     changeSetting,
     command: profileCommand,
@@ -255,7 +255,7 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
           <button className="button secondary compact-action" disabled={!profile || busy || recoveryRequired} onClick={resetDefaults} title={t("profiles.resetDefaultsDescription")} type="button"><ListRestart aria-hidden="true" size={14} /> {t("profiles.resetDefaults")}</button>
           <button className="button secondary compact-action" disabled={!profile || !profile.canSave || dirtyCount === 0 || busy || recoveryRequired} onClick={() => void saveCurrentProfile()} type="button"><Save aria-hidden="true" size={14} /> {profileCommand === "save" ? t("profiles.saving") : t("profiles.saveNow")}</button>
           {profile && !profile.canSave && <button className="button secondary compact-action" disabled={busy || recoveryRequired} onClick={() => setSaveAsOpen(true)} type="button"><SaveAll aria-hidden="true" size={14} /> {t("files.saveAs")}</button>}
-          <button className="button primary compact-action" disabled={!profile || dirtyCount > 0 || busy || recoveryRequired} onClick={() => void applyProfile()} title={dirtyCount > 0 ? t("profiles.saveBeforeApply") : undefined} type="button"><Play aria-hidden="true" size={14} /> {profileCommand === "apply" ? t("profiles.applying") : t("profiles.applyNow")}</button>
+          <button className="button primary compact-action" disabled={!profile || dirtyCount > 0 || busy || recoveryRequired} onClick={() => void designateProfile()} title={dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button"><Play aria-hidden="true" size={14} /> {profileCommand === "designate" ? t("profiles.designating") : t("profiles.designate")}</button>
         </div>}
       </header>
 
@@ -285,7 +285,7 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
           <div className="settings-form">
             <div className="section-heading"><h2><Hint content={mode === "quick" ? t("wizard.guidance") : query ? t("profiles.searchDescription", { query }) : activeDefinition.description}>{mode === "quick" ? activeWizardLabel : query ? t("profiles.searchResults") : activeDefinition.label}</Hint></h2></div>
 
-            {mode === "quick" && <WizardSettings activeStep={activeWizardStep} advanced={advanced} busy={guidedBusy} canRedoStep={stepHistory.canRedo(activeWizardStep)} canSave={profile?.canSave ?? false} canUndoStep={stepHistory.canUndo(activeWizardStep)} dirtyCount={dirtyCount} dirtyKeys={dirtyKeys} fontFace={fontFace} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} onAdvancedCommit={(next) => void commitAdvanced(next)} onApply={() => void applyProfile()} onFontFaceChange={setFontFace} onPreview={showPreview} onRedoStep={redoStepEdit} onSave={() => void saveCurrentProfile()} onSettingChange={changeGuidedSetting} onSettingPreview={previewSetting} onStepChange={setActiveWizardStep} onUndoStep={undoStepEdit} profileName={profile?.displayPath ?? null} profilePath={profile?.path ?? null} savedValues={savedValues} settings={settingsSchema} t={t} values={values} />}
+            {mode === "quick" && <WizardSettings activeStep={activeWizardStep} advanced={advanced} busy={guidedBusy} canRedoStep={stepHistory.canRedo(activeWizardStep)} canSave={profile?.canSave ?? false} canUndoStep={stepHistory.canUndo(activeWizardStep)} dirtyCount={dirtyCount} dirtyKeys={dirtyKeys} fontFace={fontFace} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} onAdvancedCommit={(next) => void commitAdvanced(next)} onApply={() => void designateProfile()} onFontFaceChange={setFontFace} onPreview={showPreview} onRedoStep={redoStepEdit} onSave={() => void saveCurrentProfile()} onSettingChange={changeGuidedSetting} onSettingPreview={previewSetting} onStepChange={setActiveWizardStep} onUndoStep={undoStepEdit} profileName={profile?.displayPath ?? null} profilePath={profile?.path ?? null} savedValues={savedValues} settings={settingsSchema} t={t} values={values} />}
 
             {mode === "advanced" && query && <SearchSettings dirtyKeys={dirtyKeys} onChange={changeSetting} onPreviewChange={previewSetting} savedValues={savedValues} settings={filteredSettings} t={t} values={values} />}
             {mode === "advanced" && !query && activeGroup === "basic" && <BasicSettings dirtyKeys={dirtyKeys} onChange={changeSetting} onPreviewChange={previewSetting} savedValues={savedValues} settings={filteredSettings} t={t} values={values} />}

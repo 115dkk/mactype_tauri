@@ -80,8 +80,8 @@ export async function scanInstallation(): Promise<InstallationStatus | null> {
   return getRuntimeAdapter().scanInstallation();
 }
 
-export async function applyOpenProfile(): Promise<AppliedProfile> {
-  return getRuntimeAdapter().applyOpenProfile();
+export async function designateOpenProfile(): Promise<AppliedProfile> {
+  return getRuntimeAdapter().designateOpenProfile();
 }
 
 export async function registerSessionTarget(target: string, arguments_: ReadonlyArray<string>): Promise<ReadonlyArray<SessionTarget>> {

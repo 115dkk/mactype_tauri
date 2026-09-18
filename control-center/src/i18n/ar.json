@@ -328,7 +328,7 @@
   "execution.systemUnavailableTitle": "انتظر الخدمة",
   "execution.systemUnavailableDescription": "انتظر انتهاء العملية الحالية، ثم حدّث الحالة.",
   "execution.systemPause": "إيقاف التطبيق على التطبيقات الجديدة",
-  "execution.systemApply": "البدء بملف تعريف التشغيل",
+  "execution.systemApply": "بدء الخدمة",
   "execution.systemPaused": "تم إيقاف تطبيق MacType على النظام مؤقتًا.",
   "execution.systemResumed": "تم استئناف تطبيق MacType على النظام.",
   "execution.systemActivated": "بدأت الخدمة بملف تعريف التشغيل.",

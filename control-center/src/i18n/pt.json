@@ -328,7 +328,7 @@
   "execution.systemUnavailableTitle": "Aguarde o serviço",
   "execution.systemUnavailableDescription": "Aguarde a operação atual terminar e atualize o estado.",
   "execution.systemPause": "Parar de aplicar a novos aplicativos",
-  "execution.systemApply": "Iniciar com o perfil de execução",
+  "execution.systemApply": "Iniciar serviço",
   "execution.systemPaused": "A aplicação do MacType ao sistema está temporariamente desativada.",
   "execution.systemResumed": "A aplicação do MacType ao sistema foi retomada.",
   "execution.systemActivated": "O serviço foi iniciado com o perfil de execução.",

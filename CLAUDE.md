@@ -14,6 +14,20 @@ This file is for AI-assisted sessions working in the 115dkk/mactype_tauri fork.
 5. Manually dispatch the one-click build:
    `gh workflow run build.yml --repo 115dkk/mactype_tauri --ref codex/upstream-pr-prep -f version=0.1.0`.
 
+## Worktree hygiene
+
+Merged worktrees are removed without asking; the user approved this on
+2026-09-18. Once a `codex/<name>` branch is merged into `main` or into
+`codex/alpha-plus-dll`, run `git worktree remove --force .worktrees/<name>`
+and delete the local branch. A branch whose pull request GitHub reports as
+merged counts as merged even when `git branch --merged` does not list it.
+Leave a worktree alone while it carries uncommitted or unmerged work, and
+leave the long-lived ones (`alpha-plus-dll`, `upstream-pr-prep`). Directories
+under `.worktrees/` that `git worktree list` does not know are leftovers and
+go too. Line-ending noise in the generated files (`generated_settings.*`,
+`gen/schemas/*.json`, `Cargo.toml`) is not work and does not protect a
+worktree.
+
 ## Upstream hygiene — what never crosses over
 
 `codex/upstream-pr-prep` (feeds upstream PR snowie2000/mactype#1142) carries
@@ -29,13 +43,6 @@ cherry-picked. Docs/CI edits get their own commits that simply are not picked.
 
 ## Communication rules
 
-- Korean replies in this project follow the `chegyejeog-chulonja-v4-style`
-  skill (`~/.claude/skills/chegyejeog-chulonja-v4-style/SKILL.md`): plain
-  Korean without translationese, no em-dashes, no emoji, prose for reasoning
-  and conclusions, lists only for genuinely parallel items. The skill's own
-  frontmatter says to wait for an explicit request; this project asks for it
-  by default, so read it at session start and keep applying it. English
-  artifacts (commit messages, PR bodies, code comments) are unaffected.
 - Never comment on the upstream repo or PR without an explicit user request.
 - Screenshots/galleries go to the FORK's issue #3 (images hosted on an orphan
   `gallery-*` branch in the fork; embed raw.githubusercontent URLs).

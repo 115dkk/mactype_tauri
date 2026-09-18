@@ -25,7 +25,9 @@ export function ConsoleShell(props: ShellProps) {
     ciSmoke: props.ciSmoke && view === "execution",
     onReady: () => props.reportReady("execution"),
   });
-  const context = useMemo(() => ({ shell: props, execution }), [props, execution]);
+  const { ciSmoke, openPreviewStudio, reconnectPreview, rediscoverInstallation, reportReady, setSkin, setStatus, skin, status, theme, toggleTheme } = props;
+  const shell = useMemo<ShellProps>(() => ({ ciSmoke, navigate, openPreviewStudio, profileMode, reconnectPreview, rediscoverInstallation, reportReady, setSkin, setStatus, skin, status, theme, toggleTheme, view }), [ciSmoke, navigate, openPreviewStudio, profileMode, reconnectPreview, rediscoverInstallation, reportReady, setSkin, setStatus, skin, status, theme, toggleTheme, view]);
+  const context = useMemo(() => ({ shell, execution }), [shell, execution]);
 
   const page = view === "files"
     ? <ConsoleFiles />

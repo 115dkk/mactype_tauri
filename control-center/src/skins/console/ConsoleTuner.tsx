@@ -11,9 +11,9 @@ export function ConsoleTuner() {
   const { shell } = useConsole();
   const mode = shell.profileMode;
   const editor = useProfileEditor({ mode });
-  const { profile, dirtyCount } = editor;
+  const { profile, dirtyCount, loading } = editor;
   const title = t(mode === "quick" ? "nav.guidedSetup" : "nav.allSettings");
-  const profileName = profile?.displayPath.split(/[\\/]/).pop() ?? t("profiles.none");
+  const profileName = loading ? t("profiles.searching") : profile?.displayPath.split(/[\\/]/).pop() ?? t("profiles.none");
   const encoding = profile ? `${profile.encoding.toUpperCase()} · ${profile.lineEnding.replace(/-/g, "").toUpperCase()}` : "";
   const filteredCount = editor.filteredSettings.length;
 

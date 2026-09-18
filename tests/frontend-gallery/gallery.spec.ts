@@ -295,6 +295,39 @@ test("structured list editors add typed entries, reject duplicates, and suggest 
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-profile-list-editors-ko.png`), fullPage: true });
 });
 
+test("selected-games mode offers a game picker and all-games mode leads to the exclusion list", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "The picker is exercised at one width");
+  await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "고급·실험" }).click();
+  const mode = page.locator("#unity_font_hook");
+  await expect(mode).toBeVisible();
+
+  await mode.selectOption("1");
+  const picker = page.getByTestId("unity-game-picker");
+  await expect(picker).toBeVisible();
+  await expect(picker.getByText("아직 선택한 게임이 없습니다.", { exact: false })).toBeVisible();
+  await picker.getByRole("checkbox", { name: /^notepad\.exe/ }).check();
+  await expect(picker.locator(".unity-games-list li > code").filter({ hasText: "notepad.exe" })).toBeVisible();
+  await expect(picker.getByRole("checkbox", { name: /^notepad\.exe/ })).toBeChecked();
+  await picker.getByRole("button", { name: "notepad.exe 제거" }).click();
+  await expect(picker.locator(".unity-games-list li")).toHaveCount(0);
+  const typed = picker.getByRole("textbox", { name: "추가" });
+  await typed.fill("Game.exe");
+  await typed.press("Enter");
+  await expect(picker.locator(".unity-games-list li > code").filter({ hasText: "Game.exe" })).toBeVisible();
+  await expect(typed).toHaveValue("");
+  expect(await overflowingElements(page)).toEqual([]);
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-unity-selected-games-ko.png`), fullPage: true });
+
+  await mode.selectOption("3");
+  await expect(picker).toHaveCount(0);
+  await page.getByRole("button", { name: "제외 목록 열기" }).click();
+  const excluded = page.locator(".list-editor[data-kind='unityExcludeGames']");
+  await expect(excluded).toBeVisible();
+  await expect(excluded.getByRole("combobox", { name: "제외할 Unity 게임 · 추가" })).toBeFocused();
+  await expect(page.locator(".list-editor").filter({ hasText: "적용할 Unity 게임" })).toHaveCount(0);
+});
+
 test("profile preview docks as a full-height right column at wide widths", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1280", "Docked preview behavior is width-specific");
   await page.setViewportSize({ width: 1680, height: 900 });

@@ -236,6 +236,11 @@ export type NativePreviewMode = "sample" | "ladder" | "compare" | "listing";
 
 /** Everything the native window needs; omitted fields keep the window's previous value. */
 export interface NativePreviewOptions {
+  /** The profile and overrides the window renders with. The window keeps them
+      and re-applies them before it paints, so strips rendered for another
+      caller (the studio, another profile) never change what it shows. */
+  profilePath?: string;
+  overrides?: Readonly<Record<string, number>>;
   displayMode?: NativePreviewMode;
   text?: string;
   listingText?: string;

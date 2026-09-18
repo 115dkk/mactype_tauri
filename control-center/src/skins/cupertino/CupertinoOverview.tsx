@@ -17,7 +17,7 @@ export function CupertinoOverview({ shell }: { shell: ShellProps }) {
   const hidden = newestFirst.length - shown.length;
 
   return (
-    <CupertinoPage subtitle={t("overview.subtitle")} title={t("nav.overview")} titleId="overview-title">
+    <CupertinoPage fill subtitle={t("overview.subtitle")} title={t("nav.overview")} titleId="overview-title">
       <CupertinoGroup dataKind="service">
         <CupertinoRow
           dataKind="hero"

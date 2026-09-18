@@ -51,6 +51,24 @@ function clamp(value: number, low: number, high: number): number {
   return Math.min(high, Math.max(low, value));
 }
 
+/* The last complete batch per request set, kept across mounts. A board that
+   unmounts on navigation and comes back shows its bitmaps at once; the PNGs
+   stay on disk and the browser keeps them decoded. The signature carries
+   every field of every request, so a different profile, text, width or
+   revision is a different entry. */
+const SPECIMEN_CACHE_LIMIT = 32;
+const specimenCache = new Map<string, ReadonlyArray<SpecimenLine>>();
+
+function rememberSpecimen(signature: string, lines: ReadonlyArray<SpecimenLine>): void {
+  specimenCache.delete(signature);
+  specimenCache.set(signature, lines);
+  while (specimenCache.size > SPECIMEN_CACHE_LIMIT) {
+    const oldest = specimenCache.keys().next().value;
+    if (oldest === undefined) break;
+    specimenCache.delete(oldest);
+  }
+}
+
 /* Renders a batch of specimen strips through the helper, one after another,
    and publishes the batch only when every strip of the newest request set is
    ready. A newer batch abandons the running one, and the last complete batch
@@ -118,6 +136,7 @@ export function useSpecimenRenders(requests: ReadonlyArray<SpecimenRequest>, ena
           }
         }
         if (aborted || batch.id < batchCounter.current) continue;
+        rememberSpecimen(JSON.stringify(batch.requests), rendered);
         setLines(rendered);
         setError(null);
       }
@@ -128,6 +147,7 @@ export function useSpecimenRenders(requests: ReadonlyArray<SpecimenRequest>, ena
   }, []);
 
   const signature = JSON.stringify(requests);
+  const cached = enabled && requests.length > 0 ? specimenCache.get(signature) : undefined;
   useEffect(() => {
     if (!enabled) return;
     if (requests.length === 0) {
@@ -136,11 +156,18 @@ export function useSpecimenRenders(requests: ReadonlyArray<SpecimenRequest>, ena
       setLines([]);
       return;
     }
+    if (cached) {
+      batchCounter.current += 1;
+      pending.current = null;
+      setLines(cached);
+      setError(null);
+      return;
+    }
     pending.current = { id: ++batchCounter.current, requests };
     void drain();
-    // The signature captures every field of every request.
+    // The signature captures every field of every request, and the cache entry follows it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drain, enabled, signature]);
 
-  return { lines, error, rendering };
+  return { lines: cached ?? lines, error, rendering };
 }

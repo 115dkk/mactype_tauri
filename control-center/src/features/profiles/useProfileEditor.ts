@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { settingsSchema } from "../../generated/settings";
 import { settingMessageKey, useI18n } from "../../i18n/i18n";
 import { loadInstalledFontFamilies } from "../../app/tauri";
-import type { ListDefinition } from "../../pages/profiles/ListsEditor";
+import type { ListDefinition, ListKind } from "../../pages/profiles/ListsEditor";
 import { splitSubstitution } from "../../pages/profiles/profileEditorUtils";
 import type { PreviewVariant, ProfilePreviewHandle } from "../../pages/profiles/ProfilePreviewPanel";
 import { useProfileDocument } from "../../pages/profiles/useProfileDocument";
@@ -83,6 +83,9 @@ export function useProfileEditor({ mode = "advanced" }: ProfileEditorOptions = {
     return definitions;
   }, [t, values.unity_font_hook]);
   const [activeGroup, setActiveGroup] = useState<GroupId>("basic");
+  /* A list another group sends the reader to; the lists editor scrolls to it
+     once and clears it. */
+  const [listFocus, setListFocus] = useState<ListKind | null>(null);
   const [activeWizardStep, setActiveWizardStep] = useState<WizardStepId>("start");
   /* Step-scoped guided history. Advanced mode can rewrite the document
      through the global backend history, so the per-step record resets when
@@ -245,10 +248,12 @@ export function useProfileEditor({ mode = "advanced" }: ProfileEditorOptions = {
   const activeDefinition = groups.find((group) => group.id === activeGroup) ?? groups[0];
   const activeWizardLabel = t(`wizard.${activeWizardStep}`);
   const stepIndex = wizardStepIds.indexOf(activeWizardStep);
-  const chooseGroup = (group: GroupId) => {
+  const chooseGroup = (group: GroupId, focusList?: ListKind) => {
     setActiveGroup(group);
     setQuery("");
+    setListFocus(focusList ?? null);
   };
+  const clearListFocus = () => setListFocus(null);
   const headingText = mode === "quick" ? activeWizardLabel : query ? t("profiles.searchResults") : activeDefinition.label;
   const headingHint = mode === "quick" ? t("wizard.guidance") : query ? t("profiles.searchDescription", { query }) : activeDefinition.description;
   const submitSaveAs = () => {
@@ -270,6 +275,7 @@ export function useProfileEditor({ mode = "advanced" }: ProfileEditorOptions = {
     activeWizardStep,
     changeGuidedSetting,
     chooseGroup,
+    clearListFocus,
     dirtyCount,
     filteredSettings,
     fontFace,
@@ -282,6 +288,7 @@ export function useProfileEditor({ mode = "advanced" }: ProfileEditorOptions = {
     individualLabels,
     installedFontKeys,
     listDefinitions,
+    listFocus,
     locale,
     mode,
     previewDocked,

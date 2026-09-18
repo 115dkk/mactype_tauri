@@ -7,6 +7,8 @@ interface CupertinoPageProps {
   subtitle?: ReactNode;
   actions?: ReactNode;
   wide?: boolean;
+  /* The page fills the window's height and its last group takes the rest. */
+  fill?: boolean;
   /* A detail page shows a back control before the title instead of the subtitle. */
   onBack?: () => void;
   backLabel?: string;
@@ -14,10 +16,10 @@ interface CupertinoPageProps {
 }
 
 /* A System Settings page: a bold 24-pixel title, a muted subtitle, actions at
-   the trailing edge, and a 700-pixel content column. */
-export function CupertinoPage({ title, titleId, subtitle, actions, wide, onBack, backLabel, children }: CupertinoPageProps) {
+   the trailing edge, and a content column that follows the window. */
+export function CupertinoPage({ title, titleId, subtitle, actions, wide, fill, onBack, backLabel, children }: CupertinoPageProps) {
   return (
-    <section aria-labelledby={titleId} className="cupertino-page" data-wide={wide}>
+    <section aria-labelledby={titleId} className="cupertino-page" data-fill={fill} data-wide={wide}>
       <div className="cupertino-hd">
         <div>
           {onBack && <button className="cupertino-back" onClick={onBack} type="button"><ChevronLeft aria-hidden="true" size={16} strokeWidth={2} />{backLabel}</button>}

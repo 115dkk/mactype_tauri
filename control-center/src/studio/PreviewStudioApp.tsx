@@ -195,6 +195,8 @@ export function PreviewStudioApp() {
   const showNative = async () => {
     try {
       await setNativePreview(true, {
+        profilePath: sourceA.profilePath ?? undefined,
+        overrides: sourceA.overrides,
         displayMode: "sample",
         text: studioText(settings),
         listingText: studioText(settings).split("\n")[0],

@@ -128,9 +128,17 @@ pub struct NativePreviewChrome {
     pub(crate) mono_status: bool,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+/// Everything the native window draws with. The window keeps its own profile
+/// and overrides and re-applies them before it paints, so strips rendered for
+/// another caller (the Preview Studio, a different profile) never change what
+/// the window shows.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativePreviewOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) profile_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) overrides: Option<BTreeMap<String, f64>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) display_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -220,6 +228,8 @@ mod native_preview_tests {
     #[test]
     fn native_preview_options_round_trip_full_json_and_omit_absent_fields() {
         let documented = json!({
+            "profilePath": r"C:\MacType\ini\Default.ini",
+            "overrides": { "gamma_value": 1.4, "normal_weight": 3.0 },
             "displayMode": "sample",
             "text": r"sample text, may contain \n",
             "listingText": "pangram for listing mode",

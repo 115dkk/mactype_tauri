@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PreviewEngine } from "../../app/model";
 import { previewImageUrl } from "../../app/tauri";
 import { useI18n } from "../../i18n/i18n";
@@ -20,23 +20,31 @@ interface SpecimenBoardProps {
   labelled?: boolean;
   bold?: boolean;
   italic?: boolean;
+  /* Changes when the profile file behind profilePath changed, so a cached
+     batch for the old file is not shown for the new one. */
+  revision?: string;
 }
 
 /* A type-specimen board: one sample rendered by the helper at several sizes
    inside one canvas. The strips are requested at the canvas width and shown
    1:1, never resampled. */
-export function SpecimenBoard({ profilePath, overrides, engine, fontFace, sizes, text, dark, className, labelled = true, bold, italic }: SpecimenBoardProps) {
+export function SpecimenBoard({ profilePath, overrides, engine, fontFace, sizes, text, dark, className, labelled = true, bold, italic, revision }: SpecimenBoardProps) {
   const { t } = useI18n();
   const canvasRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const displayScale = window.devicePixelRatio || 1;
   const palette = specimenPalette(dark);
 
-  useEffect(() => {
+  /* The width is read before the first paint, so a board that mounts with
+     a cached batch draws the bitmaps in its first frame rather than the
+     placeholder; the observer then follows every later resize. */
+  useLayoutEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
+    const measure = (contentWidth: number) => setWidth(Math.max(0, Math.floor((contentWidth - (labelled ? 40 : 0)) / 8) * 8));
+    measure(canvas.clientWidth);
     const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) setWidth(Math.max(0, Math.floor((entry.contentRect.width - (labelled ? 40 : 0)) / 8) * 8));
+      for (const entry of entries) measure(entry.contentRect.width);
     });
     observer.observe(canvas);
     return () => observer.disconnect();
@@ -48,7 +56,7 @@ export function SpecimenBoard({ profilePath, overrides, engine, fontFace, sizes,
     return sizes.map((size) => {
       const wrappedText = wrapSample(text, fontFace, size, width);
       return {
-        key: `${size}`,
+        key: revision ? `${size}@${revision}` : `${size}`,
         profilePath,
         overrides: overrides ?? {},
         engine,
@@ -64,7 +72,7 @@ export function SpecimenBoard({ profilePath, overrides, engine, fontFace, sizes,
         italic,
       };
     });
-  }, [bold, displayScale, engine, fontFace, italic, overrides, palette.background, palette.foreground, profilePath, sizes, text, width]);
+  }, [bold, displayScale, engine, fontFace, italic, overrides, palette.background, palette.foreground, profilePath, revision, sizes, text, width]);
 
   const { lines, error } = useSpecimenRenders(requests);
   const displayedPalette = lines[0]?.request ?? palette;
@@ -74,7 +82,7 @@ export function SpecimenBoard({ profilePath, overrides, engine, fontFace, sizes,
       {lines.length > 0 ? lines.map((line) => (
         <figure className="specimen-strip" data-size={line.request.fontSizePt} key={line.key}>
           {labelled && <figcaption>{line.request.fontSizePt}</figcaption>}
-          <img alt={t("profiles.previewImageAlt")} height={line.result.height / displayScale} key={line.result.requestId} src={previewImageUrl(line.result.imagePath)} width={line.result.width / displayScale} />
+          <img alt={t("profiles.previewImageAlt")} height={line.result.height / displayScale} src={previewImageUrl(line.result.imagePath)} width={line.result.width / displayScale} />
         </figure>
       )) : sizes.map((size) => (
         /* The placeholder keeps the strip's eventual height, and its own line

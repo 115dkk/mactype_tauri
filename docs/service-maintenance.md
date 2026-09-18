@@ -53,6 +53,8 @@ Reboot, multi-session, AppInit, and migration remain `UNKNOWN` until their dispa
 ## Repair and rollback
 
 - `repair` preserves the caller's running/stopped state. A running service is stopped, repaired from the fixed payload, restarted, and required to reach Ready.
+- `bootstrap-install` (installer only) publishes the bundled default profile on a fresh install, preserves the existing one on an update, and returns only when the service is Auto/LocalSystem/Running with strict Ready health.
+- `bootstrap-install-preserve-run-state` (installer only) deploys the runtime and registers the Auto/LocalSystem service like `bootstrap-install`, but publishes no profile on a fresh install and starts only a service that was observed running. A never-started install is the supported stopped state described above.
 - `rollback` changes the active profile generation and keeps the displaced generation as the next rollback target.
 - `restore-runtime` uses the protected migration runtime pin; it is not a general version selector.
 - If an activation or repair journal exists, every mutating verb first runs durable recovery. Do not delete journals manually.

@@ -332,7 +332,7 @@
   "execution.systemUnavailableTitle": "請等待服務完成操作",
   "execution.systemUnavailableDescription": "請等待目前操作完成，然後重新整理狀態。",
   "execution.systemPause": "停止向新應用程式套用",
-  "execution.systemApply": "以執行設定檔啟動",
+  "execution.systemApply": "啟動服務",
   "execution.systemPaused": "已暫時關閉 MacType 全系統套用。",
   "execution.systemResumed": "已恢復 MacType 全系統套用。",
   "execution.systemActivated": "服務已以執行設定檔啟動。",

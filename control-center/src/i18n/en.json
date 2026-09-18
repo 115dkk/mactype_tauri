@@ -332,7 +332,7 @@
   "execution.systemUnavailableTitle": "Wait for the service",
   "execution.systemUnavailableDescription": "Wait for the current operation to finish, then refresh the status.",
   "execution.systemPause": "Stop applying to new apps",
-  "execution.systemApply": "Start with the run profile",
+  "execution.systemApply": "Start service",
   "execution.systemPaused": "MacType system application is temporarily off.",
   "execution.systemResumed": "MacType system application has resumed.",
   "execution.systemActivated": "The service started with the run profile.",

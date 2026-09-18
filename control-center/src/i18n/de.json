@@ -332,7 +332,7 @@
   "execution.systemUnavailableTitle": "Bitte auf den Dienst warten",
   "execution.systemUnavailableDescription": "Warten Sie auf den Abschluss des Vorgangs und aktualisieren Sie dann den Status.",
   "execution.systemPause": "Anwendung auf neue Apps stoppen",
-  "execution.systemApply": "Mit dem Ausführungsprofil starten",
+  "execution.systemApply": "Dienst starten",
   "execution.systemPaused": "Die systemweite MacType-Anwendung ist vorübergehend aus.",
   "execution.systemResumed": "Die systemweite MacType-Anwendung wurde fortgesetzt.",
   "execution.systemActivated": "Der Dienst wurde mit dem Ausführungsprofil gestartet.",

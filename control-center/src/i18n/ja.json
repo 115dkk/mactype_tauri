@@ -332,7 +332,7 @@
   "execution.systemUnavailableTitle": "サービスの処理をお待ちください",
   "execution.systemUnavailableDescription": "現在の処理が終わってから状態を更新してください。",
   "execution.systemPause": "新しく開くアプリへの適用を停止",
-  "execution.systemApply": "実行プロファイルで開始",
+  "execution.systemApply": "サービスを開始",
   "execution.systemPaused": "MacType のシステム適用を一時停止しました。",
   "execution.systemResumed": "MacType のシステム適用を再開しました。",
   "execution.systemActivated": "実行プロファイルでサービスを開始しました。",

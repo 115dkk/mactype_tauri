@@ -54,6 +54,7 @@ class PreviewRuntime {
     COLORREF muted;
     COLORREF accent;
     COLORREF on_accent;
+    bool operator==(const Palette&) const = default;
   };
 
   struct NativeChrome {
@@ -66,6 +67,7 @@ class PreviewRuntime {
     int canvas_radius;
     int canvas_inset;
     bool mono_status;
+    bool operator==(const NativeChrome&) const = default;
   };
 
  private:
@@ -94,6 +96,7 @@ class PreviewRuntime {
     std::wstring png_filter{L"PNG files (*.png)|*.png"};
     std::wstring saved{L"Saved"};
     std::wstring copied{L"Copied"};
+    bool operator==(const NativeLabels&) const = default;
   };
 
   struct CanvasBitmap;

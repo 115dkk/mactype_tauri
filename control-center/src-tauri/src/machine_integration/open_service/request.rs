@@ -11,6 +11,7 @@ pub(crate) enum SystemServiceAction {
     Start,
     Stop,
     PublishProfile,
+    DesignateProfile,
     MigrateFromLegacy,
     Rollback,
     RemoveLegacy,
@@ -29,7 +30,8 @@ impl SystemServiceAction {
             Self::Stop => Some("stop"),
             Self::PublishProfile => Some("publish-profile"),
             Self::Rollback => Some("rollback"),
-            Self::MigrateFromLegacy
+            Self::DesignateProfile
+            | Self::MigrateFromLegacy
             | Self::RemoveLegacy
             | Self::DisableLegacyTrayAutostart
             | Self::RestoreLegacyTrayAutostart => None,
@@ -45,6 +47,7 @@ impl SystemServiceAction {
             Self::Start => "start",
             Self::Stop => "stop",
             Self::PublishProfile => "publish-profile",
+            Self::DesignateProfile => "designate-profile",
             Self::MigrateFromLegacy => "migrate-from-legacy",
             Self::Rollback => "rollback",
             Self::RemoveLegacy => "remove-legacy",
@@ -62,6 +65,7 @@ impl SystemServiceAction {
             "start" => Self::Start,
             "stop" => Self::Stop,
             "publish-profile" => Self::PublishProfile,
+            "designate-profile" => Self::DesignateProfile,
             "migrate-from-legacy" => Self::MigrateFromLegacy,
             "rollback" => Self::Rollback,
             "remove-legacy" => Self::RemoveLegacy,
@@ -74,7 +78,10 @@ impl SystemServiceAction {
     pub(super) fn needs_profile_input(self) -> bool {
         matches!(
             self,
-            Self::PublishProfile | Self::MigrateFromLegacy | Self::RemoveLegacy
+            Self::PublishProfile
+                | Self::DesignateProfile
+                | Self::MigrateFromLegacy
+                | Self::RemoveLegacy
         )
     }
 }
@@ -221,4 +228,21 @@ where
         nonce: parse_profile_transfer_nonce(nonce_text)?,
     };
     Ok(Some(PrivilegedRequest { action, transfer }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SystemServiceAction;
+
+    #[test]
+    fn designate_profile_is_a_profile_carrying_broker_action_without_a_setup_verb() {
+        let action = SystemServiceAction::DesignateProfile;
+        assert_eq!(action.broker_verb(), "designate-profile");
+        assert_eq!(
+            SystemServiceAction::from_broker_verb("designate-profile"),
+            Some(action)
+        );
+        assert!(action.needs_profile_input());
+        assert_eq!(action.setup_verb(), None);
+    }
 }

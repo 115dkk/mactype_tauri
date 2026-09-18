@@ -1,16 +1,17 @@
 import { AlertTriangle, Check, FileInput, FileOutput, FolderOpen, Play, Save, SaveAll, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import type { LegacyProfileCandidate, PreviewRequest, PreviewResult, ProfileEntry, ProfileSnapshot } from "../app/model";
+import type { DesignationEffect, ExecutionStatus, LegacyProfileCandidate, PreviewRequest, PreviewResult, ProfileEntry, ProfileSnapshot } from "../app/model";
 import { operationErrorMessage } from "../app/operationError";
 import {
-  applyOpenProfile,
   currentProfile,
+  designateOpenProfile,
   discoverLegacyProfile,
   duplicateProfile,
   exportProfile,
   importProfile,
   listProfiles,
   loadExecutionStatus,
+  manageSystemService,
   openProfile,
   pickIniProfile,
   pickIniExportPath,
@@ -36,6 +37,8 @@ export function FileSettingsPage({ onEditInTuner }: FileSettingsPageProps) {
   const [profile, setProfile] = useState<ProfileSnapshot | null>(null);
   const [profiles, setProfiles] = useState<ReadonlyArray<ProfileEntry>>([]);
   const [appliedProfile, setAppliedProfile] = useState<string | null>(null);
+  const [execution, setExecution] = useState<ExecutionStatus | null>(null);
+  const [designationEffect, setDesignationEffect] = useState<DesignationEffect | null>(null);
   const [legacy, setLegacy] = useState<LegacyProfileCandidate | null>(null);
   const [thumbnails, setThumbnails] = useState<ReadonlyMap<string, PreviewResult | null>>(() => new Map(thumbnailCache));
   const [copyName, setCopyName] = useState("");
@@ -64,6 +67,7 @@ export function FileSettingsPage({ onEditInTuner }: FileSettingsPageProps) {
         setProfile(selected);
         setProfiles(available);
         setAppliedProfile(execution.activeProfile);
+        setExecution(execution);
         setLegacy(detected && !managedDetected && !sameProfileIdentity(detected, execution.activeProfile) ? detected : null);
       })
       .catch((caught: unknown) => {
@@ -97,6 +101,7 @@ export function FileSettingsPage({ onEditInTuner }: FileSettingsPageProps) {
 
   const run = async (operation: string, action: () => Promise<ProfileSnapshot>, success: (opened: ProfileSnapshot) => string): Promise<boolean> => {
     setBusy(operation);
+    setDesignationEffect(null);
     try {
       const opened = await action();
       rememberProfile(opened.path);
@@ -140,16 +145,39 @@ export function FileSettingsPage({ onEditInTuner }: FileSettingsPageProps) {
     }, (opened) => t("files.saved", { name: fileName(opened.path) }));
   };
 
-  const apply = async () => {
-    setBusy("apply");
+  const designate = async () => {
+    setBusy("designate");
+    setDesignationEffect(null);
     try {
-      const applied = await applyOpenProfile();
-      setAppliedProfile(applied.sourceProfile);
-      setLegacy((detected) => detected && sameProfileIdentity(detected, applied.sourceProfile) ? null : detected);
-      setMessage(t("files.applied", { name: fileName(applied.sourceProfile) }));
+      const designated = await designateOpenProfile();
+      const name = fileName(designated.sourceProfile);
+      setAppliedProfile(designated.sourceProfile);
+      setLegacy((detected) => detected && sameProfileIdentity(detected, designated.sourceProfile) ? null : detected);
+      setMessage(t(designated.effect === "live" ? "profiles.designatedLive" : "profiles.designatedNextStart", { name }));
+      setDesignationEffect(designated.effect);
       setError(null);
+      setExecution(await loadExecutionStatus());
     } catch (caught: unknown) {
       setError(operationErrorMessage(caught, t));
+      setMessage(null);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // The one place this page may turn the service on: a separate, labelled
+  // click offered after a designation that the stopped service is holding.
+  const startServiceNow = async () => {
+    setBusy("start");
+    setDesignationEffect(null);
+    try {
+      const next = await manageSystemService("start");
+      setExecution(next);
+      setAppliedProfile(next.activeProfile);
+      setMessage(t("files.serviceStartedWithRunProfile", { name: next.activeProfile ? fileName(next.activeProfile) : "" }));
+      setError(null);
+    } catch (caught: unknown) {
+      setError(operationErrorMessage(caught, t, "execution.operationFailed"));
       setMessage(null);
     } finally {
       setBusy(null);
@@ -175,6 +203,7 @@ export function FileSettingsPage({ onEditInTuner }: FileSettingsPageProps) {
   const exportIni = async () => {
     if (!profile) return;
     setBusy("export");
+    setDesignationEffect(null);
     try {
       const defaultName = fileName(profile.path);
       const selected = await pickIniExportPath(t("files.iniFilter"), defaultName);
@@ -193,6 +222,7 @@ export function FileSettingsPage({ onEditInTuner }: FileSettingsPageProps) {
 
   const revealCurrentProfile = async () => {
     setBusy("reveal");
+    setDesignationEffect(null);
     try {
       const path = await revealProfileFile();
       setMessage(t("files.revealed", { name: fileName(path) }));
@@ -206,6 +236,12 @@ export function FileSettingsPage({ onEditInTuner }: FileSettingsPageProps) {
   };
 
   const dirtyCount = profile?.dirtyKeys.length ?? 0;
+  const serviceCanStart = Boolean(
+    execution?.systemService.installation === "current"
+      && execution.systemService.runtime === "stopped"
+      && execution.systemService.canStart,
+  );
+  const offerStart = designationEffect === "next-start" && serviceCanStart;
   const detailsSummary = profile
     ? `${t("files.fileDetails")} · ${profile.encoding.toUpperCase()} · ${profile.lineEnding.replace(/-/g, "").toUpperCase()}${dirtyCount ? ` · ${t("files.unsaved")} ${t("files.unsavedCount", { count: dirtyCount })}` : ""}`
     : `${t("files.fileDetails")} · —`;
@@ -241,7 +277,7 @@ export function FileSettingsPage({ onEditInTuner }: FileSettingsPageProps) {
             const applied = matchesAppliedProfile(entry, appliedProfile);
             const thumbnail = thumbnails.get(entry.path) ?? null;
             return (
-              <li className="profile-card" data-applied={applied} data-selected={selected} key={entry.path}>
+              <li className="profile-card" data-applied={applied} data-run-profile={applied} data-selected={selected} key={entry.path}>
                 <button aria-pressed={selected} className="profile-card-select" disabled={busy !== null} onClick={() => void chooseProfile(entry.path)} type="button">
                   <span className="profile-card-thumb">
                     {thumbnail
@@ -250,7 +286,7 @@ export function FileSettingsPage({ onEditInTuner }: FileSettingsPageProps) {
                   </span>
                   <span className="profile-card-title">
                     <strong>{entry.name}</strong>
-                    {applied && <span className="profile-card-badge">{t("files.appliedBadge")}</span>}
+                    {applied && <span className="profile-card-badge">{t("files.runProfileBadge")}</span>}
                   </span>
                   <code title={entry.path}>{entry.displayPath}</code>
                 </button>
@@ -284,11 +320,16 @@ export function FileSettingsPage({ onEditInTuner }: FileSettingsPageProps) {
           <button className="button secondary" disabled={!profile || !profile.canSave || dirtyCount === 0 || busy !== null} onClick={() => void save()} type="button"><Save aria-hidden="true" size={17} /> {busy === "save" ? t("profiles.saving") : t("profiles.save")}</button>
           <div className="file-save-as"><input aria-label={t("profiles.copyName")} disabled={!profile || busy !== null} onChange={(event) => setCopyName(event.target.value)} placeholder={t("files.saveAsName")} value={copyName} /><button className="button secondary" disabled={!profile || !copyName.trim() || busy !== null} onClick={() => void duplicate()} type="button"><SaveAll aria-hidden="true" size={16} /> {t("files.saveAs")}</button></div>
           <button className="button secondary" disabled={!profile || busy !== null} onClick={() => void exportIni()} type="button"><FileOutput aria-hidden="true" size={17} /> {busy === "export" ? t("files.exporting") : t("files.chooseExport")}</button>
-          <button className="button primary" disabled={!profile || dirtyCount > 0 || busy !== null} onClick={() => void apply()} title={dirtyCount > 0 ? t("profiles.saveBeforeApply") : undefined} type="button"><Play aria-hidden="true" size={17} /> {busy === "apply" ? t("profiles.applying") : t("profiles.apply")}</button>
+          <button className="button primary" disabled={!profile || dirtyCount > 0 || busy !== null} onClick={() => void designate()} title={dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button"><Play aria-hidden="true" size={17} /> {busy === "designate" ? t("profiles.designating") : t("profiles.designate")}</button>
         </div>
       </section>
 
-      {message && <p aria-live="polite" className="success-message" data-operation="file-settings"><Check aria-hidden="true" size={16} /> {message}</p>}
+      {message && (
+        <p aria-live="polite" className="success-message" data-operation="file-settings">
+          <Check aria-hidden="true" size={16} /> {message}
+          {offerStart && <button className="text-action" disabled={busy !== null} onClick={() => void startServiceNow()} type="button"><Play aria-hidden="true" size={14} /> {busy === "start" ? t("execution.serviceWorking") : t("files.startServiceNow")}</button>}
+        </p>
+      )}
       {error && <p className="inline-error"><AlertTriangle aria-hidden="true" size={15} /> {error}</p>}
     </section>
   );

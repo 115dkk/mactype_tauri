@@ -370,6 +370,21 @@ function runningGalleryService(current: SystemServiceStatus): SystemServiceStatu
   };
 }
 
+/* Designating a run profile moves the pointer; only a running service changes
+   state, because it switches to the new profile at once. */
+export function transitionGalleryRunProfile(
+  current: ExecutionStatus,
+  displayPath: string,
+  live: boolean,
+): ExecutionStatus {
+  const next = live ? transitionGalleryExecutionStatus(current, "publish-profile") : current;
+  return withGalleryLegacyTrayPolicy({
+    ...next,
+    activeProfile: displayPath,
+    expectedProfileDigest: expectedGalleryDigest,
+  }, next.legacyTray);
+}
+
 export function transitionGalleryExecutionStatus(
   current: ExecutionStatus,
   action: SystemServiceAction,

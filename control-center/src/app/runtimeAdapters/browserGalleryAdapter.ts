@@ -24,6 +24,7 @@ import {
   transitionGalleryLegacyTrayAutostartDisable,
   transitionGalleryLegacyTrayExit,
   transitionGalleryExecutionStatus,
+  transitionGalleryRunProfile,
 } from "./browserGalleryExecution";
 import { createBrowserGalleryProfileState } from "./browserGalleryProfiles";
 
@@ -185,15 +186,21 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
     return Promise.resolve(null);
   },
 
-  applyOpenProfile(): Promise<AppliedProfile> {
+  designateOpenProfile(): Promise<AppliedProfile> {
     const query = new URLSearchParams(window.location.search);
-    if (query.get("service-fail") === "publish-profile") {
-      return Promise.reject(new Error("control-center-internal-operation-failed:publish-profile"));
+    const failing = query.get("service-fail");
+    if (failing === "publish-profile" || failing === "designate-profile") {
+      return Promise.reject(new Error(`control-center-internal-operation-failed:${failing}`));
     }
-    updateGalleryExecutionStatus(
-      transitionGalleryExecutionStatus(currentGalleryExecutionStatus(), "publish-profile"),
-    );
-    return Promise.resolve<AppliedProfile>({ sourceProfile: galleryProfiles.current().displayPath, runtimeRoot: "C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\runtime\\generations\\gallery" });
+    const current = currentGalleryExecutionStatus();
+    const live = current.systemService.runtime === "running";
+    const sourceProfile = galleryProfiles.current().displayPath;
+    updateGalleryExecutionStatus(transitionGalleryRunProfile(current, sourceProfile, live));
+    return Promise.resolve<AppliedProfile>({
+      sourceProfile,
+      runtimeRoot: "C:\\Users\\Gallery\\AppData\\Local\\MacType\\ControlCenter\\runtime\\generations\\gallery",
+      effect: live ? "live" : "next-start",
+    });
   },
 
   registerSessionTarget(target: string, arguments_: ReadonlyArray<string>): Promise<ReadonlyArray<SessionTarget>> {

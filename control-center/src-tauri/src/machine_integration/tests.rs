@@ -875,3 +875,173 @@ fn startup_disable_never_mutates_when_a_tray_process_is_running() {
     assert!(disable_legacy_tray_startup_with(&mut backend).is_err());
     assert_eq!(backend.events, [StartupCoordinationEvent::Observe]);
 }
+
+struct DesignateBackend {
+    states: VecDeque<SystemServiceStatus>,
+    actions: Vec<MachineAction>,
+}
+
+impl MachineBackend for DesignateBackend {
+    fn new_service_status(&mut self) -> SystemServiceStatus {
+        self.states.pop_front().expect("test service state")
+    }
+
+    fn legacy_tray_status(&mut self) -> LegacyTrayStatus {
+        LegacyTrayStatus::clear()
+    }
+
+    fn appinit_conflict(&mut self) -> Result<bool, String> {
+        Ok(false)
+    }
+
+    fn legacy_service_blocks_activation(&mut self) -> Result<bool, String> {
+        Ok(false)
+    }
+
+    fn execute(&mut self, action: MachineAction, _profile: Option<&[u8]>) -> Result<(), String> {
+        self.actions.push(action);
+        Ok(())
+    }
+}
+
+#[test]
+fn designating_a_profile_only_publishes_it_while_the_service_is_stopped() {
+    let profile = b"[General]\r\nGammaValue=1.3\r\n";
+    for installation in [
+        InstallationState::Current,
+        InstallationState::Outdated,
+        InstallationState::Absent,
+    ] {
+        let mut backend = DesignateBackend {
+            states: VecDeque::from([SystemServiceStatus {
+                installation,
+                runtime: RuntimeState::Stopped,
+                health: HealthState::Unknown,
+                active_profile_digest: None,
+                ..ready_auto_service()
+            }]),
+            actions: Vec::new(),
+        };
+
+        designate_profile_transaction_with(&mut backend, profile).unwrap();
+
+        assert_eq!(backend.actions, [MachineAction::PublishProfile]);
+        assert!(backend.states.is_empty());
+    }
+}
+
+#[test]
+fn designating_a_profile_switches_a_running_service_through_the_publish_transaction() {
+    let profile = b"[General]\r\nGammaValue=1.3\r\n";
+    let digest = mactype_service_contract::GenerationId::from_profile_bytes(profile)
+        .as_str()
+        .to_owned();
+    let running = SystemServiceStatus {
+        active_profile_digest: None,
+        ..ready_auto_service()
+    };
+    let mut backend = DesignateBackend {
+        states: VecDeque::from([
+            running.clone(),
+            running,
+            SystemServiceStatus {
+                active_profile_digest: Some(digest),
+                ..ready_auto_service()
+            },
+        ]),
+        actions: Vec::new(),
+    };
+
+    designate_profile_transaction_with(&mut backend, profile).unwrap();
+
+    assert_eq!(
+        backend.actions,
+        [
+            MachineAction::Stop,
+            MachineAction::PublishProfile,
+            MachineAction::Start,
+        ]
+    );
+}
+
+#[test]
+fn designating_a_profile_refuses_a_transitioning_or_foreign_service() {
+    for status in [
+        SystemServiceStatus {
+            runtime: RuntimeState::StartPending,
+            ..ready_auto_service()
+        },
+        SystemServiceStatus {
+            backend: ServiceBackend::Foreign,
+            installation: InstallationState::Invalid,
+            runtime: RuntimeState::Stopped,
+            ..ready_auto_service()
+        },
+    ] {
+        let mut backend = DesignateBackend {
+            states: VecDeque::from([status]),
+            actions: Vec::new(),
+        };
+
+        let error = designate_profile_transaction_with(&mut backend, b"[General]\r\n").unwrap_err();
+
+        assert!(
+            error.contains("foreign, transitioning, or unsafe"),
+            "{error}"
+        );
+        assert!(backend.actions.is_empty());
+    }
+}
+
+#[test]
+fn designate_profile_requires_profile_bytes_and_a_clear_tray() {
+    let mut backend = FakeMachineBackend {
+        status: Some(ready_auto_service()),
+        ..Default::default()
+    };
+    let error = execute_machine_action_with(&mut backend, MachineAction::DesignateProfile, None)
+        .unwrap_err();
+    assert!(error.contains("invalid profile payload"), "{error}");
+    assert!(backend.executed.is_none());
+
+    let mut backend = FakeMachineBackend {
+        status: Some(ready_auto_service()),
+        legacy_tray: Some(LegacyTrayStatus::from_states(
+            LegacyTrayProcessState::TrustedCurrentSession {
+                pid: 4242,
+                creation_time: 101,
+                path: std::path::PathBuf::from(r"C:\Program Files\MacType\MacTray.exe"),
+            },
+            LegacyTrayStartupState::Absent,
+        )),
+        ..Default::default()
+    };
+    let error = execute_machine_action_with(
+        &mut backend,
+        MachineAction::DesignateProfile,
+        Some(b"[General]\r\n"),
+    )
+    .unwrap_err();
+    assert!(error.contains("legacy MacTray tray mode"), "{error}");
+    assert!(backend.executed.is_none());
+
+    let mut backend = FakeMachineBackend {
+        status: Some(SystemServiceStatus {
+            runtime: RuntimeState::Stopped,
+            health: HealthState::Unknown,
+            active_profile_digest: None,
+            ..ready_auto_service()
+        }),
+        ..Default::default()
+    };
+    execute_machine_action_with(
+        &mut backend,
+        MachineAction::DesignateProfile,
+        Some(b"[General]\r\n"),
+    )
+    .unwrap();
+    assert_eq!(
+        backend.executed.as_ref().map(|(action, _)| *action),
+        Some(MachineAction::DesignateProfile)
+    );
+}

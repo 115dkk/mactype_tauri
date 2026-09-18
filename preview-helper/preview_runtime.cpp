@@ -1175,7 +1175,11 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
     }
   }
   const bool theme_changed = pending.dark_theme != dark_theme_;
-  const bool chrome_changed = pending.chrome.has_value() || chrome_.has_value();
+  const bool chrome_changed = pending.chrome != chrome_;
+  const bool labels_changed = pending.labels != labels_;
+  const bool title_changed = pending.labels.title != labels_.title;
+  const bool layout_changed = theme_changed || chrome_changed || labels_changed ||
+                              pending.zoom != zoom_;
   display_mode_ = pending.display_mode;
   sample_text_ = std::move(pending.sample_text);
   listing_text_ = std::move(pending.listing_text);
@@ -1198,10 +1202,10 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
     recreate_palette_brushes();
     apply_combo_theme();
   }
-  recreate_ui_font();
-  SetWindowTextW(native_window_, labels_.title.c_str());
+  if (title_changed) SetWindowTextW(native_window_, labels_.title.c_str());
   sync_controls();
-  relayout_controls();
+  if (layout_changed) relayout_controls();
+  else InvalidateRect(native_window_, nullptr, FALSE);
   return true;
 }
 
@@ -1247,6 +1251,15 @@ std::string PreviewRuntime::native_state_json(bool visible) const {
 }
 
 void PreviewRuntime::show_native_window() {
+  if (IsWindowVisible(native_window_) && !IsIconic(native_window_)) {
+    /* An open window takes new options in place: the z-order follows the
+       topmost flag and the canvas repaints, without activating the window
+       again and pulling focus away from the editor that sent the change. */
+    SetWindowPos(native_window_, topmost_ ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    InvalidateRect(native_window_, nullptr, FALSE);
+    return;
+  }
   if (has_placement_) {
     SetWindowPlacement(native_window_, &placement_);
   } else {
@@ -1412,17 +1425,33 @@ void PreviewRuntime::sync_controls() {
     face_index = SendMessageW(face_combo_, CB_INSERTSTRING, 0,
                               reinterpret_cast<LPARAM>(font_face_.c_str()));
   }
-  if (face_index != CB_ERR && face_index != CB_ERRSPACE) {
+  if (face_index != CB_ERR && face_index != CB_ERRSPACE &&
+      SendMessageW(face_combo_, CB_GETCURSEL, 0, 0) != face_index) {
     SendMessageW(face_combo_, CB_SETCURSEL, static_cast<WPARAM>(face_index), 0);
   }
   const std::wstring size = std::to_wstring(static_cast<int>(std::lround(font_size_pt_)));
   const LRESULT size_index = SendMessageW(size_combo_, CB_FINDSTRINGEXACT, static_cast<WPARAM>(-1),
                                           reinterpret_cast<LPARAM>(size.c_str()));
-  if (size_index != CB_ERR) SendMessageW(size_combo_, CB_SETCURSEL, static_cast<WPARAM>(size_index), 0);
-  updating_edit_ = true;
-  SetWindowTextW(edit_control_, sample_text_.c_str());
-  updating_edit_ = false;
-  ShowWindow(edit_control_, edit_visible_ ? SW_SHOW : SW_HIDE);
+  if (size_index != CB_ERR && SendMessageW(size_combo_, CB_GETCURSEL, 0, 0) != size_index) {
+    SendMessageW(size_combo_, CB_SETCURSEL, static_cast<WPARAM>(size_index), 0);
+  }
+  /* The edit control keeps its caret unless the sample really changed; it
+     stores line breaks as CR LF, so the comparison ignores the CR. */
+  const int length = GetWindowTextLengthW(edit_control_);
+  std::wstring current(static_cast<std::size_t>(length) + 1, L'\0');
+  GetWindowTextW(edit_control_, current.data(), length + 1);
+  current.resize(static_cast<std::size_t>(length));
+  std::erase(current, L'\r');
+  std::wstring wanted = sample_text_;
+  std::erase(wanted, L'\r');
+  if (current != wanted) {
+    updating_edit_ = true;
+    SetWindowTextW(edit_control_, sample_text_.c_str());
+    updating_edit_ = false;
+  }
+  if ((IsWindowVisible(edit_control_) != FALSE) != edit_visible_) {
+    ShowWindow(edit_control_, edit_visible_ ? SW_SHOW : SW_HIDE);
+  }
 }
 
 std::wstring PreviewRuntime::selected_face_for_tests() const {

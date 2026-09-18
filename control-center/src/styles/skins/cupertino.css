@@ -135,16 +135,22 @@ html[data-skin="cupertino"] .cupertino-titlebar .window-title { padding-inline: 
 html[data-skin="cupertino"] .cupertino-titlebar .window-controls button { width: 46px; }
 html[data-skin="cupertino"] .cupertino-work { display: block; position: relative; min-width: 0; min-height: 0; overflow: auto; background: var(--color-canvas); }
 
-/* Page: bold title, a 700-pixel column, section labels between groups. */
+/* Page: bold title, a content column that follows the window, section
+   labels between groups. The column is capped where Fluent caps its own, and
+   a page that fills (the Tuner, the overview) runs its last group to the
+   bottom instead of leaving the canvas empty under a short column. */
 html[data-skin="cupertino"] .cupertino-page { display: flex; flex-direction: column; min-height: 100%; padding: 8px 32px 28px; }
-html[data-skin="cupertino"] .cupertino-page[data-wide="true"] { height: 100%; min-height: 0; overflow: hidden; }
+html[data-skin="cupertino"] .cupertino-page[data-wide="true"], html[data-skin="cupertino"] .cupertino-page[data-fill="true"] { height: 100%; min-height: 0; overflow: hidden; }
 html[data-skin="cupertino"] .cupertino-hd { display: flex; flex: 0 0 auto; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
 html[data-skin="cupertino"] .cupertino-back { display: inline-flex; align-items: center; gap: 2px; margin: 0 0 4px -4px; padding: 0 6px 0 2px; border: 0; background: transparent; color: var(--color-primary); font-size: 13px; }
 html[data-skin="cupertino"] .cupertino-sub { margin-top: 2px; color: var(--color-muted); }
 html[data-skin="cupertino"] .cupertino-sub .profile-editing, html[data-skin="cupertino"] .cupertino-sub .profile-save-warning, html[data-skin="cupertino"] .cupertino-sub .profile-message { margin: 0; color: var(--color-muted); }
 html[data-skin="cupertino"] .cupertino-hd-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
-html[data-skin="cupertino"] .cupertino-col { max-width: 700px; }
-html[data-skin="cupertino"] .cupertino-page[data-wide="true"] .cupertino-col { display: flex; flex: 1 1 auto; min-height: 0; max-width: none; flex-direction: column; }
+html[data-skin="cupertino"] .cupertino-col { max-width: 1000px; }
+html[data-skin="cupertino"] .cupertino-page[data-wide="true"] .cupertino-col, html[data-skin="cupertino"] .cupertino-page[data-fill="true"] .cupertino-col { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; }
+html[data-skin="cupertino"] .cupertino-page[data-wide="true"] .cupertino-col { max-width: none; }
+html[data-skin="cupertino"] .cupertino-page[data-fill="true"] .cupertino-col > [data-recent-activity] { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
+html[data-skin="cupertino"] .cupertino-page[data-fill="true"] .cupertino-col > [data-recent-activity] > .cupertino-group { flex: 1 1 auto; min-height: 0; overflow: auto; }
 html[data-skin="cupertino"] .cupertino-sect { margin: 18px 0 6px 2px; font-size: 13px; font-weight: 600; }
 html[data-skin="cupertino"] .cupertino-col > .cupertino-sect:first-child { margin-top: 0; }
 html[data-skin="cupertino"] .cupertino-footnote { margin: 8px 2px 0; color: var(--color-muted); font-size: 11px; line-height: 14px; }
@@ -216,6 +222,10 @@ html[data-skin="cupertino"] .cupertino-desc { margin: 2px 0 8px; color: var(--co
 html[data-skin="cupertino"] .cupertino-settings-group .setting-row { position: relative; min-height: 44px; padding: 8px 16px; }
 html[data-skin="cupertino"] .cupertino-settings-group .setting-row + .setting-row::before { content: ""; position: absolute; top: 0; right: 0; left: 16px; height: 1px; background: var(--cupertino-sep); }
 html[data-skin="cupertino"] .cupertino-settings-group .wizard-start-card, html[data-skin="cupertino"] .cupertino-settings-group .wizard-apply-card { margin: 12px 16px; }
+html[data-skin="cupertino"] .cupertino-settings-group > .collection-editor, html[data-skin="cupertino"] .cupertino-settings-group > .list-grid, html[data-skin="cupertino"] .cupertino-settings-group > .advanced-editor, html[data-skin="cupertino"] .cupertino-settings-group > .unity-games, html[data-skin="cupertino"] .cupertino-settings-group > .unity-hook-notice { margin-inline: 16px; }
+html[data-skin="cupertino"] .cupertino-settings-group > .list-grid { padding-block: 12px; }
+html[data-skin="cupertino"] .cupertino-settings-group > .collection-editor { padding-block: 12px; }
+html[data-skin="cupertino"] .cupertino-settings-group .individual-row, html[data-skin="cupertino"] .cupertino-settings-group .list-editor ul, html[data-skin="cupertino"] .cupertino-settings-group .list-editor-empty, html[data-skin="cupertino"] .cupertino-settings-group .unity-games { border-radius: 8px; }
 html[data-skin="cupertino"] .cupertino-settings-group .wizard-progress, html[data-skin="cupertino"] .cupertino-settings-group .wizard-step-tools { padding: 8px 16px; }
 html[data-skin="cupertino"] .cupertino-workspace .preview-panel { margin: 0; padding: 0; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface); overflow: hidden; }
 html[data-skin="cupertino"] .cupertino-workspace[data-preview-docked="true"] .preview-panel { padding-inline-start: 0; border-inline-start: 1px solid var(--color-border); }
@@ -257,7 +267,7 @@ html[data-skin="cupertino"] .event-row { border-bottom-color: var(--cupertino-se
   html[data-skin="cupertino"] .cupertino-side .preference-menu { top: 30px; bottom: auto; right: 0; left: auto; }
   html[data-skin="cupertino"] .cupertino-right { display: block; }
   html[data-skin="cupertino"] .cupertino-titlebar { position: static; }
-  html[data-skin="cupertino"] .cupertino-page, html[data-skin="cupertino"] .cupertino-page[data-wide="true"] { height: auto; min-height: 0; padding: 8px 16px 24px; overflow: visible; }
+  html[data-skin="cupertino"] .cupertino-page, html[data-skin="cupertino"] .cupertino-page[data-wide="true"], html[data-skin="cupertino"] .cupertino-page[data-fill="true"] { height: auto; min-height: 0; padding: 8px 16px 24px; overflow: visible; }
   html[data-skin="cupertino"] .cupertino-hd { flex-direction: column; align-items: stretch; }
   html[data-skin="cupertino"] .cupertino-row, html[data-skin="cupertino"] .cupertino-row[data-leading="true"] { grid-template-columns: minmax(0, 1fr); }
   html[data-skin="cupertino"] .cupertino-profile-row { grid-template-columns: auto auto minmax(0, 1fr); }

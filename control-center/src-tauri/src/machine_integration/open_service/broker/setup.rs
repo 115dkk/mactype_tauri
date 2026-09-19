@@ -57,6 +57,26 @@ pub(super) fn publish_and_activate(profile: &[u8]) -> Result<(), String> {
     )
 }
 
+pub(super) fn designate_and_hold(profile: &[u8]) -> Result<(), String> {
+    if crate::machine_integration::registry_conflict_detected() {
+        return Err("AppInit conflicts block machine integration changes".to_owned());
+    }
+    // Only the live branch activates anything, so only it inherits the
+    // legacy-service gate; publishing a generation for a stopped service does not.
+    if query().runtime == crate::service_contract::RuntimeState::Running
+        && crate::machine_integration::legacy_mactray::legacy_service_blocks_activation()?
+    {
+        return Err(
+            "a legacy MacType service is still installed; migrate it before applying the profile"
+                .to_owned(),
+        );
+    }
+    crate::machine_integration::designate_profile_transaction_with(
+        &mut OpenServicePublishBackend,
+        profile,
+    )
+}
+
 pub(in crate::machine_integration::open_service) fn run_setup(
     action: SystemServiceAction,
     profile: Option<&[u8]>,

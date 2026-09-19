@@ -18,7 +18,7 @@ pub(super) use process::{
     combine_broker_cleanup_error, terminate_broker_process_with, BrokerProcessControl,
     BrokerTermination,
 };
-use setup::publish_and_activate;
+use setup::{designate_and_hold, publish_and_activate};
 pub(super) use setup::{fixed_setup_path, run_restore_pinned_runtime, run_setup};
 
 use super::{
@@ -120,6 +120,7 @@ fn receive_required_profile_bounded(transfer: &ProfileTransferToken) -> Result<V
 fn run_profile_action(action: SystemServiceAction, profile: &[u8]) -> Result<(), String> {
     match action {
         SystemServiceAction::PublishProfile => publish_and_activate(profile),
+        SystemServiceAction::DesignateProfile => designate_and_hold(profile),
         SystemServiceAction::MigrateFromLegacy => {
             migrate_from_legacy(&mut SystemMigrationBackend::default(), profile)
         }

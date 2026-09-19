@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, FileInput, FolderOpen } from "lucide-react";
+import { AlertTriangle, Check, FileInput, FolderOpen, Play } from "lucide-react";
 import type { ShellProps } from "../../app/shell";
 import { previewImageUrl } from "../../app/tauri";
 import { matchesAppliedProfile, THUMBNAIL_SAMPLE_TEXT, useFileSettingsModel } from "../../features/files/useFileSettingsModel";
@@ -44,7 +44,7 @@ export function CupertinoFiles({ shell }: { shell: ShellProps }) {
                 {thumbnail ? <img alt={t("files.thumbnailAlt", { name: entry.name })} loading="lazy" src={previewImageUrl(thumbnail.imagePath)} /> : <span aria-hidden="true">{THUMBNAIL_SAMPLE_TEXT}</span>}
               </span>
               <div className="cupertino-row-copy">
-                <div className="cupertino-row-title">{entry.name}{applied && <CupertinoBadge>{t("files.appliedBadge")}</CupertinoBadge>}</div>
+                <div className="cupertino-row-title">{entry.name}{applied && <CupertinoBadge>{t("files.runProfileBadge")}</CupertinoBadge>}</div>
                 <div className="cupertino-row-desc"><code title={entry.path}>{entry.displayPath}</code></div>
               </div>
               <div className="cupertino-row-value"><button className="button secondary" disabled={busy !== null} onClick={() => void model.editInTuner(entry.path)} type="button">{t("files.editInTuner")}</button></div>
@@ -67,10 +67,15 @@ export function CupertinoFiles({ shell }: { shell: ShellProps }) {
         <button className="button secondary" disabled={!profile || busy !== null} onClick={() => void model.exportIni()} type="button">{busy === "export" ? t("files.exporting") : `${t("files.chooseExport")}…`}</button>
         <span className="cupertino-spacer" />
         <button className="button secondary" disabled={!model.canSave} onClick={() => void model.save()} type="button">{busy === "save" ? t("profiles.saving") : t("profiles.save")}</button>
-        <button className="button primary" disabled={!model.canApply} onClick={() => void model.apply()} title={model.dirtyCount > 0 ? t("profiles.saveBeforeApply") : undefined} type="button">{busy === "apply" ? t("profiles.applying") : t("profiles.apply")}</button>
+        <button className="button primary" disabled={!model.canDesignate} onClick={() => void model.designate()} title={model.dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button">{busy === "designate" ? t("profiles.designating") : t("profiles.designate")}</button>
       </CupertinoToolbar>
 
-      {message && <p aria-live="polite" className="success-message" data-operation="file-settings"><Check aria-hidden="true" size={16} /> {message}</p>}
+      {message && (
+        <p aria-live="polite" className="success-message" data-operation="file-settings">
+          <Check aria-hidden="true" size={16} /> {message}
+          {model.offerStart && <button className="text-action" disabled={busy !== null} onClick={() => void model.startServiceNow()} type="button"><Play aria-hidden="true" size={13} strokeWidth={1.8} /> {busy === "start" ? t("execution.serviceWorking") : t("files.startServiceNow")}</button>}
+        </p>
+      )}
       {error && <p className="inline-error"><AlertTriangle aria-hidden="true" size={15} /> {error}</p>}
     </CupertinoPage>
   );

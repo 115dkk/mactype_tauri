@@ -6,18 +6,18 @@ use mactype_service_contract::MachinePaths;
 
 use super::{known_folders, machine_lock, runtime_recovery, scm};
 use crate::{
-    run_install_bootstrap_with, run_uninstall_owned_with, BootstrapOutcome, BootstrapPreflight,
-    InstallBootstrapBackend, OpenServiceObservation, RuntimeInstaller, SetupError,
-    UninstallBackend, UninstallOutcome,
+    run_install_bootstrap_with, run_uninstall_owned_with, BootstrapOutcome, BootstrapPlan,
+    BootstrapPreflight, BootstrapStartPolicy, InstallBootstrapBackend, OpenServiceObservation,
+    RuntimeInstaller, SetupError, UninstallBackend, UninstallOutcome,
 };
 
-pub fn run_bootstrap() -> Result<BootstrapOutcome, SetupError> {
+pub fn run_bootstrap(policy: BootstrapStartPolicy) -> Result<BootstrapOutcome, SetupError> {
     let _lock = machine_lock::MachineSetupLock::acquire()?;
     let paths = known_folders::machine_paths()?;
     preflight::validate_and_harden_installer_root(&paths)?;
     let manager = scm::ServiceManager::connect(paths.service_root().to_owned())?;
     runtime_recovery::recover(&paths, &manager)?;
-    run_install_bootstrap_with(&mut WindowsInstallerBackend::new(paths, manager))
+    run_install_bootstrap_with(&mut WindowsInstallerBackend::new(paths, manager), policy)
 }
 
 pub fn run_uninstall() -> Result<UninstallOutcome, SetupError> {
@@ -52,7 +52,7 @@ impl InstallBootstrapBackend for WindowsInstallerBackend {
         snapshot
     }
 
-    fn apply_atomically(&mut self, mode: &crate::BootstrapMode) -> Result<String, SetupError> {
+    fn apply_atomically(&mut self, plan: &BootstrapPlan) -> Result<Option<String>, SetupError> {
         let expected = self.inspected.clone().ok_or_else(|| {
             SetupError::Runtime("bootstrap mutation was requested before preflight".to_owned())
         })?;
@@ -62,7 +62,7 @@ impl InstallBootstrapBackend for WindowsInstallerBackend {
                 "machine integration state changed after bootstrap preflight".to_owned(),
             ));
         }
-        self.apply_transaction(&actual, mode)
+        self.apply_transaction(&actual, plan)
     }
 }
 

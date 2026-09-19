@@ -552,6 +552,52 @@ function Assert-ReadyOpenService {
     }
 }
 
+function Assert-StoppedOpenService {
+    param(
+        [Parameter(Mandatory)] [hashtable] $PayloadManifest,
+        [Parameter(Mandatory)] [string] $OpenServiceName,
+        [Parameter(Mandatory)] [string] $ServiceRoot,
+        [Parameter(Mandatory)] [string] $ProfileRoot
+    )
+
+    $service = Get-FixedService -Name $OpenServiceName
+    if (-not $service) { throw 'Installer did not register the fixed open service.' }
+    $current = Get-Content -LiteralPath (Join-Path $ServiceRoot 'current.json') -Raw | ConvertFrom-Json
+    if ($current.schema -ne 1 -or $current.version -cne $PayloadManifest.version) {
+        throw 'Active runtime pointer does not select the bundled runtime version.'
+    }
+    $generationRoot = Join-Path $ServiceRoot ("bin\" + $current.version)
+    $expectedImage = [IO.Path]::GetFullPath((Join-Path $generationRoot 'mactype-service.exe'))
+    $actualImage = Get-ServiceExecutablePath -ImagePath $service.PathName
+    if (-not $expectedImage.Equals([IO.Path]::GetFullPath($actualImage), [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Open service image '$actualImage' is not the active protected runtime '$expectedImage'."
+    }
+    if ($service.StartMode -ne 'Auto' -or $service.StartName -ne 'LocalSystem' -or $service.State -ne 'Stopped') {
+        throw "Never-started open service is not Auto/LocalSystem/Stopped: $($service.StartMode)/$($service.StartName)/$($service.State)"
+    }
+    if (Test-Path -LiteralPath (Join-Path $generationRoot 'MacType.ini')) {
+        throw 'A never-started install must not materialize a runtime-adjacent profile.'
+    }
+    if (Test-Path -LiteralPath (Join-Path $ProfileRoot 'active.json')) {
+        throw 'A never-started install must not publish a protected active profile.'
+    }
+    if (Test-Path -LiteralPath (Join-Path $ServiceRoot 'health.json')) {
+        throw 'A never-started service must not have published health.'
+    }
+
+    $receipt = Get-Content -LiteralPath (Join-Path $ServiceRoot ("runtime-receipts\" + $current.version + '.json')) -Raw | ConvertFrom-Json -AsHashtable
+    if ($receipt.schema -ne 1 -or $receipt.version -cne $current.version) {
+        throw 'Installed runtime receipt is invalid.'
+    }
+    foreach ($entry in $receipt.files.GetEnumerator()) {
+        $hash = (Get-FileHash -LiteralPath (Join-Path $generationRoot $entry.Key) -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($entry.Value -cne "sha256:$hash") { throw "Installed runtime differs from receipt: $($entry.Key)" }
+    }
+    [pscustomobject]@{
+        RuntimeVersion = $current.version
+    }
+}
+
 function Assert-BaselineRestoredAfterFailedUpgrade {
     param(
         [Parameter(Mandatory)] [pscustomobject] $Baseline,

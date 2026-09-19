@@ -99,9 +99,13 @@ export interface ManualLaunchCandidate {
   windowTitle: string | null;
 }
 
+/** "live": a running service switched to the run profile at once; "next-start": the choice is held until the service next starts. */
+export type DesignationEffect = "live" | "next-start";
+
 export interface AppliedProfile {
   sourceProfile: string;
   runtimeRoot: string;
+  effect: DesignationEffect;
 }
 
 export interface ProfileSnapshot {

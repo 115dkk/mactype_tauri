@@ -84,6 +84,8 @@ foreach ($protectedInstallerToken in @(
     'PrivilegesRequired=admin',
     'UsePreviousAppDir=no',
     'bootstrap-install',
+    'bootstrap-install-preserve-run-state',
+    '{param:STARTSERVICE|0}',
     'uninstall-owned',
     'UninstallNeedRestart',
     'DeferredRuntimeCleanup',

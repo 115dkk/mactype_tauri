@@ -40,7 +40,7 @@ export function FluentFiles({ shell }: { shell: ShellProps }) {
                   <span className="fluent-thumb">
                     {thumbnail ? <img alt={t("files.thumbnailAlt", { name: entry.name })} loading="lazy" src={previewImageUrl(thumbnail.imagePath)} /> : <span aria-hidden="true" className="fluent-thumb-fallback">{THUMBNAIL_SAMPLE_TEXT}</span>}
                   </span>
-                  <span className="fluent-pcard-name"><strong>{entry.name}</strong>{applied && <span className="fluent-badge">{t("files.appliedBadge")}</span>}</span>
+                  <span className="fluent-pcard-name"><strong>{entry.name}</strong>{applied && <span className="fluent-badge">{t("files.runProfileBadge")}</span>}</span>
                   <code title={entry.path}>{entry.displayPath}</code>
                 </button>
                 <div className="fluent-pcard-foot"><button className="text-action fluent-link" disabled={busy !== null} onClick={() => void model.editInTuner(entry.path)} type="button">{t("files.editInTuner")}</button></div>
@@ -73,11 +73,16 @@ export function FluentFiles({ shell }: { shell: ShellProps }) {
         </FluentCards>
         <div className="fluent-footer-actions">
           <button className="button secondary" disabled={!model.canSave} onClick={() => void model.save()} type="button"><Save aria-hidden="true" size={16} strokeWidth={1.6} /> {busy === "save" ? t("profiles.saving") : t("profiles.save")}</button>
-          <button className="button primary" disabled={!model.canApply} onClick={() => void model.apply()} title={model.dirtyCount > 0 ? t("profiles.saveBeforeApply") : undefined} type="button"><Play aria-hidden="true" size={16} strokeWidth={1.6} /> {busy === "apply" ? t("profiles.applying") : t("profiles.apply")}</button>
+          <button className="button primary" disabled={!model.canDesignate} onClick={() => void model.designate()} title={model.dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button"><Play aria-hidden="true" size={16} strokeWidth={1.6} /> {busy === "designate" ? t("profiles.designating") : t("profiles.designate")}</button>
         </div>
       </FluentSection>
 
-      {message && <p aria-live="polite" className="success-message" data-operation="file-settings"><Check aria-hidden="true" size={16} /> {message}</p>}
+      {message && (
+        <p aria-live="polite" className="success-message" data-operation="file-settings">
+          <Check aria-hidden="true" size={16} /> {message}
+          {model.offerStart && <button className="text-action fluent-link" disabled={busy !== null} onClick={() => void model.startServiceNow()} type="button"><Play aria-hidden="true" size={14} strokeWidth={1.6} /> {busy === "start" ? t("execution.serviceWorking") : t("files.startServiceNow")}</button>}
+        </p>
+      )}
       {error && <p className="inline-error"><AlertTriangle aria-hidden="true" size={15} /> {error}</p>}
     </FluentPage>
   );

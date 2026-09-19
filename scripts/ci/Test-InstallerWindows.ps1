@@ -171,7 +171,29 @@ try {
     $legacyFixtureCreated = $false
 
     $installerTouchedMachine = $true
-    Invoke-InstallerExpectedSuccess -File $resolvedBaselineInstaller -Arguments ($silentArguments + '/TASKS=desktopicon') -Label 'Protected baseline install'
+    Invoke-InstallerExpectedSuccess -File $resolvedBaselineInstaller -Arguments ($silentArguments + '/TASKS=desktopicon') -Label 'Protected install without service start'
+    Assert-RequiredApplicationFiles -ApplicationRoot $applicationRoot
+    $stoppedPayload = Assert-ServicePayload -ApplicationRoot $applicationRoot
+    [void](Assert-StoppedOpenService `
+        -PayloadManifest $stoppedPayload `
+        -OpenServiceName $openServiceName `
+        -ServiceRoot $serviceRoot `
+        -ProfileRoot $profileRoot)
+    Assert-CommonDesktopShortcut -CommonDesktopShortcut $commonDesktopShortcut -ApplicationRoot $applicationRoot
+    Assert-UserMarkers -UserMarkerRoot $userMarkerRoot -UserMarkers $userMarkers
+    $stoppedUninstaller = Get-ChildItem -LiteralPath $applicationRoot -File -Filter 'unins*.exe' | Select-Object -First 1
+    if (-not $stoppedUninstaller) { throw 'Never-started install did not create an uninstaller.' }
+    Invoke-InstallerExpectedSuccess -File $stoppedUninstaller.FullName -Arguments $silentArguments -Label 'Uninstall never-started service'
+    if (Get-FixedService -Name $openServiceName) { throw 'Uninstall left the never-started open service registered.' }
+    if (Test-Path -LiteralPath (Join-Path $profileRoot 'active.json')) { throw 'A never-started install must not publish a protected profile.' }
+    if (Test-Path -LiteralPath $applicationRoot) {
+        $remainingApplicationTree = Get-BoundedTreeInventory -Path $applicationRoot
+        throw "Uninstall of a never-started install left the application root behind.`nRemaining tree:`n$remainingApplicationTree"
+    }
+    if (Test-Path -LiteralPath $commonDesktopShortcut) { throw 'Uninstall of a never-started install left the common desktop shortcut behind.' }
+    Assert-UserMarkers -UserMarkerRoot $userMarkerRoot -UserMarkers $userMarkers
+
+    Invoke-InstallerExpectedSuccess -File $resolvedBaselineInstaller -Arguments ($silentArguments + '/TASKS=desktopicon' + '/STARTSERVICE=1') -Label 'Protected baseline install'
     Assert-RequiredApplicationFiles -ApplicationRoot $applicationRoot
     $payload = Assert-ServicePayload -ApplicationRoot $applicationRoot
     $baseline = Assert-ReadyOpenService `
@@ -295,7 +317,7 @@ try {
     Assert-UserMarkers -UserMarkerRoot $userMarkerRoot -UserMarkers $userMarkers
 
     Assert-UserMarkers -UserMarkerRoot $userMarkerRoot -UserMarkers $userMarkers
-    Write-Host 'PASS: fixed Program Files install, strict Ready, profile-preserving upgrade, visible failure, exact-owned or reboot-deferred uninstall, and blocked conflict preservation'
+    Write-Host 'PASS: fixed Program Files install, never-started install without a published profile, strict Ready on opt-in, profile-preserving upgrade, visible failure, exact-owned or reboot-deferred uninstall, and blocked conflict preservation'
 }
 catch {
     $diagnostics = @(

@@ -21,7 +21,7 @@ pub use process_candidates::ManualLaunchCandidate;
 use runtime::prepare_runtime_at;
 pub(crate) use runtime::record_system_injection_choice;
 use runtime::{active_runtime, active_system_profile_payload, system_injection_paused};
-pub use runtime::{apply_profile, AppliedProfile};
+pub use runtime::{apply_profile, AppliedProfile, DesignationEffect};
 use session::{
     launch_registered_targets_impl, launch_with_mactype_impl, register_session_target_impl,
     remove_session_target_impl,
@@ -290,24 +290,63 @@ fn record_successful_activity(
     }
 }
 
+/// Makes the open profile the run profile. The service's on/off state is never
+/// changed here: a running service switches live, a stopped installed one has
+/// the profile published for its next start, and an absent or blocked service
+/// keeps only this user's pointer until the existing Start path publishes it.
 #[tauri::command]
-pub(crate) fn apply_open_profile(state: State<'_, ProfileState>) -> Result<AppliedProfile, String> {
+pub(crate) fn designate_open_profile(
+    state: State<'_, ProfileState>,
+) -> Result<AppliedProfile, String> {
+    use crate::diagnostics::ActivityKind;
+    use crate::machine_integration::MachineAction;
+    use crate::service_contract::{InstallationState, RuntimeState};
+
     let root =
         installation_root().ok_or_else(|| "MacType installation was not found".to_owned())?;
     let (profile_path, profile_bytes) = state.active_payload()?;
-    let applied = apply_profile(&root, &profile_path, &profile_bytes)?;
-    if env::var_os("MACTYPE_CI_SMOKE_FILE").is_none() {
-        let before = status(Some(&root));
-        execute_machine_action(
-            crate::machine_integration::MachineAction::PublishProfile,
-            Some(&profile_bytes),
-        )?;
-        let current = status(Some(&root));
-        record_successful_activity(
-            crate::machine_integration::MachineAction::PublishProfile,
-            before.system_service.runtime == crate::service_contract::RuntimeState::Running,
-            &current,
+    let mut applied = apply_profile(&root, &profile_path, &profile_bytes)?;
+    if env::var_os("MACTYPE_CI_SMOKE_FILE").is_some() {
+        let _ = crate::diagnostics::record_activity(
+            ActivityKind::ProfileDesignated,
+            Some(&applied.source_profile),
         );
+        return Ok(applied);
+    }
+    let before = status(Some(&root));
+    let service = &before.system_service;
+    let machine_step = if service.runtime == RuntimeState::Running {
+        Some(MachineAction::PublishProfile)
+    } else if service.runtime == RuntimeState::Stopped
+        && matches!(
+            service.installation,
+            InstallationState::Current | InstallationState::Outdated
+        )
+        && before.system_modes_supported
+        && !before.registry_mode_detected
+        && !before.legacy_tray.blocks_machine_change()
+    {
+        Some(MachineAction::DesignateProfile)
+    } else {
+        None
+    };
+    match machine_step {
+        Some(MachineAction::PublishProfile) => {
+            execute_machine_action(MachineAction::PublishProfile, Some(&profile_bytes))?;
+            applied.effect = DesignationEffect::Live;
+        }
+        // The pause marker records the user's last on/off choice; holding a
+        // profile for the next start is not that choice, so it stays untouched.
+        Some(action) => crate::machine_integration::execute(action, Some(&profile_bytes))?,
+        None => {}
+    }
+    let _ = crate::diagnostics::record_activity(
+        ActivityKind::ProfileDesignated,
+        Some(&applied.source_profile),
+    );
+    if applied.effect == DesignationEffect::Live {
+        let current = status(Some(&root));
+        record_successful_activity(MachineAction::PublishProfile, true, &current);
     }
     Ok(applied)
 }
@@ -501,6 +540,34 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn public_machine_action_rejects_internal_designate_profile() {
+        assert!(
+            serde_json::from_str::<crate::machine_integration::PublicMachineAction>(
+                r#""designate-profile""#,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn designation_effect_is_reported_in_kebab_case() {
+        let held = AppliedProfile {
+            source_profile: "ini\\Default.ini".to_owned(),
+            runtime_root: "C:\\runtime".to_owned(),
+            effect: DesignationEffect::NextStart,
+        };
+        let held_json = serde_json::to_string(&held).unwrap();
+        let live = AppliedProfile {
+            effect: DesignationEffect::Live,
+            ..held
+        };
+        assert!(held_json.contains("\"effect\":\"next-start\""));
+        assert!(serde_json::to_string(&live)
+            .unwrap()
+            .contains("\"effect\":\"live\""));
     }
 
     #[test]

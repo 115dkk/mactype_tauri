@@ -27,7 +27,7 @@ export function CupertinoOverview({ shell }: { shell: ShellProps }) {
           title={t(`overview.${state}Title` as MessageKey)}
           value={<button className="button secondary" onClick={() => shell.navigate("execution")} type="button">{t("overview.manageService")}…</button>}
         />
-        <CupertinoRow onDisclose={() => shell.navigate("files")} title={t("overview.activeProfile")} value={<><code>{model.activeProfile ?? t("overview.unknownProfile")}</code>{state === "normal" && <CupertinoBadge>{t("files.appliedBadge")}</CupertinoBadge>}</>} />
+        <CupertinoRow onDisclose={() => shell.navigate("files")} title={t("overview.activeProfile")} value={<><code>{model.activeProfile ?? t("overview.unknownProfile")}</code>{state === "normal" && <CupertinoBadge>{t("files.inUseBadge")}</CupertinoBadge>}</>} />
         <CupertinoRow title={t("overview.executionMode")} value={modeText} />
         <CupertinoRow onDisclose={() => shell.navigate("diagnostics")} title={t("finding.preview")} value={<span className="cupertino-value" data-tone={helperConnected ? "ok" : "warn"}>{helperConnected ? t("overview.checked") : t("finding.waiting")}</span>} />
         <CupertinoRow title={t("overview.lastApplied")} value={latestApplied ? t("overview.todayAt", { time: eventClock(latestApplied.ts, locale) }) : t("overview.noLastApplied")} />

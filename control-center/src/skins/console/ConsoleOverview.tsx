@@ -105,7 +105,7 @@ export function ConsoleOverview() {
             <small>{execution.serviceStateText}</small>
           </div>
           <ConsoleKv rows={[
-            { key: "profile", label: t("execution.summaryProfile"), value: <><code>{execution.activeProfileName}</code>{execution.systemInjectionAction.state === "active" && <span className="console-tag">{t("files.appliedBadge")}</span>}</> },
+            { key: "profile", label: t("execution.summaryProfile"), value: <><code>{execution.activeProfileName}</code>{execution.systemInjectionAction.state === "active" && <span className="console-tag">{t("files.inUseBadge")}</span>}</> },
             { key: "mode", label: t("overview.executionMode"), value: t(execution.serviceSummary.modeKey) },
             { key: "applied", label: t("overview.lastApplied"), value: latestApplied ? eventClock(latestApplied.ts, locale) : t("overview.noLastApplied") },
             { key: "preview", label: t("finding.preview"), value: <><StatusDot tone={helperConnected ? "ok" : "warn"} /> {helperConnected ? `${t("overview.checked")} · x86` : t("finding.waiting")}</> },

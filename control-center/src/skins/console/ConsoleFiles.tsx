@@ -38,7 +38,7 @@ export function ConsoleFiles() {
     >
       <ConsolePanel
         footer={<>
-          {message && <span className="success-message" data-operation="file-settings"><Check aria-hidden="true" size={14} /> {message}</span>}
+          {message && <span className="success-message" data-operation="file-settings"><Check aria-hidden="true" size={14} /> {message}{model.offerStart && <button className="text-action" disabled={busy !== null} onClick={() => void model.startServiceNow()} type="button"><Play aria-hidden="true" size={12} strokeWidth={2} /> {busy === "start" ? t("execution.serviceWorking") : t("files.startServiceNow")}</button>}</span>}
           {error && <span className="inline-error"><AlertTriangle aria-hidden="true" size={14} /> {error}</span>}
           {!message && !error && <span className="console-muted">{profile && !profile.canSave ? t("files.readOnly") : t("files.selectDescription")}</span>}
         </>}
@@ -61,7 +61,7 @@ export function ConsoleFiles() {
               <button aria-pressed={selected} className="console-table-row" data-applied={isApplied} data-selected={selected} disabled={busy !== null} key={entry.path} onClick={() => void model.chooseProfile(entry.path)} onDoubleClick={() => void model.editInTuner(entry.path)} role="row" type="button">
                 <strong role="cell">{entry.name}</strong>
                 <code role="cell" title={entry.path}>{entry.displayPath}</code>
-                <span role="cell">{isApplied && <span className="console-tag ok">{t("files.appliedBadge")}</span>}</span>
+                <span role="cell">{isApplied && <span className="console-tag ok">{t("files.runProfileBadge")}</span>}</span>
               </button>
             );
           })}
@@ -74,9 +74,9 @@ export function ConsoleFiles() {
           <button className="button ghost" disabled={!profile || busy !== null} onClick={() => void model.revealCurrentProfile()} type="button"><FolderOpen aria-hidden="true" size={14} /> {t("files.reveal")}</button>
           <span className="console-spacer" />
           <button className="button secondary" disabled={!model.canSave} onClick={() => void model.save()} type="button"><Save aria-hidden="true" size={14} /> {busy === "save" ? t("profiles.saving") : t("profiles.save")}</button>
-          <button className="button primary" disabled={!model.canApply} onClick={() => void model.apply()} title={model.dirtyCount > 0 ? t("profiles.saveBeforeApply") : undefined} type="button"><Play aria-hidden="true" size={14} strokeWidth={2} /> {busy === "apply" ? t("profiles.applying") : t("profiles.apply")}</button>
+          <button className="button primary" disabled={!model.canDesignate} onClick={() => void model.designate()} title={model.dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button"><Play aria-hidden="true" size={14} strokeWidth={2} /> {busy === "designate" ? t("profiles.designating") : t("profiles.designate")}</button>
         </>}
-        right={applied && <span className="console-tag ok">{t("files.appliedBadge")}</span>}
+        right={applied && <span className="console-tag ok">{t("files.runProfileBadge")}</span>}
         scroll={false}
         title={t("files.selectedTitle")}
       >

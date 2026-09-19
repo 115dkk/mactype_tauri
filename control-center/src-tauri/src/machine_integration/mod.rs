@@ -30,7 +30,7 @@ pub(crate) use open_service::{
     machine_roots, management_package_state as service_management_package_state,
 };
 use orchestrator::{execute_machine_action_with, tray_apply_with, tray_login_with};
-pub(crate) use publish::publish_profile_transaction_with;
+pub(crate) use publish::{designate_profile_transaction_with, publish_profile_transaction_with};
 pub(crate) use status::status;
 #[cfg(test)]
 use status::{project_new_service_capabilities, project_system_injection_active};

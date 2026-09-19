@@ -3,8 +3,8 @@ import type { AdvancedProfile, IndividualSetting, ProfileSnapshot } from "../../
 import { operationErrorMessage } from "../../app/operationError";
 import { openPreferredProfile, rememberProfile } from "../../app/profilePreference";
 import {
-  applyOpenProfile,
   currentProfile,
+  designateOpenProfile,
   discardProfileChanges,
   duplicateProfile,
   listProfiles,
@@ -21,7 +21,7 @@ import {
 import { settingsSchema } from "../../generated/settings";
 import type { I18nValue } from "../../i18n/i18n";
 
-type ProfileCommand = "undo" | "redo" | "discard" | "save" | "save-as" | "apply";
+type ProfileCommand = "undo" | "redo" | "discard" | "save" | "save-as" | "designate";
 
 const emptyAdvancedProfile: AdvancedProfile = {
   shadow: null,
@@ -168,14 +168,14 @@ export function useProfileDocument(t: I18nValue["t"]) {
     }
   };
 
-  const applyProfile = async () => {
+  const designateProfile = async () => {
     if (recoveryRequired || (profile?.dirtyKeys.length ?? 0) > 0) return;
-    setCommand("apply");
+    setCommand("designate");
     try {
       await mutationQueue.current;
-      const applied = await applyOpenProfile();
-      const name = applied.sourceProfile.split(/[\\/]/).pop() ?? applied.sourceProfile;
-      setMessage(t("profiles.applied", { name }));
+      const designated = await designateOpenProfile();
+      const name = designated.sourceProfile.split(/[\\/]/).pop() ?? designated.sourceProfile;
+      setMessage(t(designated.effect === "live" ? "profiles.designatedLive" : "profiles.designatedNextStart", { name }));
       setError(null);
     } catch (caught: unknown) {
       setError(operationErrorMessage(caught, t));
@@ -238,7 +238,7 @@ export function useProfileDocument(t: I18nValue["t"]) {
   return {
     addIndividual,
     advanced,
-    applyProfile,
+    designateProfile,
     busy,
     changeSetting,
     command,

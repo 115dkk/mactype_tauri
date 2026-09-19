@@ -18,6 +18,7 @@ static WRITE_ERROR_REPORTED: AtomicBool = AtomicBool::new(false);
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum ActivityKind {
     ProfileApplied,
+    ProfileDesignated,
     ProfileVerified,
     ServiceStarted,
     ServiceInstalled,
@@ -157,6 +158,7 @@ pub(super) fn record_activity_at(
 ) -> Result<PathBuf, String> {
     let (area, code) = match activity {
         ActivityKind::ProfileApplied => (EventArea::Profile, "profile-applied"),
+        ActivityKind::ProfileDesignated => (EventArea::Profile, "profile-designated"),
         ActivityKind::ProfileVerified => (EventArea::Profile, "profile-verified"),
         ActivityKind::ServiceStarted => (EventArea::Service, "service-started"),
         ActivityKind::ServiceInstalled => (EventArea::Service, "service-installed"),
@@ -317,6 +319,7 @@ fn convert_operation(entry: OperationLogEntry) -> EventRecord {
 fn convert_activity(entry: ActivityLogEntry) -> EventRecord {
     let (area, code) = match entry.activity {
         ActivityKind::ProfileApplied => (EventArea::Profile, "profile-applied"),
+        ActivityKind::ProfileDesignated => (EventArea::Profile, "profile-designated"),
         ActivityKind::ProfileVerified => (EventArea::Profile, "profile-verified"),
         ActivityKind::ServiceStarted => (EventArea::Service, "service-started"),
         ActivityKind::ServiceInstalled => (EventArea::Service, "service-installed"),

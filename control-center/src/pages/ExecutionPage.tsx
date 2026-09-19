@@ -71,7 +71,7 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
             <div>
               <span className="eyebrow">{t("execution.openServiceTitle")}</span>
               <strong>{t(systemInjectionAction.titleKey)}</strong>
-              <p>{t(systemInjectionAction.descriptionKey)}</p>
+              <p>{t(systemInjectionAction.descriptionKey, { name: model.activeProfileName })}</p>
             </div>
           </div>
           <button

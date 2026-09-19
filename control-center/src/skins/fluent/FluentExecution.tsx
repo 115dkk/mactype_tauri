@@ -61,7 +61,7 @@ export function FluentExecution({ shell }: { shell: ShellProps }) {
             <ServicePackageNotice model={model} />
             <FluentSubRow
               action={<button className={`button ${systemInjectionAction.intent === "stop" ? "secondary" : "primary"}`} disabled={!systemInjectionAction.enabled} onClick={() => void model.manageService(systemInjectionAction.command)} type="button">{t(systemInjectionAction.labelKey)}</button>}
-              description={t(systemInjectionAction.descriptionKey)}
+              description={t(systemInjectionAction.descriptionKey, { name: model.activeProfileName })}
               title={t(systemInjectionAction.titleKey)}
             />
             <FluentSubRow action={<FluentState>{t(model.profileIndicator.labelKey)}</FluentState>} title={t("execution.profileGeneration")} />

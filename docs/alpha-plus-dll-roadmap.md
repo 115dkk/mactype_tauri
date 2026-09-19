@@ -283,7 +283,13 @@ coherent virtual SFNT files. The core copies the native system font set into
 an `IDWriteFontSetBuilder`; for each configured source it reads the replacement
 through the documented DirectWrite file stream, rewrites the complete OpenType
 `name` table to the source alias, repairs every SFNT checksum, and publishes an
-immutable content-addressed file in the per-user MacType cache. The builder is
+immutable content-addressed file in the per-user MacType cache. That directory
+carries the read and execute grants of `%WINDIR%\Fonts` (`BUILTIN\Users`,
+`ALL APPLICATION PACKAGES`, `ALL RESTRICTED APPLICATION PACKAGES`), inherited by
+every file, because a browser GPU process opens the file by path under a
+restricted token and DirectWrite spares it that open only while the Font Cache
+Service is warm; a cold service after a reboot otherwise made WebRender draw the
+alias's glyph ids with Arial. The builder is
 given an ordinary native `IDWriteFontFaceReference` for that file. The resulting
 collection can locate `Cambria`, for example, while its name-table identity is
 consistently `Cambria` and its metrics, outlines, file, resource, and glyph data

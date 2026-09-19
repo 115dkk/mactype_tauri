@@ -65,6 +65,8 @@ or executable-name workaround.
 | Console tool storm / eager per-process DirectWrite work | field log of this branch, 2026-09-06 | Run the post-loader-lock existing-factory worker only when DirectWrite was mapped before injection, so a process that never touches DirectWrite creates no factory and prepares no alias collection. |
 | Millisecond-lived console tools receiving the renderer | field log of this branch, 2026-09-06 | Read the bounded PE subsystem of the exact image. Defer a fresh console target until it is two seconds old and record it quietly as vanished if it exits first; with `SkipConsoleProcesses=1` skip the exact console process instead. GUI, other, and unavailable classifications stay eligible. |
 | Loader hook ran on a 64 KB driver worker thread | field log of this branch, 2026-09-11: Rebel Inc. Escalation (Unity 2022.3.62f3, IL2CPP) died with `STATUS_STACK_OVERFLOW` inside `MacType64.dll` while an NVIDIA D3D11 worker thread loaded `tzres.dll` through the hooked `LoadLibraryExW` | The `DWriteCore.dll` module check no longer places a 32,768-character path on the stack. Module base names resolve through a bounded heap query, the virtual font comparison chunk moved to the heap, and the open-core build rejects any first-party renderer frame above 16 KB. |
+| Startup applications created before the service reached Ready (a slow service start, an automatic sign-in after a restart) | field report, 2026-09: whether a file manager started with Windows was covered changed with the automatic sign-in setting | Initialisation subscribes to `Win32_ProcessStartTrace` before taking its `Win32_Process` snapshot and injects every process alive at that moment from the backlog; session lock and unlock do not filter targets. These targets take the late route, so a DirectWrite collection they already retained stays an older generation. |
+| Browser chrome text garbled after a reboot: Latin drawn in the wrong glyph order, Hangul as boxes | field measurement of this branch, 2026-09-19: the Firefox address bar and tab title were shaped with the Pretendard alias and rasterised with Arial | A browser GPU process opens the aliased font file by path under a restricted token; the per-user cache had inherited a profile DACL that denies it, and once the Font Cache Service is cold after a reboot WebRender falls back to Arial. The cache directory now grants `BUILTIN\Users`, `ALL APPLICATION PACKAGES`, and `ALL RESTRICTED APPLICATION PACKAGES` read and execute, inherited by every file, exactly like `%WINDIR%\Fonts`. |
 
 ## Implemented evidence
 
@@ -93,6 +95,21 @@ face and rendered tofu. Alias resolution now preserves every case-insensitively
 distinct name for the face when all matching rules agree on one replacement;
 conflicting rules retain the native face. Focused x86/x64 tests cover the
 localized Semilight name set and the fail-closed conflict case.
+
+A reboot on 2026-09-19 exposed a boundary on the consumer side of the virtual
+font files. Firefox shapes its chrome text in the parent process with the
+aliased face and hands WebRender the file path; the GPU process opens that
+path under a restricted token whose file access is decided by `BUILTIN\Users`,
+`Everyone`, and `RESTRICTED`, and the per-user cache directory had inherited a
+profile DACL with none of them. While the Font Cache Service is warm,
+DirectWrite serves the file without that open, so two fresh instances rendered
+correctly; after the reboot the service was cold, the open failed, and
+WebRender rasterised Pretendard glyph ids with Arial, which is the garbled
+address bar the user saw. The cache directory now grants `BUILTIN\Users`,
+`ALL APPLICATION PACKAGES`, and `ALL RESTRICTED APPLICATION PACKAGES` read and
+execute with inheritance, the same grants `%WINDIR%\Fonts` carries. The probe
+test opens a persisted file under a privilege-stripped restricted token and
+proves that a protected-DACL control file is still denied.
 
 The supported setup stop also retires the exact generated DLL-adjacent
 profile. The existing early-injection tree test keeps a renderer loaded in a

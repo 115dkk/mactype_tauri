@@ -109,6 +109,13 @@ impl WindowsInstallerBackend {
             },
             |_, generation| {
                 if !plan.start_service {
+                    // The preserve policy leaves an observed-stopped service stopped.
+                    // PreserveExisting re-materialised the DLL-adjacent profile above,
+                    // and a supported stop requires that child-relay lease to be
+                    // absent, so clear it again instead of probing Ready.
+                    if preserve_stopped_state(snapshot.open_service) {
+                        store.suspend_active_runtime()?;
+                    }
                     return Ok(());
                 }
                 let generation = generation.as_ref().ok_or_else(|| {
@@ -117,12 +124,7 @@ impl WindowsInstallerBackend {
                     )
                 })?;
                 self.manager
-                    .start_and_wait_ready_for_profile(generation.as_str())?;
-                if preserve_stopped_state(snapshot.open_service) {
-                    self.manager.stop()?;
-                    store.suspend_active_runtime()?;
-                }
-                Ok(())
+                    .start_and_wait_ready_for_profile(generation.as_str())
             },
         );
 
@@ -212,7 +214,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn reinstall_preserves_an_owned_stopped_service_after_the_ready_probe() {
+    fn preserve_bootstrap_clears_the_relay_lease_only_for_an_owned_stopped_service() {
         assert!(preserve_stopped_state(OpenServiceObservation::OwnedStopped));
         assert!(!preserve_stopped_state(OpenServiceObservation::Absent));
         assert!(!preserve_stopped_state(

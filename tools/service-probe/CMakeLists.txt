@@ -100,7 +100,7 @@ target_compile_definitions(module-name-tests PRIVATE UNICODE _UNICODE WIN32_LEAN
 add_executable(directwrite-font-cache-tests tests/directwrite_font_cache_tests.cpp)
 target_compile_features(directwrite-font-cache-tests PRIVATE cxx_std_20)
 target_compile_definitions(directwrite-font-cache-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
-target_link_libraries(directwrite-font-cache-tests PRIVATE bcrypt)
+target_link_libraries(directwrite-font-cache-tests PRIVATE bcrypt advapi32)
 
 add_executable(startup-debug-probe tests/startup_debug_probe.cpp)
 target_compile_features(startup-debug-probe PRIVATE cxx_std_20)

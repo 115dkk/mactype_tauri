@@ -31,6 +31,8 @@ Normal target skips and known pre-injection rejection (including a process disap
 
 A failed or cancelled WMI event wait is an observer failure; the platform never reports a failed `Next` call as a timeout. The host reports `degraded` with `observer: failed`, resubscribes with a doubling delay from 1 to 30 seconds for up to 12 attempts, reconciles a fresh `Win32_Process` snapshot after a successful subscription, and returns to `ready`. Only exhausted attempts stop the service.
 
+Initialisation takes the `Win32_ProcessStartTrace` subscription before its first `Win32_Process` snapshot and folds that snapshot into the injection backlog, so a process created before the service reached Ready, including the shell and the startup applications of an automatic sign-in after a restart, is injected from the backlog instead of being missed. Session lock and unlock notifications do not filter targets; only disconnect, logoff, and terminate notifications clear a session's deduplication records. The backlog is the late route: a target that already retained a DirectWrite collection keeps that older generation.
+
 Session-change notifications enter a fixed-capacity nonblocking queue. A burst is drained without last-write-wins loss; queue overflow requests conservative invalidation of all process deduplication state rather than pretending that an unknown session event was handled.
 
 ## Health contract

@@ -1,6 +1,7 @@
 #include "directwrite_virtual_font.h"
 #include "renderer_raii.h"
 
+#include <aclapi.h>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -10,6 +11,7 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <sddl.h>
 #include <string>
 #include <strsafe.h>
 #include <utility>
@@ -785,6 +787,95 @@ HRESULT EnsureDirectory(std::wstring const& path)
 	return S_OK;
 }
 
+// Sandboxed renderer-side processes (a browser GPU process under a restricted
+// token, an AppContainer) open the aliased file by path. The user profile DACL
+// denies them, and a failed open there is rasterised silently with a fallback
+// face, so the cache tree carries the read grants of %WINDIR%\Fonts.
+HRESULT GrantSharedReadAccess(std::wstring const& directory) noexcept
+{
+	try
+	{
+		std::vector<BYTE> users(SECURITY_MAX_SID_SIZE);
+		std::vector<BYTE> packages(SECURITY_MAX_SID_SIZE);
+		DWORD size = static_cast<DWORD>(users.size());
+		if (!CreateWellKnownSid(WinBuiltinUsersSid, nullptr, users.data(), &size))
+			return HRESULT_FROM_WIN32(GetLastError());
+		size = static_cast<DWORD>(packages.size());
+		if (!CreateWellKnownSid(WinBuiltinAnyPackageSid, nullptr, packages.data(), &size))
+			return HRESULT_FROM_WIN32(GetLastError());
+		PSID rawRestricted = nullptr;
+		if (!ConvertStringSidToSidW(L"S-1-15-2-2", &rawRestricted))
+			return HRESULT_FROM_WIN32(GetLastError());
+		renderer_raii::UniqueLocalMemory<void> restricted(rawRestricted);
+		std::array<PSID, 3> trustees = {{users.data(), packages.data(), restricted.get()}};
+
+		std::wstring name = directory;
+		PACL existingDacl = nullptr;
+		PSECURITY_DESCRIPTOR rawDescriptor = nullptr;
+		DWORD error = GetNamedSecurityInfoW(
+			&name[0], SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
+			nullptr, nullptr, &existingDacl, nullptr, &rawDescriptor);
+		renderer_raii::UniqueLocalMemory<void> descriptor(rawDescriptor);
+		if (error != ERROR_SUCCESS)
+			return HRESULT_FROM_WIN32(error);
+
+		constexpr DWORD access = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
+		constexpr BYTE inheritance = OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE;
+		std::array<bool, 3> found = {};
+		if (existingDacl != nullptr)
+		{
+			for (DWORD index = 0; index < existingDacl->AceCount; ++index)
+			{
+				void* rawAce = nullptr;
+				if (!GetAce(existingDacl, index, &rawAce))
+					return HRESULT_FROM_WIN32(GetLastError());
+				auto const* header = static_cast<ACE_HEADER const*>(rawAce);
+				if (header->AceType != ACCESS_ALLOWED_ACE_TYPE ||
+					(header->AceFlags & inheritance) != inheritance)
+					continue;
+				auto* ace = static_cast<ACCESS_ALLOWED_ACE*>(rawAce);
+				if ((ace->Mask & access) != access)
+					continue;
+				for (size_t trustee = 0; trustee < trustees.size(); ++trustee)
+				{
+					if (EqualSid(&ace->SidStart, trustees[trustee]))
+						found[trustee] = true;
+				}
+			}
+		}
+		if (std::all_of(found.begin(), found.end(), [](bool value) { return value; }))
+			return S_FALSE;
+
+		std::array<EXPLICIT_ACCESS_W, 3> entries = {};
+		for (size_t index = 0; index < entries.size(); ++index)
+		{
+			entries[index].grfAccessPermissions = access;
+			entries[index].grfAccessMode = GRANT_ACCESS;
+			entries[index].grfInheritance = SUB_CONTAINERS_AND_OBJECTS_INHERIT;
+			entries[index].Trustee.TrusteeForm = TRUSTEE_IS_SID;
+			entries[index].Trustee.ptstrName = static_cast<LPWSTR>(trustees[index]);
+		}
+		PACL rawMerged = nullptr;
+		error = SetEntriesInAclW(
+			static_cast<ULONG>(entries.size()), entries.data(), existingDacl, &rawMerged);
+		renderer_raii::UniqueLocalMemory<ACL> merged(rawMerged);
+		if (error != ERROR_SUCCESS)
+			return HRESULT_FROM_WIN32(error);
+		error = SetNamedSecurityInfoW(
+			&name[0], SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
+			nullptr, nullptr, merged.get(), nullptr);
+		return HRESULT_FROM_WIN32(error);
+	}
+	catch (std::bad_alloc const&)
+	{
+		return E_OUTOFMEMORY;
+	}
+	catch (...)
+	{
+		return E_FAIL;
+	}
+}
+
 HRESULT ReadEnvironmentVariable(
 	WCHAR const* name,
 	std::wstring& value)
@@ -835,7 +926,16 @@ HRESULT GetCacheDirectory(std::wstring& path)
 	if (FAILED(result))
 		return result;
 	AppendPathComponent(path, L"FontCache");
-	return EnsureDirectory(path);
+	result = EnsureDirectory(path);
+	if (FAILED(result))
+		return result;
+	static std::atomic<bool> sharedReadAttempted(false);
+	if (!sharedReadAttempted.exchange(true))
+	{
+		// Sandboxed callers lack WRITE_DAC; an ordinary process can repair it later.
+		GrantSharedReadAccess(path);
+	}
+	return S_OK;
 }
 
 HRESULT FileMatches(

@@ -1,11 +1,12 @@
+import { readPreference, writePreference } from "../../app/persistedPreference";
 import { defaultEventViewOptions, type EventViewOptions } from "./useEventLog";
 
 const storageKey = "mactype-control-center.event-view";
 
-export function loadEventViewOptions(): EventViewOptions {
+function parseEventViewOptions(raw: string): EventViewOptions | null {
   try {
-    const stored: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? "null");
-    if (!stored || typeof stored !== "object" || Array.isArray(stored)) return { ...defaultEventViewOptions };
+    const stored: unknown = JSON.parse(raw);
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) return null;
     const values = stored as Record<string, unknown>;
     return {
       hideInjectionSummary: typeof values.hideInjectionSummary === "boolean" ? values.hideInjectionSummary : false,
@@ -13,14 +14,18 @@ export function loadEventViewOptions(): EventViewOptions {
       hideRoutine: typeof values.hideRoutine === "boolean" ? values.hideRoutine : false,
     };
   } catch {
-    return { ...defaultEventViewOptions };
+    return null;
   }
 }
 
+export function loadEventViewOptions(): EventViewOptions {
+  return readPreference({
+    key: storageKey,
+    parse: parseEventViewOptions,
+    fallback: () => ({ ...defaultEventViewOptions }),
+  });
+}
+
 export function saveEventViewOptions(options: EventViewOptions): void {
-  try {
-    window.localStorage.setItem(storageKey, JSON.stringify(options));
-  } catch {
-    // View options still apply for this session when storage is unavailable.
-  }
+  writePreference(storageKey, JSON.stringify(options));
 }

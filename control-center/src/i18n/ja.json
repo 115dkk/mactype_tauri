@@ -133,7 +133,6 @@
   "guided.lcd": "LCD 配列と色調",
   "guided.substitution": "フォント置換",
   "guided.apply": "実行プロファイルの設定",
-  "guided.quickActions": "クイック操作",
   "guided.advancedSettings": "すべての詳細設定",
   "guided.saveProfile": "プロファイルを保存",
   "guided.restoreDefaults": "既定値に戻す",

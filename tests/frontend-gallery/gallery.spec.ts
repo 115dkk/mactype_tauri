@@ -2,6 +2,114 @@ import { expect, test } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { galleryLocales, galleryViews } from "./windows";
+import {
+  projectServiceCapabilities,
+  type ServiceCapabilityInput,
+  type ServiceCapabilityProjection,
+} from "../../control-center/src/app/runtimeAdapters/serviceCapabilityPolicy";
+import {
+  galleryExecutionStatus,
+  transitionGalleryExecutionStatus,
+  transitionGalleryLegacyTrayAutostartDisable,
+  transitionGalleryLegacyTrayExit,
+  transitionGalleryRunProfile,
+} from "../../control-center/src/app/runtimeAdapters/browserGalleryExecution";
+import type { ExecutionStatus } from "../../control-center/src/app/model";
+
+const serviceCapabilityCases = JSON.parse(
+  fs.readFileSync(path.join(__dirname, "..", "..", "shared", "service-capability-cases.json"), "utf8"),
+) as Array<{ name: string; input: ServiceCapabilityInput; expected: ServiceCapabilityProjection }>;
+
+for (const capabilityCase of serviceCapabilityCases) {
+  test(`shared service capability projection matches ${capabilityCase.name}`, () => {
+    expect(projectServiceCapabilities(capabilityCase.input), capabilityCase.name).toEqual(capabilityCase.expected);
+  });
+}
+
+function galleryCapabilities(status: ExecutionStatus): ServiceCapabilityProjection {
+  const { canInstall, canRemove, canStart, canStop, canRepair, canUpgrade } = status.systemService;
+  return {
+    canInstall, canRemove, canStart, canStop, canRepair, canUpgrade,
+    systemModesSupported: status.systemModesSupported,
+    migrationAvailable: status.legacyMacTray?.migrationAvailable ?? false,
+  };
+}
+
+for (const fixture of [
+  { name: "legacy-tray-conflict-present", query: "system-service=ready&service-runtime=stopped&legacy-tray=trusted-current" },
+  { name: "foreign-backend", query: "system-service=foreign-service&service-runtime=running" },
+  { name: "inaccessible-installation", query: "system-service=inaccessible-service&service-runtime=unknown" },
+  { name: "stopped-current-package-not-installed", query: "system-service=ready&service-runtime=stopped&service-package=not-installed" },
+  { name: "stopped-current-package-incomplete", query: "system-service=ready&service-runtime=stopped&service-package=incomplete" },
+  { name: "stopped-current-package-untrusted", query: "system-service=ready&service-runtime=stopped&service-package=untrusted" },
+]) {
+  test(`gallery preserves Rust capability gates for ${fixture.name}`, async ({ page }) => {
+    const query = `${fixture.query}&legacy=migration-available&legacy-state=stopped`;
+    const capabilityCase = serviceCapabilityCases.find((candidate) => candidate.name === fixture.name);
+    if (!capabilityCase) throw new Error(`Missing shared capability case: ${fixture.name}`);
+    const status = galleryExecutionStatus(new URLSearchParams(query));
+    expect(galleryCapabilities(status), fixture.name).toEqual(capabilityCase.expected);
+    const designated = transitionGalleryRunProfile(status, "Profiles\\Gallery.ini", false);
+    expect(galleryCapabilities(designated), `${fixture.name} after designation`).toEqual(capabilityCase.expected);
+
+    await page.goto(`/?view=execution&gallery=1&lang=en&${query}`, { waitUntil: "networkidle" });
+    await openServiceDetails(page);
+    const migrate = page.locator('[data-service-backend="legacy-mactray"]').getByRole("button", { name: "Migrate", exact: true });
+    if (fixture.name === "legacy-tray-conflict-present") await expect(migrate).toBeDisabled();
+    else await expect(migrate).toBeEnabled();
+    expect(await overflowingElements(page)).toEqual([]);
+  });
+}
+
+test("gallery capability projection preserves drift, tray clamps and absent transitions", () => {
+  const status = galleryExecutionStatus(new URLSearchParams("system-service=ready&legacy-tray=trusted-current&legacy-startup=hkcu-run&legacy=migration-available"));
+  expect(status.systemModesSupported).toBe(true);
+  expect(status.legacyMacTray?.migrationAvailable).toBe(true);
+  expect(status.systemService.canStop).toBe(true);
+  expect(status.systemService.canRemove).toBe(false);
+  const process = status.legacyTray.process;
+  if (process.state !== "trusted-current-session") throw new Error("Expected a trusted gallery MacTray");
+  const exited = transitionGalleryLegacyTrayExit(status, process);
+  expect(exited.systemModesSupported).toBe(true);
+  expect(exited.systemInjectionActive).toBe(false);
+  expect(exited.systemService.canRemove).toBe(false);
+  expect(exited.legacyMacTray?.migrationAvailable).toBe(true);
+  const cleared = transitionGalleryLegacyTrayAutostartDisable(exited);
+  expect(cleared.systemService.canRemove).toBe(true);
+  const stopped = transitionGalleryExecutionStatus(cleared, "stop");
+  const drifted = transitionGalleryRunProfile({
+    ...stopped,
+    systemService: { ...stopped.systemService, configurationDrift: true },
+  }, "ini\\Default.ini", false);
+  expect(drifted.systemService.configurationDrift).toBe(true);
+  expect(drifted.systemService.canStart).toBe(false);
+  expect(drifted.systemService.canRepair).toBe(true);
+  const removed = transitionGalleryExecutionStatus(stopped, "remove");
+  expect(removed.systemService.backend).toBe("none");
+  expect(removed.systemService.canInstall).toBe(true);
+  expect(removed.systemService.canRemove).toBe(false);
+  const absent = galleryExecutionStatus(new URLSearchParams("system-service=migration-available"));
+  expect(absent.systemService.backend).toBe("none");
+  expect(absent.systemService.canInstall).toBe(true);
+  expect(absent.systemService.canRemove).toBe(false);
+  const deleting = galleryExecutionStatus(new URLSearchParams("system-service=delete-pending"));
+  expect(deleting.systemService.runtime).toBe("unknown");
+  expect(deleting.systemService.canRemove).toBe(false);
+});
+
+test("running legacy migration requires a trusted binary regardless of a declared capability", () => {
+  const capabilityCase = serviceCapabilityCases.find((candidate) => candidate.name === "legacy-migration-available");
+  if (!capabilityCase) throw new Error("Missing shared legacy migration case");
+  const input: ServiceCapabilityInput = {
+    ...capabilityCase.input,
+    legacy: { presence: "owned", state: "running", migrationAvailable: true },
+  };
+  expect(projectServiceCapabilities(input).migrationAvailable).toBe(false);
+  expect(projectServiceCapabilities({
+    ...input,
+    legacy: { ...input.legacy, trustedBinaryAvailable: true },
+  }).migrationAvailable).toBe(true);
+});
 
 const galleryRoot = path.resolve(__dirname, "../../artifacts/frontend-gallery");
 /* The docked preview is a property of the shipped window size, so the gallery

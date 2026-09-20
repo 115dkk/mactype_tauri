@@ -11,6 +11,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 #![deny(clippy::undocumented_unsafe_blocks)]
 
+mod bounded_read;
 mod clipboard;
 mod com;
 mod end_session;

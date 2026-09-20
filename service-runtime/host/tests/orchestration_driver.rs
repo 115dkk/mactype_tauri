@@ -1,3 +1,12 @@
+#[path = "support/event_sink.rs"]
+mod event_sink_support;
+
+#[path = "support/inspector.rs"]
+mod inspector_support;
+#[path = "support/recorder.rs"]
+mod recorder_support;
+
+use event_sink_support::discard_events;
 use std::collections::VecDeque;
 use std::io;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -12,8 +21,11 @@ use mactype_service_host::{
     BrokerDisposition, BrokerResult, HealthPublisher, InitializedRuntime, InjectionBroker,
     InjectionRequest, InspectedProcess, ObserverRecoveryPolicy, ProcessArchitecture,
     ProcessEventSource, ProcessFacts, ProcessIdentity, ProcessInspector, RuntimeInitializer,
-    ServiceRuntime, ServiceStatus, SessionChange, StatusReporter, StopSignal, TargetLiveness,
+    ServiceRuntime, SessionChange, StopSignal, TargetLiveness,
 };
+
+use inspector_support::{InspectorResponse, ScriptedInspector};
+use recorder_support::Recorder;
 
 const PROFILE_DIGEST: &str =
     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -29,6 +41,24 @@ fn inspected(identity: ProcessIdentity) -> InspectedProcess {
             image_name: Some("target.exe".to_owned()),
         },
     }
+}
+
+fn fixed_inspector(pids: impl IntoIterator<Item = u32>) -> ScriptedInspector {
+    ScriptedInspector::new(pids.into_iter().map(|pid| {
+        (
+            pid,
+            InspectorResponse::inspected(
+                inspected(ProcessIdentity {
+                    pid,
+                    creation_time: 100,
+                    session_id: 2,
+                    architecture: ProcessArchitecture::X64,
+                    protected: false,
+                }),
+                mactype_service_host::TargetLifecycle::Running,
+            ),
+        )
+    }))
 }
 
 struct QueueSource {
@@ -141,8 +171,9 @@ fn initialize_with_recovery_source(
         900,
         RUNTIME_GENERATION,
         Box::new(source),
-        Box::new(FixedInspector),
+        Box::new(fixed_inspector([42, 43, 44])),
         Box::new(SharedBroker { requests }),
+        discard_events(),
     )
 }
 
@@ -157,20 +188,6 @@ impl RuntimeInitializer for RecoveryInitializer {
             self.source.lock().unwrap().take().unwrap(),
             self.requests.clone(),
         )
-    }
-}
-
-struct FixedInspector;
-
-impl ProcessInspector for FixedInspector {
-    fn inspect(&self, pid: u32) -> Result<InspectedProcess, StructuredServiceError> {
-        Ok(inspected(ProcessIdentity {
-            pid,
-            creation_time: 100,
-            session_id: 2,
-            architecture: ProcessArchitecture::X64,
-            protected: false,
-        }))
     }
 }
 
@@ -213,29 +230,12 @@ impl RuntimeInitializer for TestInitializer {
                 snapshot: vec![40, 41],
                 pids: VecDeque::from([Some(42)]),
             }),
-            Box::new(FixedInspector),
+            Box::new(fixed_inspector([42, 40, 41])),
             Box::new(SharedBroker {
                 requests: self.requests.clone(),
             }),
+            discard_events(),
         )
-    }
-}
-
-#[derive(Default)]
-struct Recorder {
-    reports: Mutex<Vec<HealthReport>>,
-}
-
-impl StatusReporter for Recorder {
-    fn report(&self, _status: ServiceStatus) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-impl HealthPublisher for Recorder {
-    fn publish(&self, report: &HealthReport) -> io::Result<()> {
-        self.reports.lock().unwrap().push(report.clone());
-        Ok(())
     }
 }
 
@@ -321,7 +321,7 @@ fn observer_failure_resubscribes_and_reconciles_the_missed_snapshot() {
         [Ok(Some(42)), Err(observer_error("observer-wait-failed"))],
     );
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -345,7 +345,7 @@ fn observer_failure_resubscribes_and_reconciles_the_missed_snapshot() {
             .collect::<Vec<_>>(),
         [42, 43, 44]
     );
-    let reports = recorder.reports.lock().unwrap();
+    let reports = recorder.reports();
     let degraded_index = reports
         .iter()
         .position(|report| {
@@ -373,7 +373,7 @@ fn observer_recovery_gives_up_after_the_configured_attempts() {
         [Err(observer_error("observer-wait-failed"))],
     );
 
-    let error = ServiceRuntime::new("0.2.0")
+    let error = ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -387,7 +387,7 @@ fn observer_recovery_gives_up_after_the_configured_attempts() {
 
     assert!(error.to_string().contains("observer-resubscribe-3"));
     assert_eq!(source_handle.state.lock().unwrap().subscribe_calls, 4);
-    let reports = recorder.reports.lock().unwrap();
+    let reports = recorder.reports();
     let terminal_runtime_health = reports
         .iter()
         .rev()
@@ -410,7 +410,7 @@ fn observer_recovery_stops_when_the_service_stops() {
         [Err(observer_error("observer-wait-failed"))],
     );
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -430,7 +430,7 @@ fn ready_driver_consumes_process_events_until_stop() {
     let requests = Arc::new(Mutex::new(Vec::new()));
     let recorder = Recorder::default();
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -450,7 +450,7 @@ fn ready_driver_consumes_process_events_until_stop() {
             .collect::<Vec<_>>(),
         [42, 40, 41]
     );
-    let reports = recorder.reports.lock().unwrap();
+    let reports = recorder.reports();
     let terminal = reports.last().unwrap();
     assert_eq!(terminal.health, HealthState::Unknown);
     assert_eq!(
@@ -517,10 +517,11 @@ impl RuntimeInitializer for TerminalInitializer {
                 snapshot: Vec::new(),
                 pids: VecDeque::from([Some(42)]),
             }),
-            Box::new(FixedInspector),
+            Box::new(fixed_inspector([42])),
             Box::new(TerminalBroker {
                 requests: self.requests.clone(),
             }),
+            discard_events(),
         )
     }
 }
@@ -530,7 +531,7 @@ fn terminal_target_failure_keeps_global_ready_while_the_result_stays_process_loc
     let requests = Arc::new(Mutex::new(Vec::new()));
     let recorder = Recorder::default();
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -542,7 +543,7 @@ fn terminal_target_failure_keeps_global_ready_while_the_result_stays_process_loc
         .unwrap();
 
     assert_eq!(requests.lock().unwrap().len(), 1);
-    let reports = recorder.reports.lock().unwrap();
+    let reports = recorder.reports();
     let latest = reports
         .iter()
         .rev()
@@ -601,13 +602,14 @@ impl RuntimeInitializer for RecoveringInitializer {
                 snapshot: Vec::new(),
                 pids: VecDeque::from([Some(42), Some(43)]),
             }),
-            Box::new(FixedInspector),
+            Box::new(fixed_inspector([42, 43])),
             Box::new(RecoveringBroker {
                 attempts: AtomicUsize::new(0),
                 requests: self.requests.clone(),
                 first_code: self.first_code,
                 first_win32_error: self.first_win32_error,
             }),
+            discard_events(),
         )
     }
 }
@@ -631,7 +633,7 @@ fn cleanup_unknown_degrades_its_generation_then_next_success_recovers_ready() {
     let recorder = Recorder::default();
     let requests = Arc::new(Mutex::new(Vec::new()));
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -646,7 +648,7 @@ fn cleanup_unknown_degrades_its_generation_then_next_success_recovers_ready() {
         )
         .unwrap();
 
-    let reports = recorder.reports.lock().unwrap();
+    let reports = recorder.reports();
     let degraded = reports
         .iter()
         .find(|report| report.health == HealthState::Degraded)
@@ -721,6 +723,7 @@ impl RuntimeInitializer for VanishedTargetInitializer {
                 first_code: "post-injection-state-cleanup-unknown",
                 first_win32_error: Some(299),
             }),
+            discard_events(),
         )
     }
 }
@@ -730,7 +733,7 @@ fn cleanup_unknown_for_a_vanished_target_never_degrades_global_health() {
     let recorder = Recorder::default();
     let requests = Arc::new(Mutex::new(Vec::new()));
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -743,7 +746,7 @@ fn cleanup_unknown_for_a_vanished_target_never_degrades_global_health() {
         )
         .unwrap();
 
-    let reports = recorder.reports.lock().unwrap();
+    let reports = recorder.reports();
     assert!(
         reports
             .iter()
@@ -775,7 +778,7 @@ fn conflicting_mactype_module_stays_process_local_and_global_ready() {
     let recorder = Recorder::default();
     let requests = Arc::new(Mutex::new(Vec::new()));
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -790,7 +793,7 @@ fn conflicting_mactype_module_stays_process_local_and_global_ready() {
         )
         .unwrap();
 
-    let reports = recorder.reports.lock().unwrap();
+    let reports = recorder.reports();
     assert!(reports
         .iter()
         .all(|report| report.health != HealthState::Degraded));
@@ -819,7 +822,7 @@ fn invalid_helper_response_degrades_its_generation_then_next_success_recovers_re
     let recorder = Recorder::default();
     let requests = Arc::new(Mutex::new(Vec::new()));
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -834,7 +837,7 @@ fn invalid_helper_response_degrades_its_generation_then_next_success_recovers_re
         )
         .unwrap();
 
-    let reports = recorder.reports.lock().unwrap();
+    let reports = recorder.reports();
     let degraded = reports
         .iter()
         .find(|report| report.health == HealthState::Degraded)
@@ -921,6 +924,7 @@ impl RuntimeInitializer for TargetInspectionRaceInitializer {
             Box::new(SharedBroker {
                 requests: self.requests.clone(),
             }),
+            discard_events(),
         )
     }
 }
@@ -944,7 +948,7 @@ fn target_inspection_races_are_skipped_without_degrading_ready_or_blocking_the_n
     let requests = Arc::new(Mutex::new(Vec::new()));
     let recorder = Recorder::default();
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -966,7 +970,7 @@ fn target_inspection_races_are_skipped_without_degrading_ready_or_blocking_the_n
             .collect::<Vec<_>>(),
         [11, 21, 31, 41, 51]
     );
-    let reports = recorder.reports.lock().unwrap();
+    let reports = recorder.reports();
     assert!(reports.iter().all(
         |report| report.health != HealthState::Degraded && report.health != HealthState::Failed
     ));
@@ -997,10 +1001,13 @@ impl RuntimeInitializer for TelemetryInitializer {
                     .map(|index| Some(1000 + index as u32))
                     .collect(),
             }),
-            Box::new(FixedInspector),
+            Box::new(fixed_inspector(
+                (0..self.process_count).map(|index| 1000 + index as u32),
+            )),
             Box::new(SharedBroker {
                 requests: self.requests.clone(),
             }),
+            discard_events(),
         )
     }
 }
@@ -1070,7 +1077,7 @@ fn bounded_consecutive_health_report_failures_recover_and_stop_cleanly() {
     let health = TelemetryHealthPublisher::new(TelemetryFailurePattern::First(4));
     let status = Recorder::default();
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &status,
             &health,
@@ -1097,7 +1104,7 @@ fn excessive_consecutive_health_report_failures_return_the_publish_error() {
     let health = TelemetryHealthPublisher::new(TelemetryFailurePattern::Always);
     let status = Recorder::default();
 
-    let error = ServiceRuntime::new("0.2.0")
+    let error = ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &status,
             &health,
@@ -1125,7 +1132,7 @@ fn intermittent_health_report_failures_reset_the_consecutive_failure_count() {
     let health = TelemetryHealthPublisher::new(TelemetryFailurePattern::Intermittent);
     let status = Recorder::default();
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &status,
             &health,

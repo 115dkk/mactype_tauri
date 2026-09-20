@@ -12,6 +12,7 @@ use windows_sys::Win32::System::Registry::{
     KEY_WOW64_32KEY, KEY_WOW64_64KEY, REG_DWORD, REG_EXPAND_SZ, REG_SZ,
 };
 
+use crate::bounded_read::{retry_bytes, CallOutcome, RetryError};
 use crate::wide::wide_null;
 
 const MAX_VALUE_NAME_UNITS: usize = 16_384;
@@ -257,64 +258,47 @@ impl RegistryKey {
     ) -> io::Result<Option<RawRegistryValue>> {
         let wide_name = checked_wide(name, "registry value name")?;
         let mut kind = 0_u32;
-        let mut size = 0_u32;
-        // SAFETY: the key is live; `wide_name` is NUL-terminated; null data asks
-        // only for the size and both outputs are local values.
-        let status = unsafe {
-            RegQueryValueExW(
-                self.0,
-                wide_name.as_ptr(),
-                null(),
-                &mut kind,
-                null_mut(),
-                &mut size,
-            )
-        };
-        if status == ERROR_FILE_NOT_FOUND {
+        let mut first_call = true;
+        let mut missing = false;
+        let bytes = read_raw_bytes(maximum_bytes, |buffer, capacity, needed| {
+            let is_first_call = first_call;
+            first_call = false;
+            // SAFETY: the key and NUL-terminated name are live; bounded_read
+            // supplies a null pointer only for zero capacity and otherwise a
+            // writable allocation described by `capacity`; outputs are local.
+            let status = unsafe {
+                RegQueryValueExW(
+                    self.0,
+                    wide_name.as_ptr(),
+                    null(),
+                    &mut kind,
+                    buffer,
+                    needed,
+                )
+            };
+            match status {
+                ERROR_FILE_NOT_FOUND if is_first_call => {
+                    missing = true;
+                    *needed = 0;
+                    Ok(CallOutcome::Complete)
+                }
+                ERROR_FILE_NOT_FOUND => Err(io::Error::from_raw_os_error(status as i32)),
+                ERROR_SUCCESS if capacity == 0 && *needed > 0 => Ok(CallOutcome::MoreData(
+                    io::Error::from_raw_os_error(ERROR_MORE_DATA as i32),
+                )),
+                ERROR_SUCCESS => Ok(CallOutcome::Complete),
+                ERROR_MORE_DATA => Ok(CallOutcome::MoreData(io::Error::from_raw_os_error(
+                    status as i32,
+                ))),
+                other => Err(io::Error::from_raw_os_error(other as i32)),
+            }
+        })?;
+        if missing {
             return Ok(None);
         }
-        if status != ERROR_SUCCESS {
-            return Err(io::Error::from_raw_os_error(status as i32));
-        }
-        if size as usize > maximum_bytes {
-            return Err(bound_error());
-        }
-        let mut bytes = vec![0_u8; size as usize];
-        let mut actual_kind = 0_u32;
-        let mut actual_size = size;
-        // SAFETY: `bytes` is writable for the capacity passed with it; an empty
-        // value uses a null data pointer, and all other pointers remain live.
-        let status = unsafe {
-            RegQueryValueExW(
-                self.0,
-                wide_name.as_ptr(),
-                null(),
-                &mut actual_kind,
-                if bytes.is_empty() {
-                    null_mut()
-                } else {
-                    bytes.as_mut_ptr()
-                },
-                &mut actual_size,
-            )
-        };
-        if status == ERROR_MORE_DATA || actual_size as usize > maximum_bytes {
-            return Err(bound_error());
-        }
-        if status != ERROR_SUCCESS || actual_size > size {
-            return Err(if status == ERROR_SUCCESS {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "registry value changed while it was being read",
-                )
-            } else {
-                io::Error::from_raw_os_error(status as i32)
-            });
-        }
-        bytes.truncate(actual_size as usize);
         Ok(Some(RawRegistryValue {
             name: name.to_owned(),
-            kind: actual_kind,
+            kind,
             bytes,
         }))
     }
@@ -336,42 +320,53 @@ impl RegistryKey {
         }
         // RegEnumValueW's input capacity includes space for the terminating NUL.
         let mut name = vec![0_u16; maximum_name_units];
-        let mut data = vec![0_u8; maximum_value_bytes];
         let mut values = Vec::new();
         for index in 0.. {
-            let mut name_length = maximum_name_units as u32;
+            let mut name_length = 0_u32;
             let mut kind = 0_u32;
-            let mut data_length = maximum_value_bytes as u32;
-            // SAFETY: fixed buffers are writable for the capacities passed; an
-            // empty data bound uses a null pointer, and output lengths are local.
-            let status = unsafe {
-                RegEnumValueW(
-                    self.0,
-                    index,
-                    name.as_mut_ptr(),
-                    &mut name_length,
-                    null(),
-                    &mut kind,
-                    if data.is_empty() {
-                        null_mut()
-                    } else {
-                        data.as_mut_ptr()
-                    },
-                    &mut data_length,
-                )
-            };
-            if status == ERROR_NO_MORE_ITEMS {
+            let mut no_more_items = false;
+            let data =
+                read_enumerated_raw_bytes(maximum_value_bytes, |buffer, capacity, data_length| {
+                    name_length = maximum_name_units as u32;
+                    // SAFETY: the key and name allocation are live;
+                    // bounded_read supplies a null data pointer only for zero
+                    // capacity and otherwise a writable allocation described
+                    // by `capacity`; all output lengths are live locals.
+                    let status = unsafe {
+                        RegEnumValueW(
+                            self.0,
+                            index,
+                            name.as_mut_ptr(),
+                            &mut name_length,
+                            null(),
+                            &mut kind,
+                            buffer,
+                            data_length,
+                        )
+                    };
+                    match status {
+                        ERROR_NO_MORE_ITEMS => {
+                            no_more_items = true;
+                            *data_length = 0;
+                            Ok(CallOutcome::Complete)
+                        }
+                        ERROR_SUCCESS if capacity == 0 && *data_length > 0 => {
+                            Ok(CallOutcome::MoreData(io::Error::from_raw_os_error(
+                                ERROR_MORE_DATA as i32,
+                            )))
+                        }
+                        ERROR_SUCCESS => Ok(CallOutcome::Complete),
+                        ERROR_MORE_DATA if *data_length <= capacity => Err(bound_error()),
+                        ERROR_MORE_DATA => Ok(CallOutcome::MoreData(io::Error::from_raw_os_error(
+                            status as i32,
+                        ))),
+                        other => Err(io::Error::from_raw_os_error(other as i32)),
+                    }
+                })?;
+            if no_more_items {
                 break;
             }
-            if status == ERROR_MORE_DATA {
-                return Err(bound_error());
-            }
-            if status != ERROR_SUCCESS {
-                return Err(io::Error::from_raw_os_error(status as i32));
-            }
-            if name_length as usize >= maximum_name_units
-                || data_length as usize > maximum_value_bytes
-            {
+            if name_length as usize >= maximum_name_units {
                 return Err(bound_error());
             }
             let value_name = String::from_utf16(&name[..name_length as usize]).map_err(|_| {
@@ -383,7 +378,7 @@ impl RegistryKey {
             values.push(RawRegistryValue {
                 name: value_name,
                 kind,
-                bytes: data[..data_length as usize].to_vec(),
+                bytes: data,
             });
         }
         Ok(values)
@@ -437,40 +432,53 @@ impl RegistryKey {
     pub fn values(&self) -> io::Result<Vec<RegistryValue>> {
         let mut values = Vec::new();
         let mut name = vec![0_u16; MAX_VALUE_NAME_UNITS + 1];
-        let mut data = vec![0_u8; MAX_VALUE_BYTES];
         for index in 0.. {
-            let mut name_length = MAX_VALUE_NAME_UNITS as u32;
+            let mut name_length = 0_u32;
             let mut kind = 0_u32;
-            let mut data_length = data.len() as u32;
-            // SAFETY: the key is open; `name` and `data` are writable for the
-            // lengths passed alongside them, and both lengths are updated to
-            // what was written.
-            let status = unsafe {
-                RegEnumValueW(
-                    self.0,
-                    index,
-                    name.as_mut_ptr(),
-                    &mut name_length,
-                    null(),
-                    &mut kind,
-                    data.as_mut_ptr(),
-                    &mut data_length,
-                )
-            };
-            if status == ERROR_NO_MORE_ITEMS {
+            let mut no_more_items = false;
+            let bytes = read_enumerated_bytes(|buffer, capacity, data_length| {
+                name_length = MAX_VALUE_NAME_UNITS as u32;
+                // SAFETY: the key and name allocation are live; bounded_read
+                // supplies a null data pointer only for zero capacity and
+                // otherwise a writable allocation described by `capacity`;
+                // all output lengths are live locals.
+                let status = unsafe {
+                    RegEnumValueW(
+                        self.0,
+                        index,
+                        name.as_mut_ptr(),
+                        &mut name_length,
+                        null(),
+                        &mut kind,
+                        buffer,
+                        data_length,
+                    )
+                };
+                match status {
+                    ERROR_NO_MORE_ITEMS => {
+                        no_more_items = true;
+                        *data_length = 0;
+                        Ok(CallOutcome::Complete)
+                    }
+                    ERROR_SUCCESS if capacity == 0 && *data_length > 0 => Ok(
+                        CallOutcome::MoreData(io::Error::from_raw_os_error(ERROR_MORE_DATA as i32)),
+                    ),
+                    ERROR_SUCCESS => Ok(CallOutcome::Complete),
+                    ERROR_MORE_DATA if *data_length <= capacity => Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "registry value exceeds the fixed bound",
+                    )),
+                    ERROR_MORE_DATA => Ok(CallOutcome::MoreData(io::Error::from_raw_os_error(
+                        status as i32,
+                    ))),
+                    other => Err(io::Error::from_raw_os_error(other as i32)),
+                }
+            })?;
+            if no_more_items {
                 break;
             }
-            if status == ERROR_MORE_DATA {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "registry value exceeds the fixed bound",
-                ));
-            }
-            if status != ERROR_SUCCESS
-                || name_length as usize > MAX_VALUE_NAME_UNITS
-                || data_length as usize > data.len()
-            {
-                return Err(io::Error::from_raw_os_error(status as i32));
+            if name_length as usize > MAX_VALUE_NAME_UNITS {
+                return Err(io::Error::from_raw_os_error(ERROR_SUCCESS as i32));
             }
             let name = String::from_utf16(&name[..name_length as usize]).map_err(|_| {
                 io::Error::new(
@@ -478,9 +486,8 @@ impl RegistryKey {
                     "registry value name is not UTF-16",
                 )
             })?;
-            let bytes = &data[..data_length as usize];
             let data = match kind {
-                REG_SZ | REG_EXPAND_SZ => RegistryValueData::String(decode_string(bytes)),
+                REG_SZ | REG_EXPAND_SZ => RegistryValueData::String(decode_string(&bytes)),
                 REG_DWORD if bytes.len() == 4 => RegistryValueData::Dword(u32::from_le_bytes([
                     bytes[0], bytes[1], bytes[2], bytes[3],
                 ])),
@@ -497,6 +504,47 @@ impl Drop for RegistryKey {
         // SAFETY: the key was opened by `RegOpenKeyExW` and is closed once.
         unsafe { RegCloseKey(self.0) };
     }
+}
+
+fn read_raw_bytes(
+    maximum_bytes: usize,
+    call: impl FnMut(*mut u8, u32, &mut u32) -> io::Result<CallOutcome>,
+) -> io::Result<Vec<u8>> {
+    retry_bytes(0, maximum_bytes, call).map_err(|error| match error {
+        RetryError::Call(error) => error,
+        RetryError::LimitExceeded | RetryError::ReturnedLengthExceedsLimit => bound_error(),
+        RetryError::ReturnedLengthExceedsCapacity => io::Error::new(
+            io::ErrorKind::InvalidData,
+            "registry value changed while it was being read",
+        ),
+    })
+}
+
+fn read_enumerated_raw_bytes(
+    maximum_bytes: usize,
+    call: impl FnMut(*mut u8, u32, &mut u32) -> io::Result<CallOutcome>,
+) -> io::Result<Vec<u8>> {
+    retry_bytes(0, maximum_bytes, call).map_err(|error| match error {
+        RetryError::Call(error) => error,
+        RetryError::LimitExceeded
+        | RetryError::ReturnedLengthExceedsCapacity
+        | RetryError::ReturnedLengthExceedsLimit => bound_error(),
+    })
+}
+
+fn read_enumerated_bytes(
+    call: impl FnMut(*mut u8, u32, &mut u32) -> io::Result<CallOutcome>,
+) -> io::Result<Vec<u8>> {
+    retry_bytes(0, MAX_VALUE_BYTES, call).map_err(|error| match error {
+        RetryError::Call(error) => error,
+        RetryError::LimitExceeded => io::Error::new(
+            io::ErrorKind::InvalidData,
+            "registry value exceeds the fixed bound",
+        ),
+        RetryError::ReturnedLengthExceedsCapacity | RetryError::ReturnedLengthExceedsLimit => {
+            io::Error::from_raw_os_error(ERROR_SUCCESS as i32)
+        }
+    })
 }
 
 fn checked_wide(value: &str, field: &'static str) -> io::Result<Vec<u16>> {
@@ -535,16 +583,18 @@ mod tests {
     use std::ptr::null_mut;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use windows_sys::Win32::Foundation::ERROR_SUCCESS;
+    use windows_sys::Win32::Foundation::{ERROR_MORE_DATA, ERROR_SUCCESS};
     use windows_sys::Win32::System::Registry::{
         RegCreateKeyExW, RegDeleteKeyW, HKEY_CURRENT_USER, KEY_READ, KEY_WRITE, REG_BINARY,
         REG_OPTION_NON_VOLATILE,
     };
 
     use super::{
-        decode_string, DeleteValueOutcome, RegistryKey, RegistryRoot, RegistryValueData,
-        RegistryView,
+        decode_string, read_enumerated_bytes, read_enumerated_raw_bytes, read_raw_bytes,
+        DeleteValueOutcome, RegistryKey, RegistryRoot, RegistryValueData, RegistryView,
+        MAX_VALUE_BYTES,
     };
+    use crate::bounded_read::CallOutcome;
     use crate::wide::wide_null;
 
     #[test]
@@ -590,6 +640,42 @@ mod tests {
         }
         assert_eq!(decode_string(&bytes).as_deref(), Some("run"));
         assert_eq!(decode_string(&bytes[..5]), None);
+    }
+
+    #[test]
+    fn raw_value_reader_enforces_its_byte_cap() {
+        let error = read_raw_bytes(4, |_, _, needed| {
+            *needed = 5;
+            Ok(CallOutcome::MoreData(std::io::Error::from_raw_os_error(
+                ERROR_MORE_DATA as i32,
+            )))
+        })
+        .unwrap_err();
+        assert_eq!(error.to_string(), "registry value exceeds the bound");
+    }
+
+    #[test]
+    fn raw_value_enumerator_enforces_its_byte_cap() {
+        let error = read_enumerated_raw_bytes(4, |_, _, needed| {
+            *needed = 5;
+            Ok(CallOutcome::MoreData(std::io::Error::from_raw_os_error(
+                ERROR_MORE_DATA as i32,
+            )))
+        })
+        .unwrap_err();
+        assert_eq!(error.to_string(), "registry value exceeds the bound");
+    }
+
+    #[test]
+    fn fixed_value_enumerator_enforces_its_byte_cap() {
+        let error = read_enumerated_bytes(|_, _, needed| {
+            *needed = (MAX_VALUE_BYTES + 1) as u32;
+            Ok(CallOutcome::MoreData(std::io::Error::from_raw_os_error(
+                ERROR_MORE_DATA as i32,
+            )))
+        })
+        .unwrap_err();
+        assert_eq!(error.to_string(), "registry value exceeds the fixed bound");
     }
 
     #[test]

@@ -37,6 +37,7 @@ pub use acl::{
     AclValidationError, AllowedAce, OwnedSid, SecurityAclError, ValidatedDacl, ValidatedSid,
 };
 
+use crate::bounded_read::{probe_word_aligned, CallOutcome, ProbeError, WordAlignedBuffer};
 use crate::handle::OwnedHandle;
 use crate::wide::{bounded_units, wide_null, wide_path};
 
@@ -353,6 +354,26 @@ impl SelfRelativeSecurityDescriptor {
     }
 }
 
+fn query_token_user(
+    call: impl FnMut(*mut usize, u32, &mut u32) -> io::Result<CallOutcome>,
+) -> io::Result<WordAlignedBuffer> {
+    probe_word_aligned(size_of::<TOKEN_USER>(), MAX_TOKEN_INFORMATION_BYTES, call).map_err(
+        |error| match error {
+            ProbeError::Call(error)
+            | ProbeError::ProbeCompleted(error)
+            | ProbeError::FillNeedsMore(error) => error,
+            ProbeError::SizeOutOfRange => io::Error::new(
+                io::ErrorKind::InvalidData,
+                "token user information size is out of range",
+            ),
+            ProbeError::ReturnedLengthOutOfRange { .. } => io::Error::new(
+                io::ErrorKind::InvalidData,
+                "token user information changed during the read",
+            ),
+        },
+    )
+}
+
 /// Formats the current process token's user SID.
 pub fn current_user_sid_string() -> io::Result<String> {
     let mut token = ptr::null_mut();
@@ -362,47 +383,27 @@ pub fn current_user_sid_string() -> io::Result<String> {
         return Err(io::Error::last_os_error());
     }
     let token = OwnedHandle::from_creation(token)?;
-    let mut needed = 0_u32;
-    // SAFETY: the token is live; null data and zero capacity form the documented
-    // size probe, and `needed` is a local output.
-    let probed =
-        unsafe { GetTokenInformation(token.as_raw(), TokenUser, ptr::null_mut(), 0, &mut needed) };
-    let probe_error = io::Error::last_os_error();
-    if probed != 0 || probe_error.raw_os_error() != Some(ERROR_INSUFFICIENT_BUFFER as i32) {
-        return Err(probe_error);
-    }
-    if needed < size_of::<TOKEN_USER>() as u32 || needed as usize > MAX_TOKEN_INFORMATION_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "token user information size is out of range",
-        ));
-    }
-    let word_count = (needed as usize).div_ceil(size_of::<usize>());
-    let mut words = vec![0_usize; word_count];
-    let capacity = (words.len() * size_of::<usize>()) as u32;
-    // SAFETY: the token is live; word storage provides TOKEN_USER alignment and
-    // is writable for `capacity` bytes; `needed` is a local output.
-    if unsafe {
-        GetTokenInformation(
-            token.as_raw(),
-            TokenUser,
-            words.as_mut_ptr().cast(),
-            capacity,
-            &mut needed,
-        )
-    } == 0
-    {
-        return Err(io::Error::last_os_error());
-    }
-    if needed < size_of::<TOKEN_USER>() as u32 || needed > capacity {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "token user information changed during the read",
-        ));
-    }
-    // SAFETY: the successful call initialized a TOKEN_USER header in aligned
-    // storage and reported at least its complete size.
-    let user = unsafe { words.as_ptr().cast::<TOKEN_USER>().read() };
+    let information = query_token_user(|buffer, capacity, needed| {
+        // SAFETY: the token is live; bounded_read passes either the documented
+        // null size probe or word-aligned writable storage described by
+        // `capacity`, and `needed` is a live out value.
+        let result = unsafe {
+            GetTokenInformation(token.as_raw(), TokenUser, buffer.cast(), capacity, needed)
+        };
+        if result != 0 {
+            return Ok(CallOutcome::Complete);
+        }
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() == Some(ERROR_INSUFFICIENT_BUFFER as i32) {
+            Ok(CallOutcome::MoreData(error))
+        } else {
+            Err(error)
+        }
+    })?;
+    // SAFETY: GetTokenInformation succeeded and bounded_read verified that its
+    // reported byte range contains a complete, word-aligned TOKEN_USER header.
+    let user = unsafe { information.read::<TOKEN_USER>() }
+        .expect("token information header size and alignment were checked");
     let mut string = ptr::null_mut();
     // SAFETY: the SID pointer belongs to the live token-information buffer and
     // `string` is a local output receiving a LocalAlloc allocation.
@@ -528,10 +529,13 @@ pub fn current_token_is_member_of(group: &OwnedSid) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use windows_sys::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER;
+
     use super::{
-        current_user_sid_string, LocalSecurityDescriptor, OwnedSid, PrivilegeGuard,
-        SecurityDescriptor,
+        current_user_sid_string, query_token_user, LocalSecurityDescriptor, OwnedSid,
+        PrivilegeGuard, SecurityDescriptor, MAX_TOKEN_INFORMATION_BYTES,
     };
+    use crate::bounded_read::CallOutcome;
 
     #[test]
     fn a_tree_reset_from_sddl_is_read_back_as_the_same_allowed_aces() {
@@ -549,6 +553,22 @@ mod tests {
         assert!(dacl.allowed_aces().any(|ace| ace.trustee_matches(&system)));
         assert!(
             LocalSecurityDescriptor::query_named_file(&directory.path().join("missing")).is_err()
+        );
+    }
+
+    #[test]
+    fn token_user_reader_enforces_its_byte_cap() {
+        let error = query_token_user(|_, _, needed| {
+            *needed = (MAX_TOKEN_INFORMATION_BYTES + 1) as u32;
+            Ok(CallOutcome::MoreData(std::io::Error::from_raw_os_error(
+                ERROR_INSUFFICIENT_BUFFER as i32,
+            )))
+        })
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "token user information size is out of range"
         );
     }
 

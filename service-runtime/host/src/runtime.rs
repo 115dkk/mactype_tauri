@@ -2,6 +2,7 @@ mod lifecycle;
 
 use std::fmt;
 use std::io;
+use std::sync::Arc;
 
 use mactype_service_contract::{ReadinessReport, StructuredServiceError};
 
@@ -104,10 +105,14 @@ impl From<io::Error> for HostError {
 
 pub struct ServiceRuntime<'a> {
     service_version: &'a str,
+    events: Arc<dyn crate::HostEventSink>,
 }
 
 impl<'a> ServiceRuntime<'a> {
-    pub const fn new(service_version: &'a str) -> Self {
-        Self { service_version }
+    pub fn new(service_version: &'a str, events: Arc<dyn crate::HostEventSink>) -> Self {
+        Self {
+            service_version,
+            events,
+        }
     }
 }

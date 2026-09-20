@@ -1,18 +1,20 @@
 use mactype_service_contract::{MachinePaths, StructuredServiceError};
+use std::sync::Arc;
 
 use crate::{
-    initialize_process_orchestration, FixedHelperBroker, InitializedRuntime,
+    initialize_process_orchestration, FixedHelperBroker, HostEventSink, InitializedRuntime,
     ProtectedProfileInitializer, ProtectedRuntimeAssets, RuntimeInitializer, WindowsHelperLauncher,
     WindowsProcessInspector, WindowsStartupSafety, WmiProcessEventSource,
 };
 
 pub struct WindowsOpenServiceInitializer {
     paths: MachinePaths,
+    events: Arc<dyn HostEventSink>,
 }
 
 impl WindowsOpenServiceInitializer {
-    pub const fn new(paths: MachinePaths) -> Self {
-        Self { paths }
+    pub fn new(paths: MachinePaths, events: Arc<dyn HostEventSink>) -> Self {
+        Self { paths, events }
     }
 }
 
@@ -25,7 +27,7 @@ impl RuntimeInitializer for WindowsOpenServiceInitializer {
         let service_pid = std::process::id();
         let inspector = WindowsProcessInspector::new();
         let launcher = WindowsHelperLauncher::new(crate::scm::stop_requested);
-        let broker = FixedHelperBroker::new(&assets, launcher);
+        let broker = FixedHelperBroker::new(&assets, launcher, self.events.clone());
         initialize_process_orchestration(
             profile.active_profile_digest,
             service_pid,
@@ -33,6 +35,7 @@ impl RuntimeInitializer for WindowsOpenServiceInitializer {
             Box::new(source),
             Box::new(inspector),
             Box::new(broker),
+            self.events.clone(),
         )
     }
 }

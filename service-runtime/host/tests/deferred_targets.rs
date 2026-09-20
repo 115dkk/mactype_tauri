@@ -1,28 +1,29 @@
-use std::collections::VecDeque;
-use std::sync::Mutex;
+#[path = "support/event_sink.rs"]
+mod event_sink_support;
+
+#[path = "support/broker.rs"]
+mod broker_support;
+#[path = "support/identity.rs"]
+mod identity_support;
+#[path = "support/inspector.rs"]
+mod inspector_support;
+
+use event_sink_support::discard_events;
 use std::time::{Duration, Instant};
 
-use mactype_service_contract::StructuredServiceError;
 use mactype_service_host::{
-    BrokerDisposition, BrokerResult, DeferralReason, InjectionBroker, InjectionRequest,
-    InspectedProcess, ProcessArchitecture, ProcessFacts, ProcessIdentity, ProcessInspector,
-    ProcessOrchestrator, ProcessOutcome, SessionChange, TargetLifecycle, TargetLiveness,
-    MAX_DEFERRED_TARGETS, TARGET_VANISHED_RESULT_CODE,
+    BrokerDisposition, BrokerResult, DeferralReason, InspectedProcess, ProcessFacts,
+    ProcessIdentity, ProcessOrchestrator, ProcessOutcome, SessionChange, TargetLifecycle,
+    TargetLiveness, MAX_DEFERRED_TARGETS, TARGET_VANISHED_RESULT_CODE,
 };
 
 fn binding() -> String {
     "a".repeat(64)
 }
 
-fn identity(pid: u32) -> ProcessIdentity {
-    ProcessIdentity {
-        pid,
-        creation_time: u64::from(pid) + 100,
-        session_id: 2,
-        architecture: ProcessArchitecture::X64,
-        protected: false,
-    }
-}
+use broker_support::ScriptedBroker;
+use identity_support::identity;
+use inspector_support::{InspectorResponse, ScriptedInspector};
 
 fn inspected(identity: ProcessIdentity) -> InspectedProcess {
     InspectedProcess {
@@ -36,61 +37,16 @@ fn inspected(identity: ProcessIdentity) -> InspectedProcess {
     }
 }
 
-struct MutableInspector {
-    lifecycle: Mutex<TargetLifecycle>,
-    liveness: Mutex<TargetLiveness>,
-}
-
-impl MutableInspector {
-    fn new(lifecycle: TargetLifecycle, liveness: TargetLiveness) -> Self {
-        Self {
-            lifecycle: Mutex::new(lifecycle),
-            liveness: Mutex::new(liveness),
-        }
-    }
-
-    fn set_lifecycle(&self, lifecycle: TargetLifecycle) {
-        *self.lifecycle.lock().unwrap() = lifecycle;
-    }
-}
-
-impl ProcessInspector for MutableInspector {
-    fn inspect(&self, pid: u32) -> Result<InspectedProcess, StructuredServiceError> {
-        Ok(inspected(identity(pid)))
-    }
-
-    fn probe_target_lifecycle(&self, _identity: &ProcessIdentity) -> TargetLifecycle {
-        *self.lifecycle.lock().unwrap()
-    }
-
-    fn probe_target_liveness(&self, _identity: &ProcessIdentity) -> TargetLiveness {
-        *self.liveness.lock().unwrap()
-    }
-}
-
-struct SequenceBroker {
-    results: Mutex<VecDeque<BrokerResult>>,
-    requests: Mutex<Vec<InjectionRequest>>,
-}
-
-impl SequenceBroker {
-    fn new(results: impl IntoIterator<Item = BrokerResult>) -> Self {
-        Self {
-            results: Mutex::new(results.into_iter().collect()),
-            requests: Mutex::new(Vec::new()),
-        }
-    }
-
-    fn request_count(&self) -> usize {
-        self.requests.lock().unwrap().len()
-    }
-}
-
-impl InjectionBroker for SequenceBroker {
-    fn inject(&self, request: &InjectionRequest) -> BrokerResult {
-        self.requests.lock().unwrap().push(request.clone());
-        self.results.lock().unwrap().pop_front().unwrap()
-    }
+fn response(
+    pid: u32,
+    lifecycle: TargetLifecycle,
+    liveness: TargetLiveness,
+) -> (u32, InspectorResponse) {
+    (
+        pid,
+        InspectorResponse::inspected(inspected(identity(pid, u64::from(pid) + 100)), lifecycle)
+            .with_liveness(liveness),
+    )
 }
 
 fn broker_result(disposition: BrokerDisposition, code: &str) -> BrokerResult {
@@ -103,9 +59,15 @@ fn broker_result(disposition: BrokerDisposition, code: &str) -> BrokerResult {
 
 #[test]
 fn frozen_target_is_deferred_deduplicated_and_injected_after_it_runs() {
-    let inspector = MutableInspector::new(TargetLifecycle::Frozen, TargetLiveness::Alive);
-    let broker = SequenceBroker::new([broker_result(BrokerDisposition::Injected, "module-loaded")]);
-    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
+    let target = identity(42, 142);
+    let inspector = ScriptedInspector::new([
+        response(42, TargetLifecycle::Frozen, TargetLiveness::Alive),
+        response(42, TargetLifecycle::Frozen, TargetLiveness::Alive),
+        response(42, TargetLifecycle::Running, TargetLiveness::Alive),
+    ]);
+    let broker = ScriptedBroker::new([broker_result(BrokerDisposition::Injected, "module-loaded")]);
+    let mut orchestrator =
+        ProcessOrchestrator::new(900, binding(), &inspector, &broker, discard_events());
     let start = Instant::now();
 
     assert_eq!(
@@ -129,7 +91,7 @@ fn frozen_target_is_deferred_deduplicated_and_injected_after_it_runs() {
         None
     );
 
-    inspector.set_lifecycle(TargetLifecycle::Running);
+    inspector.set_lifecycle(&target, TargetLifecycle::Running);
     assert_eq!(
         orchestrator
             .poll_deferred(start + Duration::from_secs(2))
@@ -142,16 +104,19 @@ fn frozen_target_is_deferred_deduplicated_and_injected_after_it_runs() {
 
 #[test]
 fn frozen_target_that_exits_becomes_a_quiet_skip() {
-    let inspector = MutableInspector::new(TargetLifecycle::Frozen, TargetLiveness::Alive);
-    let broker = SequenceBroker::new([]);
-    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
+    let target = identity(42, 142);
+    let inspector =
+        ScriptedInspector::new([response(42, TargetLifecycle::Frozen, TargetLiveness::Alive)]);
+    let broker = ScriptedBroker::new([]);
+    let mut orchestrator =
+        ProcessOrchestrator::new(900, binding(), &inspector, &broker, discard_events());
     let start = Instant::now();
 
     assert_eq!(
         orchestrator.handle_pid_at(42, start).unwrap(),
         ProcessOutcome::Deferred
     );
-    inspector.set_lifecycle(TargetLifecycle::Exiting);
+    inspector.set_lifecycle(&target, TargetLifecycle::Exiting);
     assert_eq!(
         orchestrator
             .poll_deferred(start + Duration::from_secs(2))
@@ -168,12 +133,17 @@ fn frozen_target_that_exits_becomes_a_quiet_skip() {
 
 #[test]
 fn pre_resume_launch_failure_for_a_vanished_target_is_a_quiet_skip() {
-    let inspector = MutableInspector::new(TargetLifecycle::Running, TargetLiveness::Vanished);
-    let broker = SequenceBroker::new([broker_result(
+    let inspector = ScriptedInspector::new([response(
+        42,
+        TargetLifecycle::Running,
+        TargetLiveness::Vanished,
+    )]);
+    let broker = ScriptedBroker::new([broker_result(
         BrokerDisposition::LaunchFailed,
         "helper-launch-failed-before-resume",
     )]);
-    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
+    let mut orchestrator =
+        ProcessOrchestrator::new(900, binding(), &inspector, &broker, discard_events());
 
     assert_eq!(
         orchestrator.handle_pid(42).unwrap(),
@@ -188,15 +158,18 @@ fn pre_resume_launch_failure_for_a_vanished_target_is_a_quiet_skip() {
 
 #[test]
 fn helper_launch_deferrals_double_to_the_cap_then_reject() {
-    let inspector = MutableInspector::new(TargetLifecycle::Running, TargetLiveness::Alive);
+    let inspector = ScriptedInspector::new(
+        (0..6).map(|_| response(42, TargetLifecycle::Running, TargetLiveness::Alive)),
+    );
     let launch_failure = || {
         broker_result(
             BrokerDisposition::LaunchFailed,
             "helper-launch-failed-before-resume",
         )
     };
-    let broker = SequenceBroker::new((0..6).map(|_| launch_failure()));
-    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
+    let broker = ScriptedBroker::new((0..6).map(|_| launch_failure()));
+    let mut orchestrator =
+        ProcessOrchestrator::new(900, binding(), &inspector, &broker, discard_events());
     let start = Instant::now();
 
     assert_eq!(
@@ -228,12 +201,17 @@ fn helper_launch_deferrals_double_to_the_cap_then_reject() {
 
 #[test]
 fn broker_frozen_race_enters_the_frozen_deferral_queue() {
-    let inspector = MutableInspector::new(TargetLifecycle::Running, TargetLiveness::Alive);
-    let broker = SequenceBroker::new([broker_result(
+    let inspector = ScriptedInspector::new([response(
+        42,
+        TargetLifecycle::Running,
+        TargetLiveness::Alive,
+    )]);
+    let broker = ScriptedBroker::new([broker_result(
         BrokerDisposition::TargetFrozen,
         "process-frozen",
     )]);
-    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
+    let mut orchestrator =
+        ProcessOrchestrator::new(900, binding(), &inspector, &broker, discard_events());
     let start = Instant::now();
 
     assert_eq!(
@@ -248,9 +226,13 @@ fn broker_frozen_race_enters_the_frozen_deferral_queue() {
 
 #[test]
 fn deferred_capacity_evicts_and_records_the_oldest_target() {
-    let inspector = MutableInspector::new(TargetLifecycle::Frozen, TargetLiveness::Alive);
-    let broker = SequenceBroker::new([]);
-    let mut orchestrator = ProcessOrchestrator::new(u32::MAX, binding(), &inspector, &broker);
+    let inspector = ScriptedInspector::new(
+        (1..=(MAX_DEFERRED_TARGETS as u32 + 1))
+            .map(|pid| response(pid, TargetLifecycle::Frozen, TargetLiveness::Alive)),
+    );
+    let broker = ScriptedBroker::new([]);
+    let mut orchestrator =
+        ProcessOrchestrator::new(u32::MAX, binding(), &inspector, &broker, discard_events());
     let start = Instant::now();
 
     for pid in 1..=(MAX_DEFERRED_TARGETS as u32 + 1) {
@@ -269,9 +251,13 @@ fn deferred_capacity_evicts_and_records_the_oldest_target() {
 
 #[test]
 fn session_changes_retain_other_sessions_and_overflow_clears_all_deferrals() {
-    let inspector = MutableInspector::new(TargetLifecycle::Frozen, TargetLiveness::Alive);
-    let broker = SequenceBroker::new([]);
-    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
+    let inspector = ScriptedInspector::new([
+        response(42, TargetLifecycle::Frozen, TargetLiveness::Alive),
+        response(43, TargetLifecycle::Frozen, TargetLiveness::Alive),
+    ]);
+    let broker = ScriptedBroker::new([]);
+    let mut orchestrator =
+        ProcessOrchestrator::new(900, binding(), &inspector, &broker, discard_events());
     let start = Instant::now();
 
     orchestrator.handle_pid_at(42, start).unwrap();

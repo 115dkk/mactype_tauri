@@ -34,6 +34,7 @@ mod windows_startup_safety;
 #[cfg(windows)]
 mod windows_wmi;
 
+pub use event_log::{HostEvent, HostEventLogger, HostEventSink};
 pub use file_health::{CompositeHealthPublisher, FileHealthPublisher};
 pub use helper_broker::{
     FixedHelperBroker, HelperInvocation, HelperLaunchError, HelperLaunchStage, HelperLauncher,

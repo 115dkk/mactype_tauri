@@ -23,22 +23,6 @@ pub(super) fn tray_login_with(
     }
 }
 
-pub(super) fn tray_apply_with(
-    backend: &mut impl MachineBackend,
-    paused: bool,
-    profile: &[u8],
-) -> Result<(), ActionFailure> {
-    if paused {
-        return Err(ActionFailure::internal("system injection is paused"));
-    }
-    if profile.is_empty() || profile.len() > mactype_service_contract::MAX_PROFILE_BYTES {
-        return Err(ActionFailure::internal(
-            "the active profile payload is outside the allowed range",
-        ));
-    }
-    execute_machine_action_with(backend, MachineAction::PublishProfile, Some(profile))
-}
-
 pub(super) fn execute_machine_action_with(
     backend: &mut impl MachineBackend,
     action: MachineAction,

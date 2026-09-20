@@ -207,12 +207,17 @@ jobs:
         run: pnpm install --frozen-lockfile
       - working-directory: control-center
         run: pnpm generate:settings
+      - name: Generate the native preview contract
+        working-directory: control-center
+        run: pnpm generate:native-preview
       - working-directory: control-center
         run: pnpm test:i18n
       - working-directory: control-center
         run: pnpm test:settings
       - name: Verify generated settings sources are committed
-        run: git diff --exit-code -- control-center/src/generated/settings.ts control-center/src-tauri/src/generated_settings.rs preview-helper/include/generated_settings.h
+        run: git diff --exit-code -- control-center/src/generated/settings.ts control-center/src/generated/nativePreview.ts control-center/src-tauri/src/generated_settings.rs preview-helper/include/generated_settings.h preview-helper/include/generated_native_preview.h
+      - name: Verify the preview helper protocol contract
+        run: node scripts/ci/Test-PreviewProtocolDrift.mjs
       - working-directory: control-center
         run: pnpm lint
       - working-directory: control-center

@@ -25,29 +25,66 @@ pub fn log_root() -> Result<PathBuf, String> {
         .ok_or_else(|| "LOCALAPPDATA is not available".to_owned())
 }
 
-fn event_paths() -> Result<Vec<PathBuf>, String> {
-    let mut paths = vec![log_root()?.join("control-center.log")];
+#[derive(Clone, Debug)]
+struct EventSourcePath {
+    source: EventSource,
+    path: PathBuf,
+}
+
+fn event_source_paths(
+    control_center: PathBuf,
+    machine: Option<(PathBuf, PathBuf)>,
+) -> Vec<EventSourcePath> {
+    let mut paths = vec![EventSourcePath {
+        source: EventSource::ControlCenter,
+        path: control_center,
+    }];
+    if let Some((service_host, service_setup)) = machine {
+        paths.push(EventSourcePath {
+            source: EventSource::ServiceHost,
+            path: service_host,
+        });
+        paths.push(EventSourcePath {
+            source: EventSource::ServiceSetup,
+            path: service_setup,
+        });
+    }
+    paths
+}
+
+fn event_paths() -> Result<Vec<EventSourcePath>, String> {
+    let control_center = log_root()?.join("control-center.log");
     #[cfg(windows)]
-    {
+    let machine = {
         let (program_files, program_data) = crate::machine_integration::machine_roots()?;
         let machine = mactype_service_contract::MachinePaths::from_trusted_os_roots(
             &program_files,
             &program_data,
         )
         .map_err(|error| error.to_string())?;
-        paths.push(machine.service_host_event_log().to_owned());
-        paths.push(machine.service_setup_event_log().to_owned());
-    }
-    Ok(paths)
+        Some((
+            machine.service_host_event_log().to_owned(),
+            machine.service_setup_event_log().to_owned(),
+        ))
+    };
+    #[cfg(not(windows))]
+    let machine = None;
+    Ok(event_source_paths(control_center, machine))
 }
 
-fn read_all_events(paths: &[PathBuf], limit: usize) -> Vec<EventRecord> {
-    if limit == 0 || paths.is_empty() {
+fn read_all_events(paths: &[EventSourcePath], limit: usize) -> Vec<EventRecord> {
+    if limit == 0 {
         return Vec::new();
     }
-    let local_root = paths[0].parent().unwrap_or_else(|| Path::new(""));
-    let mut events = operation_log::read_all_at(local_root);
-    events.extend(read_events(&paths[1..], usize::MAX));
+    let mut events = Vec::new();
+    for source in paths {
+        if source.source == EventSource::ControlCenter {
+            let local_root = source.path.parent().unwrap_or_else(|| Path::new(""));
+            events.extend(operation_log::read_all_at(local_root));
+        } else {
+            events.extend(read_events(std::slice::from_ref(&source.path), usize::MAX));
+        }
+    }
     events.sort_by_key(|event| event.ts);
     let start = events.len().saturating_sub(limit);
     events.split_off(start)
@@ -332,7 +369,7 @@ pub(crate) fn record_preview_event(
 }
 
 pub(crate) fn watch_paths() -> Result<Vec<PathBuf>, String> {
-    event_paths()
+    event_paths().map(|paths| paths.into_iter().map(|source| source.path).collect())
 }
 
 pub(crate) fn newest_timestamp() -> Option<u64> {
@@ -362,22 +399,17 @@ pub(super) fn render_event(event: &EventRecord) -> String {
     value
 }
 
-fn source_statuses(paths: &[PathBuf]) -> Vec<EventSourceStatus> {
+fn source_statuses(paths: &[EventSourcePath]) -> Vec<EventSourceStatus> {
     paths
         .iter()
-        .enumerate()
-        .map(|(index, path)| {
-            let metadata = fs::metadata(path);
+        .map(|source| {
+            let metadata = fs::metadata(&source.path);
             let present = metadata.as_ref().is_ok_and(|metadata| metadata.is_file());
             EventSourceStatus {
-                source: match index {
-                    0 => EventSource::ControlCenter,
-                    1 => EventSource::ServiceHost,
-                    _ => EventSource::ServiceSetup,
-                },
-                path: path.to_string_lossy().into_owned(),
+                source: source.source,
+                path: source.path.to_string_lossy().into_owned(),
                 present,
-                readable: present && fs::File::open(path).is_ok(),
+                readable: present && fs::File::open(&source.path).is_ok(),
                 bytes: metadata.map_or(0, |metadata| metadata.len()),
             }
         })
@@ -427,7 +459,20 @@ mod tests {
         let directory = root.join("service-setup.log");
         fs::create_dir_all(&directory).unwrap();
 
-        let statuses = source_statuses(&[written, never_written, directory]);
+        let statuses = source_statuses(&[
+            EventSourcePath {
+                source: EventSource::ControlCenter,
+                path: written,
+            },
+            EventSourcePath {
+                source: EventSource::ServiceHost,
+                path: never_written,
+            },
+            EventSourcePath {
+                source: EventSource::ServiceSetup,
+                path: directory,
+            },
+        ]);
         assert_eq!(statuses.len(), 3);
         assert!(statuses[0].present && statuses[0].readable);
         assert_eq!(statuses[0].bytes, 3);
@@ -436,6 +481,66 @@ mod tests {
         // A directory standing where the log file belongs is not a log file.
         assert!(!statuses[2].present && !statuses[2].readable);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn source_identity_survives_a_different_input_order() {
+        let root = env::temp_dir().join(format!(
+            "mactype-reordered-source-status-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let control_center = root.join("control-center.log");
+        fs::write(
+            &control_center,
+            concat!(
+                "{\"timestampUnixMs\":7,\"activity\":\"profile-applied\",",
+                "\"profile\":\"A.ini\"}
+"
+            ),
+        )
+        .unwrap();
+        let service_host = root.join("service-host.log");
+        mactype_service_contract::event_log::EventLogWriter::new(service_host.clone())
+            .append(&EventRecord::new(
+                7,
+                EventSeverity::Info,
+                EventArea::Service,
+                "service-started",
+                BTreeMap::new(),
+                None,
+                EventSource::ServiceHost,
+            ))
+            .unwrap();
+        let paths = [
+            EventSourcePath {
+                source: EventSource::ServiceHost,
+                path: service_host,
+            },
+            EventSourcePath {
+                source: EventSource::ControlCenter,
+                path: control_center,
+            },
+        ];
+
+        let events = read_all_events(&paths, 10);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].source, EventSource::ServiceHost);
+        assert_eq!(events[1].source, EventSource::ControlCenter);
+        let statuses = source_statuses(&paths);
+        assert_eq!(statuses[0].source, EventSource::ServiceHost);
+        assert_eq!(statuses[1].source, EventSource::ControlCenter);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn non_windows_source_shape_contains_only_control_center() {
+        let control_center = PathBuf::from("control-center.log");
+        let paths = event_source_paths(control_center.clone(), None);
+
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].source, EventSource::ControlCenter);
+        assert_eq!(paths[0].path, control_center);
     }
 
     #[test]
@@ -619,7 +724,19 @@ mod tests {
                 EventSource::ServiceHost,
             ))
             .unwrap();
-        let events = read_all_events(&[root.join("control-center.log"), service], 10);
+        let events = read_all_events(
+            &[
+                EventSourcePath {
+                    source: EventSource::ControlCenter,
+                    path: root.join("control-center.log"),
+                },
+                EventSourcePath {
+                    source: EventSource::ServiceHost,
+                    path: service,
+                },
+            ],
+            10,
+        );
         assert_eq!(events[0].source, EventSource::ControlCenter);
         assert_eq!(events[1].source, EventSource::ServiceHost);
         fs::remove_dir_all(root).unwrap();

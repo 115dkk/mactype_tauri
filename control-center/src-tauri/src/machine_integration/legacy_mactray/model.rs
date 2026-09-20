@@ -84,7 +84,7 @@ pub(crate) struct LegacyTrayStartupEntry {
     pub(crate) target_path: PathBuf,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum LegacyTrayConflictState {
     Clear,

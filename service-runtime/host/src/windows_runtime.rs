@@ -20,8 +20,12 @@ impl WindowsOpenServiceInitializer {
 
 impl RuntimeInitializer for WindowsOpenServiceInitializer {
     fn initialize(&self) -> Result<InitializedRuntime, StructuredServiceError> {
-        let profile = ProtectedProfileInitializer::new(self.paths.clone()).initialize()?;
-        let assets = ProtectedRuntimeAssets::load(self.paths.clone())?;
+        let profile_initializer = ProtectedProfileInitializer::new(self.paths.clone());
+        let prepared_profile = profile_initializer.prepare()?;
+        let generation = profile_initializer.resolve_generation(&prepared_profile)?;
+        let profile =
+            profile_initializer.initialize_with_generation(prepared_profile, &generation)?;
+        let assets = ProtectedRuntimeAssets::load_from_generation(&generation)?;
         WindowsStartupSafety::verify(&assets.root().join("mactype-service.exe"))?;
         let source = WmiProcessEventSource::connect()?;
         let service_pid = std::process::id();

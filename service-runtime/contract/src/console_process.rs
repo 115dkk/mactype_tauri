@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use crate::profile::{profile_structure_bytes, trim_ascii};
+use crate::{ini_policy, profile::profile_structure_bytes};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ConsoleProcessPolicy {
@@ -12,28 +12,10 @@ impl ConsoleProcessPolicy {
         let Ok(structure) = profile_structure_bytes(bytes) else {
             return Self::default();
         };
-        let mut policy = Self::default();
-        let mut in_general = false;
-        for raw_line in structure.split(|byte| *byte == b'\n') {
-            let line = trim_ascii(raw_line);
-            if line.is_empty() || matches!(line[0], b';' | b'#') {
-                continue;
-            }
-            if line.len() >= 3 && line[0] == b'[' && line[line.len() - 1] == b']' {
-                in_general = trim_ascii(&line[1..line.len() - 1]).eq_ignore_ascii_case(b"General");
-                continue;
-            }
-            if !in_general {
-                continue;
-            }
-            let Some(separator) = line.iter().position(|byte| *byte == b'=') else {
-                continue;
-            };
-            if trim_ascii(&line[..separator]).eq_ignore_ascii_case(b"SkipConsoleProcesses") {
-                policy.skip_console = trim_ascii(&line[separator + 1..]) == b"1";
-            }
+        Self {
+            skip_console: ini_policy::lookup(&structure, b"General", b"SkipConsoleProcesses")
+                == Some(b"1"),
         }
-        policy
     }
 
     pub const fn skip_console(self) -> bool {

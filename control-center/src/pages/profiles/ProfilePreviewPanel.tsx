@@ -19,7 +19,7 @@ import { runtime } from "../../app/runtimeAdapter";
 import type { I18nValue } from "../../i18n/i18n";
 
 const DEFAULT_PREVIEW_HEIGHT = 300;
-const QUICK_PREVIEW_HEIGHT = 240;
+const GUIDED_PREVIEW_HEIGHT = 240;
 const MIN_PREVIEW_HEIGHT = 128;
 const MAX_PREVIEW_HEIGHT = 640;
 /* The undocked preview is a bottom panel sharing its column with the settings
@@ -66,7 +66,7 @@ interface ProfilePreviewPanelProps {
   fontFace: string;
   fontFamilies: ReadonlyArray<string>;
   fontOptionLabel: (font: string) => string;
-  mode: "quick" | "advanced";
+  mode: "guided" | "all";
   onError: (message: string | null) => void;
   onFontFaceChange: (font: string) => void;
   onPreviewReady?: () => void;
@@ -186,7 +186,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
   }), []);
 
   useEffect(() => {
-    if (mode === "quick") setPreviewHeight((current) => Math.min(current, QUICK_PREVIEW_HEIGHT));
+    if (mode === "guided") setPreviewHeight((current) => Math.min(current, GUIDED_PREVIEW_HEIGHT));
   }, [mode]);
 
   useEffect(() => {

@@ -22,7 +22,7 @@ interface State {
   trayStart: boolean;
 }
 
-type ProfileMode = "quick" | "advanced";
+type ProfileMode = "guided" | "all";
 
 type Action =
   | { type: "navigate"; view: ViewId; profileMode?: ProfileMode }
@@ -55,7 +55,7 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
   const { t } = useI18n();
   const [state, dispatch] = useReducer(reducer, {
     view: "overview",
-    profileMode: "advanced",
+    profileMode: "all",
     theme: initialTheme,
     status: fallbackStatus,
     ready: false,
@@ -94,7 +94,7 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
   }, [state.ciSmoke, state.profileMode, state.ready, state.trayStart, state.view]);
 
   const page = useMemo(() => {
-    if (state.view === "files") return <FileSettingsPage onEditInTuner={() => dispatch({ type: "navigate", view: "profiles", profileMode: "advanced" })} />;
+    if (state.view === "files") return <FileSettingsPage onEditInTuner={() => dispatch({ type: "navigate", view: "profiles", profileMode: "all" })} />;
     if (state.view === "profiles") return <ProfilesPage ciSmoke={state.ciSmoke} mode={state.profileMode} onPreviewReady={() => void runtime().reportFrontendReady("profiles")} />;
     if (state.view === "execution") return <ExecutionPage ciSmoke={state.ciSmoke} onReady={() => void runtime().reportFrontendReady("execution")} />;
     if (state.view === "diagnostics") return <DiagnosticsPage
@@ -146,11 +146,11 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
           <div aria-labelledby="nav-group-tuner" className="nav-group" role="group">
             <span className="nav-group-label" id="nav-group-tuner">{t("nav.tunerGroup")}</span>
             <div className="nav-group-items">
-              <button className="nav-item nav-subitem" data-selected={state.view === "profiles" && state.profileMode === "quick"} onClick={() => dispatch({ type: "navigate", view: "profiles", profileMode: "quick" })} type="button">
+              <button className="nav-item nav-subitem" data-selected={state.view === "profiles" && state.profileMode === "guided"} onClick={() => dispatch({ type: "navigate", view: "profiles", profileMode: "guided" })} type="button">
                 <Sparkles aria-hidden="true" size={17} strokeWidth={1.8} />
                 <span>{t("nav.guidedSetup")}</span>
               </button>
-              <button className="nav-item nav-subitem" data-selected={state.view === "profiles" && state.profileMode === "advanced"} onClick={() => dispatch({ type: "navigate", view: "profiles", profileMode: "advanced" })} type="button">
+              <button className="nav-item nav-subitem" data-selected={state.view === "profiles" && state.profileMode === "all"} onClick={() => dispatch({ type: "navigate", view: "profiles", profileMode: "all" })} type="button">
                 <SlidersHorizontal aria-hidden="true" size={17} strokeWidth={1.8} />
                 <span>{t("nav.allSettings")}</span>
               </button>

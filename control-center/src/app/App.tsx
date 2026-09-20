@@ -6,7 +6,7 @@ import { ProfilesPage } from "../pages/ProfilesPage";
 import { ExecutionPage } from "../pages/ExecutionPage";
 import { FileSettingsPage } from "../pages/FileSettingsPage";
 import { fallbackStatus, type InstallationStatus, type ViewId } from "./model";
-import { loadLaunchContext, reconnectPreview, rediscoverInstallation, reportFrontendFailure, reportFrontendReady, scanInstallation, verifyTrayModeForCi } from "./tauri";
+import { runtime } from "./runtimeAdapter";
 import { useI18n } from "../i18n/i18n";
 import { LanguagePicker } from "../components/LanguagePicker";
 import { WindowTitleBar } from "../components/WindowTitleBar";
@@ -22,7 +22,7 @@ interface State {
   trayStart: boolean;
 }
 
-type ProfileMode = "quick" | "advanced";
+type ProfileMode = "guided" | "all";
 
 type Action =
   | { type: "navigate"; view: ViewId; profileMode?: ProfileMode }
@@ -55,7 +55,7 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
   const { t } = useI18n();
   const [state, dispatch] = useReducer(reducer, {
     view: "overview",
-    profileMode: "advanced",
+    profileMode: "all",
     theme: initialTheme,
     status: fallbackStatus,
     ready: false,
@@ -65,7 +65,7 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
 
   useEffect(() => {
     let active = true;
-    void Promise.all([loadLaunchContext(), scanInstallation()]).then(([context, status]) => {
+    void Promise.all([runtime().loadLaunchContext(), runtime().scanInstallation()]).then(([context, status]) => {
       if (!active) return;
       dispatch({ type: "launched", view: context.view, ciSmoke: context.ciSmoke, trayStart: context.trayStart });
       if (status) dispatch({ type: "status", status });
@@ -85,27 +85,27 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
     document.body.dataset.profileMode = state.profileMode;
     document.body.dataset.rendered = "true";
     if (state.ciSmoke && state.trayStart) {
-      void verifyTrayModeForCi()
-        .then(() => reportFrontendReady(state.view))
-        .catch((error: unknown) => reportFrontendFailure(state.view, error instanceof Error ? error.message : String(error)));
+      void runtime().verifyTrayModeForCi()
+        .then(() => runtime().reportFrontendReady(state.view))
+        .catch((error: unknown) => runtime().reportFrontendFailure(state.view, error instanceof Error ? error.message : String(error)));
     } else if (!state.ciSmoke || (state.view !== "profiles" && state.view !== "execution")) {
-      void reportFrontendReady(state.view);
+      void runtime().reportFrontendReady(state.view);
     }
   }, [state.ciSmoke, state.profileMode, state.ready, state.trayStart, state.view]);
 
   const page = useMemo(() => {
-    if (state.view === "files") return <FileSettingsPage onEditInTuner={() => dispatch({ type: "navigate", view: "profiles", profileMode: "advanced" })} />;
-    if (state.view === "profiles") return <ProfilesPage ciSmoke={state.ciSmoke} mode={state.profileMode} onModeChange={(profileMode) => dispatch({ type: "navigate", view: "profiles", profileMode })} onPreviewReady={() => void reportFrontendReady("profiles")} />;
-    if (state.view === "execution") return <ExecutionPage ciSmoke={state.ciSmoke} onReady={() => void reportFrontendReady("execution")} />;
+    if (state.view === "files") return <FileSettingsPage onEditInTuner={() => dispatch({ type: "navigate", view: "profiles", profileMode: "all" })} />;
+    if (state.view === "profiles") return <ProfilesPage ciSmoke={state.ciSmoke} mode={state.profileMode} onPreviewReady={() => void runtime().reportFrontendReady("profiles")} />;
+    if (state.view === "execution") return <ExecutionPage ciSmoke={state.ciSmoke} onReady={() => void runtime().reportFrontendReady("execution")} />;
     if (state.view === "diagnostics") return <DiagnosticsPage
       status={state.status}
       onReconnect={async () => {
-        const status = await reconnectPreview();
+        const status = await runtime().reconnectPreview();
         dispatch({ type: "status", status });
         return status;
       }}
       onRelocate={async () => {
-        const status = await rediscoverInstallation();
+        const status = await runtime().rediscoverInstallation();
         dispatch({ type: "status", status });
         return status;
       }}
@@ -146,11 +146,11 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
           <div aria-labelledby="nav-group-tuner" className="nav-group" role="group">
             <span className="nav-group-label" id="nav-group-tuner">{t("nav.tunerGroup")}</span>
             <div className="nav-group-items">
-              <button className="nav-item nav-subitem" data-selected={state.view === "profiles" && state.profileMode === "quick"} onClick={() => dispatch({ type: "navigate", view: "profiles", profileMode: "quick" })} type="button">
+              <button className="nav-item nav-subitem" data-selected={state.view === "profiles" && state.profileMode === "guided"} onClick={() => dispatch({ type: "navigate", view: "profiles", profileMode: "guided" })} type="button">
                 <Sparkles aria-hidden="true" size={17} strokeWidth={1.8} />
                 <span>{t("nav.guidedSetup")}</span>
               </button>
-              <button className="nav-item nav-subitem" data-selected={state.view === "profiles" && state.profileMode === "advanced"} onClick={() => dispatch({ type: "navigate", view: "profiles", profileMode: "advanced" })} type="button">
+              <button className="nav-item nav-subitem" data-selected={state.view === "profiles" && state.profileMode === "all"} onClick={() => dispatch({ type: "navigate", view: "profiles", profileMode: "all" })} type="button">
                 <SlidersHorizontal aria-hidden="true" size={17} strokeWidth={1.8} />
                 <span>{t("nav.allSettings")}</span>
               </button>

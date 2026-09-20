@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKe
 import type { ExecutionStatus, ManualLaunchCandidate, SystemServiceAction } from "../app/model";
 import { projectExecutionView } from "../app/executionViewModel";
 import { operationErrorMessage } from "../app/operationError";
-import { disableLegacyTrayAutostart, launchRegisteredTargets, launchTargetWithMactype, listManualLaunchCandidates, loadExecutionStatus, manageSystemService, pickExecutable, registerSessionTarget, removeSessionTarget, reportFrontendFailure, requestLegacyTrayExit, revealSystemService, setSessionAutostart, verifyInjectionWorkflowForCi } from "../app/tauri";
+import { runtime } from "../app/runtimeAdapter";
 import { useI18n } from "../i18n/i18n";
 
 export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean; onReady?: () => void }) {
@@ -27,20 +27,20 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
 
   const refresh = useCallback(async () => {
     try {
-      const nextStatus = await loadExecutionStatus();
+      const nextStatus = await runtime().loadExecutionStatus();
       setStatus(nextStatus);
       setError(null);
       if (ciSmoke) {
         if (!nextStatus.injectionReady || !nextStatus.activeProfile) {
           throw new Error("CI profile application did not produce an active injection runtime");
         }
-        await verifyInjectionWorkflowForCi();
+        await runtime().verifyInjectionWorkflowForCi();
         onReady?.();
       }
     } catch (caught: unknown) {
       const message = caught instanceof Error ? caught.message : String(caught);
       setError(message);
-      if (ciSmoke) void reportFrontendFailure("execution", message);
+      if (ciSmoke) void runtime().reportFrontendFailure("execution", message);
     }
   }, [ciSmoke, onReady]);
 
@@ -50,7 +50,7 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
 
   const toggleAutostart = async (enabled: boolean) => {
     try {
-      const actual = await setSessionAutostart(enabled);
+      const actual = await runtime().setSessionAutostart(enabled);
       setStatus((current) => current ? { ...current, autoStart: actual } : current);
       setMessage(actual ? t("execution.autostartOn") : t("execution.autostartOff"));
       setError(null);
@@ -62,7 +62,7 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
   const launch = async () => {
     try {
       const arguments_ = argumentsText.split(/\r?\n/).map((argument) => argument.trim()).filter(Boolean);
-      const pid = await launchTargetWithMactype(target, arguments_);
+      const pid = await runtime().launchTargetWithMactype(target, arguments_);
       setMessage(t("execution.launched", { pid }));
       setError(null);
     } catch (caught: unknown) {
@@ -74,7 +74,7 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
 
   const loadCandidates = useCallback(async () => {
     try {
-      setCandidates(await listManualLaunchCandidates());
+      setCandidates(await runtime().listManualLaunchCandidates());
       setError(null);
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -83,7 +83,7 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
 
   const chooseTarget = async () => {
     try {
-      const selected = await pickExecutable(t("execution.executableFilter"));
+      const selected = await runtime().pickExecutable(t("execution.executableFilter"));
       if (selected) setTarget(selected);
       setError(null);
     } catch (caught: unknown) {
@@ -93,7 +93,7 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
 
   const register = async () => {
     try {
-      const sessionTargets = await registerSessionTarget(target, argumentsFromEditor());
+      const sessionTargets = await runtime().registerSessionTarget(target, argumentsFromEditor());
       setStatus((current) => current ? { ...current, sessionTargets } : current);
       setMessage(t("execution.registered"));
       setError(null);
@@ -104,7 +104,7 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
 
   const remove = async (registeredTarget: string) => {
     try {
-      const sessionTargets = await removeSessionTarget(registeredTarget);
+      const sessionTargets = await runtime().removeSessionTarget(registeredTarget);
       setStatus((current) => current ? { ...current, sessionTargets } : current);
       setMessage(t("execution.removed"));
       setError(null);
@@ -115,7 +115,7 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
 
   const launchAll = async () => {
     try {
-      const processes = await launchRegisteredTargets();
+      const processes = await runtime().launchRegisteredTargets();
       setMessage(t("execution.launchedRegistered", { count: processes.length }));
       setError(null);
     } catch (caught: unknown) {
@@ -127,12 +127,12 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
     setServiceBusy(action);
     const hadProfile = Boolean(status?.activeProfile);
     try {
-      const nextStatus = await manageSystemService(action);
+      const nextStatus = await runtime().manageSystemService(action);
       setStatus(nextStatus);
       // "start" and "publish-profile" auto-apply the bundled default profile
       // when none was applied yet; name what happened instead of a generic note.
       const defaultApplied = !hadProfile && Boolean(nextStatus.activeProfile);
-      const appliedName = nextStatus.activeProfile?.split(/[\\/]/).pop() ?? "";
+      const appliedName = projectExecutionView(nextStatus, null).activeProfileDisplay.name ?? "";
       setMessage(
         action === "stop"
           ? t("execution.systemPaused")
@@ -163,7 +163,7 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
 
   const revealServiceLocation = async () => {
     try {
-      await revealSystemService();
+      await runtime().revealSystemService();
       setMessage(t("execution.serviceLocationOpened"));
       setError(null);
     } catch (caught: unknown) {
@@ -177,7 +177,7 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
     if (!process || process.state !== "trusted-current-session") return;
     setLegacyTrayBusy("exit");
     try {
-      const nextStatus = await requestLegacyTrayExit({
+      const nextStatus = await runtime().requestLegacyTrayExit({
         pid: process.pid,
         creationTime: process.creationTime,
         path: process.path,
@@ -196,7 +196,7 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
   const disableLegacyTrayStartup = async () => {
     setLegacyTrayBusy("disable-autostart");
     try {
-      const nextStatus = await disableLegacyTrayAutostart();
+      const nextStatus = await runtime().disableLegacyTrayAutostart();
       setStatus(nextStatus);
       setMessage(t("execution.legacyTrayAutostartDisabled"));
       setError(null);
@@ -251,7 +251,6 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
 
   const executionView = projectExecutionView(status, serviceBusy);
   const systemInjectionAction = executionView.systemInjectionAction;
-  const service = executionView.status?.systemService;
   const legacyService = executionView.status?.legacyMacTray;
   const legacyTrayResolution = executionView.legacyTrayResolution;
   const serviceSummary = executionView.serviceSummary;
@@ -260,23 +259,8 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
   const serviceStateText = serviceStatusLine
     ? [serviceStatusLine.installationKey, serviceStatusLine.runtimeKey, ...(serviceStatusLine.healthKey ? [serviceStatusLine.healthKey] : [])].map((key) => t(key)).join(" · ")
     : t("execution.checking");
-  const servicePackageNotice = status?.serviceManagementPackage === "not-installed"
-    ? {
-        titleKey: "execution.servicePackageNotInstalledTitle" as const,
-        descriptionKey: "execution.servicePackageNotInstalledDescription" as const,
-      }
-    : status?.serviceManagementPackage === "incomplete"
-      ? {
-          titleKey: "execution.servicePackageIncompleteTitle" as const,
-          descriptionKey: "execution.servicePackageIncompleteDescription" as const,
-        }
-      : status?.serviceManagementPackage === "untrusted"
-        ? {
-            titleKey: "execution.servicePackageUntrustedTitle" as const,
-            descriptionKey: "execution.servicePackageUntrustedDescription" as const,
-          }
-        : null;
-  const activeProfileName = status?.activeProfile?.split(/[\\/]/).pop() ?? t("execution.profileNotApplied");
+  const servicePackageNotice = executionView.servicePackageNotice;
+  const activeProfileName = executionView.activeProfileDisplay.name ?? t(executionView.activeProfileDisplay.fallbackKey);
 
   const runSummaryAction = (command: SystemServiceAction) => {
     if (command === "migrate-from-legacy") {
@@ -370,7 +354,7 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
         <div className="service-row-body">
         <div className="open-service-card" data-service-backend="open-source">
         {servicePackageNotice && (
-          <div className="service-package-notice" role="status" data-service-package={status?.serviceManagementPackage} data-prominent-exception>
+          <div className="service-package-notice" role="status" data-service-package={servicePackageNotice.kind} data-prominent-exception>
             <span className="service-package-notice-icon"><ShieldAlert aria-hidden="true" size={20} /></span>
             <div>
               <strong>{t(servicePackageNotice.titleKey)}</strong>
@@ -413,8 +397,7 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
                 </button>
               </div>
             )}
-            {service?.backend === "foreign" && <p className="warning-text">{t("execution.serviceForeign")}</p>}
-            {service?.configurationDrift && <p className="warning-text">{t("execution.serviceConfigurationDriftDescription")}</p>}
+            {executionView.serviceWarnings.map((warning) => <p className="warning-text" key={warning.kind}>{t(warning.titleKey)}</p>)}
           </div>
           <div className="service-actions">
             <button className="button secondary" disabled={!executionView.canInstall} onClick={() => void manageService("install")} type="button">{serviceBusy === "install" ? t("execution.serviceWorking") : t("execution.serviceInstall")}</button>

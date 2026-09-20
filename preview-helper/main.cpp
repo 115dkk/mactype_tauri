@@ -124,13 +124,6 @@ int wmain(int argc, wchar_t** argv) {
           response.kind = mtpc::MessageKind::hello_ack;
           response.json = runtime.hello_json();
           break;
-        case mtpc::MessageKind::ping:
-          response.kind = mtpc::MessageKind::pong;
-          response.json = R"({"ok":true})";
-          break;
-        case mtpc::MessageKind::load_profile:
-          response = runtime.load_profile(request);
-          break;
         case mtpc::MessageKind::render_preview:
           response = runtime.render(request);
           break;
@@ -141,7 +134,7 @@ int wmain(int argc, wchar_t** argv) {
           response = runtime.show_native_preview(request, false);
           break;
         case mtpc::MessageKind::shutdown:
-          response.kind = mtpc::MessageKind::ack;
+          response.kind = mtpc::MessageKind::shutdown;
           response.json = R"({"shutdown":true})";
           running = false;
           break;

@@ -1,0 +1,16 @@
+name: service payload fixture
+on: workflow_dispatch
+jobs:
+  windows-build:
+    runs-on: windows-2022
+    steps:
+      - name: Build distinct immutable service payloads and a test-only failing upgrade
+        run: |-
+          $shortSha = '${{ github.sha }}'
+          $runtimeVersionStem = "0.2.0+ci.${{ github.run_id }}.$shortSha"
+          $baselineRuntimeVersion = "$runtimeVersionStem.baseline"
+          $failingRuntimeVersion = "$runtimeVersionStem.failing"
+          $currentRuntimeVersion = "$runtimeVersionStem.current"
+          .github/scripts/Build-ServiceRuntime.ps1 -OutputRoot artifacts/service-runtime-baseline -Version $baselineRuntimeVersion
+          .github/scripts/Build-FailingServiceRuntimeFixture.ps1 -OutputRoot artifacts/service-runtime-failing-upgrade -Version $failingRuntimeVersion
+          .github/scripts/Build-ServiceRuntime.ps1 -OutputRoot artifacts/service-runtime-current -Version $currentRuntimeVersion

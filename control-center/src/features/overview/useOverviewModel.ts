@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { projectExecutionView } from "../../app/executionViewModel";
+import { projectExecutionView, type ExecutionViewModel } from "../../app/executionViewModel";
 import type { EventRecord, ExecutionStatus } from "../../app/model";
-import { loadExecutionStatus, loadRecentActivity, openLogFolder, subscribeEventLog } from "../../app/tauri";
+import { runtime } from "../../app/runtimeAdapter";
 import { useI18n } from "../../i18n/i18n";
 import { eventTitle } from "../events/eventText";
 
-export type OverviewState = "normal" | "inactive" | "problem";
+export type OverviewState = ExecutionViewModel["overviewState"];
 
 export function timeText(timestamp: number, locale: string): string {
   return new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit" }).format(new Date(timestamp));
@@ -26,38 +26,34 @@ export function useOverviewModel() {
 
   useEffect(() => {
     let active = true;
-    void loadExecutionStatus().then((nextExecution) => {
+    void runtime().loadExecutionStatus().then((nextExecution) => {
       if (active) setExecution(nextExecution);
     }).catch(() => undefined);
     const refresh = () => {
-      void loadRecentActivity().then((nextActivities) => {
+      void runtime().loadRecentActivity().then((nextActivities) => {
         if (active) setActivities(nextActivities.slice(-5));
       }).catch(() => undefined);
     };
     refresh();
-    const unsubscribe = subscribeEventLog(refresh);
+    const unsubscribe = runtime().subscribeEventLog(refresh);
     return () => { active = false; unsubscribe(); };
   }, []);
 
   const view = useMemo(() => projectExecutionView(execution, null), [execution]);
-  const state: OverviewState = view.systemInjectionAction.state === "active"
-    ? "normal"
-    : execution?.systemService.runtime === "stopped"
-      ? "inactive"
-      : "problem";
+  const state = view.overviewState;
   const newestFirst = useMemo(() => [...activities].reverse(), [activities]);
   const latestApplied = newestFirst.find((entry) => entry.code === "profile-applied");
   const activityMessage = (entry: EventRecord) => eventTitle(t, locale, entry);
   const openFolder = async () => {
     setFolderMessage(null);
     try {
-      setFolderMessage(await openLogFolder());
+      setFolderMessage(await runtime().openLogFolder());
     } catch {
       setFolderMessage(t("overview.logFolderFailed"));
     }
   };
   const activeProfile = execution?.activeProfile ?? null;
-  const activeProfileName = activeProfile?.split(/[\\/]/).pop() ?? null;
+  const activeProfileName = view.activeProfileDisplay.name;
   const lastAppliedText = latestApplied ? t("overview.todayAt", { time: timeText(latestApplied.ts, locale) }) : t("overview.noLastApplied");
 
   return {

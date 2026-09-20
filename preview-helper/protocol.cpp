@@ -8,6 +8,9 @@
 namespace mtpc {
 namespace {
 
+static_assert(kHeaderSize == sizeof(std::uint32_t) + 2U * sizeof(std::uint16_t) +
+                                 sizeof(std::uint64_t) + 2U * sizeof(std::uint32_t));
+
 template <typename T>
 bool read_little_endian(std::istream& input, T& value) {
   static_assert(std::is_unsigned_v<T>);

@@ -1,26 +1,9 @@
 import { AlertTriangle, Check, FileInput, FileOutput, FolderOpen, Play, Save, SaveAll, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import type { DesignationEffect, ExecutionStatus, LegacyProfileCandidate, PreviewRequest, PreviewResult, ProfileEntry, ProfileSnapshot } from "../app/model";
-import { operationErrorMessage } from "../app/operationError";
-import {
-  currentProfile,
-  designateOpenProfile,
-  discoverLegacyProfile,
-  duplicateProfile,
-  exportProfile,
-  importProfile,
-  listProfiles,
-  loadExecutionStatus,
-  manageSystemService,
-  openProfile,
-  pickIniProfile,
-  pickIniExportPath,
-  previewImageUrl,
-  renderProfilePreview,
-  revealProfileFile,
-  saveProfile,
-} from "../app/tauri";
-import { openPreferredProfile, rememberProfile } from "../app/profilePreference";
+import type { LegacyProfileCandidate, PreviewRequest, PreviewResult } from "../app/model";
+import { runtime } from "../app/runtimeAdapter";
+import { useProfileDocument } from "../features/profiles/useProfileDocument";
+import { fileName, managedProfileFor, matchesAppliedProfile, sameProfileIdentity } from "./profiles/profileEditorUtils";
 import { useI18n } from "../i18n/i18n";
 
 const THUMBNAIL_SAMPLE_TEXT = "The quick brown fox jumps over the lazy dog 0123456789";
@@ -34,49 +17,41 @@ interface FileSettingsPageProps {
 
 export function FileSettingsPage({ onEditInTuner }: FileSettingsPageProps) {
   const { t } = useI18n();
-  const [profile, setProfile] = useState<ProfileSnapshot | null>(null);
-  const [profiles, setProfiles] = useState<ReadonlyArray<ProfileEntry>>([]);
-  const [appliedProfile, setAppliedProfile] = useState<string | null>(null);
-  const [execution, setExecution] = useState<ExecutionStatus | null>(null);
-  const [designationEffect, setDesignationEffect] = useState<DesignationEffect | null>(null);
-  const [legacy, setLegacy] = useState<LegacyProfileCandidate | null>(null);
+  const [detectedLegacy, setLegacy] = useState<LegacyProfileCandidate | null>(null);
   const [thumbnails, setThumbnails] = useState<ReadonlyMap<string, PreviewResult | null>>(() => new Map(thumbnailCache));
-  const [copyName, setCopyName] = useState("");
-  const [busy, setBusy] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const refreshProfiles = useCallback(async () => {
-    setProfiles(await listProfiles());
+  const discoverLegacyProfile = useCallback(async () => {
+    const detected = await runtime().discoverLegacyProfile();
+    setLegacy(detected);
+    return detected;
   }, []);
-
+  const {
+    appliedProfile,
+    chooseProfile,
+    command: busy,
+    copyName,
+    designateProfile: designate,
+    dirtyCount,
+    error,
+    loading,
+    message,
+    offerStart,
+    profile,
+    profiles,
+    replaceDocument,
+    runFileOperation,
+    saveCurrentProfile: save,
+    saveProfileAs: duplicate,
+    setCopyName,
+    startServiceNow,
+  } = useProfileDocument(t, { page: "files", discoverLegacyProfile });
+  const legacy = !loading && detectedLegacy && !managedProfileFor(detectedLegacy, profiles) && !sameProfileIdentity(detectedLegacy, appliedProfile)
+    ? detectedLegacy
+    : null;
   useEffect(() => {
-    let active = true;
-    void Promise.all([currentProfile(), listProfiles(), discoverLegacyProfile(), loadExecutionStatus()])
-      .then(async ([opened, available, detected, execution]) => {
-        const managedDetected = detected ? managedProfileFor(detected, available) : null;
-        const preferredProfile = execution.injectionReady
-          ? execution.activeProfile
-          : managedDetected?.displayPath ?? execution.activeProfile;
-        const selected = await openPreferredProfile(
-          opened,
-          available,
-          preferredProfile,
-        );
-        if (!active) return;
-        setProfile(selected);
-        setProfiles(available);
-        setAppliedProfile(execution.activeProfile);
-        setExecution(execution);
-        setLegacy(detected && !managedDetected && !sameProfileIdentity(detected, execution.activeProfile) ? detected : null);
-      })
-      .catch((caught: unknown) => {
-        if (active) setError(caught instanceof Error ? caught.message : String(caught));
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+    if (!loading && detectedLegacy && (managedProfileFor(detectedLegacy, profiles) || sameProfileIdentity(detectedLegacy, appliedProfile))) {
+      setLegacy(null);
+    }
+  }, [appliedProfile, detectedLegacy, loading, profiles]);
 
   useEffect(() => {
     let active = true;
@@ -85,7 +60,7 @@ export function FileSettingsPage({ onEditInTuner }: FileSettingsPageProps) {
         if (thumbnailCache.has(entry.path)) continue;
         let rendered: PreviewResult | null = null;
         try {
-          rendered = await renderProfilePreview(thumbnailRequest(entry.path));
+          rendered = await runtime().renderProfilePreview(thumbnailRequest(entry.path));
         } catch {
           rendered = null;
         }
@@ -99,149 +74,43 @@ export function FileSettingsPage({ onEditInTuner }: FileSettingsPageProps) {
     };
   }, [profiles]);
 
-  const run = async (operation: string, action: () => Promise<ProfileSnapshot>, success: (opened: ProfileSnapshot) => string): Promise<boolean> => {
-    setBusy(operation);
-    setDesignationEffect(null);
-    try {
-      const opened = await action();
-      rememberProfile(opened.path);
-      setProfile(opened);
-      await refreshProfiles();
-      setMessage(success(opened));
-      setError(null);
-      return true;
-    } catch (caught: unknown) {
-      setError(operationErrorMessage(caught, t));
-      setMessage(null);
-      return false;
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const chooseProfile = async (path: string): Promise<boolean> => {
-    if (profile?.path === path) return true;
-    return run("open", () => openProfile(path), (opened) => t("files.opened", { name: fileName(opened.path) }));
-  };
-
   const editInTuner = async (path: string) => {
     if (await chooseProfile(path)) onEditInTuner?.();
   };
 
-  const duplicate = async () => {
-    const name = copyName.trim();
-    if (!name) return;
-    await run("duplicate", () => duplicateProfile(name), (opened) => {
-      setCopyName("");
-      return t("files.duplicated", { name: fileName(opened.path) });
-    });
-  };
-
-  const save = async () => {
-    await run("save", async () => {
-      const saved = await saveProfile();
-      if (!saved) throw new Error(t("profiles.none"));
-      return saved;
-    }, (opened) => t("files.saved", { name: fileName(opened.path) }));
-  };
-
-  const designate = async () => {
-    setBusy("designate");
-    setDesignationEffect(null);
-    try {
-      const designated = await designateOpenProfile();
-      const name = fileName(designated.sourceProfile);
-      setAppliedProfile(designated.sourceProfile);
-      setLegacy((detected) => detected && sameProfileIdentity(detected, designated.sourceProfile) ? null : detected);
-      setMessage(t(designated.effect === "live" ? "profiles.designatedLive" : "profiles.designatedNextStart", { name }));
-      setDesignationEffect(designated.effect);
-      setError(null);
-      setExecution(await loadExecutionStatus());
-    } catch (caught: unknown) {
-      setError(operationErrorMessage(caught, t));
-      setMessage(null);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  // The one place this page may turn the service on: a separate, labelled
-  // click offered after a designation that the stopped service is holding.
-  const startServiceNow = async () => {
-    setBusy("start");
-    setDesignationEffect(null);
-    try {
-      const next = await manageSystemService("start");
-      setExecution(next);
-      setAppliedProfile(next.activeProfile);
-      setMessage(t("files.serviceStartedWithRunProfile", { name: next.activeProfile ? fileName(next.activeProfile) : "" }));
-      setError(null);
-    } catch (caught: unknown) {
-      setError(operationErrorMessage(caught, t, "execution.operationFailed"));
-      setMessage(null);
-    } finally {
-      setBusy(null);
-    }
-  };
-
   const importFrom = async (path: string) => {
-    await run("import", () => importProfile(path), (opened) => {
+    await replaceDocument("import", () => runtime().importProfile(path), (opened) => {
       setLegacy(null);
       return t("files.imported", { name: fileName(opened.path) });
     });
   };
 
   const chooseImport = async () => {
-    try {
-      const selected = await pickIniProfile(t("files.iniFilter"));
-      if (selected) await importFrom(selected);
-    } catch (caught: unknown) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    }
+    let selected: string | null = null;
+    const picked = await runFileOperation("pick-import", async () => {
+      selected = await runtime().pickIniProfile(t("files.iniFilter"));
+      return null;
+    });
+    if (picked && selected) await importFrom(selected);
   };
 
   const exportIni = async () => {
     if (!profile) return;
-    setBusy("export");
-    setDesignationEffect(null);
-    try {
-      const defaultName = fileName(profile.path);
-      const selected = await pickIniExportPath(t("files.iniFilter"), defaultName);
-      if (selected) {
-        const destination = await exportProfile(selected);
-        setMessage(t("files.exported", { name: fileName(destination) }));
-        setError(null);
-      }
-    } catch (caught: unknown) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-      setMessage(null);
-    } finally {
-      setBusy(null);
-    }
+    await runFileOperation("export", async () => {
+      const selected = await runtime().pickIniExportPath(t("files.iniFilter"), fileName(profile.path));
+      if (!selected) return null;
+      const destination = await runtime().exportProfile(selected);
+      return t("files.exported", { name: fileName(destination) });
+    });
   };
 
   const revealCurrentProfile = async () => {
-    setBusy("reveal");
-    setDesignationEffect(null);
-    try {
-      const path = await revealProfileFile();
-      setMessage(t("files.revealed", { name: fileName(path) }));
-      setError(null);
-    } catch (caught: unknown) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-      setMessage(null);
-    } finally {
-      setBusy(null);
-    }
+    await runFileOperation("reveal", async () => {
+      const path = await runtime().revealProfileFile();
+      return t("files.revealed", { name: fileName(path) });
+    });
   };
 
-  const dirtyCount = profile?.dirtyKeys.length ?? 0;
-  const serviceCanStart = Boolean(
-    execution?.systemService.installation === "current"
-      && execution.systemService.runtime === "stopped"
-      && execution.systemService.canStart,
-  );
-  const offerStart = designationEffect === "next-start" && serviceCanStart;
   const detailsSummary = profile
     ? `${t("files.fileDetails")} · ${profile.encoding.toUpperCase()} · ${profile.lineEnding.replace(/-/g, "").toUpperCase()}${dirtyCount ? ` · ${t("files.unsaved")} ${t("files.unsavedCount", { count: dirtyCount })}` : ""}`
     : `${t("files.fileDetails")} · —`;
@@ -281,7 +150,7 @@ export function FileSettingsPage({ onEditInTuner }: FileSettingsPageProps) {
                 <button aria-pressed={selected} className="profile-card-select" disabled={busy !== null} onClick={() => void chooseProfile(entry.path)} type="button">
                   <span className="profile-card-thumb">
                     {thumbnail
-                      ? <img alt={t("files.thumbnailAlt", { name: entry.name })} loading="lazy" src={previewImageUrl(thumbnail.imagePath)} />
+                      ? <img alt={t("files.thumbnailAlt", { name: entry.name })} loading="lazy" src={runtime().previewImageUrl(thumbnail.imagePath)} />
                       : <span aria-hidden="true" className="profile-card-thumb-fallback">{THUMBNAIL_SAMPLE_TEXT}</span>}
                   </span>
                   <span className="profile-card-title">
@@ -352,25 +221,4 @@ function thumbnailRequest(profilePath: string): PreviewRequest {
       background: "#EEF1F4",
     },
   };
-}
-
-function matchesAppliedProfile(entry: ProfileEntry, appliedProfile: string | null): boolean {
-  if (!appliedProfile) return false;
-  const normalized = appliedProfile.toLocaleLowerCase();
-  return entry.path.toLocaleLowerCase() === normalized || entry.displayPath.toLocaleLowerCase() === normalized;
-}
-
-function fileName(path: string): string {
-  return path.split(/[\\/]/).pop() ?? path;
-}
-
-function sameProfileIdentity(candidate: LegacyProfileCandidate, activeProfile: string | null): boolean {
-  if (!activeProfile) return false;
-  const stem = (path: string) => fileName(path).replace(/\.ini$/i, "").toLocaleLowerCase();
-  return candidate.name.toLocaleLowerCase() === stem(activeProfile) || stem(candidate.path) === stem(activeProfile);
-}
-
-function managedProfileFor(candidate: LegacyProfileCandidate, profiles: ReadonlyArray<ProfileEntry>): ProfileEntry | null {
-  const candidatePath = candidate.path.toLocaleLowerCase();
-  return profiles.find((profile) => profile.path.toLocaleLowerCase() === candidatePath) ?? null;
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "legacy_control_center.h"
+#include "json_document.h"
 #include "protocol.h"
 
 #include <Windows.h>
@@ -28,7 +29,6 @@ class PreviewRuntime {
 
   bool initialize(std::string& error);
   mtpc::Frame render(const mtpc::Frame& request);
-  mtpc::Frame load_profile(const mtpc::Frame& request);
   mtpc::Frame show_native_preview(const mtpc::Frame& request, bool visible);
   std::string hello_json() const;
   void pump_messages();
@@ -41,9 +41,22 @@ class PreviewRuntime {
   void set_save_in_progress_for_tests(bool in_progress);
   void trigger_save_for_tests();
   std::uint32_t save_thread_started_for_tests() const;
+  std::uint32_t relayout_count_for_tests() const;
+  std::uint32_t retitle_count_for_tests() const;
+  std::uint32_t reshow_count_for_tests() const;
 
   enum class DisplayMode { sample, ladder, compare, listing };
   enum class Skin { classic };
+
+  struct SampleState {
+    std::wstring text;
+    std::wstring font_face;
+    float font_size_pt;
+    bool bold;
+    bool italic;
+    bool operator==(const SampleState&) const = default;
+  };
+
 
   struct Palette {
     COLORREF canvas;
@@ -70,33 +83,51 @@ class PreviewRuntime {
     bool operator==(const NativeChrome&) const = default;
   };
 
+  struct NativePreviewLabels {
+    std::wstring title;
+    std::wstring font_face;
+    std::wstring font_size;
+    std::wstring bold;
+    std::wstring italic;
+    std::wstring mode_sample;
+    std::wstring mode_ladder;
+    std::wstring mode_compare;
+    std::wstring mode_listing;
+    std::wstring invert;
+    std::wstring loupe;
+    std::wstring zoom;
+    std::wstring topmost;
+    std::wstring edit_text;
+    std::wstring save_png;
+    std::wstring copy;
+    std::wstring compare_mactype;
+    std::wstring compare_windows;
+    std::wstring compare_unavailable;
+    std::wstring engine_mactype;
+    std::wstring core_version;
+    std::wstring png_filter;
+    std::wstring saved;
+    std::wstring copied;
+    bool operator==(const NativePreviewLabels&) const = default;
+  };
+
  private:
-  struct NativeLabels {
-    std::wstring title{L"MacType Preview"};
-    std::wstring font_face{L"Font"};
-    std::wstring font_size{L"Size"};
-    std::wstring bold{L"B"};
-    std::wstring italic{L"I"};
-    std::wstring mode_sample{L"Sample"};
-    std::wstring mode_ladder{L"Ladder"};
-    std::wstring mode_compare{L"Compare"};
-    std::wstring mode_listing{L"Listing"};
-    std::wstring invert{L"Invert"};
-    std::wstring loupe{L"Loupe"};
-    std::wstring zoom{L"Zoom"};
-    std::wstring topmost{L"Top"};
-    std::wstring edit_text{L"Edit"};
-    std::wstring save_png{L"Save"};
-    std::wstring copy{L"Copy"};
-    std::wstring compare_mactype{L"MacType"};
-    std::wstring compare_windows{L"Windows"};
-    std::wstring compare_unavailable{L"Comparison unavailable"};
-    std::wstring engine_mactype{L"MacType"};
-    std::wstring core_version{L"Core {version}"};
-    std::wstring png_filter{L"PNG files (*.png)|*.png"};
-    std::wstring saved{L"Saved"};
-    std::wstring copied{L"Copied"};
-    bool operator==(const NativeLabels&) const = default;
+  struct CanvasCacheKey {
+    int width;
+    int minimum_height;
+    SampleState sample;
+    std::wstring listing_text;
+    COLORREF foreground;
+    COLORREF background;
+    std::uint32_t dpi;
+    DisplayMode display_mode;
+    int zoom;
+    bool inverted;
+    std::vector<float> ladder_sizes;
+    NativePreviewLabels labels;
+    std::optional<NativeChrome> chrome;
+    bool dark_theme;
+    bool operator==(const CanvasCacheKey&) const = default;
   };
 
   struct CanvasBitmap;
@@ -104,25 +135,31 @@ class PreviewRuntime {
   static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
   static LRESULT CALLBACK edit_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
   bool create_windows(std::string& error);
-  bool apply_request(const std::string& json, std::string& error);
+  bool apply_request(const JsonDocument& document, std::string& error);
   bool apply_native_request(const std::string& json, std::string& error);
-  std::vector<std::uint8_t> render_png(const std::string& json, std::uint32_t& width,
-                                      std::uint32_t& height, std::uint32_t& dpi, std::string& error);
+  std::vector<std::uint8_t> render_png(const JsonDocument& document, std::uint32_t& width,
+                                      std::uint32_t& height, std::uint32_t& dpi,
+                                      std::string& error);
   void paint_native(HWND window);
   void recreate_ui_font();
   void recreate_palette_brushes();
   void apply_combo_theme();
   const Palette& palette() const;
   int chrome_metric(int NativeChrome::*member, int fallback) const;
-  void invalidate_canvas_cache();
-  CanvasBitmap* cached_native_canvas(int width, int minimum_height);
+  CanvasCacheKey native_canvas_key(int width, int minimum_height) const;
+  CanvasBitmap* cached_native_canvas(const CanvasCacheKey& key);
   void enumerate_fonts();
   void sync_controls();
   void relayout_controls();
   void rebuild_toolbar_layout();
   void draw_toolbar(HDC dc, const RECT& area);
   void draw_combo_item(const DRAWITEMSTRUCT& item);
-  std::unique_ptr<CanvasBitmap> render_native_canvas(int width, int minimum_height);
+  std::unique_ptr<CanvasBitmap> render_native_canvas(
+      int width, int minimum_height, const SampleState& sample, COLORREF foreground,
+      COLORREF background, std::uint32_t dpi, DisplayMode mode, int zoom, bool inverted,
+      const std::vector<float>& ladder_sizes, const std::wstring& listing_text,
+      const NativePreviewLabels& labels, const std::optional<NativeChrome>& chrome,
+      bool dark_theme);
   void execute_toolbar_action(int action);
   bool handle_key(WPARAM key);
   int hit_test_toolbar(POINT point) const;
@@ -152,15 +189,10 @@ class PreviewRuntime {
   HFONT mono_font_{};
   HBRUSH surface_brush_{};
   HBRUSH edit_brush_{};
-  std::wstring sample_text_{L"MacType preview 123 ABC\nThe quick brown fox jumps over the lazy dog."};
-  std::wstring font_face_{L"Segoe UI"};
-  float font_size_pt_{14.0F};
-  bool sample_bold_{false};
-  bool sample_italic_{false};
+  SampleState native_sample_{L"MacType preview 123 ABC\nThe quick brown fox jumps over the lazy dog.",
+                             L"Segoe UI", 14.0F, false, false};
   DisplayMode display_mode_{DisplayMode::sample};
   std::wstring listing_text_{L"The quick brown fox jumps over the lazy dog."};
-  COLORREF foreground_{RGB(24, 29, 35)};
-  COLORREF background_{RGB(238, 241, 244)};
   COLORREF native_foreground_{RGB(24, 29, 35)};
   COLORREF native_background_{RGB(238, 241, 244)};
   bool inverted_{false};
@@ -182,8 +214,8 @@ class PreviewRuntime {
   /// show grows the window to it so the labels are the words, not initials.
   int full_labels_client_width_{};
   POINT mouse_position_{};
-  std::vector<float> ladder_sizes_{8, 9, 10, 11, 12, 14, 16, 18, 20, 24};
-  NativeLabels labels_{};
+  std::vector<float> ladder_sizes_;
+  NativePreviewLabels labels_;
   std::vector<std::wstring> font_names_;
   std::vector<std::pair<int, RECT>> toolbar_buttons_;
   std::vector<std::wstring> toolbar_button_texts_;
@@ -193,15 +225,15 @@ class PreviewRuntime {
   std::wstring temporary_status_;
   WINDOWPLACEMENT placement_{sizeof(WINDOWPLACEMENT)};
   bool has_placement_{false};
-  std::uint32_t dpi_{96};
   std::uint32_t native_dpi_{96};
   std::uint32_t core_version_{};
   bool has_dll_get_version_{};
   bool com_initialized_{};
-  bool canvas_cache_dirty_{true};
-  int canvas_cache_width_{};
-  int canvas_cache_minimum_height_{};
+  std::optional<CanvasCacheKey> canvas_cache_key_;
   std::unique_ptr<CanvasBitmap> canvas_cache_;
+  std::uint32_t relayout_count_{};
+  std::uint32_t retitle_count_{};
+  std::uint32_t reshow_count_{};
   std::function<void(const mtpc::Frame&)> state_sink_;
   std::thread save_thread_;
   bool save_in_progress_{};

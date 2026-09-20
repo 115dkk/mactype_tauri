@@ -1,11 +1,11 @@
-export type WizardStepId = "start" | "rendering" | "quality" | "boldItalic" | "hinting" | "gamma" | "lcd" | "substitution" | "apply";
+export type GuidedStepId = "start" | "rendering" | "quality" | "boldItalic" | "hinting" | "gamma" | "lcd" | "substitution" | "apply";
 
-export const wizardStepIds: ReadonlyArray<WizardStepId> = ["start", "rendering", "quality", "boldItalic", "hinting", "gamma", "lcd", "substitution", "apply"];
+export const guidedStepIds: ReadonlyArray<GuidedStepId> = ["start", "rendering", "quality", "boldItalic", "hinting", "gamma", "lcd", "substitution", "apply"];
 
 /* Step contents follow the legacy MacType Tuner screens: bold and italic share
    one screen, contrast lives next to the gamma slider, and the RGB text tuning
    joins the LCD layout screen. Ids are listed in on-screen order. */
-export const wizardSettingIdsByStep: Readonly<Record<WizardStepId, ReadonlyArray<string>>> = {
+export const guidedSettingIdsByStep: Readonly<Record<GuidedStepId, ReadonlyArray<string>>> = {
   start: [],
   rendering: ["anti_alias_mode"],
   quality: ["normal_weight", "render_weight", "enable_kerning"],
@@ -17,21 +17,21 @@ export const wizardSettingIdsByStep: Readonly<Record<WizardStepId, ReadonlyArray
   apply: [],
 };
 
-export const wizardSettingIds = [...new Set(Object.values(wizardSettingIdsByStep).flat())];
+export const guidedSettingIds = [...new Set(Object.values(guidedSettingIdsByStep).flat())];
 
 /* The substitution step owns one schema setting, but its substance is the
    mapping list, which carries no saved snapshot. Undo and discard there would
    restore half the step, so it opts out of step history entirely — the tools
    and the keyboard shortcuts stay inert together. */
-export function stepSupportsHistory(step: WizardStepId): boolean {
-  return wizardSettingIdsByStep[step].length > 0 && step !== "substitution";
+export function stepSupportsHistory(step: GuidedStepId): boolean {
+  return guidedSettingIdsByStep[step].length > 0 && step !== "substitution";
 }
 
-export type WizardScaleId = "weight" | "contrast" | "gamma";
+export type GuidedScaleId = "weight" | "contrast" | "gamma";
 
 /* Guided sliders speak in outcomes, not numbers, following the legacy
    MacType Tuner endpoints (Thin↔Thick, Low↔High, Dark↔Light). */
-export const wizardScaleBySettingId: Readonly<Record<string, WizardScaleId>> = {
+export const guidedScaleBySettingId: Readonly<Record<string, GuidedScaleId>> = {
   normal_weight: "weight",
   bold_weight: "weight",
   render_weight: "weight",

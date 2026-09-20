@@ -1,0 +1,46 @@
+name: "Workflow # model"
+on:
+  push:
+    branches: [main, 'release/*']
+  workflow_dispatch:
+env:
+  PLAIN: value # ignored comment
+  HASH: 'keep # text'
+  QUOTED: "line\nvalue"
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}
+    runs-on: [self-hosted, Windows]
+    needs: [prepare, 'quote-job']
+    if: ${{ github.event_name == 'push' }}
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - name: Literal
+        id: literal
+        shell: pwsh
+        working-directory: src
+        if: always()
+        env:
+          STEP_VALUE: one
+        run: |-
+          Write-Host '# literal comment'
+          Write-Host "${{ github.sha }}"
+        with:
+          name: artifact
+          path: output
+      - name: Folded
+        uses: actions/upload-artifact@v7
+        run: >-
+          first
+          second
+      - name: Keep
+        run: |+
+          one
+          two
+  quote-job:
+    runs-on: ubuntu-latest
+    needs: prepare
+    steps:
+      - uses: actions/checkout@v7

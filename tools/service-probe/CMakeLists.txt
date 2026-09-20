@@ -98,7 +98,10 @@ add_executable(module-name-tests
 target_compile_features(module-name-tests PRIVATE cxx_std_20)
 target_compile_definitions(module-name-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
-add_executable(directwrite-font-cache-tests tests/directwrite_font_cache_tests.cpp)
+add_executable(directwrite-font-cache-tests
+  tests/directwrite_font_cache_tests.cpp
+  ../../renderer/virtual_font_cache.cpp
+)
 target_compile_features(directwrite-font-cache-tests PRIVATE cxx_std_20)
 target_compile_definitions(directwrite-font-cache-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(directwrite-font-cache-tests PRIVATE bcrypt advapi32)

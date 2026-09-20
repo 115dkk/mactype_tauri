@@ -129,6 +129,9 @@
     <ClCompile Include="renderer\directwrite_virtual_font.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="renderer\virtual_font_cache.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="renderer\dynCodeHelper.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -278,6 +281,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="renderer\directwrite_virtual_font.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="renderer\virtual_font_cache.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="renderer\dynCodeHelper.h">

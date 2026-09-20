@@ -3,6 +3,7 @@ mod model;
 use crate::target_validation::DeferralReason;
 use crate::TargetLifecycle;
 use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 use std::time::Instant;
 
 use mactype_service_contract::{
@@ -10,8 +11,9 @@ use mactype_service_contract::{
 };
 
 use crate::{
-    BrokerDisposition, BrokerResult, InjectionBroker, InjectionRequest, ProcessIdentity,
-    ProcessInspector, ProcessTargetDecision, ProcessTargetValidator, TargetLiveness,
+    BrokerDisposition, BrokerResult, HostEvent, HostEventSink, InjectionBroker, InjectionRequest,
+    ProcessIdentity, ProcessInspector, ProcessTargetDecision, ProcessTargetValidator,
+    TargetLiveness,
 };
 
 pub use model::{
@@ -31,6 +33,7 @@ pub struct InjectionOrchestrator<'a> {
     target_validator: ProcessTargetValidator<'a>,
     inspector: &'a dyn ProcessInspector,
     broker: &'a dyn InjectionBroker,
+    events: Arc<dyn HostEventSink>,
     processed: HashMap<(u32, u64), ProcessAttemptRecord>,
     process_order: VecDeque<(u32, u64)>,
     deferred: HashMap<(u32, u64), DeferredTarget>,
@@ -48,12 +51,14 @@ impl<'a> InjectionOrchestrator<'a> {
         generation_id: impl Into<String>,
         inspector: &'a dyn ProcessInspector,
         broker: &'a dyn InjectionBroker,
+        events: Arc<dyn HostEventSink>,
     ) -> Self {
         Self::build(
             service_pid,
             generation_id,
             inspector,
             broker,
+            events,
             RetryPolicy::default(),
             None,
         )
@@ -66,17 +71,20 @@ impl<'a> InjectionOrchestrator<'a> {
         broker: &'a dyn InjectionBroker,
         retry_policy: RetryPolicy,
         retry_scheduler: &'a dyn RetryScheduler,
+        events: Arc<dyn HostEventSink>,
     ) -> Self {
         Self::build(
             service_pid,
             generation_id,
             inspector,
             broker,
+            events,
             retry_policy,
             Some(retry_scheduler),
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn with_runtime_context(
         service_pid: u32,
         generation_id: impl Into<String>,
@@ -85,6 +93,7 @@ impl<'a> InjectionOrchestrator<'a> {
         broker: &'a dyn InjectionBroker,
         retry_policy: RetryPolicy,
         retry_scheduler: &'a dyn RetryScheduler,
+        events: Arc<dyn HostEventSink>,
     ) -> Self {
         let mut orchestrator = Self::with_retry_policy(
             service_pid,
@@ -93,6 +102,7 @@ impl<'a> InjectionOrchestrator<'a> {
             broker,
             retry_policy,
             retry_scheduler,
+            events,
         );
         orchestrator.profile_digest = Some(profile_digest.into());
         orchestrator
@@ -103,6 +113,7 @@ impl<'a> InjectionOrchestrator<'a> {
         generation_id: impl Into<String>,
         inspector: &'a dyn ProcessInspector,
         broker: &'a dyn InjectionBroker,
+        events: Arc<dyn HostEventSink>,
         retry_policy: RetryPolicy,
         retry_scheduler: Option<&'a dyn RetryScheduler>,
     ) -> Self {
@@ -112,6 +123,7 @@ impl<'a> InjectionOrchestrator<'a> {
             target_validator: ProcessTargetValidator::new(service_pid, inspector),
             inspector,
             broker,
+            events,
             processed: HashMap::new(),
             process_order: VecDeque::new(),
             deferred: HashMap::new(),
@@ -154,7 +166,7 @@ impl<'a> InjectionOrchestrator<'a> {
                 Ok(ProcessOutcome::Deferred)
             }
             ProcessTargetDecision::Skipped(_) => {
-                crate::event_log::injection_skipped();
+                self.events.record(HostEvent::InjectionSkipped);
                 Ok(ProcessOutcome::Skipped)
             }
         }
@@ -532,7 +544,10 @@ impl<'a> InjectionOrchestrator<'a> {
         } else {
             String::new()
         };
-        crate::event_log::injection_result(&record, process);
+        self.events.record(HostEvent::InjectionResult {
+            record: record.clone(),
+            process,
+        });
         self.processed.insert(key, record);
     }
 }

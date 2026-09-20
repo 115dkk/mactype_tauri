@@ -10,7 +10,7 @@ use mactype_service_contract::{
 use std::{
     collections::BTreeMap,
     path::PathBuf,
-    sync::{Mutex, OnceLock},
+    sync::Mutex,
     time::{Duration, Instant},
 };
 
@@ -19,77 +19,101 @@ use crate::{ProcessArchitecture, ProcessAttemptRecord, ProcessOutcome};
 const SUMMARY_WINDOW: Duration = Duration::from_secs(60);
 const DEDUPE_WINDOW: Duration = Duration::from_secs(10 * 60);
 
-static LOGGER: OnceLock<Mutex<HostEventLogger>> = OnceLock::new();
-
-pub(crate) fn initialize(path: PathBuf) {
-    let _ = LOGGER.set(Mutex::new(HostEventLogger::new(path, Instant::now())));
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HostEvent {
+    ServiceStarted {
+        version: String,
+    },
+    ServiceStartSkipped {
+        error: StructuredServiceError,
+    },
+    ServiceStopped,
+    HealthChanged {
+        state: HealthState,
+        error: Option<StructuredServiceError>,
+    },
+    InjectionResult {
+        record: ProcessAttemptRecord,
+        process: String,
+    },
+    InjectionSkipped,
+    FlushInjectionSummary,
+    HelperBrokerFailed {
+        architecture: ProcessArchitecture,
+        code: String,
+        detail: Option<String>,
+    },
 }
 
-pub(crate) fn service_started(version: &str) {
-    with_logger(|logger| logger.service_started(version));
+pub trait HostEventSink: Send + Sync {
+    fn record(&self, event: HostEvent);
 }
 
-pub(crate) fn service_start_skipped(error: &StructuredServiceError) {
-    with_logger(|logger| logger.service_start_skipped(error));
+pub struct HostEventLogger {
+    state: Mutex<HostEventLoggerState>,
 }
 
-pub(crate) fn service_stopped() {
-    with_logger(|logger| {
-        logger.flush_summary(Instant::now());
-        logger.write(
-            EventSeverity::Info,
-            EventArea::Service,
-            "service-stopped",
-            BTreeMap::new(),
-            None,
-        );
-    });
-}
+impl HostEventLogger {
+    pub fn new(path: PathBuf) -> Self {
+        Self::new_at(path, Instant::now())
+    }
 
-pub(crate) fn health_changed(state: HealthState, error: Option<&StructuredServiceError>) {
-    with_logger(|logger| logger.health_changed(state, error));
-}
+    pub fn new_at(path: PathBuf, now: Instant) -> Self {
+        Self {
+            state: Mutex::new(HostEventLoggerState::new(path, now)),
+        }
+    }
 
-pub(crate) fn injection_result(record: &ProcessAttemptRecord, process: String) {
-    with_logger(|logger| {
-        let detail = if matches!(
-            record.outcome,
-            ProcessOutcome::Rejected | ProcessOutcome::RetryExhausted
-        ) {
-            diagnostic_detail(record)
-        } else {
-            String::new()
-        };
-        logger.injection_result(record, process, detail, Instant::now());
-    });
-}
-
-pub(crate) fn injection_skipped() {
-    with_logger(|logger| logger.injection_skipped(Instant::now()));
-}
-
-pub(crate) fn flush_elapsed_injection_summary() {
-    with_logger(|logger| logger.flush_elapsed_summary(Instant::now()));
-}
-
-pub(crate) fn helper_broker_failed(
-    architecture: ProcessArchitecture,
-    code: &str,
-    detail: Option<String>,
-) {
-    with_logger(|logger| logger.helper_broker_failed(architecture, code, detail, Instant::now()));
-}
-
-fn with_logger(action: impl FnOnce(&mut HostEventLogger)) {
-    let Some(logger) = LOGGER.get() else {
-        return;
-    };
-    if let Ok(mut logger) = logger.lock() {
-        action(&mut logger);
+    pub fn record_at(&self, event: HostEvent, now: Instant) {
+        let mut logger = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match event {
+            HostEvent::ServiceStarted { version } => logger.service_started(&version),
+            HostEvent::ServiceStartSkipped { error } => logger.service_start_skipped(&error),
+            HostEvent::ServiceStopped => {
+                logger.flush_summary(now);
+                logger.write(
+                    EventSeverity::Info,
+                    EventArea::Service,
+                    "service-stopped",
+                    BTreeMap::new(),
+                    None,
+                );
+            }
+            HostEvent::HealthChanged { state, error } => {
+                logger.health_changed(state, error.as_ref());
+            }
+            HostEvent::InjectionResult { record, process } => {
+                let detail = if matches!(
+                    record.outcome,
+                    ProcessOutcome::Rejected | ProcessOutcome::RetryExhausted
+                ) {
+                    diagnostic_detail(&record)
+                } else {
+                    String::new()
+                };
+                logger.injection_result(&record, process, detail, now);
+            }
+            HostEvent::InjectionSkipped => logger.injection_skipped(now),
+            HostEvent::FlushInjectionSummary => logger.flush_elapsed_summary(now),
+            HostEvent::HelperBrokerFailed {
+                architecture,
+                code,
+                detail,
+            } => logger.helper_broker_failed(architecture, &code, detail, now),
+        }
     }
 }
 
-struct HostEventLogger {
+impl HostEventSink for HostEventLogger {
+    fn record(&self, event: HostEvent) {
+        self.record_at(event, Instant::now());
+    }
+}
+
+struct HostEventLoggerState {
     writer: EventLogWriter,
     write_error_reported: bool,
     health: Option<HealthState>,
@@ -110,7 +134,7 @@ struct InjectionSummary {
     counts: InjectionCounts,
 }
 
-impl HostEventLogger {
+impl HostEventLoggerState {
     fn new(path: PathBuf, now: Instant) -> Self {
         Self {
             writer: EventLogWriter::new(path),
@@ -354,7 +378,7 @@ mod tests {
         let root =
             std::env::temp_dir().join(format!("host-service-start-skipped-{}", std::process::id()));
         let path = root.join("host.log");
-        let mut logger = HostEventLogger::new(path.clone(), Instant::now());
+        let mut logger = HostEventLoggerState::new(path.clone(), Instant::now());
         let error = StructuredServiceError {
             code: "runtime-profile-absent".to_owned(),
             message: "the generated profile is absent".to_owned(),
@@ -387,7 +411,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("host-summary-{}", std::process::id()));
         let path = root.join("host.log");
         let start = Instant::now();
-        let mut logger = HostEventLogger::new(path.clone(), start);
+        let mut logger = HostEventLoggerState::new(path.clone(), start);
         logger.injection_result(
             &result(ProcessOutcome::Injected, "ok"),
             "a.exe".to_owned(),
@@ -427,7 +451,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("host-quiet-skip-{}", std::process::id()));
         let path = root.join("host.log");
         let start = Instant::now();
-        let mut logger = HostEventLogger::new(path.clone(), start);
+        let mut logger = HostEventLoggerState::new(path.clone(), start);
         logger.injection_result(
             &result(ProcessOutcome::Skipped, "protected-process"),
             String::new(),
@@ -453,7 +477,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("host-helper-dedupe-{}", std::process::id()));
         let path = root.join("host.log");
         let start = Instant::now();
-        let mut logger = HostEventLogger::new(path.clone(), start);
+        let mut logger = HostEventLoggerState::new(path.clone(), start);
         logger.helper_broker_failed(ProcessArchitecture::X86, "first", None, start);
         logger.helper_broker_failed(
             ProcessArchitecture::X86,
@@ -488,7 +512,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("host-dedupe-{}", std::process::id()));
         let path = root.join("host.log");
         let start = Instant::now();
-        let mut logger = HostEventLogger::new(path.clone(), start);
+        let mut logger = HostEventLoggerState::new(path.clone(), start);
         let failure = result(ProcessOutcome::Rejected, "denied");
         logger.injection_result(&failure, "game.exe".to_owned(), "first".to_owned(), start);
         logger.injection_result(

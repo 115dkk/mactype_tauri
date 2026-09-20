@@ -7,6 +7,7 @@ mod tests;
 
 use std::io;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::Arc;
 
 use mactype_service_contract::{
     effective_health_pipe_name, effective_service_name, HealthReport, HealthState,
@@ -18,8 +19,8 @@ use mactype_service_platform::run_service_dispatcher;
 use crate::named_pipe::NamedPipeHealthPublisher;
 use crate::service_version::service_runtime_version;
 use crate::{
-    CompositeHealthPublisher, FileHealthPublisher, HealthPublisher, HostError, ServiceRuntime,
-    ServiceStatus, StatusReporter, WindowsOpenServiceInitializer,
+    CompositeHealthPublisher, FileHealthPublisher, HealthPublisher, HostError, HostEventLogger,
+    HostEventSink, ServiceRuntime, ServiceStatus, StatusReporter, WindowsOpenServiceInitializer,
 };
 #[cfg(feature = "ci-test-adapter")]
 use crash_adapter::spawn_crash_once_adapter;
@@ -47,10 +48,12 @@ fn service_main() {
             return;
         }
     };
-    crate::event_log::initialize(paths.service_host_event_log().to_owned());
+    let events: Arc<dyn HostEventSink> = Arc::new(HostEventLogger::new(
+        paths.service_host_event_log().to_owned(),
+    ));
     let persisted = FileHealthPublisher::new(paths.service_root().join("health.json"));
     match catch_unwind(AssertUnwindSafe(|| {
-        run_registered_service(paths, &persisted)
+        run_registered_service(paths, &persisted, events)
     })) {
         Ok(Ok(())) => {}
         Ok(Err(error)) => report_terminal_failure(&persisted, &error, 3),
@@ -69,12 +72,13 @@ fn service_main() {
 fn run_registered_service(
     paths: MachinePaths,
     persisted: &FileHealthPublisher,
+    events: Arc<dyn HostEventSink>,
 ) -> Result<(), StructuredServiceError> {
     let reporter = Win32StatusReporter;
     let stop = Win32StopSignal;
     #[cfg(feature = "ci-test-adapter")]
     spawn_crash_once_adapter(paths.clone());
-    let initializer = WindowsOpenServiceInitializer::new(paths);
+    let initializer = WindowsOpenServiceInitializer::new(paths, events.clone());
     let health =
         NamedPipeHealthPublisher::start(effective_health_pipe_name()).map_err(|error| {
             StructuredServiceError {
@@ -84,7 +88,7 @@ fn run_registered_service(
             }
         })?;
     let composite = CompositeHealthPublisher::new(&health, persisted);
-    ServiceRuntime::new(service_runtime_version())
+    ServiceRuntime::new(service_runtime_version(), events)
         .run(&reporter, &composite, &initializer, &stop)
         .map_err(structured_host_error)
 }

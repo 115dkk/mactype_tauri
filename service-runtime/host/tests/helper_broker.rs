@@ -1,3 +1,7 @@
+#[path = "support/event_sink.rs"]
+mod event_sink_support;
+
+use event_sink_support::discard_events;
 use std::ffi::OsString;
 use std::fs;
 use std::sync::Mutex;
@@ -71,7 +75,7 @@ impl HelperLauncher for RecordingLauncher {
 fn fixed_helper_broker_selects_architecture_and_emits_only_the_strict_cli_contract() {
     let (_base, assets) = assets();
     let launcher = RecordingLauncher::default();
-    let broker = FixedHelperBroker::new(&assets, &launcher);
+    let broker = FixedHelperBroker::new(&assets, &launcher, discard_events());
     let request = InjectionRequest {
         identity: ProcessIdentity {
             pid: 42,
@@ -131,6 +135,7 @@ fn interrupted_helper_is_a_service_stop_cancellation() {
             kind: std::io::ErrorKind::Interrupted,
             stage: HelperLaunchStage::BeforeResume,
         },
+        discard_events(),
     );
     let result = broker.inject(&InjectionRequest {
         identity: ProcessIdentity {
@@ -156,6 +161,7 @@ fn before_resume_launch_failure_never_claims_unknown_target_cleanup() {
             kind: std::io::ErrorKind::InvalidInput,
             stage: HelperLaunchStage::BeforeResume,
         },
+        discard_events(),
     );
     let result = broker.inject(&InjectionRequest {
         identity: ProcessIdentity {
@@ -182,6 +188,7 @@ fn post_resume_service_stop_is_terminal_cleanup_unknown() {
             kind: std::io::ErrorKind::Interrupted,
             stage: HelperLaunchStage::AfterResume,
         },
+        discard_events(),
     );
     let result = broker.inject(&InjectionRequest {
         identity: ProcessIdentity {
@@ -207,6 +214,7 @@ fn absolute_helper_timeout_is_terminal_cleanup_unknown() {
             kind: std::io::ErrorKind::TimedOut,
             stage: HelperLaunchStage::AfterResume,
         },
+        discard_events(),
     );
     let result = broker.inject(&InjectionRequest {
         identity: ProcessIdentity {
@@ -277,7 +285,7 @@ fn incomplete_remote_thread_cleanup_is_a_terminal_broker_result() {
             .into_bytes(),
         })),
     };
-    let broker = FixedHelperBroker::new(&assets, launcher);
+    let broker = FixedHelperBroker::new(&assets, launcher, discard_events());
     let result = broker.inject(&InjectionRequest {
         identity: ProcessIdentity {
             pid: 42,
@@ -307,7 +315,7 @@ fn explicit_post_injection_unknown_code_is_preserved_for_generation_health() {
             .into_bytes(),
         })),
     };
-    let broker = FixedHelperBroker::new(&assets, launcher);
+    let broker = FixedHelperBroker::new(&assets, launcher, discard_events());
     let result = broker.inject(&InjectionRequest {
         identity: ProcessIdentity {
             pid: 42,

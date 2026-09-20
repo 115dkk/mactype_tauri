@@ -1,22 +1,19 @@
 import type { ExecutionStatus, ProfileEntry, ProfileSnapshot } from "./model";
 import { runtime } from "./runtimeAdapter";
+import { readPreference, writePreference } from "./persistedPreference";
 
 export const recentProfileStorageKey = "mactype-control-center.recent-profile";
 
 export function rememberProfile(path: string) {
-  try {
-    window.localStorage.setItem(recentProfileStorageKey, path);
-  } catch {
-    // The profile remains usable when storage is unavailable.
-  }
+  writePreference(recentProfileStorageKey, path);
 }
 
 function rememberedProfile(): string | null {
-  try {
-    return window.localStorage.getItem(recentProfileStorageKey);
-  } catch {
-    return null;
-  }
+  return readPreference<string | null>({
+    key: recentProfileStorageKey,
+    parse: (raw) => raw,
+    fallback: () => null,
+  });
 }
 
 function availablePath(profiles: ReadonlyArray<ProfileEntry>, candidate: string | null): string | null {

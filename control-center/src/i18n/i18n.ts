@@ -1,4 +1,5 @@
 import { createContext, useContext } from "react";
+import { readPreference } from "../app/persistedPreference";
 import ar from "./ar.json";
 import de from "./de.json";
 import en from "./en.json";
@@ -55,14 +56,12 @@ export function localeFromNavigator(language: string): Locale {
 }
 
 export function initialLocale(): Locale {
-  const queryLocale = new URLSearchParams(window.location.search).get("lang");
-  if (isLocale(queryLocale)) {
-    window.localStorage.setItem(localeStorageKey, queryLocale);
-    return queryLocale;
-  }
-  const stored = window.localStorage.getItem(localeStorageKey);
-  if (isLocale(stored)) return stored;
-  return localeFromNavigator(navigator.language);
+  return readPreference<Locale>({
+    key: localeStorageKey,
+    query: "lang",
+    parse: (raw) => isLocale(raw) ? raw : null,
+    fallback: () => localeFromNavigator(navigator.language),
+  });
 }
 
 export function formatMessage(message: string, variables?: Variables): string {

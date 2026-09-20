@@ -10,11 +10,12 @@ import {
   type Variables,
 } from "./i18n";
 import { runtime } from "../app/runtimeAdapter";
+import { writePreference } from "../app/persistedPreference";
 
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>(initialLocale);
   const setLocale = useCallback((next: Locale) => {
-    window.localStorage.setItem(localeStorageKey, next);
+    writePreference(localeStorageKey, next);
     setLocaleState(next);
   }, []);
   const t = useCallback((key: MessageKey, variables?: Variables) => formatMessage(catalogs[locale][key], variables), [locale]);

@@ -1008,6 +1008,87 @@ std::uint32_t PreviewRuntime::retitle_count_for_tests() const { return retitle_c
 
 std::uint32_t PreviewRuntime::reshow_count_for_tests() const { return reshow_count_; }
 
+PreviewRuntime::ToolbarSnapshot PreviewRuntime::toolbar_snapshot_for_tests() const {
+  RECT client{};
+  GetClientRect(native_window_, &client);
+  RECT edit{};
+  GetWindowRect(edit_control_, &edit);
+  MapWindowPoints(nullptr, native_window_, reinterpret_cast<POINT*>(&edit), 2);
+  HDC dc = GetDC(native_window_);
+  HGDIOBJ previous = dc ? SelectObject(dc, ui_font_) : nullptr;
+  const auto measure = [&](const std::wstring& text) {
+    SIZE extent{};
+    if (dc) {
+      GetTextExtentPoint32W(dc, text.c_str(), static_cast<int>(text.size()), &extent);
+    }
+    return extent;
+  };
+  ToolbarSnapshot snapshot{client.right, client.bottom, toolbar_layout_height_, {},
+                           {face_label_rect_, labels_.font_face, measure(labels_.font_face)},
+                           {size_label_rect_, labels_.font_size, measure(labels_.font_size)}, edit};
+  const std::size_t count = std::min(toolbar_buttons_.size(), toolbar_button_texts_.size());
+  snapshot.buttons.reserve(count);
+  for (std::size_t index = 0; index < count; ++index) {
+    const RECT rectangle = toolbar_buttons_[index].second;
+    const POINT center{(rectangle.left + rectangle.right) / 2,
+                       (rectangle.top + rectangle.bottom) / 2};
+    snapshot.buttons.push_back({toolbar_buttons_[index].first, hit_test_toolbar(center), rectangle,
+                                toolbar_button_texts_[index],
+                                measure(toolbar_button_texts_[index])});
+  }
+  if (dc) {
+    SelectObject(dc, previous);
+    ReleaseDC(native_window_, dc);
+  }
+  return snapshot;
+}
+
+bool PreviewRuntime::set_dpi_for_tests(std::uint32_t dpi) {
+  if (dpi < 72 || dpi > 768) return false;
+  apply_dpi(dpi);
+  return true;
+}
+
+std::optional<PreviewRuntime::ToolbarCapture> PreviewRuntime::capture_toolbar_for_tests() {
+  RECT client{};
+  if (!GetClientRect(native_window_, &client)) return std::nullopt;
+  const int width = client.right;
+  const int height = toolbar_layout_height_;
+  constexpr int kMaximumDimension = 8192;
+  constexpr std::size_t kMaximumPixels = 16U * 1024U * 1024U;
+  if (width <= 0 || height <= 0 || width > kMaximumDimension ||
+      height > kMaximumDimension ||
+      static_cast<std::size_t>(width) * static_cast<std::size_t>(height) > kMaximumPixels) {
+    return std::nullopt;
+  }
+  BITMAPINFO info{};
+  info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  info.bmiHeader.biWidth = width;
+  info.bmiHeader.biHeight = -height;
+  info.bmiHeader.biPlanes = 1;
+  info.bmiHeader.biBitCount = 32;
+  info.bmiHeader.biCompression = BI_RGB;
+  void* pixels = nullptr;
+  HDC dc = CreateCompatibleDC(nullptr);
+  if (!dc) return std::nullopt;
+  HBITMAP bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
+  if (!bitmap || !pixels) {
+    if (bitmap) DeleteObject(bitmap);
+    DeleteDC(dc);
+    return std::nullopt;
+  }
+  HGDIOBJ previous = SelectObject(dc, bitmap);
+  draw_toolbar(dc, RECT{0, 0, width, height});
+  GdiFlush();
+  ToolbarCapture capture{width, height, std::vector<std::uint32_t>(
+                                            static_cast<std::size_t>(width) * height)};
+  std::memcpy(capture.pixels.data(), pixels, capture.pixels.size() * sizeof(std::uint32_t));
+  SelectObject(dc, previous);
+  DeleteObject(bitmap);
+  DeleteDC(dc);
+  return capture;
+}
+
 const PreviewRuntime::Palette& PreviewRuntime::palette() const {
   return chrome_ ? chrome_->palette : (dark_theme_ ? kDarkPalette : kLightPalette);
 }
@@ -1040,6 +1121,12 @@ void PreviewRuntime::apply_combo_theme() {
   for (HWND combo : {face_combo_, size_combo_}) {
     if (combo) SetWindowTheme(combo, dark ? L"DarkMode_CFD" : nullptr, nullptr);
   }
+}
+
+void PreviewRuntime::apply_dpi(std::uint32_t dpi) {
+  native_dpi_ = dpi;
+  recreate_ui_font();
+  relayout_controls();
 }
 
 void PreviewRuntime::recreate_ui_font() {
@@ -1857,13 +1944,11 @@ LRESULT CALLBACK PreviewRuntime::window_proc(HWND window, UINT message, WPARAM w
       return 0;
     case WM_DPICHANGED:
       if (window == runtime->native_window_) {
-        runtime->native_dpi_ = HIWORD(wparam);
         const RECT* suggested = reinterpret_cast<const RECT*>(lparam);
         SetWindowPos(window, nullptr, suggested->left, suggested->top,
                      suggested->right - suggested->left, suggested->bottom - suggested->top,
                      SWP_NOZORDER | SWP_NOACTIVATE);
-        runtime->recreate_ui_font();
-        runtime->relayout_controls();
+        runtime->apply_dpi(HIWORD(wparam));
       }
       return 0;
     case WM_SIZE:

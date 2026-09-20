@@ -133,7 +133,6 @@
   "guided.lcd": "LCD 배열과 색조",
   "guided.substitution": "글꼴 대체",
   "guided.apply": "실행 프로필 지정",
-  "guided.quickActions": "빠른 작업",
   "guided.advancedSettings": "전체 고급 설정",
   "guided.saveProfile": "프로필 저장",
   "guided.restoreDefaults": "기본값으로 되돌리기",

@@ -89,6 +89,6 @@ export interface ControlCenterRuntimeAdapter {
   reportFrontendFailure(view: ViewId, message: string): Promise<void>;
 }
 
-export function getRuntimeAdapter(): ControlCenterRuntimeAdapter {
+export function runtime(): ControlCenterRuntimeAdapter {
   return "__TAURI_INTERNALS__" in window ? tauriRuntimeAdapter : browserGalleryAdapter;
 }

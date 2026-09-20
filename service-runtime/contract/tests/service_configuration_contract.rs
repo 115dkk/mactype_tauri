@@ -45,6 +45,10 @@ fn exact<'a>(image_path: &'a str) -> ObservedServiceConfiguration<'a> {
 }
 
 #[test]
+#[cfg_attr(
+    all(miri, windows),
+    ignore = "Windows Miri does not implement CreateDirectoryW"
+)]
 fn ownership_requires_the_fixed_type_account_and_protected_image() {
     let (_base, root, image) = protected_service();
     let owned = exact(&image);
@@ -84,6 +88,10 @@ fn ownership_requires_the_fixed_type_account_and_protected_image() {
 }
 
 #[test]
+#[cfg_attr(
+    all(miri, windows),
+    ignore = "Windows Miri does not implement CreateDirectoryW"
+)]
 fn missing_binary_keeps_lexical_identity_but_does_not_exist() {
     let base = std::env::temp_dir().join(format!(
         "mactype-service-contract-missing-{}-{:?}",
@@ -103,6 +111,10 @@ fn missing_binary_keeps_lexical_identity_but_does_not_exist() {
 }
 
 #[test]
+#[cfg_attr(
+    all(miri, windows),
+    ignore = "Windows Miri does not implement CreateDirectoryW"
+)]
 fn invalid_version_component_matches_neither_rule() {
     let base = std::env::temp_dir().join(format!(
         "mactype-service-contract-version-{}-{:?}",
@@ -126,6 +138,10 @@ fn invalid_version_component_matches_neither_rule() {
 }
 
 #[test]
+#[cfg_attr(
+    all(miri, windows),
+    ignore = "Windows Miri does not implement CreateDirectoryW"
+)]
 fn canonicalization_escape_does_not_count_as_an_existing_protected_binary() {
     let base = std::env::temp_dir().join(format!(
         "mactype-service-contract-escape-{}-{:?}",

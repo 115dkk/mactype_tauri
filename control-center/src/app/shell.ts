@@ -6,24 +6,30 @@ import type { MessageKey } from "../i18n/i18n";
 
 export type ProfileMode = "quick" | "advanced";
 
-/* Everything a skin shell needs from the application: where we are, how to
-   move, the preferences, the installation findings, and the callbacks the
-   pages report through. Shells never own this state; they arrange it. */
 export interface ShellProps {
-  view: ViewId;
-  profileMode: ProfileMode;
-  navigate: (view: ViewId, profileMode?: ProfileMode) => void;
-  theme: ThemePreference;
-  toggleTheme: () => void;
-  skin: SkinPreference;
-  setSkin: (skin: SkinPreference) => void;
-  status: InstallationStatus;
-  setStatus: (status: InstallationStatus) => void;
-  ciSmoke: boolean;
-  reportReady: (view: ViewId) => void;
-  reconnectPreview: () => Promise<InstallationStatus>;
-  rediscoverInstallation: () => Promise<InstallationStatus>;
-  openPreviewStudio: () => void;
+  navigation: {
+    view: ViewId;
+    profileMode: ProfileMode;
+    navigate: (view: ViewId, profileMode?: ProfileMode) => void;
+    entries: ReadonlyArray<NavEntry>;
+  };
+  preferences: {
+    theme: ThemePreference;
+    toggleTheme: () => void;
+    skin: SkinPreference;
+    setSkin: (skin: SkinPreference) => void;
+  };
+  installation: {
+    status: InstallationStatus;
+    reconnectPreview: () => Promise<void>;
+    rediscoverInstallation: () => Promise<void>;
+  };
+  operations: {
+    editInTuner: (path?: string) => void;
+    reportReady: (view: ViewId) => void;
+    openPreviewStudio: () => void;
+    ciSmoke: boolean;
+  };
 }
 
 export type NavId = "overview" | "files" | "execution" | "guided" | "all" | "diagnostics";

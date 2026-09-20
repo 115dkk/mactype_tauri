@@ -9,7 +9,7 @@ export function CupertinoOverview({ shell }: { shell: ShellProps }) {
   const { locale, t } = useI18n();
   const model = useOverviewModel();
   const { state, newestFirst, latestApplied, view } = model;
-  const preview = shell.status.findings.find((finding) => finding.label === "preview");
+  const preview = shell.installation.status.findings.find((finding) => finding.label === "preview");
   const helperConnected = preview?.value === "connected";
   const profileName = model.activeProfileName ?? t("overview.unknownProfile");
   const modeText = t(view.serviceSummary.modeKey);
@@ -25,11 +25,11 @@ export function CupertinoOverview({ shell }: { shell: ShellProps }) {
           hero
           leading={<span className="cupertino-okc" data-tone={state === "normal" ? "ok" : state === "inactive" ? "neutral" : "warn"}>{state === "normal" ? <Check aria-hidden="true" size={16} strokeWidth={3} /> : state === "inactive" ? <Power aria-hidden="true" size={15} strokeWidth={2.4} /> : <AlertTriangle aria-hidden="true" size={15} strokeWidth={2.4} />}</span>}
           title={t(`overview.${state}Title` as MessageKey)}
-          value={<button className="button secondary" onClick={() => shell.navigate("execution")} type="button">{t("overview.manageService")}…</button>}
+          value={<button className="button secondary" onClick={() => shell.navigation.navigate("execution")} type="button">{t("overview.manageService")}…</button>}
         />
-        <CupertinoRow onDisclose={() => shell.navigate("files")} title={t("overview.activeProfile")} value={<><code>{model.activeProfile ?? t("overview.unknownProfile")}</code>{state === "normal" && <CupertinoBadge>{t("files.inUseBadge")}</CupertinoBadge>}</>} />
+        <CupertinoRow onDisclose={() => shell.navigation.navigate("files")} title={t("overview.activeProfile")} value={<><code>{model.activeProfile ?? t("overview.unknownProfile")}</code>{state === "normal" && <CupertinoBadge>{t("files.inUseBadge")}</CupertinoBadge>}</>} />
         <CupertinoRow title={t("overview.executionMode")} value={modeText} />
-        <CupertinoRow onDisclose={() => shell.navigate("diagnostics")} title={t("finding.preview")} value={<span className="cupertino-value" data-tone={helperConnected ? "ok" : "warn"}>{helperConnected ? t("overview.checked") : t("finding.waiting")}</span>} />
+        <CupertinoRow onDisclose={() => shell.navigation.navigate("diagnostics")} title={t("finding.preview")} value={<span className="cupertino-value" data-tone={helperConnected ? "ok" : "warn"}>{helperConnected ? t("overview.checked") : t("finding.waiting")}</span>} />
         <CupertinoRow title={t("overview.lastApplied")} value={latestApplied ? t("overview.todayAt", { time: eventClock(latestApplied.ts, locale) }) : t("overview.noLastApplied")} />
       </CupertinoGroup>
 

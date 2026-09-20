@@ -1,3 +1,4 @@
+import { useI18n } from "../../i18n/i18n";
 import { AlertTriangle, Check, Play } from "lucide-react";
 import type { ProfileEntry } from "../../app/model";
 import type { FileSettingsModel } from "./useFileSettingsModel";
@@ -14,46 +15,51 @@ interface ActionProps extends PartProps {
 }
 
 export function RunProfileBadge({ entry, model, className = "profile-card-badge" }: PartProps & { entry: ProfileEntry | null }) {
-  if (!entry || !model.runProfileAttributes(entry)["data-run-profile"]) return null;
-  return <span className={className} {...model.runProfileAttributes(entry)}>{model.t("files.runProfileBadge")}</span>;
+  const { t } = useI18n();
+  if (!entry || !model.profiles.runProfileAttributes(entry)["data-run-profile"]) return null;
+  return <span className={className} {...model.profiles.runProfileAttributes(entry)}>{t("files.runProfileBadge")}</span>;
 }
 
 export function DesignateAction({ model, className = "button primary", variant = "classic" }: ActionProps) {
-  const { t, busy, dirtyCount } = model;
+  const { t } = useI18n();
+  const { busy } = model.files;
+  const { dirtyCount } = model.document;
   const size = variant === "console" ? 14 : variant === "fluent" ? 16 : 17;
   return (
-    <button className={className} disabled={!model.canDesignate} onClick={() => void model.designate()} title={dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button">
+    <button className={className} disabled={!model.document.canDesignate} onClick={() => void model.document.designate()} title={dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button">
       {variant !== "cupertino" && <><Play aria-hidden="true" size={size} strokeWidth={variant === "fluent" ? 1.6 : 2} /> </>}{busy === "designate" ? t("profiles.designating") : t("profiles.designate")}
     </button>
   );
 }
 
 export function StartServiceNowAction({ model, className = "text-action", variant = "classic" }: ActionProps) {
-  const { t, busy } = model;
-  if (!model.offerStart) return null;
+  const { t } = useI18n();
+  const { busy } = model.files;
+  if (!model.document.offerStart) return null;
   const size = variant === "console" ? 12 : variant === "cupertino" ? 13 : 14;
   const strokeWidth = variant === "fluent" ? 1.6 : variant === "cupertino" ? 1.8 : 2;
-  return <button className={className} disabled={busy !== null} onClick={() => void model.startServiceNow()} type="button"><Play aria-hidden="true" size={size} strokeWidth={strokeWidth} /> {busy === "start" ? t("execution.serviceWorking") : t("files.startServiceNow")}</button>;
+  return <button className={className} disabled={busy !== null} onClick={() => void model.document.startServiceNow()} type="button"><Play aria-hidden="true" size={size} strokeWidth={strokeWidth} /> {busy === "start" ? t("execution.serviceWorking") : t("files.startServiceNow")}</button>;
 }
 
 type SummaryVariant = "path" | "editing" | "title" | "description" | "encoding" | "raw-encoding" | "line-ending" | "unsaved";
 
 export function CurrentFileSummary({ model, className, variant = "path" }: PartProps & { variant?: SummaryVariant }) {
-  const { t, profile } = model;
+  const { t } = useI18n();
+  const { profile } = model.document;
   switch (variant) {
     case "editing": return <>{profile ? t("files.editing") : t("profiles.none")}</>;
     case "title": return <><CurrentFileSummary model={model} variant="editing" />{profile && <> · <CurrentFileSummary model={model} /></>}</>;
-    case "description": return profile ? <>{`${model.encodingText} · ${t("files.unsaved")} ${model.unsavedText}${!profile.canSave ? ` · ${t("files.readOnly")}` : ""}`}</> : null;
-    case "encoding": return <>{model.encodingText}</>;
+    case "description": return profile ? <>{`${model.document.encodingText} · ${t("files.unsaved")} ${model.document.unsavedText}${!profile.canSave ? ` · ${t("files.readOnly")}` : ""}`}</> : null;
+    case "encoding": return <>{model.document.encodingText}</>;
     case "raw-encoding": return <>{profile?.encoding ?? "—"}</>;
     case "line-ending": return <>{profile?.lineEnding ?? "—"}</>;
-    case "unsaved": return <>{model.unsavedText}</>;
+    case "unsaved": return <>{model.document.unsavedText}</>;
     default: return <code className={className} title={profile?.path}>{profile?.displayPath ?? t("profiles.none")}</code>;
   }
 }
 
 export function FileMessages({ model, className = "success-message", variant = "classic" }: ActionProps) {
-  const { message, error } = model;
+  const { message, error } = model.messages;
   const Tag = variant === "console" ? "span" : "p";
   return <>
     {message && <Tag aria-live={variant === "console" ? undefined : "polite"} className={className} data-operation="file-settings">

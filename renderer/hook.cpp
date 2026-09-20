@@ -12,6 +12,7 @@
 
 #include "override.h"
 #include "activation_repaint.h"
+#include "arrival_evidence.h"
 #include "child_process_relay.h"
 #include "ft.h"
 #include "fteng.h"
@@ -24,7 +25,6 @@
 #include "EventLogging.h"
 #include "hookCounter.h"
 #include "hook_lifecycle.h"
-#include "gdi_font_identity.h"
 #include "renderer_activation.h"
 #include "unload_lifecycle.h"
 #include "unity_font_hook.h"
@@ -103,6 +103,7 @@ void PublishUnavailableCapability(
 
 static DWORD WINAPI ActivationRepaintWorker(LPVOID moduleReference)
 {
+	renderer::arrival_evidence::CompleteDeferredSamples();
 	renderer_raii::UniqueModuleReference selfReference(
 		static_cast<HMODULE>(moduleReference));
 	WaitForDirectWriteHooksSettled(3000);
@@ -542,8 +543,16 @@ BOOL AddEasyHookEnv()
 	return true;
 }
 
-void HookFontCreation() {
-	renderer::gdi_font_identity::RecordHookInstall();
+void HookFontCreation(bool enabled) {
+	renderer::arrival_evidence::Record(
+		renderer::arrival_evidence::ProcessSamplers());
+	if (!enabled)
+	{
+		PublishUnavailableCapability(
+			renderer::HookCapability::fontSubstitution, 0, true,
+			renderer::CapabilityReason::explicitlyDisabled);
+		return;
+	}
 	HMODULE gdi32 = GetModuleHandle(L"gdi32full.dll");	// prefer to hook deeply
 	if (!gdi32) {
 		gdi32 = GetModuleHandle(L"gdi32.dll");
@@ -731,6 +740,7 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 						renderer::CapabilityReason::explicitlyDisabled);
 				}
 #endif
+				HookFontCreation(bUseFontSubstitute);
 				if (IsRunAsUser() && bEnableDW)
 				{
 					StartDirectWriteLifecycle();
@@ -739,15 +749,6 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 				{
 					PublishUnavailableCapability(
 						renderer::HookCapability::directWrite, 0, false,
-						renderer::CapabilityReason::explicitlyDisabled);
-				}
-				if (bUseFontSubstitute) {
-					HookFontCreation();
-				}
-				else
-				{
-					PublishUnavailableCapability(
-						renderer::HookCapability::fontSubstitution, 0, true,
 						renderer::CapabilityReason::explicitlyDisabled);
 				}
 				if (bUseUnityFontHook)

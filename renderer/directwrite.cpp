@@ -1,4 +1,5 @@
 #include "directwrite.h"
+#include "arrival_evidence.h"
 #include "directwrite_alias.h"
 #include "dynCodeHelper.h"
 #include "hookCounter.h"
@@ -2433,9 +2434,12 @@ static bool InitializeDirectWriteLifecycle()
 		const D2D1_FACTORY_OPTIONS* pFactoryOptions,
 		void** ppIFactory
 		);
-	bool const directWriteWasMapped = GetModuleHandleW(L"dwrite.dll") != nullptr;
+	renderer::arrival_evidence::ArrivalEvidence const* const arrival =
+		renderer::arrival_evidence::Recorded();
+	bool const directWriteWasMapped =
+		arrival != nullptr && arrival->dwriteMappedBeforePin;
 	bool const directWriteCoreWasMapped =
-		GetModuleHandleW(L"DWriteCore.dll") != nullptr;
+		arrival != nullptr && arrival->dwriteCoreMappedBeforePin;
 	renderer_raii::BorrowedModule d2d1 = PinOrLoadRendererModule(
 		L"d2d1.dll", lifecycle.d2d1);
 	renderer_raii::BorrowedModule dw = PinOrLoadRendererModule(

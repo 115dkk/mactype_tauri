@@ -11,12 +11,12 @@ type Detail = "system" | "registered" | "manual" | null;
 
 export function CupertinoExecution({ shell }: { shell: ShellProps }) {
   const { t } = useI18n();
-  const model = useExecutionModel({ ciSmoke: shell.ciSmoke, onReady: () => shell.reportReady("execution") });
-  const { status, serviceSummary, systemInjectionAction } = model;
+  const model = useExecutionModel({ ciSmoke: shell.operations.ciSmoke, onReady: () => shell.operations.reportReady("execution") });
+  const { status, serviceSummary, systemInjectionAction } = model.service;
   const [detail, setDetail] = useState<Detail>(null);
   const open = (next: Exclude<Detail, null>) => {
     setDetail(next);
-    if (next === "manual" && model.candidates === null) void model.loadCandidates();
+    if (next === "manual" && model.targets.candidates === null) void model.targets.loadCandidates();
   };
   const heroTone = serviceSummary.tone === "normal" ? "ok" : serviceSummary.tone === "neutral" ? "neutral" : "warn";
   const heroIcon = serviceSummary.tone === "normal" ? <Check aria-hidden="true" size={16} strokeWidth={3} /> : serviceSummary.tone === "neutral" ? <PowerOff aria-hidden="true" size={15} strokeWidth={2.4} /> : <AlertTriangle aria-hidden="true" size={15} strokeWidth={2.4} />;
@@ -30,11 +30,11 @@ export function CupertinoExecution({ shell }: { shell: ShellProps }) {
             <CupertinoGroup dataKind="system-detail">
               <ServicePackageNotice model={model} />
               <CupertinoRow
-                description={t(systemInjectionAction.descriptionKey, { name: model.activeProfileName })}
+                description={t(systemInjectionAction.descriptionKey, { name: model.service.activeProfileName })}
                 hero
                 leading={<span className="cupertino-okc" data-tone={systemInjectionAction.state === "active" ? "ok" : "neutral"}>{systemInjectionAction.state === "active" ? <Check aria-hidden="true" size={16} strokeWidth={3} /> : <PowerOff aria-hidden="true" size={15} strokeWidth={2.4} />}</span>}
                 title={t(systemInjectionAction.titleKey)}
-                value={<button className={`button ${systemInjectionAction.intent === "stop" ? "secondary" : "primary"}`} disabled={!systemInjectionAction.enabled} onClick={() => void model.manageService(systemInjectionAction.command)} type="button">{t(systemInjectionAction.labelKey)}</button>}
+                value={<button className={`button ${systemInjectionAction.intent === "stop" ? "secondary" : "primary"}`} disabled={!systemInjectionAction.enabled} onClick={() => void model.service.manageService(systemInjectionAction.command)} type="button">{t(systemInjectionAction.labelKey)}</button>}
               />
               <div className="cupertino-row cupertino-row-block"><SystemServiceDetails model={model} /></div>
             </CupertinoGroup>
@@ -57,7 +57,7 @@ export function CupertinoExecution({ shell }: { shell: ShellProps }) {
 
   return (
     <CupertinoPage
-      actions={<button className="button secondary" onClick={() => void model.refresh()} type="button">{t("execution.refresh")}</button>}
+      actions={<button className="button secondary" onClick={() => void model.service.refresh()} type="button">{t("execution.refresh")}</button>}
       subtitle={t("execution.subtitle")}
       title={t("nav.execution")}
       titleId="execution-title"
@@ -66,13 +66,13 @@ export function CupertinoExecution({ shell }: { shell: ShellProps }) {
         <CupertinoGroup dataKind="hero">
           <CupertinoRow
             dataKind="hero"
-            description={<>{t("execution.summaryProfile")} <code title={status?.activeProfile ?? undefined}>{model.activeProfileName}</code> · {model.serviceStateText}</>}
+            description={<>{t("execution.summaryProfile")} <code title={status?.activeProfile ?? undefined}>{model.service.activeProfileName}</code> · {model.service.serviceStateText}</>}
             hero
             leading={<span className="cupertino-okc" data-tone={heroTone}>{heroIcon}</span>}
             title={t(serviceSummary.statusKey)}
-            value={!model.legacyTrayResolution && <div className="cupertino-summary-actions"><ServiceSummaryNoticeAndActions model={model} /></div>}
+            value={!model.legacy.legacyTrayResolution && <div className="cupertino-summary-actions"><ServiceSummaryNoticeAndActions model={model} /></div>}
           />
-          {serviceSummary.notice && !model.legacyTrayResolution && <div className="cupertino-row cupertino-row-notice"><ShieldAlert aria-hidden="true" size={14} strokeWidth={1.8} /><div><strong>{t(serviceSummary.notice.titleKey)}</strong>{serviceSummary.notice.descriptionKey && <p>{t(serviceSummary.notice.descriptionKey)}</p>}</div></div>}
+          {serviceSummary.notice && !model.legacy.legacyTrayResolution && <div className="cupertino-row cupertino-row-notice"><ShieldAlert aria-hidden="true" size={14} strokeWidth={1.8} /><div><strong>{t(serviceSummary.notice.titleKey)}</strong>{serviceSummary.notice.descriptionKey && <p>{t(serviceSummary.notice.descriptionKey)}</p>}</div></div>}
           <LegacyTrayConflict model={model} />
         </CupertinoGroup>
       </div>
@@ -80,9 +80,9 @@ export function CupertinoExecution({ shell }: { shell: ShellProps }) {
       <CupertinoSection title={t("execution.modesPanel")}>
         <CupertinoGroup dataKind="modes">
           <CupertinoRow dataKind="system" description={t("execution.systemDescription")} onDisclose={() => open("system")} title={t("execution.systemTitle")} value={<span className="cupertino-value" data-tone={systemInjectionAction.state === "active" ? "ok" : undefined}>{t(systemInjectionAction.titleKey)}</span>} />
-          <CupertinoRow dataKind="autostart" description={t("execution.autostartDescription")} title={<span id="cupertino-autostart-title">{t("execution.autostartTitle")}</span>} value={<SwitchControl checked={status?.autoStart ?? false} disabled={!status} labelledBy="cupertino-autostart-title" onChange={(checked) => void model.toggleAutostart(checked)} />} />
+          <CupertinoRow dataKind="autostart" description={t("execution.autostartDescription")} title={<span id="cupertino-autostart-title">{t("execution.autostartTitle")}</span>} value={<SwitchControl checked={status?.autoStart ?? false} disabled={!status} labelledBy="cupertino-autostart-title" onChange={(checked) => void model.service.toggleAutostart(checked)} />} />
           <CupertinoRow dataKind="registered" description={t("execution.registeredDescription")} onDisclose={() => open("registered")} title={t("execution.registeredTitle")} value={t("execution.registeredCount", { count: status?.sessionTargets.length ?? 0 })} />
-          <CupertinoRow dataKind="manual" description={t("execution.manualDescription")} onDisclose={() => open("manual")} title={t("execution.manualTitle")} value={model.targetName || t("execution.noExecutableSelected")} />
+          <CupertinoRow dataKind="manual" description={t("execution.manualDescription")} onDisclose={() => open("manual")} title={t("execution.manualTitle")} value={model.targets.targetName || t("execution.noExecutableSelected")} />
         </CupertinoGroup>
         <CupertinoFootnote>{status ? t("execution.systemNote") : t("execution.checking")}</CupertinoFootnote>
       </CupertinoSection>

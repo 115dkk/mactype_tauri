@@ -1,4 +1,5 @@
 #include "../../../renderer/activation_repaint.h"
+#include "../../../renderer/arrival_evidence.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -51,6 +52,15 @@ int main()
     ShowWindow(shown, SW_SHOWNOACTIVATE);
     Require(UpdateWindow(shown) != FALSE, "the shown window must complete its first paint");
     PumpPendingMessages();
+
+    renderer::arrival_evidence::ResetForTests();
+    renderer::arrival_evidence::Record(
+        renderer::arrival_evidence::ProcessSamplers());
+    Require(!renderer::arrival_evidence::Recorded()->visibleTopLevelWindowExisted,
+        "the visible-window sampler ran while arrival was recorded");
+    renderer::arrival_evidence::CompleteDeferredSamples();
+    Require(renderer::arrival_evidence::Recorded()->visibleTopLevelWindowExisted,
+        "the deferred sampler missed the shown top-level window");
     Require(GetUpdateRect(shown, nullptr, FALSE) == FALSE,
             "the shown window must begin with a validated client area");
 

@@ -8,12 +8,15 @@ import { FluentCard, FluentCards, FluentPage, FluentSection } from "./FluentPart
 
 export function FluentFiles({ shell }: { shell: ShellProps }) {
   const { t } = useI18n();
-  const model = useFileSettingsModel({ onEditInTuner: () => shell.navigate("profiles", "advanced") });
-  const { profile, profiles, legacy, thumbnails, busy } = model;
+  const model = useFileSettingsModel({ onEditInTuner: shell.operations.editInTuner });
+  const { profile } = model.document;
+  const { profiles, thumbnails } = model.profiles;
+  const { legacy } = model.legacy;
+  const { busy } = model.files;
 
   return (
     <FluentPage
-      actions={<button className="button secondary" disabled={busy !== null} onClick={() => void model.chooseImport()} type="button"><FileInput aria-hidden="true" size={16} strokeWidth={1.6} /> {busy === "import" ? t("files.importing") : t("files.chooseImport")}</button>}
+      actions={<button className="button secondary" disabled={busy !== null} onClick={() => void model.files.chooseImport()} type="button"><FileInput aria-hidden="true" size={16} strokeWidth={1.6} /> {busy === "import" ? t("files.importing") : t("files.chooseImport")}</button>}
       subtitle={t("files.subtitle")}
       title={t("nav.profiles")}
       titleId="files-title"
@@ -21,7 +24,7 @@ export function FluentFiles({ shell }: { shell: ShellProps }) {
       {legacy && (
         <FluentCards>
           <FluentCard
-            action={<button className="button primary" disabled={busy !== null} onClick={() => void model.importFrom(legacy.path)} type="button">{busy === "import" ? t("files.importing") : t("files.importDetected")}</button>}
+            action={<button className="button primary" disabled={busy !== null} onClick={() => void model.legacy.importFrom(legacy.path)} type="button">{busy === "import" ? t("files.importing") : t("files.importDetected")}</button>}
             description={<>{t("files.detectedDescription", { name: legacy.name })} <code title={legacy.path}>{legacy.path}</code></>}
             icon={<FileInput aria-hidden="true" size={20} strokeWidth={1.6} />}
             title={t("files.detectedTitle")}
@@ -35,15 +38,15 @@ export function FluentFiles({ shell }: { shell: ShellProps }) {
             const selected = profile?.path === entry.path;
             const thumbnail = thumbnails.get(entry.path) ?? null;
             return (
-              <li className="fluent-pcard" {...model.runProfileAttributes(entry)} data-selected={selected} key={entry.path}>
-                <button aria-pressed={selected} className="fluent-pcard-select" disabled={busy !== null} onClick={() => void model.chooseProfile(entry.path)} type="button">
+              <li className="fluent-pcard" {...model.profiles.runProfileAttributes(entry)} data-selected={selected} key={entry.path}>
+                <button aria-pressed={selected} className="fluent-pcard-select" disabled={busy !== null} onClick={() => void model.profiles.chooseProfile(entry.path)} type="button">
                   <span className="fluent-thumb">
                     {thumbnail ? <img alt={t("files.thumbnailAlt", { name: entry.name })} loading="lazy" src={previewImageUrl(thumbnail.imagePath)} /> : <span aria-hidden="true" className="fluent-thumb-fallback">{THUMBNAIL_SAMPLE_TEXT}</span>}
                   </span>
                   <span className="fluent-pcard-name"><strong>{entry.name}</strong><RunProfileBadge className="fluent-badge" entry={entry} model={model} /></span>
                   <code title={entry.path}>{entry.displayPath}</code>
                 </button>
-                <div className="fluent-pcard-foot"><button className="text-action fluent-link" disabled={busy !== null} onClick={() => void model.editInTuner(entry.path)} type="button">{t("files.editInTuner")}</button></div>
+                <div className="fluent-pcard-foot"><button className="text-action fluent-link" disabled={busy !== null} onClick={() => void model.profiles.editInTuner(entry.path)} type="button">{t("files.editInTuner")}</button></div>
               </li>
             );
           })}
@@ -53,26 +56,26 @@ export function FluentFiles({ shell }: { shell: ShellProps }) {
       <FluentSection title={t("files.currentTitle")}>
         <FluentCards>
           <FluentCard
-            action={<button className="button secondary" disabled={!profile || busy !== null} onClick={() => void model.revealCurrentProfile()} type="button"><FolderOpen aria-hidden="true" size={16} strokeWidth={1.6} /> {t("files.reveal")}</button>}
+            action={<button className="button secondary" disabled={!profile || busy !== null} onClick={() => void model.files.revealCurrentProfile()} type="button"><FolderOpen aria-hidden="true" size={16} strokeWidth={1.6} /> {t("files.reveal")}</button>}
             description={profile ? <CurrentFileSummary model={model} variant="description" /> : undefined}
             icon={<FileText aria-hidden="true" size={20} strokeWidth={1.6} />}
             title={<CurrentFileSummary model={model} variant="title" />}
           />
           <FluentCard
-            action={<><input aria-label={t("profiles.copyName")} className="fluent-field" disabled={!profile || busy !== null} onChange={(event) => model.setCopyName(event.target.value)} placeholder={t("files.saveAsName")} value={model.copyName} /><button className="button secondary" disabled={!model.canDuplicate} onClick={() => void model.duplicate()} type="button">{t("profiles.save")}</button></>}
+            action={<><input aria-label={t("profiles.copyName")} className="fluent-field" disabled={!profile || busy !== null} onChange={(event) => model.files.setCopyName(event.target.value)} placeholder={t("files.saveAsName")} value={model.files.copyName} /><button className="button secondary" disabled={!model.files.canDuplicate} onClick={() => void model.files.duplicate()} type="button">{t("profiles.save")}</button></>}
             description={t("files.duplicateDescription")}
             icon={<Copy aria-hidden="true" size={20} strokeWidth={1.6} />}
             title={t("files.saveAs")}
           />
           <FluentCard
-            action={<button className="button secondary" disabled={!profile || busy !== null} onClick={() => void model.exportIni()} type="button">{busy === "export" ? t("files.exporting") : t("files.chooseExport")}</button>}
+            action={<button className="button secondary" disabled={!profile || busy !== null} onClick={() => void model.files.exportIni()} type="button">{busy === "export" ? t("files.exporting") : t("files.chooseExport")}</button>}
             description={t("files.exportDescription")}
             icon={<Download aria-hidden="true" size={20} strokeWidth={1.6} />}
             title={t("files.exportTitle")}
           />
         </FluentCards>
         <div className="fluent-footer-actions">
-          <button className="button secondary" disabled={!model.canSave} onClick={() => void model.save()} type="button"><Save aria-hidden="true" size={16} strokeWidth={1.6} /> {busy === "save" ? t("profiles.saving") : t("profiles.save")}</button>
+          <button className="button secondary" disabled={!model.document.canSave} onClick={() => void model.document.save()} type="button"><Save aria-hidden="true" size={16} strokeWidth={1.6} /> {busy === "save" ? t("profiles.saving") : t("profiles.save")}</button>
           <DesignateAction model={model} variant="fluent" />
         </div>
       </FluentSection>

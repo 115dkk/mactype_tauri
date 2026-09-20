@@ -1,6 +1,6 @@
 import { Moon, Search, Sun } from "lucide-react";
 import { useState } from "react";
-import { isNavSelected, navEntries, navGroupLabelKey, viewLabelKey, type NavId, type ShellProps } from "../../app/shell";
+import { isNavSelected, navGroupLabelKey, viewLabelKey, type NavId, type ShellProps } from "../../app/shell";
 import { LanguagePicker } from "../../components/LanguagePicker";
 import { SkinPicker } from "../../components/SkinPicker";
 import { WindowTitleBar } from "../../components/WindowTitleBar";
@@ -28,12 +28,12 @@ const tileTone: Record<NavId, string> = {
    the trailing edge. */
 export function CupertinoShell(props: ShellProps) {
   const { t } = useI18n();
-  const { view, profileMode, navigate } = props;
+  const { view, profileMode, navigate, entries } = props.navigation;
   const [query, setQuery] = useState("");
   const needle = query.trim().toLocaleLowerCase();
   const matches = (labelKey: Parameters<typeof t>[0]) => !needle || t(labelKey).toLocaleLowerCase().includes(needle);
   const groups = [null, "wizardGroup", "tunerGroup", "toolsGroup"] as const;
-  const visibleEntries = navEntries.filter((entry) => matches(entry.labelKey));
+  const visibleEntries = entries.filter((entry) => matches(entry.labelKey));
   const page = view === "files"
     ? <CupertinoFiles shell={props} />
     : view === "profiles"
@@ -72,10 +72,10 @@ export function CupertinoShell(props: ShellProps) {
         </nav>
         <div className="navigation-preferences cupertino-side-foot">
           <LanguagePicker />
-          <SkinPicker onChange={props.setSkin} skin={props.skin} />
-          <button aria-label={props.theme === "light" ? t("app.themeDark") : t("app.themeLight")} className="theme-toggle cupertino-item cupertino-foot-item" onClick={props.toggleTheme} type="button">
-            {props.theme === "light" ? <Moon aria-hidden="true" size={14} strokeWidth={1.8} /> : <Sun aria-hidden="true" size={14} strokeWidth={1.8} />}
-            <span>{props.theme === "light" ? t("app.themeDark") : t("app.themeLight")}</span>
+          <SkinPicker onChange={props.preferences.setSkin} skin={props.preferences.skin} />
+          <button aria-label={props.preferences.theme === "light" ? t("app.themeDark") : t("app.themeLight")} className="theme-toggle cupertino-item cupertino-foot-item" onClick={props.preferences.toggleTheme} type="button">
+            {props.preferences.theme === "light" ? <Moon aria-hidden="true" size={14} strokeWidth={1.8} /> : <Sun aria-hidden="true" size={14} strokeWidth={1.8} />}
+            <span>{props.preferences.theme === "light" ? t("app.themeDark") : t("app.themeLight")}</span>
           </button>
         </div>
       </aside>

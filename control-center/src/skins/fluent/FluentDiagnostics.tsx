@@ -9,17 +9,9 @@ import { FluentCard, FluentCards, FluentPage, FluentSection, FluentState } from 
 export function FluentDiagnostics({ shell }: { shell: ShellProps }) {
   const { t } = useI18n();
   const model = useDiagnosticsModel({
-    status: shell.status,
-    onReconnect: async () => {
-      const next = await shell.reconnectPreview();
-      shell.setStatus(next);
-      return next;
-    },
-    onRelocate: async () => {
-      const next = await shell.rediscoverInstallation();
-      shell.setStatus(next);
-      return next;
-    },
+    status: shell.installation.status,
+    onReconnect: shell.installation.reconnectPreview,
+    onRelocate: shell.installation.rediscoverInstallation,
   });
   const log = useEventLog();
   const { operation, run } = model;
@@ -42,7 +34,7 @@ export function FluentDiagnostics({ shell }: { shell: ShellProps }) {
             <button aria-busy={operation === "reconnect"} className="button secondary" disabled={operation !== null} onClick={() => void run("reconnect")} type="button">{operation === "reconnect" && <LoaderCircle aria-hidden="true" className="spin" size={16} />}{t("overview.reconnect")}</button>
           </>}
           dataKind="hero"
-          description={<code>{shell.status.root ?? t("overview.noRoot")}</code>}
+          description={<code>{shell.installation.status.root ?? t("overview.noRoot")}</code>}
           hero
           icon={allOk ? <CircleCheck aria-hidden="true" size={28} strokeWidth={1.6} /> : <AlertTriangle aria-hidden="true" size={28} strokeWidth={1.6} />}
           title={t("overview.installation")}
@@ -56,7 +48,7 @@ export function FluentDiagnostics({ shell }: { shell: ShellProps }) {
       <FluentSection title={t("diagnostics.components")}>
         <FluentCards>
           <FluentCard action={<FluentState><code>0.1.0</code></FluentState>} icon={<Package aria-hidden="true" size={20} strokeWidth={1.6} />} title="Control Center" />
-          <FluentCard action={<FluentState><code>{shell.status.coreVersion ?? t("diagnostics.unknown")}</code></FluentState>} icon={<Package aria-hidden="true" size={20} strokeWidth={1.6} />} title={t("diagnostics.core")} />
+          <FluentCard action={<FluentState><code>{shell.installation.status.coreVersion ?? t("diagnostics.unknown")}</code></FluentState>} icon={<Package aria-hidden="true" size={20} strokeWidth={1.6} />} title={t("diagnostics.core")} />
         </FluentCards>
       </FluentSection>
 

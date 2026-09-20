@@ -8,12 +8,12 @@ import { useConsole } from "./consoleContext";
 export function ConsoleServiceStatus() {
   const { t } = useI18n();
   const { execution, shell } = useConsole();
-  const preview = shell.status.findings.find((finding) => finding.label === "preview");
+  const preview = shell.installation.status.findings.find((finding) => finding.label === "preview");
   const helperConnected = preview?.value === "connected";
   return (
     <>
-      <span className="app-statusbar-item"><StatusDot tone={serviceTone(execution.serviceSummary.tone)} /> {t(execution.serviceSummary.modeKey)} · {t(execution.serviceSummary.statusKey)}</span>
-      <span className="app-statusbar-item"><code>{execution.activeProfileName}</code></span>
+      <span className="app-statusbar-item"><StatusDot tone={serviceTone(execution.service.serviceSummary.tone)} /> {t(execution.service.serviceSummary.modeKey)} · {t(execution.service.serviceSummary.statusKey)}</span>
+      <span className="app-statusbar-item"><code>{execution.service.activeProfileName}</code></span>
       <span className="app-statusbar-item" data-ok={helperConnected}><StatusDot tone={helperConnected ? "ok" : "warn"} /> {t("finding.preview")} · {helperConnected ? t("overview.checked") : t("finding.waiting")}</span>
     </>
   );

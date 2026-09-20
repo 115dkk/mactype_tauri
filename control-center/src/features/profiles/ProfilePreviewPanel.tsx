@@ -10,10 +10,10 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { NativePreviewMode, PreviewRequest, PreviewResult } from "../../app/model";
-import { currentSkin, nativeChrome } from "../../features/preview/nativeChrome";
-import { nativePreviewLabels, NATIVE_LADDER_SIZES } from "../../features/preview/nativePreviewLabels";
-import { wrapSample } from "../../features/preview/wrapSample";
-import { preparePreviewImage } from "../../features/preview/preparePreviewImage";
+import { currentSkin, nativeChrome } from "../preview/nativeChrome";
+import { nativePreviewLabels, NATIVE_LADDER_SIZES } from "../preview/nativePreviewLabels";
+import { wrapSample } from "../preview/wrapSample";
+import { preparePreviewImage } from "../preview/preparePreviewImage";
 import { useAppTheme } from "../../app/useAppTheme";
 import {
   forcePreviewCrashForCi,

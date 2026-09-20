@@ -24,7 +24,7 @@ User-facing and persisted source identities are portable (`ini\Default.ini` or `
 
 Scalar settings use the public core's `[General]` keys. Structured `[Individual]`, font include/exclude, and module include/exclude sections retain their surrounding comments while edited entries are validated and replaced. The legacy-codec gate vendors a pinned, licensed 70-profile community corpus and requires correct encoding detection, byte-identical no-edit round trips, edit/save/reopen behavior, and line-ending/BOM preservation without network access.
 
-`shared/settings-schema.json` is the source for generated Rust, TypeScript, and C++ setting definitions. CI regenerates and rejects drift.
+`shared/settings-schema.json` owns setting structure for the generated Rust, TypeScript, and C++ definitions, while the locale catalogs own display copy. CI regenerates and rejects drift.
 
 ## Localization boundary
 

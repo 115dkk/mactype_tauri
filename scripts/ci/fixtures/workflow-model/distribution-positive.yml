@@ -1,0 +1,21 @@
+name: distribution fixture
+on: workflow_dispatch
+jobs:
+  windows-build:
+    runs-on: windows-2022
+    steps:
+      - name: Build the Integration/Developer bundle
+        run: |-
+          .github/scripts/Build-IntegrationDeveloperBundle.ps1
+          Compress-Archive MacType-Control-Center-Integration-Developer-Bundle.zip
+          Write-Host INTEGRATION_SHA256SUMS.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mactype-control-center-installer-windows
+          path: |-
+            artifacts/installer/MacType-Control-Center-Installer.exe
+            artifacts/installer/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mactype-control-center-integration-developer-bundle-windows
+          path: artifacts/integration-developer-bundle/

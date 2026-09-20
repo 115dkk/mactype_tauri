@@ -1,0 +1,70 @@
+name: release fixture
+on: workflow_dispatch
+jobs:
+  release-frontend-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - run: pnpm generate:settings
+      - run: pnpm test:i18n
+      - run: pnpm test:settings
+      - run: pnpm lint
+  release-tauri-quality:
+    runs-on: windows-2022
+    steps:
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test --all-targets
+  release-cpp-quality:
+    runs-on: windows-2022
+    steps:
+      - run: ctest --test-dir build/preview-helper -C Release --output-on-failure
+  release-injector-quality:
+    runs-on: windows-2022
+    steps:
+      - run: cmake --build injector
+  release-static-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - run: scripts/ci/Test-DistributionPolicy.ps1
+      - run: scripts/ci/Test-ReleaseGatePolicy.ps1
+      - run: scripts/ci/Test-InstallerRollbackPolicy.ps1
+  removed-gallery:
+    runs-on: ubuntu-latest
+    steps:
+      - run: pnpm test:gallery
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-frontend-window-gallery
+          path: artifacts/frontend-gallery
+  release-quality-gate:
+    needs: [release-frontend-quality, release-tauri-quality, release-cpp-quality, release-injector-quality, release-static-quality, release-gallery]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo complete
+  release-main-snapshot:
+    needs: [windows-build, open-service-windows, release-quality-gate, release-gallery]
+    if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-frontend-window-gallery
+          path: gallery-artifact
+      - name: Select the bounded release gallery
+        run: |-
+          $assets = @(
+            'desktop-1280-overview-en.png',
+            'desktop-1280-execution-ready-en.png',
+            'desktop-1280-execution-migration-available-en.png',
+            'desktop-1280-profiles-zh-CN.png',
+            'mobile-390-overview-ar.png'
+          )
+      - name: Publish automatic pre-release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |-
+            release/gallery/desktop-1280-overview-en.png
+            release/gallery/desktop-1280-execution-ready-en.png
+            release/gallery/desktop-1280-execution-migration-available-en.png
+            release/gallery/desktop-1280-profiles-zh-CN.png
+            release/gallery/mobile-390-overview-ar.png

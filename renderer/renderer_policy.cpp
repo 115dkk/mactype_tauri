@@ -99,6 +99,7 @@ std::uint64_t PolicyDigest(const RendererPolicySnapshot& snapshot) noexcept
 	const RasterPolicy& raster = snapshot.raster();
 	HashValue(digest, raster.fontLoader);
 	HashValue(digest, raster.fontLinkMode);
+	HashValue(digest, raster.gammaMode);
 	HashValue(digest, raster.bitmapHeight);
 	HashValue(digest, raster.bolderMode);
 	HashValue(digest, raster.widthMode);
@@ -107,6 +108,8 @@ std::uint64_t PolicyDigest(const RendererPolicySnapshot& snapshot) noexcept
 	HashValue(digest, raster.harmonyLcd);
 	HashValue(digest, raster.loadColorFont);
 	HashValue(digest, raster.invertColor);
+	HashValue(digest, raster.useMapping);
+	HashValue(digest, raster.substituteAllFonts);
 	HashValue(digest, raster.gamma);
 	HashValue(digest, raster.renderWeight);
 	HashValue(digest, raster.contrast);
@@ -114,6 +117,35 @@ std::uint64_t PolicyDigest(const RendererPolicySnapshot& snapshot) noexcept
 	HashBytes(digest, raster.coverageTuningR.data(), raster.coverageTuningR.size());
 	HashBytes(digest, raster.coverageTuningG.data(), raster.coverageTuningG.size());
 	HashBytes(digest, raster.coverageTuningB.data(), raster.coverageTuningB.size());
+	if (raster.fontLinks)
+	{
+		HashBytes(
+			digest, raster.fontLinks->allowDefault.data(),
+			raster.fontLinks->allowDefault.size() * sizeof(bool));
+		for (const std::wstring& family : raster.fontLinks->defaultFamilies)
+		{
+			HashBytes(
+				digest, family.data(), family.size() * sizeof(wchar_t));
+			const wchar_t delimiter = L'\0';
+			HashValue(digest, delimiter);
+		}
+		for (const FontLinkEntry& entry : raster.fontLinks->entries)
+		{
+			HashBytes(
+				digest, entry.sourceFamily.data(),
+				entry.sourceFamily.size() * sizeof(wchar_t));
+			const wchar_t delimiter = L'\0';
+			HashValue(digest, delimiter);
+			for (const std::wstring& family : entry.linkedFamilies)
+			{
+				HashBytes(
+					digest, family.data(), family.size() * sizeof(wchar_t));
+				HashValue(digest, delimiter);
+			}
+		}
+	}
+	HashValue(digest, raster.shadowAlpha);
+	HashValue(digest, raster.shadowLightAlpha);
 	HashValue(digest, raster.shadowDarkColor);
 	HashValue(digest, raster.shadowLightColor);
 	const DirectWritePolicy& directWrite = snapshot.direct_write();
@@ -204,6 +236,8 @@ RendererPolicySnapshot::RendererPolicySnapshot(
 	  substitutionsReady_(candidate.substitutionsReady)
 {
 	raster_.generation = generation_;
+	if (!raster_.fontLinks)
+		raster_.fontLinks = std::make_shared<FontLinkPolicy>();
 	digest_ = PolicyDigest(*this);
 }
 

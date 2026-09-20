@@ -678,7 +678,10 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 				bEnableDW = pSettings->DirectWrite();
 				bUseFontSubstitute = !!pSettings->FontSubstitutes();
 				bHookChildProcesses = pSettings->HookChildProcesses();
-				bUseUnityFontHook = pSettings->UnityFontHookEnabledForProcess();
+				renderer::RendererPolicyRef const policy =
+					renderer::CurrentRendererPolicy();
+				bUseUnityFontHook =
+					policy && policy->hooks().unityFontEnabledForProcess;
 			}
 			if (!IsUnload) hook_initinternal();	//不加载的模块就不做任何事莵E
 			const bool processExcluded = IsProcessExcluded();

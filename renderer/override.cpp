@@ -245,7 +245,6 @@ void DeleteCachedFont(HFONT lfont)
 
 int WINAPI IMPL_GetTextFaceAliasW(HDC hdc, int nLen, LPWSTR lpAliasW)
 {
-	//CThreadCounter __counter;
 	int bResult = ORIG_GetTextFaceAliasW(hdc, nLen, lpAliasW);
 	//LOGFONT lf, lf2;
 	//StringCchCopy(lf.lfFaceName, LF_FACESIZE, lpAliasW);
@@ -393,7 +392,6 @@ HGDIOBJ WINAPI IMPL_GetStockObject(__in int i)
 
 BOOL WINAPI IMPL_BeginPath(HDC hdc)
 {
-	//CThreadCounter __counter;
 	BOOL ret=ORIG_BeginPath(hdc);
 	if (ret)
 	{
@@ -404,7 +402,6 @@ BOOL WINAPI IMPL_BeginPath(HDC hdc)
 
 BOOL WINAPI IMPL_EndPath(HDC hdc)
 {
-	//CThreadCounter __counter;
 	BOOL ret=ORIG_EndPath(hdc);
 	if (ret)
 	{
@@ -415,7 +412,6 @@ BOOL WINAPI IMPL_EndPath(HDC hdc)
 
 BOOL WINAPI IMPL_AbortPath(HDC hdc)
 {
-	//CThreadCounter __counter;
 	BOOL ret=ORIG_AbortPath(hdc);
 	if (ret)
 	{
@@ -512,7 +508,6 @@ HFONT WINAPI IMPL_CreateFontIndirectExW(CONST ENUMLOGFONTEXDV *penumlfex)
 
 BOOL WINAPI IMPL_DeleteObject(HGDIOBJ hObject)
 {
-	//CThreadCounter __counter;
 	if (hObject == g_alterGUIFont)	//我的系统字体，不可以释放掉
 		return true;
 	BOOL bResult = ORIG_DeleteObject(hObject);
@@ -544,7 +539,6 @@ BOOL __stdcall IMPL_RemoveFontResourceExW(__in LPCWSTR name, __in DWORD fl, __re
 
 BOOL WINAPI IMPL_TextOutA(HDC hdc, int nXStart, int nYStart, LPCSTR lpString, int cbString)
 {
-	//CThreadCounter __counter;
 	return IMPL_ExtTextOutA(hdc, nXStart, nYStart, 0, nullptr, lpString, cbString, nullptr);
 }
 
@@ -552,7 +546,6 @@ BOOL WINAPI IMPL_TextOutA(HDC hdc, int nXStart, int nYStart, LPCSTR lpString, in
 
 BOOL WINAPI IMPL_TextOutW(HDC hdc, int nXStart, int nYStart, LPCWSTR lpString, int cbString)
 {
-	//CThreadCounter __counter;
 	return IMPL_ExtTextOutW(hdc, nXStart, nYStart, 0, nullptr, lpString, cbString, nullptr);
 }
 
@@ -577,7 +570,6 @@ void AnsiDxToUnicodeDx(LPCSTR lpStringA, int cbString, const int* lpDxA, int* lp
 
 BOOL WINAPI IMPL_ExtTextOutA(HDC hdc, int nXStart, int nYStart, UINT fuOptions, CONST RECT *lprc, LPCSTR lpString, UINT cbString, CONST INT *lpDx)
 {
-	//CThreadCounter __counter;
 	if (!hdc || !lpString || !cbString || !g_ccbRender || !(fuOptions & ETO_IGNORELANGUAGE)) {
 		return ORIG_ExtTextOutA(hdc, nXStart, nYStart, fuOptions, lprc, lpString, cbString, lpDx);
 	}
@@ -759,7 +751,6 @@ extern ControlIder CID;
 // 取代Windows的ExtTextOutW
 BOOL WINAPI IMPL_ExtTextOutW(HDC hdc, int nXStart, int nYStart, UINT fuOptions, CONST RECT *lprc, LPCWSTR lpString, UINT cbString, CONST INT *SyslpDx)
 {
-	//CThreadCounter __counter;		//用于安全退出的计数器
 	INT* lpDx = const_cast<INT*>(SyslpDx);
 
 	if (!hdc || !lpString || !cbString || !g_ccbRender || cbString>8192) {		//no valid param or rendering is disabled from control center.

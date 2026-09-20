@@ -4,7 +4,7 @@ use std::fmt;
 
 use serde::{de, Deserialize, Deserializer, Serialize};
 
-use crate::sha256_digest;
+use crate::{ini_policy, sha256_digest};
 
 pub const MAX_PROFILE_BYTES: usize = 4 * 1024 * 1024;
 pub const PROFILE_POINTER_SCHEMA: u32 = 1;
@@ -221,29 +221,21 @@ pub fn validate_protected_renderer_profile(
     validate_ini_structure(&structure).map_err(ProtectedRendererProfileError::InvalidProfile)?;
 
     let mut saw_general = false;
-    let mut in_general = false;
-    for raw_line in structure.split(|byte| *byte == b'\n') {
-        let line = trim_ascii(raw_line);
-        if line.is_empty() || line[0] == b';' || line[0] == b'#' {
-            continue;
-        }
-        if line.len() >= 3 && line[0] == b'[' && line[line.len() - 1] == b']' {
-            let section = &line[1..line.len() - 1];
-            in_general = section.eq_ignore_ascii_case(b"General");
-            saw_general |= in_general;
-            continue;
-        }
-        if !in_general {
-            continue;
-        }
-        let Some(separator) = line.iter().position(|byte| *byte == b'=') else {
-            continue;
-        };
-        if trim_ascii(&line[..separator]).eq_ignore_ascii_case(b"AlternativeFile")
-            && !trim_ascii(&line[separator + 1..]).is_empty()
-        {
-            return Err(ProtectedRendererProfileError::AlternativeFileNotAllowed);
-        }
+    let mut alternative_file = false;
+    ini_policy::scan(
+        &structure,
+        |section| saw_general |= section.eq_ignore_ascii_case(b"General"),
+        |section, key, value| {
+            if section.eq_ignore_ascii_case(b"General")
+                && key.eq_ignore_ascii_case(b"AlternativeFile")
+                && value.is_some_and(|value| !value.is_empty())
+            {
+                alternative_file = true;
+            }
+        },
+    );
+    if alternative_file {
+        return Err(ProtectedRendererProfileError::AlternativeFileNotAllowed);
     }
     if !saw_general {
         return Err(ProtectedRendererProfileError::MissingGeneralSection);

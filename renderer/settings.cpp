@@ -266,11 +266,6 @@ void CGdippSettings::DelayedInit()
 	else
 		AddListFromSection(_T("FontSubstitutes"), m_szFileName, arrFontSubstitutes);
 	m_FontSubstitutesInfo.init(m_nFontSubstitutes, arrFontSubstitutes);
-	if (!PublishRendererPolicySnapshot(true))
-	{
-		m_bDelayedInit = false;
-		return;
-	}
 
 	auto hdcScreen = renderer_raii::AdoptWindowDeviceContext(nullptr, GetDC(nullptr));
 	if (!hdcScreen) {
@@ -288,7 +283,6 @@ void CGdippSettings::DelayedInit()
 	InitTuneTable(nTextTuningR, m_nTuneTableR);
 	InitTuneTable(nTextTuningG, m_nTuneTableG);
 	InitTuneTable(nTextTuningB, m_nTuneTableB);
-	RefreshAlphaTable();
 
 	names = _T("Individual@") + wstring(m_szexeName);
 	if (_IsFreeTypeProfileSectionExists(names.c_str(), nullptr))
@@ -365,7 +359,10 @@ void CGdippSettings::DelayedInit()
 		}
 	}
 
-	PublishRendererPolicySnapshot(true);
+	if (PublishRendererPolicySnapshot(true))
+		RefreshAlphaTable();
+	else
+		m_bDelayedInit = false;
 }
 
 bool CGdippSettings::PublishRendererPolicySnapshot(
@@ -386,6 +383,7 @@ bool CGdippSettings::PublishRendererPolicySnapshot(
 	candidate.freeType.cacheMaxBytes = m_nCacheMaxBytes;
 	candidate.raster.fontLoader = m_nFontLoader;
 	candidate.raster.fontLinkMode = m_bFontLink;
+	candidate.raster.gammaMode = m_nGammaMode;
 	candidate.raster.bitmapHeight = m_nBitmapHeight;
 	candidate.raster.bolderMode = m_nBolderMode;
 	candidate.raster.widthMode = m_nWidthMode;
@@ -394,6 +392,9 @@ bool CGdippSettings::PublishRendererPolicySnapshot(
 	candidate.raster.harmonyLcd = HarmonyLCD();
 	candidate.raster.loadColorFont = m_bColorFont;
 	candidate.raster.invertColor = m_bInvertColor;
+	candidate.raster.useMapping = m_bUseMapping;
+	candidate.raster.substituteAllFonts =
+		m_nFontSubstitutes >= SETTING_FONTSUBSTITUTE_ALL;
 	candidate.raster.gamma = m_fGammaValue;
 	candidate.raster.renderWeight = m_fRenderWeight;
 	candidate.raster.contrast = m_fContrast;
@@ -408,6 +409,9 @@ bool CGdippSettings::PublishRendererPolicySnapshot(
 		candidate.raster.coverageTuningB[index] =
 			static_cast<unsigned char>(Bound(m_nTuneTableB[index], 0, 255));
 	}
+	candidate.raster.fontLinks = m_fontlinkinfo.Snapshot();
+	candidate.raster.shadowAlpha = (std::max)(m_nShadow[2], 1);
+	candidate.raster.shadowLightAlpha = (std::max)(m_nShadow[3], 1);
 	candidate.raster.shadowDarkColor = m_nShadowDarkColor;
 	candidate.raster.shadowLightColor = m_nShadowLightColor;
 	candidate.directWrite.enabled = m_bDirectWrite != FALSE;
@@ -1712,6 +1716,27 @@ LPCWSTR CFontLinkInfo::get(int row, int col) const
 	return info[row][col];
 }
 
+std::shared_ptr<const renderer::FontLinkPolicy> CFontLinkInfo::Snapshot() const
+{
+	std::shared_ptr<renderer::FontLinkPolicy> result =
+		std::make_shared<renderer::FontLinkPolicy>();
+	for (std::size_t charset = 0; charset < result->allowDefault.size(); ++charset)
+		result->allowDefault[charset] = AllowDefaultLink[charset];
+	for (std::size_t family = 0;
+		family < result->defaultFamilies.size() &&
+		family <= static_cast<std::size_t>(FF_DECORATIVE); ++family)
+		result->defaultFamilies[family] = DefaultFontLink[family];
+	for (int row = 0; row < INFOMAX && info[row][0]; ++row)
+	{
+		renderer::FontLinkEntry entry;
+		entry.sourceFamily = info[row][0];
+		for (int column = 1; column < FONTMAX && info[row][column]; ++column)
+			entry.linkedFamilies.emplace_back(info[row][column]);
+		result->entries.push_back(std::move(entry));
+	}
+	return result;
+}
+
 CFontSubstituteData::CFontSubstituteData()
 {
 	memset(this, 0, sizeof *this);
@@ -1925,32 +1950,56 @@ bool CFontSubstitutesInfo::CopyRule(
 		replacement.lfFaceName[0] != L'\0';
 }
 
-CFontFaceNamesEnumerator::CFontFaceNamesEnumerator(LPCWSTR facename, int nFontFamily) : m_pos(0)
+CFontFaceNamesEnumerator::CFontFaceNamesEnumerator(
+	LPCWSTR facename,
+	int nFontFamily,
+	const renderer::RendererPolicySnapshot& policy)
+	: m_pos(0)
 {
-	//CCriticalSectionLock __lock;
-	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
-	TCHAR  buff[LF_FACESIZE+1];
+	TCHAR buff[LF_FACESIZE + 1];
 	GetFontLocalName(const_cast<TCHAR*>(facename), buff);
-	LPCWSTR srcfacenames[] = {
-		buff, nullptr, nullptr
-	};
-
 	int destpos = 0;
-	for (const LPCWSTR *p = srcfacenames; *p && destpos < MAXFACENAMES; ++p) {
-		m_facenames[destpos++] = *p;
-		if (pSettings->FontLink()) {
-			const LPCWSTR *facenamep = pSettings->GetFontLinkInfo().lookup(*p);
-			if (facenamep) {
-				for ( ; *facenamep && **facenamep && destpos < MAXFACENAMES; ++facenamep) {
-					m_facenames[destpos++] = *facenamep;
-				}
+	m_facenames[destpos++] = facename;
+	const std::shared_ptr<const renderer::FontLinkPolicy>& links =
+		policy.raster().fontLinks;
+	if (policy.raster().fontLinkMode && links)
+	{
+		const renderer::FontLinkEntry* entry = nullptr;
+		for (const renderer::FontLinkEntry& candidate : links->entries)
+		{
+			if (_wcsicmp(candidate.sourceFamily.c_str(), facename) == 0)
+			{
+				entry = &candidate;
+				break;
+			}
+			if (entry == nullptr &&
+				_wcsicmp(candidate.sourceFamily.c_str(), buff) == 0)
+				entry = &candidate;
+		}
+		if (entry)
+		{
+			for (const std::wstring& linked : entry->linkedFamilies)
+			{
+				if (destpos >= MAXFACENAMES)
+					break;
+				m_facenames[destpos++] = linked.c_str();
 			}
 		}
 	}
-	m_facenames[0] = facename;
-	if (pSettings->FontLink() &&
-		pSettings->FontLoader() == SETTING_FONTLOADER_FREETYPE) {
-			m_facenames[destpos++] = pSettings->GetFontLinkInfo().sysfn(nFontFamily);
+	if (policy.raster().fontLinkMode && links &&
+		policy.raster().fontLoader == SETTING_FONTLOADER_FREETYPE &&
+		destpos < MAXFACENAMES)
+	{
+		const std::size_t familyIndex =
+			static_cast<std::size_t>(static_cast<unsigned int>(nFontFamily));
+		const std::wstring& requested = familyIndex < links->defaultFamilies.size()
+			? links->defaultFamilies[familyIndex]
+			: links->defaultFamilies[1];
+		const std::wstring& fallback = links->defaultFamilies[1];
+		const std::wstring& defaultFamily =
+			requested.empty() ? fallback : requested;
+		if (!defaultFamily.empty())
+			m_facenames[destpos++] = defaultFamily.c_str();
 	}
 	m_endpos = destpos;
 }

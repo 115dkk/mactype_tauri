@@ -56,17 +56,10 @@ FT_BitmapGlyphRec empty_glyph = {};//优化控制字
 #define FT_PosToInt(x)		(((x) + (1 << 5)) >> 6)
 #define RESOLUTION_X 72
 #define RESOLUTION_Y 72
-FT_Error New_FT_Outline_Embolden(FT_Outline* outline, FT_Pos str_h, FT_Pos str_v, FT_Int font_size);
+FT_Error New_FT_Outline_Embolden(FT_Outline* outline, FT_Pos str_h, FT_Pos str_v, FT_Int font_size, int bolderMode);
 FT_Error Old_FT_Outline_Embolden(FT_Outline* outline, FT_Pos strength);
 FT_Error Vert_FT_Outline_Embolden(FT_Outline* outline, FT_Pos strength);
 ControlIder CID;
-
-renderer::freetype::RasterPolicy CaptureFreeTypeRasterPolicy()
-{
-	renderer::RendererPolicyRef const policy =
-		renderer::CurrentRendererPolicy();
-	return policy ? policy->raster() : renderer::freetype::RasterPolicy{};
-}
 
 #if _MSC_VER <= 1200
 #pragma warning(disable: 4786)
@@ -202,7 +195,7 @@ public:
 		tunetblLBS(256),
 		RGB2CRT(256) {}
 	~CAlphaBlend() {}
-	void init();
+	void init(const renderer::freetype::RasterPolicy& policy);
 	void initRGB();
 	double* GetRGBTable() { return RGB2CRT.data(); }
 	BYTE doAB(BYTE fg, BYTE bg, int alpha);
@@ -267,13 +260,12 @@ void CAlphaBlend::initRGB()
 		RGB2CRT[i] = pow(i / 255.0, 2.2);
 }
 
-void CAlphaBlend::init()
+void CAlphaBlend::init(const renderer::freetype::RasterPolicy& policy)
 {
-	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
-	const float gamma = pSettings->GammaValue();
-	const float weight = pSettings->RenderWeight();
-	const float contrast = pSettings->Contrast();
-	const int mode = pSettings->GammaMode();
+	const float gamma = policy.gamma;
+	const float weight = policy.renderWeight;
+	const float contrast = policy.contrast;
+	const int mode = policy.gammaMode;
 
 	int i;
 	float temp, alpha;
@@ -322,28 +314,27 @@ void CAlphaBlend::init()
 		tbl2[i] = rconv1(i * (BASE / (tbl2.size() - 1)));
 	}
 
-	const int* table = pSettings->GetTuneTable();
-	const int* tableR = pSettings->GetTuneTableR();
-	const int* tableG = pSettings->GetTuneTableG();
-	const int* tableB = pSettings->GetTuneTableB();
-	const int* shadow = pSettings->GetShadowParams();
-	const int paramalpha = Max(shadow[2], 1);
-	const int lightparamalpha = Max(shadow[3], 1);
+	const int paramalpha = policy.shadowAlpha;
+	const int lightparamalpha = policy.shadowLightAlpha;
 
 	for (i = 0; i < 256; ++i) {
-		tunetbl[i] = Bound(0, alphatbl[Bound(table[i], 0, 255)], CAlphaBlend::BASE);
-		tunetblR[i] = Bound(0, alphatbl[Bound(tableR[i], 0, 255)], CAlphaBlend::BASE);
-		tunetblG[i] = Bound(0, alphatbl[Bound(tableG[i], 0, 255)], CAlphaBlend::BASE);
-		tunetblB[i] = Bound(0, alphatbl[Bound(tableB[i], 0, 255)], CAlphaBlend::BASE);
-		tunetblS[i] = Bound(0, alphatbl[Bound(table[i] * paramalpha / 100, 0, 255)], CAlphaBlend::BASE);
-		tunetblRS[i] = Bound(0, alphatbl[Bound(tableR[i] * paramalpha / 100, 0, 255)], CAlphaBlend::BASE);
-		tunetblGS[i] = Bound(0, alphatbl[Bound(tableG[i] * paramalpha / 100, 0, 255)], CAlphaBlend::BASE);
-		tunetblBS[i] = Bound(0, alphatbl[Bound(tableB[i] * paramalpha / 100, 0, 255)], CAlphaBlend::BASE);	//浅色混合表
+		const int gray = policy.coverageTuning[i];
+		const int red = policy.coverageTuningR[i];
+		const int green = policy.coverageTuningG[i];
+		const int blue = policy.coverageTuningB[i];
+		tunetbl[i] = Bound(0, alphatbl[gray], CAlphaBlend::BASE);
+		tunetblR[i] = Bound(0, alphatbl[red], CAlphaBlend::BASE);
+		tunetblG[i] = Bound(0, alphatbl[green], CAlphaBlend::BASE);
+		tunetblB[i] = Bound(0, alphatbl[blue], CAlphaBlend::BASE);
+		tunetblS[i] = Bound(0, alphatbl[Bound(gray * paramalpha / 100, 0, 255)], CAlphaBlend::BASE);
+		tunetblRS[i] = Bound(0, alphatbl[Bound(red * paramalpha / 100, 0, 255)], CAlphaBlend::BASE);
+		tunetblGS[i] = Bound(0, alphatbl[Bound(green * paramalpha / 100, 0, 255)], CAlphaBlend::BASE);
+		tunetblBS[i] = Bound(0, alphatbl[Bound(blue * paramalpha / 100, 0, 255)], CAlphaBlend::BASE);	//浅色混合表
 
-		tunetblLS[i] = Bound(0, alphatbl[Bound(table[i] * lightparamalpha / 100, 0, 255)], CAlphaBlend::BASE);
-		tunetblLRS[i] = Bound(0, alphatbl[Bound(tableR[i] * lightparamalpha / 100, 0, 255)], CAlphaBlend::BASE);
-		tunetblLGS[i] = Bound(0, alphatbl[Bound(tableG[i] * lightparamalpha / 100, 0, 255)], CAlphaBlend::BASE);
-		tunetblLBS[i] = Bound(0, alphatbl[Bound(tableB[i] * lightparamalpha / 100, 0, 255)], CAlphaBlend::BASE);	//深色混合表
+		tunetblLS[i] = Bound(0, alphatbl[Bound(gray * lightparamalpha / 100, 0, 255)], CAlphaBlend::BASE);
+		tunetblLRS[i] = Bound(0, alphatbl[Bound(red * lightparamalpha / 100, 0, 255)], CAlphaBlend::BASE);
+		tunetblLGS[i] = Bound(0, alphatbl[Bound(green * lightparamalpha / 100, 0, 255)], CAlphaBlend::BASE);
+		tunetblLBS[i] = Bound(0, alphatbl[Bound(blue * lightparamalpha / 100, 0, 255)], CAlphaBlend::BASE);	//深色混合表
 	}
 }
 
@@ -1044,8 +1035,6 @@ void FreeTypeDrawBitmapGrayV(FreeTypeGlyphInfo& FTGInfo, CAlphaBlendColor& ab, i
 
 
 	const COLORREF color = FTGInfo.FTInfo->Color();
-	//const CGdippSettings* pSettings = CGdippSettings::GetInstance();
-	//const int* table = pSettings->GetTuneTable();
 	width = bitmap->width;
 	height = bitmap->rows;
 
@@ -1094,11 +1083,15 @@ private:
 	FT_Library m_lib;
 	const FT_Glyph_Class* m_clazz;
 	BYTE bgtbl[0x41];
+	renderer::freetype::RasterPolicy m_policy;
 	static int CALLBACK EnumFontFamProc(const LOGFONT* lplf, const TEXTMETRIC* lptm, DWORD FontType, LPARAM lParam);
 public:
-	CGGOGlyphLoader() : m_lib(nullptr), m_clazz(nullptr), bgtbl{} {}
+	CGGOGlyphLoader()
+		: m_lib(nullptr), m_clazz(nullptr), bgtbl{}, m_policy{} {}
 	~CGGOGlyphLoader() {}
-	bool init(FT_Library freetype_library);
+	bool init(
+		FT_Library freetype_library,
+		const renderer::freetype::RasterPolicy& policy);
 	FT_Library getlib() { return m_lib; }
 	const FT_Glyph_Class* getclazz() { return m_clazz; }
 	BYTE convbgpixel(BYTE val) { return bgtbl[val]; }
@@ -1114,7 +1107,8 @@ int CALLBACK CGGOGlyphLoader::EnumFontFamProc(const LOGFONT* lplf, const TEXTMET
 
 	TRACE(_T("Face: %s\n"), lplf->lfFaceName);
 	std::unique_ptr<FreeTypeSysFontData> fontData(
-		FreeTypeSysFontData::CreateInstance(lplf->lfFaceName, 0, false));
+		FreeTypeSysFontData::CreateInstance(
+			lplf->lfFaceName, 0, false, pThis->m_policy));
 	if (!fontData) {
 		return TRUE;
 	}
@@ -1145,7 +1139,9 @@ int CALLBACK CGGOGlyphLoader::EnumFontFamProc(const LOGFONT* lplf, const TEXTMET
 }
 
 bool
-CGGOGlyphLoader::init(FT_Library freetype_library)
+CGGOGlyphLoader::init(
+	FT_Library freetype_library,
+	const renderer::freetype::RasterPolicy& policy)
 {
 	if (m_lib) {
 		return true;
@@ -1162,6 +1158,7 @@ CGGOGlyphLoader::init(FT_Library freetype_library)
 
 	m_lib = freetype_library;
 	m_clazz = nullptr;
+	m_policy = policy;
 
 	//前の方法だと、arial.ttfが無いとまずそうなので
 	//適当に使えるアウトラインフォントを探す
@@ -1472,10 +1469,12 @@ BOOL FreeTypePrepare(FreeTypeDrawInfo& FTInfo)
 		return FALSE;	//optimized
 	FTInfo.face_id_list_num = 0;
 	pfi = nullptr;
-	CGdippSettings* pSettings = CGdippSettings::GetInstance();
 	const bool bVertical = FTInfo.rasterPolicy.fontLoader == SETTING_FONTLOADER_FREETYPE ? lf.lfFaceName[0] == _T('@') : false;
 
-	FreeTypeFontInfo* pfitemp = g_pFTEngine->FindFont(FTInfo.params);
+	if (!FTInfo.rendererPolicy)
+		return FALSE;
+	FreeTypeFontInfo* pfitemp = g_pFTEngine->FindFont(
+		FTInfo.params, FTInfo.rendererPolicy);
 	if (pfitemp) {
 		if (!pfi) pfi = pfitemp;
 		FTInfo.face_id_list_num = pfi->GetFTLink(&FTInfo.face_id_list);
@@ -1486,7 +1485,6 @@ BOOL FreeTypePrepare(FreeTypeDrawInfo& FTInfo)
 		return FALSE;
 	if (!(freetype_face = FTInfo.GetFace(0)))
 	{
-		pSettings->AddFontExclude(lf.lfFaceName);
 		return FALSE;
 	}
 
@@ -1541,7 +1539,6 @@ BOOL FreeTypePrepare(FreeTypeDrawInfo& FTInfo)
 	// fetch face again to get the correct one.
 	if (!(freetype_face = FTInfo.GetFace(0)))
 	{
-		pSettings->AddFontExclude(lf.lfFaceName);
 		return FALSE;
 	}
 
@@ -1712,10 +1709,11 @@ public:
 
 BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString, FT_Referenced_Glyph* GlyphArray, FT_DRAW_STATE* drState)
 {
-	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
 	//Snowie!!
-	BOOL bIsSymbol = GetTextCharsetInfo(FTInfo.hdc, nullptr, 0) == SYMBOL_CHARSET;
-	BOOL bAllowDefaultLink = pSettings->GetFontLinkInfo().IsAllowFontLink(static_cast<BYTE>(GetTextCharsetInfo(FTInfo.hdc, nullptr, 0)));	//是否为符号
+	const BYTE charset = static_cast<BYTE>(GetTextCharsetInfo(FTInfo.hdc, nullptr, 0));
+	BOOL bIsSymbol = charset == SYMBOL_CHARSET;
+	BOOL bAllowDefaultLink = !FTInfo.rasterPolicy.fontLinks ||
+		FTInfo.rasterPolicy.fontLinks->allowDefault[charset];	//是否为符号
 	BOOL nRet = true;
 	BOOL bWindowsLink = FTInfo.rasterPolicy.fontLinkMode == 2;
 	//!!Snowie
@@ -1748,7 +1746,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 	const bool bWidthGDI32 = true;
 	const int ggoformatbase = (FTInfo.font_type.flags & FT_LOAD_NO_HINTING) ? GGO_UNHINTED | GGO_NATIVE : GGO_NATIVE;
 
-	if (!s_GGOGlyphLoader.init(freetype_library)) {
+	if (!s_GGOGlyphLoader.init(freetype_library, FTInfo.rasterPolicy)) {
 		return FALSE;
 	}
 
@@ -2098,7 +2096,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 				}
 				if ((str_h || str_v) && New_FT_Outline_Embolden(
 					&(reinterpret_cast<FT_OutlineGlyph>((*glyph_bitmap)->ft_glyph))->outline,
-					str_h, str_v, FTInfo.height))
+					str_h, str_v, FTInfo.height, FTInfo.rasterPolicy.bolderMode))
 				{
 					FT_Done_Ref_Glyph(glyph_bitmap);
 					nRet = false;
@@ -2197,10 +2195,11 @@ gdiexit:
 
 BOOL ForEachGetGlyphGGO(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString, FT_Referenced_Glyph* GlyphArray, FT_DRAW_STATE* drState)
 {
-	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
 	//Snowie!!
-	BOOL bIsSymbol = GetTextCharsetInfo(FTInfo.hdc, nullptr, 0) == SYMBOL_CHARSET;
-	BOOL bAllowDefaultLink = pSettings->GetFontLinkInfo().IsAllowFontLink(static_cast<BYTE>(GetTextCharsetInfo(FTInfo.hdc, nullptr, 0)));	//是否为符号
+	const BYTE charset = static_cast<BYTE>(GetTextCharsetInfo(FTInfo.hdc, nullptr, 0));
+	BOOL bIsSymbol = charset == SYMBOL_CHARSET;
+	BOOL bAllowDefaultLink = !FTInfo.rasterPolicy.fontLinks ||
+		FTInfo.rasterPolicy.fontLinks->allowDefault[charset];	//是否为符号
 	BOOL nRet = true;
 	BOOL bWindowsLink = FTInfo.rasterPolicy.fontLinkMode == 2;
 	//!!Snowie
@@ -2228,7 +2227,7 @@ BOOL ForEachGetGlyphGGO(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString
 	const bool bWidthGDI32 = FTInfo.rasterPolicy.widthMode == SETTING_WIDTHMODE_GDI32;
 	const int ggoformatbase = (FTInfo.font_type.flags & FT_LOAD_NO_HINTING) ? GGO_UNHINTED | GGO_NATIVE : GGO_NATIVE;
 
-	if (!s_GGOGlyphLoader.init(freetype_library)) {
+	if (!s_GGOGlyphLoader.init(freetype_library, FTInfo.rasterPolicy)) {
 		return FALSE;
 	}
 
@@ -2427,7 +2426,7 @@ BOOL ForEachGetGlyphGGO(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString
 				}
 				if ((str_h || str_v) && New_FT_Outline_Embolden(
 					&(reinterpret_cast<FT_OutlineGlyph>((*glyph_bitmap)->ft_glyph))->outline,
-					str_h, str_v, FTInfo.height))
+					str_h, str_v, FTInfo.height, FTInfo.rasterPolicy.bolderMode))
 				{
 					FT_Done_Ref_Glyph(glyph_bitmap);
 					nRet = false;
@@ -2515,9 +2514,8 @@ BOOL CALLBACK TextOutCallback(FreeTypeGlyphInfo& FTGInfo)
 	}
 	else {
 
-		const CGdippSettings* pSettings = CGdippSettings::GetInstance();
 		if (bVertical && IsVerticalChar(FTGInfo.wch) &&
-			pSettings->FontLoader() == SETTING_FONTLOADER_FREETYPE) {
+			FTInfo->rasterPolicy.fontLoader == SETTING_FONTLOADER_FREETYPE) {
 			if (FTInfo->params->alpha > 1)
 			{
 				FreeTypeDrawBitmapV(FTGInfo, *FTGInfo.shadow, FTInfo->x + FTInfo->sx,
@@ -2769,14 +2767,15 @@ FT_Error face_requester(
 			FreeTypeFontInfo* pfi = g_pFTEngine->FindFont(
 				static_cast<int>(reinterpret_cast<INT_PTR>(face_id)));
 			Assert(pfi);
-			if (!pfi)
+			if (!pfi || !pfi->Policy())
 				return FT_Err_Invalid_Argument;
 			LPCTSTR fontname = pfi->GetName();
 
 			// 名称を指定してフォントを取得
 			std::unique_ptr<FreeTypeSysFontData> fontData(
 				FreeTypeSysFontData::CreateInstance(
-					fontname, pfi->GetFontWeight(), pfi->IsItalic()));
+					fontname, pfi->GetFontWeight(), pfi->IsItalic(),
+					pfi->Policy()->raster()));
 			if (!fontData)
 				return FT_Err_Cannot_Open_Resource;
 
@@ -2805,11 +2804,15 @@ FT_Error face_requester(
 }
 
 //新太字アルゴリズム
-FT_Error New_FT_Outline_Embolden(FT_Outline* outline, FT_Pos str_h, FT_Pos str_v, FT_Int font_size)
+FT_Error New_FT_Outline_Embolden(
+	FT_Outline* outline,
+	FT_Pos str_h,
+	FT_Pos str_v,
+	FT_Int font_size,
+	int bolderMode)
 {
-	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
 	int orientation = 0;
-	switch (pSettings->BolderMode()) {
+	switch (bolderMode) {
 	case 1:
 		return FT_Outline_EmboldenXY(outline, str_h, 0);
 
@@ -3010,6 +3013,7 @@ using FreeTypeRuntimeResources = renderer::freetype::OrderedRuntimeOwners<
 	renderer_raii::UniqueFreeTypeLibrary,
 	renderer_raii::UniqueFreeTypeManager>;
 
+
 static FreeTypeRuntimeResources& GetFreeTypeRuntimeResources()
 {
 	// Explicit unload calls FontLFree outside the loader lock. Process exit
@@ -3102,5 +3106,7 @@ void FontLFree(void) {
 //Snowie
 void RefreshAlphaTable()
 {
-	s_AlphaBlendTable.init();
+	renderer::RendererPolicyRef const policy = renderer::CurrentRendererPolicy();
+	if (policy)
+		s_AlphaBlendTable.init(policy->raster());
 }

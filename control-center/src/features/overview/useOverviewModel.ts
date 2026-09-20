@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { projectExecutionView } from "../../app/executionViewModel";
 import type { EventRecord, ExecutionStatus } from "../../app/model";
-import { loadExecutionStatus, loadRecentActivity, openLogFolder } from "../../app/tauri";
+import { loadExecutionStatus, loadRecentActivity, openLogFolder, subscribeEventLog } from "../../app/tauri";
 import { useI18n } from "../../i18n/i18n";
 import { eventTitle } from "../events/eventText";
 
@@ -15,25 +15,45 @@ export function clockText(timestamp: number, locale: string): string {
   return new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date(timestamp));
 }
 
-/* The overview reads the execution status once and the recent activity feed,
-   and projects both into the three-way state every skin's hero shows. */
-export function useOverviewModel() {
+interface OverviewModelOptions {
+  execution?: ExecutionStatus | null;
+  activityLimit?: number;
+  liveActivity?: boolean;
+}
+
+export function useOverviewModel({ execution: suppliedExecution, activityLimit = 5, liveActivity = false }: OverviewModelOptions = {}) {
   const { locale, t } = useI18n();
-  const [execution, setExecution] = useState<ExecutionStatus | null>(null);
+  const [loadedExecution, setExecution] = useState<ExecutionStatus | null>(null);
   const [activities, setActivities] = useState<ReadonlyArray<EventRecord>>([]);
   const [expanded, setExpanded] = useState(false);
   const [folderMessage, setFolderMessage] = useState<string | null>(null);
 
+  const hasSuppliedExecution = suppliedExecution !== undefined;
+  // The shell snapshot must be available on the first render after navigation.
+  const execution = hasSuppliedExecution ? suppliedExecution : loadedExecution;
+  const [activityRevision, setActivityRevision] = useState(0);
+  const refreshActivities = () => setActivityRevision((revision) => revision + 1);
+
   useEffect(() => {
+    if (hasSuppliedExecution) return;
     let active = true;
     void loadExecutionStatus().then((nextExecution) => {
       if (active) setExecution(nextExecution);
     }).catch(() => undefined);
+    return () => { active = false; };
+  }, [hasSuppliedExecution]);
+
+  useEffect(() => {
+    let active = true;
     void loadRecentActivity().then((nextActivities) => {
-      if (active) setActivities(nextActivities.slice(-5));
+      if (active) setActivities(nextActivities.slice(-activityLimit));
     }).catch(() => undefined);
     return () => { active = false; };
-  }, []);
+  }, [activityRevision, activityLimit]);
+
+  useEffect(() => {
+    if (liveActivity) return subscribeEventLog(() => setActivityRevision((revision) => revision + 1));
+  }, [liveActivity]);
 
   const view = useMemo(() => projectExecutionView(execution, null), [execution]);
   const state: OverviewState = view.systemInjectionAction.state === "active"
@@ -65,10 +85,12 @@ export function useOverviewModel() {
     expanded,
     folderMessage,
     lastAppliedText,
+    lastAppliedTimeText: latestApplied ? timeText(latestApplied.ts, locale) : t("overview.noLastApplied"),
     latestApplied,
     locale,
     newestFirst,
     openFolder,
+    refreshActivities,
     setExpanded,
     state,
     t,

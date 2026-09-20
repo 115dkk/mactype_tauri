@@ -5,6 +5,7 @@ mod broker;
 mod console_process;
 pub mod event_log;
 mod health;
+mod ini_policy;
 mod manifest;
 mod migration_pin;
 mod paths;

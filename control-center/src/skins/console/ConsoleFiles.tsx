@@ -1,6 +1,7 @@
-import { AlertTriangle, Check, FileInput, FileOutput, FolderOpen, Play, Save, SaveAll, Search, SlidersHorizontal } from "lucide-react";
+import { FileInput, FileOutput, FolderOpen, Save, SaveAll, Search, SlidersHorizontal } from "lucide-react";
 import { useState } from "react";
-import { matchesAppliedProfile, useFileSettingsModel } from "../../features/files/useFileSettingsModel";
+import { CurrentFileSummary, DesignateAction, FileMessages, RunProfileBadge } from "../../features/files/FileParts";
+import { useFileSettingsModel } from "../../features/files/useFileSettingsModel";
 import { SpecimenBoard } from "../../features/preview/SpecimenBoard";
 import { substitutedPreviewFont } from "../../features/preview/previewFonts";
 import { scriptUiFont } from "../../features/preview/scriptUiFont";
@@ -15,11 +16,10 @@ export function ConsoleFiles() {
   const { locale, t } = useI18n();
   const { shell } = useConsole();
   const model = useFileSettingsModel({ onEditInTuner: () => shell.navigate("profiles", "advanced") });
-  const { profile, profiles, appliedProfile, legacy, busy, message, error } = model;
+  const { profile, profiles, legacy, busy, message, error } = model;
   const [filter, setFilter] = useState("");
   const needle = filter.trim().toLocaleLowerCase();
   const visible = profiles.filter((entry) => !needle || entry.name.toLocaleLowerCase().includes(needle) || entry.displayPath.toLocaleLowerCase().includes(needle));
-  const applied = profile ? matchesAppliedProfile({ name: "", path: profile.path, displayPath: profile.displayPath }, appliedProfile) : false;
   const fontFace = substitutedPreviewFont(scriptUiFont(locale) ?? "Segoe UI", profile?.values.font_substitutes === 0 ? [] : profile?.advanced.fontSubstitutes ?? []);
 
   return (
@@ -38,8 +38,7 @@ export function ConsoleFiles() {
     >
       <ConsolePanel
         footer={<>
-          {message && <span className="success-message" data-operation="file-settings"><Check aria-hidden="true" size={14} /> {message}{model.offerStart && <button className="text-action" disabled={busy !== null} onClick={() => void model.startServiceNow()} type="button"><Play aria-hidden="true" size={12} strokeWidth={2} /> {busy === "start" ? t("execution.serviceWorking") : t("files.startServiceNow")}</button>}</span>}
-          {error && <span className="inline-error"><AlertTriangle aria-hidden="true" size={14} /> {error}</span>}
+          <FileMessages model={model} variant="console" />
           {!message && !error && <span className="console-muted">{profile && !profile.canSave ? t("files.readOnly") : t("files.selectDescription")}</span>}
         </>}
         right={<label className="console-field console-search"><Search aria-hidden="true" size={12} /><span className="sr-only">{t("files.search")}</span><input onChange={(event) => setFilter(event.target.value)} placeholder={t("files.search")} type="search" value={filter} /></label>}
@@ -56,12 +55,11 @@ export function ConsoleFiles() {
           <div className="console-table-head" role="row"><span role="columnheader">{t("files.columnName")}</span><span role="columnheader">{t("files.columnFile")}</span><span role="columnheader">{t("files.columnState")}</span></div>
           {visible.map((entry) => {
             const selected = profile?.path === entry.path;
-            const isApplied = matchesAppliedProfile(entry, appliedProfile);
             return (
-              <button aria-pressed={selected} className="console-table-row" data-applied={isApplied} data-selected={selected} disabled={busy !== null} key={entry.path} onClick={() => void model.chooseProfile(entry.path)} onDoubleClick={() => void model.editInTuner(entry.path)} role="row" type="button">
+              <button aria-pressed={selected} className="console-table-row" {...model.runProfileAttributes(entry)} data-selected={selected} disabled={busy !== null} key={entry.path} onClick={() => void model.chooseProfile(entry.path)} onDoubleClick={() => void model.editInTuner(entry.path)} role="row" type="button">
                 <strong role="cell">{entry.name}</strong>
                 <code role="cell" title={entry.path}>{entry.displayPath}</code>
-                <span role="cell">{isApplied && <span className="console-tag ok">{t("files.runProfileBadge")}</span>}</span>
+                <span role="cell"><RunProfileBadge className="console-tag ok" entry={entry} model={model} /></span>
               </button>
             );
           })}
@@ -74,17 +72,17 @@ export function ConsoleFiles() {
           <button className="button ghost" disabled={!profile || busy !== null} onClick={() => void model.revealCurrentProfile()} type="button"><FolderOpen aria-hidden="true" size={14} /> {t("files.reveal")}</button>
           <span className="console-spacer" />
           <button className="button secondary" disabled={!model.canSave} onClick={() => void model.save()} type="button"><Save aria-hidden="true" size={14} /> {busy === "save" ? t("profiles.saving") : t("profiles.save")}</button>
-          <button className="button primary" disabled={!model.canDesignate} onClick={() => void model.designate()} title={model.dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button"><Play aria-hidden="true" size={14} strokeWidth={2} /> {busy === "designate" ? t("profiles.designating") : t("profiles.designate")}</button>
+          <DesignateAction model={model} variant="console" />
         </>}
-        right={applied && <span className="console-tag ok">{t("files.runProfileBadge")}</span>}
+        right={<RunProfileBadge className="console-tag ok" entry={profile && { name: "", path: profile.path, displayPath: profile.displayPath }} model={model} />}
         scroll={false}
         title={t("files.selectedTitle")}
       >
         <SpecimenBoard className="specimen-board console-canvas console-canvas-fixed" dark={shell.theme === "dark"} fontFace={fontFace} profilePath={profile?.path ?? null} sizes={SPECIMEN_SIZES} text={t("profiles.samplePangram")} />
         <ConsoleKv rows={[
-          { key: "file", label: t("files.columnFile"), value: <code title={profile?.path}>{profile?.displayPath ?? t("profiles.none")}</code> },
-          { key: "unsaved", label: t("files.unsaved"), value: model.unsavedText },
-          { key: "encoding", label: t("files.encoding"), value: model.encodingText },
+          { key: "file", label: t("files.columnFile"), value: <CurrentFileSummary model={model} /> },
+          { key: "unsaved", label: t("files.unsaved"), value: <CurrentFileSummary model={model} variant="unsaved" /> },
+          { key: "encoding", label: t("files.encoding"), value: <CurrentFileSummary model={model} variant="encoding" /> },
         ]} />
         <div className="console-spacer" />
         <div className="console-saveas">

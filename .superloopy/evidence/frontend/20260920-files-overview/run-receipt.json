@@ -1,0 +1,113 @@
+{
+  "date": "2026-09-20",
+  "base_commit": "3138402a8880f07cba32b81193a17def1fe4aa10",
+  "branch": "codex/alpha-refactor-1",
+  "delta": {
+    "A1": "Shared Files badge, designation gate/tooltip, start-now action, current-file values and messages; unchanged skin containers and CSS.",
+    "A2": "Console overview consumes useOverviewModel with shell execution snapshot; specimen controls live in useOverviewSpecimen."
+  },
+  "adjacent_regressions": [
+    "Stopped/live/missing service designation",
+    "Profile editor save/discard",
+    "All-skin layout, RTL, control keyboard/focus",
+    "Localized substitution, preview inversion and 192 DPI specimens",
+    "Console overview navigation returns"
+  ],
+  "authority": [
+    "control-center/src/features/files/useFileSettingsModel.ts",
+    "control-center/src/features/overview/useOverviewModel.ts",
+    "control-center/src/styles/skins",
+    "docs/skin-designs.md"
+  ],
+  "environment": {
+    "os": "Windows 11 Education 10.0.22621",
+    "browser": "Chromium 149.0.7827.55",
+    "playwright": "1.61.1",
+    "viewports": [
+      "390x844",
+      "768x900",
+      "1280x800",
+      "880x560 at deviceScaleFactor 2"
+    ],
+    "dpi": "96 standard, 192 focused specimen case",
+    "native_capabilities": "Browser gallery uses simulated IPC and SVG previews. No installed Tauri/WebView2/helper execution or native-renderer validation performed."
+  },
+  "baseline": "Before skin edits, baseline build and five targeted Files/designation/Console substitution tests passed. Sixteen baseline captures retained.",
+  "commands": [
+    {
+      "command": "corepack pnpm install --frozen-lockfile",
+      "result": "PASS"
+    },
+    {
+      "command": "corepack pnpm test:i18n",
+      "result": "PASS: 10 locales, 799 messages, 41 settings"
+    },
+    {
+      "command": "corepack pnpm test:settings",
+      "result": "PASS: 41 supported scalar settings, structured INI settings, IControlCenter fallthrough guards"
+    },
+    {
+      "command": "corepack pnpm lint",
+      "result": "PASS: zero warnings"
+    },
+    {
+      "command": "corepack pnpm build",
+      "result": "PASS: 1699 modules transformed; existing >500 kB chunk warning"
+    },
+    {
+      "command": "CI=1 corepack pnpm test:gallery --workers=6",
+      "result": "PASS: 817 passed, 26 skipped, 843 total, 9.2 minutes; no failed or flaky result"
+    },
+    {
+      "command": "pwsh -NoProfile -File scripts/ci/Test-SourceComments.ps1",
+      "result": "PASS: 571 first-party files"
+    },
+    {
+      "command": "pwsh -NoProfile -File scripts/ci/Test-AlphaBranchPolicy.ps1",
+      "result": "PASS: Alpha rendering-core lint policy"
+    },
+    {
+      "command": "git diff --check -- <frontend owned paths>",
+      "result": "PASS"
+    }
+  ],
+  "execution_notes": [
+    "Commands require PATH=/c/Program Files/nodejs/node_modules/corepack/shims:$PATH so pnpm child scripts resolve. Initial build failed without it.",
+    "Initial new hook build failed on locale:string; corrected to Locale before final gates.",
+    "First whole-gallery run reused another worktree server on port 4173: 258 failed, 559 passed, 26 skipped, invalid for this tree.",
+    "Temporary isolated-port runs exposed the high-DPI test hardcoded URL 4173; not changed.",
+    "One isolated parallel run reported transient Fluent Arabic tablet preview overflow img [-32,720]; final entire suite passed without retry.",
+    "Tool automatically detached first full run and first isolated shard at 600 seconds despite foreground invocation; both were awaited to completion. Final full gate completed within foreground timeout.",
+    "Whole-tree git diff --check reported renderer/settings.cpp whitespace from concurrent work; no renderer files edited."
+  ],
+  "supplemental": {
+    "all_skin_start_now": "PASS on all four skins: designate with service stopped, explicit start, offer dismissed.",
+    "console_return_frames": "PASS: three returns from Diagnostics; 16/15/16 frames retained six Pretendard bitmaps and Default.ini, no source-family or missing-name frame.",
+    "console_return_limitation": "Initial strict image-URL equality assertion failed because width changed from 736 to 776 pixels; no claim of byte-identical remount images. Font/count/name audit passed.",
+    "console_log_folder": "PASS: shared model displays folder message."
+  },
+  "selectors": "No test selector changes; existing data-applied, data-run-profile Classic container hooks, badge/select classes, roles and labels retained. Added data-run-profile on other skin containers and badge spans.",
+  "visual_qa": {
+    "captures": [
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-1\\artifacts\\frontend-gallery\\desktop-1280-skin-classic-light-files-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-1\\artifacts\\frontend-gallery\\desktop-1280-skin-classic-light-overview-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-1\\artifacts\\frontend-gallery\\desktop-1280-skin-classic-dark-files-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-1\\artifacts\\frontend-gallery\\desktop-1280-skin-classic-dark-overview-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-1\\artifacts\\frontend-gallery\\desktop-1280-skin-console-light-files-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-1\\artifacts\\frontend-gallery\\desktop-1280-skin-console-light-overview-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-1\\artifacts\\frontend-gallery\\desktop-1280-skin-console-dark-files-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-1\\artifacts\\frontend-gallery\\desktop-1280-skin-console-dark-overview-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-1\\artifacts\\frontend-gallery\\desktop-1280-skin-fluent-light-files-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-1\\artifacts\\frontend-gallery\\desktop-1280-skin-fluent-light-overview-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-1\\artifacts\\frontend-gallery\\desktop-1280-skin-fluent-dark-files-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-1\\artifacts\\frontend-gallery\\desktop-1280-skin-fluent-dark-overview-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-1\\artifacts\\frontend-gallery\\desktop-1280-skin-cupertino-light-files-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-1\\artifacts\\frontend-gallery\\desktop-1280-skin-cupertino-light-overview-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-1\\artifacts\\frontend-gallery\\desktop-1280-skin-cupertino-dark-files-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-1\\artifacts\\frontend-gallery\\desktop-1280-skin-cupertino-dark-overview-ko.png"
+    ],
+    "inspection": "Visually inspected all sixteen final captures via four full-size contact sheets. Classic card grid/current-file block; Console table/selected profile and specimen/service/log panels; Fluent cards and footer actions; Cupertino radios and grouped rows retain arrangement, readable badges and theme polarity. No new clipping or overlaps observed. Existing Classic file actions remain inside scrollable work area.",
+    "pixel_comparison": "Eleven of sixteen preliminary before/after images were byte-identical in pixels. Other images had font-loading timing differences; Fluent description shaping was preserved by restoring one string node. Not a universal pixel-identical claim."
+  },
+  "scope": "No catalogue, stylesheet, route, interface id, or spec edits. No commits or tree-rewriting git commands. Generated settings files retain build-only line-ending noise for caller cleanup. No report Markdown file written; full report delivered through SubagentHandback."
+}

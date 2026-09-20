@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState, type ReactElement } from "react";
 import { useI18n } from "../i18n/i18n";
 import { fallbackStatus, type InstallationStatus, type ViewId } from "./model";
-import type { ProfileMode, ShellProps } from "./shell";
+import { navEntries, type ProfileMode, type ShellProps } from "./shell";
 import { loadLaunchContext, openPreviewStudio, reconnectPreview, rediscoverInstallation, reportFrontendFailure, reportFrontendReady, scanInstallation, verifyTrayModeForCi } from "./tauri";
 import { applySkinPreference, loadSkinPreference, type SkinPreference } from "./skinPreference";
 import { applyThemePreference, loadThemePreference, type ThemePreference } from "./themePreference";
@@ -115,7 +115,13 @@ export function App({ initialTheme = loadThemePreference(), initialSkin = loadSk
   }, [state.ciSmoke, state.previewStudioSmoke, state.profileMode, state.ready, state.trayStart, state.view]);
 
   const navigate = useCallback((view: ViewId, profileMode?: ProfileMode) => dispatch({ type: "navigate", view, profileMode }), []);
-  const setStatus = useCallback((status: InstallationStatus) => dispatch({ type: "status", status }), []);
+  const reconnect = useCallback(async () => {
+    dispatch({ type: "status", status: await reconnectPreview() });
+  }, []);
+  const rediscover = useCallback(async () => {
+    dispatch({ type: "status", status: await rediscoverInstallation() });
+  }, []);
+  const editInTuner = useCallback(() => navigate("profiles", "advanced"), [navigate]);
   const reportReady = useCallback((view: ViewId) => { void reportFrontendReady(view); }, []);
   const setSkin = useCallback((skin: SkinPreference) => dispatch({ type: "skin", skin }), []);
   const toggleTheme = useCallback(() => dispatch({ type: "toggle-theme" }), []);
@@ -130,20 +136,10 @@ export function App({ initialTheme = loadThemePreference(), initialSkin = loadSk
   return (
     <>
     <Shell
-      ciSmoke={state.ciSmoke}
-      navigate={navigate}
-      openPreviewStudio={studio}
-      profileMode={state.profileMode}
-      reconnectPreview={reconnectPreview}
-      rediscoverInstallation={rediscoverInstallation}
-      reportReady={reportReady}
-      setSkin={setSkin}
-      setStatus={setStatus}
-      skin={state.skin}
-      status={state.status}
-      theme={state.theme}
-      toggleTheme={toggleTheme}
-      view={state.view}
+      navigation={{ view: state.view, profileMode: state.profileMode, navigate, entries: navEntries }}
+      preferences={{ theme: state.theme, toggleTheme, skin: state.skin, setSkin }}
+      installation={{ status: state.status, reconnectPreview: reconnect, rediscoverInstallation: rediscover }}
+      operations={{ editInTuner, reportReady, openPreviewStudio: studio, ciSmoke: state.ciSmoke }}
     />
     {studioError && <div className="studio-open-error" role="alert">
       <span>{studioError}</span>

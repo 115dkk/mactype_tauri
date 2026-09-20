@@ -39,6 +39,7 @@ export function ConsoleFrame({ crumb, title, titleId, summary, actions, status, 
 }
 
 interface ConsolePanelProps {
+  serviceSummaryState?: string;
   title: ReactNode;
   icon?: ReactNode;
   right?: ReactNode;
@@ -49,11 +50,11 @@ interface ConsolePanelProps {
   scroll?: boolean;
 }
 
-export function ConsolePanel({ title, icon, right, footer, className, children, scroll = true }: ConsolePanelProps) {
+export function ConsolePanel({ title, icon, right, footer, className, children, scroll = true, serviceSummaryState }: ConsolePanelProps) {
   return (
     <section className={className ? `console-panel ${className}` : "console-panel"}>
       <header className="console-panel-head">{icon}<span>{title}</span>{right && <div className="console-panel-head-right">{right}</div>}</header>
-      <div className="console-panel-body" data-scroll={scroll}>{children}</div>
+      <div className="console-panel-body" data-scroll={scroll} data-service-summary={serviceSummaryState === undefined ? undefined : true} data-state={serviceSummaryState}>{children}</div>
       {footer && <div className="console-panel-foot">{footer}</div>}
     </section>
   );

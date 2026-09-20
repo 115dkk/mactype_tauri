@@ -9,7 +9,7 @@ export function FluentOverview({ shell }: { shell: ShellProps }) {
   const { locale, t } = useI18n();
   const model = useOverviewModel();
   const { state, newestFirst, latestApplied, view } = model;
-  const preview = shell.status.findings.find((finding) => finding.label === "preview");
+  const preview = shell.installation.status.findings.find((finding) => finding.label === "preview");
   const helperConnected = preview?.value === "connected";
   const profileName = model.activeProfileName ?? t("overview.unknownProfile");
   const modeText = t(view.serviceSummary.modeKey);
@@ -22,7 +22,7 @@ export function FluentOverview({ shell }: { shell: ShellProps }) {
     <FluentPage subtitle={t("overview.subtitle")} title={t("nav.overview")} titleId="overview-title">
       <FluentCards>
         <FluentCard
-          action={<button className="button secondary" onClick={() => shell.navigate("execution")} type="button">{t("overview.manageService")}</button>}
+          action={<button className="button secondary" onClick={() => shell.navigation.navigate("execution")} type="button">{t("overview.manageService")}</button>}
           dataKind="hero"
           description={heroDescription}
           hero
@@ -31,7 +31,7 @@ export function FluentOverview({ shell }: { shell: ShellProps }) {
           tone={state === "normal" ? "normal" : state === "inactive" ? "neutral" : "attention"}
         />
         <FluentCard
-          action={<><FluentState><code>{model.activeProfile ?? t("overview.unknownProfile")}</code></FluentState><button className="button secondary" onClick={() => shell.navigate("profiles", "advanced")} type="button">{t("files.editInTuner")}</button></>}
+          action={<><FluentState><code>{model.activeProfile ?? t("overview.unknownProfile")}</code></FluentState><button className="button secondary" onClick={() => shell.operations.editInTuner()} type="button">{t("files.editInTuner")}</button></>}
           description={t("overview.activeProfileHint")}
           icon={<FileText aria-hidden="true" size={20} strokeWidth={1.6} />}
           title={t("overview.activeProfile")}

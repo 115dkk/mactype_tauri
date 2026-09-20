@@ -1,12 +1,13 @@
+import { useI18n } from "../../i18n/i18n";
 import { ListRestart, Play, Redo2, RotateCcw, Save, SaveAll, Undo2, X } from "lucide-react";
 import { Hint } from "../../components/Hint";
 import { settingsSchema } from "../../generated/settings";
-import { AdvancedSettings } from "../../pages/profiles/AdvancedSettings";
-import { IndividualSettings } from "../../pages/profiles/IndividualSettings";
-import { ListsEditor } from "../../pages/profiles/ListsEditor";
-import { ProfilePreviewPanel } from "../../pages/profiles/ProfilePreviewPanel";
-import { BasicSettings, LcdSettings, SearchSettings, ShapeSettings } from "../../pages/profiles/SchemaSettings";
-import { WizardSettings } from "../../pages/profiles/WizardSettings";
+import { AdvancedSettings } from "./AdvancedSettings";
+import { IndividualSettings } from "./IndividualSettings";
+import { ListsEditor } from "./ListsEditor";
+import { ProfilePreviewPanel } from "./ProfilePreviewPanel";
+import { BasicSettings, LcdSettings, SearchSettings, ShapeSettings } from "./SchemaSettings";
+import { WizardSettings } from "./WizardSettings";
 import type { ProfileEditor } from "./useProfileEditor";
 
 interface EditorPartProps {
@@ -16,64 +17,65 @@ interface EditorPartProps {
 /* The heading above the step or group body. Skins place it inside their own
    panel or card, so it carries no page-level chrome. */
 export function ProfileEditorHeading({ editor }: EditorPartProps) {
-  return <h2><Hint content={editor.headingHint}>{editor.headingText}</Hint></h2>;
+  return <h2><Hint content={editor.editing.headingHint}>{editor.editing.headingText}</Hint></h2>;
 }
 
 /* The settings body: guided step contents, or one settings group, or the
    search results. Shared by every skin; only the surrounding chrome differs. */
 export function ProfileEditorBody({ editor }: EditorPartProps) {
-  const { mode, query, activeGroup, t } = editor;
+  const { t } = useI18n();
+  const { mode, query, activeGroup } = editor.editing;
   return (
     <>
-      {mode === "quick" && <WizardSettings activeStep={editor.activeWizardStep} advanced={editor.advanced} busy={editor.guidedBusy} canRedoStep={editor.stepHistory.canRedo(editor.activeWizardStep)} canSave={editor.profile?.canSave ?? false} canUndoStep={editor.stepHistory.canUndo(editor.activeWizardStep)} dirtyCount={editor.dirtyCount} dirtyKeys={editor.dirtyKeys} fontFace={editor.fontFace} fontFamilies={editor.fontFamilies} fontOptionLabel={editor.fontOptionLabel} onAdvancedCommit={(next) => void editor.commitAdvanced(next)} onApply={() => void editor.designateProfile()} onFontFaceChange={editor.setFontFace} onPreview={editor.showPreview} onRedoStep={editor.redoStepEdit} onSave={() => void editor.saveCurrentProfile()} onSettingChange={editor.changeGuidedSetting} onSettingPreview={editor.previewSetting} onStepChange={editor.setActiveWizardStep} onUndoStep={editor.undoStepEdit} profileName={editor.profile?.displayPath ?? null} profilePath={editor.profile?.path ?? null} savedValues={editor.savedValues} settings={settingsSchema} t={t} values={editor.values} />}
+      {mode === "quick" && <WizardSettings activeStep={editor.editing.activeWizardStep} advanced={editor.document.advanced} busy={editor.editing.guidedBusy} canRedoStep={editor.history.stepHistory.canRedo(editor.editing.activeWizardStep)} canSave={editor.document.profile?.canSave ?? false} canUndoStep={editor.history.stepHistory.canUndo(editor.editing.activeWizardStep)} dirtyCount={editor.document.dirtyCount} dirtyKeys={editor.document.dirtyKeys} fontFace={editor.preview.fontFace} fontFamilies={editor.preview.fontFamilies} fontOptionLabel={editor.preview.fontOptionLabel} onAdvancedCommit={(next) => void editor.document.commitAdvanced(next)} onApply={() => void editor.document.designateProfile()} onFontFaceChange={editor.preview.setFontFace} onPreview={editor.preview.showPreview} onRedoStep={editor.history.redoStepEdit} onSave={() => void editor.document.saveCurrentProfile()} onSettingChange={editor.editing.changeGuidedSetting} onSettingPreview={editor.document.previewSetting} onStepChange={editor.editing.setActiveWizardStep} onUndoStep={editor.history.undoStepEdit} profileName={editor.document.profile?.displayPath ?? null} profilePath={editor.document.profile?.path ?? null} savedValues={editor.document.savedValues} settings={settingsSchema} t={t} values={editor.document.values} />}
 
-      {mode === "advanced" && query && <SearchSettings dirtyKeys={editor.dirtyKeys} onChange={editor.changeSetting} onPreviewChange={editor.previewSetting} savedValues={editor.savedValues} settings={editor.filteredSettings} t={t} values={editor.values} />}
-      {mode === "advanced" && !query && activeGroup === "basic" && <BasicSettings dirtyKeys={editor.dirtyKeys} onChange={editor.changeSetting} onPreviewChange={editor.previewSetting} savedValues={editor.savedValues} settings={editor.filteredSettings} t={t} values={editor.values} />}
-      {mode === "advanced" && !query && activeGroup === "shape" && <ShapeSettings dirtyKeys={editor.dirtyKeys} onChange={editor.changeSetting} onPreviewChange={editor.previewSetting} savedValues={editor.savedValues} settings={editor.filteredSettings} t={t} values={editor.values} />}
-      {mode === "advanced" && !query && activeGroup === "lcd" && <LcdSettings dirtyKeys={editor.dirtyKeys} onChange={editor.changeSetting} onPreviewChange={editor.previewSetting} savedValues={editor.savedValues} settings={editor.filteredSettings} t={t} values={editor.values} />}
+      {mode === "advanced" && query && <SearchSettings dirtyKeys={editor.document.dirtyKeys} onChange={editor.document.changeSetting} onPreviewChange={editor.document.previewSetting} savedValues={editor.document.savedValues} settings={editor.editing.filteredSettings} t={t} values={editor.document.values} />}
+      {mode === "advanced" && !query && activeGroup === "basic" && <BasicSettings dirtyKeys={editor.document.dirtyKeys} onChange={editor.document.changeSetting} onPreviewChange={editor.document.previewSetting} savedValues={editor.document.savedValues} settings={editor.editing.filteredSettings} t={t} values={editor.document.values} />}
+      {mode === "advanced" && !query && activeGroup === "shape" && <ShapeSettings dirtyKeys={editor.document.dirtyKeys} onChange={editor.document.changeSetting} onPreviewChange={editor.document.previewSetting} savedValues={editor.document.savedValues} settings={editor.editing.filteredSettings} t={t} values={editor.document.values} />}
+      {mode === "advanced" && !query && activeGroup === "lcd" && <LcdSettings dirtyKeys={editor.document.dirtyKeys} onChange={editor.document.changeSetting} onPreviewChange={editor.document.previewSetting} savedValues={editor.document.savedValues} settings={editor.editing.filteredSettings} t={t} values={editor.document.values} />}
 
       {mode === "advanced" && !query && activeGroup === "advanced" && (
         <AdvancedSettings
-          advanced={editor.advanced}
-          dirtyKeys={editor.dirtyKeys}
-          fontFamilies={editor.fontFamilies}
-          fontOptionLabel={editor.fontOptionLabel}
-          onAdvancedChange={editor.setAdvanced}
-          onAdvancedCommit={(next) => void editor.commitAdvanced(next)}
-          onOpenList={(kind) => editor.chooseGroup("lists", kind)}
-          onSettingChange={editor.changeSetting}
-          onSettingPreview={editor.previewSetting}
-          onUnityGamesChange={(games) => void editor.updateList("unityIncludeGames", games)}
-          savedValues={editor.savedValues}
-          settings={editor.filteredSettings}
+          advanced={editor.document.advanced}
+          dirtyKeys={editor.document.dirtyKeys}
+          fontFamilies={editor.preview.fontFamilies}
+          fontOptionLabel={editor.preview.fontOptionLabel}
+          onAdvancedChange={editor.document.setAdvanced}
+          onAdvancedCommit={(next) => void editor.document.commitAdvanced(next)}
+          onOpenList={(kind) => editor.editing.chooseGroup("lists", kind)}
+          onSettingChange={editor.document.changeSetting}
+          onSettingPreview={editor.document.previewSetting}
+          onUnityGamesChange={(games) => void editor.document.updateList("unityIncludeGames", games)}
+          savedValues={editor.document.savedValues}
+          settings={editor.editing.filteredSettings}
           t={t}
-          unityGames={editor.lists.unityIncludeGames ?? []}
-          values={editor.values}
+          unityGames={editor.document.lists.unityIncludeGames ?? []}
+          values={editor.document.values}
         />
       )}
 
       {mode === "advanced" && !query && activeGroup === "individual" && (
         <IndividualSettings
-          fontFamilies={editor.fontFamilies}
-          individualLabels={editor.individualLabels}
-          individuals={editor.individuals}
-          installedFontKeys={editor.installedFontKeys}
-          onAdd={editor.addIndividual}
-          onCommit={(next) => void editor.commitIndividuals(next)}
+          fontFamilies={editor.preview.fontFamilies}
+          individualLabels={editor.editing.individualLabels}
+          individuals={editor.document.individuals}
+          installedFontKeys={editor.preview.installedFontKeys}
+          onAdd={editor.document.addIndividual}
+          onCommit={(next) => void editor.document.commitIndividuals(next)}
           t={t}
         />
       )}
 
       {mode === "advanced" && !query && activeGroup === "lists" && (
         <ListsEditor
-          definitions={editor.listDefinitions}
-          entries={editor.lists}
-          focusKind={editor.listFocus}
-          fontFamilies={editor.fontFamilies}
-          fontOptionLabel={editor.fontOptionLabel}
-          installedFontKeys={editor.installedFontKeys}
-          onFocusHandled={editor.clearListFocus}
-          onUpdateList={(kind, entries) => void editor.updateList(kind, entries)}
+          definitions={editor.editing.listDefinitions}
+          entries={editor.document.lists}
+          focusKind={editor.editing.listFocus}
+          fontFamilies={editor.preview.fontFamilies}
+          fontOptionLabel={editor.preview.fontOptionLabel}
+          installedFontKeys={editor.preview.installedFontKeys}
+          onFocusHandled={editor.editing.clearListFocus}
+          onUpdateList={(kind, entries) => void editor.document.updateList(kind, entries)}
           t={t}
         />
       )}
@@ -88,25 +90,26 @@ interface PreviewPartProps extends EditorPartProps {
 }
 
 export function ProfileEditorPreview({ editor, ciSmoke, onPreviewReady, onOpenStudio }: PreviewPartProps) {
+  const { t } = useI18n();
   return (
     <ProfilePreviewPanel
       ciSmoke={ciSmoke}
-      docked={editor.previewDocked}
-      error={editor.error}
-      fontFace={editor.fontFace}
-      fontFamilies={editor.fontFamilies}
-      fontOptionLabel={editor.fontOptionLabel}
-      mode={editor.mode}
-      onError={editor.setPreviewError}
-      onFontFaceChange={editor.setFontFace}
+      docked={editor.preview.previewDocked}
+      error={editor.document.error}
+      fontFace={editor.preview.fontFace}
+      fontFamilies={editor.preview.fontFamilies}
+      fontOptionLabel={editor.preview.fontOptionLabel}
+      mode={editor.editing.mode}
+      onError={editor.preview.setPreviewError}
+      onFontFaceChange={editor.preview.setFontFace}
       onOpenStudio={onOpenStudio}
       onPreviewReady={onPreviewReady}
-      profilePath={editor.profile?.path ?? null}
-      ref={editor.previewPanelRef}
-      savedValues={editor.savedValues}
-      t={editor.t}
-      values={editor.values}
-      variants={editor.previewVariants}
+      profilePath={editor.document.profile?.path ?? null}
+      ref={editor.preview.previewPanelRef}
+      savedValues={editor.document.savedValues}
+      t={t}
+      values={editor.document.values}
+      variants={editor.preview.previewVariants}
     />
   );
 }
@@ -123,32 +126,35 @@ interface ToolbarProps extends EditorPartProps {
    with one enabling rule, so a skin cannot expose a command the document
    refuses. Advanced mode only; guided steps carry their own step tools. */
 export function ProfileEditorToolbar({ editor, variant = "text", className }: ToolbarProps) {
-  const { t, profile, busy, dirtyCount, recoveryRequired, command } = editor;
-  if (editor.mode !== "advanced") return null;
+  const { t } = useI18n();
+  const { profile, busy, dirtyCount, recoveryRequired, command } = editor.document;
+  if (editor.editing.mode !== "advanced") return null;
   const icons = variant === "icons";
   const undoLabel = t("profiles.undo");
   const redoLabel = t("profiles.redo");
   return (
     <div aria-label={t("profiles.editActions")} className={className ?? "profile-history-actions"} role="toolbar">
-      <button aria-label={icons ? undoLabel : undefined} className={icons ? "icon-button" : "button secondary compact-action"} disabled={!profile?.canUndo || busy} onClick={() => void editor.undo()} title={icons ? undoLabel : undefined} type="button"><Undo2 aria-hidden="true" size={14} />{!icons && <> {undoLabel}</>}</button>
-      <button aria-label={icons ? redoLabel : undefined} className={icons ? "icon-button" : "button secondary compact-action"} disabled={!profile?.canRedo || busy} onClick={() => void editor.redo()} title={icons ? redoLabel : undefined} type="button"><Redo2 aria-hidden="true" size={14} />{!icons && <> {redoLabel}</>}</button>
-      <button className="button secondary compact-action" disabled={!profile || dirtyCount === 0 || busy} onClick={() => void editor.discard()} title={t("profiles.discardDescription")} type="button"><RotateCcw aria-hidden="true" size={14} /> {t("profiles.discard")}</button>
-      <button className="button secondary compact-action" disabled={!profile || busy || recoveryRequired} onClick={editor.resetDefaults} title={t("profiles.resetDefaultsDescription")} type="button"><ListRestart aria-hidden="true" size={14} /> {t("profiles.resetDefaults")}</button>
-      <button className="button secondary compact-action" disabled={!profile || !profile.canSave || dirtyCount === 0 || busy || recoveryRequired} onClick={() => void editor.saveCurrentProfile()} type="button"><Save aria-hidden="true" size={14} /> {command === "save" ? t("profiles.saving") : t("profiles.saveNow")}</button>
-      {profile && !profile.canSave && <button className="button secondary compact-action" disabled={busy || recoveryRequired} onClick={() => editor.setSaveAsOpen(true)} type="button"><SaveAll aria-hidden="true" size={14} /> {t("files.saveAs")}</button>}
-      <button className="button primary compact-action" disabled={!profile || dirtyCount > 0 || busy || recoveryRequired} onClick={() => void editor.designateProfile()} title={dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button"><Play aria-hidden="true" size={14} /> {command === "designate" ? t("profiles.designating") : t("profiles.designate")}</button>
+      <button aria-label={icons ? undoLabel : undefined} className={icons ? "icon-button" : "button secondary compact-action"} disabled={!profile?.canUndo || busy} onClick={() => void editor.document.undo()} title={icons ? undoLabel : undefined} type="button"><Undo2 aria-hidden="true" size={14} />{!icons && <> {undoLabel}</>}</button>
+      <button aria-label={icons ? redoLabel : undefined} className={icons ? "icon-button" : "button secondary compact-action"} disabled={!profile?.canRedo || busy} onClick={() => void editor.document.redo()} title={icons ? redoLabel : undefined} type="button"><Redo2 aria-hidden="true" size={14} />{!icons && <> {redoLabel}</>}</button>
+      <button className="button secondary compact-action" disabled={!profile || dirtyCount === 0 || busy} onClick={() => void editor.document.discard()} title={t("profiles.discardDescription")} type="button"><RotateCcw aria-hidden="true" size={14} /> {t("profiles.discard")}</button>
+      <button className="button secondary compact-action" disabled={!profile || busy || recoveryRequired} onClick={editor.document.resetDefaults} title={t("profiles.resetDefaultsDescription")} type="button"><ListRestart aria-hidden="true" size={14} /> {t("profiles.resetDefaults")}</button>
+      <button className="button secondary compact-action" disabled={!profile || !profile.canSave || dirtyCount === 0 || busy || recoveryRequired} onClick={() => void editor.document.saveCurrentProfile()} type="button"><Save aria-hidden="true" size={14} /> {command === "save" ? t("profiles.saving") : t("profiles.saveNow")}</button>
+      {profile && !profile.canSave && <button className="button secondary compact-action" disabled={busy || recoveryRequired} onClick={() => editor.files.setSaveAsOpen(true)} type="button"><SaveAll aria-hidden="true" size={14} /> {t("files.saveAs")}</button>}
+      <button className="button primary compact-action" disabled={!profile || dirtyCount > 0 || busy || recoveryRequired} onClick={() => void editor.document.designateProfile()} title={dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button"><Play aria-hidden="true" size={14} /> {command === "designate" ? t("profiles.designating") : t("profiles.designate")}</button>
     </div>
   );
 }
 
 export function ProfileSaveAsForm({ editor }: EditorPartProps) {
-  const { t, busy, saveAsName, command } = editor;
-  if (!editor.saveAsOpen) return null;
+  const { t } = useI18n();
+  const { busy, command } = editor.document;
+  const { saveAsName } = editor.files;
+  if (!editor.files.saveAsOpen) return null;
   return (
-    <form className="profile-save-as" onSubmit={(event) => { event.preventDefault(); editor.submitSaveAs(); }}>
-      <label><span>{t("profiles.saveAsName")}</span><input autoFocus disabled={busy} onChange={(event) => editor.setSaveAsName(event.target.value)} value={saveAsName} /></label>
+    <form className="profile-save-as" onSubmit={(event) => { event.preventDefault(); editor.files.submitSaveAs(); }}>
+      <label><span>{t("profiles.saveAsName")}</span><input autoFocus disabled={busy} onChange={(event) => editor.files.setSaveAsName(event.target.value)} value={saveAsName} /></label>
       <button className="button primary" disabled={busy || !saveAsName.trim()} type="submit"><SaveAll aria-hidden="true" size={16} /> {command === "save-as" ? t("profiles.saving") : t("files.saveAs")}</button>
-      <button aria-label={t("profiles.cancelSaveAs")} className="icon-button" disabled={busy} onClick={() => editor.setSaveAsOpen(false)} title={t("profiles.cancelSaveAs")} type="button"><X aria-hidden="true" size={16} /></button>
+      <button aria-label={t("profiles.cancelSaveAs")} className="icon-button" disabled={busy} onClick={() => editor.files.setSaveAsOpen(false)} title={t("profiles.cancelSaveAs")} type="button"><X aria-hidden="true" size={16} /></button>
     </form>
   );
 }
@@ -157,7 +163,8 @@ export function ProfileSaveAsForm({ editor }: EditorPartProps) {
    unsaved changes, and the read-only warning when the original cannot be
    saved. */
 export function ProfileEditorSummary({ editor }: EditorPartProps) {
-  const { t, loading, profile, dirtyCount, message } = editor;
+  const { t } = useI18n();
+  const { loading, profile, dirtyCount, message } = editor.document;
   return (
     <>
       {loading

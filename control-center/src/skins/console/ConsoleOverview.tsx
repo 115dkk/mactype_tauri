@@ -14,17 +14,17 @@ const SPECIMEN_SIZES = [28, 20, 14, 12, 11, 10] as const;
 
 export function ConsoleOverview() {
   const { shell, execution } = useConsole();
-  const model = useOverviewModel({ execution: execution.status, activityLimit: Infinity, liveActivity: true });
+  const model = useOverviewModel({ execution: execution.service.status, activityLimit: Infinity, liveActivity: true });
   const { locale, t, activities, newestFirst, latestApplied, lastAppliedText, lastAppliedTimeText, openFolder, folderMessage } = model;
   const activeProfileName = model.activeProfileName ?? t("execution.profileNotApplied");
   const applied = useAppliedProfileEntry(model.activeProfile);
   const specimen = useOverviewSpecimen({ locale, appliedProfilePath: applied?.path ?? null, expectedProfileDigest: model.execution?.expectedProfileDigest });
   const { fontOptions, selectedFont, fontFace, setFontSource, inverted, setInverted, dark, sample, setSample, editing, setEditing } = specimen;
-  const preview = shell.status.findings.find((finding) => finding.label === "preview");
+  const preview = shell.installation.status.findings.find((finding) => finding.label === "preview");
   const helperConnected = preview?.value === "connected";
-  const tone = serviceTone(execution.serviceSummary.tone);
+  const tone = serviceTone(execution.service.serviceSummary.tone);
   const refresh = () => {
-    void execution.refresh();
+    void execution.service.refresh();
     model.refreshActivities();
   };
 
@@ -32,14 +32,14 @@ export function ConsoleOverview() {
     <ConsoleFrame
       actions={<>
         <button className="button secondary" onClick={refresh} type="button"><RefreshCw aria-hidden="true" size={14} /> {t("execution.refresh")}</button>
-        {execution.serviceSummary.actions.map((action) => (
-          <button className={`button ${action.tone === "primary" ? "primary" : "secondary"}${action.tone === "danger" ? " danger" : ""}`} disabled={!action.enabled} key={action.command} onClick={() => execution.runSummaryAction(action.command)} type="button">{execution.serviceBusy === action.command ? t("execution.serviceWorking") : t(action.labelKey)}</button>
+        {execution.service.serviceSummary.actions.map((action) => (
+          <button className={`button ${action.tone === "primary" ? "primary" : "secondary"}${action.tone === "danger" ? " danger" : ""}`} disabled={!action.enabled} key={action.command} onClick={() => execution.service.runSummaryAction(action.command)} type="button">{execution.service.serviceBusy === action.command ? t("execution.serviceWorking") : t(action.labelKey)}</button>
         ))}
       </>}
       bodyClassName="console-cols-main-side"
       status={<ConsoleServiceStatus />}
-      statusRight={<span className="app-statusbar-item">Control Center 0.1.0{shell.status.coreVersion && <> · {t("diagnostics.core")} <code>{shell.status.coreVersion}</code></>}</span>}
-      summary={<>{t(execution.serviceSummary.modeKey)} · <code>{activeProfileName}</code>{latestApplied && <> · {lastAppliedText}</>}</>}
+      statusRight={<span className="app-statusbar-item">Control Center 0.1.0{shell.installation.status.coreVersion && <> · {t("diagnostics.core")} <code>{shell.installation.status.coreVersion}</code></>}</span>}
+      summary={<>{t(execution.service.serviceSummary.modeKey)} · <code>{activeProfileName}</code>{latestApplied && <> · {lastAppliedText}</>}</>}
       title={t("nav.overview")}
       titleId="overview-title"
     >
@@ -49,7 +49,7 @@ export function ConsoleOverview() {
           <span className="console-muted">{t("overview.specimenSource", { profile: applied?.name ?? activeProfileName })}</span>
           <span className="console-spacer" />
           <button aria-expanded={editing} className="button ghost" onClick={() => setEditing((value) => !value)} type="button"><Pencil aria-hidden="true" size={13} /> {t("profiles.editSample")}</button>
-          <button className="button ghost" onClick={shell.openPreviewStudio} type="button"><AppWindow aria-hidden="true" size={13} /> {t("profiles.openStudio")}</button>
+          <button className="button ghost" onClick={shell.operations.openPreviewStudio} type="button"><AppWindow aria-hidden="true" size={13} /> {t("profiles.openStudio")}</button>
         </>}
         icon={<Eye aria-hidden="true" size={14} />}
         right={<>
@@ -67,24 +67,24 @@ export function ConsoleOverview() {
       <div className="console-stack">
         <ConsolePanel
           footer={<>
-            <button className="button secondary" onClick={() => shell.navigate("profiles", "advanced")} type="button">{t("files.editInTuner")}</button>
+            <button className="button secondary" onClick={() => shell.operations.editInTuner()} type="button">{t("files.editInTuner")}</button>
             <span className="console-spacer" />
-            <button className={`button ${execution.systemInjectionAction.intent === "stop" ? "secondary" : "primary"}`} disabled={!execution.systemInjectionAction.enabled} onClick={() => void execution.manageService(execution.systemInjectionAction.command)} type="button">{t(execution.systemInjectionAction.labelKey)}</button>
+            <button className={`button ${execution.service.systemInjectionAction.intent === "stop" ? "secondary" : "primary"}`} disabled={!execution.service.systemInjectionAction.enabled} onClick={() => void execution.service.manageService(execution.service.systemInjectionAction.command)} type="button">{t(execution.service.systemInjectionAction.labelKey)}</button>
           </>}
           scroll={false}
           title={t("nav.execution")}
         >
           <div className="console-big" data-tone={tone}>
             <StatusDot tone={tone} />
-            {t(execution.serviceSummary.statusKey)}
-            <small>{execution.serviceStateText}</small>
+            {t(execution.service.serviceSummary.statusKey)}
+            <small>{execution.service.serviceStateText}</small>
           </div>
           <ConsoleKv rows={[
-            { key: "profile", label: t("execution.summaryProfile"), value: <><code>{activeProfileName}</code>{execution.systemInjectionAction.state === "active" && <span className="console-tag">{t("files.inUseBadge")}</span>}</> },
-            { key: "mode", label: t("overview.executionMode"), value: t(execution.serviceSummary.modeKey) },
+            { key: "profile", label: t("execution.summaryProfile"), value: <><code>{activeProfileName}</code>{execution.service.systemInjectionAction.state === "active" && <span className="console-tag">{t("files.inUseBadge")}</span>}</> },
+            { key: "mode", label: t("overview.executionMode"), value: t(execution.service.serviceSummary.modeKey) },
             { key: "applied", label: t("overview.lastApplied"), value: lastAppliedTimeText },
             { key: "preview", label: t("finding.preview"), value: <><StatusDot tone={helperConnected ? "ok" : "warn"} /> {helperConnected ? `${t("overview.checked")} · x86` : t("finding.waiting")}</> },
-            { key: "core", label: t("diagnostics.core"), value: <code>{shell.status.coreVersion ?? t("diagnostics.unknown")}</code> },
+            { key: "core", label: t("diagnostics.core"), value: <code>{shell.installation.status.coreVersion ?? t("diagnostics.unknown")}</code> },
           ]} />
         </ConsolePanel>
 

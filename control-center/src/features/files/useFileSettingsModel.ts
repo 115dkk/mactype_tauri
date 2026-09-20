@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import type { DesignationEffect, ExecutionStatus, LegacyProfileCandidate, PreviewRequest, PreviewResult, ProfileEntry, ProfileSnapshot } from "../../app/model";
 import { operationErrorMessage } from "../../app/operationError";
 import {
@@ -75,7 +75,59 @@ function thumbnailRequest(profilePath: string): PreviewRequest {
    operations with their messages. Designating sets the run profile without
    turning the service on; the one start this model offers is the separate,
    labelled start-now action after a designation a stopped service holds. */
-export function useFileSettingsModel({ onEditInTuner }: FileSettingsModelOptions = {}) {
+export interface FileSettingsProfiles {
+  appliedProfile: string | null;
+  chooseProfile: (path: string) => Promise<boolean>;
+  editInTuner: (path: string) => Promise<void>;
+  profiles: readonly ProfileEntry[];
+  runProfileAttributes: (entry: ProfileEntry) => { "data-applied": boolean; "data-run-profile": boolean; };
+  thumbnails: ReadonlyMap<string, PreviewResult | null>;
+}
+
+export interface FileSettingsDocument {
+  canDesignate: boolean;
+  canSave: boolean;
+  designate: () => Promise<void>;
+  detailsSummary: string;
+  dirtyCount: number;
+  encodingText: string;
+  offerStart: boolean;
+  profile: ProfileSnapshot | null;
+  save: () => Promise<void>;
+  startServiceNow: () => Promise<void>;
+  unsavedText: string;
+}
+
+export interface FileSettingsFiles {
+  busy: string | null;
+  canDuplicate: boolean;
+  chooseImport: () => Promise<void>;
+  copyName: string;
+  duplicate: () => Promise<void>;
+  exportIni: () => Promise<void>;
+  revealCurrentProfile: () => Promise<void>;
+  setCopyName: Dispatch<SetStateAction<string>>;
+}
+
+export interface FileSettingsLegacy {
+  importFrom: (path: string) => Promise<void>;
+  legacy: LegacyProfileCandidate | null;
+}
+
+export interface FileSettingsMessages {
+  error: string | null;
+  message: string | null;
+}
+
+export interface FileSettingsModel {
+  profiles: FileSettingsProfiles;
+  document: FileSettingsDocument;
+  files: FileSettingsFiles;
+  legacy: FileSettingsLegacy;
+  messages: FileSettingsMessages;
+}
+
+export function useFileSettingsModel({ onEditInTuner }: FileSettingsModelOptions = {}): FileSettingsModel {
   const { t } = useI18n();
   const [profile, setProfile] = useState<ProfileSnapshot | null>(null);
   const [profiles, setProfiles] = useState<ReadonlyArray<ProfileEntry>>([]);
@@ -295,40 +347,47 @@ export function useFileSettingsModel({ onEditInTuner }: FileSettingsModelOptions
   const canDuplicate = Boolean(profile) && Boolean(copyName.trim()) && busy === null;
 
   return {
-    appliedProfile,
-    busy,
-    canDesignate,
-    canDuplicate,
-    canSave,
-    chooseImport,
-    chooseProfile,
-    copyName,
-    designate,
-    detailsSummary,
-    dirtyCount,
-    duplicate,
-    editInTuner,
-    encodingText,
-    error,
-    exportIni,
-    importFrom,
-    legacy,
-    message,
-    offerStart,
-    profile,
-    profiles,
-    revealCurrentProfile,
-    runProfileAttributes: (entry: ProfileEntry) => {
-      const applied = matchesAppliedProfile(entry, appliedProfile);
-      return { "data-applied": applied, "data-run-profile": applied };
+    profiles: {
+      appliedProfile,
+      chooseProfile,
+      editInTuner,
+      profiles,
+      runProfileAttributes: (entry: ProfileEntry) => {
+        const applied = matchesAppliedProfile(entry, appliedProfile);
+        return { "data-applied": applied, "data-run-profile": applied };
+      },
+      thumbnails,
     },
-    save,
-    setCopyName,
-    startServiceNow,
-    t,
-    thumbnails,
-    unsavedText,
+    document: {
+      canDesignate,
+      canSave,
+      designate,
+      detailsSummary,
+      dirtyCount,
+      encodingText,
+      offerStart,
+      profile,
+      save,
+      startServiceNow,
+      unsavedText,
+    },
+    files: {
+      busy,
+      canDuplicate,
+      chooseImport,
+      copyName,
+      duplicate,
+      exportIni,
+      revealCurrentProfile,
+      setCopyName,
+    },
+    legacy: {
+      importFrom,
+      legacy,
+    },
+    messages: {
+      error,
+      message,
+    },
   };
 }
-
-export type FileSettingsModel = ReturnType<typeof useFileSettingsModel>;

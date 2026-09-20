@@ -1,16 +1,16 @@
 import { AlertTriangle, Check, Copy, Download, ExternalLink, FolderSearch, LoaderCircle } from "lucide-react";
-import type { InstallationStatus } from "../app/model";
-import { useDiagnosticsModel } from "../features/diagnostics/useDiagnosticsModel";
-import { EventSourceList, EventTimeline, EventViewOptions } from "../features/events/EventTimeline";
-import { useEventLog } from "../features/events/useEventLog";
+import type { InstallationStatus } from "../../app/model";
+import { useDiagnosticsModel } from "../../features/diagnostics/useDiagnosticsModel";
+import { EventSourceList, EventTimeline, EventViewOptions } from "../../features/events/EventTimeline";
+import { useEventLog } from "../../features/events/useEventLog";
 
-interface DiagnosticsPageProps {
+interface ClassicDiagnosticsProps {
   status: InstallationStatus;
-  onReconnect: () => Promise<InstallationStatus>;
-  onRelocate: () => Promise<InstallationStatus>;
+  onReconnect: () => Promise<void>;
+  onRelocate: () => Promise<void>;
 }
 
-export function DiagnosticsPage({ status, onReconnect, onRelocate }: DiagnosticsPageProps) {
+export function ClassicDiagnostics({ status, onReconnect, onRelocate }: ClassicDiagnosticsProps) {
   const model = useDiagnosticsModel({ status, onReconnect, onRelocate });
   const { t, operation, completed, error, run } = model;
   const log = useEventLog();

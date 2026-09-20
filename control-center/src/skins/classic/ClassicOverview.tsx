@@ -1,12 +1,12 @@
 import { AlertTriangle, Check, ChevronDown, ChevronUp, ExternalLink, Power, ServerCog } from "lucide-react";
-import { timeText, useOverviewModel } from "../features/overview/useOverviewModel";
-import type { MessageKey } from "../i18n/i18n";
+import { timeText, useOverviewModel } from "../../features/overview/useOverviewModel";
+import type { MessageKey } from "../../i18n/i18n";
 
-interface OverviewPageProps {
+interface ClassicOverviewProps {
   onOpenService: () => void;
 }
 
-export function OverviewPage({ onOpenService }: OverviewPageProps) {
+export function ClassicOverview({ onOpenService }: ClassicOverviewProps) {
   const model = useOverviewModel();
   const { t, locale, state, newestFirst, expanded, setExpanded, folderMessage, execution, view, latestApplied } = model;
 

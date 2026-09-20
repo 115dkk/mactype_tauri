@@ -1,6 +1,6 @@
 import { Moon, Sun } from "lucide-react";
 import { useCallback, useMemo } from "react";
-import { isNavSelected, navEntries, type ShellProps } from "../../app/shell";
+import { isNavSelected, type ShellProps } from "../../app/shell";
 import { LanguagePicker } from "../../components/LanguagePicker";
 import { SkinPicker } from "../../components/SkinPicker";
 import { WindowTitleBar } from "../../components/WindowTitleBar";
@@ -18,8 +18,8 @@ import { ConsoleTuner } from "./ConsoleTuner";
    status bar. The dashboard grammar of a rendering tool's workbench. */
 export function ConsoleShell(props: ShellProps) {
   const { t } = useI18n();
-  const { view, profileMode, navigate } = props;
-  const { ciSmoke, openPreviewStudio, reconnectPreview, rediscoverInstallation, reportReady, setSkin, setStatus, skin, status, theme, toggleTheme } = props;
+  const { view, profileMode, navigate, entries } = props.navigation;
+  const { ciSmoke, reportReady } = props.operations;
   /* One service model for the whole shell: the overview dashboard, the
      service page and every status bar read and act on the same status. */
   const onExecutionReady = useCallback(() => reportReady("execution"), [reportReady]);
@@ -27,8 +27,7 @@ export function ConsoleShell(props: ShellProps) {
     ciSmoke: ciSmoke && view === "execution",
     onReady: onExecutionReady,
   });
-  const shell = useMemo<ShellProps>(() => ({ ciSmoke, navigate, openPreviewStudio, profileMode, reconnectPreview, rediscoverInstallation, reportReady, setSkin, setStatus, skin, status, theme, toggleTheme, view }), [ciSmoke, navigate, openPreviewStudio, profileMode, reconnectPreview, rediscoverInstallation, reportReady, setSkin, setStatus, skin, status, theme, toggleTheme, view]);
-  const context = useMemo(() => ({ shell, execution }), [shell, execution]);
+  const context = useMemo(() => ({ shell: props, execution }), [props, execution]);
 
   const page = view === "files"
     ? <ConsoleFiles />
@@ -47,7 +46,7 @@ export function ConsoleShell(props: ShellProps) {
       <div className="app-shell console-shell" data-testid="app-shell">
         <aside className="navigation console-rail" aria-label={t("app.mainMenu")}>
           <nav className="console-rail-items">
-            {navEntries.map((entry) => {
+            {entries.map((entry) => {
               const Icon = entry.icon;
               const separator = previousGroup !== undefined && previousGroup !== entry.group;
               previousGroup = entry.group;
@@ -64,9 +63,9 @@ export function ConsoleShell(props: ShellProps) {
           </nav>
           <div className="navigation-preferences console-rail-foot">
             <LanguagePicker />
-            <SkinPicker onChange={props.setSkin} skin={props.skin} />
-            <button aria-label={props.theme === "light" ? t("app.themeDark") : t("app.themeLight")} className="theme-toggle console-rail-item" onClick={props.toggleTheme} type="button">
-              {props.theme === "light" ? <Moon aria-hidden="true" size={18} strokeWidth={1.6} /> : <Sun aria-hidden="true" size={18} strokeWidth={1.6} />}
+            <SkinPicker onChange={props.preferences.setSkin} skin={props.preferences.skin} />
+            <button aria-label={props.preferences.theme === "light" ? t("app.themeDark") : t("app.themeLight")} className="theme-toggle console-rail-item" onClick={props.preferences.toggleTheme} type="button">
+              {props.preferences.theme === "light" ? <Moon aria-hidden="true" size={18} strokeWidth={1.6} /> : <Sun aria-hidden="true" size={18} strokeWidth={1.6} />}
               <span>{t("app.theme")}</span>
             </button>
           </div>

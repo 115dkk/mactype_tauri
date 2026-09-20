@@ -7,7 +7,7 @@ import { CupertinoPage } from "./CupertinoParts";
 
 export function CupertinoTuner({ shell }: { shell: ShellProps }) {
   const { t } = useI18n();
-  const mode = shell.profileMode;
+  const mode = shell.navigation.profileMode;
   const editor = useProfileEditor({ mode });
 
   return (
@@ -21,25 +21,25 @@ export function CupertinoTuner({ shell }: { shell: ShellProps }) {
       <ProfileSaveAsForm editor={editor} />
       <div className="cupertino-three profile-layout" data-mode={mode}>
         <aside className="cupertino-group cupertino-list settings-index" aria-label={mode === "quick" ? t("wizard.progress") : t("profiles.sections")}>
-          {mode === "advanced" && <div className="cupertino-row cupertino-list-search"><label className="cupertino-search"><Search aria-hidden="true" size={13} strokeWidth={2} /><span className="sr-only">{t("profiles.search")}</span><input onChange={(event) => editor.setQuery(event.target.value)} placeholder={t("profiles.search")} type="search" value={editor.query} /></label></div>}
+          {mode === "advanced" && <div className="cupertino-row cupertino-list-search"><label className="cupertino-search"><Search aria-hidden="true" size={13} strokeWidth={2} /><span className="sr-only">{t("profiles.search")}</span><input onChange={(event) => editor.editing.setQuery(event.target.value)} placeholder={t("profiles.search")} type="search" value={editor.editing.query} /></label></div>}
           <ul className="cupertino-list-items">
             {mode === "quick"
-              ? editor.wizardStepIds.map((step, index) => {
-                const done = index < editor.stepIndex;
-                return <li key={step}><button className="cupertino-row cupertino-list-row" data-selected={editor.activeWizardStep === step} onClick={() => editor.setActiveWizardStep(step)} type="button"><span aria-hidden="true" className="cupertino-n" data-done={done}>{done ? <Check aria-hidden="true" size={10} strokeWidth={3} /> : index + 1}</span><span>{t(`wizard.${step}`)}</span></button></li>;
+              ? editor.editing.wizardStepIds.map((step, index) => {
+                const done = index < editor.editing.stepIndex;
+                return <li key={step}><button className="cupertino-row cupertino-list-row" data-selected={editor.editing.activeWizardStep === step} onClick={() => editor.editing.setActiveWizardStep(step)} type="button"><span aria-hidden="true" className="cupertino-n" data-done={done}>{done ? <Check aria-hidden="true" size={10} strokeWidth={3} /> : index + 1}</span><span>{t(`wizard.${step}`)}</span></button></li>;
               })
-              : editor.groups.map((group) => <li key={group.id}><button className="cupertino-row cupertino-list-row" data-selected={!editor.query && editor.activeGroup === group.id} onClick={() => editor.chooseGroup(group.id)} type="button"><span>{group.label}</span></button></li>)}
+              : editor.editing.groups.map((group) => <li key={group.id}><button className="cupertino-row cupertino-list-row" data-selected={!editor.editing.query && editor.editing.activeGroup === group.id} onClick={() => editor.editing.chooseGroup(group.id)} type="button"><span>{group.label}</span></button></li>)}
           </ul>
         </aside>
-        <div className="settings-workspace cupertino-workspace" data-preview-docked={editor.previewDocked} ref={editor.workspaceRef}>
+        <div className="settings-workspace cupertino-workspace" data-preview-docked={editor.preview.previewDocked} ref={editor.preview.workspaceRef}>
           <div className="settings-form cupertino-mid">
-            <h2>{editor.headingText}</h2>
-            <p className="cupertino-desc">{editor.headingHint}</p>
+            <h2>{editor.editing.headingText}</h2>
+            <p className="cupertino-desc">{editor.editing.headingHint}</p>
             <div className="cupertino-group cupertino-settings-group">
               <ProfileEditorBody editor={editor} />
             </div>
           </div>
-          <ProfileEditorPreview ciSmoke={shell.ciSmoke} editor={editor} onOpenStudio={shell.openPreviewStudio} onPreviewReady={() => shell.reportReady("profiles")} />
+          <ProfileEditorPreview ciSmoke={shell.operations.ciSmoke} editor={editor} onOpenStudio={shell.operations.openPreviewStudio} onPreviewReady={() => shell.operations.reportReady("profiles")} />
         </div>
       </div>
     </CupertinoPage>

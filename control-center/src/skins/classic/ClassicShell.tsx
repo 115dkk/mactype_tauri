@@ -1,44 +1,37 @@
 import { Moon, Sun } from "lucide-react";
 import { useMemo } from "react";
-import { isNavSelected, navEntries, navGroupLabelKey, viewLabelKey, type ShellProps } from "../../app/shell";
+import { isNavSelected, navGroupLabelKey, viewLabelKey, type ShellProps } from "../../app/shell";
 import { LanguagePicker } from "../../components/LanguagePicker";
 import { SkinPicker } from "../../components/SkinPicker";
 import { WindowTitleBar } from "../../components/WindowTitleBar";
 import { findingLabel, findingValue } from "../../features/diagnostics/useDiagnosticsModel";
 import { useI18n } from "../../i18n/i18n";
-import { DiagnosticsPage } from "../../pages/DiagnosticsPage";
-import { ExecutionPage } from "../../pages/ExecutionPage";
-import { FileSettingsPage } from "../../pages/FileSettingsPage";
-import { OverviewPage } from "../../pages/OverviewPage";
-import { ProfilesPage } from "../../pages/ProfilesPage";
+import { ClassicDiagnostics } from "./ClassicDiagnostics";
+import { ClassicExecution } from "./ClassicExecution";
+import { ClassicFiles } from "./ClassicFiles";
+import { ClassicOverview } from "./ClassicOverview";
+import { ClassicTuner } from "./ClassicTuner";
 
 /* The classic skin: a labelled navigation pane with grouped entries, one
    work area, and a status bar that stays hidden. This is the layout the
    Control Center shipped with, kept as the default. */
 export function ClassicShell(props: ShellProps) {
   const { t } = useI18n();
-  const { view, profileMode, navigate, status } = props;
+  const { view, profileMode, navigate, entries } = props.navigation;
+  const { status } = props.installation;
 
   const page = useMemo(() => {
-    if (view === "files") return <FileSettingsPage onEditInTuner={() => navigate("profiles", "advanced")} />;
-    if (view === "profiles") return <ProfilesPage ciSmoke={props.ciSmoke} mode={profileMode} onModeChange={(mode) => navigate("profiles", mode)} onOpenStudio={props.openPreviewStudio} onPreviewReady={() => props.reportReady("profiles")} />;
-    if (view === "execution") return <ExecutionPage ciSmoke={props.ciSmoke} onReady={() => props.reportReady("execution")} />;
-    if (view === "diagnostics") return <DiagnosticsPage
+    if (view === "files") return <ClassicFiles onEditInTuner={props.operations.editInTuner} />;
+    if (view === "profiles") return <ClassicTuner ciSmoke={props.operations.ciSmoke} mode={profileMode} onModeChange={(mode) => navigate("profiles", mode)} onOpenStudio={props.operations.openPreviewStudio} onPreviewReady={() => props.operations.reportReady("profiles")} />;
+    if (view === "execution") return <ClassicExecution ciSmoke={props.operations.ciSmoke} onReady={() => props.operations.reportReady("execution")} />;
+    if (view === "diagnostics") return <ClassicDiagnostics
       status={status}
-      onReconnect={async () => {
-        const next = await props.reconnectPreview();
-        props.setStatus(next);
-        return next;
-      }}
-      onRelocate={async () => {
-        const next = await props.rediscoverInstallation();
-        props.setStatus(next);
-        return next;
-      }}
+      onReconnect={props.installation.reconnectPreview}
+      onRelocate={props.installation.rediscoverInstallation}
     />;
-    return <OverviewPage onOpenService={() => navigate("execution")} />;
+    return <ClassicOverview onOpenService={() => navigate("execution")} />;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, profileMode, status, props.ciSmoke]);
+  }, [view, profileMode, status, props.operations.ciSmoke]);
 
   const groups = [null, "wizardGroup", "tunerGroup", "toolsGroup"] as const;
 
@@ -56,8 +49,8 @@ export function ClassicShell(props: ShellProps) {
           </div>
           <nav>
             {groups.map((group) => {
-              const entries = navEntries.filter((entry) => entry.group === group);
-              const buttons = entries.map((entry) => {
+              const groupEntries = entries.filter((entry) => entry.group === group);
+              const buttons = groupEntries.map((entry) => {
                 const Icon = entry.icon;
                 const sub = group !== null && group !== "toolsGroup";
                 return (
@@ -78,15 +71,15 @@ export function ClassicShell(props: ShellProps) {
           </nav>
           <div className="navigation-preferences">
             <LanguagePicker />
-            <SkinPicker onChange={props.setSkin} skin={props.skin} />
+            <SkinPicker onChange={props.preferences.setSkin} skin={props.preferences.skin} />
             <button
-              aria-label={props.theme === "light" ? t("app.themeDark") : t("app.themeLight")}
+              aria-label={props.preferences.theme === "light" ? t("app.themeDark") : t("app.themeLight")}
               className="theme-toggle"
-              onClick={props.toggleTheme}
+              onClick={props.preferences.toggleTheme}
               type="button"
             >
-              {props.theme === "light" ? <Moon aria-hidden="true" size={17} /> : <Sun aria-hidden="true" size={17} />}
-              <span>{props.theme === "light" ? t("app.themeDark") : t("app.themeLight")}</span>
+              {props.preferences.theme === "light" ? <Moon aria-hidden="true" size={17} /> : <Sun aria-hidden="true" size={17} />}
+              <span>{props.preferences.theme === "light" ? t("app.themeDark") : t("app.themeLight")}</span>
             </button>
           </div>
         </aside>

@@ -7,8 +7,8 @@ export type DiagnosticsOperation = "export" | "copy" | "folder" | "relocate" | "
 
 export interface DiagnosticsModelOptions {
   status: InstallationStatus;
-  onReconnect: () => Promise<InstallationStatus>;
-  onRelocate: () => Promise<InstallationStatus>;
+  onReconnect: () => Promise<void>;
+  onRelocate: () => Promise<void>;
 }
 
 /* Installation findings are named the same way everywhere they appear: the

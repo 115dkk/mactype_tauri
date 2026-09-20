@@ -1,5 +1,5 @@
 import { Moon, Sun } from "lucide-react";
-import { isNavSelected, navEntries, navGroupLabelKey, type ShellProps } from "../../app/shell";
+import { isNavSelected, navGroupLabelKey, type ShellProps } from "../../app/shell";
 import { LanguagePicker } from "../../components/LanguagePicker";
 import { SkinPicker } from "../../components/SkinPicker";
 import { WindowTitleBar } from "../../components/WindowTitleBar";
@@ -15,7 +15,7 @@ import { FluentTuner } from "./FluentTuner";
    settings cards (icon, title, description, control) instead of tables. */
 export function FluentShell(props: ShellProps) {
   const { t } = useI18n();
-  const { view, profileMode, navigate } = props;
+  const { view, profileMode, navigate, entries } = props.navigation;
   const page = view === "files"
     ? <FluentFiles shell={props} />
     : view === "profiles"
@@ -34,11 +34,11 @@ export function FluentShell(props: ShellProps) {
         <aside className="navigation fluent-nav" aria-label={t("app.mainMenu")}>
           <nav className="fluent-nav-items">
             {groups.map((group) => {
-              const entries = navEntries.filter((entry) => entry.group === group);
+              const groupEntries = entries.filter((entry) => entry.group === group);
               return (
                 <div className="fluent-nav-group" key={group ?? "root"} role={group ? "group" : undefined} aria-labelledby={group ? `fluent-nav-${group}` : undefined}>
                   {group && <span className="fluent-nav-head" id={`fluent-nav-${group}`}>{t(navGroupLabelKey(group))}</span>}
-                  {entries.map((entry) => {
+                  {groupEntries.map((entry) => {
                     const Icon = entry.icon;
                     return (
                       <button className="nav-item fluent-nav-item" data-nav={entry.id} data-selected={isNavSelected(entry, view, profileMode)} key={entry.id} onClick={() => navigate(entry.view, entry.profileMode)} type="button">
@@ -53,10 +53,10 @@ export function FluentShell(props: ShellProps) {
           </nav>
           <div className="navigation-preferences fluent-nav-foot">
             <LanguagePicker />
-            <SkinPicker onChange={props.setSkin} skin={props.skin} />
-            <button aria-label={props.theme === "light" ? t("app.themeDark") : t("app.themeLight")} className="theme-toggle fluent-nav-item" onClick={props.toggleTheme} type="button">
-              {props.theme === "light" ? <Moon aria-hidden="true" size={16} strokeWidth={1.6} /> : <Sun aria-hidden="true" size={16} strokeWidth={1.6} />}
-              <span>{props.theme === "light" ? t("app.themeDark") : t("app.themeLight")}</span>
+            <SkinPicker onChange={props.preferences.setSkin} skin={props.preferences.skin} />
+            <button aria-label={props.preferences.theme === "light" ? t("app.themeDark") : t("app.themeLight")} className="theme-toggle fluent-nav-item" onClick={props.preferences.toggleTheme} type="button">
+              {props.preferences.theme === "light" ? <Moon aria-hidden="true" size={16} strokeWidth={1.6} /> : <Sun aria-hidden="true" size={16} strokeWidth={1.6} />}
+              <span>{props.preferences.theme === "light" ? t("app.themeDark") : t("app.themeLight")}</span>
             </button>
           </div>
         </aside>

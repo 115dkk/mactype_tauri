@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { settingsSchema } from "../../generated/settings";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type RefObject } from "react";
+import { settingsSchema, type SettingDefinition } from "../../generated/settings";
 import { settingMessageKey, useI18n } from "../../i18n/i18n";
 import { loadInstalledFontFamilies } from "../../app/tauri";
-import type { ListDefinition, ListKind } from "../../pages/profiles/ListsEditor";
-import { splitSubstitution } from "../../pages/profiles/profileEditorUtils";
-import type { PreviewVariant, ProfilePreviewHandle } from "../../pages/profiles/ProfilePreviewPanel";
-import { useProfileDocument } from "../../pages/profiles/useProfileDocument";
-import { useStepHistory } from "../../pages/profiles/useStepHistory";
-import { stepSupportsHistory, wizardStepIds, type WizardStepId } from "../../pages/profiles/wizardModel";
+import type { ListDefinition, ListKind } from "./ListsEditor";
+import { splitSubstitution } from "./profileEditorUtils";
+import type { PreviewVariant, ProfilePreviewHandle } from "./ProfilePreviewPanel";
+import { useProfileDocument, type ProfileDocument } from "./useProfileDocument";
+import { useStepHistory, type StepHistory } from "./useStepHistory";
+import { stepSupportsHistory, wizardStepIds, type WizardStepId } from "./wizardModel";
 import { answerStudioRequests, publishStudioDocument } from "../../studio/studioBridge";
 import type { StudioDocument } from "../../studio/studioModel";
 
@@ -39,7 +39,67 @@ export interface ProfileEditorGroup {
 /* The Tuner document, its history, fonts, search, and preview wiring. Every
    skin builds its own chrome around this one hook, so the guided history,
    the docking rule, and the step-aware preview stacks stay identical. */
-export function useProfileEditor({ mode = "advanced" }: ProfileEditorOptions = {}) {
+export interface ProfileEditorEditing {
+  activeDefinition: ProfileEditorGroup;
+  activeGroup: GroupId;
+  activeWizardLabel: string;
+  activeWizardStep: WizardStepId;
+  changeGuidedSetting: (settingId: string, value: number) => void;
+  chooseGroup: (group: GroupId, focusList?: ListKind) => void;
+  clearListFocus: () => void;
+  filteredSettings: ReadonlyArray<SettingDefinition>;
+  groups: readonly ProfileEditorGroup[];
+  guidedBusy: boolean;
+  headingHint: string;
+  headingText: string;
+  individualLabels: string[];
+  listDefinitions: readonly ListDefinition[];
+  listFocus: ListKind | null;
+  mode: ProfileMode;
+  query: string;
+  setActiveWizardStep: Dispatch<SetStateAction<WizardStepId>>;
+  setQuery: Dispatch<SetStateAction<string>>;
+  stepIndex: number;
+  wizardStepIds: readonly WizardStepId[];
+}
+
+export interface ProfileEditorHistory {
+  redoStepEdit: () => void;
+  stepHistory: StepHistory;
+  undoStepEdit: () => void;
+}
+
+export interface ProfileEditorPreview {
+  setPreviewError: Dispatch<SetStateAction<string | null>>;
+  fontFace: string;
+  fontFamilies: string[];
+  fontOptionLabel: (font: string) => string;
+  installedFontKeys: Set<string>;
+  previewDocked: boolean;
+  previewPanelRef: RefObject<ProfilePreviewHandle | null>;
+  previewVariants: readonly PreviewVariant[];
+  setFontFace: Dispatch<SetStateAction<string>>;
+  showPreview: () => void;
+  workspaceRef: RefObject<HTMLDivElement | null>;
+}
+
+export interface ProfileEditorFiles {
+  saveAsName: string;
+  saveAsOpen: boolean;
+  setSaveAsName: Dispatch<SetStateAction<string>>;
+  setSaveAsOpen: Dispatch<SetStateAction<boolean>>;
+  submitSaveAs: () => void;
+}
+
+export interface ProfileEditor {
+  document: ProfileDocument;
+  editing: ProfileEditorEditing;
+  history: ProfileEditorHistory;
+  preview: ProfileEditorPreview;
+  files: ProfileEditorFiles;
+}
+
+export function useProfileEditor({ mode = "advanced" }: ProfileEditorOptions = {}): ProfileEditor {
   const { locale, t } = useI18n();
   const groups = useMemo<ReadonlyArray<ProfileEditorGroup>>(() => [
     { id: "basic", label: t("group.basic.label"), description: t("group.basic.description") },
@@ -59,7 +119,6 @@ export function useProfileEditor({ mode = "advanced" }: ProfileEditorOptions = {
     advanced,
     busy,
     changeSetting,
-    dirtyCount,
     individuals,
     lists,
     profile,
@@ -266,52 +325,54 @@ export function useProfileEditor({ mode = "advanced" }: ProfileEditorOptions = {
   };
 
   return {
-    ...document,
-    error: document.error ?? previewError,
-    setPreviewError,
-    activeDefinition,
-    activeGroup,
-    activeWizardLabel,
-    activeWizardStep,
-    changeGuidedSetting,
-    chooseGroup,
-    clearListFocus,
-    dirtyCount,
-    filteredSettings,
-    fontFace,
-    fontFamilies,
-    fontOptionLabel,
-    groups,
-    guidedBusy,
-    headingHint,
-    headingText,
-    individualLabels,
-    installedFontKeys,
-    listDefinitions,
-    listFocus,
-    locale,
-    mode,
-    previewDocked,
-    previewPanelRef,
-    previewVariants,
-    query,
-    redoStepEdit,
-    saveAsName,
-    saveAsOpen,
-    setActiveWizardStep,
-    setFontFace,
-    setQuery,
-    setSaveAsName,
-    setSaveAsOpen,
-    showPreview,
-    stepHistory,
-    stepIndex,
-    submitSaveAs,
-    t,
-    undoStepEdit,
-    wizardStepIds,
-    workspaceRef,
+    document: { ...document, error: document.error ?? previewError },
+    editing: {
+      activeDefinition,
+      activeGroup,
+      activeWizardLabel,
+      activeWizardStep,
+      changeGuidedSetting,
+      chooseGroup,
+      clearListFocus,
+      filteredSettings,
+      groups,
+      guidedBusy,
+      headingHint,
+      headingText,
+      individualLabels,
+      listDefinitions,
+      listFocus,
+      mode,
+      query,
+      setActiveWizardStep,
+      setQuery,
+      stepIndex,
+      wizardStepIds,
+    },
+    history: {
+      redoStepEdit,
+      stepHistory,
+      undoStepEdit,
+    },
+    preview: {
+      setPreviewError,
+      fontFace,
+      fontFamilies,
+      fontOptionLabel,
+      installedFontKeys,
+      previewDocked,
+      previewPanelRef,
+      previewVariants,
+      setFontFace,
+      showPreview,
+      workspaceRef,
+    },
+    files: {
+      saveAsName,
+      saveAsOpen,
+      setSaveAsName,
+      setSaveAsOpen,
+      submitSaveAs,
+    },
   };
 }
-
-export type ProfileEditor = ReturnType<typeof useProfileEditor>;

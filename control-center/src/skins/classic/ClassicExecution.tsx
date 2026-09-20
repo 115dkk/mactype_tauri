@@ -1,30 +1,32 @@
+import { useI18n } from "../../i18n/i18n";
 import { AlertTriangle, Check, ChevronDown, FileCode2, ListChecks, Power, PowerOff, RefreshCw, ServerCog, ShieldAlert, Wrench } from "lucide-react";
-import { ExecutionMessages, LegacyServiceControls, LegacyTrayConflict, ManualLaunchBody, MigrationConfirmation, RegisteredTargetsBody, ServicePackageNotice, SystemServiceControls, SystemServiceDetails } from "../features/execution/ExecutionParts";
-import { useExecutionModel } from "../features/execution/useExecutionModel";
+import { ExecutionMessages, LegacyServiceControls, LegacyTrayConflict, ManualLaunchBody, MigrationConfirmation, RegisteredTargetsBody, ServicePackageNotice, SystemServiceControls, SystemServiceDetails } from "../../features/execution/ExecutionParts";
+import { useExecutionModel } from "../../features/execution/useExecutionModel";
 
-export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean; onReady?: () => void }) {
+export function ClassicExecution({ ciSmoke = false, onReady }: { ciSmoke?: boolean; onReady?: () => void }) {
   const model = useExecutionModel({ ciSmoke, onReady });
-  const { t, status, serviceSummary, systemInjectionAction, serviceStateText, serviceBusy } = model;
+  const { t } = useI18n();
+  const { status, serviceSummary, systemInjectionAction, serviceStateText, serviceBusy } = model.service;
 
   return (
     <section className="page view-enter" aria-labelledby="execution-title">
       <header className="page-header">
         <div><h1 id="execution-title">{t("nav.execution")}</h1><p>{t("execution.subtitle")}</p></div>
         <div className="header-actions">
-          <button className="button secondary" onClick={() => void model.refresh()} type="button"><RefreshCw aria-hidden="true" size={16} /> {t("execution.refresh")}</button>
+          <button className="button secondary" onClick={() => void model.service.refresh()} type="button"><RefreshCw aria-hidden="true" size={16} /> {t("execution.refresh")}</button>
         </div>
       </header>
 
       <section className="service-summary" data-state={serviceSummary.tone} data-service-summary>
         <dl className="service-summary-grid">
-          <div><dt>{t("execution.summaryProfile")}</dt><dd><code title={status?.activeProfile ?? undefined}>{model.activeProfileName}</code></dd></div>
+          <div><dt>{t("execution.summaryProfile")}</dt><dd><code title={status?.activeProfile ?? undefined}>{model.service.activeProfileName}</code></dd></div>
           <div><dt>{t("execution.summaryMode")}</dt><dd>{t(serviceSummary.modeKey)}</dd></div>
           <div>
             <dt>{t("execution.summaryStatus")}</dt>
             <dd>{serviceSummary.tone === "normal" ? <Check className="success" aria-hidden="true" size={18} /> : serviceSummary.tone === "neutral" ? <PowerOff className="neutral-status" aria-hidden="true" size={18} /> : <AlertTriangle className="warning" aria-hidden="true" size={18} />}{t(serviceSummary.statusKey)}</dd>
           </div>
         </dl>
-        {model.legacyTrayResolution ? <LegacyTrayConflict model={model} /> : (
+        {model.legacy.legacyTrayResolution ? <LegacyTrayConflict model={model} /> : (
           <>
             {serviceSummary.notice && (
               <div className="service-summary-notice" data-kind={serviceSummary.notice.kind} data-prominent-exception>
@@ -41,8 +43,8 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
                   className={`button ${action.tone === "primary" ? "primary" : "secondary"}${action.tone === "danger" ? " danger" : ""}`}
                   disabled={!action.enabled}
                   key={action.command}
-                  onClick={() => model.runSummaryAction(action.command)}
-                  ref={action.command === "migrate-from-legacy" ? model.migrationTriggerRef : undefined}
+                  onClick={() => model.service.runSummaryAction(action.command)}
+                  ref={action.command === "migrate-from-legacy" ? model.migration.migrationTriggerRef : undefined}
                   type="button"
                 >
                   {serviceBusy === action.command ? t("execution.serviceWorking") : t(action.labelKey)}
@@ -71,13 +73,13 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
             <div>
               <span className="eyebrow">{t("execution.openServiceTitle")}</span>
               <strong>{t(systemInjectionAction.titleKey)}</strong>
-              <p>{t(systemInjectionAction.descriptionKey, { name: model.activeProfileName })}</p>
+              <p>{t(systemInjectionAction.descriptionKey, { name: model.service.activeProfileName })}</p>
             </div>
           </div>
           <button
             className={systemInjectionAction.intent === "stop" ? "button secondary system-injection-action" : "button primary system-injection-action"}
             disabled={!systemInjectionAction.enabled}
-            onClick={() => void model.manageService(systemInjectionAction.command)}
+            onClick={() => void model.service.manageService(systemInjectionAction.command)}
             type="button"
           >
             {t(systemInjectionAction.labelKey)}
@@ -95,7 +97,7 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
         <div className="service-row-head execution-option">
           <span className="service-row-icon"><Power aria-hidden="true" size={19} /></span>
           <span className="service-row-copy"><h2 id="autostart-title">{t("execution.autostartTitle")}</h2><p>{t("execution.autostartDescription")}</p></span>
-          <label className="switch-control"><input aria-labelledby="autostart-title" checked={status?.autoStart ?? false} disabled={!status} onChange={(event) => void model.toggleAutostart(event.target.checked)} role="switch" type="checkbox" /><span aria-hidden="true">{status?.autoStart ? t("common.on") : t("common.off")}</span></label>
+          <label className="switch-control"><input aria-labelledby="autostart-title" checked={status?.autoStart ?? false} disabled={!status} onChange={(event) => void model.service.toggleAutostart(event.target.checked)} role="switch" type="checkbox" /><span aria-hidden="true">{status?.autoStart ? t("common.on") : t("common.off")}</span></label>
         </div>
       </div>
 
@@ -111,11 +113,11 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
         </div>
       </details>
 
-      <details className="service-row" data-kind="manual" onToggle={(event) => { if (event.currentTarget.open && model.candidates === null) void model.loadCandidates(); }}>
+      <details className="service-row" data-kind="manual" onToggle={(event) => { if (event.currentTarget.open && model.targets.candidates === null) void model.targets.loadCandidates(); }}>
         <summary>
           <span className="service-row-icon"><FileCode2 aria-hidden="true" size={19} /></span>
           <span className="service-row-copy"><h2>{t("execution.manualTitle")}</h2><p>{t("execution.manualDescription")}</p></span>
-          <span className="service-row-state" data-tone="neutral">{model.targetName || t("execution.noExecutableSelected")}</span>
+          <span className="service-row-state" data-tone="neutral">{model.targets.targetName || t("execution.noExecutableSelected")}</span>
           <ChevronDown aria-hidden="true" className="service-row-chevron" size={17} />
         </summary>
         <div className="service-row-body">

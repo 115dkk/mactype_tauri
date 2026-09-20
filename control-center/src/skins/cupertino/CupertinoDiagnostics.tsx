@@ -9,17 +9,9 @@ import { CupertinoFootnote, CupertinoGroup, CupertinoPage, CupertinoRow, Cuperti
 export function CupertinoDiagnostics({ shell }: { shell: ShellProps }) {
   const { t } = useI18n();
   const model = useDiagnosticsModel({
-    status: shell.status,
-    onReconnect: async () => {
-      const next = await shell.reconnectPreview();
-      shell.setStatus(next);
-      return next;
-    },
-    onRelocate: async () => {
-      const next = await shell.rediscoverInstallation();
-      shell.setStatus(next);
-      return next;
-    },
+    status: shell.installation.status,
+    onReconnect: shell.installation.reconnectPreview,
+    onRelocate: shell.installation.rediscoverInstallation,
   });
   const log = useEventLog();
   const { operation, run } = model;
@@ -37,7 +29,7 @@ export function CupertinoDiagnostics({ shell }: { shell: ShellProps }) {
     >
       <CupertinoGroup dataKind="installation">
         <CupertinoRow
-          description={<code>{shell.status.root ?? t("overview.noRoot")}</code>}
+          description={<code>{shell.installation.status.root ?? t("overview.noRoot")}</code>}
           hero
           leading={<span className="cupertino-okc" data-tone={allOk ? "ok" : "warn"}>{allOk ? <Check aria-hidden="true" size={16} strokeWidth={3} /> : <AlertTriangle aria-hidden="true" size={15} strokeWidth={2.4} />}</span>}
           title={t("overview.installation")}
@@ -54,7 +46,7 @@ export function CupertinoDiagnostics({ shell }: { shell: ShellProps }) {
       <CupertinoSection title={t("diagnostics.components")}>
         <CupertinoGroup dataKind="components">
           <CupertinoRow title="Control Center" value={<code>0.1.0</code>} />
-          <CupertinoRow title={t("diagnostics.core")} value={<code>{shell.status.coreVersion ?? t("diagnostics.unknown")}</code>} />
+          <CupertinoRow title={t("diagnostics.core")} value={<code>{shell.installation.status.coreVersion ?? t("diagnostics.unknown")}</code>} />
         </CupertinoGroup>
       </CupertinoSection>
 

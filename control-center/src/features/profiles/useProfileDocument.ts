@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import type { AdvancedProfile, IndividualSetting, ProfileSnapshot } from "../../app/model";
 import { operationErrorMessage } from "../../app/operationError";
 import { openPreferredProfile, rememberProfile } from "../../app/profilePreference";
@@ -57,7 +57,39 @@ function profileLists(profile: ProfileSnapshot): Record<string, ReadonlyArray<st
   };
 }
 
-export function useProfileDocument(t: I18nValue["t"]) {
+export interface ProfileDocument {
+  addIndividual: (font: string) => void;
+  advanced: AdvancedProfile;
+  designateProfile: () => Promise<void>;
+  busy: boolean;
+  changeSetting: (settingId: string, value: number) => void;
+  command: ProfileCommand | null;
+  commitAdvanced: (next: AdvancedProfile) => void;
+  commitIndividuals: (next: IndividualSetting[]) => void;
+  dirtyCount: number;
+  dirtyKeys: string[];
+  discard: () => Promise<void>;
+  error: string | null;
+  individuals: IndividualSetting[];
+  lists: Record<string, readonly string[]>;
+  loading: boolean;
+  message: string | null;
+  previewSetting: (settingId: string, value: number) => void;
+  profile: ProfileSnapshot | null;
+  recoveryRequired: boolean;
+  redo: () => Promise<void>;
+  resetDefaults: () => void;
+  savedValues: Record<string, number> | undefined;
+  saveCurrentProfile: () => Promise<void>;
+  saveProfileAs: (name: string) => Promise<boolean>;
+  setAdvanced: Dispatch<SetStateAction<AdvancedProfile>>;
+  setError: Dispatch<SetStateAction<string | null>>;
+  undo: () => Promise<void>;
+  updateList: (kind: string, entries: ReadonlyArray<string>) => void;
+  values: Record<string, number>;
+}
+
+export function useProfileDocument(t: I18nValue["t"]): ProfileDocument {
   const [profile, setProfile] = useState<ProfileSnapshot | null>(null);
   const [values, setValues] = useState<Record<string, number>>(
     Object.fromEntries(settingsSchema.map((setting) => [setting.id, setting.default])),

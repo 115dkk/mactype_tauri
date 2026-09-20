@@ -15,7 +15,8 @@ type Expanded = "registered" | "manual" | null;
 export function ConsoleExecution() {
   const { locale, t } = useI18n();
   const { execution: model } = useConsole();
-  const { status, serviceSummary, systemInjectionAction, legacyService } = model;
+  const { status, serviceSummary, systemInjectionAction } = model.service;
+  const { legacyService } = model.legacy;
   const [expanded, setExpanded] = useState<Expanded>(null);
   const [checkedAt, setCheckedAt] = useState<number | null>(null);
   useEffect(() => {
@@ -24,13 +25,13 @@ export function ConsoleExecution() {
   const toggle = (kind: Exclude<Expanded, null>) => {
     const next = expanded === kind ? null : kind;
     setExpanded(next);
-    if (next === "manual" && model.candidates === null) void model.loadCandidates();
+    if (next === "manual" && model.targets.candidates === null) void model.targets.loadCandidates();
   };
   const tone = serviceTone(serviceSummary.tone);
 
   return (
     <ConsoleFrame
-      actions={<button className="button secondary" onClick={() => void model.refresh()} type="button"><RefreshCw aria-hidden="true" size={14} /> {t("execution.refresh")}</button>}
+      actions={<button className="button secondary" onClick={() => void model.service.refresh()} type="button"><RefreshCw aria-hidden="true" size={14} /> {t("execution.refresh")}</button>}
       bodyClassName="console-cols-side-main"
       crumb={t("nav.wizardGroup")}
       status={<ConsoleServiceStatus />}
@@ -41,26 +42,27 @@ export function ConsoleExecution() {
     >
       <ConsolePanel
         className="console-service-panel"
+        serviceSummaryState={serviceSummary.tone}
         footer={<>
-          <button className={`button ${systemInjectionAction.intent === "stop" ? "secondary" : "primary"}`} disabled={!systemInjectionAction.enabled} onClick={() => void model.manageService(systemInjectionAction.command)} type="button">{t(systemInjectionAction.labelKey)}</button>
+          <button className={`button ${systemInjectionAction.intent === "stop" ? "secondary" : "primary"}`} disabled={!systemInjectionAction.enabled} onClick={() => void model.service.manageService(systemInjectionAction.command)} type="button">{t(systemInjectionAction.labelKey)}</button>
           <span className="console-spacer" />
         </>}
         title={t("execution.statusPanel")}
       >
-        <div className="console-big" data-service-summary data-state={serviceSummary.tone}>
+        <div className="console-big" data-state={serviceSummary.tone}>
           <StatusDot tone={tone} />
           {t(serviceSummary.statusKey)}
-          <small>{model.serviceStateText}</small>
+          <small>{model.service.serviceStateText}</small>
         </div>
         <ConsoleKv rows={[
-          { key: "profile", label: t("execution.summaryProfile"), value: <code title={status?.activeProfile ?? undefined}>{model.activeProfileName}</code> },
+          { key: "profile", label: t("execution.summaryProfile"), value: <code title={status?.activeProfile ?? undefined}>{model.service.activeProfileName}</code> },
           { key: "mode", label: t("execution.summaryMode"), value: t(serviceSummary.modeKey) },
-          { key: "generation", label: t("execution.profileGeneration"), value: t(model.profileIndicator.labelKey) },
+          { key: "generation", label: t("execution.profileGeneration"), value: t(model.service.profileIndicator.labelKey) },
           { key: "appinit", label: t("execution.appInit"), value: status?.registryModeDetected ? t("execution.entryDetected") : t("execution.notDetected") },
           { key: "legacy", label: t("execution.legacyTrayLabel"), value: legacyService ? `${t(`execution.servicePresence.${legacyService.presence}`)} · ${t(`execution.serviceState.${legacyService.state}`)}` : t("execution.notDetected") },
         ]} />
         <LegacyTrayConflict model={model} />
-        {!model.legacyTrayResolution && (serviceSummary.notice || serviceSummary.actions.length > 0) && <div className="console-summary-actions"><ServiceSummaryNoticeAndActions model={model} /></div>}
+        {!model.legacy.legacyTrayResolution && (serviceSummary.notice || serviceSummary.actions.length > 0) && <div className="console-summary-actions"><ServiceSummaryNoticeAndActions model={model} /></div>}
         <ServicePackageNotice model={model} />
         <details className="console-details">
           <summary><Wrench aria-hidden="true" size={13} /> {t("execution.maintenance")}<ChevronDown aria-hidden="true" className="console-details-chevron" size={13} /></summary>
@@ -75,13 +77,13 @@ export function ConsoleExecution() {
           <StatusDot tone={systemInjectionAction.state === "active" ? "ok" : "neutral"} />
           <div><h3 id="console-system-title">{t("execution.systemTitle")}</h3><p>{t("execution.systemDescription")}</p></div>
           <span className="console-mode-state">{t(systemInjectionAction.titleKey)}</span>
-          <SwitchControl checked={systemInjectionAction.state === "active"} disabled={!systemInjectionAction.enabled} labelledBy="console-system-title" onChange={() => void model.manageService(systemInjectionAction.command)} />
+          <SwitchControl checked={systemInjectionAction.state === "active"} disabled={!systemInjectionAction.enabled} labelledBy="console-system-title" onChange={() => void model.service.manageService(systemInjectionAction.command)} />
         </div>
         <div className="console-mode-row" data-kind="autostart">
           <StatusDot tone={status?.autoStart ? "ok" : "neutral"} />
           <div><h3 id="console-autostart-title">{t("execution.autostartTitle")}</h3><p>{t("execution.autostartDescription")}</p></div>
           <span className="console-mode-state">{status?.autoStart ? t("common.on") : t("common.off")}</span>
-          <SwitchControl checked={status?.autoStart ?? false} disabled={!status} labelledBy="console-autostart-title" onChange={(checked) => void model.toggleAutostart(checked)} />
+          <SwitchControl checked={status?.autoStart ?? false} disabled={!status} labelledBy="console-autostart-title" onChange={(checked) => void model.service.toggleAutostart(checked)} />
         </div>
         <div className="console-mode-row" data-expanded={expanded === "registered"} data-kind="registered">
           <StatusDot tone={status?.sessionTargets.length ? "ok" : "neutral"} />
@@ -91,9 +93,9 @@ export function ConsoleExecution() {
         </div>
         {expanded === "registered" && <div className="console-mode-detail"><RegisteredTargetsBody model={model} /></div>}
         <div className="console-mode-row" data-expanded={expanded === "manual"} data-kind="manual">
-          <StatusDot tone={model.target ? "accent" : "neutral"} />
+          <StatusDot tone={model.targets.target ? "accent" : "neutral"} />
           <div><h3>{t("execution.manualTitle")}</h3><p>{t("execution.manualDescription")}</p></div>
-          <span className="console-mode-state">{model.targetName || t("execution.noExecutableSelected")}</span>
+          <span className="console-mode-state">{model.targets.targetName || t("execution.noExecutableSelected")}</span>
           <button aria-expanded={expanded === "manual"} className="icon-button" onClick={() => toggle("manual")} type="button"><ChevronDown aria-hidden="true" size={14} /></button>
         </div>
         {expanded === "manual" && <div className="console-mode-detail"><ManualLaunchBody model={model} /></div>}

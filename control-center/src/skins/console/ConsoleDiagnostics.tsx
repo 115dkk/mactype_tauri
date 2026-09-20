@@ -12,17 +12,9 @@ export function ConsoleDiagnostics() {
   const { t } = useI18n();
   const { shell } = useConsole();
   const model = useDiagnosticsModel({
-    status: shell.status,
-    onReconnect: async () => {
-      const next = await shell.reconnectPreview();
-      shell.setStatus(next);
-      return next;
-    },
-    onRelocate: async () => {
-      const next = await shell.rediscoverInstallation();
-      shell.setStatus(next);
-      return next;
-    },
+    status: shell.installation.status,
+    onReconnect: shell.installation.reconnectPreview,
+    onRelocate: shell.installation.rediscoverInstallation,
   });
   const log = useEventLog();
   const { operation, run } = model;
@@ -37,7 +29,7 @@ export function ConsoleDiagnostics() {
       crumb={t("nav.toolsGroup")}
       status={<ConsoleServiceStatus />}
       statusRight={log.summary && <span className="app-statusbar-item">{t("event.severity.warning")} {log.summary.warnings} · {t("event.severity.error")} {log.summary.errors}</span>}
-      summary={<code>{shell.status.root ?? t("overview.noRoot")}</code>}
+      summary={<code>{shell.installation.status.root ?? t("overview.noRoot")}</code>}
       title={t("nav.diagnostics")}
       titleId="diagnostics-title"
     >
@@ -55,7 +47,7 @@ export function ConsoleDiagnostics() {
         <ConsolePanel scroll={false} title={t("diagnostics.components")}>
           <ConsoleKv rows={[
             { key: "cc", label: "Control Center", value: <code>0.1.0</code> },
-            { key: "core", label: t("diagnostics.core"), value: <code>{shell.status.coreVersion ?? t("diagnostics.unknown")}</code> },
+            { key: "core", label: t("diagnostics.core"), value: <code>{shell.installation.status.coreVersion ?? t("diagnostics.unknown")}</code> },
           ]} />
         </ConsolePanel>
         <ConsolePanel

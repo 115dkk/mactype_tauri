@@ -11,13 +11,13 @@ type Expanded = "system" | "registered" | "manual" | null;
 
 export function FluentExecution({ shell }: { shell: ShellProps }) {
   const { t } = useI18n();
-  const model = useExecutionModel({ ciSmoke: shell.ciSmoke, onReady: () => shell.reportReady("execution") });
-  const { status, serviceSummary, systemInjectionAction } = model;
+  const model = useExecutionModel({ ciSmoke: shell.operations.ciSmoke, onReady: () => shell.operations.reportReady("execution") });
+  const { status, serviceSummary, systemInjectionAction } = model.service;
   const [expanded, setExpanded] = useState<Expanded>("system");
   const toggle = (kind: Exclude<Expanded, null>) => {
     const next = expanded === kind ? null : kind;
     setExpanded(next);
-    if (next === "manual" && model.candidates === null) void model.loadCandidates();
+    if (next === "manual" && model.targets.candidates === null) void model.targets.loadCandidates();
   };
   const heroIcon = serviceSummary.tone === "normal"
     ? <CircleCheck aria-hidden="true" size={28} strokeWidth={1.6} />
@@ -27,7 +27,7 @@ export function FluentExecution({ shell }: { shell: ShellProps }) {
 
   return (
     <FluentPage
-      actions={<button className="button secondary" onClick={() => void model.refresh()} type="button"><RefreshCw aria-hidden="true" size={16} strokeWidth={1.6} /> {t("execution.refresh")}</button>}
+      actions={<button className="button secondary" onClick={() => void model.service.refresh()} type="button"><RefreshCw aria-hidden="true" size={16} strokeWidth={1.6} /> {t("execution.refresh")}</button>}
       subtitle={t("execution.subtitle")}
       title={t("nav.execution")}
       titleId="execution-title"
@@ -35,9 +35,9 @@ export function FluentExecution({ shell }: { shell: ShellProps }) {
       <FluentCards>
         <div data-service-summary data-state={serviceSummary.tone}>
           <FluentCard
-            action={!model.legacyTrayResolution && <div className="fluent-summary-actions"><ServiceSummaryNoticeAndActions model={model} /></div>}
+            action={!model.legacy.legacyTrayResolution && <div className="fluent-summary-actions"><ServiceSummaryNoticeAndActions model={model} /></div>}
             dataKind="hero"
-            description={<>{t("execution.summaryProfile")} <code title={status?.activeProfile ?? undefined}>{model.activeProfileName}</code> · {model.serviceStateText}</>}
+            description={<>{t("execution.summaryProfile")} <code title={status?.activeProfile ?? undefined}>{model.service.activeProfileName}</code> · {model.service.serviceStateText}</>}
             hero
             icon={heroIcon}
             title={t(serviceSummary.statusKey)}
@@ -60,18 +60,18 @@ export function FluentExecution({ shell }: { shell: ShellProps }) {
           >
             <ServicePackageNotice model={model} />
             <FluentSubRow
-              action={<button className={`button ${systemInjectionAction.intent === "stop" ? "secondary" : "primary"}`} disabled={!systemInjectionAction.enabled} onClick={() => void model.manageService(systemInjectionAction.command)} type="button">{t(systemInjectionAction.labelKey)}</button>}
-              description={t(systemInjectionAction.descriptionKey, { name: model.activeProfileName })}
+              action={<button className={`button ${systemInjectionAction.intent === "stop" ? "secondary" : "primary"}`} disabled={!systemInjectionAction.enabled} onClick={() => void model.service.manageService(systemInjectionAction.command)} type="button">{t(systemInjectionAction.labelKey)}</button>}
+              description={t(systemInjectionAction.descriptionKey, { name: model.service.activeProfileName })}
               title={t(systemInjectionAction.titleKey)}
             />
-            <FluentSubRow action={<FluentState>{t(model.profileIndicator.labelKey)}</FluentState>} title={t("execution.profileGeneration")} />
+            <FluentSubRow action={<FluentState>{t(model.service.profileIndicator.labelKey)}</FluentState>} title={t("execution.profileGeneration")} />
             <FluentSubRow action={<FluentState tone={status?.registryModeDetected ? "warn" : undefined}>{status?.registryModeDetected ? t("execution.entryDetected") : t("execution.notDetected")}</FluentState>} description={t("execution.appInitDetectOnly")} title={t("execution.appInit")} />
             <SystemServiceControls model={model} />
             <LegacyServiceControls model={model} />
             <FluentSubRow><div className="fluent-card-desc fluent-info"><Info aria-hidden="true" size={14} strokeWidth={1.6} /> {status ? t("execution.systemNote") : t("execution.checking")}</div></FluentSubRow>
           </FluentCard>
           <FluentCard
-            action={<div className="fluent-switch"><span>{status?.autoStart ? t("common.on") : t("common.off")}</span><SwitchControl checked={status?.autoStart ?? false} disabled={!status} labelledBy="fluent-autostart-title" onChange={(checked) => void model.toggleAutostart(checked)} /></div>}
+            action={<div className="fluent-switch"><span>{status?.autoStart ? t("common.on") : t("common.off")}</span><SwitchControl checked={status?.autoStart ?? false} disabled={!status} labelledBy="fluent-autostart-title" onChange={(checked) => void model.service.toggleAutostart(checked)} /></div>}
             dataKind="autostart"
             description={t("execution.autostartDescription")}
             icon={<Power aria-hidden="true" size={20} strokeWidth={1.6} />}
@@ -89,7 +89,7 @@ export function FluentExecution({ shell }: { shell: ShellProps }) {
             <RegisteredTargetsBody model={model} />
           </FluentCard>
           <FluentCard
-            action={<FluentState>{model.targetName || t("execution.noExecutableSelected")}</FluentState>}
+            action={<FluentState>{model.targets.targetName || t("execution.noExecutableSelected")}</FluentState>}
             dataKind="manual"
             description={t("execution.manualDescription")}
             expanded={expanded === "manual"}

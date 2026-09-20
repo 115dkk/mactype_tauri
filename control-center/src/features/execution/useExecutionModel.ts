@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { ExecutionViewModel, ProfileIndicator, ServiceStatusLine, ServiceSummary, SystemInjectionPrimaryAction, LegacyTrayResolution } from "../../app/executionViewModel";
+import type { SystemServiceStatus, LegacyMacTrayStatus } from "../../app/model";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type RefObject, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { ExecutionStatus, ManualLaunchCandidate, SystemServiceAction } from "../../app/model";
 import { projectExecutionView } from "../../app/executionViewModel";
 import { operationErrorMessage } from "../../app/operationError";
@@ -19,7 +21,75 @@ export interface ServicePackageNoticeKeys {
    rows, toolbars and dialogs differently, but the actions, busy flags,
    messages and the projected view come from this one hook, so the CI smoke
    flow and the gallery states behave the same under every skin. */
-export function useExecutionModel({ ciSmoke = false, onReady }: ExecutionModelOptions = {}) {
+export interface ExecutionService {
+  activeProfileName: string;
+  executionView: ExecutionViewModel;
+  manageService: (action: SystemServiceAction) => Promise<void>;
+  profileIndicator: ProfileIndicator;
+  refresh: () => Promise<void>;
+  revealServiceLocation: () => Promise<void>;
+  runSummaryAction: (command: SystemServiceAction) => void;
+  service: SystemServiceStatus | undefined;
+  serviceBusy: string | null;
+  servicePackageNotice: ServicePackageNoticeKeys | null;
+  serviceStateText: string;
+  serviceStatusLine: ServiceStatusLine | null;
+  serviceSummary: ServiceSummary;
+  status: ExecutionStatus | null;
+  systemInjectionAction: SystemInjectionPrimaryAction;
+  toggleAutostart: (enabled: boolean) => Promise<void>;
+}
+
+export interface ExecutionLegacy {
+  disableLegacyTrayStartup: () => Promise<void>;
+  exitLegacyTray: () => Promise<void>;
+  legacyService: LegacyMacTrayStatus | null | undefined;
+  legacyTrayBusy: "exit" | "disable-autostart" | null;
+  legacyTrayResolution: LegacyTrayResolution | null;
+}
+
+export interface ExecutionTargets {
+  argumentsText: string;
+  candidateFilter: string;
+  candidates: readonly ManualLaunchCandidate[] | null;
+  chooseTarget: () => Promise<void>;
+  launch: () => Promise<void>;
+  launchAll: () => Promise<void>;
+  loadCandidates: () => Promise<void>;
+  register: () => Promise<void>;
+  remove: (registeredTarget: string) => Promise<void>;
+  setArgumentsText: Dispatch<SetStateAction<string>>;
+  setCandidateFilter: Dispatch<SetStateAction<string>>;
+  setTarget: Dispatch<SetStateAction<string>>;
+  target: string;
+  targetName: string;
+  visibleCandidates: ManualLaunchCandidate[];
+}
+
+export interface ExecutionMigration {
+  closeMigrationConfirmation: () => void;
+  confirmMigration: () => Promise<void>;
+  handleMigrationDialogKeyDown: (event: ReactKeyboardEvent<HTMLElement>) => void;
+  migrationCancelRef: RefObject<HTMLButtonElement | null>;
+  migrationConfirmationOpen: boolean;
+  migrationTriggerRef: RefObject<HTMLButtonElement | null>;
+  openMigrationConfirmation: () => void;
+}
+
+export interface ExecutionMessages {
+  error: string | null;
+  message: string | null;
+}
+
+export interface ExecutionModel {
+  service: ExecutionService;
+  legacy: ExecutionLegacy;
+  targets: ExecutionTargets;
+  migration: ExecutionMigration;
+  messages: ExecutionMessages;
+}
+
+export function useExecutionModel({ ciSmoke = false, onReady }: ExecutionModelOptions = {}): ExecutionModel {
   const { t } = useI18n();
   const [status, setStatus] = useState<ExecutionStatus | null>(null);
   const [target, setTarget] = useState("");
@@ -298,53 +368,60 @@ export function useExecutionModel({ ciSmoke = false, onReady }: ExecutionModelOp
   };
 
   return {
-    activeProfileName,
-    argumentsText,
-    candidateFilter,
-    candidates,
-    chooseTarget,
-    closeMigrationConfirmation,
-    confirmMigration,
-    disableLegacyTrayStartup,
-    error,
-    executionView,
-    exitLegacyTray,
-    handleMigrationDialogKeyDown,
-    launch,
-    launchAll,
-    legacyService,
-    legacyTrayBusy,
-    legacyTrayResolution,
-    loadCandidates,
-    manageService,
-    message,
-    migrationCancelRef,
-    migrationConfirmationOpen,
-    migrationTriggerRef,
-    openMigrationConfirmation,
-    profileIndicator,
-    refresh,
-    register,
-    remove,
-    revealServiceLocation,
-    runSummaryAction,
-    service,
-    serviceBusy,
-    servicePackageNotice,
-    serviceStateText,
-    serviceStatusLine,
-    serviceSummary,
-    setArgumentsText,
-    setCandidateFilter,
-    setTarget,
-    status,
-    systemInjectionAction,
-    t,
-    target,
-    targetName,
-    toggleAutostart,
-    visibleCandidates,
+    service: {
+      activeProfileName,
+      executionView,
+      manageService,
+      profileIndicator,
+      refresh,
+      revealServiceLocation,
+      runSummaryAction,
+      service,
+      serviceBusy,
+      servicePackageNotice,
+      serviceStateText,
+      serviceStatusLine,
+      serviceSummary,
+      status,
+      systemInjectionAction,
+      toggleAutostart,
+    },
+    legacy: {
+      disableLegacyTrayStartup,
+      exitLegacyTray,
+      legacyService,
+      legacyTrayBusy,
+      legacyTrayResolution,
+    },
+    targets: {
+      argumentsText,
+      candidateFilter,
+      candidates,
+      chooseTarget,
+      launch,
+      launchAll,
+      loadCandidates,
+      register,
+      remove,
+      setArgumentsText,
+      setCandidateFilter,
+      setTarget,
+      target,
+      targetName,
+      visibleCandidates,
+    },
+    migration: {
+      closeMigrationConfirmation,
+      confirmMigration,
+      handleMigrationDialogKeyDown,
+      migrationCancelRef,
+      migrationConfirmationOpen,
+      migrationTriggerRef,
+      openMigrationConfirmation,
+    },
+    messages: {
+      error,
+      message,
+    },
   };
 }
-
-export type ExecutionModel = ReturnType<typeof useExecutionModel>;

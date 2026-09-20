@@ -28,6 +28,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $generation = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+# A marker target lives this long after publishing its metadata. Five seconds
+# was spent by the harness alone on loaded hosted runners, and the injector
+# then correctly answered process-exiting; the budget is timing slack, not a
+# product contract.
+$markerLifetimeMs = 15000
 $testRoot = Join-Path $env:TEMP ("mactype-injector-test-" + [Guid]::NewGuid().ToString('N'))
 $processes = [System.Collections.Generic.List[System.Diagnostics.Process]]::new()
 $fixedModule = Join-Path (Split-Path -Parent $Injector) ([IO.Path]::GetFileName($Module))
@@ -51,7 +56,7 @@ function Start-Marker([string] $Name, [string] $PreloadModule = '') {
     $arguments = @(
         '--metadata', $metadataPath,
         '--result', $resultPath,
-        '--wait-ms', '5000',
+        '--wait-ms', [string]$markerLifetimeMs,
         '--expected-module', $fixedModule
     )
     if ($PreloadModule) {
@@ -148,7 +153,7 @@ try {
     if ($decoy.Process.HasExited) {
         throw 'Injector damaged the target after detecting a same-basename conflict.'
     }
-    $decoy.Process.WaitForExit(7000)
+    $decoy.Process.WaitForExit($markerLifetimeMs + 3000)
     if (-not $decoy.Process.HasExited -or $decoy.Process.ExitCode -ne 7) {
         throw 'Conflict target did not remain healthy with the expected module absent.'
     }

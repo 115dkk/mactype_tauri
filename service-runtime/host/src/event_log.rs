@@ -336,7 +336,6 @@ mod tests {
                 session_id: 9,
                 architecture: ProcessArchitecture::X64,
                 protected: false,
-                critical: false,
             },
             runtime_generation_id: "a".repeat(64),
             outcome,

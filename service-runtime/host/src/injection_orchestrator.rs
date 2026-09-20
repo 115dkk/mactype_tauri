@@ -153,7 +153,7 @@ impl<'a> InjectionOrchestrator<'a> {
                 });
                 Ok(ProcessOutcome::Deferred)
             }
-            ProcessTargetDecision::Skipped => {
+            ProcessTargetDecision::Skipped(_) => {
                 crate::event_log::injection_skipped();
                 Ok(ProcessOutcome::Skipped)
             }
@@ -225,7 +225,7 @@ impl<'a> InjectionOrchestrator<'a> {
                 self.record_skip(target.identity, TARGET_VANISHED_RESULT_CODE, None);
                 Ok(ProcessOutcome::Skipped)
             }
-            ProcessTargetDecision::Skipped => {
+            ProcessTargetDecision::Skipped(_) => {
                 self.record_skip(target.identity, "process-no-longer-eligible", None);
                 Ok(ProcessOutcome::Skipped)
             }

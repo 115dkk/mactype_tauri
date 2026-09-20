@@ -28,7 +28,20 @@ pub struct ProcessIdentity {
     pub session_id: u32,
     pub architecture: ProcessArchitecture,
     pub protected: bool,
-    pub critical: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProcessFacts {
+    pub critical_or_unknown: bool,
+    pub prohibits_dynamic_code: bool,
+    pub restricts_binary_signature: bool,
+    pub image_name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InspectedProcess {
+    pub identity: ProcessIdentity,
+    pub facts: ProcessFacts,
 }
 
 /// How a previously verified injection target looked when it was re-checked
@@ -64,7 +77,7 @@ pub trait ProcessInspector {
         None
     }
 
-    fn inspect(&self, pid: u32) -> Result<ProcessIdentity, StructuredServiceError>;
+    fn inspect(&self, pid: u32) -> Result<InspectedProcess, StructuredServiceError>;
 
     /// Re-checks whether the exact verified identity still exists after a
     /// terminal result that could not be trusted. The default cannot prove a

@@ -23,7 +23,6 @@ fn current_process_invocation(executable: PathBuf, timeout: Duration) -> HelperI
             session_id: 1,
             architecture: crate::ProcessArchitecture::X64,
             protected: false,
-            critical: false,
         },
         generation_id: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
             .to_owned(),

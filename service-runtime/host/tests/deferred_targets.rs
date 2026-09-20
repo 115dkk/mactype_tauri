@@ -5,9 +5,9 @@ use std::time::{Duration, Instant};
 use mactype_service_contract::StructuredServiceError;
 use mactype_service_host::{
     BrokerDisposition, BrokerResult, DeferralReason, InjectionBroker, InjectionRequest,
-    ProcessArchitecture, ProcessIdentity, ProcessInspector, ProcessOrchestrator, ProcessOutcome,
-    SessionChange, TargetLifecycle, TargetLiveness, MAX_DEFERRED_TARGETS,
-    TARGET_VANISHED_RESULT_CODE,
+    InspectedProcess, ProcessArchitecture, ProcessFacts, ProcessIdentity, ProcessInspector,
+    ProcessOrchestrator, ProcessOutcome, SessionChange, TargetLifecycle, TargetLiveness,
+    MAX_DEFERRED_TARGETS, TARGET_VANISHED_RESULT_CODE,
 };
 
 fn binding() -> String {
@@ -21,7 +21,18 @@ fn identity(pid: u32) -> ProcessIdentity {
         session_id: 2,
         architecture: ProcessArchitecture::X64,
         protected: false,
-        critical: false,
+    }
+}
+
+fn inspected(identity: ProcessIdentity) -> InspectedProcess {
+    InspectedProcess {
+        identity,
+        facts: ProcessFacts {
+            critical_or_unknown: false,
+            prohibits_dynamic_code: false,
+            restricts_binary_signature: false,
+            image_name: Some("target.exe".to_owned()),
+        },
     }
 }
 
@@ -44,8 +55,8 @@ impl MutableInspector {
 }
 
 impl ProcessInspector for MutableInspector {
-    fn inspect(&self, pid: u32) -> Result<ProcessIdentity, StructuredServiceError> {
-        Ok(identity(pid))
+    fn inspect(&self, pid: u32) -> Result<InspectedProcess, StructuredServiceError> {
+        Ok(inspected(identity(pid)))
     }
 
     fn probe_target_lifecycle(&self, _identity: &ProcessIdentity) -> TargetLifecycle {

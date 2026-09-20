@@ -822,6 +822,7 @@
     <ClCompile Include="renderer\directwrite.cpp" />
     <ClCompile Include="renderer\directwrite_alias.cpp" />
     <ClCompile Include="renderer\directwrite_alias_policy.cpp" />
+    <ClCompile Include="renderer\gdi_font_identity.cpp" />
     <ClCompile Include="renderer\directwrite_virtual_font.cpp" />
     <ClCompile Include="renderer\dll.cpp" />
     <ClCompile Include="renderer\dynCodeHelper.cpp" />
@@ -875,6 +876,7 @@
     <ClInclude Include="renderer\directwrite.h" />
     <ClInclude Include="renderer\directwrite_alias.h" />
     <ClInclude Include="renderer\directwrite_alias_policy.h" />
+    <ClInclude Include="renderer\gdi_font_identity.h" />
     <ClInclude Include="renderer\directwrite_virtual_font.h" />
     <ClInclude Include="renderer\dll.h" />
     <ClInclude Include="renderer\dynCodeHelper.h" />

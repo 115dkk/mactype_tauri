@@ -24,6 +24,7 @@
 #include "EventLogging.h"
 #include "hookCounter.h"
 #include "hook_lifecycle.h"
+#include "gdi_font_identity.h"
 #include "renderer_activation.h"
 #include "unload_lifecycle.h"
 #include "unity_font_hook.h"
@@ -542,6 +543,7 @@ BOOL AddEasyHookEnv()
 }
 
 void HookFontCreation() {
+	renderer::gdi_font_identity::RecordHookInstall();
 	HMODULE gdi32 = GetModuleHandle(L"gdi32full.dll");	// prefer to hook deeply
 	if (!gdi32) {
 		gdi32 = GetModuleHandle(L"gdi32.dll");

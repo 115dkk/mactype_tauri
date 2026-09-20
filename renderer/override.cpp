@@ -8,6 +8,7 @@
 #include "supinfo.h"
 #include "undocAPI.h"
 #include "freetype_raii.h"
+#include "gdi_font_identity.h"
 
 #include <malloc.h>		// _alloca
 #include <mbctype.h>	// _getmbcp
@@ -466,6 +467,12 @@ HFONT WINAPI IMPL_CreateFontIndirectExW(CONST ENUMLOGFONTEXDV *penumlfex)
 			return ORIG_CreateFontIndirectExW(penumlfex);
 		}
 	}
+
+	// A process that was already drawing when the hooks arrived keeps its
+	// stock GDI identities: a Qt GDI engine pairs the cmap of an HFONT made
+	// before the hooks with glyphs from an HFONT made after them.
+	if (renderer::gdi_font_identity::StockIdentityCommitted())
+		return ORIG_CreateFontIndirectExW(penumlfex);
 
 
 

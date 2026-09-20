@@ -120,6 +120,9 @@
     <ClCompile Include="renderer\directwrite_alias_policy.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="renderer\gdi_font_identity.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="renderer\directwrite_virtual_font.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -263,6 +266,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="renderer\directwrite_alias_policy.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="renderer\gdi_font_identity.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="renderer\directwrite_virtual_font.h">

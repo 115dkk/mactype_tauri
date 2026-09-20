@@ -42,19 +42,19 @@ pub(in crate::machine_integration::legacy_migration) fn secure_create_tree(
     root: &Path,
     components: &[&str],
 ) -> Result<PathBuf, String> {
-    if path_is_reparse(root)? {
+    if entry_is_reparse(root)? {
         return Err("legacy migration storage root is a reparse point".to_owned());
     }
     let mut path = root.to_path_buf();
     for component in components {
         path.push(component);
         if path.exists() {
-            if !path.is_dir() || path_is_reparse(&path)? {
+            if !path.is_dir() || entry_is_reparse(&path)? {
                 return Err(format!("unsafe migration directory {}", path.display()));
             }
         } else {
             fs::create_dir(&path).map_err(|error| error.to_string())?;
-            if path_is_reparse(&path)? {
+            if entry_is_reparse(&path)? {
                 return Err(format!("unsafe migration directory {}", path.display()));
             }
         }
@@ -148,8 +148,10 @@ pub(in crate::machine_integration::legacy_migration) fn export_service_registry(
     generation_root: &Path,
 ) -> Result<RegistryExportReceipt, String> {
     let export_path = generation_root.join(SERVICE_REGISTRY_EXPORT);
-    if export_path.exists() || path_is_reparse(&export_path)? {
-        return Err("legacy service registry export target already exists".to_owned());
+    match fs::symlink_metadata(&export_path) {
+        Ok(_) => return Err("legacy service registry export target already exists".to_owned()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.to_string()),
     }
     let (program, arguments) = registry_export_invocation(&system_directory()?, generation_root);
     let status = Command::new(program)

@@ -1,5 +1,5 @@
 import { Moon, Sun } from "lucide-react";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { isNavSelected, type ShellProps } from "../../app/shell";
 import { LanguagePicker } from "../../components/LanguagePicker";
 import { SkinPicker } from "../../components/SkinPicker";
@@ -27,6 +27,23 @@ export function ConsoleShell(props: ShellProps) {
     ciSmoke: ciSmoke && view === "execution",
     onReady: onExecutionReady,
   });
+  /* The other skins mount their execution model with the service page, so
+     every visit reloads the status. This shell keeps one model alive across
+     pages, so a run profile designated on the Files page or a service started
+     from there would leave the dashboard, the service page and every status
+     bar on the old snapshot until a manual refresh. Reload on each navigation
+     instead. The hook loads once on mount, and its own effect reloads when
+     the CI smoke flag flips together with the view, so both turns are
+     skipped here. */
+  const refreshExecution = execution.service.refresh;
+  const lastView = useRef(view);
+  useEffect(() => {
+    if (lastView.current === view) return;
+    const smokeFlipped = ciSmoke && (lastView.current === "execution" || view === "execution");
+    lastView.current = view;
+    if (smokeFlipped) return;
+    void refreshExecution();
+  }, [ciSmoke, refreshExecution, view]);
   const context = useMemo(() => ({ shell: props, execution }), [props, execution]);
 
   const page = view === "files"

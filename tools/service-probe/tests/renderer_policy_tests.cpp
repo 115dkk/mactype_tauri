@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <thread>
 #include <vector>
 
@@ -41,6 +42,11 @@ renderer::RendererPolicyCandidate Candidate(
     candidate.freeType.cacheMaxSizes = 1200;
     candidate.freeType.cacheMaxBytes = 10 * 1024 * 1024;
     candidate.raster.fontLoader = 1;
+    candidate.raster.fontLinkMode = 2;
+    candidate.raster.gammaMode = 3;
+    candidate.raster.bolderMode = 2;
+    candidate.raster.useMapping = true;
+    candidate.raster.substituteAllFonts = true;
     candidate.raster.gamma = gamma;
     candidate.raster.renderWeight = 1.0f;
     candidate.raster.contrast = 1.0f;
@@ -55,6 +61,14 @@ renderer::RendererPolicyCandidate Candidate(
             static_cast<unsigned char>(value);
     }
     candidate.raster.harmonyLcd = true;
+    candidate.raster.shadowAlpha = 45;
+    candidate.raster.shadowLightAlpha = 67;
+    std::shared_ptr<renderer::FontLinkPolicy> links =
+        std::make_shared<renderer::FontLinkPolicy>();
+    links->allowDefault[128] = true;
+    links->defaultFamilies[16] = L"Times New Roman";
+    links->entries.push_back({L"Arial", {L"Segoe UI", L"SimSun"}});
+    candidate.raster.fontLinks = std::move(links);
     candidate.directWrite.gamma = gamma * gamma;
     candidate.substitutionsReady = true;
     candidate.substitutionRules.push_back(Rule(L"Arial", replacement));
@@ -99,8 +113,22 @@ int main()
                 "sha256:" + std::string(64, 'a'),
             "the immutable snapshot must retain the exact profile digest");
     Require(first.snapshot->raster().generation == first.generation &&
-                first.snapshot->raster().gamma == 1.25f,
+                first.snapshot->raster().gamma == 1.25f &&
+                first.snapshot->raster().gammaMode == 3 &&
+                first.snapshot->raster().bolderMode == 2 &&
+                first.snapshot->raster().useMapping &&
+                first.snapshot->raster().substituteAllFonts &&
+                first.snapshot->raster().shadowAlpha == 45 &&
+                first.snapshot->raster().shadowLightAlpha == 67,
             "the raster view must retain its root policy generation");
+    Require(first.snapshot->raster().fontLinks &&
+                first.snapshot->raster().fontLinks->allowDefault[128] &&
+                first.snapshot->raster().fontLinks
+                        ->defaultFamilies[16] == L"Times New Roman" &&
+                first.snapshot->raster().fontLinks->entries.size() == 1 &&
+                first.snapshot->raster().fontLinks->entries[0]
+                        .linkedFamilies[1] == L"SimSun",
+            "the immutable raster view must retain the complete font-link policy");
     Require(first.snapshot->hooks().unityFontMode ==
             renderer::UnityFontHookMode::mostGames &&
             first.snapshot->hooks().unityFontEnabledForProcess,
@@ -144,6 +172,8 @@ int main()
                 enabledPolicy.snapshot->digest() != disabledPolicy.snapshot->digest(),
             "console avoidance must contribute to the root policy digest");
 
+    renderer::RasterPolicy inFlightRaster =
+        first.snapshot->raster();
     renderer::RendererPolicyRef retained = first.snapshot;
     renderer::RendererPolicyCandidate invalid = Candidate(9.0f, L"Invalid");
     invalid.freeType.cacheMaxBytes = -1;
@@ -177,6 +207,14 @@ int main()
         Candidate(1.5f, L"Segoe UI"));
     Require(second.published() && second.generation == 2 && second.revision == 2,
             "a later publication must advance one coherent identity");
+    Require(inFlightRaster.generation == first.generation &&
+                inFlightRaster.gamma == 1.25f &&
+                inFlightRaster.gammaMode == 3 &&
+                inFlightRaster.fontLinks &&
+                inFlightRaster.fontLinks->allowDefault[128] &&
+                inFlightRaster.fontLinks->entries[0].linkedFamilies[0] ==
+                    L"Segoe UI",
+            "a later snapshot revision must not alter in-flight raster policy");
     Require(retained->raster().gamma == 1.25f &&
                 retained->font_substitutions()
                         ->Resolve({L"Arial", 1})

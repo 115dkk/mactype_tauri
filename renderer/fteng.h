@@ -251,6 +251,7 @@ private:
 	char m_ebmps[256];
 	LONG volatile count;
 	CFontSettings m_set;
+	renderer::RendererPolicyRef m_policy;
 	StringHashFont m_hash;
 	wstring	m_fullname, m_familyname, m_stylename;
 	typedef map<renderer::freetype::RasterCacheKey,
@@ -264,7 +265,7 @@ private:
 	FTC_FaceID m_SimSunID;
 	NOCOPY(FreeTypeFontInfo);
 	void Compact();
-	void Createlink();
+	void Createlink(const renderer::RendererPolicyRef& policy);
 
 public:
 	void AddRef() {InterlockedIncrement(&count);};
@@ -311,63 +312,15 @@ public:
 	wstring GetFullName() {return m_fullname;};
 	bool m_isSimSun;
 	bool IsPixel;
-	FreeTypeFontInfo(int n, LPCTSTR name, int weight, bool italic, int mru, wstring fullname, wstring familyname)
-		: m_id(n), m_weight(weight), m_italic(italic), m_OS2Table(), IsPixel(false)
-		, FreeTypeMruCounter(mru), m_isSimSun(false), m_ggoFont(), m_linkinited(false), m_linknum(0), m_os2Weight(0)
-		, m_SimSunID(0), count(1), m_fullname(fullname), m_familyname(familyname), m_hashinting(3), m_nFontFamily(0)
-	{
-		//m_set = set;
-		memset(m_ebmps, 0xff, sizeof(m_ebmps));
-
-		enum { FTC_MAX_SIZES_DEFAULT = 4 };
-		const CGdippSettings* pSettings = CGdippSettings::GetInstance();
-		m_nMaxSizes = pSettings->CacheMaxSizes();
-		if (!m_nMaxSizes)
-			m_nMaxSizes = FTC_MAX_SIZES_DEFAULT;
-		//extern BOOL g_EngineCreateFont;
-			if (pSettings->FontSubstitutes() < SETTING_FONTSUBSTITUTE_ALL)
-				m_ggoFont.reset(CreateFont(10,0,0,0,weight,italic,0,0,DEFAULT_CHARSET,0,FONT_MAGIC_NUMBER,0,0,name));
-					//use magic number to create unsubstitud font
-			else
-				m_ggoFont.reset(CreateFont(10,0,0,0,weight,italic,0,0,DEFAULT_CHARSET,0,0,0,0,name));
-			renderer_raii::UniqueDeviceContext hdc(CreateCompatibleDC(nullptr));
-			auto selectedFont = renderer_raii::SelectObject(hdc.get(), m_ggoFont.get());
-			//获得字体的全称
-
-			int nSize = hdc && selectedFont ? GetOutlineTextMetrics(hdc.get(), 0, nullptr) : 0;
-			if (nSize==0)
-				m_fullname = L"";
-			else
-			{
-				std::vector<BYTE> metricBuffer(nSize, 0);
-				LPOUTLINETEXTMETRIC otm = reinterpret_cast<LPOUTLINETEXTMETRIC>(metricBuffer.data());
-				otm->otmSize = nSize;
-				if (GetOutlineTextMetrics(hdc.get(), nSize, otm) == 0) {
-					m_fullname = L"";
-				} else {
-					auto metricText = [otm](const void* offset) {
-						return reinterpret_cast<LPWSTR>(reinterpret_cast<BYTE*>(otm) + reinterpret_cast<ULONG_PTR>(offset));
-					};
-					m_fullname = wstring(metricText(otm->otmpFullName));
-					TCHAR* localname = metricText(otm->otmpFamilyName);
-					m_stylename = wstring(metricText(otm->otmpStyleName));
-					m_fullname = MakeUniqueFontName(m_fullname, localname, m_stylename);
-
-					TCHAR buff[LF_FACESIZE+1];
-					GetFontLocalName(localname, buff);
-					m_nFontFamily = otm->otmTextMetrics.tmPitchAndFamily & 0xF0;	//获取字体家族，家族对应使用什么默认链接字体
-					m_familyname = wstring(buff);
-					m_set = pSettings->FindIndividual(m_familyname.c_str());
-					m_ftWeight = CalcBoldWeight(/*weight*/700);
-					m_hash = StringHashFont(name);
-					if (m_familyname.size()>0 && m_familyname.c_str()[0]==L'@')	//附加一个@
-						m_fullname = L'@'+m_fullname;
-				}
-			}
-			//完成
-		face_id_link[0] = nullptr;
-		ggo_link[0] = nullptr;
-	}
+	FreeTypeFontInfo(
+		int n,
+		LPCTSTR name,
+		int weight,
+		bool italic,
+		int mru,
+		wstring fullname,
+		wstring familyname,
+		renderer::RendererPolicyRef policy);
 	~FreeTypeFontInfo()
 	{
 		Erase();
@@ -420,7 +373,7 @@ public:
 	{
 		CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTLINK);
 		if (!*face_id_link)
-			Createlink();
+			Createlink(m_policy);
 		*llplink = face_id_link;
 		return m_linknum;
 	}
@@ -428,7 +381,7 @@ public:
 	{
 		CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTLINK);
 		if (!*ggo_link)
-			Createlink();
+			Createlink(m_policy);
 		*llplink = ggo_link;
 		return m_linknum;
 	}
@@ -444,7 +397,12 @@ public:
 	const StringHashFont& GetHash() const { return m_hash; }
 
 	const CFontSettings& GetFontSettings() const { return m_set; }
+	const renderer::RendererPolicyRef& Policy() const { return m_policy; }
 	void SetFontSettings(const CFontSettings& set) { m_set = set;};
+	void SetPolicy(renderer::RendererPolicyRef policy)
+	{
+		m_policy = std::move(policy);
+	}
 	bool operator ==(const FreeTypeFontInfo& x) const { return (m_hash == x.m_hash); }
 
 	FreeTypeFontCache* GetCache(FTC_ScalerRec& scaler, const LOGFONT& lf);
@@ -504,18 +462,27 @@ public:
 	{
 		return weight < FW_BOLD ? 0: FW_BOLD;
 	}
-	FreeTypeFontInfo* AddFont(LPCTSTR lpFaceName, int weight, bool italic, BOOL* bIsFontLoaded = nullptr);
-	FreeTypeFontInfo* AddFont(void* lpparams);
-	int  GetFontIdByName(LPCTSTR lpFaceName, int weight, bool italic);
+	FreeTypeFontInfo* AddFont(
+		LPCTSTR lpFaceName,
+		int weight,
+		bool italic,
+		const renderer::RendererPolicyRef& policy,
+		BOOL* bIsFontLoaded = nullptr);
+	FreeTypeFontInfo* AddFont(
+		void* lpparams,
+		const renderer::RendererPolicyRef& policy);
 //	LPCTSTR GetFontById(int faceid, int& weight, bool& italic);
-	FreeTypeFontInfo* FindFont(LPCTSTR lpFaceName, int weight, bool italic, bool AddOnFind = true, BOOL* bIsFontLoaded=nullptr);
+	FreeTypeFontInfo* FindFont(
+		LPCTSTR lpFaceName,
+		int weight,
+		bool italic,
+		const renderer::RendererPolicyRef& policy,
+		bool AddOnFind = true,
+		BOOL* bIsFontLoaded = nullptr);
 	FreeTypeFontInfo* FindFont(int faceid);
-	FreeTypeFontInfo* FindFont(void* lpparams);
-
-	bool FontExists(LPCTSTR lpFaceName, int weight, bool italic)
-	{
-		return !!FindFont(lpFaceName, weight, italic);
-	}
+	FreeTypeFontInfo* FindFont(
+		void* lpparams,
+		const renderer::RendererPolicyRef& policy);
 	BOOL RemoveFont(LPCWSTR FontName);
 	BOOL RemoveFont(FreeTypeFontInfo* fontinfo);
 	BOOL RemoveThisFont(FreeTypeFontInfo* fontinfo, LOGFONT* lg);
@@ -563,6 +530,7 @@ public:
 					policy->raster().harmonyLcd)
 					settings.SetAntiAliasMode(2);
 				p->SetFontSettings(settings);
+				p->SetPolicy(policy);
 				p->UpdateFontSetting();
 			}
 			++iter;
@@ -586,15 +554,20 @@ private:
 	std::unique_ptr<FreeTypeStreamBacking> m_streamBacking;
 	renderer_raii::UniqueFreeTypeFace m_ftFace;
 
-	FreeTypeSysFontData();
+	FreeTypeSysFontData(renderer::freetype::RasterPolicy policy);
 
 	static unsigned long IoFunc(FT_Stream stream, unsigned long offset, unsigned char* buffer, unsigned long count);
 	static void CloseFunc(FT_Stream  stream);
 	bool OpenFaceByIndex(int index);
 	bool Init(LPCTSTR name, int weight, bool italic);
+	renderer::freetype::RasterPolicy m_policy;
 
 public:
-	static FreeTypeSysFontData* CreateInstance(LPCTSTR name, int weight, bool italic);
+	static FreeTypeSysFontData* CreateInstance(
+		LPCTSTR name,
+		int weight,
+		bool italic,
+		const renderer::freetype::RasterPolicy& policy);
 	~FreeTypeSysFontData();
 
 	FT_Face ReleaseFace() noexcept;

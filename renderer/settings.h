@@ -86,6 +86,7 @@ public:
 		return *DefaultFontLink[nFontFamily] ? DefaultFontLink[nFontFamily] : DefaultFontLink[1];	}
 	const LPCWSTR * lookup(LPCWSTR fontname) const;
 	LPCWSTR get(int row, int col) const;
+	std::shared_ptr<const renderer::FontLinkPolicy> Snapshot() const;
 };
 
 class CFontSubstitutesInfo;
@@ -452,7 +453,10 @@ private:
 	int m_endpos;
 	CFontFaceNamesEnumerator();
 public:
-	CFontFaceNamesEnumerator(LPCWSTR facename, int nFontFamily);
+	CFontFaceNamesEnumerator(
+		LPCWSTR facename,
+		int nFontFamily,
+		const renderer::RendererPolicySnapshot& policy);
 	operator LPCWSTR () {
 		return m_facenames[m_pos];
 	}
@@ -623,7 +627,6 @@ public:
 			break;
 		case ATTR_GammaMode:
 			pSettings->m_nGammaMode = nValue;
-			RefreshAlphaTable();
 			break;
 		case ATTR_LcdFilter:
 			pSettings->m_nLcdFilter = nValue;
@@ -634,19 +637,15 @@ public:
 			break;
 		case ATTR_TextTuning:
 			pSettings->InitTuneTable(nValue,  pSettings->m_nTuneTable);
-			RefreshAlphaTable();
 			break;
 		case ATTR_TextTuningR:
 			pSettings->InitTuneTable(nValue,  pSettings->m_nTuneTableR);
-			RefreshAlphaTable();
 			break;
 		case ATTR_TextTuningG:
 			pSettings->InitTuneTable(nValue,  pSettings->m_nTuneTableG);
-			RefreshAlphaTable();
 			break;
 		case ATTR_TextTuningB:
 			pSettings->InitTuneTable(nValue,  pSettings->m_nTuneTableB);
-			RefreshAlphaTable();
 			break;
 		case ATTR_LoadOnDemand:
 			pSettings->m_bLoadOnDemand = !!nValue;
@@ -654,7 +653,6 @@ public:
 		case ATTR_ShadowAlpha:
 			pSettings->m_nShadow[2] = nValue;
 			pSettings->m_bEnableShadow = (nValue!=1);
-			RefreshAlphaTable();
 			break;
 		case ATTR_ShadowOffset:
 			pSettings->m_nShadow[1] = nValue;
@@ -733,7 +731,6 @@ public:
 				{
 					pSettings->m_nShadow[3] = pSettings->m_nShadow[2];		//深度也相同
 				}
-				RefreshAlphaTable();
 			}
 			break;
 		default:
@@ -749,15 +746,12 @@ public:
 		{
 			case ATTR_GammaValue:
 				pSettings->m_fGammaValue = nValue;
-				RefreshAlphaTable();
 				break;
 			case ATTR_Contrast:
 				pSettings->m_fContrast = nValue;
-				RefreshAlphaTable();
 				break;
 			case ATTR_RenderWeight:
 				pSettings->m_fRenderWeight = nValue;
-				RefreshAlphaTable();
 				break;
 			default:
 				return FALSE;
@@ -852,6 +846,7 @@ public:
 			if (g_pFTEngine)
 				g_pFTEngine->ReloadAll();
 		}
+		RefreshAlphaTable();
 		m_bDirty = false;
 		return true;
 	};
@@ -935,7 +930,6 @@ public:
 			return;
 		pSettings->m_bDelayedInit = false;
 		m_bDirty = true;
-		RefreshAlphaTable();
 		RefreshSetting();
 	}
 	CControlCenter():m_nRefCount(1), m_bDirty(false), m_msgwnd(nullptr) {
@@ -957,10 +951,10 @@ public:
 			return;
 		pSettings->m_bDelayedInit = false;
 		pSettings = CGdippSettings::GetInstance();
-		RefreshAlphaTable();
 		UpdateLcdFilter();
 		if (g_pFTEngine)
 			g_pFTEngine->ReloadAll();
+		RefreshAlphaTable();
 	}
 	HWND WINAPI CreateMessageWnd() {
 		auto event = std::make_shared<renderer_raii::UniqueHandle>(

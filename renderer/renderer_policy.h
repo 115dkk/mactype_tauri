@@ -69,11 +69,25 @@ struct FreeTypeStartupPolicy final
 	int cacheMaxBytes = 0;
 };
 
+struct FontLinkEntry final
+{
+	std::wstring sourceFamily;
+	std::vector<std::wstring> linkedFamilies;
+};
+
+struct FontLinkPolicy final
+{
+	std::array<bool, 256> allowDefault{};
+	std::array<std::wstring, 0x60> defaultFamilies{};
+	std::vector<FontLinkEntry> entries;
+};
+
 struct RasterPolicy final
 {
 	std::uint64_t generation = 0;
 	int fontLoader = 0;
 	int fontLinkMode = 0;
+	int gammaMode = 0;
 	int bitmapHeight = 0;
 	int bolderMode = 0;
 	int widthMode = 0;
@@ -82,6 +96,8 @@ struct RasterPolicy final
 	bool harmonyLcd = false;
 	bool loadColorFont = false;
 	bool invertColor = false;
+	bool useMapping = false;
+	bool substituteAllFonts = false;
 	float gamma = 1.0f;
 	float renderWeight = 1.0f;
 	float contrast = 1.0f;
@@ -89,6 +105,9 @@ struct RasterPolicy final
 	std::array<unsigned char, 256> coverageTuningR{};
 	std::array<unsigned char, 256> coverageTuningG{};
 	std::array<unsigned char, 256> coverageTuningB{};
+	std::shared_ptr<const FontLinkPolicy> fontLinks;
+	int shadowAlpha = 1;
+	int shadowLightAlpha = 1;
 	std::uint32_t shadowDarkColor = 0;
 	std::uint32_t shadowLightColor = 0;
 };

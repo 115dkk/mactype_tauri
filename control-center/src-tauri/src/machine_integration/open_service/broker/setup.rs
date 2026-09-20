@@ -74,16 +74,6 @@ pub(super) fn designate_and_hold(profile: &[u8]) -> Result<(), ActionFailure> {
             AppInitConflictContext::MachineIntegrationChanges,
         )));
     }
-    // Only the live branch activates anything, so only it inherits the
-    // legacy-service gate; publishing a generation for a stopped service does not.
-    if query().runtime == crate::service_contract::RuntimeState::Running
-        && crate::machine_integration::legacy_mactray::legacy_service_blocks_activation()
-            .map_err(ActionFailure::from)?
-    {
-        return Err(ActionFailure::blocked(
-            ActionBlocker::LegacyServiceStillInstalled(LegacyServiceBlockContext::ApplyProfile),
-        ));
-    }
     crate::machine_integration::designate_profile_transaction_with(
         &mut OpenServicePublishBackend,
         profile,

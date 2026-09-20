@@ -14,6 +14,7 @@ mod runtime;
 mod session;
 mod storage;
 
+pub use crate::machine_integration::DesignationEffect;
 use autostart::autostart_value;
 use process_candidates::list_manual_launch_candidates_impl;
 pub use process_candidates::ManualLaunchCandidate;
@@ -21,7 +22,7 @@ pub use process_candidates::ManualLaunchCandidate;
 use runtime::prepare_runtime_at;
 pub(crate) use runtime::record_system_injection_choice;
 use runtime::{active_runtime, active_system_profile_payload, system_injection_paused};
-pub use runtime::{apply_profile, AppliedProfile, DesignationEffect};
+pub use runtime::{apply_profile, AppliedProfile};
 use session::{
     launch_registered_targets_impl, launch_with_mactype_impl, register_session_target_impl,
     remove_session_target_impl,
@@ -144,25 +145,6 @@ fn observe_profile(installation: Option<&Path>) -> ProfileObservation {
     project_profile_observation(local, bundled_default)
 }
 
-fn profile_publish_supported_for(
-    service: &crate::service_contract::SystemServiceStatus,
-    registry_mode_detected: bool,
-) -> bool {
-    !registry_mode_detected
-        && service.backend != crate::service_contract::ServiceBackend::Foreign
-        && matches!(
-            service.installation,
-            crate::service_contract::InstallationState::Absent
-                | crate::service_contract::InstallationState::Current
-                | crate::service_contract::InstallationState::Outdated
-        )
-        && matches!(
-            service.runtime,
-            crate::service_contract::RuntimeState::Running
-                | crate::service_contract::RuntimeState::Stopped
-        )
-}
-
 pub fn status(installation_root: Option<&Path>) -> ExecutionStatus {
     let observation = observe_profile(installation_root);
     let machine = crate::machine_integration::status(observation.expected_profile.as_deref());
@@ -184,7 +166,10 @@ pub fn status(installation_root: Option<&Path>) -> ExecutionStatus {
     record_legacy_tray_observation(legacy_mac_tray.as_ref(), &legacy_tray);
     let system_modes_supported = service_management_package
         == crate::service_contract::ServiceManagementPackageState::Ready
-        && profile_publish_supported_for(&system_service, registry_mode_detected);
+        && crate::machine_integration::profile_publication_supported(
+            &system_service,
+            registry_mode_detected,
+        );
     ExecutionStatus {
         tray_available: true,
         auto_start: autostart_value().is_some(),
@@ -300,7 +285,6 @@ pub(crate) fn designate_open_profile(
 ) -> Result<AppliedProfile, String> {
     use crate::diagnostics::ActivityKind;
     use crate::machine_integration::MachineAction;
-    use crate::service_contract::{InstallationState, RuntimeState};
 
     let root =
         installation_root().ok_or_else(|| "MacType installation was not found".to_owned())?;
@@ -313,38 +297,13 @@ pub(crate) fn designate_open_profile(
         );
         return Ok(applied);
     }
-    let before = status(Some(&root));
-    let service = &before.system_service;
-    let machine_step = if service.runtime == RuntimeState::Running {
-        Some(MachineAction::PublishProfile)
-    } else if service.runtime == RuntimeState::Stopped
-        && matches!(
-            service.installation,
-            InstallationState::Current | InstallationState::Outdated
-        )
-        && before.system_modes_supported
-        && !before.registry_mode_detected
-        && !before.legacy_tray.blocks_machine_change()
-    {
-        Some(MachineAction::DesignateProfile)
-    } else {
-        None
-    };
-    match machine_step {
-        Some(MachineAction::PublishProfile) => {
-            execute_machine_action(MachineAction::PublishProfile, Some(&profile_bytes))?;
-            applied.effect = DesignationEffect::Live;
-        }
-        // The pause marker records the user's last on/off choice; holding a
-        // profile for the next start is not that choice, so it stays untouched.
-        Some(action) => crate::machine_integration::execute(action, Some(&profile_bytes))?,
-        None => {}
-    }
+    applied.effect = crate::machine_integration::designate_run_profile(&profile_bytes)?;
     let _ = crate::diagnostics::record_activity(
         ActivityKind::ProfileDesignated,
         Some(&applied.source_profile),
     );
     if applied.effect == DesignationEffect::Live {
+        record_system_injection_choice(true)?;
         let current = status(Some(&root));
         record_successful_activity(MachineAction::PublishProfile, true, &current);
     }
@@ -410,15 +369,16 @@ pub(crate) fn apply_system_injection_from_tray_menu() -> Result<(), String> {
     }
     ensure_active_runtime()?;
     let profile = active_system_profile_payload()?;
-    let before = status(installation_root().as_deref());
-    crate::machine_integration::tray_apply(false, &profile)?;
+    let effect = crate::machine_integration::designate_run_profile(&profile)?;
     record_system_injection_choice(true)?;
-    let current = status(installation_root().as_deref());
-    record_successful_activity(
-        crate::machine_integration::MachineAction::PublishProfile,
-        before.system_service.runtime == crate::service_contract::RuntimeState::Running,
-        &current,
-    );
+    if effect == DesignationEffect::Live {
+        let current = status(installation_root().as_deref());
+        record_successful_activity(
+            crate::machine_integration::MachineAction::PublishProfile,
+            true,
+            &current,
+        );
+    }
     Ok(())
 }
 
@@ -574,21 +534,6 @@ mod tests {
     fn manual_launcher_rejects_non_executable_targets() {
         let error = launch_with_mactype_impl("Cargo.toml", &[]).unwrap_err();
         assert!(error.contains("existing .exe") || error.contains("cannot find"));
-    }
-
-    #[test]
-    fn system_injection_status_matches_the_verified_service() {
-        let status = status(None);
-        let service = &status.system_service;
-        assert_eq!(
-            status.system_modes_supported,
-            profile_publish_supported_for(service, status.registry_mode_detected)
-        );
-        assert_eq!(
-            status.system_injection_active,
-            !status.registry_mode_detected
-                && service.system_injection_active(status.expected_profile_digest.as_deref())
-        );
     }
 
     #[test]
@@ -857,51 +802,6 @@ mod tests {
         let active = runtime::active_runtime_from(&runtime_root).unwrap();
         assert_eq!(active.source_profile, Path::new(r"ini\Custom.ini"));
         fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn profile_publish_capability_requires_no_appinit_and_a_safe_stable_installation() {
-        let mut service = crate::service_contract::SystemServiceStatus {
-            backend: crate::service_contract::ServiceBackend::OpenSource,
-            installation: crate::service_contract::InstallationState::Current,
-            runtime: crate::service_contract::RuntimeState::Running,
-            health: crate::service_contract::HealthState::Ready,
-            binary_path: None,
-            win32_error: None,
-            active_profile_digest: None,
-            configuration_drift: false,
-            can_install: false,
-            can_remove: true,
-            can_start: false,
-            can_stop: true,
-            can_repair: true,
-            can_upgrade: false,
-        };
-        assert!(profile_publish_supported_for(&service, false));
-        assert!(!profile_publish_supported_for(&service, true));
-
-        for installation in [
-            crate::service_contract::InstallationState::Invalid,
-            crate::service_contract::InstallationState::Inaccessible,
-            crate::service_contract::InstallationState::DeletePending,
-        ] {
-            service.installation = installation;
-            assert!(!profile_publish_supported_for(&service, false));
-        }
-        service.installation = crate::service_contract::InstallationState::Current;
-        for runtime in [
-            crate::service_contract::RuntimeState::StartPending,
-            crate::service_contract::RuntimeState::StopPending,
-            crate::service_contract::RuntimeState::Paused,
-            crate::service_contract::RuntimeState::Unknown,
-        ] {
-            service.runtime = runtime;
-            assert!(!profile_publish_supported_for(&service, false));
-        }
-        service.runtime = crate::service_contract::RuntimeState::Stopped;
-        service.installation = crate::service_contract::InstallationState::Absent;
-        service.backend = crate::service_contract::ServiceBackend::None;
-        assert!(profile_publish_supported_for(&service, false));
     }
 
     #[test]

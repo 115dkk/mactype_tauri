@@ -9,7 +9,7 @@ use mactype_service_contract::{
 use serde::{Deserialize, Serialize};
 
 use super::super::deployment::LoadedPayload;
-use super::super::RuntimeInstaller;
+use super::super::generation_store::RuntimeGenerationStore;
 use crate::profile_bridge::GENERATED_PROFILE_NAME;
 use crate::storage::{
     atomic_write, create_protected_directory, read_bounded_directory, read_bounded_regular_file,
@@ -47,8 +47,8 @@ impl RuntimeReceipt {
     }
 }
 
-impl RuntimeInstaller {
-    pub(in crate::runtime_installer) fn verify_runtime_generation_receipt(
+impl RuntimeGenerationStore<'_> {
+    pub(in crate::runtime_installer) fn verify(
         &self,
         version: &str,
         directory: &Path,
@@ -148,7 +148,7 @@ impl RuntimeInstaller {
         self.paths.service_root().join("runtime-receipts")
     }
 
-    pub(super) fn runtime_receipt_path(&self, version: &str) -> PathBuf {
+    pub(in crate::runtime_installer) fn runtime_receipt_path(&self, version: &str) -> PathBuf {
         self.runtime_receipts_root().join(format!("{version}.json"))
     }
 }

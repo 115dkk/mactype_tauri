@@ -10,12 +10,14 @@ use super::{
     validate_runtime_pointer, RuntimePointer, MAX_ACTIVATION_JOURNAL_BYTES, MAX_POINTER_BYTES,
 };
 use crate::profile_bridge::ProfileRuntimeBridge;
-use crate::runtime_installer::{InstalledRuntime, RuntimeInstaller, RuntimeServiceBinding};
+use crate::runtime_installer::activation_transaction::RuntimeActivationTransaction;
+use crate::runtime_installer::{InstalledRuntime, RuntimeServiceBinding};
 use crate::storage::{atomic_write, read_bounded_regular_file, SetupError};
 
-impl RuntimeInstaller {
-    pub fn recover_interrupted_activation(&self) -> Result<Option<InstalledRuntime>, SetupError> {
-        self.recover_interrupted_repair()?;
+impl RuntimeActivationTransaction<'_> {
+    pub(in crate::runtime_installer) fn recover(
+        &self,
+    ) -> Result<Option<InstalledRuntime>, SetupError> {
         let journal_path = self.activation_journal_path();
         if !journal_path.exists() {
             return self.current();
@@ -40,7 +42,7 @@ impl RuntimeInstaller {
         Ok(recovered)
     }
 
-    pub fn recover_interrupted_activation_with_service_binding<I, R>(
+    pub(in crate::runtime_installer) fn recover_with_service_binding<I, R>(
         &self,
         mut inspect_service_binding: I,
         restore_previous_service_binding: R,
@@ -49,7 +51,6 @@ impl RuntimeInstaller {
         I: FnMut(Option<&Path>, Option<&Path>) -> Result<RuntimeServiceBinding, SetupError>,
         R: FnOnce(&Path, Option<&Path>) -> Result<(), SetupError>,
     {
-        self.recover_interrupted_repair()?;
         let journal_path = self.activation_journal_path();
         if !journal_path.exists() {
             return self.current();
@@ -155,7 +156,7 @@ impl RuntimeInstaller {
         role: &str,
     ) -> Result<std::path::PathBuf, SetupError> {
         let directory = self.paths.runtime_versions().join(pointer.version());
-        self.verify_runtime_generation_receipt(pointer.version(), &directory)
+        self.generation_store().verify(pointer.version(), &directory)
             .map_err(|error| {
                 SetupError::CleanupUnknown(format!(
                     "runtime activation {role} generation could not be verified for SCM recovery: {error}"
@@ -243,7 +244,8 @@ impl RuntimeInstaller {
                 "committed runtime activation {role} has no generation directory"
             ))
         })?;
-        self.verify_runtime_generation_receipt(current.version(), directory)
+        self.generation_store()
+            .verify(current.version(), directory)
             .map_err(|error| {
                 SetupError::CleanupUnknown(format!(
                     "committed runtime activation {role} could not be verified: {error}"

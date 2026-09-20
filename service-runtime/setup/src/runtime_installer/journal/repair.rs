@@ -157,7 +157,9 @@ impl RuntimeInstaller {
         self.paths.service_root().join("runtime-repair.json")
     }
 
-    pub(super) fn recover_interrupted_repair(&self) -> Result<(), SetupError> {
+    pub(in crate::runtime_installer) fn recover_interrupted_repair(
+        &self,
+    ) -> Result<(), SetupError> {
         let journal_path = self.repair_journal_path();
         if !journal_path.exists() {
             return Ok(());

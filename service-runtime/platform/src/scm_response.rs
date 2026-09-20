@@ -2,27 +2,25 @@
 //! pointer checked against the allocation before it is read.
 
 use std::io;
-use std::mem::{align_of, size_of, size_of_val};
-use std::ptr::null_mut;
+use std::mem::{align_of, size_of};
 
 use windows_sys::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER;
+
+use crate::bounded_read::{probe_word_aligned, CallOutcome, ProbeError, WordAlignedBuffer};
 
 /// The largest response any SCM query may hand back. `QueryServiceConfigW`
 /// documents 8 KiB; the Config2 levels are larger, so one generous cap
 /// covers them all.
 pub(crate) const MAX_SCM_RESPONSE_BYTES: u32 = 64 * 1024;
 
-/// A response buffer: `words` gives pointer alignment for the fixed header,
-/// `byte_length` is how many bytes the SCM reported filling (<= capacity).
+/// An SCM response in word-aligned storage with its reported byte length.
 pub(crate) struct ScmResponse {
-    words: Vec<usize>,
-    byte_length: usize,
+    storage: WordAlignedBuffer,
 }
 
 impl ScmResponse {
     /// Runs the two-call size-probe-then-fill protocol shared by
-    /// `QueryServiceConfigW`, `QueryServiceConfig2W`, and
-    /// `QueryServiceObjectSecurity`.
+    /// `QueryServiceConfigW` and `QueryServiceConfig2W`.
     ///
     /// `call(buffer, capacity, needed)` must perform exactly one Win32 call
     /// with those arguments and return its BOOL. The first invocation passes a
@@ -34,41 +32,44 @@ impl ScmResponse {
         minimum_bytes: usize,
         mut call: impl FnMut(*mut u8, u32, &mut u32) -> i32,
     ) -> io::Result<Self> {
-        let mut needed = 0_u32;
-        let result = call(null_mut(), 0, &mut needed);
-        let error = io::Error::last_os_error();
-        if result != 0 {
-            return Err(invalid_data("SCM size probe succeeded without a buffer"));
-        }
-        if error.raw_os_error() != Some(ERROR_INSUFFICIENT_BUFFER as i32) {
-            return Err(error);
-        }
-        if (needed as usize) < minimum_bytes || needed > MAX_SCM_RESPONSE_BYTES {
-            return Err(invalid_data("SCM response size is out of range"));
-        }
-
-        let word_count = (needed as usize).div_ceil(size_of::<usize>());
-        let mut words = vec![0_usize; word_count];
-        let capacity = size_of_val(words.as_slice()) as u32;
-        let result = call(words.as_mut_ptr().cast::<u8>(), capacity, &mut needed);
-        let error = io::Error::last_os_error();
-        if result == 0 {
-            return Err(error);
-        }
-
-        let byte_length = usize::min(needed as usize, capacity as usize);
-        if byte_length < minimum_bytes {
-            return Err(invalid_data("SCM response is shorter than its header"));
-        }
-        Ok(Self { words, byte_length })
+        let storage = probe_word_aligned(
+            minimum_bytes,
+            MAX_SCM_RESPONSE_BYTES as usize,
+            |buffer, capacity, needed| {
+                let result = call(buffer.cast(), capacity, needed);
+                if result != 0 {
+                    return Ok(CallOutcome::Complete);
+                }
+                let error = io::Error::last_os_error();
+                if error.raw_os_error() == Some(ERROR_INSUFFICIENT_BUFFER as i32) {
+                    Ok(CallOutcome::MoreData(error))
+                } else {
+                    Err(error)
+                }
+            },
+        )
+        .map_err(|error| match error {
+            ProbeError::Call(error) | ProbeError::FillNeedsMore(error) => error,
+            ProbeError::ProbeCompleted(_) => {
+                invalid_data("SCM size probe succeeded without a buffer")
+            }
+            ProbeError::SizeOutOfRange => invalid_data("SCM response size is out of range"),
+            ProbeError::ReturnedLengthOutOfRange { needed, .. } if needed < minimum_bytes => {
+                invalid_data("SCM response is shorter than its header")
+            }
+            ProbeError::ReturnedLengthOutOfRange { .. } => {
+                invalid_data("SCM response size is out of range")
+            }
+        })?;
+        Ok(Self { storage })
     }
 
     fn start(&self) -> usize {
-        self.words.as_ptr() as usize
+        self.storage.as_ptr() as usize
     }
 
     fn end(&self) -> usize {
-        self.start() + self.byte_length
+        self.start() + self.storage.len()
     }
 
     /// Returns the fixed header at the start of the response.
@@ -76,12 +77,13 @@ impl ScmResponse {
         if align_of::<T>() > align_of::<usize>() {
             return Err(invalid_data("SCM response header alignment is unsupported"));
         }
-        if self.byte_length < size_of::<T>() {
+        if self.storage.len() < size_of::<T>() {
             return Err(invalid_data("SCM response is shorter than its header"));
         }
-        // SAFETY: `words` is aligned for `T`, and the successful query wrote
-        // every byte of the header inside `byte_length`.
-        Ok(unsafe { self.words.as_ptr().cast::<T>().read() })
+        // SAFETY: the successful query initialized the reported bytes in
+        // word-aligned storage, and the Win32 contract defines its fixed
+        // prefix as T.
+        Ok(unsafe { self.storage.read::<T>() }.expect("alignment and header length were checked"))
     }
 
     /// Copies a fixed-size array addressed inside this response.
@@ -178,8 +180,9 @@ impl ScmResponse {
 
     #[cfg(test)]
     pub(crate) fn from_words(words: Vec<usize>, byte_length: usize) -> Self {
-        assert!(byte_length <= size_of_val(words.as_slice()));
-        Self { words, byte_length }
+        Self {
+            storage: WordAlignedBuffer::from_words(words, byte_length),
+        }
     }
 }
 
@@ -212,7 +215,7 @@ mod tests {
     fn terminated_string_inside_the_response_reads_back() {
         let units: Vec<u16> = "inside\0".encode_utf16().collect();
         let response = response_with_units(&units, units.len() * size_of::<u16>());
-        let pointer = response.words.as_ptr().cast::<u16>();
+        let pointer = response.storage.as_ptr().cast::<usize>().cast::<u16>();
         let read = response.wide_units(pointer).unwrap().unwrap();
         assert_eq!(String::from_utf16_lossy(read), "inside");
     }
@@ -221,7 +224,7 @@ mod tests {
     fn string_with_a_terminator_past_the_reported_length_fails() {
         let units: Vec<u16> = "outside\0".encode_utf16().collect();
         let response = response_with_units(&units, (units.len() - 1) * size_of::<u16>());
-        let pointer = response.words.as_ptr().cast::<u16>();
+        let pointer = response.storage.as_ptr().cast::<usize>().cast::<u16>();
         assert!(response.wide_units(pointer).is_err());
     }
 
@@ -242,7 +245,7 @@ mod tests {
     fn multi_string_reads_every_entry_and_accepts_an_empty_block() {
         let units: Vec<u16> = "one\0two\0\0".encode_utf16().collect();
         let response = response_with_units(&units, units.len() * size_of::<u16>());
-        let pointer = response.words.as_ptr().cast::<u16>();
+        let pointer = response.storage.as_ptr().cast::<usize>().cast::<u16>();
         let entries: Vec<String> = response
             .multi_units(pointer, 2)
             .unwrap()
@@ -253,7 +256,7 @@ mod tests {
 
         let empty = [0_u16];
         let response = response_with_units(&empty, size_of::<u16>());
-        let pointer = response.words.as_ptr().cast::<u16>();
+        let pointer = response.storage.as_ptr().cast::<usize>().cast::<u16>();
         assert!(response.multi_units(pointer, 0).unwrap().is_empty());
     }
 
@@ -261,7 +264,7 @@ mod tests {
     fn multi_string_without_its_empty_terminator_fails() {
         let units: Vec<u16> = "one\0two\0".encode_utf16().collect();
         let response = response_with_units(&units, units.len() * size_of::<u16>());
-        let pointer = response.words.as_ptr().cast::<u16>();
+        let pointer = response.storage.as_ptr().cast::<usize>().cast::<u16>();
         assert!(response.multi_units(pointer, 2).is_err());
     }
 
@@ -269,14 +272,14 @@ mod tests {
     fn multi_string_entry_limit_is_enforced() {
         let units: Vec<u16> = "one\0two\0\0".encode_utf16().collect();
         let response = response_with_units(&units, units.len() * size_of::<u16>());
-        let pointer = response.words.as_ptr().cast::<u16>();
+        let pointer = response.storage.as_ptr().cast::<usize>().cast::<u16>();
         assert!(response.multi_units(pointer, 1).is_err());
     }
 
     #[test]
     fn an_in_range_array_reads_back() {
         let response = ScmResponse::from_words(vec![11, 22, 33], 3 * size_of::<usize>());
-        let pointer = response.words.as_ptr();
+        let pointer = response.storage.as_ptr().cast::<usize>();
         assert_eq!(response.array(pointer, 3, 3).unwrap(), [11, 22, 33]);
         assert!(response
             .array::<usize>(std::ptr::null(), 0, 0)
@@ -297,8 +300,12 @@ mod tests {
         assert!(response
             .array::<usize>((start + 1) as *const usize, 1, 1)
             .is_err());
-        assert!(response.array(response.words.as_ptr(), 3, 3).is_err());
-        assert!(response.array(response.words.as_ptr(), 2, 1).is_err());
+        assert!(response
+            .array(response.storage.as_ptr().cast::<usize>(), 3, 3)
+            .is_err());
+        assert!(response
+            .array(response.storage.as_ptr().cast::<usize>(), 2, 1)
+            .is_err());
     }
 
     #[test]

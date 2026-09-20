@@ -8,14 +8,6 @@
 
 namespace {
 
-mtpc::Frame omitted_probe() {
-  mtpc::Frame probe;
-  probe.kind = mtpc::MessageKind::show_native_preview;
-  probe.request_id = 46;
-  probe.json = "{}";
-  return probe;
-}
-
 std::string json_path(const wchar_t* root, const char* file) {
   const std::filesystem::path path = std::filesystem::path(root) / file;
   std::string escaped;
@@ -87,33 +79,51 @@ int wmain(int argc, wchar_t** argv) {
   runtime.pump_messages();
   if (runtime.selected_face_for_tests() != L"Segoe UI") return 28;
 
-  /* A strip rendered for another caller leaves the window's sample alone. */
-  mtpc::Frame foreign_strip;
-  foreign_strip.kind = mtpc::MessageKind::render_preview;
-  foreign_strip.request_id = 56;
-  foreign_strip.json = R"({"overrides":{"normal_weight":2},"sample":{"text":"Studio strip · one line","fontFace":"Arial","fontSizePt":9,"widthPx":320,"heightPx":64,"dpi":96,"foreground":"#000000","background":"#FFFFFF"}})";
-  if (runtime.render(foreign_strip).kind != mtpc::MessageKind::preview_rendered) return 44;
-  if (runtime.native_sample_text_for_tests() != L"Native preview 한글 ABC") return 45;
-  if (runtime.strip_text_for_tests() != L"Studio strip · one line") return 46;
-  const mtpc::Frame after_strip = runtime.show_native_preview(omitted_probe(), true);
-  if (after_strip.json.find("\"fontFace\":\"Segoe UI\"") == std::string::npos ||
-      after_strip.json.find("\"fontSizePt\":16") == std::string::npos) {
-    return 47;
+  const std::uint32_t relayouts_before_repeat = runtime.relayout_count_for_tests();
+  const std::uint32_t retitles_before_repeat = runtime.retitle_count_for_tests();
+  const std::uint32_t reshows_before_repeat = runtime.reshow_count_for_tests();
+  if (runtime.show_native_preview(native, true).kind != mtpc::MessageKind::native_preview_state) {
+    return 56;
   }
-  runtime.pump_messages();
+  if (runtime.relayout_count_for_tests() != relayouts_before_repeat ||
+      runtime.retitle_count_for_tests() != retitles_before_repeat ||
+      runtime.reshow_count_for_tests() != reshows_before_repeat) {
+    return 57;
+  }
 
-  /* The window keeps its own profile and overrides; a bad path is refused. */
+  mtpc::Frame unchanged_native;
+  unchanged_native.kind = mtpc::MessageKind::show_native_preview;
+  unchanged_native.request_id = 57;
+  unchanged_native.json = "{}";
+  const mtpc::Frame native_before_strip = runtime.show_native_preview(unchanged_native, true);
+  mtpc::Frame strip_while_open = styled;
+  strip_while_open.request_id = 58;
+  strip_while_open.json = R"({"overrides":{},"sample":{"text":"Strip must stay separate","fontFace":"Arial","fontSizePt":28,"widthPx":640,"heightPx":96,"dpi":120,"foreground":"#010203","background":"#FDFCFB","bold":false,"italic":false}})";
+  if (runtime.render(strip_while_open).kind != mtpc::MessageKind::preview_rendered) return 58;
+  const mtpc::Frame native_after_strip = runtime.show_native_preview(unchanged_native, true);
+  if (native_after_strip.kind != mtpc::MessageKind::native_preview_state ||
+      native_after_strip.json != native_before_strip.json) {
+    return 59;
+  }
+
   mtpc::Frame native_settings;
   native_settings.kind = mtpc::MessageKind::show_native_preview;
-  native_settings.request_id = 57;
+  native_settings.request_id = 60;
   native_settings.json = R"({"profilePath":"Z:\\missing\\profile.ini","overrides":{"normal_weight":3}})";
-  if (runtime.show_native_preview(native_settings, true).kind != mtpc::MessageKind::error) return 48;
-  native_settings.json = std::string{R"({"profilePath":")"} + json_path(argv[1], "MacType.ini") +
+  if (runtime.show_native_preview(native_settings, true).kind != mtpc::MessageKind::error) {
+    return 60;
+  }
+  native_settings.json = std::string{R"({"profilePath":")"} +
+                         json_path(argv[1], "MacType.ini") +
                          R"(","overrides":{"normal_weight":3,"gamma_value":1.4}})";
-  if (runtime.show_native_preview(native_settings, true).kind != mtpc::MessageKind::native_preview_state) return 49;
+  if (runtime.show_native_preview(native_settings, true).kind !=
+      mtpc::MessageKind::native_preview_state) {
+    return 61;
+  }
   runtime.pump_messages();
-  if (runtime.render(foreign_strip).kind != mtpc::MessageKind::preview_rendered) return 50;
-  if (runtime.scroll_max_for_tests() < 0) return 51;
+  if (runtime.render(strip_while_open).kind != mtpc::MessageKind::preview_rendered) return 62;
+  runtime.pump_messages();
+  if (runtime.scroll_max_for_tests() < 0) return 63;
 
   mtpc::Frame tall;
   tall.kind = mtpc::MessageKind::show_native_preview;
@@ -288,11 +298,6 @@ int wmain(int argc, wchar_t** argv) {
   if (plain_response.json.find("\"engine\":\"plain\"") == std::string::npos ||
       plain_response.json.find("\"coreVersion\":0") == std::string::npos) {
     return 23;
-  }
-  const mtpc::Frame load_response = plain_runtime.load_profile(plain_render);
-  if (load_response.kind != mtpc::MessageKind::ack ||
-      load_response.json != R"({"loaded":false,"engine":"plain"})") {
-    return 24;
   }
   for (const char* skin : {"classic", "fluent", "console", "cupertino"}) {
     if (!mactype::PreviewRuntimeTestAccess::toolbar_labels(plain_runtime, skin)) return 80;

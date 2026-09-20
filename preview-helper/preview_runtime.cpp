@@ -1,20 +1,22 @@
 #include "preview_runtime.h"
 
 #include "generated_settings.h"
+#include "generated_native_preview.h"
+#include "installation_check.h"
+#include "json_document.h"
+#include "png_encoder.h"
 
 #include <CommCtrl.h>
 #include <CommDlg.h>
 #include <Shlwapi.h>
 #include <Windowsx.h>
 #include <Uxtheme.h>
-#include <Wincodec.h>
 
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -52,44 +54,31 @@ enum Action {
   kCopy,
 };
 
-constexpr PreviewRuntime::Palette kLightPalette{RGB(0xF3, 0xF5, 0xF7), RGB(0xFF, 0xFF, 0xFF),
-                                RGB(0xE9, 0xED, 0xF1), RGB(0xC9, 0xD1, 0xD8),
-                                RGB(0x17, 0x21, 0x2B), RGB(0x5A, 0x67, 0x73),
-                                RGB(0x00, 0x67, 0xC0), RGB(0xFF, 0xFF, 0xFF)};
-constexpr PreviewRuntime::Palette kDarkPalette{RGB(0x11, 0x16, 0x1B), RGB(0x19, 0x20, 0x27),
-                               RGB(0x22, 0x2B, 0x33), RGB(0x34, 0x41, 0x4C),
-                               RGB(0xE8, 0xED, 0xF2), RGB(0x9A, 0xA8, 0xB5),
-                               RGB(0x4C, 0xA6, 0xE8), RGB(0x07, 0x13, 0x1C)};
+constexpr PreviewRuntime::Palette palette_from(const GeneratedNativePalette& value) {
+  return {value.canvas, value.surface, value.hover, value.border, value.text, value.muted,
+          value.accent, value.on_accent};
+}
+
+constexpr PreviewRuntime::NativeChrome chrome_from(const GeneratedNativeChrome& value) {
+  return {PreviewRuntime::Skin::classic, palette_from(kNativeLightPalette), value.radius,
+          value.control_height, value.toolbar_height, value.status_height, value.canvas_radius,
+          value.canvas_inset, value.mono_status};
+}
+
+constexpr PreviewRuntime::Palette kLightPalette = palette_from(kNativeLightPalette);
+constexpr PreviewRuntime::Palette kDarkPalette = palette_from(kNativeDarkPalette);
+
+const char* skin_name(PreviewRuntime::Skin skin) {
+  switch (skin) {
+    case PreviewRuntime::Skin::classic: return "classic";
+    case PreviewRuntime::Skin::fluent: return "fluent";
+    case PreviewRuntime::Skin::console: return "console";
+    case PreviewRuntime::Skin::cupertino: return "cupertino";
+  }
+  return "classic";
+}
 
 int scaled(int logical, UINT dpi) { return MulDiv(logical, static_cast<int>(dpi), 96); }
-
-std::wstring full_path(const std::wstring& path) {
-  const DWORD required = GetFullPathNameW(path.c_str(), 0, nullptr, nullptr);
-  if (required == 0) return {};
-  std::wstring result(required, L'\0');
-  const DWORD written = GetFullPathNameW(path.c_str(), required, result.data(), nullptr);
-  if (written == 0 || written >= required) return {};
-  result.resize(written);
-  return result;
-}
-
-bool regular_file(const std::wstring& path) {
-  const DWORD attributes = GetFileAttributesW(path.c_str());
-  return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
-}
-
-bool x86_image(const std::wstring& path) {
-  std::ifstream input(path, std::ios::binary);
-  IMAGE_DOS_HEADER dos{};
-  input.read(reinterpret_cast<char*>(&dos), sizeof(dos));
-  if (!input || dos.e_magic != IMAGE_DOS_SIGNATURE || dos.e_lfanew <= 0) return false;
-  input.seekg(dos.e_lfanew, std::ios::beg);
-  DWORD signature{};
-  IMAGE_FILE_HEADER header{};
-  input.read(reinterpret_cast<char*>(&signature), sizeof(signature));
-  input.read(reinterpret_cast<char*>(&header), sizeof(header));
-  return input && signature == IMAGE_NT_SIGNATURE && header.Machine == IMAGE_FILE_MACHINE_I386;
-}
 
 std::wstring utf8_to_wide(const std::string& value) {
   if (value.empty()) return {};
@@ -143,228 +132,6 @@ std::string json_escape_string(const std::string& value) {
     }
   }
   return escaped;
-}
-
-std::optional<std::size_t> json_value_start(const std::string& json, const std::string& key,
-                                            std::size_t begin = 0, std::size_t end = std::string::npos) {
-  const std::string needle = '"' + key + '"';
-  std::size_t position = json.find(needle, begin);
-  if (position == std::string::npos || position >= end) return std::nullopt;
-  position = json.find(':', position + needle.size());
-  if (position == std::string::npos || position >= end) return std::nullopt;
-  do {
-    ++position;
-  } while (position < json.size() && position < end &&
-           std::isspace(static_cast<unsigned char>(json[position])) != 0);
-  return position < json.size() && position < end ? std::optional(position) : std::nullopt;
-}
-
-std::optional<std::string> json_string_at(const std::string& json, std::size_t start,
-                                          std::size_t end = std::string::npos) {
-  if (start >= json.size() || start >= end || json[start] != '"') return std::nullopt;
-  std::string result;
-  for (std::size_t index = start + 1; index < json.size() && index < end; ++index) {
-    const char character = json[index];
-    if (character == '"') return result;
-    if (character != '\\') {
-      result.push_back(character);
-      continue;
-    }
-    if (++index >= json.size() || index >= end) return std::nullopt;
-    switch (json[index]) {
-      case '"': result.push_back('"'); break;
-      case '\\': result.push_back('\\'); break;
-      case '/': result.push_back('/'); break;
-      case 'b': result.push_back('\b'); break;
-      case 'f': result.push_back('\f'); break;
-      case 'n': result.push_back('\n'); break;
-      case 'r': result.push_back('\r'); break;
-      case 't': result.push_back('\t'); break;
-      default: return std::nullopt;
-    }
-  }
-  return std::nullopt;
-}
-
-std::optional<std::string> json_string(const std::string& json, const std::string& key) {
-  const auto start = json_value_start(json, key);
-  return start ? json_string_at(json, *start) : std::nullopt;
-}
-
-std::optional<std::size_t> json_root_value_start(const std::string& json,
-                                                 const std::string& key) {
-  const std::string needle = '"' + key + '"';
-  int depth = 0;
-  bool string = false;
-  bool escape = false;
-  for (std::size_t index = 0; index < json.size(); ++index) {
-    const char character = json[index];
-    if (string) {
-      if (escape) {
-        escape = false;
-      } else if (character == '\\') {
-        escape = true;
-      } else if (character == '"') {
-        string = false;
-      }
-      continue;
-    }
-    if (character == '{' || character == '[') {
-      ++depth;
-      continue;
-    }
-    if (character == '}' || character == ']') {
-      --depth;
-      continue;
-    }
-    if (character == '"' && depth == 1 && json.compare(index, needle.size(), needle) == 0) {
-      return json_value_start(json, key, index, json.size());
-    }
-    if (character == '"') string = true;
-  }
-  return std::nullopt;
-}
-
-std::optional<std::string> json_root_string(const std::string& json, const std::string& key) {
-  const auto start = json_root_value_start(json, key);
-  return start ? json_string_at(json, *start) : std::nullopt;
-}
-
-std::optional<std::pair<std::size_t, std::size_t>> json_object_range(const std::string& json,
-                                                                     const std::string& key) {
-  const auto start = json_value_start(json, key);
-  if (!start || json[*start] != '{') return std::nullopt;
-  int depth = 0;
-  bool string = false;
-  bool escape = false;
-  for (std::size_t index = *start; index < json.size(); ++index) {
-    const char character = json[index];
-    if (string) {
-      if (escape) {
-        escape = false;
-      } else if (character == '\\') {
-        escape = true;
-      } else if (character == '"') {
-        string = false;
-      }
-      continue;
-    }
-    if (character == '"') string = true;
-    if (character == '{') ++depth;
-    if (character == '}' && --depth == 0) return std::pair(*start + 1, index);
-  }
-  return std::nullopt;
-}
-
-std::optional<std::string> json_object_string(const std::string& json, const std::string& object,
-                                               const std::string& key) {
-  const auto range = json_object_range(json, object);
-  if (!range) return std::nullopt;
-  const auto start = json_value_start(json, key, range->first, range->second);
-  return start ? json_string_at(json, *start, range->second) : std::nullopt;
-}
-
-bool json_token_ending(const std::string& json, std::size_t position) {
-  if (position >= json.size()) return true;
-  const char character = json[position];
-  return character == ',' || character == '}' || character == ']' ||
-         std::isspace(static_cast<unsigned char>(character)) != 0;
-}
-
-std::optional<double> json_number_at(const std::string& json, std::size_t start) {
-  char* end{};
-  const double value = std::strtod(json.c_str() + start, &end);
-  if (end == json.c_str() + start || !std::isfinite(value)) return std::nullopt;
-  std::size_t ending = static_cast<std::size_t>(end - json.c_str());
-  while (ending < json.size() &&
-         std::isspace(static_cast<unsigned char>(json[ending])) != 0) {
-    ++ending;
-  }
-  if (!json_token_ending(json, ending)) return std::nullopt;
-  return value;
-}
-
-std::optional<double> json_number(const std::string& json, const std::string& key) {
-  const auto start = json_value_start(json, key);
-  return start ? json_number_at(json, *start) : std::nullopt;
-}
-
-std::optional<double> json_root_number(const std::string& json, const std::string& key) {
-  const auto start = json_root_value_start(json, key);
-  return start ? json_number_at(json, *start) : std::nullopt;
-}
-
-std::optional<double> json_object_number(const std::string& json, const std::string& object,
-                                         const std::string& key) {
-  const auto range = json_object_range(json, object);
-  if (!range) return std::nullopt;
-  const auto start = json_value_start(json, key, range->first, range->second);
-  return start ? json_number_at(json, *start) : std::nullopt;
-}
-
-std::optional<bool> json_bool_at(const std::string& json, std::size_t start) {
-  const auto valid_ending = [&](std::size_t position) {
-    while (position < json.size() &&
-           std::isspace(static_cast<unsigned char>(json[position])) != 0) {
-      ++position;
-    }
-    return json_token_ending(json, position);
-  };
-  if (json.compare(start, 4, "true") == 0 && valid_ending(start + 4)) return true;
-  if (json.compare(start, 5, "false") == 0 && valid_ending(start + 5)) return false;
-  return std::nullopt;
-}
-
-std::optional<bool> json_bool(const std::string& json, const std::string& key) {
-  const auto start = json_value_start(json, key);
-  return start ? json_bool_at(json, *start) : std::nullopt;
-}
-
-std::optional<bool> json_root_bool(const std::string& json, const std::string& key) {
-  const auto start = json_root_value_start(json, key);
-  return start ? json_bool_at(json, *start) : std::nullopt;
-}
-
-std::optional<bool> json_object_bool(const std::string& json, const std::string& object,
-                                     const std::string& key) {
-  const auto range = json_object_range(json, object);
-  if (!range) return std::nullopt;
-  const auto start = json_value_start(json, key, range->first, range->second);
-  return start ? json_bool_at(json, *start) : std::nullopt;
-}
-
-std::optional<std::vector<double>> json_number_array_at(const std::string& json,
-                                                        std::size_t start) {
-  if (json[start] != '[') return std::nullopt;
-  std::vector<double> values;
-  std::size_t position = start + 1;
-  for (;;) {
-    while (position < json.size() &&
-           std::isspace(static_cast<unsigned char>(json[position])) != 0) {
-      ++position;
-    }
-    if (position >= json.size()) return std::nullopt;
-    if (json[position] == ']') return values;
-    char* end{};
-    const double value = std::strtod(json.c_str() + position, &end);
-    if (end == json.c_str() + position || !std::isfinite(value)) return std::nullopt;
-    values.push_back(value);
-    position = static_cast<std::size_t>(end - json.c_str());
-    while (position < json.size() &&
-           std::isspace(static_cast<unsigned char>(json[position])) != 0) {
-      ++position;
-    }
-    if (position >= json.size()) return std::nullopt;
-    if (json[position] == ']') return values;
-    if (json[position] != ',') return std::nullopt;
-    ++position;
-  }
-}
-
-std::optional<std::vector<double>> json_root_number_array(const std::string& json,
-                                                          const std::string& key) {
-  const auto start = json_root_value_start(json, key);
-  return start ? json_number_array_at(json, *start) : std::nullopt;
 }
 
 COLORREF parse_color(const std::string& value, COLORREF fallback) {
@@ -421,22 +188,22 @@ void fill_solid(HDC dc, const RECT& area, COLORREF color) {
   DeleteObject(brush);
 }
 
-void draw_sample(HDC dc, const RECT& area, const std::wstring& text, const std::wstring& face,
-                 float point_size, std::uint32_t dpi, COLORREF foreground, COLORREF background,
-                 bool bold, bool italic) {
+void draw_sample(HDC dc, const RECT& area, const PreviewRuntime::SampleState& sample,
+                 std::uint32_t dpi, COLORREF foreground, COLORREF background) {
   fill_solid(dc, area, background);
-  HFONT font = create_sample_font(face, point_size, dpi, bold, italic);
+  HFONT font = create_sample_font(sample.font_face, sample.font_size_pt, dpi, sample.bold,
+                                  sample.italic);
   HGDIOBJ previous_font = SelectObject(dc, font);
   SetTextColor(dc, foreground);
   SetBkMode(dc, TRANSPARENT);
-  int y = area.top + std::max(8, point_size_px(point_size, dpi) / 2);
+  int y = area.top + std::max(8, point_size_px(sample.font_size_pt, dpi) / 2);
   std::size_t start = 0;
-  while (start <= text.size()) {
-    const std::size_t end = text.find(L'\n', start);
-    const std::size_t length = (end == std::wstring::npos ? text.size() : end) - start;
-    ExtTextOutW(dc, area.left + 18, y, ETO_CLIPPED, &area, text.data() + start,
+  while (start <= sample.text.size()) {
+    const std::size_t end = sample.text.find(L'\n', start);
+    const std::size_t length = (end == std::wstring::npos ? sample.text.size() : end) - start;
+    ExtTextOutW(dc, area.left + 18, y, ETO_CLIPPED, &area, sample.text.data() + start,
                 static_cast<UINT>(length), nullptr);
-    y += std::max(22, point_size_px(point_size, dpi) * 3 / 2);
+    y += std::max(22, point_size_px(sample.font_size_pt, dpi) * 3 / 2);
     if (end == std::wstring::npos) break;
     start = end + 1;
   }
@@ -469,8 +236,9 @@ int listing_content_height(std::uint32_t dpi) {
   return 2 * margin + 2 * group + group_gap;
 }
 
-void draw_listing(HDC dc, const RECT& area, const std::wstring& text, const std::wstring& face,
-                  std::uint32_t dpi, COLORREF background) {
+void draw_listing(HDC dc, const RECT& area, const std::wstring& text,
+                  const PreviewRuntime::SampleState& sample, std::uint32_t dpi,
+                  COLORREF background) {
   fill_solid(dc, area, background);
   SetBkMode(dc, TRANSPARENT);
   const COLORREF* colors = is_dark(background) ? kListingColorsOnDark : kListingColorsOnLight;
@@ -479,7 +247,7 @@ void draw_listing(HDC dc, const RECT& area, const std::wstring& text, const std:
   int y = area.top + scaled(12, dpi);
   for (const int weight : {FW_NORMAL, FW_BOLD}) {
     for (const float point_size : {kListingSmallPt, kListingLargePt}) {
-      HFONT font = create_sample_font(face, point_size, dpi, weight == FW_BOLD, false);
+      HFONT font = create_sample_font(sample.font_face, point_size, dpi, weight == FW_BOLD, false);
       HGDIOBJ previous_font = SelectObject(dc, font);
       for (int index = 0; index < 4; ++index) {
         SetTextColor(dc, colors[index]);
@@ -556,59 +324,6 @@ int measure_wrapped_text(HFONT font, int width, const std::wstring& text, int li
   return height;
 }
 
-std::vector<std::uint8_t> encode_png(const std::uint8_t* pixels, std::uint32_t width,
-                                     std::uint32_t height, std::string& error) {
-  IWICImagingFactory* factory{};
-  IWICBitmapEncoder* encoder{};
-  IWICBitmapFrameEncode* frame{};
-  IPropertyBag2* properties{};
-  IStream* stream{};
-  std::vector<std::uint8_t> result;
-  HRESULT status = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-                                    IID_PPV_ARGS(&factory));
-  if (SUCCEEDED(status)) status = CreateStreamOnHGlobal(nullptr, TRUE, &stream);
-  if (SUCCEEDED(status)) status = factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder);
-  if (SUCCEEDED(status)) status = encoder->Initialize(stream, WICBitmapEncoderNoCache);
-  if (SUCCEEDED(status)) status = encoder->CreateNewFrame(&frame, &properties);
-  if (SUCCEEDED(status)) status = frame->Initialize(properties);
-  if (SUCCEEDED(status)) status = frame->SetSize(width, height);
-  WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
-  if (SUCCEEDED(status)) status = frame->SetPixelFormat(&format);
-  if (SUCCEEDED(status) && format != GUID_WICPixelFormat32bppBGRA) status = E_FAIL;
-  const UINT stride = width * 4U;
-  if (SUCCEEDED(status)) status = frame->WritePixels(height, stride, stride * height,
-                                                     const_cast<BYTE*>(pixels));
-  if (SUCCEEDED(status)) status = frame->Commit();
-  if (SUCCEEDED(status)) status = encoder->Commit();
-  if (SUCCEEDED(status)) {
-    HGLOBAL memory{};
-    status = GetHGlobalFromStream(stream, &memory);
-    if (SUCCEEDED(status)) {
-      const SIZE_T size = GlobalSize(memory);
-      const void* data = GlobalLock(memory);
-      if (data) {
-        const auto* begin = static_cast<const std::uint8_t*>(data);
-        result.assign(begin, begin + size);
-        GlobalUnlock(memory);
-      } else {
-        status = E_FAIL;
-      }
-    }
-  }
-  if (properties) properties->Release();
-  if (frame) frame->Release();
-  if (encoder) encoder->Release();
-  if (stream) stream->Release();
-  if (factory) factory->Release();
-  if (FAILED(status)) {
-    std::ostringstream message;
-    message << "WIC PNG encoding failed: 0x" << std::hex << static_cast<unsigned long>(status);
-    error = message.str();
-    result.clear();
-  }
-  return result;
-}
-
 std::wstring format_core_version(std::uint32_t version) {
   const std::wstring raw = std::to_wstring(version);
   if (raw.size() == 8 && raw.substr(0, 2) == L"20") {
@@ -667,7 +382,12 @@ struct PreviewRuntime::CanvasBitmap {
 PreviewRuntime::PreviewRuntime(std::wstring install_root, Engine engine)
     : engine_(engine),
       install_root_(engine == Engine::mactype ? full_path(install_root) : std::move(install_root)),
-      dll_path_(install_root_ + L"\\MacType.dll") {}
+      dll_path_(install_root_ + LR"(\MacType.dll)"),
+      ladder_sizes_(kNativeLadderSizes.begin(), kNativeLadderSizes.end()) {
+  for (std::size_t index = 0; index < kNativeLabelBindings.size(); ++index) {
+    labels_.*(kNativeLabelBindings[index].member) = kNativeLabelDefaults[index];
+  }
+}
 
 PreviewRuntime::~PreviewRuntime() {
   if (save_thread_.joinable()) {
@@ -780,7 +500,7 @@ bool PreviewRuntime::create_windows(std::string& error) {
                                     CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL,
                                 0, 0, 1, 1, native_window_, reinterpret_cast<HMENU>(kSizeCombo),
                                 window_class.hInstance, nullptr);
-  edit_control_ = CreateWindowExW(0, L"EDIT", sample_text_.c_str(),
+  edit_control_ = CreateWindowExW(0, L"EDIT", native_sample_.text.c_str(),
                                   WS_CHILD | WS_TABSTOP | ES_MULTILINE | ES_AUTOVSCROLL |
                                       WS_VSCROLL,
                                   0, 0, 1, 1, native_window_, reinterpret_cast<HMENU>(kEditControl),
@@ -815,13 +535,13 @@ std::string PreviewRuntime::hello_json() const {
          (has_dll_get_version_ ? "true" : "false") + "}";
 }
 
-bool PreviewRuntime::apply_request(const std::string& json, std::string& error) {
+bool PreviewRuntime::apply_request(const JsonDocument& document, std::string& error) {
   if (engine_ == Engine::mactype) {
     if (!control_center_) {
       error = "MacType control center is unavailable";
       return false;
     }
-    if (const auto profile = json_string(json, "profilePath"); profile && !profile->empty()) {
+    if (const auto profile = document.json_string("profilePath"); profile && !profile->empty()) {
       const std::wstring profile_path = full_path(utf8_to_wide(*profile));
       if (profile_path.empty() || !regular_file(profile_path) ||
           _wcsicmp(PathFindExtensionW(profile_path.c_str()), L".ini") != 0) {
@@ -831,7 +551,7 @@ bool PreviewRuntime::apply_request(const std::string& json, std::string& error) 
       control_center_->LoadSetting(profile_path.c_str());
     }
     for (const auto& setting : kSettings) {
-      const auto value = json_number(json, setting.id);
+      const auto value = document.json_number(setting.id);
       if (!value) continue;
       const BOOL applied = setting.is_float
                                ? control_center_->SetFloatAttribute(setting.ordinal,
@@ -846,23 +566,27 @@ bool PreviewRuntime::apply_request(const std::string& json, std::string& error) 
     control_center_->RefreshSetting();
     settings_owner_ = SettingsOwner::strip;
   }
-  if (const auto value = json_string(json, "text")) strip_.text = utf8_to_wide(*value);
-  if (const auto value = json_string(json, "fontFace")) strip_.font_face = utf8_to_wide(*value);
-  if (const auto value = json_number(json, "fontSizePt")) strip_.font_size_pt = static_cast<float>(*value);
-  if (const auto value = json_number(json, "dpi")) strip_.dpi = static_cast<std::uint32_t>(*value);
-  if (const auto value = json_string(json, "foreground")) strip_.foreground = parse_color(*value, strip_.foreground);
-  if (const auto value = json_string(json, "background")) strip_.background = parse_color(*value, strip_.background);
-  if (const auto value = json_bool(json, "bold")) strip_.bold = *value;
-  if (const auto value = json_bool(json, "italic")) strip_.italic = *value;
   return true;
 }
 
-std::vector<std::uint8_t> PreviewRuntime::render_png(const std::string& json, std::uint32_t& width,
+std::vector<std::uint8_t> PreviewRuntime::render_png(const JsonDocument& document,
+                                                     std::uint32_t& width,
                                                      std::uint32_t& height, std::uint32_t& dpi,
                                                      std::string& error) {
-  width = static_cast<std::uint32_t>(json_number(json, "widthPx").value_or(1000));
-  height = static_cast<std::uint32_t>(json_number(json, "heightPx").value_or(280));
-  dpi = static_cast<std::uint32_t>(json_number(json, "dpi").value_or(strip_.dpi));
+  SampleState sample{L"MacType preview 123 ABC\nThe quick brown fox jumps over the lazy dog.",
+                     L"Segoe UI", 14.0F, false, false};
+  COLORREF foreground = RGB(24, 29, 35);
+  COLORREF background = RGB(238, 241, 244);
+  if (const auto value = document.json_string("text")) sample.text = utf8_to_wide(*value);
+  if (const auto value = document.json_string("fontFace")) sample.font_face = utf8_to_wide(*value);
+  if (const auto value = document.json_number("fontSizePt")) sample.font_size_pt = static_cast<float>(*value);
+  if (const auto value = document.json_string("foreground")) foreground = parse_color(*value, foreground);
+  if (const auto value = document.json_string("background")) background = parse_color(*value, background);
+  if (const auto value = document.json_bool("bold")) sample.bold = *value;
+  if (const auto value = document.json_bool("italic")) sample.italic = *value;
+  width = static_cast<std::uint32_t>(document.json_number("widthPx").value_or(1000));
+  height = static_cast<std::uint32_t>(document.json_number("heightPx").value_or(280));
+  dpi = static_cast<std::uint32_t>(document.json_number("dpi").value_or(96.0));
   if (width < 64 || width > 4096 || height < 64 || height > 2048 || dpi < 72 || dpi > 768) {
     error = "preview dimensions or DPI are outside the supported range";
     return {};
@@ -873,23 +597,24 @@ std::vector<std::uint8_t> PreviewRuntime::render_png(const std::string& json, st
     return {};
   }
   const RECT area{0, 0, static_cast<LONG>(width), static_cast<LONG>(height)};
-  draw_sample(bitmap.dc, area, strip_.text, strip_.font_face, strip_.font_size_pt, dpi,
-              strip_.foreground, strip_.background, strip_.bold, strip_.italic);
+  draw_sample(bitmap.dc, area, sample, dpi, foreground, background);
   auto* pixels = static_cast<std::uint8_t*>(bitmap.bits);
   for (std::size_t index = 3; index < static_cast<std::size_t>(width) * height * 4U; index += 4) {
     pixels[index] = 0xFF;
   }
-  return encode_png(pixels, width, height, error);
+  return encode_png(width, height, width * 4U, pixels, error);
 }
 
 mtpc::Frame PreviewRuntime::render(const mtpc::Frame& request) {
   const auto started = std::chrono::steady_clock::now();
   std::string error;
-  if (!apply_request(request.json, error)) return error_frame(request.request_id, "invalid_request", error);
+  const auto parsed = JsonDocument::parse(request.json, error);
+  if (!parsed) return error_frame(request.request_id, "invalid_request", error);
+  if (!apply_request(*parsed, error)) return error_frame(request.request_id, "invalid_request", error);
   std::uint32_t width{};
   std::uint32_t height{};
   std::uint32_t dpi{};
-  auto png = render_png(request.json, width, height, dpi, error);
+  auto png = render_png(*parsed, width, height, dpi, error);
   if (png.empty()) return error_frame(request.request_id, "render_failed", error);
   const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::steady_clock::now() - started);
@@ -905,29 +630,17 @@ mtpc::Frame PreviewRuntime::render(const mtpc::Frame& request) {
   return response;
 }
 
-mtpc::Frame PreviewRuntime::load_profile(const mtpc::Frame& request) {
-  mtpc::Frame response;
-  response.kind = mtpc::MessageKind::ack;
-  response.request_id = request.request_id;
-  std::string error;
-  if (!apply_request(request.json, error)) return error_frame(request.request_id, "load_failed", error);
-  if (engine_ == Engine::plain) {
-    response.json = R"({"loaded":false,"engine":"plain"})";
-    return response;
-  }
-  response.json = R"({"loaded":true})";
-  return response;
-}
-
 bool PreviewRuntime::apply_native_request(const std::string& json, std::string& error) {
+  const auto parsed = JsonDocument::parse(json, error);
+  if (!parsed) return false;
+  const JsonDocument& document = *parsed;
+  const auto chrome_object = document.object("chrome");
+  const auto labels_object = document.object("labels");
+  const auto overrides_object = document.object("overrides");
   struct PendingNativeState {
     DisplayMode display_mode;
-    std::wstring sample_text;
+    SampleState sample;
     std::wstring listing_text;
-    std::wstring font_face;
-    float font_size_pt;
-    bool sample_bold;
-    bool sample_italic;
     bool topmost;
     bool dark_theme;
     int zoom;
@@ -935,17 +648,20 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
     COLORREF native_foreground;
     COLORREF native_background;
     bool inverted;
-    NativeLabels labels;
+    NativePreviewLabels labels;
     std::optional<NativeChrome> chrome;
     std::wstring profile_path;
     std::vector<std::pair<std::string, double>> overrides;
-  } pending{display_mode_,      sample_text_,       listing_text_, font_face_,
-            font_size_pt_,      sample_bold_,       sample_italic_, topmost_,
-            dark_theme_,        zoom_,              ladder_sizes_, native_foreground_,
-            native_background_, inverted_,          labels_,       std::nullopt,
-            native_profile_path_, native_overrides_};
+  } pending{display_mode_, native_sample_, listing_text_, topmost_, dark_theme_, zoom_,
+            ladder_sizes_, native_foreground_, native_background_, inverted_, labels_,
+            std::nullopt, native_profile_path_, native_overrides_};
 
-  if (const auto profile = json_root_string(json, "profilePath")) {
+  if (document.contains_root("profilePath")) {
+    const auto profile = document.root_string("profilePath");
+    if (!profile) {
+      error = "profilePath must be a string";
+      return false;
+    }
     if (profile->empty()) {
       pending.profile_path.clear();
     } else {
@@ -958,20 +674,20 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
       pending.profile_path = profile_path;
     }
   }
-  if (json_root_value_start(json, "overrides")) {
-    if (!json_object_range(json, "overrides")) {
+  if (document.contains_root("overrides")) {
+    if (!overrides_object) {
       error = "overrides must be an object";
       return false;
     }
     pending.overrides.clear();
     for (const auto& setting : kSettings) {
-      if (const auto value = json_object_number(json, "overrides", setting.id)) {
+      if (const auto value = overrides_object->json_number(setting.id)) {
         pending.overrides.emplace_back(setting.id, *value);
       }
     }
   }
 
-  if (const auto mode = json_root_string(json, "displayMode")) {
+  if (const auto mode = document.root_string("displayMode")) {
     if (*mode == "sample" || *mode == "default") pending.display_mode = DisplayMode::sample;
     else if (*mode == "ladder") pending.display_mode = DisplayMode::ladder;
     else if (*mode == "compare") pending.display_mode = DisplayMode::compare;
@@ -981,23 +697,23 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
       return false;
     }
   }
-  if (const auto value = json_root_string(json, "text")) {
-    pending.sample_text = utf8_to_wide(*value);
-    if (pending.sample_text.size() > 4096) {
+  if (const auto value = document.root_string("text")) {
+    pending.sample.text = utf8_to_wide(*value);
+    if (pending.sample.text.size() > 4096) {
       error = "text exceeds 4096 UTF-16 units";
       return false;
     }
   }
-  if (const auto value = json_root_string(json, "listingText")) {
+  if (const auto value = document.root_string("listingText")) {
     pending.listing_text = utf8_to_wide(*value);
     if (pending.listing_text.size() > 4096) {
       error = "listingText exceeds 4096 UTF-16 units";
       return false;
     }
   }
-  if (const auto value = json_root_string(json, "fontFace")) pending.font_face = utf8_to_wide(*value);
-  const auto font_size_start = json_root_value_start(json, "fontSizePt");
-  const auto font_size = json_root_number(json, "fontSizePt");
+  if (const auto value = document.root_string("fontFace")) pending.sample.font_face = utf8_to_wide(*value);
+  const auto font_size_start = document.contains_root("fontSizePt");
+  const auto font_size = document.root_number("fontSizePt");
   if (font_size_start && !font_size) {
     error = "fontSizePt must be a number";
     return false;
@@ -1007,11 +723,11 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
       error = "fontSizePt is outside the supported range";
       return false;
     }
-    pending.font_size_pt = static_cast<float>(*font_size);
+    pending.sample.font_size_pt = static_cast<float>(*font_size);
   }
   const auto apply_boolean = [&](const char* key, bool& destination) {
-    const auto start = json_root_value_start(json, key);
-    const auto value = json_root_bool(json, key);
+    const auto start = document.contains_root(key);
+    const auto value = document.root_bool(key);
     if (start && !value) {
       error = std::string{key} + " must be a boolean";
       return false;
@@ -1019,20 +735,20 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
     if (value) destination = *value;
     return true;
   };
-  if (!apply_boolean("bold", pending.sample_bold) ||
-      !apply_boolean("italic", pending.sample_italic) ||
+  if (!apply_boolean("bold", pending.sample.bold) ||
+      !apply_boolean("italic", pending.sample.italic) ||
       !apply_boolean("topmost", pending.topmost)) {
     return false;
   }
-  if (const auto value = json_root_string(json, "theme")) {
+  if (const auto value = document.root_string("theme")) {
     if (*value != "light" && *value != "dark") {
       error = "theme is unsupported";
       return false;
     }
     pending.dark_theme = *value == "dark";
   }
-  const auto zoom_start = json_root_value_start(json, "zoom");
-  const auto zoom = json_root_number(json, "zoom");
+  const auto zoom_start = document.contains_root("zoom");
+  const auto zoom = document.root_number("zoom");
   if (zoom_start && !zoom) {
     error = "zoom must be an integer";
     return false;
@@ -1046,8 +762,8 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
     }
     pending.zoom = requested;
   }
-  const auto sizes_start = json_root_value_start(json, "sizes");
-  const auto sizes_value = json_root_number_array(json, "sizes");
+  const auto sizes_start = document.contains_root("sizes");
+  const auto sizes_value = document.root_number_array("sizes");
   if (sizes_start && !sizes_value) {
     error = "sizes must be an array of integers";
     return false;
@@ -1069,9 +785,8 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
     pending.ladder_sizes = std::move(sizes);
   }
 
-  if (const auto chrome_range = json_object_range(json, "chrome")) {
-    (void)chrome_range;
-    const auto skin = json_object_string(json, "chrome", "skin");
+  if (chrome_object) {
+    const auto skin = chrome_object->json_string("skin");
     if (!skin) {
       error = "chrome.skin is required";
       return false;
@@ -1085,12 +800,8 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
       error = "chrome.skin is unsupported";
       return false;
     }
-    NativeChrome chrome{parsed_skin,
-                        {RGB(0xF3, 0xF5, 0xF7), RGB(0xFF, 0xFF, 0xFF),
-                         RGB(0xE9, 0xED, 0xF1), RGB(0xC9, 0xD1, 0xD8),
-                         RGB(0x17, 0x21, 0x2B), RGB(0x5A, 0x67, 0x73),
-                         RGB(0x00, 0x67, 0xC0), RGB(0xFF, 0xFF, 0xFF)},
-                        4, 32, 44, 28, 4, 18, false};
+    NativeChrome chrome = chrome_from(kNativeChromeDefault);
+    chrome.skin = parsed_skin;
     struct ColorBinding {
       const char* key;
       COLORREF Palette::*member;
@@ -1102,7 +813,7 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
         {"accent", &Palette::accent}, {"onAccent", &Palette::on_accent},
     };
     for (const auto& binding : color_bindings) {
-      const auto value = json_object_string(json, "chrome", binding.key);
+      const auto value = chrome_object->json_string(binding.key);
       if (!value) {
         error = std::string{"chrome."} + binding.key + " is required";
         return false;
@@ -1129,7 +840,7 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
         {"canvasInset", &NativeChrome::canvas_inset, 0, 64},
     };
     for (const auto& binding : metric_bindings) {
-      const auto value = json_object_number(json, "chrome", binding.key);
+      const auto value = chrome_object->json_number(binding.key);
       if (!value || *value != static_cast<double>(static_cast<int>(*value)) ||
           *value < binding.minimum || *value > binding.maximum) {
         error = std::string{"chrome."} + binding.key + " is outside the supported range";
@@ -1137,7 +848,7 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
       }
       chrome.*(binding.member) = static_cast<int>(*value);
     }
-    const auto mono = json_object_bool(json, "chrome", "monoStatus");
+    const auto mono = chrome_object->json_bool("monoStatus");
     if (!mono) {
       error = "chrome.monoStatus must be a boolean";
       return false;
@@ -1148,11 +859,11 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
     pending.chrome.reset();
   }
 
-  const auto foreground = json_root_string(json, "foreground");
-  const auto background = json_root_string(json, "background");
+  const auto foreground = document.root_string("foreground");
+  const auto background = document.root_string("background");
   const bool colors_supplied = foreground.has_value() || background.has_value();
-  const auto inverted_start = json_root_value_start(json, "inverted");
-  const auto inverted = json_root_bool(json, "inverted");
+  const auto inverted_start = document.contains_root("inverted");
+  const auto inverted = document.root_bool("inverted");
   if (inverted_start && !inverted) {
     error = "inverted must be a boolean";
     return false;
@@ -1173,53 +884,27 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
     pending.inverted = desired_inverted;
   }
 
-  struct LabelBinding {
-    const char* key;
-    std::wstring NativeLabels::*member;
-  };
-  constexpr LabelBinding bindings[] = {
-      {"title", &NativeLabels::title}, {"fontFace", &NativeLabels::font_face},
-      {"fontSize", &NativeLabels::font_size}, {"bold", &NativeLabels::bold},
-      {"italic", &NativeLabels::italic}, {"modeSample", &NativeLabels::mode_sample},
-      {"modeLadder", &NativeLabels::mode_ladder}, {"modeCompare", &NativeLabels::mode_compare},
-      {"modeListing", &NativeLabels::mode_listing}, {"invert", &NativeLabels::invert},
-      {"loupe", &NativeLabels::loupe}, {"zoom", &NativeLabels::zoom},
-      {"topmost", &NativeLabels::topmost}, {"editText", &NativeLabels::edit_text},
-      {"savePng", &NativeLabels::save_png}, {"copy", &NativeLabels::copy},
-      {"compareMacType", &NativeLabels::compare_mactype},
-      {"compareWindows", &NativeLabels::compare_windows},
-      {"compareUnavailable", &NativeLabels::compare_unavailable},
-      {"engineMacType", &NativeLabels::engine_mactype},
-      {"coreVersion", &NativeLabels::core_version}, {"pngFilter", &NativeLabels::png_filter},
-      {"saved", &NativeLabels::saved}, {"copied", &NativeLabels::copied},
-  };
-  for (const auto& binding : bindings) {
-    if (const auto value = json_object_string(json, "labels", binding.key)) {
-      if (value->size() > 256) {
-        error = std::string{"label is too long: "} + binding.key;
-        return false;
-      }
-      pending.labels.*(binding.member) = utf8_to_wide(*value);
+  for (const auto& binding : kNativeLabelBindings) {
+    const auto value = labels_object ? labels_object->json_string(binding.key) : std::nullopt;
+    if (!value) continue;
+    if (value->size() > 256) {
+      error = std::string{"label is too long: "} + binding.key;
+      return false;
     }
+    pending.labels.*(binding.member) = utf8_to_wide(*value);
   }
   const bool theme_changed = pending.dark_theme != dark_theme_;
   const bool chrome_changed = pending.chrome != chrome_;
   const bool labels_changed = pending.labels != labels_;
   const bool title_changed = pending.labels.title != labels_.title;
+  const bool controls_changed = pending.sample != native_sample_;
+  const bool settings_changed = pending.profile_path != native_profile_path_ ||
+                                pending.overrides != native_overrides_;
   const bool layout_changed = theme_changed || chrome_changed || labels_changed ||
                               pending.zoom != zoom_;
-  if (pending.profile_path != native_profile_path_ || pending.overrides != native_overrides_) {
-    native_profile_path_ = std::move(pending.profile_path);
-    native_overrides_ = std::move(pending.overrides);
-    if (settings_owner_ == SettingsOwner::native) settings_owner_ = SettingsOwner::none;
-  }
   display_mode_ = pending.display_mode;
-  sample_text_ = std::move(pending.sample_text);
+  native_sample_ = std::move(pending.sample);
   listing_text_ = std::move(pending.listing_text);
-  font_face_ = std::move(pending.font_face);
-  font_size_pt_ = pending.font_size_pt;
-  sample_bold_ = pending.sample_bold;
-  sample_italic_ = pending.sample_italic;
   topmost_ = pending.topmost;
   dark_theme_ = pending.dark_theme;
   zoom_ = pending.zoom;
@@ -1229,14 +914,19 @@ bool PreviewRuntime::apply_native_request(const std::string& json, std::string& 
   inverted_ = pending.inverted;
   labels_ = std::move(pending.labels);
   chrome_ = std::move(pending.chrome);
+  native_profile_path_ = std::move(pending.profile_path);
+  native_overrides_ = std::move(pending.overrides);
+  if (settings_changed) settings_owner_ = SettingsOwner::none;
 
-  invalidate_canvas_cache();
   if (theme_changed || chrome_changed) {
     recreate_palette_brushes();
     apply_combo_theme();
   }
-  if (title_changed) SetWindowTextW(native_window_, labels_.title.c_str());
-  sync_controls();
+  if (title_changed) {
+    SetWindowTextW(native_window_, labels_.title.c_str());
+    ++retitle_count_;
+  }
+  if (controls_changed) sync_controls();
   if (layout_changed) relayout_controls();
   else InvalidateRect(native_window_, nullptr, FALSE);
   return true;
@@ -1265,21 +955,19 @@ std::string PreviewRuntime::native_state_json(bool visible) const {
   else if (display_mode_ == DisplayMode::compare) mode = "compare";
   else if (display_mode_ == DisplayMode::listing) mode = "listing";
   std::ostringstream size;
-  size << font_size_pt_;
-  const std::string face = json_escape_string(wide_to_utf8(font_face_));
+  size << native_sample_.font_size_pt;
+  const std::string face = json_escape_string(wide_to_utf8(native_sample_.font_face));
   return std::string{"{\"visible\":"} + (visible ? "true" : "false") +
          ",\"displayMode\":\"" + mode + "\",\"background\":\"" +
          color_to_hex(native_background_) + "\",\"foreground\":\"" +
          color_to_hex(native_foreground_) + "\",\"inverted\":" +
          (inverted_ ? "true" : "false") + ",\"zoom\":" + std::to_string(zoom_) +
          ",\"fontFace\":\"" + face + "\",\"fontSizePt\":" + size.str() +
-         ",\"bold\":" + (sample_bold_ ? "true" : "false") + ",\"italic\":" +
-         (sample_italic_ ? "true" : "false") + ",\"topmost\":" +
+         ",\"bold\":" + (native_sample_.bold ? "true" : "false") + ",\"italic\":" +
+         (native_sample_.italic ? "true" : "false") + ",\"topmost\":" +
          (topmost_ ? "true" : "false") +
          (chrome_ ? std::string{",\"skin\":\""} +
-                        (chrome_->skin == Skin::classic ? "classic" :
-                         chrome_->skin == Skin::fluent ? "fluent" :
-                         chrome_->skin == Skin::console ? "console" : "cupertino") + "\"}"
+                        skin_name(chrome_->skin) + "\"}"
                   : "}");
 }
 
@@ -1312,6 +1000,7 @@ void PreviewRuntime::show_native_window() {
                    SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
   }
+  ++reshow_count_;
   SetWindowPos(native_window_, topmost_ ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
   ShowWindow(native_window_, SW_SHOWNORMAL);
@@ -1345,10 +1034,6 @@ void PreviewRuntime::close_from_window_for_tests() {
 
 bool PreviewRuntime::save_in_progress_for_tests() const { return save_in_progress_; }
 
-std::wstring PreviewRuntime::native_sample_text_for_tests() const { return sample_text_; }
-
-std::wstring PreviewRuntime::strip_text_for_tests() const { return strip_.text; }
-
 int PreviewRuntime::scroll_max_for_tests() {
   RedrawWindow(native_window_, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW);
   return scroll_max_;
@@ -1370,6 +1055,12 @@ std::uint32_t PreviewRuntime::save_thread_started_for_tests() const {
   return save_thread_started_;
 }
 
+std::uint32_t PreviewRuntime::relayout_count_for_tests() const { return relayout_count_; }
+
+std::uint32_t PreviewRuntime::retitle_count_for_tests() const { return retitle_count_; }
+
+std::uint32_t PreviewRuntime::reshow_count_for_tests() const { return reshow_count_; }
+
 const PreviewRuntime::Palette& PreviewRuntime::palette() const {
   return chrome_ ? chrome_->palette : (dark_theme_ ? kDarkPalette : kLightPalette);
 }
@@ -1378,8 +1069,12 @@ int PreviewRuntime::chrome_metric(int NativeChrome::*member, int fallback) const
   return scaled(chrome_ ? (*chrome_).*member : fallback, native_dpi_);
 }
 
-void PreviewRuntime::invalidate_canvas_cache() {
-  canvas_cache_dirty_ = true;
+PreviewRuntime::CanvasCacheKey PreviewRuntime::native_canvas_key(
+    int width, int minimum_height) const {
+  return CanvasCacheKey{width, minimum_height, native_sample_, listing_text_, native_foreground_,
+                        native_background_, native_dpi_, display_mode_, zoom_, inverted_,
+                        ladder_sizes_, labels_, chrome_, dark_theme_, native_profile_path_,
+                        native_overrides_};
 }
 
 void PreviewRuntime::apply_native_settings() {
@@ -1401,13 +1096,15 @@ void PreviewRuntime::apply_native_settings() {
   settings_owner_ = SettingsOwner::native;
 }
 
-PreviewRuntime::CanvasBitmap* PreviewRuntime::cached_native_canvas(int width, int minimum_height) {
-  if (canvas_cache_dirty_ || !canvas_cache_ || canvas_cache_width_ != width ||
-      canvas_cache_minimum_height_ != minimum_height) {
-    canvas_cache_ = render_native_canvas(width, minimum_height);
-    canvas_cache_width_ = width;
-    canvas_cache_minimum_height_ = minimum_height;
-    canvas_cache_dirty_ = false;
+PreviewRuntime::CanvasBitmap* PreviewRuntime::cached_native_canvas(const CanvasCacheKey& key) {
+  apply_native_settings();
+  if (!canvas_cache_ || !canvas_cache_key_ || *canvas_cache_key_ != key) {
+    canvas_cache_ = render_native_canvas(key.width, key.minimum_height, key.sample,
+                                         key.foreground, key.background, key.dpi,
+                                         key.display_mode, key.zoom, key.inverted,
+                                         key.ladder_sizes, key.listing_text, key.labels,
+                                         key.chrome, key.dark_theme);
+    canvas_cache_key_ = key;
   }
   return canvas_cache_.get();
 }
@@ -1476,16 +1173,16 @@ void PreviewRuntime::enumerate_fonts() {
 void PreviewRuntime::sync_controls() {
   if (!face_combo_) return;
   LRESULT face_index = SendMessageW(face_combo_, CB_FINDSTRINGEXACT, static_cast<WPARAM>(-1),
-                                    reinterpret_cast<LPARAM>(font_face_.c_str()));
+                                    reinterpret_cast<LPARAM>(native_sample_.font_face.c_str()));
   if (face_index == CB_ERR) {
     face_index = SendMessageW(face_combo_, CB_INSERTSTRING, 0,
-                              reinterpret_cast<LPARAM>(font_face_.c_str()));
+                              reinterpret_cast<LPARAM>(native_sample_.font_face.c_str()));
   }
   if (face_index != CB_ERR && face_index != CB_ERRSPACE &&
       SendMessageW(face_combo_, CB_GETCURSEL, 0, 0) != face_index) {
     SendMessageW(face_combo_, CB_SETCURSEL, static_cast<WPARAM>(face_index), 0);
   }
-  const std::wstring size = std::to_wstring(static_cast<int>(std::lround(font_size_pt_)));
+  const std::wstring size = std::to_wstring(static_cast<int>(std::lround(native_sample_.font_size_pt)));
   const LRESULT size_index = SendMessageW(size_combo_, CB_FINDSTRINGEXACT, static_cast<WPARAM>(-1),
                                           reinterpret_cast<LPARAM>(size.c_str()));
   if (size_index != CB_ERR && SendMessageW(size_combo_, CB_GETCURSEL, 0, 0) != size_index) {
@@ -1498,11 +1195,11 @@ void PreviewRuntime::sync_controls() {
   GetWindowTextW(edit_control_, current.data(), length + 1);
   current.resize(static_cast<std::size_t>(length));
   std::erase(current, L'\r');
-  std::wstring wanted = sample_text_;
+  std::wstring wanted = native_sample_.text;
   std::erase(wanted, L'\r');
   if (current != wanted) {
     updating_edit_ = true;
-    SetWindowTextW(edit_control_, sample_text_.c_str());
+    SetWindowTextW(edit_control_, native_sample_.text.c_str());
     updating_edit_ = false;
   }
   if ((IsWindowVisible(edit_control_) != FALSE) != edit_visible_) {
@@ -1524,6 +1221,7 @@ std::wstring PreviewRuntime::selected_face_for_tests() const {
 
 void PreviewRuntime::relayout_controls() {
   if (!native_window_ || !face_combo_) return;
+  ++relayout_count_;
   RECT client{};
   GetClientRect(native_window_, &client);
   const int toolbar_height = chrome_metric(&NativeChrome::toolbar_height, 40);
@@ -1618,10 +1316,7 @@ void PreviewRuntime::rebuild_toolbar_layout() {
       ++row;
     }
     toolbar_buttons_.push_back({actions[index], RECT{x, top, x + widths[index], top + height}});
-    const bool segmented_gap = chrome_ &&
-        (chrome_->skin == Skin::console || chrome_->skin == Skin::cupertino) &&
-        index >= 2 && index < 5;
-    x += widths[index] + (segmented_gap ? 0 : gap);
+    x += widths[index] + gap;
     if ((index == 1 || index == 5 || index == 8) && index + 1 < actions.size() &&
         x + widths[index + 1] <= right) {
       toolbar_separators_.push_back(RECT{x - gap / 2, top + scaled(5, native_dpi_),
@@ -1639,9 +1334,7 @@ void PreviewRuntime::rebuild_toolbar_layout() {
 
 void PreviewRuntime::draw_toolbar(HDC dc, const RECT& area) {
   const Palette& palette = this->palette();
-  const bool toolbar_on_canvas = chrome_ &&
-      (chrome_->skin == Skin::fluent || chrome_->skin == Skin::cupertino);
-  fill_solid(dc, area, toolbar_on_canvas ? palette.canvas : palette.surface);
+  fill_solid(dc, area, palette.surface);
   HGDIOBJ previous_font = SelectObject(dc, ui_font_);
   SetBkMode(dc, TRANSPARENT);
   SetTextColor(dc, palette.muted);
@@ -1659,8 +1352,8 @@ void PreviewRuntime::draw_toolbar(HDC dc, const RECT& area) {
   for (const auto& [action, rectangle] : toolbar_buttons_) {
     bool active = false;
     switch (action) {
-      case kBold: active = sample_bold_; break;
-      case kItalic: active = sample_italic_; break;
+      case kBold: active = native_sample_.bold; break;
+      case kItalic: active = native_sample_.italic; break;
       case kModeSample: active = display_mode_ == DisplayMode::sample; break;
       case kModeLadder: active = display_mode_ == DisplayMode::ladder; break;
       case kModeCompare: active = display_mode_ == DisplayMode::compare; break;
@@ -1674,42 +1367,20 @@ void PreviewRuntime::draw_toolbar(HDC dc, const RECT& area) {
     COLORREF fill = active || pressed_action_ == action
                         ? palette.accent
                         : (hover_action_ == action ? palette.hover : palette.surface);
-    if (chrome_ && chrome_->skin == Skin::cupertino && action >= kModeSample &&
-        action <= kModeListing && active) {
-      fill = palette.surface;
-    }
     HBRUSH brush = CreateSolidBrush(fill);
     COLORREF outline = active ? palette.accent : palette.border;
-    if (chrome_ && chrome_->skin == Skin::fluent && !active) outline = fill;
     HPEN pen = CreatePen(PS_SOLID, 1, outline);
     HGDIOBJ previous_brush = SelectObject(dc, brush);
     HGDIOBJ previous_pen = SelectObject(dc, pen);
     const int radius = chrome_metric(&NativeChrome::radius, 4);
     RoundRect(dc, rectangle.left, rectangle.top, rectangle.right, rectangle.bottom, radius, radius);
-    if (chrome_ && chrome_->skin == Skin::fluent) {
-      HPEN bottom = CreatePen(PS_SOLID, 1, blend_color(palette.border, RGB(0, 0, 0), 40));
-      HGDIOBJ old_bottom = SelectObject(dc, bottom);
-      MoveToEx(dc, rectangle.left + radius / 2, rectangle.bottom - 1, nullptr);
-      LineTo(dc, rectangle.right - radius / 2, rectangle.bottom - 1);
-      SelectObject(dc, old_bottom);
-      DeleteObject(bottom);
-    } else if (chrome_ && chrome_->skin == Skin::cupertino) {
-      HPEN shadow = CreatePen(PS_SOLID, 1, blend_color(RGB(0, 0, 0), palette.canvas, 5));
-      HGDIOBJ old_shadow = SelectObject(dc, shadow);
-      MoveToEx(dc, rectangle.left + radius / 2, rectangle.bottom, nullptr);
-      LineTo(dc, rectangle.right - radius / 2, rectangle.bottom);
-      SelectObject(dc, old_shadow);
-      DeleteObject(shadow);
-    }
     SelectObject(dc, previous_brush);
     SelectObject(dc, previous_pen);
     DeleteObject(brush);
     DeleteObject(pen);
     const std::wstring& text = toolbar_button_texts_[button_index++];
     RECT text_rect = rectangle;
-    const bool cupertino_selected = chrome_ && chrome_->skin == Skin::cupertino &&
-                                      action >= kModeSample && action <= kModeListing && active;
-    SetTextColor(dc, (active || pressed_action_ == action) && !cupertino_selected
+    SetTextColor(dc, (active || pressed_action_ == action)
                          ? palette.on_accent
                          : palette.text);
     DrawTextW(dc, text.c_str(), -1, &text_rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
@@ -1733,71 +1404,78 @@ void PreviewRuntime::draw_combo_item(const DRAWITEMSTRUCT& item) {
   SelectObject(item.hDC, previous);
 }
 
-std::unique_ptr<PreviewRuntime::CanvasBitmap> PreviewRuntime::render_native_canvas(int width,
-                                                                                   int minimum_height) {
+std::unique_ptr<PreviewRuntime::CanvasBitmap> PreviewRuntime::render_native_canvas(
+    int width, int minimum_height, const SampleState& sample, COLORREF foreground,
+    COLORREF background, std::uint32_t dpi, DisplayMode mode, int zoom, bool inverted,
+    const std::vector<float>& ladder_sizes, const std::wstring& listing_text,
+    const NativePreviewLabels& labels, const std::optional<NativeChrome>& chrome,
+    bool dark_theme) {
   apply_native_settings();
+  (void)zoom;
+  (void)inverted;
+  const Palette& canvas_palette = chrome ? chrome->palette : (dark_theme ? kDarkPalette : kLightPalette);
   const int content_width = std::max(1, width);
   int height = minimum_height;
-  if (display_mode_ == DisplayMode::listing) height = std::max(height, listing_content_height(native_dpi_));
-  if (display_mode_ == DisplayMode::ladder) {
-    int ladder_height = scaled(20, native_dpi_);
-    for (float size : ladder_sizes_) ladder_height += std::max(scaled(24, native_dpi_), point_size_px(size, native_dpi_) * 3 / 2);
+  if (mode == DisplayMode::listing) height = std::max(height, listing_content_height(dpi));
+  if (mode == DisplayMode::ladder) {
+    int ladder_height = scaled(20, dpi);
+    for (float size : ladder_sizes) ladder_height += std::max(scaled(24, dpi), point_size_px(size, dpi) * 3 / 2);
     height = std::max(height, ladder_height);
   }
   const int sample_line_height =
-      std::max(scaled(20, native_dpi_), point_size_px(font_size_pt_, native_dpi_) * 3 / 2);
-  const int sample_margin = scaled(18, native_dpi_);
-  const int compare_gap = scaled(1, native_dpi_);
-  const int compare_header = scaled(30, native_dpi_);
+      std::max(scaled(20, dpi), point_size_px(sample.font_size_pt, dpi) * 3 / 2);
+  const int sample_margin = scaled(18, dpi);
+  const int compare_gap = scaled(1, dpi);
+  const int compare_header = scaled(30, dpi);
   const int compare_half = (content_width - compare_gap) / 2;
-  if (display_mode_ == DisplayMode::sample || display_mode_ == DisplayMode::compare) {
+  if (mode == DisplayMode::sample || mode == DisplayMode::compare) {
     /* The canvas grows to hold every wrapped line, so a zoomed view scrolls
        through the sample instead of clipping it at the window's height. */
-    HFONT measure_font = create_sample_font(font_face_, font_size_pt_, native_dpi_, sample_bold_,
-                                            sample_italic_);
-    const int column_width = display_mode_ == DisplayMode::sample
+    HFONT measure_font = create_sample_font(sample.font_face, sample.font_size_pt, dpi, sample.bold,
+                                            sample.italic);
+    const int column_width = mode == DisplayMode::sample
                                  ? content_width - 2 * sample_margin
-                                 : compare_half - 2 * scaled(10, native_dpi_);
+                                 : compare_half - 2 * scaled(10, dpi);
     const int text_height =
-        measure_wrapped_text(measure_font, column_width, sample_text_, sample_line_height);
+        measure_wrapped_text(measure_font, column_width, sample.text, sample_line_height);
     DeleteObject(measure_font);
-    height = std::max(height, display_mode_ == DisplayMode::sample
+    height = std::max(height, mode == DisplayMode::sample
                                   ? text_height + 2 * sample_margin
-                                  : compare_header + text_height + scaled(10, native_dpi_));
+                                  : compare_header + text_height + scaled(10, dpi));
   }
   auto bitmap = std::make_unique<CanvasBitmap>(native_window_, content_width, height);
   if (!bitmap->valid()) return nullptr;
   const RECT area{0, 0, content_width, height};
-  fill_solid(bitmap->dc, area, native_background_);
+  fill_solid(bitmap->dc, area, background);
   SetBkMode(bitmap->dc, TRANSPARENT);
-  if (display_mode_ == DisplayMode::listing) {
-    draw_listing(bitmap->dc, area, listing_text_, font_face_, native_dpi_, native_background_);
-  } else if (display_mode_ == DisplayMode::ladder) {
-    int y = scaled(10, native_dpi_);
-    const int gutter = scaled(50, native_dpi_);
-    const HFONT gutter_font = chrome_ && chrome_->mono_status ? mono_font_ : ui_font_;
+  if (mode == DisplayMode::listing) {
+    draw_listing(bitmap->dc, area, listing_text, sample, dpi, background);
+  } else if (mode == DisplayMode::ladder) {
+    int y = scaled(10, dpi);
+    const int gutter = scaled(50, dpi);
+    const HFONT gutter_font = chrome && chrome->mono_status ? mono_font_ : ui_font_;
     HGDIOBJ ui_previous = SelectObject(bitmap->dc, gutter_font);
-    SetTextColor(bitmap->dc, palette().muted);
-    for (float size : ladder_sizes_) {
-      const int line_height = std::max(scaled(24, native_dpi_), point_size_px(size, native_dpi_) * 3 / 2);
+    SetTextColor(bitmap->dc, canvas_palette.muted);
+    for (float size : ladder_sizes) {
+      const int line_height = std::max(scaled(24, dpi), point_size_px(size, dpi) * 3 / 2);
       const std::wstring label = std::to_wstring(static_cast<int>(std::lround(size))) + L" pt";
       SelectObject(bitmap->dc, ui_previous);
-      HFONT sample_font = create_sample_font(font_face_, size, native_dpi_, sample_bold_, sample_italic_);
+      HFONT sample_font = create_sample_font(sample.font_face, size, dpi, sample.bold, sample.italic);
       HGDIOBJ previous_font = SelectObject(bitmap->dc, sample_font);
       TEXTMETRICW metrics{};
       GetTextMetricsW(bitmap->dc, &metrics);
       SelectObject(bitmap->dc, gutter_font);
       /* The label sits on the sample's baseline; its box starts above the
          line so a gutter font taller than a small sample is not clipped. */
-      RECT label_area{scaled(6, native_dpi_), y - line_height, gutter - scaled(4, native_dpi_),
+      RECT label_area{scaled(6, dpi), y - line_height, gutter - scaled(4, dpi),
                       y + metrics.tmAscent};
       DrawTextW(bitmap->dc, label.c_str(), -1, &label_area, DT_RIGHT | DT_BOTTOM | DT_SINGLELINE);
       SelectObject(bitmap->dc, sample_font);
-      SetTextColor(bitmap->dc, native_foreground_);
-      RECT line_area{gutter, y, content_width - scaled(8, native_dpi_), y + line_height};
-      const std::size_t newline = sample_text_.find(L'\n');
-      const std::size_t length = newline == std::wstring::npos ? sample_text_.size() : newline;
-      ExtTextOutW(bitmap->dc, line_area.left, y, ETO_CLIPPED, &line_area, sample_text_.c_str(),
+      SetTextColor(bitmap->dc, foreground);
+      RECT line_area{gutter, y, content_width - scaled(8, dpi), y + line_height};
+      const std::size_t newline = sample.text.find(L'\n');
+      const std::size_t length = newline == std::wstring::npos ? sample.text.size() : newline;
+      ExtTextOutW(bitmap->dc, line_area.left, y, ETO_CLIPPED, &line_area, sample.text.c_str(),
                   static_cast<UINT>(length), nullptr);
       SelectObject(bitmap->dc, previous_font);
       DeleteObject(sample_font);
@@ -1805,23 +1483,23 @@ std::unique_ptr<PreviewRuntime::CanvasBitmap> PreviewRuntime::render_native_canv
       y += line_height;
     }
     SelectObject(bitmap->dc, ui_previous);
-  } else if (display_mode_ == DisplayMode::compare) {
+  } else if (mode == DisplayMode::compare) {
     HGDIOBJ previous_font = SelectObject(bitmap->dc, ui_font_);
-    SetTextColor(bitmap->dc, palette().muted);
-    RECT left_header{scaled(10, native_dpi_), 0, compare_half, compare_header};
-    RECT right_header{compare_half + compare_gap + scaled(10, native_dpi_), 0, content_width,
+    SetTextColor(bitmap->dc, canvas_palette.muted);
+    RECT left_header{scaled(10, dpi), 0, compare_half, compare_header};
+    RECT right_header{compare_half + compare_gap + scaled(10, dpi), 0, content_width,
                       compare_header};
-    DrawTextW(bitmap->dc, labels_.compare_mactype.c_str(), -1, &left_header,
+    DrawTextW(bitmap->dc, labels.compare_mactype.c_str(), -1, &left_header,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    DrawTextW(bitmap->dc, labels_.compare_windows.c_str(), -1, &right_header,
+    DrawTextW(bitmap->dc, labels.compare_windows.c_str(), -1, &right_header,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     SelectObject(bitmap->dc, previous_font);
-    RECT left{scaled(10, native_dpi_), compare_header, compare_half - scaled(10, native_dpi_), height};
-    RECT right{compare_half + compare_gap + scaled(10, native_dpi_), compare_header,
-               content_width - scaled(10, native_dpi_), height};
-    HFONT sample_font = create_sample_font(font_face_, font_size_pt_, native_dpi_, sample_bold_, sample_italic_);
+    RECT left{scaled(10, dpi), compare_header, compare_half - scaled(10, dpi), height};
+    RECT right{compare_half + compare_gap + scaled(10, dpi), compare_header,
+               content_width - scaled(10, dpi), height};
+    HFONT sample_font = create_sample_font(sample.font_face, sample.font_size_pt, dpi, sample.bold, sample.italic);
     previous_font = SelectObject(bitmap->dc, sample_font);
-    wrapped_text_height(bitmap->dc, left, sample_text_, sample_line_height, native_foreground_);
+    wrapped_text_height(bitmap->dc, left, sample.text, sample_line_height, foreground);
     const BOOL disabled = control_center_ ? control_center_->EnableRender(FALSE) : FALSE;
     struct RenderRestore {
       IControlCenter* control_center;
@@ -1831,12 +1509,12 @@ std::unique_ptr<PreviewRuntime::CanvasBitmap> PreviewRuntime::render_native_canv
       }
     } restore{control_center_, disabled};
     if (disabled) {
-      wrapped_text_height(bitmap->dc, right, sample_text_, sample_line_height, native_foreground_);
+      wrapped_text_height(bitmap->dc, right, sample.text, sample_line_height, foreground);
     } else {
       SelectObject(bitmap->dc, previous_font);
       HGDIOBJ unavailable_previous = SelectObject(bitmap->dc, ui_font_);
-      SetTextColor(bitmap->dc, palette().muted);
-      DrawTextW(bitmap->dc, labels_.compare_unavailable.c_str(), -1, &right,
+      SetTextColor(bitmap->dc, canvas_palette.muted);
+      DrawTextW(bitmap->dc, labels.compare_unavailable.c_str(), -1, &right,
                 DT_CENTER | DT_VCENTER | DT_WORDBREAK);
       SelectObject(bitmap->dc, unavailable_previous);
       previous_font = SelectObject(bitmap->dc, sample_font);
@@ -1845,9 +1523,9 @@ std::unique_ptr<PreviewRuntime::CanvasBitmap> PreviewRuntime::render_native_canv
     DeleteObject(sample_font);
   } else {
     RECT text_area{sample_margin, sample_margin, content_width - sample_margin, height - sample_margin};
-    HFONT sample_font = create_sample_font(font_face_, font_size_pt_, native_dpi_, sample_bold_, sample_italic_);
+    HFONT sample_font = create_sample_font(sample.font_face, sample.font_size_pt, dpi, sample.bold, sample.italic);
     HGDIOBJ previous_font = SelectObject(bitmap->dc, sample_font);
-    wrapped_text_height(bitmap->dc, text_area, sample_text_, sample_line_height, native_foreground_);
+    wrapped_text_height(bitmap->dc, text_area, sample.text, sample_line_height, foreground);
     SelectObject(bitmap->dc, previous_font);
     DeleteObject(sample_font);
   }
@@ -1894,7 +1572,7 @@ void PreviewRuntime::paint_native(HWND window) {
       1, static_cast<int>(canvas_view.bottom - canvas_view.top) - 2 * padding);
   const int source_width = std::max(1, available_width / zoom_);
   const int source_min_height = std::max(1, available_height / zoom_);
-  CanvasBitmap* canvas = cached_native_canvas(source_width, source_min_height);
+  CanvasBitmap* canvas = cached_native_canvas(native_canvas_key(source_width, source_min_height));
   if (canvas) {
     const int drawn_width = canvas->width * zoom_;
     const int drawn_height = canvas->height * zoom_;
@@ -1969,7 +1647,7 @@ void PreviewRuntime::paint_native(HWND window) {
   }
   RECT status{0, client.bottom - status_height, client.right, client.bottom};
   fill_solid(buffer.dc, status, palette.surface);
-  const bool hairlines = !chrome_ || chrome_->skin == Skin::classic || chrome_->skin == Skin::console;
+  const bool hairlines = true;
   if (hairlines) {
     HPEN pen = CreatePen(PS_SOLID, 1, palette.border);
     HGDIOBJ previous_pen = SelectObject(buffer.dc, pen);
@@ -2016,7 +1694,7 @@ std::wstring PreviewRuntime::status_text() const {
     version.replace(marker_position, marker.size(), format_core_version(core_version_));
   }
   std::wostringstream status;
-  status << font_face_ << L" · " << static_cast<int>(std::lround(font_size_pt_)) << L" pt · "
+  status << native_sample_.font_face << L" · " << static_cast<int>(std::lround(native_sample_.font_size_pt)) << L" pt · "
          << native_dpi_ << L" DPI · " << version << L" · " << mode_label() << L" · "
          << labels_.engine_mactype;
   return status.str();
@@ -2030,25 +1708,22 @@ int PreviewRuntime::hit_test_toolbar(POINT point) const {
 }
 
 void PreviewRuntime::execute_toolbar_action(int action) {
-  bool canvas_changed = false;
   switch (action) {
-    case kBold: sample_bold_ = !sample_bold_; canvas_changed = true; break;
-    case kItalic: sample_italic_ = !sample_italic_; canvas_changed = true; break;
-    case kModeSample: display_mode_ = DisplayMode::sample; scroll_y_ = 0; canvas_changed = true; break;
-    case kModeLadder: display_mode_ = DisplayMode::ladder; scroll_y_ = 0; canvas_changed = true; break;
-    case kModeCompare: display_mode_ = DisplayMode::compare; scroll_y_ = 0; canvas_changed = true; break;
-    case kModeListing: display_mode_ = DisplayMode::listing; scroll_y_ = 0; canvas_changed = true; break;
+    case kBold: native_sample_.bold = !native_sample_.bold; break;
+    case kItalic: native_sample_.italic = !native_sample_.italic; break;
+    case kModeSample: display_mode_ = DisplayMode::sample; scroll_y_ = 0; break;
+    case kModeLadder: display_mode_ = DisplayMode::ladder; scroll_y_ = 0; break;
+    case kModeCompare: display_mode_ = DisplayMode::compare; scroll_y_ = 0; break;
+    case kModeListing: display_mode_ = DisplayMode::listing; scroll_y_ = 0; break;
     case kInvert:
       std::swap(native_foreground_, native_background_);
       inverted_ = !inverted_;
-      canvas_changed = true;
       break;
     case kLoupe: loupe_ = !loupe_; break;
     case kZoom:
       zoom_ = zoom_ == 1 ? 2 : (zoom_ == 2 ? 4 : 1);
       scroll_y_ = 0;
       rebuild_toolbar_layout();
-      canvas_changed = true;
       break;
     case kTopmost:
       topmost_ = !topmost_;
@@ -2064,7 +1739,6 @@ void PreviewRuntime::execute_toolbar_action(int action) {
     case kCopy: copy_canvas(); break;
     default: break;
   }
-  if (canvas_changed) invalidate_canvas_cache();
   InvalidateRect(native_window_, nullptr, FALSE);
 }
 
@@ -2084,12 +1758,10 @@ bool PreviewRuntime::handle_key(WPARAM key) {
   else if (key == 'B') execute_toolbar_action(kBold);
   else if (key == VK_ADD || key == VK_OEM_PLUS) {
     if (zoom_ < 4) zoom_ *= 2;
-    invalidate_canvas_cache();
     rebuild_toolbar_layout();
     InvalidateRect(native_window_, nullptr, FALSE);
   } else if (key == VK_SUBTRACT || key == VK_OEM_MINUS) {
     if (zoom_ > 1) zoom_ /= 2;
-    invalidate_canvas_cache();
     rebuild_toolbar_layout();
     InvalidateRect(native_window_, nullptr, FALSE);
   } else if (key == VK_HOME || key == VK_END) {
@@ -2119,11 +1791,16 @@ bool PreviewRuntime::save_canvas_png() {
   RECT client{};
   GetClientRect(native_window_, &client);
   const int width = std::max(1, (static_cast<int>(client.right) - 2 * scaled(18, native_dpi_)) / zoom_);
-  auto canvas = render_native_canvas(width, scaled(300, native_dpi_));
+  auto canvas = render_native_canvas(width, scaled(300, native_dpi_), native_sample_,
+                                     native_foreground_, native_background_, native_dpi_,
+                                     display_mode_, zoom_, inverted_, ladder_sizes_, listing_text_,
+                                     labels_, chrome_, dark_theme_);
   if (!canvas) return false;
   std::string error;
-  auto png = encode_png(static_cast<const std::uint8_t*>(canvas->bits), canvas->width,
-                        canvas->height, error);
+  auto png = encode_png(static_cast<std::uint32_t>(canvas->width),
+                        static_cast<std::uint32_t>(canvas->height),
+                        static_cast<std::uint32_t>(canvas->width) * 4U,
+                        static_cast<const std::uint8_t*>(canvas->bits), error);
   if (png.empty()) return false;
 
   std::wstring filter = labels_.png_filter;
@@ -2163,7 +1840,10 @@ bool PreviewRuntime::copy_canvas() {
   RECT client{};
   GetClientRect(native_window_, &client);
   const int width = std::max(1, (static_cast<int>(client.right) - 2 * scaled(18, native_dpi_)) / zoom_);
-  auto canvas = render_native_canvas(width, scaled(300, native_dpi_));
+  auto canvas = render_native_canvas(width, scaled(300, native_dpi_), native_sample_,
+                                     native_foreground_, native_background_, native_dpi_,
+                                     display_mode_, zoom_, inverted_, ladder_sizes_, listing_text_,
+                                     labels_, chrome_, dark_theme_);
   if (!canvas) return false;
   const SIZE_T pixel_bytes = static_cast<SIZE_T>(canvas->width) * canvas->height * 4U;
   const SIZE_T total = sizeof(BITMAPINFOHEADER) + pixel_bytes;
@@ -2258,7 +1938,6 @@ LRESULT CALLBACK PreviewRuntime::window_proc(HWND window, UINT message, WPARAM w
                      suggested->right - suggested->left, suggested->bottom - suggested->top,
                      SWP_NOZORDER | SWP_NOACTIVATE);
         runtime->recreate_ui_font();
-        runtime->invalidate_canvas_cache();
         runtime->relayout_controls();
       }
       return 0;
@@ -2322,8 +2001,7 @@ LRESULT CALLBACK PreviewRuntime::window_proc(HWND window, UINT message, WPARAM w
         const LRESULT selected = SendMessageW(runtime->face_combo_, CB_GETCURSEL, 0, 0);
         if (selected != CB_ERR) {
           SendMessageW(runtime->face_combo_, CB_GETLBTEXT, selected, reinterpret_cast<LPARAM>(value));
-          runtime->font_face_ = value;
-          runtime->invalidate_canvas_cache();
+          runtime->native_sample_.font_face = value;
           InvalidateRect(window, nullptr, FALSE);
         }
         return 0;
@@ -2333,8 +2011,7 @@ LRESULT CALLBACK PreviewRuntime::window_proc(HWND window, UINT message, WPARAM w
         const LRESULT selected = SendMessageW(runtime->size_combo_, CB_GETCURSEL, 0, 0);
         if (selected != CB_ERR) {
           SendMessageW(runtime->size_combo_, CB_GETLBTEXT, selected, reinterpret_cast<LPARAM>(value));
-          runtime->font_size_pt_ = static_cast<float>(_wtoi(value));
-          runtime->invalidate_canvas_cache();
+          runtime->native_sample_.font_size_pt = static_cast<float>(_wtoi(value));
           InvalidateRect(window, nullptr, FALSE);
         }
         return 0;
@@ -2344,8 +2021,7 @@ LRESULT CALLBACK PreviewRuntime::window_proc(HWND window, UINT message, WPARAM w
         std::wstring value(static_cast<std::size_t>(length) + 1, L'\0');
         GetWindowTextW(runtime->edit_control_, value.data(), length + 1);
         value.resize(static_cast<std::size_t>(length));
-        runtime->sample_text_ = std::move(value);
-        runtime->invalidate_canvas_cache();
+        runtime->native_sample_.text = std::move(value);
         InvalidateRect(window, nullptr, FALSE);
         return 0;
       }

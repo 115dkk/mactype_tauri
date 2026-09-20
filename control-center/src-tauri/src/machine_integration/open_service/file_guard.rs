@@ -26,17 +26,13 @@ pub(super) fn read_bounded_regular_file(
 }
 
 pub(super) fn reject_reparse_chain(path: &Path) -> Result<(), String> {
-    for ancestor in path.ancestors() {
-        let metadata = match fs::symlink_metadata(ancestor) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error.to_string()),
-        };
-        if metadata.file_type().is_symlink() || metadata_is_reparse(&metadata) {
-            return Err("reparse points are forbidden in the fixed file path".to_owned());
+    mactype_service_platform::validate_path_chain(path, None).map_err(|error| match error {
+        mactype_service_platform::PathChainError::ReparsePoint(_) => {
+            "reparse points are forbidden in the fixed file path".to_owned()
         }
-    }
-    Ok(())
+        mactype_service_platform::PathChainError::Io { source, .. } => source.to_string(),
+        error => error.to_string(),
+    })
 }
 
 #[cfg(windows)]

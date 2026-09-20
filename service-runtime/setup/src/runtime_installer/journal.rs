@@ -3,8 +3,8 @@ mod repair;
 mod transition;
 
 use mactype_service_contract::{
-    valid_runtime_version_component, RuntimeActivationReceipt, RuntimeGenerationPointer,
-    MAX_RUNTIME_ACTIVATION_RECEIPT_BYTES, MAX_RUNTIME_POINTER_BYTES,
+    RuntimeActivationReceipt, RuntimeGenerationPointer, MAX_RUNTIME_ACTIVATION_RECEIPT_BYTES,
+    MAX_RUNTIME_POINTER_BYTES,
 };
 
 use crate::storage::SetupError;
@@ -22,8 +22,4 @@ fn activation_receipt_bytes(receipt: &RuntimeActivationReceipt) -> Result<Vec<u8
     receipt
         .to_bytes()
         .map_err(|_| SetupError::Runtime("runtime activation journal is invalid".to_owned()))
-}
-
-pub(super) fn safe_version_component(version: &str) -> bool {
-    valid_runtime_version_component(version)
 }

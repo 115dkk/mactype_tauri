@@ -22,7 +22,11 @@ impl MachineBackend for FakeMachineBackend {
         self.status.clone().expect("test status")
     }
 
-    fn execute(&mut self, _action: MachineAction, _profile: Option<&[u8]>) -> Result<(), String> {
+    fn execute(
+        &mut self,
+        _action: MachineAction,
+        _profile: Option<&[u8]>,
+    ) -> Result<(), open_service::action_failure::ActionFailure> {
         self.calls.push("execute");
         self.executed = Some((_action, _profile.unwrap_or_default().to_vec()));
         Ok(())
@@ -88,7 +92,12 @@ fn trusted_current_session_legacy_tray_blocks_a_machine_change_before_dispatch()
 
     let error = execute_machine_action_with(&mut backend, MachineAction::Repair, None).unwrap_err();
 
-    assert!(error.contains("legacy MacTray tray mode"), "{error}");
+    assert!(matches!(
+        error.kind,
+        open_service::action_failure::ActionFailureKind::Blocked(
+            open_service::action_failure::ActionBlocker::LegacyTrayModeBlocks(_)
+        )
+    ));
     assert!(backend.executed.is_none());
 }
 
@@ -301,10 +310,12 @@ fn a_contending_legacy_service_blocks_generic_activation_but_not_reduction() {
             ..Default::default()
         };
         let error = execute_machine_action_with(&mut backend, action, payload).unwrap_err();
-        assert!(
-            error.contains("legacy MacType service"),
-            "{action:?}: {error}"
-        );
+        assert!(matches!(
+            error.kind,
+            open_service::action_failure::ActionFailureKind::Blocked(
+                open_service::action_failure::ActionBlocker::LegacyServiceStillInstalled(_)
+            )
+        ));
         assert!(backend.executed.is_none(), "{action:?} reached the broker");
     }
 
@@ -350,7 +361,12 @@ fn appinit_conflict_never_turns_an_unrelated_native_capability_into_stop() {
     let error =
         execute_machine_action_with(&mut backend, MachineAction::Start, Some(profile)).unwrap_err();
 
-    assert!(error.contains("AppInit"), "{error}");
+    assert!(matches!(
+        error.kind,
+        open_service::action_failure::ActionFailureKind::Blocked(
+            open_service::action_failure::ActionBlocker::AppInitConflict(_)
+        )
+    ));
     assert!(backend.executed.is_none());
 }
 
@@ -498,7 +514,7 @@ fn publish_profile_orders_running_stopped_and_absent_service_activation() {
             &mut self,
             action: MachineAction,
             _profile: Option<&[u8]>,
-        ) -> Result<(), String> {
+        ) -> Result<(), open_service::action_failure::ActionFailure> {
             self.actions.push(action);
             Ok(())
         }
@@ -612,9 +628,16 @@ impl MachineBackend for FailingPublishBackend {
         Ok(false)
     }
 
-    fn execute(&mut self, action: MachineAction, _profile: Option<&[u8]>) -> Result<(), String> {
+    fn execute(
+        &mut self,
+        action: MachineAction,
+        _profile: Option<&[u8]>,
+    ) -> Result<(), open_service::action_failure::ActionFailure> {
         self.actions.push(action);
-        self.results.pop_front().unwrap_or(Ok(()))
+        self.results
+            .pop_front()
+            .unwrap_or(Ok(()))
+            .map_err(open_service::action_failure::ActionFailure::from)
     }
 }
 
@@ -898,7 +921,11 @@ impl MachineBackend for DesignateBackend {
         Ok(false)
     }
 
-    fn execute(&mut self, action: MachineAction, _profile: Option<&[u8]>) -> Result<(), String> {
+    fn execute(
+        &mut self,
+        action: MachineAction,
+        _profile: Option<&[u8]>,
+    ) -> Result<(), open_service::action_failure::ActionFailure> {
         self.actions.push(action);
         Ok(())
     }
@@ -1022,7 +1049,12 @@ fn designate_profile_requires_profile_bytes_and_a_clear_tray() {
         Some(b"[General]\r\n"),
     )
     .unwrap_err();
-    assert!(error.contains("legacy MacTray tray mode"), "{error}");
+    assert!(matches!(
+        error.kind,
+        open_service::action_failure::ActionFailureKind::Blocked(
+            open_service::action_failure::ActionBlocker::LegacyTrayModeBlocks(_)
+        )
+    ));
     assert!(backend.executed.is_none());
 
     let mut backend = FakeMachineBackend {

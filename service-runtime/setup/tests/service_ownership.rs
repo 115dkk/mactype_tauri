@@ -2,9 +2,8 @@
 
 use std::fs;
 
-use mactype_service_setup::{
-    service_configuration_drift, service_configuration_matches_owned_contract,
-    service_identity_matches_owned_contract, service_image_matches_protected_contract,
+use mactype_service_contract::{
+    owned_service_identity, service_configuration_drift, service_image_matches_protected_contract,
     ObservedServiceConfiguration,
 };
 
@@ -74,38 +73,26 @@ fn service_identity_is_separate_from_repairable_configuration_drift() {
         tag_id: 0,
         dependencies: &[],
     };
-    assert!(service_identity_matches_owned_contract(&root, &exact));
-    assert!(service_configuration_drift(&exact).is_empty());
-    assert_eq!(
-        service_configuration_matches_owned_contract(&root, &exact),
-        service_identity_matches_owned_contract(&root, &exact)
-            && service_configuration_drift(&exact).is_empty()
-    );
+    assert!(owned_service_identity(&exact, &root));
+    assert!(!service_configuration_drift(&exact).is_drifted());
 
     let demand_start = ObservedServiceConfiguration {
         start_type: 3,
         ..exact
     };
-    assert!(service_identity_matches_owned_contract(
-        &root,
-        &demand_start
-    ));
-    assert_eq!(service_configuration_drift(&demand_start), ["start-type"]);
-    assert!(!service_configuration_matches_owned_contract(
-        &root,
-        &demand_start
-    ));
+    assert!(owned_service_identity(&demand_start, &root));
+    assert_eq!(
+        service_configuration_drift(&demand_start).field_names(),
+        ["start-type"]
+    );
 
     let display_drift = ObservedServiceConfiguration {
         display_name: "Foreign Display",
         ..exact
     };
-    assert!(service_identity_matches_owned_contract(
-        &root,
-        &display_drift
-    ));
+    assert!(owned_service_identity(&display_drift, &root));
     assert_eq!(
-        service_configuration_drift(&display_drift),
+        service_configuration_drift(&display_drift).field_names(),
         ["display-name"]
     );
 
@@ -119,7 +106,7 @@ fn service_identity_is_separate_from_repairable_configuration_drift() {
         ..exact
     };
     assert_eq!(
-        service_configuration_drift(&all_drift),
+        service_configuration_drift(&all_drift).field_names(),
         [
             "start-type",
             "error-control",
@@ -144,6 +131,6 @@ fn service_identity_is_separate_from_repairable_configuration_drift() {
             ..exact
         },
     ] {
-        assert!(!service_identity_matches_owned_contract(&root, &foreign));
+        assert!(!owned_service_identity(&foreign, &root));
     }
 }

@@ -10,14 +10,26 @@ use mactype_service_contract::{
 use mactype_service_host::{
     initialize_process_orchestration, initialize_process_orchestration_with_observer_recovery,
     BrokerDisposition, BrokerResult, HealthPublisher, InitializedRuntime, InjectionBroker,
-    InjectionRequest, ObserverRecoveryPolicy, ProcessArchitecture, ProcessEventSource,
-    ProcessIdentity, ProcessInspector, RuntimeInitializer, ServiceRuntime, ServiceStatus,
-    SessionChange, StatusReporter, StopSignal, TargetLiveness,
+    InjectionRequest, InspectedProcess, ObserverRecoveryPolicy, ProcessArchitecture,
+    ProcessEventSource, ProcessFacts, ProcessIdentity, ProcessInspector, RuntimeInitializer,
+    ServiceRuntime, ServiceStatus, SessionChange, StatusReporter, StopSignal, TargetLiveness,
 };
 
 const PROFILE_DIGEST: &str =
     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const RUNTIME_GENERATION: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+fn inspected(identity: ProcessIdentity) -> InspectedProcess {
+    InspectedProcess {
+        identity,
+        facts: ProcessFacts {
+            critical_or_unknown: false,
+            prohibits_dynamic_code: false,
+            restricts_binary_signature: false,
+            image_name: Some("target.exe".to_owned()),
+        },
+    }
+}
 
 struct QueueSource {
     snapshot: Vec<u32>,
@@ -151,15 +163,14 @@ impl RuntimeInitializer for RecoveryInitializer {
 struct FixedInspector;
 
 impl ProcessInspector for FixedInspector {
-    fn inspect(&self, pid: u32) -> Result<ProcessIdentity, StructuredServiceError> {
-        Ok(ProcessIdentity {
+    fn inspect(&self, pid: u32) -> Result<InspectedProcess, StructuredServiceError> {
+        Ok(inspected(ProcessIdentity {
             pid,
             creation_time: 100,
             session_id: 2,
             architecture: ProcessArchitecture::X64,
             protected: false,
-            critical: false,
-        })
+        }))
     }
 }
 
@@ -674,15 +685,14 @@ fn cleanup_unknown_degrades_its_generation_then_next_success_recovers_ready() {
 struct VanishedTargetInspector;
 
 impl ProcessInspector for VanishedTargetInspector {
-    fn inspect(&self, pid: u32) -> Result<ProcessIdentity, StructuredServiceError> {
-        Ok(ProcessIdentity {
+    fn inspect(&self, pid: u32) -> Result<InspectedProcess, StructuredServiceError> {
+        Ok(inspected(ProcessIdentity {
             pid,
             creation_time: 100,
             session_id: 2,
             architecture: ProcessArchitecture::X64,
             protected: false,
-            critical: false,
-        })
+        }))
     }
 
     fn probe_target_liveness(&self, _identity: &ProcessIdentity) -> TargetLiveness {
@@ -856,7 +866,7 @@ fn invalid_helper_response_degrades_its_generation_then_next_success_recovers_re
 struct TargetInspectionRaceInspector;
 
 impl ProcessInspector for TargetInspectionRaceInspector {
-    fn inspect(&self, pid: u32) -> Result<ProcessIdentity, StructuredServiceError> {
+    fn inspect(&self, pid: u32) -> Result<InspectedProcess, StructuredServiceError> {
         let code = match pid {
             10 => Some("process-protected-or-inaccessible"),
             20 => Some("process-creation-time-unavailable"),
@@ -872,14 +882,13 @@ impl ProcessInspector for TargetInspectionRaceInspector {
                 win32_error: Some(5),
             });
         }
-        Ok(ProcessIdentity {
+        Ok(inspected(ProcessIdentity {
             pid,
             creation_time: u64::from(pid),
             session_id: 2,
             architecture: ProcessArchitecture::X64,
             protected: false,
-            critical: false,
-        })
+        }))
     }
 }
 

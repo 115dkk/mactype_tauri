@@ -16,6 +16,8 @@ fn broker_accepts_only_fixed_verbs_without_arguments() {
     ];
 
     for (verb, expected) in allowed {
+        assert_eq!(expected.verb(), verb);
+        assert_eq!(BrokerCommand::parse_verb(verb), Some(expected));
         assert_eq!(parse_broker_command([verb]).unwrap(), expected);
     }
 

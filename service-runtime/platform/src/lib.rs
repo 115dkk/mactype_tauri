@@ -44,7 +44,8 @@ pub use environment::expand_environment_strings;
 pub use event::ManualResetEvent;
 pub use file::{
     delay_delete_until_reboot, file_attributes, is_reparse_point, mark_open_file_for_deletion,
-    replace_file, replace_file_preserving_attributes,
+    replace_file, replace_file_preserving_attributes, validate_path_chain,
+    validate_path_chain_with, PathChainError,
 };
 pub use gdi::installed_font_families;
 pub use handle::{OwnedHandle, WaitOutcome};

@@ -354,7 +354,11 @@ impl MachineBackend for RealLegacyProbeBackend {
         legacy_mactray::legacy_service_blocks_activation()
     }
 
-    fn execute(&mut self, action: MachineAction, _profile: Option<&[u8]>) -> Result<(), String> {
+    fn execute(
+        &mut self,
+        action: MachineAction,
+        _profile: Option<&[u8]>,
+    ) -> Result<(), crate::machine_integration::open_service::action_failure::ActionFailure> {
         panic!(
             "the new service must never be mutated while a legacy service is present: {action:?}"
         );

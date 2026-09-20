@@ -3,55 +3,38 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Write},
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
-pub(in crate::machine_integration::legacy_migration) fn validate_path_chain(
-    root: &Path,
-    candidate: &Path,
-    mut is_reparse: impl FnMut(&Path) -> Result<bool, String>,
-) -> Result<(), String> {
-    let relative = candidate
-        .strip_prefix(root)
-        .map_err(|_| "legacy migration path escaped its trusted root".to_owned())?;
-    let mut current = root.to_path_buf();
-    if is_reparse(&current)? {
-        return Err(format!(
-            "legacy migration refuses reparse point {}",
-            current.display()
-        ));
-    }
-    for component in relative.components() {
-        let Component::Normal(component) = component else {
-            return Err("legacy migration path contains an unsafe component".to_owned());
-        };
-        current.push(component);
-        if is_reparse(&current)? {
-            return Err(format!(
-                "legacy migration refuses reparse point {}",
-                current.display()
-            ));
-        }
-    }
-    Ok(())
+fn validate_legacy_path_chain(root: &Path, candidate: &Path) -> Result<(), String> {
+    mactype_service_platform::validate_path_chain(candidate, Some(root)).map_err(
+        |error| match error {
+            mactype_service_platform::PathChainError::ReparsePoint(path) => {
+                format!("legacy migration refuses reparse point {}", path.display())
+            }
+            mactype_service_platform::PathChainError::UnsafeComponent(_) => {
+                "legacy migration path contains an unsafe component".to_owned()
+            }
+            mactype_service_platform::PathChainError::EscapedRoot { .. } => {
+                "legacy migration path escaped its trusted root".to_owned()
+            }
+            mactype_service_platform::PathChainError::Io { source, .. } => source.to_string(),
+        },
+    )
 }
 
-pub(super) fn path_is_reparse(path: &Path) -> Result<bool, String> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(error.to_string()),
-    };
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
-        Ok(metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
-    }
-    #[cfg(not(windows))]
-    {
-        Ok(metadata.file_type().is_symlink())
+pub(super) fn entry_is_reparse(path: &Path) -> Result<bool, String> {
+    match mactype_service_platform::validate_path_chain(path, Some(path)) {
+        Ok(()) => Ok(false),
+        Err(mactype_service_platform::PathChainError::ReparsePoint(_)) => Ok(true),
+        Err(mactype_service_platform::PathChainError::Io { source, .. })
+            if source.kind() == std::io::ErrorKind::NotFound =>
+        {
+            Ok(false)
+        }
+        Err(mactype_service_platform::PathChainError::Io { source, .. }) => Err(source.to_string()),
+        Err(error) => Err(error.to_string()),
     }
 }
 
@@ -83,7 +66,7 @@ pub(in crate::machine_integration::legacy_migration) fn validate_existing_path(
     root: &Path,
     candidate: &Path,
 ) -> Result<(), String> {
-    validate_path_chain(root, candidate, path_is_reparse)
+    validate_legacy_path_chain(root, candidate)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -137,8 +120,9 @@ fn open_migration_file(path: &Path) -> Result<(File, OpenedFileMetadata), String
     #[cfg(windows)]
     {
         use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
-        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
-        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
+        };
         const FILE_SHARE_READ: u32 = 0x0000_0001;
         options
             .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
@@ -173,13 +157,12 @@ pub(in crate::machine_integration::legacy_migration) fn read_bounded_under_with<
     trusted_root: &Path,
     path: &Path,
     maximum: u64,
-    is_reparse: impl FnMut(&Path) -> Result<bool, String>,
     open: impl FnOnce(&Path) -> Result<(R, OpenedFileMetadata), String>,
 ) -> Result<Vec<u8>, String> {
     let parent = path
         .parent()
         .ok_or_else(|| "legacy migration file has no parent directory".to_owned())?;
-    validate_path_chain(trusted_root, parent, is_reparse)?;
+    validate_legacy_path_chain(trusted_root, parent)?;
     read_opened_bounded_with(path, maximum, open)
 }
 
@@ -188,13 +171,7 @@ pub(in crate::machine_integration::legacy_migration) fn read_bounded_under(
     path: &Path,
     maximum: u64,
 ) -> Result<Vec<u8>, String> {
-    read_bounded_under_with(
-        trusted_root,
-        path,
-        maximum,
-        path_is_reparse,
-        open_migration_file,
-    )
+    read_bounded_under_with(trusted_root, path, maximum, open_migration_file)
 }
 
 pub(in crate::machine_integration::legacy_migration) fn read_json_bounded_under<
@@ -223,7 +200,7 @@ pub(in crate::machine_integration::legacy_migration) fn read_optional_regular_bo
     let parent = path
         .parent()
         .ok_or_else(|| "legacy migration file has no parent directory".to_owned())?;
-    validate_path_chain(trusted_root, parent, path_is_reparse)?;
+    validate_legacy_path_chain(trusted_root, parent)?;
     match fs::symlink_metadata(path) {
         Ok(_) => read_regular_bounded_under(trusted_root, path, maximum).map(Some),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -247,12 +224,12 @@ fn temporary_sibling(path: &Path) -> Result<PathBuf, String> {
 }
 
 fn validate_atomic_target(parent: &Path, path: &Path) -> Result<bool, String> {
-    if path_is_reparse(parent)? {
+    if entry_is_reparse(parent)? {
         return Err("legacy migration refuses an atomic write through a reparse point".to_owned());
     }
     match fs::symlink_metadata(path) {
         Ok(metadata) => {
-            if path_is_reparse(path)? || !metadata.file_type().is_file() {
+            if entry_is_reparse(path)? || !metadata.file_type().is_file() {
                 Err("legacy migration refuses an unsafe atomic write target".to_owned())
             } else {
                 Ok(true)

@@ -51,9 +51,8 @@ pub(crate) use startup_coordinator::{
 pub(crate) use tray_exit::{request_tray_exit, LegacyTrayExitRequest};
 #[cfg(test)]
 use tray_startup::{
-    classify_startup_command, classify_startup_inventory, disable_startup_with,
-    is_legacy_tray_startup_candidate, startup_source_requires_current_user_sid,
-    LegacyTrayStartupObservation, StartupDisableBackend, StartupMutationEvent,
+    classify_startup_command, classify_startup_inventory, is_legacy_tray_startup_candidate,
+    startup_source_requires_current_user_sid, LegacyTrayStartupObservation,
     StartupTargetClassification,
 };
 pub(crate) use tray_startup::{

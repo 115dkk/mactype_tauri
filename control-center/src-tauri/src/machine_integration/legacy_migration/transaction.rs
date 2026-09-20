@@ -5,9 +5,18 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-pub(crate) fn prepare_backup() -> Result<MigrationReceipt, String> {
+pub(in crate::machine_integration) fn prepare_backup(
+) -> Result<MigrationReceipt, crate::machine_integration::open_service::action_failure::ActionFailure>
+{
     let status = legacy_mactray::status(crate::machine_integration::registry_conflict_detected());
     require_owned_legacy_service(&status)?;
+    prepare_backup_for_status(&status)
+        .map_err(crate::machine_integration::open_service::action_failure::ActionFailure::from)
+}
+
+fn prepare_backup_for_status(
+    status: &legacy_mactray::LegacyServiceStatus,
+) -> Result<MigrationReceipt, String> {
     if !matches!(
         status.state,
         ServiceRuntimeState::Running | ServiceRuntimeState::Stopped

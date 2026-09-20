@@ -10,7 +10,8 @@ pub(crate) use startup_receipt::{
     disable_startup_scope, dispatch_current_user_restore_command, restore_startup_scope,
     StartupReceiptScope,
 };
-pub(crate) use transaction::{prepare_backup, remove_after_verified, rollback, stop_legacy};
+pub(super) use transaction::prepare_backup;
+pub(crate) use transaction::{remove_after_verified, rollback, stop_legacy};
 
 #[cfg(test)]
 use super::legacy_mactray::{
@@ -40,7 +41,7 @@ use std::{
 use storage::{
     acl_invocation, after_hardening_with, after_registry_export_with,
     ensure_absent_restore_target_with, read_bounded_under_with, read_opened_bounded_with,
-    registry_export_invocation, validate_path_chain, OpenedFileMetadata,
+    registry_export_invocation, OpenedFileMetadata,
 };
 #[cfg(test)]
 use transaction::{perform_rollback, RollbackBackend};

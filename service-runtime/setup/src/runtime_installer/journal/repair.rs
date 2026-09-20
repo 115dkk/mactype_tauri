@@ -2,13 +2,12 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use mactype_service_contract::sha256_digest;
+use mactype_service_contract::{sha256_digest, valid_runtime_version_component};
 use serde::{Deserialize, Serialize};
 
 mod receipt;
 mod recovery;
 
-use super::safe_version_component;
 use crate::runtime_installer::deployment::{verify_existing_payload, write_synced, LoadedPayload};
 use crate::runtime_installer::RuntimeInstaller;
 use crate::storage::{
@@ -171,7 +170,7 @@ impl RuntimeInstaller {
         let journal: RuntimeRepairJournal = serde_json::from_slice(&bytes)
             .map_err(|_| SetupError::Runtime("runtime repair journal is invalid".to_owned()))?;
         if journal.schema != RUNTIME_REPAIR_SCHEMA
-            || !safe_version_component(&journal.version)
+            || !valid_runtime_version_component(&journal.version)
             || !safe_repair_entry(&journal.staging, ".repair-new-", &journal.version)
             || !safe_repair_entry(&journal.backup, ".repair-old-", &journal.version)
             || journal.staging == journal.backup

@@ -7,6 +7,7 @@ mod migration_pin;
 mod paths;
 mod profile;
 mod runtime_activation;
+mod service_configuration;
 
 pub use broker::{parse_broker_command, BrokerCommand, BrokerCommandError};
 pub use health::{
@@ -26,7 +27,7 @@ pub use migration_pin::{
 pub use paths::{MachinePathError, MachinePaths};
 pub use profile::{
     GenerationId, GenerationPointer, ProfileCatalog, ProfileError, SourceMetadata,
-    MAX_PROFILE_BYTES, PROFILE_POINTER_SCHEMA,
+    MAX_PROFILE_BYTES, MAX_PROFILE_POINTER_BYTES, PROFILE_POINTER_SCHEMA,
 };
 pub use runtime_activation::{
     parse_runtime_activation_receipt, valid_runtime_version_component,
@@ -35,8 +36,15 @@ pub use runtime_activation::{
     MAX_RUNTIME_ACTIVATION_RECEIPT_BYTES, MAX_RUNTIME_POINTER_BYTES, RUNTIME_ACTIVATION_SCHEMA,
     RUNTIME_POINTER_SCHEMA, UNCOMMITTED_RUNTIME_ACTIVATION_SCHEMA,
 };
+pub use service_configuration::{
+    owned_service_identity, service_configuration_drift, service_image_matches_protected_contract,
+    service_image_matches_protected_layout, ObservedServiceConfiguration,
+    ServiceConfigurationDrift, FIXED_ACCOUNT, FIXED_ERROR_CONTROL, FIXED_SERVICE_TYPE,
+    FIXED_START_TYPE, SERVICE_DISPLAY_NAME,
+};
 
 pub const SERVICE_NAME: &str = "MacTypeControlCenter";
+pub const LEGACY_SERVICE_NAME: &str = "MacType";
 pub const CI_TEST_SERVICE_NAME: &str = "MacTypeControlCenterTest";
 pub const HEALTH_PIPE_NAME: &str = r"\\.\pipe\MacTypeControlCenter.health.v1";
 pub const CI_TEST_HEALTH_PIPE_NAME: &str = r"\\.\pipe\MacTypeControlCenterTest.health.v1";

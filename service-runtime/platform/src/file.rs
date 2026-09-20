@@ -3,10 +3,11 @@
 //! write-through replacement, reboot-deferred deletion, and deleting a file
 //! through the handle that already verified its contents.
 
-use std::fs::File;
+use std::fmt;
+use std::fs::{self, File};
 use std::io;
 use std::os::windows::io::AsRawHandle;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use std::ptr::null;
 
 use windows_sys::Win32::Storage::FileSystem::{
@@ -32,6 +33,119 @@ pub fn file_attributes(path: &Path) -> io::Result<u32> {
 /// Whether `path` itself is a reparse point (symlink, junction, mount point).
 pub fn is_reparse_point(path: &Path) -> io::Result<bool> {
     Ok(file_attributes(path)? & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+}
+
+/// Why a candidate path failed component-by-component validation.
+#[derive(Debug)]
+pub enum PathChainError {
+    ReparsePoint(PathBuf),
+    UnsafeComponent(PathBuf),
+    EscapedRoot { root: PathBuf, candidate: PathBuf },
+    Io { path: PathBuf, source: io::Error },
+}
+
+impl fmt::Display for PathChainError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ReparsePoint(path) => {
+                write!(
+                    formatter,
+                    "path contains a reparse point: {}",
+                    path.display()
+                )
+            }
+            Self::UnsafeComponent(path) => {
+                write!(
+                    formatter,
+                    "path contains an unsafe component: {}",
+                    path.display()
+                )
+            }
+            Self::EscapedRoot { root, candidate } => write!(
+                formatter,
+                "path {} escaped trusted root {}",
+                candidate.display(),
+                root.display()
+            ),
+            Self::Io { path, source } => {
+                write!(formatter, "could not inspect {}: {source}", path.display())
+            }
+        }
+    }
+}
+
+impl std::error::Error for PathChainError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
+
+/// Validates a path chain using a caller-supplied non-following entry probe.
+pub fn validate_path_chain_with(
+    candidate: &Path,
+    trusted_root: Option<&Path>,
+    mut probe: impl FnMut(&Path) -> io::Result<Option<bool>>,
+) -> Result<(), PathChainError> {
+    let paths = if let Some(root) = trusted_root {
+        let relative = candidate
+            .strip_prefix(root)
+            .map_err(|_| PathChainError::EscapedRoot {
+                root: root.to_path_buf(),
+                candidate: candidate.to_path_buf(),
+            })?;
+        let mut current = root.to_path_buf();
+        let mut paths = vec![current.clone()];
+        for component in relative.components() {
+            let Component::Normal(component) = component else {
+                return Err(PathChainError::UnsafeComponent(candidate.to_path_buf()));
+            };
+            current.push(component);
+            paths.push(current.clone());
+        }
+        paths
+    } else {
+        if !candidate.is_absolute() {
+            return Err(PathChainError::UnsafeComponent(candidate.to_path_buf()));
+        }
+        let mut paths = candidate
+            .ancestors()
+            .filter(|path| !path.as_os_str().is_empty())
+            .map(Path::to_path_buf)
+            .collect::<Vec<_>>();
+        paths.reverse();
+        paths
+    };
+
+    for path in paths {
+        match probe(&path) {
+            Ok(Some(true)) => return Err(PathChainError::ReparsePoint(path)),
+            Ok(Some(false) | None) => {}
+            Err(source) => return Err(PathChainError::Io { path, source }),
+        }
+    }
+    Ok(())
+}
+
+/// Rejects every reparse point from the trusted or filesystem root through the candidate.
+pub fn validate_path_chain(
+    candidate: &Path,
+    trusted_root: Option<&Path>,
+) -> Result<(), PathChainError> {
+    validate_path_chain_with(candidate, trusted_root, |path| {
+        let metadata = match fs::symlink_metadata(path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        use std::os::windows::fs::MetadataExt;
+        Ok(Some(
+            metadata.file_type().is_symlink()
+                || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0,
+        ))
+    })
 }
 
 /// Moves `source` over `destination` with `MoveFileExW`, replacing it and
@@ -124,8 +238,151 @@ pub fn mark_open_file_for_deletion(file: &File) -> io::Result<()> {
 mod tests {
     use super::{
         file_attributes, is_reparse_point, mark_open_file_for_deletion, replace_file,
-        replace_file_preserving_attributes,
+        replace_file_preserving_attributes, validate_path_chain, validate_path_chain_with,
+        PathChainError,
     };
+    use std::{
+        io,
+        path::{Path, PathBuf},
+    };
+
+    #[test]
+    fn path_chain_core_handles_absence_and_reparse_entries() {
+        struct Case {
+            name: &'static str,
+            reparse_suffix: Option<&'static str>,
+            expected_reparse_suffix: Option<&'static str>,
+        }
+        for case in [
+            Case {
+                name: "absent ancestor",
+                reparse_suffix: None,
+                expected_reparse_suffix: None,
+            },
+            Case {
+                name: "dangling symlink reported by probe",
+                reparse_suffix: Some("dangling"),
+                expected_reparse_suffix: Some("dangling"),
+            },
+            Case {
+                name: "junction in the middle",
+                reparse_suffix: Some("junction"),
+                expected_reparse_suffix: Some("junction"),
+            },
+        ] {
+            let root = Path::new(r"C:\trusted");
+            let candidate = match case.name {
+                "junction in the middle" => root.join("junction").join("child"),
+                "dangling symlink reported by probe" => root.join("dangling").join("child"),
+                _ => root.join("absent").join("child"),
+            };
+            let result = validate_path_chain_with(&candidate, Some(root), |path| {
+                if case
+                    .reparse_suffix
+                    .is_some_and(|suffix| path.ends_with(suffix))
+                {
+                    Ok(Some(true))
+                } else {
+                    Ok(None)
+                }
+            });
+            match case.expected_reparse_suffix {
+                Some(suffix) => assert!(matches!(
+                    result,
+                    Err(PathChainError::ReparsePoint(path)) if path.ends_with(suffix)
+                )),
+                None => assert!(result.is_ok()),
+            }
+        }
+    }
+
+    #[test]
+    fn path_chain_core_rejects_unsafe_and_escaped_candidates() {
+        let root = Path::new(r"C:\trusted");
+        assert!(matches!(
+            validate_path_chain_with(
+                &root.join("safe").join("..").join("escape"),
+                Some(root),
+                |_| Ok(Some(false))
+            ),
+            Err(PathChainError::UnsafeComponent(_))
+        ));
+        assert!(matches!(
+            validate_path_chain_with(Path::new(r"C:\outside\file"), Some(root), |_| {
+                Ok(Some(false))
+            }),
+            Err(PathChainError::EscapedRoot { .. })
+        ));
+        assert!(matches!(
+            validate_path_chain_with(Path::new(r"relative\file"), None, |_| Ok(Some(false))),
+            Err(PathChainError::UnsafeComponent(_))
+        ));
+    }
+
+    #[test]
+    fn path_chain_without_a_trusted_root_probes_root_to_candidate() {
+        let candidate = Path::new(r"C:\trusted\child");
+        let mut probed = Vec::new();
+        validate_path_chain_with(candidate, None, |path| {
+            probed.push(path.to_path_buf());
+            Ok(Some(false))
+        })
+        .unwrap();
+
+        assert_eq!(
+            probed.first().map(PathBuf::as_path),
+            Some(Path::new(r"C:\"))
+        );
+        assert_eq!(probed.last().map(PathBuf::as_path), Some(candidate));
+    }
+
+    #[test]
+    fn path_chain_error_display_identifies_the_path_and_io_detail() {
+        let path = PathBuf::from(r"C:\trusted\file");
+        let error = PathChainError::Io {
+            path: path.clone(),
+            source: io::Error::new(io::ErrorKind::PermissionDenied, "denied"),
+        };
+        let rendered = error.to_string();
+
+        assert!(rendered.contains(&path.display().to_string()));
+        assert!(rendered.contains("denied"));
+    }
+
+    #[test]
+    fn path_chain_core_preserves_probe_io_errors() {
+        let candidate = Path::new(r"C:\trusted\file");
+        let error = validate_path_chain_with(candidate, None, |path| {
+            if path == candidate {
+                Err(io::Error::new(io::ErrorKind::PermissionDenied, "denied"))
+            } else {
+                Ok(Some(false))
+            }
+        })
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            PathChainError::Io { path, source }
+                if path == candidate && source.kind() == io::ErrorKind::PermissionDenied
+        ));
+    }
+
+    #[test]
+    fn real_directory_chain_skips_symlink_assertion_when_creation_is_refused() {
+        let directory = tempfile::tempdir().unwrap();
+        let nested = directory.path().join("one").join("two");
+        std::fs::create_dir_all(&nested).unwrap();
+        validate_path_chain(&nested, Some(directory.path())).unwrap();
+
+        let dangling = directory.path().join("dangling");
+        if std::os::windows::fs::symlink_dir(directory.path().join("missing"), &dangling).is_err() {
+            return;
+        }
+        assert!(matches!(
+            validate_path_chain(&dangling.join("child"), Some(directory.path())),
+            Err(PathChainError::ReparsePoint(path)) if path == dangling
+        ));
+    }
 
     #[test]
     fn preserving_replacement_keeps_the_destination_path() {

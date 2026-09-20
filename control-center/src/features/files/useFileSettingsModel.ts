@@ -318,6 +318,10 @@ export function useFileSettingsModel({ onEditInTuner }: FileSettingsModelOptions
     profile,
     profiles,
     revealCurrentProfile,
+    runProfileAttributes: (entry: ProfileEntry) => {
+      const applied = matchesAppliedProfile(entry, appliedProfile);
+      return { "data-applied": applied, "data-run-profile": applied };
+    },
     save,
     setCopyName,
     startServiceNow,

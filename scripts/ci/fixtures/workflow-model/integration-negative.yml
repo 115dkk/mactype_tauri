@@ -1,0 +1,10 @@
+name: integration fixture
+on: workflow_dispatch
+jobs:
+  removed-release-main-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish automatic pre-release
+        uses: softprops/action-gh-release@v3
+        with:
+          body: The bundle is directly usable when its installation tree remains intact.

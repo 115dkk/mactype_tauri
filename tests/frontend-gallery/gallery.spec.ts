@@ -1921,6 +1921,83 @@ test("dark language menu and custom titlebar follow the application theme", asyn
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-dark-language-titlebar.png`), fullPage: true });
 });
 
+for (const failure of ["access", "read", "write"] as const) {
+  test(`preferences remain usable when localStorage ${failure} throws`, async ({ page }) => {
+    const failures: string[] = [];
+    page.on("pageerror", (error) => failures.push(error.message));
+    await page.addInitScript((failure) => {
+      Object.defineProperty(navigator, "language", { get: () => "en-US" });
+      const unavailable = () => { throw new DOMException("Storage unavailable", "SecurityError"); };
+      if (failure === "access") {
+        Object.defineProperty(window, "localStorage", { get: unavailable });
+      } else {
+        Object.defineProperty(Storage.prototype, failure === "read" ? "getItem" : "setItem", { value: unavailable });
+      }
+    }, failure);
+
+    await page.goto("/?view=overview&gallery=1", { waitUntil: "networkidle" });
+    await expect(page.locator("body")).toHaveAttribute("data-rendered", "true");
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Dark theme" }).click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await page.getByTestId("language-picker-trigger").click();
+    await page.locator('[data-locale-option="ko"]').click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "ko");
+
+    await page.goto("/?view=files&gallery=1&fresh=1&lang=fr&theme=dark", { waitUntil: "networkidle" });
+    await expect(page.locator("html")).toHaveAttribute("lang", "fr");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.locator('.profile-card[data-selected="true"] .profile-card-title strong')).toHaveText("Default");
+
+    await page.goto("/?view=diagnostics&gallery=1&lang=en&theme=dark", { waitUntil: "networkidle" });
+    const summaries = page.locator('.event-row[data-code="injection-summary"]');
+    const hideSummaries = page.locator('.event-view-option[data-option="hideInjectionSummary"]').getByRole("switch");
+    await expect(hideSummaries).not.toBeChecked();
+    await expect(summaries).toHaveCount(4);
+    await hideSummaries.check();
+    await expect(summaries).toHaveCount(0);
+    expect(failures).toEqual([]);
+  });
+}
+
+test("preference query overrides persist and invalid values use stored or default choices", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "language", { get: () => "zh-HK" });
+  });
+  await page.goto("/?view=overview&gallery=1&lang=fr&theme=dark", { waitUntil: "networkidle" });
+  await expect(page.locator("html")).toHaveAttribute("lang", "fr");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  expect(await page.evaluate(() => ({
+    locale: localStorage.getItem("mactype-control-center.locale"),
+    theme: localStorage.getItem("mactype-control-center.theme"),
+  }))).toEqual({ locale: "fr", theme: "dark" });
+
+  await page.goto("/?view=overview&gallery=1&lang=invalid&theme=invalid", { waitUntil: "networkidle" });
+  await expect(page.locator("html")).toHaveAttribute("lang", "fr");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+
+  await page.goto("/?view=overview&gallery=1&lang=de&theme=light", { waitUntil: "networkidle" });
+  await expect(page.locator("html")).toHaveAttribute("lang", "de");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await page.goto("/?view=overview&gallery=1", { waitUntil: "networkidle" });
+  await expect(page.locator("html")).toHaveAttribute("lang", "de");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+
+  await page.evaluate(() => {
+    localStorage.setItem("mactype-control-center.locale", "invalid");
+    localStorage.setItem("mactype-control-center.theme", "invalid");
+    localStorage.setItem("mactype-control-center.event-view", "{invalid");
+  });
+  await page.goto("/?view=diagnostics&gallery=1&lang=invalid&theme=invalid", { waitUntil: "networkidle" });
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh-TW");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(page.locator('.event-view-option input:checked')).toHaveCount(0);
+  await expect(page.locator('.event-row[data-code="injection-summary"]')).toHaveCount(4);
+});
+
 test("theme setting persists across launches", async ({ page }) => {
   await page.goto("/?view=overview&gallery=1&lang=ko", { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "어두운 테마" }).click();

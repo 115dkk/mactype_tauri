@@ -1,3 +1,4 @@
+mod capability_table;
 mod migration;
 mod profile_transfer;
 mod request;

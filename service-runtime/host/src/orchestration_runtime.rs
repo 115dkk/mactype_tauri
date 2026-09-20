@@ -2,6 +2,7 @@
 
 use std::{
     collections::VecDeque,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -20,6 +21,7 @@ use crate::observer::{
 };
 use crate::runtime::{InitializedRuntime, RuntimeDriver, RuntimeHealthReporter, StopSignal};
 use crate::target_validation::ProcessInspector;
+use crate::{HostEvent, HostEventSink};
 
 const MAX_TOLERATED_CONSECUTIVE_HEALTH_REPORT_FAILURES: usize = 20;
 
@@ -49,6 +51,7 @@ pub fn initialize_process_orchestration(
     source: Box<dyn ProcessEventSource>,
     inspector: Box<dyn ProcessInspector>,
     broker: Box<dyn InjectionBroker>,
+    events: Arc<dyn HostEventSink>,
 ) -> Result<InitializedRuntime, StructuredServiceError> {
     initialize_process_orchestration_with_profile_policies(
         binding,
@@ -60,6 +63,7 @@ pub fn initialize_process_orchestration(
         source,
         inspector,
         broker,
+        events,
     )
 }
 
@@ -74,6 +78,7 @@ pub fn initialize_process_orchestration_with_profile_policies(
     mut source: Box<dyn ProcessEventSource>,
     inspector: Box<dyn ProcessInspector>,
     broker: Box<dyn InjectionBroker>,
+    events: Arc<dyn HostEventSink>,
 ) -> Result<InitializedRuntime, StructuredServiceError> {
     broker.verify_ready(ProcessArchitecture::X86)?;
     broker.verify_ready(ProcessArchitecture::X64)?;
@@ -96,6 +101,7 @@ pub fn initialize_process_orchestration_with_profile_policies(
             },
             inspector,
             broker,
+            events,
         }),
     ))
 }
@@ -109,6 +115,7 @@ struct ProcessOrchestrationDriver {
     observer: ObserverState,
     inspector: Box<dyn ProcessInspector>,
     broker: Box<dyn InjectionBroker>,
+    events: Arc<dyn HostEventSink>,
 }
 
 struct ObserverState {
@@ -213,10 +220,11 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
                 self.console_process,
             ),
             DeferralPolicy::default(),
+            self.events.clone(),
         );
         let mut consecutive_health_report_failures = 0;
         loop {
-            crate::event_log::flush_elapsed_injection_summary();
+            self.events.record(HostEvent::FlushInjectionSummary);
             if stop.wait_timeout(Duration::ZERO)? {
                 return Ok(());
             }

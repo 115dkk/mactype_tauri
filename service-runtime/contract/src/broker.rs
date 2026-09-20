@@ -1,6 +1,7 @@
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(usize)]
 pub enum BrokerCommand {
     Install,
     Upgrade,
@@ -12,6 +13,31 @@ pub enum BrokerCommand {
     MigrateFromLegacy,
     Rollback,
     RestoreRuntime,
+}
+
+const BROKER_COMMANDS: &[(BrokerCommand, &str)] = &[
+    (BrokerCommand::Install, "install"),
+    (BrokerCommand::Upgrade, "upgrade"),
+    (BrokerCommand::Repair, "repair"),
+    (BrokerCommand::Remove, "remove"),
+    (BrokerCommand::Start, "start"),
+    (BrokerCommand::Stop, "stop"),
+    (BrokerCommand::PublishProfile, "publish-profile"),
+    (BrokerCommand::MigrateFromLegacy, "migrate-from-legacy"),
+    (BrokerCommand::Rollback, "rollback"),
+    (BrokerCommand::RestoreRuntime, "restore-runtime"),
+];
+
+impl BrokerCommand {
+    pub const fn verb(self) -> &'static str {
+        BROKER_COMMANDS[self as usize].1
+    }
+
+    pub fn parse_verb(verb: &str) -> Option<Self> {
+        BROKER_COMMANDS
+            .iter()
+            .find_map(|(command, fixed_verb)| (*fixed_verb == verb).then_some(*command))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,17 +62,5 @@ where
         return Err(BrokerCommandError);
     }
 
-    match verb.as_ref() {
-        "install" => Ok(BrokerCommand::Install),
-        "upgrade" => Ok(BrokerCommand::Upgrade),
-        "repair" => Ok(BrokerCommand::Repair),
-        "remove" => Ok(BrokerCommand::Remove),
-        "start" => Ok(BrokerCommand::Start),
-        "stop" => Ok(BrokerCommand::Stop),
-        "publish-profile" => Ok(BrokerCommand::PublishProfile),
-        "migrate-from-legacy" => Ok(BrokerCommand::MigrateFromLegacy),
-        "rollback" => Ok(BrokerCommand::Rollback),
-        "restore-runtime" => Ok(BrokerCommand::RestoreRuntime),
-        _ => Err(BrokerCommandError),
-    }
+    BrokerCommand::parse_verb(verb.as_ref()).ok_or(BrokerCommandError)
 }

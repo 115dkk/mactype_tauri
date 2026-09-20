@@ -8,7 +8,8 @@ use super::{
     StopSignal,
 };
 use crate::{
-    ServiceStatus, StatusReporter, ACTIVE_PROFILE_ABSENT_CODE, RUNTIME_PROFILE_ABSENT_CODE,
+    HostEvent, ServiceStatus, StatusReporter, ACTIVE_PROFILE_ABSENT_CODE,
+    RUNTIME_PROFILE_ABSENT_CODE,
 };
 
 const ERROR_SERVICE_SPECIFIC_ERROR: u32 = 1066;
@@ -99,12 +100,15 @@ impl ServiceRuntime<'_> {
             self.report_failure(status, health, &error);
             return Err(HostError::Runtime(error));
         }
-        crate::event_log::service_started(self.service_version);
+        self.events.record(HostEvent::ServiceStarted {
+            version: self.service_version.to_owned(),
+        });
 
         let runtime_health = RuntimeHealthAdapter {
             publisher: health,
             service_version: self.service_version,
             binding: initialized.binding,
+            events: self.events.as_ref(),
         };
         let wait_result = match initialized.driver.as_mut() {
             Some(driver) => driver.run(stop, &runtime_health),
@@ -128,7 +132,7 @@ impl ServiceRuntime<'_> {
             injection: InjectionTelemetry::default(),
             last_error: terminal_error,
         });
-        crate::event_log::service_stopped();
+        self.events.record(HostEvent::ServiceStopped);
         if let Err(error) = status.report(ServiceStatus::stopped()) {
             return Err(self.report_io_failure(
                 status,
@@ -155,7 +159,9 @@ impl ServiceRuntime<'_> {
             injection: InjectionTelemetry::default(),
             last_error: Some(error.clone()),
         });
-        crate::event_log::service_start_skipped(error);
+        self.events.record(HostEvent::ServiceStartSkipped {
+            error: error.clone(),
+        });
         if let Err(error) = status.report(ServiceStatus::stopped()) {
             return Err(self.report_io_failure(
                 status,
@@ -201,7 +207,10 @@ impl ServiceRuntime<'_> {
             })
             .is_ok()
         {
-            crate::event_log::health_changed(HealthState::Failed, Some(error));
+            self.events.record(HostEvent::HealthChanged {
+                state: HealthState::Failed,
+                error: Some(error.clone()),
+            });
         }
         let _ = status.report(ServiceStatus::stopped_with_error(
             ERROR_SERVICE_SPECIFIC_ERROR,
@@ -214,6 +223,7 @@ struct RuntimeHealthAdapter<'a> {
     publisher: &'a dyn HealthPublisher,
     service_version: &'a str,
     binding: RendererRuntimeBinding,
+    events: &'a dyn crate::HostEventSink,
 }
 
 impl RuntimeHealthReporter for RuntimeHealthAdapter<'_> {
@@ -245,7 +255,10 @@ impl RuntimeHealthReporter for RuntimeHealthAdapter<'_> {
                 message: error.to_string(),
                 win32_error: error.raw_os_error().map(|code| code as u32),
             })?;
-        crate::event_log::health_changed(report.health, report.last_error.as_ref());
+        self.events.record(HostEvent::HealthChanged {
+            state: report.health,
+            error: report.last_error.clone(),
+        });
         Ok(())
     }
 }

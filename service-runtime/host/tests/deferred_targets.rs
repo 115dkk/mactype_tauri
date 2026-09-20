@@ -1,33 +1,28 @@
-use std::collections::VecDeque;
-use std::sync::Mutex;
+#[path = "support/broker.rs"]
+mod broker_support;
+#[path = "support/event_sink.rs"]
+mod event_sink;
+#[path = "support/identity.rs"]
+mod identity_support;
+#[path = "support/inspector.rs"]
+mod inspector_support;
+
 use std::time::{Duration, Instant};
 
-use mactype_service_contract::{
-    ConsoleProcessPolicy, PrivateFreeTypePolicy, ProfileDigest, RendererRuntimeBinding,
-    RuntimeGenerationId, UnityFontHookPolicy,
-};
+use broker_support::ScriptedBroker;
+use event_sink::discard_events;
+use identity_support::{binding, identity};
+use inspector_support::{InspectorResponse, ScriptedInspector};
+use mactype_service_contract::{ConsoleProcessPolicy, PrivateFreeTypePolicy, UnityFontHookPolicy};
 use mactype_service_host::{
     BinarySignaturePolicy, BrokerDisposition, BrokerResult, DeferralReason, DynamicCodePolicy,
-    ImageSubsystem, InjectionBroker, InjectionRequest, InspectionEvidence, ProcessArchitecture,
-    ProcessIdentity, ProcessInspection, ProcessInspectionError, ProcessInspector,
-    ProcessOrchestrator, ProcessOutcome, SessionChange, TargetLifecycle, TargetLiveness,
-    MAX_DEFERRED_TARGETS, TARGET_VANISHED_RESULT_CODE,
+    ImageSubsystem, InspectionEvidence, ProcessIdentity, ProcessInspection, ProcessOrchestrator,
+    ProcessOutcome, SessionChange, TargetLifecycle, TargetLiveness, MAX_DEFERRED_TARGETS,
+    TARGET_VANISHED_RESULT_CODE,
 };
 
-fn binding() -> RendererRuntimeBinding {
-    RendererRuntimeBinding::new(
-        RuntimeGenerationId::parse(&"a".repeat(64)).unwrap(),
-        ProfileDigest::parse(&format!("sha256:{}", "b".repeat(64))).unwrap(),
-    )
-}
-
-fn identity(pid: u32) -> ProcessIdentity {
-    ProcessIdentity {
-        pid,
-        creation_time: u64::from(pid) + 100,
-        session_id: 2,
-        architecture: ProcessArchitecture::X64,
-    }
+fn target(pid: u32) -> ProcessIdentity {
+    identity(pid, u64::from(pid) + 100)
 }
 
 fn inspection(identity: ProcessIdentity) -> ProcessInspection {
@@ -48,110 +43,30 @@ fn inspection(identity: ProcessIdentity) -> ProcessInspection {
     }
 }
 
-struct MutableInspector {
-    lifecycle: Mutex<TargetLifecycle>,
-    liveness: Mutex<TargetLiveness>,
+fn response(
+    identity: ProcessIdentity,
+    lifecycle: TargetLifecycle,
+    liveness: TargetLiveness,
+) -> (u32, InspectorResponse) {
+    (
+        identity.pid,
+        InspectorResponse::inspected(inspection(identity), lifecycle).with_liveness(liveness),
+    )
 }
 
-impl MutableInspector {
-    fn new(lifecycle: TargetLifecycle, liveness: TargetLiveness) -> Self {
-        Self {
-            lifecycle: Mutex::new(lifecycle),
-            liveness: Mutex::new(liveness),
-        }
-    }
-
-    fn set_lifecycle(&self, lifecycle: TargetLifecycle) {
-        *self.lifecycle.lock().unwrap() = lifecycle;
-    }
-}
-
-impl ProcessInspector for MutableInspector {
-    fn inspect(&self, pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
-        Ok(inspection(identity(pid)))
-    }
-
-    fn probe_target_lifecycle(&self, _identity: &ProcessIdentity) -> TargetLifecycle {
-        *self.lifecycle.lock().unwrap()
-    }
-
-    fn probe_target_liveness(&self, _identity: &ProcessIdentity) -> TargetLiveness {
-        *self.liveness.lock().unwrap()
-    }
-}
-
-struct ConsoleGraceInspector {
-    identities: Mutex<VecDeque<ProcessIdentity>>,
+fn console_response(
+    identity: ProcessIdentity,
     subsystem: ImageSubsystem,
     age: Option<Duration>,
-    liveness: Mutex<TargetLiveness>,
-    liveness_probes: Mutex<usize>,
-}
-
-impl ConsoleGraceInspector {
-    fn new(
-        identities: impl IntoIterator<Item = ProcessIdentity>,
-        subsystem: ImageSubsystem,
-        age: Option<Duration>,
-    ) -> Self {
-        Self {
-            identities: Mutex::new(identities.into_iter().collect()),
-            subsystem,
-            age,
-            liveness: Mutex::new(TargetLiveness::Alive),
-            liveness_probes: Mutex::new(0),
-        }
-    }
-
-    fn set_liveness(&self, liveness: TargetLiveness) {
-        *self.liveness.lock().unwrap() = liveness;
-    }
-}
-
-impl ProcessInspector for ConsoleGraceInspector {
-    fn inspect(&self, pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
-        let identity = self.identities.lock().unwrap().pop_front().unwrap();
-        assert_eq!(identity.pid, pid);
-        Ok(inspection(identity))
-    }
-
-    fn probe_image_subsystem(&self, _identity: &ProcessIdentity) -> ImageSubsystem {
-        self.subsystem
-    }
-
-    fn probe_process_age(&self, _identity: &ProcessIdentity) -> Option<Duration> {
-        self.age
-    }
-
-    fn probe_target_liveness(&self, _identity: &ProcessIdentity) -> TargetLiveness {
-        *self.liveness_probes.lock().unwrap() += 1;
-        *self.liveness.lock().unwrap()
-    }
-}
-
-struct SequenceBroker {
-    results: Mutex<VecDeque<BrokerResult>>,
-    requests: Mutex<Vec<InjectionRequest>>,
-}
-
-impl SequenceBroker {
-    fn new(results: impl IntoIterator<Item = BrokerResult>) -> Self {
-        Self {
-            results: Mutex::new(results.into_iter().collect()),
-            requests: Mutex::new(Vec::new()),
-        }
-    }
-
-    fn request_count(&self) -> usize {
-        self.requests.lock().unwrap().len()
-    }
-}
-
-impl InjectionBroker for SequenceBroker {
-    fn inject(&self, request: &InjectionRequest) -> BrokerResult {
-        self.requests.lock().unwrap().push(request.clone());
-        self.results.lock().unwrap().pop_front().unwrap()
-    }
+    liveness: TargetLiveness,
+) -> (u32, InspectorResponse) {
+    (
+        identity.pid,
+        InspectorResponse::inspected(inspection(identity), TargetLifecycle::Running)
+            .with_liveness(liveness)
+            .with_subsystem(subsystem)
+            .with_process_age(age),
+    )
 }
 
 fn broker_result(disposition: BrokerDisposition, code: &str) -> BrokerResult {
@@ -160,13 +75,28 @@ fn broker_result(disposition: BrokerDisposition, code: &str) -> BrokerResult {
 
 #[test]
 fn fresh_console_target_waits_only_for_the_remaining_grace_then_injects() {
-    let target = identity(42);
-    let inspector = ConsoleGraceInspector::new(
-        [target.clone(), target.clone(), target.clone()],
-        ImageSubsystem::Console,
-        Some(Duration::from_millis(750)),
-    );
-    let broker = SequenceBroker::new([broker_result(
+    let target = target(42);
+    let inspector = ScriptedInspector::new([
+        console_response(
+            target.clone(),
+            ImageSubsystem::Console,
+            Some(Duration::from_millis(750)),
+            TargetLiveness::Alive,
+        ),
+        console_response(
+            target.clone(),
+            ImageSubsystem::Console,
+            Some(Duration::from_millis(750)),
+            TargetLiveness::Alive,
+        ),
+        console_response(
+            target.clone(),
+            ImageSubsystem::Console,
+            Some(Duration::from_millis(750)),
+            TargetLiveness::Alive,
+        ),
+    ]);
+    let broker = ScriptedBroker::new([broker_result(
         BrokerDisposition::Injected,
         "renderer-active",
     )]);
@@ -178,6 +108,7 @@ fn fresh_console_target_waits_only_for_the_remaining_grace_then_injects() {
         UnityFontHookPolicy::default(),
         PrivateFreeTypePolicy::default(),
         ConsoleProcessPolicy::default(),
+        discard_events(),
     );
     let start = Instant::now();
 
@@ -197,7 +128,7 @@ fn fresh_console_target_waits_only_for_the_remaining_grace_then_injects() {
         Some(ProcessOutcome::Injected)
     );
     assert_eq!(broker.request_count(), 1);
-    assert_eq!(*inspector.liveness_probes.lock().unwrap(), 1);
+    assert_eq!(inspector.liveness_probes().len(), 1);
     assert!(orchestrator.deferred_targets().is_empty());
 }
 
@@ -210,13 +141,19 @@ fn console_grace_does_not_defer_old_non_console_or_unknown_age_targets() {
         (ImageSubsystem::Unavailable, Some(Duration::ZERO)),
         (ImageSubsystem::Console, None),
     ] {
-        let target = identity(42);
-        let inspector = ConsoleGraceInspector::new([target], subsystem, age);
-        let broker = SequenceBroker::new([broker_result(
+        let target = target(42);
+        let inspector = ScriptedInspector::new([console_response(
+            target,
+            subsystem,
+            age,
+            TargetLiveness::Alive,
+        )]);
+        let broker = ScriptedBroker::new([broker_result(
             BrokerDisposition::Injected,
             "renderer-active",
         )]);
-        let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
+        let mut orchestrator =
+            ProcessOrchestrator::new(900, binding(), &inspector, &broker, discard_events());
 
         assert_eq!(
             orchestrator.handle_pid(42).unwrap(),
@@ -230,12 +167,16 @@ fn console_grace_does_not_defer_old_non_console_or_unknown_age_targets() {
 
 #[test]
 fn console_grace_checks_liveness_before_revalidation_and_records_vanished() {
-    let target = identity(42);
-    let inspector =
-        ConsoleGraceInspector::new([target], ImageSubsystem::Console, Some(Duration::ZERO));
-    inspector.set_liveness(TargetLiveness::Vanished);
-    let broker = SequenceBroker::new([]);
-    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
+    let target = target(42);
+    let inspector = ScriptedInspector::new([console_response(
+        target,
+        ImageSubsystem::Console,
+        Some(Duration::ZERO),
+        TargetLiveness::Vanished,
+    )]);
+    let broker = ScriptedBroker::new([]);
+    let mut orchestrator =
+        ProcessOrchestrator::new(900, binding(), &inspector, &broker, discard_events());
     let start = Instant::now();
 
     assert_eq!(
@@ -256,18 +197,28 @@ fn console_grace_checks_liveness_before_revalidation_and_records_vanished() {
 
 #[test]
 fn changed_identity_during_console_grace_is_recorded_as_vanished_without_injection() {
-    let original = identity(42);
+    let original = target(42);
     let reused = ProcessIdentity {
         creation_time: original.creation_time + 1,
         ..original.clone()
     };
-    let inspector = ConsoleGraceInspector::new(
-        [original, reused],
-        ImageSubsystem::Console,
-        Some(Duration::ZERO),
-    );
-    let broker = SequenceBroker::new([]);
-    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
+    let inspector = ScriptedInspector::new([
+        console_response(
+            original,
+            ImageSubsystem::Console,
+            Some(Duration::ZERO),
+            TargetLiveness::Alive,
+        ),
+        console_response(
+            reused,
+            ImageSubsystem::Console,
+            Some(Duration::ZERO),
+            TargetLiveness::Alive,
+        ),
+    ]);
+    let broker = ScriptedBroker::new([]);
+    let mut orchestrator =
+        ProcessOrchestrator::new(900, binding(), &inspector, &broker, discard_events());
     let start = Instant::now();
 
     assert_eq!(
@@ -289,12 +240,30 @@ fn changed_identity_during_console_grace_is_recorded_as_vanished_without_injecti
 
 #[test]
 fn frozen_target_is_deferred_deduplicated_and_injected_after_it_runs() {
-    let inspector = MutableInspector::new(TargetLifecycle::Frozen, TargetLiveness::Alive);
-    let broker = SequenceBroker::new([broker_result(
+    let target = target(42);
+    let inspector = ScriptedInspector::new([
+        response(
+            target.clone(),
+            TargetLifecycle::Frozen,
+            TargetLiveness::Alive,
+        ),
+        response(
+            target.clone(),
+            TargetLifecycle::Frozen,
+            TargetLiveness::Alive,
+        ),
+        response(
+            target.clone(),
+            TargetLifecycle::Running,
+            TargetLiveness::Alive,
+        ),
+    ]);
+    let broker = ScriptedBroker::new([broker_result(
         BrokerDisposition::Injected,
         "renderer-active",
     )]);
-    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
+    let mut orchestrator =
+        ProcessOrchestrator::new(900, binding(), &inspector, &broker, discard_events());
     let start = Instant::now();
 
     assert_eq!(
@@ -318,7 +287,7 @@ fn frozen_target_is_deferred_deduplicated_and_injected_after_it_runs() {
         None
     );
 
-    inspector.set_lifecycle(TargetLifecycle::Running);
+    inspector.set_lifecycle(&target, TargetLifecycle::Running);
     assert_eq!(
         orchestrator
             .poll_deferred(start + Duration::from_secs(2))
@@ -331,16 +300,22 @@ fn frozen_target_is_deferred_deduplicated_and_injected_after_it_runs() {
 
 #[test]
 fn frozen_target_that_exits_becomes_a_quiet_skip() {
-    let inspector = MutableInspector::new(TargetLifecycle::Frozen, TargetLiveness::Alive);
-    let broker = SequenceBroker::new([]);
-    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
+    let target = target(42);
+    let inspector = ScriptedInspector::new([response(
+        target.clone(),
+        TargetLifecycle::Frozen,
+        TargetLiveness::Alive,
+    )]);
+    let broker = ScriptedBroker::new([]);
+    let mut orchestrator =
+        ProcessOrchestrator::new(900, binding(), &inspector, &broker, discard_events());
     let start = Instant::now();
 
     assert_eq!(
         orchestrator.handle_pid_at(42, start).unwrap(),
         ProcessOutcome::Deferred
     );
-    inspector.set_lifecycle(TargetLifecycle::Exiting);
+    inspector.set_lifecycle(&target, TargetLifecycle::Exiting);
     assert_eq!(
         orchestrator
             .poll_deferred(start + Duration::from_secs(2))
@@ -357,12 +332,17 @@ fn frozen_target_that_exits_becomes_a_quiet_skip() {
 
 #[test]
 fn pre_resume_launch_failure_for_a_vanished_target_is_a_quiet_skip() {
-    let inspector = MutableInspector::new(TargetLifecycle::Running, TargetLiveness::Vanished);
-    let broker = SequenceBroker::new([broker_result(
+    let inspector = ScriptedInspector::new([response(
+        target(42),
+        TargetLifecycle::Running,
+        TargetLiveness::Vanished,
+    )]);
+    let broker = ScriptedBroker::new([broker_result(
         BrokerDisposition::LaunchFailed,
         "helper-launch-failed-before-resume",
     )]);
-    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
+    let mut orchestrator =
+        ProcessOrchestrator::new(900, binding(), &inspector, &broker, discard_events());
 
     assert_eq!(
         orchestrator.handle_pid(42).unwrap(),
@@ -377,15 +357,18 @@ fn pre_resume_launch_failure_for_a_vanished_target_is_a_quiet_skip() {
 
 #[test]
 fn helper_launch_deferrals_double_to_the_cap_then_reject() {
-    let inspector = MutableInspector::new(TargetLifecycle::Running, TargetLiveness::Alive);
+    let inspector = ScriptedInspector::new(
+        (0..7).map(|_| response(target(42), TargetLifecycle::Running, TargetLiveness::Alive)),
+    );
     let launch_failure = || {
         broker_result(
             BrokerDisposition::LaunchFailed,
             "helper-launch-failed-before-resume",
         )
     };
-    let broker = SequenceBroker::new((0..6).map(|_| launch_failure()));
-    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
+    let broker = ScriptedBroker::new((0..6).map(|_| launch_failure()));
+    let mut orchestrator =
+        ProcessOrchestrator::new(900, binding(), &inspector, &broker, discard_events());
     let start = Instant::now();
 
     assert_eq!(
@@ -417,12 +400,17 @@ fn helper_launch_deferrals_double_to_the_cap_then_reject() {
 
 #[test]
 fn broker_frozen_race_enters_the_frozen_deferral_queue() {
-    let inspector = MutableInspector::new(TargetLifecycle::Running, TargetLiveness::Alive);
-    let broker = SequenceBroker::new([broker_result(
+    let inspector = ScriptedInspector::new([response(
+        target(42),
+        TargetLifecycle::Running,
+        TargetLiveness::Alive,
+    )]);
+    let broker = ScriptedBroker::new([broker_result(
         BrokerDisposition::TargetFrozen,
         "process-frozen",
     )]);
-    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
+    let mut orchestrator =
+        ProcessOrchestrator::new(900, binding(), &inspector, &broker, discard_events());
     let start = Instant::now();
 
     assert_eq!(
@@ -437,9 +425,13 @@ fn broker_frozen_race_enters_the_frozen_deferral_queue() {
 
 #[test]
 fn deferred_capacity_evicts_and_records_the_oldest_target() {
-    let inspector = MutableInspector::new(TargetLifecycle::Frozen, TargetLiveness::Alive);
-    let broker = SequenceBroker::new([]);
-    let mut orchestrator = ProcessOrchestrator::new(u32::MAX, binding(), &inspector, &broker);
+    let inspector = ScriptedInspector::new(
+        (1..=(MAX_DEFERRED_TARGETS as u32 + 1))
+            .map(|pid| response(target(pid), TargetLifecycle::Frozen, TargetLiveness::Alive)),
+    );
+    let broker = ScriptedBroker::new([]);
+    let mut orchestrator =
+        ProcessOrchestrator::new(u32::MAX, binding(), &inspector, &broker, discard_events());
     let start = Instant::now();
 
     for pid in 1..=(MAX_DEFERRED_TARGETS as u32 + 1) {
@@ -458,9 +450,13 @@ fn deferred_capacity_evicts_and_records_the_oldest_target() {
 
 #[test]
 fn session_changes_retain_other_sessions_and_overflow_clears_all_deferrals() {
-    let inspector = MutableInspector::new(TargetLifecycle::Frozen, TargetLiveness::Alive);
-    let broker = SequenceBroker::new([]);
-    let mut orchestrator = ProcessOrchestrator::new(900, binding(), &inspector, &broker);
+    let inspector = ScriptedInspector::new([
+        response(target(42), TargetLifecycle::Frozen, TargetLiveness::Alive),
+        response(target(43), TargetLifecycle::Frozen, TargetLiveness::Alive),
+    ]);
+    let broker = ScriptedBroker::new([]);
+    let mut orchestrator =
+        ProcessOrchestrator::new(900, binding(), &inspector, &broker, discard_events());
     let start = Instant::now();
 
     orchestrator.handle_pid_at(42, start).unwrap();

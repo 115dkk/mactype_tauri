@@ -1,3 +1,10 @@
+#[path = "support/event_sink.rs"]
+mod event_sink;
+#[path = "support/recorder.rs"]
+mod recorder_support;
+
+use event_sink::discard_events;
+use recorder_support::Recorder;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -23,45 +30,6 @@ fn binding() -> RendererRuntimeBinding {
     )
 }
 
-#[derive(Default)]
-struct RecorderState {
-    events: Vec<String>,
-    reports: Vec<HealthReport>,
-    statuses: Vec<ServiceStatus>,
-}
-
-#[derive(Default)]
-struct Recorder {
-    state: Mutex<RecorderState>,
-}
-
-impl Recorder {
-    fn record(&self, event: String, report: Option<&HealthReport>, status: Option<ServiceStatus>) {
-        let mut state = self.state.lock().unwrap();
-        state.events.push(event);
-        if let Some(report) = report {
-            state.reports.push(report.clone());
-        }
-        if let Some(status) = status {
-            state.statuses.push(status);
-        }
-    }
-}
-
-impl StatusReporter for Recorder {
-    fn report(&self, status: ServiceStatus) -> io::Result<()> {
-        self.record(format!("scm:{:?}", status.state), None, Some(status));
-        Ok(())
-    }
-}
-
-impl HealthPublisher for Recorder {
-    fn publish(&self, report: &HealthReport) -> io::Result<()> {
-        self.record(format!("health:{:?}", report.health), Some(report), None);
-        Ok(())
-    }
-}
-
 struct ReadyInitializer;
 
 impl RuntimeInitializer for ReadyInitializer {
@@ -84,7 +52,7 @@ impl StopSignal for ImmediateStop {
 #[test]
 fn driverless_graceful_stop_publishes_terminal_unknown_before_scm_stopped() {
     let recorder = Recorder::default();
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(&recorder, &recorder, &ReadyInitializer, &ImmediateStop)
         .unwrap();
 
@@ -153,7 +121,7 @@ fn terminal_health_publish_failure_does_not_fail_graceful_stop() {
         events: Mutex::new(Vec::new()),
     };
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(&recorder, &recorder, &ReadyInitializer, &ImmediateStop)
         .unwrap();
 
@@ -189,7 +157,7 @@ fn absent_profile_states_end_the_start_with_a_clean_stop() {
     for code in [ACTIVE_PROFILE_ABSENT_CODE, RUNTIME_PROFILE_ABSENT_CODE] {
         let recorder = Recorder::default();
 
-        ServiceRuntime::new("0.2.0")
+        ServiceRuntime::new("0.2.0", discard_events())
             .run(
                 &recorder,
                 &recorder,
@@ -260,7 +228,7 @@ fn absent_profile_states_end_the_start_with_a_clean_stop() {
 fn invalid_runtime_file_set_still_fails_the_start() {
     let recorder = Recorder::default();
 
-    assert!(ServiceRuntime::new("0.2.0")
+    assert!(ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -318,7 +286,7 @@ fn invalid_runtime_file_set_still_fails_the_start() {
 #[test]
 fn initialization_failure_never_reports_running_or_ready() {
     let recorder = Recorder::default();
-    assert!(ServiceRuntime::new("0.2.0")
+    assert!(ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -406,7 +374,7 @@ fn every_lifecycle_reporter_fault_attempts_failed_health_and_stopped_with_error(
     ] {
         let recorder = FaultRecorder::new(fault);
 
-        assert!(ServiceRuntime::new("0.2.0")
+        assert!(ServiceRuntime::new("0.2.0", discard_events())
             .run(&recorder, &recorder, &ReadyInitializer, &ImmediateStop)
             .is_err());
 
@@ -437,7 +405,7 @@ fn incomplete_required_readiness_is_reported_as_failed_before_exit() {
     }
 
     let recorder = Recorder::default();
-    assert!(ServiceRuntime::new("0.2.0")
+    assert!(ServiceRuntime::new("0.2.0", discard_events())
         .run(&recorder, &recorder, &IncompleteInitializer, &ImmediateStop)
         .is_err());
     let state = recorder.state.lock().unwrap();
@@ -529,7 +497,7 @@ fn persisted_health_refuses_oversized_service_root_without_cleanup_or_replacemen
 #[test]
 fn stop_statuses_are_nonzero_checkpoint_only_while_pending() {
     let recorder = Recorder::default();
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(&recorder, &recorder, &ReadyInitializer, &ImmediateStop)
         .unwrap();
 
@@ -599,7 +567,7 @@ impl StopSignal for RequestedStop {
 fn driver_error_after_requested_stop_reports_clean_stop_with_terminal_error() {
     let recorder = Recorder::default();
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -631,7 +599,7 @@ fn driver_error_after_requested_stop_reports_clean_stop_with_terminal_error() {
 fn driver_error_without_requested_stop_reports_failure() {
     let recorder = Recorder::default();
 
-    assert!(ServiceRuntime::new("0.2.0")
+    assert!(ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -704,7 +672,7 @@ fn driven_graceful_stop_replaces_degraded_with_terminal_unknown_before_scm_stopp
     let live = Recorder::default();
     let status = Recorder::default();
     let composite = CompositeHealthPublisher::new(&live, &persisted);
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &status,
             &composite,

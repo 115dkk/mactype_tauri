@@ -1,4 +1,5 @@
 mod appinit;
+mod designation;
 mod legacy_mactray;
 mod legacy_migration;
 #[cfg(all(test, windows))]
@@ -16,21 +17,25 @@ use appinit::appinit_view_conflict;
 
 pub(crate) use appinit::registry_conflict_detected;
 #[cfg(test)]
+use designation::designate_run_profile_with;
+use designation::execute_designation_plan_with;
+pub(crate) use designation::{designation_plan, profile_publication_supported, DesignationPlan};
+#[cfg(test)]
 pub(crate) use legacy_mactray::LegacyTrayStartupState;
 #[cfg(test)]
 use legacy_mactray::{disable_legacy_tray_startup_with, LegacyTrayStartupCoordinator};
 pub(crate) use legacy_mactray::{
     LegacyTrayConflictState, LegacyTrayExitRequest, LegacyTrayProcessState, LegacyTrayStatus,
 };
-pub(crate) use model::{
-    MachineAction, MachineBackend, MachineStatus, PublicMachineAction, TrayLoginState,
-};
+pub use model::DesignationEffect;
+use model::MachineBackend;
+pub(crate) use model::{MachineAction, MachineStatus, PublicMachineAction, TrayLoginState};
 pub(crate) use open_service::LegacyMacTrayStatus as LegacyServiceStatus;
 pub(crate) use open_service::{
     machine_roots, management_package_state as service_management_package_state,
 };
-use orchestrator::{execute_machine_action_with, tray_apply_with, tray_login_with};
-pub(crate) use publish::{designate_profile_transaction_with, publish_profile_transaction_with};
+use orchestrator::{execute_machine_action_with, tray_login_with};
+use publish::{designate_profile_transaction_with, publish_profile_transaction_with};
 pub(crate) use status::status;
 #[cfg(test)]
 use status::{project_new_service_capabilities, project_system_injection_active};
@@ -54,12 +59,25 @@ pub(crate) fn tray_login(
     )
 }
 
-pub(crate) fn execute(action: MachineAction, profile: Option<&[u8]>) -> Result<(), String> {
-    execute_machine_action_with(&mut SystemMachineBackend, action, profile)
+fn action_result(
+    result: Result<(), open_service::action_failure::ActionFailure>,
+) -> Result<(), String> {
+    result.map_err(|failure| failure.user_message())
 }
 
-pub(crate) fn tray_apply(paused: bool, profile: &[u8]) -> Result<(), String> {
-    tray_apply_with(&mut SystemMachineBackend, paused, profile)
+pub(crate) fn execute(action: MachineAction, profile: Option<&[u8]>) -> Result<(), String> {
+    action_result(execute_machine_action_with(
+        &mut SystemMachineBackend,
+        action,
+        profile,
+    ))
+}
+
+pub(crate) fn designate_run_profile(profile: &[u8]) -> Result<DesignationEffect, String> {
+    let machine_status = status(Some(profile));
+    let plan = designation_plan(&machine_status);
+    execute_designation_plan_with(&mut SystemMachineBackend, profile, plan)
+        .map_err(|failure| failure.user_message())
 }
 
 pub(crate) fn request_legacy_tray_exit(expected: &LegacyTrayExitRequest) -> Result<(), String> {

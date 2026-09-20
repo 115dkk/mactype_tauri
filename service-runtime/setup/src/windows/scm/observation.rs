@@ -1,10 +1,9 @@
 use std::path::Path;
 
+use mactype_service_contract::{owned_service_identity, LEGACY_SERVICE_NAME};
 use mactype_service_platform::{ServiceAccess, ServiceState};
 
-use super::configuration::{
-    observed_configuration, quoted_image_path, service_identity_matches_owned_contract,
-};
+use super::configuration::{observed_configuration, quoted_image_path};
 use super::ServiceManager;
 use crate::{ConflictObservation, OpenServiceObservation, SetupError};
 
@@ -33,16 +32,14 @@ impl ServiceManager {
             Ok(config) => config,
             Err(_) => return OpenServiceObservation::Unknown,
         };
-        let identity_matches = service_identity_matches_owned_contract(
-            &self.protected_root,
-            &observed_configuration(&config),
-        );
+        let identity_matches =
+            owned_service_identity(&observed_configuration(&config), &self.protected_root);
         let state = service.status().ok().map(|status| status.state);
         classify_fixed_service(identity_matches, state)
     }
 
     pub fn observe_legacy_service(&self) -> ConflictObservation {
-        match self.open_named_service("MacType", ServiceAccess::QueryStatus) {
+        match self.open_named_service(LEGACY_SERVICE_NAME, ServiceAccess::QueryStatus) {
             Ok(Some(_)) => ConflictObservation::Detected,
             Ok(None) => ConflictObservation::Clear,
             Err(_) => ConflictObservation::Unknown,

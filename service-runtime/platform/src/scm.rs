@@ -34,6 +34,7 @@ use windows_sys::Win32::System::Services::{
     SERVICE_STOP_PENDING, SERVICE_TRIGGER_INFO, SERVICE_WIN32_OWN_PROCESS,
 };
 
+use crate::bounded_read::{probe_bytes, CallOutcome, ProbeError};
 use crate::scm_response::ScmResponse;
 use crate::security::SelfRelativeSecurityDescriptor;
 use crate::wide::{multi_string, wide_null};
@@ -521,51 +522,29 @@ impl ServiceHandle {
     pub fn object_security(&self) -> io::Result<SelfRelativeSecurityDescriptor> {
         let information =
             OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
-        let mut needed = 0_u32;
-        // SAFETY: the handle is live; a null descriptor and zero capacity form
-        // the documented size probe, and `needed` is a local out value.
-        let result = unsafe {
-            QueryServiceObjectSecurity(self.0.as_raw(), information, null_mut(), 0, &mut needed)
-        };
-        let error = io::Error::last_os_error();
-        if result != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "service security size probe succeeded without a buffer",
-            ));
-        }
-        if error.raw_os_error() != Some(ERROR_INSUFFICIENT_BUFFER as i32) {
-            return Err(error);
-        }
-        if needed == 0 || needed > MAX_SECURITY_DESCRIPTOR_BYTES {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "service security descriptor size is out of range",
-            ));
-        }
-
-        let mut descriptor = vec![0_u8; needed as usize];
-        // SAFETY: the handle is live; `descriptor` is writable for the capacity
-        // passed with it, and `needed` is a local out value.
-        if unsafe {
-            QueryServiceObjectSecurity(
-                self.0.as_raw(),
-                information,
-                descriptor.as_mut_ptr().cast(),
-                descriptor.len() as u32,
-                &mut needed,
-            )
-        } == 0
-        {
-            return Err(io::Error::last_os_error());
-        }
-        if needed as usize > descriptor.len() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "service security descriptor changed during the read",
-            ));
-        }
-        descriptor.truncate(needed as usize);
+        let descriptor = query_service_security_bytes(|buffer, capacity, needed| {
+            // SAFETY: the handle is live; bounded_read passes either the
+            // documented null size probe or a writable allocation described by
+            // `capacity`, and `needed` is a live out value.
+            let result = unsafe {
+                QueryServiceObjectSecurity(
+                    self.0.as_raw(),
+                    information,
+                    buffer.cast(),
+                    capacity,
+                    needed,
+                )
+            };
+            if result != 0 {
+                return Ok(CallOutcome::Complete);
+            }
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() == Some(ERROR_INSUFFICIENT_BUFFER as i32) {
+                Ok(CallOutcome::MoreData(error))
+            } else {
+                Err(error)
+            }
+        })?;
         SelfRelativeSecurityDescriptor::from_bytes(
             descriptor,
             MAX_SECURITY_DESCRIPTOR_BYTES as usize,
@@ -988,6 +967,30 @@ fn parse_config(response: &ScmResponse) -> io::Result<ServiceConfig> {
 #[derive(Debug)]
 struct ScHandle(SC_HANDLE);
 
+fn query_service_security_bytes(
+    call: impl FnMut(*mut u8, u32, &mut u32) -> io::Result<CallOutcome>,
+) -> io::Result<Vec<u8>> {
+    probe_bytes(1, MAX_SECURITY_DESCRIPTOR_BYTES as usize, call).map_err(|error| match error {
+        ProbeError::Call(error) | ProbeError::FillNeedsMore(error) => error,
+        ProbeError::ProbeCompleted(_) => io::Error::new(
+            io::ErrorKind::InvalidData,
+            "service security size probe succeeded without a buffer",
+        ),
+        ProbeError::SizeOutOfRange => io::Error::new(
+            io::ErrorKind::InvalidData,
+            "service security descriptor size is out of range",
+        ),
+        ProbeError::ReturnedLengthOutOfRange { needed: 0 } => io::Error::new(
+            io::ErrorKind::InvalidData,
+            "security descriptor size is out of range",
+        ),
+        ProbeError::ReturnedLengthOutOfRange { .. } => io::Error::new(
+            io::ErrorKind::InvalidData,
+            "service security descriptor changed during the read",
+        ),
+    })
+}
+
 impl ScHandle {
     fn from_open(handle: SC_HANDLE) -> io::Result<Self> {
         if handle.is_null() {
@@ -1014,12 +1017,14 @@ mod tests {
     use std::mem::{size_of, size_of_val};
     use std::ptr::{null_mut, write};
 
+    use windows_sys::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER;
     use windows_sys::Win32::System::Services::QUERY_SERVICE_CONFIGW;
 
     use super::{
-        parse_config, FailureActionKind, ServiceAccess, ServiceControlManager,
-        ServiceManagerAccess, ServiceState,
+        parse_config, query_service_security_bytes, FailureActionKind, ServiceAccess,
+        ServiceControlManager, ServiceManagerAccess, ServiceState, MAX_SECURITY_DESCRIPTOR_BYTES,
     };
+    use crate::bounded_read::CallOutcome;
     use crate::scm_response::ScmResponse;
 
     fn append_units(storage: &mut [u16], cursor: &mut usize, units: &[u16]) -> *mut u16 {
@@ -1158,6 +1163,22 @@ mod tests {
             assert_eq!(FailureActionKind::from_raw(kind.as_raw()), Some(kind));
         }
         assert_eq!(FailureActionKind::from_raw(i32::MAX), None);
+    }
+
+    #[test]
+    fn service_security_reader_enforces_its_byte_cap() {
+        let error = query_service_security_bytes(|_, _, needed| {
+            *needed = MAX_SECURITY_DESCRIPTOR_BYTES + 1;
+            Ok(CallOutcome::MoreData(std::io::Error::from_raw_os_error(
+                ERROR_INSUFFICIENT_BUFFER as i32,
+            )))
+        })
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "service security descriptor size is out of range"
+        );
     }
 
     #[test]

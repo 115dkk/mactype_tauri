@@ -1,18 +1,21 @@
+use std::sync::Arc;
+
 use mactype_service_contract::{MachinePaths, StructuredServiceError};
 
 use crate::{
-    initialize_process_orchestration_with_profile_policies, FixedHelperBroker, InitializedRuntime,
-    ObserverRecoveryPolicy, ProtectedRendererRuntime, RuntimeInitializer, WindowsHelperLauncher,
-    WindowsProcessInspector, WindowsStartupSafety, WmiProcessEventSource,
+    initialize_process_orchestration_with_profile_policies, FixedHelperBroker, HostEventSink,
+    InitializedRuntime, ObserverRecoveryPolicy, ProtectedRendererRuntime, RuntimeInitializer,
+    WindowsHelperLauncher, WindowsProcessInspector, WindowsStartupSafety, WmiProcessEventSource,
 };
 
 pub struct WindowsOpenServiceInitializer {
     paths: MachinePaths,
+    events: Arc<dyn HostEventSink>,
 }
 
 impl WindowsOpenServiceInitializer {
-    pub const fn new(paths: MachinePaths) -> Self {
-        Self { paths }
+    pub fn new(paths: MachinePaths, events: Arc<dyn HostEventSink>) -> Self {
+        Self { paths, events }
     }
 }
 
@@ -24,7 +27,7 @@ impl RuntimeInitializer for WindowsOpenServiceInitializer {
         let service_pid = std::process::id();
         let inspector = WindowsProcessInspector::new();
         let launcher = WindowsHelperLauncher::new(crate::scm::stop_requested);
-        let broker = FixedHelperBroker::new(&runtime, launcher);
+        let broker = FixedHelperBroker::new(&runtime, launcher, self.events.clone());
         initialize_process_orchestration_with_profile_policies(
             runtime.binding(),
             runtime.unity_font_hook_policy().clone(),
@@ -35,6 +38,7 @@ impl RuntimeInitializer for WindowsOpenServiceInitializer {
             Box::new(source),
             Box::new(inspector),
             Box::new(broker),
+            self.events.clone(),
         )
     }
 }

@@ -37,7 +37,12 @@ fn appinit_conflict_is_rejected_before_migration() {
 
     let error = require_owned_legacy_service(&legacy).unwrap_err();
 
-    assert!(error.contains("AppInit"));
+    assert!(matches!(
+        error.kind,
+        crate::machine_integration::open_service::action_failure::ActionFailureKind::Blocked(
+            crate::machine_integration::open_service::action_failure::ActionBlocker::AppInitRegistryModeConflict
+        )
+    ));
 }
 
 #[test]
@@ -112,17 +117,6 @@ fn alternative_profile_cannot_traverse_out_of_the_installation() {
 }
 
 #[test]
-fn reparse_component_is_rejected_before_reading_a_profile() {
-    let root = Path::new(r"C:\Program Files\MacType");
-    let profile = root.join("ini").join("Community.ini");
-
-    let error = validate_path_chain(root, &profile, |path| Ok(path.ends_with(Path::new("ini"))))
-        .unwrap_err();
-
-    assert!(error.contains("reparse"));
-}
-
-#[test]
 fn modified_backup_is_rejected_by_length_and_sha256() {
     let original = b"[General]\r\nAlternativeFile=ini\\Default.ini\r\n";
     let receipt = BackupFileReceipt {
@@ -165,7 +159,11 @@ fn rollback_never_deletes_a_profile_that_was_originally_absent() {
 
 #[test]
 fn every_migration_artifact_rejects_a_reparse_point_opened_handle() {
-    let root = Path::new(r"C:\ProgramData\MacType\ControlCenter\legacy-migration");
+    let directory = std::env::temp_dir().join(format!(
+        "mactype-migration-path-test-{}",
+        std::process::id()
+    ));
+    let root = directory.as_path();
     let generation = root.join("migration-123-456");
     let artifacts = [
         root.join(CURRENT_FILE),
@@ -176,23 +174,17 @@ fn every_migration_artifact_rejects_a_reparse_point_opened_handle() {
 
     for artifact in artifacts {
         let mut opened = false;
-        let error = read_bounded_under_with(
-            root,
-            &artifact,
-            MAX_RECEIPT_BYTES,
-            |_| Ok(false),
-            |_| {
-                opened = true;
-                Ok((
-                    std::io::empty(),
-                    OpenedFileMetadata {
-                        is_regular_file: true,
-                        is_reparse_point: true,
-                        byte_length: 0,
-                    },
-                ))
-            },
-        )
+        let error = read_bounded_under_with(root, &artifact, MAX_RECEIPT_BYTES, |_| {
+            opened = true;
+            Ok((
+                std::io::empty(),
+                OpenedFileMetadata {
+                    is_regular_file: true,
+                    is_reparse_point: true,
+                    byte_length: 0,
+                },
+            ))
+        })
         .unwrap_err();
 
         assert!(error.contains("reparse"));

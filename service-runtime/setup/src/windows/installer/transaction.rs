@@ -139,9 +139,10 @@ impl WindowsInstallerBackend {
                 );
                 match restoration {
                     Ok(()) => Err(operation),
-                    Err(restoration) => Err(SetupError::CleanupUnknown(format!(
-                        "bootstrap failed ({operation}); rollback failed ({restoration})"
-                    ))),
+                    Err(restoration) => Err(SetupError::RollbackFailed {
+                        operation: format!("bootstrap failed ({operation})"),
+                        restoration: format!("rollback failed ({restoration})"),
+                    }),
                 }
             }
         }

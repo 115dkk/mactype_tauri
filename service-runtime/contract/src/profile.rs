@@ -7,6 +7,7 @@ use serde::{de, Deserialize, Deserializer, Serialize};
 use crate::{ini_policy, sha256_digest};
 
 pub const MAX_PROFILE_BYTES: usize = 4 * 1024 * 1024;
+pub const MAX_PROFILE_POINTER_BYTES: u64 = 64 * 1024;
 pub const PROFILE_POINTER_SCHEMA: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]

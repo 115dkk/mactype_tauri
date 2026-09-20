@@ -1,29 +1,23 @@
+#[path = "support/identity.rs"]
+mod identity_support;
+#[path = "support/inspector.rs"]
+mod inspector_support;
+
+use identity_support::identity as fixed_identity;
+use inspector_support::{InspectorResponse, ScriptedInspector};
 use mactype_service_contract::{
     ConsoleProcessPolicy, PrivateFreeTypePolicy, StructuredServiceError, UnityFontHookPolicy,
 };
 use mactype_service_host::{
     BinarySignaturePolicy, DeferralReason, DynamicCodePolicy, ImageSubsystem, InspectionEvidence,
-    PrivateFreeTypeClassification, ProcessArchitecture, ProcessIdentity, ProcessInspection,
-    ProcessInspectionError, ProcessInspector, ProcessSkipReason, ProcessTargetDecision,
-    ProcessTargetValidator, TargetLifecycle, UnityProcessClassification,
+    PrivateFreeTypeClassification, ProcessIdentity, ProcessInspection, ProcessInspectionError,
+    ProcessInspector, ProcessSkipReason, ProcessTargetDecision, ProcessTargetValidator,
+    TargetLifecycle, UnityProcessClassification,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 
-struct FixedInspector(Result<ProcessInspection, ProcessInspectionError>);
-
-impl ProcessInspector for FixedInspector {
-    fn inspect(&self, _pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
-        self.0.clone()
-    }
-}
-
 fn identity(pid: u32) -> ProcessIdentity {
-    ProcessIdentity {
-        pid,
-        creation_time: 100,
-        session_id: 2,
-        architecture: ProcessArchitecture::X64,
-    }
+    fixed_identity(pid, 100)
 }
 
 fn ordinary_inspection(pid: u32) -> ProcessInspection {
@@ -44,19 +38,19 @@ fn ordinary_inspection(pid: u32) -> ProcessInspection {
     }
 }
 
-struct UnityInspector {
-    inspection: ProcessInspection,
-    classification: UnityProcessClassification,
+fn fixed_inspector(inspection: ProcessInspection) -> ScriptedInspector {
+    let pid = inspection.identity.pid;
+    ScriptedInspector::new([(
+        pid,
+        InspectorResponse::inspected(inspection, TargetLifecycle::Running),
+    )])
 }
 
-impl ProcessInspector for UnityInspector {
-    fn inspect(&self, _pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
-        Ok(self.inspection.clone())
-    }
-
-    fn classify_unity_process(&self, _identity: &ProcessIdentity) -> UnityProcessClassification {
-        self.classification
-    }
+fn classified_inspector(
+    inspection: ProcessInspection,
+    response: InspectorResponse,
+) -> ScriptedInspector {
+    ScriptedInspector::new([(inspection.identity.pid, response)])
 }
 
 fn unity_policy(mode: u8) -> UnityFontHookPolicy {
@@ -85,84 +79,15 @@ fn private_freetype_policy(enabled: bool) -> PrivateFreeTypePolicy {
     )
 }
 
-struct ConsoleInspector {
-    inspection: ProcessInspection,
-    classification: ImageSubsystem,
-    lifecycle: TargetLifecycle,
-}
-
-impl ProcessInspector for ConsoleInspector {
-    fn inspect(&self, _pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
-        Ok(self.inspection.clone())
-    }
-
-    fn probe_image_subsystem(&self, _identity: &ProcessIdentity) -> ImageSubsystem {
-        self.classification
-    }
-
-    fn probe_target_lifecycle(&self, _identity: &ProcessIdentity) -> TargetLifecycle {
-        self.lifecycle
-    }
-}
-
-struct PrivateFreeTypeInspector(ProcessInspection);
-
-impl ProcessInspector for PrivateFreeTypeInspector {
-    fn inspect(&self, _pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
-        Ok(self.0.clone())
-    }
-
-    fn classify_private_freetype_process(
-        &self,
-        _identity: &ProcessIdentity,
-    ) -> PrivateFreeTypeClassification {
-        PrivateFreeTypeClassification::Detected
-    }
-}
-
-struct UnityPrivateFreeTypeInspector(ProcessInspection);
-
-impl ProcessInspector for UnityPrivateFreeTypeInspector {
-    fn inspect(&self, _pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
-        Ok(self.0.clone())
-    }
-
-    fn classify_unity_process(&self, _identity: &ProcessIdentity) -> UnityProcessClassification {
-        UnityProcessClassification::Unity
-    }
-
-    fn classify_private_freetype_process(
-        &self,
-        _identity: &ProcessIdentity,
-    ) -> PrivateFreeTypeClassification {
-        PrivateFreeTypeClassification::Detected
-    }
-}
-
 #[test]
 fn validator_returns_only_verified_eligible_identity() {
-    let inspector = FixedInspector(Ok(ordinary_inspection(42)));
+    let inspector = fixed_inspector(ordinary_inspection(42));
     let validator = ProcessTargetValidator::new(900, &inspector);
 
     assert_eq!(
         validator.validate(42).unwrap(),
         ProcessTargetDecision::Eligible(identity(42))
     );
-}
-
-struct LifecycleInspector {
-    inspection: ProcessInspection,
-    lifecycle: TargetLifecycle,
-}
-
-impl ProcessInspector for LifecycleInspector {
-    fn inspect(&self, _pid: u32) -> Result<ProcessInspection, ProcessInspectionError> {
-        Ok(self.inspection.clone())
-    }
-
-    fn probe_target_lifecycle(&self, _identity: &ProcessIdentity) -> TargetLifecycle {
-        self.lifecycle
-    }
 }
 
 #[test]
@@ -183,10 +108,9 @@ fn validator_defers_frozen_and_quietly_skips_exiting_targets() {
             },
         ),
     ] {
-        let inspector = LifecycleInspector {
-            inspection: ordinary_inspection(42),
-            lifecycle,
-        };
+        let inspection = ordinary_inspection(42);
+        let inspector =
+            ScriptedInspector::new([(42, InspectorResponse::inspected(inspection, lifecycle))]);
         assert_eq!(
             ProcessTargetValidator::new(900, &inspector)
                 .validate(42)
@@ -219,11 +143,10 @@ fn enabled_console_policy_quietly_skips_only_detected_console_images() {
             ProcessTargetDecision::Eligible(identity(42)),
         ),
     ] {
-        let inspector = ConsoleInspector {
-            inspection: ordinary_inspection(42),
-            classification,
-            lifecycle: TargetLifecycle::Running,
-        };
+        let inspection = ordinary_inspection(42);
+        let response = InspectorResponse::inspected(inspection.clone(), TargetLifecycle::Running)
+            .with_subsystem(classification);
+        let inspector = classified_inspector(inspection, response);
         let validator = ProcessTargetValidator::with_profile_policies(
             900,
             &inspector,
@@ -239,11 +162,9 @@ fn enabled_console_policy_quietly_skips_only_detected_console_images() {
 fn console_policy_runs_after_image_checks_and_before_frozen_lifecycle() {
     let mut missing_image = ordinary_inspection(42);
     missing_image.image_name = InspectionEvidence::Unavailable;
-    let inspector = ConsoleInspector {
-        inspection: missing_image,
-        classification: ImageSubsystem::Console,
-        lifecycle: TargetLifecycle::Frozen,
-    };
+    let response = InspectorResponse::inspected(missing_image.clone(), TargetLifecycle::Frozen)
+        .with_subsystem(ImageSubsystem::Console);
+    let inspector = classified_inspector(missing_image, response);
     let validator = ProcessTargetValidator::with_profile_policies(
         900,
         &inspector,
@@ -259,11 +180,10 @@ fn console_policy_runs_after_image_checks_and_before_frozen_lifecycle() {
         }
     );
 
-    let inspector = ConsoleInspector {
-        inspection: ordinary_inspection(42),
-        classification: ImageSubsystem::Console,
-        lifecycle: TargetLifecycle::Frozen,
-    };
+    let inspection = ordinary_inspection(42);
+    let response = InspectorResponse::inspected(inspection.clone(), TargetLifecycle::Frozen)
+        .with_subsystem(ImageSubsystem::Console);
+    let inspector = classified_inspector(inspection, response);
     let validator = ProcessTargetValidator::with_profile_policies(
         900,
         &inspector,
@@ -282,7 +202,10 @@ fn console_policy_runs_after_image_checks_and_before_frozen_lifecycle() {
 
 #[test]
 fn enabled_private_freetype_policy_quietly_skips_the_detected_process() {
-    let inspector = PrivateFreeTypeInspector(ordinary_inspection(42));
+    let inspection = ordinary_inspection(42);
+    let response = InspectorResponse::inspected(inspection.clone(), TargetLifecycle::Running)
+        .with_private_freetype(PrivateFreeTypeClassification::Detected);
+    let inspector = classified_inspector(inspection, response);
     let validator = ProcessTargetValidator::with_profile_policies(
         900,
         &inspector,
@@ -302,7 +225,11 @@ fn enabled_private_freetype_policy_quietly_skips_the_detected_process() {
 
 #[test]
 fn private_freetype_skip_does_not_disable_an_enabled_unity_hook_target() {
-    let inspector = UnityPrivateFreeTypeInspector(ordinary_inspection(42));
+    let inspection = ordinary_inspection(42);
+    let response = InspectorResponse::inspected(inspection.clone(), TargetLifecycle::Running)
+        .with_unity(UnityProcessClassification::Unity)
+        .with_private_freetype(PrivateFreeTypeClassification::Detected);
+    let inspector = classified_inspector(inspection, response);
     let validator = ProcessTargetValidator::with_profile_policies(
         900,
         &inspector,
@@ -329,10 +256,10 @@ fn most_games_mode_quietly_skips_the_entire_anticheat_unity_process() {
             ProcessSkipReason::UnitySafetyEvidenceUnavailable,
         ),
     ] {
-        let inspector = UnityInspector {
-            inspection: ordinary_inspection(42),
-            classification,
-        };
+        let inspection = ordinary_inspection(42);
+        let response = InspectorResponse::inspected(inspection.clone(), TargetLifecycle::Running)
+            .with_unity(classification);
+        let inspector = classified_inspector(inspection, response);
         let validator =
             ProcessTargetValidator::with_unity_font_hook_policy(900, &inspector, unity_policy(2));
         assert_eq!(
@@ -347,10 +274,10 @@ fn most_games_mode_quietly_skips_the_entire_anticheat_unity_process() {
 
 #[test]
 fn all_games_mode_does_not_bypass_os_guards_but_does_not_apply_the_anticheat_filter() {
-    let inspector = UnityInspector {
-        inspection: ordinary_inspection(42),
-        classification: UnityProcessClassification::UnityWithAntiCheat,
-    };
+    let inspection = ordinary_inspection(42);
+    let response = InspectorResponse::inspected(inspection.clone(), TargetLifecycle::Running)
+        .with_unity(UnityProcessClassification::UnityWithAntiCheat);
+    let inspector = classified_inspector(inspection, response);
     let validator =
         ProcessTargetValidator::with_unity_font_hook_policy(900, &inspector, unity_policy(3));
     assert_eq!(
@@ -363,10 +290,9 @@ fn all_games_mode_does_not_bypass_os_guards_but_does_not_apply_the_anticheat_fil
         prohibit_dynamic_code: true,
         allow_thread_opt_out: false,
     });
-    let inspector = UnityInspector {
-        inspection: blocked,
-        classification: UnityProcessClassification::UnityWithAntiCheat,
-    };
+    let response = InspectorResponse::inspected(blocked.clone(), TargetLifecycle::Running)
+        .with_unity(UnityProcessClassification::UnityWithAntiCheat);
+    let inspector = classified_inspector(blocked, response);
     let validator =
         ProcessTargetValidator::with_unity_font_hook_policy(900, &inspector, unity_policy(3));
     assert_eq!(
@@ -430,7 +356,7 @@ fn validator_preserves_the_exact_process_local_skip_reason() {
     ] {
         let pid = candidate.identity.pid;
         let expected_identity = candidate.identity.clone();
-        let inspector = FixedInspector(Ok(candidate));
+        let inspector = fixed_inspector(candidate);
         assert_eq!(
             ProcessTargetValidator::new(900, &inspector)
                 .validate(pid)
@@ -442,13 +368,16 @@ fn validator_preserves_the_exact_process_local_skip_reason() {
         );
     }
 
-    let unavailable = FixedInspector(Err(ProcessInspectionError::TargetUnavailable(
-        StructuredServiceError {
-            code: "process-protected-or-inaccessible".to_owned(),
-            message: "target disappeared or cannot be inspected".to_owned(),
-            win32_error: Some(5),
-        },
-    )));
+    let unavailable = ScriptedInspector::new([(
+        42,
+        InspectorResponse::failure(ProcessInspectionError::TargetUnavailable(
+            StructuredServiceError {
+                code: "process-protected-or-inaccessible".to_owned(),
+                message: "target disappeared or cannot be inspected".to_owned(),
+                win32_error: Some(5),
+            },
+        )),
+    )]);
     assert_eq!(
         ProcessTargetValidator::new(900, &unavailable)
             .validate(42)
@@ -462,19 +391,25 @@ fn validator_preserves_the_exact_process_local_skip_reason() {
 
 #[test]
 fn validator_rejects_identity_mismatch_and_propagates_infrastructure_failures() {
-    let mismatch = FixedInspector(Ok(ordinary_inspection(43)));
+    let mismatch = ScriptedInspector::new([(
+        42,
+        InspectorResponse::inspected(ordinary_inspection(43), TargetLifecycle::Running),
+    )]);
     let error = ProcessTargetValidator::new(900, &mismatch)
         .validate(42)
         .unwrap_err();
     assert_eq!(error.code, "process-identity-mismatch");
 
-    let infrastructure = FixedInspector(Err(ProcessInspectionError::Infrastructure(
-        StructuredServiceError {
-            code: "process-inspector-unavailable".to_owned(),
-            message: "inspector initialization failed".to_owned(),
-            win32_error: Some(6),
-        },
-    )));
+    let infrastructure = ScriptedInspector::new([(
+        42,
+        InspectorResponse::failure(ProcessInspectionError::Infrastructure(
+            StructuredServiceError {
+                code: "process-inspector-unavailable".to_owned(),
+                message: "inspector initialization failed".to_owned(),
+                win32_error: Some(6),
+            },
+        )),
+    )]);
     let error = ProcessTargetValidator::new(900, &infrastructure)
         .validate(42)
         .unwrap_err();
@@ -495,7 +430,7 @@ fn exact_system_and_installer_names_are_skipped_without_broad_name_bans() {
     ] {
         let mut inspection = ordinary_inspection(42);
         inspection.image_name = InspectionEvidence::Known(name.to_owned());
-        let inspector = FixedInspector(Ok(inspection));
+        let inspector = fixed_inspector(inspection);
         assert_eq!(
             ProcessTargetValidator::new(900, &inspector)
                 .validate(42)
@@ -515,7 +450,7 @@ fn exact_system_and_installer_names_are_skipped_without_broad_name_bans() {
     ] {
         let mut inspection = ordinary_inspection(42);
         inspection.image_name = InspectionEvidence::Known(name.to_owned());
-        let inspector = FixedInspector(Ok(inspection));
+        let inspector = fixed_inspector(inspection);
         assert!(matches!(
             ProcessTargetValidator::new(900, &inspector).validate(42),
             Ok(ProcessTargetDecision::Eligible(_))
@@ -530,7 +465,7 @@ fn only_known_hook_blocking_mitigations_are_quietly_skipped() {
         prohibit_dynamic_code: true,
         allow_thread_opt_out: false,
     });
-    let inspector = FixedInspector(Ok(dynamic_block));
+    let inspector = fixed_inspector(dynamic_block);
     assert_eq!(
         ProcessTargetValidator::new(900, &inspector)
             .validate(42)
@@ -546,7 +481,7 @@ fn only_known_hook_blocking_mitigations_are_quietly_skipped() {
         prohibit_dynamic_code: true,
         allow_thread_opt_out: true,
     });
-    let inspector = FixedInspector(Ok(thread_opt_out));
+    let inspector = fixed_inspector(thread_opt_out);
     assert!(matches!(
         ProcessTargetValidator::new(900, &inspector).validate(42),
         Ok(ProcessTargetDecision::Eligible(_))
@@ -571,7 +506,7 @@ fn only_known_hook_blocking_mitigations_are_quietly_skipped() {
     ] {
         let mut inspection = ordinary_inspection(42);
         inspection.binary_signature = InspectionEvidence::Known(signature);
-        let inspector = FixedInspector(Ok(inspection));
+        let inspector = fixed_inspector(inspection);
         assert_eq!(
             ProcessTargetValidator::new(900, &inspector)
                 .validate(42)
@@ -586,7 +521,7 @@ fn only_known_hook_blocking_mitigations_are_quietly_skipped() {
     let mut unknown = ordinary_inspection(42);
     unknown.dynamic_code = InspectionEvidence::Unavailable;
     unknown.binary_signature = InspectionEvidence::Unavailable;
-    let inspector = FixedInspector(Ok(unknown));
+    let inspector = fixed_inspector(unknown);
     assert!(matches!(
         ProcessTargetValidator::new(900, &inspector).validate(42),
         Ok(ProcessTargetDecision::Eligible(_))

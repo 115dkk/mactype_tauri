@@ -1,6 +1,7 @@
 use super::*;
 use crate::service_contract::{
-    HealthState, InstallationState, RuntimeState, ServiceBackend, SystemServiceStatus,
+    HealthState, InstallationState, RuntimeState, ServiceBackend, ServiceManagementPackageState,
+    SystemServiceStatus,
 };
 use std::collections::VecDeque;
 
@@ -22,7 +23,11 @@ impl MachineBackend for FakeMachineBackend {
         self.status.clone().expect("test status")
     }
 
-    fn execute(&mut self, _action: MachineAction, _profile: Option<&[u8]>) -> Result<(), String> {
+    fn execute(
+        &mut self,
+        _action: MachineAction,
+        _profile: Option<&[u8]>,
+    ) -> Result<(), open_service::action_failure::ActionFailure> {
         self.calls.push("execute");
         self.executed = Some((_action, _profile.unwrap_or_default().to_vec()));
         Ok(())
@@ -71,6 +76,131 @@ fn ready_auto_service() -> SystemServiceStatus {
     }
 }
 
+fn designation_status(
+    new_service: SystemServiceStatus,
+    registry_conflict: bool,
+    legacy_tray: LegacyTrayStatus,
+) -> MachineStatus {
+    MachineStatus {
+        new_service,
+        legacy_service: None,
+        legacy_tray,
+        registry_conflict,
+        system_injection_active: false,
+        expected_profile_digest: None,
+    }
+}
+
+#[test]
+fn designation_plan_covers_live_hold_and_local_only_states() {
+    let running = ready_auto_service();
+    let stopped_current = SystemServiceStatus {
+        runtime: RuntimeState::Stopped,
+        health: HealthState::Unknown,
+        active_profile_digest: None,
+        ..ready_auto_service()
+    };
+    let stopped_outdated = SystemServiceStatus {
+        installation: InstallationState::Outdated,
+        ..stopped_current.clone()
+    };
+    let absent = SystemServiceStatus {
+        backend: ServiceBackend::None,
+        installation: InstallationState::Absent,
+        ..stopped_current.clone()
+    };
+    let blocking_tray = LegacyTrayStatus::from_states(
+        LegacyTrayProcessState::TrustedCurrentSession {
+            pid: 4242,
+            creation_time: 101,
+            path: std::path::PathBuf::from(r"C:\Program Files\MacType\MacTray.exe"),
+        },
+        LegacyTrayStartupState::Absent,
+    );
+    let cases = [
+        (
+            "running",
+            designation_status(running, false, LegacyTrayStatus::clear()),
+            ServiceManagementPackageState::Ready,
+            DesignationPlan::PublishLive,
+        ),
+        (
+            "stopped current",
+            designation_status(stopped_current.clone(), false, LegacyTrayStatus::clear()),
+            ServiceManagementPackageState::Ready,
+            DesignationPlan::HoldForNextStart,
+        ),
+        (
+            "stopped outdated",
+            designation_status(stopped_outdated, false, LegacyTrayStatus::clear()),
+            ServiceManagementPackageState::Ready,
+            DesignationPlan::HoldForNextStart,
+        ),
+        (
+            "stopped but modes unsupported",
+            designation_status(stopped_current.clone(), false, LegacyTrayStatus::clear()),
+            ServiceManagementPackageState::NotInstalled,
+            DesignationPlan::KeepLocalUntilServiceStart,
+        ),
+        (
+            "registry mode",
+            designation_status(stopped_current.clone(), true, LegacyTrayStatus::clear()),
+            ServiceManagementPackageState::Ready,
+            DesignationPlan::KeepLocalUntilServiceStart,
+        ),
+        (
+            "legacy tray blocking",
+            designation_status(stopped_current, false, blocking_tray),
+            ServiceManagementPackageState::Ready,
+            DesignationPlan::KeepLocalUntilServiceStart,
+        ),
+        (
+            "absent service",
+            designation_status(absent, false, LegacyTrayStatus::clear()),
+            ServiceManagementPackageState::Ready,
+            DesignationPlan::KeepLocalUntilServiceStart,
+        ),
+    ];
+
+    for (name, status, package, expected) in cases {
+        assert_eq!(
+            designation::designation_plan_with_package(&status, package),
+            expected,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn profile_publication_support_requires_a_safe_stable_service_state() {
+    let mut service = ready_auto_service();
+    assert!(designation::profile_publication_supported(&service, false));
+    assert!(!designation::profile_publication_supported(&service, true));
+
+    for installation in [
+        InstallationState::Invalid,
+        InstallationState::Inaccessible,
+        InstallationState::DeletePending,
+    ] {
+        service.installation = installation;
+        assert!(!designation::profile_publication_supported(&service, false));
+    }
+    service.installation = InstallationState::Current;
+    for runtime in [
+        RuntimeState::StartPending,
+        RuntimeState::StopPending,
+        RuntimeState::Paused,
+        RuntimeState::Unknown,
+    ] {
+        service.runtime = runtime;
+        assert!(!designation::profile_publication_supported(&service, false));
+    }
+    service.runtime = RuntimeState::Stopped;
+    service.installation = InstallationState::Absent;
+    service.backend = ServiceBackend::None;
+    assert!(designation::profile_publication_supported(&service, false));
+}
+
 #[test]
 fn trusted_current_session_legacy_tray_blocks_a_machine_change_before_dispatch() {
     let mut backend = FakeMachineBackend {
@@ -88,7 +218,12 @@ fn trusted_current_session_legacy_tray_blocks_a_machine_change_before_dispatch()
 
     let error = execute_machine_action_with(&mut backend, MachineAction::Repair, None).unwrap_err();
 
-    assert!(error.contains("legacy MacTray tray mode"), "{error}");
+    assert!(matches!(
+        error.kind,
+        open_service::action_failure::ActionFailureKind::Blocked(
+            open_service::action_failure::ActionBlocker::LegacyTrayModeBlocks(_)
+        )
+    ));
     assert!(backend.executed.is_none());
 }
 
@@ -114,32 +249,67 @@ fn login_tray_observes_only_and_never_mutates_the_machine() {
 }
 
 #[test]
-fn explicit_tray_apply_is_the_only_tray_path_that_publishes_profile_bytes() {
+fn running_profile_designation_publishes_live_through_the_existing_action_path() {
     let profile = b"[General]\r\nGammaValue=1.3\r\n";
     let mut backend = FakeMachineBackend {
         status: Some(ready_auto_service()),
         ..Default::default()
     };
 
-    tray_apply_with(&mut backend, false, profile).unwrap();
+    let effect = designate_run_profile_with(&mut backend, profile).unwrap();
 
-    assert_eq!(
-        backend.calls,
-        [
-            "legacy-tray",
-            "appinit",
-            "status",
-            "legacy-service",
-            "execute"
-        ]
-    );
+    assert_eq!(effect, crate::execution::DesignationEffect::Live);
     assert_eq!(
         backend.executed,
         Some((MachineAction::PublishProfile, profile.to_vec()))
     );
-    assert!(tray_apply_with(&mut backend, true, profile)
-        .unwrap_err()
-        .contains("paused"));
+}
+
+#[test]
+fn stopped_profile_designation_holds_through_the_existing_action_path() {
+    let profile = b"[General]
+GammaValue=1.3
+";
+    let mut backend = FakeMachineBackend {
+        status: Some(SystemServiceStatus {
+            runtime: RuntimeState::Stopped,
+            health: HealthState::Unknown,
+            active_profile_digest: None,
+            ..ready_auto_service()
+        }),
+        ..Default::default()
+    };
+
+    let effect = designate_run_profile_with(&mut backend, profile).unwrap();
+
+    assert_eq!(effect, crate::execution::DesignationEffect::NextStart);
+    assert_eq!(
+        backend.executed,
+        Some((MachineAction::DesignateProfile, profile.to_vec()))
+    );
+}
+
+#[test]
+fn absent_service_designation_keeps_the_local_profile_without_dispatch() {
+    let profile = b"[General]
+GammaValue=1.3
+";
+    let mut backend = FakeMachineBackend {
+        status: Some(SystemServiceStatus {
+            backend: ServiceBackend::None,
+            installation: InstallationState::Absent,
+            runtime: RuntimeState::Stopped,
+            health: HealthState::Unknown,
+            active_profile_digest: None,
+            ..ready_auto_service()
+        }),
+        ..Default::default()
+    };
+
+    let effect = designate_run_profile_with(&mut backend, profile).unwrap();
+
+    assert_eq!(effect, crate::execution::DesignationEffect::NextStart);
+    assert!(backend.executed.is_none());
 }
 
 #[test]
@@ -301,10 +471,12 @@ fn a_contending_legacy_service_blocks_generic_activation_but_not_reduction() {
             ..Default::default()
         };
         let error = execute_machine_action_with(&mut backend, action, payload).unwrap_err();
-        assert!(
-            error.contains("legacy MacType service"),
-            "{action:?}: {error}"
-        );
+        assert!(matches!(
+            error.kind,
+            open_service::action_failure::ActionFailureKind::Blocked(
+                open_service::action_failure::ActionBlocker::LegacyServiceStillInstalled(_)
+            )
+        ));
         assert!(backend.executed.is_none(), "{action:?} reached the broker");
     }
 
@@ -350,7 +522,12 @@ fn appinit_conflict_never_turns_an_unrelated_native_capability_into_stop() {
     let error =
         execute_machine_action_with(&mut backend, MachineAction::Start, Some(profile)).unwrap_err();
 
-    assert!(error.contains("AppInit"), "{error}");
+    assert!(matches!(
+        error.kind,
+        open_service::action_failure::ActionFailureKind::Blocked(
+            open_service::action_failure::ActionBlocker::AppInitConflict(_)
+        )
+    ));
     assert!(backend.executed.is_none());
 }
 
@@ -498,7 +675,7 @@ fn publish_profile_orders_running_stopped_and_absent_service_activation() {
             &mut self,
             action: MachineAction,
             _profile: Option<&[u8]>,
-        ) -> Result<(), String> {
+        ) -> Result<(), open_service::action_failure::ActionFailure> {
             self.actions.push(action);
             Ok(())
         }
@@ -612,9 +789,16 @@ impl MachineBackend for FailingPublishBackend {
         Ok(false)
     }
 
-    fn execute(&mut self, action: MachineAction, _profile: Option<&[u8]>) -> Result<(), String> {
+    fn execute(
+        &mut self,
+        action: MachineAction,
+        _profile: Option<&[u8]>,
+    ) -> Result<(), open_service::action_failure::ActionFailure> {
         self.actions.push(action);
-        self.results.pop_front().unwrap_or(Ok(()))
+        self.results
+            .pop_front()
+            .unwrap_or(Ok(()))
+            .map_err(open_service::action_failure::ActionFailure::from)
     }
 }
 
@@ -879,6 +1063,7 @@ fn startup_disable_never_mutates_when_a_tray_process_is_running() {
 struct DesignateBackend {
     states: VecDeque<SystemServiceStatus>,
     actions: Vec<MachineAction>,
+    legacy_service_blocks_activation: bool,
 }
 
 impl MachineBackend for DesignateBackend {
@@ -895,23 +1080,23 @@ impl MachineBackend for DesignateBackend {
     }
 
     fn legacy_service_blocks_activation(&mut self) -> Result<bool, String> {
-        Ok(false)
+        Ok(self.legacy_service_blocks_activation)
     }
 
-    fn execute(&mut self, action: MachineAction, _profile: Option<&[u8]>) -> Result<(), String> {
+    fn execute(
+        &mut self,
+        action: MachineAction,
+        _profile: Option<&[u8]>,
+    ) -> Result<(), open_service::action_failure::ActionFailure> {
         self.actions.push(action);
         Ok(())
     }
 }
 
 #[test]
-fn designating_a_profile_only_publishes_it_while_the_service_is_stopped() {
+fn designating_a_profile_only_publishes_it_for_a_stopped_installed_service() {
     let profile = b"[General]\r\nGammaValue=1.3\r\n";
-    for installation in [
-        InstallationState::Current,
-        InstallationState::Outdated,
-        InstallationState::Absent,
-    ] {
+    for installation in [InstallationState::Current, InstallationState::Outdated] {
         let mut backend = DesignateBackend {
             states: VecDeque::from([SystemServiceStatus {
                 installation,
@@ -921,6 +1106,7 @@ fn designating_a_profile_only_publishes_it_while_the_service_is_stopped() {
                 ..ready_auto_service()
             }]),
             actions: Vec::new(),
+            legacy_service_blocks_activation: false,
         };
 
         designate_profile_transaction_with(&mut backend, profile).unwrap();
@@ -950,6 +1136,7 @@ fn designating_a_profile_switches_a_running_service_through_the_publish_transact
             },
         ]),
         actions: Vec::new(),
+        legacy_service_blocks_activation: false,
     };
 
     designate_profile_transaction_with(&mut backend, profile).unwrap();
@@ -965,8 +1152,40 @@ fn designating_a_profile_switches_a_running_service_through_the_publish_transact
 }
 
 #[test]
-fn designating_a_profile_refuses_a_transitioning_or_foreign_service() {
+fn broker_live_designation_keeps_the_typed_legacy_service_blocker() {
+    let mut backend = DesignateBackend {
+        states: VecDeque::from([ready_auto_service()]),
+        actions: Vec::new(),
+        legacy_service_blocks_activation: true,
+    };
+
+    let error = designate_profile_transaction_with(
+        &mut backend,
+        b"[General]
+",
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        error.kind,
+        open_service::action_failure::ActionFailureKind::Blocked(
+            open_service::action_failure::ActionBlocker::LegacyServiceStillInstalled(
+                open_service::action_failure::LegacyServiceBlockContext::ApplyProfile
+            )
+        )
+    ));
+    assert!(backend.actions.is_empty());
+}
+
+#[test]
+fn broker_designation_skips_the_machine_step_when_the_fresh_state_is_not_holdable() {
     for status in [
+        SystemServiceStatus {
+            backend: ServiceBackend::None,
+            installation: InstallationState::Absent,
+            runtime: RuntimeState::Stopped,
+            ..ready_auto_service()
+        },
         SystemServiceStatus {
             runtime: RuntimeState::StartPending,
             ..ready_auto_service()
@@ -981,15 +1200,13 @@ fn designating_a_profile_refuses_a_transitioning_or_foreign_service() {
         let mut backend = DesignateBackend {
             states: VecDeque::from([status]),
             actions: Vec::new(),
+            legacy_service_blocks_activation: false,
         };
 
-        let error = designate_profile_transaction_with(&mut backend, b"[General]\r\n").unwrap_err();
+        designate_profile_transaction_with(&mut backend, b"[General]\r\n").unwrap();
 
-        assert!(
-            error.contains("foreign, transitioning, or unsafe"),
-            "{error}"
-        );
         assert!(backend.actions.is_empty());
+        assert!(backend.states.is_empty());
     }
 }
 
@@ -1022,7 +1239,12 @@ fn designate_profile_requires_profile_bytes_and_a_clear_tray() {
         Some(b"[General]\r\n"),
     )
     .unwrap_err();
-    assert!(error.contains("legacy MacTray tray mode"), "{error}");
+    assert!(matches!(
+        error.kind,
+        open_service::action_failure::ActionFailureKind::Blocked(
+            open_service::action_failure::ActionBlocker::LegacyTrayModeBlocks(_)
+        )
+    ));
     assert!(backend.executed.is_none());
 
     let mut backend = FakeMachineBackend {

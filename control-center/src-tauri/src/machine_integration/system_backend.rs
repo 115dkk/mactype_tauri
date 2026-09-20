@@ -23,7 +23,11 @@ impl MachineBackend for SystemMachineBackend {
         legacy_mactray::legacy_service_blocks_activation()
     }
 
-    fn execute(&mut self, action: MachineAction, profile: Option<&[u8]>) -> Result<(), String> {
+    fn execute(
+        &mut self,
+        action: MachineAction,
+        profile: Option<&[u8]>,
+    ) -> Result<(), open_service::action_failure::ActionFailure> {
         open_service::run_action(action.into(), profile)
     }
 }

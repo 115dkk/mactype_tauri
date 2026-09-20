@@ -44,8 +44,9 @@ impl FakeMigrationBackend {
 impl MigrationBackend for FakeMigrationBackend {
     type OpenServiceSnapshot = FakeOpenServiceSnapshot;
 
-    fn prepare_legacy_backup(&mut self) -> Result<(), String> {
+    fn prepare_legacy_backup(&mut self) -> Result<(), ActionFailure> {
         self.operation("prepare-backup")
+            .map_err(ActionFailure::from)
     }
 
     fn legacy_backup_is_valid(&mut self) -> bool {
@@ -101,8 +102,9 @@ impl MigrationBackend for FakeMigrationBackend {
     fn rollback_open_service(
         &mut self,
         snapshot: &Self::OpenServiceSnapshot,
-    ) -> Result<(), String> {
-        self.operation("rollback-open-service")?;
+    ) -> Result<(), ActionFailure> {
+        self.operation("rollback-open-service")
+            .map_err(ActionFailure::from)?;
         self.open_service_installed = snapshot.installed;
         Ok(())
     }

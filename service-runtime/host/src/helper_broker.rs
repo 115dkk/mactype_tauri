@@ -4,6 +4,7 @@ use std::ffi::OsString;
 use std::fmt;
 use std::io;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use mactype_service_contract::{
@@ -17,6 +18,7 @@ use crate::observer::{
 };
 use crate::protected_renderer_runtime::ProtectedRendererRuntime;
 use crate::runtime_assets::ProtectedRuntimeAssets;
+use crate::{HostEvent, HostEventSink};
 
 const HELPER_TIMEOUT: Duration = Duration::from_secs(20);
 pub(crate) const MAX_HELPER_OUTPUT_BYTES: usize = 1536;
@@ -123,14 +125,20 @@ pub struct FixedHelperBroker<L> {
     assets: ProtectedRuntimeAssets,
     binding: RendererRuntimeBinding,
     launcher: L,
+    events: Arc<dyn HostEventSink>,
 }
 
 impl<L> FixedHelperBroker<L> {
-    pub fn new(runtime: &ProtectedRendererRuntime, launcher: L) -> Self {
+    pub fn new(
+        runtime: &ProtectedRendererRuntime,
+        launcher: L,
+        events: Arc<dyn HostEventSink>,
+    ) -> Self {
         Self {
             assets: runtime.assets().clone(),
             binding: runtime.binding(),
             launcher,
+            events,
         }
     }
 
@@ -163,11 +171,11 @@ where
         if helper.is_file() && helper.parent() == Some(self.assets.root()) {
             Ok(())
         } else {
-            crate::event_log::helper_broker_failed(
+            self.events.record(HostEvent::HelperBrokerFailed {
                 architecture,
-                "runtime-helper-unavailable",
-                Some(format!("helper={}", helper.display())),
-            );
+                code: "runtime-helper-unavailable".to_owned(),
+                detail: Some(format!("helper={}", helper.display())),
+            });
             Err(mactype_service_contract::StructuredServiceError {
                 code: "runtime-helper-unavailable".to_owned(),
                 message: "the fixed helper is not ready in the protected runtime generation"
@@ -230,14 +238,14 @@ where
             result.disposition,
             BrokerDisposition::UncertainCleanup | BrokerDisposition::UncertainIntegrity
         ) {
-            crate::event_log::helper_broker_failed(
-                request.identity.architecture,
-                &result.code,
-                Some(format!(
+            self.events.record(HostEvent::HelperBrokerFailed {
+                architecture: request.identity.architecture,
+                code: result.code.clone(),
+                detail: Some(format!(
                     "pid={} creation_time={} win32={:?}",
                     request.identity.pid, request.identity.creation_time, result.win32_error
                 )),
-            );
+            });
         }
         result
     }

@@ -55,29 +55,11 @@ pub(super) enum StartupTargetClassification {
     Untrusted,
 }
 
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub(super) enum StartupMutationEvent {
-    Observe,
-    WriteReceipt,
-    ReadReceipt,
-    Remove,
-}
-
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum StartupRestoreAction {
     Noop,
     Restore,
-}
-
-#[cfg(test)]
-pub(super) trait StartupDisableBackend {
-    fn observe_owned(&mut self) -> Result<Vec<LegacyTrayStartupArtifact>, String>;
-    fn write_receipt(&mut self, entries: &[LegacyTrayStartupArtifact]) -> Result<(), String>;
-    fn read_verified_receipt(&mut self) -> Result<Vec<LegacyTrayStartupArtifact>, String>;
-    fn remove_exact(&mut self, entries: &[LegacyTrayStartupArtifact]) -> Result<(), String>;
 }
 
 pub(super) fn classify_startup_command(
@@ -141,55 +123,6 @@ pub(super) fn classify_startup_inventory(
     } else {
         LegacyTrayStartupState::Absent
     }
-}
-
-#[cfg(test)]
-pub(super) fn disable_startup_with(backend: &mut impl StartupDisableBackend) -> Result<(), String> {
-    let original = backend.observe_owned()?;
-    if original.is_empty() {
-        return Err("no verified legacy MacTray startup entries were found".to_owned());
-    }
-    backend.write_receipt(&original)?;
-    let receipt = backend.read_verified_receipt()?;
-    if receipt != original {
-        return Err("the verified startup receipt does not exactly match observation".to_owned());
-    }
-    let current = backend.observe_owned()?;
-    if !same_startup_snapshot(&current, &original) {
-        return Err("legacy MacTray startup changed before removal".to_owned());
-    }
-    backend.remove_exact(&original)?;
-    if !backend.observe_owned()?.is_empty() {
-        return Err("legacy MacTray startup remains after removal".to_owned());
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-fn same_startup_snapshot(
-    left: &[LegacyTrayStartupArtifact],
-    right: &[LegacyTrayStartupArtifact],
-) -> bool {
-    left.len() == right.len()
-        && left.iter().all(|candidate| {
-            right
-                .iter()
-                .filter(|expected| same_startup_artifact(candidate, expected))
-                .count()
-                == 1
-        })
-}
-
-#[cfg(test)]
-fn same_startup_artifact(
-    left: &LegacyTrayStartupArtifact,
-    right: &LegacyTrayStartupArtifact,
-) -> bool {
-    left.entry == right.entry
-        && left.locator == right.locator
-        && left.raw_bytes == right.raw_bytes
-        && left.normalized_target_path == right.normalized_target_path
-        && left.user_sid == right.user_sid
 }
 
 pub(crate) fn plan_startup_restore(

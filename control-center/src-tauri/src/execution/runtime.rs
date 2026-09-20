@@ -1,5 +1,5 @@
 use super::storage::{atomic_write, data_root};
-use crate::bounded_io::read_bounded_file;
+use crate::{bounded_io::read_bounded_file, machine_integration::DesignationEffect};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -20,15 +20,6 @@ const MAX_ACTIVE_RUNTIME_BYTES: usize = 512 * 1024;
 pub(super) struct ActiveRuntime {
     pub(super) runtime_root: PathBuf,
     pub(super) source_profile: PathBuf,
-}
-
-/// How far a run-profile designation reached: a running service switched to
-/// it at once, or the choice is held until the service next starts.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum DesignationEffect {
-    Live,
-    NextStart,
 }
 
 #[derive(Serialize)]

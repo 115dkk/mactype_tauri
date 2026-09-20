@@ -1,33 +1,16 @@
+#[path = "support/identity.rs"]
+mod identity_support;
+#[path = "support/inspector.rs"]
+mod inspector_support;
+
 use mactype_service_contract::StructuredServiceError;
 use mactype_service_host::{
-    InspectedProcess, ProcessArchitecture, ProcessFacts, ProcessIdentity, ProcessInspector,
-    ProcessTargetDecision, ProcessTargetValidator, SkipReason, TargetLifecycle,
+    InspectedProcess, ProcessFacts, ProcessIdentity, ProcessTargetDecision, ProcessTargetValidator,
+    SkipReason, TargetLifecycle,
 };
 
-struct ScriptedInspector {
-    inspected: Result<InspectedProcess, StructuredServiceError>,
-    lifecycle: TargetLifecycle,
-}
-
-impl ProcessInspector for ScriptedInspector {
-    fn inspect(&self, _pid: u32) -> Result<InspectedProcess, StructuredServiceError> {
-        self.inspected.clone()
-    }
-
-    fn probe_target_lifecycle(&self, _identity: &ProcessIdentity) -> TargetLifecycle {
-        self.lifecycle
-    }
-}
-
-fn identity(pid: u32) -> ProcessIdentity {
-    ProcessIdentity {
-        pid,
-        creation_time: 100,
-        session_id: 2,
-        architecture: ProcessArchitecture::X64,
-        protected: false,
-    }
-}
+use identity_support::identity;
+use inspector_support::{InspectorResponse, ScriptedInspector};
 
 fn facts() -> ProcessFacts {
     ProcessFacts {
@@ -43,34 +26,34 @@ fn inspected(identity: ProcessIdentity, facts: ProcessFacts) -> InspectedProcess
 }
 
 fn inspector(inspected: InspectedProcess) -> ScriptedInspector {
-    ScriptedInspector {
-        inspected: Ok(inspected),
-        lifecycle: TargetLifecycle::Running,
-    }
+    ScriptedInspector::new([(
+        inspected.identity.pid,
+        InspectorResponse::inspected(inspected, TargetLifecycle::Running),
+    )])
 }
 
 #[test]
 fn validator_returns_only_verified_eligible_identity() {
-    let inspector = inspector(inspected(identity(42), facts()));
+    let inspector = inspector(inspected(identity(42, 100), facts()));
     let validator = ProcessTargetValidator::new(900, &inspector);
 
     assert_eq!(
         validator.validate(42).unwrap(),
-        ProcessTargetDecision::Eligible(identity(42))
+        ProcessTargetDecision::Eligible(identity(42, 100))
     );
 }
 
 #[test]
 fn validator_classifies_every_normal_skip_reason() {
-    let mut session_zero = identity(42);
+    let mut session_zero = identity(42, 100);
     session_zero.session_id = 0;
-    let mut protected = identity(42);
+    let mut protected = identity(42, 100);
     protected.protected = true;
 
     let rows = [
         (
             900,
-            inspected(identity(900), facts()),
+            inspected(identity(900, 100), facts()),
             TargetLifecycle::Running,
             SkipReason::SelfProcess,
         ),
@@ -89,7 +72,7 @@ fn validator_classifies_every_normal_skip_reason() {
         (
             42,
             inspected(
-                identity(42),
+                identity(42, 100),
                 ProcessFacts {
                     critical_or_unknown: true,
                     ..facts()
@@ -101,7 +84,7 @@ fn validator_classifies_every_normal_skip_reason() {
         (
             42,
             inspected(
-                identity(42),
+                identity(42, 100),
                 ProcessFacts {
                     prohibits_dynamic_code: true,
                     ..facts()
@@ -113,7 +96,7 @@ fn validator_classifies_every_normal_skip_reason() {
         (
             42,
             inspected(
-                identity(42),
+                identity(42, 100),
                 ProcessFacts {
                     restricts_binary_signature: true,
                     ..facts()
@@ -125,7 +108,7 @@ fn validator_classifies_every_normal_skip_reason() {
         (
             42,
             inspected(
-                identity(42),
+                identity(42, 100),
                 ProcessFacts {
                     image_name: Some("services.exe".to_owned()),
                     ..facts()
@@ -137,7 +120,7 @@ fn validator_classifies_every_normal_skip_reason() {
         (
             42,
             inspected(
-                identity(42),
+                identity(42, 100),
                 ProcessFacts {
                     image_name: Some("_unins001.tmp".to_owned()),
                     ..facts()
@@ -149,7 +132,7 @@ fn validator_classifies_every_normal_skip_reason() {
         (
             42,
             inspected(
-                identity(42),
+                identity(42, 100),
                 ProcessFacts {
                     image_name: None,
                     ..facts()
@@ -160,17 +143,15 @@ fn validator_classifies_every_normal_skip_reason() {
         ),
         (
             42,
-            inspected(identity(42), facts()),
+            inspected(identity(42, 100), facts()),
             TargetLifecycle::Exiting,
             SkipReason::Exiting,
         ),
     ];
 
     for (pid, inspected, lifecycle, reason) in rows {
-        let inspector = ScriptedInspector {
-            inspected: Ok(inspected),
-            lifecycle,
-        };
+        let inspector =
+            ScriptedInspector::new([(pid, InspectorResponse::inspected(inspected, lifecycle))]);
         assert_eq!(
             ProcessTargetValidator::new(900, &inspector)
                 .validate(pid)
@@ -189,14 +170,14 @@ fn validator_classifies_target_scoped_inspection_failures() {
         "process-architecture-unavailable",
         "process-architecture-unsupported",
     ] {
-        let inspector = ScriptedInspector {
-            inspected: Err(StructuredServiceError {
+        let inspector = ScriptedInspector::new([(
+            42,
+            InspectorResponse::failure(StructuredServiceError {
                 code: code.to_owned(),
                 message: "target disappeared or cannot be inspected".to_owned(),
                 win32_error: Some(5),
             }),
-            lifecycle: TargetLifecycle::Running,
-        };
+        )]);
         assert_eq!(
             ProcessTargetValidator::new(900, &inspector)
                 .validate(42)
@@ -208,20 +189,26 @@ fn validator_classifies_target_scoped_inspection_failures() {
 
 #[test]
 fn validator_rejects_identity_mismatch_and_propagates_infrastructure_failures() {
-    let mismatch = inspector(inspected(identity(43), facts()));
+    let mismatch = ScriptedInspector::new([(
+        42,
+        InspectorResponse::inspected(
+            inspected(identity(43, 100), facts()),
+            TargetLifecycle::Running,
+        ),
+    )]);
     let error = ProcessTargetValidator::new(900, &mismatch)
         .validate(42)
         .unwrap_err();
     assert_eq!(error.code, "process-identity-mismatch");
 
-    let infrastructure = ScriptedInspector {
-        inspected: Err(StructuredServiceError {
+    let infrastructure = ScriptedInspector::new([(
+        42,
+        InspectorResponse::failure(StructuredServiceError {
             code: "process-inspector-unavailable".to_owned(),
             message: "inspector initialization failed".to_owned(),
             win32_error: Some(6),
         }),
-        lifecycle: TargetLifecycle::Running,
-    };
+    )]);
     let error = ProcessTargetValidator::new(900, &infrastructure)
         .validate(42)
         .unwrap_err();

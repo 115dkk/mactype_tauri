@@ -1,16 +1,30 @@
+#[path = "support/event_sink.rs"]
+mod event_sink_support;
+
+#[path = "support/broker.rs"]
+mod broker_support;
+#[path = "support/inspector.rs"]
+mod inspector_support;
+
+use event_sink_support::{discard_events, RecordingEventSink};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use mactype_service_contract::event_log::read_events;
 use mactype_service_contract::StructuredServiceError;
 use mactype_service_host::{
     initialize_process_orchestration, subscribe_process_creation, BrokerDisposition, BrokerResult,
-    InjectionBroker, InjectionRequest, InspectedProcess, ProcessArchitecture, ProcessEventSource,
-    ProcessFacts, ProcessIdentity, ProcessInspector, ProcessOrchestrator, ProcessOutcome,
-    RetryPolicy, RetryScheduler, SessionChange, TargetLiveness, MAX_TRACKED_PROCESS_RESULTS,
-    PROCESS_CREATION_QUERY, TARGET_VANISHED_RESULT_CODE,
+    HostEvent, HostEventSink, InjectionBroker, InjectionRequest, InspectedProcess,
+    ProcessArchitecture, ProcessEventSource, ProcessFacts, ProcessIdentity, ProcessInspector,
+    ProcessOrchestrator, ProcessOutcome, RetryPolicy, RetryScheduler, SessionChange,
+    TargetLiveness, MAX_TRACKED_PROCESS_RESULTS, PROCESS_CREATION_QUERY,
+    TARGET_VANISHED_RESULT_CODE,
 };
+
+use broker_support::ScriptedBroker;
+use inspector_support::{InspectorResponse, ScriptedInspector};
 
 fn inspected(identity: ProcessIdentity) -> InspectedProcess {
     InspectedProcess {
@@ -22,6 +36,19 @@ fn inspected(identity: ProcessIdentity) -> InspectedProcess {
             image_name: Some("target.exe".to_owned()),
         },
     }
+}
+
+fn fixed_inspector(identity: ProcessIdentity, inspections: usize) -> ScriptedInspector {
+    let pid = identity.pid;
+    ScriptedInspector::new((0..inspections).map(move |_| {
+        (
+            pid,
+            InspectorResponse::inspected(
+                inspected(identity.clone()),
+                mactype_service_host::TargetLifecycle::Running,
+            ),
+        )
+    }))
 }
 
 #[derive(Default)]
@@ -53,17 +80,6 @@ fn observer_subscribes_to_immediate_process_start_events() {
     assert_eq!(source.query.as_deref(), Some(PROCESS_CREATION_QUERY));
 }
 
-struct FixedInspector {
-    identity: ProcessIdentity,
-}
-
-impl ProcessInspector for FixedInspector {
-    fn inspect(&self, pid: u32) -> Result<InspectedProcess, StructuredServiceError> {
-        assert_eq!(pid, self.identity.pid);
-        Ok(inspected(self.identity.clone()))
-    }
-}
-
 #[derive(Default)]
 struct RecordingBroker {
     requests: Mutex<Vec<InjectionRequest>>,
@@ -89,15 +105,14 @@ fn process_identity_is_requeried_before_the_fixed_broker_request() {
         architecture: ProcessArchitecture::X64,
         protected: false,
     };
-    let inspector = FixedInspector {
-        identity: identity.clone(),
-    };
+    let inspector = fixed_inspector(identity.clone(), 1);
     let broker = RecordingBroker::default();
     let mut orchestrator = ProcessOrchestrator::new(
         900,
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         &inspector,
         &broker,
+        discard_events(),
     );
 
     assert_eq!(
@@ -139,15 +154,14 @@ fn session_zero_service_self_and_protected_targets_are_skipped() {
             protected: true,
         },
     ] {
-        let inspector = FixedInspector {
-            identity: identity.clone(),
-        };
+        let inspector = fixed_inspector(identity.clone(), 1);
         let broker = RecordingBroker::default();
         let mut orchestrator = ProcessOrchestrator::new(
             900,
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             &inspector,
             &broker,
+            discard_events(),
         );
 
         assert_eq!(
@@ -197,6 +211,7 @@ fn unknown_inspector_failures_and_identity_mismatch_remain_errors_without_helper
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         &inspector,
         &broker,
+        discard_events(),
     );
 
     let error = orchestrator.handle_pid(42).unwrap_err();
@@ -208,6 +223,7 @@ fn unknown_inspector_failures_and_identity_mismatch_remain_errors_without_helper
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         &MismatchedInspector,
         &broker,
+        discard_events(),
     );
     let error = orchestrator.handle_pid(42).unwrap_err();
     assert_eq!(error.code, "process-identity-mismatch");
@@ -248,6 +264,7 @@ fn duplicate_identity_is_suppressed_but_a_reused_pid_with_new_creation_time_is_p
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         &inspector,
         &broker,
+        discard_events(),
     );
 
     assert_eq!(
@@ -263,18 +280,6 @@ fn duplicate_identity_is_suppressed_but_a_reused_pid_with_new_creation_time_is_p
         ProcessOutcome::Injected
     );
     assert_eq!(broker.requests.lock().unwrap().len(), 2);
-}
-
-struct SequenceBroker {
-    results: Mutex<VecDeque<BrokerResult>>,
-    requests: Mutex<Vec<InjectionRequest>>,
-}
-
-impl InjectionBroker for SequenceBroker {
-    fn inject(&self, request: &InjectionRequest) -> BrokerResult {
-        self.requests.lock().unwrap().push(request.clone());
-        self.results.lock().unwrap().pop_front().unwrap()
-    }
 }
 
 #[derive(Default)]
@@ -298,27 +303,24 @@ fn retryable_helper_failures_use_bounded_exponential_backoff() {
         architecture: ProcessArchitecture::X64,
         protected: false,
     };
-    let inspector = FixedInspector { identity };
-    let broker = SequenceBroker {
-        results: Mutex::new(VecDeque::from([
-            BrokerResult {
-                disposition: BrokerDisposition::RetryableFailure,
-                code: "session-unavailable".to_owned(),
-                win32_error: Some(5),
-            },
-            BrokerResult {
-                disposition: BrokerDisposition::RetryableFailure,
-                code: "architecture-unavailable".to_owned(),
-                win32_error: Some(5),
-            },
-            BrokerResult {
-                disposition: BrokerDisposition::Injected,
-                code: "module-loaded".to_owned(),
-                win32_error: None,
-            },
-        ])),
-        requests: Mutex::new(Vec::new()),
-    };
+    let inspector = fixed_inspector(identity, 1);
+    let broker = ScriptedBroker::new([
+        BrokerResult {
+            disposition: BrokerDisposition::RetryableFailure,
+            code: "session-unavailable".to_owned(),
+            win32_error: Some(5),
+        },
+        BrokerResult {
+            disposition: BrokerDisposition::RetryableFailure,
+            code: "architecture-unavailable".to_owned(),
+            win32_error: Some(5),
+        },
+        BrokerResult {
+            disposition: BrokerDisposition::Injected,
+            code: "module-loaded".to_owned(),
+            win32_error: None,
+        },
+    ]);
     let scheduler = RecordingScheduler::default();
     let mut orchestrator = ProcessOrchestrator::with_retry_policy(
         900,
@@ -331,13 +333,14 @@ fn retryable_helper_failures_use_bounded_exponential_backoff() {
             max_delay: Duration::from_millis(25),
         },
         &scheduler,
+        discard_events(),
     );
 
     assert_eq!(
         orchestrator.handle_pid(42).unwrap(),
         ProcessOutcome::Injected
     );
-    assert_eq!(broker.requests.lock().unwrap().len(), 3);
+    assert_eq!(broker.request_count(), 3);
     assert_eq!(
         *scheduler.waits.lock().unwrap(),
         [Duration::from_millis(10), Duration::from_millis(20)]
@@ -352,30 +355,28 @@ fn each_explicitly_safe_transient_code_retries_the_same_process_identity() {
         "architecture-unavailable",
         "module-inventory-unavailable",
     ] {
-        let inspector = FixedInspector {
-            identity: ProcessIdentity {
+        let inspector = fixed_inspector(
+            ProcessIdentity {
                 pid: 42,
                 creation_time: 100,
                 session_id: 2,
                 architecture: ProcessArchitecture::X64,
                 protected: false,
             },
-        };
-        let broker = SequenceBroker {
-            results: Mutex::new(VecDeque::from([
-                BrokerResult {
-                    disposition: BrokerDisposition::RetryableFailure,
-                    code: code.to_owned(),
-                    win32_error: Some(5),
-                },
-                BrokerResult {
-                    disposition: BrokerDisposition::Injected,
-                    code: "module-loaded".to_owned(),
-                    win32_error: None,
-                },
-            ])),
-            requests: Mutex::new(Vec::new()),
-        };
+            1,
+        );
+        let broker = ScriptedBroker::new([
+            BrokerResult {
+                disposition: BrokerDisposition::RetryableFailure,
+                code: code.to_owned(),
+                win32_error: Some(5),
+            },
+            BrokerResult {
+                disposition: BrokerDisposition::Injected,
+                code: "module-loaded".to_owned(),
+                win32_error: None,
+            },
+        ]);
         let scheduler = RecordingScheduler::default();
         let mut orchestrator = ProcessOrchestrator::with_retry_policy(
             900,
@@ -384,6 +385,7 @@ fn each_explicitly_safe_transient_code_retries_the_same_process_identity() {
             &broker,
             RetryPolicy::default(),
             &scheduler,
+            discard_events(),
         );
 
         assert_eq!(
@@ -391,7 +393,7 @@ fn each_explicitly_safe_transient_code_retries_the_same_process_identity() {
             ProcessOutcome::Injected,
             "{code} must be the bounded safe-retry allowlist"
         );
-        assert_eq!(broker.requests.lock().unwrap().len(), 2);
+        assert_eq!(broker.request_count(), 2);
         assert_eq!(scheduler.waits.lock().unwrap().len(), 1);
     }
 }
@@ -415,23 +417,21 @@ fn only_explicitly_safe_transient_codes_can_retry_the_same_process_identity() {
         "loader-address-unavailable",
         "remote-thread-failed",
     ] {
-        let inspector = FixedInspector {
-            identity: ProcessIdentity {
+        let inspector = fixed_inspector(
+            ProcessIdentity {
                 pid: 42,
                 creation_time: 100,
                 session_id: 2,
                 architecture: ProcessArchitecture::X64,
                 protected: false,
             },
-        };
-        let broker = SequenceBroker {
-            results: Mutex::new(VecDeque::from([BrokerResult {
-                disposition: BrokerDisposition::RetryableFailure,
-                code: code.to_owned(),
-                win32_error: Some(5),
-            }])),
-            requests: Mutex::new(Vec::new()),
-        };
+            1,
+        );
+        let broker = ScriptedBroker::new([BrokerResult {
+            disposition: BrokerDisposition::RetryableFailure,
+            code: code.to_owned(),
+            win32_error: Some(5),
+        }]);
         let scheduler = RecordingScheduler::default();
         let mut orchestrator = ProcessOrchestrator::with_retry_policy(
             900,
@@ -440,13 +440,14 @@ fn only_explicitly_safe_transient_codes_can_retry_the_same_process_identity() {
             &broker,
             RetryPolicy::default(),
             &scheduler,
+            discard_events(),
         );
 
         assert_eq!(
             orchestrator.handle_pid(42).unwrap(),
             ProcessOutcome::Rejected
         );
-        assert_eq!(broker.requests.lock().unwrap().len(), 1);
+        assert_eq!(broker.request_count(), 1);
         assert!(scheduler.waits.lock().unwrap().is_empty());
         let result = orchestrator.last_result(42, 100).unwrap();
         assert_eq!(result.attempts, 1);
@@ -464,23 +465,21 @@ impl RetryScheduler for CancellingScheduler {
 
 #[test]
 fn stop_or_shutdown_cancels_retry_without_another_helper_launch() {
-    let inspector = FixedInspector {
-        identity: ProcessIdentity {
+    let inspector = fixed_inspector(
+        ProcessIdentity {
             pid: 42,
             creation_time: 100,
             session_id: 2,
             architecture: ProcessArchitecture::X64,
             protected: false,
         },
-    };
-    let broker = SequenceBroker {
-        results: Mutex::new(VecDeque::from([BrokerResult {
-            disposition: BrokerDisposition::RetryableFailure,
-            code: "session-unavailable".to_owned(),
-            win32_error: None,
-        }])),
-        requests: Mutex::new(Vec::new()),
-    };
+        1,
+    );
+    let broker = ScriptedBroker::new([BrokerResult {
+        disposition: BrokerDisposition::RetryableFailure,
+        code: "session-unavailable".to_owned(),
+        win32_error: None,
+    }]);
     let mut orchestrator = ProcessOrchestrator::with_retry_policy(
         900,
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
@@ -488,13 +487,14 @@ fn stop_or_shutdown_cancels_retry_without_another_helper_launch() {
         &broker,
         RetryPolicy::default(),
         &CancellingScheduler,
+        discard_events(),
     );
 
     assert_eq!(
         orchestrator.handle_pid(42).unwrap(),
         ProcessOutcome::Cancelled
     );
-    assert_eq!(broker.requests.lock().unwrap().len(), 1);
+    assert_eq!(broker.request_count(), 1);
 }
 
 #[test]
@@ -506,24 +506,19 @@ fn exhausted_retry_records_the_last_bounded_process_result() {
         architecture: ProcessArchitecture::X64,
         protected: false,
     };
-    let inspector = FixedInspector {
-        identity: identity.clone(),
-    };
-    let broker = SequenceBroker {
-        results: Mutex::new(VecDeque::from([
-            BrokerResult {
-                disposition: BrokerDisposition::RetryableFailure,
-                code: "identity-unavailable".to_owned(),
-                win32_error: Some(87),
-            },
-            BrokerResult {
-                disposition: BrokerDisposition::RetryableFailure,
-                code: "module-inventory-unavailable".to_owned(),
-                win32_error: Some(1460),
-            },
-        ])),
-        requests: Mutex::new(Vec::new()),
-    };
+    let inspector = fixed_inspector(identity.clone(), 1);
+    let broker = ScriptedBroker::new([
+        BrokerResult {
+            disposition: BrokerDisposition::RetryableFailure,
+            code: "identity-unavailable".to_owned(),
+            win32_error: Some(87),
+        },
+        BrokerResult {
+            disposition: BrokerDisposition::RetryableFailure,
+            code: "module-inventory-unavailable".to_owned(),
+            win32_error: Some(1460),
+        },
+    ]);
     let scheduler = RecordingScheduler::default();
     let mut orchestrator = ProcessOrchestrator::with_retry_policy(
         900,
@@ -536,6 +531,7 @@ fn exhausted_retry_records_the_last_bounded_process_result() {
             max_delay: Duration::ZERO,
         },
         &scheduler,
+        discard_events(),
     );
 
     assert_eq!(
@@ -578,6 +574,7 @@ fn process_result_memory_is_bounded_and_evicts_the_oldest_identity() {
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         &IdentityFromPidInspector,
         &broker,
+        discard_events(),
     );
 
     for pid in 1..=(MAX_TRACKED_PROCESS_RESULTS as u32 + 1) {
@@ -609,13 +606,14 @@ fn wts_logoff_clears_dedupe_state_for_that_session() {
         architecture: ProcessArchitecture::X64,
         protected: false,
     };
-    let inspector = FixedInspector { identity };
+    let inspector = fixed_inspector(identity, 3);
     let broker = RecordingBroker::default();
     let mut orchestrator = ProcessOrchestrator::new(
         900,
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         &inspector,
         &broker,
+        discard_events(),
     );
     assert_eq!(
         orchestrator.handle_pid(42).unwrap(),
@@ -647,13 +645,14 @@ fn session_queue_overflow_clears_all_dedupe_state() {
         architecture: ProcessArchitecture::X64,
         protected: false,
     };
-    let inspector = FixedInspector { identity };
+    let inspector = fixed_inspector(identity, 3);
     let broker = RecordingBroker::default();
     let mut orchestrator = ProcessOrchestrator::new(
         900,
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         &inspector,
         &broker,
+        discard_events(),
     );
     assert_eq!(
         orchestrator.handle_pid(42).unwrap(),
@@ -698,15 +697,16 @@ impl InjectionBroker for LateSuccessBroker {
 
 #[test]
 fn verified_late_success_records_generation_bound_telemetry() {
-    let inspector = FixedInspector {
-        identity: ProcessIdentity {
+    let inspector = fixed_inspector(
+        ProcessIdentity {
             pid: 42,
             creation_time: 100,
             session_id: 2,
             architecture: ProcessArchitecture::X64,
             protected: false,
         },
-    };
+        1,
+    );
     let scheduler = RecordingScheduler::default();
     let mut orchestrator = ProcessOrchestrator::with_runtime_context(
         900,
@@ -716,6 +716,7 @@ fn verified_late_success_records_generation_bound_telemetry() {
         &LateSuccessBroker,
         RetryPolicy::default(),
         &scheduler,
+        discard_events(),
     );
 
     assert_eq!(
@@ -737,21 +738,23 @@ fn verified_late_success_records_generation_bound_telemetry() {
 
 #[test]
 fn service_stop_cancellation_is_not_retried_or_classified_as_degraded() {
-    let inspector = FixedInspector {
-        identity: ProcessIdentity {
+    let inspector = fixed_inspector(
+        ProcessIdentity {
             pid: 42,
             creation_time: 100,
             session_id: 2,
             architecture: ProcessArchitecture::X64,
             protected: false,
         },
-    };
+        1,
+    );
     let broker = ServiceStopBroker;
     let mut orchestrator = ProcessOrchestrator::new(
         900,
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         &inspector,
         &broker,
+        discard_events(),
     );
 
     assert_eq!(
@@ -765,35 +768,34 @@ fn service_stop_cancellation_is_not_retried_or_classified_as_degraded() {
 
 #[test]
 fn post_resume_service_stop_is_terminal_and_degrades_its_generation() {
-    let inspector = FixedInspector {
-        identity: ProcessIdentity {
+    let inspector = fixed_inspector(
+        ProcessIdentity {
             pid: 42,
             creation_time: 100,
             session_id: 2,
             architecture: ProcessArchitecture::X64,
             protected: false,
         },
-    };
-    let broker = SequenceBroker {
-        results: Mutex::new(VecDeque::from([BrokerResult {
-            disposition: BrokerDisposition::Rejected,
-            code: "helper-service-stop-cleanup-unknown".to_owned(),
-            win32_error: Some(1223),
-        }])),
-        requests: Mutex::new(Vec::new()),
-    };
+        1,
+    );
+    let broker = ScriptedBroker::new([BrokerResult {
+        disposition: BrokerDisposition::Rejected,
+        code: "helper-service-stop-cleanup-unknown".to_owned(),
+        win32_error: Some(1223),
+    }]);
     let mut orchestrator = ProcessOrchestrator::new(
         900,
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         &inspector,
         &broker,
+        discard_events(),
     );
 
     assert_eq!(
         orchestrator.handle_pid(42).unwrap(),
         ProcessOutcome::Rejected
     );
-    assert_eq!(broker.requests.lock().unwrap().len(), 1);
+    assert_eq!(broker.request_count(), 1);
     let record = orchestrator.last_result(42, 100).unwrap();
     assert_eq!(record.attempts, 1);
     assert_eq!(record.outcome, ProcessOutcome::Rejected);
@@ -830,15 +832,12 @@ impl ProcessInspector for ProbingInspector {
     }
 }
 
-fn cleanup_unknown_broker() -> SequenceBroker {
-    SequenceBroker {
-        results: Mutex::new(VecDeque::from([BrokerResult {
-            disposition: BrokerDisposition::Rejected,
-            code: "post-injection-state-cleanup-unknown".to_owned(),
-            win32_error: Some(299),
-        }])),
-        requests: Mutex::new(Vec::new()),
-    }
+fn cleanup_unknown_broker() -> ScriptedBroker {
+    ScriptedBroker::new([BrokerResult {
+        disposition: BrokerDisposition::Rejected,
+        code: "post-injection-state-cleanup-unknown".to_owned(),
+        win32_error: Some(299),
+    }])
 }
 
 #[test]
@@ -857,6 +856,7 @@ fn cleanup_unknown_for_a_vanished_target_is_a_trusted_skip_with_a_bounded_result
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         &inspector,
         &broker,
+        discard_events(),
     );
 
     assert_eq!(
@@ -879,7 +879,7 @@ fn cleanup_unknown_for_a_vanished_target_is_a_trusted_skip_with_a_bounded_result
         orchestrator.handle_pid(42).unwrap(),
         ProcessOutcome::Duplicate
     );
-    assert_eq!(broker.requests.lock().unwrap().len(), 1);
+    assert_eq!(broker.request_count(), 1);
 }
 
 #[test]
@@ -898,6 +898,7 @@ fn cleanup_unknown_for_a_target_still_alive_keeps_the_degraded_classification() 
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         &inspector,
         &broker,
+        discard_events(),
     );
 
     assert_eq!(
@@ -929,6 +930,7 @@ fn undeterminable_liveness_after_cleanup_unknown_keeps_the_degraded_classificati
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         &inspector,
         &broker,
+        discard_events(),
     );
 
     assert_eq!(
@@ -949,19 +951,17 @@ fn terminal_results_without_cleanup_unknown_never_probe_target_liveness() {
         protected: false,
     };
     let inspector = ProbingInspector::new(identity, TargetLiveness::Vanished);
-    let broker = SequenceBroker {
-        results: Mutex::new(VecDeque::from([BrokerResult {
-            disposition: BrokerDisposition::Rejected,
-            code: "module-load-failed".to_owned(),
-            win32_error: None,
-        }])),
-        requests: Mutex::new(Vec::new()),
-    };
+    let broker = ScriptedBroker::new([BrokerResult {
+        disposition: BrokerDisposition::Rejected,
+        code: "module-load-failed".to_owned(),
+        win32_error: None,
+    }]);
     let mut orchestrator = ProcessOrchestrator::new(
         900,
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         &inspector,
         &broker,
+        discard_events(),
     );
 
     assert_eq!(
@@ -975,28 +975,27 @@ fn terminal_results_without_cleanup_unknown_never_probe_target_liveness() {
 
 #[test]
 fn conflicting_mactype_module_is_terminal_deduplicated_and_process_local() {
-    let inspector = FixedInspector {
-        identity: ProcessIdentity {
+    let inspector = fixed_inspector(
+        ProcessIdentity {
             pid: 42,
             creation_time: 100,
             session_id: 2,
             architecture: ProcessArchitecture::X64,
             protected: false,
         },
-    };
-    let broker = SequenceBroker {
-        results: Mutex::new(VecDeque::from([BrokerResult {
-            disposition: BrokerDisposition::Rejected,
-            code: "conflicting-mactype-module-loaded".to_owned(),
-            win32_error: None,
-        }])),
-        requests: Mutex::new(Vec::new()),
-    };
+        2,
+    );
+    let broker = ScriptedBroker::new([BrokerResult {
+        disposition: BrokerDisposition::Rejected,
+        code: "conflicting-mactype-module-loaded".to_owned(),
+        win32_error: None,
+    }]);
     let mut orchestrator = ProcessOrchestrator::new(
         900,
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         &inspector,
         &broker,
+        discard_events(),
     );
 
     assert_eq!(
@@ -1007,7 +1006,7 @@ fn conflicting_mactype_module_is_terminal_deduplicated_and_process_local() {
         orchestrator.handle_pid(42).unwrap(),
         ProcessOutcome::Duplicate
     );
-    assert_eq!(broker.requests.lock().unwrap().len(), 1);
+    assert_eq!(broker.request_count(), 1);
     let record = orchestrator.last_result(42, 100).unwrap();
     assert_eq!(record.attempts, 1);
     assert_eq!(record.code, "conflicting-mactype-module-loaded");
@@ -1060,16 +1059,18 @@ fn runtime_is_ready_only_after_exact_subscription_and_both_helpers_are_verified(
         Box::new(SharedEventSource {
             query: query.clone(),
         }),
-        Box::new(FixedInspector {
-            identity: ProcessIdentity {
+        Box::new(fixed_inspector(
+            ProcessIdentity {
                 pid: 42,
                 creation_time: 100,
                 session_id: 2,
                 architecture: ProcessArchitecture::X64,
                 protected: false,
             },
-        }),
+            0,
+        )),
         Box::new(broker),
+        discard_events(),
     )
     .unwrap();
 
@@ -1085,4 +1086,182 @@ fn runtime_is_ready_only_after_exact_subscription_and_both_helpers_are_verified(
         *checked.lock().unwrap(),
         [ProcessArchitecture::X86, ProcessArchitecture::X64]
     );
+}
+
+#[test]
+fn repeated_rejected_target_results_emit_one_throttled_injection_failed_event() {
+    let directory = tempfile::tempdir().unwrap();
+    let sink = RecordingEventSink::new(directory.path().join("host.log"), Instant::now());
+    let identities = [
+        ProcessIdentity {
+            pid: 42,
+            creation_time: 100,
+            session_id: 2,
+            architecture: ProcessArchitecture::X64,
+            protected: false,
+        },
+        ProcessIdentity {
+            pid: 43,
+            creation_time: 101,
+            session_id: 2,
+            architecture: ProcessArchitecture::X64,
+            protected: false,
+        },
+    ];
+    let inspector = ScriptedInspector::new(identities.iter().cloned().map(|identity| {
+        (
+            identity.pid,
+            InspectorResponse::inspected(
+                inspected(identity),
+                mactype_service_host::TargetLifecycle::Running,
+            )
+            .with_basename("game.exe"),
+        )
+    }));
+    let broker = ScriptedBroker::new((0..2).map(|_| BrokerResult {
+        disposition: BrokerDisposition::Rejected,
+        code: "module-load-failed".to_owned(),
+        win32_error: Some(5),
+    }));
+    let mut orchestrator = ProcessOrchestrator::new(
+        900,
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        &inspector,
+        &broker,
+        sink.clone(),
+    );
+
+    assert_eq!(
+        orchestrator.handle_pid(42).unwrap(),
+        ProcessOutcome::Rejected
+    );
+    assert_eq!(
+        orchestrator.handle_pid(43).unwrap(),
+        ProcessOutcome::Rejected
+    );
+
+    let events = read_events(&[sink.path().to_owned()], 20);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.code == "injection-failed")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn successful_injection_emits_its_success_event_once() {
+    let directory = tempfile::tempdir().unwrap();
+    let sink = RecordingEventSink::new(directory.path().join("host.log"), Instant::now());
+    let identity = ProcessIdentity {
+        pid: 42,
+        creation_time: 100,
+        session_id: 2,
+        architecture: ProcessArchitecture::X64,
+        protected: false,
+    };
+    let inspector = fixed_inspector(identity, 1);
+    let broker = ScriptedBroker::new([BrokerResult {
+        disposition: BrokerDisposition::Injected,
+        code: "module-loaded".to_owned(),
+        win32_error: None,
+    }]);
+    let mut orchestrator = ProcessOrchestrator::new(
+        900,
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        &inspector,
+        &broker,
+        sink.clone(),
+    );
+
+    assert_eq!(
+        orchestrator.handle_pid(42).unwrap(),
+        ProcessOutcome::Injected
+    );
+
+    assert_eq!(
+        sink.events()
+            .iter()
+            .filter(|event| matches!(
+                event,
+                HostEvent::InjectionResult { record, .. }
+                    if record.outcome == ProcessOutcome::Injected
+            ))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn injection_summary_flushes_each_elapsed_window_and_resets_its_counts() {
+    let directory = tempfile::tempdir().unwrap();
+    let sink = RecordingEventSink::new(directory.path().join("host.log"), Instant::now());
+    let identities = [
+        ProcessIdentity {
+            pid: 42,
+            creation_time: 100,
+            session_id: 2,
+            architecture: ProcessArchitecture::X64,
+            protected: false,
+        },
+        ProcessIdentity {
+            pid: 43,
+            creation_time: 101,
+            session_id: 2,
+            architecture: ProcessArchitecture::X64,
+            protected: false,
+        },
+    ];
+    let inspector = ScriptedInspector::new(identities.iter().cloned().map(|identity| {
+        (
+            identity.pid,
+            InspectorResponse::inspected(
+                inspected(identity),
+                mactype_service_host::TargetLifecycle::Running,
+            ),
+        )
+    }));
+    let broker = ScriptedBroker::new((0..2).map(|_| BrokerResult {
+        disposition: BrokerDisposition::Injected,
+        code: "module-loaded".to_owned(),
+        win32_error: None,
+    }));
+    let mut orchestrator = ProcessOrchestrator::new(
+        900,
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        &inspector,
+        &broker,
+        sink.clone(),
+    );
+
+    assert_eq!(
+        orchestrator.handle_pid(42).unwrap(),
+        ProcessOutcome::Injected
+    );
+    sink.advance(Duration::from_secs(60));
+    assert_eq!(
+        orchestrator.handle_pid(43).unwrap(),
+        ProcessOutcome::Injected
+    );
+    sink.advance(Duration::from_secs(60));
+    HostEventSink::record(sink.as_ref(), HostEvent::FlushInjectionSummary);
+
+    let events = read_events(&[sink.path().to_owned()], 20);
+    let summaries = events
+        .iter()
+        .filter(|event| event.code == "injection-summary")
+        .collect::<Vec<_>>();
+    assert_eq!(summaries.len(), 2);
+    assert_eq!(
+        summaries[0].params.get("injected").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        summaries[1].params.get("injected").map(String::as_str),
+        Some("1")
+    );
+    assert!(summaries
+        .iter()
+        .all(|summary| summary.params.get("failed").map(String::as_str) == Some("0")));
 }

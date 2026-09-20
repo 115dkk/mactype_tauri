@@ -25,8 +25,12 @@ fn panic_failure_snapshot_is_a_valid_structured_report() {
 
 #[test]
 fn registered_service_returns_its_terminal_failure_to_service_main() {
-    let _runner: fn(MachinePaths, &FileHealthPublisher) -> Result<(), StructuredServiceError> =
-        run_registered_service;
+    type RegisteredServiceRunner = fn(
+        MachinePaths,
+        &FileHealthPublisher,
+        Arc<dyn HostEventSink>,
+    ) -> Result<(), StructuredServiceError>;
+    let _runner: RegisteredServiceRunner = run_registered_service;
 }
 
 #[test]

@@ -1,13 +1,13 @@
-use std::{collections::VecDeque, time::Duration};
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 
 use mactype_service_contract::{
     ComponentReadiness, HealthState, InjectionTelemetry, ReadinessReport, StructuredServiceError,
 };
 
 use crate::{
-    subscribe_process_creation, InitializedRuntime, InjectionBroker, ProcessArchitecture,
-    ProcessEventSource, ProcessInspector, RetryScheduler, RuntimeDriver, RuntimeHealthReporter,
-    StopSignal,
+    subscribe_process_creation, HostEvent, HostEventSink, InitializedRuntime, InjectionBroker,
+    ProcessArchitecture, ProcessEventSource, ProcessInspector, RetryScheduler, RuntimeDriver,
+    RuntimeHealthReporter, StopSignal,
 };
 
 const MAX_TOLERATED_CONSECUTIVE_HEALTH_REPORT_FAILURES: usize = 20;
@@ -39,6 +39,7 @@ pub fn initialize_process_orchestration(
     source: Box<dyn ProcessEventSource>,
     inspector: Box<dyn ProcessInspector>,
     broker: Box<dyn InjectionBroker>,
+    events: Arc<dyn HostEventSink>,
 ) -> Result<InitializedRuntime, StructuredServiceError> {
     initialize_process_orchestration_with_observer_recovery(
         active_profile_digest,
@@ -48,9 +49,11 @@ pub fn initialize_process_orchestration(
         source,
         inspector,
         broker,
+        events,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn initialize_process_orchestration_with_observer_recovery(
     active_profile_digest: Option<String>,
     observer_recovery: ObserverRecoveryPolicy,
@@ -59,6 +62,7 @@ pub fn initialize_process_orchestration_with_observer_recovery(
     mut source: Box<dyn ProcessEventSource>,
     inspector: Box<dyn ProcessInspector>,
     broker: Box<dyn InjectionBroker>,
+    events: Arc<dyn HostEventSink>,
 ) -> Result<InitializedRuntime, StructuredServiceError> {
     let profile_digest = active_profile_digest
         .clone()
@@ -86,6 +90,7 @@ pub fn initialize_process_orchestration_with_observer_recovery(
             },
             inspector,
             broker,
+            events,
         }),
     ))
 }
@@ -97,6 +102,7 @@ struct ProcessOrchestrationDriver {
     observer: ObserverState,
     inspector: Box<dyn ProcessInspector>,
     broker: Box<dyn InjectionBroker>,
+    events: Arc<dyn HostEventSink>,
 }
 
 struct ObserverState {
@@ -196,6 +202,7 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
             self.broker.as_ref(),
             crate::RetryPolicy::default(),
             &scheduler,
+            self.events.clone(),
         );
         let mut consecutive_health_report_failures = 0;
         loop {
@@ -205,7 +212,7 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
             while let Some(change) = stop.take_session_change() {
                 orchestrator.handle_session_change(change);
             }
-            crate::event_log::flush_elapsed_injection_summary();
+            self.events.record(HostEvent::FlushInjectionSummary);
             let deferred = orchestrator.poll_deferred(std::time::Instant::now());
             let outcome = match deferred {
                 Ok(Some(outcome)) if outcome != crate::ProcessOutcome::Deferred => Ok(outcome),

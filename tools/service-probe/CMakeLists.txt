@@ -67,6 +67,7 @@ target_compile_definitions(hook-lifecycle-tests PRIVATE UNICODE _UNICODE WIN32_L
 add_executable(activation-repaint-tests
   tests/activation_repaint_tests.cpp
   ../../renderer/activation_repaint.cpp
+  ../../renderer/arrival_evidence.cpp
 )
 target_compile_features(activation-repaint-tests PRIVATE cxx_std_20)
 target_compile_definitions(activation-repaint-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
@@ -162,9 +163,18 @@ add_executable(directwrite-alias-policy-tests
 target_compile_features(directwrite-alias-policy-tests PRIVATE cxx_std_20)
 target_compile_definitions(directwrite-alias-policy-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
+add_executable(arrival-evidence-tests
+  tests/arrival_evidence_tests.cpp
+  ../../renderer/arrival_evidence.cpp
+)
+target_compile_features(arrival-evidence-tests PRIVATE cxx_std_20)
+target_compile_definitions(arrival-evidence-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_link_libraries(arrival-evidence-tests PRIVATE user32 gdi32)
+
 add_executable(gdi-font-identity-tests
   tests/gdi_font_identity_tests.cpp
   ../../renderer/gdi_font_identity.cpp
+  ../../renderer/arrival_evidence.cpp
 )
 target_compile_features(gdi-font-identity-tests PRIVATE cxx_std_20)
 target_compile_definitions(gdi-font-identity-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
@@ -231,7 +241,7 @@ set_target_properties(relay-policy-probe PROPERTIES
 )
 
 if(MSVC)
-  foreach(target service-probe-common probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests activation-repaint-tests freetype-runtime-tests private-freetype-policy-tests image-subsystem-tests module-name-tests directwrite-font-cache-tests pe-export-view-tests unload-lifecycle-tests renderer-policy-tests renderer-activation-tests font-substitution-tests directwrite-alias-policy-tests gdi-font-identity-tests unity-font-hook-tests unity-font-catalog-probe renderer-profile-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe)
+  foreach(target service-probe-common probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests activation-repaint-tests freetype-runtime-tests private-freetype-policy-tests image-subsystem-tests module-name-tests directwrite-font-cache-tests pe-export-view-tests unload-lifecycle-tests renderer-policy-tests renderer-activation-tests font-substitution-tests directwrite-alias-policy-tests arrival-evidence-tests gdi-font-identity-tests unity-font-hook-tests unity-font-catalog-probe renderer-profile-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe)
     target_compile_options(${target} PRIVATE /W4 /WX /permissive- /utf-8 /sdl)
   endforeach()
   foreach(target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-profile-probe browser-launch-gate dwritecore-contract-probe relay-policy-probe)

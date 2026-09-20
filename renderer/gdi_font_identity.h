@@ -18,17 +18,11 @@ bool CommitsStockIdentity(
 	unsigned long gdiObjectsAtHookInstall,
 	bool glyphIndexTextStackLoaded) noexcept;
 
-// Samples GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS) once; later
-// calls keep the first sample. Called by HookFontCreation before it installs
-// the CreateFontIndirect hooks.
-void RecordHookInstall() noexcept;
-
-// Memoised process verdict: RecordHookInstall's sample combined with the
+// Memoised process verdict: the recorded arrival evidence combined with the
 // module probe on the first call. Never throws.
 bool StockIdentityCommitted() noexcept;
 
-// Test seams.
-unsigned long GdiObjectsAtHookInstallForTesting() noexcept;
+// Test seam for the memoised policy verdict.
 void ResetForTesting() noexcept;
 
 } // namespace gdi_font_identity

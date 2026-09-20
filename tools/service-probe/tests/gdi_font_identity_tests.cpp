@@ -1,4 +1,5 @@
 #include "../../../renderer/gdi_font_identity.h"
+#include "../../../renderer/arrival_evidence.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -35,15 +36,39 @@ bool OnlyQt5CoreLoaded(const wchar_t* name) noexcept
     return std::wcscmp(name, L"Qt5Core.dll") == 0;
 }
 
+std::uint32_t NoGdiObjects() noexcept
+{
+    return 0;
+}
+
+std::uint32_t ExistingGdiObjects() noexcept
+{
+    return 2;
+}
+
+bool FalseSample() noexcept
+{
+    return false;
+}
+
+renderer::arrival_evidence::Samplers EvidenceSamplers(
+    std::uint32_t (*gdiObjects)() noexcept)
+{
+    return renderer::arrival_evidence::Samplers{
+        gdiObjects,
+        FalseSample,
+        FalseSample,
+        FalseSample,
+    };
+}
+
 } // namespace
 
 int main()
 {
     using renderer::gdi_font_identity::CommitsStockIdentity;
-    using renderer::gdi_font_identity::GdiObjectsAtHookInstallForTesting;
     using renderer::gdi_font_identity::GlyphIndexTextStackLoaded;
     using renderer::gdi_font_identity::IsGlyphIndexTextStackModule;
-    using renderer::gdi_font_identity::RecordHookInstall;
     using renderer::gdi_font_identity::ResetForTesting;
     using renderer::gdi_font_identity::StockIdentityCommitted;
 
@@ -86,36 +111,19 @@ int main()
     Require(!GlyphIndexTextStackLoaded(OnlyQt5CoreLoaded),
         "the module probe queried an unrelated Qt module");
 
+    renderer::arrival_evidence::ResetForTests();
     ResetForTesting();
-    RecordHookInstall();
-    Require(GdiObjectsAtHookInstallForTesting() == 0,
-        "the fresh test process already owned a GDI object");
+    renderer::arrival_evidence::Record(EvidenceSamplers(NoGdiObjects));
     Require(!StockIdentityCommitted(),
-        "the fresh test process committed stock identity");
+        "zero recorded GDI objects committed stock identity");
 
-    LOGFONTW firstDescription{};
-    HFONT const firstFont = CreateFontIndirectW(&firstDescription);
-    Require(firstFont != nullptr, "the first test font could not be created");
+    renderer::arrival_evidence::ResetForTests();
     ResetForTesting();
-    RecordHookInstall();
-    unsigned long const firstSample = GdiObjectsAtHookInstallForTesting();
-    Require(firstSample >= 1,
-        "the first test font was absent from the GDI sample");
+    renderer::arrival_evidence::Record(EvidenceSamplers(ExistingGdiObjects));
     Require(!StockIdentityCommitted(),
-        "a process without a Qt GUI module committed stock identity");
-
-    LOGFONTW secondDescription{};
-    secondDescription.lfHeight = 12;
-    HFONT const secondFont = CreateFontIndirectW(&secondDescription);
-    Require(secondFont != nullptr, "the second test font could not be created");
-    RecordHookInstall();
-    Require(GdiObjectsAtHookInstallForTesting() == firstSample,
-        "a second hook-install call replaced the first sample");
-
-    DeleteObject(secondFont);
-    DeleteObject(firstFont);
+        "recorded GDI objects committed without a Qt GUI module");
 
     std::cout << "GDI font identity: 10 module names, 5 decisions, "
-        "3 probe checks, 4 process-seam checks passed\n";
+        "3 probe checks, 2 evidence checks passed\n";
     return 0;
 }

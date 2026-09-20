@@ -1,5 +1,7 @@
 #include "gdi_font_identity.h"
 
+#include "arrival_evidence.h"
+
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -21,8 +23,6 @@ constexpr std::array<const wchar_t*, 6> kGlyphIndexTextStackModules{{
 	L"QtGuid4.dll",
 }};
 
-std::atomic<bool> recorded{false};
-std::atomic<unsigned long> hookInstallGdiObjectCount{0};
 std::atomic<int> stockIdentityVerdict{0};
 
 bool IsModuleLoaded(const wchar_t* name) noexcept
@@ -65,17 +65,6 @@ bool CommitsStockIdentity(
 	return gdiObjectsAtHookInstall != 0 && glyphIndexTextStackLoaded;
 }
 
-void RecordHookInstall() noexcept
-{
-	// The sample must precede the font-creation hooks so only pre-existing GDI
-	// objects commit the process to its stock font identities.
-	if (recorded.exchange(true))
-		return;
-
-	hookInstallGdiObjectCount.store(
-		GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS));
-}
-
 bool StockIdentityCommitted() noexcept
 {
 	int const verdict = stockIdentityVerdict.load();
@@ -84,23 +73,18 @@ bool StockIdentityCommitted() noexcept
 
 	// Freeze the verdict because changing font identity after an engine caches
 	// an HFONT cmap would recreate the mismatch this policy prevents.
+	arrival_evidence::ArrivalEvidence const* const evidence =
+		arrival_evidence::Recorded();
 	bool const committed = CommitsStockIdentity(
-		hookInstallGdiObjectCount.load(),
+		evidence == nullptr ? 0U : evidence->gdiObjectsAtInstall,
 		GlyphIndexTextStackLoaded(IsModuleLoaded));
 	stockIdentityVerdict.store(committed ? 1 : -1);
 	return committed;
 }
 
-unsigned long GdiObjectsAtHookInstallForTesting() noexcept
-{
-	return hookInstallGdiObjectCount.load();
-}
-
 void ResetForTesting() noexcept
 {
 	stockIdentityVerdict.store(0);
-	hookInstallGdiObjectCount.store(0);
-	recorded.store(false);
 }
 
 } // namespace gdi_font_identity

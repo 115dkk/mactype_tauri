@@ -1089,6 +1089,10 @@ fn runtime_is_ready_only_after_exact_subscription_and_both_helpers_are_verified(
 }
 
 #[test]
+#[cfg_attr(
+    all(miri, windows),
+    ignore = "Windows Miri does not implement CreateDirectoryW"
+)]
 fn repeated_rejected_target_results_emit_one_throttled_injection_failed_event() {
     let directory = tempfile::tempdir().unwrap();
     let sink = RecordingEventSink::new(directory.path().join("host.log"), Instant::now());
@@ -1151,6 +1155,10 @@ fn repeated_rejected_target_results_emit_one_throttled_injection_failed_event() 
 }
 
 #[test]
+#[cfg_attr(
+    all(miri, windows),
+    ignore = "Windows Miri does not implement CreateDirectoryW"
+)]
 fn successful_injection_emits_its_success_event_once() {
     let directory = tempfile::tempdir().unwrap();
     let sink = RecordingEventSink::new(directory.path().join("host.log"), Instant::now());
@@ -1194,6 +1202,10 @@ fn successful_injection_emits_its_success_event_once() {
 }
 
 #[test]
+#[cfg_attr(
+    all(miri, windows),
+    ignore = "Windows Miri does not implement CreateDirectoryW"
+)]
 fn injection_summary_flushes_each_elapsed_window_and_resets_its_counts() {
     let directory = tempfile::tempdir().unwrap();
     let sink = RecordingEventSink::new(directory.path().join("host.log"), Instant::now());

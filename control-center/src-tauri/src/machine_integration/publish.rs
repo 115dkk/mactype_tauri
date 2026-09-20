@@ -1,6 +1,11 @@
-use super::{MachineAction, MachineBackend};
+use super::{
+    designation::{designation_plan_with_package, designation_status_with},
+    DesignationPlan, MachineAction, MachineBackend,
+};
 use crate::{
-    machine_integration::open_service::action_failure::{ActionFailure, RollbackOutcome},
+    machine_integration::open_service::action_failure::{
+        ActionBlocker, ActionFailure, LegacyServiceBlockContext, RollbackOutcome,
+    },
     service_contract::SystemServiceStatus,
 };
 use std::time::Duration;
@@ -89,9 +94,8 @@ pub(super) fn publish_profile_transaction_with(
 }
 
 /// Makes `profile` the run profile without changing whether the service runs:
-/// a running service switches to it live through the full publish transaction,
-/// a stopped one only receives the published generation so its next start, at
-/// boot or by hand, uses it.
+/// a running service switches live, an installed stopped service receives the
+/// generation for its next start, and an unavailable machine step is skipped.
 pub(super) fn designate_profile_transaction_with(
     backend: &mut impl MachineBackend,
     profile: &[u8],
@@ -101,24 +105,27 @@ pub(super) fn designate_profile_transaction_with(
             "the designated profile payload is outside the allowed range",
         ));
     }
-    let before = backend.new_service_status();
-    if before.runtime == crate::service_contract::RuntimeState::Running {
-        return publish_profile_transaction_with(backend, profile);
+    let status = designation_status_with(backend);
+    let plan = designation_plan_with_package(&status, backend.service_management_package_state());
+    match plan {
+        DesignationPlan::PublishLive => {
+            if backend
+                .legacy_service_blocks_activation()
+                .map_err(ActionFailure::from)?
+            {
+                return Err(ActionFailure::blocked(
+                    ActionBlocker::LegacyServiceStillInstalled(
+                        LegacyServiceBlockContext::ApplyProfile,
+                    ),
+                ));
+            }
+            publish_profile_transaction_with(backend, profile)
+        }
+        DesignationPlan::HoldForNextStart => {
+            backend.execute(MachineAction::PublishProfile, Some(profile))
+        }
+        DesignationPlan::KeepLocalUntilServiceStart => Ok(()),
     }
-    if before.backend == crate::service_contract::ServiceBackend::Foreign
-        || !matches!(
-            before.installation,
-            crate::service_contract::InstallationState::Absent
-                | crate::service_contract::InstallationState::Current
-                | crate::service_contract::InstallationState::Outdated
-        )
-        || before.runtime != crate::service_contract::RuntimeState::Stopped
-    {
-        return Err(ActionFailure::internal(
-            "the new service is foreign, transitioning, or unsafe",
-        ));
-    }
-    backend.execute(MachineAction::PublishProfile, Some(profile))
 }
 
 fn wait_for_published_profile_with(

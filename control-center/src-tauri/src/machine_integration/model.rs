@@ -1,6 +1,6 @@
 use super::open_service;
 use super::LegacyTrayStatus;
-use crate::service_contract::SystemServiceStatus;
+use crate::service_contract::{ServiceManagementPackageState, SystemServiceStatus};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,6 +48,15 @@ impl From<PublicMachineAction> for MachineAction {
     }
 }
 
+/// How far a run-profile designation reached: a running service switched to
+/// it at once, or the choice is held until the service next starts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DesignationEffect {
+    Live,
+    NextStart,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TrayLoginState {
     Paused,
@@ -68,6 +77,9 @@ pub(crate) struct MachineStatus {
 
 pub(super) trait MachineBackend {
     fn new_service_status(&mut self) -> SystemServiceStatus;
+    fn service_management_package_state(&mut self) -> ServiceManagementPackageState {
+        ServiceManagementPackageState::Ready
+    }
     fn legacy_tray_status(&mut self) -> LegacyTrayStatus;
     fn appinit_conflict(&mut self) -> Result<bool, String>;
     /// Whether the legacy "MacType" SCM service can still inject or auto-start.

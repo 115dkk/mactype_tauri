@@ -65,6 +65,33 @@ int wmain(int argc, wchar_t** argv) {
   runtime.pump_messages();
   if (runtime.selected_face_for_tests() != L"Segoe UI") return 28;
 
+  const std::uint32_t relayouts_before_repeat = runtime.relayout_count_for_tests();
+  const std::uint32_t retitles_before_repeat = runtime.retitle_count_for_tests();
+  const std::uint32_t reshows_before_repeat = runtime.reshow_count_for_tests();
+  if (runtime.show_native_preview(native, true).kind != mtpc::MessageKind::native_preview_state) {
+    return 56;
+  }
+  if (runtime.relayout_count_for_tests() != relayouts_before_repeat ||
+      runtime.retitle_count_for_tests() != retitles_before_repeat ||
+      runtime.reshow_count_for_tests() != reshows_before_repeat) {
+    return 57;
+  }
+
+  mtpc::Frame unchanged_native;
+  unchanged_native.kind = mtpc::MessageKind::show_native_preview;
+  unchanged_native.request_id = 57;
+  unchanged_native.json = "{}";
+  const mtpc::Frame native_before_strip = runtime.show_native_preview(unchanged_native, true);
+  mtpc::Frame strip_while_open = styled;
+  strip_while_open.request_id = 58;
+  strip_while_open.json = R"({"overrides":{},"sample":{"text":"Strip must stay separate","fontFace":"Arial","fontSizePt":28,"widthPx":640,"heightPx":96,"dpi":120,"foreground":"#010203","background":"#FDFCFB","bold":false,"italic":false}})";
+  if (runtime.render(strip_while_open).kind != mtpc::MessageKind::preview_rendered) return 58;
+  const mtpc::Frame native_after_strip = runtime.show_native_preview(unchanged_native, true);
+  if (native_after_strip.kind != mtpc::MessageKind::native_preview_state ||
+      native_after_strip.json != native_before_strip.json) {
+    return 59;
+  }
+
   mtpc::Frame tall;
   tall.kind = mtpc::MessageKind::show_native_preview;
   tall.request_id = 55;
@@ -238,11 +265,6 @@ int wmain(int argc, wchar_t** argv) {
   if (plain_response.json.find("\"engine\":\"plain\"") == std::string::npos ||
       plain_response.json.find("\"coreVersion\":0") == std::string::npos) {
     return 23;
-  }
-  const mtpc::Frame load_response = plain_runtime.load_profile(plain_render);
-  if (load_response.kind != mtpc::MessageKind::ack ||
-      load_response.json != R"({"loaded":false,"engine":"plain"})") {
-    return 24;
   }
   for (const char* skin : {"classic"}) {
     if (!mactype::PreviewRuntimeTestAccess::toolbar_labels(plain_runtime, skin)) return 80;

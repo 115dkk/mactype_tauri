@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) fn rollback_open_service_snapshot(
     snapshot: &SystemOpenServiceSnapshot,
-) -> Result<(), String> {
+) -> Result<(), ActionFailure> {
     let current = query();
     let controllable = current.installation == InstallationState::Absent
         || (current.backend == ServiceBackend::OpenSource
@@ -11,39 +11,48 @@ pub(super) fn rollback_open_service_snapshot(
                 InstallationState::Current | InstallationState::Outdated
             ));
     if !controllable {
-        return Err(
-            "the fixed service name became foreign or inaccessible; SCM rollback was refused"
-                .to_owned(),
-        );
+        return Err(ActionFailure::blocked(
+            ActionBlocker::FixedServiceNameForeignOrInaccessible,
+        ));
     }
     if matches!(
         current.runtime,
         RuntimeState::StartPending | RuntimeState::StopPending
     ) {
-        return Err("the open service is transitional during rollback".to_owned());
+        return Err(ActionFailure::internal(
+            "the open service is transitional during rollback",
+        ));
     }
     if current.runtime == RuntimeState::Running {
-        run_setup(SystemServiceAction::Stop, None)?;
+        run_setup(SystemServiceAction::Stop, None)
+            .map_err(|error| ActionFailure::internal_at("stop", error))?;
     }
     if snapshot.status.installation == InstallationState::Absent
         && query().installation != InstallationState::Absent
     {
-        run_setup(SystemServiceAction::Remove, None)?;
+        run_setup(SystemServiceAction::Remove, None)
+            .map_err(|error| ActionFailure::internal_at("remove", error))?;
     }
 
-    restore_protected_snapshot(snapshot)?;
+    restore_protected_snapshot(snapshot).map_err(ActionFailure::from)?;
     match snapshot.status.installation {
         InstallationState::Absent => {}
         InstallationState::Current | InstallationState::Outdated => {
-            run_restore_pinned_runtime()?;
+            run_restore_pinned_runtime()
+                .map_err(|error| ActionFailure::internal_at("restore-runtime", error))?;
             if snapshot.status.runtime == RuntimeState::Running {
-                run_setup(SystemServiceAction::Start, None)?;
+                run_setup(SystemServiceAction::Start, None)
+                    .map_err(|error| ActionFailure::internal_at("start", error))?;
             }
         }
-        _ => return Err("the saved open service state is unsafe to restore".to_owned()),
+        _ => {
+            return Err(ActionFailure::internal(
+                "the saved open service state is unsafe to restore",
+            ));
+        }
     }
-    release_migration_runtime_pin(snapshot)?;
-    cleanup_snapshot_roots(snapshot)?;
+    release_migration_runtime_pin(snapshot).map_err(ActionFailure::from)?;
+    cleanup_snapshot_roots(snapshot).map_err(ActionFailure::from)?;
     Ok(())
 }
 

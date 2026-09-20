@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::PROFILE_TRANSFER_NONCE_BYTES;
+use super::{ActionFailure, ActionFailureKind, PROFILE_TRANSFER_NONCE_BYTES};
 
 pub(super) const BROKER_RESULT_MAGIC: &[u8; 4] = b"MTBR";
 pub(super) const BROKER_RESULT_VERSION: u16 = 1;
@@ -42,15 +42,32 @@ impl BrokerResultMessage {
         }
     }
 
-    pub(super) fn failure(operation: &str, stage: &str, error_chain: &str) -> Self {
+    pub(super) fn from_failure(operation: &str, failure: &ActionFailure) -> Self {
+        let (disposition, stage) = match &failure.kind {
+            ActionFailureKind::Blocked(blocker) => {
+                (BrokerResultDisposition::Blocked, blocker.stage_code())
+            }
+            ActionFailureKind::Internal => (
+                BrokerResultDisposition::Failure,
+                failure.stage.as_deref().unwrap_or(operation),
+            ),
+        };
         Self {
             operation: bounded_text(operation, MAX_OPERATION_BYTES),
-            disposition: BrokerResultDisposition::Failure,
+            disposition,
             stage: bounded_text(stage, MAX_STAGE_BYTES),
-            error_chain: bounded_text(error_chain, MAX_ERROR_CHAIN_BYTES),
-            rollback: String::new(),
+            error_chain: bounded_text(&failure.detail, MAX_ERROR_CHAIN_BYTES),
+            rollback: failure.rollback.as_str().to_owned(),
             final_state: String::new(),
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn failure(operation: &str, stage: &str, error_chain: &str) -> Self {
+        Self::from_failure(
+            operation,
+            &ActionFailure::internal_at(stage, error_chain.to_owned()),
+        )
     }
 }
 

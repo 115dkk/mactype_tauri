@@ -1,3 +1,4 @@
+pub(super) mod action_failure;
 mod broker_result;
 mod file_guard;
 mod identity;
@@ -13,6 +14,10 @@ use broker::{
     service_package_preflight_for_layouts,
 };
 
+use action_failure::{
+    ActionBlocker, ActionFailure, ActionFailureKind, InstallationPreflightKind, RollbackOutcome,
+    INTERNAL_OPERATION_FAILURE_PREFIX,
+};
 use broker_result::{
     decode_broker_result_frame, encode_broker_result_frame, BrokerResultDisposition,
     BrokerResultMessage, BROKER_RESULT_HEADER_BYTES, BROKER_RESULT_MAGIC, BROKER_RESULT_VERSION,
@@ -20,8 +25,8 @@ use broker_result::{
 };
 use file_guard::{read_bounded_regular_file, reject_reparse_chain};
 use identity::{
-    classify_owned_installation, configured_service_binary, is_protected_service_binary, same_path,
-    select_service_health, validated_reveal_binary, LiveHealthReport,
+    classify_owned_installation, configured_service_binary, same_path, select_service_health,
+    validated_reveal_binary, LiveHealthReport,
 };
 #[cfg(test)]
 use legacy_status::legacy_migration_available;
@@ -41,30 +46,14 @@ use runtime::{
 };
 use startup_lifecycle::{finish_action_with_startup_receipts, StartupReceiptRestorer};
 
-const INSTALLATION_REQUIRED_PREFIX: &str = "control-center-installation-required:";
-const INSTALLATION_INCOMPLETE_PREFIX: &str = "control-center-installation-incomplete:";
-const INSTALLATION_UNTRUSTED_PREFIX: &str = "control-center-installation-untrusted:";
-
-fn installation_preflight_failure(error: &str) -> bool {
-    [
-        INSTALLATION_REQUIRED_PREFIX,
-        INSTALLATION_INCOMPLETE_PREFIX,
-        INSTALLATION_UNTRUSTED_PREFIX,
-    ]
-    .iter()
-    .any(|prefix| error.starts_with(prefix))
-}
-
-fn management_package_state_from_error(
-    error: &str,
+fn management_package_state_from_kind(
+    kind: InstallationPreflightKind,
 ) -> crate::service_contract::ServiceManagementPackageState {
     use crate::service_contract::ServiceManagementPackageState;
-    if error.starts_with(INSTALLATION_REQUIRED_PREFIX) {
-        ServiceManagementPackageState::NotInstalled
-    } else if error.starts_with(INSTALLATION_INCOMPLETE_PREFIX) {
-        ServiceManagementPackageState::Incomplete
-    } else {
-        ServiceManagementPackageState::Untrusted
+    match kind {
+        InstallationPreflightKind::Required => ServiceManagementPackageState::NotInstalled,
+        InstallationPreflightKind::Incomplete => ServiceManagementPackageState::Incomplete,
+        InstallationPreflightKind::Untrusted => ServiceManagementPackageState::Untrusted,
     }
 }
 
@@ -84,7 +73,7 @@ pub(crate) fn management_package_state() -> crate::service_contract::ServiceMana
     {
         broker::service_package()
             .map(|_| crate::service_contract::ServiceManagementPackageState::Ready)
-            .unwrap_or_else(|failure| management_package_state_from_error(&failure.error))
+            .unwrap_or_else(|failure| management_package_state_from_kind(failure.kind))
     }
     #[cfg(not(windows))]
     {
@@ -108,21 +97,27 @@ use std::{
 pub(crate) fn run_action(
     action: SystemServiceAction,
     profile: Option<&[u8]>,
-) -> Result<(), String> {
+) -> Result<(), ActionFailure> {
     if profile.is_some() != action.needs_profile_input()
         || profile.is_some_and(|bytes| {
             bytes.is_empty() || bytes.len() > mactype_service_contract::MAX_PROFILE_BYTES
         })
     {
-        return Err("the service action has an invalid profile payload".to_owned());
+        return Err(ActionFailure::internal(
+            "the service action has an invalid profile payload",
+        ));
     }
     #[cfg(windows)]
     let service_control_center = match broker::service_package() {
         Ok(package) => package.control_center,
         Err(failure) => {
-            let error = failure.error;
-            record_action_failure(action, profile, &error, Some(*failure.diagnostics));
-            return Err(error);
+            let failure = ActionFailure::installation_preflight(
+                failure.kind,
+                failure.diagnostics,
+                failure.error,
+            );
+            record_action_failure(action, profile, &failure);
+            return Err(failure);
         }
     };
     let result = {
@@ -133,20 +128,28 @@ pub(crate) fn run_action(
         #[cfg(not(windows))]
         {
             let _ = profile;
-            Err("system service control is available only on Windows".to_owned())
+            Err(ActionFailure::internal_at(
+                action.broker_verb(),
+                "system service control is available only on Windows",
+            ))
         }
     };
     let result =
         finish_action_with_startup_receipts(&mut SystemStartupReceiptRestorer, action, result);
     match result {
         Ok(()) => Ok(()),
-        Err(error) if expected_action_blocker(&error) => Err(error),
-        Err(error) => {
-            record_action_failure(action, profile, &error, None);
-            Err(format!(
+        Err(
+            failure @ ActionFailure {
+                kind: ActionFailureKind::Blocked(_),
+                ..
+            },
+        ) => Err(failure),
+        Err(failure) => {
+            record_action_failure(action, profile, &failure);
+            Err(ActionFailure::internal(format!(
                 "{INTERNAL_OPERATION_FAILURE_PREFIX}{}",
                 action.broker_verb()
-            ))
+            )))
         }
     }
 }
@@ -154,75 +157,41 @@ pub(crate) fn run_action(
 fn record_action_failure(
     action: SystemServiceAction,
     profile: Option<&[u8]>,
-    error: &str,
-    installation_preflight: Option<crate::diagnostics::InstallationPreflightDiagnostics>,
+    failure: &ActionFailure,
 ) {
     let profile_text = profile.map(|bytes| String::from_utf8_lossy(bytes).into_owned());
-    let failure = operation_failure(action, error, installation_preflight);
+    let failure = operation_failure(action, failure);
     let redactions = profile_text.as_deref().into_iter().collect::<Vec<_>>();
     let _ = crate::diagnostics::record_operation_failure(&failure, &redactions);
 }
 
-const INTERNAL_OPERATION_FAILURE_PREFIX: &str = "control-center-internal-operation-failed:";
-
-fn expected_action_blocker(error: &str) -> bool {
-    [
-        "administrator approval was cancelled",
-        "AppInit conflicts block",
-        "AppInit registry mode conflicts",
-        "the legacy MacTray tray mode blocks",
-        "a legacy MacType service is still installed",
-        "the fixed service name became foreign or inaccessible",
-    ]
-    .iter()
-    .any(|prefix| error.starts_with(prefix))
-        || installation_preflight_failure(error)
+fn operation_failure_metadata(
+    action: SystemServiceAction,
+    failure: &ActionFailure,
+) -> (&str, RollbackOutcome) {
+    let stage = if failure.diagnostics().is_some() {
+        "installation-preflight"
+    } else {
+        failure.stage.as_deref().unwrap_or(action.broker_verb())
+    };
+    (stage, failure.rollback)
 }
 
 fn operation_failure(
     action: SystemServiceAction,
-    error: &str,
-    installation_preflight: Option<crate::diagnostics::InstallationPreflightDiagnostics>,
+    failure: &ActionFailure,
 ) -> crate::diagnostics::OperationFailure {
-    let stage = if installation_preflight.is_some() {
-        "installation-preflight"
-    } else {
-        error
-            .split_once(':')
-            .map(|(stage, _)| stage)
-            .unwrap_or(action.broker_verb())
-    };
-    let channel_failure = [
-        "broker result channel failed:",
-        "reporting the broker result failed:",
-    ]
-    .iter()
-    .find_map(|marker| {
-        error
-            .split_once(marker)
-            .map(|(_, detail)| detail.trim().to_owned())
-    });
+    let (stage, rollback) = operation_failure_metadata(action, failure);
     let modern = status();
     let legacy = super::legacy_mactray::status(super::registry_conflict_detected());
     let receipt = super::legacy_migration::current_stage_name().unwrap_or("unavailable");
-    let rollback = if installation_preflight.is_some() {
-        "not-applicable"
-    } else if error.contains("rollback failed") || error.contains("restoration failed") {
-        "failed"
-    } else if receipt == "rollback-completed" {
-        "completed"
-    } else if receipt == "legacy-stopped" {
-        "fail-closed-legacy-stopped"
-    } else {
-        "not-applicable-or-unavailable"
-    };
     crate::diagnostics::OperationFailure {
         operation: action.broker_verb().to_owned(),
         stage: stage.to_owned(),
-        error_chain: error.to_owned(),
+        error_chain: failure.detail.clone(),
         broker_exit_code: None,
-        channel_failure,
-        rollback: rollback.to_owned(),
+        channel_failure: failure.channel_failure.clone(),
+        rollback: rollback.as_str().to_owned(),
         final_state: format!(
             "legacy={:?}/{:?}/win32={:?}; modern={:?}/{:?}/{:?}/win32={:?}; receipt={receipt}",
             legacy.presence,
@@ -233,28 +202,31 @@ fn operation_failure(
             modern.health,
             modern.win32_error,
         ),
-        installation_preflight,
+        installation_preflight: failure.diagnostics().cloned(),
     }
 }
 
 struct SystemStartupReceiptRestorer;
 
 impl StartupReceiptRestorer for SystemStartupReceiptRestorer {
-    fn restore_local_machine(&mut self) -> Result<(), String> {
+    fn restore_local_machine(&mut self) -> Result<(), ActionFailure> {
         #[cfg(windows)]
         {
             windows::run_elevated(SystemServiceAction::RestoreLegacyTrayAutostart, None)
         }
         #[cfg(not(windows))]
         {
-            Err("local-machine startup restoration is available only on Windows".to_owned())
+            Err(ActionFailure::internal(
+                "local-machine startup restoration is available only on Windows",
+            ))
         }
     }
 
-    fn restore_current_user(&mut self) -> Result<(), String> {
+    fn restore_current_user(&mut self) -> Result<(), ActionFailure> {
         super::legacy_migration::restore_startup_scope(
             super::legacy_migration::StartupReceiptScope::CurrentUser,
         )
+        .map_err(ActionFailure::from)
     }
 }
 

@@ -64,21 +64,15 @@ fn installation_preflight_errors_project_distinct_read_only_states() {
     use crate::service_contract::ServiceManagementPackageState;
 
     assert_eq!(
-        management_package_state_from_error(
-            "control-center-installation-required: run the installer"
-        ),
+        management_package_state_from_kind(InstallationPreflightKind::Required),
         ServiceManagementPackageState::NotInstalled
     );
     assert_eq!(
-        management_package_state_from_error(
-            "control-center-installation-incomplete: runtime is missing"
-        ),
+        management_package_state_from_kind(InstallationPreflightKind::Incomplete),
         ServiceManagementPackageState::Incomplete
     );
     assert_eq!(
-        management_package_state_from_error(
-            "control-center-installation-untrusted: outside Program Files"
-        ),
+        management_package_state_from_kind(InstallationPreflightKind::Untrusted),
         ServiceManagementPackageState::Untrusted
     );
 }

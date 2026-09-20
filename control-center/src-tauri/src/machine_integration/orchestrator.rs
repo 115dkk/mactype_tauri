@@ -1,5 +1,11 @@
 use super::{MachineAction, MachineBackend, TrayLoginState};
-use crate::service_contract::SystemServiceStatus;
+use crate::{
+    machine_integration::open_service::action_failure::{
+        ActionBlocker, ActionFailure, AppInitConflictContext, LegacyServiceBlockContext,
+        LegacyTrayBlockContext,
+    },
+    service_contract::SystemServiceStatus,
+};
 
 pub(super) fn tray_login_with(
     backend: &mut impl MachineBackend,
@@ -21,12 +27,14 @@ pub(super) fn tray_apply_with(
     backend: &mut impl MachineBackend,
     paused: bool,
     profile: &[u8],
-) -> Result<(), String> {
+) -> Result<(), ActionFailure> {
     if paused {
-        return Err("system injection is paused".to_owned());
+        return Err(ActionFailure::internal("system injection is paused"));
     }
     if profile.is_empty() || profile.len() > mactype_service_contract::MAX_PROFILE_BYTES {
-        return Err("the active profile payload is outside the allowed range".to_owned());
+        return Err(ActionFailure::internal(
+            "the active profile payload is outside the allowed range",
+        ));
     }
     execute_machine_action_with(backend, MachineAction::PublishProfile, Some(profile))
 }
@@ -35,7 +43,7 @@ pub(super) fn execute_machine_action_with(
     backend: &mut impl MachineBackend,
     action: MachineAction,
     profile: Option<&[u8]>,
-) -> Result<(), String> {
+) -> Result<(), ActionFailure> {
     let profile_contract_is_valid = match action {
         MachineAction::Start
         | MachineAction::PublishProfile
@@ -47,22 +55,26 @@ pub(super) fn execute_machine_action_with(
         bytes.is_empty() || bytes.len() > mactype_service_contract::MAX_PROFILE_BYTES
     });
     if !profile_contract_is_valid {
-        return Err("the machine action has an invalid profile payload".to_owned());
+        return Err(ActionFailure::internal(
+            "the machine action has an invalid profile payload",
+        ));
     }
 
     if !matches!(action, MachineAction::Rollback | MachineAction::Stop) {
         let legacy_tray = backend.legacy_tray_status();
         if legacy_tray.blocks_machine_change() {
-            return Err(
-                "the legacy MacTray tray mode blocks this machine integration change".to_owned(),
-            );
+            return Err(ActionFailure::blocked(ActionBlocker::LegacyTrayModeBlocks(
+                LegacyTrayBlockContext::MachineIntegrationChange,
+            )));
         }
     }
 
     let appinit_conflict = if matches!(action, MachineAction::Rollback | MachineAction::Stop) {
         false
     } else {
-        backend.appinit_conflict()?
+        backend
+            .appinit_conflict()
+            .map_err(|error| ActionFailure::internal_at("observe-appinit-conflict", error))?
     };
     let status = backend.new_service_status();
     if action == MachineAction::Rollback {
@@ -70,12 +82,14 @@ pub(super) fn execute_machine_action_with(
     }
     if let Some(authorized) = native_action_authorized(&status, action) {
         if !authorized {
-            return Err(format!(
+            return Err(ActionFailure::internal(format!(
                 "the current service status does not authorize {action:?}"
-            ));
+            )));
         }
         if appinit_conflict && action != MachineAction::Stop {
-            return Err("AppInit conflicts block this machine integration change".to_owned());
+            return Err(ActionFailure::blocked(ActionBlocker::AppInitConflict(
+                AppInitConflictContext::MachineIntegrationChange,
+            )));
         }
         refuse_activation_with_legacy_service(backend, action)?;
         let dispatched_action = if action == MachineAction::Start && profile.is_some() {
@@ -86,7 +100,9 @@ pub(super) fn execute_machine_action_with(
         return backend.execute(dispatched_action, profile);
     }
     if appinit_conflict {
-        return Err("AppInit conflicts block this machine integration change".to_owned());
+        return Err(ActionFailure::blocked(ActionBlocker::AppInitConflict(
+            AppInitConflictContext::MachineIntegrationChange,
+        )));
     }
     if status.backend == crate::service_contract::ServiceBackend::Foreign
         || !matches!(
@@ -101,9 +117,9 @@ pub(super) fn execute_machine_action_with(
                 | crate::service_contract::RuntimeState::Stopped
         )
     {
-        return Err(
-            "the machine integration state is foreign, transitioning, or unsafe".to_owned(),
-        );
+        return Err(ActionFailure::internal(
+            "the machine integration state is foreign, transitioning, or unsafe",
+        ));
     }
     refuse_activation_with_legacy_service(backend, action)?;
     backend.execute(action, profile)
@@ -117,16 +133,17 @@ pub(super) fn execute_machine_action_with(
 fn refuse_activation_with_legacy_service(
     backend: &mut impl MachineBackend,
     action: MachineAction,
-) -> Result<(), String> {
+) -> Result<(), ActionFailure> {
     if matches!(
         action,
         MachineAction::Install | MachineAction::Start | MachineAction::PublishProfile
-    ) && backend.legacy_service_blocks_activation()?
+    ) && backend
+        .legacy_service_blocks_activation()
+        .map_err(|error| ActionFailure::internal_at("observe-legacy-service", error))?
     {
-        return Err(
-            "a legacy MacType service is still installed; migrate it before starting the new service"
-                .to_owned(),
-        );
+        return Err(ActionFailure::blocked(
+            ActionBlocker::LegacyServiceStillInstalled(LegacyServiceBlockContext::StartNewService),
+        ));
     }
     Ok(())
 }

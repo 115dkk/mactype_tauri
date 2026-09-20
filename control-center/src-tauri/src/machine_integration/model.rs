@@ -66,7 +66,7 @@ pub(crate) struct MachineStatus {
     pub expected_profile_digest: Option<String>,
 }
 
-pub(crate) trait MachineBackend {
+pub(super) trait MachineBackend {
     fn new_service_status(&mut self) -> SystemServiceStatus;
     fn legacy_tray_status(&mut self) -> LegacyTrayStatus;
     fn appinit_conflict(&mut self) -> Result<bool, String>;
@@ -74,5 +74,9 @@ pub(crate) trait MachineBackend {
     /// A verified Stopped + Disabled service may remain installed for explicit
     /// removal without blocking the new service.
     fn legacy_service_blocks_activation(&mut self) -> Result<bool, String>;
-    fn execute(&mut self, action: MachineAction, profile: Option<&[u8]>) -> Result<(), String>;
+    fn execute(
+        &mut self,
+        action: MachineAction,
+        profile: Option<&[u8]>,
+    ) -> Result<(), open_service::action_failure::ActionFailure>;
 }

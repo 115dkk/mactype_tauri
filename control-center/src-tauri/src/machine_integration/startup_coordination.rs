@@ -1,4 +1,4 @@
-use super::{legacy_mactray, legacy_migration, open_service};
+use super::{action_result, legacy_mactray, legacy_migration, open_service};
 
 struct SystemStartupCoordinator;
 
@@ -12,17 +12,17 @@ impl legacy_mactray::LegacyTrayStartupCoordinator for SystemStartupCoordinator {
     }
 
     fn disable_local_machine(&mut self) -> Result<(), String> {
-        open_service::run_action(
+        action_result(open_service::run_action(
             open_service::SystemServiceAction::DisableLegacyTrayAutostart,
             None,
-        )
+        ))
     }
 
     fn restore_local_machine(&mut self) -> Result<(), String> {
-        open_service::run_action(
+        action_result(open_service::run_action(
             open_service::SystemServiceAction::RestoreLegacyTrayAutostart,
             None,
-        )
+        ))
     }
 
     fn restore_current_user(&mut self) -> Result<(), String> {

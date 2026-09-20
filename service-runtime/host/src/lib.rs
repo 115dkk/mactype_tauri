@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod active_generation;
 mod control;
 mod event_log;
 mod file_health;

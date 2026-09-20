@@ -3,7 +3,7 @@ use std::io;
 use std::io::Read;
 use std::path::Path;
 
-use mactype_service_contract::{RuntimeGenerationPointer, MAX_RUNTIME_POINTER_BYTES};
+use mactype_service_contract::MAX_RUNTIME_POINTER_BYTES;
 #[cfg(windows)]
 use mactype_service_platform::is_reparse_point;
 
@@ -19,12 +19,6 @@ pub(crate) fn read_bounded_regular_file(path: &Path, maximum_bytes: u64) -> io::
         ));
     }
     read_bounded_contents(file, maximum_bytes)
-}
-
-pub(crate) fn runtime_pointer_version(bytes: &[u8]) -> Option<String> {
-    RuntimeGenerationPointer::parse(bytes)
-        .ok()
-        .map(|pointer| pointer.version().to_owned())
 }
 
 pub(crate) fn read_bounded_contents(reader: impl Read, maximum_bytes: u64) -> io::Result<Vec<u8>> {

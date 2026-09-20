@@ -8,9 +8,8 @@ use mactype_service_contract::{
     MAX_PROFILE_BYTES, MAX_RUNTIME_FILE_BYTES,
 };
 
-use crate::protected_path::{
-    has_reparse_ancestor, read_bounded_regular_file, runtime_pointer_version, MAX_POINTER_BYTES,
-};
+use crate::active_generation::{self, ActiveRuntimeGeneration};
+use crate::protected_path::read_bounded_regular_file;
 
 const REQUIRED_RUNTIME_FILES: [&str; 6] = [
     "mactype-service.exe",
@@ -33,47 +32,21 @@ pub struct ProtectedRuntimeAssets {
 
 impl ProtectedRuntimeAssets {
     pub fn load(paths: MachinePaths) -> Result<Self, StructuredServiceError> {
-        let pointer = paths.runtime_pointer();
-        reject_reparse(pointer)?;
-        let bytes = read_bounded_regular_file(pointer, MAX_POINTER_BYTES).map_err(|error| {
-            if error.kind() == std::io::ErrorKind::InvalidData {
-                service_error(
-                    "active-runtime-invalid",
-                    "the protected active runtime pointer is not a bounded regular file",
-                    error.raw_os_error(),
-                )
-            } else {
-                service_error(
-                    "active-runtime-unavailable",
-                    "the protected active runtime pointer could not be read",
-                    error.raw_os_error(),
-                )
-            }
-        })?;
-        let version = runtime_pointer_version(&bytes).ok_or_else(|| {
-            service_error(
-                "active-runtime-invalid",
-                "the protected active runtime pointer has an unsupported value",
-                None,
-            )
-        })?;
+        let generation = active_generation::resolve(&paths)?;
+        Self::load_from_generation(&generation)
+    }
 
-        let root = paths.runtime_versions().join(version);
-        reject_reparse(&root)?;
-        if !root.is_dir() {
-            return Err(service_error(
-                "active-runtime-unavailable",
-                "the protected active runtime generation is missing",
-                None,
-            ));
-        }
-
-        validate_runtime_file_set(&root)?;
+    pub(crate) fn load_from_generation(
+        generation: &ActiveRuntimeGeneration,
+    ) -> Result<Self, StructuredServiceError> {
+        debug_assert_eq!(generation.version(), generation.pointer().version());
+        let root = generation.root();
+        validate_runtime_file_set(root)?;
 
         let mut immutable_files = BTreeMap::new();
         for name in REQUIRED_RUNTIME_FILES {
             let file = root.join(name);
-            reject_reparse(&file)?;
+            active_generation::reject_reparse(&file)?;
             let maximum_bytes = if name == "MacType.ini" {
                 MAX_PROFILE_BYTES
             } else {
@@ -113,7 +86,7 @@ impl ProtectedRuntimeAssets {
         Ok(Self {
             injector32: root.join("mactype-injector32.exe"),
             injector64: root.join("mactype-injector64.exe"),
-            root,
+            root: root.to_owned(),
             generation_id,
         })
     }
@@ -199,23 +172,6 @@ fn validate_runtime_file_names(
         return Err(service_error(
             "runtime-file-set-invalid",
             "the protected runtime must contain exactly the fixed service, helpers, DLLs, and generated profile",
-            None,
-        ));
-    }
-    Ok(())
-}
-
-fn reject_reparse(path: &Path) -> Result<(), StructuredServiceError> {
-    if has_reparse_ancestor(path).map_err(|error| {
-        service_error(
-            "active-runtime-inaccessible",
-            "the protected runtime path could not be inspected",
-            error.raw_os_error(),
-        )
-    })? {
-        return Err(service_error(
-            "active-runtime-reparse",
-            "reparse points are forbidden in the protected runtime path",
             None,
         ));
     }

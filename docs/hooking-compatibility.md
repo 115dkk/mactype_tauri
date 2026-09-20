@@ -67,6 +67,7 @@ or executable-name workaround.
 | Loader hook ran on a 64 KB driver worker thread | field log of this branch, 2026-09-11: Rebel Inc. Escalation (Unity 2022.3.62f3, IL2CPP) died with `STATUS_STACK_OVERFLOW` inside `MacType64.dll` while an NVIDIA D3D11 worker thread loaded `tzres.dll` through the hooked `LoadLibraryExW` | The `DWriteCore.dll` module check no longer places a 32,768-character path on the stack. Module base names resolve through a bounded heap query, the virtual font comparison chunk moved to the heap, and the open-core build rejects any first-party renderer frame above 16 KB. |
 | Startup applications created before the service reached Ready (a slow service start, an automatic sign-in after a restart) | field report, 2026-09: whether a file manager started with Windows was covered changed with the automatic sign-in setting | Initialisation subscribes to `Win32_ProcessStartTrace` before taking its `Win32_Process` snapshot and injects every process alive at that moment from the backlog; session lock and unlock do not filter targets. These targets take the late route, so a DirectWrite collection they already retained stays an older generation. |
 | Browser chrome text garbled after a reboot: Latin drawn in the wrong glyph order, Hangul as boxes | field measurement of this branch, 2026-09-19: the Firefox address bar and tab title were shaped with the Pretendard alias and rasterised with Arial | A browser GPU process opens the aliased font file by path under a restricted token; the per-user cache had inherited a profile DACL that denies it, and once the Font Cache Service is cold after a reboot WebRender falls back to Arial. The cache directory now grants `BUILTIN\Users`, `ALL APPLICATION PACKAGES`, and `ALL RESTRICTED APPLICATION PACKAGES` read and execute, inherited by every file, exactly like `%WINDIR%\Fonts`. |
+| Korean text of a Qt 5 application garbled while Latin stays correct, only in a process the renderer reached after it was already drawing (an elevated emulator front end launched from Explorer) | field measurement of this branch, 2026-09-20: MSI App Player (HD-Player.exe, Qt 5.15.4, GDI font engines) drew Gulim glyph ids with Pretendard Variable outlines | `FontSubstitutes` used to be decided per `HFONT` at `CreateFontIndirect`, so a late-injected process held the stock font for HFONTs made before the hooks and the replacement for HFONTs made after them, and Qt's GDI engine pairs the `cmap` of the first with the outlines of the second. The renderer now samples the process's GDI object count when it installs the font-creation hooks; when objects already existed and a Qt GUI module (`Qt5Gui.dll`, `Qt6Gui.dll`, `QtGui4.dll`, or a debug variant) is loaded, GDI-level substitution stays off for the life of that process, so every HFONT of a family keeps one physical identity. The DirectWrite alias collection and glyph rendering are unchanged; such a process shows its stock GDI families consistently instead of garbage. |
 
 ## Implemented evidence
 
@@ -110,6 +111,30 @@ address bar the user saw. The cache directory now grants `BUILTIN\Users`,
 execute with inheritance, the same grants `%WINDIR%\Fonts` carries. The probe
 test opens a persisted file under a privilege-stripped restricted token and
 proves that a protected-DACL control file is still denied.
+
+A second boundary sits on the GDI side and was measured on 2026-09-20 in MSI
+App Player. Its Qt 5.15.4 front end is elevated, so the pre-entry child relay
+of the hooked Explorer cannot reach it and the service observer injects it a
+few seconds after it started. By then Qt had created its Korean fallback
+engines: each `QWindowsFontEngine` keeps the `HFONT` it was born with and the
+`cmap` read from it, and later realises the same `LOGFONT` again for the
+distance-field reference font and the design-size outline font. With
+`FontSubstitutes` applied per `HFONT`, the early handles were Gulim and the
+later ones Pretendard Variable, and `GetGlyphOutline(GGO_NATIVE |
+GGO_GLYPH_INDEX)` interpreted Gulim glyph ids against Pretendard's glyph
+order. Decoding the screenshot with the two fonts' glyph orders reproduced the
+garbled lines exactly, and a direct GDI harness on the machine (one `HFONT`
+created before injection, a second one from the same `LOGFONT` created after
+it, the first handle's glyph ids drawn through the second) shows the same
+garbage. The renderer therefore freezes GDI font identity for a process that
+was already drawing when the font-creation hooks arrived and that runs a Qt
+GUI module: `HookFontCreation` records the GDI object count before it
+installs the hooks, and `IMPL_CreateFontIndirectExW` returns the stock font
+whenever that count was non-zero and such a module is loaded. A process the
+renderer reaches before it draws (the pre-entry route) is unaffected, and so
+is every process without that text stack, including Explorer and the
+applications injected from the logon backlog. The probe test covers the
+module-name match, the decision matrix, and the process-level sampling.
 
 The supported setup stop also retires the exact generated DLL-adjacent
 profile. The existing early-injection tree test keeps a renderer loaded in a

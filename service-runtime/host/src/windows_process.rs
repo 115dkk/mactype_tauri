@@ -5,21 +5,21 @@ use mactype_service_platform::{process_session_id, MachineKind, Process, Process
 use windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER;
 
 use crate::{
-    ProcessArchitecture, ProcessIdentity, ProcessInspector, TargetLifecycle, TargetLiveness,
+    InspectedProcess, ProcessArchitecture, ProcessFacts, ProcessIdentity, ProcessInspector,
+    TargetLifecycle, TargetLiveness,
 };
 
-pub struct WindowsProcessInspector {
-    service_pid: u32,
-}
+#[derive(Default)]
+pub struct WindowsProcessInspector;
 
 impl WindowsProcessInspector {
-    pub const fn new(service_pid: u32) -> Self {
-        Self { service_pid }
+    pub const fn new() -> Self {
+        Self
     }
 }
 
 impl ProcessInspector for WindowsProcessInspector {
-    fn inspect(&self, pid: u32) -> Result<ProcessIdentity, StructuredServiceError> {
+    fn inspect(&self, pid: u32) -> Result<InspectedProcess, StructuredServiceError> {
         if pid == 0 {
             return Err(service_error(
                 "process-identity-invalid",
@@ -50,23 +50,31 @@ impl ProcessInspector for WindowsProcessInspector {
             )
         })?;
         let architecture = classify_process_architecture(machine.process, machine.native)?;
-        let protected = process.is_protected_or_unknown();
-        let excluded_from_injection = pid == self.service_pid || must_skip_injection(&process);
-        Ok(ProcessIdentity {
+        let identity = ProcessIdentity {
             pid,
             creation_time,
             session_id,
             architecture,
-            protected,
-            critical: excluded_from_injection,
-        })
+            protected: process.is_protected_or_unknown(),
+        };
+        let facts = ProcessFacts {
+            critical_or_unknown: process.is_critical_or_unknown(),
+            prohibits_dynamic_code: process
+                .dynamic_code_mitigation()
+                .is_ok_and(|policy| policy.prohibit_dynamic_code && !policy.allow_thread_opt_out),
+            restricts_binary_signature: process.binary_signature_mitigation().is_ok_and(|policy| {
+                policy.microsoft_signed_only || policy.store_signed_only || policy.mitigation_opt_in
+            }),
+            image_name: image_name(&process),
+        };
+        Ok(InspectedProcess { identity, facts })
     }
 
     fn probe_target_lifecycle(&self, identity: &ProcessIdentity) -> TargetLifecycle {
         let process = match Process::open(identity.pid, ProcessAccess::QueryLimited) {
             Ok(process) => process,
             Err(error) if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) => {
-                return TargetLifecycle::Exiting
+                return TargetLifecycle::Exiting;
             }
             Err(_) => return TargetLifecycle::Unknown,
         };
@@ -136,24 +144,6 @@ fn open_for_identity(pid: u32) -> Result<Process, StructuredServiceError> {
     })
 }
 
-fn must_skip_injection(process: &Process) -> bool {
-    if process.is_critical_or_unknown() {
-        return true;
-    }
-    if process
-        .dynamic_code_mitigation()
-        .is_ok_and(|policy| policy.prohibit_dynamic_code && !policy.allow_thread_opt_out)
-        || process.binary_signature_mitigation().is_ok_and(|policy| {
-            policy.microsoft_signed_only || policy.store_signed_only || policy.mitigation_opt_in
-        })
-    {
-        return true;
-    }
-    image_name(process).as_deref().map_or(true, |name| {
-        is_important_windows_process(name) || is_installer_control_process(name)
-    })
-}
-
 fn image_name(process: &Process) -> Option<String> {
     process
         .image_path()?
@@ -178,35 +168,6 @@ fn classify_process_architecture(
             None,
         )),
     }
-}
-
-fn is_important_windows_process(name: &str) -> bool {
-    matches!(
-        name,
-        "smss.exe"
-            | "csrss.exe"
-            | "wininit.exe"
-            | "winlogon.exe"
-            | "services.exe"
-            | "lsass.exe"
-            | "fontdrvhost.exe"
-    )
-}
-
-fn is_installer_control_process(name: &str) -> bool {
-    name == "mactype-service-setup.exe" || is_inno_uninstaller(name)
-}
-
-fn is_inno_uninstaller(name: &str) -> bool {
-    let Some((stem, extension)) = name.rsplit_once('.') else {
-        return false;
-    };
-    if !matches!(extension, "exe" | "tmp") {
-        return false;
-    }
-    let stem = stem.strip_prefix('_').unwrap_or(stem);
-    stem.strip_prefix("unins")
-        .is_some_and(|sequence| sequence.bytes().all(|character| character.is_ascii_digit()))
 }
 
 /// A structured error carrying the Win32 code of the platform failure.
@@ -241,8 +202,8 @@ mod tests {
 
     #[test]
     fn liveness_probe_distinguishes_a_running_process_from_a_reused_pid() {
-        let inspector = WindowsProcessInspector::new(0);
-        let own_identity = inspector.inspect(std::process::id()).unwrap();
+        let inspector = WindowsProcessInspector::new();
+        let own_identity = inspector.inspect(std::process::id()).unwrap().identity;
         assert_eq!(
             probe_windows_target_liveness(&own_identity),
             TargetLiveness::Alive
@@ -266,7 +227,10 @@ mod tests {
             .stderr(std::process::Stdio::null())
             .spawn()
             .unwrap();
-        let identity = WindowsProcessInspector::new(0).inspect(child.id()).unwrap();
+        let identity = WindowsProcessInspector::new()
+            .inspect(child.id())
+            .unwrap()
+            .identity;
         drop(child.stdin.take());
         child.wait().unwrap();
 
@@ -274,40 +238,5 @@ mod tests {
             probe_windows_target_liveness(&identity),
             TargetLiveness::Vanished
         );
-    }
-
-    #[test]
-    fn installer_control_processes_are_never_injection_targets() {
-        for name in [
-            "mactype-service-setup.exe",
-            "unins000.exe",
-            "unins000.tmp",
-            "_unins.tmp",
-            "_unins001.exe",
-            "_unins001.tmp",
-        ] {
-            assert!(
-                is_installer_control_process(name),
-                "installer control process was eligible for injection: {name}"
-            );
-            assert!(
-                !is_important_windows_process(name),
-                "installer control process leaked into the Windows system-process predicate: {name}"
-            );
-        }
-
-        for name in [
-            "mactype-service-setup.exe.disabled",
-            "uninstall-helper.exe",
-            "unison.exe",
-        ] {
-            assert!(
-                !is_installer_control_process(name),
-                "unrelated process was excluded by an over-broad name rule: {name}"
-            );
-        }
-
-        assert!(is_important_windows_process("services.exe"));
-        assert!(!is_installer_control_process("services.exe"));
     }
 }

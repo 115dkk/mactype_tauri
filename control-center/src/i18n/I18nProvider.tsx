@@ -9,7 +9,7 @@ import {
   type MessageKey,
   type Variables,
 } from "./i18n";
-import { setApplicationLocale } from "../app/tauri";
+import { runtime } from "../app/runtimeAdapter";
 
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>(initialLocale);
@@ -24,7 +24,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
     document.body.dataset.locale = locale;
     document.title = t("app.title");
-    void setApplicationLocale(locale).catch(() => undefined);
+    void runtime().setApplicationLocale(locale).catch(() => undefined);
   }, [locale, t]);
 
   const value = useMemo(() => ({ locale, setLocale, t }), [locale, setLocale, t]);

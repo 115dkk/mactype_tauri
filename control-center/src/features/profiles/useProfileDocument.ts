@@ -1,27 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AdvancedProfile, IndividualSetting, ProfileSnapshot } from "../../app/model";
+import type { AdvancedProfile, DesignationEffect, ExecutionStatus, IndividualSetting, LegacyProfileCandidate, ProfileEntry, ProfileSnapshot } from "../../app/model";
 import { operationErrorMessage } from "../../app/operationError";
 import { openPreferredProfile, rememberProfile } from "../../app/profilePreference";
-import {
-  currentProfile,
-  designateOpenProfile,
-  discardProfileChanges,
-  duplicateProfile,
-  listProfiles,
-  loadExecutionStatus,
-  redoProfile,
-  resetProfileDefaults,
-  saveProfile,
-  undoProfile,
-  updateProfileAdvanced,
-  updateProfileIndividuals,
-  updateProfileList,
-  updateProfileSetting,
-} from "../../app/tauri";
+import { runtime } from "../../app/runtimeAdapter";
 import { settingsSchema } from "../../generated/settings";
+import { fileName, managedProfileFor } from "../../pages/profiles/profileEditorUtils";
 import type { I18nValue } from "../../i18n/i18n";
 
-type ProfileCommand = "undo" | "redo" | "discard" | "save" | "save-as" | "designate";
+type ProfileCommand = "undo" | "redo" | "discard" | "save" | "save-as" | "designate" | "open" | "import" | "export" | "reveal" | "start";
+
+interface ProfileDocumentOptions {
+  page?: "files" | "profiles";
+  discoverLegacyProfile?: () => Promise<LegacyProfileCandidate | null>;
+}
 
 const emptyAdvancedProfile: AdvancedProfile = {
   shadow: null,
@@ -55,8 +46,13 @@ function profileLists(profile: ProfileSnapshot): Record<string, ReadonlyArray<st
   };
 }
 
-export function useProfileDocument(t: I18nValue["t"]) {
+export function useProfileDocument(t: I18nValue["t"], { page = "profiles", discoverLegacyProfile }: ProfileDocumentOptions = {}) {
   const [profile, setProfile] = useState<ProfileSnapshot | null>(null);
+  const [profiles, setProfiles] = useState<ReadonlyArray<ProfileEntry>>([]);
+  const [appliedProfile, setAppliedProfile] = useState<string | null>(null);
+  const [execution, setExecution] = useState<ExecutionStatus | null>(null);
+  const [designationEffect, setDesignationEffect] = useState<DesignationEffect | null>(null);
+  const [copyName, setCopyName] = useState("");
   const [values, setValues] = useState<Record<string, number>>(
     Object.fromEntries(settingsSchema.map((setting) => [setting.id, setting.default])),
   );
@@ -98,10 +94,15 @@ export function useProfileDocument(t: I18nValue["t"]) {
 
   useEffect(() => {
     let active = true;
-    void Promise.all([currentProfile(), listProfiles(), loadExecutionStatus()])
-      .then(([current, available, execution]) => openPreferredProfile(current, available, execution.activeProfile))
-      .then((opened) => {
-        if (active && opened) applySnapshot(opened);
+    void Promise.all([runtime().currentProfile(), runtime().listProfiles(), runtime().loadExecutionStatus(), discoverLegacyProfile ? discoverLegacyProfile() : runtime().discoverLegacyProfile()])
+      .then(async ([current, available, nextExecution, detected]) => {
+        const managedDetected = detected ? managedProfileFor(detected, available) : null;
+        const opened = await openPreferredProfile(current, available, nextExecution, managedDetected);
+        if (!active) return;
+        if (opened) applySnapshot(opened);
+        setProfiles(available);
+        setAppliedProfile(nextExecution.activeProfile);
+        setExecution(nextExecution);
       })
       .catch((caught: unknown) => {
         if (active) setError(errorMessage(caught));
@@ -112,7 +113,7 @@ export function useProfileDocument(t: I18nValue["t"]) {
     return () => {
       active = false;
     };
-  }, [applySnapshot]);
+  }, [applySnapshot, discoverLegacyProfile]);
 
   const previewSetting = (settingId: string, value: number) => {
     setValues((current) => ({ ...current, [settingId]: value }));
@@ -120,12 +121,12 @@ export function useProfileDocument(t: I18nValue["t"]) {
 
   const changeSetting = (settingId: string, value: number) => {
     previewSetting(settingId, value);
-    queueMutation(() => updateProfileSetting(settingId, value));
+    queueMutation(() => runtime().updateProfileSetting(settingId, value));
   };
 
   const commitIndividuals = (next: IndividualSetting[]) => {
     setIndividuals(next);
-    queueMutation(() => updateProfileIndividuals(next));
+    queueMutation(() => runtime().updateProfileIndividuals(next));
   };
 
   const addIndividual = (font: string) => {
@@ -137,21 +138,21 @@ export function useProfileDocument(t: I18nValue["t"]) {
   const updateList = (kind: string, entries: ReadonlyArray<string>) => {
     const normalized = entries.map((entry) => entry.trim()).filter(Boolean);
     setLists((current) => ({ ...current, [kind]: normalized }));
-    queueMutation(() => updateProfileList(kind, normalized));
+    queueMutation(() => runtime().updateProfileList(kind, normalized));
   };
 
   const commitAdvanced = (next: AdvancedProfile) => {
     setAdvanced(next);
-    queueMutation(() => updateProfileAdvanced(next));
+    queueMutation(() => runtime().updateProfileAdvanced(next));
   };
 
   const resetDefaults = () => {
     setValues(Object.fromEntries(settingsSchema.map((setting) => [setting.id, setting.factory])));
-    queueMutation(() => resetProfileDefaults());
+    queueMutation(() => runtime().resetProfileDefaults());
   };
 
   const runHistoryCommand = async (nextCommand: "undo" | "redo" | "discard") => {
-    const action = nextCommand === "undo" ? undoProfile : nextCommand === "redo" ? redoProfile : discardProfileChanges;
+    const action = nextCommand === "undo" ? () => runtime().undoProfile() : nextCommand === "redo" ? () => runtime().redoProfile() : () => runtime().discardProfileChanges();
     setCommand(nextCommand);
     try {
       await mutationQueue.current;
@@ -166,35 +167,24 @@ export function useProfileDocument(t: I18nValue["t"]) {
     }
   };
 
-  const designateProfile = async () => {
-    if (recoveryRequired || (profile?.dirtyKeys.length ?? 0) > 0) return;
-    setCommand("designate");
+  const runCommand = async (
+    nextCommand: ProfileCommand,
+    action: () => Promise<string | null>,
+    formatError: (caught: unknown) => string = errorMessage,
+  ): Promise<boolean> => {
+    if (pendingEdits > 0 || command !== null) return false;
+    setCommand(nextCommand);
+    setDesignationEffect(null);
     try {
       await mutationQueue.current;
-      const designated = await designateOpenProfile();
-      const name = designated.sourceProfile.split(/[\\/]/).pop() ?? designated.sourceProfile;
-      setMessage(t(designated.effect === "live" ? "profiles.designatedLive" : "profiles.designatedNextStart", { name }));
-      setError(null);
-    } catch (caught: unknown) {
-      setError(operationErrorMessage(caught, t));
-      setMessage(null);
-    } finally {
-      setCommand(null);
-    }
-  };
-
-  const saveProfileAs = async (name: string) => {
-    if (recoveryRequired || !name.trim()) return false;
-    setCommand("save-as");
-    try {
-      await mutationQueue.current;
-      const saved = await duplicateProfile(name.trim());
-      applySnapshot(saved);
-      setMessage(t("profiles.savedAs", { path: saved.displayPath }));
-      setError(null);
+      const success = await action();
+      if (success !== null) {
+        setMessage(success);
+        setError(null);
+      }
       return true;
     } catch (caught: unknown) {
-      setError(errorMessage(caught));
+      setError(formatError(caught));
       setMessage(null);
       return false;
     } finally {
@@ -202,23 +192,80 @@ export function useProfileDocument(t: I18nValue["t"]) {
     }
   };
 
-  const saveCurrentProfile = async () => {
-    if (recoveryRequired) return;
-    setCommand("save");
+  const replaceDocument = async (
+    nextCommand: "open" | "import" | "save" | "save-as",
+    action: () => Promise<ProfileSnapshot>,
+    success: (opened: ProfileSnapshot) => string,
+  ): Promise<boolean> => runCommand(nextCommand, async () => {
+    const opened = await action();
+    applySnapshot(opened);
+    setProfiles(await runtime().listProfiles());
+    return success(opened);
+  }, page === "files" ? (caught) => operationErrorMessage(caught, t) : errorMessage);
+
+  const runFileOperation = async (operation: "pick-import" | "export" | "reveal", action: () => Promise<string | null>) => {
+    if (operation !== "pick-import") return runCommand(operation, action);
     try {
-      await mutationQueue.current;
-      const saved = await saveProfile();
-      if (!saved) throw new Error(t("profiles.none"));
-      applySnapshot(saved);
-      const name = saved.path.split(/[\\/]/).pop() ?? saved.path;
-      setMessage(t("profiles.savedNow", { name }));
-      setError(null);
+      await action();
+      return true;
     } catch (caught: unknown) {
       setError(errorMessage(caught));
-      setMessage(null);
-    } finally {
-      setCommand(null);
+      return false;
     }
+  };
+
+  const chooseProfile = async (path: string): Promise<boolean> => {
+    if (profile?.path === path) return true;
+    if (recoveryRequired) return false;
+    return replaceDocument("open", () => runtime().openProfile(path), (opened) => t("files.opened", { name: fileName(opened.path) }));
+  };
+
+  const designateProfile = async () => {
+    if (!profile || recoveryRequired || dirtyKeys.length > 0) return;
+    await runCommand("designate", async () => {
+      const designated = await runtime().designateOpenProfile();
+      setAppliedProfile(designated.sourceProfile);
+      setDesignationEffect(designated.effect);
+      setExecution(await runtime().loadExecutionStatus());
+      return t(designated.effect === "live" ? "profiles.designatedLive" : "profiles.designatedNextStart", { name: fileName(designated.sourceProfile) });
+    }, (caught) => operationErrorMessage(caught, t));
+  };
+
+  const saveProfileAs = async () => {
+    const name = copyName.trim();
+    if (!profile || recoveryRequired || !name) return false;
+    const saved = await replaceDocument("save-as", () => runtime().duplicateProfile(name), (opened) => page === "files"
+      ? t("files.duplicated", { name: fileName(opened.path) })
+      : t("profiles.savedAs", { path: opened.displayPath }));
+    if (saved) setCopyName("");
+    return saved;
+  };
+
+  const saveCurrentProfile = async () => {
+    if (!profile?.canSave || recoveryRequired || dirtyKeys.length === 0) return;
+    await replaceDocument("save", async () => {
+      const saved = await runtime().saveProfile();
+      if (!saved) throw new Error(t("profiles.none"));
+      return saved;
+    }, (opened) => t(page === "files" ? "files.saved" : "profiles.savedNow", { name: fileName(opened.path) }));
+  };
+
+  const serviceCanStart = Boolean(
+    execution?.systemService.installation === "current"
+      && execution.systemService.runtime === "stopped"
+      && execution.systemService.canStart,
+  );
+  const offerStart = designationEffect === "next-start" && serviceCanStart;
+
+  // Designation never starts the service; only this separate user action may do so.
+  const startServiceNow = async () => {
+    if (!offerStart) return;
+    await runCommand("start", async () => {
+      const next = await runtime().manageSystemService("start");
+      setExecution(next);
+      setAppliedProfile(next.activeProfile);
+      return t("files.serviceStartedWithRunProfile", { name: next.activeProfile ? fileName(next.activeProfile) : "" });
+    }, (caught) => operationErrorMessage(caught, t, "execution.operationFailed"));
   };
 
   const dirtyKeys = useMemo(() => {
@@ -234,6 +281,16 @@ export function useProfileDocument(t: I18nValue["t"]) {
   const dirtyCount = dirtyKeys.length;
 
   return {
+    appliedProfile,
+    chooseProfile,
+    copyName,
+    designationEffect,
+    offerStart,
+    profiles,
+    replaceDocument,
+    runFileOperation,
+    setCopyName,
+    startServiceNow,
     addIndividual,
     advanced,
     designateProfile,
@@ -259,7 +316,6 @@ export function useProfileDocument(t: I18nValue["t"]) {
     saveCurrentProfile,
     saveProfileAs,
     setAdvanced,
-    setError,
     undo: () => runHistoryCommand("undo"),
     updateList,
     values,

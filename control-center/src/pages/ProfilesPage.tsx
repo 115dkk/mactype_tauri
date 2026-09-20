@@ -3,14 +3,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Hint } from "../components/Hint";
 import { settingsSchema } from "../generated/settings";
 import { settingMessageKey, useI18n } from "../i18n/i18n";
-import { loadInstalledFontFamilies } from "../app/tauri";
+import { runtime } from "../app/runtimeAdapter";
 import { AdvancedSettings } from "./profiles/AdvancedSettings";
 import { IndividualSettings } from "./profiles/IndividualSettings";
 import { ListsEditor } from "./profiles/ListsEditor";
 import { BasicSettings, LcdSettings, SearchSettings, ShapeSettings } from "./profiles/SchemaSettings";
 import { splitSubstitution } from "./profiles/profileEditorUtils";
 import { ProfilePreviewPanel, type PreviewVariant, type ProfilePreviewHandle } from "./profiles/ProfilePreviewPanel";
-import { useProfileDocument } from "./profiles/useProfileDocument";
+import { useProfileDocument } from "../features/profiles/useProfileDocument";
 import { useStepHistory } from "./profiles/useStepHistory";
 import { WizardSettings } from "./profiles/WizardSettings";
 import { stepSupportsHistory, wizardStepIds, type WizardStepId } from "./profiles/wizardModel";
@@ -33,7 +33,6 @@ const DOCKED_PREVIEW_MIN_WIDTH: Readonly<Record<ProfileMode, number>> = { quick:
 interface ProfilesPageProps {
   ciSmoke?: boolean;
   mode?: ProfileMode;
-  onModeChange?: (mode: ProfileMode) => void;
   onPreviewReady?: () => void;
 }
 
@@ -68,6 +67,8 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
     command: profileCommand,
     commitAdvanced,
     commitIndividuals,
+    copyName: saveAsName,
+    setCopyName: setSaveAsName,
     dirtyCount,
     dirtyKeys,
     discard,
@@ -101,7 +102,6 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
   const [fontFace, setFontFace] = useState("Segoe UI");
   const [query, setQuery] = useState("");
   const [saveAsOpen, setSaveAsOpen] = useState(false);
-  const [saveAsName, setSaveAsName] = useState("");
   const [previewDocked, setPreviewDocked] = useState(false);
   const previewPanelRef = useRef<ProfilePreviewHandle>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -182,7 +182,7 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
 
   useEffect(() => {
     let active = true;
-    void loadInstalledFontFamilies()
+    void runtime().loadInstalledFontFamilies()
       .then((families) => {
         if (!active) return;
         setInstalledFonts(families);
@@ -262,9 +262,8 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
       {saveAsOpen && (
         <form className="profile-save-as" onSubmit={(event) => {
           event.preventDefault();
-          void saveProfileAs(saveAsName).then((saved) => {
+          void saveProfileAs().then((saved) => {
             if (saved) {
-              setSaveAsName("");
               setSaveAsOpen(false);
             }
           });

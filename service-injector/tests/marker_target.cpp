@@ -66,10 +66,21 @@ std::uint64_t file_time_to_integer(const FILETIME value) {
     return integer.QuadPart;
 }
 
+// The test script polls for the file's existence and then reads it, so the
+// text must appear complete: write a sibling temporary file and rename it over
+// the published path instead of truncating the published path first.
 bool write_text(const std::filesystem::path& path, const std::string& text) {
-    std::ofstream output{path, std::ios::binary | std::ios::trunc};
-    output << text;
-    return output.good();
+    std::filesystem::path staging = path;
+    staging += L".partial";
+    {
+        std::ofstream output{staging, std::ios::binary | std::ios::trunc};
+        output << text;
+        if (!output.good()) {
+            return false;
+        }
+    }
+    return MoveFileExW(staging.c_str(), path.c_str(),
+                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != FALSE;
 }
 
 }  // namespace

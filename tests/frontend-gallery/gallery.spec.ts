@@ -40,6 +40,33 @@ async function openServiceDetails(page: import("@playwright/test").Page) {
   }
 }
 
+async function openSharedServiceRow(page: import("@playwright/test").Page, kind: "manual" | "registered") {
+  const row = page.locator(`[data-kind="${kind}"]`);
+  const summary = row.locator("summary");
+  if (await summary.count()) {
+    if (!await row.evaluate((element) => (element as HTMLDetailsElement).open)) await summary.click();
+  } else if (await row.evaluate((element) => element.tagName === "BUTTON")) {
+    await row.click();
+  } else {
+    await row.getByRole("button").click();
+  }
+  return page.locator("main");
+}
+
+function profileChoice(page: import("@playwright/test").Page, name: string) {
+  return page.locator("[data-applied][data-selected]").filter({ hasText: name });
+}
+
+async function selectProfileChoice(page: import("@playwright/test").Page, name: string) {
+  const choice = profileChoice(page, name);
+  const radio = choice.getByRole("radio");
+  if (await radio.count()) await radio.check();
+  else if (await choice.getAttribute("role") === "row") await choice.click();
+  else await choice.getByRole("button").first().click();
+  await expect(choice).toHaveAttribute("data-selected", "true");
+  return choice;
+}
+
 const executionStateGallery = [
   { id: "ready", query: "system-service=ready", expected: "Running" },
   { id: "degraded", query: "system-service=degraded", expected: "Running" },
@@ -166,207 +193,235 @@ for (const view of galleryViews) {
   }
 }
 
-test("profile editor categories and collections remain interactive", async ({ page }, testInfo) => {
-  const failures: string[] = [];
-  page.on("console", (message) => {
-    if (message.type() === "error") failures.push(`console: ${message.text()}`);
-  });
-  page.on("pageerror", (error) => failures.push(`pageerror: ${error.message}`));
+test.describe("shared profile editor categories and collections remain interactive", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`profile editor categories and collections remain interactive ${skin}`, async ({ page }, testInfo) => {
+      const failures: string[] = [];
+      page.on("console", (message) => {
+        if (message.type() === "error") failures.push(`console: ${message.text()}`);
+      });
+      page.on("pageerror", (error) => failures.push(`pageerror: ${error.message}`));
 
-  await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
-  const undo = page.getByRole("button", { name: "되돌리기", exact: true });
-  const redo = page.getByRole("button", { name: "다시 하기", exact: true });
-  const discard = page.getByRole("button", { name: "변경 취소", exact: true });
-  await expect(undo).toBeDisabled();
-  const firstSelect = page.locator(".setting-row select").first();
-  const initialOption = await firstSelect.inputValue();
-  const nextOption = await firstSelect.locator("option").evaluateAll((options, current) => options.map((option) => (option as HTMLOptionElement).value).find((value) => value !== current), initialOption);
-  if (!nextOption) throw new Error("The first profile setting must expose an alternate option");
-  await firstSelect.selectOption(nextOption);
-  await expect(undo).toBeEnabled();
-  await undo.click();
-  await expect(redo).toBeEnabled();
-  await redo.click();
-  await expect(page.getByRole("button", { name: "실행 프로필로 지정", exact: true })).toBeDisabled();
-  await page.getByRole("button", { name: "지금 저장" }).click();
-  await expect(page.locator(".profile-message")).toContainText("지금 저장했습니다");
-  await expect(page.getByRole("button", { name: "실행 프로필로 지정", exact: true })).toBeEnabled();
-  await page.getByRole("button", { name: "실행 프로필로 지정", exact: true }).click();
-  await expect(page.locator(".profile-message")).toContainText("실행 프로필로 지정했습니다");
-  await firstSelect.selectOption(initialOption);
-  await expect(discard).toBeEnabled();
-  await discard.click();
-  await expect(discard).toBeDisabled();
-  await firstSelect.selectOption(initialOption);
-  await page.getByRole("button", { name: "지금 저장" }).click();
-  await expect(page.locator(".profile-message")).toContainText("지금 저장했습니다");
-  await expect(discard).toBeDisabled();
+      await page.goto(`/?view=profiles&gallery=1&lang=ko&skin=${skin}`, { waitUntil: "networkidle" });
+      const undo = page.getByRole("button", { name: "되돌리기", exact: true });
+      const redo = page.getByRole("button", { name: "다시 하기", exact: true });
+      const discard = page.getByRole("button", { name: "변경 취소", exact: true });
+      await expect(undo).toBeDisabled();
+      const firstSelect = page.locator(".setting-row select").first();
+      const initialOption = await firstSelect.inputValue();
+      const nextOption = await firstSelect.locator("option").evaluateAll((options, current) => options.map((option) => (option as HTMLOptionElement).value).find((value) => value !== current), initialOption);
+      if (!nextOption) throw new Error("The first profile setting must expose an alternate option");
+      await firstSelect.selectOption(nextOption);
+      await expect(undo).toBeEnabled();
+      await undo.click();
+      await expect(redo).toBeEnabled();
+      await redo.click();
+      await expect(page.getByRole("button", { name: "실행 프로필로 지정", exact: true })).toBeDisabled();
+      await page.getByRole("button", { name: "지금 저장" }).click();
+      await expect(page.locator(".profile-message")).toContainText("지금 저장했습니다");
+      await expect(page.getByRole("button", { name: "실행 프로필로 지정", exact: true })).toBeEnabled();
+      await page.getByRole("button", { name: "실행 프로필로 지정", exact: true }).click();
+      await expect(page.locator(".profile-message")).toContainText("실행 프로필로 지정했습니다");
+      await firstSelect.selectOption(initialOption);
+      await expect(discard).toBeEnabled();
+      await discard.click();
+      await expect(discard).toBeDisabled();
+      await firstSelect.selectOption(initialOption);
+      await page.getByRole("button", { name: "지금 저장" }).click();
+      await expect(page.locator(".profile-message")).toContainText("지금 저장했습니다");
+      await expect(discard).toBeDisabled();
 
-  // The default stack renders the sample once, because a second sample group
-  // would claim the height the settings form needs. Wide layouts dock the
-  // preview beside the form; narrower ones keep a bottom panel that no longer
-  // grows into the form.
-  await expect(page.locator(".preview-strip img")).toHaveCount(1);
-  const previewResizer = page.getByRole("separator", { name: "프리뷰 영역 높이 조절" });
-  const docked = await page.locator(".settings-workspace").getAttribute("data-preview-docked") === "true";
-  if (docked) {
-    await expect(previewResizer).toHaveCount(0);
-    const formBox = await page.locator(".settings-form").boundingBox();
-    const panelBox = await page.locator(".preview-panel").boundingBox();
-    if (!formBox || !panelBox) throw new Error("The docked layout must show both columns");
-    expect(panelBox.x, "the docked preview sits beside the form, not under it").toBeGreaterThanOrEqual(formBox.x + formBox.width - 1);
-  } else {
-    const settledHeight = Number(await previewResizer.getAttribute("aria-valuenow"));
-    expect(settledHeight, "footer control must stay visible").toBeGreaterThanOrEqual(220);
-    expect(settledHeight, "the panel must not grow past its default").toBeLessThanOrEqual(300);
-    await previewResizer.press("ArrowDown");
-    await expect(previewResizer).toHaveAttribute("aria-valuenow", String(settledHeight - 16));
-    await previewResizer.press("Home");
-    await expect(previewResizer).toHaveAttribute("aria-valuenow", "128");
-  }
+      // The default stack renders the sample once, because a second sample group
+      // would claim the height the settings form needs. Wide layouts dock the
+      // preview beside the form; narrower ones keep a bottom panel that no longer
+      // grows into the form.
+      await expect(page.locator(".preview-strip img")).toHaveCount(1);
+      const previewResizer = page.getByRole("separator", { name: "프리뷰 영역 높이 조절" });
+      const docked = await page.locator(".settings-workspace").getAttribute("data-preview-docked") === "true";
+      if (docked) {
+        await expect(previewResizer).toHaveCount(0);
+        const formBox = await page.locator(".settings-form").boundingBox();
+        const panelBox = await page.locator(".preview-panel").boundingBox();
+        if (!formBox || !panelBox) throw new Error("The docked layout must show both columns");
+        expect(panelBox.x, "the docked preview sits beside the form, not under it").toBeGreaterThanOrEqual(formBox.x + formBox.width - 1);
+      } else {
+        const settledHeight = Number(await previewResizer.getAttribute("aria-valuenow"));
+        expect(settledHeight, "footer control must stay visible").toBeGreaterThanOrEqual(220);
+        expect(settledHeight, "the panel must not grow past its default").toBeLessThanOrEqual(300);
+        await previewResizer.press("End");
+        const maximumHeight = Number(await previewResizer.getAttribute("aria-valuenow"));
+        await previewResizer.press("ArrowDown");
+        await expect(previewResizer).toHaveAttribute("aria-valuenow", String(Math.max(128, maximumHeight - 16)));
+        await previewResizer.press("Home");
+        await expect(previewResizer).toHaveAttribute("aria-valuenow", "128");
+        await previewResizer.press("End");
+      }
 
-  await page.getByRole("button", { name: "LCD·픽셀 배열" }).click();
-  await expect(page.getByRole("heading", { name: "LCD·픽셀 배열" })).toBeVisible();
-  await expect(page.getByText("빨강 채널 튜닝", { exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "LCD·픽셀 배열" }).click();
+      await expect(page.locator("main").getByRole("button", { name: "LCD·픽셀 배열", exact: true })).toBeVisible();
+      await expect(page.getByText("빨강 채널 튜닝", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "고급·실험" }).click();
-  await expect(page.getByText("DirectWrite 감마", { exact: true })).toBeVisible();
-  const shadow = page.getByRole("group", { name: "글자 그림자" });
-  await shadow.getByRole("checkbox").check();
-  await shadow.getByRole("spinbutton", { name: "가로 위치" }).fill("-2");
-  await shadow.getByRole("spinbutton", { name: "세로 위치" }).fill("3");
-  const lcdWeights = page.getByRole("group", { name: "사용자 지정 LCD 필터 가중치" });
-  await lcdWeights.getByRole("checkbox").check();
-  await expect(lcdWeights.getByRole("spinbutton")).toHaveCount(5);
-  const pixelLayout = page.getByRole("group", { name: "사용자 지정 픽셀 배열" });
-  await pixelLayout.getByRole("checkbox").check();
-  await expect(pixelLayout.getByRole("spinbutton")).toHaveCount(6);
-  const substitutionsBefore = await page.getByRole("combobox", { name: "원본 글꼴" }).count();
-  await page.getByRole("button", { name: "글꼴 대체 추가" }).click();
-  await expect(page.getByRole("combobox", { name: "원본 글꼴" })).toHaveCount(substitutionsBefore + 1);
+      await page.getByRole("button", { name: "고급·실험" }).click();
+      await expect(page.getByText("DirectWrite 감마", { exact: true })).toBeVisible();
+      const shadow = page.getByRole("group", { name: "글자 그림자" });
+      await shadow.getByRole("checkbox").check();
+      await shadow.getByRole("spinbutton", { name: "가로 위치" }).fill("-2");
+      await shadow.getByRole("spinbutton", { name: "세로 위치" }).fill("3");
+      const lcdWeights = page.getByRole("group", { name: "사용자 지정 LCD 필터 가중치" });
+      await lcdWeights.getByRole("checkbox").check();
+      await expect(lcdWeights.getByRole("spinbutton")).toHaveCount(5);
+      const pixelLayout = page.getByRole("group", { name: "사용자 지정 픽셀 배열" });
+      await pixelLayout.getByRole("checkbox").check();
+      await expect(pixelLayout.getByRole("spinbutton")).toHaveCount(6);
+      const substitutionsBefore = await page.getByRole("combobox", { name: "원본 글꼴" }).count();
+      await page.getByRole("button", { name: "글꼴 대체 추가" }).click();
+      await expect(page.getByRole("combobox", { name: "원본 글꼴" })).toHaveCount(substitutionsBefore + 1);
 
-  await page.getByRole("button", { name: "글꼴별 설정" }).click();
-  await page.getByRole("combobox", { name: "설치된 글꼴 선택" }).selectOption("Arial");
-  await expect(page.locator(".individual-row > strong").filter({ hasText: "Arial" })).toBeVisible();
+      await page.getByRole("button", { name: "글꼴별 설정" }).click();
+      await page.getByRole("combobox", { name: "설치된 글꼴 선택" }).selectOption("Arial");
+      await expect(page.locator(".individual-row > strong").filter({ hasText: "Arial" })).toBeVisible();
 
-  await page.getByRole("button", { name: "포함·제외" }).click();
-  await page.getByRole("combobox", { name: "제외 글꼴 · 목록에 글꼴 추가" }).selectOption("Calibri");
-  await expect(page.locator(".list-editor li > code").filter({ hasText: "Calibri" })).toBeVisible();
-  await expect(page.getByText("제외 프로그램", { exact: true })).toBeVisible();
-  await expect(page.getByText("DLL로 앱 제외", { exact: true })).toBeVisible();
-  await expect(page.getByText("글꼴 대체 제외 모듈", { exact: true })).toBeVisible();
-  await expect(page.getByRole("img", { name: "현재 설정의 글자 렌더링 프리뷰" })).toHaveAttribute("data-dark", "false");
-  await page.getByRole("button", { name: "색 반전" }).click();
-  await expect(page.getByRole("img", { name: "현재 설정의 글자 렌더링 프리뷰" })).toHaveAttribute("data-dark", "true");
-  const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
-  expect(horizontalOverflow, "interactive profile editor must not have horizontal scrolling").toBe(false);
-  expect(failures, failures.join("\n")).toEqual([]);
-});
-
-test("structured list editors add typed entries, reject duplicates, and suggest running processes", async ({ page }, testInfo) => {
-  await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "포함·제외" }).click();
-
-  const excludePrograms = page.locator(".list-editor").filter({ hasText: "제외 프로그램" });
-  const entryInput = excludePrograms.getByRole("combobox", { name: "제외 프로그램 · 추가" });
-  await expect(excludePrograms.locator("li > code").filter({ hasText: "fontview.exe" })).toBeVisible();
-
-  await entryInput.fill("notepad.exe");
-  await entryInput.press("Enter");
-  await expect(excludePrograms.locator("li > code").filter({ hasText: "notepad.exe" })).toBeVisible();
-  await expect(entryInput).toHaveValue("");
-
-  await entryInput.fill("NOTEPAD.EXE");
-  await excludePrograms.getByRole("button", { name: "제외 프로그램 · 추가" }).click();
-  await expect(excludePrograms.getByText("NOTEPAD.EXE은(는) 이미 목록에 있습니다.", { exact: true })).toBeVisible();
-  await expect(excludePrograms.locator("li")).toHaveCount(2);
-
-  await excludePrograms.getByRole("button", { name: "notepad.exe 제거" }).click();
-  await expect(excludePrograms.locator("li")).toHaveCount(1);
-  await expect(excludePrograms.getByText("이미 목록에 있습니다", { exact: false })).toHaveCount(0);
-
-  await expect(entryInput).toHaveAttribute("list", "list-process-suggestions");
-  await expect(page.locator("#list-process-suggestions option[value='code.exe']")).toHaveCount(1);
-
-  const unloadDlls = page.locator(".list-editor").filter({ hasText: "DLL로 앱 제외" });
-  await expect(unloadDlls.getByText("아직 항목이 없습니다.", { exact: true })).toBeVisible();
-
-  expect(await overflowingElements(page)).toEqual([]);
-  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-profile-list-editors-ko.png`), fullPage: true });
-});
-
-test("selected-games mode offers a game picker and all-games mode leads to the exclusion list", async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop-1280", "The picker is exercised at one width");
-  await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "고급·실험" }).click();
-  const mode = page.locator("#unity_font_hook");
-  await expect(mode).toBeVisible();
-
-  await mode.selectOption("1");
-  const picker = page.getByTestId("unity-game-picker");
-  await expect(picker).toBeVisible();
-  await expect(picker.getByText("아직 선택한 게임이 없습니다.", { exact: false })).toBeVisible();
-  await picker.getByRole("checkbox", { name: /^notepad\.exe/ }).check();
-  await expect(picker.locator(".unity-games-list li > code").filter({ hasText: "notepad.exe" })).toBeVisible();
-  await expect(picker.getByRole("checkbox", { name: /^notepad\.exe/ })).toBeChecked();
-  await picker.getByRole("button", { name: "notepad.exe 제거" }).click();
-  await expect(picker.locator(".unity-games-list li")).toHaveCount(0);
-  const typed = picker.getByRole("textbox", { name: "추가" });
-  await typed.fill("Game.exe");
-  await typed.press("Enter");
-  await expect(picker.locator(".unity-games-list li > code").filter({ hasText: "Game.exe" })).toBeVisible();
-  await expect(typed).toHaveValue("");
-  expect(await overflowingElements(page)).toEqual([]);
-  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-unity-selected-games-ko.png`), fullPage: true });
-
-  await mode.selectOption("3");
-  await expect(picker).toHaveCount(0);
-  await page.getByRole("button", { name: "제외 목록 열기" }).click();
-  const excluded = page.locator(".list-editor[data-kind='unityExcludeGames']");
-  await expect(excluded).toBeVisible();
-  await expect(excluded.getByRole("combobox", { name: "제외할 Unity 게임 · 추가" })).toBeFocused();
-  await expect(page.locator(".list-editor").filter({ hasText: "적용할 Unity 게임" })).toHaveCount(0);
-});
-
-test("profile preview docks as a full-height right column at wide widths", async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop-1280", "Docked preview behavior is width-specific");
-  await page.setViewportSize({ width: 1680, height: 900 });
-  await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
-
-  await expect(page.locator('.settings-workspace[data-preview-docked="true"]')).toHaveCount(1);
-  await expect(page.locator(".preview-resizer")).toHaveCount(0);
-  const formBox = await page.locator(".settings-form").boundingBox();
-  const previewBox = await page.locator(".preview-panel").boundingBox();
-  expect(formBox).not.toBeNull();
-  expect(previewBox).not.toBeNull();
-  expect(previewBox!.x, "docked preview must sit right of the settings form").toBeGreaterThanOrEqual(formBox!.x + formBox!.width);
-  expect(await overflowingElements(page)).toEqual([]);
-  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-preview-docked-ko.png`), fullPage: true });
-});
-
-test("the shipped default window docks the preview and never resamples the sample", async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop-1280", "The default window is a single size");
-  await page.setViewportSize(defaultWindow);
-  await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
-
-  await expect(page.locator('.settings-workspace[data-preview-docked="true"]')).toHaveCount(1);
-
-  // A strip is a bitmap drawn at the width the panel asked for. Asking for more
-  // than the canvas holds makes the browser scale it down, which shrinks the
-  // glyphs below the size the reader picked and defeats the preview.
-  const strip = page.locator(".preview-strip img").first();
-  for (const size of ["12", "14", "18"]) {
-    await page.getByRole("combobox", { name: "프리뷰 크기" }).selectOption(size);
-    await expect(strip).toHaveJSProperty("complete", true);
-    const scale = await strip.evaluate((image) => {
-      const rendered = image.getBoundingClientRect().width;
-      return rendered / Number((image as HTMLImageElement).getAttribute("width"));
+      await page.getByRole("button", { name: "포함·제외" }).click();
+      await page.getByRole("combobox", { name: "제외 글꼴 · 목록에 글꼴 추가" }).selectOption("Calibri");
+      await expect(page.locator(".list-editor li > code").filter({ hasText: "Calibri" })).toBeVisible();
+      await expect(page.getByText("제외 프로그램", { exact: true })).toBeVisible();
+      await expect(page.getByText("DLL로 앱 제외", { exact: true })).toBeVisible();
+      await expect(page.getByText("글꼴 대체 제외 모듈", { exact: true })).toBeVisible();
+      await expect(page.getByRole("img", { name: "현재 설정의 글자 렌더링 프리뷰" })).toHaveAttribute("data-dark", "false");
+      await page.getByRole("button", { name: "색 반전" }).click();
+      await expect(page.getByRole("img", { name: "현재 설정의 글자 렌더링 프리뷰" })).toHaveAttribute("data-dark", "true");
+      const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+      expect(horizontalOverflow, "interactive profile editor must not have horizontal scrolling").toBe(false);
+      expect(failures, failures.join("\n")).toEqual([]);
     });
-    expect(scale, `the ${size} pt sample must render at its own size in the docked column`).toBeCloseTo(1, 2);
   }
+});
 
-  expect(await overflowingElements(page)).toEqual([]);
-  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-preview-default-window-ko.png`), fullPage: true });
+test.describe("shared structured list editors add typed entries, reject duplicates, and suggest running processes", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`structured list editors add typed entries, reject duplicates, and suggest running processes ${skin}`, async ({ page }, testInfo) => {
+      await page.goto(`/?view=profiles&gallery=1&lang=ko&skin=${skin}`, { waitUntil: "networkidle" });
+      await page.getByRole("button", { name: "포함·제외" }).click();
+
+      const excludePrograms = page.locator(".list-editor").filter({ hasText: "제외 프로그램" });
+      const entryInput = excludePrograms.getByRole("combobox", { name: "제외 프로그램 · 추가" });
+      await expect(excludePrograms.locator("li > code").filter({ hasText: "fontview.exe" })).toBeVisible();
+
+      await entryInput.fill("notepad.exe");
+      await entryInput.press("Enter");
+      await expect(excludePrograms.locator("li > code").filter({ hasText: "notepad.exe" })).toBeVisible();
+      await expect(entryInput).toHaveValue("");
+
+      await entryInput.fill("NOTEPAD.EXE");
+      await excludePrograms.getByRole("button", { name: "제외 프로그램 · 추가" }).click();
+      await expect(excludePrograms.getByText("NOTEPAD.EXE은(는) 이미 목록에 있습니다.", { exact: true })).toBeVisible();
+      await expect(excludePrograms.locator("li")).toHaveCount(2);
+
+      await excludePrograms.getByRole("button", { name: "notepad.exe 제거" }).click();
+      await expect(excludePrograms.locator("li")).toHaveCount(1);
+      await expect(excludePrograms.getByText("이미 목록에 있습니다", { exact: false })).toHaveCount(0);
+
+      await expect(entryInput).toHaveAttribute("list", "list-process-suggestions");
+      await expect(page.locator("#list-process-suggestions option[value='code.exe']")).toHaveCount(1);
+
+      const unloadDlls = page.locator(".list-editor").filter({ hasText: "DLL로 앱 제외" });
+      await expect(unloadDlls.getByText("아직 항목이 없습니다.", { exact: true })).toBeVisible();
+
+      expect(await overflowingElements(page)).toEqual([]);
+      await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-profile-list-editors-ko.png`), fullPage: true });
+    });
+  }
+});
+
+test.describe("shared selected-games mode offers a game picker and all-games mode leads to the exclusion list", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`selected-games mode offers a game picker and all-games mode leads to the exclusion list ${skin}`, async ({ page }, testInfo) => {
+      test.skip(testInfo.project.name !== "desktop-1280", "The picker is exercised at one width");
+      await page.goto(`/?view=profiles&gallery=1&lang=ko&skin=${skin}`, { waitUntil: "networkidle" });
+      await page.getByRole("button", { name: "고급·실험" }).click();
+      const mode = page.locator("#unity_font_hook");
+      await expect(mode).toBeVisible();
+
+      await mode.selectOption("1");
+      const picker = page.getByTestId("unity-game-picker");
+      await expect(picker).toBeVisible();
+      await expect(picker.getByText("아직 선택한 게임이 없습니다.", { exact: false })).toBeVisible();
+      await picker.getByRole("checkbox", { name: /^notepad\.exe/ }).check();
+      await expect(picker.locator(".unity-games-list li > code").filter({ hasText: "notepad.exe" })).toBeVisible();
+      await expect(picker.getByRole("checkbox", { name: /^notepad\.exe/ })).toBeChecked();
+      await picker.getByRole("button", { name: "notepad.exe 제거" }).click();
+      await expect(picker.locator(".unity-games-list li")).toHaveCount(0);
+      const typed = picker.getByRole("textbox", { name: "추가" });
+      await typed.fill("Game.exe");
+      await typed.press("Enter");
+      await expect(picker.locator(".unity-games-list li > code").filter({ hasText: "Game.exe" })).toBeVisible();
+      await expect(typed).toHaveValue("");
+      expect(await overflowingElements(page)).toEqual([]);
+      await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-unity-selected-games-ko.png`), fullPage: true });
+
+      await mode.selectOption("3");
+      await expect(picker).toHaveCount(0);
+      await page.getByRole("button", { name: "제외 목록 열기" }).click();
+      const excluded = page.locator(".list-editor[data-kind='unityExcludeGames']");
+      await expect(excluded).toBeVisible();
+      await expect(excluded.getByRole("combobox", { name: "제외할 Unity 게임 · 추가" })).toBeFocused();
+      await expect(page.locator(".list-editor").filter({ hasText: "적용할 Unity 게임" })).toHaveCount(0);
+    });
+  }
+});
+
+test.describe("shared profile preview docks as a full-height right column at wide widths", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`profile preview docks as a full-height right column at wide widths ${skin}`, async ({ page }, testInfo) => {
+      test.skip(testInfo.project.name !== "desktop-1280", "Docked preview behavior is width-specific");
+      await page.setViewportSize({ width: 1680, height: 900 });
+      await page.goto(`/?view=profiles&gallery=1&lang=ko&skin=${skin}`, { waitUntil: "networkidle" });
+
+      await expect(page.locator('.settings-workspace[data-preview-docked="true"]')).toHaveCount(1);
+      await expect(page.locator(".preview-resizer")).toHaveCount(0);
+      const formBox = await page.locator(".settings-form").boundingBox();
+      const previewBox = await page.locator(".preview-panel").boundingBox();
+      expect(formBox).not.toBeNull();
+      expect(previewBox).not.toBeNull();
+      expect(previewBox!.x, "docked preview must sit right of the settings form").toBeGreaterThanOrEqual(formBox!.x + formBox!.width);
+      expect(await overflowingElements(page)).toEqual([]);
+      await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-preview-docked-ko.png`), fullPage: true });
+    });
+  }
+});
+
+test.describe("shared the shipped default window docks the preview and never resamples the sample", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`the shipped default window docks the preview and never resamples the sample ${skin}`, async ({ page }, testInfo) => {
+      test.skip(testInfo.project.name !== "desktop-1280", "The default window is a single size");
+      await page.setViewportSize(defaultWindow);
+      await page.goto(`/?view=profiles&gallery=1&lang=ko&skin=${skin}`, { waitUntil: "networkidle" });
+
+      await expect(page.locator('.settings-workspace[data-preview-docked="true"]')).toHaveCount(1);
+
+      // A strip is a bitmap drawn at the width the panel asked for. Asking for more
+      // than the canvas holds makes the browser scale it down, which shrinks the
+      // glyphs below the size the reader picked and defeats the preview.
+      const strip = page.locator(".preview-strip img").first();
+      for (const size of ["12", "14", "18"]) {
+        await page.getByRole("combobox", { name: "프리뷰 크기" }).selectOption(size);
+        await expect(strip).toHaveJSProperty("complete", true);
+        const scale = await strip.evaluate((image) => {
+          const rendered = image.getBoundingClientRect().width;
+          return rendered / Number((image as HTMLImageElement).getAttribute("width"));
+        });
+        expect(scale, `the ${size} pt sample must render at its own size in the docked column`).toBeCloseTo(1, 2);
+      }
+
+      expect(await overflowingElements(page)).toEqual([]);
+      await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-preview-default-window-ko.png`), fullPage: true });
+    });
+  }
 });
 
 test("native preview display mode dropdown drives the runtime adapter", async ({ page }, testInfo) => {
@@ -417,188 +472,194 @@ test("native preview display mode dropdown drives the runtime adapter", async ({
   expect(await overflowingElements(page)).toEqual([]);
 });
 
-test("preview comparison renders the saved and edited sides only while edits exist", async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop-1280", "The preview toolbar wraps on compact layouts");
-  await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
+test.describe("shared preview comparison renders the saved and edited sides only while edits exist", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`preview comparison renders the saved and edited sides only while edits exist ${skin}`, async ({ page }, testInfo) => {
+      test.skip(testInfo.project.name !== "desktop-1280", "The preview toolbar wraps on compact layouts");
+      await page.goto(`/?view=profiles&gallery=1&lang=ko&skin=${skin}`, { waitUntil: "networkidle" });
 
-  const compare = page.getByRole("button", { name: "비교", exact: true });
-  const strips = page.locator(".preview-strip");
-  await expect(compare).toBeDisabled();
-  const baseline = await strips.count();
-  expect(baseline).toBeGreaterThan(0);
+      const compare = page.getByRole("button", { name: "비교", exact: true });
+      const strips = page.locator(".preview-strip");
+      await expect(compare).toBeDisabled();
+      const baseline = await strips.count();
+      expect(baseline).toBeGreaterThan(0);
 
-  const firstSelect = page.locator(".setting-row select").first();
-  const initialOption = await firstSelect.inputValue();
-  const nextOption = await firstSelect.locator("option").evaluateAll((options, current) => options.map((option) => (option as HTMLOptionElement).value).find((value) => value !== current), initialOption);
-  if (!nextOption) throw new Error("The first profile setting must expose an alternate option");
-  await firstSelect.selectOption(nextOption);
-  await expect(compare).toBeEnabled();
+      const firstSelect = page.locator(".setting-row select").first();
+      const initialOption = await firstSelect.inputValue();
+      const nextOption = await firstSelect.locator("option").evaluateAll((options, current) => options.map((option) => (option as HTMLOptionElement).value).find((value) => value !== current), initialOption);
+      if (!nextOption) throw new Error("The first profile setting must expose an alternate option");
+      await firstSelect.selectOption(nextOption);
+      await expect(compare).toBeEnabled();
 
-  await compare.click();
-  await expect(compare).toHaveAttribute("aria-pressed", "true");
-  await expect(strips).toHaveCount(baseline * 2);
-  await expect(page.locator(".preview-strip figcaption").first()).toContainText("저장본");
-  await expect(page.locator(".preview-strip figcaption").nth(1)).toContainText("편집본");
-  expect(await overflowingElements(page)).toEqual([]);
-  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-preview-compare-ko.png`), fullPage: true });
+      await compare.click();
+      await expect(compare).toHaveAttribute("aria-pressed", "true");
+      await expect(strips).toHaveCount(baseline * 2);
+      await expect(page.locator(".preview-strip figcaption").first()).toContainText("저장본");
+      await expect(page.locator(".preview-strip figcaption").nth(1)).toContainText("편집본");
+      expect(await overflowingElements(page)).toEqual([]);
+      await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-preview-compare-ko.png`), fullPage: true });
 
-  // Saving makes both sides identical, so the comparison switches itself off.
-  await page.getByRole("button", { name: "지금 저장" }).click();
-  await expect(compare).toBeDisabled();
-  await expect(compare).toHaveAttribute("aria-pressed", "false");
-  await expect(strips).toHaveCount(baseline);
+      // Saving makes both sides identical, so the comparison switches itself off.
+      await page.getByRole("button", { name: "지금 저장" }).click();
+      await expect(compare).toBeDisabled();
+      await expect(compare).toHaveAttribute("aria-pressed", "false");
+      await expect(strips).toHaveCount(baseline);
+    });
+  }
 });
 
-test("RGB comparison replaces the completed preview stack atomically", async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop-1280", "The four-channel preview is docked at desktop width");
-  await page.goto("/?view=overview&gallery=1&lang=ko&preview-delay=25", { waitUntil: "networkidle" });
-  await page.locator(".navigation").getByRole("group", { name: "튜너" }).getByRole("button", { name: "단계별 설정" }).click();
-  await page.locator(".settings-index").getByRole("button", { name: "LCD 배열과 색조" }).click();
+test.describe("shared RGB comparison replaces the completed preview stack atomically", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`RGB comparison replaces the completed preview stack atomically ${skin}`, async ({ page }, testInfo) => {
+      test.skip(testInfo.project.name !== "desktop-1280", "The four-channel preview is docked at desktop width");
+      await page.goto(`/?view=overview&gallery=1&lang=ko&preview-delay=25&skin=${skin}`, { waitUntil: "networkidle" });
+      await page.locator('[data-nav="guided"]').click();
+      await page.locator("main").getByRole("button", { name: "LCD 배열과 색조" }).click();
 
-  const strips = page.locator(".preview-strip");
-  await expect(strips).toHaveCount(4);
-  const firstSlider = page.locator('.setting-row input[type="range"]').first();
-  await firstSlider.focus();
-  await firstSlider.press("ArrowRight");
-  const compare = page.getByRole("button", { name: "비교", exact: true });
-  await expect(compare).toBeEnabled();
+      const strips = page.locator(".preview-strip");
+      await expect(strips).toHaveCount(4);
+      const firstSlider = page.locator('.setting-row input[type="range"]').first();
+      await firstSlider.focus();
+      await firstSlider.press("ArrowRight");
+      const compare = page.getByRole("button", { name: "비교", exact: true });
+      await expect(compare).toBeEnabled();
 
-  await page.locator(".preview-canvas").evaluate((canvas) => {
-    const counts = [canvas.querySelectorAll(".preview-strip").length];
-    window.sessionStorage.setItem("gallery-preview-strip-counts", counts.join(","));
-    const observer = new MutationObserver(() => {
-      counts.push(canvas.querySelectorAll(".preview-strip").length);
-      window.sessionStorage.setItem("gallery-preview-strip-counts", counts.join(","));
+      await page.locator(".preview-canvas").evaluate((canvas) => {
+        const counts = [canvas.querySelectorAll(".preview-strip").length];
+        window.sessionStorage.setItem("gallery-preview-strip-counts", counts.join(","));
+        const observer = new MutationObserver(() => {
+          counts.push(canvas.querySelectorAll(".preview-strip").length);
+          window.sessionStorage.setItem("gallery-preview-strip-counts", counts.join(","));
+        });
+        observer.observe(canvas, { childList: true, subtree: true });
+      });
+
+      await compare.click();
+      await expect(strips).toHaveCount(8);
+      const observedCounts = await page.evaluate(() => (window.sessionStorage.getItem("gallery-preview-strip-counts") ?? "")
+        .split(",")
+        .filter(Boolean)
+        .map(Number));
+      expect(observedCounts, "comparison must keep the old four-line stack until all eight replacements are ready")
+        .toEqual(expect.arrayContaining([4, 8]));
+      expect(observedCounts.filter((count) => count !== 4 && count !== 8)).toEqual([]);
     });
-    observer.observe(canvas, { childList: true, subtree: true });
-  });
-
-  await compare.click();
-  await expect(strips).toHaveCount(8);
-  const observedCounts = await page.evaluate(() => (window.sessionStorage.getItem("gallery-preview-strip-counts") ?? "")
-    .split(",")
-    .filter(Boolean)
-    .map(Number));
-  expect(observedCounts, "comparison must keep the old four-line stack until all eight replacements are ready")
-    .toEqual(expect.arrayContaining([4, 8]));
-  expect(observedCounts.filter((count) => count !== 4 && count !== 8)).toEqual([]);
+  }
 });
 
-test("settings navigation restores the legacy Wizard and Tuner hierarchy", async ({ page }, testInfo) => {
-  await page.goto("/?view=overview&gallery=1&lang=ko", { waitUntil: "networkidle" });
+test.describe("shared settings navigation restores the legacy Wizard and Tuner hierarchy", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`settings navigation restores the legacy Wizard and Tuner hierarchy ${skin}`, async ({ page }, testInfo) => {
+      await page.goto(`/?view=overview&gallery=1&lang=ko&skin=${skin}`, { waitUntil: "networkidle" });
 
-  const wizardGroup = page.locator(".navigation").getByRole("group", { name: "위자드" });
-  const tunerGroup = page.locator(".navigation").getByRole("group", { name: "튜너" });
-  await expect(wizardGroup.getByRole("button", { name: "프로필" })).toBeVisible();
-  await expect(wizardGroup.getByRole("button", { name: "서비스" })).toBeVisible();
-  await expect(tunerGroup.getByRole("button", { name: "단계별 설정" })).toBeVisible();
-  await expect(tunerGroup.getByRole("button", { name: "전체 설정" })).toBeVisible();
-  await expect(page.locator(".navigation").getByRole("button", { name: "위자드", exact: true })).toHaveCount(0);
-  await expect(page.locator(".navigation").getByRole("button", { name: "튜너", exact: true })).toHaveCount(0);
+      await expect(page.locator("[data-nav]")).toHaveCount(6);
+      await expect(page.locator("[data-nav]")).toHaveText(["개요", "프로필", "서비스", "단계별 설정", "전체 설정", "진단"]);
+      await page.locator('[data-nav="guided"]').click();
+      await expect(page.locator("body")).toHaveAttribute("data-profile-mode", "quick");
+      await expect(page.getByRole("heading", { level: 1, name: "단계별 설정" })).toBeVisible();
+      expect(await page.locator("body").innerText()).not.toContain("마법사");
+      await expect(page.locator("main button[data-selected]")).toHaveCount(9);
+      await expect(page.locator("main").getByRole("button", { name: "고급·실험" })).toHaveCount(0);
+      await expect(page.getByRole("toolbar", { name: "프로필 편집 작업" })).toHaveCount(0);
+      const settingsForm = page.locator(".settings-form");
 
-  await tunerGroup.getByRole("button", { name: "단계별 설정" }).click();
-  await expect(page.locator(".profile-page")).toHaveAttribute("data-mode", "quick");
-  await expect(page.getByRole("heading", { level: 1, name: "단계별 설정" })).toBeVisible();
-  await expect(page.locator(".profile-mode-title > span")).toHaveText("Tuner");
-  expect(await page.locator(".profile-page").innerText()).not.toContain("마법사");
-  await expect(page.locator(".settings-index button")).toHaveCount(9);
-  await expect(page.locator(".settings-step")).toHaveCount(9);
-  await expect(page.locator(".settings-index").getByRole("button", { name: "고급·실험" })).toHaveCount(0);
-  await expect(page.getByRole("toolbar", { name: "프로필 편집 작업" })).toHaveCount(0);
-  const settingsForm = page.locator(".settings-form");
+      await expect(page.locator("main").getByRole("button", { name: "시작", exact: true })).toBeVisible();
+      await expect(page.locator(".wizard-start-card")).toBeVisible();
+      await expect(page.locator(".wizard-start-profile code")).toBeVisible();
+      await expect(page.locator(".wizard-start-font select")).toBeVisible();
+      await expect(page.getByRole("button", { name: "이전" })).toHaveCount(0);
+      await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-guided-start-ko.png`), fullPage: true });
 
-  await expect(page.getByRole("heading", { level: 2, name: "시작" })).toBeVisible();
-  await expect(page.locator(".wizard-start-card")).toBeVisible();
-  await expect(page.locator(".wizard-start-profile code")).toBeVisible();
-  await expect(page.locator(".wizard-start-font select")).toBeVisible();
-  await expect(page.getByRole("button", { name: "이전" })).toHaveCount(0);
-  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-guided-start-ko.png`), fullPage: true });
+      await page.getByRole("button", { name: "진행" }).click();
+      await expect(page.locator("main").getByRole("button", { name: "기본 렌더링", exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "이전" })).toBeVisible();
+      expect(await page.locator(".guided-choice").getByRole("radio").count()).toBeGreaterThanOrEqual(3);
+      await expect(page.locator(".setting-actions")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "단계 기본값 복원" })).toBeVisible();
+      expect(await settingsForm.evaluate((element) => element.scrollWidth > element.clientWidth), "Guided settings must not have internal horizontal scrolling").toBe(false);
+      // The generic overflow gate skips anything inside an overflow-hidden
+      // ancestor, so the workspace column needs its own window-bounds check: a
+      // wide control in the preview toolbar used to inflate the column past the
+      // right edge, clipping the step body instead of scrolling.
+      for (const selector of [".settings-form", ".preview-panel", ".wizard-step-tools"]) {
+        const bounds = await page.locator(selector).first().evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          return { left: Math.round(rect.left), right: Math.round(rect.right), viewport: document.documentElement.clientWidth };
+        });
+        expect(bounds.right, `${selector} must stay inside the window`).toBeLessThanOrEqual(bounds.viewport + 1);
+        expect(bounds.left, `${selector} must not start off the left edge`).toBeGreaterThanOrEqual(-1);
+      }
+      await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-guided-rendering-ko.png`), fullPage: true });
 
-  await page.getByRole("button", { name: "진행" }).click();
-  await expect(page.getByRole("heading", { level: 2, name: "기본 렌더링" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "이전" })).toBeVisible();
-  expect(await page.locator(".guided-choice").getByRole("radio").count()).toBeGreaterThanOrEqual(3);
-  await expect(page.locator(".setting-actions")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "단계 기본값 복원" })).toBeVisible();
-  expect(await settingsForm.evaluate((element) => element.scrollWidth > element.clientWidth), "Guided settings must not have internal horizontal scrolling").toBe(false);
-  // The generic overflow gate skips anything inside an overflow-hidden
-  // ancestor, so the workspace column needs its own window-bounds check: a
-  // wide control in the preview toolbar used to inflate the column past the
-  // right edge, clipping the step body instead of scrolling.
-  for (const selector of [".settings-form", ".preview-panel", ".wizard-step-tools"]) {
-    const bounds = await page.locator(selector).first().evaluate((element) => {
-      const rect = element.getBoundingClientRect();
-      return { left: Math.round(rect.left), right: Math.round(rect.right), viewport: document.documentElement.clientWidth };
+      await page.getByRole("button", { name: "진행" }).click();
+      await expect(page.locator("main").getByRole("button", { name: "글꼴 품질", exact: true })).toBeVisible();
+      await expect(page.locator(".guided-scale-words").first()).toContainText("가늘게");
+
+      // Restored legacy Tuner screen: bold and italic together, previewed as
+      // bold, italic, and bold italic lines of the same pangram.
+      await page.getByRole("button", { name: "진행" }).click();
+      await expect(page.locator("main").getByRole("button", { name: "굵게·기울임", exact: true })).toBeVisible();
+      const guidedLabels = page.locator(".guided-label label");
+      await expect(guidedLabels.nth(0)).toHaveText("굵은 글자 굵기");
+      await expect(guidedLabels.nth(1)).toHaveText("굵게 처리 방식");
+      await expect(guidedLabels.nth(2)).toHaveText("기울임 정도");
+      await expect(page.locator(".preview-strip")).toHaveCount(3);
+      await expect(page.locator(".preview-strip figcaption")).toHaveText(["굵게", "기울임", "굵은 기울임"]);
+      await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-guided-bold-italic-ko.png`), fullPage: true });
+
+      // Restored legacy Tuner screen: contrast then gamma sliders before the mode.
+      // The step is titled by what it does, not by the core setting it carries.
+      await page.locator("main").getByRole("button", { name: "밝기와 대비" }).click();
+      await expect(page.locator("main").getByRole("button", { name: "밝기와 대비", exact: true })).toBeVisible();
+      await expect(guidedLabels.nth(0)).toHaveText("대비");
+      await expect(guidedLabels.nth(1)).toHaveText("감마 값");
+      await expect(guidedLabels.nth(2)).toHaveText("감마 방식");
+
+      // LCD screen gains the RGB text tuning and compares the current method
+      // against the red, green, and blue channels without clipping line four.
+      await page.locator("main").getByRole("button", { name: "LCD 배열과 색조" }).click();
+      await expect(page.locator("main").getByRole("button", { name: "LCD 배열과 색조", exact: true })).toBeVisible();
+      await expect(guidedLabels.nth(2)).toHaveText("빨강 채널 튜닝");
+      await expect(page.locator(".preview-strip")).toHaveCount(4);
+      await expect(page.locator(".preview-strip figcaption")).toHaveText(["현재 방식", "R", "G", "B"]);
+      // Four lines scroll inside the stack instead of stretching the panel into
+      // the step body, so line four is reachable and the step keeps its room. A
+      // desktop window docks the guided preview beside the step rather than under it.
+      await page.locator(".preview-strip").last().scrollIntoViewIfNeeded();
+      await expect(page.locator(".preview-strip").last()).toBeInViewport();
+      const stepBox = await page.locator(".wizard-step-content").boundingBox();
+      if (!stepBox) throw new Error("The guided step body must stay visible");
+      expect(stepBox.height, "the step body keeps its room beside the four-line stack").toBeGreaterThanOrEqual(240);
+      if (testInfo.project.name === "desktop-1280") {
+        await expect(page.locator(".settings-workspace")).toHaveAttribute("data-preview-docked", "true");
+        await expect(page.getByRole("separator", { name: "프리뷰 영역 높이 조절" })).toHaveCount(0);
+      }
+      await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-guided-lcd-channels-ko.png`), fullPage: true });
+
+      await page.locator("main").getByRole("button", { name: "힌팅" }).click();
+      await expect(page.locator("main").getByRole("button", { name: "힌팅", exact: true })).toBeVisible();
+      await page.locator("main").getByRole("button", { name: "실행 프로필 지정", exact: true }).click();
+      await expect(page.getByRole("button", { name: "진행" })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "실행 프로필로 지정", exact: true })).toBeVisible();
+      await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-guided-apply-ko.png`), fullPage: true });
+
+      await page.locator('[data-nav="all"]').click();
+      await expect(page.locator("body")).toHaveAttribute("data-profile-mode", "advanced");
+      await expect(page.getByRole("heading", { level: 1, name: "전체 설정" })).toBeVisible();
+      await expect(page.locator("main button[data-selected]")).toHaveCount(6);
+      expect(await settingsForm.evaluate((element) => element.scrollWidth > element.clientWidth), "Tuner settings must not have internal horizontal scrolling").toBe(false);
+      await expect(page.getByRole("checkbox", { name: "고급 설정 표시" })).toHaveCount(0);
+
+      await page.locator('[data-nav="files"]').click();
+      await expect(page.locator("body")).toHaveAttribute("data-view", "files");
+      await expect(page.getByRole("heading", { level: 1, name: "프로필" })).toBeVisible();
+      await page.locator('[data-nav="execution"]').click();
+      await expect(page.locator("body")).toHaveAttribute("data-view", "execution");
     });
-    expect(bounds.right, `${selector} must stay inside the window`).toBeLessThanOrEqual(bounds.viewport + 1);
-    expect(bounds.left, `${selector} must not start off the left edge`).toBeGreaterThanOrEqual(-1);
   }
-  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-guided-rendering-ko.png`), fullPage: true });
-
-  await page.getByRole("button", { name: "진행" }).click();
-  await expect(page.getByRole("heading", { level: 2, name: "글꼴 품질" })).toBeVisible();
-  await expect(page.locator(".guided-scale-words").first()).toContainText("가늘게");
-
-  // Restored legacy Tuner screen: bold and italic together, previewed as
-  // bold, italic, and bold italic lines of the same pangram.
-  await page.getByRole("button", { name: "진행" }).click();
-  await expect(page.getByRole("heading", { level: 2, name: "굵게·기울임" })).toBeVisible();
-  const guidedLabels = page.locator(".guided-label label");
-  await expect(guidedLabels.nth(0)).toHaveText("굵은 글자 굵기");
-  await expect(guidedLabels.nth(1)).toHaveText("굵게 처리 방식");
-  await expect(guidedLabels.nth(2)).toHaveText("기울임 정도");
-  await expect(page.locator(".preview-strip")).toHaveCount(3);
-  await expect(page.locator(".preview-strip figcaption")).toHaveText(["굵게", "기울임", "굵은 기울임"]);
-  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-guided-bold-italic-ko.png`), fullPage: true });
-
-  // Restored legacy Tuner screen: contrast then gamma sliders before the mode.
-  // The step is titled by what it does, not by the core setting it carries.
-  await page.locator(".settings-index").getByRole("button", { name: "밝기와 대비" }).click();
-  await expect(page.getByRole("heading", { level: 2, name: "밝기와 대비" })).toBeVisible();
-  await expect(guidedLabels.nth(0)).toHaveText("대비");
-  await expect(guidedLabels.nth(1)).toHaveText("감마 값");
-  await expect(guidedLabels.nth(2)).toHaveText("감마 방식");
-
-  // LCD screen gains the RGB text tuning and compares the current method
-  // against the red, green, and blue channels without clipping line four.
-  await page.locator(".settings-index").getByRole("button", { name: "LCD 배열과 색조" }).click();
-  await expect(page.getByRole("heading", { level: 2, name: "LCD 배열과 색조" })).toBeVisible();
-  await expect(guidedLabels.nth(2)).toHaveText("빨강 채널 튜닝");
-  await expect(page.locator(".preview-strip")).toHaveCount(4);
-  await expect(page.locator(".preview-strip figcaption")).toHaveText(["현재 방식", "R", "G", "B"]);
-  // Four lines scroll inside the stack instead of stretching the panel into
-  // the step body, so line four is reachable and the step keeps its room. A
-  // desktop window docks the guided preview beside the step rather than under it.
-  await page.locator(".preview-strip").last().scrollIntoViewIfNeeded();
-  await expect(page.locator(".preview-strip").last()).toBeInViewport();
-  const stepBox = await page.locator(".wizard-step-content").boundingBox();
-  if (!stepBox) throw new Error("The guided step body must stay visible");
-  expect(stepBox.height, "the step body keeps its room beside the four-line stack").toBeGreaterThanOrEqual(240);
-  if (testInfo.project.name === "desktop-1280") {
-    await expect(page.locator(".settings-workspace")).toHaveAttribute("data-preview-docked", "true");
-    await expect(page.getByRole("separator", { name: "프리뷰 영역 높이 조절" })).toHaveCount(0);
-  }
-  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-guided-lcd-channels-ko.png`), fullPage: true });
-
-  await page.locator(".settings-index").getByRole("button", { name: "힌팅" }).click();
-  await expect(page.getByRole("heading", { level: 2, name: "힌팅" })).toBeVisible();
-  await page.locator(".settings-index").getByRole("button", { name: "실행 프로필 지정", exact: true }).click();
-  await expect(page.getByRole("button", { name: "진행" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "실행 프로필로 지정", exact: true })).toBeVisible();
-  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-guided-apply-ko.png`), fullPage: true });
-
-  await tunerGroup.getByRole("button", { name: "전체 설정" }).click();
-  await expect(page.locator(".profile-page")).toHaveAttribute("data-mode", "advanced");
-  await expect(page.getByRole("heading", { level: 1, name: "전체 설정" })).toBeVisible();
-  await expect(page.locator(".settings-index button")).toHaveCount(6);
-  expect(await settingsForm.evaluate((element) => element.scrollWidth > element.clientWidth), "Tuner settings must not have internal horizontal scrolling").toBe(false);
-  await expect(page.getByRole("checkbox", { name: "고급 설정 표시" })).toHaveCount(0);
-
-  await wizardGroup.getByRole("button", { name: "프로필" }).click();
-  await expect(page.locator("body")).toHaveAttribute("data-view", "files");
-  await expect(page.getByRole("heading", { level: 1, name: "프로필" })).toBeVisible();
-  await wizardGroup.getByRole("button", { name: "서비스" }).click();
-  await expect(page.locator("body")).toHaveAttribute("data-view", "execution");
 });
 
 for (const skin of gallerySkins) {
@@ -651,69 +712,74 @@ for (const skin of gallerySkins) {
   }
 }
 
-test("guided step undo, redo, and discard stay scoped to the current step", async ({ page }) => {
-  await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
-  await page.locator(".navigation").getByRole("button", { name: "단계별 설정" }).click();
-  await expect(page.locator(".profile-page")).toHaveAttribute("data-mode", "quick");
+test.describe("shared guided step undo, redo, and discard stay scoped to the current step", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`guided step undo, redo, and discard stay scoped to the current step ${skin}`, async ({ page }) => {
+      await page.goto(`/?view=profiles&gallery=1&lang=ko&skin=${skin}`, { waitUntil: "networkidle" });
+      await page.locator('[data-nav="guided"]').click();
+      await expect(page.locator("body")).toHaveAttribute("data-profile-mode", "quick");
 
-  const undoStep = page.getByRole("button", { name: "되돌리기", exact: true });
-  const redoStep = page.getByRole("button", { name: "다시 하기", exact: true });
-  const discardStep = page.getByRole("button", { name: "단계 변경 취소", exact: true });
+      const undoStep = page.getByRole("button", { name: "되돌리기", exact: true });
+      const redoStep = page.getByRole("button", { name: "다시 하기", exact: true });
+      const discardStep = page.getByRole("button", { name: "단계 변경 취소", exact: true });
 
-  // Steps without schema settings (start, substitution, apply) expose no step tools.
-  await expect(page.getByRole("toolbar", { name: "단계 편집 작업" })).toHaveCount(0);
-  await page.locator(".settings-index").getByRole("button", { name: "글꼴 대체" }).click();
-  await expect(page.getByRole("toolbar", { name: "단계 편집 작업" })).toHaveCount(0);
+      // Steps without schema settings (start, substitution, apply) expose no step tools.
+      await expect(page.getByRole("toolbar", { name: "단계 편집 작업" })).toHaveCount(0);
+      await page.locator("main").getByRole("button", { name: "글꼴 대체" }).click();
+      await expect(page.getByRole("toolbar", { name: "단계 편집 작업" })).toHaveCount(0);
 
-  await page.locator(".settings-index").getByRole("button", { name: "글꼴 품질" }).click();
-  const weightValue = page.locator("#normal_weight-value");
-  await expect(undoStep).toBeDisabled();
-  await expect(redoStep).toBeDisabled();
-  await expect(discardStep).toBeDisabled();
+      await page.locator("main").getByRole("button", { name: "글꼴 품질" }).click();
+      const weightValue = page.locator("#normal_weight-value");
+      await expect(undoStep).toBeDisabled();
+      await expect(redoStep).toBeDisabled();
+      await expect(discardStep).toBeDisabled();
 
-  await weightValue.fill("24");
-  await weightValue.press("Enter");
-  await expect(weightValue).toHaveValue("24");
-  await expect(discardStep).toBeEnabled();
+      await weightValue.fill("24");
+      await weightValue.press("Enter");
+      await expect(weightValue).toHaveValue("24");
+      await expect(discardStep).toBeEnabled();
 
-  await undoStep.click();
-  await expect(weightValue).toHaveValue("0");
-  await expect(undoStep).toBeDisabled();
-  await redoStep.click();
-  await expect(weightValue).toHaveValue("24");
-  await expect(redoStep).toBeDisabled();
+      await undoStep.click();
+      await expect(weightValue).toHaveValue("0");
+      await expect(undoStep).toBeDisabled();
+      await redoStep.click();
+      await expect(weightValue).toHaveValue("24");
+      await expect(redoStep).toBeDisabled();
 
-  // Ctrl+Z / Ctrl+Y drive the same step-scoped history from the keyboard.
-  await expect(undoStep).toBeEnabled();
-  await page.keyboard.press("Control+z");
-  await expect(weightValue).toHaveValue("0");
-  await expect(redoStep).toBeEnabled();
-  await page.keyboard.press("Control+y");
-  await expect(weightValue).toHaveValue("24");
+      // Ctrl+Z / Ctrl+Y drive the same step-scoped history from the keyboard.
+      await expect(undoStep).toBeEnabled();
+      await page.keyboard.press("Control+z");
+      await expect(weightValue).toHaveValue("0");
+      await expect(redoStep).toBeEnabled();
+      await page.keyboard.press("Control+y");
+      await expect(weightValue).toHaveValue("24");
 
-  // The brightness step starts with an empty history even though the quality
-  // step recorded edits, and its discard leaves the quality step untouched.
-  await page.locator(".settings-index").getByRole("button", { name: "밝기와 대비" }).click();
-  const contrastValue = page.locator("#contrast-value");
-  await expect(undoStep).toBeDisabled();
-  await expect(redoStep).toBeDisabled();
-  await expect(discardStep).toBeDisabled();
+      // The brightness step starts with an empty history even though the quality
+      // step recorded edits, and its discard leaves the quality step untouched.
+      await page.locator("main").getByRole("button", { name: "밝기와 대비" }).click();
+      const contrastValue = page.locator("#contrast-value");
+      await expect(undoStep).toBeDisabled();
+      await expect(redoStep).toBeDisabled();
+      await expect(discardStep).toBeDisabled();
 
-  await contrastValue.fill("2");
-  await contrastValue.press("Enter");
-  await expect(contrastValue).toHaveValue("2");
-  await discardStep.click();
-  await expect(contrastValue).toHaveValue("1");
-  await expect(discardStep).toBeDisabled();
+      await contrastValue.fill("2");
+      await contrastValue.press("Enter");
+      await expect(contrastValue).toHaveValue("2");
+      await discardStep.click();
+      await expect(contrastValue).toHaveValue("1");
+      await expect(discardStep).toBeDisabled();
 
-  // The step discard itself is one more undoable step edit.
-  await undoStep.click();
-  await expect(contrastValue).toHaveValue("2");
+      // The step discard itself is one more undoable step edit.
+      await undoStep.click();
+      await expect(contrastValue).toHaveValue("2");
 
-  await page.locator(".settings-index").getByRole("button", { name: "글꼴 품질" }).click();
-  await expect(weightValue).toHaveValue("24");
-  await expect(undoStep).toBeEnabled();
-  await expect(discardStep).toBeEnabled();
+      await page.locator("main").getByRole("button", { name: "글꼴 품질" }).click();
+      await expect(weightValue).toHaveValue("24");
+      await expect(undoStep).toBeEnabled();
+      await expect(discardStep).toBeEnabled();
+    });
+  }
 });
 
 test("slider drags and exact number edits create one undo revision per interaction", async ({ page }, testInfo) => {
@@ -810,94 +876,109 @@ test("continuous number-wheel changes preview immediately but commit one undo re
   await expect(undo).toBeDisabled();
 });
 
-test("field revert restores the saved value while default restore and profile-wide reset use core defaults", async ({ page }) => {
-  await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "글자 모양", exact: true }).click();
+test.describe("shared field revert restores the saved value while default restore and profile-wide reset use core defaults", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`field revert restores the saved value while default restore and profile-wide reset use core defaults ${skin}`, async ({ page }) => {
+      await page.goto(`/?view=profiles&gallery=1&lang=ko&skin=${skin}`, { waitUntil: "networkidle" });
+      await page.getByRole("button", { name: "글자 모양", exact: true }).click();
 
-  const weightRow = page.locator(".setting-row").filter({ hasText: "일반 글자 굵기" });
-  const exactWeight = weightRow.locator('input[type="number"]');
-  const revert = weightRow.getByRole("button", { name: /저장된 값으로 되돌리기/ });
-  const restoreDefault = weightRow.getByRole("button", { name: /기본값 복원/ });
+      const weightRow = page.locator(".setting-row").filter({ hasText: "일반 글자 굵기" });
+      const exactWeight = weightRow.locator('input[type="number"]');
+      const revert = weightRow.getByRole("button", { name: /저장된 값으로 되돌리기/ });
+      const restoreDefault = weightRow.getByRole("button", { name: /기본값 복원/ });
 
-  // Clean profile: nothing to revert; the factory weight (16) differs from the
-  // engine-default 0 the gallery profile starts from, so restore is available.
-  await expect(revert).toBeDisabled();
-  await expect(restoreDefault).toBeEnabled();
+      // Clean profile: nothing to revert; the factory weight (16) differs from the
+      // engine-default 0 the gallery profile starts from, so restore is available.
+      await expect(revert).toBeDisabled();
+      await expect(restoreDefault).toBeEnabled();
 
-  await exactWeight.fill("12");
-  await exactWeight.press("Enter");
-  await page.getByRole("button", { name: "지금 저장", exact: true }).click();
-  await expect(page.locator(".profile-message")).toContainText("지금 저장했습니다");
-  await expect(revert).toBeDisabled();
-  await expect(restoreDefault).toBeEnabled();
+      await exactWeight.fill("12");
+      await exactWeight.press("Enter");
+      await page.getByRole("button", { name: "지금 저장", exact: true }).click();
+      await expect(page.locator(".profile-message")).toContainText("지금 저장했습니다");
+      await expect(revert).toBeDisabled();
+      await expect(restoreDefault).toBeEnabled();
 
-  await exactWeight.fill("30");
-  await exactWeight.press("Enter");
-  await expect(revert).toBeEnabled();
-  await revert.click();
-  await expect(exactWeight).toHaveValue("12");
-  await expect(revert).toBeDisabled();
+      await exactWeight.fill("30");
+      await exactWeight.press("Enter");
+      await expect(revert).toBeEnabled();
+      await revert.click();
+      await expect(exactWeight).toHaveValue("12");
+      await expect(revert).toBeDisabled();
 
-  await restoreDefault.click();
-  await expect(exactWeight).toHaveValue("16");
-  await expect(restoreDefault).toBeDisabled();
-  await page.getByRole("button", { name: "되돌리기", exact: true }).click();
-  await expect(exactWeight).toHaveValue("12");
+      await restoreDefault.click();
+      await expect(exactWeight).toHaveValue("16");
+      await expect(restoreDefault).toBeDisabled();
+      await page.getByRole("button", { name: "되돌리기", exact: true }).click();
+      await expect(exactWeight).toHaveValue("12");
 
-  const gammaRow = page.locator(".setting-row").filter({ hasText: "감마 방식" });
-  const gammaSelect = gammaRow.locator("select");
-  await expect(gammaSelect).toHaveValue("-1");
-  await gammaSelect.selectOption("2");
-  await page.getByRole("button", { name: "기본값 초기화", exact: true }).click();
-  await expect(exactWeight).toHaveValue("16");
-  await expect(gammaSelect).toHaveValue("0");
-  await page.getByRole("button", { name: "되돌리기", exact: true }).click();
-  await expect(exactWeight).toHaveValue("12");
-  await expect(gammaSelect).toHaveValue("2");
+      const gammaRow = page.locator(".setting-row").filter({ hasText: "감마 방식" });
+      const gammaSelect = gammaRow.locator("select");
+      await expect(gammaSelect).toHaveValue("-1");
+      await gammaSelect.selectOption("2");
+      await page.getByRole("button", { name: "기본값 초기화", exact: true }).click();
+      await expect(exactWeight).toHaveValue("16");
+      await expect(gammaSelect).toHaveValue("0");
+      await page.getByRole("button", { name: "되돌리기", exact: true }).click();
+      await expect(exactWeight).toHaveValue("12");
+      await expect(gammaSelect).toHaveValue("2");
 
-  await page.getByRole("button", { name: "변경 취소", exact: true }).click();
-  await expect(exactWeight).toHaveValue("12");
-  await expect(gammaSelect).toHaveValue("-1");
+      await page.getByRole("button", { name: "변경 취소", exact: true }).click();
+      await expect(exactWeight).toHaveValue("12");
+      await expect(gammaSelect).toHaveValue("-1");
+    });
+  }
 });
 
-test("a rejected profile mutation requires an explicit snapshot recovery before save or apply", async ({ page }) => {
-  await page.goto("/?view=profiles&gallery=1&lang=en&profile-fail-setting=normal_weight", { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "Glyph shape", exact: true }).click();
+test.describe("shared a rejected profile mutation requires an explicit snapshot recovery before save or apply", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`a rejected profile mutation requires an explicit snapshot recovery before save or apply ${skin}`, async ({ page }) => {
+      await page.goto(`/?view=profiles&gallery=1&lang=en&profile-fail-setting=normal_weight&skin=${skin}`, { waitUntil: "networkidle" });
+      await page.getByRole("button", { name: "Glyph shape", exact: true }).click();
 
-  const normalWeight = page.locator(".setting-row").filter({ hasText: "Normal weight" }).locator('input[type="number"]');
-  const boldWeight = page.locator(".setting-row").filter({ hasText: "Bold weight" }).locator('input[type="number"]');
-  const save = page.getByRole("button", { name: "Save now", exact: true });
-  const apply = page.getByRole("button", { name: "Set as run profile", exact: true });
+      const normalWeight = page.locator(".setting-row").filter({ hasText: "Normal weight" }).locator('input[type="number"]');
+      const boldWeight = page.locator(".setting-row").filter({ hasText: "Bold weight" }).locator('input[type="number"]');
+      const save = page.getByRole("button", { name: "Save now", exact: true });
+      const apply = page.getByRole("button", { name: "Set as run profile", exact: true });
 
-  await normalWeight.fill("12");
-  await normalWeight.press("Tab");
-  await expect(page.getByText("Gallery profile mutation failed.", { exact: true })).toBeVisible();
-  await page.getByTestId("preview-invert").click();
-  await expect(page.locator(".preview-canvas")).toHaveAttribute("data-dark", "true");
-  await expect(page.getByText("Gallery profile mutation failed.", { exact: true })).toBeVisible();
-  await expect(save).toBeDisabled();
-  await expect(apply).toBeDisabled();
+      await normalWeight.fill("12");
+      await normalWeight.press("Tab");
+      await expect(page.getByText("Gallery profile mutation failed.", { exact: true })).toBeVisible();
+      await page.getByTestId("preview-invert").click();
+      await expect(page.locator(".preview-canvas")).toHaveAttribute("data-dark", "true");
+      await expect(page.getByText("Gallery profile mutation failed.", { exact: true })).toBeVisible();
+      await expect(save).toBeDisabled();
+      await expect(apply).toBeDisabled();
 
-  await boldWeight.fill("8");
-  await boldWeight.press("Tab");
-  await expect(save).toBeDisabled();
-  await expect(apply).toBeDisabled();
+      await boldWeight.fill("8");
+      await boldWeight.press("Tab");
+      await expect(save).toBeDisabled();
+      await expect(apply).toBeDisabled();
 
-  await page.getByRole("button", { name: "Discard changes", exact: true }).click();
-  await expect(normalWeight).toHaveValue("0");
-  await expect(boldWeight).toHaveValue("0");
-  await expect(apply).toBeEnabled();
+      await page.getByRole("button", { name: "Discard changes", exact: true }).click();
+      await expect(normalWeight).toHaveValue("0");
+      await expect(boldWeight).toHaveValue("0");
+      await expect(apply).toBeEnabled();
+    });
+  }
 });
 
-test("an unmounted profile preview ignores an in-flight completion", async ({ page }) => {
-  await page.goto("/?view=profiles&gallery=1&lang=en&ci-smoke=1&preview-delay=1000", { waitUntil: "domcontentloaded" });
-  await expect.poll(() => page.evaluate(() => Number(window.sessionStorage.getItem("gallery-preview-started") ?? "0"))).toBeGreaterThan(0);
+test.describe("shared an unmounted profile preview ignores an in-flight completion", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`an unmounted profile preview ignores an in-flight completion ${skin}`, async ({ page }) => {
+      await page.goto(`/?view=profiles&gallery=1&lang=en&ci-smoke=1&preview-delay=1000&skin=${skin}`, { waitUntil: "domcontentloaded" });
+      await expect.poll(() => page.evaluate(() => Number(window.sessionStorage.getItem("gallery-preview-started") ?? "0"))).toBeGreaterThan(0);
 
-  await page.getByRole("button", { name: "Overview", exact: true }).click();
-  await page.waitForTimeout(1200);
+      await page.locator('[data-nav="overview"]').click();
+      await page.waitForTimeout(1200);
 
-  await expect.poll(() => page.evaluate(() => window.sessionStorage.getItem("gallery-preview-crashes") ?? "0")).toBe("0");
-  await expect.poll(() => page.evaluate(() => window.sessionStorage.getItem("gallery-profile-ready") ?? "0")).toBe("0");
+      await expect.poll(() => page.evaluate(() => window.sessionStorage.getItem("gallery-preview-crashes") ?? "0")).toBe("0");
+      await expect.poll(() => page.evaluate(() => window.sessionStorage.getItem("gallery-profile-ready") ?? "0")).toBe("0");
+    });
+  }
 });
 
 test("settings files support import, save as, export, reveal, and apply without typing a path", async ({ page }) => {
@@ -955,65 +1036,79 @@ test("settings files use available width for profile paths", async ({ page }, te
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-settings-files-responsive-path-en.png`), fullPage: true });
 });
 
-test("diagnostics omit internal preview protocol details", async ({ page }) => {
-  await page.goto("/?view=diagnostics&gallery=1&lang=en", { waitUntil: "networkidle" });
-  await expect(page.getByText("Preview Helper", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("IPC protocol", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("MTPC v1", { exact: true })).toHaveCount(0);
+test.describe("shared diagnostics omit internal preview protocol details", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`diagnostics omit internal preview protocol details ${skin}`, async ({ page }) => {
+      await page.goto(`/?view=diagnostics&gallery=1&lang=en&skin=${skin}`, { waitUntil: "networkidle" });
+      await expect(page.getByText("Preview Helper", { exact: true })).toHaveCount(0);
+      await expect(page.getByText("IPC protocol", { exact: true })).toHaveCount(0);
+      await expect(page.getByText("MTPC v1", { exact: true })).toHaveCount(0);
+    });
+  }
 });
 
-test("writable profiles save to the original and apply by portable identity", async ({ page }, testInfo) => {
-  await page.goto("/?view=profiles&gallery=1&lang=en", { waitUntil: "networkidle" });
-  await expect(page.locator(".profile-editing")).toContainText("Editing:");
-  await expect(page.locator(".profile-editing code")).toHaveText("ini\\Default.ini");
+test.describe("shared writable profiles save to the original and apply by portable identity", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`writable profiles save to the original and apply by portable identity ${skin}`, async ({ page }, testInfo) => {
+      await page.goto(`/?view=profiles&gallery=1&lang=en&skin=${skin}`, { waitUntil: "networkidle" });
+      await expect(page.locator("main code").filter({ hasText: /Default[.]ini|Review copy[.]ini/ }).first()).toContainText("Default.ini");
 
-  const setting = page.locator(".setting-row select").first();
-  const initial = await setting.inputValue();
-  const alternate = await setting.locator("option").evaluateAll(
-    (options, current) => options.map((option) => (option as HTMLOptionElement).value).find((value) => value !== current),
-    initial,
-  );
-  if (!alternate) throw new Error("A writable profile setting needs an alternate gallery value");
-  await setting.selectOption(alternate);
+      const setting = page.locator(".setting-row select").first();
+      const initial = await setting.inputValue();
+      const alternate = await setting.locator("option").evaluateAll(
+        (options, current) => options.map((option) => (option as HTMLOptionElement).value).find((value) => value !== current),
+        initial,
+      );
+      if (!alternate) throw new Error("A writable profile setting needs an alternate gallery value");
+      await setting.selectOption(alternate);
 
-  const save = page.getByRole("button", { name: "Save now", exact: true });
-  const apply = page.getByRole("button", { name: "Set as run profile", exact: true });
-  await expect(save).toBeEnabled();
-  await expect(apply).toBeDisabled();
-  await save.click();
-  await expect(page.locator(".profile-message")).toContainText("Saved Default.ini");
-  await expect(apply).toBeEnabled();
-  await apply.click();
-  await expect(page.locator(".profile-message")).toContainText("Default.ini is now the run profile.");
+      const save = page.getByRole("button", { name: "Save now", exact: true });
+      const apply = page.getByRole("button", { name: "Set as run profile", exact: true });
+      await expect(save).toBeEnabled();
+      await expect(apply).toBeDisabled();
+      await save.click();
+      await expect(page.locator(".profile-message")).toContainText("Saved Default.ini");
+      await expect(apply).toBeEnabled();
+      await apply.click();
+      await expect(page.locator(".profile-message")).toContainText("Default.ini is now the run profile.");
 
-  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-profile-direct-save-apply-en.png`), fullPage: true });
+      await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-profile-direct-save-apply-en.png`), fullPage: true });
+    });
+  }
 });
 
-test("read-only profiles require Save as before apply", async ({ page }, testInfo) => {
-  await page.goto("/?view=profiles&gallery=1&lang=en&profile-read-only=1", { waitUntil: "networkidle" });
-  await expect(page.locator(".profile-editing code")).toHaveText("ini\\Default.ini");
-  await expect(page.getByText("The original file cannot be written.", { exact: false })).toBeVisible();
+test.describe("shared read-only profiles require Save as before apply", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`read-only profiles require Save as before apply ${skin}`, async ({ page }, testInfo) => {
+      await page.goto(`/?view=profiles&gallery=1&lang=en&profile-read-only=1&skin=${skin}`, { waitUntil: "networkidle" });
+      await expect(page.locator("main code").filter({ hasText: /Default[.]ini|Review copy[.]ini/ }).first()).toContainText("Default.ini");
+      await expect(page.getByText("The original file cannot be written.", { exact: false })).toBeVisible();
 
-  const setting = page.locator(".setting-row select").first();
-  const initial = await setting.inputValue();
-  const alternate = await setting.locator("option").evaluateAll(
-    (options, current) => options.map((option) => (option as HTMLOptionElement).value).find((value) => value !== current),
-    initial,
-  );
-  if (!alternate) throw new Error("A read-only profile setting needs an alternate gallery value");
-  await setting.selectOption(alternate);
+      const setting = page.locator(".setting-row select").first();
+      const initial = await setting.inputValue();
+      const alternate = await setting.locator("option").evaluateAll(
+        (options, current) => options.map((option) => (option as HTMLOptionElement).value).find((value) => value !== current),
+        initial,
+      );
+      if (!alternate) throw new Error("A read-only profile setting needs an alternate gallery value");
+      await setting.selectOption(alternate);
 
-  await expect(page.getByRole("button", { name: "Save now", exact: true })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Set as run profile", exact: true })).toBeDisabled();
-  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-profile-read-only-save-as-required-en.png`), fullPage: true });
-  await page.getByRole("button", { name: "Save as", exact: true }).click();
-  await page.getByRole("textbox", { name: "New profile name" }).fill("Review copy");
-  await page.locator(".profile-save-as").getByRole("button", { name: "Save as", exact: true }).click();
+      await expect(page.getByRole("button", { name: "Save now", exact: true })).toBeDisabled();
+      await expect(page.getByRole("button", { name: "Set as run profile", exact: true })).toBeDisabled();
+      await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-profile-read-only-save-as-required-en.png`), fullPage: true });
+      await page.getByRole("button", { name: "Save as", exact: true }).click();
+      await page.getByRole("textbox", { name: "New profile name" }).fill("Review copy");
+      await page.locator(".profile-save-as").getByRole("button", { name: "Save as", exact: true }).click();
 
-  await expect(page.locator(".profile-editing code")).toHaveText("Profiles\\Review copy.ini");
-  await expect(page.locator(".profile-message")).toContainText("Saved as Profiles\\Review copy.ini");
-  await expect(page.getByRole("button", { name: "Set as run profile", exact: true })).toBeEnabled();
-  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-profile-read-only-save-as-en.png`), fullPage: true });
+      await expect(page.locator("main code").filter({ hasText: /Default[.]ini|Review copy[.]ini/ }).first()).toContainText("Review copy.ini");
+      await expect(page.locator(".profile-message")).toContainText("Saved as Profiles\\Review copy.ini");
+      await expect(page.getByRole("button", { name: "Set as run profile", exact: true })).toBeEnabled();
+      await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-profile-read-only-save-as-en.png`), fullPage: true });
+    });
+  }
 });
 
 test("known legacy-selected profiles open directly without an import detour", async ({ page }, testInfo) => {
@@ -1076,33 +1171,37 @@ test("execution and new system service controls remain interactive", async ({ pa
   expect(failures, failures.join("\n")).toEqual([]);
 });
 
-test("manual launch offers running processes first and file browsing second", async ({ page }) => {
-  await page.goto("/?view=execution&gallery=1&lang=ko&system-service=ready", { waitUntil: "networkidle" });
-  const manualRow = page.locator('details.service-row[data-kind="manual"]');
-  await manualRow.locator("summary").click();
+test.describe("shared manual launch offers running processes first and file browsing second", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`manual launch offers running processes first and file browsing second ${skin}`, async ({ page }) => {
+      await page.goto(`/?view=execution&gallery=1&lang=ko&system-service=ready&skin=${skin}`, { waitUntil: "networkidle" });
+      const manualRow = await openSharedServiceRow(page, "manual");
 
-  await expect(manualRow.getByText("실행 중인 앱", { exact: true })).toBeVisible();
-  const rows = manualRow.locator(".process-picker-row");
-  await expect(rows).toHaveCount(5);
-  await expect(rows.nth(0)).toContainText("code.exe");
-  await expect(rows.nth(0)).toContainText("Visual Studio Code");
-  await expect(rows.nth(0)).toContainText("PID 5678");
-  await expect(rows.nth(1)).toContainText("제목 없음 - 메모장");
-  await expect(manualRow.getByText("목록에 없는 실행 파일 찾아보기", { exact: true })).toBeVisible();
+      await expect(manualRow.getByText("실행 중인 앱", { exact: true })).toBeVisible();
+      const rows = manualRow.locator(".process-picker-row");
+      await expect(rows).toHaveCount(5);
+      await expect(rows.nth(0)).toContainText("code.exe");
+      await expect(rows.nth(0)).toContainText("Visual Studio Code");
+      await expect(rows.nth(0)).toContainText("PID 5678");
+      await expect(rows.nth(1)).toContainText("제목 없음 - 메모장");
+      await expect(manualRow.getByText("목록에 없는 실행 파일 찾아보기", { exact: true })).toBeVisible();
 
-  const register = manualRow.getByRole("button", { name: "트레이에 등록" });
-  await expect(register).toBeDisabled();
+      const register = manualRow.getByRole("button", { name: "트레이에 등록" });
+      await expect(register).toBeDisabled();
 
-  await manualRow.getByLabel("앱 필터").fill("note");
-  await expect(rows).toHaveCount(1);
-  await expect(rows.first()).toContainText("notepad.exe");
+      await manualRow.getByLabel("앱 필터").fill("note");
+      await expect(rows).toHaveCount(1);
+      await expect(rows.first()).toContainText("notepad.exe");
 
-  await manualRow.getByRole("radio", { name: /notepad\.exe/ }).check();
-  await expect(manualRow.locator(".target-selection strong")).toHaveText("notepad.exe");
-  await expect(manualRow.locator(".target-selection code")).toHaveText("C:\\Tools\\notepad.exe");
-  await expect(register).toBeEnabled();
+      await manualRow.getByRole("radio", { name: /notepad\.exe/ }).check();
+      await expect(manualRow.locator(".target-selection strong")).toHaveText("notepad.exe");
+      await expect(manualRow.locator(".target-selection code")).toHaveText("C:\\Tools\\notepad.exe");
+      await expect(register).toBeEnabled();
 
-  expect(await overflowingElements(page)).toEqual([]);
+      expect(await overflowingElements(page)).toEqual([]);
+    });
+  }
 });
 
 test("a running legacy service is never claimed as verified system application", async ({ page }) => {
@@ -1156,78 +1255,88 @@ test("a retired stopped legacy service leaves new-service recovery available", a
   await expect(legacy.getByRole("button", { name: "마이그레이션" })).toBeDisabled();
 });
 
-test("designating a run profile with no service holds the choice until the service page starts it", async ({ page }) => {
-  await page.goto("/?view=files&gallery=1&lang=en&system-service=migration-available", { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "Set as run profile", exact: true }).click();
-  await expect(page.getByText(/is now the run profile\. The service will use it when it starts\./)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Start the service now" })).toHaveCount(0);
+test.describe("shared designating a run profile with no service holds the choice until the service page starts it", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`designating a run profile with no service holds the choice until the service page starts it ${skin}`, async ({ page }) => {
+      await page.goto(`/?view=files&gallery=1&lang=en&system-service=migration-available&skin=${skin}`, { waitUntil: "networkidle" });
+      await page.getByRole("button", { name: "Set as run profile", exact: true }).click();
+      await expect(page.getByText(/is now the run profile\. The service will use it when it starts\./)).toBeVisible();
+      await expect(page.getByRole("button", { name: "Start the service now" })).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Service" }).click();
-  await openServiceDetails(page);
-  const openService = page.locator('[data-service-backend="open-source"]');
-  await expect(openService.locator('[data-state="unavailable"], [data-state="inactive"]').first()).toBeVisible();
-  await expect(openService).not.toContainText("MacType system-wide rendering active");
-  await page.locator("[data-service-summary]").getByRole("button", { name: "Install service" }).click();
-  await expect(openService.locator('[data-state="active"]')).toBeVisible();
-  await expect(openService).toContainText("MacType system-wide rendering active");
+      await page.locator('[data-nav="execution"]').click();
+      const summary = page.locator("[data-service-summary]");
+      await expect(summary).toContainText("Install service");
+      await expect(summary).not.toContainText("Running");
+      await summary.getByRole("button", { name: "Install service" }).click();
+      await expect(summary).toContainText("Running");
+    });
+  }
 });
 
-test("designating a run profile while the service is stopped keeps it stopped and offers one explicit start", async ({ page }, testInfo) => {
-  await page.goto("/?view=files&gallery=1&lang=ko&system-service=stopped", { waitUntil: "networkidle" });
-  const pretendardCard = page.locator(".profile-card").filter({ hasText: "Pretendard forever" });
-  await expect(page.locator('.profile-card[data-run-profile="true"] .profile-card-title strong')).toHaveText("Default");
-  await pretendardCard.locator(".profile-card-select").click();
-  await page.getByRole("button", { name: "실행 프로필로 지정", exact: true }).click();
+test.describe("shared designating a run profile while the service is stopped keeps it stopped and offers one explicit start", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`designating a run profile while the service is stopped keeps it stopped and offers one explicit start ${skin}`, async ({ page }, testInfo) => {
+      await page.goto(`/?view=files&gallery=1&lang=ko&system-service=stopped&skin=${skin}`, { waitUntil: "networkidle" });
+      const pretendardCard = profileChoice(page, "Pretendard forever");
+      await expect(page.locator('[data-applied="true"][data-selected]')).toContainText("Default");
+      await selectProfileChoice(page, "Pretendard forever");
+      await page.getByRole("button", { name: "실행 프로필로 지정", exact: true }).click();
 
-  const message = page.locator('[data-operation="file-settings"]');
-  await expect(message).toContainText("서비스를 시작하면 이 프로필로 실행됩니다.");
-  await expect(pretendardCard).toHaveAttribute("data-run-profile", "true");
-  await expect(pretendardCard.locator(".profile-card-badge")).toHaveText("실행 프로필");
-  const startNow = message.getByRole("button", { name: "지금 서비스 시작" });
-  await expect(startNow).toBeVisible();
-  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-run-profile-held-ko.png`), fullPage: true });
+      const message = page.locator('[data-operation="file-settings"]');
+      await expect(message).toContainText("서비스를 시작하면 이 프로필로 실행됩니다.");
+      await expect(pretendardCard).toHaveAttribute("data-run-profile", "true");
+      await expect(pretendardCard.locator('[data-run-profile="true"]')).toHaveText("실행 프로필");
+      const startNow = message.getByRole("button", { name: "지금 서비스 시작" });
+      await expect(startNow).toBeVisible();
+      await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-run-profile-held-ko.png`), fullPage: true });
 
-  const wizardGroup = page.locator(".navigation").getByRole("group", { name: "위자드" });
-  await wizardGroup.getByRole("button", { name: "서비스" }).click();
-  const summary = page.locator("[data-service-summary]");
-  await expect(summary).toContainText("중지됨");
-  await expect(summary).toContainText("실행 프로필");
-  await expect(summary).toContainText("pretendard forever.ini");
-  await openServiceDetails(page);
-  await expect(page.getByText("MacType 시스템 적용 꺼짐", { exact: true })).toBeVisible();
-  await expect(page.locator(".system-injection-control")).toContainText("실행 프로필(pretendard forever.ini)");
+      await page.locator('[data-nav="execution"]').click();
+      await page.getByRole("button", { name: "상태 새로 고침" }).click();
+      const summary = page.locator("[data-service-summary]");
+      await expect(summary).toContainText("중지됨");
+      await expect(summary).toContainText("실행 프로필");
+      await expect(summary).toContainText("pretendard forever.ini");
 
-  // The page remounts on return, so the held designation is repeated before
-  // the one explicit start it offers is taken.
-  await wizardGroup.getByRole("button", { name: "프로필" }).click();
-  await expect(page.locator('.profile-card[data-run-profile="true"] .profile-card-title strong')).toHaveText("Pretendard forever");
-  await page.getByRole("button", { name: "실행 프로필로 지정", exact: true }).click();
-  await page.locator('[data-operation="file-settings"]').getByRole("button", { name: "지금 서비스 시작" }).click();
-  await expect(page.locator('[data-operation="file-settings"]')).toContainText("서비스를 시작했습니다.");
-  await expect(page.locator('[data-operation="file-settings"]').getByRole("button", { name: "지금 서비스 시작" })).toHaveCount(0);
-  await wizardGroup.getByRole("button", { name: "서비스" }).click();
-  await expect(summary).toContainText("실행 중");
-  await openServiceDetails(page);
-  await expect(page.getByText("MacType 시스템 적용 중", { exact: true })).toBeVisible();
+      // The page remounts on return, so the held designation is repeated before
+      // the one explicit start it offers is taken.
+      await page.locator('[data-nav="files"]').click();
+      await expect(page.locator('[data-applied="true"][data-selected]')).toContainText("Pretendard forever");
+      await page.getByRole("button", { name: "실행 프로필로 지정", exact: true }).click();
+      await page.locator('[data-operation="file-settings"]').getByRole("button", { name: "지금 서비스 시작" }).click();
+      await expect(page.locator('[data-operation="file-settings"]')).toContainText("서비스를 시작했습니다.");
+      await expect(page.locator('[data-operation="file-settings"]').getByRole("button", { name: "지금 서비스 시작" })).toHaveCount(0);
+      await page.locator('[data-nav="execution"]').click();
+      await page.getByRole("button", { name: "상태 새로 고침" }).click();
+      await expect(summary).toContainText("실행 중");
+      await expect(page.locator('[data-kind="system"]')).toContainText("MacType 시스템 적용 중");
+    });
+  }
 });
 
-test("designating a run profile while the service runs switches it live", async ({ page }, testInfo) => {
-  await page.goto("/?view=files&gallery=1&lang=ko&system-service=ready", { waitUntil: "networkidle" });
-  const pretendardCard = page.locator(".profile-card").filter({ hasText: "Pretendard forever" });
-  await pretendardCard.locator(".profile-card-select").click();
-  await page.getByRole("button", { name: "실행 프로필로 지정", exact: true }).click();
+test.describe("shared designating a run profile while the service runs switches it live", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`designating a run profile while the service runs switches it live ${skin}`, async ({ page }, testInfo) => {
+      await page.goto(`/?view=files&gallery=1&lang=ko&system-service=ready&skin=${skin}`, { waitUntil: "networkidle" });
+      const pretendardCard = profileChoice(page, "Pretendard forever");
+      await selectProfileChoice(page, "Pretendard forever");
+      await page.getByRole("button", { name: "실행 프로필로 지정", exact: true }).click();
 
-  const message = page.locator('[data-operation="file-settings"]');
-  await expect(message).toContainText("실행 중인 서비스에 바로 반영했습니다.");
-  await expect(message.getByRole("button", { name: "지금 서비스 시작" })).toHaveCount(0);
-  await expect(pretendardCard).toHaveAttribute("data-run-profile", "true");
-  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-run-profile-live-ko.png`), fullPage: true });
+      const message = page.locator('[data-operation="file-settings"]');
+      await expect(message).toContainText("실행 중인 서비스에 바로 반영했습니다.");
+      await expect(message.getByRole("button", { name: "지금 서비스 시작" })).toHaveCount(0);
+      await expect(pretendardCard).toHaveAttribute("data-run-profile", "true");
+      await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-run-profile-live-ko.png`), fullPage: true });
 
-  await page.locator(".navigation").getByRole("group", { name: "위자드" }).getByRole("button", { name: "서비스" }).click();
-  await expect(page.locator("[data-service-summary]")).toContainText("실행 중");
-  await expect(page.locator("[data-service-summary]")).toContainText("pretendard forever.ini");
-  await openServiceDetails(page);
-  await expect(page.getByText("MacType 시스템 적용 중", { exact: true })).toBeVisible();
+      await page.locator('[data-nav="execution"]').click();
+      await page.getByRole("button", { name: "상태 새로 고침" }).click();
+      await expect(page.locator("[data-service-summary]")).toContainText("실행 중");
+      await expect(page.locator("[data-service-summary]")).toContainText("pretendard forever.ini");
+      await expect(page.locator('[data-kind="system"]')).toContainText("MacType 시스템 적용 중");
+    });
+  }
 });
 
 for (const entry of [
@@ -1294,57 +1403,67 @@ test("a verified legacy service funnels activation through Migrate until it is r
   await expect(page.locator('[data-service-backend="legacy-mactray"]')).toHaveCount(0);
 });
 
-test("internal migration failures show only the localized diagnostics instruction", async ({ page }) => {
-  for (const locale of [
-    { lang: "en", title: "Migrate legacy MacTray?", continue: "Continue migration", message: "Migration failed. Check the diagnostics log for details." },
-    { lang: "ko", title: "레거시 MacTray를 마이그레이션할까요?", continue: "마이그레이션 계속", message: "마이그레이션에 실패했습니다. 자세한 내용은 진단 로그를 확인하세요." },
-  ]) {
-    await page.goto(`/?view=execution&gallery=1&lang=${locale.lang}&system-service=migration-available&legacy=migration-available&service-fail=migrate-from-legacy`, { waitUntil: "networkidle" });
-    await openServiceDetails(page);
-    const legacy = page.locator('[data-service-backend="legacy-mactray"]');
-    await legacy.getByRole("button", { name: locale.lang === "ko" ? "마이그레이션" : "Migrate" }).click();
-    await page.getByRole("dialog", { name: locale.title }).getByRole("button", { name: locale.continue }).click();
-    await expect(page.getByText(locale.message, { exact: true })).toBeVisible();
-    await expect(page.getByText(/control-center-internal-operation-failed|broker exit code|strict Ready/)).toHaveCount(0);
+test.describe("shared internal migration failures show only the localized diagnostics instruction", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`internal migration failures show only the localized diagnostics instruction ${skin}`, async ({ page }) => {
+      for (const locale of [
+        { lang: "en", title: "Migrate legacy MacTray?", continue: "Continue migration", message: "Migration failed. Check the diagnostics log for details." },
+        { lang: "ko", title: "레거시 MacTray를 마이그레이션할까요?", continue: "마이그레이션 계속", message: "마이그레이션에 실패했습니다. 자세한 내용은 진단 로그를 확인하세요." },
+      ]) {
+        await page.goto(`/?view=execution&gallery=1&lang=${locale.lang}&system-service=migration-available&legacy=migration-available&service-fail=migrate-from-legacy`, { waitUntil: "networkidle" });
+        await openServiceDetails(page);
+        const legacy = page.locator('[data-service-backend="legacy-mactray"]');
+        await legacy.getByRole("button", { name: locale.lang === "ko" ? "마이그레이션" : "Migrate" }).click();
+        await page.getByRole("dialog", { name: locale.title }).getByRole("button", { name: locale.continue }).click();
+        await expect(page.getByText(locale.message, { exact: true })).toBeVisible();
+        await expect(page.getByText(/control-center-internal-operation-failed|broker exit code|strict Ready/)).toHaveCount(0);
+      }
+    });
   }
 });
 
-test("legacy migration explains concrete actions and rollback before it can continue", async ({ page }) => {
-  await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy=migration-available", { waitUntil: "networkidle" });
+test.describe("shared legacy migration explains concrete actions and rollback before it can continue", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`legacy migration explains concrete actions and rollback before it can continue ${skin}`, async ({ page }) => {
+      await page.goto(`/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy=migration-available&skin=${skin}`, { waitUntil: "networkidle" });
 
-  const migrationTrigger = page.locator("[data-service-summary]").getByRole("button", { name: "Migrate" });
-  await migrationTrigger.click();
+      const migrationTrigger = page.locator("[data-service-summary]").getByRole("button", { name: "Migrate" });
+      await migrationTrigger.click();
 
-  const dialog = page.getByRole("dialog", { name: "Migrate legacy MacTray?" });
-  const cancel = dialog.getByRole("button", { name: "Cancel" });
-  const continueMigration = dialog.getByRole("button", { name: "Continue migration" });
-  await expect(dialog).toBeVisible();
-  await expect(cancel).toBeFocused();
-  await expect(dialog).toContainText("Checks whether another MacType mode must be turned off first");
-  await expect(dialog).toContainText("Backs up the current settings and profile before switching");
-  await expect(dialog).toContainText("Stops the legacy service");
-  await expect(dialog).toContainText("copies the current profile to the new service");
-  await expect(dialog).toContainText("installs and starts it");
-  await expect(dialog).toContainText("restores the services and profile to their previous state");
-  await expect(dialog).not.toContainText(/verif|safe|Ready|digest|smoke|does not remove/i);
+      const dialog = page.getByRole("dialog", { name: "Migrate legacy MacTray?" });
+      const cancel = dialog.getByRole("button", { name: "Cancel" });
+      const continueMigration = dialog.getByRole("button", { name: "Continue migration" });
+      await expect(dialog).toBeVisible();
+      await expect(cancel).toBeFocused();
+      await expect(dialog).toContainText("Checks whether another MacType mode must be turned off first");
+      await expect(dialog).toContainText("Backs up the current settings and profile before switching");
+      await expect(dialog).toContainText("Stops the legacy service");
+      await expect(dialog).toContainText("copies the current profile to the new service");
+      await expect(dialog).toContainText("installs and starts it");
+      await expect(dialog).toContainText("restores the services and profile to their previous state");
+      await expect(dialog).not.toContainText(/verif|safe|Ready|digest|smoke|does not remove/i);
 
-  await page.keyboard.press("Shift+Tab");
-  await expect(continueMigration).toBeFocused();
-  await page.keyboard.press("Tab");
-  await expect(cancel).toBeFocused();
-  await page.keyboard.press("Escape");
-  await expect(dialog).toHaveCount(0);
-  await expect(migrationTrigger).toBeFocused();
-  await expect(page.getByText("Migration to the new service completed.", { exact: true })).toHaveCount(0);
+      await page.keyboard.press("Shift+Tab");
+      await expect(continueMigration).toBeFocused();
+      await page.keyboard.press("Tab");
+      await expect(cancel).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(dialog).toHaveCount(0);
+      await expect(migrationTrigger).toBeFocused();
+      await expect(page.getByText("Migration to the new service completed.", { exact: true })).toHaveCount(0);
 
-  await migrationTrigger.click();
-  await cancel.click();
-  await expect(migrationTrigger).toBeFocused();
+      await migrationTrigger.click();
+      await cancel.click();
+      await expect(migrationTrigger).toBeFocused();
 
-  await migrationTrigger.click();
-  await continueMigration.click();
-  await expect(page.getByText("Migration to the new service completed.", { exact: true })).toBeVisible();
-  await expect(migrationTrigger).toHaveCount(0);
+      await migrationTrigger.click();
+      await continueMigration.click();
+      await expect(page.getByText("Migration to the new service completed.", { exact: true })).toBeVisible();
+      await expect(migrationTrigger).toHaveCount(0);
+    });
+  }
 });
 
 test("system service path is read-only and can reveal its installed location", async ({ page }) => {
@@ -1375,20 +1494,24 @@ test("an absent service never exposes a binary path or location action", async (
   await expect(openService.getByRole("button", { name: "Open service location" })).toHaveCount(0);
 });
 
-test("the service page keeps its normal state to one summary and one action", async ({ page }) => {
-  await page.goto("/?view=execution&gallery=1&lang=en&system-service=ready", { waitUntil: "networkidle" });
+test.describe("shared the service page keeps its normal state to one summary and one action", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`the service page keeps its normal state to one summary and one action ${skin}`, async ({ page }) => {
+      await page.goto(`/?view=execution&gallery=1&lang=en&system-service=ready&skin=${skin}`, { waitUntil: "networkidle" });
 
-  const summary = page.locator("[data-service-summary]");
-  await expect(summary).toContainText("Run profile");
-  await expect(summary).toContainText("Default.ini");
-  await expect(summary).toContainText("Control Center service");
-  await expect(summary).toContainText("Running");
-  await expect(summary.getByRole("button", { name: "Stop" })).toBeEnabled();
-  await expect(summary.getByRole("button")).toHaveCount(1);
-  await expect(page.getByRole("heading", { name: "System-wide modes" })).toBeVisible();
-  await expect(page.locator('details.service-row[data-kind="system"]')).toContainText("Current installation · Running · Healthy");
-  await expect(page.getByRole("button", { name: "Remove service" })).toBeHidden();
-  await expect(page.locator("details.service-row[open]")).toHaveCount(0);
+      const summary = page.locator("[data-service-summary]");
+      await expect(summary).toContainText("Run profile");
+      await expect(summary).toContainText("Default.ini");
+      await expect(summary).toContainText("Running");
+      await expect(summary.getByRole("button", { name: "Stop" })).toBeEnabled();
+      await expect(summary.getByRole("button")).toHaveCount(1);
+      await expect(page.locator('[data-kind="system"]')).toContainText("System-wide modes");
+      await expect(page.locator('[data-kind="autostart"]').getByRole("switch")).toBeEnabled();
+      await expect(page.locator('[data-kind="registered"]')).toBeVisible();
+      await expect(page.locator('[data-kind="manual"]')).toBeVisible();
+    });
+  }
 });
 
 test("small degraded states stay in Details while failed configuration is actionable", async ({ page }) => {
@@ -1482,35 +1605,45 @@ test("AppInit conflict preserves the backend-authorized recovery stop", async ({
   await expect(legacy.getByRole("button", { name: "Remove legacy service" })).toBeDisabled();
 });
 
-test("AppInit remains prominent when there is no safe automatic recovery action", async ({ page }) => {
-  await page.goto("/?view=execution&gallery=1&lang=en&system-service=legacy-conflict&service-runtime=stopped", { waitUntil: "networkidle" });
+test.describe("shared AppInit remains prominent when there is no safe automatic recovery action", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`AppInit remains prominent when there is no safe automatic recovery action ${skin}`, async ({ page }) => {
+      await page.goto(`/?view=execution&gallery=1&lang=en&system-service=legacy-conflict&service-runtime=stopped&skin=${skin}`, { waitUntil: "networkidle" });
 
-  const summary = page.locator("[data-service-summary]");
-  await expect(summary).toContainText("AppInit registry mode is active, so service installation and startup are blocked.");
-  await expect(summary.locator("[data-prominent-exception]")).toHaveAttribute("data-kind", "appinit-conflict");
-  await expect(summary.getByRole("button")).toHaveCount(0);
+      const summary = page.locator("[data-service-summary]");
+      await expect(summary).toContainText("AppInit registry mode is active, so service installation and startup are blocked.");
+      await expect(summary.locator("[data-prominent-exception]")).toHaveAttribute("data-kind", "appinit-conflict");
+      await expect(summary.getByRole("button")).toHaveCount(0);
+    });
+  }
 });
 
-test("trusted MacTray and autostart conflicts are resolved in the required order", async ({ page }) => {
-  await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy-tray=trusted-current&legacy-startup=hkcu-run", { waitUntil: "networkidle" });
+test.describe("shared trusted MacTray and autostart conflicts are resolved in the required order", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`trusted MacTray and autostart conflicts are resolved in the required order ${skin}`, async ({ page }) => {
+      await page.goto(`/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy-tray=trusted-current&legacy-startup=hkcu-run&skin=${skin}`, { waitUntil: "networkidle" });
 
-  const conflict = page.locator("[data-legacy-tray-conflict]");
-  const summaryInstall = page.locator("[data-service-summary]").getByRole("button", { name: "Install service" });
-  await expect(conflict).toContainText("Existing MacTray is running");
-  await expect(conflict.getByRole("button", { name: "Exit MacTray" })).toBeEnabled();
-  await expect(conflict.getByRole("button", { name: "Check again" })).toBeEnabled();
-  await expect(conflict.getByRole("button", { name: "Disable MacTray autostart" })).toHaveCount(0);
-  await expect(summaryInstall).toHaveCount(0);
+      const conflict = page.locator("[data-legacy-tray-conflict]");
+      const summaryInstall = page.locator("[data-service-summary]").getByRole("button", { name: "Install service" });
+      await expect(conflict).toContainText("Existing MacTray is running");
+      await expect(conflict.getByRole("button", { name: "Exit MacTray" })).toBeEnabled();
+      await expect(conflict.getByRole("button", { name: "Check again" })).toBeEnabled();
+      await expect(conflict.getByRole("button", { name: "Disable MacTray autostart" })).toHaveCount(0);
+      await expect(summaryInstall).toHaveCount(0);
 
-  await conflict.getByRole("button", { name: "Exit MacTray" }).click();
-  await expect(conflict).toContainText("MacTray autostart must be disabled");
-  await expect(conflict.getByRole("button", { name: "Exit MacTray" })).toHaveCount(0);
-  await expect(conflict.getByRole("button", { name: "Disable MacTray autostart" })).toBeEnabled();
-  await expect(summaryInstall).toHaveCount(0);
+      await conflict.getByRole("button", { name: "Exit MacTray" }).click();
+      await expect(conflict).toContainText("MacTray autostart must be disabled");
+      await expect(conflict.getByRole("button", { name: "Exit MacTray" })).toHaveCount(0);
+      await expect(conflict.getByRole("button", { name: "Disable MacTray autostart" })).toBeEnabled();
+      await expect(summaryInstall).toHaveCount(0);
 
-  await conflict.getByRole("button", { name: "Disable MacTray autostart" }).click();
-  await expect(page.locator("[data-legacy-tray-conflict]")).toHaveCount(0);
-  await expect(summaryInstall).toBeEnabled();
+      await conflict.getByRole("button", { name: "Disable MacTray autostart" }).click();
+      await expect(page.locator("[data-legacy-tray-conflict]")).toHaveCount(0);
+      await expect(summaryInstall).toBeEnabled();
+    });
+  }
 });
 
 for (const fixture of [
@@ -1600,18 +1733,23 @@ test("a foreign same-name service is prominent without exposing an unsafe action
   await expect(page.getByText("Manage service", { exact: true })).toBeHidden();
 });
 
-test("a foreign legacy service and pending removal cannot hide in Details", async ({ page }) => {
-  const summary = page.locator("[data-service-summary]");
+test.describe("shared a foreign legacy service and pending removal cannot hide in Details", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`a foreign legacy service and pending removal cannot hide in Details ${skin}`, async ({ page }) => {
+      const summary = page.locator("[data-service-summary]");
 
-  await page.goto("/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy=foreign", { waitUntil: "networkidle" });
-  await expect(summary).toContainText("A foreign legacy MacTray service was detected");
-  await expect(summary.locator("[data-prominent-exception]")).toHaveAttribute("data-kind", "legacy-service-foreign");
-  await expect(summary.getByRole("button")).toHaveCount(0);
+      await page.goto(`/?view=execution&gallery=1&lang=en&system-service=migration-available&legacy=foreign&skin=${skin}`, { waitUntil: "networkidle" });
+      await expect(summary).toContainText("A foreign legacy MacTray service was detected");
+      await expect(summary.locator("[data-prominent-exception]")).toHaveAttribute("data-kind", "legacy-service-foreign");
+      await expect(summary.getByRole("button")).toHaveCount(0);
 
-  await page.goto("/?view=execution&gallery=1&lang=en&system-service=delete-pending", { waitUntil: "networkidle" });
-  await expect(summary).toContainText("Removal pending");
-  await expect(summary.locator("[data-prominent-exception]")).toHaveAttribute("data-kind", "removal-pending");
-  await expect(summary.getByRole("button")).toHaveCount(0);
+      await page.goto(`/?view=execution&gallery=1&lang=en&system-service=delete-pending&skin=${skin}`, { waitUntil: "networkidle" });
+      await expect(summary).toContainText("Removal pending");
+      await expect(summary.locator("[data-prominent-exception]")).toHaveAttribute("data-kind", "removal-pending");
+      await expect(summary.getByRole("button")).toHaveCount(0);
+    });
+  }
 });
 
 const legacyServiceIdentityCases = [
@@ -1738,16 +1876,20 @@ for (const fixture of [
   });
 }
 
-test("a stopped new service with no alternative offers Start and Remove", async ({ page }) => {
-  await page.goto("/?view=execution&gallery=1&lang=en&system-service=ready&service-runtime=stopped", { waitUntil: "networkidle" });
-  const summary = page.locator("[data-service-summary]");
-  await expect(summary).toContainText("Stopped");
-  await expect(summary.getByRole("button", { name: "Start service" })).toBeEnabled();
-  await expect(summary.getByRole("button", { name: "Remove service" })).toBeEnabled();
-  await expect(summary.getByRole("button")).toHaveCount(2);
-  await expect(summary.locator(".success")).toHaveCount(0);
-  await expect(summary.locator(".warning")).toHaveCount(0);
-  await expect(summary.locator(".neutral-status")).toHaveCount(1);
+test.describe("shared a stopped new service with no alternative offers Start and Remove", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`a stopped new service with no alternative offers Start and Remove ${skin}`, async ({ page }) => {
+      await page.goto(`/?view=execution&gallery=1&lang=en&system-service=ready&service-runtime=stopped&skin=${skin}`, { waitUntil: "networkidle" });
+      const summary = page.locator("[data-service-summary]");
+      await expect(summary).toContainText("Stopped");
+      await expect(summary).toHaveAttribute("data-state", "neutral");
+      await expect(summary.getByRole("button", { name: "Start service" })).toBeEnabled();
+      await expect(summary.getByRole("button", { name: "Remove service" })).toBeEnabled();
+      await expect(summary.getByRole("button")).toHaveCount(2);
+
+    });
+  }
 });
 
 test("a deliberately stopped service reports neutrally instead of claiming degradation", async ({ page }) => {
@@ -1795,15 +1937,20 @@ test("starting with no applied profile applies the bundled default and says so",
   await expect(summary).toContainText("Default.ini");
 });
 
-test("the primary service action disables immediately while its mutation is busy", async ({ page }) => {
-  await page.goto("/?view=execution&gallery=1&lang=en&system-service=ready&service-runtime=stopped&service-delay=750", { waitUntil: "networkidle" });
+test.describe("shared the primary service action disables immediately while its mutation is busy", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`the primary service action disables immediately while its mutation is busy ${skin}`, async ({ page }) => {
+      await page.goto(`/?view=execution&gallery=1&lang=en&system-service=ready&service-runtime=stopped&service-delay=750&skin=${skin}`, { waitUntil: "networkidle" });
 
-  const summary = page.locator("[data-service-summary]");
-  const start = summary.getByRole("button", { name: "Start service" });
-  await expect(start).toBeEnabled();
-  await start.click();
-  await expect(summary.getByRole("button", { name: "Working…" })).toBeDisabled();
-  await expect(summary.getByRole("button", { name: "Stop" })).toBeEnabled();
+      const summary = page.locator("[data-service-summary]");
+      const start = summary.getByRole("button", { name: "Start service" });
+      await expect(start).toBeEnabled();
+      await start.click();
+      await expect(summary.getByRole("button", { name: "Working…" })).toBeDisabled();
+      await expect(summary.getByRole("button", { name: "Stop" })).toBeEnabled();
+    });
+  }
 });
 
 test("service migration gallery remains usable at low window height", async ({ page }, testInfo) => {
@@ -1874,11 +2021,21 @@ test("overview summarizes the active service and discloses at most five successf
   await expect(activity.locator("ol")).toHaveCount(0);
 });
 
-test("overview offers a Service shortcut only when the service needs attention", async ({ page }) => {
-  await page.goto("/?view=overview&gallery=1&lang=en&system-service=ready&service-runtime=stopped", { waitUntil: "networkidle" });
-  await expect(page.locator("[data-overview-service]").getByRole("button", { name: "Service" })).toBeVisible();
-  await page.goto("/?view=overview&gallery=1&lang=en&system-service=failed", { waitUntil: "networkidle" });
-  await expect(page.locator("[data-overview-service]").getByRole("button", { name: "Service" })).toBeVisible();
+test.describe("shared overview offers a Service shortcut only when the service needs attention", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`overview offers a Service shortcut when the service needs attention ${skin}`, async ({ page }) => {
+      test.skip(skin === "console", "Console provides service actions in its dashboard, not a Service shortcut");
+      for (const state of ["ready&service-runtime=stopped", "failed"]) {
+        await page.goto(`/?view=overview&gallery=1&lang=en&skin=${skin}&system-service=${state}`, { waitUntil: "networkidle" });
+        const shortcut = page.locator("main").getByRole("button", { name: /^(Service|Manage service)(…)?$/ });
+        await expect(shortcut).toBeVisible();
+        await shortcut.click();
+        await expect(page.locator("body")).toHaveAttribute("data-view", "execution");
+        await expect(page.locator("[data-service-summary]")).toContainText(state === "failed" ? "repair" : "Stopped");
+      }
+    });
+  }
 });
 
 test("diagnostics owns installation controls and always shows the localized event timeline", async ({ page }) => {
@@ -2059,6 +2216,42 @@ test("settings files present profile cards with thumbnails, apply ownership, and
   await expect(page.locator("body")).toHaveAttribute("data-profile-mode", "advanced");
 });
 
+
+test.describe("shared file hand-off and execution targets", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`profile selection hands the selected document to the tuner ${skin}`, async ({ page }) => {
+      await page.goto(`/?view=files&gallery=1&lang=en&skin=${skin}`, { waitUntil: "networkidle" });
+      const choice = await selectProfileChoice(page, "Pretendard forever");
+      const localEdit = choice.getByRole("button", { name: "Edit in Tuner" });
+      if (await localEdit.count()) await localEdit.click();
+      else await page.getByRole("button", { name: "Edit in Tuner" }).click();
+      await expect(page.locator("body")).toHaveAttribute("data-view", "profiles");
+      await expect(page.locator("body")).toHaveAttribute("data-profile-mode", "advanced");
+      await expect(page.locator("main code").first()).toContainText("pretendard forever.ini");
+    });
+
+    test(`service rows register, launch, remove, and toggle autostart ${skin}`, async ({ page }) => {
+      await page.goto(`/?view=execution&gallery=1&lang=en&skin=${skin}&system-service=ready`, { waitUntil: "networkidle" });
+      const autostart = page.locator('[data-kind="autostart"]').getByRole("switch");
+      await autostart.check();
+      await expect(autostart).toBeChecked();
+      await openSharedServiceRow(page, "manual");
+      await page.getByRole("radio", { name: /notepad[.]exe/ }).first().check();
+      await page.getByRole("button", { name: "Register in tray" }).click();
+      await page.getByRole("button", { name: "Run with MacType", exact: true }).click();
+      await expect(page.locator(".success-message")).toContainText("4242");
+      if (skin === "cupertino") await page.locator("main").getByRole("button", { name: "Service", exact: true }).click();
+      await expect(autostart).toBeChecked();
+      await openSharedServiceRow(page, "registered");
+      await expect(page.locator(".registered-launchers li code")).toContainText("notepad.exe");
+      await page.locator(".registered-launchers").getByRole("button", { name: "Launch registered apps" }).click();
+      await expect(page.locator(".success-message")).toContainText("1");
+      await page.locator(".registered-launchers li").getByRole("button").click();
+      await expect(page.locator(".registered-launchers li")).toHaveCount(0);
+    });
+  }
+});
 
 /* Every skin renders every view in both themes without horizontal overflow,
    keeps the shared navigation and preference controls, and persists through

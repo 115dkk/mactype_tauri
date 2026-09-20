@@ -1,0 +1,198 @@
+{
+  "date": "2026-09-21",
+  "base_commit": "1f8b2224c5dbda6ad54b2c11fcb2db2fee45b1e4",
+  "branch": "codex/alpha-refactor-2",
+  "delta": {
+    "A4": "Move five Classic pages and twelve shared editor modules; remove pages directory.",
+    "A3": "ShellProps groups navigation/preferences/installation/operations; App binds installation status updates.",
+    "A5": "Explicit grouped interfaces for Execution, FileSettings and ProfileEditor; consumers use useI18n.",
+    "A6": "28 existing behaviour cases parameterized over gallerySkins plus two new shared hand-off/launcher cases; locale screenshot sweep unchanged."
+  },
+  "authority": [
+    "control-center/src/features",
+    "control-center/src/app/shell.ts",
+    "control-center/src/styles/skins",
+    "docs/skin-designs.md"
+  ],
+  "baseline": "Before edits, build and targeted desktop gallery passed: 10 tests, 43.3s. A full pre-move baseline also passed: 817 passed, 26 skipped, 8.8m.",
+  "environment": {
+    "os": "Windows 11 Education 10.0.22621",
+    "browser": "Chromium 149.0.7827.55",
+    "playwright": "1.61.1",
+    "viewports": [
+      "390x844",
+      "768x900",
+      "1280x800",
+      "1680x900 docked preview",
+      "shipped default window from tauri.conf.json",
+      "880x560 at deviceScaleFactor 2"
+    ],
+    "dpi": "96 standard; 192 focused specimen case",
+    "native_capabilities": "Browser IPC/SVG fixtures only. No installed Tauri, WebView2, native helper or GDI validation."
+  },
+  "adjacent_regressions": [
+    "Designation absent/stopped/running, badges and explicit start",
+    "Save and designation gating; mutation recovery",
+    "Guided history and step-aware preview",
+    "Docking, pixel scale, comparison, unmount cancellation",
+    "Migration focus/cancel/confirm and legacy-tray conflicts",
+    "Manual/registered launchers and autostart",
+    "All locales/themes and existing layout/preference/control regressions"
+  ],
+  "setup": {
+    "command": "corepack pnpm install --frozen-lockfile",
+    "result": "PASS: 181 packages",
+    "path": "/c/Program Files/nodejs/node_modules/corepack/shims prepended",
+    "server": "CI=1; no foreign server reused"
+  },
+  "candidate_gates": {
+    "A4": [
+      {
+        "command": "corepack pnpm test:i18n",
+        "result": "PASS: 10 locales, 799 messages, 41 settings"
+      },
+      {
+        "command": "corepack pnpm test:settings",
+        "result": "PASS: 41 scalar settings, structured INI settings, IControlCenter fallthrough guards"
+      },
+      {
+        "command": "corepack pnpm lint",
+        "result": "PASS: zero errors/warnings"
+      },
+      {
+        "command": "corepack pnpm build",
+        "result": "PASS: 1699 modules; existing chunk-size warning"
+      },
+      {
+        "command": "CI=1 corepack pnpm test:gallery",
+        "result": "817 passed, 26 skipped, 843 total, 8.7m, no failed/flaky tests",
+        "log": "E:\\mactype_tauri\\.worktrees\\alpha-refactor-2\\artifacts\\a4-gallery.log"
+      }
+    ],
+    "A3": [
+      {
+        "command": "corepack pnpm test:i18n",
+        "result": "PASS: 10 locales, 799 messages, 41 settings"
+      },
+      {
+        "command": "corepack pnpm test:settings",
+        "result": "PASS: 41 scalar settings, structured INI settings, IControlCenter fallthrough guards"
+      },
+      {
+        "command": "corepack pnpm lint",
+        "result": "PASS: zero errors/warnings"
+      },
+      {
+        "command": "corepack pnpm build",
+        "result": "PASS: 1699 modules; existing chunk-size warning"
+      },
+      {
+        "command": "CI=1 corepack pnpm test:gallery",
+        "result": "817 passed, 26 skipped, 843 total, 9.4m, no failed/flaky tests",
+        "log": "E:\\mactype_tauri\\.worktrees\\alpha-refactor-2\\artifacts\\a3-gallery.log"
+      }
+    ],
+    "A5": [
+      {
+        "command": "corepack pnpm test:i18n",
+        "result": "PASS: 10 locales, 799 messages, 41 settings"
+      },
+      {
+        "command": "corepack pnpm test:settings",
+        "result": "PASS: 41 scalar settings, structured INI settings, IControlCenter fallthrough guards"
+      },
+      {
+        "command": "corepack pnpm lint",
+        "result": "PASS: zero errors/warnings"
+      },
+      {
+        "command": "corepack pnpm build",
+        "result": "PASS: 1699 modules; existing chunk-size warning"
+      },
+      {
+        "command": "CI=1 corepack pnpm test:gallery",
+        "result": "817 passed, 26 skipped, 843 total, 9.1m, no failed/flaky tests",
+        "log": "E:\\mactype_tauri\\.worktrees\\alpha-refactor-2\\artifacts\\a5-gallery.log"
+      }
+    ],
+    "A6": [
+      {
+        "command": "corepack pnpm test:i18n",
+        "result": "PASS: 10 locales, 799 messages, 41 settings"
+      },
+      {
+        "command": "corepack pnpm test:settings",
+        "result": "PASS: 41 scalar settings, structured INI settings, IControlCenter fallthrough guards"
+      },
+      {
+        "command": "corepack pnpm lint",
+        "result": "PASS: zero errors/warnings"
+      },
+      {
+        "command": "corepack pnpm build",
+        "result": "PASS: 1699 modules; existing chunk-size warning"
+      },
+      {
+        "command": "CI=1 corepack pnpm test:gallery",
+        "result": "1060 passed, 59 skipped, 1119 total, 12.3m, no failed/flaky tests",
+        "log": "E:\\mactype_tauri\\.worktrees\\alpha-refactor-2\\artifacts\\a6-gallery.log"
+      }
+    ]
+  },
+  "final_gates": [
+    {
+      "command": "pwsh -NoProfile -File scripts/ci/Test-SourceComments.ps1",
+      "result": "PASS: 574 first-party files"
+    },
+    {
+      "command": "pwsh -NoProfile -File scripts/ci/Test-AlphaBranchPolicy.ps1",
+      "result": "PASS: Alpha rendering-core lint policy"
+    },
+    {
+      "command": "git diff --check -- control-center/src docs/control-center-architecture.md tests/frontend-gallery",
+      "result": "PASS after three trailing blank lines removed"
+    }
+  ],
+  "visual_qa": {
+    "captures": [
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-2\\artifacts\\frontend-gallery\\desktop-1280-skin-classic-light-files-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-2\\artifacts\\frontend-gallery\\desktop-1280-skin-classic-light-execution-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-2\\artifacts\\frontend-gallery\\desktop-1280-skin-classic-light-overview-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-2\\artifacts\\frontend-gallery\\desktop-1280-skin-classic-light-profiles-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-2\\artifacts\\frontend-gallery\\desktop-1280-skin-fluent-light-files-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-2\\artifacts\\frontend-gallery\\desktop-1280-skin-fluent-light-execution-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-2\\artifacts\\frontend-gallery\\desktop-1280-skin-fluent-light-overview-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-2\\artifacts\\frontend-gallery\\desktop-1280-skin-fluent-light-profiles-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-2\\artifacts\\frontend-gallery\\desktop-1280-skin-console-light-files-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-2\\artifacts\\frontend-gallery\\desktop-1280-skin-console-light-execution-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-2\\artifacts\\frontend-gallery\\desktop-1280-skin-console-light-overview-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-2\\artifacts\\frontend-gallery\\desktop-1280-skin-console-light-profiles-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-2\\artifacts\\frontend-gallery\\desktop-1280-skin-cupertino-light-files-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-2\\artifacts\\frontend-gallery\\desktop-1280-skin-cupertino-light-execution-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-2\\artifacts\\frontend-gallery\\desktop-1280-skin-cupertino-light-overview-ko.png",
+      "E:\\mactype_tauri\\.worktrees\\alpha-refactor-2\\artifacts\\frontend-gallery\\desktop-1280-skin-cupertino-light-profiles-ko.png"
+    ],
+    "inspection": "All 16 inspected individually after A5, before A6. Checked selection/badges/current-file actions, service summaries and rows, overview activity/service layouts, Tuner index/form/preview. Classic/Fluent/Cupertino keep bottom preview at 1280, Console docks. No new visual defect observed; existing scrollable areas retained. No universal pixel-equality claim.",
+    "format_note": "Visual findings are here, not a report Markdown file, per task edit scope."
+  },
+  "differences_and_limits": [
+    "Console has no Overview Manage service shortcut; three viewport cases explicitly skip only that action. Fluent/Cupertino show their shortcut in normal state too.",
+    "Console uses a profile table and selected specimen, not three card thumbnails. Classic card layout/details disclosure checks remain skin-specific. All skins prove selection and Tuner hand-off.",
+    "Console execution model remains mounted across Files navigation and holds its prior snapshot after designation until Refresh. Shared designation tests explicitly refresh before asserting service state; production behaviour was not changed.",
+    "Mobile Fluent/Cupertino navigation labels are hidden with empty accessible names; tests use data-nav without DOM changes.",
+    "Console Tuner displays filename rather than portable-path summary. Save tests assert filename and success identity.",
+    "Gallery autostart and target fixtures return changes without persisting across model remounts. Launcher journey uses the Cupertino Service back button and keeps model lifetime.",
+    "Resizer End establishes actual available height before ArrowDown/Home assertions, then End restores pointer-interaction room. No forced clicks or CSS changes."
+  ],
+  "execution_notes": [
+    "A4 scripts initially failed quoting and encoding; successful move passed all gates before A3.",
+    "A3 initial lint found entry shadowing; subsequent build found MouseEvent/optional-path mismatch. Both corrected before final clean gates.",
+    "A5 initial tsc found member-rewrite collisions and an unused binding; corrected before final clean gates.",
+    "A6 focused anchored grep first found no tests. First focused run: 16 failed, 79 passed, 1 skipped (1.6m). Second: 94 passed, 1 flaky, 1 skipped (44.4s); transient Fluent read-only initial render timeout did not recur in final full run.",
+    "A6 all-width focused run: 16 failed, 313 passed, 43 skipped (4.3m). Corrected compact accessibility assumptions, resize clamping, English launch labels and fixture lifetime assertions. Next targeted run: 9 failed, 51 passed (1.1m). Final launcher family: 12 passed (11.1s).",
+    "A6 full gallery: no failures/flakes. Invoked foreground with 600000ms timeout, but tool automatically detached at 600s; immediately waited in a foreground loop to completion. No running task left at handback.",
+    "Removed three trailing model blank lines after full gallery; no executable change after the passing run.",
+    "Build generated line-ending-only noise in generated settings.ts, generated_settings.rs and generated_settings.h. No manual changes or prohibited git cleanup."
+  ],
+  "scope": "No commits, stash, checkout/reset/clean/rebase, branch/worktree creation, subagents, dependencies, catalogues or styles changed. Concurrent renderer/service-probe files not touched."
+}

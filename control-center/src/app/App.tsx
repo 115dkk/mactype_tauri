@@ -6,7 +6,7 @@ import { ProfilesPage } from "../pages/ProfilesPage";
 import { ExecutionPage } from "../pages/ExecutionPage";
 import { FileSettingsPage } from "../pages/FileSettingsPage";
 import { fallbackStatus, type InstallationStatus, type ViewId } from "./model";
-import { loadLaunchContext, reconnectPreview, rediscoverInstallation, reportFrontendFailure, reportFrontendReady, scanInstallation, verifyTrayModeForCi } from "./tauri";
+import { runtime } from "./runtimeAdapter";
 import { useI18n } from "../i18n/i18n";
 import { LanguagePicker } from "../components/LanguagePicker";
 import { WindowTitleBar } from "../components/WindowTitleBar";
@@ -65,7 +65,7 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
 
   useEffect(() => {
     let active = true;
-    void Promise.all([loadLaunchContext(), scanInstallation()]).then(([context, status]) => {
+    void Promise.all([runtime().loadLaunchContext(), runtime().scanInstallation()]).then(([context, status]) => {
       if (!active) return;
       dispatch({ type: "launched", view: context.view, ciSmoke: context.ciSmoke, trayStart: context.trayStart });
       if (status) dispatch({ type: "status", status });
@@ -85,27 +85,27 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
     document.body.dataset.profileMode = state.profileMode;
     document.body.dataset.rendered = "true";
     if (state.ciSmoke && state.trayStart) {
-      void verifyTrayModeForCi()
-        .then(() => reportFrontendReady(state.view))
-        .catch((error: unknown) => reportFrontendFailure(state.view, error instanceof Error ? error.message : String(error)));
+      void runtime().verifyTrayModeForCi()
+        .then(() => runtime().reportFrontendReady(state.view))
+        .catch((error: unknown) => runtime().reportFrontendFailure(state.view, error instanceof Error ? error.message : String(error)));
     } else if (!state.ciSmoke || (state.view !== "profiles" && state.view !== "execution")) {
-      void reportFrontendReady(state.view);
+      void runtime().reportFrontendReady(state.view);
     }
   }, [state.ciSmoke, state.profileMode, state.ready, state.trayStart, state.view]);
 
   const page = useMemo(() => {
     if (state.view === "files") return <FileSettingsPage onEditInTuner={() => dispatch({ type: "navigate", view: "profiles", profileMode: "advanced" })} />;
-    if (state.view === "profiles") return <ProfilesPage ciSmoke={state.ciSmoke} mode={state.profileMode} onModeChange={(profileMode) => dispatch({ type: "navigate", view: "profiles", profileMode })} onPreviewReady={() => void reportFrontendReady("profiles")} />;
-    if (state.view === "execution") return <ExecutionPage ciSmoke={state.ciSmoke} onReady={() => void reportFrontendReady("execution")} />;
+    if (state.view === "profiles") return <ProfilesPage ciSmoke={state.ciSmoke} mode={state.profileMode} onPreviewReady={() => void runtime().reportFrontendReady("profiles")} />;
+    if (state.view === "execution") return <ExecutionPage ciSmoke={state.ciSmoke} onReady={() => void runtime().reportFrontendReady("execution")} />;
     if (state.view === "diagnostics") return <DiagnosticsPage
       status={state.status}
       onReconnect={async () => {
-        const status = await reconnectPreview();
+        const status = await runtime().reconnectPreview();
         dispatch({ type: "status", status });
         return status;
       }}
       onRelocate={async () => {
-        const status = await rediscoverInstallation();
+        const status = await runtime().rediscoverInstallation();
         dispatch({ type: "status", status });
         return status;
       }}

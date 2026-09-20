@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { InstallationStatus } from "../../app/model";
-import { copyDiagnostics, exportDiagnostics, openLogFolder } from "../../app/tauri";
+import { runtime } from "../../app/runtimeAdapter";
 import { useI18n, type I18nValue } from "../../i18n/i18n";
 
 export type DiagnosticsOperation = "export" | "copy" | "folder" | "relocate" | "reconnect";
@@ -36,12 +36,12 @@ export function useDiagnosticsModel({ status, onReconnect, onRelocate }: Diagnos
     setCompleted(null);
     setError(null);
     try {
-      if (kind === "export") setCompleted({ kind, detail: await exportDiagnostics() });
+      if (kind === "export") setCompleted({ kind, detail: await runtime().exportDiagnostics() });
       if (kind === "copy") {
-        await copyDiagnostics();
+        await runtime().copyDiagnostics();
         setCompleted({ kind, detail: t("diagnostics.copy") });
       }
-      if (kind === "folder") setCompleted({ kind, detail: await openLogFolder() });
+      if (kind === "folder") setCompleted({ kind, detail: await runtime().openLogFolder() });
       if (kind === "relocate") {
         await onRelocate();
         setCompleted({ kind, detail: t("overview.relocate") });

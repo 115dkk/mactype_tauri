@@ -20,7 +20,6 @@ namespace mactype {
 enum class Engine { mactype, plain };
 
 class PreviewRuntime {
-  friend struct PreviewRuntimeTestAccess;
  public:
   explicit PreviewRuntime(std::wstring install_root, Engine engine = Engine::mactype);
   ~PreviewRuntime();
@@ -44,6 +43,40 @@ class PreviewRuntime {
   std::uint32_t relayout_count_for_tests() const;
   std::uint32_t retitle_count_for_tests() const;
   std::uint32_t reshow_count_for_tests() const;
+
+  struct ToolbarButtonSnapshot {
+    int id;
+    int center_hit_id;
+    RECT rectangle;
+    std::wstring text;
+    SIZE text_extent;
+  };
+
+  struct ToolbarLabelSnapshot {
+    RECT rectangle;
+    std::wstring text;
+    SIZE text_extent;
+  };
+
+  struct ToolbarSnapshot {
+    int client_width;
+    int client_height;
+    int layout_height;
+    std::vector<ToolbarButtonSnapshot> buttons;
+    ToolbarLabelSnapshot face_label;
+    ToolbarLabelSnapshot size_label;
+    RECT edit_rectangle;
+  };
+
+  struct ToolbarCapture {
+    int width;
+    int height;
+    std::vector<std::uint32_t> pixels;
+  };
+
+  ToolbarSnapshot toolbar_snapshot_for_tests() const;
+  bool set_dpi_for_tests(std::uint32_t dpi);
+  std::optional<ToolbarCapture> capture_toolbar_for_tests();
 
   enum class DisplayMode { sample, ladder, compare, listing };
   enum class Skin { classic };
@@ -141,6 +174,7 @@ class PreviewRuntime {
                                       std::uint32_t& height, std::uint32_t& dpi,
                                       std::string& error);
   void paint_native(HWND window);
+  void apply_dpi(std::uint32_t dpi);
   void recreate_ui_font();
   void recreate_palette_brushes();
   void apply_combo_theme();

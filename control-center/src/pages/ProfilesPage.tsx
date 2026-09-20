@@ -12,23 +12,23 @@ import { splitSubstitution } from "./profiles/profileEditorUtils";
 import { ProfilePreviewPanel, type PreviewVariant, type ProfilePreviewHandle } from "./profiles/ProfilePreviewPanel";
 import { useProfileDocument } from "../features/profiles/useProfileDocument";
 import { useStepHistory } from "./profiles/useStepHistory";
-import { WizardSettings } from "./profiles/WizardSettings";
-import { stepSupportsHistory, wizardStepIds, type WizardStepId } from "./profiles/wizardModel";
+import { GuidedSettings } from "./profiles/GuidedSettings";
+import { stepSupportsHistory, guidedStepIds, type GuidedStepId } from "./profiles/guidedModel";
 
 type GroupId = "basic" | "shape" | "lcd" | "advanced" | "individual" | "lists";
-type ProfileMode = "quick" | "advanced";
+type ProfileMode = "guided" | "all";
 
 /* The guided step is a short column of choices and trades width for height
    readily, so it docks the preview early. The settings table needs room for a
    label beside its control column, so it docks later. Below the threshold the
    preview falls back to a capped bottom panel.
 
-   The advanced figure is what the shipped default window reaches: the workspace
+   The all-settings figure is what the shipped default window reaches: the workspace
    is the window less the navigation rail, the page padding and the section
    index, so docking by default costs roughly 1300 logical pixels of window.
    Raising it further would push the default past a 1366-wide laptop, and the
    preview only reads as a right column if it starts as one. */
-const DOCKED_PREVIEW_MIN_WIDTH: Readonly<Record<ProfileMode, number>> = { quick: 780, advanced: 840 };
+const DOCKED_PREVIEW_MIN_WIDTH: Readonly<Record<ProfileMode, number>> = { guided: 780, all: 840 };
 
 interface ProfilesPageProps {
   ciSmoke?: boolean;
@@ -36,7 +36,7 @@ interface ProfilesPageProps {
   onPreviewReady?: () => void;
 }
 
-export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewReady }: ProfilesPageProps) {
+export function ProfilesPage({ ciSmoke = false, mode = "all", onPreviewReady }: ProfilesPageProps) {
   const { locale, t } = useI18n();
   const groups = useMemo<ReadonlyArray<{ id: GroupId; label: string; description: string }>>(() => [
     { id: "basic", label: t("group.basic.label"), description: t("group.basic.description") },
@@ -93,8 +93,8 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
   const [renderError, setPreviewError] = useState<string | null>(null);
   const previewError = documentError ?? renderError;
   const [activeGroup, setActiveGroup] = useState<GroupId>("basic");
-  const [activeWizardStep, setActiveWizardStep] = useState<WizardStepId>("start");
-  /* Step-scoped guided history. Advanced mode can rewrite the document
+  const [activeGuidedStep, setActiveGuidedStep] = useState<GuidedStepId>("start");
+  /* Step-scoped guided history. All-settings mode can rewrite the document
      through the global backend history, so the per-step record resets when
      the mode or the open document changes. */
   const stepHistory = useStepHistory(`${mode}::${profile?.path ?? ""}`);
@@ -120,17 +120,17 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
 
   const guidedBusy = !profile || busy || recoveryRequired;
   const changeGuidedSetting = (settingId: string, value: number) => {
-    if (stepSupportsHistory(activeWizardStep)) {
-      stepHistory.record(activeWizardStep, settingId, value, profile?.values[settingId] ?? value);
+    if (stepSupportsHistory(activeGuidedStep)) {
+      stepHistory.record(activeGuidedStep, settingId, value, profile?.values[settingId] ?? value);
     }
     changeSetting(settingId, value);
   };
   const undoStepEdit = () => {
-    const entry = stepHistory.undo(activeWizardStep);
+    const entry = stepHistory.undo(activeGuidedStep);
     if (entry) changeSetting(entry.settingId, entry.before);
   };
   const redoStepEdit = () => {
-    const entry = stepHistory.redo(activeWizardStep);
+    const entry = stepHistory.redo(activeGuidedStep);
     if (entry) changeSetting(entry.settingId, entry.after);
   };
 
@@ -138,7 +138,7 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
      fields keep their native editing shortcuts, and the default is only
      prevented when this step actually has something to undo or redo. */
   useEffect(() => {
-    if (mode !== "quick") return undefined;
+    if (mode !== "guided") return undefined;
     const listener = (event: KeyboardEvent) => {
       if (!event.ctrlKey || event.altKey || event.metaKey) return;
       const target = event.target;
@@ -148,10 +148,10 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
       const wantsUndo = key === "z" && !event.shiftKey;
       const wantsRedo = key === "y" || (key === "z" && event.shiftKey);
       if ((!wantsUndo && !wantsRedo) || guidedBusy) return;
-      if (wantsUndo && stepHistory.canUndo(activeWizardStep)) {
+      if (wantsUndo && stepHistory.canUndo(activeGuidedStep)) {
         event.preventDefault();
         undoStepEdit();
-      } else if (wantsRedo && stepHistory.canRedo(activeWizardStep)) {
+      } else if (wantsRedo && stepHistory.canRedo(activeGuidedStep)) {
         event.preventDefault();
         redoStepEdit();
       }
@@ -217,38 +217,38 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
      height the step body needs. */
   const previewVariants = useMemo<ReadonlyArray<PreviewVariant>>(() => {
     const pangram = t("profiles.samplePangram");
-    if (mode === "quick" && activeWizardStep === "boldItalic") {
+    if (mode === "guided" && activeGuidedStep === "boldItalic") {
       return [
-        { key: "bold", label: t("wizard.previewBold"), text: pangram, bold: true },
-        { key: "italic", label: t("wizard.previewItalic"), text: pangram, italic: true },
-        { key: "bold-italic", label: t("wizard.previewBoldItalic"), text: pangram, bold: true, italic: true },
+        { key: "bold", label: t("guided.previewBold"), text: pangram, bold: true },
+        { key: "italic", label: t("guided.previewItalic"), text: pangram, italic: true },
+        { key: "bold-italic", label: t("guided.previewBoldItalic"), text: pangram, bold: true, italic: true },
       ];
     }
-    if (mode === "quick" && activeWizardStep === "lcd") {
+    if (mode === "guided" && activeGuidedStep === "lcd") {
       return [
-        { key: "current", label: t("wizard.previewCurrent"), text: pangram },
+        { key: "current", label: t("guided.previewCurrent"), text: pangram },
         { key: "channel-r", label: "R", text: pangram, foreground: "#C80000" },
         { key: "channel-g", label: "G", text: pangram, foreground: "#008A00" },
         { key: "channel-b", label: "B", text: pangram, foreground: "#0000C8" },
       ];
     }
     return [{ key: "normal", label: null }];
-  }, [activeWizardStep, mode, t]);
+  }, [activeGuidedStep, mode, t]);
 
   const activeDefinition = groups.find((group) => group.id === activeGroup) ?? groups[0];
-  const activeWizardLabel = t(`wizard.${activeWizardStep}`);
+  const activeGuidedLabel = t(`guided.${activeGuidedStep}`);
   return (
     <section className="page profile-page view-enter" aria-labelledby="profiles-title" data-mode={mode}>
       <header className="page-header compact profile-header">
         <div>
-          <div className="profile-mode-title"><h1 id="profiles-title"><Hint content={t(mode === "quick" ? "profiles.quickDescription" : "profiles.advancedDescription")}>{t(mode === "quick" ? "nav.guidedSetup" : "nav.allSettings")}</Hint></h1><span>Tuner</span></div>
+          <div className="profile-mode-title"><h1 id="profiles-title"><Hint content={t(mode === "guided" ? "profiles.quickDescription" : "profiles.advancedDescription")}>{t(mode === "guided" ? "nav.guidedSetup" : "nav.allSettings")}</Hint></h1><span>Tuner</span></div>
           {loading
             ? <p>{t("profiles.searching")}</p>
             : <p className="profile-editing"><span>{t("profiles.editing")}</span> <code title={profile?.path}>{profile?.displayPath ?? t("profiles.none")}</code><span> · {t("profiles.unsavedSummary", { count: dirtyCount })}</span></p>}
           {profile && !profile.canSave && <p className="profile-save-warning">{t("profiles.readOnly")}</p>}
           {profileMessage && <p aria-live="polite" className="profile-message">{profileMessage}</p>}
         </div>
-        {mode === "advanced" && <div aria-label={t("profiles.editActions")} className="profile-history-actions" role="toolbar">
+        {mode === "all" && <div aria-label={t("profiles.editActions")} className="profile-history-actions" role="toolbar">
           <button className="button secondary compact-action" disabled={!profile?.canUndo || busy} onClick={() => void undo()} type="button"><Undo2 aria-hidden="true" size={14} /> {t("profiles.undo")}</button>
           <button className="button secondary compact-action" disabled={!profile?.canRedo || busy} onClick={() => void redo()} type="button"><Redo2 aria-hidden="true" size={14} /> {t("profiles.redo")}</button>
           <button className="button secondary compact-action" disabled={!profile || dirtyCount === 0 || busy} onClick={() => void discard()} title={t("profiles.discardDescription")} type="button"><RotateCcw aria-hidden="true" size={14} /> {t("profiles.discard")}</button>
@@ -275,23 +275,23 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
       )}
 
       <div className="profile-layout">
-        <aside className="settings-index" aria-label={mode === "quick" ? t("wizard.progress") : t("profiles.sections")}>
-          {mode === "advanced" && <label className="search-field"><Search aria-hidden="true" size={16} /><span className="sr-only">{t("profiles.search")}</span><input onChange={(event) => setQuery(event.target.value)} placeholder={t("profiles.search")} type="search" value={query} /></label>}
-          <ul>{mode === "quick" ? wizardStepIds.map((step, index) => <li key={step}><button data-selected={activeWizardStep === step} onClick={() => setActiveWizardStep(step)} type="button"><span className="settings-step" aria-hidden="true">{index + 1}</span><span>{t(`wizard.${step}`)}</span></button></li>) : groups.map((group) => <li key={group.id}><button data-selected={!query && activeGroup === group.id} onClick={() => { setActiveGroup(group.id); setQuery(""); }} type="button"><span>{group.label}</span></button></li>)}</ul>
+        <aside className="settings-index" aria-label={mode === "guided" ? t("guided.progress") : t("profiles.sections")}>
+          {mode === "all" && <label className="search-field"><Search aria-hidden="true" size={16} /><span className="sr-only">{t("profiles.search")}</span><input onChange={(event) => setQuery(event.target.value)} placeholder={t("profiles.search")} type="search" value={query} /></label>}
+          <ul>{mode === "guided" ? guidedStepIds.map((step, index) => <li key={step}><button data-selected={activeGuidedStep === step} onClick={() => setActiveGuidedStep(step)} type="button"><span className="settings-step" aria-hidden="true">{index + 1}</span><span>{t(`guided.${step}`)}</span></button></li>) : groups.map((group) => <li key={group.id}><button data-selected={!query && activeGroup === group.id} onClick={() => { setActiveGroup(group.id); setQuery(""); }} type="button"><span>{group.label}</span></button></li>)}</ul>
         </aside>
 
         <div className="settings-workspace" data-preview-docked={previewDocked} ref={workspaceRef}>
           <div className="settings-form">
-            <div className="section-heading"><h2><Hint content={mode === "quick" ? t("wizard.guidance") : query ? t("profiles.searchDescription", { query }) : activeDefinition.description}>{mode === "quick" ? activeWizardLabel : query ? t("profiles.searchResults") : activeDefinition.label}</Hint></h2></div>
+            <div className="section-heading"><h2><Hint content={mode === "guided" ? t("guided.guidance") : query ? t("profiles.searchDescription", { query }) : activeDefinition.description}>{mode === "guided" ? activeGuidedLabel : query ? t("profiles.searchResults") : activeDefinition.label}</Hint></h2></div>
 
-            {mode === "quick" && <WizardSettings activeStep={activeWizardStep} advanced={advanced} busy={guidedBusy} canRedoStep={stepHistory.canRedo(activeWizardStep)} canSave={profile?.canSave ?? false} canUndoStep={stepHistory.canUndo(activeWizardStep)} dirtyCount={dirtyCount} dirtyKeys={dirtyKeys} fontFace={fontFace} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} onAdvancedCommit={(next) => void commitAdvanced(next)} onApply={() => void designateProfile()} onFontFaceChange={setFontFace} onPreview={showPreview} onRedoStep={redoStepEdit} onSave={() => void saveCurrentProfile()} onSettingChange={changeGuidedSetting} onSettingPreview={previewSetting} onStepChange={setActiveWizardStep} onUndoStep={undoStepEdit} profileName={profile?.displayPath ?? null} profilePath={profile?.path ?? null} savedValues={savedValues} settings={settingsSchema} t={t} values={values} />}
+            {mode === "guided" && <GuidedSettings activeStep={activeGuidedStep} advanced={advanced} busy={guidedBusy} canRedoStep={stepHistory.canRedo(activeGuidedStep)} canSave={profile?.canSave ?? false} canUndoStep={stepHistory.canUndo(activeGuidedStep)} dirtyCount={dirtyCount} dirtyKeys={dirtyKeys} fontFace={fontFace} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} onAdvancedCommit={(next) => void commitAdvanced(next)} onApply={() => void designateProfile()} onFontFaceChange={setFontFace} onPreview={showPreview} onRedoStep={redoStepEdit} onSave={() => void saveCurrentProfile()} onSettingChange={changeGuidedSetting} onSettingPreview={previewSetting} onStepChange={setActiveGuidedStep} onUndoStep={undoStepEdit} profileName={profile?.displayPath ?? null} profilePath={profile?.path ?? null} savedValues={savedValues} settings={settingsSchema} t={t} values={values} />}
 
-            {mode === "advanced" && query && <SearchSettings dirtyKeys={dirtyKeys} onChange={changeSetting} onPreviewChange={previewSetting} savedValues={savedValues} settings={filteredSettings} t={t} values={values} />}
-            {mode === "advanced" && !query && activeGroup === "basic" && <BasicSettings dirtyKeys={dirtyKeys} onChange={changeSetting} onPreviewChange={previewSetting} savedValues={savedValues} settings={filteredSettings} t={t} values={values} />}
-            {mode === "advanced" && !query && activeGroup === "shape" && <ShapeSettings dirtyKeys={dirtyKeys} onChange={changeSetting} onPreviewChange={previewSetting} savedValues={savedValues} settings={filteredSettings} t={t} values={values} />}
-            {mode === "advanced" && !query && activeGroup === "lcd" && <LcdSettings dirtyKeys={dirtyKeys} onChange={changeSetting} onPreviewChange={previewSetting} savedValues={savedValues} settings={filteredSettings} t={t} values={values} />}
+            {mode === "all" && query && <SearchSettings dirtyKeys={dirtyKeys} onChange={changeSetting} onPreviewChange={previewSetting} savedValues={savedValues} settings={filteredSettings} t={t} values={values} />}
+            {mode === "all" && !query && activeGroup === "basic" && <BasicSettings dirtyKeys={dirtyKeys} onChange={changeSetting} onPreviewChange={previewSetting} savedValues={savedValues} settings={filteredSettings} t={t} values={values} />}
+            {mode === "all" && !query && activeGroup === "shape" && <ShapeSettings dirtyKeys={dirtyKeys} onChange={changeSetting} onPreviewChange={previewSetting} savedValues={savedValues} settings={filteredSettings} t={t} values={values} />}
+            {mode === "all" && !query && activeGroup === "lcd" && <LcdSettings dirtyKeys={dirtyKeys} onChange={changeSetting} onPreviewChange={previewSetting} savedValues={savedValues} settings={filteredSettings} t={t} values={values} />}
 
-            {mode === "advanced" && !query && activeGroup === "advanced" && (
+            {mode === "all" && !query && activeGroup === "advanced" && (
               <AdvancedSettings
                 advanced={advanced}
                 dirtyKeys={dirtyKeys}
@@ -308,7 +308,7 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
               />
             )}
 
-            {mode === "advanced" && !query && activeGroup === "individual" && (
+            {mode === "all" && !query && activeGroup === "individual" && (
               <IndividualSettings
                 fontFamilies={fontFamilies}
                 individualLabels={individualLabels}
@@ -320,7 +320,7 @@ export function ProfilesPage({ ciSmoke = false, mode = "advanced", onPreviewRead
               />
             )}
 
-            {mode === "advanced" && !query && activeGroup === "lists" && (
+            {mode === "all" && !query && activeGroup === "lists" && (
               <ListsEditor
                 definitions={listDefinitions}
                 entries={lists}

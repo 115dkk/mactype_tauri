@@ -117,6 +117,9 @@ jobs:
       - name: Test the closed GitHub Actions runtime policy
         shell: pwsh
         run: scripts/ci/Test-GitHubActionsRuntimePolicyContract.ps1
+      - name: Test the shared GitHub workflow model and policy functions
+        shell: pwsh
+        run: scripts/ci/Test-WorkflowModelContract.ps1
       - name: Enforce open service static contracts
         shell: pwsh
         run: scripts/ci/Test-OpenServiceContract.ps1

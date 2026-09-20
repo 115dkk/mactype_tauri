@@ -13,7 +13,14 @@ add_executable(mactype-preview32
   main.cpp
   preview_runtime.cpp
   protocol.cpp
+  json_document.cpp
+  png_encoder.cpp
+  installation_check.cpp
   include/generated_settings.h
+  include/generated_native_preview.h
+  include/json_document.h
+  include/png_encoder.h
+  include/installation_check.h
   include/legacy_control_center.h
   include/preview_runtime.h
   include/protocol.h
@@ -53,7 +60,19 @@ if(BUILD_TESTING)
   file(GENERATE OUTPUT "$<TARGET_FILE_DIR:fake-mactype>/MacType.ini"
        CONTENT "[FreeType]\r\nNormalWeight=0\r\nGammaValue=1.0\r\n")
 
-  add_executable(runtime-tests tests/runtime_tests.cpp preview_runtime.cpp protocol.cpp)
+  add_executable(preview-unit-tests tests/unit_tests.cpp json_document.cpp png_encoder.cpp
+                 installation_check.cpp)
+  target_include_directories(preview-unit-tests PRIVATE include)
+  target_compile_features(preview-unit-tests PRIVATE cxx_std_20)
+  target_compile_definitions(preview-unit-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+  target_link_libraries(preview-unit-tests PRIVATE windowscodecs ole32)
+  if(MSVC)
+    target_compile_options(preview-unit-tests PRIVATE /W4 /WX /permissive- /utf-8)
+  endif()
+  add_test(NAME preview-unit-tests COMMAND preview-unit-tests)
+
+  add_executable(runtime-tests tests/runtime_tests.cpp preview_runtime.cpp protocol.cpp
+                 json_document.cpp png_encoder.cpp installation_check.cpp)
   target_include_directories(runtime-tests PRIVATE include)
   target_compile_features(runtime-tests PRIVATE cxx_std_20)
   target_compile_definitions(runtime-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)

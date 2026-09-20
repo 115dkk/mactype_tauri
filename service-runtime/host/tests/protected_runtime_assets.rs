@@ -1,63 +1,28 @@
+#[path = "support/protected_tree.rs"]
+mod protected_tree_support;
+
+use protected_tree_support::ProtectedTree;
+
+fn install_runtime_fixture(tree: &ProtectedTree) -> std::path::PathBuf {
+    let profile = b"[General]
+HintingMode=0
+";
+    tree.install_active_profile(profile);
+    tree.install_runtime(Some(profile))
+}
 use std::fs;
 
 use mactype_service_contract::{
-    GenerationId, GenerationPointer, MachinePaths, IMMUTABLE_RUNTIME_FILES, MAX_PROFILE_BYTES,
-    MAX_RUNTIME_FILE_BYTES,
+    IMMUTABLE_RUNTIME_FILES, MAX_PROFILE_BYTES, MAX_RUNTIME_FILE_BYTES,
 };
 use mactype_service_host::{ProtectedRendererRuntime, RUNTIME_PROFILE_ABSENT_CODE};
-
-fn paths() -> (tempfile::TempDir, MachinePaths) {
-    let base = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
-    let program_files = base.path().join("Program Files");
-    let program_data = base.path().join("ProgramData");
-    fs::create_dir_all(&program_files).unwrap();
-    fs::create_dir_all(&program_data).unwrap();
-    (
-        base,
-        MachinePaths::from_trusted_os_roots(&program_files, &program_data).unwrap(),
-    )
-}
-
-fn install_runtime_fixture(paths: &MachinePaths) -> std::path::PathBuf {
-    let generation = paths.runtime_versions().join("0.2.0");
-    fs::create_dir_all(&generation).unwrap();
-    for name in [
-        "mactype-service.exe",
-        "mactype-injector32.exe",
-        "mactype-injector64.exe",
-        "MacType.dll",
-        "MacType64.dll",
-    ] {
-        fs::write(generation.join(name), name.as_bytes()).unwrap();
-    }
-    let profile = b"[General]\r\nHintingMode=0\r\n";
-    fs::write(generation.join("MacType.ini"), profile).unwrap();
-    fs::create_dir_all(paths.runtime_pointer().parent().unwrap()).unwrap();
-    fs::write(
-        paths.runtime_pointer(),
-        br#"{"schema":1,"version":"0.2.0"}"#,
-    )
-    .unwrap();
-    let profile_generation = GenerationId::from_profile_bytes(profile);
-    let profile_root = paths
-        .profile_generations()
-        .join(profile_generation.directory_name());
-    fs::create_dir_all(&profile_root).unwrap();
-    fs::write(profile_root.join("profile.ini"), profile).unwrap();
-    fs::create_dir_all(paths.active_profile().parent().unwrap()).unwrap();
-    fs::write(
-        paths.active_profile(),
-        serde_json::to_vec(&GenerationPointer::new(profile_generation)).unwrap(),
-    )
-    .unwrap();
-    generation
-}
 
 #[test]
 fn active_runtime_rejects_each_oversized_immutable_component_at_the_file_boundary() {
     for oversized_name in IMMUTABLE_RUNTIME_FILES {
-        let (_base, paths) = paths();
-        let generation = install_runtime_fixture(&paths);
+        let tree = ProtectedTree::new();
+        let paths = tree.paths().clone();
+        let generation = install_runtime_fixture(&tree);
         fs::File::create(generation.join(oversized_name))
             .unwrap()
             .set_len(MAX_RUNTIME_FILE_BYTES as u64 + 1)
@@ -72,8 +37,9 @@ fn active_runtime_rejects_each_oversized_immutable_component_at_the_file_boundar
 
 #[test]
 fn active_runtime_rejects_an_oversized_generated_profile_at_the_profile_boundary() {
-    let (_base, paths) = paths();
-    let generation = install_runtime_fixture(&paths);
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
+    let generation = install_runtime_fixture(&tree);
     fs::File::create(generation.join("MacType.ini"))
         .unwrap()
         .set_len(MAX_PROFILE_BYTES as u64 + 1)
@@ -87,8 +53,9 @@ fn active_runtime_rejects_an_oversized_generated_profile_at_the_profile_boundary
 
 #[test]
 fn helpers_and_dlls_are_selected_only_from_the_active_protected_runtime_generation() {
-    let (_base, paths) = paths();
-    let generation = install_runtime_fixture(&paths);
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
+    let generation = install_runtime_fixture(&tree);
 
     let runtime = ProtectedRendererRuntime::load(paths.clone()).unwrap();
     let assets = runtime.assets();
@@ -112,8 +79,9 @@ fn helpers_and_dlls_are_selected_only_from_the_active_protected_runtime_generati
 
 #[test]
 fn active_runtime_reports_a_missing_generated_profile_as_a_supported_stop() {
-    let (_base, paths) = paths();
-    let generation = install_runtime_fixture(&paths);
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
+    let generation = install_runtime_fixture(&tree);
     fs::remove_file(generation.join("MacType.ini")).unwrap();
 
     let error = ProtectedRendererRuntime::load(paths)
@@ -124,8 +92,9 @@ fn active_runtime_reports_a_missing_generated_profile_as_a_supported_stop() {
 
 #[test]
 fn active_runtime_with_a_missing_profile_and_stray_file_remains_invalid() {
-    let (_base, paths) = paths();
-    let generation = install_runtime_fixture(&paths);
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
+    let generation = install_runtime_fixture(&tree);
     fs::remove_file(generation.join("MacType.ini")).unwrap();
     fs::write(generation.join("unsigned.dll"), b"unexpected").unwrap();
 
@@ -137,8 +106,9 @@ fn active_runtime_with_a_missing_profile_and_stray_file_remains_invalid() {
 
 #[test]
 fn active_runtime_rejects_every_file_beyond_manifest_assets_and_generated_mactype_ini() {
-    let (_base, paths) = paths();
-    let generation = install_runtime_fixture(&paths);
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
+    let generation = install_runtime_fixture(&tree);
     fs::write(generation.join("unsigned.dll"), b"unexpected").unwrap();
 
     let error = ProtectedRendererRuntime::load(paths)
@@ -149,8 +119,9 @@ fn active_runtime_rejects_every_file_beyond_manifest_assets_and_generated_mactyp
 
 #[test]
 fn active_runtime_rejects_an_oversized_pointer_before_parsing() {
-    let (_base, paths) = paths();
-    install_runtime_fixture(&paths);
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
+    install_runtime_fixture(&tree);
     fs::write(paths.runtime_pointer(), vec![b'x'; 64 * 1024 + 1]).unwrap();
 
     let error = ProtectedRendererRuntime::load(paths)

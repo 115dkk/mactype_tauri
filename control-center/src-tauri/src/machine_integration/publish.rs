@@ -1,16 +1,26 @@
-use super::{MachineAction, MachineBackend};
-use crate::service_contract::SystemServiceStatus;
+use super::{
+    designation::{designation_plan_with_package, designation_status_with},
+    DesignationPlan, MachineAction, MachineBackend,
+};
+use crate::{
+    machine_integration::open_service::action_failure::{
+        ActionBlocker, ActionFailure, LegacyServiceBlockContext, RollbackOutcome,
+    },
+    service_contract::SystemServiceStatus,
+};
 use std::time::Duration;
 
 const READY_ATTEMPTS: usize = 200;
 const READY_POLL: Duration = Duration::from_millis(50);
 
-pub(crate) fn publish_profile_transaction_with(
+pub(super) fn publish_profile_transaction_with(
     backend: &mut impl MachineBackend,
     profile: &[u8],
-) -> Result<(), String> {
+) -> Result<(), ActionFailure> {
     if profile.is_empty() || profile.len() > mactype_service_contract::MAX_PROFILE_BYTES {
-        return Err("the published profile payload is outside the allowed range".to_owned());
+        return Err(ActionFailure::internal(
+            "the published profile payload is outside the allowed range",
+        ));
     }
     let before = backend.new_service_status();
     if before.backend == crate::service_contract::ServiceBackend::Foreign
@@ -26,7 +36,9 @@ pub(crate) fn publish_profile_transaction_with(
                 | crate::service_contract::RuntimeState::Stopped
         )
     {
-        return Err("the new service is foreign, transitioning, or unsafe".to_owned());
+        return Err(ActionFailure::internal(
+            "the new service is foreign, transitioning, or unsafe",
+        ));
     }
 
     let expected = mactype_service_contract::GenerationId::from_profile_bytes(profile);
@@ -38,9 +50,11 @@ pub(crate) fn publish_profile_transaction_with(
     if let Err(error) = backend.execute(MachineAction::PublishProfile, Some(profile)) {
         if before.runtime == crate::service_contract::RuntimeState::Running {
             if let Err(restart) = backend.execute(MachineAction::Start, None) {
-                return Err(format!(
-                    "{error}; machine integration cleanup is unknown because the prior service could not be restarted: {restart}"
-                ));
+                return Err(error
+                    .append_detail(format!(
+                        "; machine integration cleanup is unknown because the prior service could not be restarted: {restart}"
+                    ))
+                    .with_rollback(RollbackOutcome::Failed));
             }
         }
         return Err(error);
@@ -80,32 +94,38 @@ pub(crate) fn publish_profile_transaction_with(
 }
 
 /// Makes `profile` the run profile without changing whether the service runs:
-/// a running service switches to it live through the full publish transaction,
-/// a stopped one only receives the published generation so its next start, at
-/// boot or by hand, uses it.
-pub(crate) fn designate_profile_transaction_with(
+/// a running service switches live, an installed stopped service receives the
+/// generation for its next start, and an unavailable machine step is skipped.
+pub(super) fn designate_profile_transaction_with(
     backend: &mut impl MachineBackend,
     profile: &[u8],
-) -> Result<(), String> {
+) -> Result<(), ActionFailure> {
     if profile.is_empty() || profile.len() > mactype_service_contract::MAX_PROFILE_BYTES {
-        return Err("the designated profile payload is outside the allowed range".to_owned());
+        return Err(ActionFailure::internal(
+            "the designated profile payload is outside the allowed range",
+        ));
     }
-    let before = backend.new_service_status();
-    if before.runtime == crate::service_contract::RuntimeState::Running {
-        return publish_profile_transaction_with(backend, profile);
+    let status = designation_status_with(backend);
+    let plan = designation_plan_with_package(&status, backend.service_management_package_state());
+    match plan {
+        DesignationPlan::PublishLive => {
+            if backend
+                .legacy_service_blocks_activation()
+                .map_err(ActionFailure::from)?
+            {
+                return Err(ActionFailure::blocked(
+                    ActionBlocker::LegacyServiceStillInstalled(
+                        LegacyServiceBlockContext::ApplyProfile,
+                    ),
+                ));
+            }
+            publish_profile_transaction_with(backend, profile)
+        }
+        DesignationPlan::HoldForNextStart => {
+            backend.execute(MachineAction::PublishProfile, Some(profile))
+        }
+        DesignationPlan::KeepLocalUntilServiceStart => Ok(()),
     }
-    if before.backend == crate::service_contract::ServiceBackend::Foreign
-        || !matches!(
-            before.installation,
-            crate::service_contract::InstallationState::Absent
-                | crate::service_contract::InstallationState::Current
-                | crate::service_contract::InstallationState::Outdated
-        )
-        || before.runtime != crate::service_contract::RuntimeState::Stopped
-    {
-        return Err("the new service is foreign, transitioning, or unsafe".to_owned());
-    }
-    backend.execute(MachineAction::PublishProfile, Some(profile))
 }
 
 fn wait_for_published_profile_with(
@@ -113,9 +133,11 @@ fn wait_for_published_profile_with(
     maximum_attempts: usize,
     mut observe: impl FnMut() -> SystemServiceStatus,
     mut wait: impl FnMut(),
-) -> Result<(), String> {
+) -> Result<(), ActionFailure> {
     if maximum_attempts == 0 {
-        return Err("published profile verification has no polling budget".to_owned());
+        return Err(ActionFailure::internal(
+            "published profile verification has no polling budget",
+        ));
     }
     let mut last = None;
     for attempt in 0..maximum_attempts {
@@ -129,7 +151,7 @@ fn wait_for_published_profile_with(
         }
     }
     let status = last.expect("at least one published profile observation");
-    Err(format!(
+    Err(ActionFailure::internal(format!(
         "the new service did not become Ready with the published profile: backend={:?}, installation={:?}, runtime={:?}, health={:?}, activeProfileDigest={}, expectedProfileDigest={expected_digest}, win32Error={}",
         status.backend,
         status.installation,
@@ -139,15 +161,20 @@ fn wait_for_published_profile_with(
         status
             .win32_error
             .map_or_else(|| "none".to_owned(), |error| error.to_string())
-    ))
+    )))
 }
 
-fn combine_rollback_error(primary: String, rollback: Result<(), String>) -> String {
+fn combine_rollback_error(
+    primary: ActionFailure,
+    rollback: Result<(), ActionFailure>,
+) -> ActionFailure {
     match rollback {
         Ok(()) => primary,
-        Err(cleanup) => {
-            format!("{primary}; machine integration cleanup is unknown: {cleanup}")
-        }
+        Err(cleanup) => primary
+            .append_detail(format!(
+                "; machine integration cleanup is unknown: {cleanup}"
+            ))
+            .with_rollback(RollbackOutcome::Failed),
     }
 }
 
@@ -155,7 +182,7 @@ fn rollback_published_profile(
     backend: &mut impl MachineBackend,
     before: &SystemServiceStatus,
     profile_changed: bool,
-) -> Result<(), String> {
+) -> Result<(), ActionFailure> {
     let mut failures = Vec::new();
     let mut cleanup = vec![("stop", MachineAction::Stop)];
     if profile_changed {
@@ -182,6 +209,6 @@ fn rollback_published_profile(
     if failures.is_empty() {
         Ok(())
     } else {
-        Err(failures.join("; "))
+        Err(ActionFailure::internal(failures.join("; ")))
     }
 }

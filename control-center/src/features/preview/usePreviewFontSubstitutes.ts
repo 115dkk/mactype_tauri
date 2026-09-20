@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { loadPreviewFontSubstitutes } from "../../app/tauri";
+import { runtime } from "../../app/runtimeAdapter";
 
 interface LoadedSubstitutes {
   path: string;
@@ -21,7 +21,7 @@ export function usePreviewFontSubstitutes(path: string | null, revision?: string
   useEffect(() => {
     let active = true;
     setError(null);
-    if (path && key && !substituteCache.has(key)) void loadPreviewFontSubstitutes(path).then((mappings) => {
+    if (path && key && !substituteCache.has(key)) void runtime().loadPreviewFontSubstitutes(path).then((mappings) => {
       const entry = { path, revision: revision ?? null, mappings };
       substituteCache.delete(key);
       substituteCache.set(key, entry);

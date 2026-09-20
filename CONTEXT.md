@@ -95,10 +95,10 @@ This file fixes the domain language used by code, tests, CI, and architecture do
 : The navigation area that answers "how the profile content is shaped": profile editing (view id `profiles`, modes guided/all). It inherits the role of the legacy MacTuner. The Korean product term is always **튜너**.
 
 **Guided setup (단계별 설정)**
-: The guided editing mode inside the Tuner 영역 (internal `profileMode: "quick"`). It curates a fixed subset of settings by quiet omission and never uses wizard/마법사 vocabulary, which belongs exclusively to the Wizard 영역.
+: The guided editing mode inside the Tuner 영역 (internal `profileMode: "guided"`). It curates a fixed subset of settings by quiet omission and never uses wizard/마법사 vocabulary, which belongs exclusively to the Wizard 영역.
 
 **All settings (전체 설정)**
-: The full editing mode inside the Tuner 영역 (internal `profileMode: "advanced"`): every setting group, search, and the revert/restore-default/reset toolbar.
+: The full editing mode inside the Tuner 영역 (internal `profileMode: "all"`): every setting group, search, and the revert/restore-default/reset toolbar.
 
 ## Responsibility map
 

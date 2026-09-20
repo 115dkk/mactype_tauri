@@ -825,6 +825,7 @@
     <ClCompile Include="renderer\arrival_evidence.cpp" />
     <ClCompile Include="renderer\gdi_font_identity.cpp" />
     <ClCompile Include="renderer\directwrite_virtual_font.cpp" />
+    <ClCompile Include="renderer\virtual_font_cache.cpp" />
     <ClCompile Include="renderer\dll.cpp" />
     <ClCompile Include="renderer\dynCodeHelper.cpp" />
     <ClCompile Include="renderer\EventLogging.cpp" />
@@ -880,6 +881,7 @@
     <ClInclude Include="renderer\arrival_evidence.h" />
     <ClInclude Include="renderer\gdi_font_identity.h" />
     <ClInclude Include="renderer\directwrite_virtual_font.h" />
+    <ClInclude Include="renderer\virtual_font_cache.h" />
     <ClInclude Include="renderer\dll.h" />
     <ClInclude Include="renderer\dynCodeHelper.h" />
     <ClInclude Include="renderer\EventLogging.h" />

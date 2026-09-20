@@ -156,7 +156,7 @@ test("Console large specimens fit their bitmap and remain scrollable at high DPI
   test.skip(testInfo.project.name !== "desktop-1280", "Explicit DPI and native minimum window bounds");
   const context = await browser.newContext({ viewport: { width: 880, height: 560 }, deviceScaleFactor: 2 });
   const page = await context.newPage();
-  await page.goto("http://127.0.0.1:4173/?view=overview&gallery=1&lang=ko&skin=console&system-service=ready");
+  await page.goto("/?view=overview&gallery=1&lang=ko&skin=console&system-service=ready");
   const board = page.locator(".console-specimen-panel .specimen-board");
   await expect(board.locator("img")).toHaveCount(6);
   const clips = await board.locator("img").evaluateAll((images) => images.flatMap((element) => {

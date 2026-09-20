@@ -1,6 +1,6 @@
 import { Plus, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { listManualLaunchCandidates } from "../../app/tauri";
+import { runtime } from "../../app/runtimeAdapter";
 import { Hint } from "../../components/Hint";
 import type { I18nValue } from "../../i18n/i18n";
 
@@ -46,7 +46,7 @@ export function ListsEditor({ definitions, entries, focusKind, onFocusHandled, f
 
   useEffect(() => {
     let active = true;
-    void listManualLaunchCandidates()
+    void runtime().listManualLaunchCandidates()
       .then((candidates) => {
         if (active) setProcessNames([...new Set(candidates.map((candidate) => candidate.name))].sort((left, right) => left.localeCompare(right)));
       })

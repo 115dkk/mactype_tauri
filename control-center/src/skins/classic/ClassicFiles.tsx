@@ -1,6 +1,6 @@
 import { useI18n } from "../../i18n/i18n";
 import { FileInput, FileOutput, FolderOpen, Save, SaveAll, SlidersHorizontal } from "lucide-react";
-import { previewImageUrl } from "../../app/tauri";
+import { runtime } from "../../app/runtimeAdapter";
 import { CurrentFileSummary, DesignateAction, FileMessages, RunProfileBadge } from "../../features/files/FileParts";
 import { THUMBNAIL_SAMPLE_TEXT, useFileSettingsModel } from "../../features/files/useFileSettingsModel";
 
@@ -50,7 +50,7 @@ export function ClassicFiles({ onEditInTuner }: ClassicFilesProps) {
                 <button aria-pressed={selected} className="profile-card-select" disabled={busy !== null} onClick={() => void model.profiles.chooseProfile(entry.path)} type="button">
                   <span className="profile-card-thumb">
                     {thumbnail
-                      ? <img alt={t("files.thumbnailAlt", { name: entry.name })} loading="lazy" src={previewImageUrl(thumbnail.imagePath)} />
+                      ? <img alt={t("files.thumbnailAlt", { name: entry.name })} loading="lazy" src={runtime().previewImageUrl(thumbnail.imagePath)} />
                       : <span aria-hidden="true" className="profile-card-thumb-fallback">{THUMBNAIL_SAMPLE_TEXT}</span>}
                   </span>
                   <span className="profile-card-title">

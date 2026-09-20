@@ -112,10 +112,10 @@ export function ServiceSummaryNoticeAndActions({ model }: PartProps) {
 
 export function ServicePackageNotice({ model }: PartProps) {
   const { t } = useI18n();
-  const { servicePackageNotice, status } = model.service;
+  const { servicePackageNotice } = model.service;
   if (!servicePackageNotice) return null;
   return (
-    <div className="service-package-notice" role="status" data-service-package={status?.serviceManagementPackage} data-prominent-exception>
+    <div className="service-package-notice" role="status" data-service-package={servicePackageNotice.kind} data-prominent-exception>
       <span className="service-package-notice-icon"><ShieldAlert aria-hidden="true" size={20} /></span>
       <div>
         <strong>{t(servicePackageNotice.titleKey)}</strong>
@@ -139,7 +139,7 @@ export function SystemServiceDetails({ model }: PartProps) {
 
 export function SystemServiceControls({ model }: PartProps) {
   const { t } = useI18n();
-  const { executionView, service, serviceBusy } = model.service;
+  const { executionView, serviceBusy } = model.service;
   return (
     <div className="service-controls">
       <div>
@@ -153,8 +153,7 @@ export function SystemServiceControls({ model }: PartProps) {
             </button>
           </div>
         )}
-        {service?.backend === "foreign" && <p className="warning-text">{t("execution.serviceForeign")}</p>}
-        {service?.configurationDrift && <p className="warning-text">{t("execution.serviceConfigurationDriftDescription")}</p>}
+        {executionView.serviceWarnings.map((warning) => <p className="warning-text" key={warning.kind}>{t(warning.titleKey)}</p>)}
       </div>
       <div className="service-actions">
         <button className="button secondary" disabled={!executionView.canInstall} onClick={() => void model.service.manageService("install")} type="button">{serviceBusy === "install" ? t("execution.serviceWorking") : t("execution.serviceInstall")}</button>

@@ -1,5 +1,6 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'WorkflowModel.psm1') -Force
 
 function Test-RequiredTokens {
     param(
@@ -46,15 +47,51 @@ function Test-OpenServiceWorkflowPolicy {
         )
 
     $buildWorkflowPath = Join-Path $Root '.github\workflows\build.yml'
-    $null = Test-RequiredTokens -Failures $failures -Path $buildWorkflowPath `
-        -MissingMessage '.github/workflows/build.yml is missing.' `
-        -TokenMessage "build.yml is missing required open-service CI token '{0}'." `
-        -Tokens @(
-            'open-core:', 'mactype-open-core', 'artifacts/open-core',
-            'open-service-windows:', 'Test-OpenServiceWindows.ps1',
-            'Build-ServiceRuntime.ps1', 'ServiceRuntimeRoot', 'hook x86/x64 markers',
-            'BrowserLaunchGate', 'browser-launch-gate64.exe'
-        )
+    if (-not (Test-Path -LiteralPath $buildWorkflowPath -PathType Leaf)) {
+        $failures.Add('.github/workflows/build.yml is missing.')
+    } else {
+        $buildWorkflow = Read-GitHubWorkflow -Path $buildWorkflowPath
+        $openCoreJob = Get-WorkflowJob -Workflow $buildWorkflow -Id 'open-core'
+        if (-not $openCoreJob) {
+            $failures.Add("build.yml is missing required open-service CI job 'open-core'.")
+        } else {
+            $openCoreUpload = @(
+                Get-WorkflowStep -Job $openCoreJob -Uses 'actions/upload-artifact@v7' |
+                    Where-Object {
+                        $_.With.name -eq 'mactype-open-core' -and
+                        $_.With.path -eq 'artifacts/open-core'
+                    }
+            ) | Select-Object -First 1
+            if (-not $openCoreUpload) {
+                $failures.Add('build.yml open-core job does not upload the mactype-open-core artifact from artifacts/open-core.')
+            }
+        }
+        $openServiceJob = Get-WorkflowJob -Workflow $buildWorkflow -Id 'open-service-windows'
+        if (-not $openServiceJob) {
+            $failures.Add("build.yml is missing required open-service CI job 'open-service-windows'.")
+        } elseif (-not @(Get-WorkflowStep -Job $openServiceJob `
+            -RunLike '*Test-OpenServiceWindows.ps1*').Count) {
+            $failures.Add("build.yml open-service-windows job is missing required command token 'Test-OpenServiceWindows.ps1'.")
+        }
+        $windowsBuildJob = Get-WorkflowJob -Workflow $buildWorkflow -Id 'windows-build'
+        foreach ($token in @('Build-ServiceRuntime.ps1', 'ServiceRuntimeRoot')) {
+            if (-not $windowsBuildJob -or
+                -not @(Get-WorkflowStep -Job $windowsBuildJob -RunLike "*$token*").Count) {
+                $failures.Add("build.yml windows-build job is missing required command token '$token'.")
+            }
+        }
+        if (-not $openServiceJob -or
+            -not @(Get-WorkflowStep -Job $openServiceJob `
+                -NameLike '*hook x86/x64 markers*').Count) {
+            $failures.Add("build.yml open-service-windows job is missing required step 'hook x86/x64 markers'.")
+        }
+        foreach ($token in @('BrowserLaunchGate', 'browser-launch-gate64.exe')) {
+            if (-not $openServiceJob -or
+                -not @(Get-WorkflowStep -Job $openServiceJob -RunLike "*$token*").Count) {
+                $failures.Add("build.yml open-service-windows job is missing required browser proof token '$token'.")
+            }
+        }
+    }
 
     $hostedLifecyclePath = Join-Path $Root 'scripts\ci\Test-OpenServiceWindows.ps1'
     $hostedLifecycle = Test-RequiredTokens -Failures $failures -Path $hostedLifecyclePath `
@@ -260,15 +297,23 @@ function Test-OpenServiceWorkflowPolicy {
     $virtualFontPath = Join-Path $Root 'renderer\directwrite_virtual_font.cpp'
     $virtualFont = Test-RequiredTokens -Failures $failures -Path $virtualFontPath `
         -MissingMessage 'renderer/directwrite_virtual_font.cpp is missing.' `
-        -TokenMessage "disk-backed virtual font is missing required token '{0}'." `
+        -TokenMessage "disk-backed virtual font adapter is missing required token '{0}'." `
         -Tokens @(
-            'BuildAliasedSfnt', 'PersistFont', 'BCryptHashData',
-            'renderer_raii::UniqueHandle', 'MoveFileExW',
+            'BuildAliasedSfnt', 'virtual_font_cache::PersistFont',
             'CreateFontFileReference'
         )
     if ($virtualFont -and $virtualFont.Contains('CreateInMemoryFontFileLoader')) {
         $failures.Add('virtual fonts must not depend on a process-local DirectWrite loader.')
     }
+
+    $virtualFontCachePath = Join-Path $Root 'renderer/virtual_font_cache.cpp'
+    $null = Test-RequiredTokens -Failures $failures -Path $virtualFontCachePath `
+        -MissingMessage 'renderer/virtual_font_cache.cpp is missing.' `
+        -TokenMessage "disk-backed virtual font cache is missing required token '{0}'." `
+        -Tokens @(
+            'BCryptHashData', 'renderer_raii::UniqueHandle', 'MoveFileExW',
+            'HRESULT PersistFont'
+        )
 
     $aclFixtureModulePath = Join-Path $Root 'scripts\ci\lib\OpenServiceAclFixture.psm1'
     $null = Test-RequiredTokens -Failures $failures -Path $aclFixtureModulePath `
@@ -287,54 +332,95 @@ function Test-OpenServiceWorkflowPolicy {
         -Tokens @('Test-OpenServiceAclFixture.ps1')
 
     $lintWorkflowPath = Join-Path $Root '.github\workflows\lint.yml'
-    $null = Test-RequiredTokens -Failures $failures -Path $lintWorkflowPath `
-        -MissingMessage '.github/workflows/lint.yml is missing.' `
-        -TokenMessage "lint.yml does not enforce the service-injector contract '{0}'." `
-        -Tokens @(
-            'service-injector:', 'service-injector-x86', 'service-injector-x64',
-            'ctest --test-dir', '-DCMAKE_CXX_FLAGS=/analyze',
-            'mactype-injector32', 'mactype-injector64',
-            'Test-OpenServiceTestSupport.ps1', 'Test-OpenServicePolicyModules.ps1'
-        )
+    if (-not (Test-Path -LiteralPath $lintWorkflowPath -PathType Leaf)) {
+        $failures.Add('.github/workflows/lint.yml is missing.')
+    } else {
+        $lintWorkflow = Read-GitHubWorkflow -Path $lintWorkflowPath
+        $injectorJob = Get-WorkflowJob -Workflow $lintWorkflow -Id 'service-injector'
+        if (-not $injectorJob) {
+            $failures.Add('lint.yml does not enforce the service-injector job.')
+        } else {
+            foreach ($token in @('ctest --test-dir', '-DCMAKE_CXX_FLAGS=/analyze')) {
+                if (-not @(Get-WorkflowStep -Job $injectorJob -RunLike "*$token*").Count) {
+                    $failures.Add("lint.yml service-injector job is missing '$token'.")
+                }
+            }
+            $injectorRaw = Get-WorkflowRawText -Workflow $lintWorkflow
+            foreach ($token in @('mactype-injector32', 'mactype-injector64')) {
+                if (-not $injectorRaw.Contains($token)) {
+                    $failures.Add("lint.yml service-injector matrix is missing '$token'.")
+                }
+            }
+        }
+        $tauriJob = Get-WorkflowJob -Workflow $lintWorkflow -Id 'rust'
+        foreach ($token in @('Test-OpenServiceTestSupport.ps1', 'Test-OpenServicePolicyModules.ps1')) {
+            if (-not $tauriJob -or
+                -not @(Get-WorkflowStep -Job $tauriJob -RunLike "*$token*").Count) {
+                $failures.Add("lint.yml does not enforce the service-injector contract '$token'.")
+            }
+        }
+    }
 
     $codeqlWorkflowPath = Join-Path $Root '.github\workflows\codeql.yml'
-    $null = Test-RequiredTokens -Failures $failures -Path $codeqlWorkflowPath `
-        -MissingMessage '.github/workflows/codeql.yml is missing.' `
-        -TokenMessage "codeql.yml does not use the verified open-core analysis build '{0}'." `
-        -Tokens @('.github/scripts/Build-OpenCore.ps1')
+    if (-not (Test-Path -LiteralPath $codeqlWorkflowPath -PathType Leaf)) {
+        $failures.Add('.github/workflows/codeql.yml is missing.')
+    } else {
+        $codeqlWorkflow = Read-GitHubWorkflow -Path $codeqlWorkflowPath
+        $analysisJob = Get-WorkflowJob -Workflow $codeqlWorkflow -Id 'analyze'
+        if (-not $analysisJob -or
+            -not @(Get-WorkflowStep -Job $analysisJob `
+                -RunLike '*.github/scripts/Build-OpenCore.ps1*').Count) {
+            $failures.Add("codeql.yml does not use the verified open-core analysis build '.github/scripts/Build-OpenCore.ps1'.")
+        }
+    }
 
     $disposableWorkflowPath = Join-Path $Root '.github\workflows\open-service-disposable-vm.yml'
     $disposableScriptPath = Join-Path $Root 'scripts\ci\Test-OpenServiceDisposableVm.ps1'
     if (-not (Test-Path -LiteralPath $disposableWorkflowPath -PathType Leaf)) {
         $failures.Add('.github/workflows/open-service-disposable-vm.yml is missing.')
     } else {
-        $disposableWorkflow = Get-Content -LiteralPath $disposableWorkflowPath -Raw
-        if ($disposableWorkflow -match '(?m)^\s{2}(?:push|pull_request|schedule|workflow_call):') {
+        $disposableWorkflow = Read-GitHubWorkflow -Path $disposableWorkflowPath
+        if ($disposableWorkflow.On -match '(?m)^  (?:push|pull_request|schedule|workflow_call):') {
             $failures.Add('open-service-disposable-vm.yml must be workflow_dispatch-only.')
         }
-        foreach ($requiredToken in @(
-            'workflow_dispatch:', 'mactype-disposable-vm',
-            'I_UNDERSTAND_DISPOSABLE_VM', 'Test-OpenServiceDisposableVm.ps1'
-        )) {
-            if (-not $disposableWorkflow.Contains($requiredToken)) {
-                $failures.Add("open-service-disposable-vm.yml is missing '$requiredToken'.")
+        if ($disposableWorkflow.On -notmatch '(?m)^  workflow_dispatch:') {
+            $failures.Add("open-service-disposable-vm.yml is missing 'workflow_dispatch:'.")
+        }
+        $verifyJob = Get-WorkflowJob -Workflow $disposableWorkflow -Id 'verify'
+        if (-not $verifyJob) {
+            $failures.Add("open-service-disposable-vm.yml is missing guarded job 'verify'.")
+        } else {
+            if ('mactype-disposable-vm' -notin @($verifyJob.RunsOn)) {
+                $failures.Add("open-service-disposable-vm.yml is missing runner label 'mactype-disposable-vm'.")
             }
-        }
-        if ($disposableWorkflow -match '(?m)^\s{4}if:\s*inputs\.confirmation\s*==') {
-            $failures.Add('open-service-disposable-vm.yml must not skip the verification job on an invalid confirmation.')
-        }
-        $confirmationGuardIndex = $disposableWorkflow.IndexOf('Reject invalid confirmation')
-        $checkoutIndex = $disposableWorkflow.IndexOf('actions/checkout@')
-        if ($confirmationGuardIndex -lt 0 -or $checkoutIndex -lt 0 -or
-            $confirmationGuardIndex -gt $checkoutIndex) {
-            $failures.Add('open-service-disposable-vm.yml must reject an invalid confirmation in the first step before checkout or build work.')
-        }
-        foreach ($token in @(
-            "-cne 'I_UNDERSTAND_DISPOSABLE_VM'",
-            "throw 'Disposable VM confirmation must exactly match I_UNDERSTAND_DISPOSABLE_VM.'"
-        )) {
-            if (-not $disposableWorkflow.Contains($token)) {
-                $failures.Add("open-service-disposable-vm.yml is missing strict confirmation guard '$token'.")
+            if ($verifyJob.If -match 'inputs\.confirmation\s*==') {
+                $failures.Add('open-service-disposable-vm.yml must not skip the verification job on an invalid confirmation.')
+            }
+            $guardStep = @(Get-WorkflowStep -Job $verifyJob `
+                -NameLike 'Reject invalid confirmation') | Select-Object -First 1
+            $checkoutStep = @(Get-WorkflowStep -Job $verifyJob `
+                -Uses 'actions/checkout@v7') | Select-Object -First 1
+            $guardIndex = if ($guardStep) {
+                [array]::IndexOf([object[]] $verifyJob.Steps, $guardStep)
+            } else { -1 }
+            $checkoutIndex = if ($checkoutStep) {
+                [array]::IndexOf([object[]] $verifyJob.Steps, $checkoutStep)
+            } else { -1 }
+            if ($guardIndex -lt 0 -or $checkoutIndex -lt 0 -or
+                $guardIndex -gt $checkoutIndex) {
+                $failures.Add('open-service-disposable-vm.yml must reject an invalid confirmation in the first step before checkout or build work.')
+            }
+            foreach ($token in @(
+                "-cne 'I_UNDERSTAND_DISPOSABLE_VM'",
+                "throw 'Disposable VM confirmation must exactly match I_UNDERSTAND_DISPOSABLE_VM.'"
+            )) {
+                if (-not $guardStep -or -not $guardStep.Run.Contains($token)) {
+                    $failures.Add("open-service-disposable-vm.yml is missing strict confirmation guard '$token'.")
+                }
+            }
+            if (-not @(Get-WorkflowStep -Job $verifyJob `
+                -RunLike '*Test-OpenServiceDisposableVm.ps1*').Count) {
+                $failures.Add("open-service-disposable-vm.yml is missing 'Test-OpenServiceDisposableVm.ps1'.")
             }
         }
     }

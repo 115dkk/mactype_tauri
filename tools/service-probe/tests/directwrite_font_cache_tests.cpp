@@ -1,11 +1,14 @@
+#include "../../../renderer/renderer_raii.h"
+#include "../../../renderer/virtual_font_cache.h"
+
+#include <aclapi.h>
+#include <array>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <sddl.h>
 #include <stdexcept>
-
-// Exercise the private cache reader itself without installing renderer hooks
-// or writing into the user's font cache.
-#include "../../../renderer/directwrite_virtual_font.cpp"
+#include <vector>
 
 namespace {
 
@@ -30,7 +33,7 @@ struct Comparison
 DWORD WINAPI CompareOnSmallStack(void* argument)
 {
     auto& comparison = *static_cast<Comparison*>(argument);
-    comparison.result = directwrite_virtual_font::FileMatches(
+    comparison.result = renderer::virtual_font_cache::CompareFile(
         comparison.path, comparison.expected,
         comparison.exists, comparison.matches);
     return 0;
@@ -60,13 +63,21 @@ void RequireAcl(bool condition, char const* message)
         throw std::runtime_error(message);
 }
 
+std::wstring ReadEnvironmentVariable(WCHAR const* name)
+{
+    std::vector<WCHAR> buffer(32768);
+    DWORD const length = GetEnvironmentVariableW(
+        name, buffer.data(), static_cast<DWORD>(buffer.size()));
+    RequireAcl(length != 0 && length < buffer.size(), "cannot save LOCALAPPDATA");
+    return std::wstring(buffer.data(), length);
+}
+
 class CacheTestDirectory
 {
 public:
     CacheTestDirectory()
     {
-        RequireAcl(SUCCEEDED(directwrite_virtual_font::ReadEnvironmentVariable(
-            L"LOCALAPPDATA", originalAppData_)), "cannot save LOCALAPPDATA");
+        originalAppData_ = ReadEnvironmentVariable(L"LOCALAPPDATA");
         std::vector<WCHAR> temporary(32768);
         DWORD const length = GetTempPathW(
             static_cast<DWORD>(temporary.size()), temporary.data());
@@ -105,7 +116,9 @@ void WriteFixture(std::filesystem::path const& path, std::vector<BYTE> const& by
     auto file = renderer_raii::AdoptHandle(CreateFileW(
         path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr));
     RequireAcl(static_cast<bool>(file), "cannot create ACL fixture");
-    RequireAcl(directwrite_virtual_font::WriteAll(file.get(), bytes) == S_OK,
+    DWORD written = 0;
+    RequireAcl(WriteFile(file.get(), bytes.data(), static_cast<DWORD>(bytes.size()),
+        &written, nullptr) != FALSE && written == bytes.size(),
         "cannot write ACL fixture");
 }
 
@@ -194,10 +207,10 @@ void TestCacheAcl(std::vector<BYTE> const& fixtureBytes)
     WriteFixture(preexisting, fixtureBytes);
 
     std::wstring path;
-    RequireAcl(directwrite_virtual_font::GetCacheDirectory(path) == S_OK && path == directory.native(),
+    RequireAcl(renderer::virtual_font_cache::GetCacheDirectory(path) == S_OK && path == directory.native(),
         "cache directory did not use the isolated fixture");
     std::wstring persistedPath;
-    RequireAcl(directwrite_virtual_font::PersistFont(fixtureBytes, persistedPath) == S_OK,
+    RequireAcl(renderer::virtual_font_cache::PersistFont(fixtureBytes, persistedPath) == S_OK,
         "cannot persist the cache fixture");
     CheckReadGrants(path, true);
     CheckReadGrants(preexisting.native(), false);
@@ -227,7 +240,7 @@ void TestCacheAcl(std::vector<BYTE> const& fixtureBytes)
     WriteFixture(control, fixtureBytes);
     ProtectControl(control.native(), token.get());
     CheckRestrictedOpen(restricted.get(), control.native(), false);
-    RequireAcl(directwrite_virtual_font::GrantSharedReadAccess(path) == S_FALSE,
+    RequireAcl(renderer::virtual_font_cache::GrantSharedReadAccess(path) == S_FALSE,
         "shared read grants were not idempotent");
 }
 

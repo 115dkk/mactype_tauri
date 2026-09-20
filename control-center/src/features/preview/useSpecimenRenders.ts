@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PreviewEngine, PreviewResult } from "../../app/model";
-import { renderProfilePreview } from "../../app/tauri";
+import { runtime } from "../../app/runtimeAdapter";
 import { preparePreviewImage } from "./preparePreviewImage";
 
 export interface SpecimenRequest {
@@ -102,7 +102,7 @@ export function useSpecimenRenders(requests: ReadonlyArray<SpecimenRequest>, ena
         let aborted = false;
         for (const request of batch.requests) {
           try {
-            const result = await renderProfilePreview({
+            const result = await runtime().renderProfilePreview({
               profilePath: request.profilePath,
               overrides: { ...request.overrides },
               displayScale: request.dpi / 96,

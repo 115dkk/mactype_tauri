@@ -1,0 +1,20 @@
+name: installer fixture
+on: workflow_dispatch
+jobs:
+  removed-windows-build:
+    runs-on: windows-2022
+    steps:
+      - name: Build distinct immutable service payloads and a test-only failing upgrade
+        run: |-
+          $failingRuntimeVersion = 'fixture'
+          .github/scripts/Build-FailingServiceRuntimeFixture.ps1 -OutputRoot artifacts/service-runtime-failing-upgrade
+      - name: Build Inno Setup installer
+        run: build artifacts/installer-failing-upgrade
+      - name: Verify install, upgrade, launch, and uninstall
+        run: scripts/ci/Test-InstallerWindows.ps1 -FailingUpgradeInstaller fixture.exe
+      - name: Verify required Inno failure propagation and rollback
+        run: scripts/ci/Test-InnoInstallerFailureContract.ps1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: product
+          path: artifacts/installer/product.exe

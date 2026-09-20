@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { previewImageUrl } from "../app/tauri";
+import { runtime } from "../app/runtimeAdapter";
 import { useI18n } from "../i18n/i18n";
 import type { SpecimenLine } from "../features/preview/useSpecimenRenders";
 import type { StudioZoom } from "./studioModel";
@@ -33,7 +33,7 @@ function StripImage({ line, zoom, scale, onLoupe }: StripImageProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const source = previewImageUrl(line.result.imagePath);
+  const source = runtime().previewImageUrl(line.result.imagePath);
   const width = line.result.width / scale;
   const height = line.result.height / scale;
 
@@ -90,7 +90,7 @@ function DiffImage({ a, b, zoom, scale }: { a: SpecimenLine; b: SpecimenLine; zo
       const image = new Image();
       image.onload = () => resolve(image);
       image.onerror = () => reject(new Error("image failed to load"));
-      image.src = previewImageUrl(path);
+      image.src = runtime().previewImageUrl(path);
     });
     void Promise.all([load(a.result.imagePath), load(b.result.imagePath)]).then(([imageA, imageB]) => {
       if (!active) return;

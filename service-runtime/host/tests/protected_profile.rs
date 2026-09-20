@@ -1,72 +1,18 @@
+#[path = "support/protected_tree.rs"]
+mod protected_tree_support;
+
+use protected_tree_support::ProtectedTree;
 use std::fs;
 
-use mactype_service_contract::{
-    GenerationId, GenerationPointer, MachinePaths, ProfileCatalog, SourceMetadata,
-};
+use mactype_service_contract::{GenerationId, GenerationPointer, ProfileCatalog, SourceMetadata};
 use mactype_service_host::{
     ProtectedRendererRuntime, ACTIVE_PROFILE_ABSENT_CODE, RUNTIME_PROFILE_ABSENT_CODE,
 };
 
-fn paths() -> (tempfile::TempDir, MachinePaths) {
-    let base = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
-    let program_files = base.path().join("Program Files");
-    let program_data = base.path().join("ProgramData");
-    fs::create_dir_all(&program_files).unwrap();
-    fs::create_dir_all(&program_data).unwrap();
-    (
-        base,
-        MachinePaths::from_trusted_os_roots(&program_files, &program_data).unwrap(),
-    )
-}
-
-fn install_active_runtime(paths: &MachinePaths, profile_bytes: &[u8]) -> std::path::PathBuf {
-    let runtime = paths.runtime_versions().join("0.2.0");
-    fs::create_dir_all(&runtime).unwrap();
-    for name in [
-        "mactype-service.exe",
-        "mactype-injector32.exe",
-        "mactype-injector64.exe",
-        "MacType.dll",
-        "MacType64.dll",
-    ] {
-        fs::write(runtime.join(name), name.as_bytes()).unwrap();
-    }
-    fs::write(runtime.join("MacType.ini"), profile_bytes).unwrap();
-    fs::create_dir_all(paths.runtime_pointer().parent().unwrap()).unwrap();
-    fs::write(
-        paths.runtime_pointer(),
-        br#"{"schema":1,"version":"0.2.0"}"#,
-    )
-    .unwrap();
-    runtime
-}
-
-fn install_active_profile(paths: &MachinePaths, bytes: &[u8]) {
-    let mut catalog = ProfileCatalog::new();
-    let generation = catalog
-        .publish_machine_profile(
-            bytes,
-            SourceMetadata {
-                display_name: "bounded host input".to_owned(),
-            },
-        )
-        .unwrap();
-    let directory = paths
-        .profile_generations()
-        .join(generation.directory_name());
-    fs::create_dir_all(&directory).unwrap();
-    fs::write(directory.join("profile.ini"), bytes).unwrap();
-    fs::create_dir_all(paths.active_profile().parent().unwrap()).unwrap();
-    fs::write(
-        paths.active_profile(),
-        serde_json::to_vec(&GenerationPointer::new(generation)).unwrap(),
-    )
-    .unwrap();
-}
-
 #[test]
 fn initializer_rejects_an_oversized_active_profile_pointer_before_parsing() {
-    let (_base, paths) = paths();
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
     fs::create_dir_all(paths.active_profile().parent().unwrap()).unwrap();
     fs::write(paths.active_profile(), vec![b'x'; 64 * 1024 + 1]).unwrap();
 
@@ -79,9 +25,10 @@ fn initializer_rejects_an_oversized_active_profile_pointer_before_parsing() {
 
 #[test]
 fn initializer_rejects_an_oversized_runtime_pointer_before_parsing() {
-    let (_base, paths) = paths();
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
     let bytes = b"[General]\r\nHintingMode=0\r\n";
-    install_active_profile(&paths, bytes);
+    tree.install_active_profile(bytes);
     fs::create_dir_all(paths.runtime_pointer().parent().unwrap()).unwrap();
     fs::write(paths.runtime_pointer(), vec![b'x'; 64 * 1024 + 1]).unwrap();
 
@@ -94,7 +41,8 @@ fn initializer_rejects_an_oversized_runtime_pointer_before_parsing() {
 
 #[test]
 fn initializer_reports_the_verified_protected_active_profile_digest() {
-    let (_base, paths) = paths();
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
     let bytes = b"[General]\r\nHintingMode=0\r\n";
     let mut catalog = ProfileCatalog::new();
     let generation = catalog
@@ -116,7 +64,7 @@ fn initializer_reports_the_verified_protected_active_profile_digest() {
         serde_json::to_vec(&GenerationPointer::new(generation.clone())).unwrap(),
     )
     .unwrap();
-    install_active_runtime(&paths, bytes);
+    tree.install_runtime(Some(bytes));
 
     let runtime = ProtectedRendererRuntime::load(paths.clone()).unwrap();
     assert_eq!(
@@ -140,10 +88,11 @@ fn initializer_reports_the_verified_protected_active_profile_digest() {
 
 #[test]
 fn initializer_carries_the_verified_private_freetype_policy() {
-    let (_base, paths) = paths();
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
     let bytes = b"[General]\r\nSkipPrivateFreeType=1\r\n";
-    install_active_profile(&paths, bytes);
-    install_active_runtime(&paths, bytes);
+    tree.install_active_profile(bytes);
+    tree.install_runtime(Some(bytes));
 
     let runtime = ProtectedRendererRuntime::load(paths).unwrap();
 
@@ -152,10 +101,11 @@ fn initializer_carries_the_verified_private_freetype_policy() {
 
 #[test]
 fn initializer_carries_the_verified_console_process_policy() {
-    let (_base, paths) = paths();
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
     let bytes = b"[General]\r\nSkipConsoleProcesses=1\r\n";
-    install_active_profile(&paths, bytes);
-    install_active_runtime(&paths, bytes);
+    tree.install_active_profile(bytes);
+    tree.install_runtime(Some(bytes));
 
     let runtime = ProtectedRendererRuntime::load(paths).unwrap();
 
@@ -164,10 +114,11 @@ fn initializer_carries_the_verified_console_process_policy() {
 
 #[test]
 fn initializer_reports_an_absent_generated_runtime_profile() {
-    let (_base, paths) = paths();
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
     let bytes = b"[General]\r\nHintingMode=0\r\n";
-    install_active_profile(&paths, bytes);
-    let runtime = install_active_runtime(&paths, bytes);
+    tree.install_active_profile(bytes);
+    let runtime = tree.install_runtime(Some(bytes));
     fs::remove_file(runtime.join("MacType.ini")).unwrap();
 
     let error = ProtectedRendererRuntime::load(paths)
@@ -178,7 +129,8 @@ fn initializer_reports_an_absent_generated_runtime_profile() {
 
 #[test]
 fn initializer_rejects_a_dll_adjacent_profile_that_differs_from_the_active_generation() {
-    let (_base, paths) = paths();
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
     let bytes = b"[General]\r\nHintingMode=0\r\n";
     let mut catalog = ProfileCatalog::new();
     let generation = catalog
@@ -200,7 +152,11 @@ fn initializer_rejects_a_dll_adjacent_profile_that_differs_from_the_active_gener
         serde_json::to_vec(&GenerationPointer::new(generation)).unwrap(),
     )
     .unwrap();
-    install_active_runtime(&paths, b"[General]\r\nHintingMode=1\r\n");
+    tree.install_runtime(Some(
+        b"[General]
+HintingMode=1
+",
+    ));
 
     let error = ProtectedRendererRuntime::load(paths)
         .expect_err("mismatched runtime profile must fail initialization");
@@ -210,7 +166,8 @@ fn initializer_rejects_a_dll_adjacent_profile_that_differs_from_the_active_gener
 
 #[test]
 fn initializer_refuses_ready_while_a_durable_activation_recovery_is_pending() {
-    let (_base, paths) = paths();
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
     let bytes = b"[General]\r\nHintingMode=0\r\n";
     let mut catalog = ProfileCatalog::new();
     let generation = catalog
@@ -232,7 +189,7 @@ fn initializer_refuses_ready_while_a_durable_activation_recovery_is_pending() {
         serde_json::to_vec(&GenerationPointer::new(generation)).unwrap(),
     )
     .unwrap();
-    install_active_runtime(&paths, bytes);
+    tree.install_runtime(Some(bytes));
     fs::write(paths.profile_activation_journal(), b"pending").unwrap();
 
     let error = ProtectedRendererRuntime::load(paths.clone())
@@ -248,10 +205,11 @@ fn initializer_refuses_ready_while_a_durable_activation_recovery_is_pending() {
 
 #[test]
 fn initializer_refuses_a_runtime_activation_receipt_for_a_different_candidate() {
-    let (_base, paths) = paths();
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
     let bytes = b"[General]\r\nHintingMode=0\r\n";
-    install_active_profile(&paths, bytes);
-    install_active_runtime(&paths, bytes);
+    tree.install_active_profile(bytes);
+    tree.install_runtime(Some(bytes));
     fs::write(
         paths.runtime_activation_journal(),
         br#"{"schema":3,"phase":"committed","previous":null,"activated":{"schema":1,"version":"0.3.0"}}"#,
@@ -266,10 +224,11 @@ fn initializer_refuses_a_runtime_activation_receipt_for_a_different_candidate() 
 
 #[test]
 fn initializer_refuses_a_stale_matching_receipt_without_a_durable_commit_phase() {
-    let (_base, paths) = paths();
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
     let bytes = b"[General]\r\nHintingMode=0\r\n";
-    install_active_profile(&paths, bytes);
-    install_active_runtime(&paths, bytes);
+    tree.install_active_profile(bytes);
+    tree.install_runtime(Some(bytes));
     fs::write(
         paths.runtime_activation_journal(),
         br#"{"schema":2,"previous":null,"activated":{"schema":1,"version":"0.2.0"}}"#,
@@ -284,10 +243,11 @@ fn initializer_refuses_a_stale_matching_receipt_without_a_durable_commit_phase()
 
 #[test]
 fn initializer_refuses_legacy_uncommitted_and_rollback_required_receipts() {
-    let (_base, paths) = paths();
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
     let bytes = b"[General]\r\nHintingMode=0\r\n";
-    install_active_profile(&paths, bytes);
-    install_active_runtime(&paths, bytes);
+    tree.install_active_profile(bytes);
+    tree.install_runtime(Some(bytes));
 
     for receipt in [
         br#"{"schema":1,"previous":null}"#.as_slice(),
@@ -305,9 +265,14 @@ fn initializer_refuses_legacy_uncommitted_and_rollback_required_receipts() {
 
 #[test]
 fn initializer_reports_an_absent_active_profile_pointer_without_changing_runtime_selection() {
-    let (_base, paths) = paths();
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
     let runtime_pointer = br#"{"schema":1,"version":"0.2.0"}"#;
-    install_active_runtime(&paths, b"[General]\r\nHintingMode=0\r\n");
+    tree.install_runtime(Some(
+        b"[General]
+HintingMode=0
+",
+    ));
 
     let error = ProtectedRendererRuntime::load(paths.clone())
         .expect_err("missing active profile pointer must keep the service stopped");
@@ -322,10 +287,11 @@ fn initializer_reports_an_absent_active_profile_pointer_without_changing_runtime
 
 #[test]
 fn initializer_keeps_a_dangling_active_profile_pointer_unavailable() {
-    let (_base, paths) = paths();
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
     let bytes = b"[General]\r\nHintingMode=0\r\n";
-    install_active_profile(&paths, bytes);
-    install_active_runtime(&paths, bytes);
+    tree.install_active_profile(bytes);
+    tree.install_runtime(Some(bytes));
     fs::remove_file(
         paths
             .profile_generations()
@@ -342,7 +308,8 @@ fn initializer_keeps_a_dangling_active_profile_pointer_unavailable() {
 
 #[test]
 fn profile_activation_journal_takes_priority_over_an_absent_active_pointer() {
-    let (_base, paths) = paths();
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
     fs::create_dir_all(paths.profile_activation_journal().parent().unwrap()).unwrap();
     fs::write(paths.profile_activation_journal(), b"pending").unwrap();
 
@@ -354,10 +321,11 @@ fn profile_activation_journal_takes_priority_over_an_absent_active_pointer() {
 
 #[test]
 fn protected_renderer_runtime_rejects_an_indirect_alternative_profile() {
-    let (_base, paths) = paths();
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
     let bytes = b"[General]\r\nAlternativeFile=profile.ini\r\n";
-    install_active_profile(&paths, bytes);
-    install_active_runtime(&paths, bytes);
+    tree.install_active_profile(bytes);
+    tree.install_runtime(Some(bytes));
 
     let error = ProtectedRendererRuntime::load(paths).unwrap_err();
 
@@ -367,10 +335,11 @@ fn protected_renderer_runtime_rejects_an_indirect_alternative_profile() {
 #[cfg(feature = "ci-test-adapter")]
 #[test]
 fn protected_renderer_runtime_rejects_a_profile_pointer_change_during_pairing() {
-    let (_base, paths) = paths();
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
     let original = b"[General]\r\nHintingMode=0\r\n";
-    install_active_profile(&paths, original);
-    install_active_runtime(&paths, original);
+    tree.install_active_profile(original);
+    tree.install_runtime(Some(original));
     let replacement = b"[General]\r\nHintingMode=1\r\n";
     let replacement_generation =
         mactype_service_contract::GenerationId::from_profile_bytes(replacement);
@@ -394,10 +363,11 @@ fn protected_renderer_runtime_rejects_a_profile_pointer_change_during_pairing() 
 #[cfg(feature = "ci-test-adapter")]
 #[test]
 fn protected_renderer_runtime_rejects_a_runtime_pointer_change_during_pairing() {
-    let (_base, paths) = paths();
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
     let profile = b"[General]\r\nHintingMode=0\r\n";
-    install_active_profile(&paths, profile);
-    install_active_runtime(&paths, profile);
+    tree.install_active_profile(profile);
+    tree.install_runtime(Some(profile));
 
     let error =
         ProtectedRendererRuntime::load_with_pointer_stability_hook_for_ci(paths.clone(), || {
@@ -415,10 +385,11 @@ fn protected_renderer_runtime_rejects_a_runtime_pointer_change_during_pairing() 
 #[cfg(feature = "ci-test-adapter")]
 #[test]
 fn protected_renderer_runtime_rejects_runtime_content_changed_during_pairing() {
-    let (_base, paths) = paths();
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
     let profile = b"[General]\r\nHintingMode=0\r\n";
-    install_active_profile(&paths, profile);
-    let runtime_root = install_active_runtime(&paths, profile);
+    tree.install_active_profile(profile);
+    let runtime_root = tree.install_runtime(Some(profile));
 
     let error = ProtectedRendererRuntime::load_with_pointer_stability_hook_for_ci(paths, || {
         fs::write(runtime_root.join("MacType.dll"), b"changed-core").unwrap()

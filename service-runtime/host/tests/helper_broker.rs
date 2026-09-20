@@ -1,3 +1,7 @@
+#[path = "support/event_sink.rs"]
+mod event_sink;
+
+use event_sink::discard_events;
 use std::ffi::OsString;
 use std::fs;
 use std::sync::Mutex;
@@ -104,7 +108,7 @@ fn fixed_helper_broker_selects_architecture_and_emits_only_the_strict_cli_contra
     let (_base, runtime) = runtime();
     let assets = runtime.assets();
     let launcher = RecordingLauncher::default();
-    let broker = FixedHelperBroker::new(&runtime, &launcher);
+    let broker = FixedHelperBroker::new(&runtime, &launcher, discard_events());
     let request = InjectionRequest {
         identity: ProcessIdentity {
             pid: 42,
@@ -168,6 +172,7 @@ fn interrupted_helper_is_a_service_stop_cancellation() {
             stage: HelperLaunchStage::BeforeResume,
             raw_os_error: None,
         },
+        discard_events(),
     );
     let result = broker.inject(&InjectionRequest {
         identity: ProcessIdentity {
@@ -193,6 +198,7 @@ fn before_resume_permission_denied_preserves_launch_failure_and_win32_code() {
             stage: HelperLaunchStage::BeforeResume,
             raw_os_error: Some(5),
         },
+        discard_events(),
     );
     let result = broker.inject(&x64_request(&runtime));
 
@@ -211,6 +217,7 @@ fn before_resume_launch_failure_never_claims_unknown_target_cleanup() {
             stage: HelperLaunchStage::BeforeResume,
             raw_os_error: None,
         },
+        discard_events(),
     );
     let result = broker.inject(&InjectionRequest {
         identity: ProcessIdentity {
@@ -237,6 +244,7 @@ fn post_resume_service_stop_is_terminal_cleanup_unknown() {
             stage: HelperLaunchStage::AfterResume,
             raw_os_error: None,
         },
+        discard_events(),
     );
     let result = broker.inject(&InjectionRequest {
         identity: ProcessIdentity {
@@ -262,6 +270,7 @@ fn absolute_helper_timeout_is_terminal_cleanup_unknown() {
             stage: HelperLaunchStage::AfterResume,
             raw_os_error: None,
         },
+        discard_events(),
     );
     let result = broker.inject(&InjectionRequest {
         identity: ProcessIdentity {
@@ -330,7 +339,7 @@ fn incomplete_remote_thread_cleanup_is_a_terminal_broker_result() {
             .into_bytes(),
         })),
     };
-    let broker = FixedHelperBroker::new(&runtime, launcher);
+    let broker = FixedHelperBroker::new(&runtime, launcher, discard_events());
     let result = broker.inject(&InjectionRequest {
         identity: ProcessIdentity {
             pid: 42,
@@ -360,7 +369,7 @@ fn explicit_post_injection_unknown_code_is_preserved_for_generation_health() {
             .into_bytes(),
         })),
     };
-    let broker = FixedHelperBroker::new(&runtime, launcher);
+    let broker = FixedHelperBroker::new(&runtime, launcher, discard_events());
     let result = broker.inject(&InjectionRequest {
         identity: ProcessIdentity {
             pid: 42,
@@ -396,7 +405,7 @@ fn helper_adapter_classifies_only_verified_pre_injection_races_as_retryable() {
                 .into_bytes(),
             })),
         };
-        let broker = FixedHelperBroker::new(&runtime, launcher);
+        let broker = FixedHelperBroker::new(&runtime, launcher, discard_events());
         let result = broker.inject(&InjectionRequest {
             identity: ProcessIdentity {
                 pid: 42,
@@ -484,7 +493,7 @@ fn helper_adapter_uses_typed_cleanup_evidence_instead_of_code_suffixes() {
             .into_bytes(),
         })),
     };
-    let broker = FixedHelperBroker::new(&runtime, launcher);
+    let broker = FixedHelperBroker::new(&runtime, launcher, discard_events());
     let result = broker.inject(&InjectionRequest {
         identity: ProcessIdentity {
             pid: 42,
@@ -510,6 +519,7 @@ fn malformed_helper_frame_is_typed_as_integrity_uncertainty() {
                 stdout: b"not-json".to_vec(),
             })),
         },
+        discard_events(),
     );
     let result = broker.inject(&InjectionRequest {
         identity: ProcessIdentity {
@@ -551,6 +561,7 @@ fn inject_static_response(
                 stdout: response.into_bytes(),
             })),
         },
+        discard_events(),
     )
     .inject(request)
 }

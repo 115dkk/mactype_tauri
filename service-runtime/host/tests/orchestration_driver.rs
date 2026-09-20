@@ -1,3 +1,7 @@
+#[path = "support/event_sink.rs"]
+mod event_sink;
+
+use event_sink::discard_events;
 use std::collections::VecDeque;
 use std::io;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -144,6 +148,7 @@ fn initialize_with_recovery_source(
         Box::new(source),
         Box::new(FixedInspector),
         Box::new(SharedBroker { requests }),
+        discard_events(),
     )
 }
 
@@ -231,6 +236,7 @@ impl RuntimeInitializer for TestInitializer {
             Box::new(SharedBroker {
                 requests: self.requests.clone(),
             }),
+            discard_events(),
         )
     }
 }
@@ -335,7 +341,7 @@ fn observer_failure_resubscribes_and_reconciles_the_missed_snapshot() {
         [Ok(Some(42)), Err(observer_error("observer-wait-failed"))],
     );
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -387,7 +393,7 @@ fn observer_recovery_gives_up_after_the_configured_attempts() {
         [Err(observer_error("observer-wait-failed"))],
     );
 
-    let error = ServiceRuntime::new("0.2.0")
+    let error = ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -424,7 +430,7 @@ fn observer_recovery_stops_when_the_service_stops() {
         [Err(observer_error("observer-wait-failed"))],
     );
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -444,7 +450,7 @@ fn ready_driver_consumes_process_events_until_stop() {
     let requests = Arc::new(Mutex::new(Vec::new()));
     let recorder = Recorder::default();
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -534,6 +540,7 @@ impl RuntimeInitializer for FrozenInitializer {
             Box::new(SharedBroker {
                 requests: self.requests.clone(),
             }),
+            discard_events(),
         )
     }
 }
@@ -558,7 +565,7 @@ fn frozen_runtime_target_waits_without_broker_or_degraded_health_then_injects_on
     let requests = Arc::new(Mutex::new(Vec::new()));
     let recorder = Recorder::default();
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -626,6 +633,7 @@ impl RuntimeInitializer for TerminalInitializer {
             Box::new(TerminalBroker {
                 requests: self.requests.clone(),
             }),
+            discard_events(),
         )
     }
 }
@@ -635,7 +643,7 @@ fn terminal_target_failure_keeps_global_ready_while_the_result_stays_process_loc
     let requests = Arc::new(Mutex::new(Vec::new()));
     let recorder = Recorder::default();
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -715,6 +723,7 @@ impl RuntimeInitializer for RecoveringInitializer {
                 first_code: self.first_code,
                 first_win32_error: self.first_win32_error,
             }),
+            discard_events(),
         )
     }
 }
@@ -738,7 +747,7 @@ fn cleanup_unknown_degrades_its_generation_then_next_success_recovers_ready() {
     let recorder = Recorder::default();
     let requests = Arc::new(Mutex::new(Vec::new()));
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -828,6 +837,7 @@ impl RuntimeInitializer for VanishedTargetInitializer {
                 first_code: "post-injection-state-cleanup-unknown",
                 first_win32_error: Some(299),
             }),
+            discard_events(),
         )
     }
 }
@@ -837,7 +847,7 @@ fn cleanup_unknown_for_a_vanished_target_never_degrades_global_health() {
     let recorder = Recorder::default();
     let requests = Arc::new(Mutex::new(Vec::new()));
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -882,7 +892,7 @@ fn conflicting_mactype_module_stays_process_local_and_global_ready() {
     let recorder = Recorder::default();
     let requests = Arc::new(Mutex::new(Vec::new()));
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -927,7 +937,7 @@ fn invalid_helper_response_degrades_its_generation_then_next_success_recovers_re
     let recorder = Recorder::default();
     let requests = Arc::new(Mutex::new(Vec::new()));
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -1030,6 +1040,7 @@ impl RuntimeInitializer for TargetInspectionRaceInitializer {
             Box::new(SharedBroker {
                 requests: self.requests.clone(),
             }),
+            discard_events(),
         )
     }
 }
@@ -1053,7 +1064,7 @@ fn target_inspection_races_are_skipped_without_degrading_ready_or_blocking_the_n
     let requests = Arc::new(Mutex::new(Vec::new()));
     let recorder = Recorder::default();
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &recorder,
             &recorder,
@@ -1109,6 +1120,7 @@ impl RuntimeInitializer for TelemetryInitializer {
             Box::new(SharedBroker {
                 requests: self.requests.clone(),
             }),
+            discard_events(),
         )
     }
 }
@@ -1178,7 +1190,7 @@ fn bounded_consecutive_health_report_failures_recover_and_stop_cleanly() {
     let health = TelemetryHealthPublisher::new(TelemetryFailurePattern::First(4));
     let status = Recorder::default();
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &status,
             &health,
@@ -1205,7 +1217,7 @@ fn excessive_consecutive_health_report_failures_return_the_publish_error() {
     let health = TelemetryHealthPublisher::new(TelemetryFailurePattern::Always);
     let status = Recorder::default();
 
-    let error = ServiceRuntime::new("0.2.0")
+    let error = ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &status,
             &health,
@@ -1233,7 +1245,7 @@ fn intermittent_health_report_failures_reset_the_consecutive_failure_count() {
     let health = TelemetryHealthPublisher::new(TelemetryFailurePattern::Intermittent);
     let status = Recorder::default();
 
-    ServiceRuntime::new("0.2.0")
+    ServiceRuntime::new("0.2.0", discard_events())
         .run(
             &status,
             &health,

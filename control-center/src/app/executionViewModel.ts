@@ -77,6 +77,17 @@ export interface ProfileIndicator {
   labelKey: MessageKey;
 }
 
+export interface ServicePackageNotice {
+  kind: "not-installed" | "incomplete" | "untrusted";
+  titleKey: MessageKey;
+  descriptionKey: MessageKey;
+}
+
+export interface ActiveProfileDisplay {
+  name: string | null;
+  fallbackKey: MessageKey;
+}
+
 export interface ExecutionViewModel {
   status: ExecutionStatus | null;
   profileMatches: boolean;
@@ -86,6 +97,10 @@ export interface ExecutionViewModel {
   serviceNeedsRepair: boolean;
   serviceBinaryPath: string | null;
   serviceSummary: ServiceSummary;
+  servicePackageNotice: ServicePackageNotice | null;
+  serviceWarnings: ReadonlyArray<ServiceSummaryNotice>;
+  activeProfileDisplay: ActiveProfileDisplay;
+  overviewState: "normal" | "inactive" | "problem";
   systemInjectionAction: SystemInjectionPrimaryAction;
   legacyTrayResolution: LegacyTrayResolution | null;
   canInstall: boolean;
@@ -136,9 +151,46 @@ function projectProfileIndicator(
     : { kind: "unverified", labelKey: "execution.profileUnverified" };
 }
 
+function projectServicePackageNotice(status: ExecutionStatus | null): ServicePackageNotice | null {
+  switch (status?.serviceManagementPackage) {
+    case "not-installed":
+      return {
+        kind: "not-installed",
+        titleKey: "execution.servicePackageNotInstalledTitle",
+        descriptionKey: "execution.servicePackageNotInstalledDescription",
+      };
+    case "incomplete":
+      return {
+        kind: "incomplete",
+        titleKey: "execution.servicePackageIncompleteTitle",
+        descriptionKey: "execution.servicePackageIncompleteDescription",
+      };
+    case "untrusted":
+      return {
+        kind: "untrusted",
+        titleKey: "execution.servicePackageUntrustedTitle",
+        descriptionKey: "execution.servicePackageUntrustedDescription",
+      };
+    default:
+      return null;
+  }
+}
+
+function projectServiceWarnings(service: SystemServiceStatus | undefined): ReadonlyArray<ServiceSummaryNotice> {
+  const warnings: ServiceSummaryNotice[] = [];
+  if (service?.backend === "foreign") {
+    warnings.push({ kind: "foreign-service", titleKey: "execution.serviceForeign" });
+  }
+  if (service?.configurationDrift) {
+    warnings.push({ kind: "configuration-drift", titleKey: "execution.serviceConfigurationDriftDescription" });
+  }
+  return warnings;
+}
+
 function projectServiceSummary(
   status: ExecutionStatus | null,
   serviceBusy: string | null,
+  serviceWarnings: ReadonlyArray<ServiceSummaryNotice>,
   canInstall: boolean,
   canStart: boolean,
   canUpgrade: boolean,
@@ -155,9 +207,9 @@ function projectServiceSummary(
       && service?.activeProfileDigest
       && service.activeProfileDigest !== status.expectedProfileDigest,
   );
-  const foreignService = service?.backend === "foreign" || service?.installation === "invalid";
+  const foreignService = serviceWarnings.some((warning) => warning.kind === "foreign-service") || service?.installation === "invalid";
   const inaccessibleService = service?.installation === "inaccessible";
-  const driftedService = service?.backend === "open-source" && service.configurationDrift === true;
+  const driftedService = service?.backend === "open-source" && serviceWarnings.some((warning) => warning.kind === "configuration-drift");
   const serviceRemovalPending = service?.installation === "delete-pending";
   const modeKey: MessageKey = status?.registryModeDetected
     ? "execution.modeAppInit"
@@ -546,9 +598,23 @@ export function projectExecutionView(
     idle && !legacyTrayConflict && legacy?.migrationAvailable && !legacyMigrationComplete
   );
 
+  const serviceWarnings = projectServiceWarnings(service);
+  const systemInjectionAction = projectSystemInjectionAction(status, serviceBusy, profileMatches);
+
   return {
     status,
     profileMatches,
+    servicePackageNotice: projectServicePackageNotice(status),
+    serviceWarnings,
+    activeProfileDisplay: {
+      name: status?.activeProfile?.split(/[\\/]/).pop() ?? null,
+      fallbackKey: "execution.profileNotApplied",
+    },
+    overviewState: systemInjectionAction.state === "active"
+      ? "normal"
+      : service?.runtime === "stopped"
+        ? "inactive"
+        : "problem",
     profileIndicator: projectProfileIndicator(status, profileMatches),
     serviceStatusLine: service ? projectServiceStatusLine(service) : null,
     serviceNeedsUpgrade: service?.installation === "outdated",
@@ -558,6 +624,7 @@ export function projectExecutionView(
     serviceSummary: projectServiceSummary(
       status,
       serviceBusy,
+      serviceWarnings,
       canInstall,
       canStart,
       canUpgrade,
@@ -565,7 +632,7 @@ export function projectExecutionView(
       canRemove,
       canMigrateLegacy,
     ),
-    systemInjectionAction: projectSystemInjectionAction(status, serviceBusy, profileMatches),
+    systemInjectionAction,
     legacyTrayResolution: projectLegacyTrayResolution(status?.legacyTray),
     canInstall,
     canStart,

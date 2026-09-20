@@ -1,9 +1,11 @@
 use super::{
     super::{
+        action_failure::{
+            InstallationPreflightKind, INSTALLATION_INCOMPLETE_PREFIX,
+            INSTALLATION_REQUIRED_PREFIX, INSTALLATION_UNTRUSTED_PREFIX,
+        },
         file_guard::read_bounded_regular_file,
         runtime::{parse_bundled_runtime_manifest, MAX_BUNDLED_MANIFEST_BYTES},
-        INSTALLATION_INCOMPLETE_PREFIX, INSTALLATION_REQUIRED_PREFIX,
-        INSTALLATION_UNTRUSTED_PREFIX,
     },
     path_guard::reject_reparse_ancestors,
 };
@@ -39,6 +41,7 @@ pub(in crate::machine_integration::open_service) struct ServicePackage {
 
 #[derive(Clone, Debug)]
 pub(in crate::machine_integration::open_service) struct InstallationPreflightFailure {
+    pub(in crate::machine_integration::open_service) kind: InstallationPreflightKind,
     pub(in crate::machine_integration::open_service) error: String,
     pub(in crate::machine_integration::open_service) diagnostics:
         Box<InstallationPreflightDiagnostics>,
@@ -75,11 +78,13 @@ fn diagnostics(current_executable: Option<PathBuf>) -> InstallationPreflightDiag
 }
 
 fn failure(
+    kind: InstallationPreflightKind,
     prefix: &str,
     message: &str,
     diagnostics: InstallationPreflightDiagnostics,
 ) -> InstallationPreflightFailure {
     InstallationPreflightFailure {
+        kind,
         error: format!("{prefix} {message}"),
         diagnostics: Box::new(diagnostics),
     }
@@ -87,6 +92,7 @@ fn failure(
 
 fn required(diagnostics: InstallationPreflightDiagnostics) -> InstallationPreflightFailure {
     failure(
+        InstallationPreflightKind::Required,
         INSTALLATION_REQUIRED_PREFIX,
         "No complete Control Center service package is available. Keep the complete \
          Integration/Developer bundle together or run the installer.",
@@ -96,6 +102,7 @@ fn required(diagnostics: InstallationPreflightDiagnostics) -> InstallationPrefli
 
 fn incomplete(diagnostics: InstallationPreflightDiagnostics) -> InstallationPreflightFailure {
     failure(
+        InstallationPreflightKind::Incomplete,
         INSTALLATION_INCOMPLETE_PREFIX,
         "The Control Center service package is incomplete or damaged. Restore the complete \
          Integration/Developer bundle, or run the installer, before managing the service.",
@@ -108,6 +115,7 @@ fn untrusted(
     diagnostics: InstallationPreflightDiagnostics,
 ) -> InstallationPreflightFailure {
     failure(
+        InstallationPreflightKind::Untrusted,
         INSTALLATION_UNTRUSTED_PREFIX,
         &format!("The Control Center service package did not pass verification. {detail}"),
         diagnostics,

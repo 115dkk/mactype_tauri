@@ -10,7 +10,7 @@ pub(in crate::machine_integration::open_service) struct SystemMigrationBackend {
 impl MigrationBackend for SystemMigrationBackend {
     type OpenServiceSnapshot = SystemOpenServiceSnapshot;
 
-    fn prepare_legacy_backup(&mut self) -> Result<(), String> {
+    fn prepare_legacy_backup(&mut self) -> Result<(), ActionFailure> {
         legacy_migration::prepare_backup().map(|_| ())
     }
 
@@ -78,7 +78,7 @@ impl MigrationBackend for SystemMigrationBackend {
     fn rollback_open_service(
         &mut self,
         snapshot: &Self::OpenServiceSnapshot,
-    ) -> Result<(), String> {
+    ) -> Result<(), ActionFailure> {
         rollback_open_service_snapshot(snapshot)
     }
 

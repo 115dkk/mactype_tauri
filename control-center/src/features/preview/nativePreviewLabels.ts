@@ -1,11 +1,12 @@
 import type { I18nValue } from "../../i18n/i18n";
+import {
+  nativePreviewLadderSizes,
+  type NativePreviewLabelKey,
+} from "../../generated/nativePreview";
 
-/* The native preview window draws its own chrome, so the Control Center
-   hands it every string in the reader's language; the window never carries
-   text of its own. Keys mirror the helper's `labels` object. */
-export const NATIVE_LADDER_SIZES: ReadonlyArray<number> = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24];
+export const NATIVE_LADDER_SIZES: ReadonlyArray<number> = nativePreviewLadderSizes;
 
-export function nativePreviewLabels(t: I18nValue["t"]): Record<string, string> {
+export function nativePreviewLabels(t: I18nValue["t"]): Record<NativePreviewLabelKey, string> {
   return {
     title: t("native.title"),
     fontFace: t("profiles.previewFont"),

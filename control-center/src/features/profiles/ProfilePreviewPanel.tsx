@@ -15,19 +15,11 @@ import { nativePreviewLabels, NATIVE_LADDER_SIZES } from "../preview/nativePrevi
 import { wrapSample } from "../preview/wrapSample";
 import { preparePreviewImage } from "../preview/preparePreviewImage";
 import { useAppTheme } from "../../app/useAppTheme";
-import {
-  forcePreviewCrashForCi,
-  previewImageUrl,
-  renderProfilePreview,
-  reportFrontendFailure,
-  setNativePreview,
-  subscribeNativePreview,
-  verifyProfileWorkflowForCi,
-} from "../../app/tauri";
+import { runtime } from "../../app/runtimeAdapter";
 import type { I18nValue } from "../../i18n/i18n";
 
 const DEFAULT_PREVIEW_HEIGHT = 300;
-const QUICK_PREVIEW_HEIGHT = 240;
+const GUIDED_PREVIEW_HEIGHT = 240;
 const MIN_PREVIEW_HEIGHT = 128;
 const MAX_PREVIEW_HEIGHT = 640;
 /* The undocked preview is a bottom panel sharing its column with the settings
@@ -74,7 +66,7 @@ interface ProfilePreviewPanelProps {
   fontFace: string;
   fontFamilies: ReadonlyArray<string>;
   fontOptionLabel: (font: string) => string;
-  mode: "quick" | "advanced";
+  mode: "guided" | "all";
   onError: (message: string | null) => void;
   onFontFaceChange: (font: string) => void;
   onOpenStudio?: () => void;
@@ -146,7 +138,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
   const [nativeMode, setNativeMode] = useState<NativePreviewMode>("sample");
   /* Escape or the close button hides the window on its own; the toggle
      follows the state the window reports instead of waiting for a click. */
-  useEffect(() => subscribeNativePreview((state) => setNativeVisible(state.visible)), []);
+  useEffect(() => runtime().subscribeNativePreview((state) => setNativeVisible(state.visible)), []);
   const [previewHeight, setPreviewHeight] = useState(DEFAULT_PREVIEW_HEIGHT);
   const [sampleWidth, setSampleWidth] = useState(0);
   const [sampleEditorOpen, setSampleEditorOpen] = useState(false);
@@ -196,7 +188,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
   }), []);
 
   useEffect(() => {
-    if (mode === "quick") setPreviewHeight((current) => Math.min(current, QUICK_PREVIEW_HEIGHT));
+    if (mode === "guided") setPreviewHeight((current) => Math.min(current, GUIDED_PREVIEW_HEIGHT));
   }, [mode]);
 
   useEffect(() => {
@@ -244,7 +236,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
         let aborted = false;
         for (const entry of pending.requests) {
           try {
-            const rendered = await renderProfilePreview(entry.request);
+            const rendered = await runtime().renderProfilePreview(entry.request);
             if (!isCurrentGeneration(pending.generation)) {
               aborted = true;
               break;
@@ -269,7 +261,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
         if (aborted || lines.length !== pending.requests.length || pending.batchId < newestBatch.current) continue;
         if (ciSmoke && !restartVerified.current) {
           restartVerified.current = true;
-          await forcePreviewCrashForCi();
+          await runtime().forcePreviewCrashForCi();
           if (!isCurrentGeneration(pending.generation)) continue;
           pendingPreview.current = pending;
           continue;
@@ -376,7 +368,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
   const applyNativePreview = useCallback(async (visible: boolean, mode: NativePreviewMode, invertedNow: boolean) => {
     const requestGeneration = generation.current;
     try {
-      const state = await setNativePreview(visible, {
+      const state = await runtime().setNativePreview(visible, {
         profilePath: profilePath ?? undefined,
         overrides: values,
         displayMode: mode,
@@ -434,7 +426,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
     if (!ciSmoke || ciReadyRequestId.current !== line.result.requestId || ciWorkflowVerified.current) return;
     ciWorkflowVerified.current = true;
     const requestGeneration = generation.current;
-    void verifyProfileWorkflowForCi()
+    void runtime().verifyProfileWorkflowForCi()
       .then(() => {
         if (isCurrentGeneration(requestGeneration)) onPreviewReady?.();
       })
@@ -442,7 +434,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
         if (!isCurrentGeneration(requestGeneration)) return;
         const message = errorMessage(caught);
         onError(message);
-        void reportFrontendFailure("profiles", message);
+        void runtime().reportFrontendFailure("profiles", message);
       });
   };
 
@@ -487,7 +479,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
               height={line.result.height / displayScale}
               key={line.result.requestId}
               onLoad={() => verifyCiWorkflow(line)}
-              src={previewImageUrl(line.result.imagePath)}
+              src={runtime().previewImageUrl(line.result.imagePath)}
               width={line.result.width / displayScale}
             />
           </figure>

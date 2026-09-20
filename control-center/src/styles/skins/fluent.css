@@ -204,7 +204,7 @@ html[data-skin="fluent"] .fluent-sub-title { font-size: 20px; font-weight: 600; 
 html[data-skin="fluent"] .fluent-desc { margin: 2px 0 12px; color: var(--color-muted); }
 html[data-skin="fluent"] .fluent-main .setting-row { min-height: 56px; margin-bottom: 3px; padding: 10px 14px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-surface); }
 html[data-skin="fluent"] .fluent-main .setting-row[data-dirty="true"] .setting-label { color: var(--color-foreground); }
-html[data-skin="fluent"] .fluent-main .wizard-start-card, html[data-skin="fluent"] .fluent-main .wizard-apply-card { border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-surface); }
+html[data-skin="fluent"] .fluent-main .guided-start-card, html[data-skin="fluent"] .fluent-main .guided-apply-card { border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-surface); }
 html[data-skin="fluent"] .fluent-workspace .preview-panel { margin: 0; padding: 0; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-surface); overflow: hidden; }
 html[data-skin="fluent"] .fluent-workspace[data-preview-docked="true"] .preview-panel { padding-inline-start: 0; border-inline-start: 1px solid var(--color-border); }
 html[data-skin="fluent"] .fluent-workspace .preview-toolbar { padding: 10px 12px; border-bottom: 1px solid var(--fluent-divider); }

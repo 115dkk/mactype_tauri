@@ -221,12 +221,12 @@ html[data-skin="cupertino"] .cupertino-mid h2 { font-size: 15px; font-weight: 60
 html[data-skin="cupertino"] .cupertino-desc { margin: 2px 0 8px; color: var(--color-muted); }
 html[data-skin="cupertino"] .cupertino-settings-group .setting-row { position: relative; min-height: 44px; padding: 8px 16px; }
 html[data-skin="cupertino"] .cupertino-settings-group .setting-row + .setting-row::before { content: ""; position: absolute; top: 0; right: 0; left: 16px; height: 1px; background: var(--cupertino-sep); }
-html[data-skin="cupertino"] .cupertino-settings-group .wizard-start-card, html[data-skin="cupertino"] .cupertino-settings-group .wizard-apply-card { margin: 12px 16px; }
+html[data-skin="cupertino"] .cupertino-settings-group .guided-start-card, html[data-skin="cupertino"] .cupertino-settings-group .guided-apply-card { margin: 12px 16px; }
 html[data-skin="cupertino"] .cupertino-settings-group > .collection-editor, html[data-skin="cupertino"] .cupertino-settings-group > .list-grid, html[data-skin="cupertino"] .cupertino-settings-group > .advanced-editor, html[data-skin="cupertino"] .cupertino-settings-group > .unity-games, html[data-skin="cupertino"] .cupertino-settings-group > .unity-hook-notice { margin-inline: 16px; }
 html[data-skin="cupertino"] .cupertino-settings-group > .list-grid { padding-block: 12px; }
 html[data-skin="cupertino"] .cupertino-settings-group > .collection-editor { padding-block: 12px; }
 html[data-skin="cupertino"] .cupertino-settings-group .individual-row, html[data-skin="cupertino"] .cupertino-settings-group .list-editor ul, html[data-skin="cupertino"] .cupertino-settings-group .list-editor-empty, html[data-skin="cupertino"] .cupertino-settings-group .unity-games { border-radius: 8px; }
-html[data-skin="cupertino"] .cupertino-settings-group .wizard-progress, html[data-skin="cupertino"] .cupertino-settings-group .wizard-step-tools { padding: 8px 16px; }
+html[data-skin="cupertino"] .cupertino-settings-group .guided-progress, html[data-skin="cupertino"] .cupertino-settings-group .guided-step-tools { padding: 8px 16px; }
 html[data-skin="cupertino"] .cupertino-workspace .preview-panel { margin: 0; padding: 0; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface); overflow: hidden; }
 html[data-skin="cupertino"] .cupertino-workspace[data-preview-docked="true"] .preview-panel { padding-inline-start: 0; border-inline-start: 1px solid var(--color-border); }
 html[data-skin="cupertino"] .cupertino-workspace .preview-toolbar { padding: 8px 12px; border-bottom: 1px solid var(--cupertino-sep); }

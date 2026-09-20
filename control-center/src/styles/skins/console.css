@@ -235,8 +235,8 @@ html[data-skin="console"] .console-settings-panel .console-panel-head { min-heig
 html[data-skin="console"] .console-settings-form { display: block; padding: 0; margin: 0; overflow: visible; }
 html[data-skin="console"] .console-settings-form .setting-row { min-height: 34px; padding: 4px 12px; border-bottom: 1px solid var(--color-border); }
 html[data-skin="console"] .console-settings-form .setting-row[data-dirty="true"] { box-shadow: inset 2px 0 var(--color-primary); }
-html[data-skin="console"] .console-settings-form .wizard-progress, html[data-skin="console"] .console-settings-form .wizard-step-tools { padding: 8px 12px; }
-html[data-skin="console"] .console-settings-form .wizard-start-card, html[data-skin="console"] .console-settings-form .wizard-apply-card { margin: 10px 12px; }
+html[data-skin="console"] .console-settings-form .guided-progress, html[data-skin="console"] .console-settings-form .guided-step-tools { padding: 8px 12px; }
+html[data-skin="console"] .console-settings-form .guided-start-card, html[data-skin="console"] .console-settings-form .guided-apply-card { margin: 10px 12px; }
 html[data-skin="console"] .console-workspace .preview-panel { display: flex; flex-direction: column; min-height: 0; margin: 0; padding: 0; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface); overflow: hidden; }
 html[data-skin="console"] .console-workspace .preview-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 30px; padding: 4px 12px; border-bottom: 1px solid var(--color-border); color: var(--color-muted); font-size: 11px; }
 html[data-skin="console"] .console-workspace .preview-toolbar h2 { font-size: 11px; font-weight: 600; color: var(--color-muted); }

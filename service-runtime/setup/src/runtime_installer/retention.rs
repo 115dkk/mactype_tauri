@@ -5,12 +5,12 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use mactype_service_contract::{IMMUTABLE_RUNTIME_FILES, MAX_PINNED_RUNTIMES};
+use mactype_service_contract::{
+    valid_runtime_version_component, IMMUTABLE_RUNTIME_FILES, MAX_PINNED_RUNTIMES,
+};
 
 use super::deferred_delete::{remove_directory_or_defer, remove_file_or_defer};
-use super::journal::{
-    safe_version_component, validate_runtime_pointer, RuntimePointer, MAX_POINTER_BYTES,
-};
+use super::journal::{validate_runtime_pointer, RuntimePointer, MAX_POINTER_BYTES};
 use super::RuntimeInstaller;
 use crate::profile_bridge::GENERATED_PROFILE_NAME;
 use crate::storage::{
@@ -67,7 +67,7 @@ impl RuntimeInstaller {
                 Ok(version) => version,
                 Err(_) => continue,
             };
-            if retained.contains(&version) || !safe_version_component(&version) {
+            if retained.contains(&version) || !valid_runtime_version_component(&version) {
                 continue;
             }
             let path = entry.path();

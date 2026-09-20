@@ -3,7 +3,7 @@ mod runtime;
 
 use mactype_service_contract::{
     GenerationId, GenerationPointer, MachinePaths, ProfileCatalog, SourceMetadata,
-    MAX_PROFILE_BYTES,
+    MAX_PROFILE_BYTES, MAX_PROFILE_POINTER_BYTES,
 };
 
 use self::cleanup::remove_interrupted_generated_profile_writes;
@@ -12,7 +12,7 @@ use crate::storage::{
 };
 
 pub(crate) const GENERATED_PROFILE_NAME: &str = "MacType.ini";
-const MAX_POINTER_BYTES: u64 = 64 * 1024;
+const MAX_POINTER_BYTES: u64 = MAX_PROFILE_POINTER_BYTES;
 
 pub(crate) struct ProfileRuntimeBridge {
     paths: MachinePaths,

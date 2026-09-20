@@ -1,20 +1,15 @@
-import type { ExecutionViewModel, ProfileIndicator, ServiceStatusLine, ServiceSummary, SystemInjectionPrimaryAction, LegacyTrayResolution } from "../../app/executionViewModel";
+import type { ExecutionViewModel, ProfileIndicator, ServiceStatusLine, ServiceSummary, SystemInjectionPrimaryAction, LegacyTrayResolution, ServicePackageNotice } from "../../app/executionViewModel";
 import type { SystemServiceStatus, LegacyMacTrayStatus } from "../../app/model";
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type RefObject, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { ExecutionStatus, ManualLaunchCandidate, SystemServiceAction } from "../../app/model";
 import { projectExecutionView } from "../../app/executionViewModel";
 import { operationErrorMessage } from "../../app/operationError";
-import { disableLegacyTrayAutostart, launchRegisteredTargets, launchTargetWithMactype, listManualLaunchCandidates, loadExecutionStatus, manageSystemService, pickExecutable, registerSessionTarget, removeSessionTarget, reportFrontendFailure, requestLegacyTrayExit, revealSystemService, setSessionAutostart, verifyInjectionWorkflowForCi } from "../../app/tauri";
-import { useI18n, type MessageKey } from "../../i18n/i18n";
+import { runtime } from "../../app/runtimeAdapter";
+import { useI18n } from "../../i18n/i18n";
 
 export interface ExecutionModelOptions {
   ciSmoke?: boolean;
   onReady?: () => void;
-}
-
-export interface ServicePackageNoticeKeys {
-  titleKey: MessageKey;
-  descriptionKey: MessageKey;
 }
 
 /* The service page state machine, shared by every skin. A skin composes the
@@ -31,7 +26,7 @@ export interface ExecutionService {
   runSummaryAction: (command: SystemServiceAction) => void;
   service: SystemServiceStatus | undefined;
   serviceBusy: string | null;
-  servicePackageNotice: ServicePackageNoticeKeys | null;
+  servicePackageNotice: ServicePackageNotice | null;
   serviceStateText: string;
   serviceStatusLine: ServiceStatusLine | null;
   serviceSummary: ServiceSummary;
@@ -117,20 +112,20 @@ export function useExecutionModel({ ciSmoke = false, onReady }: ExecutionModelOp
 
   const refresh = useCallback(async () => {
     try {
-      const nextStatus = await loadExecutionStatus();
+      const nextStatus = await runtime().loadExecutionStatus();
       setStatus(nextStatus);
       setError(null);
       if (ciSmoke) {
         if (!nextStatus.injectionReady || !nextStatus.activeProfile) {
           throw new Error("CI profile application did not produce an active injection runtime");
         }
-        await verifyInjectionWorkflowForCi();
+        await runtime().verifyInjectionWorkflowForCi();
         onReadyRef.current?.();
       }
     } catch (caught: unknown) {
       const message = caught instanceof Error ? caught.message : String(caught);
       setError(message);
-      if (ciSmoke) void reportFrontendFailure("execution", message);
+      if (ciSmoke) void runtime().reportFrontendFailure("execution", message);
     }
   }, [ciSmoke]);
 
@@ -140,7 +135,7 @@ export function useExecutionModel({ ciSmoke = false, onReady }: ExecutionModelOp
 
   const toggleAutostart = async (enabled: boolean) => {
     try {
-      const actual = await setSessionAutostart(enabled);
+      const actual = await runtime().setSessionAutostart(enabled);
       setStatus((current) => current ? { ...current, autoStart: actual } : current);
       setMessage(actual ? t("execution.autostartOn") : t("execution.autostartOff"));
       setError(null);
@@ -153,7 +148,7 @@ export function useExecutionModel({ ciSmoke = false, onReady }: ExecutionModelOp
 
   const launch = async () => {
     try {
-      const pid = await launchTargetWithMactype(target, argumentsFromEditor());
+      const pid = await runtime().launchTargetWithMactype(target, argumentsFromEditor());
       setMessage(t("execution.launched", { pid }));
       setError(null);
     } catch (caught: unknown) {
@@ -163,7 +158,7 @@ export function useExecutionModel({ ciSmoke = false, onReady }: ExecutionModelOp
 
   const loadCandidates = useCallback(async () => {
     try {
-      setCandidates(await listManualLaunchCandidates());
+      setCandidates(await runtime().listManualLaunchCandidates());
       setError(null);
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -172,7 +167,7 @@ export function useExecutionModel({ ciSmoke = false, onReady }: ExecutionModelOp
 
   const chooseTarget = async () => {
     try {
-      const selected = await pickExecutable(t("execution.executableFilter"));
+      const selected = await runtime().pickExecutable(t("execution.executableFilter"));
       if (selected) setTarget(selected);
       setError(null);
     } catch (caught: unknown) {
@@ -182,7 +177,7 @@ export function useExecutionModel({ ciSmoke = false, onReady }: ExecutionModelOp
 
   const register = async () => {
     try {
-      const sessionTargets = await registerSessionTarget(target, argumentsFromEditor());
+      const sessionTargets = await runtime().registerSessionTarget(target, argumentsFromEditor());
       setStatus((current) => current ? { ...current, sessionTargets } : current);
       setMessage(t("execution.registered"));
       setError(null);
@@ -193,7 +188,7 @@ export function useExecutionModel({ ciSmoke = false, onReady }: ExecutionModelOp
 
   const remove = async (registeredTarget: string) => {
     try {
-      const sessionTargets = await removeSessionTarget(registeredTarget);
+      const sessionTargets = await runtime().removeSessionTarget(registeredTarget);
       setStatus((current) => current ? { ...current, sessionTargets } : current);
       setMessage(t("execution.removed"));
       setError(null);
@@ -204,7 +199,7 @@ export function useExecutionModel({ ciSmoke = false, onReady }: ExecutionModelOp
 
   const launchAll = async () => {
     try {
-      const processes = await launchRegisteredTargets();
+      const processes = await runtime().launchRegisteredTargets();
       setMessage(t("execution.launchedRegistered", { count: processes.length }));
       setError(null);
     } catch (caught: unknown) {
@@ -216,7 +211,7 @@ export function useExecutionModel({ ciSmoke = false, onReady }: ExecutionModelOp
     setServiceBusy(action);
     const hadProfile = Boolean(status?.activeProfile);
     try {
-      const nextStatus = await manageSystemService(action);
+      const nextStatus = await runtime().manageSystemService(action);
       setStatus(nextStatus);
       const defaultApplied = !hadProfile && Boolean(nextStatus.activeProfile);
       const appliedName = nextStatus.activeProfile?.split(/[\\/]/).pop() ?? "";
@@ -250,7 +245,7 @@ export function useExecutionModel({ ciSmoke = false, onReady }: ExecutionModelOp
 
   const revealServiceLocation = async () => {
     try {
-      await revealSystemService();
+      await runtime().revealSystemService();
       setMessage(t("execution.serviceLocationOpened"));
       setError(null);
     } catch (caught: unknown) {
@@ -264,7 +259,7 @@ export function useExecutionModel({ ciSmoke = false, onReady }: ExecutionModelOp
     if (!process || process.state !== "trusted-current-session") return;
     setLegacyTrayBusy("exit");
     try {
-      const nextStatus = await requestLegacyTrayExit({
+      const nextStatus = await runtime().requestLegacyTrayExit({
         pid: process.pid,
         creationTime: process.creationTime,
         path: process.path,
@@ -283,7 +278,7 @@ export function useExecutionModel({ ciSmoke = false, onReady }: ExecutionModelOp
   const disableLegacyTrayStartup = async () => {
     setLegacyTrayBusy("disable-autostart");
     try {
-      const nextStatus = await disableLegacyTrayAutostart();
+      const nextStatus = await runtime().disableLegacyTrayAutostart();
       setStatus(nextStatus);
       setMessage(t("execution.legacyTrayAutostartDisabled"));
       setError(null);
@@ -349,14 +344,8 @@ export function useExecutionModel({ ciSmoke = false, onReady }: ExecutionModelOp
   const serviceStateText = serviceStatusLine
     ? [serviceStatusLine.installationKey, serviceStatusLine.runtimeKey, ...(serviceStatusLine.healthKey ? [serviceStatusLine.healthKey] : [])].map((key) => t(key)).join(" · ")
     : t("execution.checking");
-  const servicePackageNotice: ServicePackageNoticeKeys | null = status?.serviceManagementPackage === "not-installed"
-    ? { titleKey: "execution.servicePackageNotInstalledTitle", descriptionKey: "execution.servicePackageNotInstalledDescription" }
-    : status?.serviceManagementPackage === "incomplete"
-      ? { titleKey: "execution.servicePackageIncompleteTitle", descriptionKey: "execution.servicePackageIncompleteDescription" }
-      : status?.serviceManagementPackage === "untrusted"
-        ? { titleKey: "execution.servicePackageUntrustedTitle", descriptionKey: "execution.servicePackageUntrustedDescription" }
-        : null;
-  const activeProfileName = status?.activeProfile?.split(/[\\/]/).pop() ?? t("execution.profileNotApplied");
+  const servicePackageNotice = executionView.servicePackageNotice;
+  const activeProfileName = executionView.activeProfileDisplay.name ?? t(executionView.activeProfileDisplay.fallbackKey);
   const targetName = target ? target.split(/[\\/]/).pop() ?? target : "";
 
   const runSummaryAction = (command: SystemServiceAction) => {

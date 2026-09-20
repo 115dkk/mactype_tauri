@@ -2,123 +2,159 @@
 param()
 
 $ErrorActionPreference = 'Stop'
-$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$artifactsRoot = [IO.Path]::GetFullPath((Join-Path $root 'artifacts'))
-$fixtureRoot = [IO.Path]::GetFullPath(
-    (Join-Path $artifactsRoot 'integration-bundle-contract-fixture')
-)
-$separators = [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
-$artifactPrefix = $artifactsRoot.TrimEnd($separators) + [IO.Path]::DirectorySeparatorChar
-if (-not $fixtureRoot.StartsWith($artifactPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-    throw "Fixture root escaped the artifacts directory: $fixtureRoot"
-}
+Import-Module (Join-Path $PSScriptRoot 'lib\WorkflowModel.psm1') -Force
 
-try {
-    if (Test-Path -LiteralPath $fixtureRoot) {
-        Remove-Item -LiteralPath $fixtureRoot -Recurse -Force
-    }
-    $input = Join-Path $fixtureRoot 'input'
-    $core = Join-Path $input 'core'
-    $runtime = Join-Path $input 'service-runtime'
-    $runtimePayload = Join-Path $runtime 'payload'
-    $runtimeFiles = Join-Path $runtimePayload 'files'
-    New-Item -ItemType Directory -Path $core, $runtimeFiles -Force | Out-Null
-
-    $app = Join-Path $input 'MacType Control Center.exe'
-    $preview = Join-Path $input 'mactype-preview32.exe'
-    Set-Content -LiteralPath $app -Value 'fixture app'
-    Set-Content -LiteralPath $preview -Value 'fixture preview'
-    foreach ($name in @(
-        'MacType.dll',
-        'MacType64.dll',
-        'MacType.Core.dll',
-        'MacType64.Core.dll',
-        'MacLoader.exe',
-        'MacLoader64.exe'
-    )) {
-        Set-Content -LiteralPath (Join-Path $core $name) -Value "fixture $name"
-    }
-    Set-Content -LiteralPath (Join-Path $runtime 'mactype-service-setup.exe') -Value 'fixture setup'
-    $payloadNames = @(
-        'mactype-service.exe',
-        'mactype-injector32.exe',
-        'mactype-injector64.exe',
-        'MacType.dll',
-        'MacType64.dll'
+function Test-IntegrationDeveloperBundlePolicy {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] $Workflow,
+        [Parameter(Mandatory)] [string] $Repo
     )
-    foreach ($name in $payloadNames) {
-        Set-Content -LiteralPath (Join-Path $runtimeFiles $name) -Value "fixture $name"
-    }
-    $manifestFiles = [ordered]@{}
-    foreach ($name in $payloadNames) {
-        $manifestFiles[$name] = 'sha256:fixture'
-    }
-    [ordered]@{ schema = 1; version = 'fixture'; files = $manifestFiles } |
-        ConvertTo-Json -Depth 4 -Compress |
-        Set-Content -LiteralPath (Join-Path $runtimePayload 'manifest.json') -Encoding utf8NoBOM
 
-    $outputRelative = Join-Path (
-        Join-Path 'artifacts' 'integration-bundle-contract-fixture'
-    ) 'output'
-    & (Join-Path $root '.github\scripts\Build-IntegrationDeveloperBundle.ps1') `
-        -ApplicationExe $app `
-        -PreviewHelper $preview `
-        -CoreRoot $core `
-        -ServiceRuntimeRoot $runtime `
-        -OutputRoot $outputRelative
+    $failures = [System.Collections.Generic.List[string]]::new()
+    $artifactsRoot = [IO.Path]::GetFullPath((Join-Path $Repo 'artifacts'))
+    $fixtureRoot = [IO.Path]::GetFullPath(
+        (Join-Path $artifactsRoot 'integration-bundle-contract-fixture')
+    )
+    $separators = [char[]]@(
+        [IO.Path]::DirectorySeparatorChar,
+        [IO.Path]::AltDirectorySeparatorChar
+    )
+    $artifactPrefix = $artifactsRoot.TrimEnd($separators) +
+        [IO.Path]::DirectorySeparatorChar
+    if (-not $fixtureRoot.StartsWith($artifactPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        $failures.Add("Fixture root escaped the artifacts directory: $fixtureRoot")
+        return $failures.ToArray()
+    }
 
-    $output = Join-Path $root $outputRelative
-    foreach ($relative in @(
-        'README.md',
-        'installation-tree\MacType Control Center.exe',
-        'installation-tree\mactype-preview32.exe',
-        'installation-tree\MacType.dll',
-        'installation-tree\MacType64.dll',
-        'installation-tree\MacType.Core.dll',
-        'installation-tree\MacType64.Core.dll',
-        'installation-tree\MacLoader.exe',
-        'installation-tree\MacLoader64.exe',
-        'installation-tree\MacType.ini',
-        'installation-tree\ini\Default.ini',
-        'installation-tree\languages\en.json',
-        'installation-tree\LICENSE.txt',
-        'installation-tree\THIRD_PARTY_NOTICES.md',
-        'installation-tree\service-runtime\mactype-service-setup.exe',
-        'installation-tree\service-runtime\payload\manifest.json',
-        'installation-tree\service-runtime\payload\files\mactype-service.exe',
-        'installation-tree\service-runtime\payload\files\mactype-injector32.exe',
-        'installation-tree\service-runtime\payload\files\mactype-injector64.exe',
-        'installation-tree\service-runtime\payload\files\MacType.dll',
-        'installation-tree\service-runtime\payload\files\MacType64.dll'
-    )) {
-        $normalizedRelative = $relative.Replace(
-            '\',
-            [string][IO.Path]::DirectorySeparatorChar
+    try {
+        if (Test-Path -LiteralPath $fixtureRoot) {
+            Remove-Item -LiteralPath $fixtureRoot -Recurse -Force
+        }
+        $input = Join-Path $fixtureRoot 'input'
+        $core = Join-Path $input 'core'
+        $runtime = Join-Path $input 'service-runtime'
+        $runtimePayload = Join-Path $runtime 'payload'
+        $runtimeFiles = Join-Path $runtimePayload 'files'
+        New-Item -ItemType Directory -Path $core, $runtimeFiles -Force | Out-Null
+
+        $app = Join-Path $input 'MacType Control Center.exe'
+        $preview = Join-Path $input 'mactype-preview32.exe'
+        Set-Content -LiteralPath $app -Value 'fixture app'
+        Set-Content -LiteralPath $preview -Value 'fixture preview'
+        foreach ($name in @(
+            'MacType.dll',
+            'MacType64.dll',
+            'MacType.Core.dll',
+            'MacType64.Core.dll',
+            'MacLoader.exe',
+            'MacLoader64.exe'
+        )) {
+            Set-Content -LiteralPath (Join-Path $core $name) -Value "fixture $name"
+        }
+        Set-Content -LiteralPath (Join-Path $runtime 'mactype-service-setup.exe') `
+            -Value 'fixture setup'
+        $payloadNames = @(
+            'mactype-service.exe',
+            'mactype-injector32.exe',
+            'mactype-injector64.exe',
+            'MacType.dll',
+            'MacType64.dll'
         )
-        if (-not (Test-Path -LiteralPath (Join-Path $output $normalizedRelative) -PathType Leaf)) {
-            throw "Integration/Developer bundle fixture is missing: $relative"
+        foreach ($name in $payloadNames) {
+            Set-Content -LiteralPath (Join-Path $runtimeFiles $name) -Value "fixture $name"
         }
-    }
-    $readme = Get-Content -LiteralPath (Join-Path $output 'README.md') -Raw
-    foreach ($token in @(
-        'can install and maintain the service directly',
-        'explicit UAC consent',
-        'does not accept arbitrary executable, DLL, service, or payload paths'
-    )) {
-        if (-not $readme.Contains($token)) {
-            throw "Integration/Developer README is missing its execution boundary: $token"
+        $manifestFiles = [ordered]@{}
+        foreach ($name in $payloadNames) {
+            $manifestFiles[$name] = 'sha256:fixture'
         }
-    }
-    $releaseWorkflow = Get-Content -LiteralPath (Join-Path $root '.github\workflows\build.yml') -Raw
-    if ($releaseWorkflow.Contains('is not a portable installation') -or
-        -not $releaseWorkflow.Contains('is directly usable when its installation tree remains intact')) {
-        throw 'Release copy misrepresents the directly usable Integration/Developer bundle.'
+        [ordered]@{ schema = 1; version = 'fixture'; files = $manifestFiles } |
+            ConvertTo-Json -Depth 4 -Compress |
+            Set-Content -LiteralPath (Join-Path $runtimePayload 'manifest.json') `
+                -Encoding utf8NoBOM
+
+        $outputRelative = Join-Path (
+            Join-Path 'artifacts' 'integration-bundle-contract-fixture'
+        ) 'output'
+        & (Join-Path $Repo '.github\scripts\Build-IntegrationDeveloperBundle.ps1') `
+            -ApplicationExe $app `
+            -PreviewHelper $preview `
+            -CoreRoot $core `
+            -ServiceRuntimeRoot $runtime `
+            -OutputRoot $outputRelative
+
+        $output = Join-Path $Repo $outputRelative
+        foreach ($relative in @(
+            'README.md',
+            'installation-tree\MacType Control Center.exe',
+            'installation-tree\mactype-preview32.exe',
+            'installation-tree\MacType.dll',
+            'installation-tree\MacType64.dll',
+            'installation-tree\MacType.Core.dll',
+            'installation-tree\MacType64.Core.dll',
+            'installation-tree\MacLoader.exe',
+            'installation-tree\MacLoader64.exe',
+            'installation-tree\MacType.ini',
+            'installation-tree\ini\Default.ini',
+            'installation-tree\languages\en.json',
+            'installation-tree\LICENSE.txt',
+            'installation-tree\THIRD_PARTY_NOTICES.md',
+            'installation-tree\service-runtime\mactype-service-setup.exe',
+            'installation-tree\service-runtime\payload\manifest.json',
+            'installation-tree\service-runtime\payload\files\mactype-service.exe',
+            'installation-tree\service-runtime\payload\files\mactype-injector32.exe',
+            'installation-tree\service-runtime\payload\files\mactype-injector64.exe',
+            'installation-tree\service-runtime\payload\files\MacType.dll',
+            'installation-tree\service-runtime\payload\files\MacType64.dll'
+        )) {
+            $normalizedRelative = $relative.Replace(
+                '\',
+                [string] [IO.Path]::DirectorySeparatorChar
+            )
+            if (-not (Test-Path -LiteralPath (Join-Path $output $normalizedRelative) `
+                -PathType Leaf)) {
+                $failures.Add("Integration/Developer bundle fixture is missing: $relative")
+            }
+        }
+        $readme = Get-Content -LiteralPath (Join-Path $output 'README.md') -Raw
+        foreach ($token in @(
+            'can install and maintain the service directly',
+            'explicit UAC consent',
+            'does not accept arbitrary executable, DLL, service, or payload paths'
+        )) {
+            if (-not $readme.Contains($token)) {
+                $failures.Add("Integration/Developer README is missing its execution boundary: $token")
+            }
+        }
+
+        $releaseJob = Get-WorkflowJob -Workflow $Workflow -Id 'release-main-snapshot'
+        if (-not $releaseJob) {
+            $failures.Add("Integration/Developer release copy job 'release-main-snapshot' is missing.")
+        } else {
+            $publicationStep = @(Get-WorkflowStep -Job $releaseJob `
+                -NameLike 'Publish automatic pre-release') | Select-Object -First 1
+            $body = if ($publicationStep) { [string] $publicationStep.With.body } else { '' }
+            if (-not $publicationStep -or
+                $body.Contains('is not a portable installation') -or
+                -not $body.Contains('is directly usable when its installation tree remains intact')) {
+                $failures.Add('Release copy misrepresents the directly usable Integration/Developer bundle.')
+            }
+        }
+    } finally {
+        if (Test-Path -LiteralPath $fixtureRoot) {
+            Remove-Item -LiteralPath $fixtureRoot -Recurse -Force
+        }
     }
 
-    Write-Host 'Integration/Developer bundle layout contract passed.'
+    return $failures.ToArray()
 }
-finally {
-    if (Test-Path -LiteralPath $fixtureRoot) {
-        Remove-Item -LiteralPath $fixtureRoot -Recurse -Force
-    }
+
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$workflow = Read-GitHubWorkflow -Path (Join-Path $root '.github\workflows\build.yml')
+$failures = @(Test-IntegrationDeveloperBundlePolicy -Workflow $workflow -Repo $root)
+if ($failures.Count -gt 0) {
+    $failures | ForEach-Object { Write-Host "ERROR: $_" -ForegroundColor Red }
+    throw "Integration/Developer bundle layout policy failed with $($failures.Count) violation(s)."
 }
+
+Write-Host 'Integration/Developer bundle layout contract passed.'

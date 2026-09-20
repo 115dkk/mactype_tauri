@@ -1,3 +1,4 @@
+use mactype_service_contract::BrokerCommand;
 use serde::Deserialize;
 use std::ffi::{OsStr, OsString};
 
@@ -20,54 +21,61 @@ pub(crate) enum SystemServiceAction {
 }
 
 impl SystemServiceAction {
-    pub(super) fn setup_verb(self) -> Option<&'static str> {
+    pub(super) fn broker_command(self) -> Option<BrokerCommand> {
         match self {
-            Self::Install => Some("install"),
-            Self::Upgrade => Some("upgrade"),
-            Self::Repair => Some("repair"),
-            Self::Remove => Some("remove"),
-            Self::Start => Some("start"),
-            Self::Stop => Some("stop"),
-            Self::PublishProfile => Some("publish-profile"),
-            Self::Rollback => Some("rollback"),
+            Self::Install => Some(BrokerCommand::Install),
+            Self::Upgrade => Some(BrokerCommand::Upgrade),
+            Self::Repair => Some(BrokerCommand::Repair),
+            Self::Remove => Some(BrokerCommand::Remove),
+            Self::Start => Some(BrokerCommand::Start),
+            Self::Stop => Some(BrokerCommand::Stop),
+            Self::PublishProfile => Some(BrokerCommand::PublishProfile),
+            Self::MigrateFromLegacy => Some(BrokerCommand::MigrateFromLegacy),
+            Self::Rollback => Some(BrokerCommand::Rollback),
             Self::DesignateProfile
-            | Self::MigrateFromLegacy
             | Self::RemoveLegacy
             | Self::DisableLegacyTrayAutostart
             | Self::RestoreLegacyTrayAutostart => None,
         }
     }
 
-    pub(super) fn broker_verb(self) -> &'static str {
-        match self {
-            Self::Install => "install",
-            Self::Upgrade => "upgrade",
-            Self::Repair => "repair",
-            Self::Remove => "remove",
-            Self::Start => "start",
-            Self::Stop => "stop",
-            Self::PublishProfile => "publish-profile",
-            Self::DesignateProfile => "designate-profile",
-            Self::MigrateFromLegacy => "migrate-from-legacy",
-            Self::Rollback => "rollback",
-            Self::RemoveLegacy => "remove-legacy",
-            Self::DisableLegacyTrayAutostart => "disable-legacy-tray-autostart",
-            Self::RestoreLegacyTrayAutostart => "restore-legacy-tray-autostart",
+    pub(super) fn setup_verb(self) -> Option<&'static str> {
+        match self.broker_command() {
+            Some(BrokerCommand::MigrateFromLegacy | BrokerCommand::RestoreRuntime) | None => None,
+            Some(command) => Some(command.verb()),
         }
     }
 
+    pub(super) fn broker_verb(self) -> &'static str {
+        self.broker_command().map_or_else(
+            || match self {
+                Self::DesignateProfile => "designate-profile",
+                Self::RemoveLegacy => "remove-legacy",
+                Self::DisableLegacyTrayAutostart => "disable-legacy-tray-autostart",
+                Self::RestoreLegacyTrayAutostart => "restore-legacy-tray-autostart",
+                _ => unreachable!("broker actions without contract commands are locally named"),
+            },
+            BrokerCommand::verb,
+        )
+    }
+
     pub(super) fn from_broker_verb(value: &str) -> Option<Self> {
+        if let Some(command) = BrokerCommand::parse_verb(value) {
+            return Some(match command {
+                BrokerCommand::Install => Self::Install,
+                BrokerCommand::Upgrade => Self::Upgrade,
+                BrokerCommand::Repair => Self::Repair,
+                BrokerCommand::Remove => Self::Remove,
+                BrokerCommand::Start => Self::Start,
+                BrokerCommand::Stop => Self::Stop,
+                BrokerCommand::PublishProfile => Self::PublishProfile,
+                BrokerCommand::MigrateFromLegacy => Self::MigrateFromLegacy,
+                BrokerCommand::Rollback => Self::Rollback,
+                BrokerCommand::RestoreRuntime => return None,
+            });
+        }
         Some(match value {
-            "install" => Self::Install,
-            "upgrade" => Self::Upgrade,
-            "repair" => Self::Repair,
-            "remove" => Self::Remove,
-            "start" => Self::Start,
-            "stop" => Self::Stop,
-            "publish-profile" => Self::PublishProfile,
             "designate-profile" => Self::DesignateProfile,
-            "migrate-from-legacy" => Self::MigrateFromLegacy,
-            "rollback" => Self::Rollback,
             "remove-legacy" => Self::RemoveLegacy,
             "disable-legacy-tray-autostart" => Self::DisableLegacyTrayAutostart,
             "restore-legacy-tray-autostart" => Self::RestoreLegacyTrayAutostart,
@@ -244,5 +252,28 @@ mod tests {
         );
         assert!(action.needs_profile_input());
         assert_eq!(action.setup_verb(), None);
+        assert_eq!(action.broker_command(), None);
+    }
+
+    #[test]
+    fn broker_actions_render_the_contract_verb() {
+        for action in [
+            SystemServiceAction::Install,
+            SystemServiceAction::Upgrade,
+            SystemServiceAction::Repair,
+            SystemServiceAction::Remove,
+            SystemServiceAction::Start,
+            SystemServiceAction::Stop,
+            SystemServiceAction::PublishProfile,
+            SystemServiceAction::MigrateFromLegacy,
+            SystemServiceAction::Rollback,
+        ] {
+            let command = action.broker_command().unwrap();
+            assert_eq!(action.broker_verb(), command.verb());
+            assert_eq!(
+                SystemServiceAction::from_broker_verb(command.verb()),
+                Some(action)
+            );
+        }
     }
 }

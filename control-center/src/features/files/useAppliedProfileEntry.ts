@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ProfileEntry } from "../../app/model";
-import { listProfiles } from "../../app/tauri";
-import { matchesAppliedProfile } from "./useFileSettingsModel";
+import { runtime } from "../../app/runtimeAdapter";
+import { matchesAppliedProfile } from "../profiles/profileEditorUtils";
 
 /* Resolves the applied profile (as the service names it) to a profile entry
    with an on-disk path the helper can render. */
@@ -9,7 +9,7 @@ export function useAppliedProfileEntry(activeProfile: string | null): ProfileEnt
   const [profiles, setProfiles] = useState<ReadonlyArray<ProfileEntry>>([]);
   useEffect(() => {
     let active = true;
-    void listProfiles().then((entries) => {
+    void runtime().listProfiles().then((entries) => {
       if (active) setProfiles(entries);
     }).catch(() => undefined);
     return () => { active = false; };

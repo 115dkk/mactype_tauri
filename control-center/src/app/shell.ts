@@ -4,7 +4,7 @@ import type { SkinPreference } from "./skinPreference";
 import type { ThemePreference } from "./themePreference";
 import type { MessageKey } from "../i18n/i18n";
 
-export type ProfileMode = "quick" | "advanced";
+export type ProfileMode = "guided" | "all";
 
 export interface ShellProps {
   navigation: {
@@ -51,8 +51,8 @@ export const navEntries: ReadonlyArray<NavEntry> = [
   { id: "overview", view: "overview", labelKey: "nav.overview", icon: Home, group: null },
   { id: "files", view: "files", labelKey: "nav.profiles", icon: FileCog, group: "wizardGroup" },
   { id: "execution", view: "execution", labelKey: "nav.execution", icon: ServerCog, group: "wizardGroup" },
-  { id: "guided", view: "profiles", profileMode: "quick", labelKey: "nav.guidedSetup", icon: Sparkles, group: "tunerGroup" },
-  { id: "all", view: "profiles", profileMode: "advanced", labelKey: "nav.allSettings", icon: SlidersHorizontal, group: "tunerGroup" },
+  { id: "guided", view: "profiles", profileMode: "guided", labelKey: "nav.guidedSetup", icon: Sparkles, group: "tunerGroup" },
+  { id: "all", view: "profiles", profileMode: "all", labelKey: "nav.allSettings", icon: SlidersHorizontal, group: "tunerGroup" },
   { id: "diagnostics", view: "diagnostics", labelKey: "nav.diagnostics", icon: Activity, group: "toolsGroup" },
 ];
 

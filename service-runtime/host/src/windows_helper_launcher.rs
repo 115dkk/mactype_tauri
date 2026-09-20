@@ -13,7 +13,10 @@ use mactype_service_platform::{
 };
 use windows_sys::Win32::Foundation::{ERROR_CANCELLED, STILL_ACTIVE};
 
-use crate::{HelperInvocation, HelperLaunchError, HelperLauncher, HelperOutput};
+use crate::{
+    helper_broker::MAX_HELPER_OUTPUT_BYTES, HelperInvocation, HelperLaunchError, HelperLauncher,
+    HelperOutput,
+};
 
 const TERMINATION_CONFIRMATION: Duration = Duration::from_millis(250);
 const WAIT_SLICE: Duration = Duration::from_millis(10);
@@ -183,7 +186,7 @@ fn wait_for_helper(
         .exit_code()
         .map_err(HelperLaunchError::after_resume)?
         .unwrap_or(STILL_ACTIVE as u32);
-    let stdout = read_bounded(&output_read, crate::helper_broker::MAX_HELPER_OUTPUT_BYTES)
+    let stdout = read_bounded(&output_read, MAX_HELPER_OUTPUT_BYTES)
         .map_err(HelperLaunchError::after_resume)?;
     Ok(HelperOutput {
         exit_code: exit_code as i32,

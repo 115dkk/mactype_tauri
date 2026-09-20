@@ -1,3 +1,26 @@
+import type { LegacyProfileCandidate, ProfileEntry } from "../../app/model";
+
+export function fileName(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
+}
+
+export function matchesAppliedProfile(entry: ProfileEntry, appliedProfile: string | null): boolean {
+  if (!appliedProfile) return false;
+  const normalized = appliedProfile.toLocaleLowerCase();
+  return entry.path.toLocaleLowerCase() === normalized || entry.displayPath.toLocaleLowerCase() === normalized;
+}
+
+export function sameProfileIdentity(candidate: LegacyProfileCandidate, activeProfile: string | null): boolean {
+  if (!activeProfile) return false;
+  const stem = (path: string) => fileName(path).replace(/\.ini$/i, "").toLocaleLowerCase();
+  return candidate.name.toLocaleLowerCase() === stem(activeProfile) || stem(candidate.path) === stem(activeProfile);
+}
+
+export function managedProfileFor(candidate: LegacyProfileCandidate, profiles: ReadonlyArray<ProfileEntry>): ProfileEntry | null {
+  const candidatePath = candidate.path.toLocaleLowerCase();
+  return profiles.find((profile) => profile.path.toLocaleLowerCase() === candidatePath) ?? null;
+}
+
 export const splitSubstitution = (mapping: string) => {
   const separator = mapping.indexOf("=");
   return separator < 0

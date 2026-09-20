@@ -24,6 +24,10 @@ pub enum SetupError {
     ReparsePoint(PathBuf),
     NoPreviousGeneration,
     CleanupUnknown(String),
+    RollbackFailed {
+        operation: String,
+        restoration: String,
+    },
     Manifest(String),
     Runtime(String),
 }
@@ -60,6 +64,13 @@ impl fmt::Display for SetupError {
             Self::CleanupUnknown(message) => {
                 write!(formatter, "machine cleanup state is unknown: {message}")
             }
+            Self::RollbackFailed {
+                operation,
+                restoration,
+            } => write!(
+                formatter,
+                "machine cleanup state is unknown: {operation}; {restoration}"
+            ),
             Self::Manifest(message) => write!(formatter, "runtime manifest is invalid: {message}"),
             Self::Runtime(message) => {
                 write!(formatter, "machine runtime operation failed: {message}")

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { EventArea, EventLogSummary, EventRecord, EventSeverity } from "../../app/model";
-import { listEvents, loadEventLogSummary, loadRecentActivity, subscribeEventLog } from "../../app/tauri";
+import { runtime } from "../../app/runtimeAdapter";
 
 import { loadEventViewOptions, saveEventViewOptions } from "./eventViewPreference";
 
@@ -22,12 +22,12 @@ export function useRecentActivity() {
   const [events, setEvents] = useState<ReadonlyArray<EventRecord>>([]);
   const [summary, setSummary] = useState<EventLogSummary | null>(null);
   const refresh = useCallback(() => {
-    void loadRecentActivity().then(setEvents).catch(() => undefined);
-    void loadEventLogSummary().then(setSummary).catch(() => undefined);
+    void runtime().loadRecentActivity().then(setEvents).catch(() => undefined);
+    void runtime().loadEventLogSummary().then(setSummary).catch(() => undefined);
   }, []);
   useEffect(() => {
     refresh();
-    return subscribeEventLog(refresh);
+    return runtime().subscribeEventLog(refresh);
   }, [refresh]);
   return { events, summary, refresh };
 }
@@ -59,7 +59,7 @@ export function useEventLog() {
   };
 
   const refresh = useCallback(() => {
-    void Promise.all([listEvents(undefined, DEFAULT_LIMIT), loadEventLogSummary()])
+    void Promise.all([runtime().listEvents(undefined, DEFAULT_LIMIT), runtime().loadEventLogSummary()])
       .then(([nextEvents, nextSummary]) => {
         setEvents(nextEvents);
         setSummary(nextSummary);
@@ -71,7 +71,7 @@ export function useEventLog() {
 
   useEffect(() => {
     refresh();
-    return subscribeEventLog(refresh);
+    return runtime().subscribeEventLog(refresh);
   }, [refresh]);
 
   const toggleSeverity = (severity: EventSeverity) => setSeverities((current) => {

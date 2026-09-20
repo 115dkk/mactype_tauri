@@ -7,7 +7,7 @@ import { IndividualSettings } from "./IndividualSettings";
 import { ListsEditor } from "./ListsEditor";
 import { ProfilePreviewPanel } from "./ProfilePreviewPanel";
 import { BasicSettings, LcdSettings, SearchSettings, ShapeSettings } from "./SchemaSettings";
-import { WizardSettings } from "./WizardSettings";
+import { GuidedSettings } from "./GuidedSettings";
 import type { ProfileEditor } from "./useProfileEditor";
 
 interface EditorPartProps {
@@ -27,14 +27,14 @@ export function ProfileEditorBody({ editor }: EditorPartProps) {
   const { mode, query, activeGroup } = editor.editing;
   return (
     <>
-      {mode === "quick" && <WizardSettings activeStep={editor.editing.activeWizardStep} advanced={editor.document.advanced} busy={editor.editing.guidedBusy} canRedoStep={editor.history.stepHistory.canRedo(editor.editing.activeWizardStep)} canSave={editor.document.profile?.canSave ?? false} canUndoStep={editor.history.stepHistory.canUndo(editor.editing.activeWizardStep)} dirtyCount={editor.document.dirtyCount} dirtyKeys={editor.document.dirtyKeys} fontFace={editor.preview.fontFace} fontFamilies={editor.preview.fontFamilies} fontOptionLabel={editor.preview.fontOptionLabel} onAdvancedCommit={(next) => void editor.document.commitAdvanced(next)} onApply={() => void editor.document.designateProfile()} onFontFaceChange={editor.preview.setFontFace} onPreview={editor.preview.showPreview} onRedoStep={editor.history.redoStepEdit} onSave={() => void editor.document.saveCurrentProfile()} onSettingChange={editor.editing.changeGuidedSetting} onSettingPreview={editor.document.previewSetting} onStepChange={editor.editing.setActiveWizardStep} onUndoStep={editor.history.undoStepEdit} profileName={editor.document.profile?.displayPath ?? null} profilePath={editor.document.profile?.path ?? null} savedValues={editor.document.savedValues} settings={settingsSchema} t={t} values={editor.document.values} />}
+      {mode === "guided" && <GuidedSettings activeStep={editor.editing.activeGuidedStep} advanced={editor.document.advanced} busy={editor.editing.guidedBusy} canRedoStep={editor.history.stepHistory.canRedo(editor.editing.activeGuidedStep)} canSave={editor.document.profile?.canSave ?? false} canUndoStep={editor.history.stepHistory.canUndo(editor.editing.activeGuidedStep)} dirtyCount={editor.document.dirtyCount} dirtyKeys={editor.document.dirtyKeys} fontFace={editor.preview.fontFace} fontFamilies={editor.preview.fontFamilies} fontOptionLabel={editor.preview.fontOptionLabel} onAdvancedCommit={(next) => void editor.document.commitAdvanced(next)} onApply={() => void editor.document.designateProfile()} onFontFaceChange={editor.preview.setFontFace} onPreview={editor.preview.showPreview} onRedoStep={editor.history.redoStepEdit} onSave={() => void editor.document.saveCurrentProfile()} onSettingChange={editor.editing.changeGuidedSetting} onSettingPreview={editor.document.previewSetting} onStepChange={editor.editing.setActiveGuidedStep} onUndoStep={editor.history.undoStepEdit} profileName={editor.document.profile?.displayPath ?? null} profilePath={editor.document.profile?.path ?? null} savedValues={editor.document.savedValues} settings={settingsSchema} t={t} values={editor.document.values} />}
 
-      {mode === "advanced" && query && <SearchSettings dirtyKeys={editor.document.dirtyKeys} onChange={editor.document.changeSetting} onPreviewChange={editor.document.previewSetting} savedValues={editor.document.savedValues} settings={editor.editing.filteredSettings} t={t} values={editor.document.values} />}
-      {mode === "advanced" && !query && activeGroup === "basic" && <BasicSettings dirtyKeys={editor.document.dirtyKeys} onChange={editor.document.changeSetting} onPreviewChange={editor.document.previewSetting} savedValues={editor.document.savedValues} settings={editor.editing.filteredSettings} t={t} values={editor.document.values} />}
-      {mode === "advanced" && !query && activeGroup === "shape" && <ShapeSettings dirtyKeys={editor.document.dirtyKeys} onChange={editor.document.changeSetting} onPreviewChange={editor.document.previewSetting} savedValues={editor.document.savedValues} settings={editor.editing.filteredSettings} t={t} values={editor.document.values} />}
-      {mode === "advanced" && !query && activeGroup === "lcd" && <LcdSettings dirtyKeys={editor.document.dirtyKeys} onChange={editor.document.changeSetting} onPreviewChange={editor.document.previewSetting} savedValues={editor.document.savedValues} settings={editor.editing.filteredSettings} t={t} values={editor.document.values} />}
+      {mode === "all" && query && <SearchSettings dirtyKeys={editor.document.dirtyKeys} onChange={editor.document.changeSetting} onPreviewChange={editor.document.previewSetting} savedValues={editor.document.savedValues} settings={editor.editing.filteredSettings} t={t} values={editor.document.values} />}
+      {mode === "all" && !query && activeGroup === "basic" && <BasicSettings dirtyKeys={editor.document.dirtyKeys} onChange={editor.document.changeSetting} onPreviewChange={editor.document.previewSetting} savedValues={editor.document.savedValues} settings={editor.editing.filteredSettings} t={t} values={editor.document.values} />}
+      {mode === "all" && !query && activeGroup === "shape" && <ShapeSettings dirtyKeys={editor.document.dirtyKeys} onChange={editor.document.changeSetting} onPreviewChange={editor.document.previewSetting} savedValues={editor.document.savedValues} settings={editor.editing.filteredSettings} t={t} values={editor.document.values} />}
+      {mode === "all" && !query && activeGroup === "lcd" && <LcdSettings dirtyKeys={editor.document.dirtyKeys} onChange={editor.document.changeSetting} onPreviewChange={editor.document.previewSetting} savedValues={editor.document.savedValues} settings={editor.editing.filteredSettings} t={t} values={editor.document.values} />}
 
-      {mode === "advanced" && !query && activeGroup === "advanced" && (
+      {mode === "all" && !query && activeGroup === "advanced" && (
         <AdvancedSettings
           advanced={editor.document.advanced}
           dirtyKeys={editor.document.dirtyKeys}
@@ -54,7 +54,7 @@ export function ProfileEditorBody({ editor }: EditorPartProps) {
         />
       )}
 
-      {mode === "advanced" && !query && activeGroup === "individual" && (
+      {mode === "all" && !query && activeGroup === "individual" && (
         <IndividualSettings
           fontFamilies={editor.preview.fontFamilies}
           individualLabels={editor.editing.individualLabels}
@@ -66,7 +66,7 @@ export function ProfileEditorBody({ editor }: EditorPartProps) {
         />
       )}
 
-      {mode === "advanced" && !query && activeGroup === "lists" && (
+      {mode === "all" && !query && activeGroup === "lists" && (
         <ListsEditor
           definitions={editor.editing.listDefinitions}
           entries={editor.document.lists}
@@ -128,7 +128,7 @@ interface ToolbarProps extends EditorPartProps {
 export function ProfileEditorToolbar({ editor, variant = "text", className }: ToolbarProps) {
   const { t } = useI18n();
   const { profile, busy, dirtyCount, recoveryRequired, command } = editor.document;
-  if (editor.editing.mode !== "advanced") return null;
+  if (editor.editing.mode !== "all") return null;
   const icons = variant === "icons";
   const undoLabel = t("profiles.undo");
   const redoLabel = t("profiles.redo");

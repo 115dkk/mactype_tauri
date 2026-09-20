@@ -2,6 +2,7 @@ use super::super::legacy_mactray::{
     LegacyScmSnapshot, LegacyServiceStatus, ServiceConfiguration, ServicePresence,
     ServiceRuntimeState,
 };
+use super::super::open_service::action_failure::{ActionBlocker, ActionFailure};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -118,24 +119,31 @@ pub(crate) struct RemovalVerification {
     pub(crate) backup_valid: bool,
 }
 
-pub(super) fn require_owned_legacy_service(status: &LegacyServiceStatus) -> Result<(), String> {
+pub(super) fn require_owned_legacy_service(
+    status: &LegacyServiceStatus,
+) -> Result<(), ActionFailure> {
     if status.registry_conflict {
-        return Err("AppInit registry mode conflicts with legacy service migration".to_owned());
+        return Err(ActionFailure::blocked(
+            ActionBlocker::AppInitRegistryModeConflict,
+        ));
     }
     if !matches!(
         status.presence,
         ServicePresence::Owned | ServicePresence::CompatibleUnquoted
     ) {
-        return Err("legacy migration requires an exactly owned service".to_owned());
+        return Err(ActionFailure::internal(
+            "legacy migration requires an exactly owned service",
+        ));
     }
     match status.state {
         ServiceRuntimeState::Stopped => Ok(()),
         ServiceRuntimeState::Running if status.trusted_binary_available => Ok(()),
-        ServiceRuntimeState::Running => Err(
-            "a running legacy service cannot be migrated without its trusted MacTray binary"
-                .to_owned(),
-        ),
-        _ => Err("legacy SCM service must be stably running or stopped".to_owned()),
+        ServiceRuntimeState::Running => Err(ActionFailure::internal(
+            "a running legacy service cannot be migrated without its trusted MacTray binary",
+        )),
+        _ => Err(ActionFailure::internal(
+            "legacy SCM service must be stably running or stopped",
+        )),
     }
 }
 

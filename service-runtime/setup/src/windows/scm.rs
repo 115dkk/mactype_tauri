@@ -7,24 +7,15 @@ use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use mactype_service_contract::effective_service_name;
+use mactype_service_contract::{effective_service_name, owned_service_identity};
 use mactype_service_platform::{
     ServiceAccess, ServiceControlManager, ServiceHandle, ServiceManagerAccess,
 };
 
-use configuration::{
-    observed_configuration, service_identity_matches_owned_contract as owns_config,
-};
-#[cfg(feature = "ci-test-adapter")]
-pub use configuration::{
-    service_configuration_drift, service_configuration_matches_owned_contract,
-    service_identity_matches_owned_contract, service_image_matches_protected_contract,
-    ObservedServiceConfiguration,
-};
+use configuration::observed_configuration;
 
 use crate::SetupError;
 
-const DISPLAY_NAME: &str = "MacType Control Center Service";
 const DESCRIPTION: &str = "Runs the open MacType machine integration runtime.";
 const STATE_TIMEOUT: Duration = Duration::from_secs(30);
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(20);
@@ -58,7 +49,7 @@ impl ServiceManager {
 
     fn ensure_owned(&self, service: &ServiceHandle) -> Result<(), SetupError> {
         let config = service.config()?;
-        if !owns_config(&self.protected_root, &observed_configuration(&config)) {
+        if !owned_service_identity(&observed_configuration(&config), &self.protected_root) {
             return Err(SetupError::Runtime(
                 "the fixed service name has a foreign identity; refusing to mutate it".to_owned(),
             ));

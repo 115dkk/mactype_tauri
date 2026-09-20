@@ -169,20 +169,20 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .settings-index li button[data-selected="true"] { font-weight: 600; }
 .settings-step { display: grid; flex: 0 0 24px; width: 24px; height: 24px; place-items: center; border: 1px solid var(--color-border-strong); border-radius: 50%; color: var(--color-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .settings-index li button[data-selected="true"] .settings-step { border-color: var(--color-primary); background: var(--color-primary); color: var(--color-on-primary); }
-.wizard-substitution { padding-bottom: 0; }
-.profile-page[data-mode="quick"] .settings-form { display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
-.wizard-layout { display: grid; min-height: 0; grid-template-rows: minmax(0, 1fr) auto; }
-.wizard-step-content { position: relative; min-height: 0; overflow-y: auto; }
-.wizard-step-tools { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0 var(--space-1); padding: var(--space-2) 0; }
-.wizard-step-tools .text-action { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 32px; }
-.wizard-start-card { display: grid; gap: var(--space-4); margin-top: var(--space-4); padding: var(--space-5); border: 1px solid var(--color-border); background: var(--color-surface-subtle); }
-.wizard-start-intro { margin: 0; }
-.wizard-start-profile { display: grid; gap: var(--space-1); }
-.wizard-start-profile > span, .wizard-start-font > span { color: var(--color-muted); font-size: 12px; }
-.wizard-start-profile code { overflow: hidden; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); background: var(--color-surface); text-overflow: ellipsis; white-space: nowrap; }
-.wizard-start-font { display: grid; max-width: 360px; gap: var(--space-1); }
-.wizard-start-font select { min-height: var(--control-height); padding-inline: var(--space-2); }
-.wizard-start-hint { margin: 0; color: var(--color-muted); }
+.guided-substitution { padding-bottom: 0; }
+.profile-page[data-mode="guided"] .settings-form { display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
+.guided-layout { display: grid; min-height: 0; grid-template-rows: minmax(0, 1fr) auto; }
+.guided-step-content { position: relative; min-height: 0; overflow-y: auto; }
+.guided-step-tools { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0 var(--space-1); padding: var(--space-2) 0; }
+.guided-step-tools .text-action { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 32px; }
+.guided-start-card { display: grid; gap: var(--space-4); margin-top: var(--space-4); padding: var(--space-5); border: 1px solid var(--color-border); background: var(--color-surface-subtle); }
+.guided-start-intro { margin: 0; }
+.guided-start-profile { display: grid; gap: var(--space-1); }
+.guided-start-profile > span, .guided-start-font > span { color: var(--color-muted); font-size: 12px; }
+.guided-start-profile code { overflow: hidden; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); background: var(--color-surface); text-overflow: ellipsis; white-space: nowrap; }
+.guided-start-font { display: grid; max-width: 360px; gap: var(--space-1); }
+.guided-start-font select { min-height: var(--control-height); padding-inline: var(--space-2); }
+.guided-start-hint { margin: 0; color: var(--color-muted); }
 .guided-row { grid-template-columns: minmax(0, 1fr); align-items: start; gap: var(--space-2); padding: var(--space-3) 0; }
 .guided-label p { margin: var(--space-1) 0 0; color: var(--color-muted); font-size: 12px; }
 .guided-choice { display: grid; gap: var(--space-1); margin: 0; padding: 0; border: 0; }
@@ -195,13 +195,13 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .guided-row .range-control input[type="range"] { grid-column: 1; grid-row: 1; }
 .guided-row .range-control input[type="number"] { grid-column: 2; grid-row: 1; }
 .guided-scale-words { display: flex; grid-column: 1; grid-row: 2; justify-content: space-between; color: var(--color-muted); font-size: 12px; }
-.wizard-apply-card { display: grid; gap: var(--space-3); margin-top: var(--space-4); padding: var(--space-4); border: 1px solid var(--color-border); background: var(--color-surface-subtle); }
-.wizard-apply-card > p { padding: var(--space-3); border-inline-start: 3px solid var(--color-success); background: var(--color-surface); }
-.wizard-apply-card > p[data-dirty="true"] { border-inline-start-color: var(--color-warning); color: var(--color-warning); }
-.wizard-apply-card > div { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-.wizard-progress { display: flex; align-items: center; padding: var(--space-2) 0; border-top: 1px solid var(--color-border); background: var(--color-canvas); }
-.wizard-next { margin-inline-start: auto; }
-[dir="rtl"] .wizard-progress svg { transform: rotate(180deg); }
+.guided-apply-card { display: grid; gap: var(--space-3); margin-top: var(--space-4); padding: var(--space-4); border: 1px solid var(--color-border); background: var(--color-surface-subtle); }
+.guided-apply-card > p { padding: var(--space-3); border-inline-start: 3px solid var(--color-success); background: var(--color-surface); }
+.guided-apply-card > p[data-dirty="true"] { border-inline-start-color: var(--color-warning); color: var(--color-warning); }
+.guided-apply-card > div { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.guided-progress { display: flex; align-items: center; padding: var(--space-2) 0; border-top: 1px solid var(--color-border); background: var(--color-canvas); }
+.guided-next { margin-inline-start: auto; }
+[dir="rtl"] .guided-progress svg { transform: rotate(180deg); }
 .checkbox-row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) 0; color: var(--color-muted); }
 .settings-workspace { display: grid; grid-template-rows: minmax(160px, 1fr) auto; min-width: 0; min-height: 0; overflow: hidden; }
 .settings-form { position: relative; min-width: 0; min-height: 0; padding: var(--space-2) 0 0 var(--space-5); overflow-x: hidden; overflow-y: auto; container: settings-form / inline-size; }
@@ -519,8 +519,8 @@ input[type="range"] { min-width: 0; height: var(--control-height); margin: 0; pa
   .profile-history-actions { justify-content: flex-start; }
   .profile-save-as { align-items: stretch; flex-direction: column; }
   .profile-save-as .button { width: 100%; }
-  .wizard-apply-card > div { flex-direction: column; }
-  .wizard-apply-card .button { width: 100%; }
+  .guided-apply-card > div { flex-direction: column; }
+  .guided-apply-card .button { width: 100%; }
   .status-band { grid-template-columns: auto minmax(0, 1fr); }
   .status-band .button { grid-column: 1 / -1; }
   .detail-list > div, .setting-row { grid-template-columns: 1fr; gap: var(--space-2); }
@@ -534,8 +534,8 @@ input[type="range"] { min-width: 0; height: var(--control-height); margin: 0; pa
   .profile-page { height: auto; overflow: visible; }
   .settings-workspace { display: block; overflow: visible; }
   .settings-form { overflow: visible; }
-  .profile-page[data-mode="quick"] .settings-form { display: block; overflow: visible; }
-  .wizard-step-content { overflow: visible; }
+  .profile-page[data-mode="guided"] .settings-form { display: block; overflow: visible; }
+  .guided-step-content { overflow: visible; }
   .settings-index { padding-right: 0; border-right: 0; border-bottom: 1px solid var(--color-border); }
   [dir="rtl"] .settings-index { padding-left: 0; border-left: 0; }
   .settings-index ul { grid-template-columns: repeat(6, max-content); overflow-x: auto; }
@@ -590,7 +590,7 @@ input[type="range"] { min-width: 0; height: var(--control-height); margin: 0; pa
   .preview-toolbar { align-items: stretch; flex-direction: column; }
   .preview-controls { width: 100%; flex-wrap: wrap; }
   .preview-controls select { flex: 1 1 96px; min-width: 0; }
-  .wizard-step-tools { justify-content: flex-start; }
+  .guided-step-tools { justify-content: flex-start; }
   /* Two list columns leave too little room for an entry field beside its add
      button once the workspace stops overflowing the window. */
   .list-grid { grid-template-columns: 1fr; }

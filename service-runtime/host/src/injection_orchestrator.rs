@@ -3,6 +3,7 @@
 mod model;
 
 use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 use std::time::Instant;
 
 use mactype_service_contract::{
@@ -19,6 +20,7 @@ use crate::target_validation::{
     DeferralReason, InspectionEvidence, ProcessInspector, ProcessSkipReason, ProcessTargetDecision,
     ProcessTargetValidator, TargetLifecycle, TargetLiveness,
 };
+use crate::{HostEvent, HostEventSink};
 
 pub use model::{
     DeferralPolicy, DeferredTarget, ProcessAttemptRecord, ProcessOutcome, RetryPolicy,
@@ -63,6 +65,7 @@ pub struct InjectionOrchestrator<'a> {
     target_validator: ProcessTargetValidator<'a>,
     inspector: &'a dyn ProcessInspector,
     broker: &'a dyn InjectionBroker,
+    events: Arc<dyn HostEventSink>,
     processed: HashMap<(u32, u64), ProcessAttemptRecord>,
     process_order: VecDeque<(u32, u64)>,
     deferred: HashMap<(u32, u64), DeferredTarget>,
@@ -80,6 +83,7 @@ impl<'a> InjectionOrchestrator<'a> {
         binding: RendererRuntimeBinding,
         inspector: &'a dyn ProcessInspector,
         broker: &'a dyn InjectionBroker,
+        events: Arc<dyn HostEventSink>,
     ) -> Self {
         Self::build(
             service_pid,
@@ -92,6 +96,7 @@ impl<'a> InjectionOrchestrator<'a> {
                 admission_policies: ProcessAdmissionPolicies::default(),
                 deferral_policy: DeferralPolicy::default(),
             },
+            events,
         )
     }
 
@@ -102,6 +107,7 @@ impl<'a> InjectionOrchestrator<'a> {
         broker: &'a dyn InjectionBroker,
         retry_policy: RetryPolicy,
         retry_scheduler: &'a dyn RetryScheduler,
+        events: Arc<dyn HostEventSink>,
     ) -> Self {
         Self::build(
             service_pid,
@@ -114,9 +120,11 @@ impl<'a> InjectionOrchestrator<'a> {
                 admission_policies: ProcessAdmissionPolicies::default(),
                 deferral_policy: DeferralPolicy::default(),
             },
+            events,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn with_profile_policies(
         service_pid: u32,
         binding: RendererRuntimeBinding,
@@ -125,6 +133,7 @@ impl<'a> InjectionOrchestrator<'a> {
         unity_font_hook: UnityFontHookPolicy,
         private_freetype: PrivateFreeTypePolicy,
         console_process: ConsoleProcessPolicy,
+        events: Arc<dyn HostEventSink>,
     ) -> Self {
         Self::build(
             service_pid,
@@ -141,6 +150,7 @@ impl<'a> InjectionOrchestrator<'a> {
                 ),
                 deferral_policy: DeferralPolicy::default(),
             },
+            events,
         )
     }
 
@@ -154,6 +164,7 @@ impl<'a> InjectionOrchestrator<'a> {
         retry_scheduler: &'a dyn RetryScheduler,
         admission_policies: ProcessAdmissionPolicies,
         deferral_policy: DeferralPolicy,
+        events: Arc<dyn HostEventSink>,
     ) -> Self {
         Self::build(
             service_pid,
@@ -166,6 +177,7 @@ impl<'a> InjectionOrchestrator<'a> {
                 admission_policies,
                 deferral_policy,
             },
+            events,
         )
     }
 
@@ -175,6 +187,7 @@ impl<'a> InjectionOrchestrator<'a> {
         inspector: &'a dyn ProcessInspector,
         broker: &'a dyn InjectionBroker,
         configuration: OrchestratorConfiguration<'a>,
+        events: Arc<dyn HostEventSink>,
     ) -> Self {
         Self {
             binding,
@@ -187,6 +200,7 @@ impl<'a> InjectionOrchestrator<'a> {
             ),
             inspector,
             broker,
+            events,
             processed: HashMap::new(),
             process_order: VecDeque::new(),
             deferred: HashMap::new(),
@@ -248,7 +262,7 @@ impl<'a> InjectionOrchestrator<'a> {
                     }
                     self.record_skip(identity, reason.code(), None);
                 } else {
-                    crate::event_log::injection_skipped();
+                    self.events.record(HostEvent::InjectionSkipped);
                 }
                 Ok(ProcessOutcome::Skipped)
             }
@@ -645,11 +659,10 @@ impl<'a> InjectionOrchestrator<'a> {
         } else {
             String::new()
         };
-        crate::event_log::injection_result(
-            &record,
+        self.events.record(HostEvent::InjectionResult {
+            record: record.clone(),
             process,
-            crate::event_log::diagnostic_detail(&record),
-        );
+        });
         self.processed.insert(key, record);
     }
 }

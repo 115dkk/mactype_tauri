@@ -1,5 +1,5 @@
-import type { ProfileEntry, ProfileSnapshot } from "./model";
-import { openDefaultProfile, openProfile } from "./tauri";
+import type { ExecutionStatus, ProfileEntry, ProfileSnapshot } from "./model";
+import { runtime } from "./runtimeAdapter";
 
 export const recentProfileStorageKey = "mactype-control-center.recent-profile";
 
@@ -31,17 +31,21 @@ function availablePath(profiles: ReadonlyArray<ProfileEntry>, candidate: string 
 export async function openPreferredProfile(
   opened: ProfileSnapshot | null,
   profiles: ReadonlyArray<ProfileEntry>,
-  appliedProfile: string | null,
+  execution: Pick<ExecutionStatus, "activeProfile" | "injectionReady">,
+  managedLegacyProfile: ProfileEntry | null = null,
 ): Promise<ProfileSnapshot | null> {
   if (opened) {
     rememberProfile(opened.path);
     return opened;
   }
 
+  const appliedProfile = execution.injectionReady
+    ? execution.activeProfile
+    : managedLegacyProfile?.displayPath ?? execution.activeProfile;
   const preferred = availablePath(profiles, rememberedProfile()) ?? availablePath(profiles, appliedProfile);
   if (preferred) {
     try {
-      const selected = await openProfile(preferred);
+      const selected = await runtime().openProfile(preferred);
       rememberProfile(selected.path);
       return selected;
     } catch {
@@ -49,7 +53,7 @@ export async function openPreferredProfile(
     }
   }
 
-  const fallback = await openDefaultProfile();
+  const fallback = await runtime().openDefaultProfile();
   if (fallback) rememberProfile(fallback.path);
   return fallback;
 }

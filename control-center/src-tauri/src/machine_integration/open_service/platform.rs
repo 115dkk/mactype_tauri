@@ -4,14 +4,15 @@ pub(super) use health::read_health_for_scm_process;
 use health::{read_health, read_persisted_health};
 
 use super::{
-    identity::{
-        core_service_capabilities, core_service_configuration_drift, owned_core_service_identity,
-        ObservedCoreServiceConfiguration,
-    },
+    identity::core_service_capabilities,
     windows::{machine_roots, RuntimePointer},
     *,
 };
-use mactype_service_contract::{HealthState as ContractHealthState, SERVICE_NAME};
+use mactype_service_contract::{
+    owned_service_identity, service_configuration_drift, valid_runtime_version_component,
+    HealthState as ContractHealthState, ObservedServiceConfiguration, MAX_RUNTIME_POINTER_BYTES,
+    SERVICE_NAME,
+};
 use mactype_service_platform::{
     known_folder_path, KnownFolder, ServiceAccess, ServiceControlManager, ServiceManagerAccess,
     ServiceState,
@@ -105,21 +106,18 @@ pub(super) fn query() -> SystemServiceStatus {
     let expected = current_service_binary(&service_root);
     let bundled = bundled_service_binary(&service_root);
     let configured = configured_service_binary(&configuration.image_path);
-    let protected = configured
-        .as_deref()
-        .is_some_and(|path| is_protected_service_binary(&service_root, path));
-    let observed = ObservedCoreServiceConfiguration {
+    let observed = ObservedServiceConfiguration {
         service_type: configuration.service_type,
         start_type: configuration.start_type,
         error_control: configuration.error_control,
+        image_path: &configuration.image_path,
         account: &configuration.account,
         display_name: &configuration.display_name,
         load_order_group: &configuration.load_order_group,
         tag_id: configuration.tag_id,
-        dependencies_empty: configuration.dependencies.is_empty(),
-        protected_image: protected,
+        dependencies: &configuration.dependencies,
     };
-    if !owned_core_service_identity(&observed) {
+    if !owned_service_identity(&observed, &service_root) {
         return SystemServiceStatus {
             backend: ServiceBackend::Foreign,
             installation: InstallationState::Invalid,
@@ -137,7 +135,7 @@ pub(super) fn query() -> SystemServiceStatus {
             can_upgrade: false,
         };
     }
-    let configuration_drift = core_service_configuration_drift(&observed);
+    let configuration_drift = service_configuration_drift(&observed).is_drifted();
     let installation = match (configured.as_ref(), expected.as_ref(), bundled.as_ref()) {
         (Some(configured), Ok(expected), Ok(bundled)) => {
             classify_owned_installation(configured, expected, bundled)
@@ -190,11 +188,11 @@ fn current_service_binary(service_root: &Path) -> Result<PathBuf, String> {
     let pointer_path = service_root.join("current.json");
     let pointer: RuntimePointer = serde_json::from_slice(&read_bounded_regular_file(
         &pointer_path,
-        64 * 1024,
+        MAX_RUNTIME_POINTER_BYTES,
         "protected runtime pointer",
     )?)
     .map_err(|error| error.to_string())?;
-    if pointer.schema != 1 || !safe_version(&pointer.version) {
+    if pointer.schema != 1 || !valid_runtime_version_component(&pointer.version) {
         return Err("invalid protected runtime pointer".to_owned());
     }
     let binary = service_root
@@ -209,12 +207,7 @@ fn current_service_binary(service_root: &Path) -> Result<PathBuf, String> {
 }
 
 pub(super) fn safe_version(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+'))
-        && !matches!(value, "." | "..")
+    valid_runtime_version_component(value)
 }
 
 pub(super) fn reveal_system_service() -> Result<(), String> {

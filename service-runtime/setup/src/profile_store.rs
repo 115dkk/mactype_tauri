@@ -4,6 +4,7 @@ mod pointer;
 
 use mactype_service_contract::{
     GenerationId, GenerationPointer, MachinePaths, ProfileCatalog, SourceMetadata,
+    MAX_PROFILE_POINTER_BYTES,
 };
 use serde::{Deserialize, Serialize};
 
@@ -13,7 +14,7 @@ use crate::storage::{reject_reparse_ancestors, SetupError};
 const LEGACY_PROFILE_ACTIVATION_SCHEMA: u32 = 1;
 const PROFILE_ACTIVATION_SCHEMA: u32 = 2;
 const MAX_ACTIVATION_JOURNAL_BYTES: u64 = 16 * 1024;
-const MAX_POINTER_BYTES: u64 = 64 * 1024;
+const MAX_POINTER_BYTES: u64 = MAX_PROFILE_POINTER_BYTES;
 
 #[derive(Clone)]
 pub struct ProfileStore {

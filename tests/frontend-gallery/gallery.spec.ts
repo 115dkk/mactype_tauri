@@ -464,7 +464,7 @@ test("settings navigation restores the legacy Wizard and Tuner hierarchy", async
   await expect(page.locator(".navigation").getByRole("button", { name: "튜너", exact: true })).toHaveCount(0);
 
   await tunerGroup.getByRole("button", { name: "단계별 설정" }).click();
-  await expect(page.locator(".profile-page")).toHaveAttribute("data-mode", "quick");
+  await expect(page.locator(".profile-page")).toHaveAttribute("data-mode", "guided");
   await expect(page.getByRole("heading", { level: 1, name: "단계별 설정" })).toBeVisible();
   await expect(page.locator(".profile-mode-title > span")).toHaveText("Tuner");
   expect(await page.locator(".profile-page").innerText()).not.toContain("마법사");
@@ -475,9 +475,9 @@ test("settings navigation restores the legacy Wizard and Tuner hierarchy", async
   const settingsForm = page.locator(".settings-form");
 
   await expect(page.getByRole("heading", { level: 2, name: "시작" })).toBeVisible();
-  await expect(page.locator(".wizard-start-card")).toBeVisible();
-  await expect(page.locator(".wizard-start-profile code")).toBeVisible();
-  await expect(page.locator(".wizard-start-font select")).toBeVisible();
+  await expect(page.locator(".guided-start-card")).toBeVisible();
+  await expect(page.locator(".guided-start-profile code")).toBeVisible();
+  await expect(page.locator(".guided-start-font select")).toBeVisible();
   await expect(page.getByRole("button", { name: "이전" })).toHaveCount(0);
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-guided-start-ko.png`), fullPage: true });
 
@@ -492,7 +492,7 @@ test("settings navigation restores the legacy Wizard and Tuner hierarchy", async
   // ancestor, so the workspace column needs its own window-bounds check: a
   // wide control in the preview toolbar used to inflate the column past the
   // right edge, clipping the step body instead of scrolling.
-  for (const selector of [".settings-form", ".preview-panel", ".wizard-step-tools"]) {
+  for (const selector of [".settings-form", ".preview-panel", ".guided-step-tools"]) {
     const bounds = await page.locator(selector).first().evaluate((element) => {
       const rect = element.getBoundingClientRect();
       return { left: Math.round(rect.left), right: Math.round(rect.right), viewport: document.documentElement.clientWidth };
@@ -538,7 +538,7 @@ test("settings navigation restores the legacy Wizard and Tuner hierarchy", async
   // desktop window docks the guided preview beside the step rather than under it.
   await page.locator(".preview-strip").last().scrollIntoViewIfNeeded();
   await expect(page.locator(".preview-strip").last()).toBeInViewport();
-  const stepBox = await page.locator(".wizard-step-content").boundingBox();
+  const stepBox = await page.locator(".guided-step-content").boundingBox();
   if (!stepBox) throw new Error("The guided step body must stay visible");
   expect(stepBox.height, "the step body keeps its room beside the four-line stack").toBeGreaterThanOrEqual(240);
   if (testInfo.project.name === "desktop-1280") {
@@ -555,7 +555,7 @@ test("settings navigation restores the legacy Wizard and Tuner hierarchy", async
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-guided-apply-ko.png`), fullPage: true });
 
   await tunerGroup.getByRole("button", { name: "전체 설정" }).click();
-  await expect(page.locator(".profile-page")).toHaveAttribute("data-mode", "advanced");
+  await expect(page.locator(".profile-page")).toHaveAttribute("data-mode", "all");
   await expect(page.getByRole("heading", { level: 1, name: "전체 설정" })).toBeVisible();
   await expect(page.locator(".settings-index button")).toHaveCount(6);
   expect(await settingsForm.evaluate((element) => element.scrollWidth > element.clientWidth), "Tuner settings must not have internal horizontal scrolling").toBe(false);
@@ -571,7 +571,7 @@ test("settings navigation restores the legacy Wizard and Tuner hierarchy", async
 test("guided step undo, redo, and discard stay scoped to the current step", async ({ page }) => {
   await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
   await page.locator(".navigation").getByRole("button", { name: "단계별 설정" }).click();
-  await expect(page.locator(".profile-page")).toHaveAttribute("data-mode", "quick");
+  await expect(page.locator(".profile-page")).toHaveAttribute("data-mode", "guided");
 
   const undoStep = page.getByRole("button", { name: "되돌리기", exact: true });
   const redoStep = page.getByRole("button", { name: "다시 하기", exact: true });
@@ -1995,6 +1995,6 @@ test("settings files present profile cards with thumbnails, apply ownership, and
   await expect(editInTuner).toHaveCount(3);
   await editInTuner.first().click();
   await expect(page.locator("body")).toHaveAttribute("data-view", "profiles");
-  await expect(page.locator("body")).toHaveAttribute("data-profile-mode", "advanced");
+  await expect(page.locator("body")).toHaveAttribute("data-profile-mode", "all");
 });
 

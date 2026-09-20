@@ -1,3 +1,4 @@
+use super::super::action_failure::LegacyServiceBlockContext;
 use super::super::*;
 
 #[cfg(windows)]
@@ -21,6 +22,28 @@ fn broker_result_frame_preserves_a_multistage_failure_chain() {
     assert!(decoded
         .error_chain
         .contains("legacy service restore completed"));
+}
+
+#[test]
+fn broker_result_frame_carries_a_blocker_code_independently_of_its_prose() {
+    let nonce = [0x3b; PROFILE_TRANSFER_NONCE_BYTES];
+    let failure = ActionFailure::blocked_with_detail(
+        ActionBlocker::LegacyServiceStillInstalled(LegacyServiceBlockContext::StartNewService),
+        "localized or reworded detail".to_owned(),
+    );
+    let result = BrokerResultMessage::from_failure("start", &failure);
+
+    let frame = encode_broker_result_frame(&result, &nonce).unwrap();
+    let decoded = decode_broker_result_frame(&frame, &nonce).unwrap();
+
+    assert_eq!(decoded.disposition, BrokerResultDisposition::Blocked);
+    assert_eq!(
+        ActionBlocker::from_stage_code(&decoded.stage, None),
+        Some(ActionBlocker::LegacyServiceStillInstalled(
+            LegacyServiceBlockContext::StartNewService
+        ))
+    );
+    assert_eq!(decoded.error_chain, "localized or reworded detail");
 }
 
 #[cfg(windows)]

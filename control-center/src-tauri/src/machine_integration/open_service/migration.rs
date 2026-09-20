@@ -1,3 +1,4 @@
+use super::action_failure::{ActionFailure, RollbackOutcome};
 use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -25,7 +26,7 @@ impl MigrationVerification {
 pub(super) trait MigrationBackend {
     type OpenServiceSnapshot;
 
-    fn prepare_legacy_backup(&mut self) -> Result<(), String>;
+    fn prepare_legacy_backup(&mut self) -> Result<(), ActionFailure>;
     fn legacy_backup_is_valid(&mut self) -> bool;
     fn capture_open_service(&mut self) -> Result<Self::OpenServiceSnapshot, String>;
     fn stop_legacy(&mut self) -> Result<(), String>;
@@ -39,8 +40,10 @@ pub(super) trait MigrationBackend {
     fn strict_ready(&mut self, expected_digest: &str) -> Result<bool, String>;
     fn verify_injection_smoke(&mut self, expected_digest: &str) -> Result<bool, String>;
     fn complete_migration(&mut self, snapshot: &Self::OpenServiceSnapshot) -> Result<(), String>;
-    fn rollback_open_service(&mut self, snapshot: &Self::OpenServiceSnapshot)
-        -> Result<(), String>;
+    fn rollback_open_service(
+        &mut self,
+        snapshot: &Self::OpenServiceSnapshot,
+    ) -> Result<(), ActionFailure>;
     fn restore_legacy(&mut self) -> Result<(), String>;
     fn removal_verification(
         &mut self,
@@ -67,16 +70,32 @@ pub(super) fn migration_activation_actions(
 pub(super) fn migrate_from_legacy(
     backend: &mut impl MigrationBackend,
     profile: &[u8],
-) -> Result<(), String> {
-    backend
-        .prepare_legacy_backup()
-        .map_err(|error| format!("prepare legacy backup: {error}"))?;
+) -> Result<(), ActionFailure> {
+    backend.prepare_legacy_backup().map_err(|failure| {
+        if matches!(
+            failure.kind,
+            super::action_failure::ActionFailureKind::Blocked(_)
+        ) {
+            failure
+        } else {
+            ActionFailure::internal_at(
+                "prepare legacy backup",
+                format!("prepare legacy backup: {failure}"),
+            )
+        }
+    })?;
     if !backend.legacy_backup_is_valid() {
-        return Err("validate legacy backup: backup receipt is invalid".to_owned());
+        return Err(ActionFailure::internal_at(
+            "validate legacy backup",
+            "validate legacy backup: backup receipt is invalid",
+        ));
     }
-    let snapshot = backend
-        .capture_open_service()
-        .map_err(|error| format!("capture open service state: {error}"))?;
+    let snapshot = backend.capture_open_service().map_err(|error| {
+        ActionFailure::internal_at(
+            "capture open service state",
+            format!("capture open service state: {error}"),
+        )
+    })?;
     if let Err(error) = backend.stop_legacy() {
         return Err(rollback_migration_failure(
             backend,
@@ -156,9 +175,10 @@ fn rollback_migration_failure<B: MigrationBackend>(
     snapshot: &B::OpenServiceSnapshot,
     stage: &str,
     primary: String,
-) -> String {
+) -> ActionFailure {
     let open_rollback = backend.rollback_open_service(snapshot).err();
     let legacy_rollback = backend.restore_legacy().err();
+    let rollback_failed = open_rollback.is_some() || legacy_rollback.is_some();
     let mut error = format!("{stage}: {primary}");
     if let Some(rollback) = open_rollback {
         error.push_str(&format!("; open service rollback failed: {rollback}"));
@@ -166,25 +186,38 @@ fn rollback_migration_failure<B: MigrationBackend>(
     if let Some(rollback) = legacy_rollback {
         error.push_str(&format!("; legacy service restore failed: {rollback}"));
     }
-    error
+    let rollback = if rollback_failed {
+        RollbackOutcome::Failed
+    } else {
+        RollbackOutcome::Completed
+    };
+    ActionFailure::internal_at(stage, error).with_rollback(rollback)
 }
 
 pub(super) fn remove_legacy_after_verification(
     backend: &mut impl MigrationBackend,
     profile: &[u8],
-) -> Result<(), String> {
+) -> Result<(), ActionFailure> {
     if !backend.legacy_backup_is_valid() {
-        return Err("validate legacy backup: backup receipt is invalid".to_owned());
+        return Err(ActionFailure::internal_at(
+            "validate legacy backup",
+            "validate legacy backup: backup receipt is invalid",
+        ));
     }
     let expected = GenerationId::from_profile_bytes(profile);
     let verification = backend
         .removal_verification(expected.as_str())
-        .map_err(|error| format!("verify legacy removal gate: {error}"))?;
+        .map_err(|error| {
+            ActionFailure::internal_at(
+                "verify legacy removal gate",
+                format!("verify legacy removal gate: {error}"),
+            )
+        })?;
     if !verification.permits_removal() {
-        return Err(
-            "verify legacy removal gate: Ready, profile digest, or x86/x64 telemetry is missing"
-                .to_owned(),
-        );
+        return Err(ActionFailure::internal_at(
+            "verify legacy removal gate",
+            "verify legacy removal gate: Ready, profile digest, or x86/x64 telemetry is missing",
+        ));
     }
     if let Err(error) = backend.remove_legacy() {
         // Do not restore (restart) the legacy service on a removal failure. By the
@@ -192,9 +225,13 @@ pub(super) fn remove_legacy_after_verification(
         // so restarting the legacy service would double-inject. The legacy service
         // is stopped and disabled, so leaving it in place is safe; the caller can
         // retry removal or roll back explicitly.
-        return Err(format!(
-            "remove legacy service: {error}; the legacy service remains stopped and disabled"
-        ));
+        return Err(ActionFailure::internal_at(
+            "remove legacy service",
+            format!(
+                "remove legacy service: {error}; the legacy service remains stopped and disabled"
+            ),
+        )
+        .with_rollback(RollbackOutcome::FailClosedLegacyStopped));
     }
     Ok(())
 }

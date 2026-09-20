@@ -23,13 +23,6 @@ pub use runtime_installer::{
 };
 pub use storage::SetupError;
 
-#[cfg(all(windows, feature = "ci-test-adapter"))]
-pub use windows::scm::{
-    service_configuration_drift, service_configuration_matches_owned_contract,
-    service_identity_matches_owned_contract, service_image_matches_protected_contract,
-    ObservedServiceConfiguration,
-};
-
 pub fn run_broker_command(
     command: mactype_service_contract::BrokerCommand,
     profile_input: Option<&[u8]>,

@@ -2,7 +2,10 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use mactype_service_contract::{effective_service_name, HealthReport, HealthState};
+use mactype_service_contract::{
+    effective_service_name, owned_service_identity, service_configuration_drift, HealthReport,
+    HealthState, SERVICE_DISPLAY_NAME,
+};
 use mactype_service_platform::{
     Process, ProcessAccess, ServiceAccess, ServiceConfig, ServiceHandle, ServiceState,
     ServiceStatusSnapshot, WaitOutcome,
@@ -12,12 +15,11 @@ use windows_sys::Win32::Foundation::{
 };
 
 use super::configuration::{
-    configure_metadata, observed_configuration, quoted_image_path, service_configuration_drift,
-    service_configuration_matches_owned_contract, service_identity_matches_owned_contract,
-    validate_service_binary,
+    configure_metadata, observed_configuration, quoted_image_path,
+    service_configuration_matches_owned_contract, validate_service_binary,
 };
 use super::health::wait_for_ready_health;
-use super::{ServiceManager, DISPLAY_NAME, HEALTH_TIMEOUT, STATE_TIMEOUT};
+use super::{ServiceManager, HEALTH_TIMEOUT, STATE_TIMEOUT};
 use crate::storage::read_bounded_regular_file;
 use crate::SetupError;
 
@@ -211,7 +213,7 @@ impl ServiceManager {
         let image_path = quoted_image_path(service_binary)?;
         let service = self.manager.create_own_process_auto_start(
             effective_service_name(),
-            DISPLAY_NAME,
+            SERVICE_DISPLAY_NAME,
             &image_path,
         )?;
         if let Err(error) = configure_metadata(&service) {
@@ -230,16 +232,17 @@ impl ServiceManager {
             .ok_or_else(|| SetupError::Runtime("the open service is not installed".to_owned()))?;
         self.ensure_owned(&service)?;
         let before = service.config()?;
-        let repaired_fields = service_configuration_drift(&observed_configuration(&before));
+        let repaired_fields =
+            service_configuration_drift(&observed_configuration(&before)).field_names();
         let image_path = quoted_image_path(service_binary)?;
-        service.set_image_and_display_name(&image_path, DISPLAY_NAME)?;
+        service.set_image_and_display_name(&image_path, SERVICE_DISPLAY_NAME)?;
         service.restore_owned_mutable_configuration()?;
         configure_metadata(&service).map_err(|error| {
             error.at_machine_path("configure service recovery metadata", service_binary)
         })?;
         let after = service.config()?;
         let observed_after = observed_configuration(&after);
-        if !service_identity_matches_owned_contract(&self.protected_root, &observed_after) {
+        if !owned_service_identity(&observed_after, &self.protected_root) {
             return Err(SetupError::Runtime(
                 "service reconfiguration left an identity mismatch".to_owned(),
             ));
@@ -247,7 +250,9 @@ impl ServiceManager {
         if !service_configuration_matches_owned_contract(&self.protected_root, &observed_after) {
             return Err(SetupError::Runtime(format!(
                 "service reconfiguration left configuration drift: {}",
-                service_configuration_drift(&observed_after).join(",")
+                service_configuration_drift(&observed_after)
+                    .field_names()
+                    .join(",")
             )));
         }
         if !repaired_fields.is_empty() {

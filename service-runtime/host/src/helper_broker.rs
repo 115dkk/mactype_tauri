@@ -10,7 +10,7 @@ use crate::{
 };
 
 const HELPER_TIMEOUT: Duration = Duration::from_secs(20);
-const MAX_HELPER_OUTPUT_BYTES: usize = 1024;
+pub(crate) const MAX_HELPER_OUTPUT_BYTES: usize = 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HelperInvocation {

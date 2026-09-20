@@ -1,9 +1,6 @@
 #![forbid(unsafe_code)]
 
-use mactype_service_contract::{
-    event_log::{EventArea, EventLogWriter, EventSeverity, EventSource},
-    BrokerCommand,
-};
+use mactype_service_contract::event_log::{EventArea, EventLogWriter, EventSeverity, EventSource};
 use std::{
     collections::BTreeMap,
     sync::atomic::{AtomicBool, Ordering},
@@ -15,7 +12,7 @@ static WRITE_ERROR_REPORTED: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn command_verb(command: SetupCommand) -> &'static str {
     match command {
-        SetupCommand::Broker(command) => broker_verb(command),
+        SetupCommand::Broker(command) => command.verb(),
         SetupCommand::BootstrapInstall(policy) => policy.verb(),
         SetupCommand::UninstallOwned => "uninstall-owned",
     }
@@ -125,25 +122,10 @@ fn writer() -> Result<EventLogWriter, String> {
     }
 }
 
-fn broker_verb(command: BrokerCommand) -> &'static str {
-    match command {
-        BrokerCommand::Install => "install",
-        BrokerCommand::Upgrade => "upgrade",
-        BrokerCommand::Repair => "repair",
-        BrokerCommand::Remove => "remove",
-        BrokerCommand::Start => "start",
-        BrokerCommand::Stop => "stop",
-        BrokerCommand::PublishProfile => "publish-profile",
-        BrokerCommand::MigrateFromLegacy => "migrate-from-legacy",
-        BrokerCommand::Rollback => "rollback",
-        BrokerCommand::RestoreRuntime => "restore-runtime",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mactype_service_contract::event_log::read_events;
+    use mactype_service_contract::{event_log::read_events, BrokerCommand};
 
     #[test]
     fn setup_failure_keeps_stage_and_redacts_profile_bytes() {

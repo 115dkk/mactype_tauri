@@ -1,4 +1,3 @@
-use super::runtime::safe_runtime_version;
 use crate::service_contract::{
     InstallationState, RuntimeState, ServiceBackend, SystemServiceStatus,
 };
@@ -19,19 +18,6 @@ pub(super) fn configured_service_binary(image_path: &str) -> Option<PathBuf> {
     Some(PathBuf::from(&rest[..quote]))
 }
 
-pub(super) fn is_protected_service_binary(root: &Path, binary: &Path) -> bool {
-    let Ok(relative) = binary.strip_prefix(root) else {
-        return false;
-    };
-    let components = relative.components().collect::<Vec<_>>();
-    components.len() == 3
-        && components[0].as_os_str().eq_ignore_ascii_case("bin")
-        && safe_runtime_version(&components[1].as_os_str().to_string_lossy())
-        && components[2]
-            .as_os_str()
-            .eq_ignore_ascii_case("mactype-service.exe")
-}
-
 pub(super) fn classify_owned_installation(
     configured: &Path,
     protected_current: &Path,
@@ -42,36 +28,6 @@ pub(super) fn classify_owned_installation(
     } else {
         InstallationState::Outdated
     }
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct ObservedCoreServiceConfiguration<'a> {
-    pub(super) service_type: u32,
-    pub(super) start_type: u32,
-    pub(super) error_control: u32,
-    pub(super) account: &'a str,
-    pub(super) display_name: &'a str,
-    pub(super) load_order_group: &'a str,
-    pub(super) tag_id: u32,
-    pub(super) dependencies_empty: bool,
-    pub(super) protected_image: bool,
-}
-
-pub(super) fn owned_core_service_identity(observed: &ObservedCoreServiceConfiguration<'_>) -> bool {
-    observed.service_type == 0x10
-        && observed.account.eq_ignore_ascii_case("LocalSystem")
-        && observed.protected_image
-}
-
-pub(super) fn core_service_configuration_drift(
-    observed: &ObservedCoreServiceConfiguration<'_>,
-) -> bool {
-    observed.start_type != 2
-        || observed.error_control != 1
-        || observed.display_name != "MacType Control Center Service"
-        || !observed.load_order_group.is_empty()
-        || (observed.tag_id != 0 && !observed.load_order_group.is_empty())
-        || !observed.dependencies_empty
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -164,7 +120,11 @@ pub(super) fn validated_reveal_binary(
         .as_deref()
         .and_then(configured_service_binary)
         .ok_or_else(|| "the system service ImagePath is invalid".to_owned())?;
-    if !is_protected_service_binary(service_root, &binary) {
+    let image_path = format!(r#""{}" --service"#, binary.display());
+    if !mactype_service_contract::service_image_matches_protected_contract(
+        service_root,
+        &image_path,
+    ) {
         return Err("the system service binary is outside the protected layout".to_owned());
     }
     Ok(binary)

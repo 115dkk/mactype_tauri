@@ -1,14 +1,12 @@
 use std::io;
 
-use mactype_service_contract::StructuredServiceError;
+use mactype_service_contract::{StructuredServiceError, LEGACY_SERVICE_NAME};
 use mactype_service_platform::{
     ServiceAccess, ServiceControlManager, ServiceHandle, ServiceManagerAccess, ServiceState,
 };
 use windows_sys::Win32::Foundation::ERROR_SERVICE_DOES_NOT_EXIST;
 
 use crate::LegacyServiceRuntimeState;
-
-const LEGACY_SERVICE_NAME: &str = "MacType";
 
 pub(super) struct ServiceManager(ServiceControlManager);
 

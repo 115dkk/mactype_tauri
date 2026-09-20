@@ -2,10 +2,12 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 
-use mactype_service_contract::{HealthReport, MAX_PINNED_RUNTIMES};
+use mactype_service_contract::{
+    valid_runtime_version_component, HealthReport, MAX_PINNED_RUNTIMES,
+};
 
 use super::deferred_delete::{defer_directory, remove_directory_or_defer, remove_file_or_defer};
-use super::journal::{safe_version_component, validate_runtime_pointer, MAX_POINTER_BYTES};
+use super::journal::{validate_runtime_pointer, MAX_POINTER_BYTES};
 use super::RuntimeInstaller;
 use crate::storage::{
     read_bounded_directory, read_bounded_regular_file, reject_reparse_ancestors, SetupError,
@@ -149,7 +151,7 @@ impl RuntimeInstaller {
             let version = entry.file_name().into_string().map_err(|_| {
                 SetupError::Runtime("runtime generation name is not Unicode".to_owned())
             })?;
-            if !safe_version_component(&version) {
+            if !valid_runtime_version_component(&version) {
                 return Err(SetupError::Runtime(
                     "runtime generation name is not canonical".to_owned(),
                 ));
@@ -171,7 +173,7 @@ impl RuntimeInstaller {
             let version = name.strip_suffix(".json").ok_or_else(|| {
                 SetupError::Runtime("runtime receipt name is not canonical".to_owned())
             })?;
-            if !safe_version_component(version) {
+            if !valid_runtime_version_component(version) {
                 return Err(SetupError::Runtime(
                     "runtime receipt name is not canonical".to_owned(),
                 ));

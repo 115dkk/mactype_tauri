@@ -2,10 +2,7 @@ use super::super::*;
 use crate::machine_integration::legacy_mactray::{
     LegacyServiceStatus, ServicePresence, ServiceRuntimeState,
 };
-use crate::machine_integration::open_service::identity::{
-    core_service_capabilities, core_service_configuration_drift, owned_core_service_identity,
-    ObservedCoreServiceConfiguration,
-};
+use crate::machine_integration::open_service::identity::core_service_capabilities;
 
 #[test]
 fn absent_service_never_claims_system_injection() {
@@ -61,61 +58,6 @@ fn bundled_manifest_version_drives_outdated_classification() {
         classify_owned_installation(&bundled, &bundled, &bundled),
         InstallationState::Current
     );
-}
-
-#[test]
-fn status_separates_core_service_identity_from_configuration_drift() {
-    let exact = ObservedCoreServiceConfiguration {
-        service_type: 0x10,
-        start_type: 2,
-        error_control: 1,
-        account: "LocalSystem",
-        display_name: "MacType Control Center Service",
-        load_order_group: "",
-        tag_id: 0,
-        dependencies_empty: true,
-        protected_image: true,
-    };
-    assert!(owned_core_service_identity(&exact));
-    assert!(!core_service_configuration_drift(&exact));
-
-    for drift in [
-        ObservedCoreServiceConfiguration {
-            start_type: 3,
-            ..exact
-        },
-        ObservedCoreServiceConfiguration {
-            error_control: 0,
-            ..exact
-        },
-        ObservedCoreServiceConfiguration {
-            display_name: "Foreign Display",
-            load_order_group: "group",
-            tag_id: 1,
-            dependencies_empty: false,
-            ..exact
-        },
-    ] {
-        assert!(owned_core_service_identity(&drift));
-        assert!(core_service_configuration_drift(&drift));
-    }
-
-    for foreign in [
-        ObservedCoreServiceConfiguration {
-            service_type: 0x20,
-            ..exact
-        },
-        ObservedCoreServiceConfiguration {
-            account: "LocalService",
-            ..exact
-        },
-        ObservedCoreServiceConfiguration {
-            protected_image: false,
-            ..exact
-        },
-    ] {
-        assert!(!owned_core_service_identity(&foreign));
-    }
 }
 
 #[test]
@@ -265,8 +207,21 @@ fn live_ready_is_authoritative_only_when_the_pipe_server_pid_matches_scm() {
 
 #[test]
 fn reveal_accepts_only_owned_stable_protected_service_images() {
-    let root = std::path::Path::new(r"C:\Program Files\MacType Control Center\Service");
+    // Reveal opens Explorer on the file, so the check is filesystem-backed and
+    // the owned case needs a real binary under a real protected root.
+    let temp = std::env::temp_dir().join(format!(
+        "mactype-reveal-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or_default()
+    ));
+    let root = temp.join("Service");
     let binary = root.join("bin").join("0.3.0").join("mactype-service.exe");
+    std::fs::create_dir_all(binary.parent().unwrap()).unwrap();
+    std::fs::write(&binary, b"MZ").unwrap();
+    let root = root.as_path();
     let mut status = absent_status();
     status.backend = ServiceBackend::OpenSource;
     status.installation = InstallationState::Current;
@@ -282,4 +237,13 @@ fn reveal_accepts_only_owned_stable_protected_service_images() {
     status.backend = ServiceBackend::OpenSource;
     status.binary_path = Some(r#""C:\Users\person\mactype-service.exe" --service"#.to_owned());
     assert!(validated_reveal_binary(root, &status).is_err());
+    status.binary_path = Some(format!(
+        r#""{}" --service"#,
+        root.join("bin")
+            .join("9.9.9")
+            .join("mactype-service.exe")
+            .display()
+    ));
+    assert!(validated_reveal_binary(root, &status).is_err());
+    let _ = std::fs::remove_dir_all(&temp);
 }

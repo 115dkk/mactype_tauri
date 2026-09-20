@@ -3,12 +3,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use mactype_service_contract::{
-    sha256_digest, IMMUTABLE_RUNTIME_FILES, MAX_PROFILE_BYTES, MAX_RUNTIME_FILE_BYTES,
+    sha256_digest, valid_runtime_version_component, IMMUTABLE_RUNTIME_FILES, MAX_PROFILE_BYTES,
+    MAX_RUNTIME_FILE_BYTES,
 };
 use serde::{Deserialize, Serialize};
 
 use super::super::deployment::LoadedPayload;
-use super::super::journal::safe_version_component;
 use super::super::RuntimeInstaller;
 use crate::profile_bridge::GENERATED_PROFILE_NAME;
 use crate::storage::{
@@ -31,7 +31,7 @@ impl RuntimeReceipt {
     fn is_valid_for(&self, version: &str) -> bool {
         self.schema == RUNTIME_RECEIPT_SCHEMA
             && self.version == version
-            && safe_version_component(&self.version)
+            && valid_runtime_version_component(&self.version)
             && self.files.len() == IMMUTABLE_RUNTIME_FILES.len()
             && IMMUTABLE_RUNTIME_FILES
                 .iter()

@@ -312,10 +312,13 @@ impl RuntimeInstaller {
                 if rollback_failures.is_empty() {
                     return Err(error);
                 }
-                return Err(SetupError::CleanupUnknown(format!(
-                    "runtime activation failed ({error}); rollback remained incomplete: {}. The activation journal was retained",
-                    rollback_failures.join("; ")
-                )));
+                return Err(SetupError::RollbackFailed {
+                    operation: format!("runtime activation failed ({error})"),
+                    restoration: format!(
+                        "rollback remained incomplete: {}. The activation journal was retained",
+                        rollback_failures.join("; ")
+                    ),
+                });
             }
         };
         let receipt_removed =

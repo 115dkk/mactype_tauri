@@ -10,6 +10,7 @@ This runbook covers the **신식 서비스** (`MacTypeControlCenter`) and its is
 4. Compare `current.json`, `active.json`, and the DLL-adjacent `MacType.ini`. A recovery journal or byte mismatch is a repair condition, not a cosmetic warning. A runtime whose only missing file is the generated `MacType.ini` is reported as `runtime-profile-absent` with terminal `Unknown` health and a clean stop, not as a failure.
 
 The setup interface has fixed verbs only: `install`, `upgrade`, `repair`, `remove`, `start`, `stop`, `publish-profile`, `rollback`, and `restore-runtime`. Never add a service-name or path override for operator convenience.
+The setup broker exits with code 1 for an operation failure, code 2 for an invalid command line, and code 3 when the operation failed and its rollback or restoration also failed.
 
 The 신식 서비스 recovery policy retries after 5 seconds and then 30 seconds. `SERVICE_FAILURE_ACTIONS_FLAG` enables those actions for non-crash `SERVICE_STOPPED` errors with a nonzero exit code, including initialization failures.
 

@@ -13,11 +13,13 @@ use mactype_service_platform::{
 };
 use windows_sys::Win32::Foundation::{ERROR_CANCELLED, STILL_ACTIVE};
 
-use crate::{HelperInvocation, HelperLaunchError, HelperLauncher, HelperOutput};
+use crate::{
+    helper_broker::MAX_HELPER_OUTPUT_BYTES, HelperInvocation, HelperLaunchError, HelperLauncher,
+    HelperOutput,
+};
 
 const TERMINATION_CONFIRMATION: Duration = Duration::from_millis(250);
 const WAIT_SLICE: Duration = Duration::from_millis(10);
-const MAX_HELPER_OUTPUT_BYTES: usize = 1024;
 
 /// The launcher's most recent child, held open with SYNCHRONIZE while it is
 /// still suspended so tests wait on that exact process object. A PID alone

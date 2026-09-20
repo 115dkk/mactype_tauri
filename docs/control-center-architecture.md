@@ -6,6 +6,8 @@ The x64 Tauri process never loads `MacType.dll`. It owns profile files, validati
 
 `MachineIntegration` is the deep module behind the frontend system-integration seam. Its frontend adapter produces `ExecutionViewModel`; SCM flags, protected storage, migration receipts, helpers, and registry inspection remain implementation details. **신식 서비스** means the open-source `MacTypeControlCenter` runtime. **레거시 서비스** means the original `MacType` service hosted by `MacTray.exe`; it is a migration subject and fallback only.
 
+`projectExecutionView` owns the service package notice, the foreign and configuration-drift warnings, the active profile display name and the overview state; execution bodies and every skin consume that projection, and `useOverviewModel` may reuse a supplied execution snapshot.
+
 ## Preview boundary
 
 The parent starts the Helper directly with `std::process::Command`, redirected stdin/stdout/stderr, and no shell. MTPC v1 frames have fixed little-endian headers and bounded JSON/PNG lengths. A reader thread consumes responses while stderr is retained in a 100-line diagnostic buffer. Requests time out after two seconds; the parent terminates and restarts the Helper once before returning an error.
@@ -40,6 +42,8 @@ The main thread invokes the state sink between request dispatches, so event fram
 
 Rust owns a line-preserving INI document. It retains BOM, encoding, line endings, blank lines, comments, unknown entries, and ordering. Only the value slice of a changed key is rewritten. Save compares the original SHA-256, flushes a same-directory temporary file, keeps one backup, and uses `ReplaceFileW` on Windows.
 
+`src/features/profiles/useProfileDocument.ts` owns the open document, the profile list and execution snapshot, guarded save/save-as and run-profile designation with its effect, and the separate start-now offer; Files and Tuner consume it, and `src/app/profilePreference.ts` holds the shared open-profile precedence including the managed legacy-profile fallback. File discovery presentation, thumbnails, import, export and reveal stay in `useFileSettingsModel`.
+
 The editor keeps the selected source profile as the editing identity. A writable profile in the installation `ini` directory or the user-owned `%LOCALAPPDATA%\MacType\ControlCenter\profiles` directory is saved back to that same file. Installed read-only profiles and external files require an explicit Import or Save As operation; both create a user-owned copy without elevation. A profile selected by an existing installation's `MacType.ini` is opened directly when it already belongs to a known profile directory, so the UI does not ask the user to import a profile it can already edit.
 
 User-facing and persisted source identities are portable (`ini\Default.ini` or `Profiles\Foo.ini`) for files in those profile directories. Absolute paths are retained only for actual file I/O and reveal-in-Explorer actions. Applying is allowed only from a saved document and publishes the exact saved bytes into the service's protected generation; the generated `profile.ini`, digest, and runtime path remain internal implementation details. Imports are strictly decoded as INI documents, copied byte-for-byte, and receive a collision-safe name.
@@ -64,6 +68,8 @@ Changing the language updates visible text, the document title, accessibility la
 ## Skin boundary
 
 `features/` holds shared behaviour and shared bodies, `skins/<id>/` holds one skin's arrangement, and there is no `pages/`; a shell receives already-bound operations; it never pairs a callback with a setter itself.
+
+Runtime operations go through `runtime()` from `src/app/runtimeAdapter.ts`; there is no forwarding `app/tauri.ts`. Tuner modes are `guided` and `all`; guided setting keys and classes use `guided`, while `wizardGroup` names only the Wizard navigation area.
 
 The React tree is split into headless page models and skin shells. `src/features/<page>/use<Page>Model.ts` owns a page's state, IPC calls, busy flags and messages; `src/features/execution/ExecutionParts.tsx` and `src/features/profiles/ProfileEditorParts.tsx` hold the bodies every skin shows the same way (the migration dialog, the manual launcher, the settings body, the docked preview). `src/app/App.tsx` owns navigation, preferences and the installation status and renders one shell per skin through `ShellProps` (`src/app/shell.ts`, which also fixes the six navigation entries and their groups). A shell (`src/skins/<id>/`) arranges the models in its own paradigm and never re-implements an action. `skinPreference.ts` resolves the skin like the locale (`?skin=` wins and is persisted, then the stored choice, then `classic`) and applies it as `html[data-skin]`; `themePreference.ts` accepts `?theme=` the same way. Each skin's stylesheet lives in `src/styles/skins/<id>.css`, scoped to its `data-skin` value. The `PreferenceMenu` component backs both the language and the skin pickers so a skin restyles one popup. The frontend gallery renders every skin in both themes at every viewport and asserts no horizontal overflow, that the pickers stay reachable, that a chosen skin survives a reload, and shared behaviour on every skin through the shared contract; only skin-specific interactions are asserted per skin.
 

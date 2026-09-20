@@ -1,7 +1,7 @@
 import { AppWindow, Contrast, Download, RotateCcw, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ProfileEntry } from "../app/model";
-import { listProfiles, loadInstalledFontFamilies, pickPngExportPath, reportPreviewStudioReady, setNativePreview, writePreviewExport } from "../app/tauri";
+import { runtime } from "../app/runtimeAdapter";
 import { useAppTheme } from "../app/useAppTheme";
 import { Segmented } from "../components/Segmented";
 import { SwitchControl } from "../components/SwitchControl";
@@ -68,10 +68,10 @@ export function PreviewStudioApp() {
 
   useEffect(() => {
     let active = true;
-    void listProfiles().then((entries) => {
+    void runtime().listProfiles().then((entries) => {
       if (active) setProfiles(entries);
     }).catch(() => undefined);
-    void loadInstalledFontFamilies().then((families) => {
+    void runtime().loadInstalledFontFamilies().then((families) => {
       if (active) setFonts(families);
     }).catch(() => undefined);
     return () => { active = false; };
@@ -114,7 +114,7 @@ export function PreviewStudioApp() {
   useEffect(() => {
     if (readyReported.current || rendersA.lines.length + rendersB.lines.length === 0) return;
     readyReported.current = true;
-    void reportPreviewStudioReady();
+    void runtime().reportPreviewStudioReady();
   }, [rendersA.lines.length, rendersB.lines.length]);
   const palette = studioPalette(settings, theme);
 
@@ -182,9 +182,9 @@ export function PreviewStudioApp() {
       const boards = [{ label: sourceLabel(settings.sourceA, sourceA), lines: rendersA.lines }];
       if (twoBoards) boards.push({ label: sourceLabel(settings.sourceB, sourceB), lines: rendersB.lines });
       const png = await composeStudioPng(boards, palette.background, palette.foreground);
-      const path = await pickPngExportPath(t("studio.pngFilter"), `mactype-specimen-${new Date().toISOString().slice(0, 10)}.png`);
+      const path = await runtime().pickPngExportPath(t("studio.pngFilter"), `mactype-specimen-${new Date().toISOString().slice(0, 10)}.png`);
       if (!path) return;
-      const written = await writePreviewExport(path, png);
+      const written = await runtime().writePreviewExport(path, png);
       setExportMessage(t("studio.exported", { path: written }));
     } catch (caught: unknown) {
       setExportMessage(caught instanceof Error ? caught.message : String(caught));
@@ -194,7 +194,7 @@ export function PreviewStudioApp() {
   };
   const showNative = async () => {
     try {
-      await setNativePreview(true, {
+      await runtime().setNativePreview(true, {
         profilePath: sourceA.profilePath ?? undefined,
         overrides: sourceA.overrides,
         displayMode: "sample",

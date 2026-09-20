@@ -1,0 +1,83 @@
+{
+  "date": "2026-09-21",
+  "base_commit": "841e4a85ccc0bd75c530dae483452670f7b9bef3",
+  "source_main": "47b3b041a1f492376715cff01578eb66e53eaec1",
+  "branch": "codex/alpha-intake",
+  "delta": {
+    "44041bc": "M18 runtime() accessor, M4 shared profile document and precedence, M5 shared projection fields, preserving grouped alpha skin interfaces and Preview Studio.",
+    "811cf1c": "Guided vocabulary, modes guided/all, 38 keys renamed in each of ten catalogs with values and order unchanged.",
+    "c0dc90d": "Generated native-preview contract is the backend worker scope, not edited by the frontend worker."
+  },
+  "authority": [
+    "control-center/src/app/runtimeAdapter.ts",
+    "control-center/src/app/profilePreference.ts",
+    "control-center/src/app/executionViewModel.ts",
+    "control-center/src/features/profiles/useProfileDocument.ts",
+    "control-center/src/features/files/useFileSettingsModel.ts",
+    "control-center/src/app/shell.ts",
+    "control-center/src/styles/app.css",
+    "control-center/src/styles/skins"
+  ],
+  "baseline": "Production build passed before edits (1699 modules). Initial browser attempt blocked by occupied 4173. During concurrent native contract merge, a targeted run against baseline dist had 1 legacy-profile test pass and 4 expected new-selector/old-dist failures; this is not post-port validation.",
+  "environment": {
+    "os": "Windows 11 Education 10.0.22621",
+    "playwright": "1.61.1",
+    "browser": "Chromium 149.0.7827.55",
+    "viewports": [
+      "390x844",
+      "768x900",
+      "1280x800",
+      "1680x900 docking",
+      "shipped default window from tauri.conf.json",
+      "880x560 at deviceScaleFactor 2"
+    ],
+    "dpi": "96 standard; 192 focused specimen",
+    "native_capabilities": "Browser IPC/SVG simulation only; no installed Tauri, WebView2 or real helper/GDI validation."
+  },
+  "adjacent_regressions": [
+    "Files/Tuner shared preferred profile including managed legacy fallback in all four skins",
+    "Run profile designation absent/stopped/running and separate explicit start",
+    "Mutation recovery, save-as, save/discard, step-local guided history",
+    "Alpha Unity lists and all 41 settings including HookChildProcesses",
+    "Every skin/theme/locale, docking, native-preview simulation and Preview Studio"
+  ],
+  "gates": {
+    "install": "PASS frozen lockfile",
+    "i18n": "PASS 10 locales / 799 messages / 41 settings",
+    "catalog_value_identity": "PASS all ten catalogs match base after wizard.* to guided.* key mapping, including key order",
+    "settings": "PASS 41 scalar settings / structured INI / IControlCenter fallthrough",
+    "lint": "PASS",
+    "build": "PASS 1699 modules, existing >500 kB chunk warning",
+    "source_comments": "PASS 594 first-party files on final concurrent tree (earlier run: 583)",
+    "alpha_branch_policy": "PASS",
+    "diff_check": "PASS (generated LF/CRLF warnings only)",
+    "gallery": "Canonical CI=1 corepack pnpm test:gallery BLOCKED: 4173 remains occupied by worth-frontend Vite preview PID 38788. Full isolated run PASSED: 1060 passed, 59 skipped, total 1119, 7.7m, zero failed or flaky.",
+    "gallery_command": "CI=1 corepack pnpm exec playwright test -c ../.superloopy/evidence/frontend/20260921-main-intake/playwright-isolated.config.ts --workers=12 --fully-parallel",
+    "gallery_config_delta": "Uses the original testDir/testMatch/projects/reporters. Only port/baseURL 4283 and direct node Vite command differ. One absolute URL in skin-preview.spec.ts now uses the configured baseURL.",
+    "gallery_focused": "36 passed (10.8m including hung pnpm server teardown). All four skins: mode navigation, guided history, recovery, writable/read-only save, three designation states; all three package notices; managed legacy fallback.",
+    "gallery_first_full": "1058 passed, 59 skipped, 2 failed (10.6m). New managed-legacy assertion incorrectly demanded visibility of a responsive-hidden Console status code at mobile/tablet. Changed it to text identity; the guided screen and selected file still assert visible state. Focused rerun 3 passed (7.9s); final full run green.",
+    "vocabulary_audit": "PASS remaining wizard/Wizard references name the Wizard navigation area only; no tauri.ts import/getRuntimeAdapter, no wizard key family or CSS/step identifiers, no old profile modes."
+  },
+  "visual_review": {
+    "captures": [
+      "desktop-1280-classic-guided-start-ko.png",
+      "desktop-1280-console-guided-apply-ko.png",
+      "desktop-1280-cupertino-guided-rendering-ko.png",
+      "desktop-1280-fluent-guided-lcd-channels-ko.png"
+    ],
+    "location": "artifacts/frontend-gallery",
+    "findings": "Classic retains step index, profile identity and readable preview; Console retains compact apply controls and status strip; Cupertino retains grouped rendering choices and trailing preview; Fluent retains LCD controls and four current/R/G/B sample strips. No clipped labels, overlap, missing preview or changed skin arrangement in inspected captures. Browser images are simulated, not native rendering proof."
+  },
+  "limitations": [
+    "Initial build/lint/diff runs were blocked by concurrent nativeChrome merge markers; subsequent runs passed once the backend worker resolved them.",
+    "No unrelated server termination, config edits, commits, checkout/reset, or background commands.",
+    "No VISUAL_QA.md or other docs edited per task. Coordinator should add the visual findings to the canonical document.",
+    "The tool moved two foreground commands to background after its hard 600s timeout even though run_in_background was never requested. Waited for each to finish before handoff. First focused run had completed all assertions but hung in pnpm server teardown; stopped only this task-owned Vite PID 9432 after verifying its alpha-intake/4283 command. Runner then exited 0. Full isolated final run used direct node Vite and completed within 600s.",
+    "Frozen build generators rewrote generated settings with line-ending-only noise. No checkout/reset used; coordinator owns cleanup and native generated contracts."
+  ],
+  "artifacts": [
+    "gallery-isolated-final.log",
+    "gallery-isolated.log",
+    "playwright-isolated.config.ts"
+  ]
+}

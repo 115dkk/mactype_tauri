@@ -22,7 +22,7 @@ export function ClassicShell(props: ShellProps) {
 
   const page = useMemo(() => {
     if (view === "files") return <ClassicFiles onEditInTuner={props.operations.editInTuner} />;
-    if (view === "profiles") return <ClassicTuner ciSmoke={props.operations.ciSmoke} mode={profileMode} onModeChange={(mode) => navigate("profiles", mode)} onOpenStudio={props.operations.openPreviewStudio} onPreviewReady={() => props.operations.reportReady("profiles")} />;
+    if (view === "profiles") return <ClassicTuner ciSmoke={props.operations.ciSmoke} mode={profileMode} onOpenStudio={props.operations.openPreviewStudio} onPreviewReady={() => props.operations.reportReady("profiles")} />;
     if (view === "execution") return <ClassicExecution ciSmoke={props.operations.ciSmoke} onReady={() => props.operations.reportReady("execution")} />;
     if (view === "diagnostics") return <ClassicDiagnostics
       status={status}

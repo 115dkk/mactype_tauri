@@ -1,6 +1,6 @@
 import { FileInput, FolderOpen } from "lucide-react";
 import type { ShellProps } from "../../app/shell";
-import { previewImageUrl } from "../../app/tauri";
+import { runtime } from "../../app/runtimeAdapter";
 import { CurrentFileSummary, DesignateAction, FileMessages, RunProfileBadge } from "../../features/files/FileParts";
 import { THUMBNAIL_SAMPLE_TEXT, useFileSettingsModel } from "../../features/files/useFileSettingsModel";
 import { useI18n } from "../../i18n/i18n";
@@ -44,7 +44,7 @@ export function CupertinoFiles({ shell }: { shell: ShellProps }) {
                 <span aria-hidden="true" className="cupertino-radio" />
               </label>
               <span className="cupertino-thumb">
-                {thumbnail ? <img alt={t("files.thumbnailAlt", { name: entry.name })} loading="lazy" src={previewImageUrl(thumbnail.imagePath)} /> : <span aria-hidden="true">{THUMBNAIL_SAMPLE_TEXT}</span>}
+                {thumbnail ? <img alt={t("files.thumbnailAlt", { name: entry.name })} loading="lazy" src={runtime().previewImageUrl(thumbnail.imagePath)} /> : <span aria-hidden="true">{THUMBNAIL_SAMPLE_TEXT}</span>}
               </span>
               <div className="cupertino-row-copy">
                 <div className="cupertino-row-title">{entry.name}<RunProfileBadge className="cupertino-badge" entry={entry} model={model} /></div>

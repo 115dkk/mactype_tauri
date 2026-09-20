@@ -1,7 +1,7 @@
 import { FolderOpen, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { ManualLaunchCandidate } from "../../app/model";
-import { listManualLaunchCandidates, pickExecutable } from "../../app/tauri";
+import { runtime } from "../../app/runtimeAdapter";
 import type { I18nValue } from "../../i18n/i18n";
 
 interface UnityGamePickerProps {
@@ -41,7 +41,7 @@ export function UnityGamePicker({ games, onChange, t }: UnityGamePickerProps) {
   const loadCandidates = useCallback(async () => {
     setLoadingCandidates(true);
     try {
-      setCandidates(uniqueCandidates(await listManualLaunchCandidates()));
+      setCandidates(uniqueCandidates(await runtime().listManualLaunchCandidates()));
     } catch {
       setCandidates([]);
     } finally {
@@ -52,7 +52,7 @@ export function UnityGamePicker({ games, onChange, t }: UnityGamePickerProps) {
   useEffect(() => {
     let active = true;
     setLoadingCandidates(true);
-    void listManualLaunchCandidates()
+    void runtime().listManualLaunchCandidates()
       .then((loaded) => {
         if (active) setCandidates(uniqueCandidates(loaded));
       })
@@ -88,7 +88,7 @@ export function UnityGamePicker({ games, onChange, t }: UnityGamePickerProps) {
     else add(candidate.name);
   };
   const browse = async () => {
-    const selected = await pickExecutable(t("execution.executableFilter"));
+    const selected = await runtime().pickExecutable(t("execution.executableFilter"));
     if (selected) add(executableName(selected));
   };
 

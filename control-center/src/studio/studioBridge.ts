@@ -1,4 +1,4 @@
-import { emitStudioMessage, subscribeStudioMessage } from "../app/tauri";
+import { runtime } from "../app/runtimeAdapter";
 import type { StudioDocument } from "./studioModel";
 
 const DOCUMENT_CHANNEL = "studio:document";
@@ -9,22 +9,22 @@ const REQUEST_CHANNEL = "studio:request";
    Messages are Tauri events across windows, and a local event bus in the
    browser gallery. */
 export function publishStudioDocument(document: StudioDocument): void {
-  void emitStudioMessage(DOCUMENT_CHANNEL, document).catch(() => undefined);
+  void runtime().emitStudioMessage(DOCUMENT_CHANNEL, document).catch(() => undefined);
 }
 
 export function answerStudioRequests(current: () => StudioDocument | null): () => void {
-  return subscribeStudioMessage<unknown>(REQUEST_CHANNEL, () => {
+  return runtime().subscribeStudioMessage<unknown>(REQUEST_CHANNEL, () => {
     const document = current();
     if (document) publishStudioDocument(document);
   });
 }
 
 export function requestStudioDocument(): void {
-  void emitStudioMessage(REQUEST_CHANNEL, {}).catch(() => undefined);
+  void runtime().emitStudioMessage(REQUEST_CHANNEL, {}).catch(() => undefined);
 }
 
 export function subscribeStudioDocument(listener: (document: StudioDocument) => void): () => void {
-  return subscribeStudioMessage<StudioDocument>(DOCUMENT_CHANNEL, (document) => {
+  return runtime().subscribeStudioMessage<StudioDocument>(DOCUMENT_CHANNEL, (document) => {
     if (document && typeof document === "object" && "values" in document) listener(document);
   });
 }

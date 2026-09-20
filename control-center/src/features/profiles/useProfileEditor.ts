@@ -1,18 +1,18 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type RefObject } from "react";
 import { settingsSchema, type SettingDefinition } from "../../generated/settings";
 import { settingMessageKey, useI18n } from "../../i18n/i18n";
-import { loadInstalledFontFamilies } from "../../app/tauri";
+import { runtime } from "../../app/runtimeAdapter";
 import type { ListDefinition, ListKind } from "./ListsEditor";
 import { splitSubstitution } from "./profileEditorUtils";
 import type { PreviewVariant, ProfilePreviewHandle } from "./ProfilePreviewPanel";
 import { useProfileDocument, type ProfileDocument } from "./useProfileDocument";
 import { useStepHistory, type StepHistory } from "./useStepHistory";
-import { stepSupportsHistory, wizardStepIds, type WizardStepId } from "./wizardModel";
+import { stepSupportsHistory, guidedStepIds, type GuidedStepId } from "./guidedModel";
 import { answerStudioRequests, publishStudioDocument } from "../../studio/studioBridge";
 import type { StudioDocument } from "../../studio/studioModel";
 
 export type GroupId = "basic" | "shape" | "lcd" | "advanced" | "individual" | "lists";
-export type ProfileMode = "quick" | "advanced";
+export type ProfileMode = "guided" | "all";
 
 /* The guided step is a short column of choices and trades width for height
    readily, so it docks the preview early. The settings table needs room for a
@@ -24,7 +24,7 @@ export type ProfileMode = "quick" | "advanced";
    index, so docking by default costs roughly 1300 logical pixels of window.
    Raising it further would push the default past a 1366-wide laptop, and the
    preview only reads as a right column if it starts as one. */
-export const DOCKED_PREVIEW_MIN_WIDTH: Readonly<Record<ProfileMode, number>> = { quick: 780, advanced: 840 };
+export const DOCKED_PREVIEW_MIN_WIDTH: Readonly<Record<ProfileMode, number>> = { guided: 780, all: 840 };
 
 export interface ProfileEditorOptions {
   mode?: ProfileMode;
@@ -42,8 +42,8 @@ export interface ProfileEditorGroup {
 export interface ProfileEditorEditing {
   activeDefinition: ProfileEditorGroup;
   activeGroup: GroupId;
-  activeWizardLabel: string;
-  activeWizardStep: WizardStepId;
+  activeGuidedLabel: string;
+  activeGuidedStep: GuidedStepId;
   changeGuidedSetting: (settingId: string, value: number) => void;
   chooseGroup: (group: GroupId, focusList?: ListKind) => void;
   clearListFocus: () => void;
@@ -57,10 +57,10 @@ export interface ProfileEditorEditing {
   listFocus: ListKind | null;
   mode: ProfileMode;
   query: string;
-  setActiveWizardStep: Dispatch<SetStateAction<WizardStepId>>;
+  setActiveGuidedStep: Dispatch<SetStateAction<GuidedStepId>>;
   setQuery: Dispatch<SetStateAction<string>>;
   stepIndex: number;
-  wizardStepIds: readonly WizardStepId[];
+  guidedStepIds: readonly GuidedStepId[];
 }
 
 export interface ProfileEditorHistory {
@@ -99,7 +99,7 @@ export interface ProfileEditor {
   files: ProfileEditorFiles;
 }
 
-export function useProfileEditor({ mode = "advanced" }: ProfileEditorOptions = {}): ProfileEditor {
+export function useProfileEditor({ mode = "all" }: ProfileEditorOptions = {}): ProfileEditor {
   const { locale, t } = useI18n();
   const groups = useMemo<ReadonlyArray<ProfileEditorGroup>>(() => [
     { id: "basic", label: t("group.basic.label"), description: t("group.basic.description") },
@@ -145,7 +145,7 @@ export function useProfileEditor({ mode = "advanced" }: ProfileEditorOptions = {
   /* A list another group sends the reader to; the lists editor scrolls to it
      once and clears it. */
   const [listFocus, setListFocus] = useState<ListKind | null>(null);
-  const [activeWizardStep, setActiveWizardStep] = useState<WizardStepId>("start");
+  const [activeGuidedStep, setActiveGuidedStep] = useState<GuidedStepId>("start");
   /* Step-scoped guided history. Advanced mode can rewrite the document
      through the global backend history, so the per-step record resets when
      the mode or the open document changes. */
@@ -154,7 +154,7 @@ export function useProfileEditor({ mode = "advanced" }: ProfileEditorOptions = {
   const [fontFace, setFontFace] = useState("Segoe UI");
   const [query, setQuery] = useState("");
   const [saveAsOpen, setSaveAsOpen] = useState(false);
-  const [saveAsName, setSaveAsName] = useState("");
+  const { copyName: saveAsName, setCopyName: setSaveAsName } = document;
   const [previewDocked, setPreviewDocked] = useState(false);
   const previewPanelRef = useRef<ProfilePreviewHandle>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -173,17 +173,17 @@ export function useProfileEditor({ mode = "advanced" }: ProfileEditorOptions = {
 
   const guidedBusy = !profile || busy || recoveryRequired;
   const changeGuidedSetting = (settingId: string, value: number) => {
-    if (stepSupportsHistory(activeWizardStep)) {
-      stepHistory.record(activeWizardStep, settingId, value, profile?.values[settingId] ?? value);
+    if (stepSupportsHistory(activeGuidedStep)) {
+      stepHistory.record(activeGuidedStep, settingId, value, profile?.values[settingId] ?? value);
     }
     changeSetting(settingId, value);
   };
   const undoStepEdit = () => {
-    const entry = stepHistory.undo(activeWizardStep);
+    const entry = stepHistory.undo(activeGuidedStep);
     if (entry) changeSetting(entry.settingId, entry.before);
   };
   const redoStepEdit = () => {
-    const entry = stepHistory.redo(activeWizardStep);
+    const entry = stepHistory.redo(activeGuidedStep);
     if (entry) changeSetting(entry.settingId, entry.after);
   };
 
@@ -191,7 +191,7 @@ export function useProfileEditor({ mode = "advanced" }: ProfileEditorOptions = {
      fields keep their native editing shortcuts, and the default is only
      prevented when this step actually has something to undo or redo. */
   useEffect(() => {
-    if (mode !== "quick") return undefined;
+    if (mode !== "guided") return undefined;
     const listener = (event: KeyboardEvent) => {
       if (!event.ctrlKey || event.altKey || event.metaKey) return;
       const target = event.target;
@@ -201,10 +201,10 @@ export function useProfileEditor({ mode = "advanced" }: ProfileEditorOptions = {
       const wantsUndo = key === "z" && !event.shiftKey;
       const wantsRedo = key === "y" || (key === "z" && event.shiftKey);
       if ((!wantsUndo && !wantsRedo) || guidedBusy) return;
-      if (wantsUndo && stepHistory.canUndo(activeWizardStep)) {
+      if (wantsUndo && stepHistory.canUndo(activeGuidedStep)) {
         event.preventDefault();
         undoStepEdit();
-      } else if (wantsRedo && stepHistory.canRedo(activeWizardStep)) {
+      } else if (wantsRedo && stepHistory.canRedo(activeGuidedStep)) {
         event.preventDefault();
         redoStepEdit();
       }
@@ -235,7 +235,7 @@ export function useProfileEditor({ mode = "advanced" }: ProfileEditorOptions = {
 
   useEffect(() => {
     let active = true;
-    void loadInstalledFontFamilies()
+    void runtime().loadInstalledFontFamilies()
       .then((families) => {
         if (!active) return;
         setInstalledFonts(families);
@@ -286,41 +286,38 @@ export function useProfileEditor({ mode = "advanced" }: ProfileEditorOptions = {
      height the step body needs. */
   const previewVariants = useMemo<ReadonlyArray<PreviewVariant>>(() => {
     const pangram = t("profiles.samplePangram");
-    if (mode === "quick" && activeWizardStep === "boldItalic") {
+    if (mode === "guided" && activeGuidedStep === "boldItalic") {
       return [
-        { key: "bold", label: t("wizard.previewBold"), text: pangram, bold: true },
-        { key: "italic", label: t("wizard.previewItalic"), text: pangram, italic: true },
-        { key: "bold-italic", label: t("wizard.previewBoldItalic"), text: pangram, bold: true, italic: true },
+        { key: "bold", label: t("guided.previewBold"), text: pangram, bold: true },
+        { key: "italic", label: t("guided.previewItalic"), text: pangram, italic: true },
+        { key: "bold-italic", label: t("guided.previewBoldItalic"), text: pangram, bold: true, italic: true },
       ];
     }
-    if (mode === "quick" && activeWizardStep === "lcd") {
+    if (mode === "guided" && activeGuidedStep === "lcd") {
       return [
-        { key: "current", label: t("wizard.previewCurrent"), text: pangram },
+        { key: "current", label: t("guided.previewCurrent"), text: pangram },
         { key: "channel-r", label: "R", text: pangram, foreground: "#C80000" },
         { key: "channel-g", label: "G", text: pangram, foreground: "#008A00" },
         { key: "channel-b", label: "B", text: pangram, foreground: "#0000C8" },
       ];
     }
     return [{ key: "normal", label: null }];
-  }, [activeWizardStep, mode, t]);
+  }, [activeGuidedStep, mode, t]);
 
   const activeDefinition = groups.find((group) => group.id === activeGroup) ?? groups[0];
-  const activeWizardLabel = t(`wizard.${activeWizardStep}`);
-  const stepIndex = wizardStepIds.indexOf(activeWizardStep);
+  const activeGuidedLabel = t(`guided.${activeGuidedStep}`);
+  const stepIndex = guidedStepIds.indexOf(activeGuidedStep);
   const chooseGroup = (group: GroupId, focusList?: ListKind) => {
     setActiveGroup(group);
     setQuery("");
     setListFocus(focusList ?? null);
   };
   const clearListFocus = () => setListFocus(null);
-  const headingText = mode === "quick" ? activeWizardLabel : query ? t("profiles.searchResults") : activeDefinition.label;
-  const headingHint = mode === "quick" ? t("wizard.guidance") : query ? t("profiles.searchDescription", { query }) : activeDefinition.description;
+  const headingText = mode === "guided" ? activeGuidedLabel : query ? t("profiles.searchResults") : activeDefinition.label;
+  const headingHint = mode === "guided" ? t("guided.guidance") : query ? t("profiles.searchDescription", { query }) : activeDefinition.description;
   const submitSaveAs = () => {
-    void document.saveProfileAs(saveAsName).then((saved) => {
-      if (saved) {
-        setSaveAsName("");
-        setSaveAsOpen(false);
-      }
+    void document.saveProfileAs().then((saved) => {
+      if (saved) setSaveAsOpen(false);
     });
   };
 
@@ -329,8 +326,8 @@ export function useProfileEditor({ mode = "advanced" }: ProfileEditorOptions = {
     editing: {
       activeDefinition,
       activeGroup,
-      activeWizardLabel,
-      activeWizardStep,
+      activeGuidedLabel,
+      activeGuidedStep,
       changeGuidedSetting,
       chooseGroup,
       clearListFocus,
@@ -344,10 +341,10 @@ export function useProfileEditor({ mode = "advanced" }: ProfileEditorOptions = {
       listFocus,
       mode,
       query,
-      setActiveWizardStep,
+      setActiveGuidedStep,
       setQuery,
       stepIndex,
-      wizardStepIds,
+      guidedStepIds,
     },
     history: {
       redoStepEdit,

@@ -1,6 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { skinStorageKey } from "./skinPreference";
-import { reportFrontendFailure } from "./tauri";
+import { runtime } from "./runtimeAdapter";
 
 interface AppErrorBoundaryProps {
   children: ReactNode;
@@ -23,7 +23,7 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
-    void reportFrontendFailure("overview", `${error.message}\n${info.componentStack ?? ""}`).catch(() => undefined);
+    void runtime().reportFrontendFailure("overview", `${error.message}\n${info.componentStack ?? ""}`).catch(() => undefined);
   }
 
   private recover = (resetSkin: boolean) => {

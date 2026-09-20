@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PreviewEngine } from "../../app/model";
-import { previewImageUrl } from "../../app/tauri";
+import { runtime } from "../../app/runtimeAdapter";
 import { useI18n } from "../../i18n/i18n";
 import { specimenPalette } from "./specimenPalette";
 import { wrapSample } from "./wrapSample";
@@ -82,7 +82,7 @@ export function SpecimenBoard({ profilePath, overrides, engine, fontFace, sizes,
       {lines.length > 0 ? lines.map((line) => (
         <figure className="specimen-strip" data-size={line.request.fontSizePt} key={line.key}>
           {labelled && <figcaption>{line.request.fontSizePt}</figcaption>}
-          <img alt={t("profiles.previewImageAlt")} height={line.result.height / displayScale} src={previewImageUrl(line.result.imagePath)} width={line.result.width / displayScale} />
+          <img alt={t("profiles.previewImageAlt")} height={line.result.height / displayScale} src={runtime().previewImageUrl(line.result.imagePath)} width={line.result.width / displayScale} />
         </figure>
       )) : sizes.map((size) => (
         /* The placeholder keeps the strip's eventual height, and its own line

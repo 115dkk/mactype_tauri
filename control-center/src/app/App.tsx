@@ -2,7 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useState, type ReactElement
 import { useI18n } from "../i18n/i18n";
 import { fallbackStatus, type InstallationStatus, type ViewId } from "./model";
 import { navEntries, type ProfileMode, type ShellProps } from "./shell";
-import { loadLaunchContext, openPreviewStudio, reconnectPreview, rediscoverInstallation, reportFrontendFailure, reportFrontendReady, scanInstallation, verifyTrayModeForCi } from "./tauri";
+import { runtime } from "./runtimeAdapter";
 import { applySkinPreference, loadSkinPreference, type SkinPreference } from "./skinPreference";
 import { applyThemePreference, loadThemePreference, type ThemePreference } from "./themePreference";
 import { ClassicShell } from "../skins/classic/ClassicShell";
@@ -69,7 +69,7 @@ export function App({ initialTheme = loadThemePreference(), initialSkin = loadSk
   const studioOpening = useRef(false);
   const [state, dispatch] = useReducer(reducer, {
     view: "overview",
-    profileMode: "advanced",
+    profileMode: "all",
     theme: initialTheme,
     skin: initialSkin,
     status: fallbackStatus,
@@ -81,10 +81,10 @@ export function App({ initialTheme = loadThemePreference(), initialSkin = loadSk
 
   useEffect(() => {
     let active = true;
-    void Promise.all([loadLaunchContext(), scanInstallation()]).then(([context, status]) => {
+    void Promise.all([runtime().loadLaunchContext(), runtime().scanInstallation()]).then(([context, status]) => {
       if (!active) return;
       dispatch({ type: "launched", view: context.view, ciSmoke: context.ciSmoke, trayStart: context.trayStart, previewStudioSmoke: context.previewStudioSmoke ?? false });
-      if (context.ciSmoke && context.previewStudioSmoke) void openPreviewStudio().catch((error: unknown) => reportFrontendFailure("overview", String(error)));
+      if (context.ciSmoke && context.previewStudioSmoke) void runtime().openPreviewStudio().catch((error: unknown) => runtime().reportFrontendFailure("overview", String(error)));
       if (status) dispatch({ type: "status", status });
     });
     return () => {
@@ -106,30 +106,30 @@ export function App({ initialTheme = loadThemePreference(), initialSkin = loadSk
     document.body.dataset.profileMode = state.profileMode;
     document.body.dataset.rendered = "true";
     if (state.ciSmoke && state.trayStart) {
-      void verifyTrayModeForCi()
-        .then(() => reportFrontendReady(state.view))
-        .catch((error: unknown) => reportFrontendFailure(state.view, error instanceof Error ? error.message : String(error)));
+      void runtime().verifyTrayModeForCi()
+        .then(() => runtime().reportFrontendReady(state.view))
+        .catch((error: unknown) => runtime().reportFrontendFailure(state.view, error instanceof Error ? error.message : String(error)));
     } else if (!state.ciSmoke || (state.view !== "profiles" && state.view !== "execution")) {
-      void reportFrontendReady(state.view);
+      void runtime().reportFrontendReady(state.view);
     }
   }, [state.ciSmoke, state.previewStudioSmoke, state.profileMode, state.ready, state.trayStart, state.view]);
 
   const navigate = useCallback((view: ViewId, profileMode?: ProfileMode) => dispatch({ type: "navigate", view, profileMode }), []);
   const reconnect = useCallback(async () => {
-    dispatch({ type: "status", status: await reconnectPreview() });
+    dispatch({ type: "status", status: await runtime().reconnectPreview() });
   }, []);
   const rediscover = useCallback(async () => {
-    dispatch({ type: "status", status: await rediscoverInstallation() });
+    dispatch({ type: "status", status: await runtime().rediscoverInstallation() });
   }, []);
-  const editInTuner = useCallback(() => navigate("profiles", "advanced"), [navigate]);
-  const reportReady = useCallback((view: ViewId) => { void reportFrontendReady(view); }, []);
+  const editInTuner = useCallback(() => navigate("profiles", "all"), [navigate]);
+  const reportReady = useCallback((view: ViewId) => { void runtime().reportFrontendReady(view); }, []);
   const setSkin = useCallback((skin: SkinPreference) => dispatch({ type: "skin", skin }), []);
   const toggleTheme = useCallback(() => dispatch({ type: "toggle-theme" }), []);
   const studio = useCallback(() => {
     if (studioOpening.current) return;
     studioOpening.current = true;
     setStudioError(null);
-    void openPreviewStudio().catch((error: unknown) => setStudioError(error instanceof Error ? error.message : String(error))).finally(() => { studioOpening.current = false; });
+    void runtime().openPreviewStudio().catch((error: unknown) => setStudioError(error instanceof Error ? error.message : String(error))).finally(() => { studioOpening.current = false; });
   }, []);
 
   const Shell = shells[state.skin];

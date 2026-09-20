@@ -1,6 +1,6 @@
 import { Copy, Download, FileInput, FileText, FolderOpen, Save } from "lucide-react";
 import type { ShellProps } from "../../app/shell";
-import { previewImageUrl } from "../../app/tauri";
+import { runtime } from "../../app/runtimeAdapter";
 import { CurrentFileSummary, DesignateAction, FileMessages, RunProfileBadge } from "../../features/files/FileParts";
 import { THUMBNAIL_SAMPLE_TEXT, useFileSettingsModel } from "../../features/files/useFileSettingsModel";
 import { useI18n } from "../../i18n/i18n";
@@ -41,7 +41,7 @@ export function FluentFiles({ shell }: { shell: ShellProps }) {
               <li className="fluent-pcard" {...model.profiles.runProfileAttributes(entry)} data-selected={selected} key={entry.path}>
                 <button aria-pressed={selected} className="fluent-pcard-select" disabled={busy !== null} onClick={() => void model.profiles.chooseProfile(entry.path)} type="button">
                   <span className="fluent-thumb">
-                    {thumbnail ? <img alt={t("files.thumbnailAlt", { name: entry.name })} loading="lazy" src={previewImageUrl(thumbnail.imagePath)} /> : <span aria-hidden="true" className="fluent-thumb-fallback">{THUMBNAIL_SAMPLE_TEXT}</span>}
+                    {thumbnail ? <img alt={t("files.thumbnailAlt", { name: entry.name })} loading="lazy" src={runtime().previewImageUrl(thumbnail.imagePath)} /> : <span aria-hidden="true" className="fluent-thumb-fallback">{THUMBNAIL_SAMPLE_TEXT}</span>}
                   </span>
                   <span className="fluent-pcard-name"><strong>{entry.name}</strong><RunProfileBadge className="fluent-badge" entry={entry} model={model} /></span>
                   <code title={entry.path}>{entry.displayPath}</code>

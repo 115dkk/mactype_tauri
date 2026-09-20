@@ -1,4 +1,4 @@
-import { previewImageUrl } from "../app/tauri";
+import { runtime } from "../app/runtimeAdapter";
 import type { SpecimenLine } from "../features/preview/useSpecimenRenders";
 
 interface ExportBoard {
@@ -15,7 +15,7 @@ function loadImage(path: string): Promise<HTMLImageElement> {
     const image = new Image();
     image.onload = () => resolve(image);
     image.onerror = () => reject(new Error("specimen image failed to load"));
-    image.src = previewImageUrl(path);
+    image.src = runtime().previewImageUrl(path);
   });
 }
 

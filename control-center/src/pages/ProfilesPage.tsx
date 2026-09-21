@@ -1,4 +1,4 @@
-import { ListRestart, Play, Redo2, RotateCcw, Save, SaveAll, Search, Undo2, X } from "lucide-react";
+import { BadgeCheck, ListRestart, Redo2, RotateCcw, Save, SaveAll, Search, Undo2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Hint } from "../components/Hint";
 import { settingsSchema } from "../generated/settings";
@@ -255,7 +255,7 @@ export function ProfilesPage({ ciSmoke = false, mode = "all", onPreviewReady }: 
           <button className="button secondary compact-action" disabled={!profile || busy || recoveryRequired} onClick={resetDefaults} title={t("profiles.resetDefaultsDescription")} type="button"><ListRestart aria-hidden="true" size={14} /> {t("profiles.resetDefaults")}</button>
           <button className="button secondary compact-action" disabled={!profile || !profile.canSave || dirtyCount === 0 || busy || recoveryRequired} onClick={() => void saveCurrentProfile()} type="button"><Save aria-hidden="true" size={14} /> {profileCommand === "save" ? t("profiles.saving") : t("profiles.saveNow")}</button>
           {profile && !profile.canSave && <button className="button secondary compact-action" disabled={busy || recoveryRequired} onClick={() => setSaveAsOpen(true)} type="button"><SaveAll aria-hidden="true" size={14} /> {t("files.saveAs")}</button>}
-          <button className="button primary compact-action" disabled={!profile || dirtyCount > 0 || busy || recoveryRequired} onClick={() => void designateProfile()} title={dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button"><Play aria-hidden="true" size={14} /> {profileCommand === "designate" ? t("profiles.designating") : t("profiles.designate")}</button>
+          <button className="button designate compact-action" disabled={!profile || dirtyCount > 0 || busy || recoveryRequired} onClick={() => void designateProfile()} title={dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button"><BadgeCheck aria-hidden="true" size={14} /> {profileCommand === "designate" ? t("profiles.designating") : t("profiles.designate")}</button>
         </div>}
       </header>
 

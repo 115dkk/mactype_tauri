@@ -4,10 +4,20 @@ import { operationErrorMessage } from "../../app/operationError";
 import { openPreferredProfile, rememberProfile } from "../../app/profilePreference";
 import { runtime } from "../../app/runtimeAdapter";
 import { settingsSchema } from "../../generated/settings";
-import { fileName, managedProfileFor } from "../../pages/profiles/profileEditorUtils";
+import { fileName, managedProfileFor, matchesAppliedProfile, profileNameStem, reservedProfileNameCharacters } from "../../pages/profiles/profileEditorUtils";
 import type { I18nValue } from "../../i18n/i18n";
 
 type ProfileCommand = "undo" | "redo" | "discard" | "save" | "save-as" | "designate" | "open" | "import" | "export" | "reveal" | "start";
+
+/* What a completed save still owes the service. "designate" follows a save as,
+   which leaves a profile the service has never seen; "apply-to-service"
+   follows a save over the run profile, which the running service will not
+   read on its own. */
+export type ProfileFollowUp = "designate" | "apply-to-service";
+
+/* Mirrors the managed-directory collision the Tauri side enforces, so the
+   naming dialog can refuse a taken name without a round trip. */
+export type ProfileNameVerdict = "ok" | "empty" | "taken" | "reserved-character";
 
 interface ProfileDocumentOptions {
   page?: "files" | "profiles";
@@ -52,7 +62,11 @@ export function useProfileDocument(t: I18nValue["t"], { page = "profiles", disco
   const [appliedProfile, setAppliedProfile] = useState<string | null>(null);
   const [execution, setExecution] = useState<ExecutionStatus | null>(null);
   const [designationEffect, setDesignationEffect] = useState<DesignationEffect | null>(null);
-  const [copyName, setCopyName] = useState("");
+  /* Which unfinished consequence the last successful save left behind. The
+     service resolves its profile generation once at startup and accepts no
+     reload control, so saving the run profile leaves the running service on
+     the previous bytes until the user publishes them. */
+  const [followUp, setFollowUp] = useState<ProfileFollowUp | null>(null);
   const [values, setValues] = useState<Record<string, number>>(
     Object.fromEntries(settingsSchema.map((setting) => [setting.id, setting.default])),
   );
@@ -84,6 +98,8 @@ export function useProfileDocument(t: I18nValue["t"], { page = "profiles", disco
       .then((snapshot) => {
         if (snapshot) setProfile(snapshot);
         setMessage(null);
+        setFollowUp(null);
+        setDesignationEffect(null);
       })
       .catch((caught: unknown) => {
         setRecoveryRequired(true);
@@ -175,6 +191,7 @@ export function useProfileDocument(t: I18nValue["t"], { page = "profiles", disco
     if (pendingEdits > 0 || command !== null) return false;
     setCommand(nextCommand);
     setDesignationEffect(null);
+    setFollowUp(null);
     try {
       await mutationQueue.current;
       const success = await action();
@@ -220,34 +237,42 @@ export function useProfileDocument(t: I18nValue["t"], { page = "profiles", disco
     return replaceDocument("open", () => runtime().openProfile(path), (opened) => t("files.opened", { name: fileName(opened.path) }));
   };
 
-  const designateProfile = async () => {
+  /* One command, two framings. "designate" makes this profile the run profile;
+     "apply-to-service" republishes the run profile the user has just edited. */
+  const designateProfile = async (intent: ProfileFollowUp = "designate") => {
     if (!profile || recoveryRequired || dirtyKeys.length > 0) return;
     await runCommand("designate", async () => {
       const designated = await runtime().designateOpenProfile();
       setAppliedProfile(designated.sourceProfile);
       setDesignationEffect(designated.effect);
       setExecution(await runtime().loadExecutionStatus());
-      return t(designated.effect === "live" ? "profiles.designatedLive" : "profiles.designatedNextStart", { name: fileName(designated.sourceProfile) });
+      const live = designated.effect === "live";
+      const key = intent === "apply-to-service"
+        ? (live ? "profiles.appliedLive" : "profiles.appliedNextStart")
+        : (live ? "profiles.designatedLive" : "profiles.designatedNextStart");
+      return t(key, { name: fileName(designated.sourceProfile) });
     }, (caught) => operationErrorMessage(caught, t));
   };
 
-  const saveProfileAs = async () => {
-    const name = copyName.trim();
+  const saveProfileAs = async (requestedName: string) => {
+    const name = requestedName.trim();
     if (!profile || recoveryRequired || !name) return false;
     const saved = await replaceDocument("save-as", () => runtime().duplicateProfile(name), (opened) => page === "files"
       ? t("files.duplicated", { name: fileName(opened.path) })
       : t("profiles.savedAs", { path: opened.displayPath }));
-    if (saved) setCopyName("");
+    if (saved) setFollowUp("designate");
     return saved;
   };
 
   const saveCurrentProfile = async () => {
     if (!profile?.canSave || recoveryRequired || dirtyKeys.length === 0) return;
-    await replaceDocument("save", async () => {
-      const saved = await runtime().saveProfile();
-      if (!saved) throw new Error(t("profiles.none"));
-      return saved;
+    const written = { path: profile.path, displayPath: profile.displayPath };
+    const saved = await replaceDocument("save", async () => {
+      const next = await runtime().saveProfile();
+      if (!next) throw new Error(t("profiles.none"));
+      return next;
     }, (opened) => t(page === "files" ? "files.saved" : "profiles.savedNow", { name: fileName(opened.path) }));
+    if (saved && matchesAppliedProfile(written, appliedProfile)) setFollowUp("apply-to-service");
   };
 
   const serviceCanStart = Boolean(
@@ -268,6 +293,37 @@ export function useProfileDocument(t: I18nValue["t"], { page = "profiles", disco
     }, (caught) => operationErrorMessage(caught, t, "execution.operationFailed"));
   };
 
+  /* The Tauri side writes every copy into the managed profile directory, so a
+     name collides only with the profiles already shown as Profiles\<name>.ini. */
+  const managedProfileNames = useMemo(
+    () => new Set(
+      profiles
+        .filter((entry) => entry.displayPath.toLocaleLowerCase().startsWith("profiles\\"))
+        .map((entry) => profileNameStem(entry.path).toLocaleLowerCase()),
+    ),
+    [profiles],
+  );
+
+  const profileNameVerdict = useCallback((candidate: string): ProfileNameVerdict => {
+    const name = candidate.trim();
+    if (!name) return "empty";
+    if (reservedProfileNameCharacters.test(name)) return "reserved-character";
+    return managedProfileNames.has(name.toLocaleLowerCase()) ? "taken" : "ok";
+  }, [managedProfileNames]);
+
+  /* Save As opens on the current name, the way Windows does, but advanced past
+     any collision so the dialog never opens already refusing itself. */
+  const suggestedProfileName = useMemo(() => {
+    if (!profile) return "";
+    const stem = profileNameStem(profile.path);
+    if (!managedProfileNames.has(stem.toLocaleLowerCase())) return stem;
+    for (let index = 2; index < 1000; index += 1) {
+      const candidate = `${stem} (${index})`;
+      if (!managedProfileNames.has(candidate.toLocaleLowerCase())) return candidate;
+    }
+    return stem;
+  }, [managedProfileNames, profile]);
+
   const dirtyKeys = useMemo(() => {
     const keys = new Set(profile?.dirtyKeys ?? []);
     if (profile) {
@@ -283,14 +339,15 @@ export function useProfileDocument(t: I18nValue["t"], { page = "profiles", disco
   return {
     appliedProfile,
     chooseProfile,
-    copyName,
     designationEffect,
+    followUp,
     offerStart,
     profiles,
+    profileNameVerdict,
     replaceDocument,
     runFileOperation,
-    setCopyName,
     startServiceNow,
+    suggestedProfileName,
     addIndividual,
     advanced,
     designateProfile,

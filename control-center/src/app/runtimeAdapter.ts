@@ -16,6 +16,7 @@ import type {
   PreviewResult,
   ProfileEntry,
   ProfileSnapshot,
+  RepublishOutcome,
   EventFilter,
   EventLogSummary,
   EventRecord,
@@ -41,6 +42,9 @@ export interface ControlCenterRuntimeAdapter {
   launchTargetWithMactype(target: string, arguments_: ReadonlyArray<string>): Promise<number>;
   scanInstallation(): Promise<InstallationStatus | null>;
   designateOpenProfile(): Promise<AppliedProfile>;
+  /* Publishes the designated profile straight from its file, never the open
+     document, which may be another profile or the same one still being edited. */
+  republishRunProfile(): Promise<RepublishOutcome>;
   registerSessionTarget(target: string, arguments_: ReadonlyArray<string>): Promise<ReadonlyArray<SessionTarget>>;
   removeSessionTarget(target: string): Promise<ReadonlyArray<SessionTarget>>;
   launchRegisteredTargets(): Promise<ReadonlyArray<number>>;

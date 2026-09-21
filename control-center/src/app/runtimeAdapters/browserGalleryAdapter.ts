@@ -12,6 +12,7 @@ import {
   type PreviewRequest,
   type PreviewResult,
   type ProfileSnapshot,
+  type RepublishOutcome,
   type EventFilter,
   type EventLogSummary,
   type EventRecord,
@@ -203,6 +204,25 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
     });
   },
 
+  republishRunProfile(): Promise<RepublishOutcome> {
+    const query = new URLSearchParams(window.location.search);
+    const current = currentGalleryExecutionStatus();
+    if (query.get("service-fail") === "republish-profile" || !current.activeProfile) {
+      return Promise.reject(new Error("control-center-internal-operation-failed:republish-profile"));
+    }
+    const live = current.systemService.runtime === "running";
+    const next = transitionGalleryRunProfile(current, current.activeProfile, live);
+    const complete = (): RepublishOutcome => ({
+      effect: live ? "live" : "next-start",
+      status: updateGalleryExecutionStatus(next),
+    });
+    const delay = Number(query.get("service-delay"));
+    if (Number.isFinite(delay) && delay > 0) {
+      return new Promise((resolve) => window.setTimeout(() => resolve(complete()), delay));
+    }
+    return Promise.resolve(complete());
+  },
+
   registerSessionTarget(target: string, arguments_: ReadonlyArray<string>): Promise<ReadonlyArray<SessionTarget>> {
     return Promise.resolve<ReadonlyArray<SessionTarget>>([{ target, arguments: arguments_ }]);
   },
@@ -367,7 +387,13 @@ export const browserGalleryAdapter: ControlCenterRuntimeAdapter = {
   },
 
   saveProfile(): Promise<ProfileSnapshot | null> {
-    return Promise.resolve(galleryProfiles.save());
+    const profile = galleryProfiles.current();
+    const current = currentGalleryExecutionStatus();
+    const saved = galleryProfiles.save();
+    if (profile.dirtyKeys.length > 0 && profile.displayPath === current.activeProfile && current.runProfilePublication !== "unknown") {
+      updateGalleryExecutionStatus({ ...current, runProfilePublication: "pending" });
+    }
+    return Promise.resolve(saved);
   },
 
   renderProfilePreview(request): Promise<PreviewResult | null> {

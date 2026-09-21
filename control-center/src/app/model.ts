@@ -36,7 +36,19 @@ export interface ExecutionStatus {
   injectionReady: boolean;
   activeProfile: string | null;
   expectedProfileDigest: string | null;
+  /** Whether the designated profile's file on disk is what was last published. */
+  runProfilePublication: RunProfilePublication;
   sessionTargets: ReadonlyArray<SessionTarget>;
+}
+
+/* "pending" means the user changed the run profile and the Control Center has
+   not published it. Whether a running service agrees with the machine is a
+   separate question, answered by the profile-mismatch state. */
+export type RunProfilePublication = "published" | "pending" | "unknown";
+
+export interface RepublishOutcome {
+  effect: DesignationEffect;
+  status: ExecutionStatus;
 }
 
 export interface StructuredServiceError {

@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { StatusDot } from "../../components/StatusDot";
 import { SwitchControl } from "../../components/SwitchControl";
 import { eventTime } from "../../features/events/eventText";
-import { ExecutionMessages, LegacyServiceControls, LegacyTrayConflict, ManualLaunchBody, MigrationConfirmation, RegisteredTargetsBody, ServicePackageNotice, ServiceSummaryNoticeAndActions, SystemServiceControls } from "../../features/execution/ExecutionParts";
+import { RunProfilePendingNotice, ExecutionMessages, LegacyServiceControls, LegacyTrayConflict, ManualLaunchBody, MigrationConfirmation, RegisteredTargetsBody, ServicePackageNotice, ServiceSummaryNoticeAndActions, SystemServiceControls } from "../../features/execution/ExecutionParts";
 import { useI18n } from "../../i18n/i18n";
 import { ConsoleFrame, ConsoleKv, ConsolePanel } from "./ConsoleFrame";
 import { useConsole } from "./consoleContext";
@@ -32,6 +32,7 @@ export function ConsoleExecution() {
   return (
     <ConsoleFrame
       actions={<button className="button secondary" onClick={() => void model.service.refresh()} type="button"><RefreshCw aria-hidden="true" size={14} /> {t("execution.refresh")}</button>}
+      notice={<RunProfilePendingNotice model={model} />}
       bodyClassName="console-cols-side-main"
       crumb={t("nav.wizardGroup")}
       status={<ConsoleServiceStatus />}

@@ -258,3 +258,6 @@ html[data-skin="fluent"] .event-chip[aria-pressed="true"] { background: var(--fl
   html[data-skin="fluent"] .fluent-two { display: block; }
   html[data-skin="fluent"] .fluent-workspace { display: block; }
 }
+
+html[data-skin="fluent"] .profile-name-dialog { border-color: var(--color-border-strong); border-radius: var(--radius-control); background: var(--color-surface); box-shadow: var(--shadow-window); }
+html[data-skin="fluent"] .button[data-dirty="true"] { border-color: var(--color-primary); color: color-mix(in srgb, var(--color-primary) 85%, var(--color-foreground)); }

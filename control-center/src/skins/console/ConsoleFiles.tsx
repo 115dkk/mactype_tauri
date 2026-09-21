@@ -1,6 +1,6 @@
 import { FileInput, FileOutput, FolderOpen, Save, SaveAll, Search, SlidersHorizontal } from "lucide-react";
 import { useState } from "react";
-import { CurrentFileSummary, DesignateAction, FileMessages, RunProfileBadge } from "../../features/files/FileParts";
+import { CurrentFileSummary, FileNameDialog, DesignateAction, FileMessages, RunProfileBadge } from "../../features/files/FileParts";
 import { useFileSettingsModel } from "../../features/files/useFileSettingsModel";
 import { SpecimenBoard } from "../../features/preview/SpecimenBoard";
 import { substitutedPreviewFont } from "../../features/preview/previewFonts";
@@ -90,10 +90,11 @@ export function ConsoleFiles() {
         ]} />
         <div className="console-spacer" />
         <div className="console-saveas">
-          <input aria-label={t("profiles.copyName")} className="console-field" disabled={!profile || busy !== null} onChange={(event) => model.files.setCopyName(event.target.value)} placeholder={t("files.saveAsName")} value={model.files.copyName} />
-          <button className="button secondary" disabled={!model.files.canDuplicate} onClick={() => void model.files.duplicate()} type="button"><SaveAll aria-hidden="true" size={14} /> {t("files.saveAs")}</button>
+          
+          <button className="button secondary" disabled={!model.files.canDuplicate} onClick={() => model.files.setNameDialogOpen(true)} type="button"><SaveAll aria-hidden="true" size={14} /> {t("files.saveAs")}</button>
         </div>
       </ConsolePanel>
+      <FileNameDialog model={model} />
     </ConsoleFrame>
   );
 }

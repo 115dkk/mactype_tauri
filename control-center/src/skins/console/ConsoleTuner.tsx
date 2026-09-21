@@ -1,6 +1,6 @@
 import { Search } from "lucide-react";
 import { StatusDot } from "../../components/StatusDot";
-import { ProfileEditorBody, ProfileEditorPreview, ProfileEditorToolbar, ProfileSaveAsForm } from "../../features/profiles/ProfileEditorParts";
+import { ProfileEditorBody, ProfileEditorPreview, ProfileEditorToolbar, ProfileEditorNameDialog } from "../../features/profiles/ProfileEditorParts";
 import { useProfileEditor } from "../../features/profiles/useProfileEditor";
 import { useI18n } from "../../i18n/i18n";
 import { ConsoleFrame, ConsolePanel } from "./ConsoleFrame";
@@ -32,7 +32,7 @@ export function ConsoleTuner() {
       title={title}
       titleId="profiles-title"
     >
-      <ProfileSaveAsForm editor={editor} />
+      <ProfileEditorNameDialog editor={editor} />
       <ConsolePanel className="console-index-panel" title={mode === "guided" ? t("profiles.stepsPanel") : t("profiles.sections")}>
         {mode === "all" && <label className="console-field console-search console-index-search"><Search aria-hidden="true" size={12} /><span className="sr-only">{t("profiles.search")}</span><input onChange={(event) => editor.editing.setQuery(event.target.value)} placeholder={t("profiles.search")} type="search" value={editor.editing.query} /></label>}
         <ul className="console-index">

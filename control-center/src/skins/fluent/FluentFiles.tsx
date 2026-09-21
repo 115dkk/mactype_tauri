@@ -1,7 +1,7 @@
 import { Copy, Download, FileInput, FileText, FolderOpen, Save } from "lucide-react";
 import type { ShellProps } from "../../app/shell";
 import { runtime } from "../../app/runtimeAdapter";
-import { CurrentFileSummary, DesignateAction, FileMessages, RunProfileBadge } from "../../features/files/FileParts";
+import { CurrentFileSummary, FileNameDialog, DesignateAction, FileMessages, RunProfileBadge } from "../../features/files/FileParts";
 import { THUMBNAIL_SAMPLE_TEXT, useFileSettingsModel } from "../../features/files/useFileSettingsModel";
 import { useI18n } from "../../i18n/i18n";
 import { FluentCard, FluentCards, FluentPage, FluentSection } from "./FluentParts";
@@ -62,7 +62,7 @@ export function FluentFiles({ shell }: { shell: ShellProps }) {
             title={<CurrentFileSummary model={model} variant="title" />}
           />
           <FluentCard
-            action={<><input aria-label={t("profiles.copyName")} className="fluent-field" disabled={!profile || busy !== null} onChange={(event) => model.files.setCopyName(event.target.value)} placeholder={t("files.saveAsName")} value={model.files.copyName} /><button className="button secondary" disabled={!model.files.canDuplicate} onClick={() => void model.files.duplicate()} type="button">{t("profiles.save")}</button></>}
+            action={<><button className="button secondary" disabled={!model.files.canDuplicate} onClick={() => model.files.setNameDialogOpen(true)} type="button">{t("files.saveAs")}</button></>}
             description={t("files.duplicateDescription")}
             icon={<Copy aria-hidden="true" size={20} strokeWidth={1.6} />}
             title={t("files.saveAs")}
@@ -80,6 +80,7 @@ export function FluentFiles({ shell }: { shell: ShellProps }) {
         </div>
       </FluentSection>
 
+      <FileNameDialog model={model} />
       <FileMessages model={model} variant="fluent" />
     </FluentPage>
   );

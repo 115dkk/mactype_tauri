@@ -1,7 +1,7 @@
 import { FileInput, FolderOpen } from "lucide-react";
 import type { ShellProps } from "../../app/shell";
 import { runtime } from "../../app/runtimeAdapter";
-import { CurrentFileSummary, DesignateAction, FileMessages, RunProfileBadge } from "../../features/files/FileParts";
+import { CurrentFileSummary, FileNameDialog, DesignateAction, FileMessages, RunProfileBadge } from "../../features/files/FileParts";
 import { THUMBNAIL_SAMPLE_TEXT, useFileSettingsModel } from "../../features/files/useFileSettingsModel";
 import { useI18n } from "../../i18n/i18n";
 import { CupertinoGroup, CupertinoPage, CupertinoRow, CupertinoSection, CupertinoToolbar } from "./CupertinoParts";
@@ -61,7 +61,7 @@ export function CupertinoFiles({ shell }: { shell: ShellProps }) {
           <CupertinoRow title={t("files.editing")} value={<><CurrentFileSummary model={model} /><button aria-label={t("files.reveal")} className="button icon" disabled={!profile || busy !== null} onClick={() => void model.files.revealCurrentProfile()} title={t("files.reveal")} type="button"><FolderOpen aria-hidden="true" size={13} strokeWidth={1.8} /></button></>} />
           <CupertinoRow title={`${t("files.encoding")} · ${t("files.lineEnding")}`} value={<CurrentFileSummary model={model} variant="encoding" />} />
           <CupertinoRow title={t("files.unsaved")} value={<CurrentFileSummary model={model} variant="unsaved" />} />
-          <CupertinoRow description={t("files.duplicateDescription")} title={t("files.saveAs")} value={<><input aria-label={t("profiles.copyName")} className="cupertino-field" disabled={!profile || busy !== null} onChange={(event) => model.files.setCopyName(event.target.value)} placeholder={t("files.saveAsName")} value={model.files.copyName} /><button className="button secondary" disabled={!model.files.canDuplicate} onClick={() => void model.files.duplicate()} type="button">{t("profiles.save")}</button></>} />
+          <CupertinoRow description={t("files.duplicateDescription")} title={t("files.saveAs")} value={<><button className="button secondary" disabled={!model.files.canDuplicate} onClick={() => model.files.setNameDialogOpen(true)} type="button">{t("files.saveAs")}</button></>} />
         </CupertinoGroup>
         {profile && !profile.canSave && <p className="cupertino-footnote">{t("files.readOnly")}</p>}
       </CupertinoSection>
@@ -73,6 +73,7 @@ export function CupertinoFiles({ shell }: { shell: ShellProps }) {
         <DesignateAction model={model} variant="cupertino" />
       </CupertinoToolbar>
 
+      <FileNameDialog model={model} />
       <FileMessages model={model} variant="cupertino" />
     </CupertinoPage>
   );

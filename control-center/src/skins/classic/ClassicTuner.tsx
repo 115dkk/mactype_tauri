@@ -1,7 +1,7 @@
 import { useI18n } from "../../i18n/i18n";
 import { Search } from "lucide-react";
 import { Hint } from "../../components/Hint";
-import { ProfileEditorBody, ProfileEditorHeading, ProfileEditorPreview, ProfileEditorSummary, ProfileEditorToolbar, ProfileSaveAsForm } from "../../features/profiles/ProfileEditorParts";
+import { ProfileEditorBody, ProfileEditorHeading, ProfileEditorPreview, ProfileEditorSummary, ProfileEditorToolbar, ProfileEditorNameDialog } from "../../features/profiles/ProfileEditorParts";
 import { useProfileEditor, type ProfileMode } from "../../features/profiles/useProfileEditor";
 
 interface ClassicTunerProps {
@@ -24,7 +24,7 @@ export function ClassicTuner({ ciSmoke = false, mode = "all", onPreviewReady, on
         <ProfileEditorToolbar editor={editor} />
       </header>
 
-      <ProfileSaveAsForm editor={editor} />
+      <ProfileEditorNameDialog editor={editor} />
 
       <div className="profile-layout">
         <aside className="settings-index" aria-label={mode === "guided" ? t("guided.progress") : t("profiles.sections")}>

@@ -1,6 +1,6 @@
 import { Check, Search } from "lucide-react";
 import type { ShellProps } from "../../app/shell";
-import { ProfileEditorBody, ProfileEditorPreview, ProfileEditorSummary, ProfileEditorToolbar, ProfileSaveAsForm } from "../../features/profiles/ProfileEditorParts";
+import { ProfileEditorBody, ProfileEditorPreview, ProfileEditorSummary, ProfileEditorToolbar, ProfileEditorNameDialog } from "../../features/profiles/ProfileEditorParts";
 import { useProfileEditor } from "../../features/profiles/useProfileEditor";
 import { useI18n } from "../../i18n/i18n";
 import { CupertinoPage } from "./CupertinoParts";
@@ -18,7 +18,7 @@ export function CupertinoTuner({ shell }: { shell: ShellProps }) {
       titleId="profiles-title"
       wide
     >
-      <ProfileSaveAsForm editor={editor} />
+      <ProfileEditorNameDialog editor={editor} />
       <div className="cupertino-three profile-layout" data-mode={mode}>
         <aside className="cupertino-group cupertino-list settings-index" aria-label={mode === "guided" ? t("guided.progress") : t("profiles.sections")}>
           {mode === "all" && <div className="cupertino-row cupertino-list-search"><label className="cupertino-search"><Search aria-hidden="true" size={13} strokeWidth={2} /><span className="sr-only">{t("profiles.search")}</span><input onChange={(event) => editor.editing.setQuery(event.target.value)} placeholder={t("profiles.search")} type="search" value={editor.editing.query} /></label></div>}

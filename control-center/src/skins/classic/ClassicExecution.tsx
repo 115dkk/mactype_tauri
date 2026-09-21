@@ -1,6 +1,6 @@
 import { useI18n } from "../../i18n/i18n";
 import { AlertTriangle, Check, ChevronDown, FileCode2, ListChecks, Power, PowerOff, RefreshCw, ServerCog, ShieldAlert, Wrench } from "lucide-react";
-import { ExecutionMessages, LegacyServiceControls, LegacyTrayConflict, ManualLaunchBody, MigrationConfirmation, RegisteredTargetsBody, ServicePackageNotice, SystemServiceControls, SystemServiceDetails } from "../../features/execution/ExecutionParts";
+import { RunProfilePendingNotice, ExecutionMessages, LegacyServiceControls, LegacyTrayConflict, ManualLaunchBody, MigrationConfirmation, RegisteredTargetsBody, ServicePackageNotice, SystemServiceControls, SystemServiceDetails } from "../../features/execution/ExecutionParts";
 import { useExecutionModel } from "../../features/execution/useExecutionModel";
 
 export function ClassicExecution({ ciSmoke = false, onReady }: { ciSmoke?: boolean; onReady?: () => void }) {
@@ -16,6 +16,8 @@ export function ClassicExecution({ ciSmoke = false, onReady }: { ciSmoke?: boole
           <button className="button secondary" onClick={() => void model.service.refresh()} type="button"><RefreshCw aria-hidden="true" size={16} /> {t("execution.refresh")}</button>
         </div>
       </header>
+
+      <RunProfilePendingNotice model={model} />
 
       <section className="service-summary" data-state={serviceSummary.tone} data-service-summary>
         <dl className="service-summary-grid">

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import type { LegacyProfileCandidate, PreviewRequest, PreviewResult, ProfileEntry, ProfileSnapshot } from "../../app/model";
 import { runtime } from "../../app/runtimeAdapter";
-import { useProfileDocument } from "../profiles/useProfileDocument";
+import { useProfileDocument, type ProfileNameVerdict } from "../profiles/useProfileDocument";
 import { fileName, managedProfileFor, matchesAppliedProfile, sameProfileIdentity } from "../profiles/profileEditorUtils";
 import { useI18n } from "../../i18n/i18n";
 
@@ -65,11 +65,14 @@ export interface FileSettingsFiles {
   busy: string | null;
   canDuplicate: boolean;
   chooseImport: () => Promise<void>;
-  copyName: string;
-  duplicate: () => Promise<boolean>;
+  nameDialogOpen: boolean;
+  setNameDialogOpen: Dispatch<SetStateAction<boolean>>;
+  suggestedProfileName: string;
+  profileNameVerdict: (candidate: string) => ProfileNameVerdict;
+  documentBusy: boolean;
+  duplicate: (name: string) => Promise<boolean>;
   exportIni: () => Promise<void>;
   revealCurrentProfile: () => Promise<void>;
-  setCopyName: Dispatch<SetStateAction<string>>;
 }
 
 export interface FileSettingsLegacy {
@@ -92,6 +95,7 @@ export interface FileSettingsModel {
 
 export function useFileSettingsModel({ onEditInTuner }: FileSettingsModelOptions = {}): FileSettingsModel {
   const { t } = useI18n();
+  const [nameDialogOpen, setNameDialogOpen] = useState(false);
   const [detectedLegacy, setLegacy] = useState<LegacyProfileCandidate | null>(null);
   const [thumbnails, setThumbnails] = useState<ReadonlyMap<string, PreviewResult | null>>(() => new Map(thumbnailCache));
   const discoverLegacyProfile = useCallback(async () => {
@@ -105,7 +109,8 @@ export function useFileSettingsModel({ onEditInTuner }: FileSettingsModelOptions
     command: busy,
     busy: documentBusy,
     recoveryRequired,
-    copyName,
+    suggestedProfileName,
+    profileNameVerdict,
     designateProfile: designate,
     dirtyCount,
     error,
@@ -118,7 +123,6 @@ export function useFileSettingsModel({ onEditInTuner }: FileSettingsModelOptions
     runFileOperation,
     saveCurrentProfile: save,
     saveProfileAs: duplicate,
-    setCopyName,
     startServiceNow,
   } = useProfileDocument(t, { page: "files", discoverLegacyProfile });
   const legacy = !loading && detectedLegacy && !managedProfileFor(detectedLegacy, profiles) && !sameProfileIdentity(detectedLegacy, appliedProfile)
@@ -195,7 +199,7 @@ export function useFileSettingsModel({ onEditInTuner }: FileSettingsModelOptions
     : `${t("files.fileDetails")} · —`;
   const canSave = Boolean(profile?.canSave) && dirtyCount > 0 && !documentBusy && !recoveryRequired;
   const canDesignate = Boolean(profile) && dirtyCount === 0 && !documentBusy && !recoveryRequired;
-  const canDuplicate = Boolean(profile) && Boolean(copyName.trim()) && !documentBusy && !recoveryRequired;
+  const canDuplicate = Boolean(profile) && !documentBusy && !recoveryRequired;
 
   return {
     profiles: {
@@ -226,11 +230,14 @@ export function useFileSettingsModel({ onEditInTuner }: FileSettingsModelOptions
       busy,
       canDuplicate,
       chooseImport,
-      copyName,
+      nameDialogOpen,
+      setNameDialogOpen,
+      documentBusy,
+      suggestedProfileName,
+      profileNameVerdict,
       duplicate,
       exportIni,
       revealCurrentProfile,
-      setCopyName,
     },
     legacy: {
       importFrom,

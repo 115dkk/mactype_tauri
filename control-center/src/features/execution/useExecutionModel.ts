@@ -20,6 +20,9 @@ export interface ExecutionService {
   activeProfileName: string;
   executionView: ExecutionViewModel;
   manageService: (action: SystemServiceAction) => Promise<void>;
+  /* Publishes the designated profile from its file so a service left on older
+     bytes can be brought onto the settings the user already saved. */
+  republishRunProfile: () => Promise<void>;
   profileIndicator: ProfileIndicator;
   refresh: () => Promise<void>;
   revealServiceLocation: () => Promise<void>;
@@ -243,6 +246,21 @@ export function useExecutionModel({ ciSmoke = false, onReady }: ExecutionModelOp
     }
   };
 
+  const republishRunProfile = async () => {
+    setServiceBusy("republish-profile");
+    try {
+      const outcome = await runtime().republishRunProfile();
+      setStatus(outcome.status);
+      setMessage(t(outcome.effect === "live" ? "profiles.appliedLive" : "profiles.appliedNextStart"));
+      setError(null);
+    } catch (caught: unknown) {
+      setError(operationErrorMessage(caught, t, "execution.operationFailed"));
+      setMessage(null);
+    } finally {
+      setServiceBusy(null);
+    }
+  };
+
   const revealServiceLocation = async () => {
     try {
       await runtime().revealSystemService();
@@ -361,6 +379,7 @@ export function useExecutionModel({ ciSmoke = false, onReady }: ExecutionModelOp
       activeProfileName,
       executionView,
       manageService,
+      republishRunProfile,
       profileIndicator,
       refresh,
       revealServiceLocation,

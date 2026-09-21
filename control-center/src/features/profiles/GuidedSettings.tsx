@@ -1,4 +1,5 @@
-import { ArrowLeft, ArrowRight, BadgeCheck, Eye, ListRestart, Redo2, RotateCcw, Save, Undo2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, BadgeCheck, Eye, ListRestart, Play, Redo2, RotateCcw, Save, SaveAll, Undo2, Upload } from "lucide-react";
+import type { ProfileFollowUp } from "./useProfileDocument";
 import type { AdvancedProfile } from "../../app/model";
 import type { SettingDefinition } from "../../generated/settings";
 import type { I18nValue, MessageKey } from "../../i18n/i18n";
@@ -13,17 +14,22 @@ interface GuidedSettingsProps {
   canRedoStep: boolean;
   canSave: boolean;
   canUndoStep: boolean;
+  designating: boolean;
   dirtyCount: number;
   dirtyKeys: ReadonlyArray<string>;
+  followUp: ProfileFollowUp | null;
   fontFace: string;
   fontFamilies: ReadonlyArray<string>;
   fontOptionLabel: (font: string) => string;
+  offerStart: boolean;
   onAdvancedCommit: (profile: AdvancedProfile) => void;
-  onApply: () => void;
+  onApply: (intent: ProfileFollowUp) => void;
   onFontFaceChange: (font: string) => void;
   onPreview: () => void;
   onRedoStep: () => void;
   onSave: () => void;
+  onSaveAs: () => void;
+  onStartService: () => void;
   onSettingChange: (settingId: string, value: number) => void;
   onSettingPreview: (settingId: string, value: number) => void;
   onStepChange: (step: GuidedStepId) => void;
@@ -32,6 +38,7 @@ interface GuidedSettingsProps {
   profilePath: string | null;
   savedValues?: Readonly<Record<string, number>>;
   settings: ReadonlyArray<SettingDefinition>;
+  starting: boolean;
   t: I18nValue["t"];
   values: Readonly<Record<string, number>>;
 }
@@ -43,17 +50,22 @@ export function GuidedSettings({
   canRedoStep,
   canSave,
   canUndoStep,
+  designating,
   dirtyCount,
   dirtyKeys,
+  followUp,
   fontFace,
   fontFamilies,
   fontOptionLabel,
+  offerStart,
   onAdvancedCommit,
   onApply,
   onFontFaceChange,
   onPreview,
   onRedoStep,
   onSave,
+  onSaveAs,
+  onStartService,
   onSettingChange,
   onSettingPreview,
   onStepChange,
@@ -62,6 +74,7 @@ export function GuidedSettings({
   profilePath,
   savedValues,
   settings,
+  starting,
   t,
   values,
 }: GuidedSettingsProps) {
@@ -142,8 +155,11 @@ export function GuidedSettings({
             <p data-dirty={dirtyCount > 0}>{dirtyCount > 0 ? t("guided.unsavedWarning") : t("guided.savedState")}</p>
             <div>
               <button className="button secondary" onClick={onPreview} type="button"><Eye aria-hidden="true" size={16} /> {t("profiles.preview")}</button>
-              <button className="button secondary" disabled={busy || dirtyCount === 0 || !canSave} onClick={onSave} type="button"><Save aria-hidden="true" size={16} /> {t("guided.saveProfile")}</button>
-              <button className="button designate" disabled={busy || dirtyCount > 0} onClick={onApply} title={dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button"><BadgeCheck aria-hidden="true" size={16} /> {t("guided.designateMacType")}</button>
+              <button className="button secondary" disabled={busy || dirtyCount === 0 || !canSave} data-dirty={dirtyCount > 0} onClick={onSave} type="button"><Save aria-hidden="true" size={16} /> {t("guided.saveProfile")}</button>
+              <button className="button secondary" disabled={busy} onClick={onSaveAs} type="button"><SaveAll aria-hidden="true" size={16} /> {t("files.saveAs")}</button>
+              {followUp === "designate" && <button className="button designate" disabled={busy || dirtyCount > 0} onClick={() => onApply("designate")} title={dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button"><BadgeCheck aria-hidden="true" size={16} /> {designating ? t("profiles.designating") : t("profiles.designate")}</button>}
+              {followUp === "apply-to-service" && <button className="button designate" disabled={busy || dirtyCount > 0} onClick={() => onApply("apply-to-service")} title={t("profiles.applyToServiceDescription")} type="button"><Upload aria-hidden="true" size={16} /> {designating ? t("profiles.applyingToService") : t("profiles.applyToService")}</button>}
+              {!followUp && offerStart && <button className="button designate" disabled={busy} onClick={onStartService} type="button"><Play aria-hidden="true" size={16} /> {starting ? t("execution.serviceWorking") : t("files.startServiceNow")}</button>}
             </div>
           </section>
         )}

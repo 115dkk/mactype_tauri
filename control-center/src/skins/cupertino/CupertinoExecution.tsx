@@ -2,7 +2,7 @@ import { AlertTriangle, Check, PowerOff, ShieldAlert } from "lucide-react";
 import { useState } from "react";
 import type { ShellProps } from "../../app/shell";
 import { SwitchControl } from "../../components/SwitchControl";
-import { ExecutionMessages, LegacyServiceControls, LegacyTrayConflict, ManualLaunchBody, MigrationConfirmation, RegisteredTargetsBody, ServicePackageNotice, ServiceSummaryNoticeAndActions, SystemServiceControls, SystemServiceDetails } from "../../features/execution/ExecutionParts";
+import { RunProfilePendingNotice, ExecutionMessages, LegacyServiceControls, LegacyTrayConflict, ManualLaunchBody, MigrationConfirmation, RegisteredTargetsBody, ServicePackageNotice, ServiceSummaryNoticeAndActions, SystemServiceControls, SystemServiceDetails } from "../../features/execution/ExecutionParts";
 import { useExecutionModel } from "../../features/execution/useExecutionModel";
 import { useI18n } from "../../i18n/i18n";
 import { CupertinoFootnote, CupertinoGroup, CupertinoPage, CupertinoRow, CupertinoSection } from "./CupertinoParts";
@@ -62,6 +62,7 @@ export function CupertinoExecution({ shell }: { shell: ShellProps }) {
       title={t("nav.execution")}
       titleId="execution-title"
     >
+      <RunProfilePendingNotice model={model} />
       <div data-service-summary data-state={serviceSummary.tone}>
         <CupertinoGroup dataKind="hero">
           <CupertinoRow

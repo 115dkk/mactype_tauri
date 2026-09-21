@@ -84,11 +84,9 @@ export interface ProfileEditorPreview {
 }
 
 export interface ProfileEditorFiles {
-  saveAsName: string;
-  saveAsOpen: boolean;
-  setSaveAsName: Dispatch<SetStateAction<string>>;
-  setSaveAsOpen: Dispatch<SetStateAction<boolean>>;
-  submitSaveAs: () => void;
+  nameDialogOpen: boolean;
+  setNameDialogOpen: Dispatch<SetStateAction<boolean>>;
+  submitSaveAs: (name: string) => void;
 }
 
 export interface ProfileEditor {
@@ -153,8 +151,7 @@ export function useProfileEditor({ mode = "all" }: ProfileEditorOptions = {}): P
   const [installedFonts, setInstalledFonts] = useState<ReadonlyArray<string>>([]);
   const [fontFace, setFontFace] = useState("Segoe UI");
   const [query, setQuery] = useState("");
-  const [saveAsOpen, setSaveAsOpen] = useState(false);
-  const { copyName: saveAsName, setCopyName: setSaveAsName } = document;
+  const [nameDialogOpen, setNameDialogOpen] = useState(false);
   const [previewDocked, setPreviewDocked] = useState(false);
   const previewPanelRef = useRef<ProfilePreviewHandle>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -315,9 +312,9 @@ export function useProfileEditor({ mode = "all" }: ProfileEditorOptions = {}): P
   const clearListFocus = () => setListFocus(null);
   const headingText = mode === "guided" ? activeGuidedLabel : query ? t("profiles.searchResults") : activeDefinition.label;
   const headingHint = mode === "guided" ? t("guided.guidance") : query ? t("profiles.searchDescription", { query }) : activeDefinition.description;
-  const submitSaveAs = () => {
-    void document.saveProfileAs().then((saved) => {
-      if (saved) setSaveAsOpen(false);
+  const submitSaveAs = (name: string) => {
+    void document.saveProfileAs(name).then((saved) => {
+      if (saved) setNameDialogOpen(false);
     });
   };
 
@@ -365,10 +362,8 @@ export function useProfileEditor({ mode = "all" }: ProfileEditorOptions = {}): P
       workspaceRef,
     },
     files: {
-      saveAsName,
-      saveAsOpen,
-      setSaveAsName,
-      setSaveAsOpen,
+      nameDialogOpen,
+      setNameDialogOpen,
       submitSaveAs,
     },
   };

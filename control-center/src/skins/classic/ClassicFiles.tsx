@@ -1,7 +1,7 @@
 import { useI18n } from "../../i18n/i18n";
 import { FileInput, FileOutput, FolderOpen, Save, SaveAll, SlidersHorizontal } from "lucide-react";
 import { runtime } from "../../app/runtimeAdapter";
-import { CurrentFileSummary, DesignateAction, FileMessages, RunProfileBadge } from "../../features/files/FileParts";
+import { CurrentFileSummary, FileNameDialog, DesignateAction, FileMessages, RunProfileBadge } from "../../features/files/FileParts";
 import { THUMBNAIL_SAMPLE_TEXT, useFileSettingsModel } from "../../features/files/useFileSettingsModel";
 
 interface ClassicFilesProps {
@@ -14,7 +14,7 @@ export function ClassicFiles({ onEditInTuner }: ClassicFilesProps) {
   const { profile } = model.document;
   const { profiles, thumbnails } = model.profiles;
   const { legacy } = model.legacy;
-  const { copyName, busy } = model.files;
+  const { busy } = model.files;
 
   return (
     <section className="page view-enter" aria-labelledby="files-title">
@@ -87,12 +87,13 @@ export function ClassicFiles({ onEditInTuner }: ClassicFilesProps) {
         </details>
         <div className="file-primary-actions">
           <button className="button secondary" disabled={!model.document.canSave} onClick={() => void model.document.save()} type="button"><Save aria-hidden="true" size={17} /> {busy === "save" ? t("profiles.saving") : t("profiles.save")}</button>
-          <div className="file-save-as"><input aria-label={t("profiles.copyName")} disabled={!profile || busy !== null} onChange={(event) => model.files.setCopyName(event.target.value)} placeholder={t("files.saveAsName")} value={copyName} /><button className="button secondary" disabled={!model.files.canDuplicate} onClick={() => void model.files.duplicate()} type="button"><SaveAll aria-hidden="true" size={16} /> {t("files.saveAs")}</button></div>
+          <div className="file-save-as"><button className="button secondary" disabled={!model.files.canDuplicate} onClick={() => model.files.setNameDialogOpen(true)} type="button"><SaveAll aria-hidden="true" size={16} /> {t("files.saveAs")}</button></div>
           <button className="button secondary" disabled={!profile || busy !== null} onClick={() => void model.files.exportIni()} type="button"><FileOutput aria-hidden="true" size={17} /> {busy === "export" ? t("files.exporting") : t("files.chooseExport")}</button>
           <DesignateAction model={model} />
         </div>
       </section>
 
+      <FileNameDialog model={model} />
       <FileMessages model={model} />
     </section>
   );

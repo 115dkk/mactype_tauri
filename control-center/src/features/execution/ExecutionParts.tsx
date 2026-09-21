@@ -1,5 +1,5 @@
 import { useI18n } from "../../i18n/i18n";
-import { AlertTriangle, Check, FileCode2, FolderOpen, LogOut, Play, PowerOff, RefreshCw, ShieldAlert, Trash2, UserPlus, Wrench } from "lucide-react";
+import { AlertTriangle, Check, FileClock, FileCode2, FolderOpen, LogOut, Play, PowerOff, RefreshCw, ShieldAlert, Trash2, Upload, UserPlus, Wrench } from "lucide-react";
 import type { ExecutionModel } from "./useExecutionModel";
 
 interface PartProps {
@@ -256,5 +256,24 @@ export function ExecutionMessages({ model }: PartProps) {
       {model.messages.message && <p className="success-message">{model.messages.message}</p>}
       {model.messages.error && <p className="inline-error"><AlertTriangle aria-hidden="true" size={15} /> {model.messages.error}</p>}
     </>
+  );
+}
+
+export function RunProfilePendingNotice({ model }: PartProps) {
+  const { t } = useI18n();
+  const { status, systemInjectionAction, serviceBusy } = model.service;
+  if (status?.runProfilePublication !== "pending") return null;
+  const running = systemInjectionAction.intent === "stop";
+  return (
+    <div className="run-profile-pending" role="status" data-run-profile-pending>
+      <span className="run-profile-pending-icon"><FileClock aria-hidden="true" size={20} /></span>
+      <div>
+        <strong>{t(running ? "execution.runProfilePendingRunningTitle" : "execution.runProfilePendingStoppedTitle")}</strong>
+        <p>{t(running ? "execution.runProfilePendingRunningDescription" : "execution.runProfilePendingStoppedDescription")}</p>
+      </div>
+      <button className="button designate" disabled={serviceBusy !== null} onClick={() => void model.service.republishRunProfile()} type="button">
+        <Upload aria-hidden="true" size={16} /> {t(serviceBusy === "republish-profile" ? "profiles.applyingToService" : "profiles.applyToService")}
+      </button>
+    </div>
   );
 }

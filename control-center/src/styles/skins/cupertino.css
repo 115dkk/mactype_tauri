@@ -143,7 +143,12 @@ html[data-skin="cupertino"] .cupertino-work { display: block; position: relative
    bottom instead of leaving the canvas empty under a short column. */
 html[data-skin="cupertino"] .cupertino-page { display: flex; flex-direction: column; min-height: 100%; padding: 8px 32px 28px; }
 html[data-skin="cupertino"] .cupertino-page[data-wide="true"], html[data-skin="cupertino"] .cupertino-page[data-fill="true"] { height: 100%; min-height: 0; overflow: hidden; }
-html[data-skin="cupertino"] .cupertino-hd { display: flex; flex: 0 0 auto; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+/* The command row has to be allowed to shrink, or its own flex-wrap never
+   engages and one button too many pushes the header past the page. A button
+   sitting past that edge scrolls the page sideways the moment it is clicked,
+   and the offset stays. */
+html[data-skin="cupertino"] .cupertino-hd { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+html[data-skin="cupertino"] .cupertino-hd > * { min-width: 0; }
 html[data-skin="cupertino"] .cupertino-back { display: inline-flex; align-items: center; gap: 2px; margin: 0 0 4px -4px; padding: 0 6px 0 2px; border: 0; background: transparent; color: var(--color-primary); font-size: 13px; }
 html[data-skin="cupertino"] .cupertino-sub { margin-top: 2px; color: var(--color-muted); }
 html[data-skin="cupertino"] .cupertino-sub .profile-editing, html[data-skin="cupertino"] .cupertino-sub .profile-save-warning, html[data-skin="cupertino"] .cupertino-sub .profile-message { margin: 0; color: var(--color-muted); }
@@ -278,3 +283,6 @@ html[data-skin="cupertino"] .event-row { border-bottom-color: var(--cupertino-se
   html[data-skin="cupertino"] .cupertino-three { display: block; }
   html[data-skin="cupertino"] .cupertino-workspace { display: block; }
 }
+
+html[data-skin="cupertino"] .profile-name-dialog { border-color: var(--color-border-strong); border-radius: var(--radius-control); background: var(--color-surface); box-shadow: var(--shadow-window); }
+html[data-skin="cupertino"] .button[data-dirty="true"] { border-color: var(--color-primary); color: color-mix(in srgb, var(--color-primary) 85%, var(--color-foreground)); }

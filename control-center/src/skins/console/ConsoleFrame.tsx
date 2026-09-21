@@ -6,6 +6,7 @@ interface ConsoleFrameProps {
   title: string;
   titleId: string;
   summary?: ReactNode;
+  notice?: ReactNode;
   actions?: ReactNode;
   status?: ReactNode;
   statusRight?: ReactNode;
@@ -17,7 +18,7 @@ interface ConsoleFrameProps {
 /* The Console page frame: a command bar with the breadcrumb and the page's
    actions, a panel body, and a status bar the page fills with its own
    context. Every Console page contributes all three. */
-export function ConsoleFrame({ crumb, title, titleId, summary, actions, status, statusRight, bodyStyle, bodyClassName, children }: ConsoleFrameProps) {
+export function ConsoleFrame({ crumb, title, titleId, summary, notice, actions, status, statusRight, bodyStyle, bodyClassName, children }: ConsoleFrameProps) {
   return (
     <section aria-labelledby={titleId} className="console-page">
       <div className="console-bar">
@@ -28,6 +29,7 @@ export function ConsoleFrame({ crumb, title, titleId, summary, actions, status, 
         {summary && <div className="console-sub">{summary}</div>}
         <div className="console-bar-right">{actions}</div>
       </div>
+      {notice && <div className="console-page-notice">{notice}</div>}
       <div className={bodyClassName ? `console-body ${bodyClassName}` : "console-body"} style={bodyStyle}>{children}</div>
       <footer className="app-statusbar console-status" data-testid="app-statusbar">
         {status}

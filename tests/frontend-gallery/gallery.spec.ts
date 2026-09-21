@@ -281,7 +281,7 @@ test("profile editor categories and collections remain interactive", async ({ pa
   });
   page.on("pageerror", (error) => failures.push(`pageerror: ${error.message}`));
 
-  await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
+  await page.goto("/?view=profiles&gallery=1&lang=ko&profile-unapplied=1", { waitUntil: "networkidle" });
   const undo = page.getByRole("button", { name: "되돌리기", exact: true });
   const redo = page.getByRole("button", { name: "다시 하기", exact: true });
   const discard = page.getByRole("button", { name: "변경 취소", exact: true });
@@ -295,9 +295,15 @@ test("profile editor categories and collections remain interactive", async ({ pa
   await undo.click();
   await expect(redo).toBeEnabled();
   await redo.click();
-  await expect(page.getByRole("button", { name: "실행 프로필로 지정", exact: true })).toBeDisabled();
-  await page.getByRole("button", { name: "지금 저장" }).click();
-  await expect(page.locator(".profile-message")).toContainText("지금 저장했습니다");
+  await expect(page.locator(".profile-history-actions .designate")).toHaveCount(0);
+  await page.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(page.locator(".profile-message")).toContainText("저장했습니다");
+  await expect(page.locator(".profile-history-actions .designate")).toHaveCount(0);
+  await page.getByRole("button", { name: "다른 이름으로 저장", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "다른 이름으로 저장", exact: true });
+  await dialog.getByRole("textbox", { name: "새 프로필 이름" }).fill("Gallery edited copy");
+  await dialog.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
   await expect(page.getByRole("button", { name: "실행 프로필로 지정", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "실행 프로필로 지정", exact: true }).click();
   await expect(page.locator(".profile-message")).toContainText("실행 프로필로 지정했습니다");
@@ -306,8 +312,8 @@ test("profile editor categories and collections remain interactive", async ({ pa
   await discard.click();
   await expect(discard).toBeDisabled();
   await firstSelect.selectOption(initialOption);
-  await page.getByRole("button", { name: "지금 저장" }).click();
-  await expect(page.locator(".profile-message")).toContainText("지금 저장했습니다");
+  await page.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(page.locator(".profile-message")).toContainText("저장했습니다");
   await expect(discard).toBeDisabled();
 
   // The default stack renders the sample once, because a second sample group
@@ -518,7 +524,7 @@ test("preview comparison renders the saved and edited sides only while edits exi
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-preview-compare-ko.png`), fullPage: true });
 
   // Saving makes both sides identical, so the comparison switches itself off.
-  await page.getByRole("button", { name: "지금 저장" }).click();
+  await page.getByRole("button", { name: "저장", exact: true }).click();
   await expect(compare).toBeDisabled();
   await expect(compare).toHaveAttribute("aria-pressed", "false");
   await expect(strips).toHaveCount(baseline);
@@ -659,7 +665,8 @@ test("settings navigation restores the legacy Wizard and Tuner hierarchy", async
   await expect(page.getByRole("heading", { level: 2, name: "힌팅" })).toBeVisible();
   await page.locator(".settings-index").getByRole("button", { name: "실행 프로필 지정", exact: true }).click();
   await expect(page.getByRole("button", { name: "진행" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "실행 프로필로 지정", exact: true })).toBeVisible();
+  await expect(page.locator(".guided-apply-card .designate")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "다른 이름으로 저장", exact: true })).toBeEnabled();
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-guided-apply-ko.png`), fullPage: true });
 
   await tunerGroup.getByRole("button", { name: "전체 설정" }).click();
@@ -851,8 +858,8 @@ test("field revert restores the saved value while default restore and profile-wi
 
   await exactWeight.fill("12");
   await exactWeight.press("Enter");
-  await page.getByRole("button", { name: "지금 저장", exact: true }).click();
-  await expect(page.locator(".profile-message")).toContainText("지금 저장했습니다");
+  await page.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(page.locator(".profile-message")).toContainText("저장했습니다");
   await expect(revert).toBeDisabled();
   await expect(restoreDefault).toBeEnabled();
 
@@ -891,8 +898,9 @@ test("a rejected profile mutation requires an explicit snapshot recovery before 
 
   const normalWeight = page.locator(".setting-row").filter({ hasText: "Normal weight" }).locator('input[type="number"]');
   const boldWeight = page.locator(".setting-row").filter({ hasText: "Bold weight" }).locator('input[type="number"]');
-  const save = page.getByRole("button", { name: "Save now", exact: true });
-  const apply = page.getByRole("button", { name: "Set as run profile", exact: true });
+  const save = page.getByRole("button", { name: "Save", exact: true });
+  const saveAs = page.getByRole("button", { name: "Save as", exact: true });
+  const followUp = page.locator(".profile-history-actions .designate");
 
   await normalWeight.fill("12");
   await normalWeight.press("Tab");
@@ -901,17 +909,20 @@ test("a rejected profile mutation requires an explicit snapshot recovery before 
   await expect(page.locator(".preview-canvas")).toHaveAttribute("data-dark", "true");
   await expect(page.getByText("Gallery profile mutation failed.", { exact: true })).toBeVisible();
   await expect(save).toBeDisabled();
-  await expect(apply).toBeDisabled();
+  await expect(saveAs).toBeDisabled();
+  await expect(followUp).toHaveCount(0);
 
   await boldWeight.fill("8");
   await boldWeight.press("Tab");
   await expect(save).toBeDisabled();
-  await expect(apply).toBeDisabled();
+  await expect(saveAs).toBeDisabled();
+  await expect(followUp).toHaveCount(0);
 
   await page.getByRole("button", { name: "Discard changes", exact: true }).click();
   await expect(normalWeight).toHaveValue("0");
   await expect(boldWeight).toHaveValue("0");
-  await expect(apply).toBeEnabled();
+  await expect(saveAs).toBeEnabled();
+  await expect(followUp).toHaveCount(0);
 });
 
 test("an unmounted profile preview ignores an in-flight completion", async ({ page }) => {
@@ -939,8 +950,11 @@ test("settings files support import, save as, export, reveal, and apply without 
 
   await page.getByRole("button", { name: "INI 파일 선택" }).click();
   await expect(page.locator('[data-operation="file-settings"]')).toContainText("Community.ini");
-  await page.getByRole("textbox", { name: "복제 프로필 이름" }).fill("Gallery copy");
-  await page.getByRole("button", { name: "다른 이름으로 저장" }).click();
+  await page.getByRole("button", { name: "다른 이름으로 저장", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "다른 이름으로 저장", exact: true });
+  await dialog.getByRole("textbox", { name: "새 프로필 이름" }).fill("Gallery copy");
+  await dialog.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
   await expect(page.locator('[data-operation="file-settings"]')).toContainText("Gallery copy.ini");
   await page.getByRole("button", { name: "파일 위치 열기" }).click();
   await expect(page.locator('[data-operation="file-settings"]')).toContainText("파일 위치를 열었습니다");
@@ -987,7 +1001,7 @@ test("diagnostics omit internal preview protocol details", async ({ page }) => {
   await expect(page.getByText("MTPC v1", { exact: true })).toHaveCount(0);
 });
 
-test("writable profiles save to the original and apply by portable identity", async ({ page }, testInfo) => {
+test("saving over the run profile offers applying the saved settings to the service", async ({ page }, testInfo) => {
   await page.goto("/?view=profiles&gallery=1&lang=en", { waitUntil: "networkidle" });
   await expect(page.locator(".profile-editing")).toContainText("Editing:");
   await expect(page.locator(".profile-editing code")).toHaveText("ini\\Default.ini");
@@ -1001,15 +1015,16 @@ test("writable profiles save to the original and apply by portable identity", as
   if (!alternate) throw new Error("A writable profile setting needs an alternate gallery value");
   await setting.selectOption(alternate);
 
-  const save = page.getByRole("button", { name: "Save now", exact: true });
-  const apply = page.getByRole("button", { name: "Set as run profile", exact: true });
+  const save = page.getByRole("button", { name: "Save", exact: true });
+  const apply = page.getByRole("button", { name: "Apply to service", exact: true });
   await expect(save).toBeEnabled();
-  await expect(apply).toBeDisabled();
+  await expect(page.locator(".profile-history-actions .designate")).toHaveCount(0);
   await save.click();
   await expect(page.locator(".profile-message")).toContainText("Saved Default.ini");
   await expect(apply).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Set as run profile", exact: true })).toHaveCount(0);
   await apply.click();
-  await expect(page.locator(".profile-message")).toContainText("Default.ini is now the run profile.");
+  await expect(page.locator(".profile-message")).toContainText("Restarted the service on the settings you saved. Apps opened from now on use them.");
 
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-profile-direct-save-apply-en.png`), fullPage: true });
 });
@@ -1028,17 +1043,115 @@ test("read-only profiles require Save as before apply", async ({ page }, testInf
   if (!alternate) throw new Error("A read-only profile setting needs an alternate gallery value");
   await setting.selectOption(alternate);
 
-  await expect(page.getByRole("button", { name: "Save now", exact: true })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Set as run profile", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Set as run profile", exact: true })).toHaveCount(0);
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-profile-read-only-save-as-required-en.png`), fullPage: true });
   await page.getByRole("button", { name: "Save as", exact: true }).click();
   await page.getByRole("textbox", { name: "New profile name" }).fill("Review copy");
-  await page.locator(".profile-save-as").getByRole("button", { name: "Save as", exact: true }).click();
+  await page.getByRole("dialog", { name: "Save as", exact: true }).getByRole("button", { name: "Save", exact: true }).click();
 
   await expect(page.locator(".profile-editing code")).toHaveText("Profiles\\Review copy.ini");
   await expect(page.locator(".profile-message")).toContainText("Saved as Profiles\\Review copy.ini");
   await expect(page.getByRole("button", { name: "Set as run profile", exact: true })).toBeEnabled();
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-profile-read-only-save-as-en.png`), fullPage: true });
+});
+
+for (const view of ["files", "profiles"]) {
+  test(`${view} Save As validates names, traps focus, and restores its trigger`, async ({ page }, testInfo) => {
+    await page.goto(`/?view=${view}&gallery=1&lang=ko`, { waitUntil: "networkidle" });
+    const trigger = page.getByRole("button", { name: "다른 이름으로 저장", exact: true });
+    await trigger.click();
+    const dialog = page.getByRole("dialog", { name: "다른 이름으로 저장", exact: true });
+    const name = dialog.getByRole("textbox", { name: "새 프로필 이름", exact: true });
+    const submit = dialog.getByRole("button", { name: "저장", exact: true });
+    const cancel = dialog.getByRole("button", { name: "취소", exact: true });
+    await expect(name).toHaveValue("Default");
+    await expect(name).toBeFocused();
+    expect(await name.evaluate((element: HTMLInputElement) => [element.selectionStart, element.selectionEnd])).toEqual([0, 7]);
+    await expect(submit).toBeEnabled();
+    await name.press("Shift+Tab");
+    await expect(submit).toBeFocused();
+    await submit.press("Tab");
+    await expect(name).toBeFocused();
+    await name.fill("Recent");
+    await expect(dialog).toContainText("같은 이름의 프로필이 이미 있습니다.");
+    await expect(name).toHaveAttribute("aria-invalid", "true");
+    await expect(name).toHaveAttribute("aria-describedby", "profile-name-dialog-message");
+    await expect(submit).toBeDisabled();
+    await name.press("Enter");
+    await expect(dialog).toBeVisible();
+    await name.press("Shift+Tab");
+    await expect(cancel).toBeFocused();
+    await cancel.press("Tab");
+    await expect(name).toBeFocused();
+    await name.fill("Bad/name");
+    await expect(dialog).toContainText("이름에 쓸 수 없는 문자가 들어 있습니다.");
+    await expect(submit).toBeDisabled();
+    await name.fill("");
+    await expect(dialog.locator('[aria-live="polite"]')).toBeEmpty();
+    await expect(submit).toBeDisabled();
+    await name.fill("Gallery named profile");
+    await expect(name).toHaveAttribute("aria-invalid", "false");
+    await expect(name).not.toHaveAttribute("aria-describedby");
+    await expect(submit).toBeEnabled();
+    expect(await overflowingElements(page)).toEqual([]);
+    await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${view}-save-as-dialog-ko.png`), fullPage: true });
+    await name.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await trigger.click();
+    await cancel.click();
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await trigger.click();
+    await name.fill("Gallery named profile");
+    await name.press("Enter");
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+  });
+}
+
+test("Save As advances the suggested name past a managed profile collision", async ({ page }) => {
+  await page.goto("/?view=files&gallery=1&lang=en", { waitUntil: "networkidle" });
+  await page.locator(".profile-card").filter({ hasText: "Recent" }).locator(".profile-card-select").click();
+  await page.getByRole("button", { name: "Save as", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Save as", exact: true });
+  await expect(dialog.getByRole("textbox", { name: "New profile name" })).toHaveValue("Recent (2)");
+  await expect(dialog.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+});
+
+test("guided saving offers only the outstanding follow-up and clears it after an edit", async ({ page }) => {
+  await page.goto("/?view=profiles&gallery=1&lang=ko&service-runtime=stopped", { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "단계별 설정", exact: true }).click();
+  await page.locator(".settings-index").getByRole("button", { name: "실행 프로필 지정", exact: true }).click();
+  const card = page.locator(".guided-apply-card");
+  await expect(card.locator(".designate")).toHaveCount(0);
+  await card.getByRole("button", { name: "다른 이름으로 저장", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "다른 이름으로 저장", exact: true });
+  await dialog.getByRole("textbox", { name: "새 프로필 이름" }).fill("Guided copy");
+  await dialog.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(card.getByRole("button")).toHaveText(["프리뷰", "프로필 저장", "다른 이름으로 저장", "실행 프로필로 지정"]);
+  await card.getByRole("button", { name: "실행 프로필로 지정", exact: true }).click();
+  await expect(card.getByRole("button", { name: "지금 서비스 시작", exact: true })).toBeEnabled();
+  await page.locator(".settings-index").getByRole("button", { name: "기본 렌더링", exact: true }).click();
+  const choice = page.locator('.guided-choice input:not(:checked)').first();
+  await choice.check();
+  await page.locator(".settings-index").getByRole("button", { name: "실행 프로필 지정", exact: true }).click();
+  await expect(card.locator(".designate")).toHaveCount(0);
+  await card.getByRole("button", { name: "프로필 저장", exact: true }).click();
+  const apply = card.getByRole("button", { name: "서비스에 적용", exact: true });
+  await expect(apply).toBeEnabled();
+  await expect(card.getByRole("button", { name: "실행 프로필로 지정", exact: true })).toHaveCount(0);
+  await page.locator(".settings-index").getByRole("button", { name: "기본 렌더링", exact: true }).click();
+  await choice.check();
+  await page.locator(".settings-index").getByRole("button", { name: "실행 프로필 지정", exact: true }).click();
+  await expect(card.locator(".designate")).toHaveCount(0);
+  await card.getByRole("button", { name: "프로필 저장", exact: true }).click();
+  await expect(apply).toBeEnabled();
+  await apply.click();
+  await expect(page.locator(".profile-message")).toHaveText("저장한 설정을 실행 프로필에 반영했습니다. 서비스를 시작하면 이 설정으로 실행됩니다.");
+  await expect(card.getByRole("button", { name: "지금 서비스 시작", exact: true })).toBeEnabled();
 });
 
 test("known legacy-selected profiles open directly without an import detour", async ({ page }, testInfo) => {
@@ -1262,6 +1375,13 @@ for (const entry of [
 ] as const) {
   test(`${entry.view} hides internal ${entry.failing} details behind the diagnostics message`, async ({ page }) => {
     await page.goto(`/?view=${entry.view}&gallery=1&lang=en&service-fail=${entry.failing}`, { waitUntil: "networkidle" });
+    if (entry.view === "profiles") {
+      await page.getByRole("button", { name: "Save as", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Save as", exact: true });
+      await dialog.getByRole("textbox", { name: "New profile name" }).fill("Publish failure copy");
+      await dialog.getByRole("button", { name: "Save", exact: true }).click();
+      await expect(dialog).toHaveCount(0);
+    }
     await page.getByRole("button", { name: "Set as run profile", exact: true }).first().click();
 
     await expect(page.getByText("The operation failed. Check the diagnostics log for details.", { exact: true })).toBeVisible();

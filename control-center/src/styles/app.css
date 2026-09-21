@@ -72,6 +72,10 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
    foreground because pure accent on the hover tint falls under 4.5:1. */
 .button.designate { border-color: var(--color-primary); background: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface)); color: color-mix(in srgb, var(--color-primary) 85%, var(--color-foreground)); }
 .button.designate:hover { background: color-mix(in srgb, var(--color-primary) 18%, var(--color-surface)); }
+/* A save with work waiting takes the accent on its border and label only, so
+   nobody wonders whether the profile can be tried without saving first. The
+   tinted fill stays reserved for the action that save unlocks. */
+.button[data-dirty="true"] { border-color: var(--color-primary); color: color-mix(in srgb, var(--color-primary) 85%, var(--color-foreground)); }
 .button.danger { border-color: var(--color-danger); color: var(--color-danger); }
 .icon-button { display: inline-grid; width: var(--control-height); place-items: center; padding: 0; }
 .text-action { display: inline-flex; min-height: var(--control-height); align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border: 0; background: transparent; color: var(--color-primary); font-weight: 600; }
@@ -131,9 +135,6 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .profile-editing { display: flex; min-width: 0; flex-wrap: wrap; align-items: baseline; gap: var(--space-1); }
 .profile-editing code { color: var(--color-foreground); font-weight: 650; overflow-wrap: anywhere; }
 .profile-save-warning, .file-save-warning { color: var(--color-warning) !important; }
-.profile-save-as { display: flex; align-items: end; gap: var(--space-2); margin-bottom: var(--space-3); padding: var(--space-3); border: 1px solid var(--color-warning); background: var(--color-surface-subtle); }
-.profile-save-as label { display: grid; flex: 1; gap: var(--space-1); color: var(--color-muted); }
-.profile-save-as input { width: 100%; min-width: 160px; padding-inline: var(--space-2); }
 .profile-actions { flex-wrap: wrap; justify-content: flex-end; }
 .profile-actions select { max-width: 180px; padding-inline: var(--space-2); }
 .profile-actions input { width: 150px; padding-inline: var(--space-2); }
@@ -402,6 +403,13 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .migration-confirmation ol { display: grid; gap: var(--space-2); padding-inline-start: var(--space-6); }
 .migration-confirmation-note { padding: var(--space-3); border-inline-start: 3px solid var(--color-warning); background: var(--color-surface-subtle); }
 .migration-confirmation-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
+.profile-name-dialog { display: grid; width: min(420px, 100%); max-height: calc(100dvh - (2 * var(--space-4))); gap: var(--space-4); padding: var(--space-5); overflow-y: auto; border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface); box-shadow: var(--shadow-window); }
+.profile-name-dialog > p { color: var(--color-muted); }
+.profile-name-dialog form { display: grid; gap: var(--space-4); min-width: 0; }
+.profile-name-dialog label { display: grid; gap: var(--space-1); min-width: 0; }
+.profile-name-dialog input { width: 100%; min-width: 0; padding-inline: var(--space-2); }
+.profile-name-dialog-message { color: var(--color-danger); overflow-wrap: anywhere; }
+.profile-name-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
 .service-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
 .system-injection-control { display: flex; align-items: center; justify-content: space-between; gap: var(--space-6); padding: var(--space-4); border-top: 1px solid var(--color-border); background: var(--color-surface-subtle); }
 .system-injection-state { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
@@ -450,8 +458,6 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 [dir="rtl"] .compact-details > div { border-right: 0; border-left: 1px solid var(--color-border); }
 [dir="rtl"] .compact-details > div:last-child { border-left: 0; }
 .file-primary-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-2); padding: var(--space-4); border-top: 1px solid var(--color-border); }
-.file-save-as { display: flex; min-width: min(100%, 320px); gap: var(--space-2); }
-.file-save-as input { min-width: 120px; padding-inline: var(--space-2); flex: 1; }
 .manual-actions { display: flex; gap: var(--space-2); }
 .registered-launchers { padding: var(--space-4); border-top: 1px solid var(--color-border); }
 .registered-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
@@ -491,8 +497,6 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
   .page-header, .split-section { align-items: stretch; flex-direction: column; }
   .header-actions { flex-wrap: wrap; }
   .profile-history-actions { justify-content: flex-start; }
-  .profile-save-as { align-items: stretch; flex-direction: column; }
-  .profile-save-as .button { width: 100%; }
   .guided-apply-card > div { flex-direction: column; }
   .guided-apply-card .button { width: 100%; }
   .status-band { grid-template-columns: auto minmax(0, 1fr); }
@@ -529,7 +533,6 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
   .legacy-import-banner > svg { display: none; }
   .legacy-import-banner .button, .file-primary-actions .button { width: 100%; }
   .file-primary-actions { align-items: stretch; flex-direction: column; }
-  .file-save-as { display: grid; min-width: 0; }
   .compact-details > div, [dir="rtl"] .compact-details > div { border-right: 0; border-left: 0; border-bottom: 1px solid var(--color-border); }
   .execution-option { align-items: flex-start; flex-direction: column; }
   .service-summary-grid { grid-template-columns: 1fr; }

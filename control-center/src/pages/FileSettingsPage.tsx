@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, FileInput, FileOutput, FolderOpen, Play, Save, SaveAll, SlidersHorizontal } from "lucide-react";
+import { AlertTriangle, BadgeCheck, Check, FileInput, FileOutput, FolderOpen, Play, Save, SaveAll, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { LegacyProfileCandidate, PreviewRequest, PreviewResult } from "../app/model";
 import { runtime } from "../app/runtimeAdapter";
@@ -189,7 +189,7 @@ export function FileSettingsPage({ onEditInTuner }: FileSettingsPageProps) {
           <button className="button secondary" disabled={!profile || !profile.canSave || dirtyCount === 0 || busy !== null} onClick={() => void save()} type="button"><Save aria-hidden="true" size={17} /> {busy === "save" ? t("profiles.saving") : t("profiles.save")}</button>
           <div className="file-save-as"><input aria-label={t("profiles.copyName")} disabled={!profile || busy !== null} onChange={(event) => setCopyName(event.target.value)} placeholder={t("files.saveAsName")} value={copyName} /><button className="button secondary" disabled={!profile || !copyName.trim() || busy !== null} onClick={() => void duplicate()} type="button"><SaveAll aria-hidden="true" size={16} /> {t("files.saveAs")}</button></div>
           <button className="button secondary" disabled={!profile || busy !== null} onClick={() => void exportIni()} type="button"><FileOutput aria-hidden="true" size={17} /> {busy === "export" ? t("files.exporting") : t("files.chooseExport")}</button>
-          <button className="button primary" disabled={!profile || dirtyCount > 0 || busy !== null} onClick={() => void designate()} title={dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button"><Play aria-hidden="true" size={17} /> {busy === "designate" ? t("profiles.designating") : t("profiles.designate")}</button>
+          <button className="button designate" disabled={!profile || dirtyCount > 0 || busy !== null} onClick={() => void designate()} title={dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button"><BadgeCheck aria-hidden="true" size={17} /> {busy === "designate" ? t("profiles.designating") : t("profiles.designate")}</button>
         </div>
       </section>
 

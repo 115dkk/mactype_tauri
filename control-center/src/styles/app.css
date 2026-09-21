@@ -66,6 +66,11 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .button, .icon-button, .text-action { transition: transform var(--motion-fast) var(--ease-standard); }
 .button:active, .icon-button:active, .text-action:active { transform: scale(0.96); }
 .button.primary { border-color: var(--color-primary); background: var(--color-primary); color: var(--color-on-primary); }
+/* Designating the run profile writes a setting; it never starts the service.
+   The accent outline keeps the action focal without borrowing the solid fill
+   the service power button wears. */
+.button.designate { border-color: var(--color-primary); background: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface)); color: var(--color-primary); }
+.button.designate:hover { background: color-mix(in srgb, var(--color-primary) 18%, var(--color-surface)); filter: none; }
 .button.danger { border-color: var(--color-danger); color: var(--color-danger); }
 .icon-button { display: inline-grid; width: var(--control-height); place-items: center; padding: 0; }
 .text-action { display: inline-flex; min-height: var(--control-height); align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border: 0; background: transparent; color: var(--color-primary); font-weight: 600; }

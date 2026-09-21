@@ -1,5 +1,5 @@
 import { useI18n } from "../../i18n/i18n";
-import { AlertTriangle, Check, Play } from "lucide-react";
+import { AlertTriangle, BadgeCheck, Check, Play } from "lucide-react";
 import type { ProfileEntry } from "../../app/model";
 import type { FileSettingsModel } from "./useFileSettingsModel";
 
@@ -20,14 +20,14 @@ export function RunProfileBadge({ entry, model, className = "profile-card-badge"
   return <span className={className} {...model.profiles.runProfileAttributes(entry)}>{t("files.runProfileBadge")}</span>;
 }
 
-export function DesignateAction({ model, className = "button primary", variant = "classic" }: ActionProps) {
+export function DesignateAction({ model, className = "button designate", variant = "classic" }: ActionProps) {
   const { t } = useI18n();
   const { busy } = model.files;
   const { dirtyCount } = model.document;
   const size = variant === "console" ? 14 : variant === "fluent" ? 16 : 17;
   return (
     <button className={className} disabled={!model.document.canDesignate} onClick={() => void model.document.designate()} title={dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button">
-      {variant !== "cupertino" && <><Play aria-hidden="true" size={size} strokeWidth={variant === "fluent" ? 1.6 : 2} /> </>}{busy === "designate" ? t("profiles.designating") : t("profiles.designate")}
+      {variant !== "cupertino" && <><BadgeCheck aria-hidden="true" size={size} strokeWidth={variant === "fluent" ? 1.6 : 2} /> </>}{busy === "designate" ? t("profiles.designating") : t("profiles.designate")}
     </button>
   );
 }

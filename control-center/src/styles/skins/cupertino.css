@@ -75,6 +75,8 @@ html[data-skin="cupertino"] h2 { font-size: 13px; font-weight: 600; }
 /* Controls: 26 px, 6 px corners, a faint drop shadow instead of a border weight. */
 html[data-skin="cupertino"] .button { min-height: var(--control-height); height: var(--control-height); padding: 0 12px; gap: 6px; border: 1px solid var(--color-border-strong); border-radius: 6px; background: var(--color-surface); color: var(--color-foreground); font-size: 13px; font-weight: 400; box-shadow: 0 1px 1px rgba(0, 0, 0, 0.05); white-space: nowrap; }
 html[data-skin="cupertino"] .button.primary { border-color: transparent; background: var(--color-primary); color: var(--color-on-primary); font-weight: 500; }
+/* Mix the accent with the foreground to keep tinted-button text at 4.5:1. */
+html[data-skin="cupertino"] .button.designate { border-color: var(--color-primary); background: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface)); color: color-mix(in srgb, var(--color-primary) 80%, var(--color-foreground)); font-weight: 500; }
 html[data-skin="cupertino"] .button.danger { color: var(--color-destructive); }
 html[data-skin="cupertino"] .button.icon { width: var(--control-height); padding: 0; }
 html[data-skin="cupertino"] .icon-button { width: var(--control-height); min-height: var(--control-height); height: var(--control-height); border: 1px solid var(--color-border-strong); border-radius: 6px; background: var(--color-surface); box-shadow: 0 1px 1px rgba(0, 0, 0, 0.05); }

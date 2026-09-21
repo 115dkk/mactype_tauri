@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Eye, ListRestart, Play, Redo2, RotateCcw, Save, Undo2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, BadgeCheck, Eye, ListRestart, Redo2, RotateCcw, Save, Undo2 } from "lucide-react";
 import type { AdvancedProfile } from "../../app/model";
 import type { SettingDefinition } from "../../generated/settings";
 import type { I18nValue, MessageKey } from "../../i18n/i18n";
@@ -143,7 +143,7 @@ export function GuidedSettings({
             <div>
               <button className="button secondary" onClick={onPreview} type="button"><Eye aria-hidden="true" size={16} /> {t("profiles.preview")}</button>
               <button className="button secondary" disabled={busy || dirtyCount === 0 || !canSave} onClick={onSave} type="button"><Save aria-hidden="true" size={16} /> {t("guided.saveProfile")}</button>
-              <button className="button primary" disabled={busy || dirtyCount > 0} onClick={onApply} title={dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button"><Play aria-hidden="true" size={16} /> {t("guided.designateMacType")}</button>
+              <button className="button designate" disabled={busy || dirtyCount > 0} onClick={onApply} title={dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button"><BadgeCheck aria-hidden="true" size={16} /> {t("guided.designateMacType")}</button>
             </div>
           </section>
         )}

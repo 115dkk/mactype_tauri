@@ -15,7 +15,7 @@ use std::{
 #[cfg(test)]
 use std::fs::File;
 
-pub(super) fn user_profile_root() -> Option<PathBuf> {
+pub(crate) fn user_profile_root() -> Option<PathBuf> {
     env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .map(|path| path.join("MacType").join("ControlCenter").join("profiles"))

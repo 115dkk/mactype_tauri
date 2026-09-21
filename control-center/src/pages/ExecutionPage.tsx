@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, ChevronDown, FileCode2, FolderOpen, ListChecks, LogOut, Play, Power, PowerOff, RefreshCw, ServerCog, ShieldAlert, Trash2, UserPlus, Wrench } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, FileClock, FileCode2, FolderOpen, ListChecks, LogOut, Play, Power, PowerOff, RefreshCw, ServerCog, ShieldAlert, Trash2, Upload, UserPlus, Wrench } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { ExecutionStatus, ManualLaunchCandidate, SystemServiceAction } from "../app/model";
 import { projectExecutionView } from "../app/executionViewModel";
@@ -161,6 +161,21 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
     }
   };
 
+  const republishRunProfile = async () => {
+    setServiceBusy("republish-profile");
+    try {
+      const outcome = await runtime().republishRunProfile();
+      setStatus(outcome.status);
+      setMessage(t(outcome.effect === "live" ? "profiles.appliedLive" : "profiles.appliedNextStart"));
+      setError(null);
+    } catch (caught: unknown) {
+      setError(operationErrorMessage(caught, t, "execution.operationFailed"));
+      setMessage(null);
+    } finally {
+      setServiceBusy(null);
+    }
+  };
+
   const revealServiceLocation = async () => {
     try {
       await runtime().revealSystemService();
@@ -278,6 +293,19 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
           <button className="button secondary" onClick={() => void refresh()} type="button"><RefreshCw aria-hidden="true" size={16} /> {t("execution.refresh")}</button>
         </div>
       </header>
+
+      {status?.runProfilePublication === "pending" && (
+        <div className="run-profile-pending" role="status" data-run-profile-pending>
+          <span className="run-profile-pending-icon"><FileClock aria-hidden="true" size={20} /></span>
+          <div>
+            <strong>{t(systemInjectionAction.intent === "stop" ? "execution.runProfilePendingRunningTitle" : "execution.runProfilePendingStoppedTitle")}</strong>
+            <p>{t(systemInjectionAction.intent === "stop" ? "execution.runProfilePendingRunningDescription" : "execution.runProfilePendingStoppedDescription")}</p>
+          </div>
+          <button className="button designate" disabled={serviceBusy !== null} onClick={() => void republishRunProfile()} type="button">
+            <Upload aria-hidden="true" size={16} /> {t(serviceBusy === "republish-profile" ? "profiles.applyingToService" : "profiles.applyToService")}
+          </button>
+        </div>
+      )}
 
       <section className="service-summary" data-state={serviceSummary.tone} data-service-summary>
         <dl className="service-summary-grid">

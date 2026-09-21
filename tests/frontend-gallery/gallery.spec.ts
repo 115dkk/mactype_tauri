@@ -198,6 +198,125 @@ for (const state of executionStateGallery) {
   });
 }
 
+test("gallery publication state follows designation and preserves pending changes across start and stop", () => {
+  const pending = galleryExecutionStatus(new URLSearchParams("run-profile-pending=1"));
+  expect(pending.runProfilePublication).toBe("pending");
+  const stopped = transitionGalleryExecutionStatus(pending, "stop");
+  expect(stopped.runProfilePublication).toBe("pending");
+  expect(transitionGalleryExecutionStatus(stopped, "start").runProfilePublication).toBe("pending");
+  expect(transitionGalleryRunProfile(stopped, "Profiles\\Gallery.ini", false).runProfilePublication).toBe("published");
+  const unapplied = galleryExecutionStatus(new URLSearchParams("profile-unapplied=1&run-profile-pending=1"));
+  expect(unapplied.runProfilePublication).toBe("unknown");
+  expect(transitionGalleryExecutionStatus(unapplied, "start").runProfilePublication).toBe("published");
+});
+
+for (const publication of [
+  { state: "published", query: "" },
+  { state: "unknown", query: "&profile-unapplied=1" },
+  { state: "unknown", query: "&profile-runtime-missing=1&run-profile-pending=1" },
+] as const) {
+  test(`run profile notice stays absent when ${publication.state} (${publication.query || "default"})`, async ({ page }) => {
+    expect(galleryExecutionStatus(new URLSearchParams(publication.query)).runProfilePublication).toBe(publication.state);
+    await page.goto(`/?view=execution&gallery=1&lang=en${publication.query}`, { waitUntil: "networkidle" });
+    await expect(page.locator("[data-service-summary]")).toBeVisible();
+    await expect(page.locator("[data-run-profile-pending]")).toHaveCount(0);
+    await page.getByRole("button", { name: "Refresh status" }).click();
+    await expect(page.locator("[data-run-profile-pending]")).toHaveCount(0);
+  });
+}
+
+for (const service of [
+  { runtime: "running", title: "The settings in use are the previous ones", message: "Restarted the service on the settings you saved. Apps opened from now on use them." },
+  { runtime: "stopped", title: "Starting now would run the previous settings", message: "Saved these settings into the run profile. They take effect when you start the service." },
+] as const) {
+  test(`pending run profile applies calmly while the service is ${service.runtime}`, async ({ page }, testInfo) => {
+    await page.goto(`/?view=execution&gallery=1&lang=en&run-profile-pending=1&service-runtime=${service.runtime}&service-delay=1000`, { waitUntil: "networkidle" });
+    const notice = page.locator("[data-run-profile-pending]");
+    await expect(notice).toHaveAttribute("role", "status");
+    await expect(notice.locator("strong")).toHaveText(service.title);
+    await expect(notice).toBeInViewport({ ratio: 1 });
+    await expect(page.locator(".page-header + [data-run-profile-pending] + [data-service-summary]")).toHaveCount(1);
+    // The service page marks exceptional blocks and warning icons explicitly.
+    expect(await notice.evaluate((element) => element.matches('[data-prominent-exception], [data-state="attention"], [data-state="critical"], .warning, .warning-text'))).toBe(false);
+    await expect(notice.locator('[data-prominent-exception], .warning, .warning-text, .lucide-triangle-alert')).toHaveCount(0);
+    await expect(notice.locator(".lucide-file-clock")).toHaveCount(1);
+    expect(await overflowingElements(page)).toEqual([]);
+    await page.screenshot({
+      path: path.join(galleryRoot, `${testInfo.project.name}-execution-state-run-profile-pending-${service.runtime}-en.png`),
+      fullPage: true,
+    });
+    await notice.getByRole("button", { name: "Apply to service", exact: true }).click();
+    await expect(notice.getByRole("button")).toBeDisabled();
+    await expect(notice.getByRole("button")).toHaveText("Applying");
+    await expect(notice).toHaveCount(0);
+    await expect(page.locator(".success-message")).toHaveText(service.message);
+    await expect(page.locator("[data-service-summary]")).toContainText(service.runtime === "running" ? "Running" : "Stopped");
+    await page.getByRole("button", { name: "Refresh status" }).click();
+    await expect(notice).toHaveCount(0);
+  });
+}
+
+test("pending run profile keeps the notice and reports service operation failures", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=en&run-profile-pending=1&service-fail=republish-profile", { waitUntil: "networkidle" });
+  const notice = page.locator("[data-run-profile-pending]");
+  await notice.getByRole("button", { name: "Apply to service", exact: true }).click();
+  await expect(page.locator(".inline-error")).toBeVisible();
+  await expect(page.locator(".inline-error")).not.toContainText("control-center-internal-operation-failed");
+  await expect(page.locator(".success-message")).toHaveCount(0);
+  await expect(notice.getByRole("button", { name: "Apply to service", exact: true })).toBeEnabled();
+});
+
+for (const locale of galleryLocales) {
+  test(`pending run profile notice fits in ${locale.id}`, async ({ page }, testInfo) => {
+    await page.goto(`/?view=execution&gallery=1&lang=${locale.id}&run-profile-pending=1`, { waitUntil: "networkidle" });
+    const notice = page.locator("[data-run-profile-pending]");
+    await expect(notice).toBeInViewport({ ratio: 1 });
+    await expect(notice.getByRole("button")).toBeInViewport({ ratio: 1 });
+    expect(await overflowingElements(page)).toEqual([]);
+    expect(await notice.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(false);
+    await page.screenshot({
+      path: path.join(galleryRoot, `${testInfo.project.name}-execution-state-run-profile-pending-${locale.id}.png`),
+      fullPage: true,
+    });
+  });
+}
+
+for (const theme of ["light", "dark"] as const) {
+  test(`pending run profile text meets contrast requirements in ${theme}`, async ({ page }, testInfo) => {
+    await page.goto(`/?view=execution&gallery=1&lang=en&run-profile-pending=1&theme=${theme}`, { waitUntil: "networkidle" });
+    const notice = page.locator("[data-run-profile-pending]");
+    await expect(notice).toBeVisible();
+    const contrast = await notice.evaluate((element) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 1;
+      const context = canvas.getContext("2d")!;
+      const rgb = (color: string) => {
+        context.clearRect(0, 0, 1, 1);
+        context.fillStyle = color;
+        context.fillRect(0, 0, 1, 1);
+        return Array.from(context.getImageData(0, 0, 1, 1).data).slice(0, 3);
+      };
+      const luminance = (color: number[]) => color.map((channel) => {
+        const value = channel / 255;
+        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      }).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+      const background = rgb(getComputedStyle(element).backgroundColor);
+      const title = rgb(getComputedStyle(element.querySelector("strong")!).color);
+      const paragraph = rgb(getComputedStyle(element.querySelector("p")!).color);
+      const ratio = (color: number[]) => (Math.max(luminance(color), luminance(background)) + 0.05)
+        / (Math.min(luminance(color), luminance(background)) + 0.05);
+      return { background, title, paragraph, titleRatio: ratio(title), paragraphRatio: ratio(paragraph) };
+    });
+    expect(contrast.titleRatio).toBeGreaterThanOrEqual(4.5);
+    expect(contrast.paragraphRatio).toBeGreaterThanOrEqual(4.5);
+    console.log(`Run profile notice contrast (${testInfo.project.name}, ${theme}): ${JSON.stringify(contrast)}`);
+    await page.screenshot({
+      path: path.join(galleryRoot, `${testInfo.project.name}-execution-state-run-profile-pending-${theme}-en.png`),
+      fullPage: true,
+    });
+  });
+}
+
 for (const wording of [
   { locale: "ko", expected: "Control Center 서비스", forbidden: "신식 서비스" },
   { locale: "zh-CN", expected: "Control Center 服务", forbidden: "新式服务" },

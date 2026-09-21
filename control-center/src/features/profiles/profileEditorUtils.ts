@@ -4,7 +4,15 @@ export function fileName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
 }
 
-export function matchesAppliedProfile(entry: ProfileEntry, appliedProfile: string | null): boolean {
+export function profileNameStem(path: string): string {
+  return fileName(path).replace(/\.ini$/i, "");
+}
+
+/* The same set the Tauri side refuses when it names the copy; keeping it here
+   lets the naming dialog explain the refusal before the round trip. */
+export const reservedProfileNameCharacters = /[<>:"/\\|?*]/;
+
+export function matchesAppliedProfile(entry: { path: string; displayPath: string }, appliedProfile: string | null): boolean {
   if (!appliedProfile) return false;
   const normalized = appliedProfile.toLocaleLowerCase();
   return entry.path.toLocaleLowerCase() === normalized || entry.displayPath.toLocaleLowerCase() === normalized;

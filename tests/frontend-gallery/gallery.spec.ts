@@ -203,7 +203,7 @@ test.describe("shared profile editor categories and collections remain interacti
       });
       page.on("pageerror", (error) => failures.push(`pageerror: ${error.message}`));
 
-      await page.goto(`/?view=profiles&gallery=1&lang=ko&skin=${skin}`, { waitUntil: "networkidle" });
+      await page.goto(`/?view=profiles&gallery=1&lang=ko&profile-unapplied=1&skin=${skin}`, { waitUntil: "networkidle" });
       const undo = page.getByRole("button", { name: "되돌리기", exact: true });
       const redo = page.getByRole("button", { name: "다시 하기", exact: true });
       const discard = page.getByRole("button", { name: "변경 취소", exact: true });
@@ -217,9 +217,16 @@ test.describe("shared profile editor categories and collections remain interacti
       await undo.click();
       await expect(redo).toBeEnabled();
       await redo.click();
-      await expect(page.getByRole("button", { name: "실행 프로필로 지정", exact: true })).toBeDisabled();
-      await page.getByRole("button", { name: "지금 저장" }).click();
-      await expect(page.locator(".profile-message")).toContainText("지금 저장했습니다");
+      const slot = page.locator(".profile-history-actions .designate");
+      await expect(slot).toHaveCount(0);
+      await page.getByRole("button", { name: "저장", exact: true }).click();
+      await expect(page.locator(".profile-message")).toContainText("저장했습니다");
+      await expect(slot).toHaveCount(0);
+      await page.getByRole("button", { name: "다른 이름으로 저장", exact: true }).click();
+      const copyDialog = page.getByRole("dialog", { name: "다른 이름으로 저장", exact: true });
+      await copyDialog.getByRole("textbox", { name: "새 프로필 이름" }).fill(`Gallery edited copy ${skin}`);
+      await copyDialog.getByRole("button", { name: "저장", exact: true }).click();
+      await expect(copyDialog).toHaveCount(0);
       await expect(page.getByRole("button", { name: "실행 프로필로 지정", exact: true })).toBeEnabled();
       await page.getByRole("button", { name: "실행 프로필로 지정", exact: true }).click();
       await expect(page.locator(".profile-message")).toContainText("실행 프로필로 지정했습니다");
@@ -228,8 +235,8 @@ test.describe("shared profile editor categories and collections remain interacti
       await discard.click();
       await expect(discard).toBeDisabled();
       await firstSelect.selectOption(initialOption);
-      await page.getByRole("button", { name: "지금 저장" }).click();
-      await expect(page.locator(".profile-message")).toContainText("지금 저장했습니다");
+      await page.getByRole("button", { name: "저장", exact: true }).click();
+      await expect(page.locator(".profile-message")).toContainText("저장했습니다");
       await expect(discard).toBeDisabled();
 
       // The default stack renders the sample once, because a second sample group
@@ -501,7 +508,7 @@ test.describe("shared preview comparison renders the saved and edited sides only
       await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-preview-compare-ko.png`), fullPage: true });
 
       // Saving makes both sides identical, so the comparison switches itself off.
-      await page.getByRole("button", { name: "지금 저장" }).click();
+      await page.getByRole("button", { name: "저장", exact: true }).click();
       await expect(compare).toBeDisabled();
       await expect(compare).toHaveAttribute("aria-pressed", "false");
       await expect(strips).toHaveCount(baseline);
@@ -643,7 +650,8 @@ test.describe("shared settings navigation restores the legacy Wizard and Tuner h
       await expect(page.locator("main").getByRole("button", { name: "힌팅", exact: true })).toBeVisible();
       await page.locator("main").getByRole("button", { name: "실행 프로필 지정", exact: true }).click();
       await expect(page.getByRole("button", { name: "진행" })).toHaveCount(0);
-      await expect(page.getByRole("button", { name: "실행 프로필로 지정", exact: true })).toBeVisible();
+      await expect(page.locator(".guided-apply-card .designate")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "다른 이름으로 저장", exact: true })).toBeEnabled();
       await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-guided-apply-ko.png`), fullPage: true });
 
       await page.locator('[data-nav="all"]').click();
@@ -670,7 +678,7 @@ for (const skin of gallerySkins) {
       await expect(page.locator("html")).toHaveAttribute("data-skin", skin);
       await expect(page.locator("html")).toHaveAttribute("dir", locale.direction);
 
-      const save = page.getByRole("button", { name: messages["profiles.saveNow"], exact: true });
+      const save = page.getByRole("button", { name: messages["profiles.save"], exact: true });
       const discard = page.getByRole("button", { name: messages["profiles.discard"], exact: true });
       for (const id of ["hook_child_processes", "skip_console_processes"]) {
         const control = page.getByRole("switch", { name: messages[`settings.${id}.label`], exact: true });
@@ -895,8 +903,8 @@ test.describe("shared field revert restores the saved value while default restor
 
       await exactWeight.fill("12");
       await exactWeight.press("Enter");
-      await page.getByRole("button", { name: "지금 저장", exact: true }).click();
-      await expect(page.locator(".profile-message")).toContainText("지금 저장했습니다");
+      await page.getByRole("button", { name: "저장", exact: true }).click();
+      await expect(page.locator(".profile-message")).toContainText("저장했습니다");
       await expect(revert).toBeDisabled();
       await expect(restoreDefault).toBeEnabled();
 
@@ -940,8 +948,9 @@ test.describe("shared a rejected profile mutation requires an explicit snapshot 
 
       const normalWeight = page.locator(".setting-row").filter({ hasText: "Normal weight" }).locator('input[type="number"]');
       const boldWeight = page.locator(".setting-row").filter({ hasText: "Bold weight" }).locator('input[type="number"]');
-      const save = page.getByRole("button", { name: "Save now", exact: true });
-      const apply = page.getByRole("button", { name: "Set as run profile", exact: true });
+      const save = page.getByRole("button", { name: "Save", exact: true });
+      const saveAs = page.getByRole("button", { name: "Save as", exact: true });
+      const followUp = page.locator(".profile-history-actions .designate");
 
       await normalWeight.fill("12");
       await normalWeight.press("Tab");
@@ -950,17 +959,20 @@ test.describe("shared a rejected profile mutation requires an explicit snapshot 
       await expect(page.locator(".preview-canvas")).toHaveAttribute("data-dark", "true");
       await expect(page.getByText("Gallery profile mutation failed.", { exact: true })).toBeVisible();
       await expect(save).toBeDisabled();
-      await expect(apply).toBeDisabled();
+      await expect(saveAs).toBeDisabled();
+      await expect(followUp).toHaveCount(0);
 
       await boldWeight.fill("8");
       await boldWeight.press("Tab");
       await expect(save).toBeDisabled();
-      await expect(apply).toBeDisabled();
+      await expect(saveAs).toBeDisabled();
+      await expect(followUp).toHaveCount(0);
 
       await page.getByRole("button", { name: "Discard changes", exact: true }).click();
       await expect(normalWeight).toHaveValue("0");
       await expect(boldWeight).toHaveValue("0");
-      await expect(apply).toBeEnabled();
+      await expect(saveAs).toBeEnabled();
+      await expect(followUp).toHaveCount(0);
     });
   }
 });
@@ -995,8 +1007,11 @@ test("settings files support import, save as, export, reveal, and apply without 
 
   await page.getByRole("button", { name: "INI 파일 선택" }).click();
   await expect(page.locator('[data-operation="file-settings"]')).toContainText("Community.ini");
-  await page.getByRole("textbox", { name: "복제 프로필 이름" }).fill("Gallery copy");
-  await page.getByRole("button", { name: "다른 이름으로 저장" }).click();
+  await page.getByRole("button", { name: "다른 이름으로 저장", exact: true }).click();
+  const filesDialog = page.getByRole("dialog", { name: "다른 이름으로 저장", exact: true });
+  await filesDialog.getByRole("textbox", { name: "새 프로필 이름" }).fill("Gallery copy");
+  await filesDialog.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(filesDialog).toHaveCount(0);
   await expect(page.locator('[data-operation="file-settings"]')).toContainText("Gallery copy.ini");
   await page.getByRole("button", { name: "파일 위치 열기" }).click();
   await expect(page.locator('[data-operation="file-settings"]')).toContainText("파일 위치를 열었습니다");
@@ -1053,7 +1068,7 @@ test.describe("shared writable profiles save to the original and apply by portab
   for (const skin of gallerySkins) {
     test(`writable profiles save to the original and apply by portable identity ${skin}`, async ({ page }, testInfo) => {
       await page.goto(`/?view=profiles&gallery=1&lang=en&skin=${skin}`, { waitUntil: "networkidle" });
-      await expect(page.locator("main code").filter({ hasText: /Default[.]ini|Review copy[.]ini/ }).first()).toContainText("Default.ini");
+      await expect(page.locator("main code").filter({ hasText: /Default[.]ini|Review copy/ }).first()).toContainText("Default.ini");
 
       const setting = page.locator(".setting-row select").first();
       const initial = await setting.inputValue();
@@ -1064,15 +1079,16 @@ test.describe("shared writable profiles save to the original and apply by portab
       if (!alternate) throw new Error("A writable profile setting needs an alternate gallery value");
       await setting.selectOption(alternate);
 
-      const save = page.getByRole("button", { name: "Save now", exact: true });
-      const apply = page.getByRole("button", { name: "Set as run profile", exact: true });
+      const save = page.getByRole("button", { name: "Save", exact: true });
+      const apply = page.getByRole("button", { name: "Apply to service", exact: true });
       await expect(save).toBeEnabled();
-      await expect(apply).toBeDisabled();
+      await expect(page.locator(".profile-history-actions .designate")).toHaveCount(0);
       await save.click();
       await expect(page.locator(".profile-message")).toContainText("Saved Default.ini");
       await expect(apply).toBeEnabled();
+      await expect(page.getByRole("button", { name: "Set as run profile", exact: true })).toHaveCount(0);
       await apply.click();
-      await expect(page.locator(".profile-message")).toContainText("Default.ini is now the run profile.");
+      await expect(page.locator(".profile-message")).toContainText("Restarted the service on the settings you saved. Apps opened from now on use them.");
 
       await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-profile-direct-save-apply-en.png`), fullPage: true });
     });
@@ -1084,7 +1100,7 @@ test.describe("shared read-only profiles require Save as before apply", () => {
   for (const skin of gallerySkins) {
     test(`read-only profiles require Save as before apply ${skin}`, async ({ page }, testInfo) => {
       await page.goto(`/?view=profiles&gallery=1&lang=en&profile-read-only=1&skin=${skin}`, { waitUntil: "networkidle" });
-      await expect(page.locator("main code").filter({ hasText: /Default[.]ini|Review copy[.]ini/ }).first()).toContainText("Default.ini");
+      await expect(page.locator("main code").filter({ hasText: /Default[.]ini|Review copy/ }).first()).toContainText("Default.ini");
       await expect(page.getByText("The original file cannot be written.", { exact: false })).toBeVisible();
 
       const setting = page.locator(".setting-row select").first();
@@ -1096,15 +1112,15 @@ test.describe("shared read-only profiles require Save as before apply", () => {
       if (!alternate) throw new Error("A read-only profile setting needs an alternate gallery value");
       await setting.selectOption(alternate);
 
-      await expect(page.getByRole("button", { name: "Save now", exact: true })).toBeDisabled();
-      await expect(page.getByRole("button", { name: "Set as run profile", exact: true })).toBeDisabled();
+      await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+      await expect(page.getByRole("button", { name: "Set as run profile", exact: true })).toHaveCount(0);
       await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-profile-read-only-save-as-required-en.png`), fullPage: true });
       await page.getByRole("button", { name: "Save as", exact: true }).click();
-      await page.getByRole("textbox", { name: "New profile name" }).fill("Review copy");
-      await page.locator(".profile-save-as").getByRole("button", { name: "Save as", exact: true }).click();
+      await page.getByRole("textbox", { name: "New profile name" }).fill(`Review copy ${skin}`);
+      await page.getByRole("dialog", { name: "Save as", exact: true }).getByRole("button", { name: "Save", exact: true }).click();
 
-      await expect(page.locator("main code").filter({ hasText: /Default[.]ini|Review copy[.]ini/ }).first()).toContainText("Review copy.ini");
-      await expect(page.locator(".profile-message")).toContainText("Saved as Profiles\\Review copy.ini");
+      await expect(page.locator("main code").filter({ hasText: /Default[.]ini|Review copy/ }).first()).toContainText(`Review copy ${skin}.ini`);
+      await expect(page.locator(".profile-message")).toContainText(`Saved as Profiles\\Review copy ${skin}.ini`);
       await expect(page.getByRole("button", { name: "Set as run profile", exact: true })).toBeEnabled();
       await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-profile-read-only-save-as-en.png`), fullPage: true });
     });
@@ -1356,6 +1372,13 @@ for (const entry of [
 ] as const) {
   test(`${entry.view} hides internal ${entry.failing} details behind the diagnostics message`, async ({ page }) => {
     await page.goto(`/?view=${entry.view}&gallery=1&lang=en&service-fail=${entry.failing}`, { waitUntil: "networkidle" });
+    if (entry.view === "profiles") {
+      await page.getByRole("button", { name: "Save as", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Save as", exact: true });
+      await dialog.getByRole("textbox", { name: "New profile name" }).fill("Publish failure copy");
+      await dialog.getByRole("button", { name: "Save", exact: true }).click();
+      await expect(dialog).toHaveCount(0);
+    }
     await page.getByRole("button", { name: "Set as run profile", exact: true }).first().click();
 
     await expect(page.getByText("The operation failed. Check the diagnostics log for details.", { exact: true })).toBeVisible();

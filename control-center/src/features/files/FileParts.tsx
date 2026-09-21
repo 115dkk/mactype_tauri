@@ -1,3 +1,4 @@
+import { ProfileNameDialog } from "../../components/ProfileNameDialog";
 import { useI18n } from "../../i18n/i18n";
 import { AlertTriangle, BadgeCheck, Check, Play } from "lucide-react";
 import type { ProfileEntry } from "../../app/model";
@@ -68,4 +69,11 @@ export function FileMessages({ model, className = "success-message", variant = "
     </Tag>}
     {error && <Tag className="inline-error"><AlertTriangle aria-hidden="true" size={variant === "console" ? 14 : 15} /> {error}</Tag>}
   </>;
+}
+
+export function FileNameDialog({ model }: PartProps) {
+  if (!model.files.nameDialogOpen) return null;
+  return <ProfileNameDialog busy={model.files.documentBusy} initialName={model.files.suggestedProfileName} onCancel={() => model.files.setNameDialogOpen(false)} onSubmit={(name) => void model.files.duplicate(name).then((saved) => {
+    if (saved) model.files.setNameDialogOpen(false);
+  })} verdict={model.files.profileNameVerdict} />;
 }

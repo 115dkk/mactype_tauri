@@ -2,7 +2,7 @@ import { AlertTriangle, CircleCheck, Info, Layers, ListChecks, Power, PowerOff, 
 import { useState } from "react";
 import type { ShellProps } from "../../app/shell";
 import { SwitchControl } from "../../components/SwitchControl";
-import { ExecutionMessages, LegacyServiceControls, LegacyTrayConflict, ManualLaunchBody, MigrationConfirmation, RegisteredTargetsBody, ServicePackageNotice, ServiceSummaryNoticeAndActions, SystemServiceControls } from "../../features/execution/ExecutionParts";
+import { RunProfilePendingNotice, ExecutionMessages, LegacyServiceControls, LegacyTrayConflict, ManualLaunchBody, MigrationConfirmation, RegisteredTargetsBody, ServicePackageNotice, ServiceSummaryNoticeAndActions, SystemServiceControls } from "../../features/execution/ExecutionParts";
 import { useExecutionModel } from "../../features/execution/useExecutionModel";
 import { useI18n } from "../../i18n/i18n";
 import { FluentCard, FluentCards, FluentPage, FluentSection, FluentState, FluentSubRow } from "./FluentParts";
@@ -32,6 +32,7 @@ export function FluentExecution({ shell }: { shell: ShellProps }) {
       title={t("nav.execution")}
       titleId="execution-title"
     >
+      <RunProfilePendingNotice model={model} />
       <FluentCards>
         <div data-service-summary data-state={serviceSummary.tone}>
           <FluentCard

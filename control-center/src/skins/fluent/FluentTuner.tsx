@@ -1,6 +1,6 @@
 import { Check, Search } from "lucide-react";
 import type { ShellProps } from "../../app/shell";
-import { ProfileEditorBody, ProfileEditorPreview, ProfileEditorSummary, ProfileEditorToolbar, ProfileSaveAsForm } from "../../features/profiles/ProfileEditorParts";
+import { ProfileEditorBody, ProfileEditorPreview, ProfileEditorSummary, ProfileEditorToolbar, ProfileEditorNameDialog } from "../../features/profiles/ProfileEditorParts";
 import { useProfileEditor } from "../../features/profiles/useProfileEditor";
 import { useI18n } from "../../i18n/i18n";
 import { FluentPage } from "./FluentParts";
@@ -19,7 +19,7 @@ export function FluentTuner({ shell }: { shell: ShellProps }) {
       titleId="profiles-title"
       wide
     >
-      <ProfileSaveAsForm editor={editor} />
+      <ProfileEditorNameDialog editor={editor} />
       <div className="fluent-two profile-layout" data-mode={mode}>
         <aside className="fluent-index settings-index" aria-label={mode === "guided" ? t("guided.progress") : t("profiles.sections")}>
           {mode === "all" && <label className="fluent-field fluent-search search-field"><Search aria-hidden="true" size={14} strokeWidth={1.8} /><span className="sr-only">{t("profiles.search")}</span><input onChange={(event) => editor.editing.setQuery(event.target.value)} placeholder={t("profiles.search")} type="search" value={editor.editing.query} /></label>}

@@ -170,6 +170,14 @@ export function useProfileDocument(t: I18nValue["t"], { page = "profiles", disco
   const runHistoryCommand = async (nextCommand: "undo" | "redo" | "discard") => {
     const action = nextCommand === "undo" ? () => runtime().undoProfile() : nextCommand === "redo" ? () => runtime().redoProfile() : () => runtime().discardProfileChanges();
     setCommand(nextCommand);
+    /* Undo, redo and discard move the document away from the save whose
+       consequence the slot is describing, so they retire it as any other
+       command does. No user can reach that today, because saving clears the
+       document's history and leaves nothing dirty, so all three are disabled
+       until an edit that already retires the slot. The clearing is here so the
+       invariant does not depend on that distant detail staying true. */
+    setDesignationEffect(null);
+    setFollowUp(null);
     try {
       await mutationQueue.current;
       applySnapshot(await action());

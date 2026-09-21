@@ -349,6 +349,12 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .service-row[open] > summary .service-row-chevron { transform: rotate(180deg); }
 .service-row-body { border-top: 1px solid var(--color-border); }
 .service-row-body > .open-service-card > :first-child { border-top: 0; }
+.run-profile-pending { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: var(--space-3); margin-bottom: var(--space-4); padding: var(--space-4); border: 1px solid color-mix(in srgb, var(--color-primary) 40%, var(--color-border)); background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface)); }
+.run-profile-pending > div { display: grid; min-width: 0; gap: var(--space-1); }
+.run-profile-pending strong { text-wrap: balance; }
+.run-profile-pending p { color: var(--color-muted); text-wrap: pretty; }
+.run-profile-pending-icon { display: grid; width: var(--control-height); height: var(--control-height); place-items: center; color: var(--color-primary); }
+.run-profile-pending > .button { align-self: center; }
 .service-package-notice { display: flex; align-items: flex-start; gap: var(--space-3); padding: var(--space-4); border-top: 1px solid var(--color-warning); background: color-mix(in srgb, var(--color-warning) 8%, var(--color-surface)); }
 .service-package-notice > div { display: grid; min-width: 0; gap: var(--space-1); }
 .service-package-notice strong { text-wrap: balance; }
@@ -535,6 +541,8 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
   .file-primary-actions { align-items: stretch; flex-direction: column; }
   .compact-details > div, [dir="rtl"] .compact-details > div { border-right: 0; border-left: 0; border-bottom: 1px solid var(--color-border); }
   .execution-option { align-items: flex-start; flex-direction: column; }
+  .run-profile-pending { grid-template-columns: auto minmax(0, 1fr); }
+  .run-profile-pending > .button { grid-column: 1 / -1; }
   .service-summary-grid { grid-template-columns: 1fr; }
   .service-summary-grid > div { border-inline-end: 0; border-bottom: 1px solid var(--color-border); }
   .service-summary-grid > div:last-child { border-bottom: 0; }

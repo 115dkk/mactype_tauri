@@ -269,6 +269,9 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
     injectionReady: !query.has("profile-runtime-missing"),
     activeProfile,
     expectedProfileDigest: activeProfile ? expectedGalleryDigest : null,
+    runProfilePublication: !activeProfile || query.has("profile-runtime-missing")
+      ? "unknown"
+      : query.has("run-profile-pending") ? "pending" : "published",
     sessionTargets: [],
   };
 }
@@ -363,6 +366,7 @@ export function transitionGalleryRunProfile(
     ...next,
     activeProfile: displayPath,
     expectedProfileDigest: expectedGalleryDigest,
+    runProfilePublication: "published",
   }, next.legacyTray);
 }
 
@@ -409,6 +413,7 @@ export function transitionGalleryExecutionStatus(
     ...current,
     activeProfile: defaultApplied ? "ini\\Default.ini" : current.activeProfile,
     expectedProfileDigest: defaultApplied ? expectedGalleryDigest : current.expectedProfileDigest,
+    runProfilePublication: defaultApplied ? "published" : current.runProfilePublication,
     systemInjectionActive: true,
     systemService: runningGalleryService(current.systemService),
     legacyMacTray: action === "migrate-from-legacy" && current.legacyMacTray

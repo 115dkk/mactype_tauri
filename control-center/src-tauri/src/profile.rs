@@ -24,7 +24,25 @@ mod tests;
 mod upstream_corpus_tests;
 
 pub(crate) use identity::source_profile_reference;
+pub(crate) use legacy::user_profile_root;
 pub(crate) use legacy::{bundled_default_profile_at, legacy_alternative_file_bytes};
+
+#[cfg(test)]
+pub(crate) fn profile_state_with_unsaved_setting(
+    path: &std::path::Path,
+    setting_id: &str,
+    value: f64,
+) -> ProfileState {
+    let state = ProfileState::default();
+    state.set(ProfileDocument::open(path).unwrap()).unwrap();
+    commands::update_profile_setting(setting_id.to_owned(), value, &state).unwrap();
+    state
+}
+
+#[cfg(test)]
+pub(crate) fn encoded_profile_state(state: &ProfileState) -> Vec<u8> {
+    state.read(|document| document.encoded()).unwrap()
+}
 
 #[cfg(test)]
 use document::hash;

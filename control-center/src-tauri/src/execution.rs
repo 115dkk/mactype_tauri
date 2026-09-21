@@ -29,6 +29,14 @@ use session::{
 };
 pub use session::{session_targets, SessionTarget};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RunProfilePublication {
+    Published,
+    Pending,
+    Unknown,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionStatus {
@@ -45,7 +53,15 @@ pub struct ExecutionStatus {
     pub injection_ready: bool,
     pub active_profile: Option<String>,
     pub expected_profile_digest: Option<String>,
+    pub run_profile_publication: RunProfilePublication,
     pub session_targets: Vec<SessionTarget>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepublishOutcome {
+    pub effect: DesignationEffect,
+    pub status: ExecutionStatus,
 }
 
 fn record_legacy_tray_observation(
@@ -167,6 +183,62 @@ fn observe_profile(installation: Option<&Path>) -> ProfileObservation {
     project_profile_observation(local, bundled_default)
 }
 
+fn resolve_run_profile_path(installation_root: Option<&Path>, source: &Path) -> Option<PathBuf> {
+    if source.is_absolute() {
+        return Some(source.to_path_buf());
+    }
+    let mut components = source.components();
+    let first = components.next()?;
+    if first
+        .as_os_str()
+        .to_string_lossy()
+        .eq_ignore_ascii_case("Profiles")
+    {
+        let mut profile = crate::profile::user_profile_root()?;
+        profile.extend(components);
+        Some(profile)
+    } else {
+        installation_root.map(|root| root.join(source))
+    }
+}
+
+fn run_profile_payload(
+    installation_root: Option<&Path>,
+    source: Option<&Path>,
+) -> Result<(PathBuf, Vec<u8>), String> {
+    let source = source.ok_or_else(|| "no run profile is designated".to_owned())?;
+    let path = resolve_run_profile_path(installation_root, source)
+        .ok_or_else(|| "the designated run profile path cannot be resolved".to_owned())?;
+    let bytes = read_bounded_file(
+        &path,
+        mactype_service_contract::MAX_PROFILE_BYTES,
+        "designated run profile",
+    )?;
+    if bytes.is_empty() {
+        return Err("designated run profile must not be empty".to_owned());
+    }
+    Ok((path, bytes))
+}
+
+fn run_profile_publication(
+    installation_root: Option<&Path>,
+    source: Option<&Path>,
+    last_published_digest: Option<&str>,
+) -> RunProfilePublication {
+    let Some(last_published_digest) = last_published_digest else {
+        return RunProfilePublication::Unknown;
+    };
+    let Ok((_, bytes)) = run_profile_payload(installation_root, source) else {
+        return RunProfilePublication::Unknown;
+    };
+    let digest = mactype_service_contract::GenerationId::from_profile_bytes(&bytes);
+    if digest.as_str() == last_published_digest {
+        RunProfilePublication::Published
+    } else {
+        RunProfilePublication::Pending
+    }
+}
+
 pub fn status(installation_root: Option<&Path>) -> ExecutionStatus {
     let observation = observe_profile(installation_root);
     let machine = crate::machine_integration::status(observation.expected_profile.as_deref());
@@ -178,6 +250,11 @@ pub fn status(installation_root: Option<&Path>) -> ExecutionStatus {
         service_management_package,
     );
     let expected_profile_digest = machine.expected_profile_digest;
+    let run_profile_publication = run_profile_publication(
+        installation_root,
+        designated_run_profile_source(&observation),
+        expected_profile_digest.as_deref(),
+    );
     let system_injection_active = machine.system_injection_active;
     let legacy_mac_tray = machine.legacy_service;
     let legacy_tray = machine.legacy_tray;
@@ -203,6 +280,7 @@ pub fn status(installation_root: Option<&Path>) -> ExecutionStatus {
                 .into_owned()
         }),
         expected_profile_digest,
+        run_profile_publication,
         session_targets: session_targets().unwrap_or_default(),
     }
 }
@@ -320,6 +398,47 @@ pub(crate) fn designate_open_profile(
         record_successful_activity(MachineAction::PublishProfile, true, &current);
     }
     Ok(applied)
+}
+
+fn republish_run_profile_with(
+    root: &Path,
+    source: &Path,
+    publish: impl FnOnce(&[u8]) -> Result<DesignationEffect, String>,
+    refresh_runtime: impl FnOnce(&Path, &Path, &[u8]) -> Result<(), String>,
+    refresh_status: impl FnOnce() -> ExecutionStatus,
+) -> Result<RepublishOutcome, String> {
+    let (profile_path, profile_bytes) = run_profile_payload(Some(root), Some(source))?;
+    let effect = publish(&profile_bytes)?;
+    refresh_runtime(root, &profile_path, &profile_bytes)?;
+    Ok(RepublishOutcome {
+        effect,
+        status: refresh_status(),
+    })
+}
+
+fn designated_run_profile_source(observation: &ProfileObservation) -> Option<&Path> {
+    observation
+        .local_runtime
+        .as_ref()
+        .map(|runtime| runtime.source_profile.as_path())
+}
+
+#[tauri::command]
+pub(crate) fn republish_run_profile() -> Result<RepublishOutcome, String> {
+    let root =
+        installation_root().ok_or_else(|| "MacType installation was not found".to_owned())?;
+    let observation = observe_profile(Some(&root));
+    let source = designated_run_profile_source(&observation)
+        .ok_or_else(|| "no run profile is designated".to_owned())?;
+    republish_run_profile_with(
+        &root,
+        source,
+        crate::machine_integration::designate_run_profile,
+        |root, profile_path, profile_bytes| {
+            apply_profile(root, profile_path, profile_bytes).map(|_| ())
+        },
+        || status(Some(&root)),
+    )
 }
 
 fn ensure_active_runtime() -> Result<bool, String> {
@@ -503,6 +622,252 @@ pub(crate) fn ci_verify_injection_workflow() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_root(label: &str) -> PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        env::temp_dir().join(format!("mactype-execution-{label}-{unique}"))
+    }
+
+    fn test_status(publication: RunProfilePublication) -> ExecutionStatus {
+        use crate::machine_integration::{
+            LegacyTrayProcessState, LegacyTrayStartupState, LegacyTrayStatus,
+        };
+        use crate::service_contract::{
+            HealthState, InstallationState, RuntimeState, ServiceBackend,
+            ServiceManagementPackageState, SystemServiceStatus,
+        };
+
+        ExecutionStatus {
+            tray_available: true,
+            auto_start: false,
+            manual_launcher_available: true,
+            service_management_package: ServiceManagementPackageState::Ready,
+            system_service: SystemServiceStatus {
+                backend: ServiceBackend::OpenSource,
+                installation: InstallationState::Current,
+                runtime: RuntimeState::Running,
+                health: HealthState::Ready,
+                binary_path: None,
+                win32_error: None,
+                active_profile_digest: None,
+                configuration_drift: false,
+                can_install: false,
+                can_remove: true,
+                can_start: false,
+                can_stop: true,
+                can_repair: true,
+                can_upgrade: false,
+            },
+            legacy_mac_tray: None,
+            legacy_tray: LegacyTrayStatus::from_states(
+                LegacyTrayProcessState::Absent,
+                LegacyTrayStartupState::Absent,
+            ),
+            registry_mode_detected: false,
+            system_modes_supported: true,
+            system_injection_active: false,
+            injection_ready: true,
+            active_profile: Some(r"ini\Run.ini".to_owned()),
+            expected_profile_digest: None,
+            run_profile_publication: publication,
+            session_targets: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn run_profile_publication_reports_published_for_matching_last_published_digest() {
+        let root = test_root("publication-published");
+        let profile = root.join("Run.ini");
+        let bytes = b"[General]\r\nNormalWeight=2\r\n";
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&profile, bytes).unwrap();
+        let digest = mactype_service_contract::GenerationId::from_profile_bytes(bytes);
+
+        assert_eq!(
+            run_profile_publication(None, Some(&profile), Some(digest.as_str())),
+            RunProfilePublication::Published
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn run_profile_publication_reports_pending_for_file_changed_since_last_publication() {
+        let root = test_root("publication-pending");
+        let profile = root.join("Run.ini");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&profile, b"[General]\r\nNormalWeight=7\r\n").unwrap();
+        let last_published = mactype_service_contract::GenerationId::from_profile_bytes(
+            b"[General]\r\nNormalWeight=2\r\n",
+        );
+
+        assert_eq!(
+            run_profile_publication(None, Some(&profile), Some(last_published.as_str())),
+            RunProfilePublication::Pending
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn run_profile_publication_is_unknown_without_a_designated_profile() {
+        let digest = mactype_service_contract::GenerationId::from_profile_bytes(b"profile");
+
+        assert_eq!(
+            run_profile_publication(None, None, Some(digest.as_str())),
+            RunProfilePublication::Unknown
+        );
+    }
+
+    #[test]
+    fn run_profile_publication_is_unknown_for_a_missing_profile() {
+        let root = test_root("publication-missing");
+        let missing = root.join("Missing.ini");
+        let digest = mactype_service_contract::GenerationId::from_profile_bytes(b"profile");
+
+        assert_eq!(
+            run_profile_publication(None, Some(&missing), Some(digest.as_str())),
+            RunProfilePublication::Unknown
+        );
+    }
+
+    #[test]
+    fn run_profile_publication_is_unknown_for_an_unreadable_profile() {
+        let root = test_root("publication-unreadable");
+        let unreadable = root.join("Unreadable.ini");
+        let digest = mactype_service_contract::GenerationId::from_profile_bytes(b"profile");
+        fs::create_dir_all(&unreadable).unwrap();
+
+        assert_eq!(
+            run_profile_publication(None, Some(&unreadable), Some(digest.as_str())),
+            RunProfilePublication::Unknown
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn stopped_service_with_edited_run_profile_is_pending_without_an_active_digest() {
+        let root = test_root("publication-stopped-pending");
+        let profile = root.join("Run.ini");
+        let last_published = b"[General]\r\nNormalWeight=2\r\n";
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&profile, b"[General]\r\nNormalWeight=7\r\n").unwrap();
+        let expected_profile_digest =
+            mactype_service_contract::GenerationId::from_profile_bytes(last_published);
+        let mut status = test_status(RunProfilePublication::Unknown);
+        status.system_service.runtime = crate::service_contract::RuntimeState::Stopped;
+        status.system_service.health = crate::service_contract::HealthState::Unknown;
+        status.system_service.active_profile_digest = None;
+
+        status.run_profile_publication =
+            run_profile_publication(None, Some(&profile), Some(expected_profile_digest.as_str()));
+
+        assert_eq!(status.system_service.active_profile_digest, None);
+        assert_eq!(
+            status.run_profile_publication,
+            RunProfilePublication::Pending
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn run_profile_publication_is_unknown_without_a_last_published_digest() {
+        let root = test_root("publication-no-last-published-digest");
+        let profile = root.join("Run.ini");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&profile, b"profile").unwrap();
+
+        assert_eq!(
+            run_profile_publication(None, Some(&profile), None),
+            RunProfilePublication::Unknown
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn deleted_run_profile_does_not_prevent_a_complete_status_projection() {
+        let root = test_root("deleted-status-profile");
+        let profile = root.join("Deleted.ini");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&profile, b"profile").unwrap();
+        fs::remove_file(&profile).unwrap();
+        let publication = run_profile_publication(
+            None,
+            Some(&profile),
+            Some("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        );
+        let status = test_status(publication);
+
+        assert_eq!(
+            status.run_profile_publication,
+            RunProfilePublication::Unknown
+        );
+        assert!(status.active_profile.is_some());
+        assert!(status.injection_ready);
+        assert_eq!(
+            status.system_service.runtime,
+            crate::service_contract::RuntimeState::Running
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn republish_uses_designated_file_bytes_instead_of_unsaved_open_document() {
+        let root = test_root("republish-disk-bytes");
+        let installation = root.join("installation");
+        let profile = installation.join("ini").join("Run.ini");
+        let disk = b"[General]\r\nNormalWeight=2\r\n";
+        fs::create_dir_all(profile.parent().unwrap()).unwrap();
+        fs::write(installation.join("MacLoader.exe"), b"loader").unwrap();
+        fs::write(installation.join("MacType.dll"), b"core").unwrap();
+        fs::write(&profile, disk).unwrap();
+        let open_state =
+            crate::profile::profile_state_with_unsaved_setting(&profile, "normal_weight", 9.0);
+        assert_ne!(crate::profile::encoded_profile_state(&open_state), disk);
+        let published = std::cell::RefCell::new(Vec::new());
+        let refreshed = std::cell::RefCell::new(Vec::new());
+
+        let outcome = republish_run_profile_with(
+            &installation,
+            Path::new(r"ini\Run.ini"),
+            |bytes| {
+                published.replace(bytes.to_vec());
+                Ok(DesignationEffect::Live)
+            },
+            |_, _, bytes| {
+                refreshed.replace(bytes.to_vec());
+                Ok(())
+            },
+            || test_status(RunProfilePublication::Published),
+        )
+        .unwrap();
+
+        assert_eq!(published.into_inner(), disk);
+        assert_eq!(refreshed.into_inner(), disk);
+        assert_eq!(outcome.effect, DesignationEffect::Live);
+        assert_eq!(
+            outcome.status.run_profile_publication,
+            RunProfilePublication::Published
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn run_profile_publication_serializes_in_kebab_case() {
+        assert_eq!(
+            serde_json::to_string(&RunProfilePublication::Published).unwrap(),
+            r#""published""#
+        );
+        assert_eq!(
+            serde_json::to_string(&RunProfilePublication::Pending).unwrap(),
+            r#""pending""#
+        );
+        assert_eq!(
+            serde_json::to_string(&RunProfilePublication::Unknown).unwrap(),
+            r#""unknown""#
+        );
+    }
 
     #[test]
     fn public_machine_action_rejects_internal_rollback() {

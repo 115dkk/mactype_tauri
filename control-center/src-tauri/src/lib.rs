@@ -67,6 +67,7 @@ pub fn run() {
             execution::launch_with_mactype,
             execution::list_manual_launch_candidates,
             execution::designate_open_profile,
+            execution::republish_run_profile,
             execution::activate_system_injection,
             execution::register_session_target,
             execution::remove_session_target,

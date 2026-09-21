@@ -2,6 +2,7 @@ import { AlertTriangle, BadgeCheck, Check, FileInput, FileOutput, FolderOpen, Pl
 import { useCallback, useEffect, useState } from "react";
 import type { LegacyProfileCandidate, PreviewRequest, PreviewResult } from "../app/model";
 import { runtime } from "../app/runtimeAdapter";
+import { ProfileNameDialog } from "../components/ProfileNameDialog";
 import { useProfileDocument } from "../features/profiles/useProfileDocument";
 import { fileName, managedProfileFor, matchesAppliedProfile, sameProfileIdentity } from "./profiles/profileEditorUtils";
 import { useI18n } from "../i18n/i18n";
@@ -17,6 +18,7 @@ interface FileSettingsPageProps {
 
 export function FileSettingsPage({ onEditInTuner }: FileSettingsPageProps) {
   const { t } = useI18n();
+  const [nameDialogOpen, setNameDialogOpen] = useState(false);
   const [detectedLegacy, setLegacy] = useState<LegacyProfileCandidate | null>(null);
   const [thumbnails, setThumbnails] = useState<ReadonlyMap<string, PreviewResult | null>>(() => new Map(thumbnailCache));
   const discoverLegacyProfile = useCallback(async () => {
@@ -28,7 +30,7 @@ export function FileSettingsPage({ onEditInTuner }: FileSettingsPageProps) {
     appliedProfile,
     chooseProfile,
     command: busy,
-    copyName,
+    busy: documentBusy,
     designateProfile: designate,
     dirtyCount,
     error,
@@ -37,11 +39,13 @@ export function FileSettingsPage({ onEditInTuner }: FileSettingsPageProps) {
     offerStart,
     profile,
     profiles,
+    profileNameVerdict,
+    recoveryRequired,
     replaceDocument,
     runFileOperation,
     saveCurrentProfile: save,
     saveProfileAs: duplicate,
-    setCopyName,
+    suggestedProfileName,
     startServiceNow,
   } = useProfileDocument(t, { page: "files", discoverLegacyProfile });
   const legacy = !loading && detectedLegacy && !managedProfileFor(detectedLegacy, profiles) && !sameProfileIdentity(detectedLegacy, appliedProfile)
@@ -186,12 +190,16 @@ export function FileSettingsPage({ onEditInTuner }: FileSettingsPageProps) {
           </dl>
         </details>
         <div className="file-primary-actions">
-          <button className="button secondary" disabled={!profile || !profile.canSave || dirtyCount === 0 || busy !== null} onClick={() => void save()} type="button"><Save aria-hidden="true" size={17} /> {busy === "save" ? t("profiles.saving") : t("profiles.save")}</button>
-          <div className="file-save-as"><input aria-label={t("profiles.copyName")} disabled={!profile || busy !== null} onChange={(event) => setCopyName(event.target.value)} placeholder={t("files.saveAsName")} value={copyName} /><button className="button secondary" disabled={!profile || !copyName.trim() || busy !== null} onClick={() => void duplicate()} type="button"><SaveAll aria-hidden="true" size={16} /> {t("files.saveAs")}</button></div>
+          <button className="button secondary" disabled={!profile || !profile.canSave || dirtyCount === 0 || busy !== null} data-dirty={dirtyCount > 0} onClick={() => void save()} type="button"><Save aria-hidden="true" size={17} /> {busy === "save" ? t("profiles.saving") : t("profiles.save")}</button>
+          <button className="button secondary" disabled={!profile || documentBusy || recoveryRequired} onClick={() => setNameDialogOpen(true)} type="button"><SaveAll aria-hidden="true" size={16} /> {t("files.saveAs")}</button>
           <button className="button secondary" disabled={!profile || busy !== null} onClick={() => void exportIni()} type="button"><FileOutput aria-hidden="true" size={17} /> {busy === "export" ? t("files.exporting") : t("files.chooseExport")}</button>
           <button className="button designate" disabled={!profile || dirtyCount > 0 || busy !== null} onClick={() => void designate()} title={dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button"><BadgeCheck aria-hidden="true" size={17} /> {busy === "designate" ? t("profiles.designating") : t("profiles.designate")}</button>
         </div>
       </section>
+
+      {nameDialogOpen && <ProfileNameDialog busy={documentBusy} initialName={suggestedProfileName} onCancel={() => setNameDialogOpen(false)} onSubmit={(name) => void duplicate(name).then((saved) => {
+        if (saved) setNameDialogOpen(false);
+      })} verdict={profileNameVerdict} />}
 
       {message && (
         <p aria-live="polite" className="success-message" data-operation="file-settings">

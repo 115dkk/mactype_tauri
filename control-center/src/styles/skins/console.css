@@ -73,6 +73,8 @@ html[data-skin="console"] .window-controls button { width: 40px; }
 /* Controls: 26 px, 4 px corners, no elevation. */
 html[data-skin="console"] .button { min-height: var(--control-height); height: var(--control-height); padding: 0 10px; gap: 6px; border: 1px solid var(--color-border-strong); border-radius: 4px; background: var(--color-surface-subtle); color: var(--color-foreground); font-size: 12px; font-weight: 400; box-shadow: none; }
 html[data-skin="console"] .button.primary { border-color: var(--color-primary); background: var(--color-primary); color: var(--color-on-primary); font-weight: 600; }
+/* Mix the accent with the foreground to keep tinted-button text at 4.5:1. */
+html[data-skin="console"] .button.designate { border-color: var(--color-primary); background: var(--console-accent-soft); color: color-mix(in srgb, var(--color-primary) 60%, var(--color-foreground)); font-weight: 600; }
 html[data-skin="console"] .button.danger { border-color: var(--color-destructive); color: var(--color-destructive); background: transparent; }
 html[data-skin="console"] .button.ghost { border-color: transparent; background: transparent; color: var(--color-muted); }
 html[data-skin="console"] .button.ghost:hover { color: var(--color-foreground); background: var(--console-accent-soft); }

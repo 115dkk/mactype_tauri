@@ -1,5 +1,5 @@
 import { useI18n } from "../../i18n/i18n";
-import { ListRestart, Play, Redo2, RotateCcw, Save, SaveAll, Undo2, X } from "lucide-react";
+import { BadgeCheck, ListRestart, Redo2, RotateCcw, Save, SaveAll, Undo2, X } from "lucide-react";
 import { Hint } from "../../components/Hint";
 import { settingsSchema } from "../../generated/settings";
 import { AdvancedSettings } from "./AdvancedSettings";
@@ -140,7 +140,7 @@ export function ProfileEditorToolbar({ editor, variant = "text", className }: To
       <button className="button secondary compact-action" disabled={!profile || busy || recoveryRequired} onClick={editor.document.resetDefaults} title={t("profiles.resetDefaultsDescription")} type="button"><ListRestart aria-hidden="true" size={14} /> {t("profiles.resetDefaults")}</button>
       <button className="button secondary compact-action" disabled={!profile || !profile.canSave || dirtyCount === 0 || busy || recoveryRequired} onClick={() => void editor.document.saveCurrentProfile()} type="button"><Save aria-hidden="true" size={14} /> {command === "save" ? t("profiles.saving") : t("profiles.saveNow")}</button>
       {profile && !profile.canSave && <button className="button secondary compact-action" disabled={busy || recoveryRequired} onClick={() => editor.files.setSaveAsOpen(true)} type="button"><SaveAll aria-hidden="true" size={14} /> {t("files.saveAs")}</button>}
-      <button className="button primary compact-action" disabled={!profile || dirtyCount > 0 || busy || recoveryRequired} onClick={() => void editor.document.designateProfile()} title={dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button"><Play aria-hidden="true" size={14} /> {command === "designate" ? t("profiles.designating") : t("profiles.designate")}</button>
+      <button className="button designate compact-action" disabled={!profile || dirtyCount > 0 || busy || recoveryRequired} onClick={() => void editor.document.designateProfile()} title={dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button"><BadgeCheck aria-hidden="true" size={14} /> {command === "designate" ? t("profiles.designating") : t("profiles.designate")}</button>
     </div>
   );
 }

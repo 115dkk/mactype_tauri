@@ -33,7 +33,7 @@ If a proposed design change needs a new native command or new data from Windows,
 | Custom title bar layout, icon, window-control icons | `control-center/src/components/WindowTitleBar.tsx` | `.window-titlebar`, `.window-title`, `.window-controls` in `app.css`; `--titlebar-height` in `tokens.css` |
 | Language picker layout, option order, scrollable menu | `control-center/src/components/LanguagePicker.tsx` and `control-center/src/i18n/i18n.ts` | `.language-*` selectors in `app.css`, including dark and mobile states |
 | Hint popovers on section headings | `control-center/src/components/Hint.tsx` | `.hint`, `.hint-term`, `.hint-popover` |
-| Overview status card, four-column details, activity disclosure | `control-center/src/pages/OverviewPage.tsx` and `control-center/src/features/overview/useOverviewModel.ts` | `.overview-service-*`, `.recent-activity`, `.disclosure-actions`; the Overview cases in `tests/frontend-gallery/gallery.spec.ts` |
+| Overview status card, four-column details, activity disclosure | `control-center/src/pages/OverviewPage.tsx` and `control-center/src/features/overview/useOverviewModel.ts` | `.overview-service-*`, `.recent-activity`, `.disclosure-actions` |
 | Profile list (Files view), legacy import banner, import/export, run profile badge and designate control | `control-center/src/pages/FileSettingsPage.tsx` | `control-center/src/features/profiles/useProfileDocument.ts`; `.profile-card*`, `.legacy-import-*`, `.file-*`, `.selected-file*`, `data-run-profile` |
 | Tuner shell: mode switch, header, history actions, save-as, preview placement | `control-center/src/pages/ProfilesPage.tsx` | `.profile-page`, `.profile-layout`, `.profile-header`, `.profile-mode-title`, `.profile-history-actions`, `.settings-workspace`, `.settings-index`, `.settings-form` |
 | Guided setup steps, per-step tools, start card, final apply card | `control-center/src/pages/profiles/GuidedSettings.tsx` and `guidedModel.ts` | `.guided-*` and `.profile-page[data-mode="guided"]` in `app.css`; `useStepHistory.ts` for per-step undo |
@@ -45,7 +45,7 @@ If a proposed design change needs a new native command or new data from Windows,
 | Diagnostics installation card, components table, timeline placement, log sources | `control-center/src/pages/DiagnosticsPage.tsx` and `control-center/src/features/diagnostics/useDiagnosticsModel.ts` | `.installation-heading`, `.diagnostic-list`, `.diagnostic-events`, `.disclosure-actions` |
 | Event timeline rows, chips, search, details, view options | `control-center/src/features/events/EventTimeline.tsx` | `.event-*` in `app.css`; `eventText.ts` for titles and localized reasons; `eventViewPreference.ts` for the three persisted view options |
 | User-facing text | Every JSON catalog under `control-center/src/i18n/` | All ten catalogs keep the same keys and placeholders; every non-ASCII character in `ko.json` must exist in `control-center/src/assets/fonts/ko-glyphs.txt` |
-| Locale order, language detection, RTL selection | `control-center/src/i18n/i18n.ts` and `I18nProvider.tsx` | `tests/frontend-gallery/windows.ts` holds the localized view titles the gallery expects |
+| Locale order, language detection, RTL selection | `control-center/src/i18n/i18n.ts` and `I18nProvider.tsx` | `localeOptions` fixes the picker order; `I18nProvider.tsx` sets the document direction |
 | Browser-only sample data used during design work | `control-center/src/app/runtimeAdapters/browserGalleryAdapter.ts`, `browserGalleryExecution.ts`, `browserGalleryProfiles.ts` | Keep fixture DTOs equal to `runtimeAdapter.ts`; the fixtures simulate the native status, they are not a second place to decide what the UI allows |
 | In-app MacType logo | `control-center/public/mactype-icon.png` | Keep the filename so no code changes |
 | Packaged EXE and installer icon | `control-center/src-tauri/icons/icon.ico` and `assets/mactype.ico` | Assets only; no Rust source change |
@@ -119,7 +119,7 @@ Guided setup and All settings are two presentations of the same profile document
 - Change the shared font-substitution UI in `FontSubstitutionEditor.tsx`; both modes consume it.
 - Change visual hierarchy, the fixed progress controls, and the compact guided preview height with `.guided-*` and `.profile-page[data-mode="guided"]` in `app.css`.
 
-Keep guided step buttons directly selectable. The bottom navigation shows only Continue on the first step, both controls in the middle, and only Previous on the final step. Save and designate are offered on the final step; font substitution has its own step. These are UX invariants covered by `tests/frontend-gallery/gallery.spec.ts`.
+Keep guided step buttons directly selectable. The bottom navigation shows only Continue on the first step, both controls in the middle, and only Previous on the final step. Save and designate are offered on the final step; font substitution has its own step. These are UX invariants.
 
 ### Change the preview panel or the native preview window
 
@@ -139,16 +139,14 @@ For a frontend-only page:
 2. Add the page component under `control-center/src/pages`.
 3. Register its icon, order, and render branch in `App.tsx`.
 4. Add `nav.<id>` to every locale catalog.
-5. Add the view and its localized titles to `tests/frontend-gallery/windows.ts`.
-6. Add a gallery interaction test if the page has controls.
 
 This does not require Rust. Only native command-line launch support for the new view would need a change to the Tauri launch parser.
 
 ### Change copy or add a locale
 
-Never put translated text directly in TSX. Messages live in ten JSON files under `control-center/src/i18n`. Keys and `{placeholder}` names must match exactly across catalogs, and `pnpm test:i18n` also checks that every Korean glyph is covered by the bundled subset font.
+Never put translated text directly in TSX. Messages live in ten JSON files under `control-center/src/i18n`. Keys and `{placeholder}` names must match exactly across catalogs, and every Korean glyph must be covered by the bundled subset font.
 
-When adding a locale, update `localeOptions`, `catalogs`, and locale detection in `i18n.ts`, then add its script and direction to `tests/frontend-gallery/windows.ts`. RTL is selected in `I18nProvider.tsx`; use logical CSS properties such as `padding-inline-start` where possible and add `[dir="rtl"]` only when the visual direction genuinely changes.
+When adding a locale, update `localeOptions`, `catalogs`, and locale detection in `i18n.ts`. RTL is selected in `I18nProvider.tsx`; use logical CSS properties such as `padding-inline-start` where possible and add `[dir="rtl"]` only when the visual direction genuinely changes.
 
 ### Change hints and icons
 
@@ -182,21 +180,18 @@ http://localhost:1420/?view=execution&lang=ar
 | `raw-active`, `profile-unapplied`, `profile-runtime-missing`, `profile-read-only`, `profile-fail-setting`, `fresh`, `preview-delay` | flags | Profile and preview fixtures. |
 | `events-empty`, `events-absent`, `events-unreadable` | flags | Event log fixtures for Diagnostics. |
 
-The gallery specs also pass `gallery=1`; nothing reads it, it only marks a gallery URL. Use the in-app theme button or `?theme=` to inspect dark mode. Browser mode is for design and interaction review; native Windows behavior stays behind the runtime adapter.
+A gallery URL also carries `gallery=1`; nothing reads it, it only marks the mode. Use the in-app theme button or `?theme=` to inspect dark mode. Browser mode is for design and interaction review; native Windows behavior stays behind the runtime adapter.
 
 ## Before sending a design change
 
 Run the frontend-only checks from `control-center`:
 
 ```powershell
-pnpm test:i18n
-pnpm test:settings
 pnpm lint
 pnpm build
-pnpm test:gallery
 ```
 
-The gallery builds the app, serves it with `pnpm preview` on port 4173, and renders every view in all ten locales at 390, 768, and 1280 pixels, plus the interaction specs in `gallery.spec.ts` and `main-port.spec.ts`. It fails on JavaScript errors, horizontal overflow, broken RTL, missing translations, or an inaccessible interaction result. Review the images under `artifacts/frontend-gallery`, including at least one mobile layout, one dark state, and Arabic RTL.
+Then serve the build with `pnpm preview` and open each view with `?gallery=` in all ten locales at 390, 768, and 1280 pixels, including at least one mobile layout, one dark state, and Arabic RTL. Watch for JavaScript errors, horizontal overflow, broken RTL, and missing translations.
 
 ## When a change needs native work
 

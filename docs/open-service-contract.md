@@ -80,4 +80,4 @@ AppInit conflict, a foreign service identity, an invalid protected path, missing
 | M21 | Reboot and first logon | `UNKNOWN` | `IMPLEMENTED` (Auto start only; first-logon coverage `UNKNOWN`) | `UNKNOWN` |
 | M22 | Existing AppInit injection | `UNKNOWN` | `IMPLEMENTED` | `UNKNOWN` |
 
-The 레거시 서비스 PASS entries are backed by three trials per architecture under `evidence/mactray-service/1.0.2023.7`. The 신식 서비스 hosted lifecycle and manual disposable-VM interfaces live in `scripts/ci/Test-OpenServiceWindows.ps1` and `scripts/ci/Test-OpenServiceDisposableVm.ps1`. No manual dispatch result is claimed until its JSON artifact is retained and reviewed.
+The 레거시 서비스 PASS entries are backed by three trials per architecture under `evidence/mactray-service/1.0.2023.7`. No manual dispatch result is claimed until its JSON artifact is retained and reviewed.

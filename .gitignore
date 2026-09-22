@@ -2,8 +2,6 @@
 .vscode/
 deps/
 lib/
-!scripts/ci/lib/
-!scripts/ci/lib/**
 Debug*/
 Rel*/
 x64/

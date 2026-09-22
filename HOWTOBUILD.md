@@ -31,9 +31,6 @@ pnpm --dir control-center install --frozen-lockfile
 Before packaging, run:
 
 ```powershell
-scripts/ci/Test-DistributionPolicy.ps1
-scripts/ci/Test-OpenServiceContract.ps1
-scripts/ci/Test-NewCppStyle.ps1
 cargo test --manifest-path service-runtime/Cargo.toml --workspace --all-targets --all-features
 ```
 

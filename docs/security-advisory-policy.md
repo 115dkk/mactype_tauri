@@ -10,11 +10,11 @@ its preview helper are Windows-only. Tauri 2.11.5 and its current development
 branch still require the GTK 0.18 family, so forcing `glib 0.20` would create an
 invalid dependency graph instead of fixing a shipped binary.
 
-`scripts/ci/Test-RustAdvisoryScope.ps1` therefore fails CI if the vulnerable
-crate becomes reachable from either `x86_64-pc-windows-msvc` or
-`i686-pc-windows-msvc`. The machine-readable exception is in
-`security/rust-advisory-exceptions.json` and expires on 2027-01-31. Remove the
-exception and update the GTK dependency family as soon as Tauri supports it.
+The exception holds only while the vulnerable crate stays unreachable from
+`x86_64-pc-windows-msvc` and `i686-pc-windows-msvc`. The machine-readable
+record is in `security/rust-advisory-exceptions.json` and expires on
+2027-01-31. Remove the exception and update the GTK dependency family as
+soon as Tauri supports it.
 
 References:
 

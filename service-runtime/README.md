@@ -72,4 +72,5 @@ Actual SCM install/start/Ready/stop/remove and protected ACL checks require an e
 disposable Windows runner. They must use the fixed CI adapter identity and must not run
 against a developer workstation service.
 
-The normal hosted lifecycle runs `scripts/ci/Test-OpenServiceWindows.ps1`. Reboot, AppInit, migration, and multi-user checks use the dispatch-only `.github/workflows/open-service-disposable-vm.yml`. An implemented verifier is not a PASS: its result remains `UNKNOWN` until the disposable-VM JSON artifact is retained.
+An implemented verifier is not a PASS: its result remains `UNKNOWN` until a
+disposable-VM JSON artifact is retained.

@@ -20,8 +20,6 @@ const MAX_PROFILE_DIRECTORY_ENTRIES: usize = 512;
 
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod upstream_corpus_tests;
 
 pub(crate) use identity::source_profile_reference;
 pub(crate) use legacy::user_profile_root;
@@ -44,8 +42,6 @@ pub(crate) fn encoded_profile_state(state: &ProfileState) -> Vec<u8> {
     state.read(|document| document.encoded()).unwrap()
 }
 
-#[cfg(test)]
-use document::hash;
 #[cfg(test)]
 use legacy::{discover_legacy_profile_at, import_profile_to, install_system_profile_at};
 

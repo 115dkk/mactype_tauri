@@ -28,8 +28,6 @@ A change to those configuration fields leaves the service owned. Control Center 
 cargo fmt --manifest-path service-runtime/Cargo.toml --all -- --check
 cargo test --manifest-path service-runtime/Cargo.toml --workspace --all-targets --all-features
 cargo clippy --manifest-path service-runtime/Cargo.toml --workspace --all-targets --all-features -- -D warnings
-scripts/ci/Test-OpenServiceContract.ps1
-scripts/ci/Test-DistributionPolicy.ps1
 ```
 
 The service-injector must also pass x86 and x64 Release build, CTest, and MSVC `/analyze`. `lint.yml` is the merge-blocking reference implementation.

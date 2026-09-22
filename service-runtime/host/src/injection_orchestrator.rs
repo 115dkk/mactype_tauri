@@ -165,8 +165,10 @@ impl<'a> InjectionOrchestrator<'a> {
                 });
                 Ok(ProcessOutcome::Deferred)
             }
-            ProcessTargetDecision::Skipped(_) => {
-                self.events.record(HostEvent::InjectionSkipped);
+            ProcessTargetDecision::Skipped(reason) => {
+                self.events.record(HostEvent::InjectionSkipped {
+                    reason: reason.code(),
+                });
                 Ok(ProcessOutcome::Skipped)
             }
         }

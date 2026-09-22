@@ -27,6 +27,27 @@ pub enum SkipReason {
     InspectionFailed(&'static str),
 }
 
+impl SkipReason {
+    /// The stable name this skip is counted under. A skipped target writes no
+    /// event of its own, so without this the reason dies in the function that
+    /// computed it and an operator sees only a total.
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::SelfProcess => "self-process",
+            Self::SessionZero => "session-zero",
+            Self::Protected => "protected",
+            Self::CriticalOrUnknown => "critical-or-unknown",
+            Self::DynamicCodeMitigation => "dynamic-code-mitigation",
+            Self::BinarySignatureMitigation => "binary-signature-mitigation",
+            Self::ImportantWindowsProcess => "important-windows-process",
+            Self::InstallerControlProcess => "installer-control-process",
+            Self::ImageNameUnavailable => "image-name-unavailable",
+            Self::Exiting => "exiting",
+            Self::InspectionFailed(_) => "inspection-failed",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeferralReason {
     Frozen,
@@ -125,6 +146,15 @@ fn target_scoped_inspection_failure(code: &str) -> Option<&'static str> {
         "process-architecture-unsupported" => Some("process-architecture-unsupported"),
         _ => None,
     }
+}
+
+/// Whether this image is a relay root, meaning its children inherit MacType
+/// through the in-process child-process relay rather than through a separate
+/// injection. The interactive session's shell is the only one, because it is
+/// the parent of everything the operator launches, so a backlog that reaches
+/// it last leaves every program started meanwhile without the relay.
+pub fn is_relay_root(image_name: &str) -> bool {
+    image_name == "explorer.exe"
 }
 
 fn is_important_windows_process(name: &str) -> bool {

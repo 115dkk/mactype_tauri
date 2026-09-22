@@ -30,6 +30,15 @@ function Start-Marker([string] $Executable, [string] $Name) {
     [pscustomobject]@{ name = $Name; out = $out; process = $process }
 }
 
+function ConvertTo-UnixMilliseconds([object] $Value) {
+    # ConvertFrom-Json turns ISO timestamps into DateTime values; casting the
+    # value keeps its milliseconds, while going through [string] would not.
+    if ($Value -is [DateTime]) {
+        return ([DateTimeOffset]$Value.ToUniversalTime()).ToUnixTimeMilliseconds()
+    }
+    return [DateTimeOffset]::Parse([string]$Value, [Globalization.CultureInfo]::InvariantCulture).ToUnixTimeMilliseconds()
+}
+
 function Read-Latency([object] $Launch) {
     if (-not $Launch.process.WaitForExit($markerWaitMilliseconds + 20000)) {
         throw "Latency marker $($Launch.name) did not exit."
@@ -38,9 +47,9 @@ function Read-Latency([object] $Launch) {
         throw "Latency marker $($Launch.name) wrote no result."
     }
     $result = Get-Content -LiteralPath $Launch.out -Raw | ConvertFrom-Json
-    $started = [DateTimeOffset]::Parse([string]$result.startedAt).ToUnixTimeMilliseconds()
+    $started = ConvertTo-UnixMilliseconds $result.startedAt
     $latency = if ($result.mactypeModuleLoaded -and $result.loadObservedAt) {
-        [DateTimeOffset]::Parse([string]$result.loadObservedAt).ToUnixTimeMilliseconds() - $started
+        (ConvertTo-UnixMilliseconds $result.loadObservedAt) - $started
     } else {
         $null
     }

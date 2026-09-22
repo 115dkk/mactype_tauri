@@ -77,6 +77,13 @@ pub trait ProcessInspector {
         None
     }
 
+    /// The lowercase image file name of a bare PID. It verifies no identity,
+    /// so it orders the startup backlog and never gates a safety decision.
+    fn image_name_for_ordering(&self, pid: u32) -> Option<String> {
+        let _ = pid;
+        None
+    }
+
     fn inspect(&self, pid: u32) -> Result<InspectedProcess, StructuredServiceError>;
 
     /// Re-checks whether the exact verified identity still exists after a

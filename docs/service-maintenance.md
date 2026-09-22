@@ -69,6 +69,7 @@ Reboot, multi-session, AppInit, and migration remain `UNKNOWN` until their dispa
 | `appinit-conflict` | Disable the conflicting registry mode through an explicit user action, then start again. Never silently edit AppInit. |
 | helper timeout or cleanup unknown | Treat the target result as terminal, retain logs, and verify the Job ended. Do not retry the same target automatically. |
 | one target inaccessible or unsupported | Keep global Ready if infrastructure remains healthy; the target is skipped fail-closed. |
+| `injection-rights-stripped` | Another product's kernel callback removed `PROCESS_VM_OPERATION`, `PROCESS_VM_WRITE` or `PROCESS_CREATE_THREAD` from the handle while the open still succeeded. Injection into that target is impossible, not broken; the target is skipped and health stays Ready. |
 | observer or protected-runtime failure | Mark global health degraded/failed and stop claiming active integration. |
 | migration failure | Restore the pinned runtime, original 레거시 서비스 configuration, and prior running state from the protected receipt. |
 

@@ -74,7 +74,7 @@ pub fn initialize_process_orchestration_with_observer_recovery(
     broker.verify_ready(ProcessArchitecture::X86)?;
     broker.verify_ready(ProcessArchitecture::X64)?;
     subscribe_process_creation(source.as_mut())?;
-    let snapshot_pids = source.snapshot_pids()?.into();
+    let snapshot_pids = relay_roots_first(source.snapshot_pids()?, inspector.as_ref());
 
     Ok(InitializedRuntime::driven(
         active_profile_digest,
@@ -117,19 +117,46 @@ enum ObserverRecovery {
     Stopped,
 }
 
+/// Orders a backlog so relay roots are drained first, keeping the original
+/// relative order within each group. Draining is one helper launch per target,
+/// so a shell that sits late in a snapshot of a busy machine stays uninjected
+/// for the whole drain, and every program started meanwhile misses the relay.
+fn relay_roots_first(pids: Vec<u32>, inspector: &dyn ProcessInspector) -> VecDeque<u32> {
+    let (roots, rest): (Vec<u32>, Vec<u32>) = pids.into_iter().partition(|pid| {
+        inspector
+            .image_name_for_ordering(*pid)
+            .is_some_and(|name| crate::is_relay_root(&name))
+    });
+    roots.into_iter().chain(rest).collect()
+}
+
 impl ObserverState {
     /// Takes the subscription again and folds every process that started while
     /// it was down into the backlog, so a recovery misses no injection target.
-    fn resubscribe(&mut self) -> Result<(), StructuredServiceError> {
+    /// A relay root found this way goes to the front: the shell may be the very
+    /// process whose restart took the subscription down with it.
+    fn resubscribe(
+        &mut self,
+        inspector: &dyn ProcessInspector,
+    ) -> Result<(), StructuredServiceError> {
         subscribe_process_creation(self.source.as_mut())?;
         for pid in self.source.snapshot_pids()? {
-            if !self.snapshot_pids.contains(&pid) {
+            if self.snapshot_pids.contains(&pid) {
+                continue;
+            }
+            if inspector
+                .image_name_for_ordering(pid)
+                .is_some_and(|name| crate::is_relay_root(&name))
+            {
+                self.snapshot_pids.push_front(pid);
+            } else {
                 self.snapshot_pids.push_back(pid);
             }
         }
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn recover_observer(
         &mut self,
         error: StructuredServiceError,
@@ -138,6 +165,7 @@ impl ObserverState {
         scheduler: &StopRetryScheduler<'_>,
         consecutive_health_report_failures: &mut usize,
         injection: InjectionTelemetry,
+        inspector: &dyn ProcessInspector,
     ) -> Result<ObserverRecovery, StructuredServiceError> {
         let observer_failed = ReadinessReport {
             observer: ComponentReadiness::Failed,
@@ -158,7 +186,7 @@ impl ObserverState {
             if !scheduler.wait(delay) || stop.stop_requested() {
                 return Ok(ObserverRecovery::Stopped);
             }
-            match self.resubscribe() {
+            match self.resubscribe(inspector) {
                 Ok(()) => {
                     report_runtime_health(
                         health,
@@ -236,13 +264,20 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
                             &scheduler,
                             &mut consecutive_health_report_failures,
                             orchestrator.injection_telemetry(),
+                            self.inspector.as_ref(),
                         ) {
                             Ok(ObserverRecovery::Resubscribed) => continue,
                             Ok(ObserverRecovery::Stopped) => return Ok(()),
                             Err(error) => return Err(error),
                         },
                     };
-                    orchestrator.handle_pid(pid)
+                    let started = std::time::Instant::now();
+                    let outcome = orchestrator.handle_pid(pid);
+                    self.events.record(HostEvent::InjectionPipelineSample {
+                        millis: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                        backlog: self.observer.snapshot_pids.len(),
+                    });
+                    outcome
                 }
             };
             match outcome {
@@ -314,5 +349,48 @@ struct StopRetryScheduler<'a>(&'a dyn StopSignal);
 impl crate::RetryScheduler for StopRetryScheduler<'_> {
     fn wait(&self, delay: Duration) -> bool {
         matches!(self.0.wait_timeout(delay), Ok(false))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::relay_roots_first;
+    use crate::{InspectedProcess, ProcessInspector};
+    use mactype_service_contract::StructuredServiceError;
+
+    /// Names PIDs by a fixed convention so ordering can be asserted without a
+    /// live process: 100 and 200 are shells, everything else is not.
+    struct NamedPids;
+
+    impl ProcessInspector for NamedPids {
+        fn inspect(&self, _pid: u32) -> Result<InspectedProcess, StructuredServiceError> {
+            unreachable!("ordering never inspects an identity")
+        }
+
+        fn image_name_for_ordering(&self, pid: u32) -> Option<String> {
+            match pid {
+                100 | 200 => Some("explorer.exe".to_owned()),
+                900 => None,
+                other => Some(format!("program-{other}.exe")),
+            }
+        }
+    }
+
+    #[test]
+    fn a_shell_buried_in_the_backlog_is_drained_before_everything_else() {
+        let ordered = relay_roots_first(vec![5, 6, 100, 7, 200, 900], &NamedPids);
+
+        assert_eq!(
+            ordered.into_iter().collect::<Vec<u32>>(),
+            vec![100, 200, 5, 6, 7, 900],
+            "shells first, and both groups keep the order the snapshot gave them"
+        );
+    }
+
+    #[test]
+    fn a_backlog_without_a_shell_is_left_exactly_as_it_arrived() {
+        let ordered = relay_roots_first(vec![9, 8, 7], &NamedPids);
+
+        assert_eq!(ordered.into_iter().collect::<Vec<u32>>(), vec![9, 8, 7]);
     }
 }

@@ -395,6 +395,11 @@ try {
         -ExpectedRuntimeRoot $activeRuntimeRoot)
     Assert-PersistedReadyHealth -ExpectedDigest $digestA -Phase 'x86/x64 marker injection'
     Assert-GenerationBoundMarkerTelemetry -MarkerResults $markerResults -ExpectedDigest $digestA
+    try {
+        & (Join-Path $PSScriptRoot 'Measure-ServiceInjectionLatency.ps1') -Marker32 $Marker32 -Marker64 $Marker64
+    } catch {
+        Write-Warning "Injection latency could not be measured: $_"
+    }
 
     $null = Invoke-OpenServiceSetupLogged -SetupExecutable $stagedSetup -Verb 'stop'
     if ((Get-Service -Name $serviceName).Status -ne 'Stopped') { throw "$serviceName did not stop." }

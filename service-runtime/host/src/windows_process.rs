@@ -102,6 +102,10 @@ impl ProcessInspector for WindowsProcessInspector {
         image_name(&process)
     }
 
+    fn image_name_for_ordering(&self, pid: u32) -> Option<String> {
+        image_name(&Process::open(pid, ProcessAccess::QueryLimited).ok()?)
+    }
+
     fn probe_target_liveness(&self, identity: &ProcessIdentity) -> TargetLiveness {
         probe_windows_target_liveness(identity)
     }

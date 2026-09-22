@@ -68,7 +68,7 @@ pub use runtime_assets::{ProtectedRuntimeAssets, RUNTIME_PROFILE_ABSENT_CODE};
 pub use startup_safety::{LegacyServiceRuntimeState, StartupSafetySnapshot};
 pub use status::{ScmState, ServiceStatus, StatusReporter, SERVICE_STOP_WAIT_HINT_MS};
 pub use target_validation::{
-    DeferralReason, ProcessTargetDecision, ProcessTargetValidator, SkipReason,
+    is_relay_root, DeferralReason, ProcessTargetDecision, ProcessTargetValidator, SkipReason,
 };
 #[cfg(windows)]
 pub use windows_helper_launcher::WindowsHelperLauncher;

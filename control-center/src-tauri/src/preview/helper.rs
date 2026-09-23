@@ -95,6 +95,10 @@ impl HelperProcess {
         command.arg("--install-root").arg(install_root);
         if engine == PreviewEngine::Plain {
             command.arg("--engine").arg("plain");
+            // Set the existing renderer opt-out before process creation: the
+            // service can inject before the helper reaches its plain startup.
+            command.env_remove("MACTYPE_FORCE_LOAD");
+            command.env("MACTYPE_FORCE_EXCLUDE", "1");
         }
         command
             .stdin(Stdio::piped())

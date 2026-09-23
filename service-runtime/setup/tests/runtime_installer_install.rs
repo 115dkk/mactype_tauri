@@ -251,3 +251,24 @@ fn runtime_staging_cleanup_never_deletes_an_unexpected_entry() {
 
     assert!(unexpected.exists());
 }
+
+#[test]
+fn staging_failure_does_not_register_a_partial_generation() {
+    let (base, paths) = test_paths();
+    let collision = paths
+        .runtime_versions()
+        .join(format!(".staging-0.2.0-{}", std::process::id()));
+    fs::create_dir_all(&collision).unwrap();
+    fs::write(collision.join("unexpected.bin"), b"not installer-owned").unwrap();
+
+    let result = RuntimeInstaller::new(paths.clone())
+        .deploy_with_health_check(&payload(base.path(), "0.2.0", b"service-v2"), |_| Ok(()));
+
+    assert!(result.is_err());
+    assert!(!paths.runtime_versions().join("0.2.0").exists());
+    assert!(!paths
+        .service_root()
+        .join("runtime-receipts")
+        .join("0.2.0.json")
+        .exists());
+}

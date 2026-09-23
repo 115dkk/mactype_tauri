@@ -19,6 +19,7 @@ endif()
 set(_injector_sources
   src/broker_request.cpp
   src/fixed_module.cpp
+  src/handle_rights.cpp
   src/injector.cpp
   src/module_inventory.cpp
   src/process_lifecycle.cpp
@@ -41,6 +42,7 @@ target_include_directories(${_injector_target} PRIVATE include ../shared)
 
 add_executable(injector-contract-tests
   src/broker_request.cpp
+  src/handle_rights.cpp
   src/module_inventory.cpp
   src/process_lifecycle.cpp
   src/remote_injection_verdict.cpp

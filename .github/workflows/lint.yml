@@ -26,6 +26,9 @@ jobs:
         run: pnpm install --frozen-lockfile
       - working-directory: control-center
         run: pnpm generate:settings
+      - name: Generate the native preview contract
+        working-directory: control-center
+        run: pnpm generate:native-preview
       - working-directory: control-center
         run: pnpm generate:native-preview
       - working-directory: control-center

@@ -9,7 +9,8 @@ use mactype_service_contract::{
     verify_runtime_manifest, VerifiedRuntimeManifest, MAX_PROFILE_BYTES, MAX_RUNTIME_FILE_BYTES,
 };
 
-use super::{FixedPayload, RuntimeInstaller};
+use super::generation_store::RuntimeGenerationStore;
+use super::FixedPayload;
 use crate::profile_bridge::GENERATED_PROFILE_NAME;
 use crate::storage::{
     create_protected_directory, read_bounded_directory, read_bounded_regular_file,
@@ -86,13 +87,44 @@ impl FixedPayload {
     }
 }
 
-impl RuntimeInstaller {
-    pub(super) fn stage_payload(
+impl RuntimeGenerationStore<'_> {
+    pub(super) fn stage<F>(
+        &self,
+        payload: &LoadedPayload,
+        replace_invalid: bool,
+        replace_invalid_payload: F,
+    ) -> Result<std::path::PathBuf, SetupError>
+    where
+        F: FnOnce(&Path, &LoadedPayload) -> Result<(), SetupError>,
+    {
+        let destination = self
+            .paths
+            .runtime_versions()
+            .join(payload.verified.version());
+        self.stage_payload(
+            payload,
+            &destination,
+            replace_invalid,
+            replace_invalid_payload,
+        )
+        .map_err(|error| error.at_machine_path("stage verified runtime payload", &destination))?;
+        let receipt_path = self.runtime_receipt_path(payload.verified.version());
+        self.write_runtime_receipt(payload).map_err(|error| {
+            error.at_machine_path("write runtime generation receipt", &receipt_path)
+        })?;
+        Ok(destination)
+    }
+
+    fn stage_payload<F>(
         &self,
         payload: &LoadedPayload,
         destination: &Path,
         replace_invalid: bool,
-    ) -> Result<(), SetupError> {
+        replace_invalid_payload: F,
+    ) -> Result<(), SetupError>
+    where
+        F: FnOnce(&Path, &LoadedPayload) -> Result<(), SetupError>,
+    {
         create_protected_directory(self.paths.runtime_versions())?;
         remove_legacy_staging_collision(
             self.paths.runtime_versions(),
@@ -104,7 +136,7 @@ impl RuntimeInstaller {
             match verify_existing_payload(destination, &payload.files) {
                 Ok(()) => return Ok(()),
                 Err(error) if !replace_invalid => return Err(error),
-                Err(_) => return self.replace_runtime_payload(destination, payload),
+                Err(_) => return replace_invalid_payload(destination, payload),
             }
         }
 

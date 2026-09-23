@@ -111,6 +111,10 @@ impl ProcessInspector for WindowsProcessInspector {
         })
     }
 
+    fn image_name_for_ordering(&self, pid: u32) -> Option<String> {
+        image_name(&Process::open(pid, ProcessAccess::QueryLimited).ok()?)
+    }
+
     fn probe_target_liveness(&self, identity: &ProcessIdentity) -> TargetLiveness {
         probe_windows_target_liveness(identity)
     }
@@ -332,6 +336,13 @@ fn open_for_identity(pid: u32) -> Result<Process, StructuredServiceError> {
             &error,
         )
     })
+}
+
+fn image_name(process: &Process) -> Option<String> {
+    process
+        .image_path()?
+        .file_name()
+        .map(|name| name.to_string_lossy().to_ascii_lowercase())
 }
 
 fn classify_process_architecture(

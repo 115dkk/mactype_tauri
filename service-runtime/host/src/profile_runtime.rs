@@ -279,3 +279,72 @@ fn service_error(code: &str, message: &str) -> StructuredServiceError {
         win32_error: None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::Path;
+
+    use mactype_service_contract::MachinePaths;
+
+    use super::ensure_activation_state_is_stable;
+
+    const COMMITTED_RECEIPT_FOR_0_3_0: &[u8] =
+        br#"{"schema":3,"phase":"committed","previous":null,"activated":{"schema":1,"version":"0.3.0"}}"#;
+
+    fn machine_paths(root: &Path) -> MachinePaths {
+        let program_files = root.join("Program Files");
+        let program_data = root.join("ProgramData");
+        fs::create_dir_all(&program_files).unwrap();
+        fs::create_dir_all(&program_data).unwrap();
+        MachinePaths::from_trusted_os_roots(&program_files, &program_data).unwrap()
+    }
+
+    #[test]
+    #[cfg_attr(
+        all(miri, windows),
+        ignore = "Windows Miri does not implement CreateDirectoryW"
+    )]
+    fn a_committed_receipt_that_does_not_own_the_active_pointer_asks_for_recovery() {
+        let root = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+        let paths = machine_paths(root.path());
+        fs::create_dir_all(paths.runtime_versions().join("0.2.0")).unwrap();
+        fs::create_dir_all(paths.runtime_versions().join("0.3.0")).unwrap();
+        fs::write(
+            paths.runtime_pointer(),
+            br#"{"schema":1,"version":"0.2.0"}"#,
+        )
+        .unwrap();
+        fs::write(
+            paths.runtime_activation_journal(),
+            COMMITTED_RECEIPT_FOR_0_3_0,
+        )
+        .unwrap();
+
+        let error = ensure_activation_state_is_stable(&paths)
+            .expect_err("the committed receipt does not own the active runtime pointer");
+
+        assert_eq!(error.code, "activation-recovery-required");
+    }
+
+    #[test]
+    #[cfg_attr(
+        all(miri, windows),
+        ignore = "Windows Miri does not implement CreateDirectoryW"
+    )]
+    fn an_unreadable_pointer_under_a_committed_receipt_asks_for_recovery() {
+        let root = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+        let paths = machine_paths(root.path());
+        fs::create_dir_all(paths.runtime_activation_journal().parent().unwrap()).unwrap();
+        fs::write(
+            paths.runtime_activation_journal(),
+            COMMITTED_RECEIPT_FOR_0_3_0,
+        )
+        .unwrap();
+
+        let error = ensure_activation_state_is_stable(&paths)
+            .expect_err("an absent active runtime pointer cannot own the committed receipt");
+
+        assert_eq!(error.code, "activation-recovery-required");
+    }
+}

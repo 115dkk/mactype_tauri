@@ -264,6 +264,17 @@ fn initializer_refuses_legacy_uncommitted_and_rollback_required_receipts() {
 }
 
 #[test]
+fn initializer_does_not_claim_ready_without_an_active_generation() {
+    let tree = ProtectedTree::new();
+    let paths = tree.paths().clone();
+
+    let error = ProtectedRendererRuntime::load(paths)
+        .expect_err("nothing has been published, so the start must end as a supported stop");
+
+    assert_eq!(error.code, ACTIVE_PROFILE_ABSENT_CODE);
+}
+
+#[test]
 fn initializer_reports_an_absent_active_profile_pointer_without_changing_runtime_selection() {
     let tree = ProtectedTree::new();
     let paths = tree.paths().clone();

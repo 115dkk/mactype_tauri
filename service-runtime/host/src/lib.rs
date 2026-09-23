@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 mod control;
+#[cfg(windows)]
+mod etw_observer;
 mod event_log;
 mod file_health;
 mod generated_unity_anticheat_catalog;
@@ -37,12 +39,16 @@ mod windows_startup_safety;
 #[cfg(windows)]
 mod windows_wmi;
 
-pub use event_log::{HostEvent, HostEventLogger, HostEventSink};
-pub use file_health::{CompositeHealthPublisher, FileHealthPublisher};
 #[cfg(windows)]
+pub use etw_observer::{
+    EtwProcessEventSource, ETW_OBSERVER_OVERFLOW_CODE, ETW_OBSERVER_STOPPED_CODE,
+    PROCESS_START_SESSION,
+};
+pub use event_log::{HostEvent, HostEventLogger, HostEventSink, LiveObserver};
+pub use file_health::{CompositeHealthPublisher, FileHealthPublisher};
 pub use helper_broker::{
-    FixedHelperBroker, HelperInvocation, HelperLaunchError, HelperLaunchStage, HelperLauncher,
-    HelperOutput,
+    FixedHelperBroker, FixedModuleProbe, FixedModuleState, HelperInvocation, HelperLaunchError,
+    HelperLaunchStage, HelperLauncher, HelperOutput, PlatformFixedModuleProbe,
 };
 pub use injection_orchestrator::{
     DeferralPolicy, DeferredTarget, InjectionOrchestrator, ProcessAttemptRecord, ProcessOutcome,
@@ -55,8 +61,8 @@ pub type ProcessOrchestrator<'a> = InjectionOrchestrator<'a>;
 pub use image_subsystem::ImageSubsystem;
 pub use observer::{
     subscribe_process_creation, BrokerDisposition, BrokerResult, InjectionBroker, InjectionRequest,
-    ProcessArchitecture, ProcessEventSource, ProcessIdentity, MAX_BROKER_DIAGNOSTIC_CODE_BYTES,
-    PROCESS_CREATION_QUERY,
+    ProcessArchitecture, ProcessEventSource, ProcessIdentity, FALLBACK_PROCESS_CREATION_QUERY,
+    MAX_BROKER_DIAGNOSTIC_CODE_BYTES, PROCESS_CREATION_QUERY,
 };
 pub use orchestration_runtime::{
     initialize_process_orchestration, initialize_process_orchestration_with_profile_policies,
@@ -72,7 +78,7 @@ pub use runtime_assets::{ProtectedRuntimeAssets, RUNTIME_PROFILE_ABSENT_CODE};
 pub use startup_safety::{LegacyServiceRuntimeState, StartupSafetySnapshot};
 pub use status::{ScmState, ServiceStatus, StatusReporter, SERVICE_STOP_WAIT_HINT_MS};
 pub use target_validation::{
-    BinarySignaturePolicy, DeferralReason, DynamicCodePolicy, InspectionEvidence,
+    is_relay_root, BinarySignaturePolicy, DeferralReason, DynamicCodePolicy, InspectionEvidence,
     PrivateFreeTypeClassification, ProcessInspection, ProcessInspectionError, ProcessInspector,
     ProcessSkipReason, ProcessTargetDecision, ProcessTargetValidator, TargetLifecycle,
     TargetLiveness, UnityProcessClassification,

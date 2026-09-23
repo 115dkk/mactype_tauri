@@ -9,16 +9,13 @@ export const settingsSchema = [
     "control": "select",
     "options": [
       {
-        "value": 0,
-        "label": "기본"
+        "value": 0
       },
       {
-        "value": 1,
-        "label": "힌팅 없음"
+        "value": 1
       },
       {
-        "value": 2,
-        "label": "자동 힌팅"
+        "value": 2
       }
     ],
     "min": 0,
@@ -30,9 +27,7 @@ export const settingsSchema = [
     "previewable": true,
     "apply": "refresh_engine",
     "legacy_control_center_ordinal": 0,
-    "supported": true,
-    "label": "힌팅 방식",
-    "description": "작은 글자를 픽셀 격자에 맞추는 방식을 선택합니다."
+    "supported": true
   },
   {
     "id": "enable_kerning",
@@ -50,8 +45,6 @@ export const settingsSchema = [
     "apply": "refresh_engine",
     "legacy_control_center_ordinal": 5,
     "supported": true,
-    "label": "커닝",
-    "description": "글자 쌍 간격 정보를 적용합니다.",
     "factory": 0
   },
   {
@@ -63,12 +56,10 @@ export const settingsSchema = [
     "control": "select",
     "options": [
       {
-        "value": 0,
-        "label": "FreeType"
+        "value": 0
       },
       {
-        "value": 1,
-        "label": "Windows GDI"
+        "value": 1
       }
     ],
     "min": 0,
@@ -80,8 +71,6 @@ export const settingsSchema = [
     "apply": "refresh_engine",
     "legacy_control_center_ordinal": 21,
     "supported": true,
-    "label": "글꼴 로더",
-    "description": "글꼴 윤곽을 불러올 엔진을 선택합니다.",
     "factory": 0
   },
   {
@@ -93,16 +82,13 @@ export const settingsSchema = [
     "control": "select",
     "options": [
       {
-        "value": 0,
-        "label": "사용 안 함"
+        "value": 0
       },
       {
-        "value": 1,
-        "label": "FreeType 문자표"
+        "value": 1
       },
       {
-        "value": 2,
-        "label": "Windows 변환"
+        "value": 2
       }
     ],
     "min": 0,
@@ -114,9 +100,7 @@ export const settingsSchema = [
     "previewable": true,
     "apply": "refresh_engine",
     "legacy_control_center_ordinal": 18,
-    "supported": true,
-    "label": "글꼴 연결",
-    "description": "누락된 문자를 Windows 글꼴 연결 정보로 보완합니다."
+    "supported": true
   },
   {
     "id": "load_on_demand",
@@ -134,9 +118,7 @@ export const settingsSchema = [
     "previewable": false,
     "apply": "restart_required",
     "legacy_control_center_ordinal": 20,
-    "supported": true,
-    "label": "필요할 때 로드",
-    "description": "코어가 필요한 시점에 글꼴 자원을 불러옵니다."
+    "supported": true
   },
   {
     "id": "direct_write",
@@ -154,9 +136,7 @@ export const settingsSchema = [
     "previewable": false,
     "apply": "restart_required",
     "legacy_control_center_ordinal": 26,
-    "supported": true,
-    "label": "DirectWrite 지원",
-    "description": "지원되는 DirectWrite 경로를 활성화합니다. GDI 프리뷰에는 적용되지 않습니다."
+    "supported": true
   },
   {
     "id": "normal_weight",
@@ -174,9 +154,7 @@ export const settingsSchema = [
     "previewable": true,
     "apply": "refresh_engine",
     "legacy_control_center_ordinal": 2,
-    "supported": true,
-    "label": "일반 글자 굵기",
-    "description": "일반 글꼴의 획 굵기를 미세 조정합니다."
+    "supported": true
   },
   {
     "id": "bold_weight",
@@ -194,9 +172,7 @@ export const settingsSchema = [
     "previewable": true,
     "apply": "refresh_engine",
     "legacy_control_center_ordinal": 3,
-    "supported": true,
-    "label": "굵은 글자 굵기",
-    "description": "굵은 글꼴의 획 굵기를 미세 조정합니다."
+    "supported": true
   },
   {
     "id": "italic_slant",
@@ -214,8 +190,6 @@ export const settingsSchema = [
     "apply": "refresh_engine",
     "legacy_control_center_ordinal": 4,
     "supported": true,
-    "label": "기울임 정도",
-    "description": "이탤릭 글꼴의 기울기를 조정합니다.",
     "factory": 0
   },
   {
@@ -227,16 +201,13 @@ export const settingsSchema = [
     "control": "select",
     "options": [
       {
-        "value": 0,
-        "label": "자동"
+        "value": 0
       },
       {
-        "value": 1,
-        "label": "가로 방향"
+        "value": 1
       },
       {
-        "value": 2,
-        "label": "양방향"
+        "value": 2
       }
     ],
     "min": 0,
@@ -248,8 +219,6 @@ export const settingsSchema = [
     "apply": "refresh_engine",
     "legacy_control_center_ordinal": 8,
     "supported": true,
-    "label": "굵게 처리 방식",
-    "description": "획을 굵게 만드는 방향을 선택합니다.",
     "factory": 0
   },
   {
@@ -261,20 +230,16 @@ export const settingsSchema = [
     "control": "select",
     "options": [
       {
-        "value": -1,
-        "label": "감마 사용 안 함"
+        "value": -1
       },
       {
-        "value": 0,
-        "label": "사용자 값"
+        "value": 0
       },
       {
-        "value": 1,
-        "label": "sRGB"
+        "value": 1
       },
       {
-        "value": 2,
-        "label": "호환 모드"
+        "value": 2
       }
     ],
     "min": -1,
@@ -286,9 +251,7 @@ export const settingsSchema = [
     "previewable": true,
     "apply": "refresh_engine",
     "legacy_control_center_ordinal": 6,
-    "supported": true,
-    "label": "감마 방식",
-    "description": "알파 혼합에 사용할 감마 방식을 선택합니다."
+    "supported": true
   },
   {
     "id": "gamma_value",
@@ -306,9 +269,7 @@ export const settingsSchema = [
     "previewable": true,
     "apply": "refresh_engine",
     "legacy_control_center_ordinal": 13,
-    "supported": true,
-    "label": "감마 값",
-    "description": "낮을수록 중간 농도의 픽셀이 더 진하게 보입니다."
+    "supported": true
   },
   {
     "id": "contrast",
@@ -326,9 +287,7 @@ export const settingsSchema = [
     "previewable": true,
     "apply": "refresh_engine",
     "legacy_control_center_ordinal": 14,
-    "supported": true,
-    "label": "대비",
-    "description": "렌더링된 획의 대비를 조정합니다."
+    "supported": true
   },
   {
     "id": "render_weight",
@@ -346,9 +305,7 @@ export const settingsSchema = [
     "previewable": true,
     "apply": "refresh_engine",
     "legacy_control_center_ordinal": 15,
-    "supported": true,
-    "label": "렌더 가중치",
-    "description": "FreeType 렌더링 강도를 조정합니다."
+    "supported": true
   },
   {
     "id": "anti_alias_mode",
@@ -359,36 +316,28 @@ export const settingsSchema = [
     "control": "select",
     "options": [
       {
-        "value": -1,
-        "label": "사용 안 함"
+        "value": -1
       },
       {
-        "value": 0,
-        "label": "회색조"
+        "value": 0
       },
       {
-        "value": 1,
-        "label": "Light"
+        "value": 1
       },
       {
-        "value": 2,
-        "label": "LCD RGB"
+        "value": 2
       },
       {
-        "value": 3,
-        "label": "LCD BGR"
+        "value": 3
       },
       {
-        "value": 4,
-        "label": "Light LCD RGB"
+        "value": 4
       },
       {
-        "value": 5,
-        "label": "Light LCD BGR"
+        "value": 5
       },
       {
-        "value": 6,
-        "label": "PenTile"
+        "value": 6
       }
     ],
     "min": -1,
@@ -400,9 +349,7 @@ export const settingsSchema = [
     "previewable": true,
     "apply": "refresh_engine",
     "legacy_control_center_ordinal": 1,
-    "supported": true,
-    "label": "안티앨리어싱 방식",
-    "description": "회색조, RGB, BGR 및 픽셀 배열 렌더링 방식을 선택합니다."
+    "supported": true
   },
   {
     "id": "lcd_filter",
@@ -413,20 +360,16 @@ export const settingsSchema = [
     "control": "select",
     "options": [
       {
-        "value": 0,
-        "label": "없음"
+        "value": 0
       },
       {
-        "value": 1,
-        "label": "기본"
+        "value": 1
       },
       {
-        "value": 2,
-        "label": "Light"
+        "value": 2
       },
       {
-        "value": 16,
-        "label": "Legacy"
+        "value": 16
       }
     ],
     "min": 0,
@@ -438,9 +381,7 @@ export const settingsSchema = [
     "previewable": true,
     "apply": "refresh_engine",
     "legacy_control_center_ordinal": 7,
-    "supported": true,
-    "label": "LCD 필터",
-    "description": "서브픽셀 필터 커널의 기본 방식을 선택합니다."
+    "supported": true
   },
   {
     "id": "text_tuning",
@@ -458,8 +399,6 @@ export const settingsSchema = [
     "apply": "refresh_engine",
     "legacy_control_center_ordinal": 9,
     "supported": true,
-    "label": "회색조 튜닝",
-    "description": "회색조 렌더링의 문자 경계를 조정합니다.",
     "factory": 0
   },
   {
@@ -478,9 +417,7 @@ export const settingsSchema = [
     "previewable": true,
     "apply": "refresh_engine",
     "legacy_control_center_ordinal": 10,
-    "supported": true,
-    "label": "빨강 채널 튜닝",
-    "description": "LCD 빨강 서브픽셀의 문자 경계를 조정합니다."
+    "supported": true
   },
   {
     "id": "text_tuning_g",
@@ -498,9 +435,7 @@ export const settingsSchema = [
     "previewable": true,
     "apply": "refresh_engine",
     "legacy_control_center_ordinal": 11,
-    "supported": true,
-    "label": "초록 채널 튜닝",
-    "description": "LCD 초록 서브픽셀의 문자 경계를 조정합니다."
+    "supported": true
   },
   {
     "id": "text_tuning_b",
@@ -518,9 +453,7 @@ export const settingsSchema = [
     "previewable": true,
     "apply": "refresh_engine",
     "legacy_control_center_ordinal": 12,
-    "supported": true,
-    "label": "파랑 채널 튜닝",
-    "description": "LCD 파랑 서브픽셀의 문자 경계를 조정합니다."
+    "supported": true
   },
   {
     "id": "hint_small_font",
@@ -538,8 +471,6 @@ export const settingsSchema = [
     "apply": "refresh_engine",
     "legacy_control_center_ordinal": 27,
     "supported": true,
-    "label": "작은 글꼴 힌팅",
-    "description": "작은 크기의 글꼴에 별도 힌팅 경로를 사용합니다.",
     "factory": 0
   },
   {
@@ -558,8 +489,6 @@ export const settingsSchema = [
     "apply": "refresh_engine",
     "legacy_control_center_ordinal": 25,
     "supported": true,
-    "label": "비트맵 글꼴 최대 크기",
-    "description": "이 크기까지 포함된 비트맵 글리프를 허용합니다. 0은 제한 없음입니다.",
     "factory": 0
   },
   {
@@ -578,8 +507,6 @@ export const settingsSchema = [
     "apply": "restart_required",
     "legacy_control_center_ordinal": -1,
     "supported": true,
-    "label": "렌더링 최대 높이",
-    "description": "FreeType가 처리할 최대 글꼴 높이입니다. 0은 제한 없음입니다.",
     "factory": 0
   },
   {
@@ -598,8 +525,6 @@ export const settingsSchema = [
     "apply": "restart_required",
     "legacy_control_center_ordinal": -1,
     "supported": true,
-    "label": "렌더링 최소 높이",
-    "description": "FreeType가 처리할 최소 글꼴 높이입니다.",
     "factory": 0
   },
   {
@@ -618,9 +543,7 @@ export const settingsSchema = [
     "previewable": false,
     "apply": "restart_required",
     "legacy_control_center_ordinal": 19,
-    "supported": true,
-    "label": "자식 프로세스에도 적용",
-    "description": "이 프로그램이 새로 여는 자식 프로세스에도 같은 MacType 프로필을 적용합니다."
+    "supported": true
   },
   {
     "id": "use_mapping",
@@ -638,8 +561,6 @@ export const settingsSchema = [
     "apply": "restart_required",
     "legacy_control_center_ordinal": -1,
     "supported": true,
-    "label": "UseMapping",
-    "description": "General / UseMapping",
     "factory": 0
   },
   {
@@ -658,8 +579,6 @@ export const settingsSchema = [
     "apply": "restart_required",
     "legacy_control_center_ordinal": -1,
     "supported": true,
-    "label": "UseInclude",
-    "description": "General / UseInclude",
     "factory": 0
   },
   {
@@ -671,16 +590,13 @@ export const settingsSchema = [
     "control": "select",
     "options": [
       {
-        "value": 0,
-        "label": "Disabled"
+        "value": 0
       },
       {
-        "value": 1,
-        "label": "Safe"
+        "value": 1
       },
       {
-        "value": 2,
-        "label": "All"
+        "value": 2
       }
     ],
     "min": 0,
@@ -692,8 +608,6 @@ export const settingsSchema = [
     "apply": "restart_required",
     "legacy_control_center_ordinal": 22,
     "supported": true,
-    "label": "FontSubstitutes",
-    "description": "General / FontSubstitutes",
     "factory": 0
   },
   {
@@ -712,9 +626,7 @@ export const settingsSchema = [
     "previewable": false,
     "apply": "restart_required",
     "legacy_control_center_ordinal": -1,
-    "supported": true,
-    "label": "자체 FreeType 사용 프로그램 건너뛰기",
-    "description": "자체 FreeType 사용을 명시한 프로그램은 일반 후킹에서 조용히 제외합니다. Unity 글꼴 후킹에는 적용하지 않습니다."
+    "supported": true
   },
   {
     "id": "skip_console_processes",
@@ -732,9 +644,7 @@ export const settingsSchema = [
     "previewable": false,
     "apply": "restart_required",
     "legacy_control_center_ordinal": -1,
-    "supported": true,
-    "label": "터미널 프로그램 건너뛰기",
-    "description": "cmd, PowerShell, git, gh처럼 콘솔로 실행되는 프로그램에는 적용하지 않습니다. 터미널 창 자체의 글자는 그대로 적용됩니다."
+    "supported": true
   },
   {
     "id": "unity_font_hook",
@@ -745,20 +655,16 @@ export const settingsSchema = [
     "control": "select",
     "options": [
       {
-        "value": 0,
-        "label": "끄기"
+        "value": 0
       },
       {
-        "value": 1,
-        "label": "선택한 게임에만"
+        "value": 1
       },
       {
-        "value": 2,
-        "label": "대부분의 게임에서"
+        "value": 2
       },
       {
-        "value": 3,
-        "label": "모든 게임에서"
+        "value": 3
       }
     ],
     "min": 0,
@@ -770,9 +676,7 @@ export const settingsSchema = [
     "previewable": false,
     "apply": "restart_required",
     "legacy_control_center_ordinal": -1,
-    "supported": true,
-    "label": "Unity 글꼴 후킹",
-    "description": "Unity의 사설 FreeType 글리프를 프로필에 맞게 보정합니다. 검증된 UnityPlayer 빌드만 후킹하며 기본값은 끄기입니다."
+    "supported": true
   },
   {
     "id": "cache_max_faces",
@@ -790,9 +694,7 @@ export const settingsSchema = [
     "previewable": false,
     "apply": "restart_required",
     "legacy_control_center_ordinal": -1,
-    "supported": true,
-    "label": "CacheMaxFaces",
-    "description": "General / CacheMaxFaces"
+    "supported": true
   },
   {
     "id": "cache_max_sizes",
@@ -810,9 +712,7 @@ export const settingsSchema = [
     "previewable": false,
     "apply": "restart_required",
     "legacy_control_center_ordinal": -1,
-    "supported": true,
-    "label": "CacheMaxSizes",
-    "description": "General / CacheMaxSizes"
+    "supported": true
   },
   {
     "id": "cache_max_bytes",
@@ -830,9 +730,7 @@ export const settingsSchema = [
     "previewable": false,
     "apply": "restart_required",
     "legacy_control_center_ordinal": -1,
-    "supported": true,
-    "label": "CacheMaxBytes",
-    "description": "General / CacheMaxBytes"
+    "supported": true
   },
   {
     "id": "dw_gamma_value",
@@ -850,9 +748,7 @@ export const settingsSchema = [
     "previewable": false,
     "apply": "restart_required",
     "legacy_control_center_ordinal": -1,
-    "supported": true,
-    "label": "GammaValue",
-    "description": "DirectWrite / GammaValue"
+    "supported": true
   },
   {
     "id": "dw_contrast",
@@ -870,8 +766,6 @@ export const settingsSchema = [
     "apply": "restart_required",
     "legacy_control_center_ordinal": -1,
     "supported": true,
-    "label": "Contrast",
-    "description": "DirectWrite / Contrast",
     "factory": 1
   },
   {
@@ -883,32 +777,25 @@ export const settingsSchema = [
     "control": "select",
     "options": [
       {
-        "value": 0,
-        "label": "0"
+        "value": 0
       },
       {
-        "value": 1,
-        "label": "1"
+        "value": 1
       },
       {
-        "value": 2,
-        "label": "2"
+        "value": 2
       },
       {
-        "value": 3,
-        "label": "3"
+        "value": 3
       },
       {
-        "value": 4,
-        "label": "4"
+        "value": 4
       },
       {
-        "value": 5,
-        "label": "5"
+        "value": 5
       },
       {
-        "value": 6,
-        "label": "6"
+        "value": 6
       }
     ],
     "min": 0,
@@ -920,9 +807,7 @@ export const settingsSchema = [
     "previewable": false,
     "apply": "restart_required",
     "legacy_control_center_ordinal": -1,
-    "supported": true,
-    "label": "RenderingMode",
-    "description": "DirectWrite / RenderingMode"
+    "supported": true
   },
   {
     "id": "dw_cleartype_level",
@@ -940,8 +825,6 @@ export const settingsSchema = [
     "apply": "restart_required",
     "legacy_control_center_ordinal": -1,
     "supported": true,
-    "label": "ClearTypeLevel",
-    "description": "DirectWrite / ClearTypeLevel",
     "factory": 1
   },
   {
@@ -960,8 +843,6 @@ export const settingsSchema = [
     "apply": "restart_required",
     "legacy_control_center_ordinal": -1,
     "supported": true,
-    "label": "ClipBoxFix",
-    "description": "Experimental / ClipBoxFix",
     "factory": 1
   },
   {
@@ -980,8 +861,6 @@ export const settingsSchema = [
     "apply": "restart_required",
     "legacy_control_center_ordinal": -1,
     "supported": true,
-    "label": "ColorFont",
-    "description": "Experimental / ColorFont",
     "factory": 0
   },
   {
@@ -1000,8 +879,6 @@ export const settingsSchema = [
     "apply": "restart_required",
     "legacy_control_center_ordinal": -1,
     "supported": true,
-    "label": "InvertColor",
-    "description": "Experimental / InvertColor",
     "factory": 0
   }
 ] as const;

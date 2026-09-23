@@ -78,6 +78,17 @@ drift gate plus cross-language golden tests.
 | DirectWrite hook lifecycle additions | `DirectWriteLifecycle` Interface and the appropriate DirectWrite Adapter |
 | FreeType global ownership changes | deep `FreeTypeRuntime` Implementation |
 
+A merge needs more care here than a cherry-pick does. A pick that touches a root
+renderer source fails loudly, because alpha deleted that path. A merge does not:
+when main adds a renderer source at the root that alpha has never had at the root,
+git sees a file added on one side only and takes it without a conflict, leaving two
+copies of the same implementation in one tree. Main gained
+`child_process_relay.cpp`, `child_process_relay.h` and `shared/hook_compatibility.h`
+at its root on 2026-09-23 in merge `cbef7fc`, and alpha already carries all three
+under `renderer/` and `shared/`. Before committing any merge from main, list the
+files it added at the repository root and check each against `renderer/`; remove the
+root copy rather than keeping both.
+
 `codex/renderer-memory-safety` is never an intake source. It is a separate
 classic-C++/no-RAII upstream experiment and must not be referenced, merged, or
 cherry-picked into alpha-plus.
@@ -139,6 +150,7 @@ Add one row whenever a post-refactor main change is evaluated.
 | `54a867d5aebc3940404aa3a9c3f36ca9fe7b3f52` | direct cherry-pick (patch-equivalent after semantic port) | `7fac14a` | event integration 30/30 | The three file-backed event integration tests already received the Windows Miri exclusions while porting `5961339`; applying this commit produced no additional behavior change. |
 | `44041bc37917a41ba28eb640e0385ebb024bfd05` | semantic port | `2160941` | i18n (10 locales, 799 messages), settings, eslint, tsc/vite build, source comments, alpha branch policy, full gallery 1119 (1060 passed, 59 skipped) | `runtime()` replaces the forwarding `app/tauri.ts` in every alpha consumer, the skins, the Unity picker and the Studio included; `features/profiles/useProfileDocument.ts` owns the document, the snapshots and the guarded save/designate/start-now flow with `app/profilePreference.ts` holding the one precedence including the managed-legacy fallback; `app/executionViewModel.ts` owns the presentation edges for all four skins. Named page-model groups, Unity lists and the Studio stay. |
 | `811cf1c44d5a8199c00bfb43cf497cb54a599008` | semantic port | `2160941` | catalog identity audit against 841e4a8, i18n gate, full gallery as above, completeness grep | The guided vocabulary and the `guided`/`all` modes reach alpha's models, four Tuner skins, `app.css` and the skin stylesheets, all ten catalogs (38 keys renamed, values and order unchanged) and the gallery specs; `nav.wizardGroup` and the Wizard navigation area keep their names. CONTEXT.md carries the new mode values. |
+| `23f044ca62f11df68f6558c317328104392ccfbb` | whole-range merge intake at 2026-09-23 (alpha `f97722a`, merge-base `14eba4f`) | see the merge commit | branch gates, listed in the delivery proof | 123 main-only commits folded in one `git merge` rather than a pick sequence, because the backlog had grown past the point where per-commit picks could be reviewed. 121 files conflicted and were resolved by area: service-runtime, control-center, and the native, docs and CI remainder. The rows above stay the record for everything before this merge-base. |
 
 An intentional non-port needs a concrete reason, such as fork-only behavior,
 an invariant already satisfied by a stronger Module, or a change made obsolete

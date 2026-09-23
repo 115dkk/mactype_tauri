@@ -40,4 +40,3 @@ export function wrapSample(text: string, fontFace: string, fontSizePt: number, w
   if (!measure) return text;
   return text.split("\n").flatMap((line) => wrapSampleLine(line, measure, room)).join("\n");
 }
-

@@ -62,7 +62,7 @@ fn observer_subscribes_to_the_immediate_process_start_trace() {
 
     assert_eq!(
         PROCESS_CREATION_QUERY,
-        "SELECT * FROM Win32_ProcessStartTrace"
+        "SELECT ProcessID FROM Win32_ProcessStartTrace"
     );
     assert_eq!(source.query.as_deref(), Some(PROCESS_CREATION_QUERY));
 }

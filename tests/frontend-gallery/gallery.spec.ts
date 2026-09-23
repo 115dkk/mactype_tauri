@@ -2,6 +2,114 @@ import { expect, test } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { galleryLocales, gallerySkins, galleryViews } from "./windows";
+import {
+  projectServiceCapabilities,
+  type ServiceCapabilityInput,
+  type ServiceCapabilityProjection,
+} from "../../control-center/src/app/runtimeAdapters/serviceCapabilityPolicy";
+import {
+  galleryExecutionStatus,
+  transitionGalleryExecutionStatus,
+  transitionGalleryLegacyTrayAutostartDisable,
+  transitionGalleryLegacyTrayExit,
+  transitionGalleryRunProfile,
+} from "../../control-center/src/app/runtimeAdapters/browserGalleryExecution";
+import type { ExecutionStatus } from "../../control-center/src/app/model";
+
+const serviceCapabilityCases = JSON.parse(
+  fs.readFileSync(path.join(__dirname, "..", "..", "shared", "service-capability-cases.json"), "utf8"),
+) as Array<{ name: string; input: ServiceCapabilityInput; expected: ServiceCapabilityProjection }>;
+
+for (const capabilityCase of serviceCapabilityCases) {
+  test(`shared service capability projection matches ${capabilityCase.name}`, () => {
+    expect(projectServiceCapabilities(capabilityCase.input), capabilityCase.name).toEqual(capabilityCase.expected);
+  });
+}
+
+function galleryCapabilities(status: ExecutionStatus): ServiceCapabilityProjection {
+  const { canInstall, canRemove, canStart, canStop, canRepair, canUpgrade } = status.systemService;
+  return {
+    canInstall, canRemove, canStart, canStop, canRepair, canUpgrade,
+    systemModesSupported: status.systemModesSupported,
+    migrationAvailable: status.legacyMacTray?.migrationAvailable ?? false,
+  };
+}
+
+for (const fixture of [
+  { name: "legacy-tray-conflict-present", query: "system-service=ready&service-runtime=stopped&legacy-tray=trusted-current" },
+  { name: "foreign-backend", query: "system-service=foreign-service&service-runtime=running" },
+  { name: "inaccessible-installation", query: "system-service=inaccessible-service&service-runtime=unknown" },
+  { name: "stopped-current-package-not-installed", query: "system-service=ready&service-runtime=stopped&service-package=not-installed" },
+  { name: "stopped-current-package-incomplete", query: "system-service=ready&service-runtime=stopped&service-package=incomplete" },
+  { name: "stopped-current-package-untrusted", query: "system-service=ready&service-runtime=stopped&service-package=untrusted" },
+]) {
+  test(`gallery preserves Rust capability gates for ${fixture.name}`, async ({ page }) => {
+    const query = `${fixture.query}&legacy=migration-available&legacy-state=stopped`;
+    const capabilityCase = serviceCapabilityCases.find((candidate) => candidate.name === fixture.name);
+    if (!capabilityCase) throw new Error(`Missing shared capability case: ${fixture.name}`);
+    const status = galleryExecutionStatus(new URLSearchParams(query));
+    expect(galleryCapabilities(status), fixture.name).toEqual(capabilityCase.expected);
+    const designated = transitionGalleryRunProfile(status, "Profiles\\Gallery.ini", false);
+    expect(galleryCapabilities(designated), `${fixture.name} after designation`).toEqual(capabilityCase.expected);
+
+    await page.goto(`/?view=execution&gallery=1&lang=en&${query}`, { waitUntil: "networkidle" });
+    await openServiceDetails(page);
+    const migrate = page.locator('[data-service-backend="legacy-mactray"]').getByRole("button", { name: "Migrate", exact: true });
+    if (fixture.name === "legacy-tray-conflict-present") await expect(migrate).toBeDisabled();
+    else await expect(migrate).toBeEnabled();
+    expect(await overflowingElements(page)).toEqual([]);
+  });
+}
+
+test("gallery capability projection preserves drift, tray clamps and absent transitions", () => {
+  const status = galleryExecutionStatus(new URLSearchParams("system-service=ready&legacy-tray=trusted-current&legacy-startup=hkcu-run&legacy=migration-available"));
+  expect(status.systemModesSupported).toBe(true);
+  expect(status.legacyMacTray?.migrationAvailable).toBe(true);
+  expect(status.systemService.canStop).toBe(true);
+  expect(status.systemService.canRemove).toBe(false);
+  const process = status.legacyTray.process;
+  if (process.state !== "trusted-current-session") throw new Error("Expected a trusted gallery MacTray");
+  const exited = transitionGalleryLegacyTrayExit(status, process);
+  expect(exited.systemModesSupported).toBe(true);
+  expect(exited.systemInjectionActive).toBe(false);
+  expect(exited.systemService.canRemove).toBe(false);
+  expect(exited.legacyMacTray?.migrationAvailable).toBe(true);
+  const cleared = transitionGalleryLegacyTrayAutostartDisable(exited);
+  expect(cleared.systemService.canRemove).toBe(true);
+  const stopped = transitionGalleryExecutionStatus(cleared, "stop");
+  const drifted = transitionGalleryRunProfile({
+    ...stopped,
+    systemService: { ...stopped.systemService, configurationDrift: true },
+  }, "ini\\Default.ini", false);
+  expect(drifted.systemService.configurationDrift).toBe(true);
+  expect(drifted.systemService.canStart).toBe(false);
+  expect(drifted.systemService.canRepair).toBe(true);
+  const removed = transitionGalleryExecutionStatus(stopped, "remove");
+  expect(removed.systemService.backend).toBe("none");
+  expect(removed.systemService.canInstall).toBe(true);
+  expect(removed.systemService.canRemove).toBe(false);
+  const absent = galleryExecutionStatus(new URLSearchParams("system-service=migration-available"));
+  expect(absent.systemService.backend).toBe("none");
+  expect(absent.systemService.canInstall).toBe(true);
+  expect(absent.systemService.canRemove).toBe(false);
+  const deleting = galleryExecutionStatus(new URLSearchParams("system-service=delete-pending"));
+  expect(deleting.systemService.runtime).toBe("unknown");
+  expect(deleting.systemService.canRemove).toBe(false);
+});
+
+test("running legacy migration requires a trusted binary regardless of a declared capability", () => {
+  const capabilityCase = serviceCapabilityCases.find((candidate) => candidate.name === "legacy-migration-available");
+  if (!capabilityCase) throw new Error("Missing shared legacy migration case");
+  const input: ServiceCapabilityInput = {
+    ...capabilityCase.input,
+    legacy: { presence: "owned", state: "running", migrationAvailable: true },
+  };
+  expect(projectServiceCapabilities(input).migrationAvailable).toBe(false);
+  expect(projectServiceCapabilities({
+    ...input,
+    legacy: { ...input.legacy, trustedBinaryAvailable: true },
+  }).migrationAvailable).toBe(true);
+});
 
 const galleryRoot = path.resolve(__dirname, "../../artifacts/frontend-gallery");
 /* The docked preview is a property of the shipped window size, so the gallery
@@ -112,6 +220,125 @@ for (const state of executionStateGallery) {
     expect(await overflowingElements(page)).toEqual([]);
     await page.screenshot({
       path: path.join(galleryRoot, `${testInfo.project.name}-execution-state-${state.id}-en.png`),
+      fullPage: true,
+    });
+  });
+}
+
+test("gallery publication state follows designation and preserves pending changes across start and stop", () => {
+  const pending = galleryExecutionStatus(new URLSearchParams("run-profile-pending=1"));
+  expect(pending.runProfilePublication).toBe("pending");
+  const stopped = transitionGalleryExecutionStatus(pending, "stop");
+  expect(stopped.runProfilePublication).toBe("pending");
+  expect(transitionGalleryExecutionStatus(stopped, "start").runProfilePublication).toBe("pending");
+  expect(transitionGalleryRunProfile(stopped, "Profiles\\Gallery.ini", false).runProfilePublication).toBe("published");
+  const unapplied = galleryExecutionStatus(new URLSearchParams("profile-unapplied=1&run-profile-pending=1"));
+  expect(unapplied.runProfilePublication).toBe("unknown");
+  expect(transitionGalleryExecutionStatus(unapplied, "start").runProfilePublication).toBe("published");
+});
+
+for (const publication of [
+  { state: "published", query: "" },
+  { state: "unknown", query: "&profile-unapplied=1" },
+  { state: "unknown", query: "&profile-runtime-missing=1&run-profile-pending=1" },
+] as const) {
+  test(`run profile notice stays absent when ${publication.state} (${publication.query || "default"})`, async ({ page }) => {
+    expect(galleryExecutionStatus(new URLSearchParams(publication.query)).runProfilePublication).toBe(publication.state);
+    await page.goto(`/?view=execution&gallery=1&lang=en${publication.query}`, { waitUntil: "networkidle" });
+    await expect(page.locator("[data-service-summary]")).toBeVisible();
+    await expect(page.locator("[data-run-profile-pending]")).toHaveCount(0);
+    await page.getByRole("button", { name: "Refresh status" }).click();
+    await expect(page.locator("[data-run-profile-pending]")).toHaveCount(0);
+  });
+}
+
+for (const service of [
+  { runtime: "running", title: "The settings in use are the previous ones", message: "Restarted the service on the settings you saved. Apps opened from now on use them." },
+  { runtime: "stopped", title: "Starting now would run the previous settings", message: "Saved these settings into the run profile. They take effect when you start the service." },
+] as const) {
+  test(`pending run profile applies calmly while the service is ${service.runtime}`, async ({ page }, testInfo) => {
+    await page.goto(`/?view=execution&gallery=1&lang=en&run-profile-pending=1&service-runtime=${service.runtime}&service-delay=1000`, { waitUntil: "networkidle" });
+    const notice = page.locator("[data-run-profile-pending]");
+    await expect(notice).toHaveAttribute("role", "status");
+    await expect(notice.locator("strong")).toHaveText(service.title);
+    await expect(notice).toBeInViewport({ ratio: 1 });
+    await expect(page.locator(".page-header + [data-run-profile-pending] + [data-service-summary]")).toHaveCount(1);
+    // The service page marks exceptional blocks and warning icons explicitly.
+    expect(await notice.evaluate((element) => element.matches('[data-prominent-exception], [data-state="attention"], [data-state="critical"], .warning, .warning-text'))).toBe(false);
+    await expect(notice.locator('[data-prominent-exception], .warning, .warning-text, .lucide-triangle-alert')).toHaveCount(0);
+    await expect(notice.locator(".lucide-file-clock")).toHaveCount(1);
+    expect(await overflowingElements(page)).toEqual([]);
+    await page.screenshot({
+      path: path.join(galleryRoot, `${testInfo.project.name}-execution-state-run-profile-pending-${service.runtime}-en.png`),
+      fullPage: true,
+    });
+    await notice.getByRole("button", { name: "Apply to service", exact: true }).click();
+    await expect(notice.getByRole("button")).toBeDisabled();
+    await expect(notice.getByRole("button")).toHaveText("Applying");
+    await expect(notice).toHaveCount(0);
+    await expect(page.locator(".success-message")).toHaveText(service.message);
+    await expect(page.locator("[data-service-summary]")).toContainText(service.runtime === "running" ? "Running" : "Stopped");
+    await page.getByRole("button", { name: "Refresh status" }).click();
+    await expect(notice).toHaveCount(0);
+  });
+}
+
+test("pending run profile keeps the notice and reports service operation failures", async ({ page }) => {
+  await page.goto("/?view=execution&gallery=1&lang=en&run-profile-pending=1&service-fail=republish-profile", { waitUntil: "networkidle" });
+  const notice = page.locator("[data-run-profile-pending]");
+  await notice.getByRole("button", { name: "Apply to service", exact: true }).click();
+  await expect(page.locator(".inline-error")).toBeVisible();
+  await expect(page.locator(".inline-error")).not.toContainText("control-center-internal-operation-failed");
+  await expect(page.locator(".success-message")).toHaveCount(0);
+  await expect(notice.getByRole("button", { name: "Apply to service", exact: true })).toBeEnabled();
+});
+
+for (const locale of galleryLocales) {
+  test(`pending run profile notice fits in ${locale.id}`, async ({ page }, testInfo) => {
+    await page.goto(`/?view=execution&gallery=1&lang=${locale.id}&run-profile-pending=1`, { waitUntil: "networkidle" });
+    const notice = page.locator("[data-run-profile-pending]");
+    await expect(notice).toBeInViewport({ ratio: 1 });
+    await expect(notice.getByRole("button")).toBeInViewport({ ratio: 1 });
+    expect(await overflowingElements(page)).toEqual([]);
+    expect(await notice.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(false);
+    await page.screenshot({
+      path: path.join(galleryRoot, `${testInfo.project.name}-execution-state-run-profile-pending-${locale.id}.png`),
+      fullPage: true,
+    });
+  });
+}
+
+for (const theme of ["light", "dark"] as const) {
+  test(`pending run profile text meets contrast requirements in ${theme}`, async ({ page }, testInfo) => {
+    await page.goto(`/?view=execution&gallery=1&lang=en&run-profile-pending=1&theme=${theme}`, { waitUntil: "networkidle" });
+    const notice = page.locator("[data-run-profile-pending]");
+    await expect(notice).toBeVisible();
+    const contrast = await notice.evaluate((element) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 1;
+      const context = canvas.getContext("2d")!;
+      const rgb = (color: string) => {
+        context.clearRect(0, 0, 1, 1);
+        context.fillStyle = color;
+        context.fillRect(0, 0, 1, 1);
+        return Array.from(context.getImageData(0, 0, 1, 1).data).slice(0, 3);
+      };
+      const luminance = (color: number[]) => color.map((channel) => {
+        const value = channel / 255;
+        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      }).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+      const background = rgb(getComputedStyle(element).backgroundColor);
+      const title = rgb(getComputedStyle(element.querySelector("strong")!).color);
+      const paragraph = rgb(getComputedStyle(element.querySelector("p")!).color);
+      const ratio = (color: number[]) => (Math.max(luminance(color), luminance(background)) + 0.05)
+        / (Math.min(luminance(color), luminance(background)) + 0.05);
+      return { background, title, paragraph, titleRatio: ratio(title), paragraphRatio: ratio(paragraph) };
+    });
+    expect(contrast.titleRatio).toBeGreaterThanOrEqual(4.5);
+    expect(contrast.paragraphRatio).toBeGreaterThanOrEqual(4.5);
+    console.log(`Run profile notice contrast (${testInfo.project.name}, ${theme}): ${JSON.stringify(contrast)}`);
+    await page.screenshot({
+      path: path.join(galleryRoot, `${testInfo.project.name}-execution-state-run-profile-pending-${theme}-en.png`),
       fullPage: true,
     });
   });
@@ -429,6 +656,31 @@ test.describe("shared the shipped default window docks the preview and never res
       await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-preview-default-window-ko.png`), fullPage: true });
     });
   }
+});
+
+test("the shipped default window docks the preview and never resamples the sample", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "The default window is a single size");
+  await page.setViewportSize(defaultWindow);
+  await page.goto("/?view=profiles&gallery=1&lang=ko", { waitUntil: "networkidle" });
+
+  await expect(page.locator('.settings-workspace[data-preview-docked="true"]')).toHaveCount(1);
+
+  // A strip is a bitmap drawn at the width the panel asked for. Asking for more
+  // than the canvas holds makes the browser scale it down, which shrinks the
+  // glyphs below the size the reader picked and defeats the preview.
+  const strip = page.locator(".preview-strip img").first();
+  for (const size of ["12", "14", "18"]) {
+    await page.getByRole("combobox", { name: "프리뷰 크기" }).selectOption(size);
+    await expect(strip).toHaveJSProperty("complete", true);
+    const scale = await strip.evaluate((image) => {
+      const rendered = image.getBoundingClientRect().width;
+      return rendered / Number((image as HTMLImageElement).getAttribute("width"));
+    });
+    expect(scale, `the ${size} pt sample must render at its own size in the docked column`).toBeCloseTo(1, 2);
+  }
+
+  expect(await overflowingElements(page)).toEqual([]);
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-preview-default-window-ko.png`), fullPage: true });
 });
 
 test("native preview display mode dropdown drives the runtime adapter", async ({ page }, testInfo) => {
@@ -1127,6 +1379,104 @@ test.describe("shared read-only profiles require Save as before apply", () => {
   }
 });
 
+for (const view of ["files", "profiles"]) {
+  test(`${view} Save As validates names, traps focus, and restores its trigger`, async ({ page }, testInfo) => {
+    await page.goto(`/?view=${view}&gallery=1&lang=ko`, { waitUntil: "networkidle" });
+    const trigger = page.getByRole("button", { name: "다른 이름으로 저장", exact: true });
+    await trigger.click();
+    const dialog = page.getByRole("dialog", { name: "다른 이름으로 저장", exact: true });
+    const name = dialog.getByRole("textbox", { name: "새 프로필 이름", exact: true });
+    const submit = dialog.getByRole("button", { name: "저장", exact: true });
+    const cancel = dialog.getByRole("button", { name: "취소", exact: true });
+    await expect(name).toHaveValue("Default");
+    await expect(name).toBeFocused();
+    expect(await name.evaluate((element: HTMLInputElement) => [element.selectionStart, element.selectionEnd])).toEqual([0, 7]);
+    await expect(submit).toBeEnabled();
+    await name.press("Shift+Tab");
+    await expect(submit).toBeFocused();
+    await submit.press("Tab");
+    await expect(name).toBeFocused();
+    await name.fill("Recent");
+    await expect(dialog).toContainText("같은 이름의 프로필이 이미 있습니다.");
+    await expect(name).toHaveAttribute("aria-invalid", "true");
+    await expect(name).toHaveAttribute("aria-describedby", "profile-name-dialog-message");
+    await expect(submit).toBeDisabled();
+    await name.press("Enter");
+    await expect(dialog).toBeVisible();
+    await name.press("Shift+Tab");
+    await expect(cancel).toBeFocused();
+    await cancel.press("Tab");
+    await expect(name).toBeFocused();
+    await name.fill("Bad/name");
+    await expect(dialog).toContainText("이름에 쓸 수 없는 문자가 들어 있습니다.");
+    await expect(submit).toBeDisabled();
+    await name.fill("");
+    await expect(dialog.locator('[aria-live="polite"]')).toBeEmpty();
+    await expect(submit).toBeDisabled();
+    await name.fill("Gallery named profile");
+    await expect(name).toHaveAttribute("aria-invalid", "false");
+    await expect(name).not.toHaveAttribute("aria-describedby");
+    await expect(submit).toBeEnabled();
+    expect(await overflowingElements(page)).toEqual([]);
+    await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${view}-save-as-dialog-ko.png`), fullPage: true });
+    await name.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await trigger.click();
+    await cancel.click();
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await trigger.click();
+    await name.fill("Gallery named profile");
+    await name.press("Enter");
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+  });
+}
+
+test("Save As advances the suggested name past a managed profile collision", async ({ page }) => {
+  await page.goto("/?view=files&gallery=1&lang=en", { waitUntil: "networkidle" });
+  await page.locator(".profile-card").filter({ hasText: "Recent" }).locator(".profile-card-select").click();
+  await page.getByRole("button", { name: "Save as", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Save as", exact: true });
+  await expect(dialog.getByRole("textbox", { name: "New profile name" })).toHaveValue("Recent (2)");
+  await expect(dialog.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+});
+
+test("guided saving offers only the outstanding follow-up and clears it after an edit", async ({ page }) => {
+  await page.goto("/?view=profiles&gallery=1&lang=ko&service-runtime=stopped", { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "단계별 설정", exact: true }).click();
+  await page.locator(".settings-index").getByRole("button", { name: "실행 프로필 지정", exact: true }).click();
+  const card = page.locator(".guided-apply-card");
+  await expect(card.locator(".designate")).toHaveCount(0);
+  await card.getByRole("button", { name: "다른 이름으로 저장", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "다른 이름으로 저장", exact: true });
+  await dialog.getByRole("textbox", { name: "새 프로필 이름" }).fill("Guided copy");
+  await dialog.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(card.getByRole("button")).toHaveText(["프리뷰", "프로필 저장", "다른 이름으로 저장", "실행 프로필로 지정"]);
+  await card.getByRole("button", { name: "실행 프로필로 지정", exact: true }).click();
+  await expect(card.getByRole("button", { name: "지금 서비스 시작", exact: true })).toBeEnabled();
+  await page.locator(".settings-index").getByRole("button", { name: "기본 렌더링", exact: true }).click();
+  const choice = page.locator('.guided-choice input:not(:checked)').first();
+  await choice.check();
+  await page.locator(".settings-index").getByRole("button", { name: "실행 프로필 지정", exact: true }).click();
+  await expect(card.locator(".designate")).toHaveCount(0);
+  await card.getByRole("button", { name: "프로필 저장", exact: true }).click();
+  const apply = card.getByRole("button", { name: "서비스에 적용", exact: true });
+  await expect(apply).toBeEnabled();
+  await expect(card.getByRole("button", { name: "실행 프로필로 지정", exact: true })).toHaveCount(0);
+  await page.locator(".settings-index").getByRole("button", { name: "기본 렌더링", exact: true }).click();
+  await choice.check();
+  await page.locator(".settings-index").getByRole("button", { name: "실행 프로필 지정", exact: true }).click();
+  await expect(card.locator(".designate")).toHaveCount(0);
+  await card.getByRole("button", { name: "프로필 저장", exact: true }).click();
+  await expect(apply).toBeEnabled();
+  await apply.click();
+  await expect(page.locator(".profile-message")).toHaveText("저장한 설정을 실행 프로필에 반영했습니다. 서비스를 시작하면 이 설정으로 실행됩니다.");
+  await expect(card.getByRole("button", { name: "지금 서비스 시작", exact: true })).toBeEnabled();
+});
+
 test("known legacy-selected profiles open directly without an import detour", async ({ page }, testInfo) => {
   await page.goto("/?view=files&gallery=1&lang=en&fresh=1&profile-runtime-missing=1", { waitUntil: "networkidle" });
   await expect(page.locator(".legacy-import-banner")).toHaveCount(0);
@@ -1363,6 +1713,64 @@ test.describe("shared designating a run profile while the service runs switches 
       await expect(page.locator('[data-kind="system"]')).toContainText("MacType 시스템 적용 중");
     });
   }
+});
+
+test("designating a run profile while the service is stopped keeps it stopped and offers one explicit start", async ({ page }, testInfo) => {
+  await page.goto("/?view=files&gallery=1&lang=ko&system-service=stopped", { waitUntil: "networkidle" });
+  const pretendardCard = page.locator(".profile-card").filter({ hasText: "Pretendard forever" });
+  await expect(page.locator('.profile-card[data-run-profile="true"] .profile-card-title strong')).toHaveText("Default");
+  await pretendardCard.locator(".profile-card-select").click();
+  await page.getByRole("button", { name: "실행 프로필로 지정", exact: true }).click();
+
+  const message = page.locator('[data-operation="file-settings"]');
+  await expect(message).toContainText("서비스를 시작하면 이 프로필로 실행됩니다.");
+  await expect(pretendardCard).toHaveAttribute("data-run-profile", "true");
+  await expect(pretendardCard.locator(".profile-card-badge")).toHaveText("실행 프로필");
+  const startNow = message.getByRole("button", { name: "지금 서비스 시작" });
+  await expect(startNow).toBeVisible();
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-run-profile-held-ko.png`), fullPage: true });
+
+  const wizardGroup = page.locator(".navigation").getByRole("group", { name: "위자드" });
+  await wizardGroup.getByRole("button", { name: "서비스" }).click();
+  const summary = page.locator("[data-service-summary]");
+  await expect(summary).toContainText("중지됨");
+  await expect(summary).toContainText("실행 프로필");
+  await expect(summary).toContainText("pretendard forever.ini");
+  await openServiceDetails(page);
+  await expect(page.getByText("MacType 시스템 적용 꺼짐", { exact: true })).toBeVisible();
+  await expect(page.locator(".system-injection-control")).toContainText("실행 프로필(pretendard forever.ini)");
+
+  // The page remounts on return, so the held designation is repeated before
+  // the one explicit start it offers is taken.
+  await wizardGroup.getByRole("button", { name: "프로필" }).click();
+  await expect(page.locator('.profile-card[data-run-profile="true"] .profile-card-title strong')).toHaveText("Pretendard forever");
+  await page.getByRole("button", { name: "실행 프로필로 지정", exact: true }).click();
+  await page.locator('[data-operation="file-settings"]').getByRole("button", { name: "지금 서비스 시작" }).click();
+  await expect(page.locator('[data-operation="file-settings"]')).toContainText("서비스를 시작했습니다.");
+  await expect(page.locator('[data-operation="file-settings"]').getByRole("button", { name: "지금 서비스 시작" })).toHaveCount(0);
+  await wizardGroup.getByRole("button", { name: "서비스" }).click();
+  await expect(summary).toContainText("실행 중");
+  await openServiceDetails(page);
+  await expect(page.getByText("MacType 시스템 적용 중", { exact: true })).toBeVisible();
+});
+
+test("designating a run profile while the service runs switches it live", async ({ page }, testInfo) => {
+  await page.goto("/?view=files&gallery=1&lang=ko&system-service=ready", { waitUntil: "networkidle" });
+  const pretendardCard = page.locator(".profile-card").filter({ hasText: "Pretendard forever" });
+  await pretendardCard.locator(".profile-card-select").click();
+  await page.getByRole("button", { name: "실행 프로필로 지정", exact: true }).click();
+
+  const message = page.locator('[data-operation="file-settings"]');
+  await expect(message).toContainText("실행 중인 서비스에 바로 반영했습니다.");
+  await expect(message.getByRole("button", { name: "지금 서비스 시작" })).toHaveCount(0);
+  await expect(pretendardCard).toHaveAttribute("data-run-profile", "true");
+  await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-run-profile-live-ko.png`), fullPage: true });
+
+  await page.locator(".navigation").getByRole("group", { name: "위자드" }).getByRole("button", { name: "서비스" }).click();
+  await expect(page.locator("[data-service-summary]")).toContainText("실행 중");
+  await expect(page.locator("[data-service-summary]")).toContainText("pretendard forever.ini");
+  await openServiceDetails(page);
+  await expect(page.getByText("MacType 시스템 적용 중", { exact: true })).toBeVisible();
 });
 
 for (const entry of [
@@ -2093,6 +2501,51 @@ test("diagnostics owns installation controls and always shows the localized even
   await expect(page.locator('[data-operation="folder"]')).toContainText("ControlCenter");
 });
 
+test("event view options hide summaries, persist, and collapse repeated failures", async ({ page }) => {
+  await page.goto("/?view=diagnostics&gallery=1&lang=ko", { waitUntil: "networkidle" });
+  const summaries = page.locator('.event-row[data-code="injection-summary"]');
+  await expect(summaries).toHaveCount(4);
+  await expect(page.getByTestId("event-timeline")).toContainText("최근 1분 동안");
+  const hideSummaries = page.getByRole("switch", { name: "적용 요약 숨기기" });
+  for (const option of ["hideInjectionSummary", "collapseRepeatedFailures", "hideRoutine"]) {
+    await expect(page.locator(`.event-view-option[data-option="${option}"] .switch-control > span`)).toBeVisible();
+  }
+  await page.locator('.event-view-option[data-option="hideInjectionSummary"] .switch-control > span').click();
+  await expect(summaries).toHaveCount(0);
+  await page.reload({ waitUntil: "networkidle" });
+  await expect(hideSummaries).toBeChecked();
+  await expect(summaries).toHaveCount(0);
+  await hideSummaries.uncheck();
+  await expect(summaries).toHaveCount(4);
+  const repeated = page.locator('.event-row[data-code="injection-failed"]').filter({ hasText: "vgtray.exe" });
+  await expect(repeated).toHaveCount(3);
+  const collapse = page.getByRole("switch", { name: "반복된 적용 실패 접기" });
+  await collapse.check();
+  await expect(repeated).toHaveCount(1);
+  await expect(repeated.locator(".event-repeat")).toHaveText("3회 반복");
+  await expect(page.locator('.event-row[data-code="injection-failed"]').filter({ hasText: "firefox.exe" })).toHaveCount(1);
+  await collapse.uncheck();
+  await expect(repeated).toHaveCount(3);
+  const routine = page.locator('.event-row[data-code="app-started"], .event-row[data-code="preview-helper-connected"], .event-row[data-code="profile-verified"]');
+  await expect(routine).toHaveCount(3);
+  await page.getByRole("switch", { name: "앱 실행·미리보기 기록 숨기기" }).check();
+  await expect(routine).toHaveCount(0);
+  await page.evaluate(() => localStorage.removeItem("mactype-control-center.event-view"));
+});
+
+test("event log sources omit absent files but report existing unreadable files classic", async ({ page }) => {
+  await page.goto("/?view=diagnostics&gallery=1&lang=ko&events-absent=1", { waitUntil: "networkidle" });
+  await page.locator("details.event-source-disclosure > summary").click();
+  await expect(page.locator(".event-sources > div")).toHaveCount(2);
+  await expect(page.locator(".event-sources")).not.toContainText("서비스 설치");
+  await page.goto("/?view=diagnostics&gallery=1&lang=ko", { waitUntil: "networkidle" });
+  await page.locator("details.event-source-disclosure > summary").click();
+  await expect(page.locator(".event-sources > div")).toHaveCount(3);
+  await page.goto("/?view=diagnostics&gallery=1&lang=ko&events-unreadable=1", { waitUntil: "networkidle" });
+  await page.locator("details.event-source-disclosure > summary").click();
+  await expect(page.locator(".event-sources > div").nth(2)).toContainText("읽을 수 없음");
+});
+
 test("language setting switches every supported locale and persists", async ({ page }, testInfo) => {
   await page.goto("/?view=overview&gallery=1&lang=ko", { waitUntil: "networkidle" });
   for (const locale of galleryLocales) {
@@ -2170,6 +2623,83 @@ test("dark language menu and custom titlebar follow the application theme", asyn
   expect(themeColors).toEqual({ menu: "rgb(25, 32, 39)", titlebar: "rgb(25, 32, 39)" });
   expect(await menu.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
   await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-dark-language-titlebar.png`), fullPage: true });
+});
+
+for (const failure of ["access", "read", "write"] as const) {
+  test(`preferences remain usable when localStorage ${failure} throws`, async ({ page }) => {
+    const failures: string[] = [];
+    page.on("pageerror", (error) => failures.push(error.message));
+    await page.addInitScript((failure) => {
+      Object.defineProperty(navigator, "language", { get: () => "en-US" });
+      const unavailable = () => { throw new DOMException("Storage unavailable", "SecurityError"); };
+      if (failure === "access") {
+        Object.defineProperty(window, "localStorage", { get: unavailable });
+      } else {
+        Object.defineProperty(Storage.prototype, failure === "read" ? "getItem" : "setItem", { value: unavailable });
+      }
+    }, failure);
+
+    await page.goto("/?view=overview&gallery=1", { waitUntil: "networkidle" });
+    await expect(page.locator("body")).toHaveAttribute("data-rendered", "true");
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Dark theme" }).click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await page.getByTestId("language-picker-trigger").click();
+    await page.locator('[data-locale-option="ko"]').click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "ko");
+
+    await page.goto("/?view=files&gallery=1&fresh=1&lang=fr&theme=dark", { waitUntil: "networkidle" });
+    await expect(page.locator("html")).toHaveAttribute("lang", "fr");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.locator('.profile-card[data-selected="true"] .profile-card-title strong')).toHaveText("Default");
+
+    await page.goto("/?view=diagnostics&gallery=1&lang=en&theme=dark", { waitUntil: "networkidle" });
+    const summaries = page.locator('.event-row[data-code="injection-summary"]');
+    const hideSummaries = page.locator('.event-view-option[data-option="hideInjectionSummary"]').getByRole("switch");
+    await expect(hideSummaries).not.toBeChecked();
+    await expect(summaries).toHaveCount(4);
+    await hideSummaries.check();
+    await expect(summaries).toHaveCount(0);
+    expect(failures).toEqual([]);
+  });
+}
+
+test("preference query overrides persist and invalid values use stored or default choices", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "language", { get: () => "zh-HK" });
+  });
+  await page.goto("/?view=overview&gallery=1&lang=fr&theme=dark", { waitUntil: "networkidle" });
+  await expect(page.locator("html")).toHaveAttribute("lang", "fr");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  expect(await page.evaluate(() => ({
+    locale: localStorage.getItem("mactype-control-center.locale"),
+    theme: localStorage.getItem("mactype-control-center.theme"),
+  }))).toEqual({ locale: "fr", theme: "dark" });
+
+  await page.goto("/?view=overview&gallery=1&lang=invalid&theme=invalid", { waitUntil: "networkidle" });
+  await expect(page.locator("html")).toHaveAttribute("lang", "fr");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+
+  await page.goto("/?view=overview&gallery=1&lang=de&theme=light", { waitUntil: "networkidle" });
+  await expect(page.locator("html")).toHaveAttribute("lang", "de");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await page.goto("/?view=overview&gallery=1", { waitUntil: "networkidle" });
+  await expect(page.locator("html")).toHaveAttribute("lang", "de");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+
+  await page.evaluate(() => {
+    localStorage.setItem("mactype-control-center.locale", "invalid");
+    localStorage.setItem("mactype-control-center.theme", "invalid");
+    localStorage.setItem("mactype-control-center.event-view", "{invalid");
+  });
+  await page.goto("/?view=diagnostics&gallery=1&lang=invalid&theme=invalid", { waitUntil: "networkidle" });
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh-TW");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(page.locator('.event-view-option input:checked')).toHaveCount(0);
+  await expect(page.locator('.event-row[data-code="injection-summary"]')).toHaveCount(4);
 });
 
 test("theme setting persists across launches", async ({ page }) => {
@@ -2454,7 +2984,7 @@ for (const skin of gallerySkins) {
   });
 }
 
-test("event log sources omit absent files but report existing unreadable files", async ({ page }) => {
+test("event log sources omit absent files but report existing unreadable files console", async ({ page }) => {
   await page.goto("/?view=diagnostics&gallery=1&lang=ko&skin=console&events-absent=1", { waitUntil: "networkidle" });
   await expect(page.locator(".event-sources > div")).toHaveCount(2);
   await expect(page.locator(".event-sources")).not.toContainText("서비스 설치");

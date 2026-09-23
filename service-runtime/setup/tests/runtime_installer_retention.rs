@@ -137,3 +137,24 @@ fn retention_preserves_an_old_generation_with_an_unexpected_entry() {
         .join("operator.bin")
         .exists());
 }
+
+#[test]
+fn retention_never_removes_the_active_or_a_pinned_generation() {
+    let (base, paths) = test_paths();
+    let installer = RuntimeInstaller::new(paths.clone());
+    installer
+        .deploy_with_health_check(&payload(base.path(), "0.1.0", b"service-v1"), |_| Ok(()))
+        .unwrap();
+    installer
+        .deploy_with_health_check(&payload(base.path(), "0.2.0", b"service-v2"), |_| Ok(()))
+        .unwrap();
+    pin_runtime_generation(&paths, "0123456789abcdeffedcba9876543210", "0.1.0");
+
+    installer
+        .deploy_with_health_check(&payload(base.path(), "0.3.0", b"service-v3"), |_| Ok(()))
+        .unwrap();
+
+    assert!(paths.runtime_versions().join("0.1.0").is_dir());
+    assert!(paths.runtime_versions().join("0.3.0").is_dir());
+    assert_eq!(active_version(paths.runtime_pointer()), "0.3.0");
+}

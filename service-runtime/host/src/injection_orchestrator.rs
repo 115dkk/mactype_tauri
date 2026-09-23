@@ -74,6 +74,7 @@ pub struct InjectionOrchestrator<'a> {
     retry_scheduler: Option<&'a dyn RetryScheduler>,
     deferral_policy: DeferralPolicy,
     last_injected_identity: Option<ProcessIdentity>,
+    last_handled_creation_time: Option<u64>,
     injection_telemetry: InjectionTelemetry,
 }
 
@@ -209,6 +210,7 @@ impl<'a> InjectionOrchestrator<'a> {
             retry_scheduler: configuration.retry_scheduler,
             deferral_policy: configuration.deferral_policy,
             last_injected_identity: None,
+            last_handled_creation_time: None,
             injection_telemetry: InjectionTelemetry::default(),
         }
     }
@@ -222,8 +224,10 @@ impl<'a> InjectionOrchestrator<'a> {
         pid: u32,
         now: Instant,
     ) -> Result<ProcessOutcome, StructuredServiceError> {
+        self.last_handled_creation_time = None;
         match self.target_validator.validate(pid)? {
             ProcessTargetDecision::Eligible(identity) => {
+                self.last_handled_creation_time = Some(identity.creation_time);
                 if self.contains_identity(&identity) {
                     return Ok(ProcessOutcome::Duplicate);
                 }
@@ -243,6 +247,7 @@ impl<'a> InjectionOrchestrator<'a> {
                 self.attempt_injection(identity, 0, now)
             }
             ProcessTargetDecision::Deferred { identity, reason } => {
+                self.last_handled_creation_time = Some(identity.creation_time);
                 if self.contains_identity(&identity) {
                     return Ok(ProcessOutcome::Duplicate);
                 }
@@ -262,7 +267,9 @@ impl<'a> InjectionOrchestrator<'a> {
                     }
                     self.record_skip(identity, reason.code(), None);
                 } else {
-                    self.events.record(HostEvent::InjectionSkipped);
+                    self.events.record(HostEvent::InjectionSkipped {
+                        reason: reason.code(),
+                    });
                 }
                 Ok(ProcessOutcome::Skipped)
             }
@@ -382,6 +389,27 @@ impl<'a> InjectionOrchestrator<'a> {
         let mut delay = self.retry_policy.initial_delay;
         for attempt in 1..=attempts {
             let result = self.broker.inject(&request).into_bounded_evidence();
+            match result.disposition {
+                BrokerDisposition::LaunchFailed => {
+                    return Ok(self.handle_launch_failure(
+                        request.identity.clone(),
+                        deferrals,
+                        now,
+                        result,
+                        attempt,
+                    ));
+                }
+                BrokerDisposition::TargetFrozen => {
+                    self.insert_deferred(DeferredTarget {
+                        identity: request.identity.clone(),
+                        reason: DeferralReason::Frozen,
+                        deferrals,
+                        not_before: now + self.deferral_policy.frozen_recheck,
+                    });
+                    return Ok(ProcessOutcome::Deferred);
+                }
+                _ => {}
+            }
             match result.disposition {
                 BrokerDisposition::LaunchFailed => {
                     return Ok(self.handle_launch_failure(
@@ -524,6 +552,14 @@ impl<'a> InjectionOrchestrator<'a> {
 
     pub fn last_injected_identity(&self) -> Option<&ProcessIdentity> {
         self.last_injected_identity.as_ref()
+    }
+
+    /// The creation time the validator read for the PID handled most recently,
+    /// or `None` when that PID was passed over before any identity was
+    /// established. It lets the caller say how late the service heard about a
+    /// process without opening the target a second time to ask again.
+    pub fn last_handled_creation_time(&self) -> Option<u64> {
+        self.last_handled_creation_time
     }
 
     pub fn last_result(&self, pid: u32, creation_time: u64) -> Option<&ProcessAttemptRecord> {
@@ -669,6 +705,7 @@ impl<'a> InjectionOrchestrator<'a> {
 
 fn terminal_outcome(disposition: BrokerDisposition, final_attempt: bool) -> Option<ProcessOutcome> {
     match disposition {
+        BrokerDisposition::LaunchFailed | BrokerDisposition::TargetFrozen => None,
         BrokerDisposition::Cancelled => Some(ProcessOutcome::Cancelled),
         BrokerDisposition::Injected => Some(ProcessOutcome::Injected),
         BrokerDisposition::Skipped => Some(ProcessOutcome::Skipped),
@@ -677,6 +714,5 @@ fn terminal_outcome(disposition: BrokerDisposition, final_attempt: bool) -> Opti
         | BrokerDisposition::UncertainIntegrity => Some(ProcessOutcome::Rejected),
         BrokerDisposition::Retryable if final_attempt => Some(ProcessOutcome::RetryExhausted),
         BrokerDisposition::Retryable => None,
-        BrokerDisposition::LaunchFailed | BrokerDisposition::TargetFrozen => None,
     }
 }

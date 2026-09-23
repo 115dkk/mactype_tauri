@@ -6,11 +6,9 @@ use mactype_service_platform::{
     WmiPropertyStep,
 };
 
-use crate::ProcessEventSource;
+use crate::{ProcessEventSource, FALLBACK_PROCESS_CREATION_QUERY};
 
 const PROCESS_SNAPSHOT_QUERY: &str = "SELECT ProcessID FROM Win32_Process";
-const FALLBACK_PROCESS_CREATION_QUERY: &str =
-    "SELECT * FROM __InstanceCreationEvent WITHIN 1 WHERE TargetInstance ISA 'Win32_Process'";
 const SNAPSHOT_ROW_TIMEOUT: Duration = Duration::from_millis(5_000);
 
 #[derive(Clone, Copy)]

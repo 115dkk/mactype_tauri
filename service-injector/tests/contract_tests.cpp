@@ -1,4 +1,5 @@
 #include "broker_request.h"
+#include "handle_rights.h"
 #include "module_inventory.h"
 #include "process_lifecycle.h"
 #include "remote_injection_verdict.h"
@@ -313,6 +314,28 @@ bool incompatible_process_mitigations_are_classified_before_injection() {
                HookCompatibility::binary_signature_restricted;
 }
 
+bool a_stripped_injection_right_is_detected() {
+    using mactype::injector::injection_rights_present;
+    constexpr ACCESS_MASK complete =
+        PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION |
+        PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ | SYNCHRONIZE;
+    if (!injection_rights_present(complete)) {
+        return false;
+    }
+    // Every right injection needs, one at a time. A kernel callback that
+    // defends a process strips these while the open still succeeds.
+    for (const ACCESS_MASK stripped :
+         {ACCESS_MASK{PROCESS_CREATE_THREAD}, ACCESS_MASK{PROCESS_VM_OPERATION},
+          ACCESS_MASK{PROCESS_VM_WRITE}}) {
+        if (injection_rights_present(complete & ~stripped)) {
+            return false;
+        }
+    }
+    // The rights we merely read with are not enough on their own.
+    return !injection_rights_present(0U) &&
+           !injection_rights_present(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ);
+}
+
 bool process_lifecycle_flags_are_decoded_independently() {
     struct Case final {
         std::uint32_t flags;
@@ -509,6 +532,10 @@ int wmain() {
     if (!malformed_or_missing_process_handle_is_rejected()) {
         std::cerr << "malformed or missing inherited process handle was accepted\n";
         return 6;
+    }
+    if (!a_stripped_injection_right_is_detected()) {
+        std::cerr << "a handle missing an injection right was treated as usable\n";
+        return 16;
     }
     if (!process_lifecycle_flags_are_decoded_independently()) {
         std::cerr << "process lifecycle flags were decoded incorrectly\n";

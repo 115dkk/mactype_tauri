@@ -38,6 +38,8 @@ Closing the native window or pressing Escape emits an unsolicited `native_previe
 The Helper renders and PNG-encodes on its main thread, while a separate STA thread owns the save dialog and file write so IPC remains responsive.
 The main thread invokes the state sink between request dispatches, so event frames and response frames cannot interleave; Rust emits valid state as `native-preview:state` and keeps every unsolicited frame out of the response channel.
 
+Document errors and preview render errors have separate ownership: a good redraw does not recover a failed profile mutation. Native window lifecycle tests run in the Windows Tauri smoke gate in addition to the browser gallery.
+
 ## Profile boundary
 
 Rust owns a line-preserving INI document. It retains BOM, encoding, line endings, blank lines, comments, unknown entries, and ordering. Only the value slice of a changed key is rewritten. Save compares the original SHA-256, flushes a same-directory temporary file, keeps one backup, and uses `ReplaceFileW` on Windows.
@@ -57,11 +59,11 @@ only a persisted degraded or failed record remains diagnostically relevant.
 
 Scalar settings use the public core's `[General]` keys. Structured `[Individual]`, font include/exclude, and module include/exclude sections retain their surrounding comments while edited entries are validated and replaced. The legacy-codec gate vendors a pinned, licensed 70-profile community corpus and requires correct encoding detection, byte-identical no-edit round trips, edit/save/reopen behavior, and line-ending/BOM preservation without network access.
 
-`shared/settings-schema.json` is the source for generated Rust, TypeScript, and C++ setting definitions. CI regenerates and rejects drift.
+`shared/settings-schema.json` owns setting structure for the generated Rust, TypeScript, and C++ definitions, while the locale catalogs own display copy. CI regenerates and rejects drift.
 
 ## Localization boundary
 
-The React frontend owns ten complete runtime catalogs: Korean, English, Simplified Chinese, Traditional Chinese, Japanese, French, German, Spanish, Portuguese, and Arabic. An explicit `?lang=` value takes precedence and is persisted per user; otherwise the stored preference or the browser language selects the initial locale. Chinese script and regional subtags are normalized separately (`zh-Hant`, Taiwan, Hong Kong, and Macao select Traditional Chinese), while unsupported locales fall back to English.
+The React frontend owns ten complete runtime catalogs: Korean, English, Simplified Chinese, Traditional Chinese, Japanese, French, German, Spanish, Portuguese, and Arabic. An explicit `?lang=` value takes precedence and is persisted per user; otherwise the stored preference or the browser language selects the initial locale. The locale, theme, event view options, and the remembered profile share one persisted-preference policy in `control-center/src/app/persistedPreference.ts`: a valid explicit query value wins and is persisted best-effort, then the stored value, then the owner's fallback; a failed write never changes the selection. Chinese script and regional subtags are normalized separately (`zh-Hant`, Taiwan, Hong Kong, and Macao select Traditional Chinese), while unsupported locales fall back to English.
 
 Changing the language updates visible text, the document title, accessibility labels, the HTML language and direction, and the native Tauri tray menu without restarting. Arabic sets native right-to-left document direction and direction-aware navigation and editor borders. CI requires exact catalog key and placeholder parity, coverage for all generated settings, native tray-menu tests, and real browser rendering of every view, viewport, and locale.
 
@@ -82,6 +84,12 @@ The window is an application surface, not a page. `#root` is a flex column over 
 ## Event log
 
 The frontend reads the unified event log (`docs/event-log-policy.md`) through `list_events`, `event_log_summary` and `recent_activity`, refreshes on the `event-log:changed` event, and localises every code through `event.<code>` keys in `src/features/events/eventText.ts`. `EventTimeline` is the one timeline component; skins style it and decide where the filter chips sit.
+
+Diagnostics always displays the common service/setup/Control Center event timeline with localized summaries and expandable technical detail. It also localizes the `panic` and `end-session-hook-failed` event codes. The log-file disclosure omits a source whose `present` field is false; a missing field from an older backend is treated as present. An existing unreadable file still appears with its status.
+
+Three view options hide apply summaries (`injection-summary`), collapse repeated apply failures, or hide routine app and preview events (`app-started`, `preview-helper-connected`, `profile-verified`). All default to off and persist per user under `mactype-control-center.event-view`. They affect only the display and never change log files. Collapsing keeps the newest failure for each matching process name (case-insensitive) and reason, with a repeat-count badge. Counts include only events matching the severity, area, and search filters. Resetting those filters does not reset the view options.
+
+Titles localize the `reason` of `injection-failed` and the `code` of `helper-broker-failed` through `event.reason.*` catalog keys. Unknown values retain the backend spelling, and raw parameters and detail remain in each row's disclosure.
 
 ## Execution boundary
 

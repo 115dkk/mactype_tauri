@@ -8,7 +8,7 @@ use mactype_service_contract::{
     MAX_RUNTIME_FILE_BYTES,
 };
 
-use super::super::RuntimeInstaller;
+use super::super::generation_store::RuntimeGenerationStore;
 use crate::profile_bridge::GENERATED_PROFILE_NAME;
 use crate::storage::{
     read_bounded_directory, read_bounded_regular_file, reject_reparse_ancestors, SetupError,
@@ -16,7 +16,7 @@ use crate::storage::{
 
 const MIGRATION_RUNTIME_PINS_DIRECTORY: &str = "migration-runtime-pins";
 
-impl RuntimeInstaller {
+impl RuntimeGenerationStore<'_> {
     pub(in crate::runtime_installer) fn load_verified_migration_pins(
         &self,
     ) -> Result<BTreeMap<String, MigrationPinnedRuntime>, SetupError> {

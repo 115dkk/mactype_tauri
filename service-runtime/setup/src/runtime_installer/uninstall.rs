@@ -7,6 +7,7 @@ use mactype_service_contract::{
 };
 
 use super::deferred_delete::{defer_directory, remove_directory_or_defer, remove_file_or_defer};
+use super::generation_store::RuntimeGenerationStore;
 use super::journal::{validate_runtime_pointer, MAX_POINTER_BYTES};
 use super::RuntimeInstaller;
 use crate::storage::{
@@ -35,13 +36,22 @@ impl RuntimeInstaller {
     /// all be proven to belong to this installer. Protected profiles live below
     /// ProgramData and are deliberately outside this operation.
     pub fn remove_receipted_installation(&self) -> Result<bool, SetupError> {
-        self.remove_receipted_installation_after(|| Ok(()))
+        self.generation_store().remove_owned(|| Ok(()))
     }
 
     pub(crate) fn remove_receipted_installation_after<F>(
         &self,
         before_cleanup: F,
     ) -> Result<bool, SetupError>
+    where
+        F: FnOnce() -> Result<(), SetupError>,
+    {
+        self.generation_store().remove_owned(before_cleanup)
+    }
+}
+
+impl RuntimeGenerationStore<'_> {
+    pub(super) fn remove_owned<F>(&self, before_cleanup: F) -> Result<bool, SetupError>
     where
         F: FnOnce() -> Result<(), SetupError>,
     {
@@ -156,7 +166,7 @@ impl RuntimeInstaller {
                     "runtime generation name is not canonical".to_owned(),
                 ));
             }
-            self.verify_runtime_generation_receipt(&version, &entry.path())?;
+            self.verify(&version, &entry.path())?;
             versions.insert(version);
         }
 

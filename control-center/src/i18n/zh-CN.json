@@ -525,6 +525,8 @@
   "execution.launchedRegistered": "已使用 MacType 启动 {count} 个已登记程序。",
   "group.advanced.label": "高级与实验",
   "group.advanced.description": "调整应用兼容性和内存使用，或尝试实验性文字选项。",
+  "settings.hook_child_processes.label": "应用到其启动的程序",
+  "settings.hook_child_processes.description": "已应用 MacType 的程序启动另一个程序时，立即为该程序应用相同的配置。",
   "settings.use_mapping.label": "映射字体文件",
   "settings.use_mapping.description": "换用另一种方式在内存中保存字体数据。字体加载失败时可尝试更改。",
   "settings.use_include.label": "使用包含列表",

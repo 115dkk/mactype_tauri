@@ -310,6 +310,18 @@ pub const SETTINGS: &[SettingDefinition] = &[
         ordinal: -1,
     },
     SettingDefinition {
+        id: "hook_child_processes",
+        section: "General",
+        key: "HookChildProcesses",
+        value_type: SettingValueType::Integer,
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        factory: 1.0,
+        previewable: false,
+        ordinal: 19,
+    },
+    SettingDefinition {
         id: "use_mapping",
         section: "General",
         key: "UseMapping",

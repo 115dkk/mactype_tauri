@@ -528,6 +528,24 @@ export const settingsSchema = [
     "factory": 0
   },
   {
+    "id": "hook_child_processes",
+    "group": "basic",
+    "section": "General",
+    "key": "HookChildProcesses",
+    "type": "integer",
+    "control": "boolean",
+    "min": 0,
+    "max": 1,
+    "default": 0,
+    "factory": 1,
+    "unit": null,
+    "advanced": false,
+    "previewable": false,
+    "apply": "restart_required",
+    "legacy_control_center_ordinal": 19,
+    "supported": true
+  },
+  {
     "id": "use_mapping",
     "group": "basic",
     "section": "General",

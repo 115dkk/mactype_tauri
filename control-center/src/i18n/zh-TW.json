@@ -525,6 +525,8 @@
   "execution.launchedRegistered": "已使用 MacType 啟動 {count} 個已登錄程式。",
   "group.advanced.label": "進階與實驗",
   "group.advanced.description": "調整應用程式相容性和記憶體使用，或嘗試實驗性文字選項。",
+  "settings.hook_child_processes.label": "套用到其啟動的程式",
+  "settings.hook_child_processes.description": "已套用 MacType 的程式啟動另一個程式時，立即為該程式套用相同的設定。",
   "settings.use_mapping.label": "映射字型檔案",
   "settings.use_mapping.description": "換用另一種方式在記憶體中保存字型資料。字型載入失敗時可嘗試變更。",
   "settings.use_include.label": "使用包含清單",

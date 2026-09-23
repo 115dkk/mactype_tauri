@@ -525,6 +525,8 @@
   "execution.launchedRegistered": "Se iniciaron {count} aplicaciones registradas con MacType.",
   "group.advanced.label": "Avanzado y experimental",
   "group.advanced.description": "Ajusta la compatibilidad y el uso de memoria, o prueba opciones de texto experimentales.",
+  "settings.hook_child_processes.label": "Aplicar a las apps que inician",
+  "settings.hook_child_processes.description": "Cuando una app con MacType inicia otra, aplica el mismo perfil a esa app de inmediato.",
   "settings.use_mapping.label": "Mapear archivos de fuentes",
   "settings.use_mapping.description": "Usa otro método para mantener las fuentes en memoria. Prueba a cambiarlo si no se cargan.",
   "settings.use_include.label": "Usar listas de inclusión",

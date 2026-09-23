@@ -525,6 +525,8 @@
   "execution.launchedRegistered": "{count} registrierte Apps wurden mit MacType gestartet.",
   "group.advanced.label": "Erweitert und experimentell",
   "group.advanced.description": "Passen Sie App-Kompatibilität und Speicherbedarf an oder testen Sie experimentelle Textoptionen.",
+  "settings.hook_child_processes.label": "Auf gestartete Apps anwenden",
+  "settings.hook_child_processes.description": "Startet eine App mit MacType eine weitere App, erhält auch diese sofort dasselbe Profil.",
   "settings.use_mapping.label": "Schriftdateien abbilden",
   "settings.use_mapping.description": "Verwendet eine andere Methode zum Halten der Schriftdaten im Speicher. Versuchen Sie sie bei Ladefehlern.",
   "settings.use_include.label": "Einschlusslisten verwenden",

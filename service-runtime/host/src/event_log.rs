@@ -40,19 +40,47 @@ pub enum HostEvent {
         reason: &'static str,
     },
     /// One trip through the orchestration loop: how long the target took to
-    /// handle and how deep the startup backlog still was. Targets are handled
-    /// one helper launch at a time, so these two numbers say whether a slow
-    /// pipeline or a long queue is what keeps a newly created process waiting.
+    /// handle, how deep the startup backlog still was, and how old the process
+    /// already was when handling began. Targets are handled one helper launch
+    /// at a time, so the first two numbers say whether a slow pipeline or a
+    /// long queue is what keeps a newly created process waiting, and the third
+    /// says how much of the wait was over before the service heard anything.
+    /// Only a target the live event source announced has an age; one drained
+    /// from a startup or recovery snapshot may have been running for days.
     InjectionPipelineSample {
         millis: u64,
         backlog: usize,
+        age_millis: Option<u64>,
     },
+    /// Which of the two process event sources the service is actually running
+    /// on. It changes no event and no message parameter; it only names the
+    /// source in the summary detail, where a maintainer reading a log can see
+    /// whether the fast source was available on that machine.
+    LiveObserverSelected(LiveObserver),
     FlushInjectionSummary,
     HelperBrokerFailed {
         architecture: ProcessArchitecture,
         code: String,
         detail: Option<String>,
     },
+}
+
+/// The process event source the service is running on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LiveObserver {
+    /// A private real-time ETW session on the kernel process provider.
+    Etw,
+    /// The WMI subscription, used when no real-time session could be started.
+    Wmi,
+}
+
+impl LiveObserver {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Etw => "etw",
+            Self::Wmi => "wmi",
+        }
+    }
 }
 
 pub trait HostEventSink: Send + Sync {
@@ -107,9 +135,14 @@ impl HostEventLogger {
                 logger.injection_result(&record, process, detail, now);
             }
             HostEvent::InjectionSkipped { reason } => logger.injection_skipped(reason, now),
-            HostEvent::InjectionPipelineSample { millis, backlog } => {
-                logger.injection_pipeline_sample(millis, backlog);
+            HostEvent::InjectionPipelineSample {
+                millis,
+                backlog,
+                age_millis,
+            } => {
+                logger.injection_pipeline_sample(millis, backlog, age_millis);
             }
+            HostEvent::LiveObserverSelected(observer) => logger.observer = Some(observer),
             HostEvent::FlushInjectionSummary => logger.flush_elapsed_summary(now),
             HostEvent::HelperBrokerFailed {
                 architecture,
@@ -130,6 +163,7 @@ struct HostEventLoggerState {
     writer: EventLogWriter,
     write_error_reported: bool,
     health: Option<HealthState>,
+    observer: Option<LiveObserver>,
     summary: InjectionSummary,
     injection_throttle: EventThrottle,
     helper_throttle: EventThrottle,
@@ -158,18 +192,33 @@ struct PipelineSamples {
     millis_sum: u64,
     millis_max: u64,
     backlog_max: usize,
+    /// Ages are counted separately because only a target the live event
+    /// source announced has one; averaging over every sample would divide the
+    /// live ages by a window full of snapshot targets.
+    age_count: u64,
+    age_sum: u64,
+    age_max: u64,
 }
 
 impl PipelineSamples {
-    fn record(&mut self, millis: u64, backlog: usize) {
+    fn record(&mut self, millis: u64, backlog: usize, age_millis: Option<u64>) {
         self.count += 1;
         self.millis_sum = self.millis_sum.saturating_add(millis);
         self.millis_max = self.millis_max.max(millis);
         self.backlog_max = self.backlog_max.max(backlog);
+        if let Some(age) = age_millis {
+            self.age_count += 1;
+            self.age_sum = self.age_sum.saturating_add(age);
+            self.age_max = self.age_max.max(age);
+        }
     }
 
     fn average_millis(&self) -> u64 {
         self.millis_sum.checked_div(self.count).unwrap_or(0)
+    }
+
+    fn average_age_millis(&self) -> u64 {
+        self.age_sum.checked_div(self.age_count).unwrap_or(0)
     }
 }
 
@@ -179,6 +228,7 @@ impl HostEventLoggerState {
             writer: EventLogWriter::new(path),
             write_error_reported: false,
             health: None,
+            observer: None,
             summary: InjectionSummary {
                 window_start: now,
                 counts: InjectionCounts::default(),
@@ -256,8 +306,8 @@ impl HostEventLoggerState {
             .or_default() += 1;
     }
 
-    fn injection_pipeline_sample(&mut self, millis: u64, backlog: usize) {
-        self.summary.pipeline.record(millis, backlog);
+    fn injection_pipeline_sample(&mut self, millis: u64, backlog: usize, age_millis: Option<u64>) {
+        self.summary.pipeline.record(millis, backlog, age_millis);
     }
 
     fn injection_result(
@@ -350,7 +400,7 @@ impl HostEventLoggerState {
                 ("failed".to_owned(), counts.failed.to_string()),
                 ("skipped".to_owned(), counts.skipped.to_string()),
             ]),
-            summary_detail(&reasons, &pipeline),
+            summary_detail(&reasons, &pipeline, self.observer),
         );
     }
 
@@ -399,16 +449,35 @@ fn health_name(state: HealthState) -> &'static str {
 /// localized message templates, and every locale catalogue must carry the same
 /// placeholder set, so a number that exists to be read by a maintainer would
 /// cost ten translations to add and ten more to change.
-fn summary_detail(reasons: &BTreeMap<String, u64>, pipeline: &PipelineSamples) -> Option<String> {
+fn summary_detail(
+    reasons: &BTreeMap<String, u64>,
+    pipeline: &PipelineSamples,
+    observer: Option<LiveObserver>,
+) -> Option<String> {
     let mut detail = String::new();
     if pipeline.count > 0 {
         detail.push_str(&format!(
-            "handle_avg_ms={} handle_max_ms={} backlog_max={} n={}",
+            "handle_avg_ms={} handle_max_ms={}",
             pipeline.average_millis(),
             pipeline.millis_max,
-            pipeline.backlog_max,
-            pipeline.count
         ));
+        if pipeline.age_count > 0 {
+            detail.push_str(&format!(
+                " age_avg_ms={} age_max_ms={}",
+                pipeline.average_age_millis(),
+                pipeline.age_max,
+            ));
+        }
+        detail.push_str(&format!(
+            " backlog_max={} n={}",
+            pipeline.backlog_max, pipeline.count
+        ));
+    }
+    if let Some(observer) = observer {
+        if !detail.is_empty() {
+            detail.push(' ');
+        }
+        detail.push_str(&format!("observer={}", observer.name()));
     }
     if !reasons.is_empty() {
         if !detail.is_empty() {
@@ -476,9 +545,9 @@ mod tests {
     }
 
     #[test]
-    fn a_window_with_no_samples_and_no_skips_carries_no_detail() {
+    fn a_window_with_no_samples_no_skips_and_no_named_source_carries_no_detail() {
         assert_eq!(
-            summary_detail(&BTreeMap::new(), &PipelineSamples::default()),
+            summary_detail(&BTreeMap::new(), &PipelineSamples::default(), None),
             None
         );
     }
@@ -486,16 +555,17 @@ mod tests {
     #[test]
     fn the_summary_detail_averages_the_pipeline_and_ranks_the_skip_reasons() {
         let mut pipeline = PipelineSamples::default();
-        pipeline.record(10, 3);
-        pipeline.record(30, 140);
-        pipeline.record(20, 7);
+        pipeline.record(10, 3, None);
+        pipeline.record(30, 140, None);
+        pipeline.record(20, 7, None);
         let reasons = BTreeMap::from([
             ("module-already-loaded".to_owned(), 31),
             ("session-zero".to_owned(), 120),
             ("protected".to_owned(), 31),
         ]);
 
-        let detail = summary_detail(&reasons, &pipeline).expect("a populated window has detail");
+        let detail =
+            summary_detail(&reasons, &pipeline, None).expect("a populated window has detail");
 
         assert_eq!(
             detail,
@@ -505,13 +575,58 @@ mod tests {
     }
 
     #[test]
+    fn ages_are_averaged_over_the_samples_that_have_one_and_the_source_is_named() {
+        let mut pipeline = PipelineSamples::default();
+        pipeline.record(10, 0, Some(400));
+        pipeline.record(30, 0, None);
+        pipeline.record(20, 0, Some(100));
+
+        let detail = summary_detail(&BTreeMap::new(), &pipeline, Some(LiveObserver::Etw))
+            .expect("a populated window has detail");
+
+        assert_eq!(
+            detail,
+            "handle_avg_ms=20 handle_max_ms=30 age_avg_ms=250 age_max_ms=400 \
+             backlog_max=0 n=3 observer=etw"
+        );
+    }
+
+    #[test]
+    fn a_window_of_snapshot_targets_alone_reports_no_age_at_all() {
+        let mut pipeline = PipelineSamples::default();
+        pipeline.record(5, 12, None);
+
+        let detail = summary_detail(&BTreeMap::new(), &pipeline, Some(LiveObserver::Wmi))
+            .expect("a populated window has detail");
+
+        assert_eq!(
+            detail,
+            "handle_avg_ms=5 handle_max_ms=5 backlog_max=12 n=1 observer=wmi"
+        );
+    }
+
+    #[test]
+    fn the_source_is_named_even_in_a_window_that_only_skipped() {
+        let reasons = BTreeMap::from([("session-zero".to_owned(), 2)]);
+
+        let detail = summary_detail(
+            &reasons,
+            &PipelineSamples::default(),
+            Some(LiveObserver::Wmi),
+        )
+        .expect("a skip tally has detail");
+
+        assert_eq!(detail, "observer=wmi | skip: session-zero=2");
+    }
+
+    #[test]
     fn a_skip_tally_too_long_for_one_record_is_truncated_rather_than_dropped() {
         let reasons: BTreeMap<String, u64> = (0..MAX_EVENT_DETAIL_BYTES)
             .map(|index| (format!("reason-{index:06}"), 1))
             .collect();
 
-        let detail =
-            summary_detail(&reasons, &PipelineSamples::default()).expect("a tally has detail");
+        let detail = summary_detail(&reasons, &PipelineSamples::default(), None)
+            .expect("a tally has detail");
 
         assert!(detail.len() <= MAX_EVENT_DETAIL_BYTES);
         assert!(detail.ends_with("..."));

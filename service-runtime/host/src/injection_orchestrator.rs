@@ -42,6 +42,7 @@ pub struct InjectionOrchestrator<'a> {
     retry_policy: RetryPolicy,
     retry_scheduler: Option<&'a dyn RetryScheduler>,
     last_injected_identity: Option<ProcessIdentity>,
+    last_handled_creation_time: Option<u64>,
     injection_telemetry: InjectionTelemetry,
 }
 
@@ -132,6 +133,7 @@ impl<'a> InjectionOrchestrator<'a> {
             retry_policy,
             retry_scheduler,
             last_injected_identity: None,
+            last_handled_creation_time: None,
             injection_telemetry: InjectionTelemetry::default(),
         }
     }
@@ -145,14 +147,17 @@ impl<'a> InjectionOrchestrator<'a> {
         pid: u32,
         now: Instant,
     ) -> Result<ProcessOutcome, StructuredServiceError> {
+        self.last_handled_creation_time = None;
         match self.target_validator.validate(pid)? {
             ProcessTargetDecision::Eligible(identity) => {
+                self.last_handled_creation_time = Some(identity.creation_time);
                 if self.contains_identity(&identity) {
                     return Ok(ProcessOutcome::Duplicate);
                 }
                 self.attempt_injection(identity, 0, now)
             }
             ProcessTargetDecision::Deferred { identity, reason } => {
+                self.last_handled_creation_time = Some(identity.creation_time);
                 if self.contains_identity(&identity) {
                     return Ok(ProcessOutcome::Duplicate);
                 }
@@ -411,6 +416,14 @@ impl<'a> InjectionOrchestrator<'a> {
 
     pub fn last_injected_identity(&self) -> Option<&ProcessIdentity> {
         self.last_injected_identity.as_ref()
+    }
+
+    /// The creation time the validator read for the PID handled most recently,
+    /// or `None` when that PID was passed over before any identity was
+    /// established. It lets the caller say how late the service heard about a
+    /// process without opening the target a second time to ask again.
+    pub fn last_handled_creation_time(&self) -> Option<u64> {
+        self.last_handled_creation_time
     }
 
     pub fn last_result(&self, pid: u32, creation_time: u64) -> Option<&ProcessAttemptRecord> {

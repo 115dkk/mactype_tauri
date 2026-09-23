@@ -251,10 +251,16 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
                     } else {
                         Duration::ZERO
                     };
-                    let pid = match self.observer.source.next_pid(event_wait) {
-                        Ok(Some(pid)) => pid,
+                    // A target the live source announced has an age worth
+                    // measuring: the process was created moments ago and every
+                    // millisecond until the injection is a millisecond it
+                    // spends drawing with stock fonts. One drained from a
+                    // snapshot may have been running for days, so it carries
+                    // no age at all.
+                    let (pid, announced) = match self.observer.source.next_pid(event_wait) {
+                        Ok(Some(pid)) => (pid, true),
                         Ok(None) => match self.observer.snapshot_pids.pop_front() {
-                            Some(pid) => pid,
+                            Some(pid) => (pid, false),
                             None => continue,
                         },
                         Err(error) => match self.observer.recover_observer(
@@ -272,10 +278,15 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
                         },
                     };
                     let started = std::time::Instant::now();
+                    let handling_began = announced.then(current_filetime).flatten();
                     let outcome = orchestrator.handle_pid(pid);
+                    let age_millis = handling_began
+                        .zip(orchestrator.last_handled_creation_time())
+                        .and_then(|(now, created)| filetime_age_millis(now, created));
                     self.events.record(HostEvent::InjectionPipelineSample {
                         millis: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
                         backlog: self.observer.snapshot_pids.len(),
+                        age_millis,
                     });
                     outcome
                 }
@@ -320,6 +331,33 @@ impl RuntimeDriver for ProcessOrchestrationDriver {
     }
 }
 
+/// Ticks between 1601-01-01 and 1970-01-01, the offset between the epoch a
+/// `FILETIME` counts from and the one `SystemTime` does.
+const UNIX_EPOCH_FILETIME_TICKS: u128 = 116_444_736_000_000_000;
+
+/// The system clock as a `FILETIME`: 100-nanosecond ticks since 1601-01-01
+/// UTC, the same scale a process creation time is reported on. `None` if the
+/// clock is set before 1970, which a running Windows machine does not produce.
+fn current_filetime() -> Option<u64> {
+    let since_unix_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?;
+    filetime_from_unix_epoch(since_unix_epoch)
+}
+
+/// Moves a duration measured from the Unix epoch onto the `FILETIME` scale.
+fn filetime_from_unix_epoch(since_unix_epoch: Duration) -> Option<u64> {
+    let ticks = since_unix_epoch.as_nanos() / 100 + UNIX_EPOCH_FILETIME_TICKS;
+    u64::try_from(ticks).ok()
+}
+
+/// How long ago `creation_time` was, in milliseconds. A creation time in the
+/// future is the mark of a clock the machine has just adjusted, and no age can
+/// be read out of it.
+fn filetime_age_millis(now: u64, creation_time: u64) -> Option<u64> {
+    now.checked_sub(creation_time).map(|ticks| ticks / 10_000)
+}
+
 fn report_runtime_health(
     health: &dyn RuntimeHealthReporter,
     consecutive_failures: &mut usize,
@@ -354,9 +392,10 @@ impl crate::RetryScheduler for StopRetryScheduler<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::relay_roots_first;
+    use super::{filetime_age_millis, filetime_from_unix_epoch, relay_roots_first};
     use crate::{InspectedProcess, ProcessInspector};
     use mactype_service_contract::StructuredServiceError;
+    use std::time::Duration;
 
     /// Names PIDs by a fixed convention so ordering can be asserted without a
     /// live process: 100 and 200 are shells, everything else is not.
@@ -392,5 +431,47 @@ mod tests {
         let ordered = relay_roots_first(vec![9, 8, 7], &NamedPids);
 
         assert_eq!(ordered.into_iter().collect::<Vec<u32>>(), vec![9, 8, 7]);
+    }
+
+    #[test]
+    fn an_age_counts_whole_milliseconds_of_filetime_ticks() {
+        let created = 133_000_000_000_000_000_u64;
+
+        assert_eq!(filetime_age_millis(created, created), Some(0));
+        assert_eq!(filetime_age_millis(created + 9_999, created), Some(0));
+        assert_eq!(filetime_age_millis(created + 10_000, created), Some(1));
+        assert_eq!(
+            filetime_age_millis(created + 12_345_678, created),
+            Some(1_234)
+        );
+        assert_eq!(
+            filetime_age_millis(created + 20_000_000, created),
+            Some(2_000)
+        );
+    }
+
+    #[test]
+    fn a_creation_time_in_the_future_yields_no_age_rather_than_a_wrapped_one() {
+        let created = 133_000_000_000_000_000_u64;
+
+        assert_eq!(filetime_age_millis(created - 1, created), None);
+        assert_eq!(filetime_age_millis(0, created), None);
+    }
+
+    #[test]
+    fn the_clock_conversion_lands_on_the_epoch_a_creation_time_is_counted_from() {
+        // The Unix epoch itself, and 2020-01-01T00:00:00Z, as FILETIMEs.
+        assert_eq!(
+            filetime_from_unix_epoch(Duration::ZERO),
+            Some(116_444_736_000_000_000)
+        );
+        assert_eq!(
+            filetime_from_unix_epoch(Duration::from_secs(1_577_836_800)),
+            Some(132_223_104_000_000_000)
+        );
+        assert_eq!(
+            filetime_from_unix_epoch(Duration::from_nanos(150)),
+            Some(116_444_736_000_000_001)
+        );
     }
 }

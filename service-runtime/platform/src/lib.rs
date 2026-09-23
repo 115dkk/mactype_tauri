@@ -16,6 +16,7 @@ mod clipboard;
 mod com;
 mod end_session;
 mod environment;
+mod etw;
 mod event;
 mod file;
 mod gdi;
@@ -23,6 +24,7 @@ mod handle;
 mod job;
 mod known_folders;
 mod launch;
+mod module_inventory;
 mod mutex;
 mod pipe;
 mod process;
@@ -42,6 +44,7 @@ pub use clipboard::set_clipboard_unicode_text;
 pub use com::{ComApartment, ComThreading};
 pub use end_session::{end_session_action, install_end_session_exit_hook, EndSessionAction};
 pub use environment::expand_environment_strings;
+pub use etw::{running_process_ids, ProcessStartEvent, ProcessStartTrace};
 pub use event::ManualResetEvent;
 pub use file::{
     delay_delete_until_reboot, file_attributes, is_reparse_point, mark_open_file_for_deletion,
@@ -55,6 +58,7 @@ pub use known_folders::{known_folder_path, system_directory, KnownFolder};
 pub use launch::{
     anonymous_pipe, null_device, read_bounded, ProcessLaunch, StandardHandles, SuspendedChild,
 };
+pub use module_inventory::{process_module_presence, ModulePresence};
 pub use mutex::{MutexAcquisition, NamedMutex};
 pub use pipe::{
     cancelled_pipe_operations, named_pipe_server_process_id, ConnectOutcome, NamedPipeClient,

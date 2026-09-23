@@ -2,6 +2,8 @@
 
 mod active_generation;
 mod control;
+#[cfg(windows)]
+mod etw_observer;
 mod event_log;
 mod file_health;
 mod helper_broker;
@@ -35,11 +37,16 @@ mod windows_startup_safety;
 #[cfg(windows)]
 mod windows_wmi;
 
-pub use event_log::{HostEvent, HostEventLogger, HostEventSink};
+#[cfg(windows)]
+pub use etw_observer::{
+    EtwProcessEventSource, ETW_OBSERVER_OVERFLOW_CODE, ETW_OBSERVER_STOPPED_CODE,
+    PROCESS_START_SESSION,
+};
+pub use event_log::{HostEvent, HostEventLogger, HostEventSink, LiveObserver};
 pub use file_health::{CompositeHealthPublisher, FileHealthPublisher};
 pub use helper_broker::{
-    FixedHelperBroker, HelperInvocation, HelperLaunchError, HelperLaunchStage, HelperLauncher,
-    HelperOutput,
+    FixedHelperBroker, FixedModuleProbe, FixedModuleState, HelperInvocation, HelperLaunchError,
+    HelperLaunchStage, HelperLauncher, HelperOutput, PlatformFixedModuleProbe,
 };
 pub use injection_orchestrator::{
     DeferralPolicy, DeferredTarget, InjectionOrchestrator, ProcessAttemptRecord, ProcessOutcome,

@@ -56,6 +56,10 @@ pub enum ProcessAccess {
     /// is opened inheritable because it reaches the helper through handle
     /// inheritance and never by PID.
     InjectionTarget,
+    /// The rights `EnumProcessModulesEx` requires to list a target's loaded
+    /// modules. It reads the target's module list out of its address space,
+    /// so limited query rights are not enough.
+    ModuleInventory,
 }
 
 impl ProcessAccess {
@@ -74,6 +78,7 @@ impl ProcessAccess {
                     | PROCESS_VM_READ
                     | SYNCHRONIZE
             }
+            Self::ModuleInventory => PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
         }
     }
 

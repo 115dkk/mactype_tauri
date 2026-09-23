@@ -11,6 +11,7 @@
 //
 
 #include "override.h"
+#include "child_process_relay.h"
 #include "ft.h"
 #include "fteng.h"
 #include <locale.h>
@@ -496,7 +497,20 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 	try {
 		static bool bDllInited = false;
 		BOOL IsUnload = false, bEnableDW = true, bUseFontSubstitute = false;
+		bool bHookChildProcesses = false;
 
+#ifdef USE_DETOURS
+		if (IsChildProcessRelayHelper())
+		{
+			if (reason == DLL_PROCESS_ATTACH)
+			{
+				g_dllInstance = instance;
+				g_hinstDLL = instance;
+				DisableThreadLibraryCalls(instance);
+			}
+			return TRUE;
+		}
+#endif
 
 		switch (reason) {
 		case DLL_PROCESS_ATTACH:
@@ -563,6 +577,7 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 				IsUnload = IsProcessUnload();
 				bEnableDW = pSettings->DirectWrite();
 				bUseFontSubstitute = !!pSettings->FontSubstitutes();
+				bHookChildProcesses = pSettings->HookChildProcesses();
 			}
 			if (!IsUnload) hook_initinternal();	//不加载的模块就不做任何事莵E
 			//5
@@ -585,6 +600,13 @@ BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 					DebugOut(L"Can't do hooking, exiting");
 					return FALSE;
 				}
+#ifdef USE_DETOURS
+				if (bHookChildProcesses && CreateProcessInternalW != nullptr) {
+					*(DWORD_PTR*)&ORIG_CreateProcessInternalW = (DWORD_PTR)CreateProcessInternalW;
+					if (hook_demand_CreateProcessInternalW() != NOERROR)
+						DebugOut(L"Child process relay hook is unavailable");
+				}
+#endif
 				//hook d2d if already loaded
 	/*
 				DWORD dwSessionID = 0;

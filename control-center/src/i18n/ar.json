@@ -525,6 +525,8 @@
   "execution.launchedRegistered": "تم تشغيل {count} من التطبيقات المسجلة عبر MacType.",
   "group.advanced.label": "متقدم وتجريبي",
   "group.advanced.description": "اضبط توافق التطبيقات واستخدام الذاكرة، أو جرّب خيارات النص التجريبية.",
+  "settings.hook_child_processes.label": "التطبيق على ما تُشغّله من تطبيقات",
+  "settings.hook_child_processes.description": "عندما يُشغّل تطبيق يعمل عليه MacType تطبيقًا آخر، طبّق الملف نفسه عليه فورًا.",
   "settings.use_mapping.label": "تعيين ملفات الخطوط",
   "settings.use_mapping.description": "استخدم طريقة بديلة للاحتفاظ ببيانات الخط في الذاكرة. جرّب تغييرها إذا تعذّر تحميل الخطوط.",
   "settings.use_include.label": "استخدام قوائم التضمين",

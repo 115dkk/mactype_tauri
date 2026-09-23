@@ -18,6 +18,9 @@
     <ClCompile Include="cache.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="child_process_relay.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="dll.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -85,6 +88,9 @@
     <ClInclude Include="cache.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="child_process_relay.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="common.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -128,6 +134,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="settings.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="shared\hook_compatibility.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="stdint.h">

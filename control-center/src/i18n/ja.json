@@ -525,6 +525,8 @@
   "execution.launchedRegistered": "{count} 個の登録アプリを MacType で起動しました。",
   "group.advanced.label": "詳細・実験機能",
   "group.advanced.description": "アプリとの互換性やメモリ使用量を調整し、試験的な文字表示の設定を試します。",
+  "settings.hook_child_processes.label": "起動したアプリにも適用",
+  "settings.hook_child_processes.description": "MacTypeが適用されたアプリが別のアプリを起動したとき、そのアプリにもすぐ同じプロファイルを適用します。",
   "settings.use_mapping.label": "フォントファイルをマップ",
   "settings.use_mapping.description": "フォントデータをメモリに保持する方法を変えます。読み込めない場合に試してください。",
   "settings.use_include.label": "包含リストを使用",

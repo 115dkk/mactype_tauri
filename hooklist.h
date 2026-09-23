@@ -104,6 +104,25 @@ HOOK_MANUALLY(HRESULT, DWriteCreateFactory,  (
 			  __in REFIID iid,
 			  __out IUnknown **factory), (factoryType, iid, factory))
 
+#ifdef USE_DETOURS
+HOOK_MANUALLY(BOOL, CreateProcessInternalW, (
+	HANDLE token,
+	LPCTSTR applicationName,
+	LPTSTR commandLine,
+	LPSECURITY_ATTRIBUTES processAttributes,
+	LPSECURITY_ATTRIBUTES threadAttributes,
+	BOOL inheritHandles,
+	DWORD creationFlags,
+	LPVOID environment,
+	LPCTSTR currentDirectory,
+	LPSTARTUPINFO startupInfo,
+	LPPROCESS_INFORMATION processInformation,
+	PHANDLE newToken),
+	(token, applicationName, commandLine, processAttributes, threadAttributes,
+	 inheritHandles, creationFlags, environment, currentDirectory, startupInfo,
+	 processInformation, newToken))
+#endif
+
 HOOK_MANUALLY(HRESULT, D2D1CreateDevice, (
 			  IDXGIDevice* dxgiDevice,
 			  CONST D2D1_CREATION_PROPERTIES* creationProperties,

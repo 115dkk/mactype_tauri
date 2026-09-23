@@ -525,6 +525,8 @@
   "execution.launchedRegistered": "{count} applications inscrites ont démarré avec MacType.",
   "group.advanced.label": "Avancé et expérimental",
   "group.advanced.description": "Réglez la compatibilité et la mémoire, ou essayez des options de texte expérimentales.",
+  "settings.hook_child_processes.label": "Appliquer aux applis lancées",
+  "settings.hook_child_processes.description": "Quand une application dotée de MacType en lance une autre, celle-ci reçoit aussitôt le même profil.",
   "settings.use_mapping.label": "Mapper les fichiers de police",
   "settings.use_mapping.description": "Utilisez une autre méthode pour garder les polices en mémoire. Essayez-la si leur chargement échoue.",
   "settings.use_include.label": "Utiliser les listes d’inclusion",

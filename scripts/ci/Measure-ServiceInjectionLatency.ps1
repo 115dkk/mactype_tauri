@@ -6,6 +6,10 @@ param(
     [Parameter(Mandatory)]
     [string] $Marker64,
 
+    [string] $WindowMarker32,
+
+    [string] $WindowMarker64,
+
     [int] $SingleRounds = 6,
 
     [int] $Burst64 = 12,
@@ -17,6 +21,13 @@ param(
 # injected parent created, which is every program started before the shell is
 # injected. It never gates on the numbers: a hosted runner's timing is not a
 # product property. It fails only when it cannot measure.
+#
+# Console and windowed programs are measured apart because a branch may hold a
+# console program back on purpose. The alpha branch waits out a grace period
+# before reaching a console program that has only just started, so its console
+# rows carry that wait on top of the latency while its windowed rows carry the
+# latency alone. Reading one number for both kinds would credit the wait to the
+# observer and hide what the observer actually costs.
 
 $ErrorActionPreference = 'Stop'
 $markerWaitMilliseconds = 6000
@@ -77,6 +88,36 @@ function Get-Stats([object[]] $Samples) {
     }
 }
 
+# One kind of program, measured twice: alone, then against a burst that makes
+# the service drain a queue instead of handling one target at a time.
+function Measure-Kind([string] $Executable32, [string] $Executable64, [string] $Tag) {
+    $single = @()
+    for ($round = 0; $round -lt $SingleRounds; $round++) {
+        $single += Read-Latency (Start-Marker -Executable $Executable64 -Name "$Tag-single-$round")
+        Start-Sleep -Milliseconds 750
+    }
+
+    $launches = @()
+    for ($index = 0; $index -lt $Burst64; $index++) {
+        $launches += Start-Marker -Executable $Executable64 -Name "$Tag-burst64-$index"
+    }
+    for ($index = 0; $index -lt $Burst32; $index++) {
+        $launches += Start-Marker -Executable $Executable32 -Name "$Tag-burst32-$index"
+    }
+    $burst = @($launches | ForEach-Object { Read-Latency $_ })
+
+    [pscustomobject]@{ tag = $Tag; single = $single; burst = $burst }
+}
+
+$kinds = @(
+    [pscustomobject]@{ tag = 'console'; x86 = $Marker32; x64 = $Marker64 }
+)
+if ($WindowMarker32 -and $WindowMarker64 -and
+    (Test-Path -LiteralPath $WindowMarker32 -PathType Leaf) -and
+    (Test-Path -LiteralPath $WindowMarker64 -PathType Leaf)) {
+    $kinds += [pscustomobject]@{ tag = 'windowed'; x86 = $WindowMarker32; x64 = $WindowMarker64 }
+}
+
 # WMI delivery on its own: the same trace class the service subscribes to,
 # received by this shell, against the creation time each marker reports.
 $sourceId = "mactype-latency-trace-$PID"
@@ -84,20 +125,10 @@ Register-CimIndicationEvent -Query 'SELECT ProcessID FROM Win32_ProcessStartTrac
 try {
     Start-Sleep -Milliseconds 1500
 
-    $single = @()
-    for ($round = 0; $round -lt $SingleRounds; $round++) {
-        $single += Read-Latency (Start-Marker -Executable $Marker64 -Name "single-$round")
-        Start-Sleep -Milliseconds 750
+    $measured = @()
+    foreach ($kind in $kinds) {
+        $measured += Measure-Kind -Executable32 $kind.x86 -Executable64 $kind.x64 -Tag $kind.tag
     }
-
-    $launches = @()
-    for ($index = 0; $index -lt $Burst64; $index++) {
-        $launches += Start-Marker -Executable $Marker64 -Name "burst64-$index"
-    }
-    for ($index = 0; $index -lt $Burst32; $index++) {
-        $launches += Start-Marker -Executable $Marker32 -Name "burst32-$index"
-    }
-    $burst = @($launches | ForEach-Object { Read-Latency $_ })
 
     Start-Sleep -Milliseconds 2500
     $arrivals = @{}
@@ -112,21 +143,24 @@ try {
     Get-Event -SourceIdentifier $sourceId -ErrorAction SilentlyContinue | Remove-Event
 }
 
-$wmi = @(@($single) + @($burst) | ForEach-Object {
+$allSamples = @($measured | ForEach-Object { @($_.single) + @($_.burst) } | ForEach-Object { $_ })
+$wmi = @($allSamples | ForEach-Object {
     $arrival = $arrivals[[uint32]$_.pid]
     $delivery = $null
     if ($null -ne $arrival) { $delivery = $arrival - $_.startedMs }
     [pscustomobject]@{ latencyMs = $delivery }
 })
 
-$rows = @(
-    [pscustomobject]@{ series = 'birth to MacType loaded, one program at a time'; stats = Get-Stats $single }
-    [pscustomobject]@{ series = "birth to MacType loaded, $($Burst64 + $Burst32) programs at once"; stats = Get-Stats $burst }
-    [pscustomobject]@{ series = 'birth to Win32_ProcessStartTrace delivery (this shell)'; stats = Get-Stats $wmi }
-)
+$burstSize = $Burst64 + $Burst32
+$rows = @()
+foreach ($kind in $measured) {
+    $rows += [pscustomobject]@{ series = "$($kind.tag) program, one at a time"; stats = Get-Stats $kind.single }
+    $rows += [pscustomobject]@{ series = "$($kind.tag) program, $burstSize at once"; stats = Get-Stats $kind.burst }
+}
+$rows += [pscustomobject]@{ series = 'Win32_ProcessStartTrace delivery (this shell)'; stats = Get-Stats $wmi }
 
 $lines = @(
-    '### Service injection latency (ms)',
+    '### Birth to MacType loaded (ms)',
     '',
     '| series | n | reached | min | p50 | p90 | max |',
     '| --- | ---: | ---: | ---: | ---: | ---: | ---: |'
@@ -136,7 +170,7 @@ foreach ($row in $rows) {
     $lines += "| $($row.series) | $($s.n) | $($s.hooked) | $($s.min) | $($s.p50) | $($s.p90) | $($s.max) |"
 }
 $lines += ''
-$lines += 'Marker load times are polled every 25 ms. Reported, never gated.'
+$lines += 'Marker load times are polled every 25 ms. Reported, never gated. A branch that holds young console programs back on purpose carries that wait in its console rows; read the windowed rows for the latency alone.'
 $lines | ForEach-Object { Write-Host $_ }
 if ($env:GITHUB_STEP_SUMMARY) {
     $lines | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8

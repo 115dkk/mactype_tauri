@@ -65,7 +65,9 @@ jobs:
             -ServiceExecutable service-runtime/target/release/mactype-service.exe `
             -OpenCoreRoot artifacts/open-core `
             -Marker32 build/service-probe/Win32/Release/probe-console32.exe `
-            -Marker64 build/service-probe/x64/Release/probe-console64.exe
+            -Marker64 build/service-probe/x64/Release/probe-console64.exe `
+            -WindowMarker32 build/service-probe/Win32/Release/probe-window32.exe `
+            -WindowMarker64 build/service-probe/x64/Release/probe-window64.exe
 
   windows-build:
     needs: open-core

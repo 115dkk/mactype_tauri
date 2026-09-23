@@ -15,6 +15,13 @@ param(
     [Parameter(Mandatory)]
     [string] $Marker64,
 
+    # Windowed markers are optional so a caller that builds only the console
+    # pair still runs. When they are there the latency report separates the two
+    # kinds, which matters on a branch that holds young console programs back.
+    [string] $WindowMarker32,
+
+    [string] $WindowMarker64,
+
     [switch] $LeaveInstalledForReboot
 )
 
@@ -396,7 +403,9 @@ try {
     Assert-PersistedReadyHealth -ExpectedDigest $digestA -Phase 'x86/x64 marker injection'
     Assert-GenerationBoundMarkerTelemetry -MarkerResults $markerResults -ExpectedDigest $digestA
     try {
-        & (Join-Path $PSScriptRoot 'Measure-ServiceInjectionLatency.ps1') -Marker32 $Marker32 -Marker64 $Marker64
+        & (Join-Path $PSScriptRoot 'Measure-ServiceInjectionLatency.ps1') `
+            -Marker32 $Marker32 -Marker64 $Marker64 `
+            -WindowMarker32 $WindowMarker32 -WindowMarker64 $WindowMarker64
     } catch {
         Write-Warning "Injection latency could not be measured: $_"
     }

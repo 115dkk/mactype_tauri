@@ -131,12 +131,16 @@ try {
     }
 
     Start-Sleep -Milliseconds 2500
+    # Every arrival is kept per PID rather than only the first. Windows reuses
+    # process ids, and over a run this long it does: keeping one arrival per id
+    # paired an earlier process's notification with a later process's birth and
+    # reported a delivery that arrived seventy seconds before the process
+    # started.
     $arrivals = @{}
     foreach ($record in @(Get-Event -SourceIdentifier $sourceId -ErrorAction SilentlyContinue)) {
         $processId = [uint32]$record.SourceEventArgs.NewEvent.ProcessID
-        if (-not $arrivals.ContainsKey($processId)) {
-            $arrivals[$processId] = ([DateTimeOffset]$record.TimeGenerated.ToUniversalTime()).ToUnixTimeMilliseconds()
-        }
+        if (-not $arrivals.ContainsKey($processId)) { $arrivals[$processId] = [System.Collections.Generic.List[long]]::new() }
+        $arrivals[$processId].Add(([DateTimeOffset]$record.TimeGenerated.ToUniversalTime()).ToUnixTimeMilliseconds())
     }
 } finally {
     Unregister-Event -SourceIdentifier $sourceId -ErrorAction SilentlyContinue
@@ -145,9 +149,16 @@ try {
 
 $allSamples = @($measured | ForEach-Object { @($_.single) + @($_.burst) } | ForEach-Object { $_ })
 $wmi = @($allSamples | ForEach-Object {
-    $arrival = $arrivals[[uint32]$_.pid]
+    # The earliest arrival that is not older than the process itself. The
+    # tolerance absorbs the difference between the clock the marker reads its
+    # creation time from and the one the event is stamped with.
+    $candidates = $arrivals[[uint32]$_.pid]
     $delivery = $null
-    if ($null -ne $arrival) { $delivery = $arrival - $_.startedMs }
+    if ($null -ne $candidates) {
+        $floor = $_.startedMs - 200
+        $match = @($candidates | Where-Object { $_ -ge $floor } | Sort-Object | Select-Object -First 1)
+        if ($match.Count -eq 1) { $delivery = [long]$match[0] - $_.startedMs }
+    }
     [pscustomobject]@{ latencyMs = $delivery }
 })
 

@@ -36,6 +36,9 @@ Rationale shared by more than one Module has one canonical home:
 | FreeType ownership, cache policy, and loader-lock teardown | `docs/freetype-runtime.md` |
 | Renderer thread stack budget and how a Release image is measured | `docs/renderer-stack-budget.md` |
 | Control Center profile selection, service state, preview, and UI projection | `docs/control-center-architecture.md` |
+| Open service boundary, health, and injection contract | `docs/open-service-contract.md` |
+| Legacy MacTray service shape, ownership, and retirement | `docs/mactray-service-characterization.md` |
+| Lint exceptions and their boundary | `docs/lint-policy.md` |
 | Branch delivery, merge, and exact-SHA CI completion | `AGENTS.md` and `CLAUDE.md` |
 
 An inline warning may point at a local consequence of one of these contracts,

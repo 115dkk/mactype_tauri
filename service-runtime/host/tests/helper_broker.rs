@@ -4,7 +4,7 @@ mod event_sink;
 use event_sink::discard_events;
 use std::ffi::OsString;
 use std::fs;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use mactype_service_contract::{
     GenerationId, GenerationPointer, MachinePaths, ProfileDigest, RendererActivationDisposition,
@@ -26,9 +26,10 @@ fn test_binding() -> RendererRuntimeBinding {
     )
 }
 use mactype_service_host::{
-    BrokerDisposition, BrokerResult, FixedHelperBroker, HelperInvocation, HelperLaunchError,
-    HelperLaunchStage, HelperLauncher, HelperOutput, InjectionBroker, InjectionRequest,
-    ProcessArchitecture, ProcessIdentity, ProtectedRendererRuntime,
+    BrokerDisposition, BrokerResult, FixedHelperBroker, FixedModuleProbe, FixedModuleState,
+    HelperInvocation, HelperLaunchError, HelperLaunchStage, HelperLauncher, HelperOutput,
+    InjectionBroker, InjectionRequest, ProcessArchitecture, ProcessIdentity,
+    ProtectedRendererRuntime,
 };
 
 fn runtime() -> (tempfile::TempDir, ProtectedRendererRuntime) {
@@ -934,4 +935,107 @@ fn cleanup_unknown_evidence_accepts_only_the_producer_tuple_allowlist() {
             assert_eq!(result.code, code);
         }
     }
+}
+
+/// Answers the module question without a live process, and records what it
+/// was asked, so both branches of the pre-check can be driven from a test.
+struct StubModuleProbe {
+    state: FixedModuleState,
+    asked: Arc<Mutex<Vec<std::path::PathBuf>>>,
+}
+
+impl FixedModuleProbe for StubModuleProbe {
+    fn fixed_module_state(
+        &self,
+        _identity: &ProcessIdentity,
+        module: &std::path::Path,
+    ) -> FixedModuleState {
+        self.asked.lock().unwrap().push(module.to_owned());
+        self.state
+    }
+}
+
+fn broker_with_module_state<'a>(
+    runtime: &ProtectedRendererRuntime,
+    launcher: &'a RecordingLauncher,
+    state: FixedModuleState,
+) -> (
+    FixedHelperBroker<&'a RecordingLauncher>,
+    Arc<Mutex<Vec<std::path::PathBuf>>>,
+) {
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let broker = FixedHelperBroker::with_module_probe(
+        runtime,
+        launcher,
+        discard_events(),
+        Box::new(StubModuleProbe {
+            state,
+            asked: Arc::clone(&asked),
+        }),
+    );
+    (broker, asked)
+}
+
+fn target(architecture: ProcessArchitecture) -> ProcessIdentity {
+    ProcessIdentity {
+        pid: 42,
+        creation_time: 133_967_890_123_456_789,
+        session_id: 2,
+        architecture,
+    }
+}
+
+#[test]
+fn a_target_that_already_carries_the_renderer_is_skipped_without_a_helper_launch() {
+    let (_base, runtime) = runtime();
+    let launcher = RecordingLauncher::default();
+    let (broker, asked) = broker_with_module_state(&runtime, &launcher, FixedModuleState::Loaded);
+
+    let result = broker.inject(&InjectionRequest {
+        identity: target(ProcessArchitecture::X64),
+        binding: runtime.binding(),
+    });
+
+    assert_eq!(result.disposition, BrokerDisposition::Skipped);
+    assert_eq!(result.code, "module-already-loaded");
+    assert_eq!(result.win32_error, None);
+    assert!(launcher.invocations.lock().unwrap().is_empty());
+    assert_eq!(
+        asked.lock().unwrap().as_slice(),
+        [runtime.assets().root().join("MacType64.dll")]
+    );
+}
+
+#[test]
+fn a_target_without_the_renderer_reaches_the_helper_exactly_as_before() {
+    let (_base, runtime) = runtime();
+    let launcher = RecordingLauncher::default();
+    let (broker, asked) = broker_with_module_state(&runtime, &launcher, FixedModuleState::Absent);
+
+    let result = broker.inject(&InjectionRequest {
+        identity: target(ProcessArchitecture::X86),
+        binding: runtime.binding(),
+    });
+
+    assert_eq!(result.disposition, BrokerDisposition::Injected);
+    assert_eq!(launcher.invocations.lock().unwrap().len(), 1);
+    assert_eq!(
+        asked.lock().unwrap().as_slice(),
+        [runtime.assets().root().join("MacType.dll")]
+    );
+}
+
+#[test]
+fn a_module_question_that_cannot_be_answered_still_launches_the_helper() {
+    let (_base, runtime) = runtime();
+    let launcher = RecordingLauncher::default();
+    let (broker, _asked) = broker_with_module_state(&runtime, &launcher, FixedModuleState::Unknown);
+
+    let result = broker.inject(&InjectionRequest {
+        identity: target(ProcessArchitecture::X86),
+        binding: runtime.binding(),
+    });
+
+    assert_eq!(result.disposition, BrokerDisposition::Injected);
+    assert_eq!(launcher.invocations.lock().unwrap().len(), 1);
 }

@@ -10,6 +10,7 @@ import type {
   SystemServiceAction,
   SystemServiceStatus,
 } from "../model";
+import { projectServiceCapabilities } from "./serviceCapabilityPolicy";
 export const expectedGalleryDigest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 type GalleryQuery = Pick<URLSearchParams, "get" | "has">;
@@ -141,7 +142,6 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
       || requestedPackage === "untrusted"
       ? requestedPackage
       : "ready";
-  const managementPackageReady = serviceManagementPackage === "ready";
   const appInitConflict = fixture === "legacy-conflict";
   const profileMismatch = fixture === "profile-mismatch";
   const ready = fixture === "ready" || appInitConflict;
@@ -152,13 +152,14 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
     || fixture === "unknown-health"
     || profileMismatch
     ? "running"
-    : "stopped";
+    : fixture === "inaccessible-service" || fixture === "delete-pending"
+      ? "unknown"
+      : "stopped";
   const serviceRuntime = serviceRuntimeValues.find((runtime) => runtime === requestedServiceRuntime)
     ?? defaultServiceRuntime;
-  const serviceStable = serviceRuntime === "running" || serviceRuntime === "stopped";
   const serviceBackend = fixture === "foreign-service"
     ? "foreign"
-    : fixture === "inaccessible-service"
+    : fixture === "inaccessible-service" || fixture === "migration-available"
       ? "none"
       : "open-source";
   const serviceInstallation = fixture === "foreign-service"
@@ -172,12 +173,6 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
       : fixture === "outdated"
         ? "outdated"
         : "current";
-  const generalMutationAllowed = managementPackageReady
-    && serviceBackend === "open-source"
-    && serviceStable
-    && !appInitConflict;
-  const systemModesSupported = generalMutationAllowed
-    && (serviceInstallation === "absent" || serviceInstallation === "current" || serviceInstallation === "outdated");
   const activeProfile = query.has("profile-unapplied")
     ? null
     : query.has("legacy-applied")
@@ -192,11 +187,9 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
     || fixture === "legacy-conflict";
   const requestedLegacyState = query.get("legacy-state");
   const legacyState = legacyRuntimeValues.find((state) => state === requestedLegacyState) ?? "running";
-  const legacyStable = legacyState === "running" || legacyState === "stopped";
   const legacyRetired = query.get("legacy-retired") === "1";
   const legacyTray = galleryLegacyTrayStatus(query);
   const legacyTrayClear = legacyTray.conflict === "clear";
-  const conflictFreeMutationAllowed = generalMutationAllowed && legacyTrayClear;
   const liveServiceHealth = ready
     ? "ready"
     : fixture === "degraded"
@@ -206,7 +199,27 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
         : fixture === "failed"
           ? "failed"
           : "unknown";
-  const conflictFreeSystemModesSupported = systemModesSupported && legacyTrayClear;
+  const legacy: Pick<LegacyMacTrayStatus, "presence" | "state" | "trustedBinaryAvailable"> = {
+    presence: !legacyRequested
+      ? "absent"
+      : legacyForeign
+        ? "foreign"
+        : legacyUncertain
+          ? "inaccessible"
+          : galleryLegacyService.presence,
+    state: legacyUncertain ? "unknown" : legacyState,
+    trustedBinaryAvailable: !legacyForeign && !legacyUncertain,
+  };
+  const { systemModesSupported, migrationAvailable, ...capabilities } = projectServiceCapabilities({
+    runtime: serviceRuntime,
+    installation: serviceInstallation,
+    configurationDrift: false,
+    backend: serviceBackend,
+    registryModeDetected: appInitConflict,
+    legacyTrayConflict: legacyTray.conflict,
+    legacy,
+    managementPackage: serviceManagementPackage,
+  });
 
   return {
     trayAvailable: true,
@@ -234,36 +247,21 @@ export function galleryExecutionStatus(query: GalleryQuery): ExecutionStatus {
           : ready
             ? expectedGalleryDigest
             : null,
-      canInstall: conflictFreeMutationAllowed && serviceInstallation === "absent",
-      canRemove: conflictFreeMutationAllowed && (serviceInstallation === "current" || serviceInstallation === "outdated"),
-      canStart: conflictFreeMutationAllowed && serviceInstallation === "current" && serviceRuntime === "stopped",
-      canStop: managementPackageReady && serviceBackend === "open-source" && serviceRuntime === "running",
-      canRepair: conflictFreeMutationAllowed && serviceInstallation === "current",
-      canUpgrade: conflictFreeMutationAllowed && serviceInstallation === "outdated",
+      ...capabilities,
     },
     legacyMacTray: legacyRequested ? {
       ...galleryLegacyService,
-      presence: legacyForeign
-        ? "foreign"
-        : legacyUncertain
-          ? "inaccessible"
-          : galleryLegacyService.presence,
-      state: legacyUncertain ? "unknown" : legacyState,
+      ...legacy,
       win32Error: legacyUncertain ? 5 : null,
       registryConflict: appInitConflict,
-      trustedBinaryAvailable: !legacyForeign && !legacyUncertain,
       canRemove: false,
       canStop: !legacyForeign && !legacyUncertain && !appInitConflict && legacyState === "running",
-      migrationAvailable: !legacyRetired
-        && !legacyForeign
-        && !legacyUncertain
-        && conflictFreeSystemModesSupported
-        && legacyStable,
+      migrationAvailable: !legacyRetired && migrationAvailable,
       blocksActivation: !legacyRetired,
     } : null,
     legacyTray,
     registryModeDetected: appInitConflict,
-    systemModesSupported: conflictFreeSystemModesSupported,
+    systemModesSupported,
     systemInjectionActive: legacyTrayClear && (query.has("raw-active") ? true : ready && !appInitConflict),
     injectionReady: !query.has("profile-runtime-missing"),
     activeProfile,
@@ -280,23 +278,23 @@ function withGalleryLegacyTrayPolicy(
   legacyTray: LegacyTrayStatus,
 ): ExecutionStatus {
   const service = current.systemService;
-  const serviceStable = service.runtime === "running" || service.runtime === "stopped";
-  const mutationAllowed = legacyTray.conflict === "clear"
-    && current.serviceManagementPackage === "ready"
-    && !current.registryModeDetected
-    && service.backend === "open-source"
-    && serviceStable;
-  const systemModesSupported = mutationAllowed
-    && (service.installation === "absent"
-      || service.installation === "current"
-      || service.installation === "outdated");
+  const { systemModesSupported, migrationAvailable, ...capabilities } = projectServiceCapabilities({
+    runtime: service.runtime,
+    installation: service.installation,
+    configurationDrift: service.configurationDrift,
+    backend: service.backend,
+    registryModeDetected: current.registryModeDetected,
+    legacyTrayConflict: legacyTray.conflict,
+    legacy: current.legacyMacTray ?? { presence: "absent", state: "stopped" },
+    managementPackage: current.serviceManagementPackage,
+  });
   const systemInjectionActive = systemModesSupported
+    && legacyTray.conflict === "clear"
+    && service.backend === "open-source"
     && service.runtime === "running"
     && service.health === "ready"
     && Boolean(current.expectedProfileDigest)
     && service.activeProfileDigest === current.expectedProfileDigest;
-  const legacyStable = current.legacyMacTray?.state === "running"
-    || current.legacyMacTray?.state === "stopped";
 
   return {
     ...current,
@@ -305,23 +303,12 @@ function withGalleryLegacyTrayPolicy(
     systemInjectionActive,
     systemService: {
       ...service,
-      configurationDrift: false,
-      canInstall: mutationAllowed && service.installation === "absent",
-      canRemove: mutationAllowed && (service.installation === "current" || service.installation === "outdated"),
-      canStart: mutationAllowed && service.installation === "current" && service.runtime === "stopped",
-      canStop: current.serviceManagementPackage === "ready"
-        && service.backend === "open-source"
-        && service.runtime === "running",
-      canRepair: mutationAllowed && service.installation === "current",
-      canUpgrade: mutationAllowed && service.installation === "outdated",
+      ...capabilities,
     },
     legacyMacTray: current.legacyMacTray
       ? {
           ...current.legacyMacTray,
-          migrationAvailable: current.legacyMacTray.presence !== "foreign"
-            && current.legacyMacTray.blocksActivation
-            && systemModesSupported
-            && legacyStable,
+          migrationAvailable: current.legacyMacTray.blocksActivation && migrationAvailable,
           canRemove: legacyTray.conflict === "clear" && current.legacyMacTray.canRemove,
         }
       : null,
@@ -361,12 +348,6 @@ function runningGalleryService(current: SystemServiceStatus): SystemServiceStatu
     runtime: "running",
     health: "ready",
     activeProfileDigest: expectedGalleryDigest,
-    canInstall: false,
-    canRemove: true,
-    canStart: false,
-    canStop: true,
-    canRepair: false,
-    canUpgrade: false,
   };
 }
 
@@ -400,8 +381,6 @@ export function transitionGalleryExecutionStatus(
         runtime: "stopped",
         health: "unknown",
         activeProfileDigest: null,
-        canStart: !current.registryModeDetected && current.systemService.installation === "current",
-        canStop: false,
       },
     }, current.legacyTray);
   }
@@ -412,16 +391,11 @@ export function transitionGalleryExecutionStatus(
       systemService: {
         ...current.systemService,
         configurationDrift: false,
+        backend: "none",
         installation: "absent",
         runtime: "stopped",
         health: "unknown",
         activeProfileDigest: null,
-        canInstall: true,
-        canRemove: false,
-        canStart: false,
-        canStop: false,
-        canRepair: false,
-        canUpgrade: false,
       },
     }, current.legacyTray);
   }

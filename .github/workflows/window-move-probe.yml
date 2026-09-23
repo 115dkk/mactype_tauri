@@ -1,0 +1,77 @@
+name: Window move probe
+
+# A one-off measurement, dispatched by hand: how smoothly the Control Center
+# window moves under each skin on a hosted runner. The classic skin is the
+# control. The entry point lives on main because GitHub dispatches only
+# workflows on the default branch; the measured tree is the ref given as an
+# input, where the skins and the probe scripts live. Results land in the job
+# summary and the artifact; nothing here gates a merge.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch or commit to build and measure
+        default: codex/alpha-plus-dll
+      skins:
+        description: Comma-separated skins to measure (classic is the control)
+        default: classic,console,fluent,cupertino
+      steps:
+        description: Move steps per round
+        default: "240"
+      interval:
+        description: Milliseconds between steps
+        default: "8"
+      rounds:
+        description: Rounds per skin (the worst round is reported)
+        default: "2"
+      drag:
+        description: Also drive a real mouse drag through SendInput
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: control-center/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: microsoft/setup-msbuild@v3
+      - name: Install frontend dependencies
+        working-directory: control-center
+        run: pnpm install --frozen-lockfile
+      - name: Build preview helper, frontend, and Tauri program
+        shell: pwsh
+        run: .github/scripts/Build-ControlCenter.ps1 -Configuration Release -SkipInstall
+      - name: Measure window moves per skin
+        shell: pwsh
+        run: |
+          $arguments = @{
+            Executable = 'control-center/src-tauri/target/release/mactype-control-center.exe'
+            PreviewHelper = 'build/preview-helper/Release/mactype-preview32.exe'
+            Skins = '${{ inputs.skins }}'
+            Steps = [int]'${{ inputs.steps }}'
+            IntervalMs = [int]'${{ inputs.interval }}'
+            Rounds = [int]'${{ inputs.rounds }}'
+          }
+          if ('${{ inputs.drag }}' -eq 'true') { $arguments.Drag = $true }
+          scripts/ci/Measure-WindowMove.ps1 @arguments
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: window-move-probe
+          path: artifacts/window-move-probe
+          if-no-files-found: warn

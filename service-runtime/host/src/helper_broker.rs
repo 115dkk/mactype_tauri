@@ -3,7 +3,7 @@
 use std::ffi::OsString;
 use std::fmt;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,6 +22,13 @@ use crate::{HostEvent, HostEventSink};
 
 const HELPER_TIMEOUT: Duration = Duration::from_secs(20);
 pub(crate) const MAX_HELPER_OUTPUT_BYTES: usize = 1536;
+
+/// The code the helper itself reports when it finds this generation's module
+/// already loaded in the target (`service-injector/src/injector.cpp`). The
+/// broker answers with the same code when it can see that for itself, so the
+/// skip tally counts a relayed target once, under one name, however it was
+/// noticed.
+const MODULE_ALREADY_LOADED_CODE: &str = "module-already-loaded";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HelperInvocation {
@@ -121,11 +128,58 @@ where
     }
 }
 
+/// What a target's module list said about this generation's renderer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FixedModuleState {
+    /// Exactly this generation's module, at its path in the protected runtime,
+    /// is loaded in the target already.
+    Loaded,
+    /// The list was read and the module was not in it.
+    Absent,
+    /// The question could not be answered.
+    Unknown,
+}
+
+/// Asks whether a target already carries the renderer, so the broker can skip
+/// a helper launch that has nothing left to do.
+pub trait FixedModuleProbe {
+    fn fixed_module_state(&self, identity: &ProcessIdentity, module: &Path) -> FixedModuleState;
+}
+
+/// The probe the service runs with: a module-list read on the live target.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct PlatformFixedModuleProbe;
+
+#[cfg(windows)]
+impl FixedModuleProbe for PlatformFixedModuleProbe {
+    fn fixed_module_state(&self, identity: &ProcessIdentity, module: &Path) -> FixedModuleState {
+        use mactype_service_platform::ModulePresence;
+
+        match mactype_service_platform::process_module_presence(
+            identity.pid,
+            identity.creation_time,
+            module,
+        ) {
+            ModulePresence::Loaded => FixedModuleState::Loaded,
+            ModulePresence::Absent => FixedModuleState::Absent,
+            ModulePresence::Unknown => FixedModuleState::Unknown,
+        }
+    }
+}
+
+#[cfg(not(windows))]
+impl FixedModuleProbe for PlatformFixedModuleProbe {
+    fn fixed_module_state(&self, _identity: &ProcessIdentity, _module: &Path) -> FixedModuleState {
+        FixedModuleState::Unknown
+    }
+}
+
 pub struct FixedHelperBroker<L> {
     assets: ProtectedRuntimeAssets,
     binding: RendererRuntimeBinding,
     launcher: L,
     events: Arc<dyn HostEventSink>,
+    module_probe: Box<dyn FixedModuleProbe>,
 }
 
 impl<L> FixedHelperBroker<L> {
@@ -134,11 +188,26 @@ impl<L> FixedHelperBroker<L> {
         launcher: L,
         events: Arc<dyn HostEventSink>,
     ) -> Self {
+        Self::with_module_probe(
+            runtime,
+            launcher,
+            events,
+            Box::new(PlatformFixedModuleProbe),
+        )
+    }
+
+    pub fn with_module_probe(
+        runtime: &ProtectedRendererRuntime,
+        launcher: L,
+        events: Arc<dyn HostEventSink>,
+        module_probe: Box<dyn FixedModuleProbe>,
+    ) -> Self {
         Self {
             assets: runtime.assets().clone(),
             binding: runtime.binding(),
             launcher,
             events,
+            module_probe,
         }
     }
 
@@ -153,6 +222,15 @@ impl<L> FixedHelperBroker<L> {
             binding: request.binding,
             timeout: HELPER_TIMEOUT,
         }
+    }
+
+    /// This generation's renderer for `architecture`, at its path inside the
+    /// protected runtime generation root.
+    fn fixed_module(&self, architecture: ProcessArchitecture) -> PathBuf {
+        self.assets.root().join(match architecture {
+            ProcessArchitecture::X86 => "MacType.dll",
+            ProcessArchitecture::X64 => "MacType64.dll",
+        })
     }
 }
 
@@ -191,6 +269,19 @@ where
         }
         if request.binding.profile_digest() != self.binding.profile_digest() {
             return invalid_response("profile-digest-mismatch", None);
+        }
+        // Launching the helper costs a process creation and several hundred
+        // milliseconds to arrive at the very answer we can read here, so a
+        // target that already carries the renderer is answered directly. Only
+        // a positive match skips; absent, unanswerable, and every failure go
+        // on to the helper exactly as before.
+        let module = self.fixed_module(request.identity.architecture);
+        if self
+            .module_probe
+            .fixed_module_state(&request.identity, &module)
+            == FixedModuleState::Loaded
+        {
+            return BrokerResult::new(BrokerDisposition::Skipped, MODULE_ALREADY_LOADED_CODE, None);
         }
         let invocation = self.invocation(request);
         let result = match self.launcher.launch(&invocation) {

@@ -1,6 +1,7 @@
 #include "injector.h"
 
 #include "fixed_module.h"
+#include "handle_rights.h"
 #include "module_inventory.h"
 #include "process_lifecycle.h"
 #include "remote_injection.h"
@@ -229,6 +230,15 @@ Result inject_fixed_adjacent_module(const BrokerRequest& request) noexcept {
     const auto verified_creation_time = process_creation_time(process.get());
     if (!verified_creation_time || *verified_creation_time != request.expected_creation_time) {
         return make_result(request, ResultStatus::rejected, "creation-time-mismatch",
+                           kFixedModuleNameUtf8);
+    }
+    // Asked for after the module check, so a target the in-process relay has
+    // already reached still reports `module-already-loaded`. A stripped handle
+    // makes injection impossible rather than broken, so this is a skip and
+    // must not degrade service health.
+    const auto granted = granted_access(process.get());
+    if (granted && !injection_rights_present(*granted)) {
+        return make_result(request, ResultStatus::skipped, "injection-rights-stripped",
                            kFixedModuleNameUtf8);
     }
     return bind_renderer_activation_evidence(

@@ -4,12 +4,12 @@ use std::path::PathBuf;
 use mactype_service_contract::{RuntimeActivationPhase, RuntimeActivationReceipt};
 
 use super::{activation_receipt_bytes, validate_runtime_pointer, RuntimePointer};
-use crate::runtime_installer::RuntimeInstaller;
+use crate::runtime_installer::activation_transaction::RuntimeActivationTransaction;
 use crate::storage::{
     atomic_write, read_bounded_regular_file, reject_reparse_ancestors, SetupError,
 };
 
-impl RuntimeInstaller {
+impl RuntimeActivationTransaction<'_> {
     pub(in crate::runtime_installer) fn write_activation_journal(
         &self,
         previous: Option<RuntimePointer>,

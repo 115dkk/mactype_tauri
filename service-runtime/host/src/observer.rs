@@ -4,7 +4,9 @@ use std::time::Duration;
 
 use mactype_service_contract::{RendererRuntimeBinding, StructuredServiceError};
 
-pub const PROCESS_CREATION_QUERY: &str = "SELECT * FROM Win32_ProcessStartTrace";
+pub const PROCESS_CREATION_QUERY: &str = "SELECT ProcessID FROM Win32_ProcessStartTrace";
+pub const FALLBACK_PROCESS_CREATION_QUERY: &str =
+    "SELECT * FROM __InstanceCreationEvent WITHIN 1 WHERE TargetInstance ISA 'Win32_Process'";
 pub const MAX_BROKER_DIAGNOSTIC_CODE_BYTES: usize = 128;
 pub trait ProcessEventSource {
     fn subscribe(&mut self, query: &str) -> Result<(), StructuredServiceError>;

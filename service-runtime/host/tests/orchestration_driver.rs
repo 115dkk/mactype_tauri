@@ -1,6 +1,9 @@
 #[path = "support/event_sink.rs"]
 mod event_sink;
 
+#[path = "support/recorder.rs"]
+mod recorder_support;
+
 use event_sink::discard_events;
 use std::collections::VecDeque;
 use std::io;
@@ -19,9 +22,10 @@ use mactype_service_host::{
     InitializedRuntime, InjectionBroker, InjectionRequest, InspectionEvidence,
     ObserverRecoveryPolicy, ProcessArchitecture, ProcessEventSource, ProcessIdentity,
     ProcessInspection, ProcessInspectionError, ProcessInspector, RuntimeInitializer,
-    ServiceRuntime, ServiceStatus, SessionChange, StatusReporter, StopSignal, TargetLifecycle,
-    TargetLiveness,
+    ServiceRuntime, SessionChange, StopSignal, TargetLifecycle, TargetLiveness,
 };
+
+use recorder_support::Recorder;
 
 const PROFILE_DIGEST: &str =
     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -242,24 +246,6 @@ impl RuntimeInitializer for TestInitializer {
 }
 
 #[derive(Default)]
-struct Recorder {
-    reports: Mutex<Vec<HealthReport>>,
-}
-
-impl StatusReporter for Recorder {
-    fn report(&self, _status: ServiceStatus) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-impl HealthPublisher for Recorder {
-    fn publish(&self, report: &HealthReport) -> io::Result<()> {
-        self.reports.lock().unwrap().push(report.clone());
-        Ok(())
-    }
-}
-
-#[derive(Default)]
 struct StopAfterOnePoll {
     polls: AtomicUsize,
 }
@@ -365,7 +351,7 @@ fn observer_failure_resubscribes_and_reconciles_the_missed_snapshot() {
             .collect::<Vec<_>>(),
         [42, 43, 44]
     );
-    let reports = recorder.reports.lock().unwrap();
+    let reports = recorder.reports();
     let degraded_index = reports
         .iter()
         .position(|report| {
@@ -407,7 +393,7 @@ fn observer_recovery_gives_up_after_the_configured_attempts() {
 
     assert!(error.to_string().contains("observer-resubscribe-3"));
     assert_eq!(source_handle.state.lock().unwrap().subscribe_calls, 4);
-    let reports = recorder.reports.lock().unwrap();
+    let reports = recorder.reports();
     let terminal_runtime_health = reports
         .iter()
         .rev()
@@ -470,7 +456,7 @@ fn ready_driver_consumes_process_events_until_stop() {
             .collect::<Vec<_>>(),
         [42, 40, 41]
     );
-    let reports = recorder.reports.lock().unwrap();
+    let reports = recorder.reports();
     let terminal = reports.last().unwrap();
     assert_eq!(terminal.health, HealthState::Unknown);
     assert_eq!(
@@ -579,7 +565,7 @@ fn frozen_runtime_target_waits_without_broker_or_degraded_health_then_injects_on
         .unwrap();
 
     assert_eq!(requests.lock().unwrap().len(), 1);
-    let reports = recorder.reports.lock().unwrap();
+    let reports = recorder.reports();
     assert!(reports
         .iter()
         .all(|report| report.health != HealthState::Degraded));
@@ -655,7 +641,7 @@ fn terminal_target_failure_keeps_global_ready_while_the_result_stays_process_loc
         .unwrap();
 
     assert_eq!(requests.lock().unwrap().len(), 1);
-    let reports = recorder.reports.lock().unwrap();
+    let reports = recorder.reports();
     let latest = reports
         .iter()
         .rev()
@@ -763,7 +749,7 @@ fn cleanup_unknown_degrades_its_generation_then_next_success_recovers_ready() {
         )
         .unwrap();
 
-    let reports = recorder.reports.lock().unwrap();
+    let reports = recorder.reports();
     let degraded = reports
         .iter()
         .find(|report| report.health == HealthState::Degraded)
@@ -860,7 +846,7 @@ fn cleanup_unknown_for_a_vanished_target_never_degrades_global_health() {
         )
         .unwrap();
 
-    let reports = recorder.reports.lock().unwrap();
+    let reports = recorder.reports();
     assert!(
         reports
             .iter()
@@ -908,7 +894,7 @@ fn conflicting_mactype_module_stays_process_local_and_global_ready() {
         )
         .unwrap();
 
-    let reports = recorder.reports.lock().unwrap();
+    let reports = recorder.reports();
     assert!(reports
         .iter()
         .all(|report| report.health != HealthState::Degraded));
@@ -953,7 +939,7 @@ fn invalid_helper_response_degrades_its_generation_then_next_success_recovers_re
         )
         .unwrap();
 
-    let reports = recorder.reports.lock().unwrap();
+    let reports = recorder.reports();
     let degraded = reports
         .iter()
         .find(|report| report.health == HealthState::Degraded)
@@ -1086,7 +1072,7 @@ fn target_inspection_races_are_skipped_without_degrading_ready_or_blocking_the_n
             .collect::<Vec<_>>(),
         [11, 21, 31, 41, 51]
     );
-    let reports = recorder.reports.lock().unwrap();
+    let reports = recorder.reports();
     assert!(reports.iter().all(
         |report| report.health != HealthState::Degraded && report.health != HealthState::Failed
     ));

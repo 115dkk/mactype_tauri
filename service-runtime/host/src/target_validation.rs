@@ -144,6 +144,13 @@ pub trait ProcessInspector {
         let _ = identity;
         None
     }
+
+    /// The lowercase image file name of a bare PID. It verifies no identity,
+    /// so it orders the startup backlog and never gates a safety decision.
+    fn image_name_for_ordering(&self, pid: u32) -> Option<String> {
+        let _ = pid;
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -410,6 +417,15 @@ fn skipped(inspection: &ProcessInspection, reason: ProcessSkipReason) -> Process
     }
 }
 
+/// Whether this image is a relay root, meaning its children inherit MacType
+/// through the in-process child-process relay rather than through a separate
+/// injection. The interactive session's shell is the only one, because it is
+/// the parent of everything the operator launches, so a backlog that reaches
+/// it last leaves every program started meanwhile without the relay.
+pub fn is_relay_root(image_name: &str) -> bool {
+    image_name.eq_ignore_ascii_case("explorer.exe")
+}
+
 fn is_important_windows_process(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
@@ -445,5 +461,45 @@ fn service_error(code: &str, message: &str) -> StructuredServiceError {
         code: code.to_owned(),
         message: message.to_owned(),
         win32_error: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_important_windows_process, is_installer_control_process};
+
+    #[test]
+    fn installer_control_processes_are_never_injection_targets() {
+        for name in [
+            "mactype-service-setup.exe",
+            "unins000.exe",
+            "unins000.tmp",
+            "_unins.tmp",
+            "_unins001.exe",
+            "_unins001.tmp",
+        ] {
+            assert!(
+                is_installer_control_process(name),
+                "installer control process was eligible for injection: {name}"
+            );
+            assert!(
+                !is_important_windows_process(name),
+                "installer control process leaked into the Windows system-process predicate: {name}"
+            );
+        }
+
+        for name in [
+            "mactype-service-setup.exe.disabled",
+            "uninstall-helper.exe",
+            "unison.exe",
+        ] {
+            assert!(
+                !is_installer_control_process(name),
+                "unrelated process was excluded by an over-broad name rule: {name}"
+            );
+        }
+
+        assert!(is_important_windows_process("services.exe"));
+        assert!(!is_installer_control_process("services.exe"));
     }
 }

@@ -87,7 +87,8 @@ fn machine_owner_error(error: SecurityAclError) -> SetupError {
 }
 
 fn invalid_machine_owner(_error: AclValidationError) -> SetupError {
-    foreign_lock_error("owner SID is missing or malformed")
+    // A missing or malformed owner cannot be one of the trusted writers.
+    foreign_lock_error("owner is neither SYSTEM nor BUILTIN\\Administrators")
 }
 
 fn machine_dacl_error(error: SecurityAclError) -> SetupError {
@@ -97,8 +98,15 @@ fn machine_dacl_error(error: SecurityAclError) -> SetupError {
     }
 }
 
-fn invalid_machine_dacl(_error: AclValidationError) -> SetupError {
-    foreign_lock_error("DACL contains an unexpected ACE")
+fn invalid_machine_dacl(error: AclValidationError) -> SetupError {
+    match error {
+        AclValidationError::MissingDacl => {
+            foreign_lock_error("DACL does not contain exactly the two trusted writer ACEs")
+        }
+        // Any ACE that is not a well-formed allow ACE fails validation as a
+        // whole, which is the same rejection the per-ACE type check made.
+        _ => foreign_lock_error("DACL contains an unexpected ACE"),
+    }
 }
 
 fn foreign_lock_error(detail: &str) -> SetupError {

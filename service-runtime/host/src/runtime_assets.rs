@@ -98,7 +98,7 @@ impl ProtectedRuntimeAssets {
         Ok(Self {
             injector32: root.join("mactype-injector32.exe"),
             injector64: root.join("mactype-injector64.exe"),
-            root,
+            root: root.to_owned(),
             generation_id,
         })
     }
@@ -120,7 +120,7 @@ impl ProtectedRuntimeAssets {
     }
 }
 
-fn validate_runtime_file_set(root: &Path) -> Result<(), StructuredServiceError> {
+pub(crate) fn validate_runtime_file_set(root: &Path) -> Result<(), StructuredServiceError> {
     let names = fs::read_dir(root)
         .map_err(|error| {
             service_error(

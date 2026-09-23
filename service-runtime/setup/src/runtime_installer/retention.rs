@@ -10,16 +10,20 @@ use mactype_service_contract::{
 };
 
 use super::deferred_delete::{remove_directory_or_defer, remove_file_or_defer};
+use super::generation_store::RuntimeGenerationStore;
 use super::journal::{validate_runtime_pointer, RuntimePointer, MAX_POINTER_BYTES};
-use super::RuntimeInstaller;
 use crate::profile_bridge::GENERATED_PROFILE_NAME;
 use crate::storage::{
     atomic_write, read_bounded_directory, read_bounded_regular_file, reject_reparse_ancestors,
     SetupError,
 };
 
-impl RuntimeInstaller {
-    pub(super) fn finalize_retention(
+impl RuntimeGenerationStore<'_> {
+    pub(super) fn verify_pinned(&self, version: &str) -> Result<bool, SetupError> {
+        Ok(self.load_verified_migration_pins()?.contains_key(version))
+    }
+
+    pub(super) fn retain(
         &self,
         old_pointer: Option<&RuntimePointer>,
         current_version: &str,
@@ -100,7 +104,7 @@ impl RuntimeInstaller {
         directory: &Path,
         defer_locked_files: bool,
     ) -> Result<(), SetupError> {
-        self.verify_runtime_generation_receipt(version, directory)?;
+        self.verify(version, directory)?;
         let removable = read_bounded_directory(
             directory,
             IMMUTABLE_RUNTIME_FILES.len() + 1,

@@ -87,10 +87,15 @@ Assert-Equal -Actual $literal.WorkingDirectory -Expected 'src' `
 Assert-Equal -Actual $literal.If -Expected 'always()' -Message 'Step if parsing failed.'
 Assert-Equal -Actual $literal.Env.STEP_VALUE -Expected 'one' -Message 'Step env parsing failed.'
 Assert-Equal -Actual $literal.With.name -Expected 'artifact' -Message 'Step with parsing failed.'
-$expectedLiteral = @'
-Write-Host '# literal comment'
-Write-Host "${{ github.sha }}"
-'@
+# Joined rather than written as a here-string: a here-string takes the line
+# endings of the file it sits in, so on a CRLF checkout it produced CRLF while
+# the parser under test yields LF, and this gate could not be run locally at
+# all. The parser's own output is the thing being asserted, so the expectation
+# has to be built with the line ending the parser uses.
+$expectedLiteral = @(
+    "Write-Host '# literal comment'",
+    'Write-Host "${{ github.sha }}"'
+) -join "`n"
 Assert-Equal -Actual $literal.Run -Expected $expectedLiteral `
     -Message 'Literal block scalar parsing failed.'
 $folded = @(Get-WorkflowStep -Job $build -NameLike 'Folded') | Select-Object -First 1

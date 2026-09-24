@@ -253,7 +253,7 @@ for (const publication of [
 }
 
 for (const service of [
-  { runtime: "running", title: "The settings in use are the previous ones", message: "Restarted the service on the settings you saved. Apps opened from now on use them." },
+  { runtime: "running", title: "The settings in use are the previous ones", message: "Restarted the service on the settings you saved. Apps without MacType, open now or later, get them; reopen apps that already had MacType to switch them over." },
   { runtime: "stopped", title: "Starting now would run the previous settings", message: "Saved these settings into the run profile. They take effect when you start the service." },
 ] as const) {
   test(`pending run profile applies calmly while the service is ${service.runtime}`, async ({ page }, testInfo) => {
@@ -361,7 +361,7 @@ test("copy review gallery captures the Korean ready service", async ({ page }, t
   await page.goto("/?view=execution&gallery=1&lang=ko&system-service=ready", { waitUntil: "networkidle" });
   const system = page.locator('details.service-row[data-kind="system"]');
   await system.locator("summary").click();
-  await expect(system).toContainText("새로 여는 앱에 프로파일을 적용하고 있습니다.");
+  await expect(system).toContainText("열려 있는 앱과 새로 여는 앱에 프로파일을 적용하고 있습니다.");
   await page.screenshot({
     path: path.join(galleryRoot, `${testInfo.project.name}-copy-review-ready-ko.png`),
     fullPage: true,
@@ -1340,7 +1340,7 @@ test.describe("shared writable profiles save to the original and apply by portab
       await expect(apply).toBeEnabled();
       await expect(page.getByRole("button", { name: "Set as run profile", exact: true })).toHaveCount(0);
       await apply.click();
-      await expect(page.locator(".profile-message")).toContainText("Restarted the service on the settings you saved. Apps opened from now on use them.");
+      await expect(page.locator(".profile-message")).toContainText("Restarted the service on the settings you saved. Apps without MacType, open now or later, get them; reopen apps that already had MacType to switch them over.");
 
       await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-profile-direct-save-apply-en.png`), fullPage: true });
     });

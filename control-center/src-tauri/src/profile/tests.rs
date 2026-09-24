@@ -644,6 +644,7 @@ fn supported_advanced_edits_preserve_unsupported_profile_entries() {
             lcd_filter_weight: Some(vec![1, 2, 3, 4, 5]),
             pixel_layout: Some(vec![-20, 0, 0, 0, 20, 0]),
             font_substitutes: vec!["Tahoma=Segoe UI".to_owned()],
+            font_substitute_bold_pairs: Vec::new(),
         })
         .unwrap();
     document
@@ -728,5 +729,211 @@ fn rejected_trimmed_advanced_list_entry_is_transactional() {
 
     assert!(document.set_advanced(advanced).is_err());
     assert_eq!(document.encoded().unwrap(), before);
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn bold_pairs_are_read_normalised_and_broken_lines_are_dropped() {
+    let path = temp_profile(
+        "[FontSubstitutes]\r\n맑은 고딕=Pretendard Medium,129\r\n[FontSubstitutesBold]\r\nInter=Inter Bold\r\n Pretendard Medium,129 = Pretendard Bold,129 \r\nno separator\r\nEmpty=\r\nSegoe UI=segoe ui\r\n"
+            .as_bytes(),
+    );
+    let document = ProfileDocument::open(&path).unwrap();
+    assert_eq!(
+        document.snapshot().advanced.font_substitute_bold_pairs,
+        vec!["Inter=Inter Bold", "Pretendard Medium=Pretendard Bold"]
+    );
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn advanced_edit_replaces_bold_pairs_and_preserves_other_sections() {
+    let path = temp_profile(
+        b"[General]\r\nFontSubstitutes=1\r\n[FontSubstitutes]\r\nArial=Inter\r\n[FontSubstitutesBold]\r\nInter=Old Bold\r\n[UnityInclude]\r\nselected-game.exe\r\n",
+    );
+    let mut document = ProfileDocument::open(&path).unwrap();
+    let mut advanced = document.snapshot().advanced;
+    advanced.font_substitutes = vec!["Arial=Inter".to_owned(), "Tahoma=Noto Sans".to_owned()];
+    advanced.font_substitute_bold_pairs = vec![
+        " Inter = Inter Bold ".to_owned(),
+        "Noto Sans,1=Noto Sans Bold,1".to_owned(),
+    ];
+    document.update_advanced(advanced).unwrap();
+    let rendered = String::from_utf8(document.encoded().unwrap()).unwrap();
+    assert!(rendered
+        .contains("[FontSubstitutesBold]\r\nInter=Inter Bold\r\nNoto Sans=Noto Sans Bold\r\n"));
+    assert!(!rendered.contains("Old Bold"));
+    assert!(rendered.contains("[FontSubstitutes]\r\nArial=Inter\r\nTahoma=Noto Sans\r\n"));
+    assert!(rendered.contains("[UnityInclude]\r\nselected-game.exe\r\n"));
+    assert!(!rendered.replace("\r\n", "").contains('\n'));
+    assert_eq!(
+        document.snapshot().advanced.font_substitute_bold_pairs,
+        vec!["Inter=Inter Bold", "Noto Sans=Noto Sans Bold"]
+    );
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn advanced_edit_adds_the_bold_pair_section_when_absent() {
+    let path = temp_profile(b"[FontSubstitutes]\nArial=Inter\n");
+    let mut document = ProfileDocument::open(&path).unwrap();
+    let mut advanced = document.snapshot().advanced;
+    advanced.font_substitute_bold_pairs = vec!["Inter=Inter Bold".to_owned()];
+    document.update_advanced(advanced).unwrap();
+    let rendered = String::from_utf8(document.encoded().unwrap()).unwrap();
+    assert!(rendered.contains("[FontSubstitutesBold]\nInter=Inter Bold\n"));
+    assert!(!rendered.contains('\r'));
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn rejected_bold_pair_is_transactional() {
+    let path = temp_profile(b"[FontSubstitutes]\r\nArial=Inter\r\n");
+    let mut document = ProfileDocument::open(&path).unwrap();
+    let before = document.encoded().unwrap();
+    for (broken, message) in [
+        ("missing separator", "must use Replacement font=Bold font"),
+        ("Inter=", "require both fonts"),
+        ("=Inter Bold", "require both fonts"),
+        ("Inter=inter,0", "differs from the replacement"),
+        (";Inter=Inter Bold", "unsupported character"),
+    ] {
+        let mut advanced = document.snapshot().advanced;
+        advanced.font_substitute_bold_pairs = vec![broken.to_owned()];
+        let error = document.update_advanced(advanced).unwrap_err();
+        assert!(error.contains(message), "{broken}: {error}");
+        assert_eq!(document.encoded().unwrap(), before);
+    }
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn bold_pair_list_kind_maps_to_its_section() {
+    let path = temp_profile(b"[General]\nNormalWeight=0\n");
+    let mut document = ProfileDocument::open(&path).unwrap();
+    document
+        .set_list(
+            "fontSubstituteBoldPairs",
+            vec!["Inter=Inter Bold".to_owned()],
+        )
+        .unwrap();
+    let rendered = String::from_utf8(document.encoded().unwrap()).unwrap();
+    assert!(rendered.contains("[FontSubstitutesBold]\nInter=Inter Bold\n"));
+    let _ = fs::remove_file(path);
+}
+
+fn bold_gate_profile(mode: u8, substitution: u8, pairs: &str) -> PathBuf {
+    temp_profile(
+        format!(
+            "[General]\nFontSubstitutes={substitution}\nFontSubstitutesBold={mode}\n[FontSubstitutes]\nArial=Inter\nSegoe UI=Pretendard Medium,129\n[FontSubstitutesBold]\n{pairs}"
+        )
+        .as_bytes(),
+    )
+}
+
+#[test]
+fn explicit_bold_mode_saves_with_an_unpaired_replacement() {
+    let path = bold_gate_profile(2, 1, "Inter=Inter Bold\n");
+    let mut document = ProfileDocument::open(&path).unwrap();
+    document
+        .update_value("font_substitute_bold_mode", 3.0)
+        .unwrap();
+    document.save().unwrap();
+    let parent = path.parent().unwrap().to_path_buf();
+    let name = format!(
+        "mactype-bold-copy-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let copy = document.duplicate_in(&parent, &name).unwrap();
+    let reopened = ProfileDocument::open(&path).unwrap();
+    let snapshot = reopened.snapshot();
+    assert_eq!(snapshot.values.get("font_substitute_bold_mode"), Some(&3.0));
+    assert_eq!(
+        snapshot.advanced.font_substitute_bold_pairs,
+        vec!["Inter=Inter Bold"]
+    );
+    let _ = fs::remove_file(copy.path);
+    let _ = fs::remove_file(path.with_extension("ini.bak"));
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn bold_mode_defaults_to_same_family_when_absent() {
+    let path = temp_profile(b"[General]\nFontSubstitutes=1\n[FontSubstitutes]\nArial=Inter\n");
+    let mut document = ProfileDocument::open(&path).unwrap();
+    assert_eq!(
+        document.snapshot().values.get("font_substitute_bold_mode"),
+        Some(&2.0)
+    );
+    document.set_value("normal_weight", 1.0).unwrap();
+    document.save().unwrap();
+    let _ = fs::remove_file(path.with_extension("ini.bak"));
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn broken_bold_pair_lines_never_affect_valid_pairs() {
+    let source = "[General]\r\nFontSubstitutes=1\r\nFontSubstitutesBold=3\r\n[FontSubstitutes]\r\nArial=Inter\r\nGulim=Pretendard\r\nTahoma=Noto Sans\r\n[FontSubstitutesBold]\r\nPretendard\r\nInter=Inter Bold\r\nNoto Sans=,129\r\n=Orphan Bold\r\nPretendard=pretendard,1\r\n";
+    let path = temp_profile(source.as_bytes());
+    let document = ProfileDocument::open(&path).unwrap();
+    assert_eq!(
+        document.snapshot().advanced.font_substitute_bold_pairs,
+        vec!["Inter=Inter Bold"]
+    );
+    assert_eq!(document.encoded().unwrap(), source.as_bytes());
+    assert!(!document.is_dirty());
+    assert_eq!(fs::read(&path).unwrap(), source.as_bytes());
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn broken_bold_pair_line_stays_on_disk_until_new_pairs_are_committed() {
+    let source = b"[General]\r\nFontSubstitutes=1\r\nFontSubstitutesBold=3\r\nNormalWeight=0\r\n[FontSubstitutes]\r\nArial=Inter\r\n[FontSubstitutesBold]\r\nInter=Inter Bold\r\nbroken pair line\r\n";
+    let path = temp_profile(source);
+    let mut document = ProfileDocument::open(&path).unwrap();
+    document.update_value("normal_weight", 1.0).unwrap();
+    document.save().unwrap();
+    let saved = String::from_utf8(fs::read(&path).unwrap()).unwrap();
+    assert!(saved.contains("[FontSubstitutesBold]\r\nInter=Inter Bold\r\nbroken pair line\r\n"));
+    assert_eq!(
+        saved,
+        String::from_utf8(source.to_vec())
+            .unwrap()
+            .replace("NormalWeight=0", "NormalWeight=1")
+    );
+
+    let mut advanced = document.snapshot().advanced;
+    assert_eq!(
+        advanced.font_substitute_bold_pairs,
+        vec!["Inter=Inter Bold"]
+    );
+    advanced.font_substitute_bold_pairs = vec!["Inter=Inter Black".to_owned()];
+    document.update_advanced(advanced).unwrap();
+    document.save().unwrap();
+    let saved = String::from_utf8(fs::read(&path).unwrap()).unwrap();
+    assert!(saved.ends_with("[FontSubstitutesBold]\r\nInter=Inter Black\r\n"));
+    assert!(!saved.contains("broken pair line"));
+    let _ = fs::remove_file(path.with_extension("ini.bak"));
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn a_broken_pair_beside_a_valid_one_rejects_the_whole_write() {
+    let source =
+        b"[FontSubstitutes]\r\nArial=Inter\r\n[FontSubstitutesBold]\r\nInter=Inter Bold\r\n";
+    let path = temp_profile(source);
+    let mut document = ProfileDocument::open(&path).unwrap();
+    let mut advanced = document.snapshot().advanced;
+    advanced.font_substitute_bold_pairs =
+        vec!["Inter=Inter Black".to_owned(), "Pretendard=,129".to_owned()];
+    let error = document.update_advanced(advanced).unwrap_err();
+    assert!(error.starts_with("bold substitution pairs"), "{error}");
+    assert_eq!(document.encoded().unwrap(), source);
+    assert!(!document.is_dirty());
+    assert!(!document.undo());
+    assert_eq!(fs::read(&path).unwrap(), source);
     let _ = fs::remove_file(path);
 }

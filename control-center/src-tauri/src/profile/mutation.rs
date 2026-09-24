@@ -231,6 +231,7 @@ impl ProfileDocument {
             "advanced:pixelLayout",
         );
         self.replace_list_section("FontSubstitutes", rendered.font_substitutes);
+        self.replace_list_section("FontSubstitutesBold", rendered.font_substitute_bold_pairs);
         Ok(())
     }
 
@@ -311,6 +312,7 @@ impl ProfileDocument {
             "unityIncludeGames" => "UnityInclude",
             "unityExcludeGames" => "UnityExclude",
             "fontSubstitutes" => "FontSubstitutes",
+            "fontSubstituteBoldPairs" => "FontSubstitutesBold",
             _ => return Err(format!("unknown profile list: {kind}")),
         };
         let normalized = normalize_list_entries(entries)?;

@@ -1,4 +1,8 @@
-use super::super::{document::validate_entry, AdvancedProfile, IndividualSetting, ShadowSetting};
+use super::super::{
+    bold_substitution::{canonical_pairs, parse_pair},
+    document::validate_entry,
+    AdvancedProfile, IndividualSetting, ShadowSetting,
+};
 use crate::generated_settings::{SettingDefinition, SettingValueType, SETTINGS};
 use std::collections::BTreeSet;
 
@@ -13,6 +17,7 @@ pub(super) struct RenderedAdvancedProfile {
     pub(super) lcd_filter_weight: Option<String>,
     pub(super) pixel_layout: Option<String>,
     pub(super) font_substitutes: Vec<String>,
+    pub(super) font_substitute_bold_pairs: Vec<String>,
 }
 
 pub(super) fn render_setting_value(
@@ -49,6 +54,7 @@ pub(super) fn render_advanced_profile(
         lcd_filter_weight,
         pixel_layout,
         font_substitutes,
+        font_substitute_bold_pairs,
     } = profile;
     let shadow = shadow.map(render_shadow).transpose()?;
     let lcd_filter_weight = lcd_filter_weight
@@ -61,11 +67,15 @@ pub(super) fn render_advanced_profile(
         .transpose()?;
     let font_substitutes = normalize_list_entries(font_substitutes)?;
     validate_font_substitutions(&font_substitutes)?;
+    let font_substitute_bold_pairs = normalize_list_entries(font_substitute_bold_pairs)?;
+    validate_bold_pairs(&font_substitute_bold_pairs)?;
+    let font_substitute_bold_pairs = canonical_pairs(&font_substitute_bold_pairs);
     Ok(RenderedAdvancedProfile {
         shadow,
         lcd_filter_weight,
         pixel_layout,
         font_substitutes,
+        font_substitute_bold_pairs,
     })
 }
 
@@ -180,6 +190,24 @@ fn validate_font_substitutions(entries: &[String]) -> Result<(), String> {
         };
         if source.trim().is_empty() || replacement.trim().is_empty() {
             return Err("font substitutions require both source and replacement fonts".to_owned());
+        }
+    }
+    Ok(())
+}
+
+fn validate_bold_pairs(entries: &[String]) -> Result<(), String> {
+    for pair in entries {
+        let Some((family, bold)) = pair.split_once('=') else {
+            return Err("bold substitution pairs must use Replacement font=Bold font".to_owned());
+        };
+        if family.trim().is_empty() || bold.trim().is_empty() {
+            return Err("bold substitution pairs require both fonts".to_owned());
+        }
+        if parse_pair(pair).is_none() {
+            return Err(
+                "bold substitution pairs require both fonts and a bold font that differs from the replacement"
+                    .to_owned(),
+            );
         }
     }
     Ok(())

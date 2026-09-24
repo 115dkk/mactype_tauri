@@ -23,33 +23,39 @@ constexpr UINT32 kOs2 = 0x4F532F32;
 constexpr UINT32 kHead = 0x68656164;
 constexpr UINT32 kName = 0x6E616D65;
 
-std::vector<BYTE> NameTable()
+std::vector<BYTE> NameTable(std::wstring const& style)
 {
-    std::wstring const family = L"Src";
-    std::wstring const style = L"Medium";
-    std::vector<BYTE> table(6 + 2 * 12, 0);
-    sfnt::WriteU16(table, 2, 2);
+    std::vector<std::pair<int, std::wstring>> const names = {
+        {1, L"Src"},
+        {2, style},
+        {4, L"Src " + style},
+        {6, L"Src-Medium"},
+        {16, L"Src"},
+        {17, style},
+    };
+    std::vector<BYTE> table(6 + names.size() * 12, 0);
+    sfnt::WriteU16(table, 2, static_cast<UINT16>(names.size()));
     sfnt::WriteU16(table, 4, static_cast<UINT16>(table.size()));
     UINT16 offset = 0;
-    UINT16 id = 1;
-    for (std::wstring const* value : {&family, &style}) {
-        std::size_t const record = 6 + static_cast<std::size_t>(id - 1) * 12;
+    for (std::size_t index = 0; index < names.size(); ++index) {
+        std::wstring const& value = names[index].second;
+        std::size_t const record = 6 + index * 12;
         sfnt::WriteU16(table, record, 3);
         sfnt::WriteU16(table, record + 2, 1);
         sfnt::WriteU16(table, record + 4, 0x409);
-        sfnt::WriteU16(table, record + 6, id++);
-        sfnt::WriteU16(table, record + 8, static_cast<UINT16>(value->size() * 2));
+        sfnt::WriteU16(table, record + 6, static_cast<UINT16>(names[index].first));
+        sfnt::WriteU16(table, record + 8, static_cast<UINT16>(value.size() * 2));
         sfnt::WriteU16(table, record + 10, offset);
-        for (wchar_t character : *value) {
+        for (wchar_t character : value) {
             table.push_back(static_cast<BYTE>(character >> 8));
             table.push_back(static_cast<BYTE>(character));
         }
-        offset = static_cast<UINT16>(offset + value->size() * 2);
+        offset = static_cast<UINT16>(offset + value.size() * 2);
     }
     return table;
 }
 
-std::vector<BYTE> Sfnt(bool withOs2)
+std::vector<BYTE> Sfnt(bool withOs2, std::wstring const& style = L"Medium")
 {
     std::vector<std::pair<UINT32, std::vector<BYTE>>> tables;
     if (withOs2) {
@@ -59,7 +65,7 @@ std::vector<BYTE> Sfnt(bool withOs2)
         tables.emplace_back(kOs2, os2);
     }
     tables.emplace_back(kHead, std::vector<BYTE>(54, 0));
-    tables.emplace_back(kName, NameTable());
+    tables.emplace_back(kName, NameTable(style));
     std::vector<BYTE> font(12 + tables.size() * 16, 0);
     sfnt::WriteU32(font, 0, 0x00010000);
     sfnt::WriteU16(font, 4, static_cast<UINT16>(tables.size()));
@@ -102,6 +108,23 @@ std::vector<BYTE> Table(std::vector<BYTE> const& font, UINT32 tag, bool verifyCh
     return {};
 }
 
+std::wstring Name(std::vector<BYTE> const& font, UINT16 id)
+{
+    UINT16 format = 0;
+    std::vector<sfnt::NameRecord> records;
+    std::vector<sfnt::LanguageTagRecord> tags;
+    Require(sfnt::ReadNameTable(Table(font, kName, true), format, records, tags),
+            "the rewritten name table must parse");
+    for (sfnt::NameRecord const& record : records) {
+        std::wstring value;
+        if (record.id == id && sfnt::DecodeName(record, value)) {
+            return value;
+        }
+    }
+    Require(false, "an expected name record is missing");
+    return {};
+}
+
 } // namespace
 
 int main()
@@ -132,8 +155,24 @@ int main()
             "a bold advertisement must set head.macStyle bold");
     Require(sfnt::TableChecksum(advertised.data(), advertised.size()) == 0xB1B0AFBA,
             "the head checksum adjustment must cover the rewritten tables");
-    Require(Table(advertised, kName, true) == Table(plain, kName, false),
-            "a weight advertisement must not change the alias names");
+    Require(Name(advertised, 1) == L"Alias" && Name(advertised, 16) == L"Alias" &&
+                Name(advertised, 2) == L"Bold" && Name(advertised, 17) == L"Bold" &&
+                Name(advertised, 4) == L"Alias Bold" &&
+                Name(advertised, 6) == L"Alias-Bold" &&
+                identity.fullName == L"Alias Bold" &&
+                identity.postScriptName == L"Alias-Bold",
+            "a bold advertisement must name its own Bold subfamily, full and PostScript names");
+    Require(Name(plain, 2) == L"Medium" && Name(plain, 17) == L"Medium" &&
+                Name(plain, 4) == L"Alias Medium" && Name(plain, 6) == L"Alias-Medium",
+            "the plain alias must keep the backing subfamily");
+
+    std::vector<BYTE> italic;
+    Require(SUCCEEDED(font::BuildAliasedSfnt(
+                Sfnt(true, L"Medium Italic"), 0, L"Alias", bold, italic, identity)) &&
+                Name(italic, 2) == L"Bold Italic" && Name(italic, 17) == L"Bold Italic" &&
+                Name(italic, 4) == L"Alias Bold Italic" &&
+                Name(italic, 6) == L"Alias-BoldItalic",
+            "a bold advertisement of an italic backing must stay italic");
 
     bold.weight = 400;
     Require(SUCCEEDED(font::BuildAliasedSfnt(
@@ -141,6 +180,8 @@ int main()
                 sfnt::ReadU16(Table(plain, kOs2, true), 62) == 0x0040 &&
                 (sfnt::ReadU16(Table(plain, kHead, true), 44) & 1) == 0,
             "a regular advertisement must clear the bold flags again");
+    Require(Name(plain, 2) == L"Bold",
+            "a regular advertisement must leave the subfamily names alone");
 
     bold.weight = 700;
     Require(font::BuildAliasedSfnt(

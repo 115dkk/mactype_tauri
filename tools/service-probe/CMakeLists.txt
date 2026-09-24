@@ -229,6 +229,12 @@ set_target_properties(renderer-profile-probe PROPERTIES
   OUTPUT_NAME "renderer-profile-probe${PROBE_ARCH_SUFFIX}"
 )
 
+add_executable(bold-substitution-probe tests/bold_substitution_probe.cpp)
+target_link_libraries(bold-substitution-probe PRIVATE service-probe-common)
+set_target_properties(bold-substitution-probe PROPERTIES
+  OUTPUT_NAME "bold-substitution-probe${PROBE_ARCH_SUFFIX}"
+)
+
 add_executable(browser-launch-gate browser_launch_gate.cpp)
 target_link_libraries(browser-launch-gate PRIVATE service-probe-common)
 set_target_properties(browser-launch-gate PROPERTIES OUTPUT_NAME "browser-launch-gate${PROBE_ARCH_SUFFIX}")
@@ -261,10 +267,10 @@ set_target_properties(relay-policy-probe PROPERTIES
 )
 
 if(MSVC)
-  foreach(target service-probe-common probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests activation-repaint-tests freetype-runtime-tests private-freetype-policy-tests image-subsystem-tests module-name-tests directwrite-font-cache-tests pe-export-view-tests unload-lifecycle-tests renderer-policy-tests renderer-activation-tests font-substitution-tests bold-face-selection-tests directwrite-virtual-font-tests directwrite-alias-policy-tests arrival-evidence-tests gdi-font-identity-tests unity-font-hook-tests unity-font-catalog-probe renderer-profile-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe)
+  foreach(target service-probe-common probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests activation-repaint-tests freetype-runtime-tests private-freetype-policy-tests image-subsystem-tests module-name-tests directwrite-font-cache-tests pe-export-view-tests unload-lifecycle-tests renderer-policy-tests renderer-activation-tests font-substitution-tests bold-face-selection-tests directwrite-virtual-font-tests directwrite-alias-policy-tests arrival-evidence-tests gdi-font-identity-tests unity-font-hook-tests unity-font-catalog-probe renderer-profile-probe bold-substitution-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe)
     target_compile_options(${target} PRIVATE /W4 /WX /permissive- /utf-8 /sdl)
   endforeach()
-  foreach(target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-profile-probe browser-launch-gate dwritecore-contract-probe relay-policy-probe)
+  foreach(target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-profile-probe bold-substitution-probe browser-launch-gate dwritecore-contract-probe relay-policy-probe)
     target_link_options(${target} PRIVATE
       /MANIFEST:EMBED
       "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/probe.manifest"

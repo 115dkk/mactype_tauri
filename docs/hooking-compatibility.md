@@ -166,6 +166,24 @@ Steam-launched process, a stock control that reaches the same UI boundary, and
 a full-window capture after injection. Hook counters and non-empty glyph
 bitmaps cannot promote a splash screen or a failed stock control to success.
 
+## Bold substitution evidence
+
+`scripts/lab/Test-BoldSubstitutionField.ps1` proves which face a substituted
+bold request renders, per `FontSubstitutesBold` mode, on real fonts. It refuses
+to run while the 신식 서비스 could inject another renderer generation, stages
+one core and one `MacType.ini` per mode and source family in an empty
+directory, launches `bold-substitution-probe32/64` from an unhooked parent, and
+accepts a run only when the process carries exactly that one MacType module.
+The probe reads the face GDI really selected (`GetOutlineTextMetrics`, the
+OS/2 weight class and the whole-file hash through `GetFontData`, whose hook
+fakes only the name table), DirectWrite's collection match with its
+simulations, and the faces a text layout created against the native collection
+actually drew, and compares each with Pretendard Regular, Medium, Bold and
+ExtraBold measured in the same process. Hooked views (`GetTextFace`,
+`GetObject`) are recorded but never judged. The summary marks every path
+against the face the mode promises; a text format cannot request a simulation,
+so mode 1 legitimately lands on the family's real bold there.
+
 `scripts/lab/Get-InstalledRuntimeProvenance.ps1` provides the cross-device
 check without installing a development environment. It verifies the protected
 runtime pointer and receipt, hashes both renderer architectures and helpers,

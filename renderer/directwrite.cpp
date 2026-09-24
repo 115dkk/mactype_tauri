@@ -10,6 +10,7 @@
 #include <array>
 #include <atomic>
 #include <mutex>
+#include <string>
 #include <vector>
 
 void MyDebug(const TCHAR *sz, ...)
@@ -2763,14 +2764,133 @@ HRESULT WINAPI IMPL_Factory3_GetSystemFontCollection(
 	return result;
 }
 
-static WCHAR const* ResolveFactoryFamilyName(
+struct FactoryFamilyTranslation
+{
+	std::wstring gdiFamily;
+	LONG gdiWeight = 0;
+	bool italic = false;
+	std::wstring family;
+	DWRITE_FONT_WEIGHT weight = DWRITE_FONT_WEIGHT_NORMAL;
+};
+
+struct FactoryFamilyTranslationCache
+{
+	std::mutex mutex;
+	std::vector<FactoryFamilyTranslation> entries;
+};
+
+constexpr size_t kFactoryFamilyTranslationLimit = 64;
+
+static FactoryFamilyTranslationCache& GetFactoryFamilyTranslationCache()
+{
+	static FactoryFamilyTranslationCache* cache = new FactoryFamilyTranslationCache;
+	return *cache;
+}
+
+static void ClearFactoryFamilyTranslations() noexcept
+{
+	FactoryFamilyTranslationCache& cache = GetFactoryFamilyTranslationCache();
+	std::lock_guard<std::mutex> lock(cache.mutex);
+	cache.entries.clear();
+}
+
+static bool ReadPreferredFamilyName(
+	IDWriteLocalizedStrings* names,
+	std::wstring& family)
+{
+	if (names->GetCount() == 0)
+		return false;
+	UINT32 index = 0;
+	BOOL exists = FALSE;
+	if (FAILED(names->FindLocaleName(L"en-us", &index, &exists)) || !exists)
+		index = 0;
+	UINT32 length = 0;
+	if (FAILED(names->GetStringLength(index, &length)))
+		return false;
+	std::vector<WCHAR> buffer(static_cast<size_t>(length) + 1);
+	if (FAILED(names->GetString(index, buffer.data(), length + 1)))
+		return false;
+	family.assign(buffer.data(), length);
+	return !family.empty();
+}
+
+// A replacement such as "Pretendard Medium" is a GDI family name that the
+// native collection behind a nullptr CreateTextFormat does not contain, so
+// DirectWrite would fall back per character. GDI interop maps the resolved
+// LOGFONT to the DirectWrite family and weight that hold the same face.
+static bool TranslateGdiFamily(
+	IDWriteFactory* factory,
+	LOGFONT const& replacement,
+	std::wstring& family,
+	DWRITE_FONT_WEIGHT& weight)
+{
+	CComPtr<IDWriteGdiInterop> interop;
+	CComPtr<IDWriteFont> font;
+	CComPtr<IDWriteFontFamily> fontFamily;
+	CComPtr<IDWriteLocalizedStrings> names;
+	if (FAILED(factory->GetGdiInterop(&interop)) || interop == nullptr ||
+		FAILED(interop->CreateFontFromLOGFONT(&replacement, &font)) ||
+		font == nullptr ||
+		FAILED(font->GetFontFamily(&fontFamily)) || fontFamily == nullptr ||
+		FAILED(fontFamily->GetFamilyNames(&names)) || names == nullptr ||
+		!ReadPreferredFamilyName(names, family))
+		return false;
+	weight = font->GetWeight();
+	// GDI would embolden this face; a text format cannot carry a simulation,
+	// so it keeps the requested weight instead.
+	if ((font->GetSimulations() & DWRITE_FONT_SIMULATIONS_BOLD) != 0 &&
+		replacement.lfWeight > static_cast<LONG>(weight))
+		weight = static_cast<DWRITE_FONT_WEIGHT>(replacement.lfWeight);
+	return true;
+}
+
+static bool LookupFactoryFamily(
+	IDWriteFactory* factory,
+	LOGFONT const& replacement,
+	std::wstring& family,
+	DWRITE_FONT_WEIGHT& weight)
+{
+	FactoryFamilyTranslationCache& cache = GetFactoryFamilyTranslationCache();
+	bool const italic = replacement.lfItalic != 0;
+	{
+		std::lock_guard<std::mutex> lock(cache.mutex);
+		for (FactoryFamilyTranslation const& entry : cache.entries)
+		{
+			if (entry.gdiWeight == replacement.lfWeight &&
+				entry.italic == italic &&
+				entry.gdiFamily == replacement.lfFaceName)
+			{
+				family = entry.family;
+				weight = entry.weight;
+				return true;
+			}
+		}
+	}
+	if (!TranslateGdiFamily(factory, replacement, family, weight))
+		return false;
+	FactoryFamilyTranslation entry;
+	entry.gdiFamily = replacement.lfFaceName;
+	entry.gdiWeight = replacement.lfWeight;
+	entry.italic = italic;
+	entry.family = family;
+	entry.weight = weight;
+	std::lock_guard<std::mutex> lock(cache.mutex);
+	if (cache.entries.size() >= kFactoryFamilyTranslationLimit)
+		cache.entries.clear();
+	cache.entries.push_back(std::move(entry));
+	return true;
+}
+
+static bool ResolveFactoryFamilyName(
+	IDWriteFactory* factory,
 	WCHAR const* familyName,
 	DWRITE_FONT_WEIGHT fontWeight,
 	DWRITE_FONT_STYLE fontStyle,
-	LOGFONT& replacement)
+	std::wstring& resolvedFamily,
+	DWRITE_FONT_WEIGHT& resolvedWeight)
 {
 	if (familyName == nullptr)
-		return familyName;
+		return false;
 
 	SignalDirectWriteDiagnostic(L"find-called");
 	SignalDirectWriteFamilyDiagnostic(L"find", familyName);
@@ -2780,15 +2900,28 @@ static WCHAR const* ResolveFactoryFamilyName(
 	source.lfItalic = fontStyle != DWRITE_FONT_STYLE_NORMAL;
 	if (FAILED(StringCchCopyW(
 			source.lfFaceName, ARRAYSIZE(source.lfFaceName), familyName)))
-		return familyName;
-	replacement = source;
+		return false;
+	LOGFONT replacement = source;
 
 	CGdippSettings const* settings = CGdippSettings::GetInstance();
 	if (!settings->CopyForceFont(replacement, source))
-		return familyName;
+		return false;
 	SignalDirectWriteDiagnostic(L"substitution-resolved");
 	SignalDirectWriteFamilyDiagnostic(L"resolved", familyName);
-	return replacement.lfFaceName;
+	try
+	{
+		if (LookupFactoryFamily(factory, replacement, resolvedFamily, resolvedWeight))
+			return true;
+		// The substitution's bold decision (weight dropped, kept, or a heavier
+		// face chosen) travels back in the replacement LOGFONT weight.
+		resolvedFamily = replacement.lfFaceName;
+		resolvedWeight = static_cast<DWRITE_FONT_WEIGHT>(replacement.lfWeight);
+		return true;
+	}
+	catch (...)
+	{
+		return false;
+	}
 }
 
 HRESULT WINAPI IMPL_CreateTextFormat(
@@ -2804,20 +2937,17 @@ HRESULT WINAPI IMPL_CreateTextFormat(
 {
 	// Explicit collections own their own naming model. The nullptr path uses
 	// the factory's native system collection, so resolve it at this boundary.
-	LOGFONT replacement = {};
-	WCHAR const* resolvedFamily = fontCollection == nullptr ?
+	std::wstring resolvedFamily;
+	DWRITE_FONT_WEIGHT resolvedWeight = fontWeight;
+	bool const resolved = fontCollection == nullptr &&
 		ResolveFactoryFamilyName(
-			fontFamilyName, fontWeight, fontStyle, replacement) :
-		fontFamilyName;
-	// The substitution's bold decision (weight dropped, kept, or a heavier
-	// face chosen) travels back in the replacement LOGFONT weight.
-	DWRITE_FONT_WEIGHT const resolvedWeight = resolvedFamily != fontFamilyName ?
-		static_cast<DWRITE_FONT_WEIGHT>(replacement.lfWeight) : fontWeight;
+			self, fontFamilyName, fontWeight, fontStyle,
+			resolvedFamily, resolvedWeight);
 	return ORIG_CreateTextFormat(
 		self,
-		resolvedFamily,
+		resolved ? resolvedFamily.c_str() : fontFamilyName,
 		fontCollection,
-		resolvedWeight,
+		resolved ? resolvedWeight : fontWeight,
 		fontStyle,
 		fontStretch,
 		fontSize,
@@ -2831,6 +2961,7 @@ bool RestoreDirectWriteVtableHooks(DWORD timeoutMilliseconds)
 		return false;
 	RestoreFactoryAliasVtables();
 	ClearFactoryAliasSources();
+	ClearFactoryFamilyTranslations();
 	directwrite_alias::ClearCache();
 	return true;
 }

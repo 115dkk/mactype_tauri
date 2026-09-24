@@ -42,6 +42,11 @@ constexpr UINT16 kOs2SelectionRegular = 0x0040;
 constexpr size_t kHeadMacStyleOffset = 44;
 constexpr UINT16 kHeadMacStyleBold = 0x0001;
 
+bool IsBoldWeightClass(UINT16 weight) noexcept
+{
+	return weight >= 600;
+}
+
 using renderer::sfnt::CanRead;
 using renderer::sfnt::DecodeName;
 using renderer::sfnt::IsUnicodeNameRecord;
@@ -128,10 +133,13 @@ HRESULT ReadReplacementFile(
 	return S_OK;
 }
 
-bool IsIdentityName(UINT16 id) noexcept
+bool IsIdentityName(UINT16 id, bool rewriteSubfamily) noexcept
 {
 	switch (id)
 	{
+	case 2:  // Subfamily
+	case 17: // Typographic subfamily
+		return rewriteSubfamily;
 	case 1:  // Font family
 	case 3:  // Unique identifier
 	case 4:  // Full name
@@ -188,6 +196,17 @@ bool EncodeName(
 bool EqualsInsensitive(std::wstring const& left, WCHAR const* right) noexcept
 {
 	return _wcsicmp(left.c_str(), right) == 0;
+}
+
+bool ContainsInsensitive(std::wstring const& text, WCHAR const* part) noexcept
+{
+	size_t const partLength = wcslen(part);
+	for (size_t start = 0; start + partLength <= text.size(); ++start)
+	{
+		if (_wcsnicmp(text.c_str() + start, part, partLength) == 0)
+			return true;
+	}
+	return false;
 }
 
 bool IsRegularStyle(std::wstring const& style) noexcept
@@ -295,6 +314,9 @@ std::wstring IdentityValue(
 		return identity.family;
 	case 3:
 		return identity.postScriptName + L";MacTypeAlias;" + HexHash(familyHash);
+	case 2:
+	case 17:
+		return identity.subfamily;
 	case 4:
 	case 18:
 		return identity.fullName;
@@ -311,9 +333,19 @@ std::wstring IdentityValue(
 	}
 }
 
+// A bold-advertised alias of a face that also backs a regular alias would
+// otherwise share its full and PostScript names, and DirectWrite keeps only
+// the first of two fonts with identical names.
+std::wstring AdvertisedSubfamily(std::wstring const& backingSubfamily)
+{
+	return ContainsInsensitive(backingSubfamily, L"Italic") ?
+		L"Bold Italic" : L"Bold";
+}
+
 bool BuildNameTable(
 	std::vector<BYTE> const& original,
 	std::wstring const& family,
+	bool advertiseBold,
 	std::vector<BYTE>& rewritten,
 	Identity& representativeIdentity)
 {
@@ -329,13 +361,16 @@ bool BuildNameTable(
 	kept.reserve(records.size());
 	for (NameRecord record : records)
 	{
-		if (!IsIdentityName(record.id))
+		if (!IsIdentityName(record.id, advertiseBold))
 		{
 			kept.emplace_back(std::move(record));
 			continue;
 		}
 
-		Identity const identity = MakeIdentity(family, FindSubfamily(records, record));
+		std::wstring subfamily = FindSubfamily(records, record);
+		if (advertiseBold)
+			subfamily = AdvertisedSubfamily(subfamily);
+		Identity const identity = MakeIdentity(family, subfamily);
 		std::vector<BYTE> value;
 		if (!EncodeName(record, IdentityValue(record.id, identity, familyHash), value))
 			continue;
@@ -411,11 +446,6 @@ bool IsScalerType(UINT32 value) noexcept
 {
 	return value == kTagTrueType || value == kTagCff ||
 		value == kTagTrue || value == kTagType1;
-}
-
-bool IsBoldWeightClass(UINT16 weight) noexcept
-{
-	return weight >= 600;
 }
 
 void AdvertiseOs2Weight(std::vector<BYTE>& table, UINT16 weight)
@@ -507,7 +537,12 @@ HRESULT BuildAliasedSfnt(
 			std::vector<BYTE> original(
 				source.begin() + table.sourceOffset,
 				source.begin() + table.sourceOffset + table.sourceLength);
-			if (!BuildNameTable(original, family, table.replacement, identity))
+			if (!BuildNameTable(
+					original,
+					family,
+					options.overrideWeight && IsBoldWeightClass(options.weight),
+					table.replacement,
+					identity))
 				return DWRITE_E_FILEFORMAT;
 			foundName = true;
 		}
@@ -641,10 +676,8 @@ HRESULT CreateAliasedReference(
 		if (FAILED(result) || fontFile == nullptr)
 			return FAILED(result) ? result : E_FAIL;
 
-		DWRITE_FONT_SIMULATIONS simulations =
+		DWRITE_FONT_SIMULATIONS const simulations =
 			replacementReference->GetSimulations();
-		if (options.addBoldSimulation)
-			simulations |= DWRITE_FONT_SIMULATIONS_BOLD;
 
 		CComPtr<IDWriteFontFaceReference1> replacementReference1;
 		CComPtr<IDWriteFactory6> factory6;

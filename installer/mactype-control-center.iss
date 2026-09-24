@@ -78,11 +78,11 @@ korean.ForeignContentsButton=계속
 english.StartServicePageCaption=Start the MacType service now?
 english.StartServicePageDescription=Choose whether MacType starts applying fonts as soon as setup finishes.
 english.StartServicePageSubCaption=The service is installed either way. Leave the box unchecked to install it without starting it; you can start it later from MacType Control Center.
-english.StartServiceOption=Start the service right after installation. The bundled default profile (Default.ini) is applied to newly opened apps immediately.
+english.StartServiceOption=Start the service right after installation. The bundled default profile (Default.ini) is applied right away to apps that are already open and to apps opened later.
 korean.StartServicePageCaption=MacType 서비스를 바로 시작할까요?
 korean.StartServicePageDescription=설치가 끝나자마자 MacType가 글꼴 적용을 시작할지 정합니다.
 korean.StartServicePageSubCaption=서비스는 어느 쪽이든 설치됩니다. 선택하지 않으면 서비스를 설치만 하고 시작하지 않으며, 나중에 MacType Control Center에서 시작할 수 있습니다.
-korean.StartServiceOption=설치 직후 서비스를 시작합니다. 새로 여는 앱에 기본 프로필(Default.ini)이 바로 적용됩니다.
+korean.StartServiceOption=설치 직후 서비스를 시작합니다. 이미 열려 있는 앱과 나중에 여는 앱에 기본 프로필(Default.ini)이 바로 적용됩니다.
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce

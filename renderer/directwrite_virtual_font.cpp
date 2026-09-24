@@ -1,4 +1,5 @@
 #include "directwrite_virtual_font.h"
+#include "sfnt_names.h"
 #include "virtual_font_cache.h"
 
 #include <algorithm>
@@ -31,58 +32,27 @@ constexpr UINT32 kTagType1 = MakeTag('t', 'y', 'p', '1');
 constexpr UINT32 kTagName = MakeTag('n', 'a', 'm', 'e');
 constexpr UINT32 kTagHead = MakeTag('h', 'e', 'a', 'd');
 constexpr UINT32 kTagDsig = MakeTag('D', 'S', 'I', 'G');
+constexpr UINT32 kTagOs2 = MakeTag('O', 'S', '/', '2');
 constexpr UINT32 kSfntChecksum = 0xB1B0AFBA;
+constexpr size_t kOs2WeightClassOffset = 4;
+constexpr size_t kOs2SelectionOffset = 62;
+constexpr UINT16 kOs2SelectionItalic = 0x0001;
+constexpr UINT16 kOs2SelectionBold = 0x0020;
+constexpr UINT16 kOs2SelectionRegular = 0x0040;
+constexpr size_t kHeadMacStyleOffset = 44;
+constexpr UINT16 kHeadMacStyleBold = 0x0001;
 
-bool CanRead(size_t offset, size_t length, size_t size) noexcept
-{
-	return offset <= size && length <= size - offset;
-}
-
-UINT16 ReadU16(std::vector<BYTE> const& bytes, size_t offset)
-{
-	return static_cast<UINT16>(
-		(static_cast<UINT16>(bytes[offset]) << 8) |
-		static_cast<UINT16>(bytes[offset + 1]));
-}
-
-UINT32 ReadU32(std::vector<BYTE> const& bytes, size_t offset)
-{
-	return (static_cast<UINT32>(bytes[offset]) << 24) |
-		(static_cast<UINT32>(bytes[offset + 1]) << 16) |
-		(static_cast<UINT32>(bytes[offset + 2]) << 8) |
-		static_cast<UINT32>(bytes[offset + 3]);
-}
-
-void WriteU16(std::vector<BYTE>& bytes, size_t offset, UINT16 value)
-{
-	bytes[offset] = static_cast<BYTE>(value >> 8);
-	bytes[offset + 1] = static_cast<BYTE>(value);
-}
-
-void WriteU32(std::vector<BYTE>& bytes, size_t offset, UINT32 value)
-{
-	bytes[offset] = static_cast<BYTE>(value >> 24);
-	bytes[offset + 1] = static_cast<BYTE>(value >> 16);
-	bytes[offset + 2] = static_cast<BYTE>(value >> 8);
-	bytes[offset + 3] = static_cast<BYTE>(value);
-}
-
-UINT32 TableChecksum(BYTE const* bytes, size_t size) noexcept
-{
-	UINT32 checksum = 0;
-	for (size_t offset = 0; offset < size; offset += 4)
-	{
-		UINT32 word = 0;
-		for (size_t byteIndex = 0; byteIndex < 4; ++byteIndex)
-		{
-			word <<= 8;
-			if (offset + byteIndex < size)
-				word |= bytes[offset + byteIndex];
-		}
-		checksum += word;
-	}
-	return checksum;
-}
+using renderer::sfnt::CanRead;
+using renderer::sfnt::DecodeName;
+using renderer::sfnt::IsUnicodeNameRecord;
+using renderer::sfnt::LanguageTagRecord;
+using renderer::sfnt::NameRecord;
+using renderer::sfnt::ReadNameTable;
+using renderer::sfnt::ReadU16;
+using renderer::sfnt::ReadU32;
+using renderer::sfnt::TableChecksum;
+using renderer::sfnt::WriteU16;
+using renderer::sfnt::WriteU32;
 
 class FontFileFragment
 {
@@ -158,20 +128,6 @@ HRESULT ReadReplacementFile(
 	return S_OK;
 }
 
-struct NameRecord
-{
-	UINT16 platform = 0;
-	UINT16 encoding = 0;
-	UINT16 language = 0;
-	UINT16 id = 0;
-	std::vector<BYTE> value;
-};
-
-struct LanguageTagRecord
-{
-	std::vector<BYTE> value;
-};
-
 bool IsIdentityName(UINT16 id) noexcept
 {
 	switch (id)
@@ -189,43 +145,6 @@ bool IsIdentityName(UINT16 id) noexcept
 	default:
 		return false;
 	}
-}
-
-bool IsUnicodeNameRecord(NameRecord const& record) noexcept
-{
-	return record.platform == 0 || record.platform == 3;
-}
-
-bool DecodeName(NameRecord const& record, std::wstring& value)
-{
-	value.clear();
-	if (IsUnicodeNameRecord(record))
-	{
-		if ((record.value.size() & 1) != 0)
-			return false;
-		value.reserve(record.value.size() / 2);
-		for (size_t offset = 0; offset < record.value.size(); offset += 2)
-		{
-			value.push_back(static_cast<WCHAR>(
-				(static_cast<UINT16>(record.value[offset]) << 8) |
-				static_cast<UINT16>(record.value[offset + 1])));
-		}
-		return true;
-	}
-	if (record.platform != 1 || record.value.empty())
-		return false;
-
-	int const required = MultiByteToWideChar(
-		CP_MACCP, 0,
-		reinterpret_cast<char const*>(record.value.data()),
-		static_cast<int>(record.value.size()), nullptr, 0);
-	if (required <= 0)
-		return false;
-	value.resize(static_cast<size_t>(required));
-	return MultiByteToWideChar(
-		CP_MACCP, 0,
-		reinterpret_cast<char const*>(record.value.data()),
-		static_cast<int>(record.value.size()), &value[0], required) == required;
 }
 
 bool EncodeName(
@@ -392,72 +311,6 @@ std::wstring IdentityValue(
 	}
 }
 
-bool ReadNameTable(
-	std::vector<BYTE> const& table,
-	UINT16& format,
-	std::vector<NameRecord>& records,
-	std::vector<LanguageTagRecord>& languageTags)
-{
-	if (!CanRead(0, 6, table.size()))
-		return false;
-	format = ReadU16(table, 0);
-	if (format > 1)
-		return false;
-	UINT16 const count = ReadU16(table, 2);
-	UINT16 const stringOffset = ReadU16(table, 4);
-	size_t const recordsEnd = 6 + static_cast<size_t>(count) * 12;
-	if (!CanRead(6, static_cast<size_t>(count) * 12, table.size()) ||
-		stringOffset < recordsEnd || stringOffset > table.size())
-		return false;
-
-	records.reserve(count);
-	for (UINT16 index = 0; index < count; ++index)
-	{
-		size_t const offset = 6 + static_cast<size_t>(index) * 12;
-		NameRecord record;
-		record.platform = ReadU16(table, offset);
-		record.encoding = ReadU16(table, offset + 2);
-		record.language = ReadU16(table, offset + 4);
-		record.id = ReadU16(table, offset + 6);
-		UINT16 const length = ReadU16(table, offset + 8);
-		UINT16 const valueOffset = ReadU16(table, offset + 10);
-		size_t const absolute = static_cast<size_t>(stringOffset) + valueOffset;
-		if (!CanRead(absolute, length, table.size()))
-			return false;
-		record.value.assign(
-			table.begin() + absolute,
-			table.begin() + absolute + length);
-		records.emplace_back(std::move(record));
-	}
-
-	if (format == 1)
-	{
-		if (!CanRead(recordsEnd, 2, table.size()))
-			return false;
-		UINT16 const countTags = ReadU16(table, recordsEnd);
-		size_t const tagsOffset = recordsEnd + 2;
-		if (!CanRead(tagsOffset, static_cast<size_t>(countTags) * 4, table.size()) ||
-			stringOffset < tagsOffset + static_cast<size_t>(countTags) * 4)
-			return false;
-		languageTags.reserve(countTags);
-		for (UINT16 index = 0; index < countTags; ++index)
-		{
-			size_t const offset = tagsOffset + static_cast<size_t>(index) * 4;
-			UINT16 const length = ReadU16(table, offset);
-			UINT16 const valueOffset = ReadU16(table, offset + 2);
-			size_t const absolute = static_cast<size_t>(stringOffset) + valueOffset;
-			if (!CanRead(absolute, length, table.size()))
-				return false;
-			LanguageTagRecord tag;
-			tag.value.assign(
-				table.begin() + absolute,
-				table.begin() + absolute + length);
-			languageTags.emplace_back(std::move(tag));
-		}
-	}
-	return true;
-}
-
 bool BuildNameTable(
 	std::vector<BYTE> const& original,
 	std::wstring const& family,
@@ -560,13 +413,49 @@ bool IsScalerType(UINT32 value) noexcept
 		value == kTagTrue || value == kTagType1;
 }
 
+bool IsBoldWeightClass(UINT16 weight) noexcept
+{
+	return weight >= 600;
+}
+
+void AdvertiseOs2Weight(std::vector<BYTE>& table, UINT16 weight)
+{
+	WriteU16(table, kOs2WeightClassOffset, weight);
+	UINT16 selection = ReadU16(table, kOs2SelectionOffset);
+	if (IsBoldWeightClass(weight))
+	{
+		selection = static_cast<UINT16>(
+			(selection | kOs2SelectionBold) & ~kOs2SelectionRegular);
+	}
+	else
+	{
+		selection = static_cast<UINT16>(selection & ~kOs2SelectionBold);
+		if ((selection & kOs2SelectionItalic) == 0)
+			selection = static_cast<UINT16>(selection | kOs2SelectionRegular);
+	}
+	WriteU16(table, kOs2SelectionOffset, selection);
+}
+
+void AdvertiseHeadWeight(std::vector<BYTE>& table, UINT16 weight)
+{
+	UINT16 macStyle = ReadU16(table, kHeadMacStyleOffset);
+	macStyle = IsBoldWeightClass(weight) ?
+		static_cast<UINT16>(macStyle | kHeadMacStyleBold) :
+		static_cast<UINT16>(macStyle & ~kHeadMacStyleBold);
+	WriteU16(table, kHeadMacStyleOffset, macStyle);
+}
+
+} // namespace
+
 HRESULT BuildAliasedSfnt(
 	std::vector<BYTE> const& source,
 	UINT32 faceIndex,
 	std::wstring const& family,
+	AliasOptions const& options,
 	std::vector<BYTE>& output,
 	Identity& identity)
 {
+	output.clear();
 	if (!CanRead(0, 12, source.size()))
 		return DWRITE_E_FILEFORMAT;
 
@@ -600,6 +489,7 @@ HRESULT BuildAliasedSfnt(
 	tables.reserve(sourceTableCount);
 	bool foundName = false;
 	bool foundHead = false;
+	bool foundOs2 = false;
 	for (UINT16 index = 0; index < sourceTableCount; ++index)
 	{
 		size_t const recordOffset = faceOffset + 12 +
@@ -625,11 +515,31 @@ HRESULT BuildAliasedSfnt(
 		{
 			if (table.sourceLength < 12)
 				return DWRITE_E_FILEFORMAT;
+			if (options.overrideWeight)
+			{
+				if (table.sourceLength < kHeadMacStyleOffset + 2)
+					return DWRITE_E_FILEFORMAT;
+				table.replacement.assign(
+					source.begin() + table.sourceOffset,
+					source.begin() + table.sourceOffset + table.sourceLength);
+				AdvertiseHeadWeight(table.replacement, options.weight);
+			}
 			foundHead = true;
+		}
+		else if (table.tag == kTagOs2 && options.overrideWeight)
+		{
+			if (table.sourceLength < kOs2SelectionOffset + 2)
+				return DWRITE_E_FILEFORMAT;
+			table.replacement.assign(
+				source.begin() + table.sourceOffset,
+				source.begin() + table.sourceOffset + table.sourceLength);
+			AdvertiseOs2Weight(table.replacement, options.weight);
+			foundOs2 = true;
 		}
 		tables.emplace_back(std::move(table));
 	}
 	if (!foundName || !foundHead || tables.empty() ||
+		(options.overrideWeight && !foundOs2) ||
 		tables.size() > std::numeric_limits<UINT16>::max())
 		return DWRITE_E_FILEFORMAT;
 
@@ -690,15 +600,13 @@ HRESULT BuildAliasedSfnt(
 	return S_OK;
 }
 
-
-} // namespace
-
 HRESULT CreateAliasedReference(
 	IDWriteFactory3* factory,
 	IDWriteFontFaceReference* replacementReference,
 	WCHAR const* aliasFamily,
 	CComPtr<IDWriteFontFaceReference>& reference,
-	Identity& identity)
+	Identity& identity,
+	AliasOptions const& options)
 {
 	reference.Release();
 	identity = {};
@@ -718,7 +626,7 @@ HRESULT CreateAliasedReference(
 
 		std::vector<BYTE> aliased;
 		result = BuildAliasedSfnt(
-			source, faceIndex, aliasFamily, aliased, identity);
+			source, faceIndex, aliasFamily, options, aliased, identity);
 		if (FAILED(result))
 			return result;
 
@@ -732,6 +640,11 @@ HRESULT CreateAliasedReference(
 			backingPath.c_str(), nullptr, &fontFile);
 		if (FAILED(result) || fontFile == nullptr)
 			return FAILED(result) ? result : E_FAIL;
+
+		DWRITE_FONT_SIMULATIONS simulations =
+			replacementReference->GetSimulations();
+		if (options.addBoldSimulation)
+			simulations |= DWRITE_FONT_SIMULATIONS_BOLD;
 
 		CComPtr<IDWriteFontFaceReference1> replacementReference1;
 		CComPtr<IDWriteFactory6> factory6;
@@ -748,7 +661,7 @@ HRESULT CreateAliasedReference(
 				result = factory6->CreateFontFaceReference(
 					fontFile,
 					0,
-					replacementReference->GetSimulations(),
+					simulations,
 					axisValues.data(),
 					axisCount,
 					&aliasedReference1);
@@ -763,7 +676,7 @@ HRESULT CreateAliasedReference(
 		return factory->CreateFontFaceReference(
 			fontFile,
 			0,
-			replacementReference->GetSimulations(),
+			simulations,
 			&reference);
 	}
 	catch (std::bad_alloc const&)

@@ -220,6 +220,8 @@ export interface AdvancedProfile {
   lcdFilterWeight: ReadonlyArray<number> | null;
   pixelLayout: ReadonlyArray<number> | null;
   fontSubstitutes: ReadonlyArray<string>;
+  /* "ReplacementFamily=BoldFamily" lines read by the explicit-pairs bold mode. */
+  fontSubstituteBoldPairs: ReadonlyArray<string>;
 }
 
 export interface PreviewSample {

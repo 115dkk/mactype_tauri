@@ -3,6 +3,8 @@ import type { ProfileFollowUp } from "./useProfileDocument";
 import type { AdvancedProfile } from "../../app/model";
 import type { SettingDefinition } from "../../generated/settings";
 import type { I18nValue, MessageKey } from "../../i18n/i18n";
+import { BoldSubstitutionPairEditor } from "./BoldSubstitutionPairEditor";
+import { boldPairsRequired, isSettingDisclosed } from "./boldSubstitution";
 import { FontSubstitutionEditor } from "./FontSubstitutionEditor";
 import { SchemaSettings } from "./SchemaSettings";
 import { stepSupportsHistory, guidedScaleBySettingId, guidedSettingIdsByStep, guidedStepIds, type GuidedStepId } from "./guidedModel";
@@ -43,6 +45,13 @@ interface GuidedSettingsProps {
   values: Readonly<Record<string, number>>;
 }
 
+const boldModeNoteKeys: Readonly<Record<number, MessageKey>> = {
+  0: "advanced.boldSubstitutionNote.off",
+  1: "advanced.boldSubstitutionNote.synthetic",
+  2: "advanced.boldSubstitutionNote.auto",
+  3: "advanced.boldSubstitutionNote.pairs",
+};
+
 export function GuidedSettings({
   activeStep,
   advanced,
@@ -82,7 +91,10 @@ export function GuidedSettings({
   /* Keep the step's own order (legacy Tuner screen order), not schema order. */
   const currentSettings = guidedSettingIdsByStep[activeStep]
     .map((settingId) => settings.find((setting) => setting.id === settingId))
-    .filter((setting): setting is SettingDefinition => setting !== undefined);
+    .filter((setting): setting is SettingDefinition => setting !== undefined)
+    .filter((setting) => isSettingDisclosed(setting.id, values));
+  const boldMode = values.font_substitute_bold_mode;
+  const boldModeDisclosed = activeStep === "substitution" && currentSettings.some((setting) => setting.id === "font_substitute_bold_mode");
   const previousStep = guidedStepIds[stepIndex - 1];
   const nextStep = guidedStepIds[stepIndex + 1];
   const stepAtFactory = currentSettings.every((setting) => (values[setting.id] ?? setting.default) === setting.factory);
@@ -147,7 +159,16 @@ export function GuidedSettings({
         {activeStep !== "start" && activeStep !== "apply" && <SchemaSettings dirtyKeys={dirtyKeys} endpointWords={endpointWords} onChange={onSettingChange} onPreviewChange={onSettingPreview} savedValues={savedValues} settings={currentSettings} t={t} values={values} variant="guided" />}
         {activeStep === "substitution" && (
           <div className="advanced-editor guided-substitution">
+            {boldModeDisclosed && boldMode !== undefined && boldMode in boldModeNoteKeys && (
+              <p className="bold-substitution-note" role="note">{t(boldModeNoteKeys[boldMode])}</p>
+            )}
             <fieldset><FontSubstitutionEditor advanced={advanced} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} onCommit={onAdvancedCommit} t={t} /></fieldset>
+            {boldPairsRequired(values) && (
+              <fieldset>
+                <legend>{t("advanced.boldSubstitutionPairs")}</legend>
+                <BoldSubstitutionPairEditor advanced={advanced} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} onCommit={onAdvancedCommit} t={t} />
+              </fieldset>
+            )}
           </div>
         )}
         {activeStep === "apply" && (

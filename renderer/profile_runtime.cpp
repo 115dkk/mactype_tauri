@@ -55,7 +55,8 @@ bool IsCompleteCandidate(const RendererPolicyCandidate& candidate) noexcept
 		candidate.directWrite.contrast <= 0.0f ||
 		!std::isfinite(candidate.directWrite.clearTypeLevel) ||
 		candidate.directWrite.clearTypeLevel < 0.0f ||
-		candidate.directWrite.clearTypeLevel > 1.0f)
+		candidate.directWrite.clearTypeLevel > 1.0f ||
+		candidate.substitutionBoldMode > font_substitution::BoldMode::pairs)
 		return false;
 	for (const FontIndividualPolicy& individual : candidate.individualFonts)
 	{
@@ -163,7 +164,10 @@ ProfilePublication ProfileRuntime::Publish(
 		const std::uint64_t revision = revision_ + 1;
 		std::shared_ptr<const font_substitution::Snapshot> substitutions =
 			font_substitution::Snapshot::Build(
-				std::move(candidate.substitutionRules), revision);
+				std::move(candidate.substitutionRules),
+				candidate.substitutionBoldMode,
+				std::move(candidate.substitutionBoldPairs),
+				revision);
 		RendererPolicyRef snapshot(new RendererPolicySnapshot(
 			std::move(candidate), generation, revision, substitutions));
 

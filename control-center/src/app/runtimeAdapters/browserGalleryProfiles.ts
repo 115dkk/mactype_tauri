@@ -38,6 +38,7 @@ const fallbackGalleryProfile: ProfileSnapshot = {
     lcdFilterWeight: null,
     pixelLayout: null,
     fontSubstitutes: [],
+    fontSubstituteBoldPairs: [],
   },
 };
 

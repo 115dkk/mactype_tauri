@@ -126,6 +126,93 @@ int main()
                 result.family == L"Missing",
             "an unmatched family must be returned unchanged");
 
+    substitution::BoldPair pair;
+    Require(substitution::ParseBoldPairLine(L"  Pretendard Medium \t=  Pretendard Bold ", pair) &&
+                pair.family == L"Pretendard Medium" && pair.boldFamily == L"Pretendard Bold",
+            "a bold pair line must trim both sides");
+    Require(substitution::ParseBoldPairLine(L"Noto Sans KR,129=Noto Sans KR Bold , 129", pair) &&
+                pair.family == L"Noto Sans KR" && pair.boldFamily == L"Noto Sans KR Bold",
+            "a bold pair line must drop a trailing charset suffix from either side");
+    Require(substitution::ParseBoldPairLine(L"Family,Name=Bold", pair) &&
+                pair.family == L"Family,Name",
+            "a comma that is not a charset suffix must stay in the family name");
+    Require(!substitution::ParseBoldPairLine(L"Pretendard", pair) &&
+                pair.family.empty() && pair.boldFamily.empty(),
+            "a bold pair line without '=' must be ignored");
+    Require(!substitution::ParseBoldPairLine(L"=Pretendard Bold", pair) &&
+                !substitution::ParseBoldPairLine(L"Pretendard=  ", pair) &&
+                !substitution::ParseBoldPairLine(L",129=Bold", pair),
+            "a bold pair line with an empty side must be ignored");
+    Require(!substitution::ParseBoldPairLine(L"Pretendard=pretendard", pair),
+            "an identity bold pair must be ignored");
+
+    substitution::BoldMode mode = substitution::BoldMode::ignoreWeight;
+    Require(substitution::BoldModeFromProfileValue(3, mode) &&
+                mode == substitution::BoldMode::pairs &&
+                !substitution::BoldModeFromProfileValue(4, mode) &&
+                mode == substitution::BoldMode::sameFamily,
+            "profile values must map onto bold modes and default to same family");
+
+    std::vector<substitution::Rule> const boldRules = {Rule(L"Malgun Gothic", L"Pretendard Medium")};
+    auto pairs = substitution::Snapshot::Build(
+        boldRules, substitution::BoldMode::pairs,
+        {{L"Pretendard Medium", L"Overridden Bold"},
+         {L"PRETENDARD MEDIUM", L"Pretendard Bold"},
+         {L"", L"Empty"},
+         {L"Same", L"same"},
+         {L"Other", L"Other Bold"}},
+        20);
+    Require(pairs->bold_pairs().size() == 2 &&
+                pairs->bold_pairs()[0].boldFamily == L"Pretendard Bold",
+            "bold pairs must drop empty and identity pairs and keep the last per family");
+    Require(pairs->FindBoldPair(L"pretendard medium") != nullptr &&
+                pairs->FindBoldPair(L"pretendard medium")->boldFamily == L"Pretendard Bold" &&
+                pairs->FindBoldPair(L"Missing") == nullptr,
+            "bold pair lookup must be case-insensitive");
+
+    substitution::BoldPlan plan = pairs->PlanBold(L"Pretendard Medium", 700);
+    Require(plan.action == substitution::BoldAction::pairedFamily &&
+                plan.pairedFamily == L"Pretendard Bold",
+            "pairs mode must direct a bold request to its paired family");
+    Require(pairs->PlanBold(L"Unpaired", 700).action == substitution::BoldAction::dropWeight,
+            "pairs mode without a pair must ignore the requested weight");
+    Require(pairs->PlanBold(L"Pretendard Medium", 599).action ==
+                substitution::BoldAction::unchanged,
+            "a request below the bold class must keep today's behaviour");
+    Require(substitution::Snapshot::Build(boldRules, substitution::BoldMode::ignoreWeight, {}, 21)
+                    ->PlanBold(L"Pretendard Medium", 600).action ==
+                substitution::BoldAction::dropWeight &&
+                substitution::Snapshot::Build(boldRules, substitution::BoldMode::synthetic, {}, 21)
+                        ->PlanBold(L"Pretendard Medium", 600).action ==
+                    substitution::BoldAction::keepWeight &&
+                substitution::Snapshot::Build(boldRules, substitution::BoldMode::sameFamily, {}, 21)
+                        ->PlanBold(L"Pretendard Medium", 600).action ==
+                    substitution::BoldAction::sameFamilyFace,
+            "each bold mode must map onto its adapter action");
+
+    auto twoArgument = substitution::Snapshot::Build(boldRules, 30);
+    auto sameFamily = substitution::Snapshot::Build(
+        boldRules, substitution::BoldMode::sameFamily, {}, 30);
+    Require(twoArgument->bold_mode() == substitution::BoldMode::sameFamily &&
+                twoArgument->bold_pairs().empty() &&
+                twoArgument->digest() == sameFamily->digest(),
+            "the two-argument build must mean same-family mode without pairs");
+    auto pairsReloaded = substitution::Snapshot::Build(
+        boldRules, substitution::BoldMode::pairs,
+        {{L"Pretendard Medium", L"Pretendard Bold"}, {L"Other", L"Other Bold"}}, 40);
+    Require(pairsReloaded->digest() == pairs->digest(),
+            "identical bold settings must keep one digest across generations");
+    auto pairsChanged = substitution::Snapshot::Build(
+        boldRules, substitution::BoldMode::pairs,
+        {{L"Pretendard Medium", L"Pretendard ExtraBold"}, {L"Other", L"Other Bold"}}, 40);
+    auto modeChanged = substitution::Snapshot::Build(
+        boldRules, substitution::BoldMode::synthetic,
+        {{L"Pretendard Medium", L"Pretendard Bold"}, {L"Other", L"Other Bold"}}, 40);
+    Require(pairsChanged->digest() != pairs->digest() &&
+                modeChanged->digest() != pairs->digest() &&
+                sameFamily->digest() != pairs->digest(),
+            "a bold mode or pair change must change the snapshot digest");
+
     std::cout << "Font substitution snapshot tests passed.\n";
     return 0;
 }

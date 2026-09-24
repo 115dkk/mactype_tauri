@@ -834,6 +834,9 @@
     <ClCompile Include="renderer\ft2vert.c" />
     <ClCompile Include="renderer\fteng.cpp" />
     <ClCompile Include="renderer\font_substitution.cpp" />
+    <ClCompile Include="renderer\bold_face_selection.cpp" />
+    <ClCompile Include="renderer\gdi_family_catalog.cpp" />
+    <ClCompile Include="renderer\sfnt_names.cpp" />
     <ClCompile Include="renderer\ftref.c" />
     <ClCompile Include="renderer\gdiPlusFlat2.cpp" />
     <ClCompile Include="renderer\hash_list.cpp" />
@@ -892,6 +895,9 @@
     <ClInclude Include="renderer\ftref.h" />
     <ClInclude Include="renderer\freetype_runtime.h" />
     <ClInclude Include="renderer\font_substitution.h" />
+    <ClInclude Include="renderer\bold_face_selection.h" />
+    <ClInclude Include="renderer\gdi_family_catalog.h" />
+    <ClInclude Include="renderer\sfnt_names.h" />
     <ClInclude Include="renderer\gdiPlusFlat2.h" />
     <ClInclude Include="renderer\hash_list.h" />
     <ClInclude Include="renderer\hookCounter.h" />

@@ -7,6 +7,7 @@ use std::{
 };
 use tauri::State;
 
+mod bold_substitution;
 mod codec;
 mod commands;
 mod document;
@@ -225,6 +226,8 @@ pub struct AdvancedProfile {
     pub lcd_filter_weight: Option<Vec<i32>>,
     pub pixel_layout: Option<Vec<i32>>,
     pub font_substitutes: Vec<String>,
+    #[serde(default)]
+    pub font_substitute_bold_pairs: Vec<String>,
 }
 
 #[tauri::command]

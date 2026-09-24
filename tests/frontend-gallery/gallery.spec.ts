@@ -972,6 +972,111 @@ for (const skin of gallerySkins) {
   }
 }
 
+test.describe("shared bold substitution method follows the substitution choice and its mappings", () => {
+  test.describe.configure({ mode: "parallel" });
+  for (const skin of gallerySkins) {
+    test(`bold substitution method follows the substitution choice and its mappings ${skin}`, async ({ page }, testInfo) => {
+      await page.goto(`/?view=profiles&gallery=1&lang=ko&skin=${skin}`, { waitUntil: "networkidle" });
+
+      // With substitution off, the bold method exists nowhere a settings list renders.
+      await expect(page.locator("#font_substitutes")).toBeVisible();
+      await expect(page.locator("#font_substitute_bold_mode")).toHaveCount(0);
+      // Search results follow the same rule; the narrow Cupertino layout has no settings search.
+      const search = page.getByRole("searchbox", { name: "설정 검색", exact: true });
+      if (await search.isVisible()) {
+        await search.fill("글꼴 대체");
+        await expect(page.locator("#font_substitutes")).toBeVisible();
+        await expect(page.locator("#font_substitute_bold_mode")).toHaveCount(0);
+        await search.fill("");
+      }
+
+      await page.locator('[data-nav="guided"]').click();
+      await expect(page.locator("body")).toHaveAttribute("data-profile-mode", "guided");
+      await page.locator("main").getByRole("button", { name: "글꼴 대체" }).click();
+      const boldMode = page.getByRole("group", { name: "굵은 글꼴 대체 방식", exact: true });
+      const pairs = page.getByRole("group", { name: "굵은 글꼴 쌍", exact: true });
+      await expect(boldMode).toHaveCount(0);
+      await expect(pairs).toHaveCount(0);
+
+      // Choosing substitution discloses the method at its automatic default.
+      await page.getByRole("radio", { name: "안전한 대체", exact: true }).check();
+      await expect(boldMode).toBeVisible();
+      await expect(boldMode.getByRole("radio", { name: "같은 글꼴에서 자동 선택", exact: true })).toBeChecked();
+      await expect(page.getByRole("note").filter({ hasText: "같은 글꼴의 Bold 글꼴을 자동으로 고릅니다." })).toBeVisible();
+      await expect(pairs).toHaveCount(0);
+
+      // Explicit pairs start empty until a mapping names a replacement family.
+      await boldMode.getByRole("radio", { name: "선택한 글꼴 쌍으로 대체", exact: true }).check();
+      await expect(page.getByRole("note").filter({ hasText: "없음이면 굵게 그리지 않습니다." })).toBeVisible();
+      await expect(pairs).toBeVisible();
+      await expect(pairs.getByRole("note")).toHaveText("글꼴 대체 매핑을 먼저 추가하세요.");
+      await page.getByRole("button", { name: "글꼴 대체 추가" }).click();
+      const replacement = await page.getByRole("combobox", { name: "대체 글꼴", exact: true }).last().inputValue();
+      const boldSelect = pairs.getByRole("combobox", { name: "굵은 대체 글꼴", exact: true });
+      await expect(pairs.locator(".font-substitution-source")).toHaveCount(1);
+      await expect(pairs.locator(".font-substitution-source")).toHaveText(replacement);
+      await expect(pairs.locator(".font-substitution-source")).toHaveAttribute("aria-label", "대체 글꼴");
+      await expect(pairs.getByRole("button")).toHaveCount(0);
+      await expect(boldSelect).toHaveCount(1);
+      await expect(boldSelect).toHaveValue("");
+      await expect(boldSelect.locator("option:checked")).toHaveText("없음");
+      await expect.poll(() => overflowingElements(page)).toEqual([]);
+      await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-guided-bold-pairs-ko.png`), fullPage: true });
+
+      // None is a valid relation: the profile saves with the pair unassigned.
+      await page.locator("main").getByRole("button", { name: "실행 프로필 지정", exact: true }).click();
+      const guidedSave = page.locator(".guided-apply-card").getByRole("button", { name: "프로필 저장", exact: true });
+      await expect(guidedSave).toBeEnabled();
+      await guidedSave.click();
+      await expect(guidedSave).toBeDisabled();
+      await expect(page.locator(".guided-apply-card p[data-dirty]")).toHaveAttribute("data-dirty", "false");
+
+      // Assigning a bold family writes the pair and dirties the profile.
+      await page.locator("main").getByRole("button", { name: "글꼴 대체" }).click();
+      const boldFamily = replacement === "Arial" ? "Calibri" : "Arial";
+      await boldSelect.selectOption(boldFamily);
+      await expect(boldSelect).toHaveValue(boldFamily);
+      await page.locator("main").getByRole("button", { name: "실행 프로필 지정", exact: true }).click();
+      await expect(guidedSave).toBeEnabled();
+
+      // All settings shows the method in the basic group and the same pair
+      // editor under the mapping list of the advanced group.
+      await page.locator('[data-nav="all"]').click();
+      await expect(page.locator("body")).toHaveAttribute("data-profile-mode", "all");
+      await expect(page.locator("#font_substitute_bold_mode")).toHaveValue("3");
+      await page.getByRole("button", { name: "고급·실험" }).click();
+      const mappings = page.getByRole("group", { name: "글꼴 대체 매핑", exact: true });
+      const allPairs = page.getByRole("group", { name: "굵은 글꼴 쌍", exact: true });
+      await expect(allPairs).toBeVisible();
+      const mappingsBox = await mappings.boundingBox();
+      const pairsBox = await allPairs.boundingBox();
+      if (!mappingsBox || !pairsBox) throw new Error("Both substitution editors must render");
+      expect(pairsBox.y, "the pair editor sits under the mapping list").toBeGreaterThanOrEqual(mappingsBox.y + mappingsBox.height - 1);
+      await expect(allPairs.locator(".font-substitution-source")).toHaveText(replacement);
+      const allBoldSelect = allPairs.getByRole("combobox", { name: "굵은 대체 글꼴", exact: true });
+      await expect(allBoldSelect).toHaveValue(boldFamily);
+      const save = page.getByRole("button", { name: "저장", exact: true });
+      await expect(save).toBeEnabled();
+      await expect.poll(() => overflowingElements(page)).toEqual([]);
+      await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-all-bold-pairs-ko.png`), fullPage: true });
+
+      // Choosing None again removes the pair; the document still saves.
+      await allBoldSelect.selectOption("");
+      await expect(allBoldSelect).toHaveValue("");
+      await save.click();
+      await expect(save).toBeDisabled();
+      await expect(allBoldSelect).toHaveValue("");
+
+      // Turning substitution off hides the method and the pair editor again.
+      await page.getByRole("button", { name: "기본 설정" }).click();
+      await page.locator("#font_substitutes").selectOption("0");
+      await expect(page.locator("#font_substitute_bold_mode")).toHaveCount(0);
+      await page.getByRole("button", { name: "고급·실험" }).click();
+      await expect(allPairs).toHaveCount(0);
+    });
+  }
+});
+
 test.describe("shared guided step undo, redo, and discard stay scoped to the current step", () => {
   test.describe.configure({ mode: "parallel" });
   for (const skin of gallerySkins) {

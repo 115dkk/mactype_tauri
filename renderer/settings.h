@@ -211,6 +211,8 @@ private:
 	int  m_nLcdFilter;
 	int  m_nShadow[4];
 	int  m_nFontSubstitutes;
+	int  m_nFontSubstitutesBold = 2;
+	std::vector<renderer::font_substitution::BoldPair> m_fontSubstituteBoldPairs;
 	int  m_nUnityFontHook;
 	int	 m_bFontLink;	//改为可以使用多种参数
 	int  m_nWidthMode;

@@ -29,6 +29,7 @@ const emptyAdvancedProfile: AdvancedProfile = {
   lcdFilterWeight: null,
   pixelLayout: null,
   fontSubstitutes: [],
+  fontSubstituteBoldPairs: [],
 };
 
 function errorMessage(error: unknown): string {
@@ -42,6 +43,7 @@ function cloneAdvancedProfile(advanced: AdvancedProfile): AdvancedProfile {
     lcdFilterWeight: advanced.lcdFilterWeight ? [...advanced.lcdFilterWeight] : null,
     pixelLayout: advanced.pixelLayout ? [...advanced.pixelLayout] : null,
     fontSubstitutes: [...advanced.fontSubstitutes],
+    fontSubstituteBoldPairs: [...(advanced.fontSubstituteBoldPairs ?? [])],
   };
 }
 

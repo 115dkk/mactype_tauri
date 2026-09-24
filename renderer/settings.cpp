@@ -4,6 +4,8 @@
 #include "supinfo.h"
 #include "fteng.h"
 #include "font_substitution.h"
+#include "bold_face_selection.h"
+#include "gdi_family_catalog.h"
 #include "profile_runtime.h"
 #include <stdlib.h>
 #include <freetype/ftmodapi.h>
@@ -267,6 +269,22 @@ void CGdippSettings::DelayedInit()
 		AddListFromSection(_T("FontSubstitutes"), m_szFileName, arrFontSubstitutes);
 	m_FontSubstitutesInfo.init(m_nFontSubstitutes, arrFontSubstitutes);
 
+	// IniParser keeps one value per key (the last line) and returns the keys
+	// sorted case-insensitively; among what it returns, the last accepted
+	// pair for a family wins in Snapshot::Build.
+	m_fontSubstituteBoldPairs.clear();
+	names = _T("FontSubstitutesBold@") + wstring(m_szexeName);
+	LPCTSTR const boldSection =
+		_IsFreeTypeProfileSectionExists(names.c_str(), m_szFileName) ?
+		names.c_str() : _T("FontSubstitutesBold");
+	for (LPCTSTR line = _GetPrivateProfileSection(boldSection, m_szFileName);
+		line != nullptr && *line != _T('\0'); line += _tcslen(line) + 1)
+	{
+		renderer::font_substitution::BoldPair pair;
+		if (renderer::font_substitution::ParseBoldPairLine(line, pair))
+			m_fontSubstituteBoldPairs.push_back(std::move(pair));
+	}
+
 	auto hdcScreen = renderer_raii::AdoptWindowDeviceContext(nullptr, GetDC(nullptr));
 	if (!hdcScreen) {
 		// Nothing below runs without the screen DC, so this is the only
@@ -437,8 +455,11 @@ bool CGdippSettings::PublishRendererPolicySnapshot(
 	}
 
 	candidate.substitutionsReady = substitutionsReady;
+	renderer::font_substitution::BoldModeFromProfileValue(
+		m_nFontSubstitutesBold, candidate.substitutionBoldMode);
 	if (substitutionsReady)
 	{
+		candidate.substitutionBoldPairs = m_fontSubstituteBoldPairs;
 		candidate.substitutionRules.reserve(
 			static_cast<size_t>(m_FontSubstitutesInfo.GetSize()));
 		for (int index = 0; index < m_FontSubstitutesInfo.GetSize(); ++index)
@@ -787,6 +808,8 @@ SKIP:
 													 SETTING_FONTSUBSTITUTE_DISABLE,
 													 SETTING_FONTSUBSTITUTE_ALL,
 												 lpszFile);
+	m_nFontSubstitutesBold = _GetFreeTypeProfileBoundInt(
+		_T("FontSubstitutesBold"), 2, 0, 3, lpszFile);
 	m_nUnityFontHook = _GetFreeTypeProfileBoundInt(
 		_T("UnityFontHook"),
 		SETTING_UNITY_FONT_HOOK_OFF,
@@ -1478,6 +1501,91 @@ int CGdippSettings::_GetAlternativeProfileName(LPTSTR lpszName, LPCTSTR lpszFile
 	}
 }
 
+namespace {
+
+bool SetSubstitutedFace(
+	LOGFONT& lf,
+	bool vertical,
+	const std::wstring& family,
+	int weight) noexcept
+{
+	WCHAR face[LF_FACESIZE] = {};
+	HRESULT const copied = vertical ?
+		StringCchPrintfW(face, LF_FACESIZE, L"@%s", family.c_str()) :
+		StringCchCopyW(face, LF_FACESIZE, family.c_str());
+	if (FAILED(copied))
+		return false;
+	memcpy(lf.lfFaceName, face, sizeof(face));
+	lf.lfWeight = weight;
+	return true;
+}
+
+// Runs after the family swap. keepWeight leaves the request as it is, so GDI
+// and FreeType synthesize bold from the replacement face.
+void ApplySubstitutionBoldPolicy(
+	const renderer::font_substitution::Snapshot& snapshot,
+	const std::wstring& resolvedFamily,
+	const LOGFONT& original,
+	LOGFONT& lf) noexcept
+{
+	namespace substitution = renderer::font_substitution;
+	namespace selection = renderer::bold_face_selection;
+	try
+	{
+		bool const vertical = !resolvedFamily.empty() && resolvedFamily[0] == L'@';
+		std::wstring const family =
+			vertical ? resolvedFamily.substr(1) : resolvedFamily;
+		substitution::BoldPlan const plan =
+			snapshot.PlanBold(family, static_cast<int>(original.lfWeight));
+		bool const italic = original.lfItalic != 0;
+		std::vector<selection::FaceCandidate> faces;
+		switch (plan.action)
+		{
+		case substitution::BoldAction::unchanged:
+		case substitution::BoldAction::keepWeight:
+			return;
+		case substitution::BoldAction::dropWeight:
+			lf.lfWeight = FW_NORMAL;
+			return;
+		case substitution::BoldAction::sameFamilyFace:
+		{
+			if (!renderer::gdi_family_catalog::FamilyFaces(family.c_str(), faces))
+				return;
+			const selection::FaceCandidate* const base =
+				selection::SelectNearestWeight(faces, FW_NORMAL, italic);
+			if (base == nullptr)
+				return;
+			int const baseWeight = base->weight;
+			if (!renderer::gdi_family_catalog::TypographicFamilyFaces(
+					family.c_str(), faces))
+				return;
+			const selection::FaceCandidate* const chosen = selection::SelectBoldFace(
+				faces, baseWeight, static_cast<int>(original.lfWeight), italic);
+			if (chosen != nullptr)
+				SetSubstitutedFace(lf, vertical, chosen->gdiFamily, chosen->weight);
+			return;
+		}
+		case substitution::BoldAction::pairedFamily:
+		{
+			const selection::FaceCandidate* chosen = nullptr;
+			if (renderer::gdi_family_catalog::FamilyFaces(
+					plan.pairedFamily.c_str(), faces))
+				chosen = selection::SelectNearestWeight(
+					faces, static_cast<int>(original.lfWeight), italic);
+			if (chosen == nullptr ||
+				!SetSubstitutedFace(lf, vertical, chosen->gdiFamily, chosen->weight))
+				lf.lfWeight = FW_NORMAL;
+			return;
+		}
+		}
+	}
+	catch (...)
+	{
+	}
+}
+
+} // namespace
+
 bool CGdippSettings::CopyForceFont(LOGFONT& lf, const LOGFONT& lfOrg) const
 {
 	_ASSERTE(m_bDelayedInit);
@@ -1501,8 +1609,11 @@ bool CGdippSettings::CopyForceFont(LOGFONT& lf, const LOGFONT& lfOrg) const
 		return false;
 
 	lf = original;
-	return SUCCEEDED(StringCchCopy(
-		lf.lfFaceName, LF_FACESIZE, resolution.family.c_str()));
+	if (FAILED(StringCchCopy(
+			lf.lfFaceName, LF_FACESIZE, resolution.family.c_str())))
+		return false;
+	ApplySubstitutionBoldPolicy(*snapshot, resolution.family, original, lf);
+	return true;
 }
 
 CFontLinkInfo::CFontLinkInfo()

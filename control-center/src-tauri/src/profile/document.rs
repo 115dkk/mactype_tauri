@@ -1,4 +1,5 @@
 use super::{
+    bold_substitution::canonical_pairs,
     codec::{decode, detect_line_ending, original_legacy_lines, split_lines},
     identity::identify_profile,
     AdvancedProfile, IndividualSetting, IniNode, LineEnding, ProfileDocument, ProfileLists,
@@ -240,6 +241,7 @@ impl ProfileDocument {
             lcd_filter_weight: self.parse_vector("General", "LcdFilterWeight", 5),
             pixel_layout: self.parse_vector("General", "PixelLayout", 6),
             font_substitutes: self.list_entries("FontSubstitutes"),
+            font_substitute_bold_pairs: canonical_pairs(&self.list_entries("FontSubstitutesBold")),
         }
     }
 

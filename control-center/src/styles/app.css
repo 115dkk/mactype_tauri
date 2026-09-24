@@ -299,6 +299,10 @@ input[type="range"] { min-width: 0; height: var(--control-height); margin: 0; pa
 .font-substitution-row select { width: 100%; min-width: 0; padding-inline: var(--space-2); }
 .font-substitution-row > svg { color: var(--color-muted); }
 [dir="rtl"] .font-substitution-row > svg { transform: rotate(180deg); }
+/* The replacement family of a bold pair follows the mapping list; it is a fixed value, not an input, so it keeps the control box but drops the field look. */
+.font-substitution-source { display: flex; min-width: 0; min-height: var(--control-height); align-items: center; padding-inline: var(--space-2); border: 1px dashed var(--color-border); border-radius: var(--radius-control); background: var(--color-surface-subtle); color: var(--color-foreground); overflow-wrap: anywhere; }
+.bold-substitution-note, .bold-substitution-empty { margin: 0; color: var(--color-muted); }
+.guided-substitution .bold-substitution-note { padding-inline: var(--space-3); }
 .font-add-button { justify-self: start; }
 .individual-row { display: grid; grid-template-columns: 150px minmax(0, 1fr) var(--control-height); align-items: center; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--color-border); background: var(--color-surface); }
 .individual-row > div { display: grid; grid-template-columns: repeat(6, minmax(64px, 1fr)); gap: var(--space-2); }

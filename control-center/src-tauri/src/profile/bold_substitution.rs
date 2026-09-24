@@ -2,9 +2,10 @@
 //!
 //! The renderer and the frontend apply the same rules: a family name loses a
 //! trailing `,<digits>` charset suffix, families compare case-insensitively,
-//! and a broken pair line counts as no pair at all.
+//! the last pair written for a family wins, and a broken pair line counts as
+//! no pair at all.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 /// Trims a family name and drops a trailing `,<digits>` charset suffix.
 fn family_name(raw: &str) -> &str {
@@ -31,15 +32,24 @@ pub(super) fn parse_pair(line: &str) -> Option<(String, String)> {
     Some((family.to_owned(), bold.to_owned()))
 }
 
-/// Valid pairs in canonical `Family=BoldFamily` form; malformed lines are
-/// dropped and only the first pair for each family is kept.
+/// Valid pairs in canonical `Family=BoldFamily` form, in the order each
+/// family first appears; malformed lines are dropped and the last pair
+/// written for a family replaces the earlier ones, as an ini key would.
 pub(super) fn canonical_pairs<'a>(lines: impl IntoIterator<Item = &'a String>) -> Vec<String> {
-    let mut seen = BTreeSet::new();
-    lines
-        .into_iter()
-        .filter_map(|line| parse_pair(line))
-        .filter(|(family, _)| seen.insert(family.to_lowercase()))
-        .map(|(family, bold)| format!("{family}={bold}"))
+    let mut order = Vec::new();
+    let mut latest = BTreeMap::new();
+    for (family, bold) in lines.into_iter().filter_map(|line| parse_pair(line)) {
+        let key = family.to_lowercase();
+        if latest.insert(key.clone(), (family, bold)).is_none() {
+            order.push(key);
+        }
+    }
+    order
+        .iter()
+        .map(|key| {
+            let (family, bold) = &latest[key];
+            format!("{family}={bold}")
+        })
         .collect()
 }
 
@@ -76,16 +86,16 @@ mod tests {
     }
 
     #[test]
-    fn canonical_pairs_keep_the_first_pair_per_family() {
+    fn canonical_pairs_keep_the_last_pair_per_family_in_first_appearance_order() {
         let pairs = lines(&[
             "Inter=Inter Bold",
             "broken",
-            "inter=Other",
             "Noto=Noto Bold,1",
+            "inter=Other",
         ]);
         assert_eq!(
             canonical_pairs(&pairs),
-            vec!["Inter=Inter Bold", "Noto=Noto Bold"]
+            vec!["inter=Other", "Noto=Noto Bold"]
         );
     }
 }

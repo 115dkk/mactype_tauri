@@ -13,16 +13,16 @@ export const guidedSettingIdsByStep: Readonly<Record<GuidedStepId, ReadonlyArray
   hinting: ["hinting_mode", "hint_small_font"],
   gamma: ["contrast", "gamma_value", "gamma_mode"],
   lcd: ["lcd_filter", "text_tuning", "text_tuning_r", "text_tuning_g", "text_tuning_b"],
-  substitution: ["font_substitutes"],
+  substitution: ["font_substitutes", "font_substitute_bold_mode"],
   apply: [],
 };
 
 export const guidedSettingIds = [...new Set(Object.values(guidedSettingIdsByStep).flat())];
 
-/* The substitution step owns one schema setting, but its substance is the
-   mapping list, which carries no saved snapshot. Undo and discard there would
-   restore half the step, so it opts out of step history entirely — the tools
-   and the keyboard shortcuts stay inert together. */
+/* The substitution step owns two schema settings, but its substance is the
+   mapping list and the bold pairs, which carry no saved snapshot. Undo and
+   discard there would restore half the step, so it opts out of step history
+   entirely — the tools and the keyboard shortcuts stay inert together. */
 export function stepSupportsHistory(step: GuidedStepId): boolean {
   return guidedSettingIdsByStep[step].length > 0 && step !== "substitution";
 }

@@ -2,6 +2,8 @@ import type { AdvancedProfile } from "../../app/model";
 import { Hint } from "../../components/Hint";
 import type { SettingDefinition } from "../../generated/settings";
 import type { I18nValue } from "../../i18n/i18n";
+import { BoldSubstitutionPairEditor } from "./BoldSubstitutionPairEditor";
+import { boldPairsRequired } from "./boldSubstitution";
 import { FontSubstitutionEditor } from "./FontSubstitutionEditor";
 import type { ListKind } from "./ListsEditor";
 import { SchemaSettings } from "./SchemaSettings";
@@ -163,12 +165,21 @@ function RoutingSettings({
   fontOptionLabel,
   onCommit,
   t,
-}: AdvancedSectionProps & Pick<AdvancedSettingsProps, "fontFamilies" | "fontOptionLabel">) {
+  values,
+}: AdvancedSectionProps & Pick<AdvancedSettingsProps, "fontFamilies" | "fontOptionLabel" | "values">) {
   return (
-    <fieldset className="advanced-text-fields">
-      <legend><Hint content={t("advanced.fontSubstitutesHelp")}>{t("advanced.fontSubstitutes")}</Hint></legend>
-      <FontSubstitutionEditor advanced={advanced} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} onCommit={onCommit} t={t} />
-    </fieldset>
+    <>
+      <fieldset className="advanced-text-fields">
+        <legend><Hint content={t("advanced.fontSubstitutesHelp")}>{t("advanced.fontSubstitutes")}</Hint></legend>
+        <FontSubstitutionEditor advanced={advanced} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} onCommit={onCommit} t={t} />
+      </fieldset>
+      {boldPairsRequired(values) && (
+        <fieldset className="advanced-text-fields">
+          <legend><Hint content={t("advanced.boldSubstitutionPairsHelp")}>{t("advanced.boldSubstitutionPairs")}</Hint></legend>
+          <BoldSubstitutionPairEditor advanced={advanced} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} onCommit={onCommit} t={t} />
+        </fieldset>
+      )}
+    </>
   );
 }
 
@@ -211,7 +222,7 @@ export function AdvancedSettings({
         <ShadowSettings {...sectionProps} />
         <LcdFilterSettings {...sectionProps} />
         <PixelLayoutSettings {...sectionProps} />
-        <RoutingSettings {...sectionProps} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} />
+        <RoutingSettings {...sectionProps} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} values={values} />
       </div>
     </>
   );

@@ -3,6 +3,7 @@ import { settingsSchema, type SettingDefinition } from "../../generated/settings
 import { settingMessageKey, useI18n } from "../../i18n/i18n";
 import { runtime } from "../../app/runtimeAdapter";
 import type { ListDefinition, ListKind } from "./ListsEditor";
+import { isSettingDisclosed } from "./boldSubstitution";
 import { splitSubstitution } from "./profileEditorUtils";
 import type { PreviewVariant, ProfilePreviewHandle } from "./ProfilePreviewPanel";
 import { useProfileDocument, type ProfileDocument } from "./useProfileDocument";
@@ -218,13 +219,14 @@ export function useProfileEditor({ mode = "all" }: ProfileEditorOptions = {}): P
         const pair = splitSubstitution(mapping);
         return [pair.source, pair.replacement];
       }),
+      ...advanced.fontSubstituteBoldPairs.map((pair) => pair.slice(pair.indexOf("=") + 1)),
       ...(lists.excludeFonts ?? []),
       ...(lists.includeFonts ?? []),
     ].map((font) => font.trim()).filter(Boolean);
     const collator = new Intl.Collator(locale, { sensitivity: "base", numeric: true });
     return [...new Set([...installedFonts, ...referenced])]
       .sort((left, right) => collator.compare(left, right));
-  }, [advanced.fontSubstitutes, fontFace, individuals, installedFonts, lists.excludeFonts, lists.includeFonts, locale]);
+  }, [advanced.fontSubstituteBoldPairs, advanced.fontSubstitutes, fontFace, individuals, installedFonts, lists.excludeFonts, lists.includeFonts, locale]);
   const installedFontKeys = useMemo(() => new Set(installedFonts.map((font) => font.toLocaleLowerCase())), [installedFonts]);
   const fontOptionLabel = (font: string) => installedFontKeys.has(font.toLocaleLowerCase())
     ? font
@@ -249,11 +251,12 @@ export function useProfileEditor({ mode = "all" }: ProfileEditorOptions = {}): P
   const filteredSettings = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
     return settingsSchema.filter((setting) => {
+      if (!isSettingDisclosed(setting.id, values)) return false;
       if (!needle && setting.group !== activeGroup) return false;
       const localized = `${t(settingMessageKey(setting.id, "label"))} ${t(settingMessageKey(setting.id, "description"))} ${setting.key}`;
       return !needle || localized.toLocaleLowerCase().includes(needle);
     });
-  }, [activeGroup, query, t]);
+  }, [activeGroup, query, t, values]);
 
   const showPreview = () => {
     previewPanelRef.current?.show();

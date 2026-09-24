@@ -159,6 +159,42 @@ int main()
     Require(first.snapshot->font_settings_for(L"Missing").GetHintingMode() == 1,
             "unknown fonts must use the immutable common policy");
 
+    Require(first.snapshot->font_substitutions()->bold_mode() ==
+                    renderer::font_substitution::BoldMode::sameFamily &&
+                first.snapshot->font_substitutions()->bold_pairs().empty(),
+            "a candidate without bold settings must publish same-family mode");
+
+    renderer::ProfileRuntime boldRuntime;
+    renderer::RendererPolicyCandidate boldCandidate =
+        Candidate(1.25f, L"Courier New");
+    boldCandidate.substitutionBoldMode = renderer::font_substitution::BoldMode::pairs;
+    boldCandidate.substitutionBoldPairs.push_back({L"Courier New", L"Courier New Bold"});
+    renderer::RendererPolicyCandidate boldChanged = boldCandidate;
+    boldChanged.substitutionBoldMode = renderer::font_substitution::BoldMode::synthetic;
+    const renderer::ProfilePublication boldPolicy =
+        boldRuntime.Publish(std::move(boldCandidate));
+    Require(boldPolicy.published() &&
+                boldPolicy.snapshot->font_substitutions()->bold_mode() ==
+                    renderer::font_substitution::BoldMode::pairs &&
+                boldPolicy.snapshot->font_substitutions()->bold_pairs().size() == 1 &&
+                boldPolicy.snapshot->font_substitutions()
+                        ->FindBoldPair(L"courier new")
+                        ->boldFamily == L"Courier New Bold" &&
+                renderer::font_substitution::ProcessRegistry().Load()->bold_mode() ==
+                    renderer::font_substitution::BoldMode::pairs,
+            "the bold substitution mode and pairs must reach the published snapshot");
+    const renderer::ProfilePublication boldModePolicy =
+        boldRuntime.Publish(std::move(boldChanged));
+    Require(boldModePolicy.published() &&
+                boldModePolicy.snapshot->digest() != boldPolicy.snapshot->digest(),
+            "the bold substitution mode must contribute to the root policy digest");
+    renderer::RendererPolicyCandidate outOfRange = Candidate(1.25f, L"Courier New");
+    outOfRange.substitutionBoldMode =
+        static_cast<renderer::font_substitution::BoldMode>(4);
+    Require(!boldRuntime.Publish(std::move(outOfRange)).published() &&
+                boldRuntime.Load() == boldModePolicy.snapshot,
+            "an out-of-range bold mode must preserve the prior snapshot");
+
     renderer::ProfileRuntime digestRuntime;
     renderer::RendererPolicyCandidate consoleEnabled =
         Candidate(1.25f, L"Courier New");

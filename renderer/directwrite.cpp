@@ -2765,6 +2765,8 @@ HRESULT WINAPI IMPL_Factory3_GetSystemFontCollection(
 
 static WCHAR const* ResolveFactoryFamilyName(
 	WCHAR const* familyName,
+	DWRITE_FONT_WEIGHT fontWeight,
+	DWRITE_FONT_STYLE fontStyle,
 	LOGFONT& replacement)
 {
 	if (familyName == nullptr)
@@ -2774,6 +2776,8 @@ static WCHAR const* ResolveFactoryFamilyName(
 	SignalDirectWriteFamilyDiagnostic(L"find", familyName);
 	LOGFONT source = {};
 	source.lfCharSet = DEFAULT_CHARSET;
+	source.lfWeight = static_cast<LONG>(fontWeight);
+	source.lfItalic = fontStyle != DWRITE_FONT_STYLE_NORMAL;
 	if (FAILED(StringCchCopyW(
 			source.lfFaceName, ARRAYSIZE(source.lfFaceName), familyName)))
 		return familyName;
@@ -2802,12 +2806,18 @@ HRESULT WINAPI IMPL_CreateTextFormat(
 	// the factory's native system collection, so resolve it at this boundary.
 	LOGFONT replacement = {};
 	WCHAR const* resolvedFamily = fontCollection == nullptr ?
-		ResolveFactoryFamilyName(fontFamilyName, replacement) : fontFamilyName;
+		ResolveFactoryFamilyName(
+			fontFamilyName, fontWeight, fontStyle, replacement) :
+		fontFamilyName;
+	// The substitution's bold decision (weight dropped, kept, or a heavier
+	// face chosen) travels back in the replacement LOGFONT weight.
+	DWRITE_FONT_WEIGHT const resolvedWeight = resolvedFamily != fontFamilyName ?
+		static_cast<DWRITE_FONT_WEIGHT>(replacement.lfWeight) : fontWeight;
 	return ORIG_CreateTextFormat(
 		self,
 		resolvedFamily,
 		fontCollection,
-		fontWeight,
+		resolvedWeight,
 		fontStyle,
 		fontStretch,
 		fontSize,

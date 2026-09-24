@@ -26,6 +26,8 @@ cmake --build $build --config RelWithDebInfo --target `
     module-name-tests `
     directwrite-font-cache-tests `
     font-substitution-tests `
+    bold-face-selection-tests `
+    directwrite-virtual-font-tests `
     directwrite-alias-policy-tests `
     unity-font-hook-tests
 
@@ -67,6 +69,8 @@ try {
         'module-name-tests.exe',
         'directwrite-font-cache-tests.exe',
         'font-substitution-tests.exe',
+        'bold-face-selection-tests.exe',
+        'directwrite-virtual-font-tests.exe',
         'directwrite-alias-policy-tests.exe',
         'unity-font-hook-tests.exe'
     )) {

@@ -145,6 +145,9 @@ struct RendererPolicyCandidate final
 	CFontSettings commonFontSettings;
 	std::vector<FontIndividualPolicy> individualFonts;
 	std::vector<font_substitution::Rule> substitutionRules;
+	font_substitution::BoldMode substitutionBoldMode =
+		font_substitution::BoldMode::sameFamily;
+	std::vector<font_substitution::BoldPair> substitutionBoldPairs;
 	bool substitutionsReady = false;
 };
 

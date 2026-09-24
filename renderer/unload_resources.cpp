@@ -2,6 +2,7 @@
 #include "unload_lifecycle.h"
 
 #include "font_substitution.h"
+#include "gdi_family_catalog.h"
 #include "profile_runtime.h"
 #include "settings.h"
 
@@ -40,6 +41,7 @@ bool DrainProcessRendererResourcesOutsideLoaderLock() noexcept
 				FontLFree();
 			ClearProcessProfileRuntimeForQuietUnload();
 			font_substitution::ClearProcessRegistryForQuietUnload();
+			gdi_family_catalog::ClearForQuietUnload();
 			CGdippSettings::DestroyInstance();
 			g_rendererResourcesDrained.store(true, std::memory_order_release);
 		});

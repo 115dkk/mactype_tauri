@@ -10,6 +10,7 @@
 #include <atlcomcli.h>
 
 #include <string>
+#include <vector>
 
 namespace directwrite_virtual_font {
 
@@ -19,6 +20,17 @@ struct Identity
 	std::wstring subfamily;
 	std::wstring fullName;
 	std::wstring postScriptName;
+};
+
+// overrideWeight makes the alias advertise `weight` through OS/2
+// usWeightClass, the OS/2 fsSelection BOLD bit and head.macStyle bold, so the
+// alias family mirrors the source family's weight axis. Without it the output
+// bytes are exactly those of the plain alias.
+struct AliasOptions
+{
+	bool overrideWeight = false;
+	UINT16 weight = 400;
+	bool addBoldSimulation = false;
 };
 
 // Produces one self-contained SFNT whose glyph and metric tables come from the
@@ -31,6 +43,16 @@ HRESULT CreateAliasedReference(
 	IDWriteFontFaceReference* replacementReference,
 	WCHAR const* aliasFamily,
 	CComPtr<IDWriteFontFaceReference>& reference,
+	Identity& identity,
+	AliasOptions const& options = AliasOptions());
+
+// The SFNT rewrite behind CreateAliasedReference, exposed for tests.
+HRESULT BuildAliasedFontFile(
+	std::vector<BYTE> const& source,
+	UINT32 faceIndex,
+	std::wstring const& family,
+	AliasOptions const& options,
+	std::vector<BYTE>& output,
 	Identity& identity);
 
 } // namespace directwrite_virtual_font

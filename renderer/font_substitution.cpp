@@ -1,5 +1,7 @@
 #include "font_substitution.h"
 
+#include "bold_face_selection.h"
+
 #include <algorithm>
 
 namespace renderer {
@@ -60,6 +62,54 @@ std::uint64_t SnapshotDigest(const std::vector<Rule>& rules) noexcept
 	return hash == 0 ? 1 : hash;
 }
 
+std::uint64_t BoldDigest(
+	std::uint64_t hash,
+	BoldMode boldMode,
+	const std::vector<BoldPair>& pairs) noexcept
+{
+	hash = HashByte(hash, 0xfd);
+	hash = HashByte(hash, static_cast<unsigned char>(boldMode));
+	for (const BoldPair& pair : pairs)
+	{
+		hash = HashFamily(hash, pair.family);
+		hash = HashFamily(hash, pair.boldFamily);
+	}
+	return hash == 0 ? 1 : hash;
+}
+
+bool IsPairSpace(wchar_t value) noexcept
+{
+	return value == L' ' || value == L'\t' || value == L'\r' ||
+		value == L'\n' || value == 0x3000;
+}
+
+std::wstring Trim(const std::wstring& value)
+{
+	std::size_t first = 0;
+	std::size_t last = value.size();
+	while (first < last && IsPairSpace(value[first]))
+		++first;
+	while (last > first && IsPairSpace(value[last - 1]))
+		--last;
+	return value.substr(first, last - first);
+}
+
+std::wstring PairSide(const std::wstring& value)
+{
+	std::wstring side = Trim(value);
+	std::size_t const comma = side.rfind(L',');
+	if (comma != std::wstring::npos)
+	{
+		std::wstring const suffix = Trim(side.substr(comma + 1));
+		bool digits = !suffix.empty();
+		for (wchar_t character : suffix)
+			digits = digits && character >= L'0' && character <= L'9';
+		if (digits)
+			side = Trim(side.substr(0, comma));
+	}
+	return side;
+}
+
 bool SameRuleKey(const Rule& left, const Rule& right) noexcept
 {
 	return left.charsetSpecific == right.charsetSpecific &&
@@ -79,8 +129,54 @@ bool ContainsFamily(
 
 } // namespace
 
+bool ParseBoldPairLine(const std::wstring& line, BoldPair& pair)
+{
+	pair = {};
+	std::size_t const separator = line.find(L'=');
+	if (separator == std::wstring::npos)
+		return false;
+	std::wstring family = PairSide(line.substr(0, separator));
+	std::wstring boldFamily = PairSide(line.substr(separator + 1));
+	if (family.empty() || boldFamily.empty() || EqualFamily(family, boldFamily))
+		return false;
+	pair.family = std::move(family);
+	pair.boldFamily = std::move(boldFamily);
+	return true;
+}
+
+bool BoldModeFromProfileValue(int value, BoldMode& mode) noexcept
+{
+	switch (value)
+	{
+	case 0:
+		mode = BoldMode::ignoreWeight;
+		return true;
+	case 1:
+		mode = BoldMode::synthetic;
+		return true;
+	case 2:
+		mode = BoldMode::sameFamily;
+		return true;
+	case 3:
+		mode = BoldMode::pairs;
+		return true;
+	default:
+		mode = BoldMode::sameFamily;
+		return false;
+	}
+}
+
 std::shared_ptr<const Snapshot> Snapshot::Build(
 	std::vector<Rule> rules,
+	std::uint64_t generation)
+{
+	return Build(std::move(rules), BoldMode::sameFamily, {}, generation);
+}
+
+std::shared_ptr<const Snapshot> Snapshot::Build(
+	std::vector<Rule> rules,
+	BoldMode boldMode,
+	std::vector<BoldPair> boldPairs,
 	std::uint64_t generation)
 {
 	std::vector<Rule> accepted;
@@ -99,9 +195,72 @@ std::shared_ptr<const Snapshot> Snapshot::Build(
 			rule.id = StableRuleId(rule);
 		accepted.push_back(std::move(rule));
 	}
-	std::uint64_t const digest = SnapshotDigest(accepted);
-	return std::shared_ptr<const Snapshot>(
-		new Snapshot(std::move(accepted), generation, digest));
+	std::vector<BoldPair> acceptedPairs;
+	acceptedPairs.reserve(boldPairs.size());
+	for (BoldPair& pair : boldPairs)
+	{
+		if (pair.family.empty() || pair.boldFamily.empty() ||
+			EqualFamily(pair.family, pair.boldFamily))
+			continue;
+		std::vector<BoldPair>::iterator const existing = std::find_if(
+			acceptedPairs.begin(), acceptedPairs.end(),
+			[&](const BoldPair& candidate) {
+				return EqualFamily(candidate.family, pair.family);
+			});
+		if (existing != acceptedPairs.end())
+			*existing = std::move(pair);
+		else
+			acceptedPairs.push_back(std::move(pair));
+	}
+	std::uint64_t const digest = BoldDigest(
+		SnapshotDigest(accepted), boldMode, acceptedPairs);
+	return std::shared_ptr<const Snapshot>(new Snapshot(
+		std::move(accepted), boldMode, std::move(acceptedPairs),
+		generation, digest));
+}
+
+const BoldPair* Snapshot::FindBoldPair(const std::wstring& family) const noexcept
+{
+	for (const BoldPair& pair : boldPairs_)
+	{
+		if (EqualFamily(pair.family, family))
+			return &pair;
+	}
+	return nullptr;
+}
+
+BoldPlan Snapshot::PlanBold(
+	const std::wstring& resolvedFamily,
+	int requestedWeight) const
+{
+	BoldPlan plan;
+	if (!bold_face_selection::IsBoldClassWeight(requestedWeight))
+		return plan;
+	switch (boldMode_)
+	{
+	case BoldMode::ignoreWeight:
+		plan.action = BoldAction::dropWeight;
+		break;
+	case BoldMode::synthetic:
+		plan.action = BoldAction::keepWeight;
+		break;
+	case BoldMode::sameFamily:
+		plan.action = BoldAction::sameFamilyFace;
+		break;
+	case BoldMode::pairs:
+	{
+		const BoldPair* const pair = FindBoldPair(resolvedFamily);
+		if (pair == nullptr)
+		{
+			plan.action = BoldAction::dropWeight;
+			break;
+		}
+		plan.action = BoldAction::pairedFamily;
+		plan.pairedFamily = pair->boldFamily;
+		break;
+	}
+	}
+	return plan;
 }
 
 const Rule* Snapshot::FindRule(

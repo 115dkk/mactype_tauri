@@ -611,6 +611,38 @@ export const settingsSchema = [
     "factory": 0
   },
   {
+    "id": "font_substitute_bold_mode",
+    "group": "basic",
+    "section": "General",
+    "key": "FontSubstitutesBold",
+    "type": "integer",
+    "control": "select",
+    "options": [
+      {
+        "value": 0
+      },
+      {
+        "value": 1
+      },
+      {
+        "value": 2
+      },
+      {
+        "value": 3
+      }
+    ],
+    "min": 0,
+    "max": 3,
+    "default": 2,
+    "factory": 2,
+    "unit": null,
+    "advanced": true,
+    "previewable": false,
+    "apply": "restart_required",
+    "legacy_control_center_ordinal": -1,
+    "supported": true
+  },
+  {
     "id": "skip_private_freetype",
     "group": "advanced",
     "section": "General",

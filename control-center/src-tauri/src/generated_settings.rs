@@ -358,6 +358,18 @@ pub const SETTINGS: &[SettingDefinition] = &[
         ordinal: 22,
     },
     SettingDefinition {
+        id: "font_substitute_bold_mode",
+        section: "General",
+        key: "FontSubstitutesBold",
+        value_type: SettingValueType::Integer,
+        min: 0.0,
+        max: 3.0,
+        default: 2.0,
+        factory: 2.0,
+        previewable: false,
+        ordinal: -1,
+    },
+    SettingDefinition {
         id: "skip_private_freetype",
         section: "General",
         key: "SkipPrivateFreeType",

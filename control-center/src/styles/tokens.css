@@ -56,8 +56,12 @@
    Regular face — and synthetic bold stays forbidden, so bold Hangul comes from the bundled
    Pretendard subset with real variable weights. Yu Gothic UI, Microsoft YaHei UI, and
    Microsoft JhengHei UI resolve 600/700 to their true SemiBold/Bold cuts, so naming them
-   explicitly is enough for ja/zh. Glyphs outside the subset fall through to Malgun Gothic. */
-:root:lang(ko) { font-family: "Segoe UI Variable Text", "Segoe UI", "Pretendard KO UI", "Malgun Gothic", sans-serif; }
+   explicitly is enough for ja/zh. Glyphs outside the subset fall through to Malgun Gothic.
+   Korean wraps between words (keep-all): the default breaks between any two syllables, so a
+   sentence that misses the line by one syllable leaves "다." alone on the next line. Words in
+   the UI copy stay far narrower than the narrowest column, and word-break inherits, so every
+   Korean paragraph, label and button gets the rule from the root. */
+:root:lang(ko) { font-family: "Segoe UI Variable Text", "Segoe UI", "Pretendard KO UI", "Malgun Gothic", sans-serif; word-break: keep-all; }
 :root:lang(ja) { font-family: "Segoe UI Variable Text", "Segoe UI", "Yu Gothic UI", "Meiryo UI", sans-serif; }
 :root:lang(zh-CN) { font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", sans-serif; }
 :root:lang(zh-TW) { font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft JhengHei UI", sans-serif; }

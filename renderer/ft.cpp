@@ -61,6 +61,19 @@ FT_Error Old_FT_Outline_Embolden(FT_Outline* outline, FT_Pos strength);
 FT_Error Vert_FT_Outline_Embolden(FT_Outline* outline, FT_Pos strength);
 ControlIder CID;
 
+// A face counts as bold when its style flag or its OS/2 weight class already
+// reaches FW_BOLD; like GDI, it is never emboldened again on top of that.
+static bool FaceIsBold(FT_Face face)
+{
+	if (face == nullptr)
+		return false;
+	if (face->style_flags & FT_STYLE_FLAG_BOLD)
+		return true;
+	const TT_OS2* const os2 =
+		static_cast<const TT_OS2*>(FT_Get_Sfnt_Table(face, ft_sfnt_os2));
+	return os2 != nullptr && os2->usWeightClass >= FW_BOLD;
+}
+
 #if _MSC_VER <= 1200
 #pragma warning(disable: 4786)
 #endif
@@ -1510,7 +1523,7 @@ BOOL FreeTypePrepare(FreeTypeDrawInfo& FTInfo)
 
 		if (lf.lfQuality && os2_table->xAvgCharWidth)
 		{
-			if (!(freetype_face->style_flags & FT_STYLE_FLAG_BOLD) && tm.tmWeight >= FW_BOLD)
+			if (!FaceIsBold(freetype_face) && tm.tmWeight >= FW_BOLD)
 				--FTInfo.params->otm->otmTextMetrics.tmAveCharWidth;
 			scaler.width = MulDiv(FTInfo.params->otm->otmTextMetrics.tmAveCharWidth, FTInfo.params->otm->otmEMSquare, os2_table->xAvgCharWidth);
 		}
@@ -2041,7 +2054,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 
 				bool bRequiredownsize;
 
-				bIsIndivBold = freetype_face->style_flags & FT_STYLE_FLAG_BOLD;	// separate bold font?
+				bIsIndivBold = FaceIsBold(freetype_face);	// separate bold font?
 				bIsBold = (IsFontBold(lf) && !bIsIndivBold);	// Synthesize bold when no distinct bold face exists.
 				bRequiredownsize = bIsBold && FTInfo.rasterPolicy.bolderMode != 1;
 				if (bRequiredownsize)

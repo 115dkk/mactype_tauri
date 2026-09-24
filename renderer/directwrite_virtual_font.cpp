@@ -447,7 +447,7 @@ void AdvertiseHeadWeight(std::vector<BYTE>& table, UINT16 weight)
 
 } // namespace
 
-HRESULT BuildAliasedFontFile(
+HRESULT BuildAliasedSfnt(
 	std::vector<BYTE> const& source,
 	UINT32 faceIndex,
 	std::wstring const& family,
@@ -625,7 +625,7 @@ HRESULT CreateAliasedReference(
 			return result;
 
 		std::vector<BYTE> aliased;
-		result = BuildAliasedFontFile(
+		result = BuildAliasedSfnt(
 			source, faceIndex, aliasFamily, options, aliased, identity);
 		if (FAILED(result))
 			return result;

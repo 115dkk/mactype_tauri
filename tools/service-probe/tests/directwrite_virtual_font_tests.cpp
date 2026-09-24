@@ -110,7 +110,7 @@ int main()
     std::vector<BYTE> const source = Sfnt(true);
     std::vector<BYTE> plain;
     font::Identity identity;
-    Require(SUCCEEDED(font::BuildAliasedFontFile(
+    Require(SUCCEEDED(font::BuildAliasedSfnt(
                 source, 0, L"Alias", font::AliasOptions(), plain, identity)) &&
                 identity.family == L"Alias",
             "the plain alias must build");
@@ -122,7 +122,7 @@ int main()
     bold.overrideWeight = true;
     bold.weight = 700;
     std::vector<BYTE> advertised;
-    Require(SUCCEEDED(font::BuildAliasedFontFile(
+    Require(SUCCEEDED(font::BuildAliasedSfnt(
                 source, 0, L"Alias", bold, advertised, identity)),
             "the weight-advertising alias must build");
     std::vector<BYTE> const os2 = Table(advertised, kOs2, true);
@@ -136,14 +136,14 @@ int main()
             "a weight advertisement must not change the alias names");
 
     bold.weight = 400;
-    Require(SUCCEEDED(font::BuildAliasedFontFile(
+    Require(SUCCEEDED(font::BuildAliasedSfnt(
                 advertised, 0, L"Alias", bold, plain, identity)) &&
                 sfnt::ReadU16(Table(plain, kOs2, true), 62) == 0x0040 &&
                 (sfnt::ReadU16(Table(plain, kHead, true), 44) & 1) == 0,
             "a regular advertisement must clear the bold flags again");
 
     bold.weight = 700;
-    Require(font::BuildAliasedFontFile(
+    Require(font::BuildAliasedSfnt(
                 Sfnt(false), 0, L"Alias", bold, advertised, identity) ==
                 DWRITE_E_FILEFORMAT,
             "a weight advertisement without OS/2 must fail closed");

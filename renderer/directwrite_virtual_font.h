@@ -47,7 +47,7 @@ HRESULT CreateAliasedReference(
 	AliasOptions const& options = AliasOptions());
 
 // The SFNT rewrite behind CreateAliasedReference, exposed for tests.
-HRESULT BuildAliasedFontFile(
+HRESULT BuildAliasedSfnt(
 	std::vector<BYTE> const& source,
 	UINT32 faceIndex,
 	std::wstring const& family,

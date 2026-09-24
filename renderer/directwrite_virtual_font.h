@@ -24,13 +24,14 @@ struct Identity
 
 // overrideWeight makes the alias advertise `weight` through OS/2
 // usWeightClass, the OS/2 fsSelection BOLD bit and head.macStyle bold, so the
-// alias family mirrors the source family's weight axis. Without it the output
-// bytes are exactly those of the plain alias.
+// alias family mirrors the source family's weight axis. A bold-class weight
+// also names the subfamily Bold (or Bold Italic), so the alias has its own
+// full and PostScript names. Without it the output bytes are exactly those of
+// the plain alias.
 struct AliasOptions
 {
 	bool overrideWeight = false;
 	UINT16 weight = 400;
-	bool addBoldSimulation = false;
 };
 
 // Produces one self-contained SFNT whose glyph and metric tables come from the

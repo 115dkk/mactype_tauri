@@ -91,13 +91,12 @@ void AppendLocalizedFamilies(
 	}
 }
 
-bool ResolveReplacementFamily(
+void ReadSourceFamilyNames(
 	IDWriteFontSet* systemFontSet,
 	UINT32 index,
-	renderer::font_substitution::Snapshot const& snapshot,
-	FamilyAliasResolution& resolution)
+	std::vector<std::wstring>& names)
 {
-	std::vector<std::wstring> aliases;
+	names.clear();
 	for (DWRITE_FONT_PROPERTY_ID const familyProperty : kFamilyPropertyIds)
 	{
 		BOOL exists = FALSE;
@@ -106,9 +105,8 @@ bool ResolveReplacementFamily(
 				index, familyProperty, &exists, &familyNames)) ||
 			!exists || familyNames == nullptr)
 			continue;
-		AppendLocalizedFamilies(familyNames, aliases);
+		AppendLocalizedFamilies(familyNames, names);
 	}
-	return ResolveFamilyAliases(aliases, snapshot, resolution);
 }
 
 struct FaceTraits
@@ -278,20 +276,21 @@ struct ReplacementChoice
 	directwrite_virtual_font::AliasOptions options;
 };
 
-// A bold-class source face always yields an alias that advertises the source
-// weight, so the alias family keeps the source family's weight axis and
-// DirectWrite neither picks another slot nor simulates bold on its own.
+// Bold-class traits yield an alias that advertises that weight, so the alias
+// family keeps the source family's weight axis and DirectWrite neither picks
+// another slot nor simulates bold on its own. Synthetic bold is the exception:
+// the font set builder drops a simulation attached to an aliased reference, so
+// that alias keeps the backing's own weight and DirectWrite simulates bold
+// for the missing slot.
 HRESULT FindReplacementReference(
 	IDWriteFontSet* systemFontSet,
-	IDWriteFontFaceReference* sourceReference,
+	FaceTraits const& source,
 	renderer::font_substitution::Snapshot const& snapshot,
 	std::wstring const& replacementFamily,
 	ReplacementChoice& choice)
 {
 	namespace substitution = renderer::font_substitution;
 	choice = {};
-	FaceTraits source;
-	ReadFaceTraits(sourceReference, source);
 
 	CComPtr<IDWriteFontSet> replacementSet;
 	if (!renderer::bold_face_selection::IsBoldClassWeight(
@@ -315,8 +314,7 @@ HRESULT FindReplacementReference(
 	if (FAILED(result) || baseReference == nullptr)
 		return FAILED(result) ? result : DWRITE_E_NOFONT;
 
-	choice.options.overrideWeight = true;
-	choice.options.weight = static_cast<UINT16>(source.weight);
+	bool synthetic = false;
 	substitution::BoldPlan const plan = snapshot.PlanBold(
 		replacementFamily, static_cast<int>(source.weight));
 	switch (plan.action)
@@ -324,24 +322,165 @@ HRESULT FindReplacementReference(
 	case substitution::BoldAction::sameFamilyFace:
 		choice.reference = SelectSameFamilyBoldFace(
 			systemFontSet, replacementSet, baseReference, source);
-		choice.options.addBoldSimulation = choice.reference == nullptr;
+		synthetic = choice.reference == nullptr;
 		break;
 	case substitution::BoldAction::pairedFamily:
 		choice.reference = SelectPairedFace(
 			systemFontSet, plan.pairedFamily, source);
 		break;
 	case substitution::BoldAction::keepWeight:
-		choice.options.addBoldSimulation = true;
+		synthetic = true;
 		break;
 	case substitution::BoldAction::unchanged:
 	case substitution::BoldAction::dropWeight:
 		break;
+	}
+	if (!synthetic)
+	{
+		choice.options.overrideWeight = true;
+		choice.options.weight = static_cast<UINT16>(source.weight);
 	}
 	if (choice.reference == nullptr)
 		choice.reference = baseReference;
 	return S_OK;
 }
 
+struct NativeFace
+{
+	UINT32 index = 0;
+	std::vector<std::wstring> familyNames;
+};
+
+struct BuildObservations
+{
+	std::vector<SourceFaceObservation> faces;
+	std::vector<FaceTraits> traits;
+	std::vector<NativeFace> unresolved;
+};
+
+void Observe(
+	BuildObservations& observations,
+	std::vector<std::wstring> familyNames,
+	FaceTraits const& traits,
+	bool aliased,
+	std::wstring const& replacementFamily)
+{
+	SourceFaceObservation face;
+	face.familyNames = std::move(familyNames);
+	face.weight = static_cast<int>(traits.weight);
+	face.italic = traits.style != DWRITE_FONT_STYLE_NORMAL;
+	face.aliased = aliased;
+	if (aliased)
+		face.replacementFamily = replacementFamily;
+	observations.faces.push_back(std::move(face));
+	observations.traits.push_back(traits);
+}
+
+// Only an unresolved face that shares a name with an aliased face can hold that
+// name's bold slot, so only those faces pay for reading their traits.
+void ObserveUnresolvedFaces(
+	IDWriteFontSet* systemFontSet,
+	BuildObservations& observations)
+{
+	std::vector<std::wstring> aliasedNames;
+	for (SourceFaceObservation const& face : observations.faces)
+	{
+		if (face.aliased)
+			aliasedNames.insert(
+				aliasedNames.end(), face.familyNames.begin(), face.familyNames.end());
+	}
+	for (NativeFace& native : observations.unresolved)
+	{
+		if (!SharesFamilyName(native.familyNames, aliasedNames))
+			continue;
+		CComPtr<IDWriteFontFaceReference> reference;
+		FaceTraits traits;
+		// An unreadable face counts as bold so its names never gain a twin.
+		if (FAILED(systemFontSet->GetFontFaceReference(native.index, &reference)) ||
+			!ReadFaceTraits(reference, traits))
+			traits.weight = DWRITE_FONT_WEIGHT_BOLD;
+		Observe(observations, std::move(native.familyNames), traits, false, {});
+	}
+	observations.unresolved.clear();
+}
+
+void AddSyntheticBoldSlots(
+	IDWriteFactory3* factory3,
+	IDWriteFontSetBuilder* builder,
+	IDWriteFontSet* systemFontSet,
+	renderer::font_substitution::Snapshot const& snapshot,
+	BuildObservations const& observations,
+	AliasFontSet& result,
+	bool& missingReplacement)
+{
+	std::vector<SyntheticBoldSlot> slots;
+	if (!PlanSyntheticBoldSlots(observations.faces, slots))
+		return;
+	for (SyntheticBoldSlot const& slot : slots)
+	{
+		FaceTraits traits = observations.traits[slot.templateFace];
+		traits.weight = DWRITE_FONT_WEIGHT_BOLD;
+		ReplacementChoice replacement;
+		HRESULT const found = FindReplacementReference(
+			systemFontSet,
+			traits,
+			snapshot,
+			observations.faces[slot.templateFace].replacementFamily,
+			replacement);
+		if (FAILED(found) || replacement.reference == nullptr)
+		{
+			missingReplacement = true;
+			continue;
+		}
+		if (!replacement.options.overrideWeight)
+			continue;
+		std::vector<CComPtr<IDWriteFontFaceReference>> boldReferences;
+		for (std::wstring const& familyName : slot.familyNames)
+		{
+			CComPtr<IDWriteFontFaceReference> boldReference;
+			directwrite_virtual_font::Identity identity;
+			if (FAILED(directwrite_virtual_font::CreateAliasedReference(
+					factory3,
+					replacement.reference,
+					familyName.c_str(),
+					boldReference,
+					identity,
+					replacement.options)))
+			{
+				boldReferences.clear();
+				break;
+			}
+			boldReferences.push_back(boldReference);
+		}
+		if (boldReferences.empty())
+		{
+			missingReplacement = true;
+			continue;
+		}
+		bool added = true;
+		for (CComPtr<IDWriteFontFaceReference> const& boldReference : boldReferences)
+		{
+			if (FAILED(builder->AddFontFaceReference(boldReference)))
+			{
+				added = false;
+				break;
+			}
+		}
+		if (!added)
+		{
+			missingReplacement = true;
+			continue;
+		}
+		++result.substitutionCount;
+	}
+}
+
+// A family name that an alias carries but that no source face of that name
+// fills at a bold-class weight gets one synthesized weight-700 slot, backed by
+// the same FontSubstitutesBold decision a real bold source face would get. A
+// name whose bold face stayed native, whose aliases disagree on the
+// replacement, or whose decision is synthetic bold keeps only the slots its
+// source faces produced.
 BuildStatus Build(
 	IDWriteFactory* factory,
 	IDWriteFontSet* systemFontSet,
@@ -369,6 +508,7 @@ BuildStatus Build(
 	bool missingReplacement = false;
 	bool resolvedRule = false;
 	BuildStatus emptyResultStatus = BuildStatus::replacementUnavailable;
+	BuildObservations observations;
 	UINT32 const fontCount = systemFontSet->GetFontCount();
 	for (UINT32 index = 0; index < fontCount; ++index)
 	{
@@ -378,20 +518,25 @@ BuildStatus Build(
 		if (FAILED(addResult) || sourceReference == nullptr)
 			return BuildStatus::addFontFailed;
 
+		std::vector<std::wstring> sourceNames;
+		ReadSourceFamilyNames(systemFontSet, index, sourceNames);
 		FamilyAliasResolution familyResolution;
-		if (!ResolveReplacementFamily(
-			systemFontSet, index, *snapshot, familyResolution))
+		if (!ResolveFamilyAliases(sourceNames, *snapshot, familyResolution))
 		{
 			if (FAILED(builder->AddFontFaceReference(sourceReference)))
 				return BuildStatus::addFontFailed;
+			if (!sourceNames.empty())
+				observations.unresolved.push_back({index, std::move(sourceNames)});
 			continue;
 		}
 		resolvedRule = true;
 
+		FaceTraits sourceTraits;
+		ReadFaceTraits(sourceReference, sourceTraits);
 		ReplacementChoice replacement;
 		HRESULT substitutionResult = FindReplacementReference(
 			systemFontSet,
-			sourceReference,
+			sourceTraits,
 			*snapshot,
 			familyResolution.replacementFamily,
 			replacement);
@@ -428,6 +573,12 @@ BuildStatus Build(
 				}
 			}
 		}
+		Observe(
+			observations,
+			std::move(familyResolution.sourceAliases),
+			sourceTraits,
+			complete,
+			familyResolution.replacementFamily);
 		if (!complete)
 		{
 			missingReplacement = true;
@@ -436,6 +587,19 @@ BuildStatus Build(
 			continue;
 		}
 		++result.substitutionCount;
+	}
+
+	if (result.substitutionCount != 0)
+	{
+		ObserveUnresolvedFaces(systemFontSet, observations);
+		AddSyntheticBoldSlots(
+			factory3,
+			builder,
+			systemFontSet,
+			*snapshot,
+			observations,
+			result,
+			missingReplacement);
 	}
 
 	if (result.substitutionCount == 0)

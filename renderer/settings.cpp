@@ -269,6 +269,12 @@ void CGdippSettings::DelayedInit()
 
 	auto hdcScreen = renderer_raii::AdoptWindowDeviceContext(nullptr, GetDC(nullptr));
 	if (!hdcScreen) {
+		// Nothing below runs without the screen DC, so this is the only
+		// publication such a process gets. Without it the snapshot keeps the
+		// rule-less generation from LoadSettings and the raster, DirectWrite
+		// and Unity readers never see a substitution.
+		if (!PublishRendererPolicySnapshot(true))
+			m_bDelayedInit = false;
 		return;
 	}
 

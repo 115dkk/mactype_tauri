@@ -543,7 +543,7 @@
   "settings.font_substitutes.option.0": "사용 안 함",
   "settings.font_substitutes.option.1": "안전한 대체",
   "settings.font_substitutes.option.2": "모든 대체",
-  "settings.font_substitute_bold_mode.label": "굵은 글꼴 대체 방식",
+  "settings.font_substitute_bold_mode.label": "굵은 글꼴 대체법",
   "settings.font_substitute_bold_mode.description": "대체 글꼴을 굵게 그려야 할 때 사용할 글꼴을 정합니다. 끄면 굵기 요청을 반영하지 않고, 합성 볼드는 대체 글꼴을 강제로 굵게 그리며, 자동 선택은 같은 글꼴의 Bold를 고르고, 글꼴 쌍은 직접 고른 글꼴을 사용합니다.",
   "settings.font_substitute_bold_mode.option.0": "끄기",
   "settings.font_substitute_bold_mode.option.1": "합성 볼드로 대체",

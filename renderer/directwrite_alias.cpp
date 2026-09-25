@@ -718,6 +718,42 @@ BuildStatus GetOrCreate(
 	}
 }
 
+BuildStatus GetCachedForFactory(
+	IDWriteFactory* factory,
+	std::uint64_t substitutionGeneration,
+	AliasFontSet& result) noexcept
+{
+	result = {};
+	try
+	{
+		CComPtr<IUnknown> const identity = GetIdentity(factory);
+		if (identity == nullptr)
+			return BuildStatus::unsupportedFactory;
+		AliasCache& cache = GetCache();
+		std::lock_guard<std::mutex> lock(cache.mutex);
+		for (CacheEntry const& entry : cache.entries)
+		{
+			if (entry.factoryIdentity == identity &&
+				entry.generation == substitutionGeneration)
+			{
+				result = entry.aliases;
+				return result.status;
+			}
+		}
+		return BuildStatus::systemSetUnavailable;
+	}
+	catch (std::bad_alloc const&)
+	{
+		result = {};
+		return BuildStatus::outOfMemory;
+	}
+	catch (...)
+	{
+		result = {};
+		return BuildStatus::unexpectedFailure;
+	}
+}
+
 void ClearCache() noexcept
 {
 	AliasCache& cache = GetCache();

@@ -153,6 +153,22 @@ int main()
         {L"Malgun Gothic", L"맑은 고딕"}, *cycle, resolution),
         "a cyclic substitution produced a DirectWrite alias");
 
+    directwrite_alias::FallbackAliasResolution fallback;
+    Require(directwrite_alias::ResolveFallbackAlias(
+        {L"Malgun Gothic", L"맑은 고딕"}, *substitutions, fallback) &&
+        fallback.matchedSourceName == L"맑은 고딕" &&
+        fallback.replacementFamily == L"Pretendard Variable",
+        "fallback selection did not preserve the name that matched the snapshot");
+    Require(!directwrite_alias::ResolveFallbackAlias(
+        {L"Segoe UI", L"Segoe UI Variable"}, *substitutions, fallback),
+        "fallback selection matched a family without a substitution rule");
+    Require(!directwrite_alias::ResolveFallbackAlias(
+        {L"Malgun Gothic", L"맑은 고딕"}, *conflicting, fallback),
+        "fallback selection accepted conflicting names for one mapped face");
+    Require(!directwrite_alias::ResolveFallbackAlias(
+        {L"Malgun Gothic", L"맑은 고딕"}, *cycle, fallback),
+        "fallback selection accepted a cyclic substitution");
+
     TestSyntheticBoldSlots();
     return 0;
 }

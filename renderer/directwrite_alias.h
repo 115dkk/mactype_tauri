@@ -41,6 +41,11 @@ BuildStatus GetOrCreate(
 	IDWriteFontSet* systemFontSet,
 	AliasFontSet& result) noexcept;
 
+BuildStatus GetCachedForFactory(
+	IDWriteFactory* factory,
+	std::uint64_t substitutionGeneration,
+	AliasFontSet& result) noexcept;
+
 void ClearCache() noexcept;
 
 WCHAR const* StatusName(BuildStatus status) noexcept;

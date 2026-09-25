@@ -198,6 +198,30 @@ std::string HashBytes(const void* data, const std::size_t size) {
   return hash.Finish();
 }
 
+std::string HashFile(const std::wstring& path) {
+  HANDLE file = CreateFileW(path.c_str(), GENERIC_READ,
+                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) {
+    return {};
+  }
+  Sha256 hash;
+  std::array<BYTE, 64 * 1024> buffer{};
+  for (;;) {
+    DWORD read = 0;
+    if (ReadFile(file, buffer.data(), static_cast<DWORD>(buffer.size()),
+                 &read, nullptr) == FALSE) {
+      CloseHandle(file);
+      return {};
+    }
+    if (read == 0) {
+      CloseHandle(file);
+      return hash.Finish();
+    }
+    hash.Update(buffer.data(), read);
+  }
+}
+
 class JsonWriter final {
  public:
   void BeginObject() {
@@ -617,6 +641,7 @@ GdiMeasurement MeasureGdi(const GdiRequest& request, const bool window_dc,
 struct FontFileRecord {
   std::wstring path;
   bool local = false;
+  std::string hash;
   std::wstring error;
 };
 
@@ -665,6 +690,24 @@ struct TextFormatRecord {
   bool ok = false;
   std::vector<std::wstring> errors;
   std::vector<GlyphRunRecord> runs;
+};
+
+struct FallbackRecord {
+  std::wstring primary_family;
+  std::wstring sample_text;
+  bool ok = false;
+  std::vector<std::wstring> errors;
+  UINT32 text_position = 0;
+  UINT32 text_length = 0;
+  UINT32 mapped_length = 0;
+  float scale = 0.0F;
+  bool has_font = false;
+  UINT32 weight = 0;
+  DWRITE_FONT_SIMULATIONS simulations = DWRITE_FONT_SIMULATIONS_NONE;
+  std::vector<std::pair<std::wstring, std::wstring>> family_names;
+  std::wstring win32_family;
+  FaceRecord face;
+  TextFormatRecord layout;
 };
 
 std::wstring LocalizedAt(IDWriteLocalizedStrings* strings, const UINT32 index) {
@@ -785,6 +828,7 @@ FaceRecord DescribeFace(IDWriteFontFace* face) {
               file_record.error = L"GetFilePathFromKey failed";
             } else {
               file_record.path.assign(path.data(), length);
+              file_record.hash = HashFile(file_record.path);
             }
           }
         }
@@ -1012,6 +1056,159 @@ class CaptureRenderer final : public IDWriteTextRenderer {
   std::vector<GlyphRunRecord> runs_;
 };
 
+class AnalysisSource final : public IDWriteTextAnalysisSource {
+ public:
+  explicit AnalysisSource(const std::wstring& text) : text_(text) {}
+
+  IFACEMETHODIMP QueryInterface(REFIID riid, void** object) override {
+    if (object == nullptr) {
+      return E_POINTER;
+    }
+    if (riid == __uuidof(IUnknown) ||
+        riid == __uuidof(IDWriteTextAnalysisSource)) {
+      *object = static_cast<IDWriteTextAnalysisSource*>(this);
+      AddRef();
+      return S_OK;
+    }
+    *object = nullptr;
+    return E_NOINTERFACE;
+  }
+  IFACEMETHODIMP_(ULONG) AddRef() override {
+    return static_cast<ULONG>(InterlockedIncrement(&references_));
+  }
+  IFACEMETHODIMP_(ULONG) Release() override {
+    const LONG remaining = InterlockedDecrement(&references_);
+    if (remaining == 0) {
+      delete this;
+    }
+    return static_cast<ULONG>(remaining);
+  }
+  IFACEMETHODIMP GetTextAtPosition(UINT32 position, const wchar_t** text,
+                                   UINT32* length) override {
+    if (text == nullptr || length == nullptr) {
+      return E_POINTER;
+    }
+    if (position >= text_.size()) {
+      *text = nullptr;
+      *length = 0;
+      return S_OK;
+    }
+    *text = text_.c_str() + position;
+    *length = static_cast<UINT32>(text_.size() - position);
+    return S_OK;
+  }
+  IFACEMETHODIMP GetTextBeforePosition(UINT32 position, const wchar_t** text,
+                                       UINT32* length) override {
+    if (text == nullptr || length == nullptr) {
+      return E_POINTER;
+    }
+    const UINT32 available = static_cast<UINT32>(
+        (std::min)(static_cast<std::size_t>(position), text_.size()));
+    *text = available == 0 ? nullptr : text_.c_str();
+    *length = available;
+    return S_OK;
+  }
+  IFACEMETHODIMP_(DWRITE_READING_DIRECTION)
+  GetParagraphReadingDirection() override {
+    return DWRITE_READING_DIRECTION_LEFT_TO_RIGHT;
+  }
+  IFACEMETHODIMP GetLocaleName(UINT32 position, UINT32* length,
+                               const wchar_t** locale) override {
+    if (length == nullptr || locale == nullptr) {
+      return E_POINTER;
+    }
+    *length = position >= text_.size()
+                  ? 0
+                  : static_cast<UINT32>(text_.size() - position);
+    *locale = L"ko-kr";
+    return S_OK;
+  }
+  IFACEMETHODIMP GetNumberSubstitution(
+      UINT32 position, UINT32* length,
+      IDWriteNumberSubstitution** substitution) override {
+    if (length == nullptr || substitution == nullptr) {
+      return E_POINTER;
+    }
+    *length = position >= text_.size()
+                  ? 0
+                  : static_cast<UINT32>(text_.size() - position);
+    *substitution = nullptr;
+    return S_OK;
+  }
+
+ private:
+  ~AnalysisSource() = default;
+
+  LONG references_ = 1;
+  std::wstring text_;
+};
+
+TextFormatRecord MeasureTextFormat(IDWriteFactory* factory,
+                                   const std::wstring& family,
+                                   DWRITE_FONT_WEIGHT weight,
+                                   const std::wstring& text);
+
+FallbackRecord MeasureFallback(IDWriteFactory* factory,
+                               const std::wstring& primary_family,
+                               const std::wstring& text,
+                               const UINT32 text_position,
+                               const UINT32 text_length) {
+  FallbackRecord record;
+  record.primary_family = primary_family;
+  record.sample_text = text;
+  record.text_position = text_position;
+  record.text_length = text_length;
+  record.layout = MeasureTextFormat(factory, primary_family,
+                                    DWRITE_FONT_WEIGHT_NORMAL, text);
+  ComPtr<IDWriteFactory2> factory2;
+  ComPtr<IDWriteFontFallback> fallback;
+  if (FAILED(factory->QueryInterface(IID_PPV_ARGS(&factory2))) ||
+      factory2 == nullptr ||
+      FAILED(factory2->GetSystemFontFallback(&fallback)) ||
+      fallback == nullptr) {
+    record.errors.push_back(L"GetSystemFontFallback failed");
+    return record;
+  }
+  ComPtr<AnalysisSource> source;
+  source.Attach(new AnalysisSource(text));
+  ComPtr<IDWriteFont> font;
+  HRESULT result = fallback->MapCharacters(
+      source.Get(), text_position, text_length, nullptr,
+      primary_family.c_str(), DWRITE_FONT_WEIGHT_NORMAL,
+      DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+      &record.mapped_length, &font, &record.scale);
+  if (FAILED(result)) {
+    record.errors.push_back(HresultText(L"IDWriteFontFallback::MapCharacters", result));
+    return record;
+  }
+  record.ok = true;
+  if (font == nullptr) {
+    return record;
+  }
+  record.has_font = true;
+  record.weight = static_cast<UINT32>(font->GetWeight());
+  record.simulations = font->GetSimulations();
+  ComPtr<IDWriteFontFamily> family;
+  ComPtr<IDWriteLocalizedStrings> names;
+  if (SUCCEEDED(font->GetFontFamily(&family)) && family != nullptr &&
+      SUCCEEDED(family->GetFamilyNames(&names)) && names != nullptr) {
+    for (UINT32 index = 0; index < names->GetCount(); ++index) {
+      record.family_names.emplace_back(LocaleAt(names.Get(), index),
+                                       LocalizedAt(names.Get(), index));
+    }
+  }
+  record.win32_family = InformationalString(
+      font.Get(), DWRITE_INFORMATIONAL_STRING_WIN32_FAMILY_NAMES);
+  ComPtr<IDWriteFontFace> face;
+  result = font->CreateFontFace(&face);
+  if (FAILED(result) || face == nullptr) {
+    record.errors.push_back(HresultText(L"fallback IDWriteFont::CreateFontFace", result));
+    return record;
+  }
+  record.face = DescribeFace(face.Get());
+  return record;
+}
+
 TextFormatRecord MeasureTextFormat(IDWriteFactory* factory,
                                    const std::wstring& family,
                                    const DWRITE_FONT_WEIGHT weight,
@@ -1053,6 +1250,7 @@ struct StateMeasurement {
   std::vector<std::wstring> dwrite_errors;
   std::vector<DWriteFontRecord> dwrite_fonts;
   std::vector<TextFormatRecord> text_formats;
+  std::vector<FallbackRecord> fallbacks;
 };
 
 StateMeasurement MeasureState(const char* name, const Arguments& arguments,
@@ -1108,6 +1306,21 @@ StateMeasurement MeasureState(const char* name, const Arguments& arguments,
       factory.Get(), arguments.source, DWRITE_FONT_WEIGHT_BOLD, arguments.text));
   state.text_formats.push_back(MeasureTextFormat(
       factory.Get(), arguments.source, DWRITE_FONT_WEIGHT_NORMAL, arguments.text));
+  constexpr wchar_t fallback_text[] = L"Abc 검색 대체로 흐림";
+  constexpr UINT32 hangul_position = 4;
+  constexpr UINT32 hangul_length =
+      static_cast<UINT32>(_countof(fallback_text) - 1) - hangul_position;
+  for (const wchar_t* primary : {L"Segoe UI", L"Segoe UI Variable"}) {
+    FallbackRecord fallback = MeasureFallback(
+        factory.Get(), primary, fallback_text, hangul_position, hangul_length);
+    if (fallback.mapped_length != 0 &&
+        fallback.mapped_length < fallback.text_length) {
+      fallback = MeasureFallback(
+          factory.Get(), primary, fallback_text, hangul_position,
+          fallback.mapped_length);
+    }
+    state.fallbacks.push_back(std::move(fallback));
+  }
   return state;
 }
 
@@ -1151,6 +1364,8 @@ void WriteFace(JsonWriter& json, const FaceRecord& face) {
     json.StringOrNull(file.path);
     json.Key("local");
     json.Bool(file.local);
+    json.Key("sha256");
+    json.AsciiOrNull(file.hash);
     json.Key("error");
     json.StringOrNull(file.error);
     json.EndObject();
@@ -1609,6 +1824,72 @@ void WriteState(JsonWriter& json, const StateMeasurement& state,
     }
     json.EndArray();
     WriteErrors(json, record.errors);
+    json.EndObject();
+  }
+  json.EndArray();
+  json.Key("fallback");
+  json.BeginArray();
+  for (const FallbackRecord& fallback : state.fallbacks) {
+    json.BeginObject();
+    json.Key("primaryFamily");
+    json.String(fallback.primary_family);
+    json.Key("text");
+    json.String(fallback.sample_text);
+    json.Key("ok");
+    json.Bool(fallback.ok);
+    json.Key("textPosition");
+    json.Number(fallback.text_position);
+    json.Key("textLength");
+    json.Number(fallback.text_length);
+    json.Key("mappedLength");
+    json.Number(fallback.mapped_length);
+    json.Key("scale");
+    json.Real(fallback.scale);
+    json.Key("hasFont");
+    json.Bool(fallback.has_font);
+    json.Key("weight");
+    if (fallback.has_font) {
+      json.Number(fallback.weight);
+    } else {
+      json.Null();
+    }
+    json.Key("simulations");
+    json.Ascii(SimulationsText(fallback.simulations));
+    json.Key("familyNames");
+    json.BeginArray();
+    for (const auto& [locale, name] : fallback.family_names) {
+      json.BeginObject();
+      json.Key("locale");
+      json.String(locale);
+      json.Key("name");
+      json.String(name);
+      json.EndObject();
+    }
+    json.EndArray();
+    json.Key("win32FamilyName");
+    json.StringOrNull(fallback.win32_family);
+    json.Key("face");
+    if (fallback.has_font) {
+      WriteFace(json, fallback.face);
+    } else {
+      json.Null();
+    }
+    json.Key("layoutRuns");
+    json.BeginArray();
+    for (const GlyphRunRecord& run : fallback.layout.runs) {
+      json.BeginObject();
+      json.Key("textPosition");
+      json.Number(run.text_position);
+      json.Key("textLength");
+      json.Number(run.text_length);
+      json.Key("glyphCount");
+      json.Number(run.glyph_count);
+      json.Key("face");
+      WriteFace(json, run.face);
+      json.EndObject();
+    }
+    json.EndArray();
+    WriteErrors(json, fallback.errors);
     json.EndObject();
   }
   json.EndArray();

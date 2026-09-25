@@ -1,6 +1,7 @@
 #include "directwrite.h"
 #include "arrival_evidence.h"
 #include "directwrite_alias.h"
+#include "directwrite_fallback.h"
 #include "dynCodeHelper.h"
 #include "hookCounter.h"
 #include "hook_lifecycle.h"
@@ -1703,7 +1704,7 @@ bool CaptureFactoryAliasSource(IDWriteFactory* factory)
 	directwrite_alias::BuildStatus const status =
 		directwrite_alias::GetOrCreate(factory, systemSet, aliases);
 	SignalDirectWriteDiagnostic(directwrite_alias::StatusName(status));
-	return true;
+	return HookDirectWriteSystemFallback(factory, systemCollection);
 }
 
 void RestoreFactoryAliasVtables() noexcept
@@ -1875,6 +1876,8 @@ void TriggerHook(ID2D1Factory* d2d_factory) {
 // 				IDWriteFactory3::GetSystemFontSet
 // 				IDWriteFactory3::GetSystemFontCollection
 // 				CreateTextFormat with the native system collection
+// 				IDWriteFontFallback::MapCharacters
+// 				IDWriteFontFallback1::MapCharacters
 
 // 		IDWriteFactory<N>
 // 			CreateGlyphRunAnalysis<N>
@@ -2959,7 +2962,9 @@ bool RestoreDirectWriteVtableHooks(DWORD timeoutMilliseconds)
 {
 	if (!HCounter::wait(static_cast<int>(timeoutMilliseconds)))
 		return false;
+	RestoreDirectWriteFallbackVtableHooks();
 	RestoreFactoryAliasVtables();
+	ClearDirectWriteFallbackSources();
 	ClearFactoryAliasSources();
 	ClearFactoryFamilyTranslations();
 	directwrite_alias::ClearCache();

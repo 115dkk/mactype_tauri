@@ -57,7 +57,11 @@ semantic results:
 `ProfileRuntime` publishes a complete immutable `RendererPolicySnapshot` only
 after parsing and validation succeed. A failed reload preserves the previously
 published snapshot. One render request retains one snapshot revision, so it
-cannot observe a mixture of policy generations.
+cannot observe a mixture of policy generations. DirectWrite system fallback is
+part of the same substitution Adapter: both `IDWriteFontFallback` overloads
+retain one font-substitution snapshot for each call, leave app-private
+collections untouched, and replace a mapped
+font only when the alias face covers the complete mapped text span.
 
 ## Process-lifetime and unload policy
 

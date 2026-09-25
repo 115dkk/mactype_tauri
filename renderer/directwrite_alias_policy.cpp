@@ -141,6 +141,59 @@ bool PlanSyntheticBoldSlots(
 	}
 }
 
+bool ResolveFallbackAlias(
+	const std::vector<std::wstring>& mappedFontNames,
+	const renderer::font_substitution::Snapshot& substitutions,
+	FallbackAliasResolution& resolution) noexcept
+{
+	try
+	{
+		FallbackAliasResolution candidate;
+		bool matched = false;
+		for (const std::wstring& name : mappedFontNames)
+		{
+			if (name.empty())
+				continue;
+			renderer::font_substitution::Resolution const resolved =
+				substitutions.Resolve({name, DEFAULT_CHARSET});
+			if (resolved.status ==
+				renderer::font_substitution::ResolutionStatus::noMatch)
+				continue;
+			if (resolved.status !=
+					renderer::font_substitution::ResolutionStatus::applied ||
+				!resolved.matched)
+			{
+				resolution = {};
+				return false;
+			}
+			if (!matched)
+			{
+				candidate.matchedSourceName = name;
+				candidate.replacementFamily = resolved.family;
+				matched = true;
+			}
+			else if (!EqualOrdinalIgnoreCase(
+					candidate.replacementFamily, resolved.family))
+			{
+				resolution = {};
+				return false;
+			}
+		}
+		if (!matched)
+		{
+			resolution = {};
+			return false;
+		}
+		resolution = std::move(candidate);
+		return true;
+	}
+	catch (...)
+	{
+		resolution = {};
+		return false;
+	}
+}
+
 bool ResolveFamilyAliases(
 	const std::vector<std::wstring>& sourceAliases,
 	const renderer::font_substitution::Snapshot& substitutions,

@@ -14,10 +14,21 @@ struct FamilyAliasResolution final
 	std::vector<std::wstring> sourceAliases;
 };
 
+struct FallbackAliasResolution final
+{
+	std::wstring matchedSourceName;
+	std::wstring replacementFamily;
+};
+
 bool ResolveFamilyAliases(
 	const std::vector<std::wstring>& sourceAliases,
 	const renderer::font_substitution::Snapshot& substitutions,
 	FamilyAliasResolution& resolution) noexcept;
+
+bool ResolveFallbackAlias(
+	const std::vector<std::wstring>& mappedFontNames,
+	const renderer::font_substitution::Snapshot& substitutions,
+	FallbackAliasResolution& resolution) noexcept;
 
 // One source face as the alias build saw it. `aliased` is false for a face
 // kept native, whether no rule resolved it or its replacement failed.

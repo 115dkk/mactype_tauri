@@ -188,6 +188,10 @@ mactype::hooking::HookCompatibility QueryHookCompatibility(
     bool const signatureKnown = GetProcessMitigationPolicy(
         process, ProcessSignaturePolicy, &signature,
         sizeof(signature)) != FALSE;
+    PROCESS_MITIGATION_SYSTEM_CALL_DISABLE_POLICY systemCallDisable{};
+    bool const systemCallDisableKnown = GetProcessMitigationPolicy(
+        process, ProcessSystemCallDisablePolicy, &systemCallDisable,
+        sizeof(systemCallDisable)) != FALSE;
     return mactype::hooking::ClassifyHookCompatibility({
         dynamicCodeKnown,
         dynamicCodeKnown && dynamicCode.ProhibitDynamicCode != 0,
@@ -196,6 +200,9 @@ mactype::hooking::HookCompatibility QueryHookCompatibility(
         signatureKnown && signature.MicrosoftSignedOnly != 0,
         signatureKnown && signature.StoreSignedOnly != 0,
         signatureKnown && signature.MitigationOptIn != 0,
+        systemCallDisableKnown,
+        systemCallDisableKnown &&
+            systemCallDisable.DisallowWin32kSystemCalls != 0,
     });
 }
 
@@ -320,6 +327,8 @@ ChildRelayReason ClassifyTarget(
         return ChildRelayReason::dynamicCodeProhibited;
     case mactype::hooking::HookCompatibility::binary_signature_restricted:
         return ChildRelayReason::binarySignatureRestricted;
+    case mactype::hooking::HookCompatibility::win32k_lockdown:
+        return ChildRelayReason::win32kLockdown;
     }
     return ChildRelayReason::none;
 }

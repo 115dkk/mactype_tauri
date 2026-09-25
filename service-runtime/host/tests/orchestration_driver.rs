@@ -4,7 +4,7 @@ mod event_sink;
 #[path = "support/recorder.rs"]
 mod recorder_support;
 
-use event_sink::discard_events;
+use event_sink::{discard_events, RecordingEventSink};
 use std::collections::VecDeque;
 use std::io;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -22,7 +22,8 @@ use mactype_service_host::{
     InitializedRuntime, InjectionBroker, InjectionRequest, InspectionEvidence,
     ObserverRecoveryPolicy, ProcessArchitecture, ProcessEventSource, ProcessIdentity,
     ProcessInspection, ProcessInspectionError, ProcessInspector, RuntimeInitializer,
-    ServiceRuntime, SessionChange, StopSignal, TargetLifecycle, TargetLiveness,
+    ServiceRuntime, SessionChange, StopSignal, SystemCallDisablePolicy, TargetLifecycle,
+    TargetLiveness,
 };
 
 use recorder_support::Recorder;
@@ -186,6 +187,9 @@ fn ordinary_inspection(identity: ProcessIdentity) -> ProcessInspection {
             microsoft_signed_only: false,
             store_signed_only: false,
             mitigation_opt_in: false,
+        }),
+        system_call_disable: InspectionEvidence::Known(SystemCallDisablePolicy {
+            disallow_win32k_system_calls: false,
         }),
     }
 }
@@ -804,6 +808,7 @@ impl ProcessInspector for VanishedTargetInspector {
 
 struct VanishedTargetInitializer {
     requests: Arc<Mutex<Vec<InjectionRequest>>>,
+    events: Arc<dyn mactype_service_host::HostEventSink>,
 }
 
 impl RuntimeInitializer for VanishedTargetInitializer {
@@ -823,7 +828,7 @@ impl RuntimeInitializer for VanishedTargetInitializer {
                 first_code: "post-injection-state-cleanup-unknown",
                 first_win32_error: Some(299),
             }),
-            discard_events(),
+            self.events.clone(),
         )
     }
 }
@@ -832,13 +837,17 @@ impl RuntimeInitializer for VanishedTargetInitializer {
 fn cleanup_unknown_for_a_vanished_target_never_degrades_global_health() {
     let recorder = Recorder::default();
     let requests = Arc::new(Mutex::new(Vec::new()));
+    let directory = tempfile::tempdir().unwrap();
+    let events =
+        RecordingEventSink::new(directory.path().join("host.log"), std::time::Instant::now());
 
-    ServiceRuntime::new("0.2.0", discard_events())
+    ServiceRuntime::new("0.2.0", events.clone())
         .run(
             &recorder,
             &recorder,
             &VanishedTargetInitializer {
                 requests: requests.clone(),
+                events: events.clone(),
             },
             &StopAfterTwoProcesses {
                 polls: AtomicUsize::new(0),
@@ -871,6 +880,10 @@ fn cleanup_unknown_for_a_vanished_target_never_degrades_global_health() {
             .collect::<Vec<_>>(),
         [42, 43]
     );
+    assert!(events.events().iter().all(|event| !matches!(
+        event,
+        mactype_service_host::HostEvent::HelperBrokerFailed { .. }
+    )));
 }
 
 #[test]

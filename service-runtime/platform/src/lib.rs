@@ -69,7 +69,7 @@ pub use pipe::{
 pub use process::{
     process_session_id, terminate_current_process, MachineKind, Process, ProcessAccess,
     ProcessBinarySignatureMitigation, ProcessDynamicCodeMitigation, ProcessLifecycleFlags,
-    ProcessMachine,
+    ProcessMachine, ProcessSystemCallDisableMitigation,
 };
 pub use random::system_random_bytes;
 pub use registry::{

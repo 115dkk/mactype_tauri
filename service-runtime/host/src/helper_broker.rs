@@ -284,7 +284,7 @@ where
             return BrokerResult::new(BrokerDisposition::Skipped, MODULE_ALREADY_LOADED_CODE, None);
         }
         let invocation = self.invocation(request);
-        let result = match self.launcher.launch(&invocation) {
+        match self.launcher.launch(&invocation) {
             Ok(output) => parse_output(request, output),
             Err(error)
                 if error.stage() == HelperLaunchStage::BeforeResume
@@ -324,21 +324,7 @@ where
                     error.raw_os_error().map(|code| code as u32),
                 )
             }
-        };
-        if matches!(
-            result.disposition,
-            BrokerDisposition::UncertainCleanup | BrokerDisposition::UncertainIntegrity
-        ) {
-            self.events.record(HostEvent::HelperBrokerFailed {
-                architecture: request.identity.architecture,
-                code: result.code.clone(),
-                detail: Some(format!(
-                    "pid={} creation_time={} win32={:?}",
-                    request.identity.pid, request.identity.creation_time, result.win32_error
-                )),
-            });
         }
-        result
     }
 }
 

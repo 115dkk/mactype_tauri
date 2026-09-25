@@ -80,8 +80,8 @@ pub use status::{ScmState, ServiceStatus, StatusReporter, SERVICE_STOP_WAIT_HINT
 pub use target_validation::{
     is_relay_root, BinarySignaturePolicy, DeferralReason, DynamicCodePolicy, InspectionEvidence,
     PrivateFreeTypeClassification, ProcessInspection, ProcessInspectionError, ProcessInspector,
-    ProcessSkipReason, ProcessTargetDecision, ProcessTargetValidator, TargetLifecycle,
-    TargetLiveness, UnityProcessClassification,
+    ProcessSkipReason, ProcessTargetDecision, ProcessTargetValidator, SystemCallDisablePolicy,
+    TargetLifecycle, TargetLiveness, UnityProcessClassification,
 };
 #[cfg(windows)]
 pub use windows_helper_launcher::WindowsHelperLauncher;

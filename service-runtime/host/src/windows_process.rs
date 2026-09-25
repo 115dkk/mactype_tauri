@@ -14,7 +14,8 @@ use crate::image_subsystem::{read_image_subsystem, ImageSubsystem};
 use crate::{
     BinarySignaturePolicy, DynamicCodePolicy, InspectionEvidence, PrivateFreeTypeClassification,
     ProcessArchitecture, ProcessIdentity, ProcessInspection, ProcessInspectionError,
-    ProcessInspector, TargetLifecycle, TargetLiveness, UnityProcessClassification,
+    ProcessInspector, SystemCallDisablePolicy, TargetLifecycle, TargetLiveness,
+    UnityProcessClassification,
 };
 
 const MAX_UNITY_INSTALLATION_ENTRIES: usize = 4_096;
@@ -105,6 +106,14 @@ impl ProcessInspector for WindowsProcessInspector {
                         microsoft_signed_only: policy.microsoft_signed_only,
                         store_signed_only: policy.store_signed_only,
                         mitigation_opt_in: policy.mitigation_opt_in,
+                    })
+                })
+                .unwrap_or(InspectionEvidence::Unavailable),
+            system_call_disable: process
+                .system_call_disable_mitigation()
+                .map(|policy| {
+                    InspectionEvidence::Known(SystemCallDisablePolicy {
+                        disallow_win32k_system_calls: policy.disallow_win32k_system_calls,
                     })
                 })
                 .unwrap_or(InspectionEvidence::Unavailable),

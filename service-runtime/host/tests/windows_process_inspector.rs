@@ -37,6 +37,10 @@ fn windows_inspector_reports_identity_and_facts_for_the_current_process() {
         inspection.binary_signature,
         InspectionEvidence::Known(policy) if policy.explicitly_blocks_modules()
     ));
+    assert!(!matches!(
+        inspection.system_call_disable,
+        InspectionEvidence::Known(policy) if policy.disallow_win32k_system_calls
+    ));
     assert_eq!(
         inspector.probe_target_lifecycle(&identity),
         TargetLifecycle::Running

@@ -20,13 +20,15 @@ use windows_sys::Win32::System::SystemInformation::{
 };
 use windows_sys::Win32::System::SystemServices::{
     PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY, PROCESS_MITIGATION_DYNAMIC_CODE_POLICY,
+    PROCESS_MITIGATION_SYSTEM_CALL_DISABLE_POLICY,
 };
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, GetExitCodeProcess, GetProcessId, GetProcessInformation,
     GetProcessMitigationPolicy, GetProcessTimes, IsProcessCritical, IsWow64Process2, OpenProcess,
     ProcessDynamicCodePolicy, ProcessProtectionLevelInfo, ProcessSignaturePolicy,
-    QueryFullProcessImageNameW, TerminateProcess, PROCESS_ALL_ACCESS, PROCESS_CREATE_THREAD,
-    PROCESS_NAME_WIN32, PROCESS_PROTECTION_LEVEL_INFORMATION, PROCESS_QUERY_INFORMATION,
+    ProcessSystemCallDisablePolicy, QueryFullProcessImageNameW, TerminateProcess,
+    PROCESS_ALL_ACCESS, PROCESS_CREATE_THREAD, PROCESS_NAME_WIN32,
+    PROCESS_PROTECTION_LEVEL_INFORMATION, PROCESS_QUERY_INFORMATION,
     PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE,
     PROTECTION_LEVEL_NONE,
 };
@@ -107,6 +109,12 @@ pub struct ProcessBinarySignatureMitigation {
     pub microsoft_signed_only: bool,
     pub store_signed_only: bool,
     pub mitigation_opt_in: bool,
+}
+
+/// The system-call-disable mitigation bits the service admission policy consumes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProcessSystemCallDisableMitigation {
+    pub disallow_win32k_system_calls: bool,
 }
 
 /// The lifecycle facts `NtQueryInformationProcess` exposes beyond the
@@ -430,6 +438,30 @@ impl Process {
         })
     }
 
+    /// The system-call-disable mitigation bits, preserving a failed policy query.
+    pub fn system_call_disable_mitigation(&self) -> io::Result<ProcessSystemCallDisableMitigation> {
+        let mut policy = PROCESS_MITIGATION_SYSTEM_CALL_DISABLE_POLICY::default();
+        // SAFETY: the handle is live; the buffer pointer and length describe
+        // exactly the local mitigation policy structure.
+        if unsafe {
+            GetProcessMitigationPolicy(
+                self.handle.as_raw(),
+                ProcessSystemCallDisablePolicy,
+                (&mut policy as *mut PROCESS_MITIGATION_SYSTEM_CALL_DISABLE_POLICY).cast(),
+                size_of::<PROCESS_MITIGATION_SYSTEM_CALL_DISABLE_POLICY>(),
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: the binding exposes the policy bitfield through this union
+        // member, which was initialized by the successful query above.
+        let flags = unsafe { policy.Anonymous.Flags };
+        Ok(ProcessSystemCallDisableMitigation {
+            disallow_win32k_system_calls: flags & (1 << 0) != 0,
+        })
+    }
+
     /// The binary-signature mitigation bits, preserving a failed policy query.
     pub fn binary_signature_mitigation(&self) -> io::Result<ProcessBinarySignatureMitigation> {
         let mut policy = PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY::default();
@@ -637,6 +669,12 @@ mod tests {
         assert_eq!(process.exit_code().unwrap(), None);
         assert!(!process.is_critical_or_unknown());
         assert!(!process.is_protected_or_unknown());
+        assert!(
+            !process
+                .system_call_disable_mitigation()
+                .unwrap()
+                .disallow_win32k_system_calls
+        );
         let machine = process.machine().unwrap();
         assert!(matches!(
             machine.native,

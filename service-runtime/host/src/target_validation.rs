@@ -73,6 +73,11 @@ impl BinarySignaturePolicy {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SystemCallDisablePolicy {
+    pub disallow_win32k_system_calls: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcessInspection {
     pub identity: ProcessIdentity,
@@ -81,6 +86,7 @@ pub struct ProcessInspection {
     pub critical: InspectionEvidence<bool>,
     pub dynamic_code: InspectionEvidence<DynamicCodePolicy>,
     pub binary_signature: InspectionEvidence<BinarySignaturePolicy>,
+    pub system_call_disable: InspectionEvidence<SystemCallDisablePolicy>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -168,6 +174,7 @@ pub enum ProcessSkipReason {
     ImageNameUnavailable,
     DynamicCodeProhibited,
     BinarySignatureRestricted,
+    Win32kSystemCallsDisabled,
     PrivateFreeTypeDetected,
     ConsoleProcess,
     UnityAntiCheatDetected,
@@ -190,6 +197,7 @@ impl ProcessSkipReason {
             Self::ImageNameUnavailable => "image-name-unavailable",
             Self::DynamicCodeProhibited => "dynamic-code-policy-blocks-hooks",
             Self::BinarySignatureRestricted => "binary-signature-policy-blocks-module",
+            Self::Win32kSystemCallsDisabled => "win32k-lockdown-blocks-module",
             Self::PrivateFreeTypeDetected => "private-freetype-detected",
             Self::ConsoleProcess => "console-process-policy",
             Self::UnityAntiCheatDetected => "unity-anticheat-detected",
@@ -338,6 +346,15 @@ impl<'a> ProcessTargetValidator<'a> {
             return Ok(skipped(
                 &inspection,
                 ProcessSkipReason::BinarySignatureRestricted,
+            ));
+        }
+        if matches!(
+            inspection.system_call_disable,
+            InspectionEvidence::Known(policy) if policy.disallow_win32k_system_calls
+        ) {
+            return Ok(skipped(
+                &inspection,
+                ProcessSkipReason::Win32kSystemCallsDisabled,
             ));
         }
         if matches!(

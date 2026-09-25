@@ -1,7 +1,7 @@
 #[path = "support/event_sink.rs"]
 mod event_sink;
 
-use event_sink::discard_events;
+use event_sink::{discard_events, RecordingEventSink};
 use std::ffi::OsString;
 use std::fs;
 use std::sync::{Arc, Mutex};
@@ -384,6 +384,30 @@ fn explicit_post_injection_unknown_code_is_preserved_for_generation_health() {
     assert_eq!(result.disposition, BrokerDisposition::UncertainCleanup);
     assert_eq!(result.code, "post-injection-state-cleanup-unknown");
     assert_eq!(result.win32_error, Some(299));
+}
+
+#[test]
+fn broker_defers_cleanup_uncertainty_event_until_orchestration_classifies_the_target() {
+    let (_base, runtime) = runtime();
+    let generation = runtime.assets().generation_id().to_owned();
+    let launcher = StaticLauncher {
+        output: Mutex::new(Some(HelperOutput {
+            exit_code: 3,
+            stdout: format!(
+                "{{\"schemaVersion\":2,\"status\":\"failed\",\"code\":\"post-injection-state-cleanup-unknown\",\"pid\":42,\"sessionId\":2,\"generationId\":\"{generation}\",\"module\":\"MacType64.dll\",\"windowsError\":299,\"cleanupComplete\":false,\"rendererEvidence\":null}}"
+            )
+            .into_bytes(),
+        })),
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let events =
+        RecordingEventSink::new(directory.path().join("host.log"), std::time::Instant::now());
+    let broker = FixedHelperBroker::new(&runtime, launcher, events.clone());
+
+    let result = broker.inject(&x64_request(&runtime));
+
+    assert_eq!(result.disposition, BrokerDisposition::UncertainCleanup);
+    assert!(events.events().is_empty());
 }
 
 #[test]

@@ -97,6 +97,15 @@ constexpr USHORT kExpectedMachine = IMAGE_FILE_MACHINE_I386;
         error = GetLastError();
     }
 
+    PROCESS_MITIGATION_SYSTEM_CALL_DISABLE_POLICY system_call_disable{};
+    const bool system_call_disable_query_succeeded =
+        GetProcessMitigationPolicy(process, ProcessSystemCallDisablePolicy,
+                                   &system_call_disable,
+                                   sizeof(system_call_disable)) != FALSE;
+    if (!system_call_disable_query_succeeded && error == 0U) {
+        error = GetLastError();
+    }
+
     return classify_hook_compatibility(HookCompatibilityEvidence{
         dynamic_code_query_succeeded,
         dynamic_code.ProhibitDynamicCode != 0U,
@@ -105,6 +114,8 @@ constexpr USHORT kExpectedMachine = IMAGE_FILE_MACHINE_I386;
         signature.MicrosoftSignedOnly != 0U,
         signature.StoreSignedOnly != 0U,
         signature.MitigationOptIn != 0U,
+        system_call_disable_query_succeeded,
+        system_call_disable.DisallowWin32kSystemCalls != 0U,
     });
 }
 

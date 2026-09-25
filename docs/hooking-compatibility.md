@@ -21,8 +21,10 @@ or executable-name workaround.
   registry. A repeat observation is a duplicate rather than another injection
   attempt. PID reuse is safe because a different creation time is a different
   identity.
-- `ProhibitDynamicCode` without thread opt-out, and any active Microsoft-only,
-  Store-only, or mitigation-opt-in image signature policy, are explicit blocks.
+- `ProhibitDynamicCode` without thread opt-out, any active Microsoft-only,
+  Store-only, or mitigation-opt-in image signature policy, and
+  `DisallowWin32kSystemCalls` are explicit blocks. Win32k lockdown uses the
+  process-local `win32k-lockdown-blocks-module` skip code.
 - A failed or unavailable mitigation query is not an implicit global refusal.
 - A frozen (PLM-suspended) target or a helper launch that fails before resume is a deferred target: the host re-checks it from a bounded deferred set, it is neither a failure nor a health condition, and it becomes a normal attempt when the target runs again. A deferred target that exits becomes a quiet skip.
 - A newly observed console-subsystem target (PE optional header `IMAGE_SUBSYSTEM_WINDOWS_CUI`) younger than the console grace period (2 s) is deferred until the remainder of that grace expires. A target that exits during the grace becomes a quiet `injection-target-vanished` skip; a survivor is revalidated once and proceeds without another grace deferral. `SkipConsoleProcesses=1` instead quietly skips the exact verified console process (`console-process-policy`); GUI images, terminal hosts, and unavailable subsystem or age evidence remain eligible, and neither decision changes health-v1.

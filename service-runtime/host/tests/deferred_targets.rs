@@ -17,8 +17,8 @@ use mactype_service_contract::{ConsoleProcessPolicy, PrivateFreeTypePolicy, Unit
 use mactype_service_host::{
     BinarySignaturePolicy, BrokerDisposition, BrokerResult, DeferralReason, DynamicCodePolicy,
     ImageSubsystem, InspectionEvidence, ProcessIdentity, ProcessInspection, ProcessOrchestrator,
-    ProcessOutcome, SessionChange, TargetLifecycle, TargetLiveness, MAX_DEFERRED_TARGETS,
-    TARGET_VANISHED_RESULT_CODE,
+    ProcessOutcome, SessionChange, SystemCallDisablePolicy, TargetLifecycle, TargetLiveness,
+    MAX_DEFERRED_TARGETS, TARGET_VANISHED_RESULT_CODE,
 };
 
 fn target(pid: u32) -> ProcessIdentity {
@@ -39,6 +39,9 @@ fn inspection(identity: ProcessIdentity) -> ProcessInspection {
             microsoft_signed_only: false,
             store_signed_only: false,
             mitigation_opt_in: false,
+        }),
+        system_call_disable: InspectionEvidence::Known(SystemCallDisablePolicy {
+            disallow_win32k_system_calls: false,
         }),
     }
 }

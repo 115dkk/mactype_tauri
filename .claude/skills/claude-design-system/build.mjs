@@ -564,13 +564,16 @@ function buildIndex(options) {
     if (!index.groups.includes(group)) index.groups.push(group);
   }
   for (const upload of uploads) {
-    const id = blobs[`${upload.group}/${upload.name}`];
-    if (!id) {
+    // The asset store may normalise a file (SVG comments and whitespace), so the size it
+    // reports wins over the local one.
+    const entry = blobs[`${upload.group}/${upload.name}`];
+    if (!entry) {
       if (existing?.assetGroups?.[upload.group]?.files?.[assetKey(upload.name)]) continue;
       fail(`no blob id for ${upload.group}/${upload.name}`);
     }
+    const { id, size } = typeof entry === "string" ? { id: entry, size: upload.size } : entry;
     const group = index.assetGroups[upload.group];
-    group.files[assetKey(upload.name)] = { name: upload.name, blob: id.replace(/^\/_blob\//, ""), size: upload.size, type: upload.type };
+    group.files[assetKey(upload.name)] = { name: upload.name, blob: id.replace(/^\/_blob\//, ""), size, type: upload.type };
     if (!group.order.includes(upload.name)) group.order.push(upload.name);
   }
   index.lastChange = {

@@ -49,8 +49,9 @@ branch must never reach the other branch's system. This folder is fork-only tool
    Resolve every warning; a preview class the stylesheets never style is a bug in the preview.
 5. Upload each `uploads.json` entry that the live index does not already record
    (`assetGroups.<Group>.files`): Artifact `publish` with the target `url`, `asset: true` and
-   the entry's `localPath` (`file_paths` takes 25 at a time). Write the returned ids to a
-   `blobs.json` as `{"Icons/house.svg": "<id>"}`.
+   the entry's `localPath` (`file_paths` takes 25 at a time). Write each returned id and the
+   stored size the upload reports to a `blobs.json` as
+   `{"Icons/house.svg": {"id": "<id>", "size": 409}}`; the store normalises SVGs.
 6. `node .claude/skills/claude-design-system/build.mjs index --out <scratch>/ds --blobs <blobs.json> --existing <the index read in step 1>`.
 7. Publish in one call: Artifact `publish` with the target `url`, `root` `<scratch>/ds`,
    `file_path` `<scratch>/ds/project/design-system.json` and `files` = `<scratch>/ds/files.json`.

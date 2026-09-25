@@ -12,7 +12,7 @@ use mactype_service_host::{
     BinarySignaturePolicy, DeferralReason, DynamicCodePolicy, ImageSubsystem, InspectionEvidence,
     PrivateFreeTypeClassification, ProcessIdentity, ProcessInspection, ProcessInspectionError,
     ProcessInspector, ProcessSkipReason, ProcessTargetDecision, ProcessTargetValidator,
-    TargetLifecycle, UnityProcessClassification,
+    SystemCallDisablePolicy, TargetLifecycle, UnityProcessClassification,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -34,6 +34,9 @@ fn ordinary_inspection(pid: u32) -> ProcessInspection {
             microsoft_signed_only: false,
             store_signed_only: false,
             mitigation_opt_in: false,
+        }),
+        system_call_disable: InspectionEvidence::Known(SystemCallDisablePolicy {
+            disallow_win32k_system_calls: false,
         }),
     }
 }
@@ -518,9 +521,25 @@ fn only_known_hook_blocking_mitigations_are_quietly_skipped() {
         );
     }
 
+    let mut win32k_block = ordinary_inspection(42);
+    win32k_block.system_call_disable = InspectionEvidence::Known(SystemCallDisablePolicy {
+        disallow_win32k_system_calls: true,
+    });
+    let inspector = fixed_inspector(win32k_block);
+    assert_eq!(
+        ProcessTargetValidator::new(900, &inspector)
+            .validate(42)
+            .unwrap(),
+        ProcessTargetDecision::Skipped {
+            identity: Some(identity(42)),
+            reason: ProcessSkipReason::Win32kSystemCallsDisabled,
+        }
+    );
+
     let mut unknown = ordinary_inspection(42);
     unknown.dynamic_code = InspectionEvidence::Unavailable;
     unknown.binary_signature = InspectionEvidence::Unavailable;
+    unknown.system_call_disable = InspectionEvidence::Unavailable;
     let inspector = fixed_inspector(unknown);
     assert!(matches!(
         ProcessTargetValidator::new(900, &inspector).validate(42),

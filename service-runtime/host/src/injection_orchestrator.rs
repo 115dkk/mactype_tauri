@@ -438,6 +438,7 @@ impl<'a> InjectionOrchestrator<'a> {
                 }
                 let (outcome, result) =
                     self.reclassify_vanished_target(&request.identity, outcome, result);
+                self.record_helper_failure_if_uncertain(&request.identity, &result);
                 self.record_result(request.identity.clone(), outcome, attempt, result);
                 return Ok(outcome);
             }
@@ -616,8 +617,10 @@ impl<'a> InjectionOrchestrator<'a> {
         if !matches!(
             outcome,
             ProcessOutcome::Rejected | ProcessOutcome::RetryExhausted
-        ) || result.disposition != BrokerDisposition::UncertainCleanup
-        {
+        ) || !matches!(
+            result.disposition,
+            BrokerDisposition::UncertainCleanup | BrokerDisposition::UncertainIntegrity
+        ) {
             return (outcome, result);
         }
         match self.inspector.probe_target_liveness(identity) {
@@ -629,7 +632,40 @@ impl<'a> InjectionOrchestrator<'a> {
                     result.win32_error,
                 ),
             ),
-            TargetLiveness::Alive | TargetLiveness::Unknown => (outcome, result),
+            TargetLiveness::Alive | TargetLiveness::Unknown => {
+                if self.inspector.probe_target_lifecycle(identity) == TargetLifecycle::Exiting {
+                    (
+                        ProcessOutcome::Skipped,
+                        BrokerResult::new(
+                            BrokerDisposition::Skipped,
+                            ProcessSkipReason::TargetExiting.code(),
+                            result.win32_error,
+                        ),
+                    )
+                } else {
+                    (outcome, result)
+                }
+            }
+        }
+    }
+
+    fn record_helper_failure_if_uncertain(
+        &self,
+        identity: &ProcessIdentity,
+        result: &BrokerResult,
+    ) {
+        if matches!(
+            result.disposition,
+            BrokerDisposition::UncertainCleanup | BrokerDisposition::UncertainIntegrity
+        ) {
+            self.events.record(HostEvent::HelperBrokerFailed {
+                architecture: identity.architecture,
+                code: result.code.clone(),
+                detail: Some(format!(
+                    "pid={} creation_time={} win32={:?}",
+                    identity.pid, identity.creation_time, result.win32_error
+                )),
+            });
         }
     }
 

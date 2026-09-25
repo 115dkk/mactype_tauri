@@ -125,22 +125,34 @@ LPTSTR WINAPI PathCombine(LPTSTR pszDest, LPCTSTR pszDir, LPCTSTR pszFile)
 		return nullptr;
 	}
 
-	//かなり手抜き
-	TCHAR szCurDir[MAX_PATH], szDir[MAX_PATH+1];
-	GetCurrentDirectory(MAX_PATH, szCurDir);
-	_tcsncpy(szDir, pszDir, MAX_PATH - 1);
-	szDir[MAX_PATH - 1] = _T('\0');
-	PathAddBackslash(szDir);
-	if (!SetCurrentDirectory(szDir)) {
+	// The current directory is process-global state of the host application.
+	// Changing it from a renderer races the application's own threads, and in
+	// MSYS processes SetCurrentDirectory fails outright (ERROR_FILENAME_EXCED_RANGE),
+	// which made renderer startup fail. Build an absolute path instead and let
+	// GetFullPathName only normalize it.
+	std::basic_string<TCHAR> combined;
+	const bool unc = pszFile[0] == _T('\\') && pszFile[1] == _T('\\');
+	const bool drive = pszFile[0] != _T('\0') && pszFile[1] == _T(':');
+	if (unc || drive) {
+		combined = pszFile;
+	} else if (pszFile[0] == _T('\\') || pszFile[0] == _T('/')) {
+		if (pszDir[0] == _T('\0') || pszDir[1] != _T(':')) {
+			*pszDest = _T('\0');
+			return nullptr;
+		}
+		combined.assign(pszDir, 2);
+		combined += pszFile;
+	} else {
+		combined = pszDir;
+		if (!combined.empty() && combined.back() != _T('\\') && combined.back() != _T('/'))
+			combined += _T('\\');
+		combined += pszFile;
+	}
+	const DWORD length = GetFullPathName(combined.c_str(), MAX_PATH, pszDest, nullptr);
+	if (length == 0 || length >= MAX_PATH) {
 		*pszDest = _T('\0');
 		return nullptr;
 	}
-	TCHAR szFile[MAX_PATH];
-	_tcsncpy(szFile, pszFile, MAX_PATH - 1);
-	szFile[MAX_PATH - 1] = _T('\0');
-	GetFullPathName(szFile, MAX_PATH, pszDest, nullptr);
-	SetCurrentDirectory(szCurDir);
-TRACE(_T("PathCombine: %s\n"), pszDest);
 	return pszDest;
 }
 

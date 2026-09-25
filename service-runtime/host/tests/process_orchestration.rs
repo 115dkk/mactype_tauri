@@ -23,8 +23,8 @@ use mactype_service_host::{
     InjectionBroker, InjectionRequest, InspectionEvidence, PrivateFreeTypeClassification,
     ProcessArchitecture, ProcessEventSource, ProcessIdentity, ProcessInspection,
     ProcessInspectionError, ProcessInspector, ProcessOrchestrator, ProcessOutcome, RetryPolicy,
-    RetryScheduler, SessionChange, TargetLiveness, MAX_TRACKED_PROCESS_RESULTS,
-    PROCESS_CREATION_QUERY, TARGET_VANISHED_RESULT_CODE,
+    RetryScheduler, SessionChange, SystemCallDisablePolicy, TargetLifecycle, TargetLiveness,
+    MAX_TRACKED_PROCESS_RESULTS, PROCESS_CREATION_QUERY, TARGET_VANISHED_RESULT_CODE,
 };
 
 const PROFILE_DIGEST: &str =
@@ -85,6 +85,9 @@ fn ordinary_inspection(identity: ProcessIdentity) -> ProcessInspection {
             microsoft_signed_only: false,
             store_signed_only: false,
             mitigation_opt_in: false,
+        }),
+        system_call_disable: InspectionEvidence::Known(SystemCallDisablePolicy {
+            disallow_win32k_system_calls: false,
         }),
     }
 }
@@ -1076,6 +1079,7 @@ fn post_resume_service_stop_is_terminal_and_degrades_its_generation() {
 struct ProbingInspector {
     identity: ProcessIdentity,
     liveness: TargetLiveness,
+    lifecycles: Mutex<VecDeque<TargetLifecycle>>,
     probes: Mutex<Vec<ProcessIdentity>>,
 }
 
@@ -1084,6 +1088,20 @@ impl ProbingInspector {
         Self {
             identity,
             liveness,
+            lifecycles: Mutex::new(VecDeque::from([TargetLifecycle::Running])),
+            probes: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn with_lifecycle(
+        identity: ProcessIdentity,
+        liveness: TargetLiveness,
+        lifecycle: TargetLifecycle,
+    ) -> Self {
+        Self {
+            identity,
+            liveness,
+            lifecycles: Mutex::new(VecDeque::from([TargetLifecycle::Running, lifecycle])),
             probes: Mutex::new(Vec::new()),
         }
     }
@@ -1099,6 +1117,14 @@ impl ProcessInspector for ProbingInspector {
         self.probes.lock().unwrap().push(identity.clone());
         self.liveness
     }
+
+    fn probe_target_lifecycle(&self, _identity: &ProcessIdentity) -> TargetLifecycle {
+        self.lifecycles
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or(TargetLifecycle::Running)
+    }
 }
 
 fn cleanup_unknown_broker() -> SequenceBroker {
@@ -1112,6 +1138,13 @@ fn cleanup_unknown_broker() -> SequenceBroker {
     }
 }
 
+fn helper_failure_events(events: &[HostEvent]) -> Vec<&HostEvent> {
+    events
+        .iter()
+        .filter(|event| matches!(event, HostEvent::HelperBrokerFailed { .. }))
+        .collect()
+}
+
 #[test]
 fn cleanup_unknown_for_a_vanished_target_is_a_trusted_skip_with_a_bounded_result() {
     let identity = ProcessIdentity {
@@ -1122,8 +1155,10 @@ fn cleanup_unknown_for_a_vanished_target_is_a_trusted_skip_with_a_bounded_result
     };
     let inspector = ProbingInspector::new(identity.clone(), TargetLiveness::Vanished);
     let broker = cleanup_unknown_broker();
+    let directory = tempfile::tempdir().unwrap();
+    let sink = RecordingEventSink::new(directory.path().join("host.log"), Instant::now());
     let mut orchestrator =
-        ProcessOrchestrator::new(900, binding(), &inspector, &broker, discard_events());
+        ProcessOrchestrator::new(900, binding(), &inspector, &broker, sink.clone());
 
     assert_eq!(
         orchestrator.handle_pid(42).unwrap(),
@@ -1146,6 +1181,7 @@ fn cleanup_unknown_for_a_vanished_target_is_a_trusted_skip_with_a_bounded_result
         ProcessOutcome::Duplicate
     );
     assert_eq!(broker.requests.lock().unwrap().len(), 1);
+    assert!(helper_failure_events(&sink.events()).is_empty());
 }
 
 #[test]
@@ -1158,8 +1194,10 @@ fn cleanup_unknown_for_a_target_still_alive_keeps_the_degraded_classification() 
     };
     let inspector = ProbingInspector::new(identity, TargetLiveness::Alive);
     let broker = cleanup_unknown_broker();
+    let directory = tempfile::tempdir().unwrap();
+    let sink = RecordingEventSink::new(directory.path().join("host.log"), Instant::now());
     let mut orchestrator =
-        ProcessOrchestrator::new(900, binding(), &inspector, &broker, discard_events());
+        ProcessOrchestrator::new(900, binding(), &inspector, &broker, sink.clone());
 
     assert_eq!(
         orchestrator.handle_pid(42).unwrap(),
@@ -1172,6 +1210,41 @@ fn cleanup_unknown_for_a_target_still_alive_keeps_the_degraded_classification() 
     let health_error = orchestrator.generation_health_error().unwrap();
     assert_eq!(health_error.code, "injection-cleanup-unknown");
     assert_eq!(health_error.win32_error, Some(299));
+    let events = sink.events();
+    assert_eq!(helper_failure_events(&events).len(), 1);
+    assert!(matches!(
+        helper_failure_events(&events)[0],
+        HostEvent::HelperBrokerFailed { architecture, code, detail }
+            if *architecture == ProcessArchitecture::X64
+                && code == "post-injection-state-cleanup-unknown"
+                && detail.as_deref().is_some_and(|value| value.contains("pid=42"))
+    ));
+}
+
+#[test]
+fn cleanup_unknown_for_an_exiting_target_is_a_quiet_target_exiting_skip() {
+    let identity = ProcessIdentity {
+        pid: 42,
+        creation_time: 100,
+        session_id: 2,
+        architecture: ProcessArchitecture::X64,
+    };
+    let inspector =
+        ProbingInspector::with_lifecycle(identity, TargetLiveness::Alive, TargetLifecycle::Exiting);
+    let broker = cleanup_unknown_broker();
+    let directory = tempfile::tempdir().unwrap();
+    let sink = RecordingEventSink::new(directory.path().join("host.log"), Instant::now());
+    let mut orchestrator =
+        ProcessOrchestrator::new(900, binding(), &inspector, &broker, sink.clone());
+
+    assert_eq!(
+        orchestrator.handle_pid(42).unwrap(),
+        ProcessOutcome::Skipped
+    );
+    let record = orchestrator.last_result(42, 100).unwrap();
+    assert_eq!(record.code, "target-exiting");
+    assert!(orchestrator.generation_health_error().is_none());
+    assert!(helper_failure_events(&sink.events()).is_empty());
 }
 
 #[test]

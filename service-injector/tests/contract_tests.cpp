@@ -264,34 +264,47 @@ bool incompatible_process_mitigations_are_classified_before_injection() {
     const HookCompatibilityEvidence compatible{
         true, false, false,
         true, false, false, false,
+        true, false,
     };
     const HookCompatibilityEvidence thread_opt_out{
         true, true, true,
         true, false, false, false,
+        true, false,
     };
     const HookCompatibilityEvidence dynamic_code_blocked{
         true, true, false,
         true, false, false, false,
+        true, false,
     };
     const HookCompatibilityEvidence microsoft_only{
         true, false, false,
         true, true, false, false,
+        true, false,
     };
     const HookCompatibilityEvidence store_only{
         true, false, false,
         true, false, true, false,
+        true, false,
     };
     const HookCompatibilityEvidence mitigation_opt_in{
         true, false, false,
         true, false, false, true,
+        true, false,
+    };
+    const HookCompatibilityEvidence win32k_locked{
+        true, false, false,
+        true, false, false, false,
+        true, true,
     };
     const HookCompatibilityEvidence unavailable_but_not_explicitly_blocked{
         false, false, false,
         true, false, false, false,
+        false, false,
     };
     const HookCompatibilityEvidence partially_observed_signature_block{
         false, false, false,
         true, true, false, false,
+        false, false,
     };
 
     return classify_hook_compatibility(compatible) == HookCompatibility::compatible &&
@@ -308,6 +321,10 @@ bool incompatible_process_mitigations_are_classified_before_injection() {
                HookCompatibility::binary_signature_restricted &&
            hook_compatibility_code(HookCompatibility::binary_signature_restricted) ==
                "binary-signature-policy-blocks-module" &&
+           classify_hook_compatibility(win32k_locked) ==
+               HookCompatibility::win32k_lockdown &&
+           hook_compatibility_code(HookCompatibility::win32k_lockdown) ==
+               "win32k-lockdown-blocks-module" &&
            classify_hook_compatibility(unavailable_but_not_explicitly_blocked) ==
                HookCompatibility::compatible &&
            classify_hook_compatibility(partially_observed_signature_block) ==

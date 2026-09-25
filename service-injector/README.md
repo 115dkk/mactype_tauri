@@ -76,4 +76,9 @@ validates real DLL loading, activation-evidence round trips, quiet-skip unload,
 duplicate ownership, intentional skipping of a same-basename module from
 another directory, creation-time/session/architecture rejection, arbitrary
 runtime selector rejection, process-lifecycle decoding and querying, bounded
-JSON, and verified late loading after the initial deadline.
+JSON, and verified late loading after the initial deadline. A marker whose
+verdict depends on the helper judges module residency once, after the script
+has received the broker's answer and published the marker's settle file, so the
+verdict describes the state the helper left behind rather than a moment inside
+its load, query and release; the same-basename conflict marker instead watches
+its whole lifetime.

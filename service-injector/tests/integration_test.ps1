@@ -54,9 +54,14 @@ function Wait-ForFile([string] $Path, [System.Diagnostics.Process] $Process) {
     }
 }
 
-function Start-Marker([string] $Name, [string] $PreloadModule = '') {
+# A settled marker judges module residency once, when Complete-Marker publishes
+# its settle file after the broker has returned. An unsettled marker keeps its
+# own timing: it watches its whole lifetime and re-samples 1.5 s after it first
+# sees the module.
+function Start-Marker([string] $Name, [string] $PreloadModule = '', [switch] $Unsettled) {
     $metadataPath = Join-Path $testRoot "$Name-metadata.json"
     $resultPath = Join-Path $testRoot "$Name-result.json"
+    $settlePath = if ($Unsettled) { $null } else { Join-Path $testRoot "$Name-settle" }
     $arguments = @(
         '--metadata', $metadataPath,
         '--result', $resultPath,
@@ -66,6 +71,9 @@ function Start-Marker([string] $Name, [string] $PreloadModule = '') {
     if ($PreloadModule) {
         $arguments += @('--preload', $PreloadModule)
     }
+    if ($settlePath) {
+        $arguments += @('--settle', $settlePath)
+    }
     $process = Start-Process -FilePath $Target -ArgumentList $arguments -PassThru
     $processes.Add($process)
     Wait-ForFile -Path $metadataPath -Process $process
@@ -73,7 +81,27 @@ function Start-Marker([string] $Name, [string] $PreloadModule = '') {
         Process = $process
         Identity = (Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json)
         ResultPath = $resultPath
+        SettlePath = $settlePath
     }
+}
+
+# Marker exit codes: 0 expected module resident, 7 absent, 9 module inventory
+# unreadable, 10 settle file never published; 2 to 6 and 8 are setup failures.
+function Complete-Marker($Marker, [int] $ExpectedExitCode, [string] $Failure) {
+    if ($Marker.SettlePath) {
+        [IO.File]::WriteAllText($Marker.SettlePath, '')
+    }
+    [void]$Marker.Process.WaitForExit($markerLifetimeMs + 3000)
+    if ($Marker.Process.HasExited -and $Marker.Process.ExitCode -eq $ExpectedExitCode) {
+        return
+    }
+    $exit = if ($Marker.Process.HasExited) { [string]$Marker.Process.ExitCode } else { 'still running' }
+    $result = if (Test-Path -LiteralPath $Marker.ResultPath) {
+        (Get-Content -LiteralPath $Marker.ResultPath -Raw).Trim()
+    } else {
+        'no result'
+    }
+    throw "$Failure (marker exit $exit, expected $ExpectedExitCode; result $result)"
 }
 
 function Invoke-Broker(
@@ -154,10 +182,7 @@ try {
     }
     Assert-EvidenceModuleLoad $duplicate 3
 
-    $valid.Process.WaitForExit(5000)
-    if (-not $valid.Process.HasExited -or $valid.Process.ExitCode -ne 0) {
-        throw 'Marker target did not observe the fixed adjacent module.'
-    }
+    Complete-Marker $valid 0 'Marker target did not observe the fixed adjacent module.'
 
     Copy-Item -LiteralPath $fixedModule -Destination $moduleBackup -Force
     Copy-Item -LiteralPath $QuietModule -Destination $fixedModule -Force
@@ -170,10 +195,7 @@ try {
         throw 'Renderer quiet skip did not return verified bounded evidence and cleanup.'
     }
     Assert-EvidenceModuleLoad $quietResponse 2
-    $quiet.Process.WaitForExit($markerLifetimeMs + 3000)
-    if (-not $quiet.Process.HasExited -or $quiet.Process.ExitCode -ne 7) {
-        throw 'Explicit renderer skip left the fixed renderer resident in the target.'
-    }
+    Complete-Marker $quiet 7 'Explicit renderer skip left the fixed renderer resident in the target.'
 
     $quietPreloaded = Start-Marker -Name 'renderer-quiet-skip-preloaded' -PreloadModule $fixedModule
     $quietPreloadedResponse = Invoke-Broker -Executable $Injector -Identity $quietPreloaded.Identity
@@ -182,10 +204,7 @@ try {
         throw 'Preloaded quiet renderer verification did not release its helper-owned reference.'
     }
     Assert-EvidenceModuleLoad $quietPreloadedResponse 3
-    $quietPreloaded.Process.WaitForExit(5000)
-    if (-not $quietPreloaded.Process.HasExited -or $quietPreloaded.Process.ExitCode -ne 0) {
-        throw 'Preloaded quiet renderer lost the target-owned module reference.'
-    }
+    Complete-Marker $quietPreloaded 0 'Preloaded quiet renderer lost the target-owned module reference.'
     Copy-Item -LiteralPath $moduleBackup -Destination $fixedModule -Force
     Remove-Item -LiteralPath $moduleBackup -Force
     $moduleReplaced = $false
@@ -194,7 +213,9 @@ try {
         [IO.Path]::GetFullPath($DecoyModule) -eq [IO.Path]::GetFullPath($fixedModule)) {
         throw 'Decoy fixture must use the fixed basename from a different directory.'
     }
-    $decoy = Start-Marker -Name 'same-basename-decoy' -PreloadModule $DecoyModule
+    # The conflict marker stays unsettled: its verdict covers its whole lifetime,
+    # and the premature-result check below reads it before any broker runs.
+    $decoy = Start-Marker -Name 'same-basename-decoy' -PreloadModule $DecoyModule -Unsettled
     Start-Sleep -Milliseconds 1800
     if (Test-Path -LiteralPath $decoy.ResultPath) {
         $prematureResult = Get-Content -LiteralPath $decoy.ResultPath -Raw | ConvertFrom-Json
@@ -208,18 +229,12 @@ try {
     if ($decoy.Process.HasExited) {
         throw 'Injector damaged the target after detecting a same-basename conflict.'
     }
-    $decoy.Process.WaitForExit($markerLifetimeMs + 3000)
-    if (-not $decoy.Process.HasExited -or $decoy.Process.ExitCode -ne 7) {
-        throw 'Conflict target did not remain healthy with the expected module absent.'
-    }
+    Complete-Marker $decoy 7 'Conflict target did not remain healthy with the expected module absent.'
 
     $afterConflict = Start-Marker -Name 'after-same-basename-conflict'
     $afterConflictResponse = Invoke-Broker -Executable $Injector -Identity $afterConflict.Identity
     Assert-Response $afterConflictResponse 0 'injected' 'renderer-active'
-    $afterConflict.Process.WaitForExit(5000)
-    if (-not $afterConflict.Process.HasExited -or $afterConflict.Process.ExitCode -ne 0) {
-        throw 'A clean process did not recover to normal injection after a conflict.'
-    }
+    Complete-Marker $afterConflict 0 'A clean process did not recover to normal injection after a conflict.'
 
     $wrongCreation = Start-Marker -Name 'wrong-creation'
     $wrongCreationIdentity = $wrongCreation.Identity.PSObject.Copy()
@@ -287,10 +302,7 @@ try {
     if (-not $timeoutResponse.Response.cleanupComplete) {
         throw 'Verified late injection did not release remote memory and handles.'
     }
-    $slow.Process.WaitForExit(5000)
-    if (-not $slow.Process.HasExited -or $slow.Process.ExitCode -ne 0) {
-        throw 'Marker target did not observe the verified late module load.'
-    }
+    Complete-Marker $slow 0 'Marker target did not observe the verified late module load.'
 } finally {
     foreach ($process in $processes) {
         if ($process -and -not $process.HasExited) {

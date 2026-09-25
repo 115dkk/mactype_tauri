@@ -834,6 +834,10 @@ impl RuntimeInitializer for VanishedTargetInitializer {
 }
 
 #[test]
+#[cfg_attr(
+    all(miri, windows),
+    ignore = "Windows Miri does not implement CreateDirectoryW"
+)]
 fn cleanup_unknown_for_a_vanished_target_never_degrades_global_health() {
     let recorder = Recorder::default();
     let requests = Arc::new(Mutex::new(Vec::new()));

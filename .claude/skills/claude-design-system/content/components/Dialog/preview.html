@@ -1,0 +1,27 @@
+<!-- @dsCard group="Feedback" height=300 subtitle="Save as dialog with a validation message" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Dialog</title>
+<style>
+html, body { height: auto; min-height: 0; }
+body { overflow: visible; padding: 0; }
+
+</style>
+</head>
+<body>
+<div class="confirmation-backdrop" style="position: relative; min-height: 300px">
+  <section aria-labelledby="ds-dialog-title" aria-modal="true" class="profile-name-dialog" role="dialog">
+    <h2 id="ds-dialog-title">Save as</h2>
+    <p>Saves a new file in your personal profile folder.</p>
+    <form>
+      <label><span>New profile name</span><input aria-invalid="true" type="text" value="Default"></label>
+      <p class="profile-name-dialog-message">A profile with that name already exists.</p>
+      <div class="profile-name-dialog-actions">
+        <button class="button secondary" type="button">Cancel</button>
+        <button class="button primary" disabled type="submit">Save</button>
+      </div>
+    </form>
+  </section>
+</div>
+</body>
+</html>

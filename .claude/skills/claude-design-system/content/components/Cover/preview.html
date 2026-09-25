@@ -1,0 +1,99 @@
+<!-- @dsCard height=288 -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Cover</title>
+<style>
+html, body { height: auto; min-height: 0; margin: 0; }
+body { overflow: visible; padding: 0; background: var(--color-canvas); }
+.ds-cover { position: relative; width: 960px; height: 288px; background: var(--color-canvas); color: var(--color-foreground); overflow: hidden; }
+.ds-cover svg { position: absolute; inset: 0; }
+.ds-cover .ds-accent { fill: var(--color-primary); }
+.ds-cover .ds-tint { fill: var(--color-surface-subtle); }
+.ds-cover .ds-signal { fill: var(--color-success); }
+.ds-cover .ds-ink { fill: var(--color-foreground); }
+.ds-cover .ds-dot { fill: var(--color-canvas); }
+.ds-cover .ds-block { rx: var(--radius-control); ry: var(--radius-control); }
+.ds-cover-text { position: absolute; left: 48px; right: 48px; bottom: 26px; }
+.ds-cover-name { margin: 0; font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif; font-size: 64px; font-weight: 600; line-height: 0.95; letter-spacing: -0.5px; color: var(--color-foreground); }
+.ds-cover-tagline { margin: 8px 0 0; font-size: 14px; line-height: 20px; color: var(--color-muted); }
+</style>
+</head>
+<body>
+<div class="ds-cover">
+  <!-- blocks: color-primary (416 wide), color-surface-subtle (184), color-success (48), color-foreground (288), 112 tall, radius-control corners, space-2 gaps
+       arrangement: top-band skeleton, a strip of unequal bands; the name is too wide for the 440px side zone
+       pattern: dot grid (a 4px-grid, dense technical surface for glyph rendering), 60 dots cut out in color-canvas at a space-4 pitch inside the ink block
+       scales: pitch space-4 (16), gaps space-2 (8), corners radius-control (4) -->
+  <svg aria-hidden="true" height="288" viewBox="0 0 960 288" width="960">
+    <rect class="ds-accent ds-block" height="112" width="416" x="0" y="0"/>
+    <rect class="ds-tint ds-block" height="112" width="184" x="424" y="0"/>
+    <rect class="ds-signal ds-block" height="112" width="48" x="616" y="0"/>
+    <rect class="ds-ink ds-block" height="112" width="288" x="672" y="0"/>
+    <circle class="ds-dot" cx="728" cy="16" r="2"/>
+    <circle class="ds-dot" cx="744" cy="16" r="2"/>
+    <circle class="ds-dot" cx="760" cy="16" r="2"/>
+    <circle class="ds-dot" cx="776" cy="16" r="2"/>
+    <circle class="ds-dot" cx="792" cy="16" r="2"/>
+    <circle class="ds-dot" cx="808" cy="16" r="2"/>
+    <circle class="ds-dot" cx="824" cy="16" r="2"/>
+    <circle class="ds-dot" cx="840" cy="16" r="2"/>
+    <circle class="ds-dot" cx="856" cy="16" r="2"/>
+    <circle class="ds-dot" cx="872" cy="16" r="2"/>
+    <circle class="ds-dot" cx="728" cy="32" r="2"/>
+    <circle class="ds-dot" cx="744" cy="32" r="2"/>
+    <circle class="ds-dot" cx="760" cy="32" r="2"/>
+    <circle class="ds-dot" cx="776" cy="32" r="2"/>
+    <circle class="ds-dot" cx="792" cy="32" r="2"/>
+    <circle class="ds-dot" cx="808" cy="32" r="2"/>
+    <circle class="ds-dot" cx="824" cy="32" r="2"/>
+    <circle class="ds-dot" cx="840" cy="32" r="2"/>
+    <circle class="ds-dot" cx="856" cy="32" r="2"/>
+    <circle class="ds-dot" cx="872" cy="32" r="2"/>
+    <circle class="ds-dot" cx="728" cy="48" r="2"/>
+    <circle class="ds-dot" cx="744" cy="48" r="2"/>
+    <circle class="ds-dot" cx="760" cy="48" r="2"/>
+    <circle class="ds-dot" cx="776" cy="48" r="2"/>
+    <circle class="ds-dot" cx="792" cy="48" r="2"/>
+    <circle class="ds-dot" cx="808" cy="48" r="2"/>
+    <circle class="ds-dot" cx="824" cy="48" r="2"/>
+    <circle class="ds-dot" cx="840" cy="48" r="2"/>
+    <circle class="ds-dot" cx="856" cy="48" r="2"/>
+    <circle class="ds-dot" cx="872" cy="48" r="2"/>
+    <circle class="ds-dot" cx="728" cy="64" r="2"/>
+    <circle class="ds-dot" cx="744" cy="64" r="2"/>
+    <circle class="ds-dot" cx="760" cy="64" r="2"/>
+    <circle class="ds-dot" cx="776" cy="64" r="2"/>
+    <circle class="ds-dot" cx="792" cy="64" r="2"/>
+    <circle class="ds-dot" cx="808" cy="64" r="2"/>
+    <circle class="ds-dot" cx="824" cy="64" r="2"/>
+    <circle class="ds-dot" cx="840" cy="64" r="2"/>
+    <circle class="ds-dot" cx="856" cy="64" r="2"/>
+    <circle class="ds-dot" cx="872" cy="64" r="2"/>
+    <circle class="ds-dot" cx="728" cy="80" r="2"/>
+    <circle class="ds-dot" cx="744" cy="80" r="2"/>
+    <circle class="ds-dot" cx="760" cy="80" r="2"/>
+    <circle class="ds-dot" cx="776" cy="80" r="2"/>
+    <circle class="ds-dot" cx="792" cy="80" r="2"/>
+    <circle class="ds-dot" cx="808" cy="80" r="2"/>
+    <circle class="ds-dot" cx="824" cy="80" r="2"/>
+    <circle class="ds-dot" cx="840" cy="80" r="2"/>
+    <circle class="ds-dot" cx="856" cy="80" r="2"/>
+    <circle class="ds-dot" cx="872" cy="80" r="2"/>
+    <circle class="ds-dot" cx="728" cy="96" r="2"/>
+    <circle class="ds-dot" cx="744" cy="96" r="2"/>
+    <circle class="ds-dot" cx="760" cy="96" r="2"/>
+    <circle class="ds-dot" cx="776" cy="96" r="2"/>
+    <circle class="ds-dot" cx="792" cy="96" r="2"/>
+    <circle class="ds-dot" cx="808" cy="96" r="2"/>
+    <circle class="ds-dot" cx="824" cy="96" r="2"/>
+    <circle class="ds-dot" cx="840" cy="96" r="2"/>
+    <circle class="ds-dot" cx="856" cy="96" r="2"/>
+    <circle class="ds-dot" cx="872" cy="96" r="2"/>
+  </svg>
+  <div class="ds-cover-text">
+    <p class="ds-cover-name">MacType Control Center</p>
+    <p class="ds-cover-tagline">The classic Windows control surface for MacType, in light and dark.</p>
+  </div>
+</div>
+</body>
+</html>

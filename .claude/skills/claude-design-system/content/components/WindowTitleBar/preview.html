@@ -1,0 +1,21 @@
+<!-- @dsCard group="Navigation" height=64 subtitle="Custom title bar with product icon and window controls" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>WindowTitleBar</title>
+<style>
+html, body { height: auto; min-height: 0; }
+body { overflow: visible; padding: 0; }
+
+</style>
+</head>
+<body>
+<header class="window-titlebar" style="position: static">
+  <div class="window-title"><img alt="" height="18" src="{{logo}}" width="18"><span>MacType Control Center</span></div>
+  <div class="window-controls">
+    <button aria-label="Minimize window" type="button">{{icon:Minus:16:1.7}}</button>
+    <button aria-label="Maximize or restore window" type="button">{{icon:Square:13:1.5}}</button>
+    <button aria-label="Close window" class="window-close" type="button">{{icon:X:16:1.7}}</button>
+  </div>
+</header>
+</body>
+</html>

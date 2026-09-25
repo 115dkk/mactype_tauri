@@ -1,0 +1,35 @@
+<!-- @dsCard group="Navigation" height=560 subtitle="Product lockup, grouped items, language and theme" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Navigation</title>
+<style>
+html, body { height: auto; min-height: 0; }
+body { overflow: visible; padding: 0; }
+</style>
+</head>
+<body>
+<aside class="navigation" style="width: var(--nav-width); height: 560px">
+  <div class="product-lockup"><img alt="" height="32" src="{{logo}}" width="32"><div><strong>MacType</strong><span>Control Center</span></div></div>
+  <nav>
+    <button class="nav-item" data-selected="false" type="button">{{icon:Home:18:1.8}}<span>Overview</span></button>
+    <div class="nav-group" role="group"><span class="nav-group-label">Wizard</span>
+      <div class="nav-group-items">
+        <button class="nav-item nav-subitem" data-selected="true" type="button">{{icon:FileCog:17:1.8}}<span>Profiles</span></button>
+        <button class="nav-item nav-subitem" data-selected="false" type="button">{{icon:ServerCog:17:1.8}}<span>Service</span></button>
+      </div>
+    </div>
+    <div class="nav-group" role="group"><span class="nav-group-label">Tuner</span>
+      <div class="nav-group-items">
+        <button class="nav-item nav-subitem" data-selected="false" type="button">{{icon:Sparkles:17:1.8}}<span>Guided setup</span></button>
+        <button class="nav-item nav-subitem" data-selected="false" type="button">{{icon:SlidersHorizontal:17:1.8}}<span>All settings</span></button>
+      </div>
+    </div>
+    <button class="nav-item" data-selected="false" type="button">{{icon:Activity:18:1.8}}<span>Diagnostics</span></button>
+  </nav>
+  <div class="navigation-preferences">
+    <div class="language-control">{{icon:Languages:17}}<div class="language-picker"><button aria-haspopup="listbox" aria-label="Display language" class="language-picker-trigger" type="button">English</button></div></div>
+    <button class="theme-toggle" type="button">{{icon:Moon:17}}<span>Dark theme</span></button>
+  </div>
+</aside>
+</body>
+</html>

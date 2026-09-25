@@ -1,0 +1,27 @@
+<!-- @dsCard group="Layout" height=236 subtitle="Page header, section heading with actions, detail list" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>SectionBlock</title>
+<style>
+html, body { height: auto; min-height: 0; }
+body { overflow: visible; padding: 16px; }
+
+</style>
+</head>
+<body>
+<header class="page-header">
+  <div><h1>Diagnostics</h1><p>Review the installation, component versions, and diagnostic logs.</p></div>
+  <button class="button primary" type="button">{{icon:Download:17}} Export diagnostics</button>
+</header>
+<section class="section-block">
+  <div class="section-heading installation-heading">
+    <div><h2>Installation</h2><code>C:\Program Files\MacType</code></div>
+    <div class="header-actions"><button class="button secondary" type="button">{{icon:FolderSearch:17}}Find installation again</button></div>
+  </div>
+  <dl class="detail-list">
+    <div><dt>Control Center</dt><dd>{{icon:Check:17}}<code>0.1.0</code></dd></div>
+    <div><dt>MacType core</dt><dd>{{icon:Check:17}}<code>2026.9.25</code></dd></div>
+  </dl>
+</section>
+</body>
+</html>

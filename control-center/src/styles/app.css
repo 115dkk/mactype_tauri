@@ -76,7 +76,7 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
    nobody wonders whether the profile can be tried without saving first. The
    tinted fill stays reserved for the action that save unlocks. */
 .button[data-dirty="true"] { border-color: var(--color-primary); color: color-mix(in srgb, var(--color-primary) 85%, var(--color-foreground)); }
-.button.danger { border-color: var(--color-danger); color: var(--color-danger); }
+.button.danger { border-color: var(--color-destructive); color: var(--color-destructive); }
 .icon-button { display: inline-grid; width: var(--control-height); place-items: center; padding: 0; }
 .text-action { display: inline-flex; min-height: var(--control-height); align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border: 0; background: transparent; color: var(--color-primary); font-weight: 600; }
 .text-action:hover { text-decoration: underline; }
@@ -313,7 +313,7 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .hint-popover { position: fixed; z-index: 60; top: 0; left: 0; width: max-content; max-width: 360px; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border-strong); border-radius: var(--radius-control); background: var(--color-surface); box-shadow: var(--shadow-window); color: var(--color-foreground); font-size: 12px; font-weight: 400; line-height: 1.55; text-align: start; text-decoration: none; white-space: normal; visibility: hidden; opacity: 0; transform: translateY(2px); transition: opacity var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard), visibility 0s linear var(--motion-fast); }
 .hint-popover[data-open="true"] { visibility: visible; opacity: 1; transform: none; transition-delay: 0s; }
 .hint-popover .hint-meta { display: block; margin-top: 2px; color: var(--color-muted); }
-.inline-error { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); color: var(--color-danger); font-size: 12px; }
+.inline-error { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); color: var(--color-destructive); font-size: 12px; }
 .execution-option { display: flex; align-items: center; justify-content: space-between; gap: var(--space-6); padding: var(--space-4); }
 .execution-option > div { display: flex; align-items: center; gap: var(--space-3); }
 .execution-option p, .manual-launcher label > span, .system-mode-note { color: var(--color-muted); }
@@ -414,7 +414,7 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 .profile-name-dialog form { display: grid; gap: var(--space-4); min-width: 0; }
 .profile-name-dialog label { display: grid; gap: var(--space-1); min-width: 0; }
 .profile-name-dialog input { width: 100%; min-width: 0; padding-inline: var(--space-2); }
-.profile-name-dialog-message { color: var(--color-danger); overflow-wrap: anywhere; }
+.profile-name-dialog-message { color: var(--color-destructive); overflow-wrap: anywhere; }
 .profile-name-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
 .service-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
 .system-injection-control { display: flex; align-items: center; justify-content: space-between; gap: var(--space-6); padding: var(--space-4); border-top: 1px solid var(--color-border); background: var(--color-surface-subtle); }

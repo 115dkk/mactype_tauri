@@ -1,0 +1,33 @@
+<!-- @dsCard group="Status" height=240 subtitle="Overview service state with four facts and recent activity" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>ServiceCard</title>
+<style>
+html, body { height: auto; min-height: 0; }
+body { overflow: visible; padding: 16px; }
+
+</style>
+</head>
+<body>
+<section class="overview-service-card section-block" data-state="normal" style="margin-top: 0">
+  <div class="overview-service-heading">
+    {{icon:Check:22}}
+    <h2>MacType is running</h2>
+  </div>
+  <dl class="overview-service-details">
+    <div><dt>Run profile</dt><dd><code>Default.ini</code></dd></div>
+    <div><dt>Mode</dt><dd>Control Center service</dd></div>
+    <div><dt>Status</dt><dd>Normal</dd></div>
+    <div><dt>Last applied</dt><dd>Today at 14:02</dd></div>
+  </dl>
+</section>
+<section class="section-block recent-activity" style="margin-top: 16px">
+  <div class="section-heading"><h2>Recent activity</h2></div>
+  <div class="activity-latest"><p>The service started with the run profile.<span aria-hidden="true"> · </span><time>14:02</time></p></div>
+  <div class="disclosure-actions">
+    <button class="text-action" type="button">{{icon:ExternalLink:15}}Open log folder</button>
+    <button aria-expanded="false" class="text-action" type="button">Expand{{icon:ChevronDown:15}}</button>
+  </div>
+</section>
+</body>
+</html>

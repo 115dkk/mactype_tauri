@@ -1,0 +1,27 @@
+<!-- @dsCard group="Actions" height=128 subtitle="Primary, designate, secondary, danger, icon, text action, disabled" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Button</title>
+<style>
+html, body { height: auto; min-height: 0; }
+body { overflow: visible; padding: 16px; }
+.ds-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ds-stack { display: grid; gap: 12px; justify-items: start; }
+</style>
+</head>
+<body>
+<div class="ds-stack">
+  <div class="ds-row">
+    <button class="button primary" type="button">{{icon:Play:17}}Start service</button>
+    <button class="button designate" type="button">{{icon:BadgeCheck:16}}Set as run profile</button>
+    <button class="button secondary" type="button">{{icon:RefreshCw:16}}Refresh status</button>
+    <button class="button danger" type="button">{{icon:Trash2:16}}Delete</button>
+  </div>
+  <div class="ds-row">
+    <button class="icon-button" type="button" aria-label="Copy information">{{icon:Copy:17}}</button>
+    <button class="text-action" type="button">{{icon:ExternalLink:15}}Open log folder</button>
+    <button class="button secondary" type="button" disabled>{{icon:SaveAll:16}}Save as</button>
+  </div>
+</div>
+</body>
+</html>

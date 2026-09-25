@@ -993,7 +993,7 @@ test.describe("shared bold substitution method follows the substitution choice a
       await page.locator('[data-nav="guided"]').click();
       await expect(page.locator("body")).toHaveAttribute("data-profile-mode", "guided");
       await page.locator("main").getByRole("button", { name: "글꼴 대체" }).click();
-      const boldMode = page.getByRole("group", { name: "굵은 글꼴 대체 방식", exact: true });
+      const boldMode = page.getByRole("group", { name: "굵은 글꼴 대체법", exact: true });
       const pairs = page.getByRole("group", { name: "굵은 글꼴 쌍", exact: true });
       await expect(boldMode).toHaveCount(0);
       await expect(pairs).toHaveCount(0);

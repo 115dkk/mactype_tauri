@@ -58,7 +58,7 @@ This file fixes the domain language used by code, tests, CI, and architecture do
 **FontSubstitutionSnapshot**
 : The immutable, reference-counted rule generation consumed by both GDI and DirectWrite adapters. It owns case-insensitive rule identity, charset precedence, deterministic chains, cycle/depth failure, the bold substitution method with its explicit bold pairs, generation, and digest. Reload publishes a new snapshot; in-flight rendering keeps the old one and no adapter reads the mutable profile rule map.
 
-**굵은 글꼴 대체 방식 (bold substitution method)**
+**굵은 글꼴 대체법 (bold substitution method)**
 : The `FontSubstitutesBold` policy inside FontSubstitutionSnapshot that decides what a substituted family does when a bold-class face (weight 600 or more) is requested: `0` ignores the weight, `1` forces a synthetic bold, `2` selects the bold face of the replacement's own typographic family (the nearest heavier weight when no 700 exists; default), and `3` uses the `[FontSubstitutesBold]` pairs keyed by the resolved replacement family. Both GDI and DirectWrite adapters apply the same selection rule; the alias collection gives a source family that has no bold-class face of its own one synthesized bold slot so DirectWrite can honour the method, and a text format created against the native collection reaches the same decision through the GDI request. In mode `3` the default relation of a replacement family is **없음** (no pair line): the replacement face is used as is and the weight is ignored, and a malformed pair line or an uninstalled paired family means the same. A pair never redirects to a family the user did not choose, and 없음 never blocks saving.
 
 **FreeTypeRuntime**

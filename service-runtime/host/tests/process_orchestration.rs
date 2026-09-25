@@ -1146,6 +1146,10 @@ fn helper_failure_events(events: &[HostEvent]) -> Vec<&HostEvent> {
 }
 
 #[test]
+#[cfg_attr(
+    all(miri, windows),
+    ignore = "Windows Miri does not implement CreateDirectoryW"
+)]
 fn cleanup_unknown_for_a_vanished_target_is_a_trusted_skip_with_a_bounded_result() {
     let identity = ProcessIdentity {
         pid: 42,
@@ -1185,6 +1189,10 @@ fn cleanup_unknown_for_a_vanished_target_is_a_trusted_skip_with_a_bounded_result
 }
 
 #[test]
+#[cfg_attr(
+    all(miri, windows),
+    ignore = "Windows Miri does not implement CreateDirectoryW"
+)]
 fn cleanup_unknown_for_a_target_still_alive_keeps_the_degraded_classification() {
     let identity = ProcessIdentity {
         pid: 42,
@@ -1222,6 +1230,10 @@ fn cleanup_unknown_for_a_target_still_alive_keeps_the_degraded_classification() 
 }
 
 #[test]
+#[cfg_attr(
+    all(miri, windows),
+    ignore = "Windows Miri does not implement CreateDirectoryW"
+)]
 fn cleanup_unknown_for_an_exiting_target_is_a_quiet_target_exiting_skip() {
     let identity = ProcessIdentity {
         pid: 42,

@@ -129,6 +129,9 @@
     <ClCompile Include="renderer\directwrite_alias_policy.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="renderer\directwrite_fallback.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="renderer\arrival_evidence.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -290,6 +293,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="renderer\directwrite_alias_policy.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="renderer\directwrite_fallback.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="renderer\arrival_evidence.h">

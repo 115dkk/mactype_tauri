@@ -2,6 +2,7 @@
 
 #include <psapi.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -95,47 +96,78 @@ template <typename Attempt, typename Failed>
     }
 }
 
+[[nodiscard]] ModuleRelisting relist_module(const HANDLE process,
+                                            const HMODULE module) noexcept {
+    const auto current = enumerate_modules(process);
+    if (!current) {
+        return inventory_failure_is_transient(GetLastError())
+                   ? ModuleRelisting::LoaderListInFlux
+                   : ModuleRelisting::Unreadable;
+    }
+    return std::find(current->begin(), current->end(), module) == current->end()
+               ? ModuleRelisting::NoLongerListed
+               : ModuleRelisting::StillListed;
+}
+
+// K32GetModuleFileNameExW looks the handle up in the target's current loader
+// list, so a module that unloaded after the snapshot fails here with an error
+// the retry bound would not recognise. The last error is rewritten from a
+// fresh snapshot before any caller classifies it.
 [[nodiscard]] std::optional<std::wstring_view> module_path(
     HANDLE process, const HMODULE module, std::vector<wchar_t>& path) noexcept {
     const DWORD length = K32GetModuleFileNameExW(
         process, module, path.data(), static_cast<DWORD>(path.size()));
     if (length == 0U || length >= path.size()) {
+        const DWORD read_error = length == 0U ? GetLastError() : ERROR_INSUFFICIENT_BUFFER;
+        SetLastError(module_path_read_error(read_error, relist_module(process, module)));
         return std::nullopt;
     }
     return std::wstring_view{path.data(), length};
 }
 
-[[nodiscard]] std::optional<std::uintptr_t> remote_module_base(
-    HANDLE process, const std::wstring_view module_path_name) noexcept {
-    const auto normalized_expected = normalized_module_path(module_path_name);
-    if (!normalized_expected) {
-        return std::nullopt;
-    }
-    const auto inventory = retry_transient_inventory(
-        process, [&]() noexcept { return enumerate_modules(process); },
-        [](const auto& result) noexcept { return !result; });
+struct ModuleBaseLookup final {
+    bool readable{};
+    std::optional<std::uintptr_t> base;
+};
+
+[[nodiscard]] ModuleBaseLookup module_base_once(
+    HANDLE process, const std::wstring& normalized_expected) noexcept {
+    const auto inventory = enumerate_modules(process);
     if (!inventory) {
-        return std::nullopt;
+        return {};
     }
     try {
         std::vector<wchar_t> path(kMaxModulePathCharacters);
         for (const HMODULE module : *inventory) {
             const auto current_path = module_path(process, module, path);
             if (!current_path) {
-                return std::nullopt;
+                return {};
             }
             const auto normalized_current = normalized_module_path(*current_path);
             if (!normalized_current) {
-                return std::nullopt;
+                return {};
             }
-            if (_wcsicmp(normalized_current->c_str(), normalized_expected->c_str()) == 0) {
-                return reinterpret_cast<std::uintptr_t>(module);
+            if (_wcsicmp(normalized_current->c_str(), normalized_expected.c_str()) == 0) {
+                return {true, reinterpret_cast<std::uintptr_t>(module)};
             }
         }
     } catch (...) {
+        return {};
+    }
+    return {true, std::nullopt};
+}
+
+[[nodiscard]] std::optional<std::uintptr_t> module_base(
+    HANDLE process, const std::wstring_view module_path_name) noexcept {
+    const auto normalized_expected = normalized_module_path(module_path_name);
+    if (!normalized_expected) {
         return std::nullopt;
     }
-    return std::nullopt;
+    return retry_transient_inventory(
+               process,
+               [&]() noexcept { return module_base_once(process, *normalized_expected); },
+               [](const ModuleBaseLookup& lookup) noexcept { return !lookup.readable; })
+        .base;
 }
 
 [[nodiscard]] FixedModuleState fixed_module_state_once(
@@ -209,7 +241,7 @@ template <typename Attempt, typename Failed>
     if (length == 0U || length >= implementation_path.size()) {
         return std::nullopt;
     }
-    const auto remote_implementation = remote_module_base(
+    const auto remote_implementation = module_base(
         process, std::wstring_view{implementation_path.data(), length});
     if (!remote_implementation) {
         return std::nullopt;
@@ -223,6 +255,19 @@ template <typename Attempt, typename Failed>
 
 bool inventory_failure_is_transient(const DWORD error) noexcept {
     return error == ERROR_PARTIAL_COPY;
+}
+
+DWORD module_path_read_error(const DWORD read_error,
+                             const ModuleRelisting relisting) noexcept {
+    switch (relisting) {
+    case ModuleRelisting::NoLongerListed:
+    case ModuleRelisting::LoaderListInFlux:
+        return ERROR_PARTIAL_COPY;
+    case ModuleRelisting::StillListed:
+    case ModuleRelisting::Unreadable:
+        break;
+    }
+    return read_error;
 }
 
 InventoryRetry inventory_retry_action(const DWORD error,
@@ -257,35 +302,7 @@ FixedModuleState fixed_module_state(
 
 std::optional<std::uintptr_t> fixed_module_base(
     HANDLE process, const std::filesystem::path& expected_path) noexcept {
-    const auto normalized_expected = normalized_module_path(expected_path.native());
-    if (!normalized_expected) {
-        return std::nullopt;
-    }
-    const auto inventory = retry_transient_inventory(
-        process, [&]() noexcept { return enumerate_modules(process); },
-        [](const auto& result) noexcept { return !result; });
-    if (!inventory) {
-        return std::nullopt;
-    }
-    try {
-        std::vector<wchar_t> path(kMaxModulePathCharacters);
-        for (const HMODULE module : *inventory) {
-            const auto current_path = module_path(process, module, path);
-            if (!current_path) {
-                return std::nullopt;
-            }
-            const auto normalized_current = normalized_module_path(*current_path);
-            if (!normalized_current) {
-                return std::nullopt;
-            }
-            if (_wcsicmp(normalized_current->c_str(), normalized_expected->c_str()) == 0) {
-                return reinterpret_cast<std::uintptr_t>(module);
-            }
-        }
-    } catch (...) {
-        return std::nullopt;
-    }
-    return std::nullopt;
+    return module_base(process, expected_path.native());
 }
 
 std::optional<LPTHREAD_START_ROUTINE> remote_load_library(HANDLE process) noexcept {

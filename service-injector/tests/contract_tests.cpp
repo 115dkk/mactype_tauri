@@ -494,6 +494,24 @@ bool transient_inventory_failures_are_retried_only_within_the_bound() {
                InventoryRetry::GiveUp;
 }
 
+bool stale_module_snapshots_are_retried_like_an_inconsistent_loader_list() {
+    using mactype::injector::inventory_failure_is_transient;
+    using mactype::injector::module_path_read_error;
+    using mactype::injector::ModuleRelisting;
+    return inventory_failure_is_transient(
+               module_path_read_error(ERROR_INVALID_HANDLE, ModuleRelisting::NoLongerListed)) &&
+           inventory_failure_is_transient(
+               module_path_read_error(ERROR_MOD_NOT_FOUND, ModuleRelisting::LoaderListInFlux)) &&
+           module_path_read_error(ERROR_INVALID_HANDLE, ModuleRelisting::StillListed) ==
+               ERROR_INVALID_HANDLE &&
+           module_path_read_error(ERROR_ACCESS_DENIED, ModuleRelisting::Unreadable) ==
+               ERROR_ACCESS_DENIED &&
+           module_path_read_error(ERROR_INSUFFICIENT_BUFFER, ModuleRelisting::StillListed) ==
+               ERROR_INSUFFICIENT_BUFFER &&
+           module_path_read_error(ERROR_PARTIAL_COPY, ModuleRelisting::StillListed) ==
+               ERROR_PARTIAL_COPY;
+}
+
 }  // namespace
 
 int wmain() {
@@ -560,6 +578,10 @@ int wmain() {
     if (!transient_inventory_failures_are_retried_only_within_the_bound()) {
         std::cerr << "transient module inventory failures were not retried within the bound\n";
         return 13;
+    }
+    if (!stale_module_snapshots_are_retried_like_an_inconsistent_loader_list()) {
+        std::cerr << "a module that unloaded after the inventory snapshot was not retried\n";
+        return 17;
     }
     return 0;
 }

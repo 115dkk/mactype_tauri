@@ -11,7 +11,7 @@
   "color-focus": "The 2px keyboard focus outline, offset 2px, on every focusable control.",
   "color-success": "Verified and running state only: the overview state icon, check marks and state text. Never decorative.",
   "color-warning": "Attention state only: warning icons, warning text and notices. Never decorative.",
-  "color-destructive": "Failure and destructive actions: critical rows and notices, and the window close button's hover fill (with a white glyph).",
+  "color-destructive": "Failure and destructive actions: danger buttons, inline errors, dialog validation messages, critical rows and notices, and the window close button's hover fill (with a white glyph).",
   "color-preview": "Ground of the preview canvas, profile thumbnails and specimen strips when the canvas follows the window theme. Helper bitmaps own their own colours on top of it.",
   "space-1": "4px: gaps inside the navigation lists and between a heading and its description.",
   "space-2": "8px: icon-to-label gaps, navigation item padding and the gap between header actions.",

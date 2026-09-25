@@ -1,6 +1,6 @@
 ---
 name: claude-design-system
-description: Keep this branch's Claude Design design system in sync with the Control Center. Use when the user asks to update, re-sync or publish the design system, and after a change to control-center/src/styles/**, the skins, DESIGN.md, docs/skin-designs.md, the bundled fonts, the product icon or the lucide icons the frontend imports. Each branch has its own system; never publish one branch's design to the other's.
+description: Keep this branch's Claude Design design system in sync with the Control Center. Use when the user asks to update, re-sync or publish the design system, and after a change to control-center/src/styles/**, the skins where the branch has them, DESIGN.md, docs/skin-designs.md, the bundled fonts, the product icon or the lucide icons the frontend imports. Each branch has its own system; never publish one branch's design to the other's.
 ---
 
 # Claude Design system for this branch
@@ -21,15 +21,19 @@ branch must never reach the other branch's system. This folder is fork-only tool
 
 - `build.mjs` derives everything that has a source in the repository: `tokens.json` (every
   colour token per theme with its contrast failures flagged, sizes, spacing, radius, shadow,
-  opacity), `components/bundle.css` (the app's stylesheets in `main.tsx` import order, token
-  declarations moved out, skin selectors keyed on theme ids), the bundled font, the section
-  files named in `target.json`, the product icon and every lucide icon the frontend imports.
+  opacity), `components/bundle.css` (the app's stylesheets in `main.tsx` import order with the
+  token declarations moved out; where the branch has skins, each skin's selectors key on its
+  theme ids), the bundled font, the section files named in `target.json`, the product icon and
+  every lucide icon the frontend imports.
 - `content/` holds what a person writes: `README.md` (the brand book), `token-notes.json`
   (one usage note per token; the build fails when a token has none), `type.json` (type
   families, styles and font sources), `contrast.json` (the pairs checked per theme),
   `marker-classes.json`, the asset group READMEs and `components/<Name>/README.md` and
   `preview.html`. Previews use the real class names; `{{icon:Name:size[:stroke]}}` expands
   to the lucide SVG and `{{logo}}` to the product icon as a data URI.
+- `content/` differs per branch: alpha adds the skin components, skin token notes and type
+  styles. Never copy `content/` between branches wholesale; port a shared change by hand and
+  rebuild each branch from its own sources.
 
 ## Re-sync
 
@@ -45,8 +49,9 @@ branch must never reach the other branch's system. This folder is fork-only tool
    Resolve every warning; a preview class the stylesheets never style is a bug in the preview.
 5. Upload each `uploads.json` entry that the live index does not already record
    (`assetGroups.<Group>.files`): Artifact `publish` with the target `url`, `asset: true` and
-   the entry's `localPath` (`file_paths` takes 25 at a time). Write the returned ids to a
-   `blobs.json` as `{"Icons/house.svg": "<id>"}`.
+   the entry's `localPath` (`file_paths` takes 25 at a time). Write each returned id and the
+   stored size the upload reports to a `blobs.json` as
+   `{"Icons/house.svg": {"id": "<id>", "size": 409}}`; the store normalises SVGs.
 6. `node .claude/skills/claude-design-system/build.mjs index --out <scratch>/ds --blobs <blobs.json> --existing <the index read in step 1>`.
 7. Publish in one call: Artifact `publish` with the target `url`, `root` `<scratch>/ds`,
    `file_path` `<scratch>/ds/project/design-system.json` and `files` = `<scratch>/ds/files.json`.

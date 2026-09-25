@@ -93,6 +93,11 @@ function Write-Profile([string] $Path, [string] $Source, [int] $Mode) {
     if ($englishTwins.ContainsKey($Source)) {
         $lines.Add("$($englishTwins[$Source])=$Replacement")
     }
+    foreach ($fallbackSource in @('맑은 고딕', 'Malgun Gothic')) {
+        if (-not ($lines -contains "$fallbackSource=$Replacement")) {
+            $lines.Add("$fallbackSource=$Replacement")
+        }
+    }
     if ($Mode -eq 3) {
         $lines.Add('')
         $lines.Add('[FontSubstitutesBold]')
@@ -164,6 +169,34 @@ function Get-Mark([object] $Expected, [bool] $Pass) {
     return ' FAIL'
 }
 
+function Get-FallbackVerdicts([object] $State, [object] $Mode) {
+    $result = [Collections.Generic.List[object]]::new()
+    foreach ($fallback in @($State.directWrite.fallback)) {
+        $families = @($fallback.familyNames | ForEach-Object { $_.name })
+        $runFamilies = @($fallback.layoutRuns | ForEach-Object { $_.face.familyName })
+        $fallbackPaths = @($fallback.face.files | ForEach-Object { $_.path })
+        $replacement = @($fallbackPaths | Where-Object {
+            $_ -match '[\\/]MacType[\\/]FontCache[\\/]'
+        }).Count -ne 0
+        $source = @($fallbackPaths | Where-Object {
+            [IO.Path]::GetFileName($_) -match '^malgun'
+        }).Count -ne 0
+        $result.Add([ordered]@{
+            primaryFamily = $fallback.primaryFamily
+            mappedLength = $fallback.mappedLength
+            familyNames = $families
+            weight = $fallback.weight
+            simulations = $fallback.simulations
+            files = @($fallback.face.files)
+            layoutRunFamilies = $runFamilies
+            replacementObserved = $replacement
+            sourceObserved = $source
+            pass = if ($null -eq $Mode) { $null } else { $replacement -and -not $source }
+        })
+    }
+    return @($result)
+}
+
 function Get-RunVerdict([object] $Json, [string] $StateName, [object] $Mode) {
     $state = $Json.states.$StateName
     $gdi = $state.verdicts.gdi.source700
@@ -184,6 +217,7 @@ function Get-RunVerdict([object] $Json, [string] $StateName, [object] $Mode) {
         dwriteCollection700 = [ordered]@{ backing = $collection.backing; simulations = $collection.simulations; weight = $collection.weight; pass = if ($expected) { [bool] $collectionPass } else { $null } }
         dwriteTextFormat700 = [ordered]@{ backing = $textFormat.backing; simulations = $textFormat.simulations; runBackings = $textFormat.runBackings; pass = if ($expected) { [bool] $textFormatPass } else { $null } }
         pixels = [ordered]@{ match = $gdi.pixelsMatch; expected = if ($expected) { $expected.Pixels } else { $null }; pass = if ($expected) { [bool] $pixelsPass } else { $null } }
+        fallback = Get-FallbackVerdicts $state $Mode
         expected = $expected
     }
 }
@@ -299,21 +333,28 @@ foreach ($architecture in $Architectures) {
     $markdown.Add('')
     $markdown.Add("## $architecture")
     $markdown.Add('')
-    $markdown.Add('| Mode | Source | Isolated | GDI 700 face / synthetic | DWrite collection 700 backing / simulations | DWrite text format 700 backing / simulations | Pixel match |')
-    $markdown.Add('|---|---|---|---|---|---|---|')
+    $markdown.Add('| Mode | Source | Isolated | GDI 700 face / synthetic | DWrite collection 700 backing / simulations | DWrite text format 700 backing / simulations | Segoe UI fallback | Segoe UI Variable fallback | Pixel match |')
+    $markdown.Add('|---|---|---|---|---|---|---|---|---|')
     foreach ($run in @($runs | Where-Object { $_.architecture -eq $architecture })) {
         $modeText = if ($null -eq $run.mode) { 'stock' } else { [string] $run.mode }
         $isolatedText = if ($null -eq $run.isolated) { 'n/a' } else { ([string] $run.isolated).ToLowerInvariant() }
         if ($null -eq $run.verdict) {
-            $markdown.Add("| $modeText | $($run.source) | $isolatedText | $($run.problem) | | | |")
+            $markdown.Add("| $modeText | $($run.source) | $isolatedText | $($run.problem) | | | | | |")
             continue
         }
         $v = $run.verdict
         $gdiText = Format-Cell $v.gdi700 "$($v.gdi700.face) / $(([string] $v.gdi700.synthetic).ToLowerInvariant())"
         $collectionText = Format-Cell $v.dwriteCollection700 "$($v.dwriteCollection700.backing) / $($v.dwriteCollection700.simulations)"
         $textFormatText = Format-Cell $v.dwriteTextFormat700 "$($v.dwriteTextFormat700.backing) / $($v.dwriteTextFormat700.simulations)"
+        $fallbackCells = @('Segoe UI', 'Segoe UI Variable') | ForEach-Object {
+            $fallback = @($v.fallback | Where-Object primaryFamily -eq $_ | Select-Object -First 1)
+            if ($fallback.Count -eq 0) { 'no data' }
+            elseif ($fallback[0].replacementObserved) { 'Pretendard' + (Get-Mark $fallback[0].pass ([bool] $fallback[0].pass)) }
+            elseif ($fallback[0].sourceObserved) { 'Malgun Gothic' + (Get-Mark $fallback[0].pass ([bool] $fallback[0].pass)) }
+            else { 'other' + (Get-Mark $fallback[0].pass ([bool] $fallback[0].pass)) }
+        }
         $pixelText = Format-Cell $v.pixels $(if ($v.pixels.match) { $v.pixels.match } else { 'none' })
-        $markdown.Add("| $modeText | $($run.source) | $isolatedText | $gdiText | $collectionText | $textFormatText | $pixelText |")
+        $markdown.Add("| $modeText | $($run.source) | $isolatedText | $gdiText | $collectionText | $textFormatText | $($fallbackCells[0]) | $($fallbackCells[1]) | $pixelText |")
     }
 }
 

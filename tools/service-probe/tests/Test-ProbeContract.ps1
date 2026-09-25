@@ -31,7 +31,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "CMake configure failed with exit code $LASTEXITCODE"
 }
 
-& cmake --build $buildDirectory --config Release --target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests freetype-runtime-tests pe-export-view-tests unload-lifecycle-tests renderer-policy-tests private-freetype-policy-tests image-subsystem-tests module-name-tests directwrite-font-cache-tests renderer-activation-tests font-substitution-tests renderer-profile-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe
+& cmake --build $buildDirectory --config Release --target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests freetype-runtime-tests pe-export-view-tests unload-lifecycle-tests renderer-policy-tests private-freetype-policy-tests image-subsystem-tests module-name-tests directwrite-font-cache-tests renderer-activation-tests font-substitution-tests directwrite-alias-policy-tests bold-substitution-probe renderer-profile-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe
 if ($LASTEXITCODE -ne 0) {
     throw "CMake build failed with exit code $LASTEXITCODE"
 }
@@ -101,6 +101,12 @@ $fontSubstitutionTestPath = Join-Path $buildDirectory 'Release\font-substitution
 & $fontSubstitutionTestPath
 if ($LASTEXITCODE -ne 0) {
     throw "Font substitution snapshot tests failed with exit code $LASTEXITCODE"
+}
+
+$directWriteAliasPolicyTestPath = Join-Path $buildDirectory 'Release\directwrite-alias-policy-tests.exe'
+& $directWriteAliasPolicyTestPath
+if ($LASTEXITCODE -ne 0) {
+    throw "DirectWrite alias policy tests failed with exit code $LASTEXITCODE"
 }
 
 $gatePath = Join-Path $buildDirectory "Release\browser-launch-gate$suffix.exe"

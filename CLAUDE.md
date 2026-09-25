@@ -259,6 +259,24 @@ cherry-picked. Docs/CI edits get their own commits that simply are not picked.
 - Screenshots/galleries go to the FORK's issue #3 (images hosted on an orphan
   `gallery-*` branch in the fork; embed raw.githubusercontent URLs).
 
+## Claude Design design systems
+
+The Control Center design differs between this branch and `main`, so each has
+its own Claude Design system and never shares one:
+
+- `codex/alpha-plus-dll`: MacType Control Center Alpha,
+  https://claude.ai/artifact/WtU5TdF7vAKYavzVBJsgVb (four skins, eight themes).
+- `main`: MacType Control Center Main,
+  https://claude.ai/artifact/5Gkn7RvXDYNe6QHYMWWSKp (classic, light and dark).
+
+Re-sync with the `claude-design-system` skill in
+`.claude/skills/claude-design-system/` after a change to the Control Center
+stylesheets, skins, `DESIGN.md`, `docs/skin-designs.md`, bundled fonts, product
+icon or imported lucide icons. Publish only to the url in that folder's
+`target.json`; alpha skins, tokens or components never go into main's system.
+The skill folder is fork-only like this file: it never reaches
+`codex/upstream-pr-prep` or an upstream pull request.
+
 ## Repo quirks worth knowing
 
 - **`gh` defaults to the UPSTREAM repo** (snowie2000/mactype, via the

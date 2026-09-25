@@ -1,0 +1,53 @@
+<!-- @dsCard group="Fluent" height=420 subtitle="Hero, expander with sub-rows, switch card" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>FluentCard</title>
+<style>
+html, body { height: auto; min-height: 0; }
+body { overflow: visible; padding: 0; }
+.ds-skin { padding: 16px; background: var(--color-canvas); color: var(--color-foreground); font-size: 14px; line-height: 1.5; }
+.ds-skin[data-theme^="fluent-"] { line-height: 20px; }
+.ds-skin[data-theme^="console-"] { font-family: "Segoe UI Variable Small", "Segoe UI", sans-serif; font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
+.ds-skin[data-theme^="cupertino-"] { font-size: 13px; line-height: 17px; }
+</style>
+</head>
+<body>
+<div class="ds-skin" data-ds-skin="fluent" data-theme="fluent-light">
+  <div class="fluent-cards">
+    <div class="fluent-card" data-hero="true" data-tone="normal">
+      <span class="fluent-card-icon">{{icon:Check:28:2}}</span>
+      <div class="fluent-card-copy"><div class="fluent-card-title">MacType system-wide rendering active</div><div class="fluent-card-desc">Run profile <code>Default.ini</code> · Running</div></div>
+      <div class="fluent-card-act"></div>
+    </div>
+  </div>
+  <h2 class="fluent-sect">Modes</h2>
+  <div class="fluent-cards">
+    <div class="fluent-card" data-expanded="true">
+      <span class="fluent-card-icon">{{icon:Layers:20:1.6}}</span>
+      <div class="fluent-card-copy"><div class="fluent-card-title">System-wide modes</div><div class="fluent-card-desc">Apply your profile to apps that are already open and to apps you open later.</div></div>
+      <div class="fluent-card-act"><span class="fluent-state" data-tone="ok">MacType system-wide rendering active</span><button aria-expanded="true" class="fluent-chev" type="button">{{icon:ChevronDown:16:1.6}}</button></div>
+      <div class="fluent-sub-rows">
+        <div class="fluent-sub-row"><div><div class="fluent-card-title">Profile application status</div></div><span class="fluent-state">Current</span></div>
+        <div class="fluent-sub-row"><div><div class="fluent-card-title">AppInit registry mode</div><div class="fluent-card-desc">Detection only.</div></div><span class="fluent-state">Not detected</span></div>
+      </div>
+    </div>
+    <div class="fluent-card">
+      <span class="fluent-card-icon">{{icon:Power:20:1.6}}</span>
+      <div class="fluent-card-copy"><div class="fluent-card-title">Start in the tray at sign-in</div><div class="fluent-card-desc">Open Control Center in the tray when you sign in to Windows.</div></div>
+      <div class="fluent-card-act"><div class="fluent-switch"><span>On</span><label class="switch-control"><input aria-label="Start in the tray at sign-in" checked role="switch" type="checkbox"></label></div></div>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  var pinned = document.querySelectorAll("[data-ds-skin]");
+  function sync() {
+    var mode = /dark$/.test(document.documentElement.getAttribute("data-theme") || "") ? "dark" : "light";
+    pinned.forEach(function (el) { el.setAttribute("data-theme", el.getAttribute("data-ds-skin") + "-" + mode); });
+  }
+  sync();
+  new MutationObserver(sync).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+})();
+</script>
+</body>
+</html>

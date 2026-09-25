@@ -1,0 +1,9 @@
+{
+  "branch": "codex/alpha-plus-dll",
+  "title": "MacType Control Center Alpha",
+  "url": "https://claude.ai/artifact/WtU5TdF7vAKYavzVBJsgVb",
+  "namespace": "MacTypeControlCenterAlpha",
+  "sections": [
+    { "from": "docs/skin-designs.md", "to": "skins.md" }
+  ]
+}

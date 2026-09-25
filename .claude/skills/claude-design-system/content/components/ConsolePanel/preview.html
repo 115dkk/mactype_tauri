@@ -1,0 +1,48 @@
+<!-- @dsCard group="Console" height=330 subtitle="Panel with LED line, key/value table, tags and the status bar" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>ConsolePanel</title>
+<style>
+html, body { height: auto; min-height: 0; }
+body { overflow: visible; padding: 0; }
+.ds-skin { padding: 16px; background: var(--color-canvas); color: var(--color-foreground); font-size: 14px; line-height: 1.5; }
+.ds-skin[data-theme^="fluent-"] { line-height: 20px; }
+.ds-skin[data-theme^="console-"] { font-family: "Segoe UI Variable Small", "Segoe UI", sans-serif; font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
+.ds-skin[data-theme^="cupertino-"] { font-size: 13px; line-height: 17px; }
+</style>
+</head>
+<body>
+<div class="ds-skin" data-ds-skin="console" data-theme="console-dark">
+  <section class="console-panel console-service-panel">
+    <header class="console-panel-head"><span>Service status</span><div class="console-panel-head-right"><span class="console-tag ok">Run profile</span></div></header>
+    <div class="console-panel-body" data-scroll="false">
+      <div class="console-big" data-state="normal"><span aria-hidden="true" class="status-dot" data-tone="ok"></span>MacType system-wide rendering active<small>Running</small></div>
+      <dl class="console-kv">
+        <div><dt>Run profile</dt><dd><code>Default.ini</code></dd></div>
+        <div><dt>Mode</dt><dd>Control Center service</dd></div>
+        <div><dt>Profile application status</dt><dd>Current</dd></div>
+        <div><dt>AppInit registry mode</dt><dd>Not detected</dd></div>
+      </dl>
+    </div>
+    <div class="console-panel-foot"><button class="button secondary" type="button">Stop applying to new apps</button><span class="console-spacer"></span></div>
+  </section>
+  <footer class="app-statusbar console-status" style="margin-top: 12px">
+    <span class="app-statusbar-item"><span aria-hidden="true" class="status-dot" data-tone="ok"></span> Control Center service · MacType system-wide rendering active</span>
+    <span class="app-statusbar-item"><code>Default.ini</code></span>
+    <span class="app-statusbar-spacer"></span>
+    <span class="app-statusbar-item">Last checked 14:02</span>
+  </footer>
+</div>
+<script>
+(function () {
+  var pinned = document.querySelectorAll("[data-ds-skin]");
+  function sync() {
+    var mode = /dark$/.test(document.documentElement.getAttribute("data-theme") || "") ? "dark" : "light";
+    pinned.forEach(function (el) { el.setAttribute("data-theme", el.getAttribute("data-ds-skin") + "-" + mode); });
+  }
+  sync();
+  new MutationObserver(sync).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+})();
+</script>
+</body>
+</html>

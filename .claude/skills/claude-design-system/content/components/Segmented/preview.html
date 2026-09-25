@@ -1,0 +1,25 @@
+<!-- @dsCard group="Inputs" height=72 subtitle="Two to four way choice, compact variant" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Segmented</title>
+<style>
+html, body { height: auto; min-height: 0; }
+body { overflow: visible; padding: 16px; }
+.ds-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ds-stack { display: grid; gap: 12px; justify-items: start; }
+</style>
+</head>
+<body>
+<div class="ds-row" style="gap: 16px">
+  <div aria-label="Comparison" class="segmented" role="radiogroup">
+    <button aria-checked="true" class="segmented-option" role="radio" type="button">Tuner edits</button>
+    <button aria-checked="false" class="segmented-option" role="radio" type="button">Saved profile</button>
+    <button aria-checked="false" class="segmented-option" role="radio" type="button">Windows</button>
+  </div>
+  <div aria-label="Preview font" class="segmented" data-compact="true" role="radiogroup">
+    <button aria-checked="false" class="segmented-option" role="radio" type="button">Segoe UI</button>
+    <button aria-checked="true" class="segmented-option" role="radio" type="button">Pretendard</button>
+  </div>
+</div>
+</body>
+</html>

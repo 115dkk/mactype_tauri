@@ -1,0 +1,55 @@
+<!-- @dsCard group="Navigation" height=600 subtitle="Classic pane: product lockup, grouped items, preferences" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Navigation</title>
+<style>
+html, body { height: auto; min-height: 0; }
+body { overflow: visible; padding: 0; }
+.ds-skin { padding: 16px; background: var(--color-canvas); color: var(--color-foreground); font-size: 14px; line-height: 1.5; }
+.ds-skin[data-theme^="fluent-"] { line-height: 20px; }
+.ds-skin[data-theme^="console-"] { font-family: "Segoe UI Variable Small", "Segoe UI", sans-serif; font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
+.ds-skin[data-theme^="cupertino-"] { font-size: 13px; line-height: 17px; }
+</style>
+</head>
+<body>
+<div class="ds-skin" data-ds-skin="classic" data-theme="classic-light" style="padding: 0">
+  <aside class="navigation" style="width: var(--nav-width); height: 600px">
+    <div class="product-lockup"><img alt="" height="32" src="{{logo}}" width="32"><div><strong>MacType</strong><span>Control Center</span></div></div>
+    <nav>
+      <button class="nav-item" data-selected="false" type="button">{{icon:Home:18:1.8}}<span>Overview</span></button>
+      <div class="nav-group" role="group"><span class="nav-group-label">Wizard</span>
+        <div class="nav-group-items">
+          <button class="nav-item nav-subitem" data-selected="true" type="button">{{icon:FileCog:17:1.8}}<span>Profiles</span></button>
+          <button class="nav-item nav-subitem" data-selected="false" type="button">{{icon:ServerCog:17:1.8}}<span>Service</span></button>
+        </div>
+      </div>
+      <div class="nav-group" role="group"><span class="nav-group-label">Tuner</span>
+        <div class="nav-group-items">
+          <button class="nav-item nav-subitem" data-selected="false" type="button">{{icon:ListChecks:17:1.8}}<span>Guided setup</span></button>
+          <button class="nav-item nav-subitem" data-selected="false" type="button">{{icon:SlidersHorizontal:17:1.8}}<span>All settings</span></button>
+        </div>
+      </div>
+      <div class="nav-group" role="group"><span class="nav-group-label">Tools</span>
+        <button class="nav-item" data-selected="false" type="button">{{icon:Activity:18:1.8}}<span>Diagnostics</span></button>
+      </div>
+    </nav>
+    <div class="navigation-preferences">
+      <div class="preference-control"><div class="preference-picker"><button aria-haspopup="listbox" class="preference-trigger" type="button">{{icon:Languages:17}}<span>English</span></button></div></div>
+      <div class="preference-control"><div class="preference-picker"><button aria-haspopup="listbox" class="preference-trigger" type="button">{{icon:Palette:17}}<span>Classic</span></button></div></div>
+      <button class="theme-toggle" type="button">{{icon:Moon:17}}<span>Dark theme</span></button>
+    </div>
+  </aside>
+</div>
+<script>
+(function () {
+  var pinned = document.querySelectorAll("[data-ds-skin]");
+  function sync() {
+    var mode = /dark$/.test(document.documentElement.getAttribute("data-theme") || "") ? "dark" : "light";
+    pinned.forEach(function (el) { el.setAttribute("data-theme", el.getAttribute("data-ds-skin") + "-" + mode); });
+  }
+  sync();
+  new MutationObserver(sync).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+})();
+</script>
+</body>
+</html>

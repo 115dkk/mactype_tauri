@@ -1,0 +1,54 @@
+<!-- @dsCard group="Cupertino" height=330 subtitle="Hero row, tile rows, switch, disclosure and footnote" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>CupertinoGroup</title>
+<style>
+html, body { height: auto; min-height: 0; }
+body { overflow: visible; padding: 0; }
+.ds-skin { padding: 16px; background: var(--color-canvas); color: var(--color-foreground); font-size: 14px; line-height: 1.5; }
+.ds-skin[data-theme^="fluent-"] { line-height: 20px; }
+.ds-skin[data-theme^="console-"] { font-family: "Segoe UI Variable Small", "Segoe UI", sans-serif; font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
+.ds-skin[data-theme^="cupertino-"] { font-size: 13px; line-height: 17px; }
+</style>
+</head>
+<body>
+<div class="ds-skin" data-ds-skin="cupertino" data-theme="cupertino-light">
+  <div class="cupertino-group">
+    <div class="cupertino-row" data-hero="true" data-leading="true">
+      <span aria-hidden="true" class="cupertino-okc" data-tone="ok">{{icon:Check:16:3}}</span>
+      <div class="cupertino-row-copy"><div class="cupertino-row-title">MacType system-wide rendering active</div><div class="cupertino-row-desc">Run profile <code>Default.ini</code> · Running</div></div>
+    </div>
+  </div>
+  <h2 class="cupertino-sect">Modes</h2>
+  <div class="cupertino-group">
+    <button class="cupertino-row cupertino-row-disclose" data-leading="true" type="button">
+      <span class="cupertino-tile" data-tone="blue">{{icon:Layers:12:2.2}}</span>
+      <div class="cupertino-row-copy"><div class="cupertino-row-title">System-wide modes</div></div>
+      <div class="cupertino-row-value"><span class="cupertino-value" data-tone="ok">On</span>{{icon:ChevronRight:14}}</div>
+    </button>
+    <div class="cupertino-row" data-leading="true">
+      <span class="cupertino-tile" data-tone="green">{{icon:Power:12:2.2}}</span>
+      <div class="cupertino-row-copy"><div class="cupertino-row-title">Start in the tray at sign-in</div></div>
+      <div class="cupertino-row-value"><label class="switch-control"><input aria-label="Start in the tray at sign-in" checked role="switch" type="checkbox"></label></div>
+    </div>
+    <button class="cupertino-row cupertino-row-disclose" data-leading="true" type="button">
+      <span class="cupertino-tile" data-tone="violet">{{icon:ListChecks:12:2.2}}</span>
+      <div class="cupertino-row-copy"><div class="cupertino-row-title">Apps to launch with MacType</div></div>
+      <div class="cupertino-row-value">2 registered<span class="cupertino-badge">New</span>{{icon:ChevronRight:14}}</div>
+    </button>
+  </div>
+  <p class="cupertino-footnote">Apps that already have MacType keep their settings until you reopen them.</p>
+</div>
+<script>
+(function () {
+  var pinned = document.querySelectorAll("[data-ds-skin]");
+  function sync() {
+    var mode = /dark$/.test(document.documentElement.getAttribute("data-theme") || "") ? "dark" : "light";
+    pinned.forEach(function (el) { el.setAttribute("data-theme", el.getAttribute("data-ds-skin") + "-" + mode); });
+  }
+  sync();
+  new MutationObserver(sync).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+})();
+</script>
+</body>
+</html>

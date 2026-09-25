@@ -1,0 +1,11 @@
+[
+  { "foreground": "color-foreground", "grounds": ["color-canvas", "color-surface", "color-surface-subtle"], "minimum": 4.5 },
+  { "foreground": "color-muted", "grounds": ["color-canvas", "color-surface", "color-surface-subtle"], "minimum": 4.5 },
+  { "foreground": "color-primary", "grounds": ["color-surface"], "minimum": 4.5 },
+  { "foreground": "color-on-primary", "grounds": ["color-primary"], "minimum": 4.5 },
+  { "foreground": "color-success", "grounds": ["color-surface"], "minimum": 4.5 },
+  { "foreground": "color-warning", "grounds": ["color-surface"], "minimum": 4.5 },
+  { "foreground": "color-destructive", "grounds": ["color-surface"], "minimum": 4.5 },
+  { "foreground": "color-border-strong", "grounds": ["color-surface"], "minimum": 3 },
+  { "foreground": "color-focus", "grounds": ["color-canvas", "color-surface"], "minimum": 3 }
+]

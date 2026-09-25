@@ -1,0 +1,111 @@
+<!-- @dsCard height=320 -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Cover</title>
+<style>
+html, body { height: auto; min-height: 0; margin: 0; }
+body { overflow: visible; padding: 0; background: var(--color-canvas); }
+.ds-cover { position: relative; width: 960px; height: 320px; background: var(--color-canvas); color: var(--color-foreground); overflow: hidden; }
+.ds-cover svg { position: absolute; inset: 0; }
+.ds-cover .ds-accent { fill: var(--color-primary); }
+.ds-cover .ds-ink { fill: var(--color-foreground); }
+.ds-cover .ds-dot { fill: var(--color-canvas); }
+.ds-cover .ds-block { rx: var(--radius-control); ry: var(--radius-control); }
+.ds-cover-text { position: absolute; left: 48px; right: 48px; bottom: 26px; }
+.ds-cover-name { margin: 0; font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif; font-size: 64px; font-weight: 600; line-height: 0.95; letter-spacing: -0.5px; color: var(--color-foreground); }
+.ds-cover-tagline { margin: 8px 0 0; font-size: 14px; line-height: 20px; color: var(--color-muted); }
+</style>
+</head>
+<body>
+<div class="ds-cover">
+  <!-- blocks: color-primary of each skin (classic 320, fluent 176, console 144, cupertino 112 wide) and color-foreground (160) as a strip of unequal bands, 112 tall, radius-control corners, space-2 gaps
+       arrangement: top-band skeleton; the name is too wide for the 440px side zone
+       pattern: dot grid (a 4px-grid, dense technical system renders glyphs on a pixel grid), 60 dots cut out in color-canvas at a space-4 pitch inside the ink block
+       scales: pitch space-4 (16), gaps space-2 (8), corners radius-control (4) -->
+  <svg aria-hidden="true" height="320" viewBox="0 0 960 320" width="960">
+    <g data-ds-skin="classic" data-theme="classic-light"><rect class="ds-accent ds-block" height="112" width="320" x="0" y="0"/></g>
+    <g data-ds-skin="fluent" data-theme="fluent-light"><rect class="ds-accent ds-block" height="112" width="176" x="328" y="0"/></g>
+    <g data-ds-skin="console" data-theme="console-light"><rect class="ds-accent ds-block" height="112" width="144" x="512" y="0"/></g>
+    <g data-ds-skin="cupertino" data-theme="cupertino-light"><rect class="ds-accent ds-block" height="112" width="112" x="664" y="0"/></g>
+    <g data-ds-skin="classic" data-theme="classic-light">
+      <rect class="ds-ink ds-block" height="112" width="176" x="784" y="0"/>
+      <circle class="ds-dot" cx="800" cy="16" r="2"/>
+      <circle class="ds-dot" cx="816" cy="16" r="2"/>
+      <circle class="ds-dot" cx="832" cy="16" r="2"/>
+      <circle class="ds-dot" cx="848" cy="16" r="2"/>
+      <circle class="ds-dot" cx="864" cy="16" r="2"/>
+      <circle class="ds-dot" cx="880" cy="16" r="2"/>
+      <circle class="ds-dot" cx="896" cy="16" r="2"/>
+      <circle class="ds-dot" cx="912" cy="16" r="2"/>
+      <circle class="ds-dot" cx="928" cy="16" r="2"/>
+      <circle class="ds-dot" cx="944" cy="16" r="2"/>
+      <circle class="ds-dot" cx="800" cy="32" r="2"/>
+      <circle class="ds-dot" cx="816" cy="32" r="2"/>
+      <circle class="ds-dot" cx="832" cy="32" r="2"/>
+      <circle class="ds-dot" cx="848" cy="32" r="2"/>
+      <circle class="ds-dot" cx="864" cy="32" r="2"/>
+      <circle class="ds-dot" cx="880" cy="32" r="2"/>
+      <circle class="ds-dot" cx="896" cy="32" r="2"/>
+      <circle class="ds-dot" cx="912" cy="32" r="2"/>
+      <circle class="ds-dot" cx="928" cy="32" r="2"/>
+      <circle class="ds-dot" cx="944" cy="32" r="2"/>
+      <circle class="ds-dot" cx="800" cy="48" r="2"/>
+      <circle class="ds-dot" cx="816" cy="48" r="2"/>
+      <circle class="ds-dot" cx="832" cy="48" r="2"/>
+      <circle class="ds-dot" cx="848" cy="48" r="2"/>
+      <circle class="ds-dot" cx="864" cy="48" r="2"/>
+      <circle class="ds-dot" cx="880" cy="48" r="2"/>
+      <circle class="ds-dot" cx="896" cy="48" r="2"/>
+      <circle class="ds-dot" cx="912" cy="48" r="2"/>
+      <circle class="ds-dot" cx="928" cy="48" r="2"/>
+      <circle class="ds-dot" cx="944" cy="48" r="2"/>
+      <circle class="ds-dot" cx="800" cy="64" r="2"/>
+      <circle class="ds-dot" cx="816" cy="64" r="2"/>
+      <circle class="ds-dot" cx="832" cy="64" r="2"/>
+      <circle class="ds-dot" cx="848" cy="64" r="2"/>
+      <circle class="ds-dot" cx="864" cy="64" r="2"/>
+      <circle class="ds-dot" cx="880" cy="64" r="2"/>
+      <circle class="ds-dot" cx="896" cy="64" r="2"/>
+      <circle class="ds-dot" cx="912" cy="64" r="2"/>
+      <circle class="ds-dot" cx="928" cy="64" r="2"/>
+      <circle class="ds-dot" cx="944" cy="64" r="2"/>
+      <circle class="ds-dot" cx="800" cy="80" r="2"/>
+      <circle class="ds-dot" cx="816" cy="80" r="2"/>
+      <circle class="ds-dot" cx="832" cy="80" r="2"/>
+      <circle class="ds-dot" cx="848" cy="80" r="2"/>
+      <circle class="ds-dot" cx="864" cy="80" r="2"/>
+      <circle class="ds-dot" cx="880" cy="80" r="2"/>
+      <circle class="ds-dot" cx="896" cy="80" r="2"/>
+      <circle class="ds-dot" cx="912" cy="80" r="2"/>
+      <circle class="ds-dot" cx="928" cy="80" r="2"/>
+      <circle class="ds-dot" cx="944" cy="80" r="2"/>
+      <circle class="ds-dot" cx="800" cy="96" r="2"/>
+      <circle class="ds-dot" cx="816" cy="96" r="2"/>
+      <circle class="ds-dot" cx="832" cy="96" r="2"/>
+      <circle class="ds-dot" cx="848" cy="96" r="2"/>
+      <circle class="ds-dot" cx="864" cy="96" r="2"/>
+      <circle class="ds-dot" cx="880" cy="96" r="2"/>
+      <circle class="ds-dot" cx="896" cy="96" r="2"/>
+      <circle class="ds-dot" cx="912" cy="96" r="2"/>
+      <circle class="ds-dot" cx="928" cy="96" r="2"/>
+      <circle class="ds-dot" cx="944" cy="96" r="2"/>
+    </g>
+  </svg>
+  <div class="ds-cover-text">
+    <p class="ds-cover-name">MacType Control Center<br>Alpha</p>
+    <p class="ds-cover-tagline">Four skins over one application model, each in light and dark.</p>
+  </div>
+</div>
+<script>
+(function () {
+  var pinned = document.querySelectorAll("[data-ds-skin]");
+  function sync() {
+    var mode = /dark$/.test(document.documentElement.getAttribute("data-theme") || "") ? "dark" : "light";
+    pinned.forEach(function (el) { el.setAttribute("data-theme", el.getAttribute("data-ds-skin") + "-" + mode); });
+  }
+  sync();
+  new MutationObserver(sync).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+})();
+</script>
+</body>
+</html>

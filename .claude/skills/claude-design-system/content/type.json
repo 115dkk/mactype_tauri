@@ -1,0 +1,60 @@
+{
+  "fonts": [
+    { "family": "Pretendard KO UI", "source": "control-center/src/assets/fonts/pretendard-ko-ui.woff2", "file": "fonts/pretendard-ko-ui.woff2", "weight": "100 900", "style": "normal" }
+  ],
+  "files": [
+    { "source": "control-center/src/assets/fonts/OFL-Pretendard.txt", "file": "fonts/OFL-Pretendard.txt" }
+  ],
+  "families": {
+    "ui": "\"Segoe UI Variable Text\", \"Segoe UI\", sans-serif",
+    "ui-ko": "\"Segoe UI Variable Text\", \"Segoe UI\", \"Pretendard KO UI\", \"Malgun Gothic\", sans-serif",
+    "ui-ja": "\"Segoe UI Variable Text\", \"Segoe UI\", \"Yu Gothic UI\", \"Meiryo UI\", sans-serif",
+    "ui-zh-cn": "\"Segoe UI Variable Text\", \"Segoe UI\", \"Microsoft YaHei UI\", sans-serif",
+    "ui-zh-tw": "\"Segoe UI Variable Text\", \"Segoe UI\", \"Microsoft JhengHei UI\", sans-serif",
+    "mono": "Consolas, \"Cascadia Mono\", monospace",
+    "specimen": "\"Segoe UI\", sans-serif",
+    "fluent-display": "\"Segoe UI Variable Display\", \"Segoe UI\", sans-serif",
+    "console-ui": "\"Segoe UI Variable Small\", \"Segoe UI\", sans-serif",
+    "console-mono": "\"Cascadia Mono\", Consolas, monospace"
+  },
+  "groups": [
+    { "name": "Classic", "family": "ui", "styles": [
+      { "name": "type-title", "fontSize": "24px", "lineHeight": 1.25, "fontWeight": 600, "letterSpacing": "-0.2px", "sample": "서비스", "usage": "View title (h1) in the classic skin." },
+      { "name": "type-section", "fontSize": "16px", "lineHeight": 1.4, "fontWeight": 600, "sample": "Recent activity", "usage": "Section title (h2) in the classic skin." },
+      { "name": "type-body", "fontSize": "14px", "lineHeight": 1.5, "fontWeight": 400, "sample": "MacType is running", "usage": "Body copy and control text; the root font size of the window." },
+      { "name": "type-label", "fontSize": "13px", "lineHeight": 1.35, "fontWeight": 600, "sample": "Display language", "usage": "Field and setting labels." },
+      { "name": "type-caption", "fontSize": "12px", "lineHeight": 1.4, "fontWeight": 400, "letterSpacing": "0.1px", "sample": "The original file remains unchanged until you save.", "usage": "Metadata, setting help text and dirty marks." },
+      { "name": "type-nav-group", "fontSize": "11px", "fontWeight": 600, "letterSpacing": "0.08em", "sample": "Tuner", "usage": "Navigation group labels; the stylesheet sets them uppercase, which leaves Hangul and CJK unchanged." }
+    ] },
+    { "name": "Code", "family": "mono", "styles": [
+      { "name": "type-mono", "fontSize": "12px", "lineHeight": 1.5, "fontWeight": 400, "sample": "C:\\Program Files\\MacType\\ini\\Default.ini", "usage": "Versions, paths and profile file names in every skin but Console." }
+    ] },
+    { "name": "Fluent", "family": "ui", "styles": [
+      { "name": "type-fluent-display", "family": "fluent-display", "fontSize": "28px", "lineHeight": "36px", "fontWeight": 600, "letterSpacing": "-0.2px", "sample": "Service", "usage": "Fluent page title (h1)." },
+      { "name": "type-fluent-hero", "fontSize": "20px", "lineHeight": "28px", "fontWeight": 600, "sample": "MacType is running", "usage": "Title of a hero settings card." },
+      { "name": "type-fluent-section", "fontSize": "14px", "lineHeight": "20px", "fontWeight": 600, "sample": "Modes", "usage": "Section heading above a run of cards." },
+      { "name": "type-fluent-body", "fontSize": "14px", "lineHeight": "20px", "fontWeight": 400, "sample": "Start with Windows", "usage": "Body copy and settings card titles; Fluent never bolds a card title." },
+      { "name": "type-fluent-caption", "fontSize": "12px", "lineHeight": "16px", "fontWeight": 400, "sample": "Runs the service when you sign in.", "usage": "Muted settings card description." }
+    ] },
+    { "name": "Console", "family": "console-ui", "styles": [
+      { "name": "type-console-title", "fontSize": "13px", "lineHeight": "16px", "fontWeight": 600, "sample": "Service", "usage": "Command bar page title (h1)." },
+      { "name": "type-console-body", "fontSize": "12px", "lineHeight": "16px", "fontWeight": 400, "sample": "Injection ready", "usage": "Console body copy with tabular numbers." },
+      { "name": "type-console-panel", "fontSize": "11px", "fontWeight": 600, "sample": "SERVICE", "usage": "Panel title strip, in the muted colour." },
+      { "name": "type-console-value", "family": "console-mono", "fontSize": "11px", "fontWeight": 400, "sample": "2026.9.25-alpha", "usage": "Values, versions and paths in key/value tables." }
+    ] },
+    { "name": "Cupertino", "family": "ui", "styles": [
+      { "name": "type-cupertino-title", "fontSize": "24px", "lineHeight": "30px", "fontWeight": 700, "letterSpacing": "-0.3px", "sample": "Service", "usage": "Cupertino page title (h1)." },
+      { "name": "type-cupertino-hero", "fontSize": "15px", "fontWeight": 600, "sample": "MacType is running", "usage": "Title of a hero row." },
+      { "name": "type-cupertino-body", "fontSize": "13px", "lineHeight": "17px", "fontWeight": 400, "sample": "Start with Windows", "usage": "Body copy and row titles." },
+      { "name": "type-cupertino-footnote", "fontSize": "11px", "lineHeight": "14px", "fontWeight": 400, "sample": "Changes apply to apps you open next.", "usage": "Row descriptions and footnotes under a group." }
+    ] },
+    { "name": "Specimen", "family": "specimen", "styles": [
+      { "name": "type-specimen", "fontSize": "20px", "lineHeight": 1.65, "fontWeight": 400, "sample": "다람쥐 헌 쳇바퀴에 타고파 The quick brown fox", "usage": "Placeholder text inside a preview canvas before the helper returns its bitmap." }
+    ] }
+  ],
+  "notes": {
+    "size": "Classic defaults. Fluent, Console and Cupertino override these on their own root block (see the Skin designs section); a component reads the variable, never a literal.",
+    "spacing": "The 4px grid every skin shares.",
+    "radius": "Classic default; Cupertino uses 6px, the rest 4px."
+  }
+}

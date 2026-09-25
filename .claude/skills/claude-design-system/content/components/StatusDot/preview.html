@@ -1,0 +1,21 @@
+<!-- @dsCard group="Status" height=64 subtitle="ok, warn, bad, accent, neutral" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>StatusDot</title>
+<style>
+html, body { height: auto; min-height: 0; }
+body { overflow: visible; padding: 16px; }
+.ds-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ds-stack { display: grid; gap: 12px; justify-items: start; }
+</style>
+</head>
+<body>
+<div class="ds-row" style="gap: 20px">
+  <span class="ds-row"><span aria-hidden="true" class="status-dot" data-tone="ok"></span>Running</span>
+  <span class="ds-row"><span aria-hidden="true" class="status-dot" data-tone="warn"></span>Needs attention</span>
+  <span class="ds-row"><span aria-hidden="true" class="status-dot" data-tone="bad"></span>Failed</span>
+  <span class="ds-row"><span aria-hidden="true" class="status-dot" data-tone="accent"></span>Changed</span>
+  <span class="ds-row"><span aria-hidden="true" class="status-dot" data-tone="neutral"></span>Stopped</span>
+</div>
+</body>
+</html>

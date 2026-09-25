@@ -2,6 +2,7 @@
 
 #include <psapi.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -95,42 +96,73 @@ template <typename Attempt, typename Failed>
     }
 }
 
+[[nodiscard]] ModuleRelisting relist_module(const HANDLE process,
+                                            const HMODULE module) noexcept {
+    const auto current = enumerate_modules(process);
+    if (!current) {
+        return inventory_failure_is_transient(GetLastError())
+                   ? ModuleRelisting::LoaderListInFlux
+                   : ModuleRelisting::Unreadable;
+    }
+    return std::find(current->begin(), current->end(), module) == current->end()
+               ? ModuleRelisting::NoLongerListed
+               : ModuleRelisting::StillListed;
+}
+
+// K32GetModuleFileNameExW looks the handle up in the target's current loader
+// list, so a module that unloaded after the snapshot fails here with an error
+// the retry bound would not recognise. The last error is rewritten from a
+// fresh snapshot before any caller classifies it.
 [[nodiscard]] std::optional<std::wstring_view> module_path(
     HANDLE process, const HMODULE module, std::vector<wchar_t>& path) noexcept {
     const DWORD length = K32GetModuleFileNameExW(
         process, module, path.data(), static_cast<DWORD>(path.size()));
     if (length == 0U || length >= path.size()) {
+        const DWORD read_error = length == 0U ? GetLastError() : ERROR_INSUFFICIENT_BUFFER;
+        SetLastError(module_path_read_error(read_error, relist_module(process, module)));
         return std::nullopt;
     }
     return std::wstring_view{path.data(), length};
 }
 
-[[nodiscard]] std::optional<std::uintptr_t> remote_module_base(
+struct ModuleBaseLookup final {
+    bool readable{};
+    std::optional<std::uintptr_t> base;
+};
+
+[[nodiscard]] ModuleBaseLookup remote_module_base_once(
     HANDLE process, const std::wstring_view module_name) noexcept {
-    const auto inventory = retry_transient_inventory(
-        process, [process]() noexcept { return enumerate_modules(process); },
-        [](const std::optional<std::vector<HMODULE>>& modules) noexcept {
-            return !modules.has_value();
-        });
+    const auto inventory = enumerate_modules(process);
     if (!inventory) {
-        return std::nullopt;
+        return {};
     }
     try {
         std::vector<wchar_t> path(kMaxModulePathCharacters);
         for (const HMODULE module : *inventory) {
             const auto current_path = module_path(process, module, path);
             if (!current_path) {
-                return std::nullopt;
+                return {};
             }
             const std::filesystem::path parsed{*current_path};
             if (_wcsicmp(parsed.filename().c_str(), module_name.data()) == 0) {
-                return reinterpret_cast<std::uintptr_t>(module);
+                return {true, reinterpret_cast<std::uintptr_t>(module)};
             }
         }
     } catch (...) {
-        return std::nullopt;
+        return {};
     }
-    return std::nullopt;
+    return {true, std::nullopt};
+}
+
+[[nodiscard]] std::optional<std::uintptr_t> remote_module_base(
+    HANDLE process, const std::wstring_view module_name) noexcept {
+    return retry_transient_inventory(
+               process,
+               [process, module_name]() noexcept {
+                   return remote_module_base_once(process, module_name);
+               },
+               [](const ModuleBaseLookup& lookup) noexcept { return !lookup.readable; })
+        .base;
 }
 
 bool module_paths_equal_impl(const std::wstring_view left,
@@ -192,6 +224,19 @@ bool module_paths_equal_impl(const std::wstring_view left,
 
 bool inventory_failure_is_transient(const DWORD error) noexcept {
     return error == ERROR_PARTIAL_COPY;
+}
+
+DWORD module_path_read_error(const DWORD read_error,
+                             const ModuleRelisting relisting) noexcept {
+    switch (relisting) {
+    case ModuleRelisting::NoLongerListed:
+    case ModuleRelisting::LoaderListInFlux:
+        return ERROR_PARTIAL_COPY;
+    case ModuleRelisting::StillListed:
+    case ModuleRelisting::Unreadable:
+        break;
+    }
+    return read_error;
 }
 
 InventoryRetry inventory_retry_action(const DWORD error,

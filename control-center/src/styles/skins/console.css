@@ -81,8 +81,11 @@ html[data-skin="console"] .button.ghost:hover { color: var(--color-foreground); 
 html[data-skin="console"] .icon-button { width: var(--control-height); min-height: var(--control-height); height: var(--control-height); border: 1px solid var(--color-border-strong); border-radius: 4px; background: var(--color-surface-subtle); }
 html[data-skin="console"] .text-action { min-height: var(--control-height); padding: 0 8px; font-size: 12px; color: var(--color-muted); }
 html[data-skin="console"] .text-action:hover { color: var(--color-foreground); }
-html[data-skin="console"] select, html[data-skin="console"] input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), html[data-skin="console"] textarea { border: 1px solid var(--color-border-strong); border-radius: 4px; background: var(--color-surface-subtle); color: var(--color-foreground); font-size: 12px; }
-html[data-skin="console"] select, html[data-skin="console"] input:not([type="range"]):not([type="checkbox"]):not([type="radio"]) { height: var(--control-height); padding-inline: 8px; }
+/* Inputs inside a .console-field take the field's frame, not their own. Each
+   :not() adds to the specificity, so excluding them here is the only override
+   that holds; a later ".console-field input" rule loses to this chain. */
+html[data-skin="console"] select, html[data-skin="console"] input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not(.console-field input), html[data-skin="console"] textarea { border: 1px solid var(--color-border-strong); border-radius: 4px; background: var(--color-surface-subtle); color: var(--color-foreground); font-size: 12px; }
+html[data-skin="console"] select, html[data-skin="console"] input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not(.console-field input) { height: var(--control-height); padding-inline: 8px; }
 html[data-skin="console"] { --switch-width: 30px; --switch-height: 16px; --switch-inset: 1px; --selection-size: 14px; --select-marker-size: 6px; }
 html[data-skin="console"] .switch-control > span { display: none; }
 html[data-skin="console"] .status-dot { width: 8px; height: 8px; }
@@ -238,6 +241,7 @@ html[data-skin="console"] .console-settings-form { display: block; padding: 0; m
 html[data-skin="console"] .console-settings-form .setting-row { min-height: 34px; padding: 4px 12px; border-bottom: 1px solid var(--color-border); }
 html[data-skin="console"] .console-settings-form .setting-row[data-dirty="true"] { box-shadow: inset 2px 0 var(--color-primary); }
 html[data-skin="console"] .console-settings-form .guided-progress, html[data-skin="console"] .console-settings-form .guided-step-tools { padding: 8px 12px; }
+html[data-skin="console"] .console-settings-form .advanced-editor, html[data-skin="console"] .console-settings-form .collection-editor, html[data-skin="console"] .console-settings-form .list-grid { padding-inline: 12px; }
 html[data-skin="console"] .console-settings-form .guided-start-card, html[data-skin="console"] .console-settings-form .guided-apply-card { margin: 10px 12px; }
 html[data-skin="console"] .console-workspace .preview-panel { display: flex; flex-direction: column; min-height: 0; margin: 0; padding: 0; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface); overflow: hidden; }
 html[data-skin="console"] .console-workspace .preview-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 30px; padding: 4px 12px; border-bottom: 1px solid var(--color-border); color: var(--color-muted); font-size: 11px; }

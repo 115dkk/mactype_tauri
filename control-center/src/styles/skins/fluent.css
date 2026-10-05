@@ -85,9 +85,12 @@ html[data-skin="fluent"] .button.danger { color: var(--color-destructive); }
 html[data-skin="fluent"] .button.ghost { border-color: transparent; background: transparent; color: var(--color-muted); }
 html[data-skin="fluent"] .icon-button { width: var(--control-height); min-height: var(--control-height); height: var(--control-height); border: 1px solid var(--color-border); border-bottom-color: var(--fluent-control-bottom); border-radius: 4px; background: var(--fluent-control); }
 html[data-skin="fluent"] .text-action, html[data-skin="fluent"] .fluent-link { color: var(--fluent-accent-text); font-size: 14px; }
-html[data-skin="fluent"] select, html[data-skin="fluent"] input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), html[data-skin="fluent"] textarea { border: 1px solid var(--color-border); border-bottom-color: var(--fluent-control-bottom); border-radius: 4px; background: var(--fluent-control); color: var(--color-foreground); }
-html[data-skin="fluent"] input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):focus-visible, html[data-skin="fluent"] textarea:focus-visible { outline: none; border-bottom: 2px solid var(--color-primary); }
+/* A search field draws the frame around its icon and input, so the input
+   inside it stays out of the skin's control frame. */
+html[data-skin="fluent"] select, html[data-skin="fluent"] input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not(.search-field input), html[data-skin="fluent"] textarea { border: 1px solid var(--color-border); border-bottom-color: var(--fluent-control-bottom); border-radius: 4px; background: var(--fluent-control); color: var(--color-foreground); }
+html[data-skin="fluent"] input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not(.search-field input):focus-visible, html[data-skin="fluent"] textarea:focus-visible { outline: none; border-bottom: 2px solid var(--color-primary); }
 html[data-skin="fluent"] .fluent-field { height: var(--control-height); padding: 0 11px; }
+html[data-skin="fluent"] .search-field input { background: transparent; }
 html[data-skin="fluent"] .switch-control input { border-color: var(--color-muted); background: transparent; }
 html[data-skin="fluent"] .switch-control input:checked { border-color: var(--color-primary); background: var(--color-primary); }
 html[data-skin="fluent"] .fluent-switch { display: inline-flex; align-items: center; gap: 12px; }

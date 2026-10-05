@@ -248,8 +248,20 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
 /* The docked column is what the reader judges the rendering in, so it takes a
    larger share than a side panel would: the strips wrap to whatever width it
    gets, and a narrow column turns one sample line into four. */
-.settings-workspace[data-preview-docked="true"] { grid-template-columns: minmax(0, 1fr) clamp(360px, 38%, 520px); grid-template-rows: minmax(0, 1fr); column-gap: var(--space-5); }
-.settings-workspace[data-preview-docked="true"] .preview-panel { margin: 0; padding-inline-start: var(--space-5); border-inline-start: 1px solid var(--color-border); overflow-y: auto; }
+.settings-workspace[data-preview-docked="true"] { grid-template-columns: minmax(0, 1fr) clamp(360px, 38%, 520px); grid-template-rows: minmax(0, 1fr); column-gap: 0; }
+/* The form's scrollbar is the divider: it sits on the column boundary, and the
+   form keeps the same gutter on both sides of its content. The 1px line is
+   painted on the form's border box, under the scrollbar, so it shows only
+   while the form has nothing to scroll. */
+.settings-workspace[data-preview-docked="true"] .settings-form { padding-inline-end: var(--space-5); background: linear-gradient(var(--color-border), var(--color-border)) right top / 1px 100% no-repeat border-box; }
+[dir="rtl"] .settings-workspace[data-preview-docked="true"] .settings-form { background-position: left top; }
+/* Guided mode scrolls the step content, not the form, so the gutter moves
+   inside the scroller and the scrollbar still lands on the boundary. */
+.profile-page[data-mode="guided"] .settings-workspace[data-preview-docked="true"] .settings-form { padding-inline-end: 0; }
+.profile-page[data-mode="guided"] .settings-workspace[data-preview-docked="true"] .guided-step-content { padding-inline-end: var(--space-5); }
+.profile-page[data-mode="guided"] .settings-workspace[data-preview-docked="true"] .settings-form > :not(.guided-layout),
+.profile-page[data-mode="guided"] .settings-workspace[data-preview-docked="true"] .guided-progress { margin-inline-end: var(--space-5); }
+.settings-workspace[data-preview-docked="true"] .preview-panel { margin: 0; padding-inline-start: var(--space-5); overflow-y: auto; }
 .settings-workspace[data-preview-docked="true"] .preview-toolbar { align-items: stretch; flex-direction: column; gap: var(--space-2); }
 .settings-workspace[data-preview-docked="true"] .preview-controls { width: 100%; flex-wrap: wrap; }
 .settings-workspace[data-preview-docked="true"] .preview-controls select { flex: 1 1 96px; min-width: 0; }

@@ -8,6 +8,9 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <condition_variable>
+#include <memory>
 #include <mutex>
 #include <new>
 #include <string>
@@ -21,14 +24,20 @@ struct CacheEntry
 	CComPtr<IUnknown> factoryIdentity;
 	CComPtr<IUnknown> systemSetIdentity;
 	std::uint64_t generation = 0;
+	std::condition_variable ready;
 	AliasFontSet aliases;
+	BuildStatus status = BuildStatus::unexpectedFailure;
+	bool building = true;
 };
 
 struct AliasCache
 {
 	std::mutex mutex;
-	std::vector<CacheEntry> entries;
+	std::vector<std::shared_ptr<CacheEntry>> entries;
 };
+
+constexpr std::chrono::seconds kBuildWaitTimeout(10);
+thread_local bool isBuildingAliases = false;
 
 constexpr std::array<DWRITE_FONT_PROPERTY_ID, 3> kFamilyPropertyIds = {
 	DWRITE_FONT_PROPERTY_ID_WEIGHT_STRETCH_STYLE_FAMILY_NAME,
@@ -291,6 +300,7 @@ HRESULT FindReplacementReference(
 {
 	namespace substitution = renderer::font_substitution;
 	choice = {};
+	choice.options.profileDigest = snapshot.digest();
 
 	CComPtr<IDWriteFontSet> replacementSet;
 	if (!renderer::bold_face_selection::IsBoldClassWeight(
@@ -625,12 +635,35 @@ CComPtr<IUnknown> GetIdentity(IUnknown* object)
 	return identity;
 }
 
+bool IsApplied(BuildStatus status) noexcept
+{
+	return status == BuildStatus::applied ||
+		status == BuildStatus::appliedWithMissingReplacement;
+}
+
+std::uint64_t ElapsedMicroseconds(
+	LARGE_INTEGER started,
+	LARGE_INTEGER finished,
+	LARGE_INTEGER frequency) noexcept
+{
+	if (finished.QuadPart <= started.QuadPart || frequency.QuadPart <= 0)
+		return 0;
+	LONGLONG const ticks = finished.QuadPart - started.QuadPart;
+	LONGLONG const seconds = ticks / frequency.QuadPart;
+	LONGLONG const remainder = ticks % frequency.QuadPart;
+	return static_cast<std::uint64_t>(seconds) * 1000000ULL +
+		static_cast<std::uint64_t>(
+			remainder * 1000000LL / frequency.QuadPart);
+}
+
 BuildStatus GetOrCreateUnchecked(
 	IDWriteFactory* factory,
 	IDWriteFontSet* systemFontSet,
 	AliasFontSet& result)
 {
 	result = {};
+	if (isBuildingAliases)
+		return BuildStatus::buildReentrant;
 	// The enablement state selects the immutable generation. A cached alias
 	// must never escape while the caller explicitly requests the stock set.
 	if (IsSubstitutionDisabled())
@@ -650,47 +683,81 @@ BuildStatus GetOrCreateUnchecked(
 		return BuildStatus::systemSetUnavailable;
 
 	AliasCache& cache = GetCache();
+	std::shared_ptr<CacheEntry> entry;
 	{
-		std::lock_guard<std::mutex> lock(cache.mutex);
+		std::unique_lock<std::mutex> lock(cache.mutex);
 		cache.entries.erase(
 			std::remove_if(
 				cache.entries.begin(), cache.entries.end(),
-				[generation](CacheEntry const& entry) {
-					return entry.generation != generation;
+				[generation](std::shared_ptr<CacheEntry> const& candidate) {
+					return candidate->generation != generation;
 				}),
 			cache.entries.end());
-		for (CacheEntry const& entry : cache.entries)
+		for (std::shared_ptr<CacheEntry> const& candidate : cache.entries)
 		{
-			if (entry.factoryIdentity == factoryIdentity &&
-				entry.systemSetIdentity == systemSetIdentity &&
-				entry.generation == generation)
+			if (candidate->factoryIdentity == factoryIdentity &&
+				candidate->systemSetIdentity == systemSetIdentity &&
+				candidate->generation == generation)
 			{
-				result = entry.aliases;
-				return result.status;
+				entry = candidate;
+				break;
 			}
 		}
+		if (entry != nullptr)
+		{
+			if (entry->building && !entry->ready.wait_for(
+					lock, kBuildWaitTimeout, [&entry] { return !entry->building; }))
+				return BuildStatus::waitTimeout;
+			result = entry->aliases;
+			result.cacheHit = true;
+			return entry->status;
+		}
+
+		entry = std::make_shared<CacheEntry>();
+		entry->factoryIdentity = factoryIdentity;
+		entry->systemSetIdentity = systemSetIdentity;
+		entry->generation = generation;
+		cache.entries.push_back(entry);
 	}
 
 	AliasFontSet built;
-	BuildStatus const status = Build(factory, systemFontSet, snapshot, built);
-	built.status = status;
-	if (status != BuildStatus::applied &&
-		status != BuildStatus::appliedWithMissingReplacement)
-		return status;
-
-	std::lock_guard<std::mutex> lock(cache.mutex);
-	for (CacheEntry const& entry : cache.entries)
+	BuildStatus status = BuildStatus::unexpectedFailure;
+	LARGE_INTEGER frequency = {};
+	LARGE_INTEGER started = {};
+	LARGE_INTEGER finished = {};
+	bool const timing = QueryPerformanceFrequency(&frequency) != FALSE &&
+		QueryPerformanceCounter(&started) != FALSE;
+	isBuildingAliases = true;
+	try
 	{
-		if (entry.factoryIdentity == factoryIdentity &&
-			entry.systemSetIdentity == systemSetIdentity &&
-			entry.generation == generation)
+		status = Build(factory, systemFontSet, snapshot, built);
+	}
+	catch (std::bad_alloc const&)
+	{
+		status = BuildStatus::outOfMemory;
+	}
+	catch (...)
+	{
+		status = BuildStatus::unexpectedFailure;
+	}
+	isBuildingAliases = false;
+	if (timing && QueryPerformanceCounter(&finished))
+		built.buildMicroseconds = ElapsedMicroseconds(started, finished, frequency);
+	built.status = status;
+
+	{
+		std::lock_guard<std::mutex> lock(cache.mutex);
+		entry->aliases = built;
+		entry->status = status;
+		entry->building = false;
+		if (!IsApplied(status))
 		{
-			result = entry.aliases;
-			return result.status;
+			cache.entries.erase(
+				std::remove(cache.entries.begin(), cache.entries.end(), entry),
+				cache.entries.end());
 		}
 	}
-	cache.entries.push_back({
-		factoryIdentity, systemSetIdentity, generation, built});
+	entry->ready.notify_all();
 	result = built;
 	return status;
 }
@@ -731,13 +798,14 @@ BuildStatus GetCachedForFactory(
 			return BuildStatus::unsupportedFactory;
 		AliasCache& cache = GetCache();
 		std::lock_guard<std::mutex> lock(cache.mutex);
-		for (CacheEntry const& entry : cache.entries)
+		for (std::shared_ptr<CacheEntry> const& entry : cache.entries)
 		{
-			if (entry.factoryIdentity == identity &&
-				entry.generation == substitutionGeneration)
+			if (!entry->building && entry->factoryIdentity == identity &&
+				entry->generation == substitutionGeneration)
 			{
-				result = entry.aliases;
-				return result.status;
+				result = entry->aliases;
+				result.cacheHit = true;
+				return entry->status;
 			}
 		}
 		return BuildStatus::systemSetUnavailable;
@@ -797,6 +865,10 @@ WCHAR const* StatusName(BuildStatus status) noexcept
 		return L"alias-collection-create-set-failed";
 	case BuildStatus::createCollectionFailed:
 		return L"alias-collection-create-collection-failed";
+	case BuildStatus::buildReentrant:
+		return L"alias-collection-build-reentrant";
+	case BuildStatus::waitTimeout:
+		return L"alias-collection-wait-timeout";
 	}
 	return L"alias-collection-unknown";
 }

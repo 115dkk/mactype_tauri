@@ -195,6 +195,60 @@ void CheckRestrictedOpen(HANDLE token, std::wstring const& path, bool allowed)
         allowed ? "restricted token cannot read cache fixture" : "negative control was not denied");
 }
 
+void TestManifest(std::vector<BYTE> const& fixtureBytes)
+{
+    CacheTestDirectory temporary;
+    auto const appdata = temporary.root / L"manifest-appdata";
+    auto const directory = appdata / L"MacType" / L"FontCache";
+    RequireAcl(std::filesystem::create_directories(directory),
+        "cannot create manifest cache tree");
+    RequireAcl(SetEnvironmentVariableW(L"LOCALAPPDATA", appdata.c_str()) != FALSE,
+        "cannot redirect manifest LOCALAPPDATA");
+    WriteFixture(directory / L"manifest-v1.bin", {1, 2, 3, 4});
+
+    renderer::virtual_font_cache::ManifestKey key;
+    key.replacementPath = L"C:\\Windows\\Fonts\\fixture.ttf";
+    key.replacementSize = 1234;
+    key.replacementLastWriteTime = 5678;
+    key.faceIndex = 2;
+    key.aliasFamily = L"Manifest Alias";
+    key.overrideWeight = true;
+    key.weight = 500;
+    key.profileDigest = 0x1122334455667788ULL;
+    key.axes = {{0x74686777, 500.0f}, {0x68746477, 100.0f}};
+    renderer::virtual_font_cache::ManifestValue value;
+    bool found = true;
+    RequireAcl(renderer::virtual_font_cache::LookupManifestFont(
+            key, value, found) == S_OK && !found,
+        "a corrupt manifest must be ignored");
+
+    auto const virtualFont = directory / L"cached.ttf";
+    WriteFixture(virtualFont, fixtureBytes);
+    value.virtualFontPath = virtualFont.native();
+    value.family = L"Manifest Alias";
+    value.subfamily = L"Medium";
+    value.fullName = L"Manifest Alias Medium";
+    value.postScriptName = L"ManifestAlias-Medium";
+    RequireAcl(renderer::virtual_font_cache::StoreManifestFont(key, value) == S_OK,
+        "cannot atomically store a manifest entry");
+    renderer::virtual_font_cache::ManifestValue loaded;
+    found = false;
+    RequireAcl(renderer::virtual_font_cache::LookupManifestFont(
+            key, loaded, found) == S_OK && found &&
+            loaded.virtualFontPath == value.virtualFontPath &&
+            loaded.postScriptName == value.postScriptName,
+        "a stored manifest entry did not round-trip");
+    ++key.replacementSize;
+    RequireAcl(renderer::virtual_font_cache::LookupManifestFont(
+            key, loaded, found) == S_OK && !found,
+        "source metadata must participate in the manifest key");
+    for (auto const& child : std::filesystem::directory_iterator(directory))
+    {
+        RequireAcl(child.path().filename().native().find(L".tmp-") ==
+            std::wstring::npos, "an atomic manifest temporary file leaked");
+    }
+}
+
 void TestCacheAcl(std::vector<BYTE> const& fixtureBytes)
 {
     CacheTestDirectory temporary;
@@ -285,6 +339,7 @@ int main()
     try
     {
         TestCacheAcl(comparison.expected);
+        TestManifest(comparison.expected);
     }
     catch (std::exception const& error)
     {
@@ -293,5 +348,7 @@ int main()
     }
     std::cout << "DirectWrite font cache ACL: 3 DACL checks, 2 restricted reads, "
         "1 denied control and idempotence passed\n";
+    std::cout << "DirectWrite font manifest: corrupt-ignore, atomic round-trip and "
+        "metadata-key checks passed\n";
     return 0;
 }

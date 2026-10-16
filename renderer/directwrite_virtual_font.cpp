@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <new>
@@ -33,8 +34,10 @@ constexpr UINT32 kTagName = MakeTag('n', 'a', 'm', 'e');
 constexpr UINT32 kTagHead = MakeTag('h', 'e', 'a', 'd');
 constexpr UINT32 kTagDsig = MakeTag('D', 'S', 'I', 'G');
 constexpr UINT32 kTagOs2 = MakeTag('O', 'S', '/', '2');
+constexpr UINT32 kTagFvar = MakeTag('f', 'v', 'a', 'r');
 constexpr UINT32 kSfntChecksum = 0xB1B0AFBA;
 constexpr size_t kOs2WeightClassOffset = 4;
+constexpr size_t kOs2WidthClassOffset = 6;
 constexpr size_t kOs2SelectionOffset = 62;
 constexpr UINT16 kOs2SelectionItalic = 0x0001;
 constexpr UINT16 kOs2SelectionBold = 0x0020;
@@ -89,11 +92,22 @@ private:
 	void* context_ = nullptr;
 };
 
+struct ReplacementFileIdentity
+{
+	std::wstring path;
+	UINT64 size = 0;
+	UINT64 lastWriteTime = 0;
+};
+
 HRESULT ReadReplacementFile(
 	IDWriteFontFaceReference* reference,
 	std::vector<BYTE>& bytes,
-	UINT32& faceIndex)
+	UINT32& faceIndex,
+	ReplacementFileIdentity& identity,
+	bool readBytes)
 {
+	bytes.clear();
+	identity = {};
 	CComPtr<IDWriteFontFile> file;
 	HRESULT result = reference->GetFontFile(&file);
 	if (FAILED(result) || file == nullptr)
@@ -122,6 +136,45 @@ HRESULT ReadReplacementFile(
 	if (fileSize == 0 || fileSize > std::numeric_limits<UINT32>::max())
 		return HRESULT_FROM_WIN32(ERROR_FILE_TOO_LARGE);
 
+	CComPtr<IDWriteLocalFontFileLoader> localLoader;
+	if (SUCCEEDED(fileLoader->QueryInterface(&localLoader)) &&
+		localLoader != nullptr)
+	{
+		UINT32 pathLength = 0;
+		if (SUCCEEDED(localLoader->GetFilePathLengthFromKey(
+				key, keySize, &pathLength)) && pathLength != 0 &&
+			pathLength <= 32767)
+		{
+			std::vector<WCHAR> path(static_cast<size_t>(pathLength) + 1);
+			if (SUCCEEDED(localLoader->GetFilePathFromKey(
+					key, keySize, path.data(), pathLength + 1)))
+			{
+				WIN32_FILE_ATTRIBUTE_DATA attributes = {};
+				if (GetFileAttributesExW(
+						path.data(), GetFileExInfoStandard, &attributes) &&
+					(attributes.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+				{
+					ULARGE_INTEGER size = {};
+					size.LowPart = attributes.nFileSizeLow;
+					size.HighPart = attributes.nFileSizeHigh;
+					ULARGE_INTEGER writeTime = {};
+					writeTime.LowPart = attributes.ftLastWriteTime.dwLowDateTime;
+					writeTime.HighPart = attributes.ftLastWriteTime.dwHighDateTime;
+					if (size.QuadPart == fileSize)
+					{
+						identity.path.assign(path.data(), pathLength);
+						identity.size = size.QuadPart;
+						identity.lastWriteTime = writeTime.QuadPart;
+					}
+				}
+			}
+		}
+	}
+
+	faceIndex = reference->GetFontFaceIndex();
+	if (!readBytes)
+		return S_OK;
+
 	FontFileFragment fragment(stream);
 	result = fragment.Read(0, fileSize);
 	if (FAILED(result) || fragment.get() == nullptr)
@@ -129,7 +182,6 @@ HRESULT ReadReplacementFile(
 
 	BYTE const* first = static_cast<BYTE const*>(fragment.get());
 	bytes.assign(first, first + static_cast<size_t>(fileSize));
-	faceIndex = reference->GetFontFaceIndex();
 	return S_OK;
 }
 
@@ -346,6 +398,7 @@ bool BuildNameTable(
 	std::vector<BYTE> const& original,
 	std::wstring const& family,
 	bool advertiseBold,
+	std::vector<UINT16> const& removedNames,
 	std::vector<BYTE>& rewritten,
 	Identity& representativeIdentity)
 {
@@ -361,6 +414,9 @@ bool BuildNameTable(
 	kept.reserve(records.size());
 	for (NameRecord record : records)
 	{
+		if (std::find(removedNames.begin(), removedNames.end(), record.id) !=
+			removedNames.end())
+			continue;
 		if (!IsIdentityName(record.id, advertiseBold))
 		{
 			kept.emplace_back(std::move(record));
@@ -442,6 +498,171 @@ struct SfntTable
 	std::vector<BYTE> replacement;
 };
 
+UINT32 SfntAxisTag(DWRITE_FONT_AXIS_TAG tag) noexcept
+{
+	UINT32 const value = static_cast<UINT32>(tag);
+	return ((value & 0x000000ffU) << 24) |
+		((value & 0x0000ff00U) << 8) |
+		((value & 0x00ff0000U) >> 8) |
+		((value & 0xff000000U) >> 24);
+}
+
+bool AxisValue(
+	AliasOptions const& options,
+	DWRITE_FONT_AXIS_TAG wanted,
+	FLOAT& value) noexcept
+{
+	for (DWRITE_FONT_AXIS_VALUE const& axis : options.axisValues)
+	{
+		if (axis.axisTag == wanted && std::isfinite(axis.value))
+		{
+			value = axis.value;
+			return true;
+		}
+	}
+	return false;
+}
+
+bool FixedCoordinate(FLOAT value, std::int32_t& fixed) noexcept
+{
+	double const scaled = static_cast<double>(value) * 65536.0;
+	if (!std::isfinite(scaled) ||
+		scaled < static_cast<double>((std::numeric_limits<std::int32_t>::min)()) ||
+		scaled > static_cast<double>((std::numeric_limits<std::int32_t>::max)()))
+		return false;
+	fixed = static_cast<std::int32_t>(std::lround(scaled));
+	return true;
+}
+
+void AppendRemovedName(std::vector<UINT16>& names, UINT16 name)
+{
+	if (name != 0xffff &&
+		std::find(names.begin(), names.end(), name) == names.end())
+		names.push_back(name);
+}
+
+bool BuildPinnedFvar(
+	std::vector<BYTE> const& original,
+	AliasOptions const& options,
+	std::vector<BYTE>& rewritten,
+	std::vector<UINT16>& removedNames)
+{
+	if (original.size() < 16)
+		return false;
+	UINT16 const axesOffset = ReadU16(original, 4);
+	UINT16 const axisCount = ReadU16(original, 8);
+	UINT16 const axisSize = ReadU16(original, 10);
+	UINT16 const instanceCount = ReadU16(original, 12);
+	UINT16 const instanceSize = ReadU16(original, 14);
+	if (axisCount == 0 || axisSize < 20 || instanceCount == 0 ||
+		instanceSize < 4 + static_cast<size_t>(axisCount) * 4 ||
+		!CanRead(axesOffset, static_cast<size_t>(axisCount) * axisSize,
+			original.size()))
+		return false;
+
+	size_t const instancesOffset = static_cast<size_t>(axesOffset) +
+		static_cast<size_t>(axisCount) * axisSize;
+	if (!CanRead(instancesOffset,
+			static_cast<size_t>(instanceCount) * instanceSize, original.size()))
+		return false;
+
+	std::vector<std::int32_t> pinned(axisCount);
+	for (UINT16 axisIndex = 0; axisIndex < axisCount; ++axisIndex)
+	{
+		size_t const axisOffset = static_cast<size_t>(axesOffset) +
+			static_cast<size_t>(axisIndex) * axisSize;
+		UINT32 const tag = ReadU32(original, axisOffset);
+		bool found = false;
+		for (DWRITE_FONT_AXIS_VALUE const& axis : options.axisValues)
+		{
+			if (SfntAxisTag(axis.axisTag) == tag &&
+				FixedCoordinate(axis.value, pinned[axisIndex]))
+			{
+				found = true;
+				break;
+			}
+		}
+		if (!found)
+			return false;
+	}
+
+	UINT16 pinnedInstance = instanceCount;
+	for (UINT16 instanceIndex = 0; instanceIndex < instanceCount; ++instanceIndex)
+	{
+		size_t const instanceOffset = instancesOffset +
+			static_cast<size_t>(instanceIndex) * instanceSize;
+		bool matches = true;
+		for (UINT16 axisIndex = 0; axisIndex < axisCount; ++axisIndex)
+		{
+			std::int32_t const coordinate = static_cast<std::int32_t>(
+				ReadU32(original, instanceOffset + 4 +
+					static_cast<size_t>(axisIndex) * 4));
+			if (coordinate != pinned[axisIndex])
+			{
+				matches = false;
+				break;
+			}
+		}
+		if (matches && pinnedInstance == instanceCount)
+			pinnedInstance = instanceIndex;
+	}
+	if (pinnedInstance == instanceCount)
+		return false;
+
+	size_t const pinnedOffset = instancesOffset +
+		static_cast<size_t>(pinnedInstance) * instanceSize;
+	UINT16 const pinnedSubfamily = ReadU16(original, pinnedOffset);
+	UINT16 const minimumInstanceSize = static_cast<UINT16>(4 + axisCount * 4);
+	UINT16 const pinnedPostScript = instanceSize >= minimumInstanceSize + 2
+		? ReadU16(original, pinnedOffset + minimumInstanceSize)
+		: 0xffff;
+	for (UINT16 instanceIndex = 0; instanceIndex < instanceCount; ++instanceIndex)
+	{
+		if (instanceIndex == pinnedInstance)
+			continue;
+		size_t const instanceOffset = instancesOffset +
+			static_cast<size_t>(instanceIndex) * instanceSize;
+		AppendRemovedName(removedNames, ReadU16(original, instanceOffset));
+		if (instanceSize >= minimumInstanceSize + 2)
+			AppendRemovedName(
+				removedNames, ReadU16(original, instanceOffset + minimumInstanceSize));
+	}
+	removedNames.erase(
+		std::remove(removedNames.begin(), removedNames.end(), pinnedSubfamily),
+		removedNames.end());
+	removedNames.erase(
+		std::remove(removedNames.begin(), removedNames.end(), pinnedPostScript),
+		removedNames.end());
+
+	rewritten.assign(original.begin(), original.begin() + instancesOffset);
+	rewritten.insert(
+		rewritten.end(),
+		original.begin() + pinnedOffset,
+		original.begin() + pinnedOffset + instanceSize);
+	WriteU16(rewritten, 12, 1);
+	return true;
+}
+
+UINT16 WidthClass(FLOAT width) noexcept
+{
+	constexpr std::array<FLOAT, 9> widths = {
+		50.0f, 62.5f, 75.0f, 87.5f, 100.0f,
+		112.5f, 125.0f, 150.0f, 200.0f,
+	};
+	size_t nearest = 0;
+	FLOAT distance = std::fabs(width - widths[0]);
+	for (size_t index = 1; index < widths.size(); ++index)
+	{
+		FLOAT const candidate = std::fabs(width - widths[index]);
+		if (candidate < distance)
+		{
+			nearest = index;
+			distance = candidate;
+		}
+	}
+	return static_cast<UINT16>(nearest + 1);
+}
+
 bool IsScalerType(UINT32 value) noexcept
 {
 	return value == kTagTrueType || value == kTagCff ||
@@ -464,6 +685,11 @@ void AdvertiseOs2Weight(std::vector<BYTE>& table, UINT16 weight)
 			selection = static_cast<UINT16>(selection | kOs2SelectionRegular);
 	}
 	WriteU16(table, kOs2SelectionOffset, selection);
+}
+
+void AdvertiseOs2Width(std::vector<BYTE>& table, UINT16 width)
+{
+	WriteU16(table, kOs2WidthClassOffset, width);
 }
 
 void AdvertiseHeadWeight(std::vector<BYTE>& table, UINT16 weight)
@@ -517,9 +743,6 @@ HRESULT BuildAliasedSfnt(
 
 	std::vector<SfntTable> tables;
 	tables.reserve(sourceTableCount);
-	bool foundName = false;
-	bool foundHead = false;
-	bool foundOs2 = false;
 	for (UINT16 index = 0; index < sourceTableCount; ++index)
 	{
 		size_t const recordOffset = faceOffset + 12 +
@@ -530,8 +753,45 @@ HRESULT BuildAliasedSfnt(
 		table.sourceLength = ReadU32(source, recordOffset + 12);
 		if (!CanRead(table.sourceOffset, table.sourceLength, source.size()))
 			return DWRITE_E_FILEFORMAT;
-		if (table.tag == kTagDsig)
+		if (table.tag != kTagDsig)
+			tables.emplace_back(std::move(table));
+	}
+
+	std::vector<UINT16> removedNames;
+	bool rewroteVariable = false;
+	for (SfntTable& table : tables)
+	{
+		if (table.tag != kTagFvar || options.axisValues.empty())
 			continue;
+		std::vector<BYTE> original(
+			source.begin() + table.sourceOffset,
+			source.begin() + table.sourceOffset + table.sourceLength);
+		if (!BuildPinnedFvar(
+				original, options, table.replacement, removedNames))
+			return DWRITE_E_FILEFORMAT;
+		rewroteVariable = true;
+	}
+
+	FLOAT pinnedWeight = 0;
+	FLOAT pinnedWidth = 0;
+	bool const havePinnedWeight = rewroteVariable && AxisValue(
+		options, DWRITE_FONT_AXIS_TAG_WEIGHT, pinnedWeight);
+	bool const havePinnedWidth = rewroteVariable && AxisValue(
+		options, DWRITE_FONT_AXIS_TAG_WIDTH, pinnedWidth);
+	UINT16 advertisedWeight = options.weight;
+	if (havePinnedWeight)
+	{
+		pinnedWeight = (std::max)(1.0f, (std::min)(1000.0f, pinnedWeight));
+		advertisedWeight = static_cast<UINT16>(std::lround(pinnedWeight));
+	}
+	bool const advertiseWeight = options.overrideWeight || havePinnedWeight;
+	UINT16 const advertisedWidth = WidthClass(pinnedWidth);
+
+	bool foundName = false;
+	bool foundHead = false;
+	bool foundOs2 = false;
+	for (SfntTable& table : tables)
+	{
 		if (table.tag == kTagName)
 		{
 			std::vector<BYTE> original(
@@ -540,7 +800,8 @@ HRESULT BuildAliasedSfnt(
 			if (!BuildNameTable(
 					original,
 					family,
-					options.overrideWeight && IsBoldWeightClass(options.weight),
+					advertiseWeight && IsBoldWeightClass(advertisedWeight),
+					removedNames,
 					table.replacement,
 					identity))
 				return DWRITE_E_FILEFORMAT;
@@ -548,33 +809,38 @@ HRESULT BuildAliasedSfnt(
 		}
 		else if (table.tag == kTagHead)
 		{
-			if (table.sourceLength < 12)
+			if (table.sourceLength < 12 ||
+				(advertiseWeight && table.sourceLength < kHeadMacStyleOffset + 2))
 				return DWRITE_E_FILEFORMAT;
-			if (options.overrideWeight)
+			if (advertiseWeight)
 			{
-				if (table.sourceLength < kHeadMacStyleOffset + 2)
-					return DWRITE_E_FILEFORMAT;
 				table.replacement.assign(
 					source.begin() + table.sourceOffset,
 					source.begin() + table.sourceOffset + table.sourceLength);
-				AdvertiseHeadWeight(table.replacement, options.weight);
+				AdvertiseHeadWeight(table.replacement, advertisedWeight);
 			}
 			foundHead = true;
 		}
-		else if (table.tag == kTagOs2 && options.overrideWeight)
+		else if (table.tag == kTagOs2)
 		{
-			if (table.sourceLength < kOs2SelectionOffset + 2)
+			if ((advertiseWeight || havePinnedWidth) &&
+				table.sourceLength < kOs2SelectionOffset + 2)
 				return DWRITE_E_FILEFORMAT;
-			table.replacement.assign(
-				source.begin() + table.sourceOffset,
-				source.begin() + table.sourceOffset + table.sourceLength);
-			AdvertiseOs2Weight(table.replacement, options.weight);
+			if (advertiseWeight || havePinnedWidth)
+			{
+				table.replacement.assign(
+					source.begin() + table.sourceOffset,
+					source.begin() + table.sourceOffset + table.sourceLength);
+				if (advertiseWeight)
+					AdvertiseOs2Weight(table.replacement, advertisedWeight);
+				if (havePinnedWidth)
+					AdvertiseOs2Width(table.replacement, advertisedWidth);
+			}
 			foundOs2 = true;
 		}
-		tables.emplace_back(std::move(table));
 	}
 	if (!foundName || !foundHead || tables.empty() ||
-		(options.overrideWeight && !foundOs2) ||
+		((advertiseWeight || havePinnedWidth) && !foundOs2) ||
 		tables.size() > std::numeric_limits<UINT16>::max())
 		return DWRITE_E_FILEFORMAT;
 
@@ -654,56 +920,112 @@ HRESULT CreateAliasedReference(
 	{
 		std::vector<BYTE> source;
 		UINT32 faceIndex = 0;
+		ReplacementFileIdentity sourceIdentity;
 		HRESULT result = ReadReplacementFile(
-			replacementReference, source, faceIndex);
+			replacementReference, source, faceIndex, sourceIdentity, false);
 		if (FAILED(result))
 			return result;
 
-		std::vector<BYTE> aliased;
-		result = BuildAliasedSfnt(
-			source, faceIndex, aliasFamily, options, aliased, identity);
-		if (FAILED(result))
-			return result;
+		AliasOptions effectiveOptions = options;
+		CComPtr<IDWriteFontFaceReference1> replacementReference1;
+		if (SUCCEEDED(replacementReference->QueryInterface(
+				&replacementReference1)) && replacementReference1 != nullptr)
+		{
+			UINT32 const axisCount = replacementReference1->GetFontAxisValueCount();
+			effectiveOptions.axisValues.resize(axisCount);
+			if (axisCount != 0 && FAILED(replacementReference1->GetFontAxisValues(
+					effectiveOptions.axisValues.data(), axisCount)))
+				return E_FAIL;
+		}
 
+		namespace cache = renderer::virtual_font_cache;
+		auto makeManifestKey = [&]() {
+			cache::ManifestKey key;
+			key.replacementPath = sourceIdentity.path;
+			key.replacementSize = sourceIdentity.size;
+			key.replacementLastWriteTime = sourceIdentity.lastWriteTime;
+			key.faceIndex = faceIndex;
+			key.aliasFamily = aliasFamily;
+			key.overrideWeight = effectiveOptions.overrideWeight;
+			key.weight = effectiveOptions.weight;
+			key.profileDigest = effectiveOptions.profileDigest;
+			key.axes.reserve(effectiveOptions.axisValues.size());
+			for (DWRITE_FONT_AXIS_VALUE const& axis : effectiveOptions.axisValues)
+				key.axes.push_back({static_cast<UINT32>(axis.axisTag), axis.value});
+			return key;
+		};
+
+		cache::ManifestKey manifestKey = makeManifestKey();
+		cache::ManifestValue manifestValue;
+		bool manifestHit = false;
+		cache::LookupManifestFont(manifestKey, manifestValue, manifestHit);
 		std::wstring backingPath;
-		result = renderer::virtual_font_cache::PersistFont(aliased, backingPath);
-		if (FAILED(result))
-			return result;
-
 		CComPtr<IDWriteFontFile> fontFile;
-		result = factory->CreateFontFileReference(
-			backingPath.c_str(), nullptr, &fontFile);
-		if (FAILED(result) || fontFile == nullptr)
-			return FAILED(result) ? result : E_FAIL;
+		if (manifestHit)
+		{
+			backingPath = manifestValue.virtualFontPath;
+			result = factory->CreateFontFileReference(
+				backingPath.c_str(), nullptr, &fontFile);
+			if (FAILED(result) || fontFile == nullptr)
+			{
+				manifestHit = false;
+				fontFile.Release();
+			}
+			else
+			{
+				identity.family = manifestValue.family;
+				identity.subfamily = manifestValue.subfamily;
+				identity.fullName = manifestValue.fullName;
+				identity.postScriptName = manifestValue.postScriptName;
+			}
+		}
+		if (!manifestHit)
+		{
+			result = ReadReplacementFile(
+				replacementReference, source, faceIndex, sourceIdentity, true);
+			if (FAILED(result))
+				return result;
+			manifestKey = makeManifestKey();
+			std::vector<BYTE> aliased;
+			result = BuildAliasedSfnt(
+				source, faceIndex, aliasFamily, effectiveOptions, aliased, identity);
+			if (FAILED(result))
+				return result;
+			result = renderer::virtual_font_cache::PersistFont(
+				aliased, backingPath);
+			if (FAILED(result))
+				return result;
+			result = factory->CreateFontFileReference(
+				backingPath.c_str(), nullptr, &fontFile);
+			if (FAILED(result) || fontFile == nullptr)
+				return FAILED(result) ? result : E_FAIL;
+			manifestValue.virtualFontPath = backingPath;
+			manifestValue.family = identity.family;
+			manifestValue.subfamily = identity.subfamily;
+			manifestValue.fullName = identity.fullName;
+			manifestValue.postScriptName = identity.postScriptName;
+			cache::StoreManifestFont(manifestKey, manifestValue);
+		}
 
 		DWRITE_FONT_SIMULATIONS const simulations =
 			replacementReference->GetSimulations();
 
-		CComPtr<IDWriteFontFaceReference1> replacementReference1;
 		CComPtr<IDWriteFactory6> factory6;
-		if (SUCCEEDED(replacementReference->QueryInterface(
-				&replacementReference1)) && replacementReference1 != nullptr &&
+		if (replacementReference1 != nullptr &&
 			SUCCEEDED(factory->QueryInterface(&factory6)) && factory6 != nullptr)
 		{
-			UINT32 const axisCount = replacementReference1->GetFontAxisValueCount();
-			std::vector<DWRITE_FONT_AXIS_VALUE> axisValues(axisCount);
-			if (axisCount == 0 || SUCCEEDED(replacementReference1->GetFontAxisValues(
-					axisValues.data(), axisCount)))
-			{
-				CComPtr<IDWriteFontFaceReference1> aliasedReference1;
-				result = factory6->CreateFontFaceReference(
-					fontFile,
-					0,
-					simulations,
-					axisValues.data(),
-					axisCount,
-					&aliasedReference1);
-				if (FAILED(result) || aliasedReference1 == nullptr)
-					return FAILED(result) ? result : E_FAIL;
-				reference = aliasedReference1;
-				return S_OK;
-			}
-			return E_FAIL;
+			CComPtr<IDWriteFontFaceReference1> aliasedReference1;
+			result = factory6->CreateFontFaceReference(
+				fontFile,
+				0,
+				simulations,
+				effectiveOptions.axisValues.data(),
+				static_cast<UINT32>(effectiveOptions.axisValues.size()),
+				&aliasedReference1);
+			if (FAILED(result) || aliasedReference1 == nullptr)
+				return FAILED(result) ? result : E_FAIL;
+			reference = aliasedReference1;
+			return S_OK;
 		}
 
 		return factory->CreateFontFaceReference(

@@ -84,6 +84,25 @@ below wherever the two conflict.
   face. Never collapse `Malgun Gothic`, `맑은 고딕`, and their Semilight names
   into the one spelling that matched the profile; conflicting alias rules fail
   closed to the native face.
+- The alias collection must be the first answer. A hooked factory's vtable is
+  patched before the alias build starts, so the first
+  `GetSystemFontCollection`, `GetSystemFontSet` or system-fallback call an
+  application makes waits inside the intercepted method for the build (bounded
+  at 10 s, then the stock object with `alias-collection-wait-timeout`); a
+  nested call on the building thread gets the stock object at once. The
+  `DWriteCreateFactory` detour installs synchronously at attach when
+  `dwrite.dll` is already mapped and from the loader hooks when it loads later.
+  Alias outputs are keyed in a per-user manifest under
+  `%LOCALAPPDATA%\MacType\FontCache` (replacement file identity, alias names,
+  options, pinned axes and profile digest), written atomically, bounded, and
+  ignored when corrupt, so a warm start answers in well under 250 ms. A
+  variable backing's alias file keeps only the pinned named instance: `fvar`
+  axes and defaults, `glyf` and `gvar` stay byte-identical (moving
+  `fvar.defaultValue` would silently render the default outlines under the new
+  weight), the other instances' `name` records go, and `OS/2` weight, width,
+  `fsSelection` and `head.macStyle` follow the pinned coordinates. A collection
+  an application retained before injection stays the honest older generation
+  (`unsupported-late-collection`); do not mutate retained objects.
 - `FreeTypeRuntime` is also the sole Interface for logical bitmap rows and
   one-based face IDs. Render Adapters must use `CheckedBitmapRow`; they never
   reconstruct signed-pitch pointer arithmetic. An `FT_Face` receives a

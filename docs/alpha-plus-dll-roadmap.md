@@ -345,6 +345,35 @@ does not carry alias state in thread-local storage. A collection already
 returned before injection remains an honest older immutable generation;
 diagnostics report that timing instead of mutating retained objects.
 
+Until 2026-10-17 the alias collection became the answer only after the whole
+build had run, because `HookDirectWriteAliasCollection` captured the alias
+source before patching the factory vtables. Measured on this machine with the
+renderer mapped before image entry and a warm virtual-font cache (171 files,
+806 MB): the stock collection answered for 1,171 to 1,344 ms, and an
+application that fetched the collection in its first 62 ms received
+`MALGUN.TTF` Regular for good. Chromium-family hosts (Claude Desktop, VS Code)
+fetch and retain the collection in their browser process within that time and
+hand it to renderers through `DWriteFontProxy`; their renderers held
+`malgun.ttf` and `NotoSansKR-VF.ttf` and no alias file. The factory vtables are
+now patched first and the build runs inside the intercepted call: the first
+answer is the alias generation (first call at 78 ms after factory creation
+returned the alias `Malgun Gothic / Medium / 500`; the readiness poll reports
+94 to 157 ms), a second caller waits on the same build entry for at most 10 s,
+and a nested call on the building thread receives the stock object instead of
+waiting on itself. A persistent manifest in the font cache keys alias outputs by
+replacement file identity, alias names, options, pinned axes and profile digest,
+so `BuildAliasedSfnt` and `PersistFont` run only on a miss (warm build 58 to
+140 ms). Renderer startup before image entry stayed at about 0.5 s with either
+core. The alias file of a variable backing now keeps only the pinned named
+instance: a consumer that re-parses the file sees one family with the Medium
+instance (and its simulated bold), and `GetFirstMatchingFont(400)` returns
+weight 500 instead of the default Regular; `fvar` axes and defaults, `glyf` and
+`gvar` are byte-identical, so the outlines still match the coordinates. What a
+late injection cannot do is replace a collection the application already
+retained; forwarding that retained object's family lookups to the alias
+collection is a separate design (shared vtable, identity check on `this`,
+wholesale forwarding of four methods).
+
 An injection that lands after the first frame (the open service's remote
 `LoadLibrary`, every elevated target, any child of a parent that was not
 hooked) leaves that stock frame on screen until the application repaints on

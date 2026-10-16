@@ -401,8 +401,10 @@ waits on a building entry. With that preamble inside every intercepted call,
 the first hooked probe died with `STATUS_STACK_OVERFLOW`: DirectWrite answers
 an original `GetSystemFontCollection` or `GetSystemFontFallback` call partly
 through its own virtual methods, which are the patched slots, so the preamble
-re-entered itself. `CanonicalSourceScope` in `directwrite_alias` now refuses a
-nested call on the establishing thread the way the build already refused one.
+re-entered itself. `CanonicalSourceScope` in `directwrite_readiness.h` now refuses
+a nested call on the establishing thread the way the build already refused one,
+and `directwrite-readiness-tests` covers the nested refusal and its thread
+separation alongside the two build races.
 Name-record pruning was removed (a default instance shares IDs 2 and 17 with
 the family), an explicit advertised weight wins over the pinned coordinate so
 the bold-slot alias keeps its own file, and the manifest became

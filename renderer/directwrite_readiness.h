@@ -41,4 +41,34 @@ bool WaitForBuild(
 		lock, timeout, [&entry] { return !entry->building; });
 }
 
+// A thread that is establishing a factory's canonical source must not run
+// the preamble again when DirectWrite re-enters the patched virtual slots
+// from inside the original call; the nested scope reports itself so the
+// caller hands that inner call the stock object.
+class CanonicalSourceScope
+{
+public:
+	CanonicalSourceScope() noexcept : nested_(Establishing())
+	{
+		Establishing() = true;
+	}
+	~CanonicalSourceScope()
+	{
+		if (!nested_)
+			Establishing() = false;
+	}
+	CanonicalSourceScope(CanonicalSourceScope const&) = delete;
+	CanonicalSourceScope& operator=(CanonicalSourceScope const&) = delete;
+	bool nested() const noexcept { return nested_; }
+
+private:
+	static bool& Establishing() noexcept
+	{
+		static thread_local bool establishing = false;
+		return establishing;
+	}
+
+	bool nested_ = false;
+};
+
 } // namespace directwrite_readiness

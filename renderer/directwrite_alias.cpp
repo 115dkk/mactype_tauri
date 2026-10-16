@@ -39,7 +39,6 @@ struct AliasCache
 
 constexpr std::chrono::seconds kBuildWaitTimeout(10);
 thread_local bool isBuildingAliases = false;
-thread_local bool isEstablishingCanonicalSource = false;
 
 constexpr std::array<DWRITE_FONT_PROPERTY_ID, 3> kFamilyPropertyIds = {
 	DWRITE_FONT_PROPERTY_ID_WEIGHT_STRETCH_STYLE_FAMILY_NAME,
@@ -766,18 +765,6 @@ BuildStatus GetOrCreateUnchecked(
 }
 
 } // namespace
-
-CanonicalSourceScope::CanonicalSourceScope() noexcept
-	: nested_(isEstablishingCanonicalSource)
-{
-	isEstablishingCanonicalSource = true;
-}
-
-CanonicalSourceScope::~CanonicalSourceScope()
-{
-	if (!nested_)
-		isEstablishingCanonicalSource = false;
-}
 
 BuildStatus GetOrCreate(
 	IDWriteFactory* factory,

@@ -1719,7 +1719,7 @@ directwrite_alias::BuildStatus GetCanonicalFactoryAliases(
 	// source and fallback preamble refuses a nested call on its own thread
 	// the way the build does; without that the first hooked call recursed
 	// until the stack was gone.
-	directwrite_alias::CanonicalSourceScope const scope;
+	directwrite_readiness::CanonicalSourceScope const scope;
 	if (scope.nested())
 		return directwrite_alias::BuildStatus::buildReentrant;
 	CComPtr<IDWriteFactory> factory;

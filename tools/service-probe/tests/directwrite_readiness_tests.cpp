@@ -173,12 +173,38 @@ void TestFallbackWaits()
         "fallback mapping retained the native font during the cold build");
 }
 
+void TestNestedScopeIsRefused()
+{
+    using directwrite_readiness::CanonicalSourceScope;
+    {
+        CanonicalSourceScope const outer;
+        Require(!outer.nested(), "the first scope on a thread reported itself nested");
+        {
+            CanonicalSourceScope const inner;
+            Require(inner.nested(),
+                "DirectWrite's re-entrant call on the establishing thread was not refused");
+        }
+        CanonicalSourceScope const again;
+        Require(again.nested(), "an inner scope ending released the outer scope's mark");
+        bool otherThreadNested = true;
+        std::thread other([&] {
+            CanonicalSourceScope const theirs;
+            otherThreadNested = theirs.nested();
+        });
+        other.join();
+        Require(!otherThreadNested, "the establishing mark leaked to another thread");
+    }
+    CanonicalSourceScope const fresh;
+    Require(!fresh.nested(), "the outer scope ending did not release the mark");
+}
+
 } // namespace
 
 int main()
 {
     TestModernEntryWaits();
     TestFallbackWaits();
+    TestNestedScopeIsRefused();
     std::cout << "DirectWrite readiness tests passed.\n";
     return 0;
 }

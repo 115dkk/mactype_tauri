@@ -2,7 +2,7 @@
 
 #include "renderer_raii.h"
 
-#include <dwrite.h>
+#include <dwrite_3.h>
 
 #include <algorithm>
 #include <cstring>
@@ -210,7 +210,8 @@ bool AppendUnique(
 	std::vector<InstalledFontFace>& fonts,
 	const std::wstring& family,
 	const std::wstring& path,
-	long faceIndex = 0)
+	long faceIndex = 0,
+	const std::vector<AxisValue>& axisValues = {})
 {
 	if (family.empty() || path.empty())
 		return true;
@@ -220,7 +221,7 @@ bool AppendUnique(
 				font.faceIndex == faceIndex;
 		}))
 		return true;
-	fonts.push_back({family, path, faceIndex});
+	fonts.push_back({family, path, faceIndex, axisValues});
 	return true;
 }
 
@@ -314,6 +315,36 @@ bool ReadLocalFilePath(
 	return true;
 }
 
+bool ReadFontAxisValues(
+	IDWriteFontFace* face,
+	std::vector<AxisValue>& axisValues)
+{
+	axisValues.clear();
+	if (face == nullptr)
+		return false;
+	ComOwner<IDWriteFontFace5> face5;
+	if (FAILED(face->QueryInterface(
+		__uuidof(IDWriteFontFace5),
+		reinterpret_cast<void**>(face5.put()))) || !face5)
+		return false;
+	if (!face5->HasVariations())
+		return false;
+	UINT32 const axisCount = face5->GetFontAxisValueCount();
+	if (axisCount == 0 || axisCount > 256)
+		return false;
+	std::vector<DWRITE_FONT_AXIS_VALUE> directWriteAxes(axisCount);
+	if (FAILED(face5->GetFontAxisValues(
+		directWriteAxes.data(), axisCount)))
+		return false;
+	axisValues.reserve(axisCount);
+	for (const DWRITE_FONT_AXIS_VALUE& axis : directWriteAxes)
+	{
+		axisValues.push_back({
+			static_cast<std::uint32_t>(axis.axisTag), axis.value});
+	}
+	return true;
+}
+
 bool AppendFamilyFiles(
 	IDWriteFontFamily* family,
 	const std::vector<std::wstring>& names,
@@ -335,6 +366,8 @@ bool AppendFamilyFiles(
 		UINT32 const faceIndex = face->GetIndex();
 		if (faceIndex > static_cast<UINT32>((std::numeric_limits<long>::max)()))
 			continue;
+		std::vector<AxisValue> axisValues;
+		ReadFontAxisValues(face.get(), axisValues);
 		UINT32 fileCount = 0;
 		if (FAILED(face->GetFiles(&fileCount, nullptr)) ||
 			fileCount == 0 || fileCount > 64)
@@ -356,7 +389,7 @@ bool AppendFamilyFiles(
 				continue;
 			for (const std::wstring& name : fontNames)
 				AppendUnique(
-					fonts, name, path, static_cast<long>(faceIndex));
+					fonts, name, path, static_cast<long>(faceIndex), axisValues);
 		}
 	}
 	return true;

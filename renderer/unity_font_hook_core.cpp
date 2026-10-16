@@ -1,8 +1,10 @@
 #include "unity_font_hook_core.h"
 
 #include "freetype_runtime.h"
+#include "renderer_raii.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <cwchar>
@@ -16,6 +18,50 @@ constexpr unsigned char kPixelModeGray = 2;
 constexpr unsigned char kPixelModeLcd = 5;
 constexpr unsigned char kPixelModeLcdVertical = 6;
 constexpr std::uint64_t kMaximumBitmapBytes = 64ULL * 1024ULL * 1024ULL;
+
+bool ReadBigEndian16(
+	const unsigned char* bytes,
+	std::size_t size,
+	std::size_t offset,
+	std::uint16_t& value) noexcept
+{
+	if (bytes == nullptr || offset > size || 2 > size - offset)
+		return false;
+	value = static_cast<std::uint16_t>(
+		(static_cast<std::uint16_t>(bytes[offset]) << 8) |
+		bytes[offset + 1]);
+	return true;
+}
+
+bool ReadBigEndian32(
+	const unsigned char* bytes,
+	std::size_t size,
+	std::size_t offset,
+	std::uint32_t& value) noexcept
+{
+	if (bytes == nullptr || offset > size || 4 > size - offset)
+		return false;
+	value = (static_cast<std::uint32_t>(bytes[offset]) << 24) |
+		(static_cast<std::uint32_t>(bytes[offset + 1]) << 16) |
+		(static_cast<std::uint32_t>(bytes[offset + 2]) << 8) |
+		bytes[offset + 3];
+	return true;
+}
+
+bool ReadSfntTag(
+	const unsigned char* bytes,
+	std::size_t size,
+	std::size_t offset,
+	std::uint32_t& value) noexcept
+{
+	if (bytes == nullptr || offset > size || 4 > size - offset)
+		return false;
+	value = static_cast<std::uint32_t>(bytes[offset]) |
+		(static_cast<std::uint32_t>(bytes[offset + 1]) << 8) |
+		(static_cast<std::uint32_t>(bytes[offset + 2]) << 16) |
+		(static_cast<std::uint32_t>(bytes[offset + 3]) << 24);
+	return true;
+}
 
 bool EqualOrdinalIgnoreCase(
 	const std::wstring& left,
@@ -110,7 +156,9 @@ std::vector<InstalledFontFace> PathsForFamily(
 				return path.faceIndex == font.faceIndex &&
 					EqualOrdinalIgnoreCase(path.filePath, normalized);
 			}))
-			paths.push_back({font.family, std::move(normalized), font.faceIndex});
+			paths.push_back({
+				font.family, std::move(normalized), font.faceIndex,
+				font.axisValues});
 	}
 	return paths;
 }
@@ -210,6 +258,14 @@ constexpr std::array<unsigned char, 32> kFontCatalogLoadPrefix6000_3_21X64{{
 	0x4C,0x8B,0xDC,0x55,0x53,0x57,0x49,0x8D,0xAB,0x28,0xFF,0xFF,0xFF,0x48,0x81,0xEC,
 	0xC0,0x01,0x00,0x00,0x4D,0x89,0x6B,0xD8,0xB8,0x4B,0x00,0x00,0x00,0x4D,0x89,0x73,
 }};
+constexpr std::array<unsigned char, 32> kOsFaceResolverPrefix6000_3_21X64{{
+	0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74,0x24,0x20,0x55,0x57,0x41,0x54,0x41,0x55,
+	0x41,0x57,0x48,0x8D,0x6C,0x24,0xC9,0x48,0x81,0xEC,0xC0,0x00,0x00,0x00,0x48,0x8B,
+}};
+constexpr std::array<unsigned char, 32> kFaceDonePrefix6000_3_21X64{{
+	0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0xD9,0x48,0x85,0xC9,0x0F,0x84,0xD1,0x00,
+	0x00,0x00,0x48,0x83,0xB9,0x90,0x00,0x00,0x00,0x00,0x0F,0x84,0xC3,0x00,0x00,0x00,
+}};
 // Unity 6000.3.21: DynamicFontData::GetFaceForCharacterIfAvailableInFont(
 //     const FontRef&, const core::vector<PPtr<Font>>&, unsigned int)
 constexpr std::array<unsigned char, 32> kLegacyCharacterLookupPrefix6000_3_21X64{{
@@ -282,24 +338,24 @@ constexpr AdapterDescriptor kProductionDescriptors[] = {
 	{"unity-6000.0.62-x64",0x8664,0x6902F1F8,0x0210D000,
 	 {{0x01,0x5D,0x60,0x95,0x0D,0xCD,0xDF,0x4F,0x98,0x1E,0xC2,0x4B,0x13,0x06,0x48,0xE2}},1,0x01464760,RenderAbi::internalRender,&kInternalPrefixX64,
 	 0x014631A0,&kFaceOpenPrefixLateX64,FaceOpenAbi::unityInternal},
-	// The legacy OS font catalog of this build still opens every installed
-	// file by pathname (ReadFontFileAndAddToCache), so it needs the same
-	// discovery boundary as 2019.4.41. TextCore::FontEngine::LoadFontFace
-	// gained a fourth (bool) parameter here and stays unhooked. The OS
-	// FontRef resolver exists (GetFaceForFontRefFromOSFonts, RVA 0x00D9EC70)
-	// but this build's FontRef layout is not the one ReadLegacyFontRefFamily
-	// decodes, and an undecodable family fails closed, so the adapter keeps
-	// the face-index-checked path fallback instead of the resolver context.
+	// The character lookup replaces faces that Unity cached before a late
+	// attach, using each face's stream path and index because this build's
+	// FontRef layout is undecodable. UNITY_FT_Done_Face releases each paired
+	// replacement. The pathname catalog stays native, and TextCore::FontEngine::
+	// LoadFontFace stays unhooked because this build added a fourth parameter.
 	{"unity-6000.3.21-x64",0x8664,0x6A607C81,0x02457000,
 	 {{0x64,0xA7,0x50,0xE1,0xE7,0xC9,0xF0,0x44,0x89,0x07,0xDE,0x2D,0xB3,0x87,0x2D,0x5D}},1,0x0166D120,RenderAbi::internalRender,&kInternalPrefixX64,
 	 0x0166B910,&kFaceOpenPrefixLateX64,FaceOpenAbi::unityInternal,
 	 0,nullptr,FontLoadAbi::unavailable,
 	 0x00D9F110,&kLegacyCharacterLookupPrefix6000_3_21X64,
 	 CharacterLookupAbi::legacyDynamicFont,
-	 0,nullptr,CharacterLookupAbi::unavailable,
+	 0x00D9EC70,&kOsFaceResolverPrefix6000_3_21X64,
+	 CharacterLookupAbi::legacyDynamicFont,
 	 0,nullptr,FreeTypeCharIndexAbi::unavailable,
 	 0x00D9E250,&kFontCatalogLoadPrefix6000_3_21X64,
-	 FontCatalogLoadAbi::systemCatalogEntry},
+	 FontCatalogLoadAbi::systemCatalogEntry,
+	 0x0166C2A0,&kFaceDonePrefix6000_3_21X64,
+	 FaceDoneAbi::standard},
 };
 
 bool CheckedAdd(std::size_t left, std::size_t right, std::size_t* result) noexcept
@@ -383,6 +439,77 @@ bool IsMemoryRange(
 		cursor = (std::min)(regionEnd, end);
 	}
 	return true;
+}
+
+struct NamedInstanceFaceIndexCacheEntry final
+{
+	std::wstring path;
+	long faceIndex = 0;
+};
+
+bool ReadFontFileBytes(
+	const std::wstring& path,
+	std::vector<unsigned char>& bytes)
+{
+	bytes.clear();
+	renderer_raii::UniqueHandle file(CreateFileW(
+		path.c_str(), GENERIC_READ,
+		FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+		nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
+	if (!file)
+		return false;
+	LARGE_INTEGER fileSize{};
+	constexpr LONGLONG kMaximumVariableFontBytes = 64LL * 1024LL * 1024LL;
+	if (!GetFileSizeEx(file.get(), &fileSize) || fileSize.QuadPart <= 0 ||
+		fileSize.QuadPart > kMaximumVariableFontBytes ||
+		static_cast<ULONGLONG>(fileSize.QuadPart) >
+			(std::numeric_limits<std::size_t>::max)())
+		return false;
+	bytes.resize(static_cast<std::size_t>(fileSize.QuadPart));
+	DWORD bytesRead = 0;
+	if (!ReadFile(
+		file.get(), bytes.data(), static_cast<DWORD>(bytes.size()),
+		&bytesRead, nullptr) ||
+		bytesRead != static_cast<DWORD>(bytes.size()))
+	{
+		bytes.clear();
+		return false;
+	}
+	return true;
+}
+
+long ResolveReplacementFaceIndex(
+	const InstalledFontFace& replacement,
+	std::vector<NamedInstanceFaceIndexCacheEntry>& cache)
+{
+	if (replacement.axisValues.empty() || replacement.faceIndex < 0 ||
+		replacement.faceIndex > 0xFFFF)
+		return replacement.faceIndex;
+	auto const cached = std::find_if(
+		cache.begin(), cache.end(), [&](const auto& entry) {
+			return EqualOrdinalIgnoreCase(entry.path, replacement.filePath);
+		});
+	if (cached != cache.end())
+		return cached->faceIndex;
+
+	long resolvedFaceIndex = replacement.faceIndex;
+	std::vector<unsigned char> bytes;
+	long namedInstance = 0;
+	if (ReadFontFileBytes(replacement.filePath, bytes) &&
+		ParseSfntNamedInstanceIndex(
+			bytes.data(), bytes.size(), replacement.axisValues.data(),
+			replacement.axisValues.size(), namedInstance) &&
+		namedInstance != 0)
+	{
+		unsigned long const encoded =
+			static_cast<unsigned long>(replacement.faceIndex) |
+			(static_cast<unsigned long>(namedInstance) << 16);
+		if (encoded <=
+			static_cast<unsigned long>((std::numeric_limits<long>::max)()))
+			resolvedFaceIndex = static_cast<long>(encoded);
+	}
+	cache.push_back({replacement.filePath, resolvedFaceIndex});
+	return resolvedFaceIndex;
 }
 
 class MappedImageView final
@@ -558,6 +685,169 @@ private:
 
 } // namespace
 
+bool ParseSfntNamedInstanceIndex(
+	const unsigned char* bytes,
+	std::size_t size,
+	const AxisValue* axisValues,
+	std::size_t axisValueCount,
+	long& instanceIndex) noexcept
+{
+	instanceIndex = 0;
+	try
+	{
+		if (bytes == nullptr || size < 12 ||
+			(axisValues == nullptr && axisValueCount != 0))
+			return false;
+		std::uint32_t scaler = 0;
+		std::uint16_t tableCount = 0;
+		if (!ReadBigEndian32(bytes, size, 0, scaler) ||
+			!ReadBigEndian16(bytes, size, 4, tableCount) ||
+			(scaler != 0x00010000 && scaler != 0x4F54544F &&
+			 scaler != 0x74727565 && scaler != 0x74797031) ||
+			tableCount == 0 || tableCount > 4096)
+			return false;
+		std::size_t const tableDirectoryBytes =
+			static_cast<std::size_t>(tableCount) * 16;
+		if (tableDirectoryBytes > size - 12)
+			return false;
+
+		std::size_t fvarOffset = 0;
+		std::size_t fvarLength = 0;
+		for (std::uint16_t table = 0; table < tableCount; ++table)
+		{
+			std::size_t const record = 12 +
+				static_cast<std::size_t>(table) * 16;
+			std::uint32_t tag = 0;
+			if (!ReadBigEndian32(bytes, size, record, tag))
+				return false;
+			if (tag != 0x66766172)
+				continue;
+			std::uint32_t offset = 0;
+			std::uint32_t length = 0;
+			if (!ReadBigEndian32(bytes, size, record + 8, offset) ||
+				!ReadBigEndian32(bytes, size, record + 12, length) ||
+				length < 16 || offset > size || length > size - offset)
+				return false;
+			fvarOffset = offset;
+			fvarLength = length;
+			break;
+		}
+		if (fvarLength == 0)
+			return false;
+
+		std::uint16_t majorVersion = 0;
+		std::uint16_t minorVersion = 0;
+		std::uint16_t axesArrayOffset = 0;
+		std::uint16_t reserved = 0;
+		std::uint16_t axisCount = 0;
+		std::uint16_t axisSize = 0;
+		std::uint16_t instanceCount = 0;
+		std::uint16_t instanceSize = 0;
+		if (!ReadBigEndian16(bytes, size, fvarOffset, majorVersion) ||
+			!ReadBigEndian16(bytes, size, fvarOffset + 2, minorVersion) ||
+			!ReadBigEndian16(bytes, size, fvarOffset + 4, axesArrayOffset) ||
+			!ReadBigEndian16(bytes, size, fvarOffset + 6, reserved) ||
+			!ReadBigEndian16(bytes, size, fvarOffset + 8, axisCount) ||
+			!ReadBigEndian16(bytes, size, fvarOffset + 10, axisSize) ||
+			!ReadBigEndian16(bytes, size, fvarOffset + 12, instanceCount) ||
+			!ReadBigEndian16(bytes, size, fvarOffset + 14, instanceSize) ||
+			majorVersion != 1 || minorVersion > 0 || reserved != 2 ||
+			axesArrayOffset < 16 || axisCount == 0 || axisSize < 20 ||
+			instanceCount == 0 || instanceCount > 0x7FFF)
+			return false;
+		std::size_t const coordinateBytes =
+			static_cast<std::size_t>(axisCount) * 4;
+		if (instanceSize != coordinateBytes + 4 &&
+			instanceSize != coordinateBytes + 6)
+			return false;
+		std::size_t const axesBytes =
+			static_cast<std::size_t>(axisCount) * axisSize;
+		std::size_t const instancesBytes =
+			static_cast<std::size_t>(instanceCount) * instanceSize;
+		if (axesArrayOffset > fvarLength || axesBytes > fvarLength - axesArrayOffset)
+			return false;
+		std::size_t const instancesOffset = axesArrayOffset + axesBytes;
+		if (instancesOffset > fvarLength ||
+			instancesBytes > fvarLength - instancesOffset)
+			return false;
+
+		struct Axis final
+		{
+			std::uint32_t tag = 0;
+			std::int32_t defaultValue = 0;
+			float requestedValue = 0.0F;
+		};
+		std::vector<Axis> axes;
+		axes.reserve(axisCount);
+		for (std::uint16_t axis = 0; axis < axisCount; ++axis)
+		{
+			std::size_t const record = fvarOffset + axesArrayOffset +
+				static_cast<std::size_t>(axis) * axisSize;
+			std::uint32_t tag = 0;
+			std::uint32_t minimumBits = 0;
+			std::uint32_t defaultBits = 0;
+			std::uint32_t maximumBits = 0;
+			if (!ReadSfntTag(bytes, size, record, tag) ||
+				!ReadBigEndian32(bytes, size, record + 4, minimumBits) ||
+				!ReadBigEndian32(bytes, size, record + 8, defaultBits) ||
+				!ReadBigEndian32(bytes, size, record + 12, maximumBits))
+				return false;
+			std::int32_t const minimum = static_cast<std::int32_t>(minimumBits);
+			std::int32_t const defaultValue = static_cast<std::int32_t>(defaultBits);
+			std::int32_t const maximum = static_cast<std::int32_t>(maximumBits);
+			if (minimum > defaultValue || defaultValue > maximum)
+				return false;
+			float requested = static_cast<float>(defaultValue) / 65536.0F;
+			for (std::size_t value = 0; value < axisValueCount; ++value)
+			{
+				if (axisValues[value].tag == tag)
+				{
+					requested = axisValues[value].value;
+					break;
+				}
+			}
+			if (!std::isfinite(requested))
+				return false;
+			axes.push_back({tag, defaultValue, requested});
+		}
+
+		for (std::uint16_t instance = 0; instance < instanceCount; ++instance)
+		{
+			std::size_t const record = fvarOffset + instancesOffset +
+				static_cast<std::size_t>(instance) * instanceSize;
+			bool matches = true;
+			bool defaults = true;
+			for (std::uint16_t axis = 0; axis < axisCount; ++axis)
+			{
+				std::uint32_t coordinateBits = 0;
+				if (!ReadBigEndian32(
+					bytes, size, record + 4 + static_cast<std::size_t>(axis) * 4,
+					coordinateBits))
+					return false;
+				std::int32_t const coordinate =
+					static_cast<std::int32_t>(coordinateBits);
+				float const coordinateValue =
+					static_cast<float>(coordinate) / 65536.0F;
+				if (std::fabs(coordinateValue - axes[axis].requestedValue) > 0.5F)
+					matches = false;
+				if (coordinate != axes[axis].defaultValue)
+					defaults = false;
+			}
+			if (!matches)
+				continue;
+			instanceIndex = defaults
+				? 0
+				: static_cast<long>(instance) + 1;
+			return true;
+		}
+	}
+	catch (...)
+	{
+		instanceIndex = 0;
+	}
+	return false;
+}
+
 std::shared_ptr<const FontFileRedirectTable> FontFileRedirectTable::Build(
 	const std::vector<InstalledFontFace>& installedFonts,
 	const font_substitution::Snapshot& substitutions) noexcept
@@ -566,6 +856,7 @@ std::shared_ptr<const FontFileRedirectTable> FontFileRedirectTable::Build(
 	{
 		std::vector<Redirect> redirects;
 		std::vector<InstalledFontFace> ambiguousSources;
+		std::vector<NamedInstanceFaceIndexCacheEntry> namedInstanceCache;
 		for (const font_substitution::Rule& rule : substitutions.rules())
 		{
 			font_substitution::Resolution const resolution = substitutions.Resolve(
@@ -581,13 +872,15 @@ std::shared_ptr<const FontFileRedirectTable> FontFileRedirectTable::Build(
 				installedFonts, resolution.family);
 			if (sources.empty() || replacements.size() != 1)
 				continue;
+			long const replacementFaceIndex = ResolveReplacementFaceIndex(
+				replacements.front(), namedInstanceCache);
 			for (const InstalledFontFace& source : sources)
 			{
 				std::vector<std::wstring> sourceFamilies =
 					FamiliesForFace(installedFonts, source);
 				if (sourceFamilies.empty())
 					sourceFamilies.push_back(rule.sourceFamily);
-				if (source.faceIndex == replacements.front().faceIndex &&
+				if (source.faceIndex == replacementFaceIndex &&
 					EqualOrdinalIgnoreCase(
 						source.filePath, replacements.front().filePath))
 					continue;
@@ -605,10 +898,10 @@ std::shared_ptr<const FontFileRedirectTable> FontFileRedirectTable::Build(
 						source.faceIndex,
 						std::move(sourceFamilies),
 						replacements.front().filePath,
-						replacements.front().faceIndex});
+						replacementFaceIndex});
 				}
 				else if (existing->replacementFaceIndex !=
-						replacements.front().faceIndex ||
+						replacementFaceIndex ||
 					!EqualOrdinalIgnoreCase(
 						existing->replacementPath,
 						replacements.front().filePath))
@@ -791,6 +1084,33 @@ bool ResolveTextCoreFontLoadPath(
 	}
 }
 
+bool ResolveFamilyFaceOpenPath(
+	const FontFileRedirectTable& redirects,
+	const wchar_t* requestedFamily,
+	FaceOpenPathRedirect& redirect) noexcept
+{
+	try
+	{
+		FaceOpenPathRedirect candidate;
+		if (!redirects.ResolveFamilyFace(
+			requestedFamily, candidate.replacementPath,
+			candidate.replacementFaceIndex) ||
+			!WidePathToUtf8(
+				candidate.replacementPath, candidate.replacementUtf8))
+		{
+			redirect = {};
+			return false;
+		}
+		redirect = std::move(candidate);
+		return true;
+	}
+	catch (...)
+	{
+		redirect = {};
+		return false;
+	}
+}
+
 // A private FreeType face open only carries a pathname when its flags select
 // that source; everything after that check is the same resolution the
 // TextCore font load performs.
@@ -856,6 +1176,39 @@ bool ReadLegacyFontRefFamily(
 		family.clear();
 		return false;
 	}
+}
+
+bool ReadReadableUtf8Path(
+	const char* value,
+	std::string& path) noexcept
+{
+	path.clear();
+	try
+	{
+		if (value == nullptr)
+			return false;
+		constexpr std::size_t kMaximumPathBytes = 32767;
+		std::uintptr_t const base = reinterpret_cast<std::uintptr_t>(value);
+		for (std::size_t offset = 0; offset <= kMaximumPathBytes; ++offset)
+		{
+			if (offset > std::numeric_limits<std::uintptr_t>::max() - base)
+				return false;
+			const char* const current = reinterpret_cast<const char*>(base + offset);
+			if (!IsMemoryRange(current, 1, IsReadableProtection))
+				return false;
+			char const character = *current;
+			if (character == '\0')
+				return !path.empty();
+			if (offset == kMaximumPathBytes)
+				return false;
+			path.push_back(character);
+		}
+	}
+	catch (...)
+	{
+		path.clear();
+	}
+	return false;
 }
 
 FontSubstitutionBoundary SelectFontSubstitutionBoundary(
@@ -1011,6 +1364,22 @@ bool ResolveAdapter(
 				fontCatalogLoadPrefix != *candidate.fontCatalogLoadPrefix)
 				return false;
 		}
+		bool const hasFaceDone = candidate.faceDoneRva != 0;
+		if (hasFaceDone != (candidate.faceDonePrefix != nullptr) ||
+			hasFaceDone != (candidate.faceDoneAbi != FaceDoneAbi::unavailable))
+			return false;
+		if (hasFaceDone)
+		{
+			if (!image.IsExecutableRva(
+				candidate.faceDoneRva, candidate.faceDonePrefix->size()))
+				return false;
+			std::array<unsigned char, 32> faceDonePrefix{};
+			if (!image.CopyRva(
+				candidate.faceDoneRva, faceDonePrefix.data(),
+				faceDonePrefix.size()) ||
+				faceDonePrefix != *candidate.faceDonePrefix)
+				return false;
+		}
 		match = &candidate;
 	}
 	if (match == nullptr)
@@ -1023,6 +1392,7 @@ bool ResolveAdapter(
 	resolved->osFaceResolverRva = match->osFaceResolverRva;
 	resolved->freeTypeCharIndexRva = match->freeTypeCharIndexRva;
 	resolved->fontCatalogLoadRva = match->fontCatalogLoadRva;
+	resolved->faceDoneRva = match->faceDoneRva;
 	resolved->abi = match->abi;
 	resolved->faceOpenAbi = match->faceOpenAbi;
 	resolved->fontLoadAbi = match->fontLoadAbi;
@@ -1030,6 +1400,7 @@ bool ResolveAdapter(
 	resolved->osFaceResolverAbi = match->osFaceResolverAbi;
 	resolved->freeTypeCharIndexAbi = match->freeTypeCharIndexAbi;
 	resolved->fontCatalogLoadAbi = match->fontCatalogLoadAbi;
+	resolved->faceDoneAbi = match->faceDoneAbi;
 	return true;
 }
 
@@ -1043,6 +1414,11 @@ const AdapterDescriptor* ProductionAdapterDescriptors(std::size_t* count) noexce
 bool IsExecutableMemoryRange(const void* address, std::size_t length) noexcept
 {
 	return IsMemoryRange(address, length, IsExecutableProtection);
+}
+
+bool IsReadableMemoryRange(const void* address, std::size_t length) noexcept
+{
+	return IsMemoryRange(address, length, IsReadableProtection);
 }
 
 bool ApplyCoverage(

@@ -148,13 +148,25 @@ int wmain(int argc, wchar_t** argv)
                 << L" mapped-os-family=" << snapshot.lastMappedOsFaceFamily
                 << L" mapped-os-face-family="
                 << snapshot.lastMappedOsResolvedFaceFamily
+                << L" face-replacements=" << snapshot.faceReplacements
+                << L" face-replacement-fallbacks="
+                << snapshot.faceReplacementFallbacks
+                << L" face-replacement-path="
+                << snapshot.lastFaceReplacementPath
+                << L" face-replacement-candidates="
+                << snapshot.faceReplacementCandidates
+                << L" face-replacement-family="
+                << snapshot.lastFaceReplacementFamily
                 << L" observed-path=" << snapshot.observedPath
                 << L" source=" << snapshot.sourcePath
                 << L" replacement=" << snapshot.replacementPath << L'\n';
         }
         UnmapViewOfFile(view);
         CloseHandle(mapping);
-        return read && snapshot.redirectSuccesses > 0 ? 0 : 8;
+        return read &&
+            (snapshot.redirectSuccesses > 0 || snapshot.faceReplacements > 0)
+            ? 0
+            : 8;
     }
 
     std::vector<renderer::unity::InstalledFontFace> fonts;

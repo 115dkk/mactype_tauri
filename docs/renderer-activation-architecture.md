@@ -183,7 +183,8 @@ a separately versioned diagnostic Interface.
 | DirectWrite lifecycle declarations mixed with hook Implementation declarations | narrow lifecycle Interface with classic DirectWrite and DWriteCore Adapters |
 | SafeUnload knew every DirectWrite and Unity prepare/abort/commit state | one `RendererUnloadLifecycle` provider-drain transaction with two concrete Adapters |
 | Unity private FreeType bypassed GDI and DirectWrite substitution | exact `UnityFontHookLifecycle` render and face-open adapters with checked pathname/face-index substitution, glyph coverage, and a catalog-discovery bypass for the legacy OS font catalog (Unity 2019.4.41 and 6000.3.21) that preserves source-family fallback identity |
-| Unity families shared one system font file | scoped `FontRef` selection context distinguishes native and mapped families before face-open redirection |
+| Unity families shared one system font file | scoped `FontRef` selection context distinguishes native and mapped families before face-open redirection; a `FontRef` layout the renderer cannot decode falls back to the face's own stream path and face index |
+| Unity resolved its OS faces before the renderer attached (service late path) | the character-lookup adapter replaces a natively opened, file-backed mapped face (identified by `family_name`, then stream pathname) with the replacement opened through Unity's own FreeType library, caches the pair, checks the glyph per character and releases both through the hooked `FT_Done_Face`; variable replacements select their named instance through the FreeType face index |
 | An explicitly private Qt FreeType engine conflicted with normal hooks | opt-in `PrivateFreeTypeAdmission` shared by service and pre-entry child decisions, with a Unity exception |
 
 ## Required verification

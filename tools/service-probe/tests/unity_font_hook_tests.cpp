@@ -44,6 +44,7 @@ struct Fixture final
     std::array<unsigned char, 32> faceOpenPrefix{};
     std::array<unsigned char, 32> charIndexPrefix{};
     std::array<unsigned char, 32> fontCatalogLoadPrefix{};
+    std::array<unsigned char, 32> faceDonePrefix{};
     renderer::unity::AdapterDescriptor descriptor{};
 
     Fixture()
@@ -55,6 +56,7 @@ struct Fixture final
             charIndexPrefix[index] = static_cast<unsigned char>(0xA0 + index);
             fontCatalogLoadPrefix[index] =
                 static_cast<unsigned char>(0xC0 + index);
+            faceDonePrefix[index] = static_cast<unsigned char>(0x20 + index);
         }
 
         auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(image.data());
@@ -99,6 +101,8 @@ struct Fixture final
             charIndexPrefix.data(), charIndexPrefix.size());
         std::memcpy(image.data() + 0x2180,
             fontCatalogLoadPrefix.data(), fontCatalogLoadPrefix.size());
+        std::memcpy(image.data() + 0x2200,
+            faceDonePrefix.data(), faceDonePrefix.size());
 
         descriptor = {
             "fixture", kNativeMachine, 0x12345678,
@@ -114,6 +118,9 @@ struct Fixture final
         descriptor.fontCatalogLoadPrefix = &fontCatalogLoadPrefix;
         descriptor.fontCatalogLoadAbi =
             renderer::unity::FontCatalogLoadAbi::systemCatalogEntry;
+        descriptor.faceDoneRva = 0x2200;
+        descriptor.faceDonePrefix = &faceDonePrefix;
+        descriptor.faceDoneAbi = renderer::unity::FaceDoneAbi::standard;
     }
 };
 
@@ -177,6 +184,61 @@ int main()
         std::any_of(sfntFamilies.begin(), sfntFamilies.end(),
         [](const std::wstring& family) { return family == L"굴림"; }),
         "SFNT parsing did not preserve English and Korean family names");
+
+    std::vector<unsigned char> fvar(160, 0);
+    auto writeFvarBe16 = [&](std::size_t offset, unsigned int value) {
+        fvar[offset] = static_cast<unsigned char>(value >> 8);
+        fvar[offset + 1] = static_cast<unsigned char>(value);
+    };
+    auto writeFvarBe32 = [&](std::size_t offset, std::uint32_t value) {
+        fvar[offset] = static_cast<unsigned char>(value >> 24);
+        fvar[offset + 1] = static_cast<unsigned char>(value >> 16);
+        fvar[offset + 2] = static_cast<unsigned char>(value >> 8);
+        fvar[offset + 3] = static_cast<unsigned char>(value);
+    };
+    writeFvarBe32(0, 0x00010000);
+    writeFvarBe16(4, 1);
+    std::memcpy(fvar.data() + 12, "fvar", 4);
+    writeFvarBe32(20, 64);
+    writeFvarBe32(24, 52);
+    writeFvarBe16(64, 1);
+    writeFvarBe16(66, 0);
+    writeFvarBe16(68, 16);
+    writeFvarBe16(70, 2);
+    writeFvarBe16(72, 1);
+    writeFvarBe16(74, 20);
+    writeFvarBe16(76, 2);
+    writeFvarBe16(78, 8);
+    std::memcpy(fvar.data() + 80, "wght", 4);
+    writeFvarBe32(84, 100U << 16);
+    writeFvarBe32(88, 400U << 16);
+    writeFvarBe32(92, 900U << 16);
+    writeFvarBe16(98, 256);
+    writeFvarBe16(100, 257);
+    writeFvarBe32(104, 400U << 16);
+    writeFvarBe16(108, 258);
+    writeFvarBe32(112, 500U << 16);
+    constexpr std::uint32_t weightTag =
+        static_cast<std::uint32_t>('w') |
+        (static_cast<std::uint32_t>('g') << 8) |
+        (static_cast<std::uint32_t>('h') << 16) |
+        (static_cast<std::uint32_t>('t') << 24);
+    renderer::unity::AxisValue weightAxis{weightTag, 500.0F};
+    long namedInstance = -1;
+    Require(renderer::unity::ParseSfntNamedInstanceIndex(
+        fvar.data(), fvar.size(), &weightAxis, 1, namedInstance) &&
+        namedInstance == 2,
+        "the 500-weight fvar instance did not receive its one-based index");
+    weightAxis.value = 400.0F;
+    Require(renderer::unity::ParseSfntNamedInstanceIndex(
+        fvar.data(), fvar.size(), &weightAxis, 1, namedInstance) &&
+        namedInstance == 0,
+        "the default fvar instance did not keep face index zero");
+    weightAxis.value = 450.0F;
+    Require(!renderer::unity::ParseSfntNamedInstanceIndex(
+        fvar.data(), fvar.size(), &weightAxis, 1, namedInstance) &&
+        namedInstance == 0,
+        "an unmatched fvar coordinate selected a named instance");
 
     std::vector<unsigned char> ttc(512, 0);
     auto writeTtcBe16 = [&](std::size_t offset, unsigned int value) {
@@ -251,6 +313,12 @@ int main()
         evidence, true, 8723, 6946);
     renderer::unity::RecordUnityFontOsFaceResolution(
         evidence, L"Gulim", true, true, 6946, L"Pretendard Variable");
+    renderer::unity::RecordUnityFontFaceReplacementCandidate(
+        evidence, L"Malgun Gothic");
+    renderer::unity::RecordUnityFontFaceReplacement(
+        evidence, true, L"C:\\Fonts\\PretendardVariable.ttf");
+    renderer::unity::RecordUnityFontFaceReplacement(
+        evidence, false, L"C:\\Fonts\\PretendardVariable.ttf");
     renderer::unity::UnityFontEvidenceSnapshot evidenceSnapshot{};
     Require(renderer::unity::ReadUnityFontEvidence(evidence, evidenceSnapshot),
         "a valid Unity font redirect evidence record was unreadable");
@@ -296,6 +364,13 @@ int main()
         evidenceSnapshot.mappedOsFaceResolutions == 1 &&
         evidenceSnapshot.mappedOsFaceResolutionHits == 1 &&
         evidenceSnapshot.lastMappedOsFaceSampleKoreanGlyph == 6946 &&
+        evidenceSnapshot.faceReplacements == 1 &&
+        evidenceSnapshot.faceReplacementFallbacks == 1 &&
+        evidenceSnapshot.faceReplacementCandidates == 1 &&
+        wcscmp(evidenceSnapshot.lastFaceReplacementFamily,
+            L"Malgun Gothic") == 0 &&
+        wcscmp(evidenceSnapshot.lastFaceReplacementPath,
+            L"C:\\Fonts\\PretendardVariable.ttf") == 0 &&
         wcscmp(evidenceSnapshot.lastMappedOsFaceFamily, L"Gulim") == 0 &&
         wcscmp(evidenceSnapshot.lastMappedOsResolvedFaceFamily,
             L"Pretendard Variable") == 0 &&
@@ -373,6 +448,24 @@ int main()
     Require(!renderer::unity::ReadLegacyFontRefFamily(
         inlineFontRef.data(), legacyFamily),
         "an invalid Unity inline-string length was accepted");
+    auto familySubstitutions = renderer::font_substitution::Snapshot::Build(
+        {{L"Malgun Gothic", L"Pretendard Variable Medium"}}, 2);
+    std::vector<renderer::unity::InstalledFontFace> familyFonts{
+        {L"Malgun Gothic", L"C:\\Windows\\Fonts\\malgun.ttf", 0},
+        {L"맑은 고딕", L"C:\\Windows\\Fonts\\malgun.ttf", 0},
+        {L"Pretendard Variable Medium",
+            L"C:\\Fonts\\PretendardVariable.ttf", 5L << 16},
+    };
+    auto familyRedirects = renderer::unity::FontFileRedirectTable::Build(
+        familyFonts, *familySubstitutions);
+    renderer::unity::FaceOpenPathRedirect familyRedirect;
+    Require(familyRedirects && renderer::unity::ResolveFamilyFaceOpenPath(
+        *familyRedirects, L"Malgun Gothic", familyRedirect) &&
+        familyRedirect.replacementPath ==
+            L"C:\\Fonts\\PretendardVariable.ttf" &&
+        familyRedirect.replacementFaceIndex == (5L << 16),
+        "a face identified only by Malgun Gothic did not resolve its encoded replacement");
+
     renderer::unity::FaceOpenPathRedirect faceRedirect;
     Require(renderer::unity::ResolveFaceOpenPath(
         *redirects, 0x04, "c:/windows/fonts/GULIM.TTC", 2, faceRedirect),
@@ -410,6 +503,12 @@ int main()
             Require(renderer::unity::CurrentFontRefAllowsFaceRedirect(),
                 "a mapped FontRef rejected its replacement face");
         }
+        {
+            renderer::unity::ScopedFontRefSelectionContext undecoded(
+                renderer::unity::FontRefSelection::undecoded);
+            Require(renderer::unity::CurrentFontRefAllowsFaceRedirect(),
+                "an undecodable FontRef rejected path-based fallback");
+        }
         Require(!renderer::unity::CurrentFontRefAllowsFaceRedirect(),
             "a nested mapped FontRef did not restore its native parent");
     }
@@ -440,6 +539,8 @@ int main()
                 resolved.faceOpenRva == 0x2080 &&
                 resolved.freeTypeCharIndexRva == 0x2100 &&
                 resolved.fontCatalogLoadRva == 0x2180 &&
+                resolved.faceDoneRva == 0x2200 &&
+                resolved.faceDoneAbi == renderer::unity::FaceDoneAbi::standard &&
                 resolved.abi == renderer::unity::RenderAbi::publicRender &&
                 resolved.faceOpenAbi ==
                     renderer::unity::FaceOpenAbi::unityInternal,
@@ -479,6 +580,11 @@ int main()
                 fixture.image.data(), fixture.image.size(), &fixture.descriptor, 1, &resolved),
             "a mismatched system-font catalog prologue resolved");
     fixture.image[0x2180] ^= 0xff;
+    fixture.image[0x2200] ^= 0xff;
+    Require(!renderer::unity::ResolveAdapter(
+                fixture.image.data(), fixture.image.size(), &fixture.descriptor, 1, &resolved),
+            "a mismatched face-done prologue resolved");
+    fixture.image[0x2200] ^= 0xff;
     Require(!renderer::unity::ResolveAdapter(
                 fixture.image.data(), 0x1800, &fixture.descriptor, 1, &resolved),
             "a truncated mapped image resolved");
@@ -544,8 +650,16 @@ int main()
             renderer::unity::FontCatalogLoadAbi::systemCatalogEntry &&
         plague6000Adapter->fontLoadRva == 0 &&
         plague6000Adapter->fontLoadAbi ==
-            renderer::unity::FontLoadAbi::unavailable,
-        "Plague's Unity 6000.3.21 adapter lost its font catalog boundary");
+            renderer::unity::FontLoadAbi::unavailable &&
+        plague6000Adapter->osFaceResolverRva == 0x00D9EC70 &&
+        plague6000Adapter->osFaceResolverPrefix != nullptr &&
+        plague6000Adapter->osFaceResolverAbi ==
+            renderer::unity::CharacterLookupAbi::legacyDynamicFont &&
+        plague6000Adapter->faceDoneRva == 0x0166C2A0 &&
+        plague6000Adapter->faceDonePrefix != nullptr &&
+        plague6000Adapter->faceDoneAbi ==
+            renderer::unity::FaceDoneAbi::standard,
+        "Plague's Unity 6000.3.21 adapter lost a required font hook boundary");
 
     renderer::UnityCoverageLut lut = IdentityLut();
     lut.gray[128] = 200;

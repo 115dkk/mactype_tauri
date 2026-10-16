@@ -221,6 +221,28 @@ with the boundary every isolated run shows only the use-opens (four, ending in
 `malgunbd.ttf`) and about 7,600 renders. A field run is not successful when it
 observes character lookups but every lookup resolves to glyph zero.
 
+The discovery boundary alone still leaves one order unsubstituted: when the
+renderer attaches after `DynamicFontData::GetFaceForFontRefFromOSFonts` has
+already opened the mapped file natively, `GetFaceForFontRef` caches that face
+per `FontRef` and the resolver is never consulted for it again (measured: 10,149
+resolver calls, 15 hits, in a run that attached at 1.6 s; 0 hits when attaching
+at 4 s). The replacement therefore happens in
+`DynamicFontData::GetFaceForCharacterIfAvailableInFont`, which Unity calls per
+character and fallback `FontRef` and which returns the face it is about to use.
+The adapter identifies a native face by its `family_name` (the stream pathname
+is only a borrowed caller pointer in FreeType and dangles for these faces),
+replaces only faces FreeType opened from a file stream, opens the replacement
+once through Unity's FreeType library via the original face-open trampoline,
+caches the native-to-replacement pair, returns the replacement only when it has
+a glyph for the character, and releases both faces through the hooked
+`FT_Done_Face` when Unity frees the native one. The 6000.3.21 `FontRef` layout
+is not decodable, so that build selects `undecoded` instead of failing closed.
+The same table now carries the named instance of a variable replacement
+(`Pretendard Variable Medium` is `PretendardVariable.ttf` with instance bits in
+the FreeType face index), so Unity renders the configured weight instead of the
+default instance; bold source faces still land on that same instance (the Unity
+table is weight-blind for bold).
+
 For builds with an exact OS `FontRef` resolver, a scoped selection context
 distinguishes an explicitly mapped family from an unrelated family that merely
 shares the same system font file. The context restores correctly under nesting;

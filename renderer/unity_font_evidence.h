@@ -9,7 +9,7 @@
 
 namespace renderer { namespace unity {
 
-constexpr DWORD kUnityFontEvidenceSchema = 1;
+constexpr DWORD kUnityFontEvidenceSchema = 2;
 constexpr std::size_t kUnityFontEvidencePathChars = 520;
 constexpr std::size_t kUnityFontEvidenceFamilyChars = 128;
 
@@ -54,6 +54,9 @@ struct UnityFontEvidenceV1 final
 	LONG mappedOsFaceResolutions;
 	LONG mappedOsFaceResolutionHits;
 	LONG lastMappedOsFaceSampleKoreanGlyph;
+	LONG faceReplacements;
+	LONG faceReplacementFallbacks;
+	LONG faceReplacementCandidates;
 	wchar_t lastLookupFamily[kUnityFontEvidenceFamilyChars];
 	wchar_t lastMappedFamily[kUnityFontEvidenceFamilyChars];
 	wchar_t lastMappedResolvedFaceFamily[kUnityFontEvidenceFamilyChars];
@@ -61,6 +64,8 @@ struct UnityFontEvidenceV1 final
 	wchar_t lastOsResolvedFaceFamily[kUnityFontEvidenceFamilyChars];
 	wchar_t lastMappedOsFaceFamily[kUnityFontEvidenceFamilyChars];
 	wchar_t lastMappedOsResolvedFaceFamily[kUnityFontEvidenceFamilyChars];
+	wchar_t lastFaceReplacementPath[kUnityFontEvidencePathChars];
+	wchar_t lastFaceReplacementFamily[kUnityFontEvidenceFamilyChars];
 	wchar_t observedPath[kUnityFontEvidencePathChars];
 	wchar_t sourcePath[kUnityFontEvidencePathChars];
 	wchar_t replacementPath[kUnityFontEvidencePathChars];
@@ -103,6 +108,9 @@ struct UnityFontEvidenceSnapshot final
 	LONG mappedOsFaceResolutions = 0;
 	LONG mappedOsFaceResolutionHits = 0;
 	LONG lastMappedOsFaceSampleKoreanGlyph = 0;
+	LONG faceReplacements = 0;
+	LONG faceReplacementFallbacks = 0;
+	LONG faceReplacementCandidates = 0;
 	wchar_t lastLookupFamily[kUnityFontEvidenceFamilyChars]{};
 	wchar_t lastMappedFamily[kUnityFontEvidenceFamilyChars]{};
 	wchar_t lastMappedResolvedFaceFamily[kUnityFontEvidenceFamilyChars]{};
@@ -110,6 +118,8 @@ struct UnityFontEvidenceSnapshot final
 	wchar_t lastOsResolvedFaceFamily[kUnityFontEvidenceFamilyChars]{};
 	wchar_t lastMappedOsFaceFamily[kUnityFontEvidenceFamilyChars]{};
 	wchar_t lastMappedOsResolvedFaceFamily[kUnityFontEvidenceFamilyChars]{};
+	wchar_t lastFaceReplacementPath[kUnityFontEvidencePathChars]{};
+	wchar_t lastFaceReplacementFamily[kUnityFontEvidenceFamilyChars]{};
 	wchar_t observedPath[kUnityFontEvidencePathChars]{};
 	wchar_t sourcePath[kUnityFontEvidencePathChars]{};
 	wchar_t replacementPath[kUnityFontEvidencePathChars]{};
@@ -158,6 +168,13 @@ void RecordUnityFontOsFaceResolution(
 	bool found,
 	unsigned int sampleKoreanGlyph,
 	const wchar_t* resolvedFaceFamily) noexcept;
+void RecordUnityFontFaceReplacementCandidate(
+	UnityFontEvidenceV1& evidence,
+	const wchar_t* family) noexcept;
+void RecordUnityFontFaceReplacement(
+	UnityFontEvidenceV1& evidence,
+	bool succeeded,
+	const wchar_t* replacementPath) noexcept;
 bool ReadUnityFontEvidence(
 	const UnityFontEvidenceV1& evidence,
 	UnityFontEvidenceSnapshot& snapshot) noexcept;

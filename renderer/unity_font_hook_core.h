@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
@@ -26,6 +27,12 @@ enum class FaceOpenAbi : unsigned char
 {
 	unavailable,
 	unityInternal,
+};
+
+enum class FaceDoneAbi : unsigned char
+{
+	unavailable,
+	standard,
 };
 
 enum class FontLoadAbi : unsigned char
@@ -88,6 +95,9 @@ struct AdapterDescriptor final
 	DWORD fontCatalogLoadRva = 0;
 	const std::array<unsigned char, 32>* fontCatalogLoadPrefix = nullptr;
 	FontCatalogLoadAbi fontCatalogLoadAbi = FontCatalogLoadAbi::unavailable;
+	DWORD faceDoneRva = 0;
+	const std::array<unsigned char, 32>* faceDonePrefix = nullptr;
+	FaceDoneAbi faceDoneAbi = FaceDoneAbi::unavailable;
 };
 
 struct ResolvedAdapter final
@@ -100,6 +110,7 @@ struct ResolvedAdapter final
 	DWORD osFaceResolverRva = 0;
 	DWORD freeTypeCharIndexRva = 0;
 	DWORD fontCatalogLoadRva = 0;
+	DWORD faceDoneRva = 0;
 	RenderAbi abi = RenderAbi::publicRender;
 	FaceOpenAbi faceOpenAbi = FaceOpenAbi::unavailable;
 	FontLoadAbi fontLoadAbi = FontLoadAbi::unavailable;
@@ -107,6 +118,13 @@ struct ResolvedAdapter final
 	CharacterLookupAbi osFaceResolverAbi = CharacterLookupAbi::unavailable;
 	FreeTypeCharIndexAbi freeTypeCharIndexAbi = FreeTypeCharIndexAbi::unavailable;
 	FontCatalogLoadAbi fontCatalogLoadAbi = FontCatalogLoadAbi::unavailable;
+	FaceDoneAbi faceDoneAbi = FaceDoneAbi::unavailable;
+};
+
+struct AxisValue final
+{
+	std::uint32_t tag = 0;
+	float value = 0.0F;
 };
 
 struct InstalledFontFace final
@@ -114,6 +132,7 @@ struct InstalledFontFace final
 	std::wstring family;
 	std::wstring filePath;
 	long faceIndex = 0;
+	std::vector<AxisValue> axisValues;
 };
 
 struct FaceOpenPathRedirect final
@@ -184,9 +203,25 @@ bool ResolveTextCoreFontLoadPath(
 	long requestedFaceIndex,
 	FaceOpenPathRedirect& redirect) noexcept;
 
+bool ResolveFamilyFaceOpenPath(
+	const FontFileRedirectTable& redirects,
+	const wchar_t* requestedFamily,
+	FaceOpenPathRedirect& redirect) noexcept;
+
 bool ReadLegacyFontRefFamily(
 	const void* fontRef,
 	std::wstring& family) noexcept;
+
+bool ReadReadableUtf8Path(
+	const char* value,
+	std::string& path) noexcept;
+
+bool ParseSfntNamedInstanceIndex(
+	const unsigned char* bytes,
+	std::size_t size,
+	const AxisValue* axisValues,
+	std::size_t axisValueCount,
+	long& instanceIndex) noexcept;
 
 FontSubstitutionBoundary SelectFontSubstitutionBoundary(
 	const ResolvedAdapter& adapter) noexcept;
@@ -195,6 +230,7 @@ const AdapterDescriptor* ProductionAdapterDescriptors(
 	std::size_t* count) noexcept;
 
 bool IsExecutableMemoryRange(const void* address, std::size_t length) noexcept;
+bool IsReadableMemoryRange(const void* address, std::size_t length) noexcept;
 
 bool ApplyCoverage(
 	unsigned char* buffer,

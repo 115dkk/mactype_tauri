@@ -6,11 +6,12 @@ enum class FontRefSelection : unsigned char
 {
 	nativeFamily,
 	mappedFamily,
+	undecoded,
 };
 
 // Keeps Unity's selected FontRef family paired with any nested private
-// FreeType face-open call. Builds without an exact FontRef resolver retain the
-// legacy path-based fallback; an observed native family fails closed.
+// FreeType face-open call. An undecodable reference retains the path-based
+// fallback; an observed native family fails closed.
 class ScopedFontRefSelectionContext final
 {
 public:

@@ -57,12 +57,27 @@ below wherever the two conflict.
   guards. The renderer's repeated anti-cheat scan is direct-injection defense,
   not a second service-admission authority.
 - Exact Unity builds that expose an OS `FontRef` resolver carry
-  `nativeFamily` or `mappedFamily` through `ScopedFontRefSelectionContext`.
-  A native family forbids a coincidental same-file redirect; a mapped family
-  permits it, and nested resolution must restore the preceding context. Older
-  exact adapters without that resolver retain the face-index-checked path
-  fallback. Diagnostic hooks observe only: they never replace a returned
-  `FT_Face`, retain a raw face pointer, or change cache lookup results.
+  `nativeFamily`, `mappedFamily` or `undecoded` through
+  `ScopedFontRefSelectionContext`. A decoded native family forbids a
+  coincidental same-file redirect; a mapped family permits it; a `FontRef`
+  whose layout the renderer cannot decode (Unity 6000.3.21) keeps the
+  face-index-checked path fallback instead of failing closed, and nested
+  resolution must restore the preceding context. Older exact adapters without
+  that resolver retain the same path fallback. Substitution must also complete
+  when the renderer attaches after Unity resolved a mapped source file
+  natively: Unity's caller caches that face per `FontRef` and never asks the
+  resolver again, so the character-lookup adapter replaces it at the point
+  where Unity fetches the face for a character. It identifies the face by its
+  own `family_name` (then by the stream pathname, which FreeType only borrows
+  from the caller and may dangle), replaces only faces FreeType opened from a
+  file stream (memory and custom-stream faces, including bundled assets that
+  carry a mapped family name, stay untouched), opens the replacement once
+  through Unity's FreeType library via the original face-open trampoline,
+  returns it only when it has a glyph for the requested character, keeps the
+  native-to-replacement map bounded, and releases both through the hooked
+  `FT_Done_Face` when Unity frees the native face. Every other diagnostic hook
+  observes only: it never replaces a returned `FT_Face`, retains a raw face
+  pointer, or changes cache lookup results.
 - A DirectWrite source face can expose localized, typographic, weight/style,
   and Win32 family names. If any name selects a substitution, the immutable
   alias collection must preserve every non-conflicting name for that same

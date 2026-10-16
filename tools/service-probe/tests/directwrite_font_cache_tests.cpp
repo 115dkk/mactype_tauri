@@ -4,6 +4,7 @@
 #include <aclapi.h>
 #include <array>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <sddl.h>
@@ -122,6 +123,63 @@ void WriteFixture(std::filesystem::path const& path, std::vector<BYTE> const& by
         "cannot write ACL fixture");
 }
 
+void OverwriteFixture(
+    std::filesystem::path const& path,
+    std::vector<BYTE> const& bytes)
+{
+    auto file = renderer_raii::AdoptHandle(CreateFileW(
+        path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL, nullptr));
+    RequireAcl(static_cast<bool>(file), "cannot replace manifest fixture");
+    DWORD written = 0;
+    RequireAcl(WriteFile(file.get(), bytes.data(), static_cast<DWORD>(bytes.size()),
+        &written, nullptr) != FALSE && written == bytes.size(),
+        "cannot replace complete manifest fixture");
+}
+
+std::vector<BYTE> ReadFixture(std::filesystem::path const& path)
+{
+    auto file = renderer_raii::AdoptHandle(CreateFileW(
+        path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
+    RequireAcl(static_cast<bool>(file), "cannot open manifest fixture");
+    LARGE_INTEGER size = {};
+    RequireAcl(GetFileSizeEx(file.get(), &size) != FALSE && size.QuadPart >= 0 &&
+        size.QuadPart <= 64 * 1024 * 1024, "invalid manifest fixture size");
+    std::vector<BYTE> bytes(static_cast<size_t>(size.QuadPart));
+    DWORD received = 0;
+    RequireAcl(bytes.empty() || (ReadFile(file.get(), bytes.data(),
+        static_cast<DWORD>(bytes.size()), &received, nullptr) != FALSE &&
+        received == bytes.size()), "cannot read complete manifest fixture");
+    return bytes;
+}
+
+void WriteLe32(std::vector<BYTE>& bytes, size_t offset, UINT32 value)
+{
+    RequireAcl(offset <= bytes.size() && bytes.size() - offset >= 4,
+        "manifest mutation escapes fixture");
+    for (unsigned int shift = 0; shift != 32; shift += 8)
+        bytes[offset++] = static_cast<BYTE>(value >> shift);
+}
+
+void WriteLe64(std::vector<BYTE>& bytes, size_t offset, UINT64 value)
+{
+    RequireAcl(offset <= bytes.size() && bytes.size() - offset >= 8,
+        "manifest mutation escapes fixture");
+    for (unsigned int shift = 0; shift != 64; shift += 8)
+        bytes[offset++] = static_cast<BYTE>(value >> shift);
+}
+
+UINT32 ReadLe32(std::vector<BYTE> const& bytes, size_t offset)
+{
+    RequireAcl(offset <= bytes.size() && bytes.size() - offset >= 4,
+        "manifest read escapes fixture");
+    return static_cast<UINT32>(bytes[offset]) |
+        (static_cast<UINT32>(bytes[offset + 1]) << 8) |
+        (static_cast<UINT32>(bytes[offset + 2]) << 16) |
+        (static_cast<UINT32>(bytes[offset + 3]) << 24);
+}
+
 void CheckReadGrants(std::wstring name, bool directory)
 {
     PACL dacl = nullptr;
@@ -195,8 +253,9 @@ void CheckRestrictedOpen(HANDLE token, std::wstring const& path, bool allowed)
         allowed ? "restricted token cannot read cache fixture" : "negative control was not denied");
 }
 
-void TestManifest(std::vector<BYTE> const& fixtureBytes)
+void TestManifest(std::vector<BYTE> const&)
 {
+    namespace cache = renderer::virtual_font_cache;
     CacheTestDirectory temporary;
     auto const appdata = temporary.root / L"manifest-appdata";
     auto const directory = appdata / L"MacType" / L"FontCache";
@@ -204,9 +263,13 @@ void TestManifest(std::vector<BYTE> const& fixtureBytes)
         "cannot create manifest cache tree");
     RequireAcl(SetEnvironmentVariableW(L"LOCALAPPDATA", appdata.c_str()) != FALSE,
         "cannot redirect manifest LOCALAPPDATA");
-    WriteFixture(directory / L"manifest-v1.bin", {1, 2, 3, 4});
 
-    renderer::virtual_font_cache::ManifestKey key;
+    auto const manifestV1 = directory / L"manifest-v1.bin";
+    WriteFixture(manifestV1, {
+        'M', 'T', 'F', 'M', 'V', '1', '\r', '\n', 0, 0, 0, 0,
+    });
+
+    cache::ManifestKey key;
     key.replacementPath = L"C:\\Windows\\Fonts\\fixture.ttf";
     key.replacementSize = 1234;
     key.replacementLastWriteTime = 5678;
@@ -216,39 +279,183 @@ void TestManifest(std::vector<BYTE> const& fixtureBytes)
     key.weight = 500;
     key.profileDigest = 0x1122334455667788ULL;
     key.axes = {{0x74686777, 500.0f}, {0x68746477, 100.0f}};
-    renderer::virtual_font_cache::ManifestValue value;
+    cache::ManifestValue value;
     bool found = true;
-    RequireAcl(renderer::virtual_font_cache::LookupManifestFont(
-            key, value, found) == S_OK && !found,
-        "a corrupt manifest must be ignored");
+    RequireAcl(cache::ReloadManifestForTests() == S_OK &&
+        cache::LookupManifestFont(key, value, found) == S_OK && !found,
+        "manifest-v1.bin must never be read as a v2 hit");
 
     auto const virtualFont = directory / L"cached.ttf";
-    WriteFixture(virtualFont, fixtureBytes);
+    std::vector<BYTE> validFont = {
+        0x00, 0x01, 0x00, 0x00, 0, 1, 0, 0, 0, 0, 0, 0,
+    };
+    WriteFixture(virtualFont, validFont);
     value.virtualFontPath = virtualFont.native();
+    value.virtualFontSize = validFont.size();
     value.family = L"Manifest Alias";
     value.subfamily = L"Medium";
     value.fullName = L"Manifest Alias Medium";
     value.postScriptName = L"ManifestAlias-Medium";
-    RequireAcl(renderer::virtual_font_cache::StoreManifestFont(key, value) == S_OK,
+    RequireAcl(cache::StoreManifestFont(key, value) == S_OK,
         "cannot atomically store a manifest entry");
-    renderer::virtual_font_cache::ManifestValue loaded;
+
+    auto const manifestV2 = directory / L"manifest-v2.bin";
+    std::vector<BYTE> const validManifest = ReadFixture(manifestV2);
+    RequireAcl(cache::ReloadManifestForTests() == S_OK,
+        "cannot parse the written manifest into a fresh state");
+    cache::ManifestValue loaded;
     found = false;
-    RequireAcl(renderer::virtual_font_cache::LookupManifestFont(
-            key, loaded, found) == S_OK && found &&
-            loaded.virtualFontPath == value.virtualFontPath &&
-            loaded.postScriptName == value.postScriptName,
-        "a stored manifest entry did not round-trip");
-    ++key.replacementSize;
-    RequireAcl(renderer::virtual_font_cache::LookupManifestFont(
-            key, loaded, found) == S_OK && !found,
-        "source metadata must participate in the manifest key");
+    RequireAcl(cache::LookupManifestFont(key, loaded, found) == S_OK && found &&
+        loaded.virtualFontPath == value.virtualFontPath &&
+        loaded.virtualFontSize == value.virtualFontSize &&
+        loaded.family == value.family && loaded.subfamily == value.subfamily &&
+        loaded.fullName == value.fullName &&
+        loaded.postScriptName == value.postScriptName,
+        "a freshly parsed manifest value did not round-trip every field");
+
+    auto expectKeyMiss = [&](cache::ManifestKey const& changed) {
+        cache::ManifestValue ignored;
+        bool hit = true;
+        RequireAcl(cache::LookupManifestFont(changed, ignored, hit) == S_OK && !hit,
+            "a manifest key field did not participate in lookup");
+    };
+    cache::ManifestKey changed = key;
+    changed.replacementPath.push_back(L'x');
+    expectKeyMiss(changed);
+    changed = key;
+    ++changed.replacementSize;
+    expectKeyMiss(changed);
+    changed = key;
+    ++changed.replacementLastWriteTime;
+    expectKeyMiss(changed);
+    changed = key;
+    ++changed.faceIndex;
+    expectKeyMiss(changed);
+    changed = key;
+    changed.aliasFamily.push_back(L'x');
+    expectKeyMiss(changed);
+    changed = key;
+    changed.overrideWeight = false;
+    expectKeyMiss(changed);
+    changed = key;
+    ++changed.weight;
+    expectKeyMiss(changed);
+    changed = key;
+    ++changed.profileDigest;
+    expectKeyMiss(changed);
+    changed = key;
+    ++changed.axes[0].tag;
+    expectKeyMiss(changed);
+    changed = key;
+    changed.axes[0].value = 501.0f;
+    expectKeyMiss(changed);
+    changed = key;
+    changed.axes.pop_back();
+    expectKeyMiss(changed);
+
+    cache::ManifestKey temporaryKey = key;
+    ++temporaryKey.profileDigest;
+    std::vector<BYTE> temporaryManifest = validManifest;
+    WriteLe64(temporaryManifest, 16 + 32, temporaryKey.profileDigest);
+    auto const temporaryPath = directory / L"manifest-v2.bin.tmp-concurrent";
+    WriteFixture(temporaryPath, temporaryManifest);
+    RequireAcl(cache::ReloadManifestForTests() == S_OK,
+        "cannot reload the manifest beside a concurrent temporary file");
+    expectKeyMiss(temporaryKey);
+    RequireAcl(std::filesystem::remove(temporaryPath),
+        "cannot remove concurrent manifest fixture");
+
+    std::vector<BYTE> oversizedCount = validManifest;
+    WriteLe32(oversizedCount, 12, 2049);
+    OverwriteFixture(manifestV2, oversizedCount);
+    RequireAcl(cache::ReloadManifestForTests() == S_OK,
+        "cannot reload oversized-count manifest fixture");
+    found = true;
+    RequireAcl(cache::LookupManifestFont(key, loaded, found) == S_OK && !found,
+        "an oversized manifest record count was accepted");
+
+    std::vector<BYTE> oversizedString = validManifest;
+    UINT32 const axisCount = ReadLe32(oversizedString, 16 + 52);
+    size_t const firstStringLength = 16 + 56 + static_cast<size_t>(axisCount) * 8;
+    WriteLe32(oversizedString, firstStringLength, 32769);
+    OverwriteFixture(manifestV2, oversizedString);
+    RequireAcl(cache::ReloadManifestForTests() == S_OK,
+        "cannot reload oversized-string manifest fixture");
+    found = true;
+    RequireAcl(cache::LookupManifestFont(key, loaded, found) == S_OK && !found,
+        "an oversized manifest string was accepted");
+
+    OverwriteFixture(manifestV2, validManifest);
+    RequireAcl(cache::ReloadManifestForTests() == S_OK,
+        "cannot restore the valid manifest fixture");
+    int rebuilds = 0;
+    auto lookupOrRebuild = [&] {
+        cache::ManifestValue candidate;
+        bool hit = false;
+        RequireAcl(cache::LookupManifestFont(key, candidate, hit) == S_OK,
+            "manifest lookup failed during rebuild test");
+        if (hit)
+            return;
+        ++rebuilds;
+        OverwriteFixture(virtualFont, validFont);
+        RequireAcl(cache::StoreManifestFont(key, value) == S_OK,
+            "cannot restore a rejected manifest backing");
+    };
+    lookupOrRebuild();
+    RequireAcl(rebuilds == 0, "a valid manifest backing was rebuilt");
+    std::vector<BYTE> wrongSizeFont = validFont;
+    wrongSizeFont.push_back(0);
+    OverwriteFixture(virtualFont, wrongSizeFont);
+    lookupOrRebuild();
+    RequireAcl(rebuilds == 1,
+        "a size-mismatched manifest backing did not trigger one rebuild");
+    std::vector<BYTE> corruptFont(validFont.size(), 0x7f);
+    OverwriteFixture(virtualFont, corruptFont);
+    lookupOrRebuild();
+    RequireAcl(rebuilds == 2,
+        "a corrupt non-empty manifest backing did not trigger one rebuild");
+    found = false;
+    RequireAcl(cache::LookupManifestFont(key, loaded, found) == S_OK && found,
+        "the rebuilt manifest backing was not reusable");
+
+    std::vector<BYTE> oneEntry = ReadFixture(manifestV2);
+    RequireAcl(ReadLe32(oneEntry, 12) == 1 && oneEntry.size() > 16,
+        "the eviction fixture requires one serialized entry");
+    std::vector<BYTE> record(oneEntry.begin() + 16, oneEntry.end());
+    std::vector<BYTE> full(oneEntry.begin(), oneEntry.begin() + 16);
+    WriteLe32(full, 12, 2048);
+    for (UINT64 index = 0; index < 2048; ++index)
+    {
+        std::vector<BYTE> entry = record;
+        WriteLe64(entry, 0, index + 1);
+        WriteLe64(entry, 32, index);
+        full.insert(full.end(), entry.begin(), entry.end());
+    }
+    OverwriteFixture(manifestV2, full);
+    RequireAcl(cache::ReloadManifestForTests() == S_OK,
+        "cannot load the full eviction fixture");
+    cache::ManifestKey newest = key;
+    newest.profileDigest = 4096;
+    RequireAcl(cache::StoreManifestFont(newest, value) == S_OK,
+        "cannot append the eviction trigger");
+    RequireAcl(cache::ReloadManifestForTests() == S_OK,
+        "cannot reload the evicted manifest");
+    cache::ManifestKey oldest = key;
+    oldest.profileDigest = 0;
+    found = true;
+    RequireAcl(cache::LookupManifestFont(oldest, loaded, found) == S_OK && !found,
+        "the oldest entry survived beyond the 2,048-entry bound");
+    found = false;
+    RequireAcl(cache::LookupManifestFont(newest, loaded, found) == S_OK && found &&
+        ReadLe32(ReadFixture(manifestV2), 12) == 2048,
+        "manifest eviction did not retain the newest bounded entry");
+
     for (auto const& child : std::filesystem::directory_iterator(directory))
     {
         RequireAcl(child.path().filename().native().find(L".tmp-") ==
             std::wstring::npos, "an atomic manifest temporary file leaked");
     }
 }
-
 void TestCacheAcl(std::vector<BYTE> const& fixtureBytes)
 {
     CacheTestDirectory temporary;
@@ -348,7 +555,7 @@ int main()
     }
     std::cout << "DirectWrite font cache ACL: 3 DACL checks, 2 restricted reads, "
         "1 denied control and idempotence passed\n";
-    std::cout << "DirectWrite font manifest: corrupt-ignore, atomic round-trip and "
-        "metadata-key checks passed\n";
+    std::cout << "DirectWrite font manifest: v2 round-trip, bounds, eviction, "
+        "atomic isolation and corrupt-backing rebuild passed" << std::endl;
     return 0;
 }

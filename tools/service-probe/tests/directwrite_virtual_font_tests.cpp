@@ -1,6 +1,8 @@
 #include "../../../renderer/directwrite_virtual_font.h"
 #include "../../../renderer/sfnt_names.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -10,25 +12,11 @@
 #include <utility>
 #include <vector>
 
-#pragma comment(lib, "..\\core-dependencies\\freetype-x64\\Release\\freetype.lib")
-
-extern "C" {
-struct FT_LibraryRec_;
-struct FT_FaceRec_;
-struct FT_MM_Var_;
-using FT_Library = FT_LibraryRec_*;
-using FT_Face = FT_FaceRec_*;
-using FT_MM_Var = FT_MM_Var_;
-using FT_Error = int;
-using FT_Long = long;
-FT_Error FT_Init_FreeType(FT_Library* library);
-FT_Error FT_New_Face(
-    FT_Library library, char const* path, FT_Long faceIndex, FT_Face* face);
-FT_Error FT_Get_MM_Var(FT_Face face, FT_MM_Var** master);
-FT_Error FT_Done_MM_Var(FT_Library library, FT_MM_Var* master);
-FT_Error FT_Done_Face(FT_Face face);
-FT_Error FT_Done_FreeType(FT_Library library);
-}
+#ifdef MACTYPE_PROBE_HAVE_FREETYPE
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include FT_MULTIPLE_MASTERS_H
+#endif
 
 namespace {
 
@@ -129,16 +117,16 @@ std::vector<BYTE> VariableSfnt()
     sfnt::WriteU32(fvar, 20, 100U << 16);
     sfnt::WriteU32(fvar, 24, 400U << 16);
     sfnt::WriteU32(fvar, 28, 900U << 16);
-    sfnt::WriteU16(fvar, 34, 260);
+    sfnt::WriteU16(fvar, 34, 2);
     sfnt::WriteU32(fvar, 36, 0x77647468);
     sfnt::WriteU32(fvar, 40, 50U << 16);
     sfnt::WriteU32(fvar, 44, 100U << 16);
     sfnt::WriteU32(fvar, 48, 200U << 16);
     sfnt::WriteU16(fvar, 54, 261);
-    sfnt::WriteU16(fvar, 56, 256);
+    sfnt::WriteU16(fvar, 56, 2);
     sfnt::WriteU32(fvar, 60, 400U << 16);
     sfnt::WriteU32(fvar, 64, 100U << 16);
-    sfnt::WriteU16(fvar, 68, 257);
+    sfnt::WriteU16(fvar, 68, 17);
     sfnt::WriteU16(fvar, 70, 258);
     sfnt::WriteU32(fvar, 74, 500U << 16);
     sfnt::WriteU32(fvar, 78, 100U << 16);
@@ -231,6 +219,15 @@ bool HasName(std::vector<BYTE> const& font, UINT16 id)
         [id](sfnt::NameRecord const& record) { return record.id == id; });
 }
 
+UINT32 SfntAxisTag(DWRITE_FONT_AXIS_TAG tag)
+{
+    UINT32 const value = static_cast<UINT32>(tag);
+    return ((value & 0x000000ffU) << 24) |
+        ((value & 0x0000ff00U) << 8) |
+        ((value & 0x00ff0000U) >> 8) |
+        ((value & 0xff000000U) >> 24);
+}
+
 std::wstring AxisTag(DWRITE_FONT_AXIS_TAG tag)
 {
     UINT32 const value = static_cast<UINT32>(tag);
@@ -242,7 +239,16 @@ std::wstring AxisTag(DWRITE_FONT_AXIS_TAG tag)
     return text;
 }
 
-void ValidateFreeType(WCHAR const* path)
+struct ExpectedAxis
+{
+    UINT32 tag = 0;
+    FLOAT value = 0;
+};
+
+#ifdef MACTYPE_PROBE_HAVE_FREETYPE
+void ValidateFreeType(
+    WCHAR const* path,
+    std::vector<ExpectedAxis> const& expectedAxes)
 {
     int const required = WideCharToMultiByte(
         CP_UTF8, WC_ERR_INVALID_CHARS, path, -1, nullptr, 0, nullptr, nullptr);
@@ -262,34 +268,100 @@ void ValidateFreeType(WCHAR const* path)
         "FT_New_Face rejected the alias");
     Require(FT_Get_MM_Var(face, &variation) == 0 && variation != nullptr,
         "FT_Get_MM_Var rejected the alias variation data");
+    FT_UInt defaultInstance = 0;
+    Require(FT_Get_Default_Named_Instance(face, &defaultInstance) == 0 &&
+            defaultInstance != 0,
+        "FreeType did not identify its default named instance");
+    // FreeType synthesizes the missing default instance. The fvar table keeps
+    // one file-backed instance, so the API reports that instance plus default.
+    Require(variation->num_namedstyles == 2 && variation->namedstyle != nullptr,
+        "FreeType did not report one file-backed pinned named instance");
+    unsigned int pinnedInstances = 0;
+    for (FT_UInt styleIndex = 0;
+        styleIndex < variation->num_namedstyles; ++styleIndex)
+    {
+        bool pinned = true;
+        for (ExpectedAxis const& expected : expectedAxes)
+        {
+            FT_UInt axisIndex = 0;
+            while (axisIndex < variation->num_axis &&
+                variation->axis[axisIndex].tag != expected.tag)
+                ++axisIndex;
+            Require(axisIndex < variation->num_axis,
+                "FreeType did not report an expected variation axis");
+            FT_Fixed const wanted = static_cast<FT_Fixed>(
+                std::llround(static_cast<double>(expected.value) * 65536.0));
+            if (variation->namedstyle[styleIndex].coords[axisIndex] != wanted)
+                pinned = false;
+        }
+        if (pinned)
+            ++pinnedInstances;
+    }
+    Require(pinnedInstances == 1,
+        "FreeType did not report the pinned coordinates exactly once");
+    std::wcout << L"freetype FT_New_Face=true FT_Get_MM_Var=true "
+        L"named_instances=1 synthesized_default=1" << std::endl;
     Require(FT_Done_MM_Var(library, variation) == 0,
         "FT_Done_MM_Var failed");
     Require(FT_Done_Face(face) == 0, "FT_Done_Face failed");
     Require(FT_Done_FreeType(library) == 0, "FT_Done_FreeType failed");
-    std::wcout << L"freetype FT_New_Face=true FT_Get_MM_Var=true\n";
 }
-
-void PrintAxes(IDWriteFont* font)
+#else
+void ValidateFreeType(
+    WCHAR const*,
+    std::vector<ExpectedAxis> const&)
 {
+    std::cout <<
+        "freetype validation: unavailable (configure MACTYPE_PROBE_FREETYPE_ROOT)\n";
+}
+#endif
+
+bool ReadAxes(
+    IDWriteFont* font,
+    std::vector<DWRITE_FONT_AXIS_VALUE>& values)
+{
+    values.clear();
     CComPtr<IDWriteFont3> font3;
     CComPtr<IDWriteFontFaceReference> reference;
     CComPtr<IDWriteFontFaceReference1> reference1;
     if (font == nullptr || FAILED(font->QueryInterface(&font3)) || font3 == nullptr ||
         FAILED(font3->GetFontFaceReference(&reference)) || reference == nullptr ||
         FAILED(reference->QueryInterface(&reference1)) || reference1 == nullptr)
-    {
-        std::wcout << L" axes=[]";
-        return;
-    }
+        return false;
     UINT32 const count = reference1->GetFontAxisValueCount();
-    std::vector<DWRITE_FONT_AXIS_VALUE> values(count);
-    if (count != 0 && FAILED(reference1->GetFontAxisValues(values.data(), count)))
+    values.resize(count);
+    return count == 0 || SUCCEEDED(reference1->GetFontAxisValues(values.data(), count));
+}
+
+bool AxisValue(
+    IDWriteFont* font,
+    DWRITE_FONT_AXIS_TAG wanted,
+    FLOAT& value)
+{
+    std::vector<DWRITE_FONT_AXIS_VALUE> values;
+    if (!ReadAxes(font, values))
+        return false;
+    for (DWRITE_FONT_AXIS_VALUE const& axis : values)
+    {
+        if (axis.axisTag == wanted)
+        {
+            value = axis.value;
+            return true;
+        }
+    }
+    return false;
+}
+
+void PrintAxes(IDWriteFont* font)
+{
+    std::vector<DWRITE_FONT_AXIS_VALUE> values;
+    if (!ReadAxes(font, values))
     {
         std::wcout << L" axes=<error>";
         return;
     }
     std::wcout << L" axes=[";
-    for (UINT32 index = 0; index < count; ++index)
+    for (size_t index = 0; index < values.size(); ++index)
     {
         if (index != 0)
             std::wcout << L", ";
@@ -299,7 +371,18 @@ void PrintAxes(IDWriteFont* font)
     std::wcout << L']';
 }
 
-int ProbeFontFile(WCHAR const* path)
+UINT32 FaceIndex(IDWriteFont* font)
+{
+    CComPtr<IDWriteFontFace> face;
+    Require(font != nullptr && SUCCEEDED(font->CreateFontFace(&face)) && face != nullptr,
+        "cannot create a face while reporting the pinned family");
+    return face->GetIndex();
+}
+
+int ProbeFontFile(
+    WCHAR const* path,
+    UINT16 expectedWeight = 0,
+    std::vector<ExpectedAxis> expectedAxes = {})
 {
     Require(GetModuleHandleW(L"MacType64.dll") == nullptr &&
         GetModuleHandleW(L"MacType.dll") == nullptr,
@@ -325,7 +408,12 @@ int ProbeFontFile(WCHAR const* path)
     Require(SUCCEEDED(result) && supported && faceCount != 0,
         "IDWriteFontFile::Analyze rejected the file");
     std::wcout << L"analyze supported=true face_count=" << faceCount << L'\n';
-    ValidateFreeType(path);
+    if (expectedWeight != 0)
+    {
+        Require(!expectedAxes.empty(),
+            "the strict variable probe has no expected axes");
+        ValidateFreeType(path, expectedAxes);
+    }
 
     CComPtr<IDWriteFontSetBuilder> builder;
     CComPtr<IDWriteFontSetBuilder1> builder1;
@@ -356,8 +444,20 @@ int ProbeFontFile(WCHAR const* path)
             CComPtr<IDWriteFont> font;
             Require(SUCCEEDED(family->GetFont(fontIndex, &font)) && font != nullptr,
                 "cannot read a DirectWrite font");
-            std::wcout << L"font[" << fontIndex << L"] weight=" <<
-                static_cast<unsigned int>(font->GetWeight());
+            UINT32 const weight = static_cast<UINT32>(font->GetWeight());
+            FLOAT axisWeight = 0;
+            if (expectedWeight != 0)
+            {
+                Require(weight != 400,
+                    "a pinned family still reports a weight-400 font");
+                Require(AxisValue(font, DWRITE_FONT_AXIS_TAG_WEIGHT, axisWeight) &&
+                    std::fabs(axisWeight - 400.0f) > 0.01f,
+                    "a pinned family still reports a wght-400 font");
+            }
+            std::wcout << L"font[" << fontIndex << L"] weight=" << weight <<
+                L" simulations=0x" << std::hex <<
+                static_cast<UINT32>(font->GetSimulations()) << std::dec <<
+                L" face_index=" << FaceIndex(font);
             PrintAxes(font);
             std::wcout << L'\n';
         }
@@ -373,6 +473,14 @@ int ProbeFontFile(WCHAR const* path)
             static_cast<unsigned int>(matching->GetWeight());
         PrintAxes(matching);
         std::wcout << L'\n';
+        if (expectedWeight != 0)
+        {
+            FLOAT matchingWeight = 0;
+            Require(AxisValue(
+                    matching, DWRITE_FONT_AXIS_TAG_WEIGHT, matchingWeight) &&
+                    std::fabs(matchingWeight - expectedWeight) < 0.01f,
+                "GetFirstMatchingFont(400) did not retain the pinned coordinate");
+        }
     }
     return 0;
 }
@@ -398,6 +506,45 @@ int RewriteVariableFile(WCHAR const* input, WCHAR const* output, UINT16 weight)
     Require(SUCCEEDED(directwrite_virtual_font::BuildAliasedSfnt(
             source, 0, L"Malgun Gothic", options, rewritten, identity)),
         "cannot rewrite the pinned variable alias");
+
+    std::vector<BYTE> const sourceFvar = Table(source, kFvar, false);
+    std::vector<BYTE> const rewrittenFvar = Table(rewritten, kFvar, true);
+    UINT16 const sourceAxesOffset = sfnt::ReadU16(sourceFvar, 4);
+    UINT16 const rewrittenAxesOffset = sfnt::ReadU16(rewrittenFvar, 4);
+    UINT16 const axisCount = sfnt::ReadU16(sourceFvar, 8);
+    UINT16 const axisSize = sfnt::ReadU16(sourceFvar, 10);
+    size_t const axesBytes = static_cast<size_t>(axisCount) * axisSize;
+    Require(sourceAxesOffset == rewrittenAxesOffset &&
+            sfnt::ReadU16(rewrittenFvar, 8) == axisCount &&
+            sfnt::ReadU16(rewrittenFvar, 10) == axisSize &&
+            sfnt::CanRead(sourceAxesOffset, axesBytes, sourceFvar.size()) &&
+            sfnt::CanRead(rewrittenAxesOffset, axesBytes, rewrittenFvar.size()) &&
+            std::equal(
+                sourceFvar.begin() + sourceAxesOffset,
+                sourceFvar.begin() + sourceAxesOffset + axesBytes,
+                rewrittenFvar.begin() + rewrittenAxesOffset),
+        "fvar axis records or defaults changed while pinning");
+    Require(sfnt::ReadU16(rewrittenFvar, 12) == 1,
+        "the rewritten fvar table does not contain one named instance");
+    std::vector<ExpectedAxis> expectedAxes;
+    for (UINT16 axisIndex = 0; axisIndex < axisCount; ++axisIndex)
+    {
+        UINT32 const tag = sfnt::ReadU32(
+            rewrittenFvar, rewrittenAxesOffset +
+                static_cast<size_t>(axisIndex) * axisSize);
+        auto const option = std::find_if(
+            options.axisValues.begin(), options.axisValues.end(),
+            [tag](DWRITE_FONT_AXIS_VALUE const& axis) {
+                return SfntAxisTag(axis.axisTag) == tag;
+            });
+        Require(option != options.axisValues.end(),
+            "the rewritten fvar table retained an unpinned axis");
+        expectedAxes.push_back({tag, option->value});
+    }
+    Require(Table(rewritten, kGlyf, true) == Table(source, kGlyf, false) &&
+            Table(rewritten, kGvar, true) == Table(source, kGvar, false),
+        "glyf or gvar bytes changed while pinning");
+
     std::ofstream destination(
         std::filesystem::path(output), std::ios::binary | std::ios::trunc);
     Require(static_cast<bool>(destination), "cannot create the rewritten alias");
@@ -405,9 +552,11 @@ int RewriteVariableFile(WCHAR const* input, WCHAR const* output, UINT16 weight)
         reinterpret_cast<char const*>(rewritten.data()),
         static_cast<std::streamsize>(rewritten.size()));
     Require(static_cast<bool>(destination), "cannot write the rewritten alias");
+    destination.close();
+    Require(static_cast<bool>(destination), "cannot close the rewritten alias");
     std::wcout << L"rewritten_bytes=" << rewritten.size() << L" weight=" <<
         weight << L'\n';
-    return 0;
+    return ProbeFontFile(output, weight, std::move(expectedAxes));
 }
 
 } // namespace
@@ -422,6 +571,9 @@ int wmain(int argc, WCHAR** argv)
     Require(argc == 1,
         "usage: directwrite-virtual-font-tests.exe [font-file] | "
         "--rewrite-variable input output weight");
+#ifndef MACTYPE_PROBE_HAVE_FREETYPE
+    ValidateFreeType(nullptr, {});
+#endif
     namespace font = directwrite_virtual_font;
     std::vector<BYTE> const source = Sfnt(true);
     std::vector<BYTE> plain;
@@ -498,18 +650,36 @@ int wmain(int argc, WCHAR** argv)
                 sfnt::ReadU32(pinnedFvar, 60) == (500U << 16) &&
                 sfnt::ReadU32(pinnedFvar, 64) == (100U << 16),
             "fvar must retain only the pinned named instance without moving its axes");
-    Require(!HasName(pinnedAlias, 256) && !HasName(pinnedAlias, 257) &&
+    Require(HasName(pinnedAlias, 2) && HasName(pinnedAlias, 17) &&
+                HasName(pinnedAlias, 256) && HasName(pinnedAlias, 257) &&
                 HasName(pinnedAlias, 258) && HasName(pinnedAlias, 259) &&
-                HasName(pinnedAlias, 260) && HasName(pinnedAlias, 261),
-            "only removed variable instances may lose their name records");
+                HasName(pinnedAlias, 260) && HasName(pinnedAlias, 261) &&
+                sfnt::ReadU16(pinnedFvar, 34) == 2,
+            "pinning removed shared or unused name records");
     Require(Table(pinnedAlias, kGlyf, true) == Table(variableSource, kGlyf, false) &&
                 Table(pinnedAlias, kGvar, true) == Table(variableSource, kGvar, false),
             "pinning a variable alias must leave glyf and gvar bytes unchanged");
     std::vector<BYTE> const pinnedOs2 = Table(pinnedAlias, kOs2, true);
     Require(sfnt::ReadU16(pinnedOs2, 4) == 500 &&
                 sfnt::ReadU16(pinnedOs2, 6) == 5 &&
+                (sfnt::ReadU16(pinnedOs2, 62) & 0x0020) == 0 &&
                 (sfnt::ReadU16(Table(pinnedAlias, kHead, true), 44) & 1) == 0,
             "pinned axes must set OS/2 weight and width and head bold state");
+
+    font::AliasOptions pinnedBold = pinned;
+    pinnedBold.overrideWeight = true;
+    pinnedBold.weight = 700;
+    std::vector<BYTE> pinnedBoldAlias;
+    Require(SUCCEEDED(font::BuildAliasedSfnt(
+                variableSource, 0, L"Alias", pinnedBold, pinnedBoldAlias, identity)),
+            "the pinned bold-advertised alias must build");
+    std::vector<BYTE> const pinnedBoldOs2 = Table(pinnedBoldAlias, kOs2, true);
+    Require(sfnt::ReadU16(pinnedBoldOs2, 4) == 700 &&
+                (sfnt::ReadU16(pinnedBoldOs2, 62) & 0x0020) != 0 &&
+                (sfnt::ReadU16(Table(pinnedBoldAlias, kHead, true), 44) & 1) != 0 &&
+                pinnedBoldAlias != pinnedAlias,
+            "an explicit weight override was replaced by the pinned coordinate");
+
     pinned.axisValues[0].value = 550.0f;
     Require(font::BuildAliasedSfnt(
                 variableSource, 0, L"Alias", pinned, pinnedAlias, identity) ==

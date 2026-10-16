@@ -40,6 +40,23 @@ struct AliasFontSet
 	bool cacheHit = false;
 };
 
+// Marks the calling thread as establishing a factory's canonical source.
+// A nested construction on that thread reports nested() so the caller can
+// hand DirectWrite's own re-entrant call the stock object instead of
+// running the preamble again.
+class CanonicalSourceScope
+{
+public:
+	CanonicalSourceScope() noexcept;
+	~CanonicalSourceScope();
+	CanonicalSourceScope(CanonicalSourceScope const&) = delete;
+	CanonicalSourceScope& operator=(CanonicalSourceScope const&) = delete;
+	bool nested() const noexcept { return nested_; }
+
+private:
+	bool nested_ = false;
+};
+
 BuildStatus GetOrCreate(
 	IDWriteFactory* factory,
 	IDWriteFontSet* systemFontSet,

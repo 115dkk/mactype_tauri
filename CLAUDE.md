@@ -104,12 +104,26 @@ below wherever the two conflict.
   Alias outputs are keyed in a per-user manifest under
   `%LOCALAPPDATA%\MacType\FontCache` (replacement file identity, alias names,
   options, pinned axes and profile digest), written atomically, bounded, and
-  ignored when corrupt, so a warm start answers in well under 250 ms. A
+  ignored when corrupt; a hit counts only while the backing's size and scaler
+  type still match, and a hit whose file no longer opens is dropped and
+  rebuilt once. A warm start answers in well under 250 ms. A
   variable backing's alias file keeps only the pinned named instance: `fvar`
   axes and defaults, `glyf` and `gvar` stay byte-identical (moving
   `fvar.defaultValue` would silently render the default outlines under the new
-  weight), the other instances' `name` records go, and `OS/2` weight, width,
-  `fsSelection` and `head.macStyle` follow the pinned coordinates. A collection
+  weight), every `name` record stays (a default instance shares IDs 2 and 17
+  with the family and an axis name may share an instance's ID), and `OS/2`
+  weight, width, `fsSelection` and `head.macStyle` follow the pinned
+  coordinates unless the alias advertises an explicit weight, which keeps that
+  weight and its bold bits so a bold-slot alias of a Medium backing stays a
+  distinct file. The source and fallback preamble inside the intercepted call
+  refuses a nested call on its own thread (`CanonicalSourceScope`), because
+  DirectWrite answers the original collection and fallback calls through its
+  own virtual methods, which are the patched slots; the system-fallback hook is
+  installed before the build, and a fallback lookup during a cold build waits
+  for the build like a collection call does. The `DWriteCreateFactory` entry
+  acquires its module reference before taking the hook mutex, since
+  `GetModuleHandleEx` takes the loader lock and the entry is reached from
+  `DllMain` and from `GetProcAddress` callers that already hold it. A collection
   an application retained before injection stays the honest older generation
   (`unsupported-late-collection`); do not mutate retained objects.
 - `FreeTypeRuntime` is also the sole Interface for logical bitmap rows and

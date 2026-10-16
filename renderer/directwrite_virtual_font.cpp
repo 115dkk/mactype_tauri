@@ -398,7 +398,6 @@ bool BuildNameTable(
 	std::vector<BYTE> const& original,
 	std::wstring const& family,
 	bool advertiseBold,
-	std::vector<UINT16> const& removedNames,
 	std::vector<BYTE>& rewritten,
 	Identity& representativeIdentity)
 {
@@ -414,9 +413,6 @@ bool BuildNameTable(
 	kept.reserve(records.size());
 	for (NameRecord record : records)
 	{
-		if (std::find(removedNames.begin(), removedNames.end(), record.id) !=
-			removedNames.end())
-			continue;
 		if (!IsIdentityName(record.id, advertiseBold))
 		{
 			kept.emplace_back(std::move(record));
@@ -534,18 +530,10 @@ bool FixedCoordinate(FLOAT value, std::int32_t& fixed) noexcept
 	return true;
 }
 
-void AppendRemovedName(std::vector<UINT16>& names, UINT16 name)
-{
-	if (name != 0xffff &&
-		std::find(names.begin(), names.end(), name) == names.end())
-		names.push_back(name);
-}
-
 bool BuildPinnedFvar(
 	std::vector<BYTE> const& original,
 	AliasOptions const& options,
-	std::vector<BYTE>& rewritten,
-	std::vector<UINT16>& removedNames)
+	std::vector<BYTE>& rewritten)
 {
 	if (original.size() < 16)
 		return false;
@@ -611,29 +599,6 @@ bool BuildPinnedFvar(
 
 	size_t const pinnedOffset = instancesOffset +
 		static_cast<size_t>(pinnedInstance) * instanceSize;
-	UINT16 const pinnedSubfamily = ReadU16(original, pinnedOffset);
-	UINT16 const minimumInstanceSize = static_cast<UINT16>(4 + axisCount * 4);
-	UINT16 const pinnedPostScript = instanceSize >= minimumInstanceSize + 2
-		? ReadU16(original, pinnedOffset + minimumInstanceSize)
-		: 0xffff;
-	for (UINT16 instanceIndex = 0; instanceIndex < instanceCount; ++instanceIndex)
-	{
-		if (instanceIndex == pinnedInstance)
-			continue;
-		size_t const instanceOffset = instancesOffset +
-			static_cast<size_t>(instanceIndex) * instanceSize;
-		AppendRemovedName(removedNames, ReadU16(original, instanceOffset));
-		if (instanceSize >= minimumInstanceSize + 2)
-			AppendRemovedName(
-				removedNames, ReadU16(original, instanceOffset + minimumInstanceSize));
-	}
-	removedNames.erase(
-		std::remove(removedNames.begin(), removedNames.end(), pinnedSubfamily),
-		removedNames.end());
-	removedNames.erase(
-		std::remove(removedNames.begin(), removedNames.end(), pinnedPostScript),
-		removedNames.end());
-
 	rewritten.assign(original.begin(), original.begin() + instancesOffset);
 	rewritten.insert(
 		rewritten.end(),
@@ -757,7 +722,6 @@ HRESULT BuildAliasedSfnt(
 			tables.emplace_back(std::move(table));
 	}
 
-	std::vector<UINT16> removedNames;
 	bool rewroteVariable = false;
 	for (SfntTable& table : tables)
 	{
@@ -767,7 +731,7 @@ HRESULT BuildAliasedSfnt(
 			source.begin() + table.sourceOffset,
 			source.begin() + table.sourceOffset + table.sourceLength);
 		if (!BuildPinnedFvar(
-				original, options, table.replacement, removedNames))
+				original, options, table.replacement))
 			return DWRITE_E_FILEFORMAT;
 		rewroteVariable = true;
 	}
@@ -779,7 +743,7 @@ HRESULT BuildAliasedSfnt(
 	bool const havePinnedWidth = rewroteVariable && AxisValue(
 		options, DWRITE_FONT_AXIS_TAG_WIDTH, pinnedWidth);
 	UINT16 advertisedWeight = options.weight;
-	if (havePinnedWeight)
+	if (havePinnedWeight && !options.overrideWeight)
 	{
 		pinnedWeight = (std::max)(1.0f, (std::min)(1000.0f, pinnedWeight));
 		advertisedWeight = static_cast<UINT16>(std::lround(pinnedWeight));
@@ -801,7 +765,6 @@ HRESULT BuildAliasedSfnt(
 					original,
 					family,
 					advertiseWeight && IsBoldWeightClass(advertisedWeight),
-					removedNames,
 					table.replacement,
 					identity))
 				return DWRITE_E_FILEFORMAT;
@@ -959,80 +922,115 @@ HRESULT CreateAliasedReference(
 		cache::ManifestValue manifestValue;
 		bool manifestHit = false;
 		cache::LookupManifestFont(manifestKey, manifestValue, manifestHit);
-		std::wstring backingPath;
-		CComPtr<IDWriteFontFile> fontFile;
-		if (manifestHit)
-		{
-			backingPath = manifestValue.virtualFontPath;
-			result = factory->CreateFontFileReference(
-				backingPath.c_str(), nullptr, &fontFile);
-			if (FAILED(result) || fontFile == nullptr)
+
+		DWRITE_FONT_SIMULATIONS const simulations =
+			replacementReference->GetSimulations();
+		CComPtr<IDWriteFactory6> factory6;
+		if (replacementReference1 != nullptr)
+			factory->QueryInterface(&factory6);
+		auto analyze = [](IDWriteFontFile* file) {
+			BOOL supported = FALSE;
+			DWRITE_FONT_FILE_TYPE fileType = DWRITE_FONT_FILE_TYPE_UNKNOWN;
+			DWRITE_FONT_FACE_TYPE faceType = DWRITE_FONT_FACE_TYPE_UNKNOWN;
+			UINT32 faceCount = 0;
+			HRESULT const status = file->Analyze(
+				&supported, &fileType, &faceType, &faceCount);
+			return FAILED(status) ? status :
+				(!supported || faceCount == 0 ? DWRITE_E_FILEFORMAT : S_OK);
+		};
+		auto makeReference = [&](
+			IDWriteFontFile* file,
+			CComPtr<IDWriteFontFaceReference>& created) {
+			created.Release();
+			if (factory6 != nullptr)
 			{
-				manifestHit = false;
-				fontFile.Release();
+				CComPtr<IDWriteFontFaceReference1> created1;
+				HRESULT const status = factory6->CreateFontFaceReference(
+					file,
+					0,
+					simulations,
+					effectiveOptions.axisValues.data(),
+					static_cast<UINT32>(effectiveOptions.axisValues.size()),
+					&created1);
+				if (SUCCEEDED(status))
+					created = created1;
+				return status;
 			}
-			else
+			return factory->CreateFontFaceReference(
+				file, 0, simulations, &created);
+		};
+
+		bool rebuiltBrokenHit = false;
+		for (;;)
+		{
+			bool const fromManifest = manifestHit;
+			std::wstring backingPath;
+			CComPtr<IDWriteFontFile> fontFile;
+			if (fromManifest)
 			{
+				backingPath = manifestValue.virtualFontPath;
+				result = factory->CreateFontFileReference(
+					backingPath.c_str(), nullptr, &fontFile);
+				if (SUCCEEDED(result) && fontFile != nullptr)
+					result = analyze(fontFile);
+				if (FAILED(result) || fontFile == nullptr)
+				{
+					cache::DropManifestFont(manifestKey);
+					manifestHit = false;
+					rebuiltBrokenHit = true;
+					continue;
+				}
 				identity.family = manifestValue.family;
 				identity.subfamily = manifestValue.subfamily;
 				identity.fullName = manifestValue.fullName;
 				identity.postScriptName = manifestValue.postScriptName;
 			}
-		}
-		if (!manifestHit)
-		{
-			result = ReadReplacementFile(
-				replacementReference, source, faceIndex, sourceIdentity, true);
-			if (FAILED(result))
-				return result;
-			manifestKey = makeManifestKey();
-			std::vector<BYTE> aliased;
-			result = BuildAliasedSfnt(
-				source, faceIndex, aliasFamily, effectiveOptions, aliased, identity);
-			if (FAILED(result))
-				return result;
-			result = renderer::virtual_font_cache::PersistFont(
-				aliased, backingPath);
-			if (FAILED(result))
-				return result;
-			result = factory->CreateFontFileReference(
-				backingPath.c_str(), nullptr, &fontFile);
-			if (FAILED(result) || fontFile == nullptr)
-				return FAILED(result) ? result : E_FAIL;
-			manifestValue.virtualFontPath = backingPath;
-			manifestValue.family = identity.family;
-			manifestValue.subfamily = identity.subfamily;
-			manifestValue.fullName = identity.fullName;
-			manifestValue.postScriptName = identity.postScriptName;
-			cache::StoreManifestFont(manifestKey, manifestValue);
-		}
+			else
+			{
+				result = ReadReplacementFile(
+					replacementReference, source, faceIndex, sourceIdentity, true);
+				if (FAILED(result))
+					return result;
+				manifestKey = makeManifestKey();
+				std::vector<BYTE> aliased;
+				result = BuildAliasedSfnt(
+					source, faceIndex, aliasFamily, effectiveOptions, aliased, identity);
+				if (FAILED(result))
+					return result;
+				result = renderer::virtual_font_cache::PersistFont(aliased, backingPath);
+				if (FAILED(result))
+					return result;
+				result = factory->CreateFontFileReference(
+					backingPath.c_str(), nullptr, &fontFile);
+				if (SUCCEEDED(result) && fontFile != nullptr)
+					result = analyze(fontFile);
+				if (FAILED(result) || fontFile == nullptr)
+					return FAILED(result) ? result : E_FAIL;
+				manifestValue.virtualFontPath = backingPath;
+				manifestValue.virtualFontSize = static_cast<UINT64>(aliased.size());
+				manifestValue.family = identity.family;
+				manifestValue.subfamily = identity.subfamily;
+				manifestValue.fullName = identity.fullName;
+				manifestValue.postScriptName = identity.postScriptName;
+			}
 
-		DWRITE_FONT_SIMULATIONS const simulations =
-			replacementReference->GetSimulations();
-
-		CComPtr<IDWriteFactory6> factory6;
-		if (replacementReference1 != nullptr &&
-			SUCCEEDED(factory->QueryInterface(&factory6)) && factory6 != nullptr)
-		{
-			CComPtr<IDWriteFontFaceReference1> aliasedReference1;
-			result = factory6->CreateFontFaceReference(
-				fontFile,
-				0,
-				simulations,
-				effectiveOptions.axisValues.data(),
-				static_cast<UINT32>(effectiveOptions.axisValues.size()),
-				&aliasedReference1);
-			if (FAILED(result) || aliasedReference1 == nullptr)
+			CComPtr<IDWriteFontFaceReference> created;
+			result = makeReference(fontFile, created);
+			if ((FAILED(result) || created == nullptr) &&
+				fromManifest && !rebuiltBrokenHit)
+			{
+				cache::DropManifestFont(manifestKey);
+				manifestHit = false;
+				rebuiltBrokenHit = true;
+				continue;
+			}
+			if (FAILED(result) || created == nullptr)
 				return FAILED(result) ? result : E_FAIL;
-			reference = aliasedReference1;
+			if (!fromManifest)
+				cache::StoreManifestFont(manifestKey, manifestValue);
+			reference = created;
 			return S_OK;
 		}
-
-		return factory->CreateFontFaceReference(
-			fontFile,
-			0,
-			simulations,
-			&reference);
 	}
 	catch (std::bad_alloc const&)
 	{

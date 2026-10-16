@@ -35,6 +35,7 @@ struct ManifestKey
 struct ManifestValue
 {
     std::wstring virtualFontPath;
+    UINT64 virtualFontSize = 0;
     std::wstring family;
     std::wstring subfamily;
     std::wstring fullName;
@@ -59,6 +60,11 @@ HRESULT LookupManifestFont(
 HRESULT StoreManifestFont(
     ManifestKey const& key,
     ManifestValue const& value) noexcept;
+
+HRESULT DropManifestFont(ManifestKey const& key) noexcept;
+
+// Forces the next test observation through a newly loaded manifest state.
+HRESULT ReloadManifestForTests() noexcept;
 
 HRESULT PersistFont(
     std::vector<BYTE> const& bytes,

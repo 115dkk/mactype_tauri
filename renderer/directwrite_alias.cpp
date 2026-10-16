@@ -2,6 +2,7 @@
 
 #include "bold_face_selection.h"
 #include "directwrite_alias_policy.h"
+#include "directwrite_readiness.h"
 #include "directwrite_virtual_font.h"
 #include "font_substitution.h"
 #include "settings.h"
@@ -38,6 +39,7 @@ struct AliasCache
 
 constexpr std::chrono::seconds kBuildWaitTimeout(10);
 thread_local bool isBuildingAliases = false;
+thread_local bool isEstablishingCanonicalSource = false;
 
 constexpr std::array<DWRITE_FONT_PROPERTY_ID, 3> kFamilyPropertyIds = {
 	DWRITE_FONT_PROPERTY_ID_WEIGHT_STRETCH_STYLE_FAMILY_NAME,
@@ -705,9 +707,10 @@ BuildStatus GetOrCreateUnchecked(
 		}
 		if (entry != nullptr)
 		{
-			if (entry->building && !entry->ready.wait_for(
-					lock, kBuildWaitTimeout, [&entry] { return !entry->building; }))
-				return BuildStatus::waitTimeout;
+			if (!directwrite_readiness::WaitForBuild(
+					entry, lock, kBuildWaitTimeout, !isBuildingAliases))
+				return isBuildingAliases ? BuildStatus::buildReentrant :
+					BuildStatus::waitTimeout;
 			result = entry->aliases;
 			result.cacheHit = true;
 			return entry->status;
@@ -764,6 +767,18 @@ BuildStatus GetOrCreateUnchecked(
 
 } // namespace
 
+CanonicalSourceScope::CanonicalSourceScope() noexcept
+	: nested_(isEstablishingCanonicalSource)
+{
+	isEstablishingCanonicalSource = true;
+}
+
+CanonicalSourceScope::~CanonicalSourceScope()
+{
+	if (!nested_)
+		isEstablishingCanonicalSource = false;
+}
+
 BuildStatus GetOrCreate(
 	IDWriteFactory* factory,
 	IDWriteFontSet* systemFontSet,
@@ -797,16 +812,19 @@ BuildStatus GetCachedForFactory(
 		if (identity == nullptr)
 			return BuildStatus::unsupportedFactory;
 		AliasCache& cache = GetCache();
-		std::lock_guard<std::mutex> lock(cache.mutex);
+		std::unique_lock<std::mutex> lock(cache.mutex);
 		for (std::shared_ptr<CacheEntry> const& entry : cache.entries)
 		{
-			if (!entry->building && entry->factoryIdentity == identity &&
-				entry->generation == substitutionGeneration)
-			{
-				result = entry->aliases;
-				result.cacheHit = true;
-				return entry->status;
-			}
+			if (entry->factoryIdentity != identity ||
+				entry->generation != substitutionGeneration)
+				continue;
+			if (!directwrite_readiness::WaitForBuild(
+					entry, lock, kBuildWaitTimeout, !isBuildingAliases))
+				return isBuildingAliases ? BuildStatus::systemSetUnavailable :
+					BuildStatus::waitTimeout;
+			result = entry->aliases;
+			result.cacheHit = true;
+			return entry->status;
 		}
 		return BuildStatus::systemSetUnavailable;
 	}

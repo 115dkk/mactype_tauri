@@ -29,6 +29,7 @@ cmake --build $build --config RelWithDebInfo --target `
     bold-face-selection-tests `
     directwrite-virtual-font-tests `
     directwrite-alias-policy-tests `
+    directwrite-readiness-tests `
     unity-font-hook-tests
 
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -72,6 +73,7 @@ try {
         'bold-face-selection-tests.exe',
         'directwrite-virtual-font-tests.exe',
         'directwrite-alias-policy-tests.exe',
+        'directwrite-readiness-tests.exe',
         'unity-font-hook-tests.exe'
     )) {
         & (Join-Path $build "RelWithDebInfo\$test")

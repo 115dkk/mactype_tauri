@@ -2,6 +2,7 @@
 #include "arrival_evidence.h"
 #include "directwrite_alias.h"
 #include "directwrite_fallback.h"
+#include "directwrite_readiness.h"
 #include "dynCodeHelper.h"
 #include "hookCounter.h"
 #include "hook_lifecycle.h"
@@ -1682,6 +1683,70 @@ Factory3GetSystemFontCollectionMethod GetOriginalModernSystemFontCollection(
 	return nullptr;
 }
 
+CComPtr<IDWriteFontSet> EstablishFactoryAliasSource(
+	IDWriteFactory* factory,
+	IDWriteFactory3* factory3,
+	IDWriteFontSet* candidate = nullptr)
+{
+	if (factory == nullptr || factory3 == nullptr)
+		return nullptr;
+	return directwrite_readiness::EstablishSource(
+		factory,
+		CComPtr<IDWriteFontSet>(candidate),
+		[](IDWriteFactory* owner) {
+			return GetFactoryAliasSource(owner);
+		},
+		[factory3](IDWriteFactory*, CComPtr<IDWriteFontSet>& acquired) {
+			Factory3GetSystemFontSetMethod const original =
+				GetOriginalSystemFontSet(factory3);
+			return original != nullptr &&
+				SUCCEEDED(original(factory3, &acquired)) && acquired != nullptr;
+		},
+		[](IDWriteFactory* owner, CComPtr<IDWriteFontSet> const& source) {
+			PublishFactoryAliasSource(owner, source);
+		});
+}
+
+directwrite_alias::BuildStatus GetCanonicalFactoryAliases(
+	IDWriteFactory3* factory3,
+	directwrite_alias::AliasFontSet& aliases,
+	IDWriteFontSet* candidate = nullptr,
+	IDWriteFontCollection* suppliedCollection = nullptr,
+	bool* fallbackHooked = nullptr)
+{
+	// DirectWrite answers an original collection or fallback call partly
+	// through its own virtual methods, which are the patched slots, so the
+	// source and fallback preamble refuses a nested call on its own thread
+	// the way the build does; without that the first hooked call recursed
+	// until the stack was gone.
+	directwrite_alias::CanonicalSourceScope const scope;
+	if (scope.nested())
+		return directwrite_alias::BuildStatus::buildReentrant;
+	CComPtr<IDWriteFactory> factory;
+	if (factory3 == nullptr ||
+		FAILED(factory3->QueryInterface(&factory)) || factory == nullptr)
+		return directwrite_alias::BuildStatus::unsupportedFactory;
+
+	CComPtr<IDWriteFontSet> const systemSet =
+		EstablishFactoryAliasSource(factory, factory3, candidate);
+	if (systemSet == nullptr)
+		return directwrite_alias::BuildStatus::systemSetUnavailable;
+
+	CComPtr<IDWriteFontCollection> systemCollection = suppliedCollection;
+	if (systemCollection == nullptr)
+	{
+		FactoryGetSystemFontCollectionMethod const original =
+			GetOriginalSystemFontCollection(factory);
+		if (original != nullptr)
+			original(factory, &systemCollection, FALSE);
+	}
+	bool const hooked = systemCollection != nullptr &&
+		HookDirectWriteSystemFallback(factory, systemCollection);
+	if (fallbackHooked != nullptr)
+		*fallbackHooked = hooked;
+	return directwrite_alias::GetOrCreate(factory, systemSet, aliases);
+}
+
 bool CaptureFactoryAliasSource(IDWriteFactory* factory)
 {
 	if (factory == nullptr)
@@ -1697,17 +1762,19 @@ bool CaptureFactoryAliasSource(IDWriteFactory* factory)
 
 	CComPtr<IDWriteFontCollection1> systemCollection1;
 	CComPtr<IDWriteFontSet> systemSet;
+	CComPtr<IDWriteFactory3> factory3;
 	if (FAILED(systemCollection->QueryInterface(&systemCollection1)) ||
 		systemCollection1 == nullptr ||
-		FAILED(systemCollection1->GetFontSet(&systemSet)) || systemSet == nullptr)
+		FAILED(systemCollection1->GetFontSet(&systemSet)) || systemSet == nullptr ||
+		FAILED(factory->QueryInterface(&factory3)) || factory3 == nullptr)
 		return false;
-	PublishFactoryAliasSource(factory, systemSet);
 
 	directwrite_alias::AliasFontSet aliases;
-	directwrite_alias::BuildStatus const status =
-		directwrite_alias::GetOrCreate(factory, systemSet, aliases);
+	bool fallbackHooked = false;
+	directwrite_alias::BuildStatus const status = GetCanonicalFactoryAliases(
+		factory3, aliases, systemSet, systemCollection, &fallbackHooked);
 	SignalAliasCollectionResult(status, aliases);
-	return HookDirectWriteSystemFallback(factory, systemCollection);
+	return fallbackHooked;
 }
 
 void RestoreFactoryAliasVtables() noexcept
@@ -1985,38 +2052,38 @@ static bool HookDWriteFactoryEntry(FARPROC factoryProcedure)
 		return false;
 	}
 
+	// GetModuleHandleEx takes the loader lock. Acquire this reference before the
+	// hook mutex to prevent a loader-lock/hook-mutex inversion with DllMain.
+	HMODULE rawModuleReference = nullptr;
+	GetModuleHandleExW(
+		GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+		reinterpret_cast<LPCWSTR>(factoryProcedure),
+		&rawModuleReference);
+	renderer_raii::UniqueModuleReference moduleReference(rawModuleReference);
+
 	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
-	std::lock_guard<std::mutex> lock(lifecycle.dwriteHookMutex);
-	if (lifecycle.stopping.load(std::memory_order_acquire))
-		return false;
-	if (ISHOOKED(DWriteCreateFactory))
 	{
-		if (!lifecycle.dwrite)
+		std::lock_guard<std::mutex> lock(lifecycle.dwriteHookMutex);
+		if (lifecycle.stopping.load(std::memory_order_acquire))
+			return false;
+		if (ISHOOKED(DWriteCreateFactory))
 		{
-			HMODULE moduleReference = nullptr;
-			if (GetModuleHandleExW(
-					GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-					reinterpret_cast<LPCWSTR>(factoryProcedure),
-					&moduleReference))
-				lifecycle.dwrite.reset(moduleReference);
+			if (!lifecycle.dwrite)
+				lifecycle.dwrite.swap(moduleReference);
+			return true;
 		}
-		return true;
+
+		SET_VAL(ORIG_DWriteCreateFactory, factoryProcedure);
+		if (InstallDemandHook(
+				renderer::HookCapability::directWrite,
+				reinterpret_cast<void*>(factoryProcedure),
+				hook_demand_DWriteCreateFactory) != NOERROR ||
+			!ISHOOKED(DWriteCreateFactory))
+			return false;
+
+		if (!lifecycle.dwrite)
+			lifecycle.dwrite.swap(moduleReference);
 	}
-
-	SET_VAL(ORIG_DWriteCreateFactory, factoryProcedure);
-	if (InstallDemandHook(
-			renderer::HookCapability::directWrite,
-			reinterpret_cast<void*>(factoryProcedure),
-			hook_demand_DWriteCreateFactory) != NOERROR ||
-		!ISHOOKED(DWriteCreateFactory))
-		return false;
-
-	HMODULE moduleReference = nullptr;
-	if (GetModuleHandleExW(
-			GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-			reinterpret_cast<LPCWSTR>(factoryProcedure),
-			&moduleReference))
-		lifecycle.dwrite.reset(moduleReference);
 	SignalDirectWriteDiagnostic(L"dwrite-entry-hooked");
 	return true;
 }
@@ -2032,27 +2099,38 @@ static bool HookDWriteCoreFactoryEntry(FARPROC factoryProcedure)
 		return false;
 	}
 
+	// GetModuleHandleEx takes the loader lock. Acquire this reference before the
+	// hook mutex to prevent a loader-lock/hook-mutex inversion with DllMain.
+	HMODULE rawModuleReference = nullptr;
+	GetModuleHandleExW(
+		GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+		reinterpret_cast<LPCWSTR>(factoryProcedure),
+		&rawModuleReference);
+	renderer_raii::UniqueModuleReference moduleReference(rawModuleReference);
+
 	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
-	std::lock_guard<std::mutex> lock(lifecycle.dwriteCoreHookMutex);
-	if (lifecycle.stopping.load(std::memory_order_acquire))
-		return false;
-	if (ISHOOKED(DWriteCoreCreateFactory))
-		return true;
+	{
+		std::lock_guard<std::mutex> lock(lifecycle.dwriteCoreHookMutex);
+		if (lifecycle.stopping.load(std::memory_order_acquire))
+			return false;
+		if (ISHOOKED(DWriteCoreCreateFactory))
+		{
+			if (!lifecycle.dwriteCore)
+				lifecycle.dwriteCore.swap(moduleReference);
+			return true;
+		}
 
-	SET_VAL(ORIG_DWriteCoreCreateFactory, factoryProcedure);
-	if (InstallDemandHook(
-			renderer::HookCapability::directWriteCore,
-			reinterpret_cast<void*>(factoryProcedure),
-			hook_demand_DWriteCoreCreateFactory) != NOERROR ||
-		!ISHOOKED(DWriteCoreCreateFactory))
-		return false;
+		SET_VAL(ORIG_DWriteCoreCreateFactory, factoryProcedure);
+		if (InstallDemandHook(
+				renderer::HookCapability::directWriteCore,
+				reinterpret_cast<void*>(factoryProcedure),
+				hook_demand_DWriteCoreCreateFactory) != NOERROR ||
+			!ISHOOKED(DWriteCoreCreateFactory))
+			return false;
 
-	HMODULE moduleReference = nullptr;
-	if (GetModuleHandleExW(
-			GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-			reinterpret_cast<LPCWSTR>(factoryProcedure),
-			&moduleReference))
-		lifecycle.dwriteCore.reset(moduleReference);
+		if (!lifecycle.dwriteCore)
+			lifecycle.dwriteCore.swap(moduleReference);
+	}
 	SignalDirectWriteDiagnostic(L"dwritecore-entry-hooked");
 	return true;
 }
@@ -2715,21 +2793,6 @@ static void SignalAliasCollectionResult(
 		SignalDirectWriteDiagnostic(stage);
 }
 
-static directwrite_alias::BuildStatus GetCanonicalFactoryAliases(
-	IDWriteFactory3* factory3,
-	directwrite_alias::AliasFontSet& aliases)
-{
-	CComPtr<IDWriteFactory> factory;
-	if (factory3 == nullptr ||
-		FAILED(factory3->QueryInterface(&factory)) || factory == nullptr)
-		return directwrite_alias::BuildStatus::unsupportedFactory;
-
-	CComPtr<IDWriteFontSet> const systemSet = GetFactoryAliasSource(factory);
-	if (systemSet == nullptr)
-		return directwrite_alias::BuildStatus::systemSetUnavailable;
-	return directwrite_alias::GetOrCreate(factory, systemSet, aliases);
-}
-
 HRESULT WINAPI IMPL_Factory_GetSystemFontCollection(
 	IDWriteFactory* self,
 	IDWriteFontCollection** fontCollection,
@@ -2762,16 +2825,18 @@ HRESULT WINAPI IMPL_Factory_GetSystemFontCollection(
 		*fontCollection = systemCollection.Detach();
 		return result;
 	}
-	CComPtr<IDWriteFontSet> canonicalSystemSet = GetFactoryAliasSource(self);
-	if (canonicalSystemSet == nullptr || checkForUpdates)
+	if (checkForUpdates)
+		PublishFactoryAliasSource(self, systemSet, true);
+	CComPtr<IDWriteFactory3> factory3;
+	if (FAILED(self->QueryInterface(&factory3)) || factory3 == nullptr)
 	{
-		PublishFactoryAliasSource(self, systemSet, checkForUpdates != FALSE);
-		canonicalSystemSet = GetFactoryAliasSource(self);
+		*fontCollection = systemCollection.Detach();
+		return result;
 	}
 
 	directwrite_alias::AliasFontSet aliases;
-	directwrite_alias::BuildStatus const status =
-		directwrite_alias::GetOrCreate(self, canonicalSystemSet, aliases);
+	directwrite_alias::BuildStatus const status = GetCanonicalFactoryAliases(
+		factory3, aliases, systemSet, systemCollection);
 	SignalAliasCollectionResult(status, aliases);
 	if (IsAliasCollectionApplied(status))
 	{
@@ -2845,7 +2910,7 @@ HRESULT WINAPI IMPL_Factory3_GetSystemFontCollection(
 
 	directwrite_alias::AliasFontSet aliases;
 	directwrite_alias::BuildStatus const status =
-		GetCanonicalFactoryAliases(self, aliases);
+		GetCanonicalFactoryAliases(self, aliases, nullptr, systemCollection);
 	SignalAliasCollectionResult(status, aliases);
 	if (IsAliasCollectionApplied(status))
 	{

@@ -389,6 +389,32 @@ retained; forwarding that retained object's family lookups to the alias
 collection is a separate design (shared vtable, identity check on `this`,
 wholesale forwarding of four methods).
 
+The review round on that change fixed what a read-only audit found and what
+the first pre-entry probe run showed. `HookDWriteFactoryEntry` had taken the
+hook mutex before `GetModuleHandleExW`, an inversion against the loader lock
+that `DllMain` and `GetProcAddress` callers hold; the module reference is now
+acquired first and released outside the mutex. The modern collection and
+font-set entries established the canonical source themselves instead of
+answering with the native object while the source was still unpublished, the
+system-fallback hook moved in front of the build, and `GetCachedForFactory`
+waits on a building entry. With that preamble inside every intercepted call,
+the first hooked probe died with `STATUS_STACK_OVERFLOW`: DirectWrite answers
+an original `GetSystemFontCollection` or `GetSystemFontFallback` call partly
+through its own virtual methods, which are the patched slots, so the preamble
+re-entered itself. `CanonicalSourceScope` in `directwrite_alias` now refuses a
+nested call on the establishing thread the way the build already refused one.
+Name-record pruning was removed (a default instance shares IDs 2 and 17 with
+the family), an explicit advertised weight wins over the pinned coordinate so
+the bold-slot alias keeps its own file, and the manifest became
+`manifest-v2.bin` with the backing size in the value: a hit is validated by
+size and scaler type and a hit whose file no longer opens is dropped and
+rebuilt once. Measured with the final core mapped before image entry and the
+service stopped: with the manifest deleted and the alias files still present
+the alias collection answered after 265 ms; warm, the poll saw it at 109 to
+140 ms and the first call returned the alias at 109 to 141 ms. VS Code
+started the same way received the alias in its browser process and drew the
+editor's Hangul in Pretendard Variable Medium.
+
 An injection that lands after the first frame (the open service's remote
 `LoadLibrary`, every elevated target, any child of a parent that was not
 hooked) leaves that stock frame on screen until the application repaints on

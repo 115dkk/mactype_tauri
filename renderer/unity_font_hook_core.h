@@ -9,8 +9,11 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -26,6 +29,12 @@ enum class FaceOpenAbi : unsigned char
 {
 	unavailable,
 	unityInternal,
+};
+
+enum class FaceDoneAbi : unsigned char
+{
+	unavailable,
+	standard,
 };
 
 enum class FontLoadAbi : unsigned char
@@ -88,6 +97,9 @@ struct AdapterDescriptor final
 	DWORD fontCatalogLoadRva = 0;
 	const std::array<unsigned char, 32>* fontCatalogLoadPrefix = nullptr;
 	FontCatalogLoadAbi fontCatalogLoadAbi = FontCatalogLoadAbi::unavailable;
+	DWORD faceDoneRva = 0;
+	const std::array<unsigned char, 32>* faceDonePrefix = nullptr;
+	FaceDoneAbi faceDoneAbi = FaceDoneAbi::unavailable;
 };
 
 struct ResolvedAdapter final
@@ -100,6 +112,7 @@ struct ResolvedAdapter final
 	DWORD osFaceResolverRva = 0;
 	DWORD freeTypeCharIndexRva = 0;
 	DWORD fontCatalogLoadRva = 0;
+	DWORD faceDoneRva = 0;
 	RenderAbi abi = RenderAbi::publicRender;
 	FaceOpenAbi faceOpenAbi = FaceOpenAbi::unavailable;
 	FontLoadAbi fontLoadAbi = FontLoadAbi::unavailable;
@@ -107,6 +120,13 @@ struct ResolvedAdapter final
 	CharacterLookupAbi osFaceResolverAbi = CharacterLookupAbi::unavailable;
 	FreeTypeCharIndexAbi freeTypeCharIndexAbi = FreeTypeCharIndexAbi::unavailable;
 	FontCatalogLoadAbi fontCatalogLoadAbi = FontCatalogLoadAbi::unavailable;
+	FaceDoneAbi faceDoneAbi = FaceDoneAbi::unavailable;
+};
+
+struct AxisValue final
+{
+	std::uint32_t tag = 0;
+	float value = 0.0F;
 };
 
 struct InstalledFontFace final
@@ -114,6 +134,7 @@ struct InstalledFontFace final
 	std::wstring family;
 	std::wstring filePath;
 	long faceIndex = 0;
+	std::vector<AxisValue> axisValues;
 };
 
 struct FaceOpenPathRedirect final
@@ -122,6 +143,45 @@ struct FaceOpenPathRedirect final
 	std::wstring replacementPath;
 	std::string replacementUtf8;
 	long replacementFaceIndex = 0;
+};
+
+class FaceReplacementRegistry final
+{
+public:
+	enum class State : unsigned char
+	{
+		none,
+		pending,
+		published,
+	};
+
+	struct LookupResult final
+	{
+		State state = State::none;
+		const void* replacement = nullptr;
+	};
+
+	struct ReleaseResult final
+	{
+		bool releasedNative = false;
+		const void* pairedReplacement = nullptr;
+	};
+
+	[[nodiscard]] LookupResult Lookup(const void* native) const noexcept;
+	[[nodiscard]] bool Reserve(const void* native) noexcept;
+	[[nodiscard]] bool Publish(
+		const void* native,
+		const void* replacement) noexcept;
+	void Abandon(const void* native) noexcept;
+	[[nodiscard]] ReleaseResult Release(const void* face) noexcept;
+	void Clear() noexcept;
+	[[nodiscard]] std::size_t size() const noexcept;
+	[[nodiscard]] bool IsReplacement(const void* face) const noexcept;
+
+private:
+	static constexpr std::size_t kMaximumEntries = 256;
+	std::unordered_map<const void*, const void*> replacementsByNative_;
+	std::unordered_set<const void*> replacementFaces_;
 };
 
 class FontFileRedirectTable final
@@ -184,9 +244,26 @@ bool ResolveTextCoreFontLoadPath(
 	long requestedFaceIndex,
 	FaceOpenPathRedirect& redirect) noexcept;
 
+bool ResolveFamilyFaceOpenPath(
+	const FontFileRedirectTable& redirects,
+	const wchar_t* requestedFamily,
+	FaceOpenPathRedirect& redirect) noexcept;
+
 bool ReadLegacyFontRefFamily(
 	const void* fontRef,
 	std::wstring& family) noexcept;
+
+bool ReadReadableUtf8Path(
+	const char* value,
+	std::string& path) noexcept;
+
+bool ParseSfntNamedInstanceIndex(
+	const unsigned char* bytes,
+	std::size_t size,
+	long baseFaceIndex,
+	const AxisValue* axisValues,
+	std::size_t axisValueCount,
+	long& instanceIndex) noexcept;
 
 FontSubstitutionBoundary SelectFontSubstitutionBoundary(
 	const ResolvedAdapter& adapter) noexcept;
@@ -195,6 +272,7 @@ const AdapterDescriptor* ProductionAdapterDescriptors(
 	std::size_t* count) noexcept;
 
 bool IsExecutableMemoryRange(const void* address, std::size_t length) noexcept;
+bool IsReadableMemoryRange(const void* address, std::size_t length) noexcept;
 
 bool ApplyCoverage(
 	unsigned char* buffer,

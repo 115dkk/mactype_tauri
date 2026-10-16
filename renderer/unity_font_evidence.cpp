@@ -224,19 +224,24 @@ void RecordUnityFontOsFaceResolution(
 		return;
 	if (evidence.osFaceResolutions != (std::numeric_limits<LONG>::max)())
 		++evidence.osFaceResolutions;
-	if (found &&
-		evidence.osFaceResolutionHits != (std::numeric_limits<LONG>::max)())
-		++evidence.osFaceResolutionHits;
-	evidence.lastOsFaceSampleKoreanGlyph = sampleKoreanGlyph >
-			static_cast<unsigned int>((std::numeric_limits<LONG>::max)())
-		? (std::numeric_limits<LONG>::max)()
-		: static_cast<LONG>(sampleKoreanGlyph);
 	StringCchCopyW(
 		evidence.lastOsFaceFamily, kUnityFontEvidenceFamilyChars,
 		family != nullptr ? family : L"");
-	StringCchCopyW(
-		evidence.lastOsResolvedFaceFamily, kUnityFontEvidenceFamilyChars,
-		resolvedFaceFamily != nullptr ? resolvedFaceFamily : L"");
+	// Misses outnumber hits by orders of magnitude (every uninstalled
+	// fallback name is asked again per character), so the face details
+	// describe the last resolved face rather than the last miss.
+	if (found)
+	{
+		if (evidence.osFaceResolutionHits != (std::numeric_limits<LONG>::max)())
+			++evidence.osFaceResolutionHits;
+		evidence.lastOsFaceSampleKoreanGlyph = sampleKoreanGlyph >
+				static_cast<unsigned int>((std::numeric_limits<LONG>::max)())
+			? (std::numeric_limits<LONG>::max)()
+			: static_cast<LONG>(sampleKoreanGlyph);
+		StringCchCopyW(
+			evidence.lastOsResolvedFaceFamily, kUnityFontEvidenceFamilyChars,
+			resolvedFaceFamily != nullptr ? resolvedFaceFamily : L"");
+	}
 	if (mapped)
 	{
 		if (evidence.mappedOsFaceResolutions !=
@@ -255,6 +260,55 @@ void RecordUnityFontOsFaceResolution(
 			kUnityFontEvidenceFamilyChars,
 			resolvedFaceFamily != nullptr ? resolvedFaceFamily : L"");
 	}
+	UnlockEvidence(evidence);
+}
+
+void RecordUnityFontFaceReplacementCandidate(
+	UnityFontEvidenceV1& evidence,
+	const wchar_t* family) noexcept
+{
+	if (evidence.structSize != sizeof(evidence) ||
+		evidence.schema != kUnityFontEvidenceSchema ||
+		!TryAcquireEvidenceLock(evidence))
+		return;
+	if (evidence.faceReplacementCandidates !=
+			(std::numeric_limits<LONG>::max)())
+		++evidence.faceReplacementCandidates;
+	StringCchCopyW(
+		evidence.lastFaceReplacementFamily, kUnityFontEvidenceFamilyChars,
+		family != nullptr ? family : L"");
+	UnlockEvidence(evidence);
+}
+
+void RecordUnityFontFaceReplacementHit(
+	UnityFontEvidenceV1& evidence) noexcept
+{
+	if (evidence.structSize != sizeof(evidence) ||
+		evidence.schema != kUnityFontEvidenceSchema ||
+		!TryAcquireEvidenceLock(evidence))
+		return;
+	if (evidence.faceReplacementHits != (std::numeric_limits<LONG>::max)())
+		++evidence.faceReplacementHits;
+	UnlockEvidence(evidence);
+}
+
+void RecordUnityFontFaceReplacement(
+	UnityFontEvidenceV1& evidence,
+	bool succeeded,
+	const wchar_t* replacementPath) noexcept
+{
+	if (evidence.structSize != sizeof(evidence) ||
+		evidence.schema != kUnityFontEvidenceSchema ||
+		!TryAcquireEvidenceLock(evidence))
+		return;
+	LONG& outcome = succeeded
+		? evidence.faceReplacements
+		: evidence.faceReplacementFallbacks;
+	if (outcome != (std::numeric_limits<LONG>::max)())
+		++outcome;
+	StringCchCopyW(
+		evidence.lastFaceReplacementPath, kUnityFontEvidencePathChars,
+		replacementPath != nullptr ? replacementPath : L"");
 	UnlockEvidence(evidence);
 }
 
@@ -333,6 +387,12 @@ bool ReadUnityFontEvidence(
 	snapshot.mappedOsFaceResolutionHits = evidence.mappedOsFaceResolutionHits;
 	snapshot.lastMappedOsFaceSampleKoreanGlyph =
 		evidence.lastMappedOsFaceSampleKoreanGlyph;
+	snapshot.faceReplacements = evidence.faceReplacements;
+	snapshot.faceReplacementFallbacks =
+		evidence.faceReplacementFallbacks;
+	snapshot.faceReplacementCandidates =
+		evidence.faceReplacementCandidates;
+	snapshot.faceReplacementHits = evidence.faceReplacementHits;
 	std::memcpy(
 		snapshot.lastMappedOsFaceFamily, evidence.lastMappedOsFaceFamily,
 		sizeof(snapshot.lastMappedOsFaceFamily));
@@ -343,6 +403,18 @@ bool ReadUnityFontEvidence(
 		evidence.lastMappedOsResolvedFaceFamily,
 		sizeof(snapshot.lastMappedOsResolvedFaceFamily));
 	snapshot.lastMappedOsResolvedFaceFamily[
+		kUnityFontEvidenceFamilyChars - 1] = L'\0';
+	std::memcpy(
+		snapshot.lastFaceReplacementPath,
+		evidence.lastFaceReplacementPath,
+		sizeof(snapshot.lastFaceReplacementPath));
+	snapshot.lastFaceReplacementPath[
+		kUnityFontEvidencePathChars - 1] = L'\0';
+	std::memcpy(
+		snapshot.lastFaceReplacementFamily,
+		evidence.lastFaceReplacementFamily,
+		sizeof(snapshot.lastFaceReplacementFamily));
+	snapshot.lastFaceReplacementFamily[
 		kUnityFontEvidenceFamilyChars - 1] = L'\0';
 	std::memcpy(
 		snapshot.observedPath, evidence.observedPath,

@@ -18,9 +18,18 @@ ScopedFontRefSelectionContext::ScopedFontRefSelectionContext(
 	FontRefSelection selection) noexcept
 	: previous_(static_cast<unsigned char>(g_selection))
 {
-	g_selection = selection == FontRefSelection::mappedFamily
-		? SelectionState::mappedFamily
-		: SelectionState::nativeFamily;
+	switch (selection)
+	{
+	case FontRefSelection::nativeFamily:
+		g_selection = SelectionState::nativeFamily;
+		break;
+	case FontRefSelection::mappedFamily:
+		g_selection = SelectionState::mappedFamily;
+		break;
+	case FontRefSelection::undecoded:
+		g_selection = SelectionState::unobserved;
+		break;
+	}
 }
 
 ScopedFontRefSelectionContext::~ScopedFontRefSelectionContext()

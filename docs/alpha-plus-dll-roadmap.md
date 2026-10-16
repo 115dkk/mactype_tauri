@@ -206,13 +206,57 @@ successful redirects, fallbacks, and exact paths separate from visual identity.
 Visual capture remains a separate manual artifact when Windows denies capture,
 and pre-rendered assets remain outside the font-hook seam.
 
-Unity 2019 adapters must also distinguish font discovery from font use. Its
-private system catalog opens every installed face to learn family metadata; a
-pathname substitution at that point erases the source family from fallback
-selection even though `FT_Open_Face` succeeds. The exact 2019.4.41 adapter
-therefore suppresses redirects only inside the catalog-entry loader and resumes
-them for the selected rendering face. A field run is not successful when it
+Adapters for the legacy `DynamicFontData` text path must also distinguish font
+discovery from font use. Its private system catalog opens every installed face
+to learn family metadata; a pathname substitution at that point erases the
+source family from fallback selection even though `FT_Open_Face` succeeds. The
+exact 2019.4.41 adapter therefore suppresses redirects only inside the
+catalog-entry loader and resumes them for the selected rendering face. Unity
+6000.3.21 still builds that catalog through
+`TextRenderingPrivate::ReadFontFileAndAddToCache`, so its adapter carries the
+same boundary since 2026-10-16: Plague Inc moved to that engine in 2026-09 and
+drew no Hangul whenever the renderer attached before the catalog scan (five
+redirected discovery opens ending in `malgunsl.ttf`, about 2,560 glyph renders);
+with the boundary every isolated run shows only the use-opens (four, ending in
+`malgunbd.ttf`) and about 7,600 renders. A field run is not successful when it
 observes character lookups but every lookup resolves to glyph zero.
+
+The discovery boundary alone still leaves one order unsubstituted: when the
+renderer attaches after `DynamicFontData::GetFaceForFontRefFromOSFonts` has
+already opened the mapped file natively, `GetFaceForFontRef` caches that face
+per `FontRef` and the resolver is never consulted for it again (measured: 10,149
+resolver calls, 15 hits, in a run that attached at 1.6 s; 0 hits when attaching
+at 4 s). The replacement therefore happens in
+`DynamicFontData::GetFaceForCharacterIfAvailableInFont`, which Unity calls per
+character and fallback `FontRef` and which returns the face it is about to use.
+The adapter identifies a native face only by its `family_name` (the stream
+pathname is a borrowed caller pointer in FreeType and dangles for these faces,
+so it is never read), replaces only faces whose stream carries FreeType's own
+file read callback (learned from the replacement the renderer opens by pathname
+itself, which excludes memory and custom-stream faces), opens the replacement
+once through Unity's FreeType library via the original face-open trampoline
+while no registry lock is held (FreeType's open failure path calls
+`FT_Done_Face`, which is the hooked function; a pending reservation keeps
+concurrent lookups on the native face until the open settles), returns the
+replacement only when it has a glyph for the character, counts those hits
+separately from constructed replacements, and releases both faces through the
+hooked `FT_Done_Face` when Unity frees the native one. That release is final by
+construction: the player exports no `FT_Reference_Face`. Detach leaves published
+replacement faces alive on purpose, because Unity may still hold a returned
+pointer and its library outlives the renderer; each renderer generation can
+therefore leave at most 256 faces behind until the library is destroyed, an
+accepted cost of the rare unload/reload cycle. The hook-level sequences (open
+failure re-entering Done_Face, callback mismatch before and after the canonical
+callback is learned) are covered by field runs and by the registry tests, not by
+a hook orchestration seam; that seam is a follow-up. The 6000.3.21 `FontRef` layout is
+not decodable, so that build selects `undecoded` instead of failing closed. The
+same table now carries the named instance of a variable replacement
+(`Pretendard Variable Medium` is `PretendardVariable.ttf` with instance bits in
+the FreeType face index), keyed by file, base face index and axis values so two
+rules on one variable file (`맑은 고딕` to Medium, `맑은 고딕 Semilight` to
+SemiBold) resolve to their own instances, and the fvar parser follows `ttcf`
+collections to the selected face. Bold source faces still land on the mapped
+instance (the Unity table is weight-blind for bold).
 
 For builds with an exact OS `FontRef` resolver, a scoped selection context
 distinguishes an explicitly mapped family from an unrelated family that merely

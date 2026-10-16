@@ -206,12 +206,19 @@ successful redirects, fallbacks, and exact paths separate from visual identity.
 Visual capture remains a separate manual artifact when Windows denies capture,
 and pre-rendered assets remain outside the font-hook seam.
 
-Unity 2019 adapters must also distinguish font discovery from font use. Its
-private system catalog opens every installed face to learn family metadata; a
-pathname substitution at that point erases the source family from fallback
-selection even though `FT_Open_Face` succeeds. The exact 2019.4.41 adapter
-therefore suppresses redirects only inside the catalog-entry loader and resumes
-them for the selected rendering face. A field run is not successful when it
+Adapters for the legacy `DynamicFontData` text path must also distinguish font
+discovery from font use. Its private system catalog opens every installed face
+to learn family metadata; a pathname substitution at that point erases the
+source family from fallback selection even though `FT_Open_Face` succeeds. The
+exact 2019.4.41 adapter therefore suppresses redirects only inside the
+catalog-entry loader and resumes them for the selected rendering face. Unity
+6000.3.21 still builds that catalog through
+`TextRenderingPrivate::ReadFontFileAndAddToCache`, so its adapter carries the
+same boundary since 2026-10-16: Plague Inc moved to that engine in 2026-09 and
+drew no Hangul whenever the renderer attached before the catalog scan (five
+redirected discovery opens ending in `malgunsl.ttf`, about 2,560 glyph renders);
+with the boundary every isolated run shows only the use-opens (four, ending in
+`malgunbd.ttf`) and about 7,600 renders. A field run is not successful when it
 observes character lookups but every lookup resolves to glyph zero.
 
 For builds with an exact OS `FontRef` resolver, a scoped selection context

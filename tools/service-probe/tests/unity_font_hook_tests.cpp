@@ -530,6 +530,23 @@ int main()
             renderer::unity::FontCatalogLoadAbi::systemCatalogEntry,
         "Plague's exact Unity adapter cannot preserve or verify its font catalog");
 
+    // Plague Inc moved to Unity 6000.3.21 in 2026-09; that build keeps the
+    // pathname-based legacy catalog, so its adapter must carry the same
+    // discovery boundary or Korean fallback text vanishes.
+    auto const plague6000Adapter = std::find_if(
+        production, production + productionCount, [](const auto& adapter) {
+            return std::strcmp(adapter.name, "unity-6000.3.21-x64") == 0;
+        });
+    Require(plague6000Adapter != production + productionCount &&
+        plague6000Adapter->fontCatalogLoadRva == 0x00D9E250 &&
+        plague6000Adapter->fontCatalogLoadPrefix != nullptr &&
+        plague6000Adapter->fontCatalogLoadAbi ==
+            renderer::unity::FontCatalogLoadAbi::systemCatalogEntry &&
+        plague6000Adapter->fontLoadRva == 0 &&
+        plague6000Adapter->fontLoadAbi ==
+            renderer::unity::FontLoadAbi::unavailable,
+        "Plague's Unity 6000.3.21 adapter lost its font catalog boundary");
+
     renderer::UnityCoverageLut lut = IdentityLut();
     lut.gray[128] = 200;
     std::array<unsigned char, 8> gray{{128, 64, 7, 7, 128, 32, 7, 7}};

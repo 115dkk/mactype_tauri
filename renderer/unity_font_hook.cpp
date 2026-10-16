@@ -297,10 +297,11 @@ void HookFontCatalogLoad(void* entry) noexcept
 		ProcessUnityLifecycle().fontCatalogLoad;
 	if (original == nullptr)
 		return;
-	// Unity 2019 opens every installed font while building its private
-	// family catalog. Redirecting those discovery opens replaces the
-	// catalog identity itself (for example, Malgun becomes Pretendard), so
-	// the later fallback search can no longer select the configured source.
+	// The legacy OS font catalog (Unity 2019 and still Unity 6000.3) opens
+	// every installed font by pathname while building its private family
+	// list. Redirecting those discovery opens replaces the catalog identity
+	// itself (for example, Malgun becomes Pretendard), so the later fallback
+	// search can no longer select the configured source and draws nothing.
 	// Keep discovery native; pathname substitution resumes when Unity opens
 	// the face it selected for actual text.
 	ScopedFaceOpenRedirectBypass bypass;

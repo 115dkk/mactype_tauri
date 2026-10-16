@@ -20,8 +20,6 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 #ifdef USE_DETOURS
@@ -90,8 +88,8 @@ struct UnityLifecycleState final
 	std::shared_ptr<const renderer::unity::FontFileRedirectTable> redirects;
 #ifdef USE_DETOURS
 	std::mutex faceReplacementMutex;
-	std::unordered_map<FT_Face, FT_Face> faceReplacements;
-	std::unordered_set<FT_Face> replacementFaces;
+	renderer::unity::FaceReplacementRegistry faceReplacements;
+	std::atomic<FT_Stream_IoFunc> fileStreamRead{nullptr};
 #endif
 	renderer_raii::UniqueHandle evidenceMapping;
 	renderer_raii::UniqueMappedView evidenceView;
@@ -304,49 +302,21 @@ private:
 
 void ReadUnityFaceFamilyName(FT_Face face, std::wstring& family) noexcept;
 
-constexpr std::size_t kMaximumCachedFaceReplacements = 256;
-
-bool EqualPathIgnoreCase(
-	const std::wstring& left,
-	const std::wstring& right) noexcept
-{
-	if (left.size() != right.size() ||
-		left.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)()))
-		return false;
-	return CompareStringOrdinal(
-		left.data(), static_cast<int>(left.size()),
-		right.data(), static_cast<int>(right.size()), TRUE) == CSTR_EQUAL;
-}
-
 bool ReadFaceStream(FT_Face face, FT_StreamRec& stream) noexcept
 {
 	stream = {};
-	if (face == nullptr || face->stream == nullptr ||
-		!renderer::unity::IsReadableMemoryRange(
-			face->stream, sizeof(*face->stream)))
+	if (face == nullptr ||
+		!renderer::unity::IsReadableMemoryRange(face, sizeof(*face)))
 		return false;
-	std::memcpy(&stream, face->stream, sizeof(stream));
+	FT_Stream const source = face->stream;
+	if (source == nullptr ||
+		!renderer::unity::IsReadableMemoryRange(source, sizeof(*source)))
+		return false;
+	std::memcpy(&stream, source, sizeof(stream));
+	// FreeType only borrows pathname.pointer, so identification must never read
+	// through a value that may have outlived its face-open caller.
 	return stream.read != nullptr && stream.base == nullptr &&
 		stream.pathname.pointer != nullptr;
-}
-
-bool ReadFaceSourcePath(
-	const FT_StreamRec& stream,
-	std::string& path) noexcept
-{
-	path.clear();
-	const char* const source =
-		static_cast<const char*>(stream.pathname.pointer);
-	if (source == nullptr ||
-		!renderer::unity::IsReadableMemoryRange(source, 3))
-		return false;
-	bool const drivePath =
-		((source[0] >= 'A' && source[0] <= 'Z') ||
-		 (source[0] >= 'a' && source[0] <= 'z')) &&
-		source[1] == ':' && (source[2] == '\\' || source[2] == '/');
-	bool const uncPath = source[0] == '\\' && source[1] == '\\';
-	return (drivePath || uncPath) &&
-		renderer::unity::ReadReadableUtf8Path(source, path);
 }
 
 bool ReadFaceLibrary(FT_Face face, FT_Library& library) noexcept
@@ -395,56 +365,56 @@ FT_Face ReplaceCharacterLookupFace(
 			InterlockedCompareExchange(&g_bHookEnabled, 0, 0) == FALSE)
 			return face;
 
-		std::unique_lock<std::mutex> cacheLock(lifecycle.faceReplacementMutex);
-		if (lifecycle.replacementFaces.find(face) !=
-			lifecycle.replacementFaces.end())
-			return face;
-
-		FT_StreamRec sourceStream{};
-		if (!ReadFaceStream(face, sourceStream))
-			return face;
-		std::wstring nativeFamily;
-		ReadUnityFaceFamilyName(face, nativeFamily);
 		renderer::unity::FaceOpenPathRedirect redirect;
-		bool resolved = !nativeFamily.empty() &&
-			renderer::unity::ResolveFamilyFaceOpenPath(
-				*redirects, nativeFamily.c_str(), redirect);
-		if (!resolved)
-		{
-			std::string sourcePath;
-			long const sourceIndex =
-				static_cast<long>(face->face_index & 0xFFFF);
-			resolved = ReadFaceSourcePath(sourceStream, sourcePath) &&
-				renderer::unity::ResolveTextCoreFontLoadPath(
-					*redirects, sourcePath.c_str(), sourceIndex, redirect) &&
-				!EqualPathIgnoreCase(
-					redirect.sourcePath, redirect.replacementPath);
-		}
-		if (!resolved)
-			return face;
-
-		renderer::unity::UnityFontEvidenceV1* const evidence = UnityEvidence();
-		if (evidence != nullptr)
-			renderer::unity::RecordUnityFontFaceReplacementCandidate(
-				*evidence,
-				nativeFamily.empty() ? nullptr : nativeFamily.c_str());
-		auto const cached = lifecycle.faceReplacements.find(face);
-		if (cached != lifecycle.faceReplacements.end())
-		{
-			return FT_Get_Char_Index(cached->second, character) != 0
-				? cached->second
-				: face;
-		}
-		if (lifecycle.faceReplacements.size() >=
-			kMaximumCachedFaceReplacements)
-			return face;
-
+		FT_StreamRec sourceStream{};
 		FT_Library library = nullptr;
-		FaceOpenFunction const openFace = lifecycle.faceOpen;
-		FaceDoneFunction const doneFace = lifecycle.faceDone;
-		if (!ReadFaceLibrary(face, library) || openFace == nullptr ||
-			doneFace == nullptr)
-			return face;
+		FaceOpenFunction openFace = nullptr;
+		FaceDoneFunction doneFace = nullptr;
+		{
+			std::lock_guard<std::mutex> cacheLock(
+				lifecycle.faceReplacementMutex);
+			if (lifecycle.faceReplacements.IsReplacement(face))
+				return face;
+			auto const cached = lifecycle.faceReplacements.Lookup(face);
+			if (cached.state ==
+				renderer::unity::FaceReplacementRegistry::State::pending)
+				return face;
+			if (cached.state ==
+				renderer::unity::FaceReplacementRegistry::State::published)
+			{
+				FT_Face const replacement =
+					static_cast<FT_Face>(const_cast<void*>(cached.replacement));
+				if (FT_Get_Char_Index(replacement, character) == 0)
+					return face;
+				if (auto* const evidence = UnityEvidence())
+					renderer::unity::RecordUnityFontFaceReplacementHit(
+						*evidence);
+				return replacement;
+			}
+
+			if (!ReadFaceStream(face, sourceStream))
+				return face;
+			FT_Stream_IoFunc const canonicalRead =
+				lifecycle.fileStreamRead.load(std::memory_order_acquire);
+			if (canonicalRead != nullptr && sourceStream.read != canonicalRead)
+				return face;
+			std::wstring nativeFamily;
+			ReadUnityFaceFamilyName(face, nativeFamily);
+			if (nativeFamily.empty() ||
+				!renderer::unity::ResolveFamilyFaceOpenPath(
+					*redirects, nativeFamily.c_str(), redirect))
+				return face;
+
+			if (auto* const evidence = UnityEvidence())
+				renderer::unity::RecordUnityFontFaceReplacementCandidate(
+					*evidence, nativeFamily.c_str());
+			openFace = lifecycle.faceOpen;
+			doneFace = lifecycle.faceDone;
+			if (!ReadFaceLibrary(face, library) || openFace == nullptr ||
+				doneFace == nullptr ||
+				!lifecycle.faceReplacements.Reserve(face))
+				return face;
+		}
 
 		FT_Open_Args arguments{};
 		arguments.flags = FT_OPEN_PATHNAME;
@@ -454,57 +424,84 @@ FT_Face ReplaceCharacterLookupFace(
 		FT_Error result = 0;
 		{
 			ScopedFaceOpenRedirectBypass bypass;
+			// ft_open_face_internal enters the hooked Done_Face on late allocation
+			// failures, so holding the registry mutex here would deadlock this thread.
 			result = openFace(
 				library, &arguments,
 				static_cast<FT_Long>(redirect.replacementFaceIndex),
 				&replacement, 0);
 		}
-		bool const opened = result == 0 && replacement != nullptr;
-		if (!opened)
+		if (result != 0 || replacement == nullptr)
 		{
-			renderer::unity::UnityFontEvidenceV1* const evidence =
-				UnityEvidence();
-			if (evidence != nullptr)
+			{
+				std::lock_guard<std::mutex> cacheLock(
+					lifecycle.faceReplacementMutex);
+				lifecycle.faceReplacements.Abandon(face);
+			}
+			if (auto* const evidence = UnityEvidence())
 				renderer::unity::RecordUnityFontFaceReplacement(
 					*evidence, false, redirect.replacementPath.c_str());
 			return face;
 		}
 
-		bool reverseInserted = false;
-		bool nativeInserted = false;
-		try
+		FT_StreamRec replacementStream{};
+		bool const replacementStreamReadable =
+			ReadFaceStream(replacement, replacementStream);
+		FT_Stream_IoFunc canonicalRead =
+			lifecycle.fileStreamRead.load(std::memory_order_acquire);
+		if (replacementStreamReadable && canonicalRead == nullptr)
 		{
-			reverseInserted =
-				lifecycle.replacementFaces.insert(replacement).second;
-			if (reverseInserted)
-				nativeInserted = lifecycle.faceReplacements.emplace(
-					face, replacement).second;
+			FT_Stream_IoFunc expected = nullptr;
+			if (lifecycle.fileStreamRead.compare_exchange_strong(
+					expected, replacementStream.read,
+					std::memory_order_acq_rel, std::memory_order_acquire))
+				canonicalRead = replacementStream.read;
+			else
+				canonicalRead = expected;
 		}
-		catch (...)
+		bool const customSource = replacementStreamReadable &&
+			canonicalRead != nullptr && sourceStream.read != canonicalRead;
+		if (!replacementStreamReadable || customSource)
 		{
-		}
-		if (!reverseInserted || !nativeInserted)
-		{
-			if (nativeInserted)
-				lifecycle.faceReplacements.erase(face);
-			if (reverseInserted)
-				lifecycle.replacementFaces.erase(replacement);
-			cacheLock.unlock();
+			{
+				std::lock_guard<std::mutex> cacheLock(
+					lifecycle.faceReplacementMutex);
+				lifecycle.faceReplacements.Abandon(face);
+			}
 			doneFace(replacement);
-			renderer::unity::UnityFontEvidenceV1* const evidence =
-				UnityEvidence();
-			if (evidence != nullptr)
-				renderer::unity::RecordUnityFontFaceReplacement(
-					*evidence, false, redirect.replacementPath.c_str());
+			if (!replacementStreamReadable)
+			{
+				if (auto* const evidence = UnityEvidence())
+					renderer::unity::RecordUnityFontFaceReplacement(
+						*evidence, false, redirect.replacementPath.c_str());
+			}
 			return face;
 		}
 
-		if (evidence != nullptr)
+		bool published = false;
+		bool replacementHasGlyph = false;
+		{
+			std::lock_guard<std::mutex> cacheLock(
+				lifecycle.faceReplacementMutex);
+			published = lifecycle.faceReplacements.Publish(face, replacement);
+			if (published)
+				replacementHasGlyph =
+					FT_Get_Char_Index(replacement, character) != 0;
+		}
+		if (!published)
+		{
+			doneFace(replacement);
+			return face;
+		}
+		if (auto* const evidence = UnityEvidence())
+		{
 			renderer::unity::RecordUnityFontFaceReplacement(
 				*evidence, true, redirect.replacementPath.c_str());
-		return FT_Get_Char_Index(replacement, character) != 0
-			? replacement
-			: face;
+			if (replacementHasGlyph)
+				renderer::unity::RecordUnityFontFaceReplacementHit(
+					*evidence);
+		}
+		return replacementHasGlyph ? replacement : face;
 	}
 	catch (...)
 	{
@@ -520,36 +517,22 @@ FT_Error HookFaceDone(FT_Face face) noexcept
 	if (original == nullptr)
 		return 0x06; // FT_Err_Invalid_Argument
 
-	FT_Face pairedReplacement = nullptr;
+	renderer::unity::FaceReplacementRegistry::ReleaseResult released;
 	try
 	{
 		std::lock_guard<std::mutex> cacheLock(
 			lifecycle.faceReplacementMutex);
-		auto const native = lifecycle.faceReplacements.find(face);
-		if (native != lifecycle.faceReplacements.end())
-		{
-			pairedReplacement = native->second;
-			lifecycle.faceReplacements.erase(native);
-			lifecycle.replacementFaces.erase(pairedReplacement);
-		}
-		else if (lifecycle.replacementFaces.erase(face) != 0)
-		{
-			for (auto entry = lifecycle.faceReplacements.begin();
-				entry != lifecycle.faceReplacements.end();)
-			{
-				if (entry->second == face)
-					entry = lifecycle.faceReplacements.erase(entry);
-				else
-					++entry;
-			}
-		}
+		released = lifecycle.faceReplacements.Release(face);
 	}
 	catch (...)
 	{
 	}
+	// Unity exports no FT_Reference_Face, so its Done_Face on a native face is
+	// final and the paired replacement can be released immediately afterward.
 	FT_Error const result = original(face);
-	if (pairedReplacement != nullptr)
-		original(pairedReplacement);
+	if (released.pairedReplacement != nullptr)
+		original(static_cast<FT_Face>(
+			const_cast<void*>(released.pairedReplacement)));
 	return result;
 }
 
@@ -558,8 +541,10 @@ void ClearFaceReplacementCache(UnityLifecycleState& lifecycle) noexcept
 	try
 	{
 		std::lock_guard<std::mutex> lock(lifecycle.faceReplacementMutex);
-		lifecycle.faceReplacements.clear();
-		lifecycle.replacementFaces.clear();
+		// Unity may still hold a returned replacement pointer after detach. Its
+		// FreeType library outlives the renderer, so only the bookkeeping is cleared.
+		lifecycle.faceReplacements.Clear();
+		lifecycle.fileStreamRead.store(nullptr, std::memory_order_release);
 	}
 	catch (...)
 	{
@@ -757,6 +742,9 @@ FT_Face HookLegacyCharacterLookup(
 	if (face != nullptr)
 		face = ReplaceCharacterLookupFace(face, character, selection);
 
+	// FT_Library is not thread-safe, so Unity serializes its FreeType calls and
+	// the hooked lookup and Done_Face cannot interleave. These evidence reads do
+	// not need the replacement-registry lock after the lookup returns.
 	renderer::unity::UnityFontEvidenceV1* const evidence = UnityEvidence();
 	if (evidence != nullptr)
 	{

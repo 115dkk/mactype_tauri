@@ -280,6 +280,18 @@ void RecordUnityFontFaceReplacementCandidate(
 	UnlockEvidence(evidence);
 }
 
+void RecordUnityFontFaceReplacementHit(
+	UnityFontEvidenceV1& evidence) noexcept
+{
+	if (evidence.structSize != sizeof(evidence) ||
+		evidence.schema != kUnityFontEvidenceSchema ||
+		!TryAcquireEvidenceLock(evidence))
+		return;
+	if (evidence.faceReplacementHits != (std::numeric_limits<LONG>::max)())
+		++evidence.faceReplacementHits;
+	UnlockEvidence(evidence);
+}
+
 void RecordUnityFontFaceReplacement(
 	UnityFontEvidenceV1& evidence,
 	bool succeeded,
@@ -380,6 +392,7 @@ bool ReadUnityFontEvidence(
 		evidence.faceReplacementFallbacks;
 	snapshot.faceReplacementCandidates =
 		evidence.faceReplacementCandidates;
+	snapshot.faceReplacementHits = evidence.faceReplacementHits;
 	std::memcpy(
 		snapshot.lastMappedOsFaceFamily, evidence.lastMappedOsFaceFamily,
 		sizeof(snapshot.lastMappedOsFaceFamily));

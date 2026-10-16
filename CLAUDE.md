@@ -67,15 +67,24 @@ below wherever the two conflict.
   when the renderer attaches after Unity resolved a mapped source file
   natively: Unity's caller caches that face per `FontRef` and never asks the
   resolver again, so the character-lookup adapter replaces it at the point
-  where Unity fetches the face for a character. It identifies the face by its
-  own `family_name` (then by the stream pathname, which FreeType only borrows
-  from the caller and may dangle), replaces only faces FreeType opened from a
-  file stream (memory and custom-stream faces, including bundled assets that
-  carry a mapped family name, stay untouched), opens the replacement once
-  through Unity's FreeType library via the original face-open trampoline,
-  returns it only when it has a glyph for the requested character, keeps the
-  native-to-replacement map bounded, and releases both through the hooked
-  `FT_Done_Face` when Unity frees the native face. Every other diagnostic hook
+  where Unity fetches the face for a character. It identifies the face only by
+  its own `family_name`: FreeType borrows the stream pathname from the caller,
+  so that pointer is never read. It replaces only faces whose stream carries
+  FreeType's own file read callback, learned from the replacement the renderer
+  itself opens by pathname (memory and custom-stream faces, including bundled
+  assets that carry a mapped family name, stay untouched). It opens the
+  replacement once through Unity's FreeType library via the original face-open
+  trampoline with no registry lock held, because FreeType's open failure path
+  re-enters `FT_Done_Face`; a pending reservation keeps concurrent lookups on
+  the native face. It returns the replacement only when it has a glyph for the
+  requested character, keeps the native-to-replacement registry bounded, and
+  releases both through the hooked `FT_Done_Face` when Unity frees the native
+  face (final by construction: the player exports no `FT_Reference_Face`).
+  Detach leaves published replacement faces alive on purpose, since Unity may
+  still hold a returned pointer and its library outlives the renderer. A
+  variable replacement's named instance is keyed by file, base face index and
+  axis values, and the fvar parser follows `ttcf` collections to the selected
+  face. Every other diagnostic hook
   observes only: it never replaces a returned `FT_Face`, retains a raw face
   pointer, or changes cache lookup results.
 - A DirectWrite source face can expose localized, typographic, weight/style,

@@ -12,6 +12,8 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -143,6 +145,45 @@ struct FaceOpenPathRedirect final
 	long replacementFaceIndex = 0;
 };
 
+class FaceReplacementRegistry final
+{
+public:
+	enum class State : unsigned char
+	{
+		none,
+		pending,
+		published,
+	};
+
+	struct LookupResult final
+	{
+		State state = State::none;
+		const void* replacement = nullptr;
+	};
+
+	struct ReleaseResult final
+	{
+		bool releasedNative = false;
+		const void* pairedReplacement = nullptr;
+	};
+
+	[[nodiscard]] LookupResult Lookup(const void* native) const noexcept;
+	[[nodiscard]] bool Reserve(const void* native) noexcept;
+	[[nodiscard]] bool Publish(
+		const void* native,
+		const void* replacement) noexcept;
+	void Abandon(const void* native) noexcept;
+	[[nodiscard]] ReleaseResult Release(const void* face) noexcept;
+	void Clear() noexcept;
+	[[nodiscard]] std::size_t size() const noexcept;
+	[[nodiscard]] bool IsReplacement(const void* face) const noexcept;
+
+private:
+	static constexpr std::size_t kMaximumEntries = 256;
+	std::unordered_map<const void*, const void*> replacementsByNative_;
+	std::unordered_set<const void*> replacementFaces_;
+};
+
 class FontFileRedirectTable final
 {
 public:
@@ -219,6 +260,7 @@ bool ReadReadableUtf8Path(
 bool ParseSfntNamedInstanceIndex(
 	const unsigned char* bytes,
 	std::size_t size,
+	long baseFaceIndex,
 	const AxisValue* axisValues,
 	std::size_t axisValueCount,
 	long& instanceIndex) noexcept;

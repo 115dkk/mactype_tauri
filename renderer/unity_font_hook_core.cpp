@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cwchar>
+#include <iterator>
 #include <limits>
 #include <set>
 
@@ -338,11 +339,11 @@ constexpr AdapterDescriptor kProductionDescriptors[] = {
 	{"unity-6000.0.62-x64",0x8664,0x6902F1F8,0x0210D000,
 	 {{0x01,0x5D,0x60,0x95,0x0D,0xCD,0xDF,0x4F,0x98,0x1E,0xC2,0x4B,0x13,0x06,0x48,0xE2}},1,0x01464760,RenderAbi::internalRender,&kInternalPrefixX64,
 	 0x014631A0,&kFaceOpenPrefixLateX64,FaceOpenAbi::unityInternal},
-	// The character lookup replaces faces that Unity cached before a late
-	// attach, using each face's stream path and index because this build's
-	// FontRef layout is undecodable. UNITY_FT_Done_Face releases each paired
-	// replacement. The pathname catalog stays native, and TextCore::FontEngine::
-	// LoadFontFace stays unhooked because this build added a fourth parameter.
+	// Unity caches the selected face before a late attach, so this build needs
+	// the character-lookup and final face-release boundaries. Its undecodable
+	// FontRef leaves the opened face's family name as the safe identity. The
+	// pathname catalog stays native, and TextCore::FontEngine::LoadFontFace
+	// stays unhooked because this build added a fourth parameter.
 	{"unity-6000.3.21-x64",0x8664,0x6A607C81,0x02457000,
 	 {{0x64,0xA7,0x50,0xE1,0xE7,0xC9,0xF0,0x44,0x89,0x07,0xDE,0x2D,0xB3,0x87,0x2D,0x5D}},1,0x0166D120,RenderAbi::internalRender,&kInternalPrefixX64,
 	 0x0166B910,&kFaceOpenPrefixLateX64,FaceOpenAbi::unityInternal,
@@ -443,8 +444,17 @@ bool IsMemoryRange(
 
 struct NamedInstanceFaceIndexCacheEntry final
 {
+	long baseFaceIndex = 0;
+	std::vector<AxisValue> axisValues;
+	long resolvedFaceIndex = 0;
+};
+
+struct NamedInstanceFileCacheEntry final
+{
 	std::wstring path;
-	long faceIndex = 0;
+	bool bytesAvailable = false;
+	std::vector<unsigned char> bytes;
+	std::vector<NamedInstanceFaceIndexCacheEntry> resolvedIndices;
 };
 
 bool ReadFontFileBytes(
@@ -478,27 +488,58 @@ bool ReadFontFileBytes(
 	return true;
 }
 
+bool EqualAxisValues(
+	const std::vector<AxisValue>& left,
+	const std::vector<AxisValue>& right) noexcept
+{
+	return left.size() == right.size() &&
+		std::equal(
+			left.begin(), left.end(), right.begin(),
+			[](const AxisValue& leftValue, const AxisValue& rightValue) {
+				return leftValue.tag == rightValue.tag &&
+					leftValue.value == rightValue.value;
+			});
+}
+
 long ResolveReplacementFaceIndex(
 	const InstalledFontFace& replacement,
-	std::vector<NamedInstanceFaceIndexCacheEntry>& cache)
+	std::vector<NamedInstanceFileCacheEntry>& cache)
 {
 	if (replacement.axisValues.empty() || replacement.faceIndex < 0 ||
 		replacement.faceIndex > 0xFFFF)
 		return replacement.faceIndex;
-	auto const cached = std::find_if(
+
+	std::vector<AxisValue> sortedAxisValues = replacement.axisValues;
+	std::stable_sort(
+		sortedAxisValues.begin(), sortedAxisValues.end(),
+		[](const AxisValue& left, const AxisValue& right) {
+			return left.tag < right.tag;
+		});
+	auto file = std::find_if(
 		cache.begin(), cache.end(), [&](const auto& entry) {
 			return EqualOrdinalIgnoreCase(entry.path, replacement.filePath);
 		});
-	if (cached != cache.end())
-		return cached->faceIndex;
+	if (file == cache.end())
+	{
+		cache.push_back({replacement.filePath});
+		file = std::prev(cache.end());
+		file->bytesAvailable = ReadFontFileBytes(file->path, file->bytes);
+	}
+	auto const cached = std::find_if(
+		file->resolvedIndices.begin(), file->resolvedIndices.end(),
+		[&](const NamedInstanceFaceIndexCacheEntry& entry) {
+			return entry.baseFaceIndex == replacement.faceIndex &&
+				EqualAxisValues(entry.axisValues, sortedAxisValues);
+		});
+	if (cached != file->resolvedIndices.end())
+		return cached->resolvedFaceIndex;
 
 	long resolvedFaceIndex = replacement.faceIndex;
-	std::vector<unsigned char> bytes;
 	long namedInstance = 0;
-	if (ReadFontFileBytes(replacement.filePath, bytes) &&
+	if (file->bytesAvailable &&
 		ParseSfntNamedInstanceIndex(
-			bytes.data(), bytes.size(), replacement.axisValues.data(),
-			replacement.axisValues.size(), namedInstance) &&
+			file->bytes.data(), file->bytes.size(), replacement.faceIndex,
+			sortedAxisValues.data(), sortedAxisValues.size(), namedInstance) &&
 		namedInstance != 0)
 	{
 		unsigned long const encoded =
@@ -508,7 +549,8 @@ long ResolveReplacementFaceIndex(
 			static_cast<unsigned long>((std::numeric_limits<long>::max)()))
 			resolvedFaceIndex = static_cast<long>(encoded);
 	}
-	cache.push_back({replacement.filePath, resolvedFaceIndex});
+	file->resolvedIndices.push_back({
+		replacement.faceIndex, std::move(sortedAxisValues), resolvedFaceIndex});
 	return resolvedFaceIndex;
 }
 
@@ -685,9 +727,112 @@ private:
 
 } // namespace
 
+FaceReplacementRegistry::LookupResult FaceReplacementRegistry::Lookup(
+	const void* native) const noexcept
+{
+	auto const entry = replacementsByNative_.find(native);
+	if (entry == replacementsByNative_.end())
+		return {};
+	return entry->second == nullptr
+		? LookupResult{State::pending, nullptr}
+		: LookupResult{State::published, entry->second};
+}
+
+bool FaceReplacementRegistry::Reserve(const void* native) noexcept
+{
+	if (native == nullptr || replacementsByNative_.size() >= kMaximumEntries ||
+		replacementFaces_.find(native) != replacementFaces_.end())
+		return false;
+	try
+	{
+		return replacementsByNative_.emplace(native, nullptr).second;
+	}
+	catch (...)
+	{
+		return false;
+	}
+}
+
+bool FaceReplacementRegistry::Publish(
+	const void* native,
+	const void* replacement) noexcept
+{
+	if (native == nullptr || replacement == nullptr)
+		return false;
+	auto const reservation = replacementsByNative_.find(native);
+	if (reservation == replacementsByNative_.end() ||
+		reservation->second != nullptr)
+		return false;
+	try
+	{
+		if (!replacementFaces_.insert(replacement).second)
+		{
+			replacementsByNative_.erase(reservation);
+			return false;
+		}
+		reservation->second = replacement;
+		return true;
+	}
+	catch (...)
+	{
+		replacementsByNative_.erase(reservation);
+		return false;
+	}
+}
+
+void FaceReplacementRegistry::Abandon(const void* native) noexcept
+{
+	auto const reservation = replacementsByNative_.find(native);
+	if (reservation != replacementsByNative_.end() &&
+		reservation->second == nullptr)
+		replacementsByNative_.erase(reservation);
+}
+
+FaceReplacementRegistry::ReleaseResult FaceReplacementRegistry::Release(
+	const void* face) noexcept
+{
+	auto const native = replacementsByNative_.find(face);
+	if (native != replacementsByNative_.end())
+	{
+		const void* const replacement = native->second;
+		if (replacement != nullptr)
+			replacementFaces_.erase(replacement);
+		replacementsByNative_.erase(native);
+		return {true, replacement};
+	}
+	if (replacementFaces_.erase(face) == 0)
+		return {};
+	for (auto entry = replacementsByNative_.begin();
+		entry != replacementsByNative_.end();)
+	{
+		if (entry->second == face)
+			entry = replacementsByNative_.erase(entry);
+		else
+			++entry;
+	}
+	return {};
+}
+
+void FaceReplacementRegistry::Clear() noexcept
+{
+	replacementsByNative_.clear();
+	replacementFaces_.clear();
+}
+
+std::size_t FaceReplacementRegistry::size() const noexcept
+{
+	return replacementsByNative_.size();
+}
+
+bool FaceReplacementRegistry::IsReplacement(const void* face) const noexcept
+{
+	return replacementFaces_.find(face) != replacementFaces_.end();
+}
+
 bool ParseSfntNamedInstanceIndex(
 	const unsigned char* bytes,
 	std::size_t size,
+	long baseFaceIndex,
 	const AxisValue* axisValues,
 	std::size_t axisValueCount,
 	long& instanceIndex) noexcept
@@ -695,27 +840,55 @@ bool ParseSfntNamedInstanceIndex(
 	instanceIndex = 0;
 	try
 	{
-		if (bytes == nullptr || size < 12 ||
+		if (bytes == nullptr || size < 12 || baseFaceIndex < 0 ||
 			(axisValues == nullptr && axisValueCount != 0))
 			return false;
 		std::uint32_t scaler = 0;
+		if (!ReadBigEndian32(bytes, size, 0, scaler))
+			return false;
+		std::size_t sfntOffset = 0;
+		if (scaler == 0x74746366)
+		{
+			std::uint32_t fontCount = 0;
+			if (!ReadBigEndian32(bytes, size, 8, fontCount) ||
+				fontCount == 0 || fontCount > 4096 ||
+				static_cast<unsigned long>(baseFaceIndex) >= fontCount)
+				return false;
+			std::size_t const offsetsBytes =
+				static_cast<std::size_t>(fontCount) * 4;
+			if (offsetsBytes > size - 12)
+				return false;
+			std::uint32_t faceOffset = 0;
+			if (!ReadBigEndian32(
+					bytes, size,
+					12 + static_cast<std::size_t>(baseFaceIndex) * 4,
+					faceOffset) ||
+				faceOffset > size || 12 > size - faceOffset)
+				return false;
+			sfntOffset = faceOffset;
+		}
+		else if (baseFaceIndex != 0)
+			return false;
+
 		std::uint16_t tableCount = 0;
-		if (!ReadBigEndian32(bytes, size, 0, scaler) ||
-			!ReadBigEndian16(bytes, size, 4, tableCount) ||
+		if (!ReadBigEndian32(bytes, size, sfntOffset, scaler) ||
+			!ReadBigEndian16(bytes, size, sfntOffset + 4, tableCount) ||
 			(scaler != 0x00010000 && scaler != 0x4F54544F &&
 			 scaler != 0x74727565 && scaler != 0x74797031) ||
 			tableCount == 0 || tableCount > 4096)
 			return false;
 		std::size_t const tableDirectoryBytes =
 			static_cast<std::size_t>(tableCount) * 16;
-		if (tableDirectoryBytes > size - 12)
+		std::size_t const tableDirectoryOffset = sfntOffset + 12;
+		if (tableDirectoryOffset > size ||
+			tableDirectoryBytes > size - tableDirectoryOffset)
 			return false;
 
 		std::size_t fvarOffset = 0;
 		std::size_t fvarLength = 0;
 		for (std::uint16_t table = 0; table < tableCount; ++table)
 		{
-			std::size_t const record = 12 +
+			std::size_t const record = tableDirectoryOffset +
 				static_cast<std::size_t>(table) * 16;
 			std::uint32_t tag = 0;
 			if (!ReadBigEndian32(bytes, size, record, tag))
@@ -856,7 +1029,7 @@ std::shared_ptr<const FontFileRedirectTable> FontFileRedirectTable::Build(
 	{
 		std::vector<Redirect> redirects;
 		std::vector<InstalledFontFace> ambiguousSources;
-		std::vector<NamedInstanceFaceIndexCacheEntry> namedInstanceCache;
+		std::vector<NamedInstanceFileCacheEntry> namedInstanceCache;
 		for (const font_substitution::Rule& rule : substitutions.rules())
 		{
 			font_substitution::Resolution const resolution = substitutions.Resolve(

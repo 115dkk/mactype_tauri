@@ -9,7 +9,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace {
@@ -136,10 +138,131 @@ renderer::UnityCoverageLut IdentityLut()
     return lut;
 }
 
+bool WriteTemporaryFontFile(
+    const std::vector<unsigned char>& bytes,
+    std::wstring& path)
+{
+    path.clear();
+    wchar_t directory[MAX_PATH]{};
+    DWORD const directoryLength = GetTempPathW(_countof(directory), directory);
+    if (directoryLength == 0 || directoryLength >= _countof(directory))
+        return false;
+    wchar_t temporary[MAX_PATH]{};
+    if (GetTempFileNameW(directory, L"mtu", 0, temporary) == 0)
+        return false;
+    HANDLE const file = CreateFileW(
+        temporary, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+        FILE_ATTRIBUTE_TEMPORARY, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+    {
+        DeleteFileW(temporary);
+        return false;
+    }
+    DWORD written = 0;
+    bool const succeeded = bytes.size() <=
+            static_cast<std::size_t>((std::numeric_limits<DWORD>::max)()) &&
+        WriteFile(file, bytes.data(), static_cast<DWORD>(bytes.size()),
+            &written, nullptr) != FALSE &&
+        written == static_cast<DWORD>(bytes.size());
+    CloseHandle(file);
+    if (!succeeded)
+    {
+        DeleteFileW(temporary);
+        return false;
+    }
+    path = temporary;
+    return true;
+}
+
 } // namespace
 
 int main()
 {
+    renderer::unity::FaceReplacementRegistry faceRegistry;
+    int nativeFace = 0;
+    int replacementFace = 0;
+    auto faceLookup = faceRegistry.Lookup(&nativeFace);
+    Require(faceLookup.state ==
+            renderer::unity::FaceReplacementRegistry::State::none &&
+        faceLookup.replacement == nullptr,
+        "a missing face replacement did not report the none state");
+    Require(faceRegistry.Reserve(&nativeFace),
+        "a native face could not reserve a replacement slot");
+    faceLookup = faceRegistry.Lookup(&nativeFace);
+    Require(faceLookup.state ==
+            renderer::unity::FaceReplacementRegistry::State::pending &&
+        faceLookup.replacement == nullptr,
+        "a reserved face replacement did not report the pending state");
+    Require(faceRegistry.Publish(&nativeFace, &replacementFace),
+        "a pending face replacement could not be published");
+    faceLookup = faceRegistry.Lookup(&nativeFace);
+    Require(faceLookup.state ==
+            renderer::unity::FaceReplacementRegistry::State::published &&
+        faceLookup.replacement == &replacementFace &&
+        faceRegistry.IsReplacement(&replacementFace),
+        "a published face replacement lost either registry direction");
+    auto faceRelease = faceRegistry.Release(&nativeFace);
+    Require(faceRelease.releasedNative &&
+        faceRelease.pairedReplacement == &replacementFace &&
+        faceRegistry.Lookup(&nativeFace).state ==
+            renderer::unity::FaceReplacementRegistry::State::none &&
+        !faceRegistry.IsReplacement(&replacementFace),
+        "releasing a native face did not return and remove its replacement");
+
+    int releasedReservation = 0;
+    int lateReplacement = 0;
+    Require(faceRegistry.Reserve(&releasedReservation),
+        "a release-race fixture could not reserve a slot");
+    faceRelease = faceRegistry.Release(&releasedReservation);
+    Require(faceRelease.releasedNative &&
+        faceRelease.pairedReplacement == nullptr &&
+        !faceRegistry.Publish(&releasedReservation, &lateReplacement),
+        "a replacement published after its native reservation was released");
+
+    int pendingNative = 0;
+    int unpublishedReplacement = 0;
+    Require(faceRegistry.Reserve(&pendingNative),
+        "an open-failure fixture could not reserve a slot");
+    faceRelease = faceRegistry.Release(&unpublishedReplacement);
+    Require(!faceRelease.releasedNative &&
+        faceRelease.pairedReplacement == nullptr &&
+        faceRegistry.Lookup(&pendingNative).state ==
+            renderer::unity::FaceReplacementRegistry::State::pending,
+        "Done_Face for an unpublished replacement erased the native reservation");
+    faceRegistry.Abandon(&pendingNative);
+    Require(faceRegistry.Reserve(&pendingNative),
+        "an abandoned face replacement reservation still consumed its slot");
+    faceRelease = faceRegistry.Release(&pendingNative);
+    Require(faceRelease.releasedNative &&
+        faceRelease.pairedReplacement == nullptr,
+        "releasing a pending native face reported a replacement");
+
+    int reverseNative = 0;
+    int reverseReplacement = 0;
+    Require(faceRegistry.Reserve(&reverseNative) &&
+        faceRegistry.Publish(&reverseNative, &reverseReplacement),
+        "a reverse-release fixture could not publish its pair");
+    faceRelease = faceRegistry.Release(&reverseReplacement);
+    Require(!faceRelease.releasedNative &&
+        faceRelease.pairedReplacement == nullptr &&
+        faceRegistry.Lookup(&reverseNative).state ==
+            renderer::unity::FaceReplacementRegistry::State::none &&
+        !faceRegistry.IsReplacement(&reverseReplacement),
+        "releasing by replacement key did not remove the pair");
+
+    std::array<int, 257> capacityFaces{};
+    for (std::size_t index = 0; index < 256; ++index)
+    {
+        Require(faceRegistry.Reserve(&capacityFaces[index]),
+            "the face replacement registry reached capacity too early");
+    }
+    Require(faceRegistry.size() == 256 &&
+        !faceRegistry.Reserve(&capacityFaces.back()),
+        "the face replacement registry exceeded its 256-entry cap");
+    faceRegistry.Clear();
+    Require(faceRegistry.size() == 0,
+        "clearing the face replacement registry retained entries");
+
     std::vector<unsigned char> sfnt(256, 0);
     auto writeBe16 = [&](std::size_t offset, unsigned int value) {
         sfnt[offset] = static_cast<unsigned char>(value >> 8);
@@ -226,19 +349,38 @@ int main()
     renderer::unity::AxisValue weightAxis{weightTag, 500.0F};
     long namedInstance = -1;
     Require(renderer::unity::ParseSfntNamedInstanceIndex(
-        fvar.data(), fvar.size(), &weightAxis, 1, namedInstance) &&
+        fvar.data(), fvar.size(), 0, &weightAxis, 1, namedInstance) &&
         namedInstance == 2,
         "the 500-weight fvar instance did not receive its one-based index");
     weightAxis.value = 400.0F;
     Require(renderer::unity::ParseSfntNamedInstanceIndex(
-        fvar.data(), fvar.size(), &weightAxis, 1, namedInstance) &&
+        fvar.data(), fvar.size(), 0, &weightAxis, 1, namedInstance) &&
         namedInstance == 0,
         "the default fvar instance did not keep face index zero");
     weightAxis.value = 450.0F;
     Require(!renderer::unity::ParseSfntNamedInstanceIndex(
-        fvar.data(), fvar.size(), &weightAxis, 1, namedInstance) &&
+        fvar.data(), fvar.size(), 0, &weightAxis, 1, namedInstance) &&
         namedInstance == 0,
         "an unmatched fvar coordinate selected a named instance");
+    Require(!renderer::unity::ParseSfntNamedInstanceIndex(
+        fvar.data(), fvar.size(), 1, &weightAxis, 1, namedInstance),
+        "a standalone SFNT accepted a nonzero base face index");
+    auto truncatedFvarInstances = fvar;
+    truncatedFvarInstances[24] = 0;
+    truncatedFvarInstances[25] = 0;
+    truncatedFvarInstances[26] = 0;
+    truncatedFvarInstances[27] = 51;
+    Require(!renderer::unity::ParseSfntNamedInstanceIndex(
+        truncatedFvarInstances.data(), truncatedFvarInstances.size(), 0,
+        &weightAxis, 1, namedInstance),
+        "an fvar instance array extending past its table was accepted");
+    auto zeroAxisFvar = fvar;
+    zeroAxisFvar[72] = 0;
+    zeroAxisFvar[73] = 0;
+    Require(!renderer::unity::ParseSfntNamedInstanceIndex(
+        zeroAxisFvar.data(), zeroAxisFvar.size(), 0,
+        &weightAxis, 1, namedInstance),
+        "an fvar table with no axes was accepted");
 
     std::vector<unsigned char> ttc(512, 0);
     auto writeTtcBe16 = [&](std::size_t offset, unsigned int value) {
@@ -288,6 +430,80 @@ int main()
         ttcFaces[1].family == L"Second Face" && ttcFaces[1].faceIndex == 1,
         "TTC family parsing assigned names to the wrong face index");
 
+    std::vector<unsigned char> variableTtc(640, 0);
+    auto writeVariableTtcBe16 = [&](std::size_t offset, unsigned int value) {
+        variableTtc[offset] = static_cast<unsigned char>(value >> 8);
+        variableTtc[offset + 1] = static_cast<unsigned char>(value);
+    };
+    auto writeVariableTtcBe32 = [&](std::size_t offset, std::uint32_t value) {
+        variableTtc[offset] = static_cast<unsigned char>(value >> 24);
+        variableTtc[offset + 1] = static_cast<unsigned char>(value >> 16);
+        variableTtc[offset + 2] = static_cast<unsigned char>(value >> 8);
+        variableTtc[offset + 3] = static_cast<unsigned char>(value);
+    };
+    std::memcpy(variableTtc.data(), "ttcf", 4);
+    writeVariableTtcBe32(4, 0x00010000);
+    writeVariableTtcBe32(8, 2);
+    writeVariableTtcBe32(12, 32);
+    writeVariableTtcBe32(16, 128);
+    auto writeVariableTtcFace = [&](std::size_t faceOffset,
+                                    std::size_t tableOffset,
+                                    const std::vector<unsigned int>& weights) {
+        writeVariableTtcBe32(faceOffset, 0x00010000);
+        writeVariableTtcBe16(faceOffset + 4, 1);
+        std::memcpy(variableTtc.data() + faceOffset + 12, "fvar", 4);
+        writeVariableTtcBe32(faceOffset + 20,
+            static_cast<std::uint32_t>(tableOffset));
+        writeVariableTtcBe32(faceOffset + 24,
+            static_cast<std::uint32_t>(36 + weights.size() * 8));
+        writeVariableTtcBe16(tableOffset, 1);
+        writeVariableTtcBe16(tableOffset + 2, 0);
+        writeVariableTtcBe16(tableOffset + 4, 16);
+        writeVariableTtcBe16(tableOffset + 6, 2);
+        writeVariableTtcBe16(tableOffset + 8, 1);
+        writeVariableTtcBe16(tableOffset + 10, 20);
+        writeVariableTtcBe16(tableOffset + 12,
+            static_cast<unsigned int>(weights.size()));
+        writeVariableTtcBe16(tableOffset + 14, 8);
+        std::memcpy(variableTtc.data() + tableOffset + 16, "wght", 4);
+        writeVariableTtcBe32(tableOffset + 20, 100U << 16);
+        writeVariableTtcBe32(tableOffset + 24, 400U << 16);
+        writeVariableTtcBe32(tableOffset + 28, 900U << 16);
+        for (std::size_t index = 0; index < weights.size(); ++index)
+        {
+            std::size_t const instance = tableOffset + 36 + index * 8;
+            writeVariableTtcBe16(instance,
+                static_cast<unsigned int>(300 + index));
+            writeVariableTtcBe32(instance + 4, weights[index] << 16);
+        }
+    };
+    writeVariableTtcFace(32, 256, {500});
+    writeVariableTtcFace(128, 384, {300, 500});
+    weightAxis.value = 500.0F;
+    Require(renderer::unity::ParseSfntNamedInstanceIndex(
+        variableTtc.data(), variableTtc.size(), 0,
+        &weightAxis, 1, namedInstance) && namedInstance == 1,
+        "the first TTC face did not resolve its fvar instance");
+    Require(renderer::unity::ParseSfntNamedInstanceIndex(
+        variableTtc.data(), variableTtc.size(), 1,
+        &weightAxis, 1, namedInstance) && namedInstance == 2,
+        "the second TTC face used the first face's fvar instance position");
+    std::vector<unsigned char> truncatedTtcHeader(
+        variableTtc.begin(), variableTtc.begin() + 16);
+    Require(!renderer::unity::ParseSfntNamedInstanceIndex(
+        truncatedTtcHeader.data(), truncatedTtcHeader.size(), 0,
+        &weightAxis, 1, namedInstance),
+        "a TTC header cut before its offset array was accepted");
+    auto invalidTtcOffset = variableTtc;
+    invalidTtcOffset[16] = 0;
+    invalidTtcOffset[17] = 0;
+    invalidTtcOffset[18] = 3;
+    invalidTtcOffset[19] = 0;
+    Require(!renderer::unity::ParseSfntNamedInstanceIndex(
+        invalidTtcOffset.data(), invalidTtcOffset.size(), 1,
+        &weightAxis, 1, namedInstance),
+        "a TTC face offset beyond the file was accepted");
+
     renderer::unity::UnityFontEvidenceV1 evidence{};
     renderer::unity::InitializeUnityFontEvidence(evidence, 1234);
     renderer::unity::RecordUnityFontFileOpen(
@@ -315,6 +531,7 @@ int main()
         evidence, L"Gulim", true, true, 6946, L"Pretendard Variable");
     renderer::unity::RecordUnityFontFaceReplacementCandidate(
         evidence, L"Malgun Gothic");
+    renderer::unity::RecordUnityFontFaceReplacementHit(evidence);
     renderer::unity::RecordUnityFontFaceReplacement(
         evidence, true, L"C:\\Fonts\\PretendardVariable.ttf");
     renderer::unity::RecordUnityFontFaceReplacement(
@@ -367,6 +584,7 @@ int main()
         evidenceSnapshot.faceReplacements == 1 &&
         evidenceSnapshot.faceReplacementFallbacks == 1 &&
         evidenceSnapshot.faceReplacementCandidates == 1 &&
+        evidenceSnapshot.faceReplacementHits == 1 &&
         wcscmp(evidenceSnapshot.lastFaceReplacementFamily,
             L"Malgun Gothic") == 0 &&
         wcscmp(evidenceSnapshot.lastFaceReplacementPath,
@@ -465,6 +683,79 @@ int main()
             L"C:\\Fonts\\PretendardVariable.ttf" &&
         familyRedirect.replacementFaceIndex == (5L << 16),
         "a face identified only by Malgun Gothic did not resolve its encoded replacement");
+
+    std::vector<unsigned char> namedInstanceSfnt(192, 0);
+    auto writeNamedInstanceBe16 = [&](std::size_t offset, unsigned int value) {
+        namedInstanceSfnt[offset] = static_cast<unsigned char>(value >> 8);
+        namedInstanceSfnt[offset + 1] = static_cast<unsigned char>(value);
+    };
+    auto writeNamedInstanceBe32 = [&](std::size_t offset,
+                                      std::uint32_t value) {
+        namedInstanceSfnt[offset] = static_cast<unsigned char>(value >> 24);
+        namedInstanceSfnt[offset + 1] = static_cast<unsigned char>(value >> 16);
+        namedInstanceSfnt[offset + 2] = static_cast<unsigned char>(value >> 8);
+        namedInstanceSfnt[offset + 3] = static_cast<unsigned char>(value);
+    };
+    writeNamedInstanceBe32(0, 0x00010000);
+    writeNamedInstanceBe16(4, 1);
+    std::memcpy(namedInstanceSfnt.data() + 12, "fvar", 4);
+    writeNamedInstanceBe32(20, 64);
+    writeNamedInstanceBe32(24, 84);
+    writeNamedInstanceBe16(64, 1);
+    writeNamedInstanceBe16(66, 0);
+    writeNamedInstanceBe16(68, 16);
+    writeNamedInstanceBe16(70, 2);
+    writeNamedInstanceBe16(72, 1);
+    writeNamedInstanceBe16(74, 20);
+    writeNamedInstanceBe16(76, 6);
+    writeNamedInstanceBe16(78, 8);
+    std::memcpy(namedInstanceSfnt.data() + 80, "wght", 4);
+    writeNamedInstanceBe32(84, 100U << 16);
+    writeNamedInstanceBe32(88, 400U << 16);
+    writeNamedInstanceBe32(92, 900U << 16);
+    constexpr std::array<unsigned int, 6> instanceWeights{
+        {100, 200, 300, 400, 500, 600}};
+    for (std::size_t index = 0; index < instanceWeights.size(); ++index)
+    {
+        std::size_t const instance = 100 + index * 8;
+        writeNamedInstanceBe16(instance,
+            static_cast<unsigned int>(400 + index));
+        writeNamedInstanceBe32(instance + 4, instanceWeights[index] << 16);
+    }
+    std::wstring namedInstancePath;
+    Require(WriteTemporaryFontFile(namedInstanceSfnt, namedInstancePath),
+        "the named-instance redirect fixture could not create its font file");
+    auto namedInstanceSubstitutions =
+        renderer::font_substitution::Snapshot::Build({
+            {L"Source Medium", L"Variable Medium"},
+            {L"Source SemiBold", L"Variable SemiBold"},
+            {L"Source Default", L"Variable Default"}}, 3);
+    std::vector<renderer::unity::InstalledFontFace> namedInstanceFonts{
+        {L"Source Medium", L"C:\\Fonts\\source-medium.ttf", 0},
+        {L"Source SemiBold", L"C:\\Fonts\\source-semibold.ttf", 0},
+        {L"Source Default", L"C:\\Fonts\\source-default.ttf", 0},
+        {L"Variable Medium", namedInstancePath, 0, {{weightTag, 500.0F}}},
+        {L"Variable SemiBold", namedInstancePath, 0, {{weightTag, 600.0F}}},
+        {L"Variable Default", namedInstancePath, 0},
+    };
+    auto namedInstanceRedirects = renderer::unity::FontFileRedirectTable::Build(
+        namedInstanceFonts, *namedInstanceSubstitutions);
+    long mediumFaceIndex = 0;
+    long semiBoldFaceIndex = 0;
+    long defaultFaceIndex = -1;
+    std::wstring namedInstanceReplacement;
+    Require(namedInstanceRedirects &&
+        namedInstanceRedirects->ResolveFamilyFace(
+            L"Source Medium", namedInstanceReplacement, mediumFaceIndex) &&
+        namedInstanceRedirects->ResolveFamilyFace(
+            L"Source SemiBold", namedInstanceReplacement, semiBoldFaceIndex) &&
+        namedInstanceRedirects->ResolveFamilyFace(
+            L"Source Default", namedInstanceReplacement, defaultFaceIndex) &&
+        mediumFaceIndex == (5L << 16) &&
+        semiBoldFaceIndex == (6L << 16) &&
+        mediumFaceIndex != semiBoldFaceIndex && defaultFaceIndex == 0,
+        "named instances from one file shared a path-only cached face index");
+    DeleteFileW(namedInstancePath.c_str());
 
     renderer::unity::FaceOpenPathRedirect faceRedirect;
     Require(renderer::unity::ResolveFaceOpenPath(

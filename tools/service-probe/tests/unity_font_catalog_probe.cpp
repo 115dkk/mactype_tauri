@@ -155,6 +155,8 @@ int wmain(int argc, wchar_t** argv)
                 << snapshot.lastFaceReplacementPath
                 << L" face-replacement-candidates="
                 << snapshot.faceReplacementCandidates
+                << L" face-replacement-hits="
+                << snapshot.faceReplacementHits
                 << L" face-replacement-family="
                 << snapshot.lastFaceReplacementFamily
                 << L" observed-path=" << snapshot.observedPath

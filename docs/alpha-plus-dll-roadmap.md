@@ -243,7 +243,12 @@ separately from constructed replacements, and releases both faces through the
 hooked `FT_Done_Face` when Unity frees the native one. That release is final by
 construction: the player exports no `FT_Reference_Face`. Detach leaves published
 replacement faces alive on purpose, because Unity may still hold a returned
-pointer and its library outlives the renderer. The 6000.3.21 `FontRef` layout is
+pointer and its library outlives the renderer; each renderer generation can
+therefore leave at most 256 faces behind until the library is destroyed, an
+accepted cost of the rare unload/reload cycle. The hook-level sequences (open
+failure re-entering Done_Face, callback mismatch before and after the canonical
+callback is learned) are covered by field runs and by the registry tests, not by
+a hook orchestration seam; that seam is a follow-up. The 6000.3.21 `FontRef` layout is
 not decodable, so that build selects `undecoded` instead of failing closed. The
 same table now carries the named instance of a variable replacement
 (`Pretendard Variable Medium` is `PretendardVariable.ttf` with instance bits in

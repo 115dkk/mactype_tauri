@@ -362,6 +362,13 @@ int main()
         fvar.data(), fvar.size(), 0, &weightAxis, 1, namedInstance) &&
         namedInstance == 0,
         "an unmatched fvar coordinate selected a named instance");
+    // The rejections below must come from the mutated condition alone, so the
+    // coordinate goes back to one the unchanged fixture resolves.
+    weightAxis.value = 500.0F;
+    Require(renderer::unity::ParseSfntNamedInstanceIndex(
+        fvar.data(), fvar.size(), 0, &weightAxis, 1, namedInstance) &&
+        namedInstance == 2,
+        "the unchanged fixture stopped resolving the 500-weight instance");
     Require(!renderer::unity::ParseSfntNamedInstanceIndex(
         fvar.data(), fvar.size(), 1, &weightAxis, 1, namedInstance),
         "a standalone SFNT accepted a nonzero base face index");

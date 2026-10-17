@@ -438,6 +438,39 @@ processes. The pre-entry probe exercises the collection path only; the two
 fallback windows are covered by the fake-driven readiness tests and by
 reasoning, not by a runtime reproduction.
 
+Windows Settings then froze on launch and the shell closed it as not responding
+(field log, 2026-10-17, runtime c41f489); it was fine whenever the service was
+stopped. A debugger trace in `SystemSettings.exe` counted 150 alias builds in
+30 s for one factory and one source set, all on the UI thread from
+`TextLayout::MapCharacters` through `FontFallback::FontFallback` into the
+collection hook, 85 to 130 ms each, every one ending `createSetFailed`; the
+cache erased a failed entry, so every `GetSystemFontCollection` call built
+again. The source was the set the original `GetSystemFontSet` returns, which
+`EstablishFactoryAliasSource` falls back to when the modern entry runs first:
+735 faces, 225 of them downloadable and not local. `Build` re-added every
+native face as a bare `AddFontFaceReference`, so `CreateFontSet` had to extract
+each face's properties again and failed with `DWRITE_E_REMOTEFONT` on the
+remote ones (225 `RemoteFontException` throws per build; every file open in
+the build succeeded). A probe without MacType reproduced the failure in a
+normal process and in an AppContainer, and built the legacy collection's set
+(510 local faces) without trouble, which is why Notepad kept its alias and
+Settings never got one. Non-local faces now stay out of the alias generation,
+which then matches what a successful build already produced whichever set the
+factory published first; native faces go in as `IDWriteFontSet1::GetFilteredFonts`
+subsets through `IDWriteFontSetBuilder1::AddFontSet` in source order, so
+DirectWrite keeps the properties it already has instead of reading them again;
+and a failed build stays in the cache with a retry after 2 s, 15 s and 120 s,
+after which that factory keeps the stock set until its source set or the
+profile generation changes. The legacy hook also no longer publishes an alias
+collection's set as the factory's source on `checkForUpdates`; doing so would
+have stacked a new generation on every such call. Measured with the service
+stopped and each core loaded by `MacLoader64` before image entry, in a probe
+that asks for `GetSystemFontSet` first the way Settings does: the c41f489 core
+answered `Malgun Gothic` with `MALGUN.TTF` at weight 400 and spent 2,301 ms on
+50 further legacy collection calls and 429 ms on 20 modern ones; the fixed core
+answered with the alias file at weight 500 (Pretendard Variable Medium) and
+spent 0.2 ms and under 0.1 ms.
+
 An injection that lands after the first frame (the open service's remote
 `LoadLibrary`, every elevated target, any child of a parent that was not
 hooked) leaves that stock frame on screen until the application repaints on

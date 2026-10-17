@@ -3,6 +3,7 @@
 
 #include <aclapi.h>
 #include <array>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -152,6 +153,65 @@ std::vector<BYTE> ReadFixture(std::filesystem::path const& path)
         static_cast<DWORD>(bytes.size()), &received, nullptr) != FALSE &&
         received == bytes.size()), "cannot read complete manifest fixture");
     return bytes;
+}
+
+struct ManifestMutexWorker
+{
+    HANDLE readyEvent = nullptr;
+    DWORD waitResult = WAIT_FAILED;
+    DWORD error = ERROR_SUCCESS;
+    bool released = false;
+};
+
+class TestMutexOwner
+{
+public:
+    TestMutexOwner(HANDLE mutex, bool& released) noexcept
+        : mutex_(mutex), released_(released)
+    {
+    }
+
+    ~TestMutexOwner() noexcept
+    {
+        released_ = ReleaseMutex(mutex_) != FALSE;
+    }
+
+    TestMutexOwner(TestMutexOwner const&) = delete;
+    TestMutexOwner& operator=(TestMutexOwner const&) = delete;
+
+private:
+    HANDLE mutex_;
+    bool& released_;
+};
+
+DWORD WINAPI HoldManifestMutex(void* argument)
+{
+    auto& state = *static_cast<ManifestMutexWorker*>(argument);
+    renderer_raii::UniqueHandle mutex = renderer_raii::AdoptHandle(CreateMutexW(
+        nullptr, FALSE, L"Local\\MacType.FontCache.Manifest.v2"));
+    if (!mutex)
+    {
+        state.error = GetLastError();
+        SetEvent(state.readyEvent);
+        return 1;
+    }
+    state.waitResult = WaitForSingleObject(mutex.get(), 5000);
+    bool const owns = state.waitResult == WAIT_OBJECT_0 ||
+        state.waitResult == WAIT_ABANDONED;
+    if (!owns)
+    {
+        state.error = GetLastError();
+        SetEvent(state.readyEvent);
+        return 1;
+    }
+    TestMutexOwner const owner(mutex.get(), state.released);
+    if (!SetEvent(state.readyEvent))
+    {
+        state.error = GetLastError();
+        return 1;
+    }
+    Sleep(300);
+    return 0;
 }
 
 void WriteLe32(std::vector<BYTE>& bytes, size_t offset, UINT32 value)
@@ -312,6 +372,69 @@ void TestManifest(std::vector<BYTE> const&)
         loaded.fullName == value.fullName &&
         loaded.postScriptName == value.postScriptName,
         "a freshly parsed manifest value did not round-trip every field");
+
+    auto const savedManifest = directory / L"manifest-v2.saved";
+    RequireAcl(CopyFileW(manifestV2.c_str(), savedManifest.c_str(), FALSE) != FALSE,
+        "cannot save the one-entry manifest snapshot");
+    cache::ManifestKey keyB = key;
+    keyB.profileDigest ^= 0xB000000000000000ULL;
+    RequireAcl(cache::StoreManifestFont(keyB, value) == S_OK,
+        "cannot append manifest key B");
+    RequireAcl(CopyFileW(savedManifest.c_str(), manifestV2.c_str(), FALSE) != FALSE,
+        "cannot restore the stale manifest snapshot");
+    cache::ManifestKey keyC = key;
+    keyC.profileDigest ^= 0xC000000000000000ULL;
+    RequireAcl(cache::StoreManifestFont(keyC, value) == S_OK,
+        "cannot append manifest key C after restoring disk state");
+    RequireAcl(cache::ReloadManifestForTests() == S_OK,
+        "cannot load a fresh state after the manifest changed on disk");
+    auto manifestContains = [&](cache::ManifestKey const& candidate) {
+        cache::ManifestValue ignored;
+        bool hit = false;
+        RequireAcl(cache::LookupManifestFont(candidate, ignored, hit) == S_OK,
+            "manifest lookup failed after an external replacement");
+        return hit;
+    };
+    RequireAcl(manifestContains(key) && manifestContains(keyC) &&
+        !manifestContains(keyB),
+        "a store did not reload the manifest's current disk state");
+    RequireAcl(std::filesystem::remove(savedManifest),
+        "cannot remove the saved manifest snapshot");
+
+    renderer_raii::UniqueHandle readyEvent = renderer_raii::AdoptHandle(
+        CreateEventW(nullptr, TRUE, FALSE, nullptr));
+    RequireAcl(static_cast<bool>(readyEvent),
+        "cannot create the manifest mutex test event");
+    ManifestMutexWorker mutexWorker;
+    mutexWorker.readyEvent = readyEvent.get();
+    renderer_raii::UniqueHandle mutexThread = renderer_raii::AdoptHandle(CreateThread(
+        nullptr, 0, HoldManifestMutex, &mutexWorker, 0, nullptr));
+    RequireAcl(static_cast<bool>(mutexThread),
+        "cannot create the manifest mutex holder");
+    DWORD const readyResult = WaitForSingleObject(readyEvent.get(), 10000);
+    cache::ManifestKey keyD = key;
+    keyD.profileDigest ^= 0xD000000000000000ULL;
+    HRESULT storeWhileHeld = E_ABORT;
+    auto const storeStarted = std::chrono::steady_clock::now();
+    if (readyResult == WAIT_OBJECT_0 &&
+        (mutexWorker.waitResult == WAIT_OBJECT_0 ||
+            mutexWorker.waitResult == WAIT_ABANDONED))
+        storeWhileHeld = cache::StoreManifestFont(keyD, value);
+    auto const storeElapsed = std::chrono::steady_clock::now() - storeStarted;
+    DWORD const threadResult = WaitForSingleObject(mutexThread.get(), 10000);
+    DWORD threadExitCode = 1;
+    bool const threadExitedCleanly = threadResult == WAIT_OBJECT_0 &&
+        GetExitCodeThread(mutexThread.get(), &threadExitCode) != FALSE &&
+        threadExitCode == 0;
+    RequireAcl(readyResult == WAIT_OBJECT_0 && threadExitedCleanly &&
+        mutexWorker.error == ERROR_SUCCESS && mutexWorker.released,
+        "the manifest mutex holder did not release its ownership");
+    RequireAcl(storeWhileHeld == S_OK && storeElapsed < std::chrono::milliseconds(2500),
+        "a store did not finish within the bounded manifest mutex wait");
+    RequireAcl(cache::ReloadManifestForTests() == S_OK &&
+        manifestContains(key) && manifestContains(keyC) &&
+        manifestContains(keyD) && !manifestContains(keyB),
+        "the bounded manifest mutex wait damaged the manifest");
 
     auto expectKeyMiss = [&](cache::ManifestKey const& changed) {
         cache::ManifestValue ignored;
@@ -555,7 +678,7 @@ int main()
     }
     std::cout << "DirectWrite font cache ACL: 3 DACL checks, 2 restricted reads, "
         "1 denied control and idempotence passed\n";
-    std::cout << "DirectWrite font manifest: v2 round-trip, bounds, eviction, "
-        "atomic isolation and corrupt-backing rebuild passed" << std::endl;
+    std::cout << "DirectWrite font manifest: v2 round-trip, reload, locking, bounds, "
+        "eviction, atomic isolation and corrupt-backing rebuild passed" << std::endl;
     return 0;
 }

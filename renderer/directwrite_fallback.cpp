@@ -9,6 +9,8 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -118,6 +120,22 @@ std::vector<FactorySource>& SourceRegistry()
 {
 	static std::vector<FactorySource>* registry = new std::vector<FactorySource>;
 	return *registry;
+}
+
+using FallbackDiagnosticSink = void (*)(wchar_t const*);
+
+std::atomic<FallbackDiagnosticSink>& DiagnosticSinkStorage()
+{
+	static std::atomic<FallbackDiagnosticSink> sink(nullptr);
+	return sink;
+}
+
+void SignalFallbackDiagnostic(wchar_t const* stage) noexcept
+{
+	FallbackDiagnosticSink const sink =
+		DiagnosticSinkStorage().load(std::memory_order_acquire);
+	if (sink != nullptr)
+		sink(stage);
 }
 
 template <typename Target, typename Source>
@@ -515,6 +533,9 @@ bool ResolveAliasContext(
 		return false;
 	std::array<FactorySource, kFactorySourceLimit> sources;
 	size_t const sourceCount = CopySources(sources);
+	std::chrono::steady_clock::time_point const deadline =
+		std::chrono::steady_clock::now() + directwrite_alias::BuildWaitTimeout();
+	bool waitTimedOut = false;
 	for (size_t index = 0; index < sourceCount; ++index)
 	{
 		FactorySource const& source = sources[index];
@@ -523,7 +544,9 @@ bool ResolveAliasContext(
 		directwrite_alias::AliasFontSet aliases;
 		directwrite_alias::BuildStatus const status =
 			directwrite_alias::GetCachedForFactory(
-				source.factory, snapshot->generation(), aliases);
+				source.factory, snapshot->generation(), aliases, deadline);
+		if (status == directwrite_alias::BuildStatus::waitTimeout)
+			waitTimedOut = true;
 		if (status != directwrite_alias::BuildStatus::applied &&
 			status != directwrite_alias::BuildStatus::appliedWithMissingReplacement)
 			continue;
@@ -535,6 +558,8 @@ bool ResolveAliasContext(
 		aliasCollection = candidate;
 		return true;
 	}
+	if (waitTimedOut)
+		SignalFallbackDiagnostic(L"alias-collection-wait-timeout");
 	return false;
 }
 
@@ -743,6 +768,12 @@ HRESULT WINAPI IMPL_Fallback1_MapCharacters(
 }
 
 } // namespace
+
+void SetFallbackDiagnosticSink(
+	void (*sink)(wchar_t const*) noexcept) noexcept
+{
+	DiagnosticSinkStorage().store(sink, std::memory_order_release);
+}
 
 bool HookDirectWriteSystemFallback(
 	IDWriteFactory* factory,

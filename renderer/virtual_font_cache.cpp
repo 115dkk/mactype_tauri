@@ -267,12 +267,52 @@ struct ManifestEntry
     UINT64 stamp = 0;
 };
 
+struct ManifestFileIdentity
+{
+    UINT64 lastWriteTime = 0;
+    UINT64 size = 0;
+    bool exists = false;
+};
+
 struct ManifestState
 {
     std::mutex mutex;
     std::wstring path;
     std::vector<ManifestEntry> entries;
+    ManifestFileIdentity fileIdentity;
+    bool fileIdentityKnown = false;
     bool loaded = false;
+};
+
+constexpr WCHAR kManifestMutexName[] = L"Local\\MacType.FontCache.Manifest.v2";
+constexpr DWORD kManifestMutexTimeoutMilliseconds = 2000;
+
+class ManifestProcessLock
+{
+public:
+    ManifestProcessLock() noexcept
+        : mutex_(renderer_raii::AdoptHandle(
+            CreateMutexW(nullptr, FALSE, kManifestMutexName)))
+    {
+        if (!mutex_)
+            return;
+        DWORD const result = WaitForSingleObject(
+            mutex_.get(), kManifestMutexTimeoutMilliseconds);
+        owns_ = result == WAIT_OBJECT_0 || result == WAIT_ABANDONED;
+    }
+
+    ~ManifestProcessLock() noexcept
+    {
+        if (owns_)
+            ReleaseMutex(mutex_.get());
+    }
+
+    ManifestProcessLock(ManifestProcessLock const&) = delete;
+    ManifestProcessLock& operator=(ManifestProcessLock const&) = delete;
+
+private:
+    renderer_raii::UniqueHandle mutex_;
+    bool owns_ = false;
 };
 
 // manifest-v2.bin is a bounded little-endian record stream. The explicit
@@ -418,9 +458,46 @@ bool SameKey(ManifestKey const& left, ManifestKey const& right) noexcept
     return true;
 }
 
-bool ReadManifestFile(std::wstring const& path, std::vector<BYTE>& bytes)
+bool SameFileIdentity(
+    ManifestFileIdentity const& left,
+    ManifestFileIdentity const& right) noexcept
+{
+    return left.exists == right.exists &&
+        (!left.exists || (left.lastWriteTime == right.lastWriteTime &&
+            left.size == right.size));
+}
+
+bool QueryManifestFileIdentity(
+    std::wstring const& path,
+    ManifestFileIdentity& identity) noexcept
+{
+    identity = {};
+    WIN32_FILE_ATTRIBUTE_DATA attributes = {};
+    if (!GetFileAttributesExW(
+            path.c_str(), GetFileExInfoStandard, &attributes))
+    {
+        DWORD const error = GetLastError();
+        return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
+    }
+    ULARGE_INTEGER size = {};
+    size.LowPart = attributes.nFileSizeLow;
+    size.HighPart = attributes.nFileSizeHigh;
+    ULARGE_INTEGER lastWriteTime = {};
+    lastWriteTime.LowPart = attributes.ftLastWriteTime.dwLowDateTime;
+    lastWriteTime.HighPart = attributes.ftLastWriteTime.dwHighDateTime;
+    identity.size = size.QuadPart;
+    identity.lastWriteTime = lastWriteTime.QuadPart;
+    identity.exists = true;
+    return true;
+}
+
+bool ReadManifestFile(
+    std::wstring const& path,
+    std::vector<BYTE>& bytes,
+    ManifestFileIdentity& identity)
 {
     bytes.clear();
+    identity = {};
     renderer_raii::UniqueHandle file = renderer_raii::AdoptHandle(CreateFileW(
         path.c_str(), GENERIC_READ,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -428,11 +505,21 @@ bool ReadManifestFile(std::wstring const& path, std::vector<BYTE>& bytes)
         FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
     if (!file)
         return false;
-    LARGE_INTEGER size = {};
-    if (!GetFileSizeEx(file.get(), &size) || size.QuadPart < 16 ||
-        static_cast<UINT64>(size.QuadPart) > kManifestFileLimit)
+    BY_HANDLE_FILE_INFORMATION information = {};
+    if (!GetFileInformationByHandle(file.get(), &information))
         return false;
-    bytes.resize(static_cast<size_t>(size.QuadPart));
+    ULARGE_INTEGER size = {};
+    size.LowPart = information.nFileSizeLow;
+    size.HighPart = information.nFileSizeHigh;
+    ULARGE_INTEGER lastWriteTime = {};
+    lastWriteTime.LowPart = information.ftLastWriteTime.dwLowDateTime;
+    lastWriteTime.HighPart = information.ftLastWriteTime.dwHighDateTime;
+    identity.size = size.QuadPart;
+    identity.lastWriteTime = lastWriteTime.QuadPart;
+    identity.exists = true;
+    if (identity.size < 16 || identity.size > kManifestFileLimit)
+        return false;
+    bytes.resize(static_cast<size_t>(identity.size));
     size_t offset = 0;
     while (offset < bytes.size())
     {
@@ -551,25 +638,43 @@ bool SerializeManifest(
 
 void LoadManifest(ManifestState& state, std::wstring const& path)
 {
-    if (state.loaded && state.path == path)
+    ManifestFileIdentity diskIdentity;
+    bool const diskIdentityKnown =
+        QueryManifestFileIdentity(path, diskIdentity);
+    if (state.loaded && state.path == path && state.fileIdentityKnown &&
+        diskIdentityKnown && SameFileIdentity(state.fileIdentity, diskIdentity))
         return;
     state.path = path;
     state.entries.clear();
+    state.fileIdentity = diskIdentity;
+    state.fileIdentityKnown = diskIdentityKnown;
     state.loaded = true;
-    std::vector<BYTE> bytes;
-    if (!ReadManifestFile(path, bytes))
+    if (diskIdentityKnown && !diskIdentity.exists)
         return;
+    std::vector<BYTE> bytes;
+    ManifestFileIdentity loadedIdentity;
+    if (!ReadManifestFile(path, bytes, loadedIdentity))
+    {
+        if (loadedIdentity.exists)
+        {
+            state.fileIdentity = loadedIdentity;
+            state.fileIdentityKnown = true;
+        }
+        return;
+    }
+    state.fileIdentity = loadedIdentity;
+    state.fileIdentityKnown = true;
     std::vector<ManifestEntry> parsed;
     if (ParseManifest(bytes, parsed))
         state.entries = std::move(parsed);
 }
 
 HRESULT WriteManifest(
-    std::wstring const& path,
-    std::vector<ManifestEntry> const& entries)
+    ManifestState& state,
+    std::wstring const& path)
 {
     std::vector<BYTE> bytes;
-    if (!SerializeManifest(entries, bytes))
+    if (!SerializeManifest(state.entries, bytes))
         return HRESULT_FROM_WIN32(ERROR_FILE_TOO_LARGE);
     static std::atomic<ULONG> sequence(0);
     std::wstring temporaryPath = path;
@@ -596,6 +701,13 @@ HRESULT WriteManifest(
             MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
         return HRESULT_FROM_WIN32(GetLastError());
     temporary.Commit();
+    ManifestFileIdentity writtenIdentity;
+    bool const identityKnown =
+        QueryManifestFileIdentity(path, writtenIdentity) && writtenIdentity.exists;
+    state.path = path;
+    state.loaded = true;
+    state.fileIdentity = writtenIdentity;
+    state.fileIdentityKnown = identityKnown;
     return S_OK;
 }
 
@@ -647,6 +759,7 @@ HRESULT LookupManifestFontImpl(
     std::wstring path;
     if (FAILED(ManifestPath(path)))
         return S_OK;
+    ManifestProcessLock processLock;
     ManifestState& state = GetManifestState();
     std::lock_guard<std::mutex> lock(state.mutex);
     LoadManifest(state, path);
@@ -658,7 +771,7 @@ HRESULT LookupManifestFontImpl(
                 entry->value.virtualFontPath, entry->value.virtualFontSize))
         {
             state.entries.erase(entry);
-            return WriteManifest(path, state.entries);
+            return WriteManifest(state, path);
         }
         entry->stamp = CurrentFileTime();
         value = entry->value;
@@ -684,6 +797,7 @@ HRESULT StoreManifestFontImpl(
     HRESULT result = ManifestPath(path);
     if (FAILED(result))
         return result;
+    ManifestProcessLock processLock;
     ManifestState& state = GetManifestState();
     std::lock_guard<std::mutex> lock(state.mutex);
     LoadManifest(state, path);
@@ -713,7 +827,7 @@ HRESULT StoreManifestFontImpl(
             });
         state.entries.erase(oldest);
     }
-    return WriteManifest(path, state.entries);
+    return WriteManifest(state, path);
 }
 
 HRESULT DropManifestFontImpl(ManifestKey const& key)
@@ -724,6 +838,7 @@ HRESULT DropManifestFontImpl(ManifestKey const& key)
     HRESULT result = ManifestPath(path);
     if (FAILED(result))
         return result;
+    ManifestProcessLock processLock;
     ManifestState& state = GetManifestState();
     std::lock_guard<std::mutex> lock(state.mutex);
     LoadManifest(state, path);
@@ -736,7 +851,7 @@ HRESULT DropManifestFontImpl(ManifestKey const& key)
             }),
         state.entries.end());
     return state.entries.size() == before ? S_FALSE :
-        WriteManifest(path, state.entries);
+        WriteManifest(state, path);
 }
 
 HRESULT ReloadManifestForTestsImpl()
@@ -751,6 +866,8 @@ HRESULT ReloadManifestForTestsImpl()
     std::lock_guard<std::mutex> lock(state.mutex);
     state.path = std::move(fresh.path);
     state.entries = std::move(fresh.entries);
+    state.fileIdentity = fresh.fileIdentity;
+    state.fileIdentityKnown = fresh.fileIdentityKnown;
     state.loaded = fresh.loaded;
     return S_OK;
 }

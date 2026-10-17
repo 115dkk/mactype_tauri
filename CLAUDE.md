@@ -110,8 +110,9 @@ below wherever the two conflict.
   variable backing's alias file keeps only the pinned named instance: `fvar`
   axes and defaults, `glyf` and `gvar` stay byte-identical (moving
   `fvar.defaultValue` would silently render the default outlines under the new
-  weight), every `name` record stays (a default instance shares IDs 2 and 17
-  with the family and an axis name may share an instance's ID), and `OS/2`
+  weight), instance pruning deletes no `name` record (a default instance shares
+  IDs 2 and 17 with the family and an axis name may share an instance's ID;
+  only the alias identity records are rewritten, as before), and `OS/2`
   weight, width, `fsSelection` and `head.macStyle` follow the pinned
   coordinates unless the alias advertises an explicit weight, which keeps that
   weight and its bold bits so a bold-slot alias of a Medium backing stays a

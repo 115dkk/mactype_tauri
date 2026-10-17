@@ -1731,6 +1731,7 @@ directwrite_alias::BuildStatus GetCanonicalFactoryAliases(
 		EstablishFactoryAliasSource(factory, factory3, candidate);
 	if (systemSet == nullptr)
 		return directwrite_alias::BuildStatus::systemSetUnavailable;
+	directwrite_alias::BuildReservation const reservation(factory, systemSet);
 
 	CComPtr<IDWriteFontCollection> systemCollection = suppliedCollection;
 	if (systemCollection == nullptr)
@@ -2378,6 +2379,18 @@ static void SignalDirectWriteDiagnostic(WCHAR const* stage)
 	RetainDirectWriteDiagnosticEvent(eventName);
 }
 
+static void __cdecl SignalDirectWriteFallbackDiagnostic(
+	wchar_t const* stage) noexcept
+{
+	try
+	{
+		SignalDirectWriteDiagnostic(stage);
+	}
+	catch (...)
+	{
+	}
+}
+
 static void SignalDirectWriteFamilyDiagnostic(
 	WCHAR const* stagePrefix, WCHAR const* familyName)
 {
@@ -2695,6 +2708,7 @@ static DWORD WINAPI StartDirectWriteLifecycleWorker(LPVOID moduleReference)
 void StartDirectWriteLifecycle()
 {
 	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
+	SetFallbackDiagnosticSink(&SignalDirectWriteFallbackDiagnostic);
 	std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
 	if (lifecycle.phase == DirectWriteLifecyclePhase::starting ||
 		lifecycle.phase == DirectWriteLifecyclePhase::active ||

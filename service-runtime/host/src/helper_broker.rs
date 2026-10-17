@@ -360,7 +360,7 @@ fn parse_output(request: &InjectionRequest, output: HelperOutput) -> BrokerResul
         || session != Some(u64::from(request.identity.session_id))
         || generation != Some(request.generation_id.as_str())
         || module != Some(expected_module)
-        || windows_error.map_or(true, |value| value > u64::from(u32::MAX))
+        || windows_error.is_none_or(|value| value > u64::from(u32::MAX))
         || cleanup.is_none()
     {
         return invalid_response("helper-response-invalid", None);

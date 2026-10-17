@@ -41,7 +41,6 @@ pub struct InjectionOrchestrator<'a> {
     deferral_policy: DeferralPolicy,
     retry_policy: RetryPolicy,
     retry_scheduler: Option<&'a dyn RetryScheduler>,
-    last_injected_identity: Option<ProcessIdentity>,
     last_handled_creation_time: Option<u64>,
     injection_telemetry: InjectionTelemetry,
 }
@@ -132,7 +131,6 @@ impl<'a> InjectionOrchestrator<'a> {
             deferral_policy: DeferralPolicy::default(),
             retry_policy,
             retry_scheduler,
-            last_injected_identity: None,
             last_handled_creation_time: None,
             injection_telemetry: InjectionTelemetry::default(),
         }
@@ -293,7 +291,6 @@ impl<'a> InjectionOrchestrator<'a> {
             }
             if let Some(outcome) = terminal_outcome(result.disposition, attempt == attempts) {
                 if outcome == ProcessOutcome::Injected {
-                    self.last_injected_identity = Some(request.identity.clone());
                     self.record_injection_success(&request.identity);
                 }
                 let (outcome, result) =
@@ -412,10 +409,6 @@ impl<'a> InjectionOrchestrator<'a> {
             self.deferred_order
                 .retain(|identity| self.deferred.contains_key(identity));
         }
-    }
-
-    pub fn last_injected_identity(&self) -> Option<&ProcessIdentity> {
-        self.last_injected_identity.as_ref()
     }
 
     /// The creation time the validator read for the PID handled most recently,

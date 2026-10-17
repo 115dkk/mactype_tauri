@@ -2,10 +2,11 @@
 
 use std::io;
 
-use windows_sys::Win32::Foundation::{HWND, LPARAM};
+use windows_sys::Win32::Foundation::{GetLastError, SetLastError, ERROR_SUCCESS, HWND, LPARAM};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetWindowLongW, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
-    RegisterWindowMessageW, SendNotifyMessageW, GWL_EXSTYLE, WS_EX_TOOLWINDOW,
+    EnumWindows, GetDesktopWindow, GetTopWindow, GetWindowLongW, GetWindowTextW,
+    GetWindowThreadProcessId, IsWindowVisible, RegisterWindowMessageW, SendNotifyMessageW,
+    GWL_EXSTYLE, WS_EX_TOOLWINDOW,
 };
 
 use crate::wide::wide_null;
@@ -65,6 +66,16 @@ unsafe extern "system" fn collect_window(window: HWND, parameter: LPARAM) -> i32
     1
 }
 
+fn top_window_present(window: HWND, error: u32) -> io::Result<bool> {
+    if !window.is_null() {
+        Ok(true)
+    } else if error == ERROR_SUCCESS {
+        Ok(false)
+    } else {
+        Err(io::Error::from_raw_os_error(error as i32))
+    }
+}
+
 /// Enumerates top-level windows in the Z order supplied by `EnumWindows`.
 pub fn top_level_windows(maximum_title_units: usize) -> io::Result<Vec<TopLevelWindow>> {
     if maximum_title_units > i32::MAX as usize {
@@ -73,6 +84,25 @@ pub fn top_level_windows(maximum_title_units: usize) -> io::Result<Vec<TopLevelW
             "window title bound exceeds the Win32 capacity type",
         ));
     }
+    // EnumWindows can return FALSE without an error on an empty desktop.
+    // GetTopWindow documents NULL for a parent with no children, so capture that
+    // empty snapshot separately without treating an EnumWindows failure as success.
+    // SAFETY: GetDesktopWindow returns the current desktop's system-owned window.
+    let desktop = unsafe { GetDesktopWindow() };
+    if desktop.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: last-error is thread-local; clearing it distinguishes no children
+    // from a GetTopWindow failure on this live desktop window.
+    unsafe { SetLastError(ERROR_SUCCESS) };
+    // SAFETY: the desktop window is system-owned and this query retains no handle.
+    let first_window = unsafe { GetTopWindow(desktop) };
+    // SAFETY: reads the thread-local result immediately after GetTopWindow.
+    let error = unsafe { GetLastError() };
+    if !top_window_present(first_window, error)? {
+        return Ok(Vec::new());
+    }
+
     let mut context = EnumerationContext {
         windows: Vec::new(),
         maximum_title_units,
@@ -118,7 +148,29 @@ pub fn send_notify_message(window: WindowHandle, message: u32) -> io::Result<()>
 
 #[cfg(test)]
 mod tests {
-    use super::{register_window_message, top_level_windows};
+    use std::ptr::null_mut;
+
+    use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_SUCCESS, HWND};
+
+    use super::{register_window_message, top_level_windows, top_window_present};
+
+    #[test]
+    fn null_top_window_without_error_is_an_empty_snapshot() {
+        assert!(!top_window_present(null_mut(), ERROR_SUCCESS).unwrap());
+    }
+
+    #[test]
+    fn null_top_window_preserves_the_query_error() {
+        let error = top_window_present(null_mut(), ERROR_ACCESS_DENIED).unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(ERROR_ACCESS_DENIED as i32));
+    }
+
+    #[test]
+    fn nonnull_top_window_does_not_consume_stale_last_error() {
+        let window = 1_usize as HWND;
+        assert!(top_window_present(window, ERROR_SUCCESS).unwrap());
+        assert!(top_window_present(window, ERROR_ACCESS_DENIED).unwrap());
+    }
 
     #[test]
     fn top_level_windows_enumerate_with_nonzero_handles() {

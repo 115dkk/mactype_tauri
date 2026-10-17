@@ -5,7 +5,13 @@ use mactype_service_contract::{sha256_digest, MachinePaths};
 use mactype_service_setup::FixedPayload;
 
 pub(crate) fn test_paths() -> (tempfile::TempDir, MachinePaths) {
-    let base = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+    // AppData roots are rejected, and deep checkouts exceed legacy Win32 path limits.
+    #[cfg(windows)]
+    let temporary_root =
+        std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("Temp");
+    #[cfg(not(windows))]
+    let temporary_root = std::env::current_dir().unwrap();
+    let base = tempfile::tempdir_in(temporary_root).unwrap();
     let program_files = base.path().join("Program Files");
     let program_data = base.path().join("ProgramData");
     fs::create_dir_all(&program_files).unwrap();

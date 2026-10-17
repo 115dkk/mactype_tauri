@@ -33,7 +33,9 @@ enum class BuildStatus
 struct AliasFontSet
 {
 	CComPtr<IDWriteFontSet> fontSet;
+	CComPtr<IDWriteFontSet> downloadableFontSet;
 	CComPtr<IDWriteFontCollection1> collection;
+	CComPtr<IDWriteFontCollection1> downloadableCollection;
 	UINT32 substitutionCount = 0;
 	std::uint64_t substitutionGeneration = 0;
 	std::uint64_t substitutionDigest = 0;

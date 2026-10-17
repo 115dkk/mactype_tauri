@@ -501,9 +501,14 @@ public:
 	{
 	}
 
+	bool UsesSubsets() const noexcept
+	{
+		return builder1_ != nullptr && systemFontSet1_ != nullptr;
+	}
+
 	HRESULT Keep(UINT32 index, IDWriteFontFaceReference* reference)
 	{
-		if (builder1_ == nullptr || systemFontSet1_ == nullptr)
+		if (!UsesSubsets())
 			return builder_->AddFontFaceReference(reference);
 		indices_.push_back(index);
 		return S_OK;
@@ -571,12 +576,16 @@ BuildStatus Build(
 	UINT32 const fontCount = systemFontSet->GetFontCount();
 	for (UINT32 index = 0; index < fontCount; ++index)
 	{
-		// The legacy system collection is local-only. Dropping downloadable faces
-		// makes either canonical source produce the same aliases and avoids asking
-		// the builder to extract properties from a bare remote reference.
+		// A subset keeps DirectWrite's metadata for a downloadable face. A bare
+		// non-local reference cannot survive CreateFontSet, so fallback mode skips it.
 		if (systemFontSet1 != nullptr &&
 			systemFontSet1->GetFontLocality(index) != DWRITE_LOCALITY_LOCAL)
+		{
+			if (nativeFaces.UsesSubsets() &&
+				FAILED(nativeFaces.Keep(index, nullptr)))
+				return BuildStatus::addFontFailed;
 			continue;
+		}
 
 		CComPtr<IDWriteFontFaceReference> sourceReference;
 		HRESULT addResult = systemFontSet->GetFontFaceReference(
@@ -678,11 +687,47 @@ BuildStatus Build(
 	if (result.substitutionCount == 0)
 		return resolvedRule ? emptyResultStatus :
 			BuildStatus::noResolvedSubstitutions;
-	if (FAILED(builder->CreateFontSet(&result.fontSet)) ||
-		result.fontSet == nullptr)
+	if (FAILED(builder->CreateFontSet(&result.downloadableFontSet)) ||
+		result.downloadableFontSet == nullptr)
 		return BuildStatus::createSetFailed;
+	CComPtr<IDWriteFontSet1> downloadableFontSet1;
+	result.downloadableFontSet->QueryInterface(&downloadableFontSet1);
+	if (downloadableFontSet1 != nullptr)
+	{
+		std::vector<UINT32> localIndices;
+		UINT32 const builtCount = downloadableFontSet1->GetFontCount();
+		localIndices.reserve(builtCount);
+		bool hasNonLocalFace = false;
+		for (UINT32 index = 0; index < builtCount; ++index)
+		{
+			if (downloadableFontSet1->GetFontLocality(index) == DWRITE_LOCALITY_LOCAL)
+				localIndices.push_back(index);
+			else
+				hasNonLocalFace = true;
+		}
+		if (hasNonLocalFace)
+		{
+			CComPtr<IDWriteFontSet1> localSet;
+			UINT32 const* const indices = localIndices.empty() ?
+				nullptr : localIndices.data();
+			if (FAILED(downloadableFontSet1->GetFilteredFonts(
+					indices,
+					static_cast<UINT32>(localIndices.size()),
+					&localSet)) || localSet == nullptr)
+				return BuildStatus::createSetFailed;
+			result.fontSet = localSet;
+		}
+	}
+	if (result.fontSet == nullptr)
+		result.fontSet = result.downloadableFontSet;
 	if (FAILED(factory3->CreateFontCollectionFromFontSet(
 			result.fontSet, &result.collection)) || result.collection == nullptr)
+		return BuildStatus::createCollectionFailed;
+	if (result.fontSet == result.downloadableFontSet)
+		result.downloadableCollection = result.collection;
+	else if (FAILED(factory3->CreateFontCollectionFromFontSet(
+			result.downloadableFontSet, &result.downloadableCollection)) ||
+		result.downloadableCollection == nullptr)
 		return BuildStatus::createCollectionFailed;
 
 	result.status = missingReplacement ?
@@ -711,7 +756,6 @@ bool IsPermanentBuildFailure(BuildStatus status) noexcept
 	case BuildStatus::noResolvedSubstitutions:
 	case BuildStatus::noSubstitutions:
 	case BuildStatus::unsupportedFactory:
-	case BuildStatus::builderUnavailable:
 		return true;
 	default:
 		return false;
@@ -1011,16 +1055,13 @@ BuildStatus GetCachedForFactory(
 			return BuildStatus::unsupportedFactory;
 		AliasCache& cache = GetCache();
 		std::unique_lock<std::mutex> lock(cache.mutex);
-		std::shared_ptr<CacheEntry> entry;
-		for (std::shared_ptr<CacheEntry> const& candidate : cache.entries)
-		{
-			if (candidate->factoryIdentity == identity &&
-				candidate->generation == substitutionGeneration)
-			{
-				entry = candidate;
-				break;
-			}
-		}
+		std::shared_ptr<CacheEntry> const entry =
+			directwrite_readiness::NewestMatching(
+				cache.entries,
+				[&](std::shared_ptr<CacheEntry> const& candidate) {
+					return candidate->factoryIdentity == identity &&
+						candidate->generation == substitutionGeneration;
+				});
 		if (entry == nullptr)
 			return BuildStatus::systemSetUnavailable;
 		// The wait releases the cache mutex, and meanwhile another factory's
@@ -1066,6 +1107,11 @@ bool IsAliasCollection(IUnknown* collection) noexcept
 			CComPtr<IUnknown> const aliasIdentity =
 				GetIdentity(entry->aliases.collection);
 			if (aliasIdentity != nullptr && aliasIdentity == identity)
+				return true;
+			CComPtr<IUnknown> const downloadableIdentity =
+				GetIdentity(entry->aliases.downloadableCollection);
+			if (downloadableIdentity != nullptr &&
+				downloadableIdentity == identity)
 				return true;
 		}
 	}

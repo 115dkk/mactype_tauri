@@ -7,6 +7,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -378,6 +379,34 @@ void TestFailedBuildRetryPolicy()
         "an exhausted failed entry rebuilt again");
 }
 
+struct SourceEntry
+{
+    int factory = 0;
+    int generation = 0;
+    bool applied = false;
+};
+
+void TestNewestMatchingEntry()
+{
+    std::vector<std::shared_ptr<SourceEntry>> entries = {
+        std::make_shared<SourceEntry>(SourceEntry{7, 11, false}),
+        std::make_shared<SourceEntry>(SourceEntry{8, 11, true}),
+        std::make_shared<SourceEntry>(SourceEntry{7, 11, true}),
+    };
+    std::shared_ptr<SourceEntry> const newest =
+        directwrite_readiness::NewestMatching(
+            entries, [](std::shared_ptr<SourceEntry> const& candidate) {
+                return candidate->factory == 7 && candidate->generation == 11;
+            });
+    Require(newest == entries.back() && newest->applied,
+        "fallback lookup selected an older entry for the same generation");
+    Require(!directwrite_readiness::NewestMatching(
+            entries, [](std::shared_ptr<SourceEntry> const& candidate) {
+                return candidate->factory == 9;
+            }),
+        "a missing cache match did not return a value-initialized result");
+}
+
 void TestModernEntryWaits()
 {
     FakeFactory factory;
@@ -526,6 +555,7 @@ int main()
 {
     TestFailureRetrySchedule();
     TestFailedBuildRetryPolicy();
+    TestNewestMatchingEntry();
     TestModernEntryWaits();
     TestFallbackWaits();
     TestReservedFallbackWaits();

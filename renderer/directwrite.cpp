@@ -2897,7 +2897,7 @@ HRESULT WINAPI IMPL_Factory3_GetSystemFontSet(
 	if (IsAliasCollectionApplied(status))
 	{
 		SignalDirectWriteDiagnostic(L"system-font-set-alias-returned");
-		return aliases.fontSet.CopyTo(fontSet);
+		return aliases.downloadableFontSet.CopyTo(fontSet);
 	}
 	*fontSet = systemSet.Detach();
 	return result;
@@ -2932,7 +2932,8 @@ HRESULT WINAPI IMPL_Factory3_GetSystemFontCollection(
 	if (IsAliasCollectionApplied(status))
 	{
 		SignalDirectWriteDiagnostic(L"modern-system-collection-alias-returned");
-		return aliases.collection.CopyTo(fontCollection);
+		return (includeDownloadableFonts ?
+			aliases.downloadableCollection : aliases.collection).CopyTo(fontCollection);
 	}
 	*fontCollection = systemCollection.Detach();
 	return result;

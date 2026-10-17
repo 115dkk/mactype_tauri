@@ -49,6 +49,22 @@ CompletedBuildDisposition PrepareCompletedBuild(
 	return CompletedBuildDisposition::retry;
 }
 
+// Several entries can share a factory and generation after its source set
+// changes; the newest entry belongs to the current source.
+template <typename Container, typename Predicate>
+typename Container::value_type NewestMatching(
+	Container const& entries,
+	Predicate matches)
+{
+	for (auto candidate = entries.rbegin();
+		candidate != entries.rend(); ++candidate)
+	{
+		if (matches(*candidate))
+			return *candidate;
+	}
+	return typename Container::value_type{};
+}
+
 // The caller publishes the candidate before building so every entry point uses
 // one canonical source. A publisher that loses the race reloads the winner.
 template <typename Factory, typename Source, typename GetPublished,

@@ -152,6 +152,12 @@ $env:INI_PARSER_PATH = $iniParserRoot
 $solution = Join-Path $root 'gdipp.sln'
 & $msbuild $solution /m /t:Rebuild '/p:Configuration=Rel+Detours' /p:Platform=Win32 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
 & $msbuild $solution /m /t:Rebuild '/p:Configuration=Rel+Detours' /p:Platform=x64 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
+# The Detours-based Debug configuration is built here so it cannot rot; its
+# output is never packaged.
+& $msbuild $solution /m /t:Rebuild /p:Configuration=Debug /p:Platform=x64 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
+if ($LASTEXITCODE -ne 0) { throw "The Debug|x64 core build failed with exit code $LASTEXITCODE." }
+$debugCore = Join-Path $root 'x64\Debug\MacType64.Core.dll'
+if (-not (Test-Path -LiteralPath $debugCore -PathType Leaf)) { throw "The Debug|x64 core build did not produce $debugCore." }
 
 $injectorSource = Join-Path $root 'service-injector'
 if (-not (Test-Path -LiteralPath (Join-Path $injectorSource 'CMakeLists.txt') -PathType Leaf)) {

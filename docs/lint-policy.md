@@ -36,6 +36,16 @@ renderer runs code under the loader lock. The Cppcheck job reads the language
 level from the project. On other branches the renderer keeps the MSVC default
 language mode.
 
+`gdipp.vcxproj` carries two configurations per platform on this branch:
+`Rel+Detours`, which every package and gate uses, and `Debug`, an unoptimized
+build with full symbols on the same release CRT (`/MT`) and dependency libraries,
+without `_DEBUG` and with `assert` enabled. The dependencies are built only as
+release libraries (IniParser with `/MT` and `/GL`), so a debug-CRT renderer
+would not link against them. `Build-OpenCore.ps1` builds `Debug|x64` after the
+release cores so the configuration keeps compiling; its output is never
+packaged. The EasyHook, Infinality, EXE and trace configurations were removed
+because nothing built them and they no longer compiled.
+
 On ordinary branches, generated files, build output, required third-party
 headers, `renderer/json.hpp`, and dependency trees remain outside first-party source
 linting. On `codex/alpha-plus-dll`, the override above governs every tracked

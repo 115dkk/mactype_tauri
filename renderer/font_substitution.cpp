@@ -348,20 +348,20 @@ void Registry::Publish(std::shared_ptr<const Snapshot> snapshot) noexcept
 {
 	if (snapshot)
 	{
-		std::lock_guard<std::mutex> lock(mutex_);
+		std::scoped_lock lock(mutex_);
 		snapshot_ = std::move(snapshot);
 	}
 }
 
 std::shared_ptr<const Snapshot> Registry::Load() const noexcept
 {
-	std::lock_guard<std::mutex> lock(mutex_);
+	std::scoped_lock lock(mutex_);
 	return snapshot_;
 }
 
 void Registry::ClearForQuietUnload() noexcept
 {
-	std::lock_guard<std::mutex> lock(mutex_);
+	std::scoped_lock lock(mutex_);
 	snapshot_.reset();
 }
 

@@ -354,7 +354,7 @@ struct FreeTypeDrawInfo
 	{
 		if (!freetype_face_list[index])
 		{
-			CCriticalSectionLock __lock(CCriticalSectionLock::CS_MANAGER);
+			CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_MANAGER);
 			FT_Size font_size;
 			//FTC_ScalerRec fscaler={face_id_list[index], 1,1,1,0,0};
 			scaler.face_id = face_id_list[index];

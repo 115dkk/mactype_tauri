@@ -19,7 +19,7 @@ bool IsUnavailable(CapabilityReason reason) noexcept
 
 bool HookCoordinator::BeginStart() noexcept
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     if (phase_ != RuntimePhase::uninitialized && phase_ != RuntimePhase::failed) {
         return false;
     }
@@ -33,7 +33,7 @@ bool HookCoordinator::BeginStart() noexcept
 
 bool HookCoordinator::CompleteStart() noexcept
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     if (phase_ != RuntimePhase::starting) {
         return false;
     }
@@ -44,7 +44,7 @@ bool HookCoordinator::CompleteStart() noexcept
 
 bool HookCoordinator::FailStart(long status) noexcept
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     if (phase_ != RuntimePhase::starting) {
         return false;
     }
@@ -56,7 +56,7 @@ bool HookCoordinator::FailStart(long status) noexcept
 
 bool HookCoordinator::BeginStop() noexcept
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     if (phase_ != RuntimePhase::starting && phase_ != RuntimePhase::active &&
         phase_ != RuntimePhase::failed) {
         return false;
@@ -69,7 +69,7 @@ bool HookCoordinator::BeginStop() noexcept
 
 bool HookCoordinator::AbortStop() noexcept
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     if (phase_ != RuntimePhase::stopping) {
         return false;
     }
@@ -81,7 +81,7 @@ bool HookCoordinator::AbortStop() noexcept
 
 bool HookCoordinator::CompleteStop() noexcept
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     if (phase_ != RuntimePhase::stopping) {
         return false;
     }
@@ -103,7 +103,7 @@ bool HookCoordinator::CompleteStop() noexcept
 
 bool HookCoordinator::ClearForQuietUnload() noexcept
 {
-	std::lock_guard<std::mutex> lock(mutex_);
+	std::scoped_lock lock(mutex_);
 	if (phase_ != RuntimePhase::active ||
 		std::any_of(
 			capabilities_.begin(), capabilities_.end(),
@@ -127,7 +127,7 @@ HookAttempt HookCoordinator::BeginAttempt(
     std::uintptr_t target,
     bool modulePresent)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     if (phase_ != RuntimePhase::starting && phase_ != RuntimePhase::active) {
         return {};
     }
@@ -177,7 +177,7 @@ bool HookCoordinator::CompleteAttempt(
         return false;
     }
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     if (attempt.generation_ != generation_) {
         return false;
     }
@@ -210,7 +210,7 @@ bool HookCoordinator::CompleteAttempt(
 
 HookLifecycleSnapshot HookCoordinator::Snapshot() const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     HookLifecycleSnapshot snapshot;
     snapshot.phase = phase_;
     snapshot.failureStatus = failureStatus_;
@@ -225,13 +225,13 @@ HookLifecycleSnapshot HookCoordinator::Snapshot() const
 
 RuntimePhase HookCoordinator::phase() const noexcept
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     return phase_;
 }
 
 long HookCoordinator::failure_status() const noexcept
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     return failureStatus_;
 }
 

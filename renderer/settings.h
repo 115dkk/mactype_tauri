@@ -956,7 +956,6 @@ public:
 	static void WINAPI ReloadConfig()
 	{
 		CCriticalSectionLock writerLock(CCriticalSectionLock::CS_SETTING);
-		//CCriticalSectionLock __lock(CCriticalSectionLock::CS_LIBRARY);
 		CGdippSettings* pSettings = CGdippSettings::GetInstance();
 		extern HINSTANCE g_dllInstance;
 		pSettings->m_arrIndividual.RemoveAll();

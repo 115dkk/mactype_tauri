@@ -761,7 +761,7 @@ HRESULT LookupManifestFontImpl(
         return S_OK;
     ManifestProcessLock processLock;
     ManifestState& state = GetManifestState();
-    std::lock_guard<std::mutex> lock(state.mutex);
+    std::scoped_lock lock(state.mutex);
     LoadManifest(state, path);
     for (auto entry = state.entries.begin(); entry != state.entries.end(); ++entry)
     {
@@ -799,7 +799,7 @@ HRESULT StoreManifestFontImpl(
         return result;
     ManifestProcessLock processLock;
     ManifestState& state = GetManifestState();
-    std::lock_guard<std::mutex> lock(state.mutex);
+    std::scoped_lock lock(state.mutex);
     LoadManifest(state, path);
     ManifestEntry* destination = nullptr;
     for (ManifestEntry& entry : state.entries)
@@ -840,7 +840,7 @@ HRESULT DropManifestFontImpl(ManifestKey const& key)
         return result;
     ManifestProcessLock processLock;
     ManifestState& state = GetManifestState();
-    std::lock_guard<std::mutex> lock(state.mutex);
+    std::scoped_lock lock(state.mutex);
     LoadManifest(state, path);
     size_t const before = state.entries.size();
     state.entries.erase(
@@ -863,7 +863,7 @@ HRESULT ReloadManifestForTestsImpl()
     ManifestState fresh;
     LoadManifest(fresh, path);
     ManifestState& state = GetManifestState();
-    std::lock_guard<std::mutex> lock(state.mutex);
+    std::scoped_lock lock(state.mutex);
     state.path = std::move(fresh.path);
     state.entries = std::move(fresh.entries);
     state.fileIdentity = fresh.fileIdentity;

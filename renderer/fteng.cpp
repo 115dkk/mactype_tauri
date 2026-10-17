@@ -168,7 +168,7 @@ struct DeleteCharFunc
 template <class T>
 void CompactMap(T& pp, int count, int reduce)
 {
-	CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTCACHE);
+	CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_FONTCACHE);
 	int reducecount = pp.size() - reduce;
 	typename T::iterator it= pp.begin();
 	for (int i=0;i<reducecount;i++) //删除超过FREETYPE_GC_COUNTER之后的缓存
@@ -188,7 +188,7 @@ void Compact(T** pp, int count, int reduce)
 	if (!pp || !count || count < reduce) {
 		return;
 	}
-	CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTCACHE);
+	CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_FONTCACHE);
 	TRACE(_T("Compact(0x%p, %d, %d)\n"), pp, count, reduce);
 	//GCモドキ
 	//T::m_mrucounterの降順に並ぶので
@@ -563,7 +563,7 @@ bool FreeTypeFontInfo::EmbeddedBmpExist(int px)
 		return false;
 	if (m_ebmps[px]!=-1)
 		return !!m_ebmps[px];
-	CCriticalSectionLock __lock(CCriticalSectionLock::CS_MANAGER);
+	CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_MANAGER);
 	FTC_ImageTypeRec imgtype={reinterpret_cast<FTC_FaceID>(m_id), static_cast<FT_UInt>(px), static_cast<FT_UInt>(px), FT_LOAD_DEFAULT};	//构造一个当前大小的imagetype
 	FT_Glyph temp_glyph=nullptr;
 	FT_UInt gindex = FTC_CMapCache_Lookup(cmap_cache, reinterpret_cast<FTC_FaceID>(m_id), -1, static_cast<FT_UInt32>(L'0'));	//获得0的索引值
@@ -585,7 +585,7 @@ bool FreeTypeFontInfo::EmbeddedBmpExist(int px)
 
 FreeTypeFontCache* FreeTypeFontInfo::GetCache(FTC_ScalerRec& scaler, const LOGFONT& lf)
 {
-	CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTCACHE);
+	CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_FONTCACHE);
 
 	if (AddIncrement() > m_nMaxSizes) {	//先压缩
 		Compact();
@@ -634,7 +634,7 @@ FreeTypeFontCache* FreeTypeFontInfo::GetCache(FTC_ScalerRec& scaler, const LOGFO
 //FreeTypeFontEngine
 void FreeTypeFontEngine::Compact()
 {
-	CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTENG);
+	CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_FONTENG);
 
 	TRACE(_T("FreeTypeFontEngine::Compact: %d > %d\n"), m_mfontMap.size(), m_nMaxFaces);
 	ResetGCCounter();
@@ -645,7 +645,7 @@ void FreeTypeFontEngine::Compact()
 
 BOOL FreeTypeFontEngine::RemoveFont(FreeTypeFontInfo* fontinfo)
 {
-	CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTMAP);
+	CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_FONTMAP);
 	{
 		FontMap::const_iterator iter=m_mfontMap.begin();	//遍历fontmap
 		while (iter!=m_mfontMap.end())
@@ -677,7 +677,7 @@ BOOL FreeTypeFontEngine::RemoveFont(FreeTypeFontInfo* fontinfo)
 
 BOOL FreeTypeFontEngine::RemoveThisFont(FreeTypeFontInfo* fontinfo, LOGFONT* lg)
 {
-	CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTMAP);
+	CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_FONTMAP);
 	{
 		FontMap::const_iterator iter=m_mfontMap.find(myfont(lg->lfFaceName, CalcBoldWeight(lg->lfWeight), lg->lfItalic));	//遍历fontmap
 		if (iter!=m_mfontMap.end())
@@ -700,8 +700,8 @@ BOOL FreeTypeFontEngine::RemoveFont(LPCWSTR FontName)
 	if (!fontarray) return false;
 	FTC_FaceID fid = nullptr;
 	BOOL bIsFontLoaded, bIsFontFileLoaded = false;
-	COwnedCriticalSectionLock __lock2(2, COwnedCriticalSectionLock::OCS_DC);	//获取所有权，现在要处理DC，禁止所有绘图函数访问
-	CCriticalSectionLock __lock(CCriticalSectionLock::CS_MANAGER);
+	COwnedCriticalSectionLock ownedSectionLock(2, COwnedCriticalSectionLock::OCS_DC);	//获取所有权，现在要处理DC，禁止所有绘图函数访问
+	CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_MANAGER);
 	renderer::RendererPolicyRef const policy =
 		renderer::CurrentRendererPolicy();
 	if (!policy)
@@ -722,7 +722,7 @@ BOOL FreeTypeFontEngine::RemoveFont(LPCWSTR FontName)
 			}
 			else
 				RemoveThisFont(result, fontarray);
-			CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTENG);
+			CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_FONTENG);
 			FTC_Manager_RemoveFaceID(cache_man, fid);
 			m_mfontList[static_cast<int>(reinterpret_cast<INT_PTR>(fid)) - 1] = nullptr;
 		}
@@ -756,7 +756,7 @@ FreeTypeFontInfo* FreeTypeFontEngine::AddFont(
 	const renderer::RendererPolicyRef& policy)
 {
 	FREETYPE_PARAMS* params = static_cast<FREETYPE_PARAMS*>(lpparams);
-	CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTENG);
+	CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_FONTENG);
 	const LOGFONT& lplf = *params->lplf;
 	if(!*lplf.lfFaceName || _tcslen(lplf.lfFaceName) == 0 || !policy)
 		return nullptr;
@@ -821,7 +821,7 @@ FreeTypeFontInfo* FreeTypeFontEngine::AddFont(
 	const renderer::RendererPolicyRef& policy,
 	BOOL* bIsFontLoaded)
 {
-	CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTENG);
+	CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_FONTENG);
 	if(lpFaceName == nullptr || _tcslen(lpFaceName) == 0 || !policy)
 		return nullptr;
 
@@ -882,7 +882,7 @@ FreeTypeFontInfo* FreeTypeFontEngine::FindFont(
 	const renderer::RendererPolicyRef& policy)
 {
 	FREETYPE_PARAMS* params = static_cast<FREETYPE_PARAMS*>(lpparams);
-	CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTMAP);
+	CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_FONTMAP);
 	FullNameMap::const_iterator iter=m_mfullMap.find(params->strFullName);
 	if (iter!=m_mfullMap.end())
 	{
@@ -906,7 +906,7 @@ FreeTypeFontInfo* FreeTypeFontEngine::FindFont(
 	bool AddOnFind,
 	BOOL* bIsFontLoaded)
 {
-	CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTMAP);
+	CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_FONTMAP);
 	weight = CalcBoldWeight(weight);
 	myfont font(lpFaceName, weight, italic);
 	FontMap::const_iterator iter=m_mfontMap.find(font);
@@ -923,7 +923,7 @@ FreeTypeFontInfo* FreeTypeFontEngine::FindFont(
 
 FreeTypeFontInfo* FreeTypeFontEngine::FindFont(int faceid)
 {
-	CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTMAP);
+	CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_FONTMAP);
 	renderer::freetype::CheckedFaceIndex const index =
 		renderer::freetype::CheckFaceIndex(faceid, m_mfontList.size());
 	return index.valid ? m_mfontList[index.value] : nullptr;

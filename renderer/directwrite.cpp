@@ -552,7 +552,7 @@ void HookRenderTarget(
 
 	if (hookCategory == D2D1_RENDER_TARGET_CATEGORY) {
 		static bool loaded1 = [&] {
-			CCriticalSectionLock __lock(CCriticalSectionLock::CS_DWRITE);
+			CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_DWRITE);
 			HookRenderTargetMethod(pD2D1RenderTarget, hookCategory, hookDrawText);
 			HookRenderTargetMethod(pD2D1RenderTarget, hookCategory, hookDrawGlyphRun);
 			HookRenderTargetMethod(pD2D1RenderTarget, hookCategory, hookSetTextAntialiasMode);
@@ -567,7 +567,7 @@ void HookRenderTarget(
 		}();
 	} else if (hookCategory == D2D1_RENDER_TARGET1_CATEGORY) {
 		static bool loaded2 = [&] {
-			CCriticalSectionLock __lock(CCriticalSectionLock::CS_DWRITE);
+			CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_DWRITE);
 			HookRenderTargetMethod(pD2D1RenderTarget, hookCategory, hookDrawText);
 			HookRenderTargetMethod(pD2D1RenderTarget, hookCategory, hookDrawGlyphRun);
 			HookRenderTargetMethod(pD2D1RenderTarget, hookCategory, hookSetTextAntialiasMode);
@@ -582,7 +582,7 @@ void HookRenderTarget(
 		}();
 	} else if (hookCategory == D2D1_DEVICE_CONTEXT_CATEGORY) {
 		static bool loaded3 = [&] {
-			CCriticalSectionLock __lock(CCriticalSectionLock::CS_DWRITE);
+			CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_DWRITE);
 			HookRenderTargetMethod(pD2D1RenderTarget, hookCategory, hookDrawText);
 			HookRenderTargetMethod(pD2D1RenderTarget, hookCategory, hookDrawGlyphRun);
 			HookRenderTargetMethod(pD2D1RenderTarget, hookCategory, hookSetTextAntialiasMode);
@@ -1464,7 +1464,7 @@ void PublishFactoryAliasSource(
 	if (identity == nullptr || systemSet == nullptr)
 		return;
 	{
-		std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+		std::scoped_lock lock(GetFactoryAliasVtableMutex());
 		for (FactoryAliasSource const& source : GetFactoryAliasSourceRegistry())
 		{
 			if (source.factoryIdentity == identity)
@@ -1480,7 +1480,7 @@ CComPtr<IDWriteFontSet> GetFactoryAliasSource(IDWriteFactory* factory)
 	CComPtr<IUnknown> const identity = GetFactoryIdentity(factory);
 	if (identity == nullptr)
 		return nullptr;
-	std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+	std::scoped_lock lock(GetFactoryAliasVtableMutex());
 	for (FactoryAliasSource const& source : GetFactoryAliasSourceRegistry())
 	{
 		if (source.factoryIdentity == identity)
@@ -1494,7 +1494,7 @@ std::uint64_t GetFactoryAliasSourceRevision(IDWriteFactory* factory)
 	CComPtr<IUnknown> const identity = GetFactoryIdentity(factory);
 	if (identity == nullptr)
 		return kNoFactoryAliasSource;
-	std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+	std::scoped_lock lock(GetFactoryAliasVtableMutex());
 	for (FactoryAliasSource const& source : GetFactoryAliasSourceRegistry())
 	{
 		if (source.factoryIdentity == identity)
@@ -1531,7 +1531,7 @@ void RefreshFactoryAliasSource(
 		};
 
 	{
-		std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+		std::scoped_lock lock(GetFactoryAliasVtableMutex());
 		for (FactoryAliasSource& source : GetFactoryAliasSourceRegistry())
 		{
 			if (source.factoryIdentity == identity &&
@@ -1549,7 +1549,7 @@ void RefreshFactoryAliasSource(
 
 	std::uint64_t publishedRevision = kNoFactoryAliasSource;
 	{
-		std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+		std::scoped_lock lock(GetFactoryAliasVtableMutex());
 		bool registered = false;
 		for (FactoryAliasSource& source : GetFactoryAliasSourceRegistry())
 		{
@@ -1681,7 +1681,7 @@ bool PatchFactoryAliasVtables(
 	if (factoryVtable == nullptr || factory3Vtable == nullptr)
 		return false;
 
-	std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+	std::scoped_lock lock(GetFactoryAliasVtableMutex());
 	GetOrAddFactoryAliasVtable(factoryVtable);
 	GetOrAddFactoryAliasVtable(factory3Vtable);
 	FactoryAliasVtableHooks& factoryHooks =
@@ -1742,7 +1742,7 @@ FactoryGetSystemFontCollectionMethod GetOriginalSystemFontCollection(
 {
 	void** const vtable = factory == nullptr ? nullptr :
 		*reinterpret_cast<void***>(factory);
-	std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+	std::scoped_lock lock(GetFactoryAliasVtableMutex());
 	for (FactoryAliasVtableHooks const& hooks : GetFactoryAliasVtableRegistry())
 	{
 		if (hooks.vtable == vtable)
@@ -1755,7 +1755,7 @@ Factory3GetSystemFontSetMethod GetOriginalSystemFontSet(IDWriteFactory3* factory
 {
 	void** const vtable = factory == nullptr ? nullptr :
 		*reinterpret_cast<void***>(factory);
-	std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+	std::scoped_lock lock(GetFactoryAliasVtableMutex());
 	for (FactoryAliasVtableHooks const& hooks : GetFactoryAliasVtableRegistry())
 	{
 		if (hooks.vtable == vtable)
@@ -1769,7 +1769,7 @@ Factory3GetSystemFontCollectionMethod GetOriginalModernSystemFontCollection(
 {
 	void** const vtable = factory == nullptr ? nullptr :
 		*reinterpret_cast<void***>(factory);
-	std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+	std::scoped_lock lock(GetFactoryAliasVtableMutex());
 	for (FactoryAliasVtableHooks const& hooks : GetFactoryAliasVtableRegistry())
 	{
 		if (hooks.vtable == vtable)
@@ -1877,7 +1877,7 @@ bool CaptureFactoryAliasSource(IDWriteFactory* factory)
 
 void RestoreFactoryAliasVtables() noexcept
 {
-	std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+	std::scoped_lock lock(GetFactoryAliasVtableMutex());
 	for (FactoryAliasVtableHooks& hooks : GetFactoryAliasVtableRegistry())
 	{
 		RestoreFactoryVtableMethod(
@@ -1905,7 +1905,7 @@ void ClearFactoryAliasSources() noexcept
 {
 	std::vector<FactoryAliasSource> sources;
 	{
-		std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+		std::scoped_lock lock(GetFactoryAliasVtableMutex());
 		sources.swap(GetFactoryAliasSourceRegistry());
 	}
 	sources.clear();
@@ -2162,7 +2162,7 @@ static bool HookDWriteFactoryEntry(FARPROC factoryProcedure)
 
 	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
 	{
-		std::lock_guard<std::mutex> lock(lifecycle.dwriteHookMutex);
+		std::scoped_lock lock(lifecycle.dwriteHookMutex);
 		if (lifecycle.stopping.load(std::memory_order_acquire))
 			return false;
 		if (ISHOOKED(DWriteCreateFactory))
@@ -2209,7 +2209,7 @@ static bool HookDWriteCoreFactoryEntry(FARPROC factoryProcedure)
 
 	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
 	{
-		std::lock_guard<std::mutex> lock(lifecycle.dwriteCoreHookMutex);
+		std::scoped_lock lock(lifecycle.dwriteCoreHookMutex);
 		if (lifecycle.stopping.load(std::memory_order_acquire))
 			return false;
 		if (ISHOOKED(DWriteCoreCreateFactory))
@@ -2284,7 +2284,7 @@ static void ScheduleLoadedDWriteCoreHook()
 	}
 	renderer_raii::UniqueModuleReference selfReference(moduleReference);
 	{
-		std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
+		std::scoped_lock lock(lifecycle.stateMutex);
 		if (lifecycle.stopping.load(std::memory_order_acquire))
 		{
 			lifecycle.dwriteCoreWorkerScheduled.store(false, std::memory_order_release);
@@ -2355,7 +2355,7 @@ static void ScheduleExistingDirectWriteFactoryHook()
 	if (lifecycle.stopping.load(std::memory_order_acquire))
 		return;
 	{
-		std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
+		std::scoped_lock lock(lifecycle.stateMutex);
 		if (lifecycle.existingFactoryWorker &&
 			WaitForSingleObject(lifecycle.existingFactoryWorker.get(), 0) == WAIT_TIMEOUT)
 			return;
@@ -2368,7 +2368,7 @@ static void ScheduleExistingDirectWriteFactoryHook()
 		return;
 	renderer_raii::UniqueModuleReference selfReference(moduleReference);
 	{
-		std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
+		std::scoped_lock lock(lifecycle.stateMutex);
 		if (lifecycle.stopping.load(std::memory_order_acquire) ||
 			(lifecycle.existingFactoryWorker &&
 			 WaitForSingleObject(
@@ -2527,7 +2527,7 @@ void WaitForDirectWriteHooksSettled(DWORD timeoutMs)
 	{
 		bool settled = false;
 		{
-			std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
+			std::scoped_lock lock(lifecycle.stateMutex);
 			// The worker handle outlives the factory hooks by up to five
 			// seconds of DWriteCore watching, so wait on the hook flag, not
 			// on the thread.
@@ -2556,7 +2556,7 @@ DirectWriteLifecycleStopPreparation PrepareDirectWriteLifecycleStop(
 	HANDLE existingWorker = nullptr;
 	HANDLE coreWorker = nullptr;
 	{
-		std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
+		std::scoped_lock lock(lifecycle.stateMutex);
 		if (lifecycle.phase == DirectWriteLifecyclePhase::dormant ||
 			lifecycle.phase == DirectWriteLifecyclePhase::stopped)
 			return DirectWriteLifecycleStopPreparation::alreadyStopped;
@@ -2589,7 +2589,7 @@ void AbortDirectWriteLifecycleStop()
 	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
 	bool shouldResumeStartupWatch = false;
 	{
-		std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
+		std::scoped_lock lock(lifecycle.stateMutex);
 		if (lifecycle.phase != DirectWriteLifecyclePhase::stopping)
 			return;
 		bool startupFinished = false;
@@ -2629,7 +2629,7 @@ bool CommitDirectWriteLifecycleStop(DWORD timeoutMilliseconds)
 {
 	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
 	{
-		std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
+		std::scoped_lock lock(lifecycle.stateMutex);
 		if (lifecycle.phase != DirectWriteLifecyclePhase::stopping)
 			return lifecycle.phase == DirectWriteLifecyclePhase::stopped ||
 				lifecycle.phase == DirectWriteLifecyclePhase::dormant;
@@ -2641,7 +2641,7 @@ bool CommitDirectWriteLifecycleStop(DWORD timeoutMilliseconds)
 		DirectWriteDiagnosticLock lock;
 		lifecycle.diagnosticEvents.clear();
 	}
-	std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
+	std::scoped_lock lock(lifecycle.stateMutex);
 	lifecycle.startupWorker.reset();
 	lifecycle.existingFactoryWorker.reset();
 	lifecycle.dwriteCoreWorker.reset();
@@ -2791,7 +2791,7 @@ static DWORD WINAPI StartDirectWriteLifecycleWorker(LPVOID moduleReference)
 	bool const succeeded = InitializeDirectWriteLifecycle();
 	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
 	{
-		std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
+		std::scoped_lock lock(lifecycle.stateMutex);
 		lifecycle.startupSucceeded = succeeded;
 		if (lifecycle.phase == DirectWriteLifecyclePhase::starting)
 			lifecycle.phase = succeeded
@@ -2807,7 +2807,7 @@ void StartDirectWriteLifecycle()
 {
 	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
 	SetFallbackDiagnosticSink(&SignalDirectWriteFallbackDiagnostic);
-	std::lock_guard<std::mutex> lock(lifecycle.stateMutex);
+	std::scoped_lock lock(lifecycle.stateMutex);
 	if (lifecycle.phase == DirectWriteLifecyclePhase::starting ||
 		lifecycle.phase == DirectWriteLifecyclePhase::active ||
 		lifecycle.phase == DirectWriteLifecyclePhase::stopping)
@@ -3074,7 +3074,7 @@ static FactoryFamilyTranslationCache& GetFactoryFamilyTranslationCache()
 static void ClearFactoryFamilyTranslations() noexcept
 {
 	FactoryFamilyTranslationCache& cache = GetFactoryFamilyTranslationCache();
-	std::lock_guard<std::mutex> lock(cache.mutex);
+	std::scoped_lock lock(cache.mutex);
 	cache.entries.clear();
 }
 
@@ -3137,7 +3137,7 @@ static bool LookupFactoryFamily(
 	FactoryFamilyTranslationCache& cache = GetFactoryFamilyTranslationCache();
 	bool const italic = replacement.lfItalic != 0;
 	{
-		std::lock_guard<std::mutex> lock(cache.mutex);
+		std::scoped_lock lock(cache.mutex);
 		for (FactoryFamilyTranslation const& entry : cache.entries)
 		{
 			if (entry.gdiWeight == replacement.lfWeight &&
@@ -3158,7 +3158,7 @@ static bool LookupFactoryFamily(
 	entry.italic = italic;
 	entry.family = family;
 	entry.weight = weight;
-	std::lock_guard<std::mutex> lock(cache.mutex);
+	std::scoped_lock lock(cache.mutex);
 	if (cache.entries.size() >= kFactoryFamilyTranslationLimit)
 		cache.entries.clear();
 	cache.entries.push_back(std::move(entry));

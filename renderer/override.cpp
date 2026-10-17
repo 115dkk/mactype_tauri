@@ -213,7 +213,7 @@ LPCWSTR GetCachedFontLocale(HFONT lFont)
 void AddToCachedFont(HFONT lfont, LPWSTR lpFaceName, LPWSTR lpGDIName)
 {
 	if (!lfont) return;	//不可以添加空节点
-	CCriticalSectionLock __lock(CCriticalSectionLock::CS_CACHEDFONT);
+	CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_CACHEDFONT);
 	if (GetCachedFont(lfont)) return;	//已经存在的字体
 	FontCache[lfont] = new CFontSubResult(lpFaceName, lpGDIName);
 }
@@ -221,7 +221,7 @@ void AddToCachedFont(HFONT lfont, LPWSTR lpFaceName, LPWSTR lpGDIName)
 void DeleteCachedFont(HFONT lfont)
 {
 	if (!lfont) return;	//不可以删除头结点
-	CCriticalSectionLock __lock(CCriticalSectionLock::CS_CACHEDFONT);
+	CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_CACHEDFONT);
 	CFontCache::iterator it= FontCache.find(lfont);
 	if (it!=FontCache.end())
 	{
@@ -708,7 +708,7 @@ int DisplayFromDC(HDC dc) {
 	if (!dc) {
 		return -1;
 	}
-	CCriticalSectionLock __lock(CCriticalSectionLock::CS_DCRELATION);
+	CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_DCRELATION);
 	// fetch realDC from memoryDC
 	auto it = DCRelation.find(dc);
 	if (it != DCRelation.end()) {
@@ -819,7 +819,7 @@ BOOL WINAPI IMPL_ExtTextOutW(HDC hdc, int nXStart, int nYStart, UINT fuOptions, 
 	//	return ORIG_ExtTextOutW(hdc, nXStart, nYStart, fuOptions, lprc, lpString, cbString, lpDx);
 
 
-	COwnedCriticalSectionLock __lock2(1, COwnedCriticalSectionLock::OCS_DC);	//获取所有权，防止冲突
+	COwnedCriticalSectionLock ownedSectionLock(1, COwnedCriticalSectionLock::OCS_DC);	//获取所有权，防止冲突
 	CBitmapCache& cache	= pTLInfo->BitmapCache();
 	CETOBitmap bmp(cache);
 
@@ -1278,7 +1278,7 @@ HDC WINAPI IMPL_CreateCompatibleDC(_In_opt_ HDC hdc) {
 	auto memdc = CreateCompatibleDC(hdc);
 	if (memdc) {
 		TRACE(L"CreateCompatibleDC: %d->%d\n", memdc, hdc);
-		CCriticalSectionLock __lock(CCriticalSectionLock::CS_DCRELATION);
+		CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_DCRELATION);
 		// unchain dc relations
 		auto it = DCRelation.find(hdc);
 		if (it != DCRelation.end()) {
@@ -1304,7 +1304,7 @@ HDC WINAPI IMPL_CreateCompatibleDC(_In_opt_ HDC hdc) {
 BOOL WINAPI IMPL_DeleteDC(_In_ HDC hdc) {
 	auto ret = ORIG_DeleteDC(hdc);
 	if (ret) {
-		CCriticalSectionLock __lock(CCriticalSectionLock::CS_DCRELATION);
+		CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_DCRELATION);
 		DCRelation.erase(hdc);
 		hdcReleaseRef(hdc);
 		TRACE(L"DeleteDC %d", hdc);
@@ -1319,7 +1319,7 @@ HDC WINAPI IMPL_GetDC(_In_opt_ HWND hWnd) {
 			hWnd = getMyActiveWindow();
 		}
 		if (hWnd) {
-			CCriticalSectionLock __lock(CCriticalSectionLock::CS_DCRELATION);
+			CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_DCRELATION);
 			TRACE(L"[GetDC] Custom Relation %d->%d\n", dc, hWnd);
 			hdcAddRef(dc);
 			DCHwndCache[dc] = hWnd;
@@ -1329,7 +1329,7 @@ HDC WINAPI IMPL_GetDC(_In_opt_ HWND hWnd) {
 }
 
 BOOL WINAPI IMPL_ReleaseDC(_In_opt_ HWND hWnd, _In_ HDC hDC) {
-	CCriticalSectionLock __lock(CCriticalSectionLock::CS_DCRELATION);
+	CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_DCRELATION);
 	hdcReleaseRef(hDC);
 	return ORIG_ReleaseDC(hWnd, hDC);
 }

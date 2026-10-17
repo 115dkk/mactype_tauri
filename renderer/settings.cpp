@@ -204,7 +204,7 @@ static const TCHAR c_szDirectWrite[] = _T("DirectWrite");
 
 CGdippSettings* CGdippSettings::CreateInstance()
 {
-	CCriticalSectionLock __lock(CCriticalSectionLock::CS_SETTING);
+	CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_SETTING);
 	CGdippSettings* pSettings = new CGdippSettings;
 	CGdippSettings* pOldSettings = reinterpret_cast<CGdippSettings*>(InterlockedExchangePointer(reinterpret_cast<void**>(&s_pInstance), pSettings));
 	_ASSERTE(pOldSettings == nullptr);
@@ -220,7 +220,7 @@ CGdippSettings* CGdippSettings::CreateInstance()
 
 void CGdippSettings::DestroyInstance()
 {
-	CCriticalSectionLock __lock(CCriticalSectionLock::CS_SETTING);
+	CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_SETTING);
 
 	CGdippSettings* pSettings = reinterpret_cast<CGdippSettings*>(InterlockedExchangePointer(reinterpret_cast<void**>(&s_pInstance), nullptr));
 	if (pSettings) {
@@ -230,7 +230,7 @@ void CGdippSettings::DestroyInstance()
 
 CGdippSettings* CGdippSettings::GetInstance()
 {
-	CCriticalSectionLock __lock(CCriticalSectionLock::CS_SETTING);
+	CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_SETTING);
 	CGdippSettings* pSettings = s_pInstance;
 	_ASSERTE(pSettings != nullptr);
 
@@ -242,7 +242,7 @@ CGdippSettings* CGdippSettings::GetInstance()
 
 const CGdippSettings* CGdippSettings::GetInstanceNoInit()
 {
-	CCriticalSectionLock __lock(CCriticalSectionLock::CS_SETTING);
+	CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_SETTING);
 	CGdippSettings* pSettings = s_pInstance;
 	_ASSERTE(pSettings != nullptr);
 	return pSettings;
@@ -512,7 +512,7 @@ bool CGdippSettings::PublishRendererPolicySnapshot(
 
 bool CGdippSettings::LoadSettings(HINSTANCE hModule)
 {
-	CCriticalSectionLock __lock(CCriticalSectionLock::CS_SETTING);
+	CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_SETTING);
 	if (!BuildMainProfilePath(hModule, m_szFileName)) {
 		return false;
 	}

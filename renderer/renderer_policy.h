@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -62,6 +63,17 @@ struct HookPolicy final
 	bool unityFontEnabledForProcess = false;
 };
 
+struct AdmissionPolicy final
+{
+	bool includeOnly = false;
+	bool runFromGdiExe = false;
+	std::wstring executableDirectory;
+	std::vector<std::wstring> excludeModules, includeModules, unloadModules;
+	std::vector<std::wstring> excludeFonts, includeFonts;
+	std::vector<std::wstring> unityIncludeGames, unityExcludeGames;
+	std::set<int> displayAffinity;
+};
+
 struct FreeTypeStartupPolicy final
 {
 	int cacheMaxFaces = 0;
@@ -91,6 +103,12 @@ struct RasterPolicy final
 	int bitmapHeight = 0;
 	int bolderMode = 0;
 	int widthMode = 0;
+	int minHeight = 0;
+	int maxHeight = 0;
+	int screenDpi = 96;
+	bool clipBoxFix = false;
+	bool shadowEnabled = false;
+	std::array<int, 4> shadowParams{};
 	int lcdFilter = 0;
 	bool hintSmallFont = false;
 	bool harmonyLcd = false;
@@ -139,6 +157,7 @@ struct RendererPolicyCandidate final
 	bool valid = false;
 	std::string profileDigest;
 	HookPolicy hooks;
+	AdmissionPolicy admission;
 	FreeTypeStartupPolicy freeType;
 	RasterPolicy raster;
 	DirectWritePolicy directWrite;
@@ -170,6 +189,15 @@ public:
 	}
 	[[nodiscard]] std::uint64_t digest() const noexcept { return digest_; }
 	[[nodiscard]] const HookPolicy& hooks() const noexcept { return hooks_; }
+	[[nodiscard]] const AdmissionPolicy& admission() const noexcept { return admission_; }
+	[[nodiscard]] bool font_excluded(const wchar_t* family) const noexcept;
+	[[nodiscard]] bool display_allowed(int display) const noexcept;
+	[[nodiscard]] bool process_excluded(
+		bool forceLoad, bool forceExclude, bool (*moduleLoaded)(const wchar_t*)) const;
+	[[nodiscard]] bool process_unload(
+		bool forceLoad, bool (*moduleLoaded)(const wchar_t*)) const;
+	[[nodiscard]] bool exe_unload(const wchar_t* name, bool forceLoad) const;
+	[[nodiscard]] bool unity_font_enabled_for_executable(const wchar_t* path) const noexcept;
 	[[nodiscard]] const FreeTypeStartupPolicy& free_type() const noexcept
 	{
 		return freeType_;
@@ -218,6 +246,7 @@ private:
 	std::string profileDigest_;
 	std::uint64_t digest_ = 0;
 	HookPolicy hooks_;
+	AdmissionPolicy admission_;
 	FreeTypeStartupPolicy freeType_;
 	RasterPolicy raster_;
 	DirectWritePolicy directWrite_;

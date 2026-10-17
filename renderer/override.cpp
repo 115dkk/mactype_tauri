@@ -79,58 +79,44 @@ BOOL IsValidDC(HDC hdc)
 
 }
 
+namespace {
+bool AdmissionEnvironmentFlag(const wchar_t* name)
+{
+	SetLastError(ERROR_SUCCESS);
+	const DWORD length = GetEnvironmentVariableW(name, nullptr, 0);
+	return length != 0 || GetLastError() != ERROR_ENVVAR_NOT_FOUND;
+}
+
+bool AdmissionModuleLoaded(const wchar_t* name)
+{
+	return GetModuleHandleW(name) != nullptr;
+}
+} // namespace
+
 BOOL IsProcessExcluded()
 {
-//		return TRUE;
-//	}
-
-	const CGdippSettings* pSettings = CGdippSettings::GetInstanceNoInit();
-	if (pSettings->IsInclude()) {
-		if (pSettings->IsProcessIncluded()) {
-			return FALSE;
-		}
-		return TRUE;
-	}
-
-	if (pSettings->IsProcessExcluded()) {
-		return TRUE;
-	}
-	return FALSE;
+	const auto policy = renderer::CurrentRendererPolicy();
+	return !policy || policy->process_excluded(
+		AdmissionEnvironmentFlag(L"MACTYPE_FORCE_LOAD"),
+		AdmissionEnvironmentFlag(L"MACTYPE_FORCE_EXCLUDE"), AdmissionModuleLoaded);
 }
 
 BOOL IsProcessUnload()
 {
-//		return TRUE;
-//	}
-
-	const CGdippSettings* pSettings = CGdippSettings::GetInstanceNoInit();
-	if (pSettings->IsInclude()) {
-		if (pSettings->IsProcessIncluded()) {
-			return FALSE;
-		}
-		return TRUE;
-	}
-
-	if (pSettings->IsProcessUnload()) {
-		return TRUE;
-	}
-	return FALSE;
+	const auto policy = renderer::CurrentRendererPolicy();
+	return !policy || policy->process_unload(
+		AdmissionEnvironmentFlag(L"MACTYPE_FORCE_LOAD"), AdmissionModuleLoaded);
 }
 
-BOOL IsExeUnload(LPCTSTR lpApp)
+BOOL IsExeUnload(LPCTSTR name, const renderer::RendererPolicyRef& policy)
 {
-	const CGdippSettings* pSettings = CGdippSettings::GetInstanceNoInit();
-	if (pSettings->IsInclude()) {
-		if (pSettings->IsExeInclude(lpApp)) {
-			return FALSE;
-		}
-		return TRUE;
-	}
+	return !policy || policy->exe_unload(name,
+		AdmissionEnvironmentFlag(L"MACTYPE_FORCE_LOAD"));
+}
 
-	if (pSettings->IsExeUnload(lpApp)) {
-		return TRUE;
-	}
-	return FALSE;
+BOOL IsExeUnload(LPCTSTR name)
+{
+	return IsExeUnload(name, renderer::CurrentRendererPolicy());
 }
 
 //切り上げ除算
@@ -144,8 +130,9 @@ int div_ceil(int a, int b)
 template <typename _TCHAR>	//修改这个函数，使它在失败的时候返回false，由调用者负责调用Windows原函数，实现线程安全。
 BOOL _GetTextExtentPoint32AorW(HDC hdc, _TCHAR* lpString, int cbString, LPSIZE lpSize)
 {
-	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
-	if (pSettings->WidthMode() == SETTING_WIDTHMODE_GDI32
+	const auto policy = CGdippSettings::GetRendererPolicy();
+	const renderer::RendererPolicyScope policyScope(policy);
+	if ((!policy || policy->raster().widthMode == SETTING_WIDTHMODE_GDI32)
 		|| !IsValidDC(hdc) || !lpString || cbString <= 0) {
 		return false;
 	}
@@ -262,16 +249,17 @@ int WINAPI IMPL_GetTextFaceAliasW(HDC hdc, int nLen, LPWSTR lpAliasW)
 
 DWORD WINAPI IMPL_GetGlyphOutlineW(__in HDC hdc, __in UINT uChar, __in UINT fuFormat, __out LPGLYPHMETRICS lpgm, __in DWORD cjBuffer, __out_bcount_opt(cjBuffer) LPVOID pvBuffer, __in CONST MAT2 *lpmat2)
 {
-	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
+	const auto policy = CGdippSettings::GetRendererPolicy();
+	const renderer::RendererPolicyScope policyScope(policy);
 	DWORD ret= ORIG_GetGlyphOutlineW(hdc, uChar, fuFormat, lpgm, cjBuffer, pvBuffer, lpmat2);
-	if (pSettings->EnableClipBoxFix() && (!cjBuffer || !pvBuffer)) {
+	if ((policy && policy->raster().clipBoxFix) && (!cjBuffer || !pvBuffer)) {
 		if (!(fuFormat & (GGO_BITMAP | GGO_GRAY2_BITMAP | GGO_GRAY4_BITMAP | GGO_GRAY8_BITMAP | GGO_NATIVE))) {
 			//lpgm->gmptGlyphOrigin.x -= 1;
 			//lpgm->gmptGlyphOrigin.y += 1;
 			//lpgm->gmBlackBoxX += 3;
 			//lpgm->gmBlackBoxY += 2;
 
-			static int n = static_cast<int>(floor(1.5*pSettings->ScreenDpi() / 96));
+			static int n = static_cast<int>(floor(1.5*policy->raster().screenDpi / 96));
 			int nDeltaY = n, nDeltaBlackY = n;
 			TEXTMETRIC tm = { 0 };
 			GetTextMetrics(hdc, &tm);
@@ -301,15 +289,16 @@ DWORD WINAPI IMPL_GetGlyphOutlineW(__in HDC hdc, __in UINT uChar, __in UINT fuFo
 DWORD WINAPI IMPL_GetGlyphOutlineA(__in HDC hdc, __in UINT uChar, __in UINT fuFormat, __out LPGLYPHMETRICS lpgm, __in DWORD cjBuffer, __out_bcount_opt(cjBuffer) LPVOID pvBuffer, __in CONST MAT2 *lpmat2)
 {
 	//fuFormat |= GGO_UNHINTED;
-	const CGdippSettings* pSettings = CGdippSettings::GetInstance();
+	const auto policy = CGdippSettings::GetRendererPolicy();
+	const renderer::RendererPolicyScope policyScope(policy);
 	DWORD ret=  ORIG_GetGlyphOutlineA(hdc, uChar, fuFormat, lpgm, cjBuffer, pvBuffer, lpmat2);
 // 	{
 // 		lpgm->gmptGlyphOrigin.y+=1;
 // 		lpgm->gmBlackBoxY+=1;
 // 	}
-	if (pSettings->EnableClipBoxFix() && (!cjBuffer || !pvBuffer)) {
+	if ((policy && policy->raster().clipBoxFix) && (!cjBuffer || !pvBuffer)) {
 		if (!(fuFormat & (GGO_BITMAP | GGO_GRAY2_BITMAP | GGO_GRAY4_BITMAP | GGO_GRAY8_BITMAP | GGO_NATIVE))) {
-			static int n = static_cast<int>(floor(1.5*pSettings->ScreenDpi() / 96));
+			static int n = static_cast<int>(floor(1.5*policy->raster().screenDpi / 96));
 			int nDeltaY = n, nDeltaBlackY = n;
 			TEXTMETRIC tm = { 0 };
 			GetTextMetrics(hdc, &tm);
@@ -377,7 +366,8 @@ HGDIOBJ WINAPI IMPL_GetStockObject(__in int i)
 	{
 		case DEFAULT_GUI_FONT:
 			{
-				static const CGdippSettings* pSetting = CGdippSettings::GetInstance();
+				static const bool initialized = (CGdippSettings::GetRendererPolicy(), true);
+				(void)initialized;
 				if (g_alterGUIFont)
 					return g_alterGUIFont;
 				else
@@ -476,8 +466,9 @@ HFONT WINAPI IMPL_CreateFontIndirectExW(CONST ENUMLOGFONTEXDV *penumlfex)
 			SetLastError(ERROR_INVALID_PARAMETER);
 			return nullptr;
 		}
-		const CGdippSettings* pSettings = CGdippSettings::GetInstance();
-		if (pSettings->IsFontExcluded(penumlfex->elfEnumLogfontEx.elfLogFont.lfFaceName)) {
+		const auto policy = CGdippSettings::GetRendererPolicy();
+		const renderer::RendererPolicyScope policyScope(policy);
+		if (!policy || policy->font_excluded(penumlfex->elfEnumLogfontEx.elfLogFont.lfFaceName)) {
 			TRACE(L"Font exception! ");
 			return ORIG_CreateFontIndirectExW(penumlfex);
 			//TRACE(L"Handle = %x\n" , (int)h);
@@ -488,7 +479,7 @@ HFONT WINAPI IMPL_CreateFontIndirectExW(CONST ENUMLOGFONTEXDV *penumlfex)
 		LOGFONT& lf = mfont.elfEnumLogfontEx.elfLogFont;
 		LOGFONT lfOrg(lf);
 		BOOL bForced = false;
-		if (bForced = pSettings->CopyForceFont(lf, lfOrg)) {
+		if (bForced = CopyForceFont(policy, lf, lfOrg)) {
 
 			TRACE(L"Font substitutes to \"%s\"\n", lf.lfFaceName);
 		}
@@ -769,17 +760,11 @@ BOOL WINAPI IMPL_ExtTextOutW(HDC hdc, int nXStart, int nYStart, UINT fuOptions, 
 
 	if (!(fuOptions & ETO_GLYPH_INDEX) && !(fuOptions & ETO_IGNORELANGUAGE) && !lpDx && CID.myiscomplexscript(lpString,cbString))		//complex script
 		return ORIG_ExtTextOutW(hdc, nXStart, nYStart, fuOptions, lprc, lpString, cbString, lpDx);
-	CGdippSettings* pSettings = CGdippSettings::GetInstance(); //获得一个配置文件实例
-
-	// check if per-display rendering is enabled
-	if (pSettings->DisplayAffinity().size()) {
-		set<int>& aff = pSettings->DisplayAffinity();
-		int id = DisplayFromDC(hdc);
-		if (id >= 0 && aff.find(id) == aff.end()) {
-			// Excluded displays bypass the renderer.
-			return ORIG_ExtTextOutW(hdc, nXStart, nYStart, fuOptions, lprc, lpString, cbString, lpDx);
-		}
-	}
+	const auto policy = CGdippSettings::GetRendererPolicy();
+	const renderer::RendererPolicyScope policyScope(policy);
+	if (!policy || (!policy->admission().displayAffinity.empty() &&
+		!policy->display_allowed(DisplayFromDC(hdc))))
+		return ORIG_ExtTextOutW(hdc, nXStart, nYStart, fuOptions, lprc, lpString, cbString, lpDx);
 
 	CAutoVectorPtr<INT> newdx;
 	if (!lpDx) {
@@ -890,20 +875,20 @@ ETO_TRY();
 		reinterpret_cast<DWORD_PTR>(otm.get()) + reinterpret_cast<DWORD_PTR>(otm->otmpFamilyName));
 	strFamilyName = familyName;	//Get TTF font info
 
-	const bool bVertical = pSettings->FontLoader()==SETTING_FONTLOADER_FREETYPE?  strFamilyName.c_str()[0]==L'@' :false;
+	const bool bVertical = policy->raster().fontLoader==SETTING_FONTLOADER_FREETYPE?  strFamilyName.c_str()[0]==L'@' :false;
 
 	int nFontHeight = bZoomedDC ? DCTrans->TransformYAB(tm.tmHeight) : tm.tmHeight;
-	if ((pSettings->MaxHeight() && nFontHeight > pSettings->MaxHeight()) || (pSettings->MinHeight() && nFontHeight < pSettings->MinHeight()))  {
+	if ((policy->raster().maxHeight && nFontHeight > policy->raster().maxHeight) || (policy->raster().minHeight && nFontHeight < policy->raster().minHeight))  {
 		ETO_THROW(ETOE_INVALIDHDC);	//Font size too small or too big.
 	}
 
-	if (pSettings->IsFontExcluded(strFamilyName.c_str())) {	// check if it's excluded
+	if (policy->font_excluded(strFamilyName.c_str())) {	// check if it's excluded
 		ETO_THROW(ETOE_INVALIDHDC);
 	}	//20-50ms
 
 	// check pitch to make sure it's truetype or opentype
 	if ((otm->otmTextMetrics.tmPitchAndFamily & (TMPF_TRUETYPE | TMPF_VECTOR)) == 0) {	//opentype (collection) sets the vector bit, truetype sets the truetype bit
-		pSettings->AddFontExclude(strFamilyName.c_str());
+		CGdippSettings::AddFontExclude(strFamilyName.c_str(), policy);
 		ETO_THROW(ETOE_INVALIDHDC);	// set the font as an exclusion and exit
 	}
 //====================end================================
@@ -976,12 +961,12 @@ ETO_TRY();
 		//params.ftOptions |= FTO_MONO;
 	}
 
-	if(!params.IsMono() && pSettings->EnableShadow()) {
+	if(!params.IsMono() && policy->raster().shadowEnabled) {
 		bShadow = true;
 	}
 	int xs = 0, ys=0;
 	if (bShadow) {
-		const int* shadow = pSettings->GetShadowParams();
+		const int* shadow = policy->raster().shadowParams.data();
 		xs = shadow[0], ys = shadow[1];
 		params.alpha = shadow[2] | shadow[3];
 	}

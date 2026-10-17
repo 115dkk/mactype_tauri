@@ -171,7 +171,7 @@ const wstring GetAppDir() {
 	}
 	WCHAR name[MAX_PATH] = { 0 };
 
-	int nSize = GetModuleFileName(nullptr, name, MAX_PATH + 1);
+	int nSize = GetModuleFileName(nullptr, name, ARRAYSIZE(name));
 	PathRemoveFileSpec(name);
 	AppDir = wstring(name) + L"\\"; // path should always end with a "\"
 	AppDir = LowerCase(AppDir);
@@ -246,6 +246,16 @@ const CGdippSettings* CGdippSettings::GetInstanceNoInit()
 	CGdippSettings* pSettings = s_pInstance;
 	_ASSERTE(pSettings != nullptr);
 	return pSettings;
+}
+
+renderer::RendererPolicyRef CGdippSettings::GetRendererPolicy()
+{
+	// Nested hooks may already hold a raster lock; never enter the parser then.
+	if (renderer::RendererPolicyScope::active())
+		return renderer::CurrentRendererPolicy();
+	CCriticalSectionLock lock(CCriticalSectionLock::CS_SETTING);
+	(void)GetInstance();
+	return renderer::CurrentRendererPolicy();
 }
 
 void CGdippSettings::DelayedInit()
@@ -392,6 +402,7 @@ void CGdippSettings::DelayedInit()
 bool CGdippSettings::PublishRendererPolicySnapshot(
 	bool substitutionsReady) const
 {
+	CCriticalSectionLock lock(CCriticalSectionLock::CS_SETTING);
 	renderer::RendererPolicyCandidate candidate;
 	candidate.valid = true;
 	candidate.profileDigest = m_profileDigest;
@@ -402,6 +413,17 @@ bool CGdippSettings::PublishRendererPolicySnapshot(
 	candidate.hooks.skipConsoleProcesses = m_bSkipConsoleProcesses;
 	candidate.hooks.unityFontMode = UnityFontHookMode();
 	candidate.hooks.unityFontEnabledForProcess = UnityFontHookEnabledForProcess();
+	candidate.admission.includeOnly = m_bIsInclude;
+	candidate.admission.runFromGdiExe = m_bRunFromGdiExe;
+	candidate.admission.executableDirectory = GetAppDir();
+	candidate.admission.excludeModules.assign(m_arrExcludeModule.begin(), m_arrExcludeModule.end());
+	candidate.admission.includeModules.assign(m_arrIncludeModule.begin(), m_arrIncludeModule.end());
+	candidate.admission.unloadModules.assign(m_arrUnloadModule.begin(), m_arrUnloadModule.end());
+	candidate.admission.excludeFonts.assign(m_arrExcludeFont.begin(), m_arrExcludeFont.end());
+	candidate.admission.includeFonts.assign(m_arrIncludeFont.begin(), m_arrIncludeFont.end());
+	candidate.admission.unityIncludeGames.assign(m_arrUnityIncludeGame.begin(), m_arrUnityIncludeGame.end());
+	candidate.admission.unityExcludeGames.assign(m_arrUnityExcludeGame.begin(), m_arrUnityExcludeGame.end());
+	candidate.admission.displayAffinity = m_nDisplayAffinity;
 	candidate.freeType.cacheMaxFaces = m_nCacheMaxFaces;
 	candidate.freeType.cacheMaxSizes = m_nCacheMaxSizes;
 	candidate.freeType.cacheMaxBytes = m_nCacheMaxBytes;
@@ -411,6 +433,12 @@ bool CGdippSettings::PublishRendererPolicySnapshot(
 	candidate.raster.bitmapHeight = m_nBitmapHeight;
 	candidate.raster.bolderMode = m_nBolderMode;
 	candidate.raster.widthMode = m_nWidthMode;
+	candidate.raster.minHeight = m_nMinHeight;
+	candidate.raster.maxHeight = m_nMaxHeight;
+	candidate.raster.screenDpi = m_nScreenDpi;
+	candidate.raster.clipBoxFix = m_bEnableClipBoxFix;
+	candidate.raster.shadowEnabled = EnableShadow();
+	std::copy(std::begin(m_nShadow), std::end(m_nShadow), candidate.raster.shadowParams.begin());
 	candidate.raster.lcdFilter = m_nLcdFilter;
 	candidate.raster.hintSmallFont = m_bHintSmallFont != FALSE;
 	candidate.raster.harmonyLcd = HarmonyLCD();
@@ -670,6 +698,7 @@ DWORD CGdippSettings::_GetFreeTypeProfileString(LPCTSTR lpszKey, LPCTSTR lpszDef
 
 bool CGdippSettings::LoadAppSettings(LPCTSTR lpszFile)
 {
+	CCriticalSectionLock lock(CCriticalSectionLock::CS_SETTING);
 	// 各種設定読み込み
 	// INIファイルの例:
 	// [General]
@@ -834,6 +863,7 @@ SKIP:
 		TCHAR sAffinity[260] = { 0 };
 		_GetFreeTypeProfileString(_T("DisplayAffinity"), _T(""), sAffinity, 256, lpszFile);
 		auto displays = SplitString(sAffinity);
+		m_nDisplayAffinity.clear();
 		for (auto id : displays) {
 			m_nDisplayAffinity.insert(id);
 		}
@@ -1221,10 +1251,19 @@ bool CGdippSettings::IsFontExcluded(LPCWSTR lpFaceName) const
 	return bExcluded;
 }
 
-void CGdippSettings::AddFontExclude(LPCWSTR lpFaceName)
+void CGdippSettings::AddFontExclude(LPCWSTR lpFaceName,
+	const renderer::RendererPolicyRef& policy)
 {
-	if (!IsFontExcluded(lpFaceName))
-		m_arrExcludeFont.insert(lpFaceName);
+	CCriticalSectionLock lock(CCriticalSectionLock::CS_SETTING);
+	CGdippSettings* settings = GetInstance();
+	// A late render must not add its discovered exclusion to a newer profile.
+	if (renderer::ProcessProfileRuntime().Load() != policy)
+		return;
+	if (!settings->IsFontExcluded(lpFaceName))
+	{
+		settings->m_arrExcludeFont.insert(lpFaceName);
+		settings->PublishRendererPolicySnapshot(settings->m_bDelayedInit);
+	}
 }
 
 bool CGdippSettings::IsProcessUnload() const
@@ -1588,7 +1627,14 @@ void ApplySubstitutionBoldPolicy(
 
 bool CGdippSettings::CopyForceFont(LOGFONT& lf, const LOGFONT& lfOrg) const
 {
-	_ASSERTE(m_bDelayedInit);
+	return ::CopyForceFont(renderer::CurrentRendererPolicy(), lf, lfOrg);
+}
+
+bool CopyForceFont(const renderer::RendererPolicyRef& policy,
+	LOGFONT& lf, const LOGFONT& lfOrg)
+{
+	if (!policy || !policy->substitutions_ready())
+		return false;
 	//__asm{ int 3 }
 	SetLastError(ERROR_SUCCESS);
 	const DWORD environmentLength =
@@ -1597,12 +1643,11 @@ bool CGdippSettings::CopyForceFont(LOGFONT& lf, const LOGFONT& lfOrg) const
 		return false;
 	// &lf == &lfOrg is supported: preserve the full request before resolving.
 	LOGFONT const original = lfOrg;
-	std::shared_ptr<const renderer::font_substitution::Snapshot> const snapshot =
-		renderer::font_substitution::ProcessRegistry().Load();
+	const auto& snapshot = policy->font_substitutions();
 	if (snapshot->rules().empty())
 		return false;
 	LOGFONT canonical = original;
-	GetFontSubstitutesInfo().Canonicalize(canonical);
+	CFontSubstitutesInfo::Canonicalize(canonical);
 	renderer::font_substitution::Resolution const resolution = snapshot->Resolve(
 		{canonical.lfFaceName, canonical.lfCharSet});
 	if (!resolution.matched)
@@ -1997,7 +2042,7 @@ void GetMacTypeInternalFontName(LOGFONT* lf, LPTSTR fn)
 	*fn=0;
 }
 
-void CFontSubstitutesInfo::Canonicalize(LOGFONT& lf) const
+void CFontSubstitutesInfo::Canonicalize(LOGFONT& lf)
 {
 	TCHAR* buff;
 	LOGFONT mylf(lf);

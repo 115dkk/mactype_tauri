@@ -220,9 +220,29 @@ ProfileRuntime& ProcessProfileRuntime()
 	return *runtime;
 }
 
+namespace {
+thread_local const RendererPolicyRef* callPolicy = nullptr;
+}
+
 RendererPolicyRef CurrentRendererPolicy() noexcept
 {
-	return ProcessProfileRuntime().Load();
+	return callPolicy ? *callPolicy : ProcessProfileRuntime().Load();
+}
+
+RendererPolicyScope::RendererPolicyScope(RendererPolicyRef policy) noexcept
+	: policy_(callPolicy ? *callPolicy : std::move(policy)), previous_(callPolicy)
+{
+	callPolicy = &policy_;
+}
+
+bool RendererPolicyScope::active() noexcept
+{
+	return callPolicy != nullptr;
+}
+
+RendererPolicyScope::~RendererPolicyScope()
+{
+	callPolicy = previous_;
 }
 
 void ClearProcessProfileRuntimeForQuietUnload() noexcept

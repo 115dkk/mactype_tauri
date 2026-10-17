@@ -271,12 +271,13 @@ void Params::CreateParams(IDWriteFactory *dw_factory)
 }
 
 Params::Params() {
-	const CGdippSettings* pSettings = CGdippSettings::GetInstanceNoInit();
-	Gamma = pSettings->GammaValueForDW();	//user defined value preferred.
-	EnhancedContrast = pSettings->ContrastForDW();
-	ClearTypeLevel = pSettings->ClearTypeLevelForDW();
+	const auto policy = renderer::CurrentRendererPolicy();
+	const renderer::DirectWritePolicy values = policy ? policy->direct_write() : renderer::DirectWritePolicy{};
+	Gamma = values.gamma;	//user defined value preferred.
+	EnhancedContrast = values.contrast;
+	ClearTypeLevel = values.clearTypeLevel;
 	AntialiasMode = static_cast<D2D1_TEXT_ANTIALIAS_MODE>(D2D1_TEXT_ANTIALIAS_MODE_DEFAULT);
-	switch (pSettings->AntiAliasModeForDW())
+	switch (values.antiAliasMode)
 	{
 		case 2:
 		case 4:
@@ -291,9 +292,9 @@ Params::Params() {
 			AntialiasMode = D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE;
 	}
 
-	RenderingMode = static_cast<DWRITE_RENDERING_MODE>(pSettings->RenderingModeForDW());
-	GrayscaleEnhancedContrast = pSettings->ContrastForDW();
-	switch (pSettings->GetFontSettings().GetHintingMode())
+	RenderingMode = static_cast<DWRITE_RENDERING_MODE>(values.renderingMode);
+	GrayscaleEnhancedContrast = values.contrast;
+	switch ((policy ? policy->common_font_settings().GetHintingMode() : 0))
 	{
 		case 0: GridFitMode = DWRITE_GRID_FIT_MODE_DEFAULT;
 			break;
@@ -303,7 +304,7 @@ Params::Params() {
 			GridFitMode = DWRITE_GRID_FIT_MODE_ENABLED;
 			break;
 	}
-	RenderingMode1 = static_cast<DWRITE_RENDERING_MODE1>(pSettings->RenderingModeForDW());
+	RenderingMode1 = static_cast<DWRITE_RENDERING_MODE1>(values.renderingMode);
 	RenderingParams = nullptr;
 }
 
@@ -314,10 +315,8 @@ Params* GetD2DParams() {
 
 Params* GetDWParams() {
 	static Params dwParams = [] {
-		const CGdippSettings* pSettings = CGdippSettings::GetInstanceNoInit();
-
 		Params p;
-		if (pSettings->RenderingModeForDW() == 6) {	//DW rendering in mode6 is horrible
+		if (static_cast<int>(p.RenderingMode) == 6) {	//DW rendering in mode6 is horrible
 			p.RenderingMode = DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC;
 			p.RenderingMode1 = DWRITE_RENDERING_MODE1_NATURAL_SYMMETRIC;
 		}
@@ -1722,6 +1721,8 @@ directwrite_alias::BuildStatus GetCanonicalFactoryAliases(
 	directwrite_readiness::CanonicalSourceScope const scope;
 	if (scope.nested())
 		return directwrite_alias::BuildStatus::buildReentrant;
+	const auto policy = CGdippSettings::GetRendererPolicy();
+	const renderer::RendererPolicyScope policyScope(policy);
 	CComPtr<IDWriteFactory> factory;
 	if (factory3 == nullptr ||
 		FAILED(factory3->QueryInterface(&factory)) || factory == nullptr)
@@ -1858,10 +1859,11 @@ bool hookDirectWrite(IUnknown** factory)
 	HOOK(writeFactory, GetGdiInterop, 17);
 	SeedGdiInteropHooks(writeFactory);
 
-	CGdippSettings const* settings = CGdippSettings::GetInstance();
+	const auto policy = CGdippSettings::GetRendererPolicy();
+	const renderer::RendererPolicyScope policyScope(policy);
 	bool aliasCollectionReady = true;
-	if (settings->DelayedInited() &&
-		settings->GetFontSubstitutesInfo().GetSize() != 0)
+	if (policy && policy->substitutions_ready() &&
+		!policy->font_substitutions()->rules().empty())
 	{
 		aliasCollectionReady = HookDirectWriteAliasCollection(writeFactory);
 	}
@@ -3074,8 +3076,9 @@ static bool ResolveFactoryFamilyName(
 		return false;
 	LOGFONT replacement = source;
 
-	CGdippSettings const* settings = CGdippSettings::GetInstance();
-	if (!settings->CopyForceFont(replacement, source))
+	const auto policy = CGdippSettings::GetRendererPolicy();
+	const renderer::RendererPolicyScope policyScope(policy);
+	if (!CopyForceFont(policy, replacement, source))
 		return false;
 	SignalDirectWriteDiagnostic(L"substitution-resolved");
 	SignalDirectWriteFamilyDiagnostic(L"resolved", familyName);

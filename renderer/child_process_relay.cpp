@@ -288,18 +288,17 @@ ChildRelayReason ClassifyTarget(
         WCHAR const* const name = slash == nullptr ? image.data() : slash + 1;
         if (*name == L'\0')
             return ChildRelayReason::imageNameUnavailable;
+        const auto policy = renderer::CurrentRendererPolicy();
         if (IsPolicyExcludedImage(name) ||
-            (applyProfileExclusions && IsExeUnload(name) != FALSE))
+            (applyProfileExclusions && IsExeUnload(name, policy) != FALSE))
             return ChildRelayReason::excludedImage;
         if (applyProfileExclusions)
         {
-            const CGdippSettings* settings =
-                CGdippSettings::GetInstanceNoInit();
-            if (settings != nullptr && settings->SkipPrivateFreeType())
+            if (policy && policy->hooks().skipPrivateFreeType)
             {
                 const bool unityHookTarget =
                     renderer::private_freetype::HasUnityPlayerSibling(image.data()) &&
-                    settings->UnityFontHookEnabledForExecutable(image.data());
+                    policy->unity_font_enabled_for_executable(image.data());
                 const bool privateFreeTypeDetected =
                     renderer::private_freetype::ClassifyImage(image.data()) ==
                     renderer::private_freetype::ImageClassification::detected;
@@ -308,7 +307,7 @@ ChildRelayReason ClassifyTarget(
                     return ChildRelayReason::privateFreeTypeDetected;
             }
             // GUI terminal hosts remain eligible, and unavailable evidence fails open.
-            if (settings != nullptr && settings->SkipConsoleProcesses() &&
+            if (policy && policy->hooks().skipConsoleProcesses &&
                 renderer::image_subsystem::Classify(image.data()) ==
                     renderer::image_subsystem::ImageSubsystem::console)
                 return ChildRelayReason::consoleProcessSkipped;

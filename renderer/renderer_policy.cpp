@@ -5,6 +5,8 @@
 #include <cstring>
 #include <cmath>
 #include <cwctype>
+#include <cctype>
+#include <windows.h>
 
 const signed char CFontSettings::bounds_[MAX_FONT_SETTINGS][2] = {
 	{0, 2},
@@ -93,6 +95,25 @@ std::uint64_t PolicyDigest(const RendererPolicySnapshot& snapshot) noexcept
 	HashValue(digest, snapshot.hooks().skipConsoleProcesses);
 	HashValue(digest, snapshot.hooks().unityFontMode);
 	HashValue(digest, snapshot.hooks().unityFontEnabledForProcess);
+	const AdmissionPolicy& admission = snapshot.admission();
+	HashValue(digest, admission.includeOnly);
+	HashValue(digest, admission.runFromGdiExe);
+	auto hashName = [&](const std::wstring& name) {
+		HashBytes(digest, name.data(), name.size() * sizeof(wchar_t));
+		HashValue(digest, name.size());
+	};
+	hashName(admission.executableDirectory);
+	for (const auto* names : {&admission.excludeModules, &admission.includeModules,
+		&admission.unloadModules, &admission.excludeFonts, &admission.includeFonts,
+		&admission.unityIncludeGames, &admission.unityExcludeGames})
+	{
+		HashValue(digest, names->size());
+		for (const std::wstring& name : *names)
+			hashName(name);
+	}
+	HashValue(digest, admission.displayAffinity.size());
+	for (int display : admission.displayAffinity)
+		HashValue(digest, display);
 	HashValue(digest, snapshot.free_type().cacheMaxFaces);
 	HashValue(digest, snapshot.free_type().cacheMaxSizes);
 	HashValue(digest, snapshot.free_type().cacheMaxBytes);
@@ -103,6 +124,13 @@ std::uint64_t PolicyDigest(const RendererPolicySnapshot& snapshot) noexcept
 	HashValue(digest, raster.bitmapHeight);
 	HashValue(digest, raster.bolderMode);
 	HashValue(digest, raster.widthMode);
+	HashValue(digest, raster.minHeight);
+	HashValue(digest, raster.maxHeight);
+	HashValue(digest, raster.screenDpi);
+	HashValue(digest, raster.clipBoxFix);
+	HashValue(digest, raster.shadowEnabled);
+	for (int value : raster.shadowParams)
+		HashValue(digest, value);
 	HashValue(digest, raster.lcdFilter);
 	HashValue(digest, raster.hintSmallFont);
 	HashValue(digest, raster.harmonyLcd);
@@ -227,6 +255,7 @@ RendererPolicySnapshot::RendererPolicySnapshot(
 	std::shared_ptr<const font_substitution::Snapshot> substitutions)
 	: generation_(generation), revision_(revision),
 	  profileDigest_(std::move(candidate.profileDigest)), hooks_(candidate.hooks),
+	  admission_(std::move(candidate.admission)),
 	  freeType_(candidate.freeType), raster_(candidate.raster),
 	  directWrite_(candidate.directWrite),
 	  unityCoverage_(BuildUnityCoverageLut(candidate)),
@@ -257,6 +286,133 @@ CFontSettings RendererPolicySnapshot::font_settings_for(
 	{
 	}
 	return commonFontSettings_;
+}
+
+namespace {
+
+std::wstring AdmissionDirectoryKey(std::wstring value)
+{
+	// Preserve the profile parser's existing directory comparison semantics.
+	std::transform(value.begin(), value.end(), value.begin(),
+		[](wchar_t ch) { return static_cast<wchar_t>(::tolower(ch)); });
+	return value;
+}
+
+bool MatchesModules(const std::vector<std::wstring>& entries,
+	const std::wstring& directory, bool prefix,
+	bool (*moduleLoaded)(const wchar_t*))
+{
+	for (const std::wstring& entry : entries)
+	{
+		if (!entry.empty() && entry.back() == L'\\')
+		{
+			const std::wstring key = AdmissionDirectoryKey(entry);
+			if (prefix ? directory.compare(0, key.size(), key) == 0 : directory == key)
+				return true;
+		}
+		else if (moduleLoaded && moduleLoaded(entry.c_str()))
+			return true;
+	}
+	return false;
+}
+
+bool MatchesExe(const std::vector<std::wstring>& entries, const wchar_t* name)
+{
+	if (!name)
+		return false;
+	for (const std::wstring& entry : entries)
+		if (lstrcmpiW(name, entry.c_str()) == 0)
+			return true;
+	return false;
+}
+
+} // namespace
+
+bool RendererPolicySnapshot::font_excluded(const wchar_t* family) const noexcept
+{
+	if (!family)
+		return false;
+	const auto& excluded = admission_.excludeFonts;
+	const auto& included = admission_.includeFonts;
+	return std::find(excluded.begin(), excluded.end(), family) != excluded.end() ||
+		(!included.empty() && std::find(included.begin(), included.end(), family) == included.end());
+}
+
+bool RendererPolicySnapshot::display_allowed(int display) const noexcept
+{
+	return display < 0 || admission_.displayAffinity.empty() ||
+		admission_.displayAffinity.find(display) != admission_.displayAffinity.end();
+}
+
+bool RendererPolicySnapshot::process_excluded(bool forceLoad, bool forceExclude,
+	bool (*moduleLoaded)(const wchar_t*)) const
+{
+	if (admission_.includeOnly)
+		return !(admission_.runFromGdiExe || forceLoad ||
+			MatchesModules(admission_.includeModules, admission_.executableDirectory, false, moduleLoaded));
+	if (admission_.runFromGdiExe)
+		return false;
+	if (forceExclude)
+		return true;
+	return !forceLoad && MatchesModules(admission_.excludeModules,
+		admission_.executableDirectory, true, moduleLoaded);
+}
+
+bool RendererPolicySnapshot::process_unload(bool forceLoad,
+	bool (*moduleLoaded)(const wchar_t*)) const
+{
+	if (admission_.includeOnly)
+		return !(admission_.runFromGdiExe || forceLoad ||
+			MatchesModules(admission_.includeModules, admission_.executableDirectory, false, moduleLoaded));
+	return !admission_.runFromGdiExe && !forceLoad &&
+		MatchesModules(admission_.unloadModules, admission_.executableDirectory, false, moduleLoaded);
+}
+
+bool RendererPolicySnapshot::exe_unload(const wchar_t* name, bool forceLoad) const
+{
+	if (admission_.includeOnly)
+		return admission_.runFromGdiExe || forceLoad || !MatchesExe(admission_.includeModules, name);
+	return !admission_.runFromGdiExe && !forceLoad && MatchesExe(admission_.unloadModules, name);
+}
+
+bool RendererPolicySnapshot::unity_font_enabled_for_executable(const wchar_t* path) const noexcept
+{
+	try
+	{
+		if (!path || !*path)
+			return false;
+		const std::wstring fullPath(path);
+		const auto slash = fullPath.find_last_of(L"\\/");
+		const wchar_t* name = slash == std::wstring::npos ? path : path + slash + 1;
+		const std::wstring directory = slash == std::wstring::npos ? std::wstring() :
+			AdmissionDirectoryKey(fullPath.substr(0, slash + 1));
+		auto matches = [&](const std::vector<std::wstring>& entries) {
+			for (const std::wstring& entry : entries)
+			{
+				if (!entry.empty() && entry.back() == L'\\')
+				{
+					if (!directory.empty() && directory == AdmissionDirectoryKey(entry))
+						return true;
+				}
+				else
+				{
+					const auto entrySlash = entry.find_last_of(L"\\/");
+					const wchar_t* entryName = entrySlash == std::wstring::npos ? entry.c_str() : entry.c_str() + entrySlash + 1;
+					if (lstrcmpiW(name, entryName) == 0)
+						return true;
+				}
+			}
+			return false;
+		};
+		switch (hooks_.unityFontMode)
+		{
+		case UnityFontHookMode::selectedGames: return matches(admission_.unityIncludeGames);
+		case UnityFontHookMode::mostGames: return true;
+		case UnityFontHookMode::allGames: return !matches(admission_.unityExcludeGames);
+		case UnityFontHookMode::off: default: return false;
+		}
+	}
+	catch (...) { return false; }
 }
 
 } // namespace renderer

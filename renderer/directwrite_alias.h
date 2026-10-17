@@ -68,6 +68,9 @@ BuildStatus GetOrCreate(
 	IDWriteFontSet* systemFontSet,
 	AliasFontSet& result) noexcept;
 
+// True when collection is one of the alias collections this process built.
+bool IsAliasCollection(IUnknown* collection) noexcept;
+
 BuildStatus GetCachedForFactory(
 	IDWriteFactory* factory,
 	std::uint64_t substitutionGeneration,

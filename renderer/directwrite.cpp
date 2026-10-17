@@ -2841,7 +2841,8 @@ HRESULT WINAPI IMPL_Factory_GetSystemFontCollection(
 		*fontCollection = systemCollection.Detach();
 		return result;
 	}
-	if (checkForUpdates)
+	if (checkForUpdates &&
+		!directwrite_alias::IsAliasCollection(systemCollection))
 		PublishFactoryAliasSource(self, systemSet, true);
 	CComPtr<IDWriteFactory3> factory3;
 	if (FAILED(self->QueryInterface(&factory3)) || factory3 == nullptr)

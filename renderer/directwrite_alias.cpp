@@ -29,7 +29,10 @@ struct CacheEntry
 	AliasFontSet aliases;
 	BuildStatus status = BuildStatus::unexpectedFailure;
 	DWORD reservingThread = 0;
+	unsigned failedBuilds = 0;
 	bool building = true;
+	bool retryAllowed = false;
+	std::chrono::steady_clock::time_point retryAfter{};
 };
 
 struct AliasCache
@@ -487,6 +490,45 @@ void AddSyntheticBoldSlots(
 	}
 }
 
+class NativeFaceRun
+{
+public:
+	NativeFaceRun(
+		IDWriteFontSetBuilder* builder,
+		IDWriteFontSetBuilder1* builder1,
+		IDWriteFontSet1* systemFontSet1) noexcept
+		: builder_(builder), builder1_(builder1), systemFontSet1_(systemFontSet1)
+	{
+	}
+
+	HRESULT Keep(UINT32 index, IDWriteFontFaceReference* reference)
+	{
+		if (builder1_ == nullptr || systemFontSet1_ == nullptr)
+			return builder_->AddFontFaceReference(reference);
+		indices_.push_back(index);
+		return S_OK;
+	}
+
+	HRESULT Flush()
+	{
+		if (indices_.empty())
+			return S_OK;
+		CComPtr<IDWriteFontSet1> subset;
+		HRESULT const result = systemFontSet1_->GetFilteredFonts(
+			indices_.data(), static_cast<UINT32>(indices_.size()), &subset);
+		indices_.clear();
+		if (FAILED(result) || subset == nullptr)
+			return FAILED(result) ? result : E_UNEXPECTED;
+		return builder1_->AddFontSet(subset);
+	}
+
+private:
+	IDWriteFontSetBuilder* builder_;
+	IDWriteFontSetBuilder1* builder1_;
+	IDWriteFontSet1* systemFontSet1_;
+	std::vector<UINT32> indices_;
+};
+
 // A family name that an alias carries but that no source face of that name
 // fills at a bold-class weight gets one synthesized weight-700 slot, backed by
 // the same FontSubstitutesBold decision a real bold source face would get. A
@@ -517,6 +559,11 @@ BuildStatus Build(
 	CComPtr<IDWriteFontSetBuilder> builder;
 	if (FAILED(factory3->CreateFontSetBuilder(&builder)) || builder == nullptr)
 		return BuildStatus::builderUnavailable;
+	CComPtr<IDWriteFontSet1> systemFontSet1;
+	systemFontSet->QueryInterface(&systemFontSet1);
+	CComPtr<IDWriteFontSetBuilder1> builder1;
+	builder->QueryInterface(&builder1);
+	NativeFaceRun nativeFaces(builder, builder1, systemFontSet1);
 	bool missingReplacement = false;
 	bool resolvedRule = false;
 	BuildStatus emptyResultStatus = BuildStatus::replacementUnavailable;
@@ -524,18 +571,28 @@ BuildStatus Build(
 	UINT32 const fontCount = systemFontSet->GetFontCount();
 	for (UINT32 index = 0; index < fontCount; ++index)
 	{
+		// The legacy system collection is local-only. Dropping downloadable faces
+		// makes either canonical source produce the same aliases and avoids asking
+		// the builder to extract properties from a bare remote reference.
+		if (systemFontSet1 != nullptr &&
+			systemFontSet1->GetFontLocality(index) != DWRITE_LOCALITY_LOCAL)
+			continue;
+
 		CComPtr<IDWriteFontFaceReference> sourceReference;
 		HRESULT addResult = systemFontSet->GetFontFaceReference(
 			index, &sourceReference);
 		if (FAILED(addResult) || sourceReference == nullptr)
 			return BuildStatus::addFontFailed;
+		if (systemFontSet1 == nullptr &&
+			sourceReference->GetLocality() != DWRITE_LOCALITY_LOCAL)
+			continue;
 
 		std::vector<std::wstring> sourceNames;
 		ReadSourceFamilyNames(systemFontSet, index, sourceNames);
 		FamilyAliasResolution familyResolution;
 		if (!ResolveFamilyAliases(sourceNames, *snapshot, familyResolution))
 		{
-			if (FAILED(builder->AddFontFaceReference(sourceReference)))
+			if (FAILED(nativeFaces.Keep(index, sourceReference)))
 				return BuildStatus::addFontFailed;
 			if (!sourceNames.empty())
 				observations.unresolved.push_back({index, std::move(sourceNames)});
@@ -556,6 +613,8 @@ BuildStatus Build(
 			replacement.reference != nullptr;
 		if (complete)
 		{
+			if (FAILED(nativeFaces.Flush()))
+				return BuildStatus::addFontFailed;
 			for (const std::wstring& sourceAlias :
 				familyResolution.sourceAliases)
 			{
@@ -594,13 +653,15 @@ BuildStatus Build(
 		if (!complete)
 		{
 			missingReplacement = true;
-			if (FAILED(builder->AddFontFaceReference(sourceReference)))
+			if (FAILED(nativeFaces.Keep(index, sourceReference)))
 				return BuildStatus::addFontFailed;
 			continue;
 		}
 		++result.substitutionCount;
 	}
 
+	if (FAILED(nativeFaces.Flush()))
+		return BuildStatus::addFontFailed;
 	if (result.substitutionCount != 0)
 	{
 		ObserveUnresolvedFaces(systemFontSet, observations);
@@ -641,6 +702,20 @@ bool IsApplied(BuildStatus status) noexcept
 {
 	return status == BuildStatus::applied ||
 		status == BuildStatus::appliedWithMissingReplacement;
+}
+
+bool IsPermanentBuildFailure(BuildStatus status) noexcept
+{
+	switch (status)
+	{
+	case BuildStatus::noResolvedSubstitutions:
+	case BuildStatus::noSubstitutions:
+	case BuildStatus::unsupportedFactory:
+	case BuildStatus::builderUnavailable:
+		return true;
+	default:
+		return false;
+	}
 }
 
 std::uint64_t ElapsedMicroseconds(
@@ -708,17 +783,27 @@ BuildStatus GetOrCreateUnchecked(
 		}
 		if (entry != nullptr)
 		{
-			if (entry->building &&
-				entry->reservingThread == GetCurrentThreadId())
+			if (entry->building)
 			{
-				entry->reservingThread = 0;
+				if (entry->reservingThread == GetCurrentThreadId())
+				{
+					entry->reservingThread = 0;
+				}
+				else
+				{
+					if (!directwrite_readiness::WaitForBuild(
+							entry, lock, kBuildWaitTimeout, !isBuildingAliases))
+						return isBuildingAliases ? BuildStatus::buildReentrant :
+							BuildStatus::waitTimeout;
+					result = entry->aliases;
+					result.cacheHit = true;
+					return entry->status;
+				}
 			}
-			else
+			else if (directwrite_readiness::PrepareCompletedBuild(
+					*entry, std::chrono::steady_clock::now(), IsApplied) ==
+				directwrite_readiness::CompletedBuildDisposition::useCached)
 			{
-				if (!directwrite_readiness::WaitForBuild(
-						entry, lock, kBuildWaitTimeout, !isBuildingAliases))
-					return isBuildingAliases ? BuildStatus::buildReentrant :
-						BuildStatus::waitTimeout;
 				result = entry->aliases;
 				result.cacheHit = true;
 				return entry->status;
@@ -764,11 +849,18 @@ BuildStatus GetOrCreateUnchecked(
 		entry->aliases = built;
 		entry->status = status;
 		entry->building = false;
+		entry->retryAllowed = false;
 		if (!IsApplied(status))
 		{
-			cache.entries.erase(
-				std::remove(cache.entries.begin(), cache.entries.end(), entry),
-				cache.entries.end());
+			++entry->failedBuilds;
+			if (!IsPermanentBuildFailure(status))
+			{
+				std::chrono::milliseconds delay;
+				entry->retryAllowed = directwrite_readiness::FailureRetryDelay(
+					entry->failedBuilds, delay);
+				if (entry->retryAllowed)
+					entry->retryAfter = std::chrono::steady_clock::now() + delay;
+			}
 		}
 	}
 	entry->ready.notify_all();
@@ -932,7 +1024,7 @@ BuildStatus GetCachedForFactory(
 		if (entry == nullptr)
 			return BuildStatus::systemSetUnavailable;
 		// The wait releases the cache mutex, and meanwhile another factory's
-		// build may grow the vector or a failed build may erase this element;
+		// build may grow the vector or generation pruning may erase this element;
 		// only an owned copy keeps the entry alive and off the vector.
 		std::chrono::steady_clock::duration remaining =
 			deadline - std::chrono::steady_clock::now();
@@ -958,6 +1050,29 @@ BuildStatus GetCachedForFactory(
 		result = {};
 		return BuildStatus::unexpectedFailure;
 	}
+}
+
+bool IsAliasCollection(IUnknown* collection) noexcept
+{
+	try
+	{
+		CComPtr<IUnknown> const identity = GetIdentity(collection);
+		if (identity == nullptr)
+			return false;
+		AliasCache& cache = GetCache();
+		std::lock_guard<std::mutex> lock(cache.mutex);
+		for (std::shared_ptr<CacheEntry> const& entry : cache.entries)
+		{
+			CComPtr<IUnknown> const aliasIdentity =
+				GetIdentity(entry->aliases.collection);
+			if (aliasIdentity != nullptr && aliasIdentity == identity)
+				return true;
+		}
+	}
+	catch (...)
+	{
+	}
+	return false;
 }
 
 void ClearCache() noexcept

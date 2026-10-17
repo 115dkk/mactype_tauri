@@ -273,6 +273,111 @@ void ReleaseBuild(FakeFactory& factory)
     factory.stateChanged.notify_all();
 }
 
+enum class RetryLookup
+{
+    cached,
+    waiting,
+    rebuilt,
+};
+
+struct RetryEntry
+{
+    std::chrono::steady_clock::time_point retryAfter{};
+    unsigned failedBuilds = 1;
+    unsigned reservingThread = 17;
+    bool status = false;
+    bool building = false;
+    bool retryAllowed = true;
+};
+
+RetryLookup LookupFailedEntry(
+    RetryEntry& entry,
+    std::chrono::steady_clock::time_point now,
+    unsigned& buildCount)
+{
+    if (entry.building)
+        return RetryLookup::waiting;
+    auto const disposition = directwrite_readiness::PrepareCompletedBuild(
+        entry, now, [](bool applied) { return applied; });
+    if (disposition ==
+        directwrite_readiness::CompletedBuildDisposition::useCached)
+        return RetryLookup::cached;
+    ++buildCount;
+    return RetryLookup::rebuilt;
+}
+
+void FinishFailedBuild(
+    RetryEntry& entry,
+    std::chrono::steady_clock::time_point now)
+{
+    entry.building = false;
+    ++entry.failedBuilds;
+    std::chrono::milliseconds delay;
+    entry.retryAllowed = directwrite_readiness::FailureRetryDelay(
+        entry.failedBuilds, delay);
+    if (entry.retryAllowed)
+        entry.retryAfter = now + delay;
+}
+
+void TestFailureRetrySchedule()
+{
+    std::chrono::milliseconds delay;
+    Require(directwrite_readiness::FailureRetryDelay(0, delay) && delay == 2s,
+        "failure zero did not use the first retry delay");
+    Require(directwrite_readiness::FailureRetryDelay(1, delay) && delay == 2s,
+        "the first failure did not retry after two seconds");
+    Require(directwrite_readiness::FailureRetryDelay(2, delay) && delay == 15s,
+        "the second failure did not retry after fifteen seconds");
+    Require(directwrite_readiness::FailureRetryDelay(3, delay) && delay == 120s,
+        "the third failure did not retry after two minutes");
+    Require(!directwrite_readiness::FailureRetryDelay(4, delay),
+        "the fourth failure still allowed a retry");
+    Require(!directwrite_readiness::FailureRetryDelay(99, delay),
+        "a later failure still allowed a retry");
+}
+
+void TestFailedBuildRetryPolicy()
+{
+    auto const started = std::chrono::steady_clock::time_point{};
+    RetryEntry entry;
+    entry.retryAfter = started + 2s;
+    unsigned buildCount = 1;
+
+    Require(LookupFailedEntry(entry, started + 1999ms, buildCount) ==
+        RetryLookup::cached,
+        "a failed entry rebuilt before its retry time");
+    Require(buildCount == 1 && !entry.building,
+        "a cached failure changed the build state");
+
+    Require(LookupFailedEntry(entry, started + 2s, buildCount) ==
+        RetryLookup::rebuilt,
+        "a failed entry was not rebuilt when its retry became due");
+    Require(buildCount == 2 && entry.building && entry.reservingThread == 0,
+        "the due retry did not take ownership of the completed entry");
+    Require(LookupFailedEntry(entry, started + 2s, buildCount) ==
+        RetryLookup::waiting && buildCount == 2,
+        "two callers rebuilt the same due retry");
+
+    FinishFailedBuild(entry, started + 2s);
+    Require(LookupFailedEntry(entry, started + 16s, buildCount) ==
+        RetryLookup::cached && buildCount == 2,
+        "the second failure ignored its fifteen-second delay");
+    Require(LookupFailedEntry(entry, started + 17s, buildCount) ==
+        RetryLookup::rebuilt && buildCount == 3,
+        "the second retry did not run exactly once when due");
+
+    FinishFailedBuild(entry, started + 17s);
+    Require(LookupFailedEntry(entry, started + 137s, buildCount) ==
+        RetryLookup::rebuilt && buildCount == 4,
+        "the third retry did not run after its two-minute delay");
+    FinishFailedBuild(entry, started + 137s);
+    Require(!entry.retryAllowed,
+        "the fourth failed build did not exhaust the retry schedule");
+    Require(LookupFailedEntry(entry, started + 24h, buildCount) ==
+        RetryLookup::cached && buildCount == 4,
+        "an exhausted failed entry rebuilt again");
+}
+
 void TestModernEntryWaits()
 {
     FakeFactory factory;
@@ -419,6 +524,8 @@ void TestNestedScopeIsRefused()
 
 int main()
 {
+    TestFailureRetrySchedule();
+    TestFailedBuildRetryPolicy();
     TestModernEntryWaits();
     TestFallbackWaits();
     TestReservedFallbackWaits();

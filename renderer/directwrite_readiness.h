@@ -4,6 +4,51 @@
 
 namespace directwrite_readiness {
 
+// Stores how long a key whose builds keep failing waits before it may build
+// again. False once it has failed often enough that it stays on the stock set.
+// The renderer project builds below C++17, so there is no std::optional here.
+inline bool FailureRetryDelay(
+	unsigned failedBuilds,
+	std::chrono::milliseconds& delay) noexcept
+{
+	switch (failedBuilds)
+	{
+	case 0:
+	case 1:
+		delay = std::chrono::seconds(2);
+		return true;
+	case 2:
+		delay = std::chrono::seconds(15);
+		return true;
+	case 3:
+		delay = std::chrono::seconds(120);
+		return true;
+	default:
+		delay = std::chrono::milliseconds::zero();
+		return false;
+	}
+}
+
+enum class CompletedBuildDisposition
+{
+	useCached,
+	retry,
+};
+
+// The caller holds the cache mutex and only passes a completed entry.
+template <typename Entry, typename TimePoint, typename IsApplied>
+CompletedBuildDisposition PrepareCompletedBuild(
+	Entry& entry,
+	TimePoint now,
+	IsApplied isApplied)
+{
+	if (isApplied(entry.status) || !entry.retryAllowed || now < entry.retryAfter)
+		return CompletedBuildDisposition::useCached;
+	entry.building = true;
+	entry.reservingThread = 0;
+	return CompletedBuildDisposition::retry;
+}
+
 // The caller publishes the candidate before building so every entry point uses
 // one canonical source. A publisher that loses the race reloads the winner.
 template <typename Factory, typename Source, typename GetPublished,

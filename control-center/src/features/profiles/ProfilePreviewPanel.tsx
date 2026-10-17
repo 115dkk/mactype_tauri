@@ -434,7 +434,7 @@ export const ProfilePreviewPanel = forwardRef<ProfilePreviewHandle, ProfilePrevi
         if (!isCurrentGeneration(requestGeneration)) return;
         const message = errorMessage(caught);
         onError(message);
-        void runtime().reportFrontendFailure("profiles", message);
+        void runtime().reportFrontendFailure("profiles", message).catch(() => undefined);
       });
   };
 

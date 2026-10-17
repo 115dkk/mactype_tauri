@@ -1,3 +1,5 @@
+import { readPreference, writePreference } from "./persistedPreference";
+
 export type SkinPreference = "classic" | "fluent" | "console" | "cupertino";
 
 export const skinStorageKey = "mactype-control-center.skin";
@@ -18,24 +20,15 @@ function isSkin(value: string | null): value is SkinPreference {
    first; otherwise the stored choice applies and the classic skin is the
    default. */
 export function loadSkinPreference(): SkinPreference {
-  try {
-    const requested = new URLSearchParams(window.location.search).get("skin");
-    if (isSkin(requested)) {
-      window.localStorage.setItem(skinStorageKey, requested);
-      return requested;
-    }
-    const stored = window.localStorage.getItem(skinStorageKey);
-    return isSkin(stored) ? stored : "classic";
-  } catch {
-    return "classic";
-  }
+  return readPreference<SkinPreference>({
+    key: skinStorageKey,
+    query: "skin",
+    parse: (raw) => isSkin(raw) ? raw : null,
+    fallback: () => "classic",
+  });
 }
 
 export function applySkinPreference(skin: SkinPreference) {
   document.documentElement.dataset.skin = skin;
-  try {
-    window.localStorage.setItem(skinStorageKey, skin);
-  } catch {
-    // The selected skin still applies for this session when storage is unavailable.
-  }
+  writePreference(skinStorageKey, skin);
 }

@@ -114,7 +114,7 @@ export function PreviewStudioApp() {
   useEffect(() => {
     if (readyReported.current || rendersA.lines.length + rendersB.lines.length === 0) return;
     readyReported.current = true;
-    void runtime().reportPreviewStudioReady();
+    void runtime().reportPreviewStudioReady().catch(() => undefined);
   }, [rendersA.lines.length, rendersB.lines.length]);
   const palette = studioPalette(settings, theme);
 

@@ -66,6 +66,7 @@ const shells: Record<SkinPreference, (props: ShellProps) => ReactElement> = {
 export function App({ initialTheme = loadThemePreference(), initialSkin = loadSkinPreference() }: AppProps) {
   const { t } = useI18n();
   const [studioError, setStudioError] = useState<string | null>(null);
+  const [launchError, setLaunchError] = useState<Error | null>(null);
   const studioOpening = useRef(false);
   const [state, dispatch] = useReducer(reducer, {
     view: "overview",
@@ -84,8 +85,11 @@ export function App({ initialTheme = loadThemePreference(), initialSkin = loadSk
     void Promise.all([runtime().loadLaunchContext(), runtime().scanInstallation()]).then(([context, status]) => {
       if (!active) return;
       dispatch({ type: "launched", view: context.view, ciSmoke: context.ciSmoke, trayStart: context.trayStart, previewStudioSmoke: context.previewStudioSmoke ?? false });
-      if (context.ciSmoke && context.previewStudioSmoke) void runtime().openPreviewStudio().catch((error: unknown) => runtime().reportFrontendFailure("overview", String(error)));
+      if (context.ciSmoke && context.previewStudioSmoke) void runtime().openPreviewStudio()
+        .catch((error: unknown) => runtime().reportFrontendFailure("overview", String(error)).catch(() => undefined));
       if (status) dispatch({ type: "status", status });
+    }).catch((error: unknown) => {
+      if (active) setLaunchError(error instanceof Error ? error : new Error(String(error)));
     });
     return () => {
       active = false;
@@ -107,10 +111,10 @@ export function App({ initialTheme = loadThemePreference(), initialSkin = loadSk
     document.body.dataset.rendered = "true";
     if (state.ciSmoke && state.trayStart) {
       void runtime().verifyTrayModeForCi()
-        .then(() => runtime().reportFrontendReady(state.view))
-        .catch((error: unknown) => runtime().reportFrontendFailure(state.view, error instanceof Error ? error.message : String(error)));
+        .then(() => runtime().reportFrontendReady(state.view).catch(() => undefined))
+        .catch((error: unknown) => runtime().reportFrontendFailure(state.view, error instanceof Error ? error.message : String(error)).catch(() => undefined));
     } else if (!state.ciSmoke || (state.view !== "profiles" && state.view !== "execution")) {
-      void runtime().reportFrontendReady(state.view);
+      void runtime().reportFrontendReady(state.view).catch(() => undefined);
     }
   }, [state.ciSmoke, state.previewStudioSmoke, state.profileMode, state.ready, state.trayStart, state.view]);
 
@@ -122,7 +126,7 @@ export function App({ initialTheme = loadThemePreference(), initialSkin = loadSk
     dispatch({ type: "status", status: await runtime().rediscoverInstallation() });
   }, []);
   const editInTuner = useCallback(() => navigate("profiles", "all"), [navigate]);
-  const reportReady = useCallback((view: ViewId) => { void runtime().reportFrontendReady(view); }, []);
+  const reportReady = useCallback((view: ViewId) => { void runtime().reportFrontendReady(view).catch(() => undefined); }, []);
   const setSkin = useCallback((skin: SkinPreference) => dispatch({ type: "skin", skin }), []);
   const toggleTheme = useCallback(() => dispatch({ type: "toggle-theme" }), []);
   const studio = useCallback(() => {
@@ -131,6 +135,8 @@ export function App({ initialTheme = loadThemePreference(), initialSkin = loadSk
     setStudioError(null);
     void runtime().openPreviewStudio().catch((error: unknown) => setStudioError(error instanceof Error ? error.message : String(error))).finally(() => { studioOpening.current = false; });
   }, []);
+
+  if (launchError) throw launchError;
 
   const Shell = shells[state.skin];
   return (

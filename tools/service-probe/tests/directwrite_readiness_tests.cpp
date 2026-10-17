@@ -337,21 +337,6 @@ void TestFailureRetrySchedule()
         "a later failure still allowed a retry");
 }
 
-void TestPublishedSourceRefreshPolicy()
-{
-    using directwrite_readiness::PublishedSourceIsOutOfDate;
-    Require(PublishedSourceIsOutOfDate(false, true, false, 510, 510),
-        "a factory without a published source was treated as current");
-    Require(PublishedSourceIsOutOfDate(true, true, true, 510, 510),
-        "a signaled source expiration event was ignored");
-    Require(!PublishedSourceIsOutOfDate(true, true, false, 510, 735),
-        "font counts overrode an unsignaled expiration event");
-    Require(PublishedSourceIsOutOfDate(true, false, false, 510, 735),
-        "different counts did not refresh a source without an event");
-    Require(!PublishedSourceIsOutOfDate(true, false, true, 510, 510),
-        "equal counts refreshed a source without an expiration event");
-}
-
 void TestFailedBuildRetryPolicy()
 {
     auto const started = std::chrono::steady_clock::time_point{};
@@ -569,7 +554,6 @@ void TestNestedScopeIsRefused()
 int main()
 {
     TestFailureRetrySchedule();
-    TestPublishedSourceRefreshPolicy();
     TestFailedBuildRetryPolicy();
     TestNewestMatchingEntry();
     TestModernEntryWaits();

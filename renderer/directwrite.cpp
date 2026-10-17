@@ -1415,17 +1415,14 @@ struct FactoryAliasVtableHooks
 	bool getModernSystemFontCollectionPatched = false;
 };
 
-// common.h targets RS3, so dwrite_3.h hides this optional RS4 interface.
-interface DWRITE_DECLARE_INTERFACE("DC7EAD19-E54C-43AF-B2DA-4E2B79BA3F7F")
-IDWriteFontSet2Compat : public IDWriteFontSet1
-{
-	STDMETHOD_(HANDLE, GetExpirationEvent)() PURE;
-};
-
 struct FactoryAliasSource
 {
 	CComPtr<IUnknown> factoryIdentity;
 	CComPtr<IDWriteFontSet> systemSet;
+	// The stock system collections the source was last checked against, one
+	// per includeDownloadableFonts value; the two are different objects.
+	CComPtr<IUnknown> localCollection;
+	CComPtr<IUnknown> downloadableCollection;
 };
 
 std::mutex& GetFactoryAliasVtableMutex()
@@ -1458,21 +1455,16 @@ CComPtr<IUnknown> GetFactoryIdentity(IDWriteFactory* factory)
 
 void PublishFactoryAliasSource(
 	IDWriteFactory* factory,
-	IDWriteFontSet* systemSet,
-	bool replaceExisting = false)
+	IDWriteFontSet* systemSet)
 {
 	CComPtr<IUnknown> const identity = GetFactoryIdentity(factory);
 	if (identity == nullptr || systemSet == nullptr)
 		return;
 	std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
-	for (FactoryAliasSource& source : GetFactoryAliasSourceRegistry())
+	for (FactoryAliasSource const& source : GetFactoryAliasSourceRegistry())
 	{
 		if (source.factoryIdentity == identity)
-		{
-			if (replaceExisting)
-				source.systemSet = systemSet;
 			return;
-		}
 	}
 	GetFactoryAliasSourceRegistry().push_back({identity, systemSet});
 }
@@ -1491,28 +1483,73 @@ CComPtr<IDWriteFontSet> GetFactoryAliasSource(IDWriteFactory* factory)
 	return nullptr;
 }
 
-bool FactoryAliasSourceIsOutOfDate(
+// DirectWrite returns the same system collection object until it builds a
+// new one, which it does on the first checkForUpdates call and after a font
+// change, while GetFontSet returns a new set object on every call, so only the
+// collection identity tells a repeated answer from an updated one. The legacy
+// method answers through the modern slot, so in a process whose alias build
+// succeeds only the modern hook sees the stock collection.
+void RefreshFactoryAliasSource(
 	IDWriteFactory* factory,
-	IDWriteFontSet* candidate)
+	IDWriteFontCollection* systemCollection,
+	bool includeDownloadableFonts)
 {
-	CComPtr<IDWriteFontSet> const published = GetFactoryAliasSource(factory);
-	CComPtr<IDWriteFontSet2Compat> published2;
-	HANDLE expirationEvent = nullptr;
-	if (published != nullptr &&
-		SUCCEEDED(published->QueryInterface(&published2)) && published2 != nullptr)
-		expirationEvent = published2->GetExpirationEvent();
-	bool const expirationKnown = expirationEvent != nullptr;
-	// DirectWrite owns the event; published keeps it valid through the wait.
-	bool const expirationSignaled = expirationKnown &&
-		WaitForSingleObject(expirationEvent, 0) == WAIT_OBJECT_0;
-	// GetFontSet returns a new object for every collection call, so identity
-	// cannot distinguish a repeated answer from an updated source.
-	return directwrite_readiness::PublishedSourceIsOutOfDate(
-		published != nullptr,
-		expirationKnown,
-		expirationSignaled,
-		published != nullptr ? published->GetFontCount() : 0,
-		candidate != nullptr ? candidate->GetFontCount() : 0);
+	CComPtr<IUnknown> const identity = GetFactoryIdentity(factory);
+	CComPtr<IUnknown> collectionIdentity;
+	if (identity == nullptr || systemCollection == nullptr ||
+		FAILED(systemCollection->QueryInterface(&collectionIdentity)) ||
+		collectionIdentity == nullptr ||
+		directwrite_alias::IsAliasCollection(systemCollection))
+		return;
+	auto const checkedCollection =
+		[includeDownloadableFonts](FactoryAliasSource& source) -> CComPtr<IUnknown>& {
+			return includeDownloadableFonts ?
+				source.downloadableCollection : source.localCollection;
+		};
+
+	CComPtr<IDWriteFontSet> published;
+	{
+		std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+		for (FactoryAliasSource& source : GetFactoryAliasSourceRegistry())
+		{
+			if (source.factoryIdentity == identity)
+			{
+				if (checkedCollection(source) == collectionIdentity)
+					return;
+				published = source.systemSet;
+				break;
+			}
+		}
+	}
+	CComPtr<IDWriteFontCollection1> systemCollection1;
+	CComPtr<IDWriteFontSet> systemSet;
+	if (FAILED(systemCollection->QueryInterface(&systemCollection1)) ||
+		systemCollection1 == nullptr ||
+		FAILED(systemCollection1->GetFontSet(&systemSet)) ||
+		systemSet == nullptr)
+		return;
+
+	std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+	for (FactoryAliasSource& source : GetFactoryAliasSourceRegistry())
+	{
+		if (source.factoryIdentity == identity)
+		{
+			// Another thread replaced the source meanwhile; keep its answer.
+			if (source.systemSet == published)
+			{
+				source.systemSet = systemSet;
+				checkedCollection(source) = collectionIdentity;
+			}
+			return;
+		}
+	}
+	if (published != nullptr)
+		return;
+	FactoryAliasSource source;
+	source.factoryIdentity = identity;
+	source.systemSet = systemSet;
+	checkedCollection(source) = collectionIdentity;
+	GetFactoryAliasSourceRegistry().push_back(source);
 }
 
 FactoryAliasVtableHooks& GetOrAddFactoryAliasVtable(void** vtable)
@@ -2872,10 +2909,8 @@ HRESULT WINAPI IMPL_Factory_GetSystemFontCollection(
 		*fontCollection = systemCollection.Detach();
 		return result;
 	}
-	if (checkForUpdates &&
-		!directwrite_alias::IsAliasCollection(systemCollection) &&
-		FactoryAliasSourceIsOutOfDate(self, systemSet))
-		PublishFactoryAliasSource(self, systemSet, true);
+	if (checkForUpdates)
+		RefreshFactoryAliasSource(self, systemCollection, false);
 	CComPtr<IDWriteFactory3> factory3;
 	if (FAILED(self->QueryInterface(&factory3)) || factory3 == nullptr)
 	{
@@ -2956,6 +2991,9 @@ HRESULT WINAPI IMPL_Factory3_GetSystemFontCollection(
 		self, includeDownloadableFonts, &systemCollection, checkForUpdates);
 	if (FAILED(result) || systemCollection == nullptr)
 		return result;
+	if (checkForUpdates)
+		RefreshFactoryAliasSource(
+			self, systemCollection, includeDownloadableFonts != FALSE);
 
 	directwrite_alias::AliasFontSet aliases;
 	directwrite_alias::BuildStatus const status =

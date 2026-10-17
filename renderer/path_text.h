@@ -50,11 +50,8 @@ namespace renderer::path_text {
 	constexpr std::size_t maxApiLength =
 		static_cast<std::size_t>((std::numeric_limits<DWORD>::max)());
 
-	for (;;)
+	while (path.size() <= maxApiLength)
 	{
-		if (path.size() > maxApiLength)
-			return std::nullopt;
-
 		DWORD const capacity = static_cast<DWORD>(path.size());
 		DWORD const length = GetModuleFileNameW(module, path.data(), capacity);
 		if (length == 0)
@@ -70,9 +67,10 @@ namespace renderer::path_text {
 		}
 
 		if (path.size() > maxApiLength / 2)
-			return std::nullopt;
+			break;
 		path.resize(path.size() * 2);
 	}
+	return std::nullopt;
 }
 
 } // namespace renderer::path_text

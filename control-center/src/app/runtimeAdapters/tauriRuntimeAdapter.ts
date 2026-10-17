@@ -90,7 +90,9 @@ export const tauriRuntimeAdapter: ControlCenterRuntimeAdapter = {
     void listen("event-log:changed", () => listener()).then((stop) => {
       if (disposed) stop();
       else unlisten = stop;
-    });
+    }).catch((error: unknown) => tauriRuntimeAdapter.reportFrontendFailure(
+      "diagnostics", `event-log:changed: ${error instanceof Error ? error.message : String(error)}`,
+    ).catch(() => undefined));
     return () => {
       disposed = true;
       unlisten?.();
@@ -137,7 +139,9 @@ export const tauriRuntimeAdapter: ControlCenterRuntimeAdapter = {
     void listen<NativePreviewState>("native-preview:state", (event) => listener(event.payload)).then((stop) => {
       if (disposed) stop();
       else unlisten = stop;
-    });
+    }).catch((error: unknown) => tauriRuntimeAdapter.reportFrontendFailure(
+      "profiles", `native-preview:state: ${error instanceof Error ? error.message : String(error)}`,
+    ).catch(() => undefined));
     return () => {
       disposed = true;
       unlisten?.();

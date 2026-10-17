@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer } from "react";
+import { useEffect, useMemo, useReducer, useState } from "react";
 import { Activity, FileCog, Home, Moon, ServerCog, SlidersHorizontal, Sparkles, Sun } from "lucide-react";
 import { DiagnosticsPage } from "../pages/DiagnosticsPage";
 import { OverviewPage } from "../pages/OverviewPage";
@@ -53,6 +53,7 @@ interface AppProps {
 
 export function App({ initialTheme = loadThemePreference() }: AppProps) {
   const { t } = useI18n();
+  const [launchError, setLaunchError] = useState<Error | null>(null);
   const [state, dispatch] = useReducer(reducer, {
     view: "overview",
     profileMode: "all",
@@ -69,6 +70,8 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
       if (!active) return;
       dispatch({ type: "launched", view: context.view, ciSmoke: context.ciSmoke, trayStart: context.trayStart });
       if (status) dispatch({ type: "status", status });
+    }).catch((error: unknown) => {
+      if (active) setLaunchError(error instanceof Error ? error : new Error(String(error)));
     });
     return () => {
       active = false;
@@ -86,17 +89,17 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
     document.body.dataset.rendered = "true";
     if (state.ciSmoke && state.trayStart) {
       void runtime().verifyTrayModeForCi()
-        .then(() => runtime().reportFrontendReady(state.view))
-        .catch((error: unknown) => runtime().reportFrontendFailure(state.view, error instanceof Error ? error.message : String(error)));
+        .then(() => runtime().reportFrontendReady(state.view).catch(() => undefined))
+        .catch((error: unknown) => runtime().reportFrontendFailure(state.view, error instanceof Error ? error.message : String(error)).catch(() => undefined));
     } else if (!state.ciSmoke || (state.view !== "profiles" && state.view !== "execution")) {
-      void runtime().reportFrontendReady(state.view);
+      void runtime().reportFrontendReady(state.view).catch(() => undefined);
     }
   }, [state.ciSmoke, state.profileMode, state.ready, state.trayStart, state.view]);
 
   const page = useMemo(() => {
     if (state.view === "files") return <FileSettingsPage onEditInTuner={() => dispatch({ type: "navigate", view: "profiles", profileMode: "all" })} />;
-    if (state.view === "profiles") return <ProfilesPage ciSmoke={state.ciSmoke} mode={state.profileMode} onPreviewReady={() => void runtime().reportFrontendReady("profiles")} />;
-    if (state.view === "execution") return <ExecutionPage ciSmoke={state.ciSmoke} onReady={() => void runtime().reportFrontendReady("execution")} />;
+    if (state.view === "profiles") return <ProfilesPage ciSmoke={state.ciSmoke} mode={state.profileMode} onPreviewReady={() => void runtime().reportFrontendReady("profiles").catch(() => undefined)} />;
+    if (state.view === "execution") return <ExecutionPage ciSmoke={state.ciSmoke} onReady={() => void runtime().reportFrontendReady("execution").catch(() => undefined)} />;
     if (state.view === "diagnostics") return <DiagnosticsPage
       status={state.status}
       onReconnect={async () => {
@@ -112,6 +115,8 @@ export function App({ initialTheme = loadThemePreference() }: AppProps) {
     />;
     return <OverviewPage onOpenService={() => dispatch({ type: "navigate", view: "execution" })} />;
   }, [state.ciSmoke, state.profileMode, state.status, state.view]);
+
+  if (launchError) throw launchError;
 
   return (
     <>

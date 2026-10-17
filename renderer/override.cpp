@@ -51,7 +51,7 @@ CDCRelationCache DCRelation;
 CDCHwndCache DCHwndCache;
 CDCRefCache DCRef; // HDC reference count
 //CPaintBufferCache PaintBufferCache;
-wstring nullstring;
+std::wstring nullstring;
 BOOL g_ccbRender = true;
 BOOL g_ccbCache = true;
 HFONT g_alterGUIFont = nullptr;
@@ -868,7 +868,7 @@ ETO_TRY();
 	otm->otmSize = nSize;
 	TEXTMETRIC& tm = otm->otmTextMetrics;
 	LOGFONT	lf = { 0 };
-	wstring strFamilyName;
+	std::wstring strFamilyName;
 	GetOutlineTextMetrics(hdc, nSize, otm.get());
 
 	const LPWSTR familyName = reinterpret_cast<LPWSTR>(

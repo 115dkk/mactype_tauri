@@ -13,9 +13,6 @@
 #include <dwrite_2.h>
 #include <dwrite_3.h>
 
-using namespace std;
-
-
 /*
 typedef struct _STRING {
 	USHORT  Length;
@@ -50,12 +47,12 @@ public:
 	}
 };
 
-using CFontCache = map<HFONT, CFontSubResult*>;
-using CDCArray = set<HDC>;
-using CDCRelationCache = map<HDC, HDC>;
-using CDCHwndCache = map<HDC, HWND>;
-using CDCRefCache = map<HDC, int>;
-using CPaintBufferCache = map<HPAINTBUFFER, HDC>;
+using CFontCache = std::map<HFONT, CFontSubResult*>;
+using CDCArray = std::set<HDC>;
+using CDCRelationCache = std::map<HDC, HDC>;
+using CDCHwndCache = std::map<HDC, HWND>;
+using CDCRefCache = std::map<HDC, int>;
+using CPaintBufferCache = std::map<HPAINTBUFFER, HDC>;
 
 class CThreadLocalInfo
 {

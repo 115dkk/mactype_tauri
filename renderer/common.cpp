@@ -65,7 +65,7 @@ std::string to_byte_string(const std::wstring& input)
 	return output;
 }
 
-wstring to_lower_case(wstring str) {
-	transform(str.begin(), str.end(), str.begin(), ::tolower);
+std::wstring to_lower_case(std::wstring str) {
+	std::transform(str.begin(), str.end(), str.begin(), ::tolower);
 	return str;
 }

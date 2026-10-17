@@ -23,7 +23,7 @@ extern BOOL g_ccbCache;
 extern BOOL g_ccbIndividual;
 extern FTC_Manager    cache_man;
 
-using CTLSDCArray = set<CBitmapCache*>;
+using CTLSDCArray = std::set<CBitmapCache*>;
 extern CTLSDCArray TLSDCArray;
 
 LOGFONTW* GetFontNameFromFile(LPCTSTR Filename);
@@ -31,7 +31,7 @@ bool GetFontLocalName(TCHAR* pszFontName, __out TCHAR* pszNameOut);	//获得字�
 
 struct myfont
 {
-	wstring name;
+	std::wstring name;
 	int hash;
 	bool operator < (const myfont& mf) const {
 		return name==mf.name? hash<mf.hash: name<mf.name;
@@ -147,7 +147,7 @@ public:
 };
 class FreeTypeFontCache : public FreeTypeMruCounter, public FreeTypeGCCounter
 {
-	using GlyphCache = map<int, FreeTypeCharData*>;
+	using GlyphCache = std::map<int, FreeTypeCharData*>;
 
 private:
 	bool m_active;
@@ -255,8 +255,8 @@ private:
 	CFontSettings m_set;
 	renderer::RendererPolicyRef m_policy;
 	StringHashFont m_hash;
-	wstring	m_fullname, m_familyname, m_stylename;
-	using CacheArray = map<renderer::freetype::RasterCacheKey,
+	std::wstring	m_fullname, m_familyname, m_stylename;
+	using CacheArray = std::map<renderer::freetype::RasterCacheKey,
 		std::unique_ptr<FreeTypeFontCache>>;
 	CacheArray m_cache;
 	//快速链接
@@ -312,7 +312,7 @@ public:
 		}
 		return m_hashinting;
 	}
-	wstring GetFullName() {return m_fullname;};
+	std::wstring GetFullName() {return m_fullname;};
 	bool m_isSimSun;
 	bool IsPixel;
 	FreeTypeFontInfo(
@@ -321,8 +321,8 @@ public:
 		int weight,
 		bool italic,
 		int mru,
-		wstring fullname,
-		wstring familyname,
+		std::wstring fullname,
+		std::wstring familyname,
 		renderer::RendererPolicyRef policy);
 	~FreeTypeFontInfo()
 	{
@@ -392,7 +392,7 @@ public:
 
 	INT_PTR GetId() const { return m_id; }
 	LPCTSTR GetName() const { return m_hash.c_str(); }
-	wstring GetStyleName() const { return m_stylename; }
+	std::wstring GetStyleName() const { return m_stylename; }
 	int GetFontWeight() const { return m_weight; }
 	int GetExactBoldWeight() const {return m_set.GetBoldWeight(); }
 	int GetFTWeight() const { return m_ftWeight; }
@@ -420,9 +420,9 @@ public:
 class FreeTypeFontEngine : public FreeTypeGCCounter
 {
 private:
-	using FontMap = map<myfont, FreeTypeFontInfo*>;
-	using FullNameMap = map<wstring, FreeTypeFontInfo*>;
-	using FontList = vector<FreeTypeFontInfo*>;
+	using FontMap = std::map<myfont, FreeTypeFontInfo*>;
+	using FullNameMap = std::map<std::wstring, FreeTypeFontInfo*>;
+	using FontList = std::vector<FreeTypeFontInfo*>;
 	//FontListArray	m_arrFontList;
 	int				m_nMaxFaces;
 	int				m_nMemUsed;

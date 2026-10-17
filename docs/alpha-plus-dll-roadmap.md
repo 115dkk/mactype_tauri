@@ -471,32 +471,48 @@ source set cannot hide the current one. On `checkForUpdates` the legacy hook
 used to publish the set it received as the factory's source on every call.
 DirectWrite returns a new set object from each collection call, so every such
 call keyed a fresh build, and in a process whose builds fail the retry schedule
-never applied. The hook now never publishes an alias collection's set, and it
-replaces the source only after DirectWrite signals the published set's
-expiration event (a font was installed, removed or updated; Windows 10 1803 and
-later); a set without an event is replaced only when its face count differs
-from the new answer. Measured with the service
+never applied. The set's expiration event cannot stand in for that check: only
+the first system set a process receives carries one, and every object
+DirectWrite returns after the first update check, `GetSystemFontSet` included,
+has none. The system collection object is what stays stable: DirectWrite hands
+back the same one until it builds a new one, which it does on the first update
+check and after a font change. The source therefore records the stock
+collection it was last checked against, one per `includeDownloadableFonts`
+value because those are different objects, and an update check replaces the
+source only when DirectWrite answers with a collection it has not seen. The
+replacement goes through only while the source is still the one the check
+read, so two threads that see the same new collection build once. The legacy
+method answers through the modern slot with the same `checkForUpdates` value,
+so in a process whose alias build succeeds the legacy hook only ever sees the
+alias collection; the check therefore runs in the modern hook, where the stock
+collection is visible. Before this, a process whose build succeeded never took
+a font change from an update check at all. A process that checks for updates
+now builds once more on its first check and again only after a real change.
+Measured with the service
 stopped and each core loaded by `MacLoader64` before image entry, in a probe
 that asks for `GetSystemFontSet` first the way Settings does: the c41f489 core
 answered `Malgun Gothic` with `MALGUN.TTF` at weight 400 and spent 2,301 ms on
 50 further legacy collection calls and 429 ms on 20 modern ones; the fixed core
 answered with the alias file at weight 500 (Pretendard Variable Medium),
 returned a 758-face set that still carries the downloadable faces, and spent
-0.3 ms and under 0.1 ms. Fifty legacy calls with `checkForUpdates` took
-2,947 ms on c41f489, 426.8 ms on the fixed core and 431.7 ms without MacType,
-and `Malgun Gothic` still resolved to the alias file afterwards.
+0.3 ms and under 0.1 ms.
+Update checks without MacType took 45.8 ms for the first legacy call, 414.8 ms
+for 49 more, 8.5 ms for the first downloadable modern call and 328.4 ms for 20
+alternating legacy and downloadable modern pairs; the fixed core took 93.3 ms,
+390.8 ms, 49.3 ms and 316.5 ms, the one extra build per collection kind
+falling on its first check, against 2,947 ms on c41f489 for 50 legacy update
+checks, and `Malgun Gothic` still resolved to the alias file afterwards.
 
 Two behaviours remain. The first is stock DirectWrite's: without
 MacType, DirectWrite answers `GetSystemFontSet` with 735 faces only until the
 process first asks for the legacy collection or checks for updates; from then
 on every system answer, `GetSystemFontSet` included, carries the 510 local
-faces. A source replaced by such a call therefore leaves the full view with
-local faces only, as the stock answer has. The second is a race: if a font
-change replaces the source while another thread has read the previous source but not yet reserved
-its build, that older build is inserted last and the fallback lookup keeps
-reading it until the source changes again; with replacement tied to the
-expiration event, this needs a font installation that coincides with
-collection calls on two threads.
+faces. A source replaced by an update check therefore leaves the full view
+with local faces only, as the stock answer has. The second is a race: if a
+font change replaces the source while another thread has read the previous
+source but not yet reserved its build, that older build is inserted last and
+the fallback lookup keeps reading it until the source changes again. This
+needs a font change that coincides with collection calls on two threads.
 
 An injection that lands after the first frame (the open service's remote
 `LoadLibrary`, every elevated target, any child of a parent that was not

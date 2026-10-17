@@ -978,9 +978,6 @@ FreeTypeSysFontData* FreeTypeSysFontData::CreateInstance(
 {
 	std::unique_ptr<FreeTypeSysFontData> pData(
 		new FreeTypeSysFontData(policy));
-	if (!pData) {
-		return nullptr;
-	}
 	if (!pData->Init(name, weight, italic)) {
 		return nullptr;
 	}

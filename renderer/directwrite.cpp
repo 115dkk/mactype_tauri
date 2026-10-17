@@ -22,7 +22,7 @@ void MyDebug(const TCHAR *sz, ...)
 
 	va_list args;
 	va_start(args, sz);
-	StringCchVPrintf(szData, sizeof(szData)-1, sz, args);
+	StringCchVPrintf(szData, _countof(szData), sz, args);
 	va_end(args);
 
 	OutputDebugString(szData);

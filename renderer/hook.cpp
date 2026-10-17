@@ -25,6 +25,7 @@
 #include "EventLogging.h"
 #include "hookCounter.h"
 #include "hook_lifecycle.h"
+#include "path_text.h"
 #include "renderer_activation.h"
 #include "unload_lifecycle.h"
 #include "unity_font_hook.h"
@@ -520,25 +521,29 @@ ret:
 
 BOOL AddEasyHookEnv()
 {
-	TCHAR dir[MAX_PATH];
-	int dirlen = GetModuleFileName(GetDLLInstance(), dir, MAX_PATH);
-	LPTSTR lpfilename=dir+dirlen;
-	while (lpfilename>dir && *lpfilename!=_T('\\') && *lpfilename!=_T('/')) --lpfilename;
-	*lpfilename = 0;
-	_tcscat(dir, _T(";"));
-	dirlen = _tcslen(dir);
-	const DWORD pathLength = GetEnvironmentVariable(_T("path"), nullptr, 0);
-	std::vector<TCHAR> path(static_cast<size_t>(pathLength) + dirlen + 2, _T('\0'));
-	if (pathLength != 0) {
-		GetEnvironmentVariable(_T("path"), path.data(), pathLength);
-	}
-	if (!_tcsstr(path.data(), dir))
+	std::optional<std::wstring> const directory =
+		renderer::path_text::ModuleDirectory(GetDLLInstance());
+	if (!directory)
+		return false;
+
+	std::wstring const directoryEntry = *directory + L';';
+	DWORD const pathLength = GetEnvironmentVariableW(L"path", nullptr, 0);
+	std::wstring path;
+	if (pathLength != 0)
 	{
-		const size_t currentLength = _tcslen(path.data());
-		if (currentLength != 0 && path[currentLength - 1] != _T(';'))
-			_tcscat(path.data(), _T(";"));
-		_tcscat(path.data(), dir);
-		SetEnvironmentVariable(_T("path"), path.data());
+		path.resize(pathLength);
+		DWORD const copied = GetEnvironmentVariableW(
+			L"path", path.data(), pathLength);
+		if (copied >= pathLength)
+			return false;
+		path.resize(copied);
+	}
+	if (path.find(directoryEntry) == std::wstring::npos)
+	{
+		if (!path.empty() && path.back() != L';')
+			path.push_back(L';');
+		path += directoryEntry;
+		return SetEnvironmentVariableW(L"path", path.c_str());
 	}
 	return true;
 }
@@ -600,17 +605,19 @@ void EZHookMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved) {
 	switch (reason) {
 	case DLL_PROCESS_ATTACH:
 	{
-		std::vector<WCHAR> dllPath(MAX_PATH + 1, L'\0');
-		int nSize = GetModuleFileName(g_dllInstance, dllPath.data(), static_cast<DWORD>(dllPath.size()));
-		WCHAR* p = &dllPath[nSize];
-		while (*--p != L'\\');
-		*p = L'\0';
+		std::optional<std::wstring> dllPath =
+			renderer::path_text::ModuleDirectory(g_dllInstance);
+		if (!dllPath)
+		{
+			DebugOut(L"Failed to read the renderer path, exiting");
+			return;
+		}
 #ifdef _WIN64
-		wcscat(dllPath.data(), L"\\easyhk64.dll");
+		*dllPath += L"\\easyhk64.dll";
 #else
-		wcscat(dllPath.data(), L"\\easyhk32.dll");
+		*dllPath += L"\\easyhk32.dll";
 #endif
-		HMODULE hEasyhk = LoadLibrary(dllPath.data());
+		HMODULE hEasyhk = LoadLibraryW(dllPath->c_str());
 		if (!hEasyhk) {
 			DebugOut(L"Failed to load Easyhook, exiting");
 			return;

@@ -3,6 +3,7 @@
 #include "override.h"
 #include "directwrite.h"
 #include "hook_lifecycle.h"
+#include "path_text.h"
 #include "unload_lifecycle.h"
 #include <tlhelp32.h>
 #include <shlwapi.h>	//DLLVERSIONINFO
@@ -242,16 +243,6 @@ EXTERN_C DWORD WINAPI SafeUnload(LPVOID)
 		rendererLease != nullptr ? rendererLease : g_dllInstance,
 		ERROR_SUCCESS);
 	return ERROR_SUCCESS;
-}
-
-void ChangeFileName(LPWSTR lpSrc, int nSize, LPCWSTR lpNewFileName) {
-	for (int i = nSize; i > 0; --i){
-		if (lpSrc[i] == L'\\') {
-			lpSrc[i + 1] = L'\0';
-			break;
-		}
-	}
-	wcscat(lpSrc, lpNewFileName);
 }
 
 std::string WstringToString(const std::wstring& str)
@@ -687,11 +678,12 @@ emit_db(0xC3);
 		emit_dd(orgEIP - static_cast<LONG>(reinterpret_cast<ULONG_PTR>(remoteaddr)) - static_cast<LONG>(p - code) - sizeof(LONG));
 
 		// gdi++.dllのパス
-		int nSize = GetModuleFileNameW(GetDLLInstance(), dllpath, MAX_PATH);
-		if (nSize) {
-			ChangeFileName(dllpath, nSize, L"MTBootStrap.dll");
-		}
-		return nSize != 0;
+		DWORD const pathLength = GetModuleFileNameW(
+			GetDLLInstance(), dllpath, MAX_PATH);
+		if (pathLength == 0 || pathLength >= MAX_PATH)
+			return false;
+		return renderer::path_text::ReplaceFileName(
+			std::span<wchar_t>(dllpath), L"MTBootStrap.dll");
 	}
 	bool init32(LPDWORD remoteaddr, LONG orgEIP)	//32位程序初始化
 	{
@@ -735,11 +727,12 @@ emit_dw(0xD0FF);	//call eax
 		emit_dd(orgEIP - static_cast<LONG>(reinterpret_cast<ULONG_PTR>(remoteaddr)) - static_cast<LONG>(p - code) - sizeof(LONG));
 
 		// gdi++.dllのパス
-		int nSize = GetModuleFileNameW(GetDLLInstance(), dllpath, MAX_PATH);
-		if (nSize) {
-			ChangeFileName(dllpath, nSize, L"MTBootStrap.dll");
-		}
-		return nSize != 0;
+		DWORD const pathLength = GetModuleFileNameW(
+			GetDLLInstance(), dllpath, MAX_PATH);
+		if (pathLength == 0 || pathLength >= MAX_PATH)
+			return false;
+		return renderer::path_text::ReplaceFileName(
+			std::span<wchar_t>(dllpath), L"MTBootStrap.dll");
 	}
 	bool init64From32(DWORD64 remoteaddr, DWORD64 orgEIP)
 	{
@@ -791,23 +784,26 @@ emit_dw(0xD0FF);	//call eax
 
 		// gdi++.dllのパス
 
-		int nSize = GetModuleFileNameW(GetDLLInstance(), dllpath, MAX_PATH);
-		if (nSize) {
-			ChangeFileName(dllpath, nSize, L"MTBootStrap64.dll");
-		}
-		return nSize != 0;
+		DWORD const pathLength = GetModuleFileNameW(
+			GetDLLInstance(), dllpath, MAX_PATH);
+		if (pathLength == 0 || pathLength >= MAX_PATH)
+			return false;
+		return renderer::path_text::ReplaceFileName(
+			std::span<wchar_t>(dllpath), L"MTBootStrap64.dll");
 	}
 
 	bool init64From32(DWORD64 remoteaddr, DWORD64 orgEIP, DWORD dwLoaderOffset)
 	{
 		C_ASSERT((offsetof(opcode_data, dllpath) & 1) == 0);
 
-		int nSize = GetModuleFileNameW(GetDLLInstance(), dllpath, MAX_PATH);
-		if (nSize) {
-			ChangeFileName(dllpath, nSize, L"MTBootStrap64.dll");
-		}
-		if (!nSize)
+		DWORD const pathLength = GetModuleFileNameW(
+			GetDLLInstance(), dllpath, MAX_PATH);
+		if (pathLength == 0 || pathLength >= MAX_PATH ||
+			!renderer::path_text::ReplaceFileName(
+				std::span<wchar_t>(dllpath), L"MTBootStrap64.dll"))
+		{
 			return false;
+		}
 		uniDllPath.Length = wcslen(dllpath)*sizeof(WCHAR);
 		uniDllPath.MaximumLength = uniDllPath.Length+2;
 		uniDllPath.Buffer = remoteaddr + static_cast<DWORD64>(offsetof(opcode_data, dllpath));	//prepare PUNICODE_STRING for remote process
@@ -1311,11 +1307,12 @@ emit_db(0xC1);
 		emit_db(0xE6);
 
 		// gdi++.dllのパス
-		int nSize = GetModuleFileNameW(GetDLLInstance(), dllpath, MAX_PATH);
-		if (nSize) {
-			ChangeFileName(dllpath, nSize, L"MTBootStrap64.dll");
-		}
-		return nSize != 0;
+		DWORD const pathLength = GetModuleFileNameW(
+			GetDLLInstance(), dllpath, MAX_PATH);
+		if (pathLength == 0 || pathLength >= MAX_PATH)
+			return false;
+		return renderer::path_text::ReplaceFileName(
+			std::span<wchar_t>(dllpath), L"MTBootStrap64.dll");
 	}
 
 };
@@ -1720,7 +1717,8 @@ void DebugOut(const WCHAR* szFormat, ...) {
 	va_list args;
 	va_start(args, szFormat);
 	WCHAR buffer[1024] = { 0 };
-	vswprintf(buffer, szFormat, args);
+	_vsnwprintf_s(
+		buffer, _countof(buffer), _TRUNCATE, szFormat, args);
 	va_end(args);
 	std::wstring fullmsg = L"[MTCore] " + std::wstring(buffer);
 	OutputDebugString(fullmsg.c_str());

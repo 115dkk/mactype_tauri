@@ -234,7 +234,7 @@ fn contains_mactray_target(value: &str) -> bool {
     lower.match_indices(needle).any(|(start, _)| {
         let before = lower[..start].chars().next_back();
         let after = lower[start + needle.len()..].chars().next();
-        before.map_or(true, target_boundary) && after.map_or(true, target_boundary)
+        before.is_none_or(target_boundary) && after.is_none_or(target_boundary)
     })
 }
 

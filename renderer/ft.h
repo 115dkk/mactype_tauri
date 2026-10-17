@@ -193,7 +193,7 @@ struct FREETYPE_PARAMS
 	BYTE alphatuner;
 	LOGFONTW* lplf;
 	OUTLINETEXTMETRIC* otm;
-	wstring strFamilyName, strFullName;
+	std::wstring strFamilyName, strFullName;
 
 	FREETYPE_PARAMS()
 		: etoOptions(0), ftOptions(0), charExtra(0), color(0), alpha(0),

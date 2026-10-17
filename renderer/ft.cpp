@@ -1376,36 +1376,36 @@ public:
 	DWORD getsize() { return m_size; }
 };
 
-bool IsSFNTNameMatch(const FT_Face& face, FT_UInt nameID, wstring name) {
+bool IsSFNTNameMatch(const FT_Face& face, FT_UInt nameID, std::wstring name) {
 	// get sfnt name by platform id
-	auto getSfntName = [](FT_SfntName& fn)->wstring {
+	auto getSfntName = [](FT_SfntName& fn)->std::wstring {
 		switch (fn.platform_id) {
 		case 0: {
-			return wstring(reinterpret_cast<wchar_t*>(fn.string), fn.string_len);
+			return std::wstring(reinterpret_cast<wchar_t*>(fn.string), fn.string_len);
 		}
 		case 1: {
 			//	macintosh
-			return to_wide_string(string(reinterpret_cast<char*>(fn.string), fn.string_len));
+			return to_wide_string(std::string(reinterpret_cast<char*>(fn.string), fn.string_len));
 		}
 		case 3: {
 			// Windows
 			switch (fn.encoding_id) {
 			case 0:
 			case 1: {
-				return to_utf16le(wstring(reinterpret_cast<wchar_t*>(fn.string), fn.string_len));
+				return to_utf16le(std::wstring(reinterpret_cast<wchar_t*>(fn.string), fn.string_len));
 			}
 			default:
-				return to_wide_string(string(reinterpret_cast<char*>(fn.string), fn.string_len));
+				return to_wide_string(std::string(reinterpret_cast<char*>(fn.string), fn.string_len));
 			}
 		}
 		}
 		return L"";
 		};
 
-	auto getWordSet = [](const wstring& str) {
-		set<wstring> words;
-		wstringstream ss(to_lower_case(str));
-		wstring word;
+	auto getWordSet = [](const std::wstring& str) {
+		std::set<std::wstring> words;
+		std::wstringstream ss(to_lower_case(str));
+		std::wstring word;
 		while (ss >> word) {
 			if (word != L"regular")	// drop the regular style as it can be omitted
 				words.insert(word);
@@ -1413,7 +1413,7 @@ bool IsSFNTNameMatch(const FT_Face& face, FT_UInt nameID, wstring name) {
 		return words;
 		};
 
-	auto compareStyle = [&](const wstring nameA, const wstring nameB)->bool {
+	auto compareStyle = [&](const std::wstring nameA, const std::wstring nameB)->bool {
 		auto setA = getWordSet(nameA);
 		auto setB = getWordSet(nameB);
 		return setA == setB;
@@ -1427,7 +1427,7 @@ bool IsSFNTNameMatch(const FT_Face& face, FT_UInt nameID, wstring name) {
 				if (sfntName.string_len > 0 && sfntName.string) {
 					// Macintosh and legacy Windows names are not UTF-8; one that
 					// does not decode is skipped rather than failing the face open.
-					wstring fontName;
+					std::wstring fontName;
 					try {
 						fontName = getSfntName(sfntName);
 					}
@@ -1444,7 +1444,7 @@ bool IsSFNTNameMatch(const FT_Face& face, FT_UInt nameID, wstring name) {
 	return false;
 }
 
-void VarFontByAlias(const FT_Face& face, const wstring& lfStyleName) {
+void VarFontByAlias(const FT_Face& face, const std::wstring& lfStyleName) {
 	FT_MM_Var* rawMmVar = nullptr;
 	auto error = FT_Get_MM_Var(face, &rawMmVar);
 	if (error) {
@@ -1541,7 +1541,7 @@ BOOL FreeTypePrepare(FreeTypeDrawInfo& FTInfo)
 		else
 			scaler.width = scaler.height;
 		if (bVertical)
-			swap(scaler.width, scaler.height);//如果是竖向字体，交换宽高
+			std::swap(scaler.width, scaler.height);//如果是竖向字体，交换宽高
 		//!!Snowie
 		scaler.pixel = 1;
 		scaler.x_res = 0;
@@ -2051,7 +2051,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 			}
 			else {
 				if (bVertical)
-					swap(FTInfo.font_type.height, FTInfo.font_type.width);	//交换无法旋转的文字宽高
+					std::swap(FTInfo.font_type.height, FTInfo.font_type.width);	//交换无法旋转的文字宽高
 				FTInfo.font_type.flags &= ~FT_LOAD_VERTICAL_LAYOUT;
 				if (bLcdMode) {
 					if (FTInfo.font_type.flags & FT_LOAD_TARGET_LCD_V == FT_LOAD_TARGET_LCD_V) {
@@ -2394,7 +2394,7 @@ BOOL ForEachGetGlyphGGO(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString
 			}
 			else {
 				if (bVertical)
-					swap(FTInfo.font_type.height, FTInfo.font_type.width);	//交换无法旋转的文字宽高
+					std::swap(FTInfo.font_type.height, FTInfo.font_type.width);	//交换无法旋转的文字宽高
 				FTInfo.font_type.flags &= ~FT_LOAD_VERTICAL_LAYOUT;
 				if (bLcdMode) {
 					if (FTInfo.font_type.flags & FT_LOAD_TARGET_LCD_V == FT_LOAD_TARGET_LCD_V) {
@@ -2590,7 +2590,7 @@ int IsColorDark(DWORD Color, double Gamma)
 	static double s_multipler = 116 / pow(100, 1.0 / 3.0);	//预计算常数,强制使用double版本
 	double* RGBTable = s_AlphaBlendTable.GetRGBTable();	//获得显示器转换表
 	double ret = pow(23.9746 * RGBTable[GetRValue(Color)] + 73.0653 * RGBTable[GetGValue(Color)] + 6.13799 * RGBTable[GetBValue(Color)], 1.0 / 3.0) * s_multipler - 16;
-	return max(static_cast<int>(ret + 0.499), 0);
+	return std::max(static_cast<int>(ret + 0.499), 0);
 }
 
 BOOL FreeTypeTextOut(
@@ -2624,7 +2624,7 @@ BOOL FreeTypeTextOut(
 	{
 		float Gamma = FTInfo.rasterPolicy.gamma;
 		bDarkColor = IsColorDark(FTInfo.params->color, Gamma);
-		int diff = max(darkdiff = abs(IsColorDark(FTInfo.rasterPolicy.shadowDarkColor, Gamma) - bDarkColor), lightdiff = abs(IsColorDark(FTInfo.rasterPolicy.shadowLightColor, Gamma) - bDarkColor));
+		int diff = std::max(darkdiff = abs(IsColorDark(FTInfo.rasterPolicy.shadowDarkColor, Gamma) - bDarkColor), lightdiff = abs(IsColorDark(FTInfo.rasterPolicy.shadowLightColor, Gamma) - bDarkColor));
 		ShadowColor = lightdiff <= darkdiff ? FTInfo.rasterPolicy.shadowDarkColor : FTInfo.rasterPolicy.shadowLightColor;
 		bDarkColor = lightdiff <= darkdiff;
 		if (FTInfo.rasterPolicy.shadowDarkColor == FTInfo.rasterPolicy.shadowLightColor)
@@ -2638,7 +2638,7 @@ BOOL FreeTypeTextOut(
 			if (diff < 10)
 				FTInfo.params->alpha = 1;
 			else
-				FTInfo.params->alphatuner = max(1, 100 / diff);	//根据色差调整阴影浓度
+				FTInfo.params->alphatuner = std::max(1, 100 / diff);	//根据色差调整阴影浓度
 		}
 	}
 	char mode = (*Glyphs) ? FT_BitmapGlyph((*Glyphs)->ft_glyph)->bitmap.pixel_mode : FT_PIXEL_MODE_LCD;

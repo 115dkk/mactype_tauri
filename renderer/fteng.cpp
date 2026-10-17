@@ -425,8 +425,8 @@ FreeTypeFontInfo::FreeTypeFontInfo(
 	int weight,
 	bool italic,
 	int mru,
-	wstring fullname,
-	wstring familyname,
+	std::wstring fullname,
+	std::wstring familyname,
 	renderer::RendererPolicyRef policy)
 	: m_id(n), m_weight(weight), m_italic(italic), m_OS2Table(), IsPixel(false),
 	  FreeTypeMruCounter(mru), m_isSimSun(false), m_ggoFont(),
@@ -825,7 +825,7 @@ FreeTypeFontInfo* FreeTypeFontEngine::AddFont(
 	if(lpFaceName == nullptr || _tcslen(lpFaceName) == 0 || !policy)
 		return nullptr;
 
-	wstring dumy;
+	std::wstring dumy;
 	//dumy.clear();
 	const int faceId = GetFaceID();
 	std::unique_ptr<FreeTypeFontInfo> newFont;

@@ -50,7 +50,6 @@
 
 #include <map>
 #include <string>
-using namespace std;
 
 inline constexpr int FONT_MAGIC_NUMBER = 0xA8;
 
@@ -78,7 +77,7 @@ std::string to_byte_string(const std::wstring & input);
 // convert a utf-16be string back to utf-16le string
 std::wstring to_utf16le(const std::wstring& input);
 
-wstring to_lower_case(wstring str);
+std::wstring to_lower_case(std::wstring str);
 
 FORCEINLINE HINSTANCE GetDLLInstance()
 {

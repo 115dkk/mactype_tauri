@@ -143,15 +143,15 @@ int _StrToInt(LPCTSTR pStr, int nDefault)
 #undef isdigit
 }
 
-wstring LowerCase(wstring str) {
-	transform(str.begin(), str.end(), str.begin(), ::tolower);
+std::wstring LowerCase(std::wstring str) {
+	std::transform(str.begin(), str.end(), str.begin(), ::tolower);
 	return str;
 }
 
 // split a comma separated string into an int vector
-vector<int> SplitString(LPCTSTR str) {
+std::vector<int> SplitString(LPCTSTR str) {
 	CStringTokenizer token;
-	vector<int> intList;
+	std::vector<int> intList;
 	int argc = 0;
 	argc = token.Parse(str);
 
@@ -164,8 +164,8 @@ vector<int> SplitString(LPCTSTR str) {
 	return intList;
 }
 
-const wstring GetAppDir() {
-	static wstring AppDir;
+const std::wstring GetAppDir() {
+	static std::wstring AppDir;
 	if (AppDir.length()) {
 		return AppDir;
 	}
@@ -173,7 +173,7 @@ const wstring GetAppDir() {
 
 	int nSize = GetModuleFileName(nullptr, name, ARRAYSIZE(name));
 	PathRemoveFileSpec(name);
-	AppDir = wstring(name) + L"\\"; // path should always end with a "\"
+	AppDir = std::wstring(name) + L"\\"; // path should always end with a "\"
 	AppDir = LowerCase(AppDir);
 	return AppDir;
 }
@@ -272,7 +272,7 @@ void CGdippSettings::DelayedInit()
 	// DirectWrite, so retain their exact configured family names before any
 	// GDI-dependent tuning is attempted.
 	CFontSubstitutesIniArray arrFontSubstitutes;
-	wstring names = _T("FontSubstitutes@") + wstring(m_szexeName);
+	std::wstring names = _T("FontSubstitutes@") + std::wstring(m_szexeName);
 	if (_IsFreeTypeProfileSectionExists(names.c_str(), m_szFileName))
 		AddListFromSection(names.c_str(), m_szFileName, arrFontSubstitutes);
 	else
@@ -283,7 +283,7 @@ void CGdippSettings::DelayedInit()
 	// sorted case-insensitively; among what it returns, the last accepted
 	// pair for a family wins in Snapshot::Build.
 	m_fontSubstituteBoldPairs.clear();
-	names = _T("FontSubstitutesBold@") + wstring(m_szexeName);
+	names = _T("FontSubstitutesBold@") + std::wstring(m_szexeName);
 	LPCTSTR const boldSection =
 		_IsFreeTypeProfileSectionExists(names.c_str(), m_szFileName) ?
 		names.c_str() : _T("FontSubstitutesBold");
@@ -318,7 +318,7 @@ void CGdippSettings::DelayedInit()
 	InitTuneTable(nTextTuningG, m_nTuneTableG);
 	InitTuneTable(nTextTuningB, m_nTuneTableB);
 
-	names = _T("Individual@") + wstring(m_szexeName);
+	names = _T("Individual@") + std::wstring(m_szexeName);
 	if (_IsFreeTypeProfileSectionExists(names.c_str(), nullptr))
 		AddIndividualFromSection(names.c_str(), nullptr, m_arrIndividual);
 	else
@@ -522,7 +522,7 @@ bool CGdippSettings::LoadSettings(HINSTANCE hModule)
 
 int CGdippSettings::_GetFreeTypeProfileIntFromSection(LPCTSTR lpszSection, LPCTSTR lpszKey, int nDefault, LPCTSTR lpszFile)
 {
-	wstring names = wstring(lpszSection) + _T("@") + wstring(m_szexeName);
+	std::wstring names = std::wstring(lpszSection) + _T("@") + std::wstring(m_szexeName);
 	if (m_Config.IsPartExists(names.c_str()) && m_Config[names.c_str()].IsValueExists(lpszKey))
 		return m_Config[names.c_str()][lpszKey].ToInt();
 	else
@@ -534,7 +534,7 @@ int CGdippSettings::_GetFreeTypeProfileIntFromSection(LPCTSTR lpszSection, LPCTS
 
 bool CGdippSettings::_GetFreeTypeProfileBoolFromSection(LPCTSTR lpszSection, LPCTSTR lpszKey, bool nDefault, LPCTSTR lpszFile)
 {
-	wstring names = wstring(lpszSection) + _T("@") + wstring(m_szexeName);
+	std::wstring names = std::wstring(lpszSection) + _T("@") + std::wstring(m_szexeName);
 	if (m_Config.IsPartExists(names.c_str()) && m_Config[names.c_str()].IsValueExists(lpszKey))
 		return m_Config[names.c_str()][lpszKey].ToBool();
 	else
@@ -544,9 +544,9 @@ bool CGdippSettings::_GetFreeTypeProfileBoolFromSection(LPCTSTR lpszSection, LPC
 		return nDefault;
 }
 
-wstring CGdippSettings::_GetFreeTypeProfileStrFromSection(LPCTSTR lpszSection, LPCTSTR lpszKey, const TCHAR* nDefault, LPCTSTR lpszFile)
+std::wstring CGdippSettings::_GetFreeTypeProfileStrFromSection(LPCTSTR lpszSection, LPCTSTR lpszKey, const TCHAR* nDefault, LPCTSTR lpszFile)
 {
-	wstring names = wstring(lpszSection) + _T("@") + wstring(m_szexeName);
+	std::wstring names = std::wstring(lpszSection) + _T("@") + std::wstring(m_szexeName);
 	if (m_Config.IsPartExists(names.c_str()) && m_Config[names.c_str()].IsValueExists(lpszKey))
 		return m_Config[names.c_str()][lpszKey].ToString();
 	else
@@ -578,7 +578,7 @@ bool CGdippSettings::_IsFreeTypeProfileSectionExists(LPCTSTR lpszKey, LPCTSTR lp
 
 float CGdippSettings::FastGetProfileFloat(LPCTSTR lpszSection, LPCTSTR lpszKey, float fDefault)
 {
-	wstring names = wstring(lpszSection) + _T("@") + wstring(m_szexeName);
+	std::wstring names = std::wstring(lpszSection) + _T("@") + std::wstring(m_szexeName);
 	if (m_Config.IsPartExists(names.c_str()) && m_Config[names.c_str()].IsValueExists(lpszKey))
 		return m_Config[names.c_str()][lpszKey].ToDouble();
 	else
@@ -590,7 +590,7 @@ float CGdippSettings::FastGetProfileFloat(LPCTSTR lpszSection, LPCTSTR lpszKey, 
 
 int CGdippSettings::FastGetProfileInt(LPCTSTR lpszSection, LPCTSTR lpszKey, int nDefault)
 {
-	wstring names = wstring(lpszSection) + _T("@") + wstring(m_szexeName);
+	std::wstring names = std::wstring(lpszSection) + _T("@") + std::wstring(m_szexeName);
 	if (m_Config.IsPartExists(names.c_str()) && m_Config[names.c_str()].IsValueExists(lpszKey))
 		return m_Config[names.c_str()][lpszKey].ToInt();
 	else
@@ -602,12 +602,12 @@ int CGdippSettings::FastGetProfileInt(LPCTSTR lpszSection, LPCTSTR lpszKey, int 
 
 float CGdippSettings::_GetFreeTypeProfileFloat(LPCTSTR lpszKey, float fDefault, LPCTSTR lpszFile)
 {
-	wstring names = wstring(c_szFreeType) + _T("@") + wstring(m_szexeName);
+	std::wstring names = std::wstring(c_szFreeType) + _T("@") + std::wstring(m_szexeName);
 	if (m_Config.IsPartExists(names.c_str()) && m_Config[names.c_str()].IsValueExists(lpszKey))
 		return m_Config[names.c_str()][lpszKey].ToInt();
 	else
 	{
-		names = wstring(c_szGeneral) + _T("@") + wstring(m_szexeName);
+		names = std::wstring(c_szGeneral) + _T("@") + std::wstring(m_szexeName);
 		if (m_Config.IsPartExists(names.c_str()) && m_Config[names.c_str()].IsValueExists(lpszKey))
 			return m_Config[names.c_str()][lpszKey].ToDouble();
 		else
@@ -628,7 +628,7 @@ float CGdippSettings::_GetFreeTypeProfileBoundFloat(LPCTSTR lpszKey, float fDefa
 
 DWORD CGdippSettings::FastGetProfileString(LPCTSTR lpszSection, LPCTSTR lpszKey, LPCTSTR lpszDefault, LPTSTR lpszRet, DWORD cch)
 {
-	wstring names = wstring(lpszSection) + _T("@") + wstring(m_szexeName);
+	std::wstring names = std::wstring(lpszSection) + _T("@") + std::wstring(m_szexeName);
 	if (m_Config.IsPartExists(names.c_str()) && m_Config[names.c_str()].IsValueExists(lpszKey))
 	{
 		LPCTSTR p = m_Config[names.c_str()][lpszKey];
@@ -658,7 +658,7 @@ DWORD CGdippSettings::FastGetProfileString(LPCTSTR lpszSection, LPCTSTR lpszKey,
 
 DWORD CGdippSettings::_GetFreeTypeProfileString(LPCTSTR lpszKey, LPCTSTR lpszDefault, LPTSTR lpszRet, DWORD cch, LPCTSTR lpszFile)
 {
-	wstring names = wstring(c_szFreeType) + _T("@") + wstring(m_szexeName);
+	std::wstring names = std::wstring(c_szFreeType) + _T("@") + std::wstring(m_szexeName);
 	if (m_Config.IsPartExists(names.c_str()) && m_Config[names.c_str()].IsValueExists(lpszKey))
 	{
 		LPCTSTR p = m_Config[names.c_str()][lpszKey];
@@ -667,7 +667,7 @@ DWORD CGdippSettings::_GetFreeTypeProfileString(LPCTSTR lpszKey, LPCTSTR lpszDef
 	}
 	else
 	{
-		names = wstring(c_szGeneral) + _T("@") + wstring(m_szexeName);
+		names = std::wstring(c_szGeneral) + _T("@") + std::wstring(m_szexeName);
 		if (m_Config.IsPartExists(names.c_str()) && m_Config[names.c_str()].IsValueExists(lpszKey))
 		{
 			LPCTSTR p = m_Config[names.c_str()][lpszKey];
@@ -886,7 +886,7 @@ SKIP:
 	FT_PutEnv(y, WstringToString(sTemp).c_str());
 
 	char buff[256] = {};
-	int nTemp; bool bTemp; wstring sTemp;
+	int nTemp; bool bTemp; std::wstring sTemp;
 
 	// INFINALITY settings:
 	INF_INT_ENV( "INFINALITY_FT_CHROMEOS_STYLE_SHARPENING_STRENGTH", 0);
@@ -963,7 +963,7 @@ SKIP:
 		}
 	}
 
-	wstring names = _T("LcdFilterWeight@") + wstring(m_szexeName);
+	std::wstring names = _T("LcdFilterWeight@") + std::wstring(m_szexeName);
 	if (_IsFreeTypeProfileSectionExists(names.c_str(), lpszFile))
 		m_bUseCustomLcdFilter = AddLcdFilterFromSection(names.c_str(), lpszFile, m_arrLcdFilterWeights);
 	else
@@ -977,7 +977,7 @@ SKIP:
 	return PublishRendererPolicySnapshot(false);
 }
 
-bool CGdippSettings::AddExcludeListFromSection(LPCTSTR lpszSection, LPCTSTR lpszFile, set<wstring> & arr)
+bool CGdippSettings::AddExcludeListFromSection(LPCTSTR lpszSection, LPCTSTR lpszFile, std::set<std::wstring> & arr)
 {
 	LPTSTR  buffer = _GetPrivateProfileSection(lpszSection, lpszFile);
 	if (buffer == nullptr) {
@@ -991,7 +991,7 @@ bool CGdippSettings::AddExcludeListFromSection(LPCTSTR lpszSection, LPCTSTR lpsz
 	while (*p) {
 		bool b = false;
 		GetFontLocalName(p, buff);//转换字体脕E
-		set<wstring>::const_iterator it = arr.find(buff);
+		std::set<std::wstring>::const_iterator it = arr.find(buff);
 		if (it==arr.end())
 			arr.insert(buff);
 		for (; *p; p++);	//来到下一行
@@ -1001,7 +1001,7 @@ bool CGdippSettings::AddExcludeListFromSection(LPCTSTR lpszSection, LPCTSTR lpsz
 }
 
 //template <typename T>
-bool CGdippSettings::AddListFromSection(LPCTSTR lpszSection, LPCTSTR lpszFile, set<wstring> & arr)
+bool CGdippSettings::AddListFromSection(LPCTSTR lpszSection, LPCTSTR lpszFile, std::set<std::wstring> & arr)
 {
 	LPTSTR  buffer = _GetPrivateProfileSection(lpszSection, lpszFile);
 	if (buffer == nullptr) {
@@ -1012,7 +1012,7 @@ bool CGdippSettings::AddListFromSection(LPCTSTR lpszSection, LPCTSTR lpszFile, s
 	LPTSTR p = buffer;
 	while (*p) {
 		bool b = false;
-		set<wstring>::const_iterator it = arr.find(p);
+		std::set<std::wstring>::const_iterator it = arr.find(p);
 		if (it==arr.end())
 			arr.insert(p);
 		for (; *p; p++);	//来到下一行
@@ -1528,7 +1528,7 @@ int CGdippSettings::_GetAlternativeProfileName(LPTSTR lpszName, LPCTSTR lpszFile
 	while (pexe >= szexe && *pexe != '\\')
 		pexe--;
 	pexe++;
-	wstring exename = _T("General@") + wstring(pexe);
+	std::wstring exename = _T("General@") + std::wstring(pexe);
 	if (FastGetProfileString(exename.c_str(), _T("Alternative"), nullptr, lpszName, MAX_PATH))
 	{
 		return true;

@@ -2,7 +2,27 @@
 #define _GDIPLUSFLAT_H
 
 #include <Windows.h>
+#include <algorithm>
+
+// The legacy SDK header uses unqualified min/max when NOMINMAX suppresses
+// the Windows macros. Keep the std replacements inside this include.
+#if defined(NOMINMAX) && !defined(min)
+#define MACTYPE_UNDEFINE_GDIPLUS_MIN
+#define min std::min
+#endif
+#if defined(NOMINMAX) && !defined(max)
+#define MACTYPE_UNDEFINE_GDIPLUS_MAX
+#define max std::max
+#endif
 #include "GdiPlusTypes2.h"
+#ifdef MACTYPE_UNDEFINE_GDIPLUS_MAX
+#undef max
+#undef MACTYPE_UNDEFINE_GDIPLUS_MAX
+#endif
+#ifdef MACTYPE_UNDEFINE_GDIPLUS_MIN
+#undef min
+#undef MACTYPE_UNDEFINE_GDIPLUS_MIN
+#endif
 #include <GdiPlusEnums.h>
 #include <GdiplusGpStubs.h>
 #include <GdiPlusPixelFormats.h>

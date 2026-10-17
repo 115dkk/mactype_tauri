@@ -11,7 +11,7 @@
 #include <vector>
 
 #ifndef MAX_FONT_SETTINGS
-#define MAX_FONT_SETTINGS 16
+inline constexpr int MAX_FONT_SETTINGS = 16;
 #endif
 
 class CFontSettings

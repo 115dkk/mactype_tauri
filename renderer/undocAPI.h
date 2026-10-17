@@ -1,20 +1,21 @@
 #pragma once
 
-typedef struct _UNICODE_STRING2 {
+struct _UNICODE_STRING2 {
 	USHORT Length;
 	USHORT MaximumLength;
 	PWSTR  Buffer;
-} UNICODE_STRING2;
-typedef UNICODE_STRING2 *PUNICODE_STRING2;
-typedef const UNICODE_STRING2 *PCUNICODE_STRING2;
+};
+using UNICODE_STRING2 = _UNICODE_STRING2;
+using PUNICODE_STRING2 = UNICODE_STRING2*;
+using PCUNICODE_STRING2 = const UNICODE_STRING2*;
 
 const DWORD GT_DEVICE_TO_WORLD = 0x0402;
 const DWORD GT_WORLD_TO_DEVICE = 0x0204;
 const DWORD GT_WORLD_TO_PAGE = 0x0203;
 const DWORD GT_PAGE_TO_DEVICE = 0x0304;
 
-typedef int(__stdcall * TGetTextFA)(HDC, int, LPWSTR);
-typedef BOOL (__stdcall *PFNCreateProcessInternalW)
+using TGetTextFA = int (__stdcall *)(HDC, int, LPWSTR);
+using PFNCreateProcessInternalW = BOOL (__stdcall *)
 (
  HANDLE hToken,
  LPCTSTR lpApplicationName,
@@ -29,8 +30,8 @@ typedef BOOL (__stdcall *PFNCreateProcessInternalW)
  LPPROCESS_INFORMATION lpProcessInformation ,
  PHANDLE hNewToken
  );
-typedef BOOL
-(WINAPI *PFNCreateProcessW)(
+using PFNCreateProcessW = BOOL
+(WINAPI *)(
 							__in_opt    LPCWSTR lpApplicationName,
 							__inout_opt LPWSTR lpCommandLine,
 							__in_opt    LPSECURITY_ATTRIBUTES lpProcessAttributes,
@@ -42,8 +43,8 @@ typedef BOOL
 							__in        LPSTARTUPINFOW lpStartupInfo,
 							__out       LPPROCESS_INFORMATION lpProcessInformation
 							);
-typedef BOOL
-(WINAPI *PFNCreateProcessA)(
+using PFNCreateProcessA = BOOL
+(WINAPI *)(
 							__in_opt    LPCSTR lpApplicationName,
 							__inout_opt LPSTR lpCommandLine,
 							__in_opt    LPSECURITY_ATTRIBUTES lpProcessAttributes,
@@ -55,17 +56,17 @@ typedef BOOL
 							__in        LPSTARTUPINFOA lpStartupInfo,
 							__out       LPPROCESS_INFORMATION lpProcessInformation
 							);
-typedef BOOL (WINAPI *PFNIsWow64Process)(HANDLE hProcess, PBOOL Wow64Process );
-typedef int (WINAPI * TGdiGetCodePage)(HDC);
-typedef BOOL (WINAPI * TGetTransform)(HDC, DWORD, XFORM*);
-typedef BOOL (WINAPI * PFNGetFontResourceInfo)(LPCWSTR, DWORD*, VOID*, DWORD);
-typedef LONG (WINAPI * PFNLdrLoadDll)(
+using PFNIsWow64Process = BOOL (WINAPI *)(HANDLE hProcess, PBOOL Wow64Process);
+using TGdiGetCodePage = int (WINAPI *)(HDC);
+using TGetTransform = BOOL (WINAPI *)(HDC, DWORD, XFORM*);
+using PFNGetFontResourceInfo = BOOL (WINAPI *)(LPCWSTR, DWORD*, VOID*, DWORD);
+using PFNLdrLoadDll = LONG (WINAPI *)(
 						 IN PWCHAR               PathToFile OPTIONAL,
 						 IN PULONG               DllCharacteristics OPTIONAL,
 						 IN UNICODE_STRING2*      ModuleFileName,
 						 OUT HANDLE*             ModuleHandle
 						 );
-typedef BOOL(WINAPI * PFNSetProcessMitigationPolicy)(
+using PFNSetProcessMitigationPolicy = BOOL (WINAPI *)(
 	_In_ PROCESS_MITIGATION_POLICY MitigationPolicy,
 	_In_ PVOID                     lpBuffer,
 	_In_ SIZE_T                    dwLength);

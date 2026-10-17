@@ -192,12 +192,12 @@ LPWSTR _StrDupExAtoW(LPCSTR pszMB, int cchMB /*= -1*/, LPWSTR pszStack /*= nullp
 }
 
 #ifdef _DEBUG
-typedef struct {
+struct FLAG_NAME_MAP {
 	LPCSTR		name;
 	UINT		flag;
 	UINT		mask;
 	UINT		xor;
-} FLAG_NAME_MAP;
+};
 #define DEF_FLAG_NAME(f,m,x)	{ #f, f, m, x }
 #define END_FLAG()				{ nullptr, 0, 0, 0 }
 

@@ -335,11 +335,13 @@ static DWORD K32GetProcAddressTableEntryRva(LPCSTR lpProcName)
 		: 0;
 }
 
-typedef struct _UNICODE_STRING64 {
+struct _UNICODE_STRING64 {
 	USHORT Length;
 	USHORT MaximumLength;
 	DWORD64  Buffer;
-} UNICODE_STRING64, *PUNICODE_STRING64;
+};
+using UNICODE_STRING64 = _UNICODE_STRING64;
+using PUNICODE_STRING64 = _UNICODE_STRING64*;
 
 template <typename T, typename U>
 static T ToOpcodeValue(U value)
@@ -379,7 +381,7 @@ public:
 	bool initWow64(LPDWORD remoteaddr, LONG orgEIP)	//Wow64初始化
 	{
 		//WORD嫬奅僠僃僢僋
-		C_ASSERT((offsetof(opcode_data, dllpath) & 1) == 0);
+		static_assert((offsetof(opcode_data, dllpath) & 1) == 0);
 
 		BYTE* p = code;
 
@@ -688,7 +690,7 @@ emit_db(0xC3);
 	bool init32(LPDWORD remoteaddr, LONG orgEIP)	//32位程序初始化
 	{
 		//WORD境界チェック
-		C_ASSERT((offsetof(opcode_data, dllpath) & 1) == 0);
+		static_assert((offsetof(opcode_data, dllpath) & 1) == 0);
 
 		BYTE* p = code;
 
@@ -736,7 +738,7 @@ emit_dw(0xD0FF);	//call eax
 	}
 	bool init64From32(DWORD64 remoteaddr, DWORD64 orgEIP)
 	{
-		C_ASSERT((offsetof(opcode_data, dllpath) & 1) == 0);
+		static_assert((offsetof(opcode_data, dllpath) & 1) == 0);
 
 		BYTE* p = code;
 
@@ -794,7 +796,7 @@ emit_dw(0xD0FF);	//call eax
 
 	bool init64From32(DWORD64 remoteaddr, DWORD64 orgEIP, DWORD dwLoaderOffset)
 	{
-		C_ASSERT((offsetof(opcode_data, dllpath) & 1) == 0);
+		static_assert((offsetof(opcode_data, dllpath) & 1) == 0);
 
 		DWORD const pathLength = GetModuleFileNameW(
 			GetDLLInstance(), dllpath, MAX_PATH);
@@ -901,7 +903,7 @@ emit_dw(0xD0FF);	//call eax
 	bool init(const DWORD_PTR* remoteaddr, DWORD_PTR orgEIP)
 	{
 		//WORD境界チェック
-		C_ASSERT((offsetof(opcode_data, dllpath) & 1) == 0);
+		static_assert((offsetof(opcode_data, dllpath) & 1) == 0);
 
 		BYTE* p = code;
 #undef emit_ddp
@@ -1278,7 +1280,7 @@ emit_db(0xC1);
 VOID SafeGetNativeSystemInfo(__out LPSYSTEM_INFO lpSystemInfo)
 {
 	if (nullptr == lpSystemInfo)    return;
-	typedef VOID(WINAPI *LPFN_GetNativeSystemInfo)(LPSYSTEM_INFO lpSystemInfo);
+	using LPFN_GetNativeSystemInfo = VOID (WINAPI *)(LPSYSTEM_INFO lpSystemInfo);
 	LPFN_GetNativeSystemInfo fnGetNativeSystemInfo = reinterpret_cast<LPFN_GetNativeSystemInfo>(GetProcAddress(GetModuleHandle(_T("kernel32")), "GetNativeSystemInfo"));
 	if (nullptr != fnGetNativeSystemInfo)
 	{

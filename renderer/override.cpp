@@ -31,14 +31,14 @@ void Dbg_TraceScriptShape(const WCHAR* pwcChars, int cChars, const SCRIPT_ANALYS
 #define Dbg_TraceScriptItemize(s,c)
 #define Dbg_TraceScriptShape(s,c,p,g,o)
 #endif
-#define CCH_MAX_STACK	256
+constexpr int CCH_MAX_STACK = 256;
 
-typedef HRESULT (WINAPI * __D2D1CreateFactory)(
+using __D2D1CreateFactory = HRESULT (WINAPI *)(
 										D2D1_FACTORY_TYPE factoryType,
 										REFIID riid,
 										const D2D1_FACTORY_OPTIONS *pFactoryOptions,
 										void **ppIFactory);
-typedef HRESULT (WINAPI* __DWriteCreateFactory)(
+using __DWriteCreateFactory = HRESULT (WINAPI*)(
 										__in DWRITE_FACTORY_TYPE factoryType,
 										__in REFIID iid,
 										__out IUnknown **factory
@@ -621,7 +621,7 @@ CleanUp:
 
 
 
-typedef enum {
+enum ExtTextOut_ErrorCode {
 	ETOE_OK				= 0,
 	ETOE_CREATEDC		= 1,
 	ETOE_SETFONT		= 2,
@@ -636,7 +636,7 @@ typedef enum {
 	ETOE_GETTEXTEXTENT	= 17,
 	ETOE_MONO			= 18,
 	ETOE_GENERAL		= 19,
-} ExtTextOut_ErrorCode;
+};
 
 //例外モドキ
 #define ETO_TRY()		ExtTextOut_ErrorCode error = ETOE_OK; {

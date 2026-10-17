@@ -1,7 +1,7 @@
 #include "override.h"
 
 //CreateDIB计数，将在绘制下列次数后更新DIB区
-#define BITMAP_REDUCE_COUNTER	256//默认1024
+constexpr int BITMAP_REDUCE_COUNTER = 256;//默认1024
 
 void CBitmapCache::Reset() noexcept
 {

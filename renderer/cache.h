@@ -54,8 +54,8 @@ public:
 	}
 };
 
-typedef StringHashT<LF_FACESIZE,true>	StringHashFont;
-typedef StringHashT<MAX_PATH,true>		StringHashModule;
+using StringHashFont = StringHashT<LF_FACESIZE,true>;
+using StringHashModule = StringHashT<MAX_PATH,true>;
 
 
 //COLORREF(RR GG BB 00) を DIB32(BB GG RR 00) に変換
@@ -76,7 +76,8 @@ private:
 	DWORD*	m_CurrentPixel;
 	COLORREF m_bkColor;
 
-	NOCOPY(CBitmapCache);
+	CBitmapCache(const CBitmapCache&) = delete;
+	CBitmapCache& operator=(const CBitmapCache&) = delete;
 
 public:
 	CBitmapCache()

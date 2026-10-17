@@ -12,18 +12,16 @@ public:
 private:
 	bool enabled;
 
-	typedef
-		BOOL
-		(WINAPI *PSET_THREAD_INFORMATION_PROC)(
+	using PSET_THREAD_INFORMATION_PROC = BOOL
+		(WINAPI *)(
 		_In_ HANDLE                   hThread,
 		_In_ THREAD_INFORMATION_CLASS ThreadInformationClass,
 		_In_reads_bytes_(ThreadInformationSize) PVOID ThreadInformation,
 		_In_ DWORD                    ThreadInformationSize
 		);
 
-	typedef
-		BOOL
-		(WINAPI *PGET_THREAD_INFORMATION_PROC)(
+	using PGET_THREAD_INFORMATION_PROC = BOOL
+		(WINAPI *)(
 		_In_ HANDLE                   hThread,
 		_In_ THREAD_INFORMATION_CLASS ThreadInformationClass,
 		_Out_writes_bytes_(ThreadInformationSize) PVOID ThreadInformation,

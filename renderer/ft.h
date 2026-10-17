@@ -1,15 +1,15 @@
 #ifndef FT_H
 #define FT_H
 
-#define FTO_MONO		0x0001
-#define FTO_SIZE_ONLY	0x0002
+inline constexpr int FTO_MONO = 0x0001;
+inline constexpr int FTO_SIZE_ONLY = 0x0002;
 
-#define CACHE_SIZE 20
-#define MAX_CACHE_SIZE 1024
-#define CNTRL_UNICODE_PLANE 2
-#define CNTRL_COMPLEX_TEXT 1
-#define CNTRL_ZERO_WIDTH 4
-typedef char (*COLORCACHE)[3][256][256];
+inline constexpr int CACHE_SIZE = 20;
+inline constexpr int MAX_CACHE_SIZE = 1024;
+inline constexpr int CNTRL_UNICODE_PLANE = 2;
+inline constexpr int CNTRL_COMPLEX_TEXT = 1;
+inline constexpr int CNTRL_ZERO_WIDTH = 4;
+using COLORCACHE = char (*)[3][256][256];
 
 #include "fteng.h"
 

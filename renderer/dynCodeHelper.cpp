@@ -4,9 +4,8 @@
 * class AutoEnableDynamicCodeGen
 */
 
-typedef
-BOOL
-(WINAPI *PGET_PROCESS_MITIGATION_POLICY_PROC)(
+using PGET_PROCESS_MITIGATION_POLICY_PROC = BOOL
+(WINAPI *)(
 _In_  HANDLE                    hProcess,
 _In_  PROCESS_MITIGATION_POLICY MitigationPolicy,
 _Out_ PVOID                     lpBuffer,

@@ -465,9 +465,13 @@ and a local-only subset of it answers the legacy collection,
 objects split. A system without those interfaces (Windows 10 before 1709) keeps
 the per-reference path and leaves downloadable faces out. A failed build stays in the cache with a
 retry after 2 s, 15 s and 120 s, after which that factory keeps the stock set
-until its source set or the profile generation changes, and the fallback lookup
-reads the newest entry for a factory, so a failure retained for a superseded
-source set cannot hide the current one. On `checkForUpdates` the legacy hook
+until its source set or the profile generation changes. The fallback lookup
+reads the entry built from the factory's canonical source, which the cache
+records with its revision whenever the source is published or replaced, and
+the newest entry only until that source has one. Neither a failure retained
+for a superseded source set nor a build reserved late for one (a thread that
+read the previous source just before a replacement inserts its entry after the
+current one) can then stand in for the current source. On `checkForUpdates` the legacy hook
 used to publish the set it received as the factory's source on every call.
 DirectWrite returns a new set object from each collection call, so every such
 call keyed a fresh build, and in a process whose builds fail the retry schedule
@@ -507,16 +511,12 @@ alternating legacy and downloadable modern pairs; the fixed core took 84.1 ms,
 falling on its first check, against 2,947 ms on c41f489 for 50 legacy update
 checks, and `Malgun Gothic` still resolved to the alias file afterwards.
 
-Two behaviours remain. The first is stock DirectWrite's: without
+One behaviour remains, and it is stock DirectWrite's: without
 MacType, DirectWrite answers `GetSystemFontSet` with 735 faces only until the
 process first asks for the legacy collection or checks for updates; from then
 on every system answer, `GetSystemFontSet` included, carries the 510 local
 faces. A source replaced by an update check therefore leaves the full view
-with local faces only, as the stock answer has. The second is a race: if a
-font change replaces the source while another thread has read the previous
-source but not yet reserved its build, that older build is inserted last and
-the fallback lookup keeps reading it until the source changes again. This
-needs a font change that coincides with collection calls on two threads.
+with local faces only, as the stock answer has.
 
 An injection that lands after the first frame (the open service's remote
 `LoadLibrary`, every elevated target, any child of a parent that was not

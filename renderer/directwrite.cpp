@@ -1415,6 +1415,13 @@ struct FactoryAliasVtableHooks
 	bool getModernSystemFontCollectionPatched = false;
 };
 
+// common.h targets RS3, so dwrite_3.h hides this optional RS4 interface.
+interface DWRITE_DECLARE_INTERFACE("DC7EAD19-E54C-43AF-B2DA-4E2B79BA3F7F")
+IDWriteFontSet2Compat : public IDWriteFontSet1
+{
+	STDMETHOD_(HANDLE, GetExpirationEvent)() PURE;
+};
+
 struct FactoryAliasSource
 {
 	CComPtr<IUnknown> factoryIdentity;
@@ -1482,6 +1489,30 @@ CComPtr<IDWriteFontSet> GetFactoryAliasSource(IDWriteFactory* factory)
 			return source.systemSet;
 	}
 	return nullptr;
+}
+
+bool FactoryAliasSourceIsOutOfDate(
+	IDWriteFactory* factory,
+	IDWriteFontSet* candidate)
+{
+	CComPtr<IDWriteFontSet> const published = GetFactoryAliasSource(factory);
+	CComPtr<IDWriteFontSet2Compat> published2;
+	HANDLE expirationEvent = nullptr;
+	if (published != nullptr &&
+		SUCCEEDED(published->QueryInterface(&published2)) && published2 != nullptr)
+		expirationEvent = published2->GetExpirationEvent();
+	bool const expirationKnown = expirationEvent != nullptr;
+	// DirectWrite owns the event; published keeps it valid through the wait.
+	bool const expirationSignaled = expirationKnown &&
+		WaitForSingleObject(expirationEvent, 0) == WAIT_OBJECT_0;
+	// GetFontSet returns a new object for every collection call, so identity
+	// cannot distinguish a repeated answer from an updated source.
+	return directwrite_readiness::PublishedSourceIsOutOfDate(
+		published != nullptr,
+		expirationKnown,
+		expirationSignaled,
+		published != nullptr ? published->GetFontCount() : 0,
+		candidate != nullptr ? candidate->GetFontCount() : 0);
 }
 
 FactoryAliasVtableHooks& GetOrAddFactoryAliasVtable(void** vtable)
@@ -2842,7 +2873,8 @@ HRESULT WINAPI IMPL_Factory_GetSystemFontCollection(
 		return result;
 	}
 	if (checkForUpdates &&
-		!directwrite_alias::IsAliasCollection(systemCollection))
+		!directwrite_alias::IsAliasCollection(systemCollection) &&
+		FactoryAliasSourceIsOutOfDate(self, systemSet))
 		PublishFactoryAliasSource(self, systemSet, true);
 	CComPtr<IDWriteFactory3> factory3;
 	if (FAILED(self->QueryInterface(&factory3)) || factory3 == nullptr)

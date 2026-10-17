@@ -29,6 +29,20 @@ inline bool FailureRetryDelay(
 	}
 }
 
+inline bool PublishedSourceIsOutOfDate(
+	bool hasPublishedSource,
+	bool expirationKnown,
+	bool expirationSignaled,
+	unsigned publishedFontCount,
+	unsigned candidateFontCount) noexcept
+{
+	if (!hasPublishedSource)
+		return true;
+	if (expirationKnown)
+		return expirationSignaled;
+	return publishedFontCount != candidateFontCount;
+}
+
 enum class CompletedBuildDisposition
 {
 	useCached,

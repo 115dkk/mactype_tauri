@@ -74,10 +74,6 @@ static bool FaceIsBold(FT_Face face)
 	return os2 != nullptr && os2->usWeightClass >= FW_BOLD;
 }
 
-#if _MSC_VER <= 1200
-#pragma warning(disable: 4786)
-#endif
-
 
 //更新
 #define RGBA(r,g,b,a)          (static_cast<COLORREF>(static_cast<BYTE>(r) | (static_cast<WORD>(static_cast<BYTE>(g)) << 8) | (static_cast<DWORD>(static_cast<BYTE>(b)) << 16) | (static_cast<DWORD>(static_cast<BYTE>(a)) << 24)))
@@ -2584,10 +2580,10 @@ int IsColorDark(DWORD Color, double Gamma)
 	//采用Photoshop sRGB的RGB->Lab算法进行换算，L为色彩视觉亮度
 	//感谢 西安理工大学 贾婉丽 的分析
 	//===============================================================
-	static double s_multipler = 116 / pow(100, (double)1.0 / 3.0);	//预计算常数,强制使用double版本
+	static double s_multipler = 116 / pow(100, 1.0 / 3.0);	//预计算常数,强制使用double版本
 	double* RGBTable = s_AlphaBlendTable.GetRGBTable();	//获得显示器转换表
 	double ret = pow(23.9746 * RGBTable[GetRValue(Color)] + 73.0653 * RGBTable[GetGValue(Color)] + 6.13799 * RGBTable[GetBValue(Color)], 1.0 / 3.0) * s_multipler - 16;
-	return max(int(ret + 0.499), 0);
+	return max(static_cast<int>(ret + 0.499), 0);
 }
 
 BOOL FreeTypeTextOut(

@@ -15,6 +15,7 @@
 
 #define NOMINMAX
 #include <Windows.h>
+#include <intrin.h>
 #include <Uxtheme.h>
 #include <usp10.h>
 #include <functional>
@@ -35,8 +36,6 @@
 #include <dwrite_2.h>
 #include <dwrite_3.h>
 #include <string>
-
-#define for if(0);else for
 
 #include <tchar.h>
 #include <stddef.h>
@@ -61,22 +60,8 @@ using namespace std;
 #endif
 
 #ifndef NOP_FUNCTION
-#if (_MSC_VER >= 1210)
 #define NOP_FUNCTION	__noop
-#else
-#define NOP_FUNCTION	static_cast<void>(0)
-#endif	//_MSC_VER
 #endif	//!NOP_FUNCTION
-#ifndef C_ASSERT
-#define C_ASSERT(e)		typedef char __C_ASSERT__[(e)?1:-1]
-#endif	//!C_ASSERT
-#ifndef FORCEINLINE
-#if (_MSC_VER >= 1200)
-#define FORCEINLINE		__forceinline
-#else
-#define FORCEINLINE		__inline
-#endif	//_MSC_VER
-#endif	//!FORCEINLINE
 
 
 void Log(char* Msg);
@@ -106,7 +91,6 @@ class CCriticalSectionLock
 #define MAX_CRITICAL_COUNT 20
 private:
 	static renderer_raii::CriticalSection m_cs[MAX_CRITICAL_COUNT];
-	friend class CCriticalSectionLockTry;
 	int m_index;
 public:
 	enum {
@@ -320,23 +304,6 @@ public:
 	}
 };
 
-class CCriticalSectionLockTry
-{
-public:
-	static BOOL TryEnter(int index=CCriticalSectionLock::CS_LIBRARY)
-	{
-		return ::TryEnterCriticalSection(CCriticalSectionLock::m_cs[index].get());
-	}
-	static int CritalCount(int index=CCriticalSectionLock::CS_LIBRARY)
-	{
-		return CCriticalSectionLock::m_cs[index].get()->RecursionCount;
-	}
-	static void Leave(int index=CCriticalSectionLock::CS_LIBRARY)
-	{
-		::LeaveCriticalSection(CCriticalSectionLock::m_cs[index].get());
-	}
-};
-
 // 使用後はfreeで開放する事
 LPWSTR _StrDupExAtoW(LPCSTR pszMB, int cchMB, LPWSTR pszStack, int cchStack, int* pcchWC, int nACP = CP_ACP);
 static inline LPWSTR _StrDupAtoW(LPCSTR pszMB, int cchMB = -1, int* pcchWC = nullptr)
@@ -423,15 +390,8 @@ DEFINE_SELECT_FUNCTION(HBITMAP,	Bitmap)
 #undef DEFINE_DELETE_FUNCTION
 #undef DEFINE_SELECT_FUNCTION
 
-#if (_MSC_VER >= 1300)
 #pragma deprecated(DeleteObject)
 #pragma deprecated(SelectObject)
-#else	//_MSC_VER < 1300
-#undef DeleteObject
-#define DeleteObject		DeleteObject_instead_use_DeleteXXX
-#undef SelectObject
-#define SelectObject		SelectObject_instead_use_DeleteXXX
-#endif	//_MSC_VER
 
 #else	//!_DEBUG
 #ifndef _INC_WINDOWSX
@@ -456,13 +416,7 @@ DEFINE_SELECT_FUNCTION(HBITMAP,	Bitmap)
 #ifdef _DEBUG
 FORCEINLINE static __int64 GetClockCount()
 {
-	LARGE_INTEGER cycles;
-	__asm {
-		rdtsc
-		mov cycles.LowPart,  eax
-		mov cycles.HighPart, edx
-	}
-	return cycles.QuadPart;
+	return static_cast<__int64>(__rdtsc());
 }
 
 //使用例

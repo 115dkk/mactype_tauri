@@ -990,7 +990,7 @@ public:
 			};
 			wndclass.cbClsExtra = 0;
 			wndclass.cbWndExtra = 0;
-			wndclass.hInstance = 0;
+			wndclass.hInstance = nullptr;
 			wndclass.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
 			wndclass.hCursor = LoadCursor(nullptr, IDC_ARROW);
 			wndclass.hbrBackground = static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH));

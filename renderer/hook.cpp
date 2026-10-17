@@ -628,7 +628,7 @@ void EZHookMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved) {
 }
 
 extern COLORCACHE* g_AACache2[MAX_CACHE_SIZE];
-HANDLE hDelayHook = 0;
+HANDLE hDelayHook = nullptr;
 
 BOOL WINAPI  DllMain(HINSTANCE instance, DWORD reason, LPVOID lpReserved)
 {

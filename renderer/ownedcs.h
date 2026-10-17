@@ -1,3 +1,5 @@
+#pragma once
+
 #include <windows.h>
 
 typedef struct _OWNED_CRITIAL_SECTION 

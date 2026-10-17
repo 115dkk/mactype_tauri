@@ -24,7 +24,6 @@
 #include <malloc.h>
 #include <crtdbg.h>
 
-#define for if(0);else for
 #ifndef _countof
 #define _countof(array)		(sizeof(array) / sizeof((array)[0]))
 #endif
@@ -41,14 +40,14 @@
 #define IDC_EXEC		103
 
 static void showmsg(LPCSTR msg) {
-	MessageBoxA(NULL, msg, "MacType ERROR", MB_OK | MB_ICONSTOP);
+	MessageBoxA(nullptr, msg, "MacType ERROR", MB_OK | MB_ICONSTOP);
 }
 
 static void errmsg(UINT id, DWORD code)
 {
 	char  buffer[512];
 	char  format[128];
-	LoadStringA(GetModuleHandleA(NULL), id, format, 128);
+	LoadStringA(GetModuleHandleA(nullptr), id, format, 128);
 	wnsprintfA(buffer, 512, format, code);
 	showmsg(buffer);
 }
@@ -80,51 +79,12 @@ HINSTANCE hinstDLL;
 #define _GDIPP_EXE
 #define _GDIPP_RUN_CPP
 
-//#define OLD_PSDK
-
-#ifdef OLD_PSDK
-extern "C" {
-	HRESULT WINAPI _SHILCreateFromPath(LPCWSTR pszPath, LPITEMIDLIST* ppidl, DWORD* rgflnOut)
-	{
-		if (!pszPath || !ppidl) {
-			return E_INVALIDARG;
-		}
-
-		LPSHELLFOLDER psf;
-		HRESULT hr = ::SHGetDesktopFolder(&psf);
-		if (hr != NOERROR) {
-			return hr;
-		}
-
-		ULONG chEaten;
-		LPOLESTR lpszDisplayName = ::StrDupW(pszPath);
-		hr = psf->ParseDisplayName(NULL, NULL, lpszDisplayName, &chEaten, ppidl, rgflnOut);
-		::LocalFree(lpszDisplayName);
-		psf->Release();
-		return hr;
-	}
-
-	void WINAPI _SHFree(void* pv)
-	{
-		if (!pv) {
-			return;
-		}
-
-		LPMALLOC pMalloc = NULL;
-		if (::SHGetMalloc(&pMalloc) == NOERROR) {
-			pMalloc->Free(pv);
-			pMalloc->Release();
-		}
-	}
-}
-#else
 #define _SHILCreateFromPath	SHILCreateFromPath
 #define _SHFree				SHFree
-#endif
 
 
 bool isX64PE(const TCHAR* file_path) {
-	HANDLE hFile = CreateFile(file_path, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	HANDLE hFile = CreateFile(file_path, GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 	if (hFile == INVALID_HANDLE_VALUE) {
 		showmsg("Error opening file");
 		return false;
@@ -132,7 +92,7 @@ bool isX64PE(const TCHAR* file_path) {
 
 	IMAGE_DOS_HEADER dosHeader;
 	DWORD bytesRead;
-	if (!ReadFile(hFile, &dosHeader, sizeof(IMAGE_DOS_HEADER), &bytesRead, NULL)) {
+	if (!ReadFile(hFile, &dosHeader, sizeof(IMAGE_DOS_HEADER), &bytesRead, nullptr)) {
 		showmsg("Error reading file");
 		CloseHandle(hFile);
 		return false;
@@ -147,8 +107,8 @@ bool isX64PE(const TCHAR* file_path) {
 
 	IMAGE_NT_HEADERS ntHeaders;
 	// Seek to the PE header offset
-	SetFilePointer(hFile, dosHeader.e_lfanew, NULL, FILE_BEGIN);
-	if (!ReadFile(hFile, &ntHeaders, sizeof(IMAGE_NT_HEADERS), &bytesRead, NULL)) {
+	SetFilePointer(hFile, dosHeader.e_lfanew, nullptr, FILE_BEGIN);
+	if (!ReadFile(hFile, &ntHeaders, sizeof(IMAGE_NT_HEADERS), &bytesRead, nullptr)) {
 		showmsg("Error reading PE header");
 		CloseHandle(hFile);
 		return false;
@@ -183,8 +143,8 @@ static HRESULT HookAndExecute(int show)
 	}
 	if (argc <= 1) {
 		char buffer[256];
-		LoadStringA(GetModuleHandleA(NULL), IDS_USAGE, buffer, 256);
-		MessageBoxA(NULL,
+		LoadStringA(GetModuleHandleA(nullptr), IDS_USAGE, buffer, 256);
+		MessageBoxA(nullptr,
 			buffer
 			, "MacType", MB_OK | MB_ICONINFORMATION);
 		LocalFree(argv);
@@ -198,7 +158,7 @@ static HRESULT HookAndExecute(int show)
 		length += wcslen(argv[i]) + 3;
 	}
 
-	LPWSTR cmdline = (WCHAR*)calloc(sizeof(WCHAR), length);
+	LPWSTR cmdline = static_cast<WCHAR*>(calloc(sizeof(WCHAR), length));
 	if (!cmdline) {
 		LocalFree(argv);
 		return E_OUTOFMEMORY;
@@ -226,12 +186,12 @@ static HRESULT HookAndExecute(int show)
 // now we got the full cmdline for external exetuble. let's check if we can hook into it
 #ifdef _M_IX86
 	if (isX64PE(argv[1])) {
-		ShellExecute(NULL, NULL, L"macloader64.exe", cmdline, NULL, SW_SHOW);
+		ShellExecute(nullptr, nullptr, L"macloader64.exe", cmdline, nullptr, SW_SHOW);
 		return S_OK;
 	}
 #else
 	if (!isX64PE(argv[1])) {
-		ShellExecute(NULL, NULL, L"macloader.exe", cmdline, NULL, SW_SHOW);
+		ShellExecute(nullptr, nullptr, L"macloader.exe", cmdline, nullptr, SW_SHOW);
 		return S_OK;
 	}
 #endif
@@ -244,7 +204,7 @@ static HRESULT HookAndExecute(int show)
 	}
 	else {
 		WCHAR gdippDir[MAX_PATH];
-		GetModuleFileNameW(NULL, gdippDir, _countof(gdippDir));
+		GetModuleFileNameW(nullptr, gdippDir, _countof(gdippDir));
 		PathRemoveFileSpec(gdippDir);
 
 		// カレントディレクトリがgdi++.exeの置かれているディレクトリと同じだったら、
@@ -259,7 +219,7 @@ static HRESULT HookAndExecute(int show)
 
 #ifdef _DEBUG
 	if ((GetAsyncKeyState(VK_CONTROL) & 0x8000)
-		&& MessageBoxW(NULL, cmdline, NULL, MB_YESNO) != IDYES) {
+		&& MessageBoxW(nullptr, cmdline, nullptr, MB_YESNO) != IDYES) {
 		free(cmdline);
 		return NOERROR;
 	}
@@ -272,33 +232,33 @@ static HRESULT HookAndExecute(int show)
 
 	// get current directory and append mactype dll 
 	char path[MAX_PATH] = { 0 };
-	if (GetModuleFileNameA(NULL, path, _countof(path))) {
+	if (GetModuleFileNameA(nullptr, path, _countof(path))) {
 		PathRemoveFileSpecA(path);
 		strcat(path, "\\");
 	}
 	strcat(path, MacTypeDllA);
 
-	auto ret = DetourCreateProcessWithDllEx(NULL, cmdline, NULL, NULL, false, 0, NULL, dir, &startupInfo, &processInfo, path, NULL);
+	auto ret = DetourCreateProcessWithDllEx(nullptr, cmdline, nullptr, nullptr, false, 0, nullptr, dir, &startupInfo, &processInfo, path, nullptr);
 
 	free(cmdline);
 	LocalFree(argv);
-	argv = NULL;
+	argv = nullptr;
 	return ret ? S_OK : E_ACCESSDENIED;
 }
 
 int WINAPI wWinMain(HINSTANCE ins, HINSTANCE prev, LPWSTR cmd, int show)
 {
 	_CrtSetDbgFlag(_CrtSetDbgFlag(_CRTDBG_REPORT_FLAG) | _CRTDBG_LEAK_CHECK_DF);
-	OleInitialize(NULL);
+	OleInitialize(nullptr);
 
 	WCHAR path[MAX_PATH];
-	if (GetModuleFileNameW(NULL, path, _countof(path))) {
+	if (GetModuleFileNameW(nullptr, path, _countof(path))) {
 		PathRemoveFileSpec(path);
 		wcscat(path, L"\\");
 		wcscat(path, MacTypeDll);
 		//DONT_RESOLVE_DLL_REFERENCESを指定すると依存関係の解決や
 		//DllMainの呼び出しが行われない
-		hinstDLL = LoadLibraryExW(path, NULL, DONT_RESOLVE_DLL_REFERENCES);
+		hinstDLL = LoadLibraryExW(path, nullptr, DONT_RESOLVE_DLL_REFERENCES);
 	}
 	if (!hinstDLL) {
 		errmsg(IDS_DLL, HresultFromLastError());

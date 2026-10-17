@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <optional>
 
 namespace directwrite_readiness {
@@ -58,6 +59,26 @@ typename Container::value_type NewestMatching(
 			return *candidate;
 	}
 	return typename Container::value_type{};
+}
+
+// The fallback lookup reads the entry built from the factory's canonical
+// source. A build reserved late for a superseded source is inserted after the
+// current one, so insertion order alone would let it stand in for the current
+// source; the newest entry serves only until the canonical source has one.
+template <typename Container, typename Predicate, typename CanonicalPredicate>
+typename Container::value_type CanonicalOrNewestMatching(
+	Container const& entries,
+	Predicate matches,
+	CanonicalPredicate isCanonical)
+{
+	typename Container::value_type const canonical = NewestMatching(
+		entries,
+		[&](typename Container::value_type const& candidate) {
+			return matches(candidate) && isCanonical(candidate);
+		});
+	if (canonical)
+		return canonical;
+	return NewestMatching(entries, matches);
 }
 
 // The caller publishes the candidate before building so every entry point uses
@@ -126,5 +147,13 @@ private:
 
 	bool nested_ = false;
 };
+
+// Counts modern collection calls on this thread, so the legacy hook can tell
+// that DirectWrite answered it through the patched modern slot.
+inline std::uint64_t& ModernCollectionCalls() noexcept
+{
+	static thread_local std::uint64_t calls = 0;
+	return calls;
+}
 
 } // namespace directwrite_readiness

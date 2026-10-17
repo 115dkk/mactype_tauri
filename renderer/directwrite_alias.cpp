@@ -35,10 +35,18 @@ struct CacheEntry
 	std::chrono::steady_clock::time_point retryAfter{};
 };
 
+struct CanonicalSource
+{
+	CComPtr<IUnknown> factoryIdentity;
+	CComPtr<IUnknown> systemSetIdentity;
+	std::uint64_t revision = 0;
+};
+
 struct AliasCache
 {
 	std::mutex mutex;
 	std::vector<std::shared_ptr<CacheEntry>> entries;
+	std::vector<CanonicalSource> canonicalSources;
 };
 
 constexpr std::chrono::seconds kBuildWaitTimeout(10);
@@ -1055,12 +1063,25 @@ BuildStatus GetCachedForFactory(
 			return BuildStatus::unsupportedFactory;
 		AliasCache& cache = GetCache();
 		std::unique_lock<std::mutex> lock(cache.mutex);
+		CComPtr<IUnknown> canonicalSource;
+		for (CanonicalSource const& source : cache.canonicalSources)
+		{
+			if (source.factoryIdentity == identity)
+			{
+				canonicalSource = source.systemSetIdentity;
+				break;
+			}
+		}
 		std::shared_ptr<CacheEntry> const entry =
-			directwrite_readiness::NewestMatching(
+			directwrite_readiness::CanonicalOrNewestMatching(
 				cache.entries,
 				[&](std::shared_ptr<CacheEntry> const& candidate) {
 					return candidate->factoryIdentity == identity &&
 						candidate->generation == substitutionGeneration;
+				},
+				[&](std::shared_ptr<CacheEntry> const& candidate) {
+					return canonicalSource != nullptr &&
+						candidate->systemSetIdentity == canonicalSource;
 				});
 		if (entry == nullptr)
 			return BuildStatus::systemSetUnavailable;
@@ -1121,11 +1142,49 @@ bool IsAliasCollection(IUnknown* collection) noexcept
 	return false;
 }
 
+void SetCanonicalSource(
+	IDWriteFactory* factory,
+	IDWriteFontSet* systemFontSet,
+	std::uint64_t revision) noexcept
+{
+	try
+	{
+		CComPtr<IUnknown> const factoryIdentity = GetIdentity(factory);
+		CComPtr<IUnknown> const systemSetIdentity = GetIdentity(systemFontSet);
+		if (factoryIdentity == nullptr || systemSetIdentity == nullptr)
+			return;
+		AliasCache& cache = GetCache();
+		std::lock_guard<std::mutex> lock(cache.mutex);
+		for (CanonicalSource& source : cache.canonicalSources)
+		{
+			if (source.factoryIdentity == factoryIdentity)
+			{
+				if (revision > source.revision)
+				{
+					source.systemSetIdentity = systemSetIdentity;
+					source.revision = revision;
+				}
+				return;
+			}
+		}
+		CanonicalSource source;
+		source.factoryIdentity = factoryIdentity;
+		source.systemSetIdentity = systemSetIdentity;
+		source.revision = revision;
+		cache.canonicalSources.push_back(source);
+	}
+	catch (...)
+	{
+		// Without a record the fallback lookup reads the newest entry.
+	}
+}
+
 void ClearCache() noexcept
 {
 	AliasCache& cache = GetCache();
 	std::lock_guard<std::mutex> lock(cache.mutex);
 	cache.entries.clear();
+	cache.canonicalSources.clear();
 }
 
 WCHAR const* StatusName(BuildStatus status) noexcept

@@ -462,14 +462,41 @@ never aliased. The build keeps two views of the result: the full set answers
 `GetSystemFontSet` and `GetSystemFontCollection(includeDownloadableFonts=TRUE)`,
 and a local-only subset of it answers the legacy collection,
 `includeDownloadableFonts=FALSE` and the fallback mapping, the way the stock
-objects split. A system without those interfaces keeps the per-reference path
-and leaves downloadable faces out. A failed build stays in the cache with a
+objects split. A system without those interfaces (Windows 10 before 1709) keeps
+the per-reference path and leaves downloadable faces out. A failed build stays in the cache with a
 retry after 2 s, 15 s and 120 s, after which that factory keeps the stock set
-until its source set or the profile generation changes, and the fallback lookup
-reads the newest entry for a factory, so a failure retained for a superseded
-source set cannot hide the current one. The legacy hook also no longer publishes an alias
-collection's set as the factory's source on `checkForUpdates`; doing so would
-have stacked a new generation on every such call. Measured with the service
+until its source set or the profile generation changes. The fallback lookup
+reads the entry built from the factory's canonical source, which the cache
+records with its revision whenever the source is published or replaced, and
+the newest entry only until that source has one. Neither a failure retained
+for a superseded source set nor a build reserved late for one (a thread that
+read the previous source just before a replacement inserts its entry after the
+current one) can then stand in for the current source. On `checkForUpdates` the legacy hook
+used to publish the set it received as the factory's source on every call.
+DirectWrite returns a new set object from each collection call, so every such
+call keyed a fresh build, and in a process whose builds fail the retry schedule
+never applied. The set's expiration event cannot stand in for that check: only
+the first system set a process receives carries one, and every object
+DirectWrite returns after the first update check, `GetSystemFontSet` included,
+has none. The system collection object is what stays stable: DirectWrite hands
+back the same one until it builds a new one, which it does on the first update
+check and after a font change. The source therefore records the stock
+collection it was last checked against, one per `includeDownloadableFonts`
+value because those are different objects, and an update check replaces the
+source only when DirectWrite answers with a collection it has not seen. The
+replacement goes through only while the source's revision is the one read
+before the stock call, so two threads that see the same new collection build
+once and an answer that was delayed across a font change cannot roll a newer
+source back. The legacy method answers through the modern slot with the same
+`checkForUpdates` value, so in a process whose alias build succeeds the legacy
+hook only ever sees the alias collection; the check therefore runs in the
+modern hook, where the stock collection is visible, and the legacy hook checks
+only when no modern call ran on its thread during the stock call. An alias
+collection it holds is then never taken for a stock one, even after a profile
+reload has pruned the cache entry that identified it. Before this, a process whose build succeeded never took
+a font change from an update check at all. A process that checks for updates
+now builds once more on its first check and again only after a real change.
+Measured with the service
 stopped and each core loaded by `MacLoader64` before image entry, in a probe
 that asks for `GetSystemFontSet` first the way Settings does: the c41f489 core
 answered `Malgun Gothic` with `MALGUN.TTF` at weight 400 and spent 2,301 ms on
@@ -477,6 +504,19 @@ answered `Malgun Gothic` with `MALGUN.TTF` at weight 400 and spent 2,301 ms on
 answered with the alias file at weight 500 (Pretendard Variable Medium),
 returned a 758-face set that still carries the downloadable faces, and spent
 0.3 ms and under 0.1 ms.
+Update checks without MacType took 45.8 ms for the first legacy call, 414.8 ms
+for 49 more, 8.5 ms for the first downloadable modern call and 328.4 ms for 20
+alternating legacy and downloadable modern pairs; the fixed core took 84.1 ms,
+412.3 ms, 50.9 ms and 331.4 ms, the one extra build per collection kind
+falling on its first check, against 2,947 ms on c41f489 for 50 legacy update
+checks, and `Malgun Gothic` still resolved to the alias file afterwards.
+
+One behaviour remains, and it is stock DirectWrite's: without
+MacType, DirectWrite answers `GetSystemFontSet` with 735 faces only until the
+process first asks for the legacy collection or checks for updates; from then
+on every system answer, `GetSystemFontSet` included, carries the 510 local
+faces. A source replaced by an update check therefore leaves the full view
+with local faces only, as the stock answer has.
 
 An injection that lands after the first frame (the open service's remote
 `LoadLibrary`, every elevated target, any child of a parent that was not

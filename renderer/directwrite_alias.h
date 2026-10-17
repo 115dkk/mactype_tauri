@@ -73,6 +73,14 @@ BuildStatus GetOrCreate(
 // True when collection is one of the alias collections this process built.
 bool IsAliasCollection(IUnknown* collection) noexcept;
 
+// Records the factory's canonical alias source for the fallback lookup. A
+// revision below the one already recorded is ignored, so publications that
+// reach the cache out of order keep the newest source.
+void SetCanonicalSource(
+	IDWriteFactory* factory,
+	IDWriteFontSet* systemFontSet,
+	std::uint64_t revision) noexcept;
+
 BuildStatus GetCachedForFactory(
 	IDWriteFactory* factory,
 	std::uint64_t substitutionGeneration,

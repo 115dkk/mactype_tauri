@@ -1419,7 +1419,14 @@ struct FactoryAliasSource
 {
 	CComPtr<IUnknown> factoryIdentity;
 	CComPtr<IDWriteFontSet> systemSet;
+	// The stock system collections the source was last checked against, one
+	// per includeDownloadableFonts value; the two are different objects.
+	CComPtr<IUnknown> localCollection;
+	CComPtr<IUnknown> downloadableCollection;
+	std::uint64_t revision = 0;
 };
+
+constexpr std::uint64_t kNoFactoryAliasSource = ~std::uint64_t{0};
 
 std::mutex& GetFactoryAliasVtableMutex()
 {
@@ -1451,23 +1458,21 @@ CComPtr<IUnknown> GetFactoryIdentity(IDWriteFactory* factory)
 
 void PublishFactoryAliasSource(
 	IDWriteFactory* factory,
-	IDWriteFontSet* systemSet,
-	bool replaceExisting = false)
+	IDWriteFontSet* systemSet)
 {
 	CComPtr<IUnknown> const identity = GetFactoryIdentity(factory);
 	if (identity == nullptr || systemSet == nullptr)
 		return;
-	std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
-	for (FactoryAliasSource& source : GetFactoryAliasSourceRegistry())
 	{
-		if (source.factoryIdentity == identity)
+		std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+		for (FactoryAliasSource const& source : GetFactoryAliasSourceRegistry())
 		{
-			if (replaceExisting)
-				source.systemSet = systemSet;
-			return;
+			if (source.factoryIdentity == identity)
+				return;
 		}
+		GetFactoryAliasSourceRegistry().push_back({identity, systemSet});
 	}
-	GetFactoryAliasSourceRegistry().push_back({identity, systemSet});
+	directwrite_alias::SetCanonicalSource(factory, systemSet, 0);
 }
 
 CComPtr<IDWriteFontSet> GetFactoryAliasSource(IDWriteFactory* factory)
@@ -1482,6 +1487,97 @@ CComPtr<IDWriteFontSet> GetFactoryAliasSource(IDWriteFactory* factory)
 			return source.systemSet;
 	}
 	return nullptr;
+}
+
+std::uint64_t GetFactoryAliasSourceRevision(IDWriteFactory* factory)
+{
+	CComPtr<IUnknown> const identity = GetFactoryIdentity(factory);
+	if (identity == nullptr)
+		return kNoFactoryAliasSource;
+	std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+	for (FactoryAliasSource const& source : GetFactoryAliasSourceRegistry())
+	{
+		if (source.factoryIdentity == identity)
+			return source.revision;
+	}
+	return kNoFactoryAliasSource;
+}
+
+// DirectWrite returns the same system collection object until it builds a
+// new one, which it does on the first checkForUpdates call and after a font
+// change, while GetFontSet returns a new set object on every call, so only the
+// collection identity tells a repeated answer from an updated one. The legacy
+// method answers through the modern slot, so in a process whose alias build
+// succeeds only the modern hook sees the stock collection. The caller reads
+// expectedRevision before the stock call, because a source published while
+// that call ran can reflect a newer collection than the one it returns.
+void RefreshFactoryAliasSource(
+	IDWriteFactory* factory,
+	std::uint64_t expectedRevision,
+	IDWriteFontCollection* systemCollection,
+	bool includeDownloadableFonts)
+{
+	CComPtr<IUnknown> const identity = GetFactoryIdentity(factory);
+	CComPtr<IUnknown> collectionIdentity;
+	if (identity == nullptr || systemCollection == nullptr ||
+		FAILED(systemCollection->QueryInterface(&collectionIdentity)) ||
+		collectionIdentity == nullptr ||
+		directwrite_alias::IsAliasCollection(systemCollection))
+		return;
+	auto const checkedCollection =
+		[includeDownloadableFonts](FactoryAliasSource& source) -> CComPtr<IUnknown>& {
+			return includeDownloadableFonts ?
+				source.downloadableCollection : source.localCollection;
+		};
+
+	{
+		std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+		for (FactoryAliasSource& source : GetFactoryAliasSourceRegistry())
+		{
+			if (source.factoryIdentity == identity &&
+				checkedCollection(source) == collectionIdentity)
+				return;
+		}
+	}
+	CComPtr<IDWriteFontCollection1> systemCollection1;
+	CComPtr<IDWriteFontSet> systemSet;
+	if (FAILED(systemCollection->QueryInterface(&systemCollection1)) ||
+		systemCollection1 == nullptr ||
+		FAILED(systemCollection1->GetFontSet(&systemSet)) ||
+		systemSet == nullptr)
+		return;
+
+	std::uint64_t publishedRevision = kNoFactoryAliasSource;
+	{
+		std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+		bool registered = false;
+		for (FactoryAliasSource& source : GetFactoryAliasSourceRegistry())
+		{
+			if (source.factoryIdentity != identity)
+				continue;
+			registered = true;
+			// A source published since the stock call began is kept.
+			if (source.revision == expectedRevision)
+			{
+				source.systemSet = systemSet;
+				checkedCollection(source) = collectionIdentity;
+				publishedRevision = ++source.revision;
+			}
+			break;
+		}
+		if (!registered && expectedRevision == kNoFactoryAliasSource)
+		{
+			FactoryAliasSource source;
+			source.factoryIdentity = identity;
+			source.systemSet = systemSet;
+			checkedCollection(source) = collectionIdentity;
+			GetFactoryAliasSourceRegistry().push_back(source);
+			publishedRevision = source.revision;
+		}
+	}
+	if (publishedRevision != kNoFactoryAliasSource)
+		directwrite_alias::SetCanonicalSource(
+			factory, systemSet, publishedRevision);
 }
 
 FactoryAliasVtableHooks& GetOrAddFactoryAliasVtable(void** vtable)
@@ -2824,6 +2920,10 @@ HRESULT WINAPI IMPL_Factory_GetSystemFontCollection(
 		GetOriginalSystemFontCollection(self);
 	if (original == nullptr)
 		return E_UNEXPECTED;
+	std::uint64_t const sourceRevision = checkForUpdates ?
+		GetFactoryAliasSourceRevision(self) : kNoFactoryAliasSource;
+	std::uint64_t const modernCalls =
+		directwrite_readiness::ModernCollectionCalls();
 	CComPtr<IDWriteFontCollection> systemCollection;
 	HRESULT const result = original(self, &systemCollection, checkForUpdates);
 	if (FAILED(result) || systemCollection == nullptr)
@@ -2841,9 +2941,12 @@ HRESULT WINAPI IMPL_Factory_GetSystemFontCollection(
 		*fontCollection = systemCollection.Detach();
 		return result;
 	}
+	// When the modern hook answered this call it already checked the stock
+	// collection, and what came back here may be an alias collection.
 	if (checkForUpdates &&
-		!directwrite_alias::IsAliasCollection(systemCollection))
-		PublishFactoryAliasSource(self, systemSet, true);
+		directwrite_readiness::ModernCollectionCalls() == modernCalls)
+		RefreshFactoryAliasSource(
+			self, sourceRevision, systemCollection, false);
 	CComPtr<IDWriteFactory3> factory3;
 	if (FAILED(self->QueryInterface(&factory3)) || factory3 == nullptr)
 	{
@@ -2919,11 +3022,17 @@ HRESULT WINAPI IMPL_Factory3_GetSystemFontCollection(
 		GetOriginalModernSystemFontCollection(self);
 	if (original == nullptr)
 		return E_UNEXPECTED;
+	++directwrite_readiness::ModernCollectionCalls();
+	std::uint64_t const sourceRevision = checkForUpdates ?
+		GetFactoryAliasSourceRevision(self) : kNoFactoryAliasSource;
 	CComPtr<IDWriteFontCollection1> systemCollection;
 	HRESULT const result = original(
 		self, includeDownloadableFonts, &systemCollection, checkForUpdates);
 	if (FAILED(result) || systemCollection == nullptr)
 		return result;
+	if (checkForUpdates)
+		RefreshFactoryAliasSource(self, sourceRevision, systemCollection,
+			includeDownloadableFonts != FALSE);
 
 	directwrite_alias::AliasFontSet aliases;
 	directwrite_alias::BuildStatus const status =

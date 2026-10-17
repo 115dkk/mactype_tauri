@@ -73,7 +73,6 @@ pub struct InjectionOrchestrator<'a> {
     retry_policy: RetryPolicy,
     retry_scheduler: Option<&'a dyn RetryScheduler>,
     deferral_policy: DeferralPolicy,
-    last_injected_identity: Option<ProcessIdentity>,
     last_handled_creation_time: Option<u64>,
     injection_telemetry: InjectionTelemetry,
 }
@@ -209,7 +208,6 @@ impl<'a> InjectionOrchestrator<'a> {
             retry_policy: configuration.retry_policy,
             retry_scheduler: configuration.retry_scheduler,
             deferral_policy: configuration.deferral_policy,
-            last_injected_identity: None,
             last_handled_creation_time: None,
             injection_telemetry: InjectionTelemetry::default(),
         }
@@ -410,30 +408,8 @@ impl<'a> InjectionOrchestrator<'a> {
                 }
                 _ => {}
             }
-            match result.disposition {
-                BrokerDisposition::LaunchFailed => {
-                    return Ok(self.handle_launch_failure(
-                        request.identity.clone(),
-                        deferrals,
-                        now,
-                        result,
-                        attempt,
-                    ));
-                }
-                BrokerDisposition::TargetFrozen => {
-                    self.insert_deferred(DeferredTarget {
-                        identity: request.identity.clone(),
-                        reason: DeferralReason::Frozen,
-                        deferrals,
-                        not_before: now + self.deferral_policy.frozen_recheck,
-                    });
-                    return Ok(ProcessOutcome::Deferred);
-                }
-                _ => {}
-            }
             if let Some(outcome) = terminal_outcome(result.disposition, attempt == attempts) {
                 if outcome == ProcessOutcome::Injected {
-                    self.last_injected_identity = Some(request.identity.clone());
                     self.record_injection_success(&request.identity);
                 }
                 let (outcome, result) =
@@ -549,10 +525,6 @@ impl<'a> InjectionOrchestrator<'a> {
             .iter()
             .filter_map(|key| self.deferred.get(key).cloned())
             .collect()
-    }
-
-    pub fn last_injected_identity(&self) -> Option<&ProcessIdentity> {
-        self.last_injected_identity.as_ref()
     }
 
     /// The creation time the validator read for the PID handled most recently,

@@ -346,16 +346,16 @@ fn append_quoted(output: &mut Vec<u16>, argument: &OsStr) {
         if value == backslash {
             slashes += 1;
         } else if value == quote {
-            output.extend(std::iter::repeat(backslash).take(slashes * 2 + 1));
+            output.extend(std::iter::repeat_n(backslash, slashes * 2 + 1));
             output.push(value);
             slashes = 0;
         } else {
-            output.extend(std::iter::repeat(backslash).take(slashes));
+            output.extend(std::iter::repeat_n(backslash, slashes));
             output.push(value);
             slashes = 0;
         }
     }
-    output.extend(std::iter::repeat(backslash).take(slashes * 2));
+    output.extend(std::iter::repeat_n(backslash, slashes * 2));
     output.push(quote);
 }
 

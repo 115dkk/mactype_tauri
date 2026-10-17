@@ -670,11 +670,12 @@ BuildStatus GetOrCreateUnchecked(
 	// must never escape while the caller explicitly requests the stock set.
 	if (IsSubstitutionDisabled())
 		return BuildStatus::noSubstitutions;
-	CGdippSettings const* settings = CGdippSettings::GetInstance();
-	if (!settings->DelayedInited())
+	const auto policy = CGdippSettings::GetRendererPolicy();
+	const renderer::RendererPolicyScope policyScope(policy);
+	if (!policy || !policy->substitutions_ready())
 		return BuildStatus::settingsNotInitialized;
 	std::shared_ptr<const renderer::font_substitution::Snapshot> const snapshot =
-		renderer::font_substitution::ProcessRegistry().Load();
+		policy->font_substitutions();
 	if (!snapshot || snapshot->rules().empty())
 		return BuildStatus::noSubstitutions;
 	std::uint64_t const generation = snapshot->generation();
@@ -785,11 +786,11 @@ BuildReservation::BuildReservation(
 	{
 		if (isBuildingAliases || IsSubstitutionDisabled())
 			return;
-		CGdippSettings const* settings = CGdippSettings::GetInstance();
-		if (!settings->DelayedInited())
+		const auto policy = CGdippSettings::GetRendererPolicy();
+		if (!policy || !policy->substitutions_ready())
 			return;
 		std::shared_ptr<const renderer::font_substitution::Snapshot> const snapshot =
-			renderer::font_substitution::ProcessRegistry().Load();
+			policy->font_substitutions();
 		if (!snapshot || snapshot->rules().empty())
 			return;
 

@@ -128,7 +128,7 @@ export function useExecutionModel({ ciSmoke = false, onReady }: ExecutionModelOp
     } catch (caught: unknown) {
       const message = caught instanceof Error ? caught.message : String(caught);
       setError(message);
-      if (ciSmoke) void runtime().reportFrontendFailure("execution", message);
+      if (ciSmoke) void runtime().reportFrontendFailure("execution", message).catch(() => undefined);
     }
   }, [ciSmoke]);
 

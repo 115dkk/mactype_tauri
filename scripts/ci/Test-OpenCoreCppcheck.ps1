@@ -26,8 +26,8 @@ if ($version -ne 'Cppcheck 2.20.0') {
 
 New-Item -ItemType Directory -Force -Path $evidenceRoot | Out-Null
 $configurations = @(
-    @{ Name = 'x86'; Project = 'Release|Win32'; Platform = 'win32A'; Architecture = '_X86_' },
-    @{ Name = 'x64'; Project = 'Release|x64'; Platform = 'win64'; Architecture = '_AMD64_' }
+    @{ Name = 'x86'; Project = 'Rel+Detours|Win32'; Platform = 'win32A'; Architecture = '_X86_' },
+    @{ Name = 'x64'; Project = 'Rel+Detours|x64'; Platform = 'win64'; Architecture = '_AMD64_' }
 )
 
 # Phase-one debt is explicit and category-scoped. None of these suppressions

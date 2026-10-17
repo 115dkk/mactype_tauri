@@ -57,6 +57,21 @@ private:
 
 ProfileRuntime& ProcessProfileRuntime();
 RendererPolicyRef CurrentRendererPolicy() noexcept;
+
+// Nested GDI/DWrite hooks and raster helpers share the outer call's policy.
+// The thread-local slot borrows this stack owner; it owns no exit-time resource.
+class RendererPolicyScope final
+{
+public:
+	explicit RendererPolicyScope(RendererPolicyRef policy) noexcept;
+	[[nodiscard]] static bool active() noexcept;
+	~RendererPolicyScope();
+	RendererPolicyScope(const RendererPolicyScope&) = delete;
+	RendererPolicyScope& operator=(const RendererPolicyScope&) = delete;
+private:
+	RendererPolicyRef policy_;
+	const RendererPolicyRef* previous_;
+};
 void ClearProcessProfileRuntimeForQuietUnload() noexcept;
 
 } // namespace renderer

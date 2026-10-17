@@ -2,6 +2,8 @@
 
 #include "common.h"
 #include "renderer_policy.h"
+#include "profile_runtime.h"
+#include "control_message.h"
 #include "gdiPlusFlat2.h"
 #include "cache.h"
 #include "hash_list.h"
@@ -42,6 +44,8 @@ bool DrainProcessRendererResourcesOutsideLoaderLock() noexcept;
 #undef HOOK_MANUALLY
 
 int _StrToInt(LPCTSTR pStr, int nDefault);
+bool CopyForceFont(const renderer::RendererPolicyRef& policy, LOGFONT& font, const LOGFONT& original);
+BOOL IsExeUnload(LPCTSTR name, const renderer::RendererPolicyRef& policy);
 
 
 class CFontIndividual
@@ -118,7 +122,7 @@ private:
 	void initreg();
 public:
 	void init(int nFontSubstitutes, const CFontSubstitutesIniArray& iniarray);
-	void Canonicalize(LOGFONT& lf) const;
+	static void Canonicalize(LOGFONT& lf);
 	const LOGFONT * lookup(LOGFONT &lf) const;
 	bool CopyRule(
 		int index,
@@ -412,6 +416,7 @@ public:
 	bool DelayedInited() const { return m_bDelayedInit; }	// return the delayedinit status
 
 	bool CopyForceFont(LOGFONT& lf, const LOGFONT& lfOrg) const;
+	static renderer::RendererPolicyRef GetRendererPolicy();
 
 	//それ以外
 	bool IsInclude() const { return m_bIsInclude; }
@@ -422,7 +427,6 @@ public:
 	const int* GetTuneTableR() const { return m_nTuneTableR; }
 	const int* GetTuneTableG() const { return m_nTuneTableG; }
 	const int* GetTuneTableB() const { return m_nTuneTableB; }
-	set<int>& DisplayAffinity() { return m_nDisplayAffinity; }
 
 	bool LoadSettings(HINSTANCE hModule);
 
@@ -433,7 +437,7 @@ public:
 	bool IsProcessUnload() const;
 	bool IsExeUnload(LPCTSTR lpApp) const;
 	bool IsExeInclude(LPCTSTR lpApp) const;
-	void AddFontExclude(LPCWSTR lpFaceName);	//点阵字体直接自动添加到此列表
+	static void AddFontExclude(LPCWSTR lpFaceName, const renderer::RendererPolicyRef& policy);	//点阵字体直接自动添加到此列表
 	bool IsProcessExcluded() const;
 	bool IsProcessIncluded() const;
 	const CFontSettings& FindIndividual(LPCTSTR lpFaceName) const;
@@ -606,6 +610,7 @@ public:
 
 	BOOL WINAPI SetIntAttribute(int eSet, int nValue)
 	{
+		CCriticalSectionLock writerLock(CCriticalSectionLock::CS_SETTING);
 		CGdippSettings* pSettings = CGdippSettings::GetInstance();
 		switch (static_cast<eMTSettings>(eSet))
 		{
@@ -743,6 +748,7 @@ public:
 	}
 	BOOL WINAPI SetFloatAttribute(int eSet, float nValue)
 	{
+		CCriticalSectionLock writerLock(CCriticalSectionLock::CS_SETTING);
 		CGdippSettings* pSettings = CGdippSettings::GetInstance();
 		switch (static_cast<eMTSettings>(eSet))
 		{
@@ -762,6 +768,7 @@ public:
 		return true;
 	};
 	int WINAPI GetIntAttribute(int eSet) {
+		CCriticalSectionLock writerLock(CCriticalSectionLock::CS_SETTING);
 		CGdippSettings* pSettings = CGdippSettings::GetInstance();
 		switch (static_cast<eMTSettings>(eSet))
 		{
@@ -825,6 +832,7 @@ public:
 		return 0;
 	};
 	float WINAPI GetFloatAttribute(int eSet) {
+		CCriticalSectionLock writerLock(CCriticalSectionLock::CS_SETTING);
 		CGdippSettings* pSettings = CGdippSettings::GetInstance();
 		switch (static_cast<eMTSettings>(eSet))
 		{
@@ -840,6 +848,7 @@ public:
 		return 0;
 	};
 	BOOL WINAPI RefreshSetting(void) {
+		CCriticalSectionLock writerLock(CCriticalSectionLock::CS_SETTING);
 		if (m_bDirty) {
 			CGdippSettings* pSettings = CGdippSettings::GetInstance();
 			if (!pSettings->PublishRendererPolicySnapshot(
@@ -855,6 +864,7 @@ public:
 	BOOL WINAPI EnableRender(BOOL bEnable){g_ccbRender = bEnable; return true;};
 	BOOL WINAPI EnableCache(BOOL bEnable){g_ccbCache = bEnable; return true;};
 	BOOL WINAPI ClearIndividual(){
+		CCriticalSectionLock writerLock(CCriticalSectionLock::CS_SETTING);
 		CGdippSettings* pSettings = CGdippSettings::GetInstance();
 		pSettings->m_arrIndividual.RemoveAll();
 		m_bDirty = true;
@@ -862,6 +872,7 @@ public:
 	};
 	BOOL WINAPI AddIndividual(WCHAR* fontSetting)
 	{
+		CCriticalSectionLock writerLock(CCriticalSectionLock::CS_SETTING);
 		CGdippSettings* pSettings = CGdippSettings::GetInstance();
 		IndividualArray& arr = pSettings->m_arrIndividual;
 		LPTSTR p = fontSetting;
@@ -909,6 +920,7 @@ public:
 		m_bDirty = true;
 		return true; };
 	BOOL WINAPI DelIndividual(WCHAR* lpFaceName) {
+		CCriticalSectionLock writerLock(CCriticalSectionLock::CS_SETTING);
 		CGdippSettings* pSettings = CGdippSettings::GetInstance();
 		CFontIndividual* p		= pSettings->m_arrIndividual.Begin();
 		CFontIndividual* end	= pSettings->m_arrIndividual.End();
@@ -923,6 +935,7 @@ public:
 		return true;};
 	void WINAPI LoadSetting(const WCHAR* lpFileName)
 	{
+		CCriticalSectionLock writerLock(CCriticalSectionLock::CS_SETTING);
 		CGdippSettings* pSettings = CGdippSettings::GetInstance();
 		ClearIndividual();
 		pSettings->m_FontSubstitutesInfoForDW.RemoveAll();
@@ -942,6 +955,7 @@ public:
 	};
 	static void WINAPI ReloadConfig()
 	{
+		CCriticalSectionLock writerLock(CCriticalSectionLock::CS_SETTING);
 		//CCriticalSectionLock __lock(CCriticalSectionLock::CS_LIBRARY);
 		CGdippSettings* pSettings = CGdippSettings::GetInstance();
 		extern HINSTANCE g_dllInstance;
@@ -1016,29 +1030,22 @@ public:
 	LRESULT WINAPI MsgProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 		switch (msg) {
 			case WM_COPYDATA: {
-				COPYDATASTRUCT* data = reinterpret_cast<COPYDATASTRUCT*>(lparam);
-				if (data->cbData && data->lpData) {	// ignore invalid request.
-					string json;
-					json.resize(data->cbData);
-					memcpy(&json[0], data->lpData, data->cbData);
-					auto jsonobj = json::parse(json.begin(), json.end());
-					string command = jsonobj["command"].get<std::string>();
-					// various command dispatch
-					if (command == "loadprofile") {	// load target profile from disk
-						string filename = jsonobj["file"].get<std::string>();
-						if (filename.length()) {
-							this->LoadSetting(to_wide_string(filename).c_str());
-							RedrawCurrentApp();
-						}
+				try {
+					const COPYDATASTRUCT* data = reinterpret_cast<const COPYDATASTRUCT*>(lparam);
+					if (!data)
+						return ERROR_INVALID_DATA;
+					const auto command = renderer::ParseControlMessage(data->lpData, data->cbData);
+					if (command.kind == renderer::ControlMessageKind::ping)
+						return ERROR_SUCCESS;
+					if (command.kind == renderer::ControlMessageKind::loadProfile) {
+						this->LoadSetting(to_wide_string(command.path).c_str());
+						RedrawCurrentApp();
 						return ERROR_SUCCESS;
 					}
-					if (command == "ping") {
-						//__asm db 0xcc;	// cause debugger to break
-						//DebugBreak();
-						return ERROR_SUCCESS;
-					}
+				} catch (...) {
+					// Neither decoding nor profile loading may unwind through USER32.
 				}
-				break;
+				return ERROR_INVALID_DATA;
 			}
 			default: {
 				return DefWindowProc(hwnd, msg, wparam, lparam);

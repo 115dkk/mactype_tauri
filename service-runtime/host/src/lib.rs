@@ -47,8 +47,8 @@ pub use etw_observer::{
 pub use event_log::{HostEvent, HostEventLogger, HostEventSink, LiveObserver};
 pub use file_health::{CompositeHealthPublisher, FileHealthPublisher};
 pub use helper_broker::{
-    FixedHelperBroker, FixedModuleProbe, FixedModuleState, HelperInvocation, HelperLaunchError,
-    HelperLaunchStage, HelperLauncher, HelperOutput, PlatformFixedModuleProbe,
+    FixedHelperBroker, HelperInvocation, HelperLaunchError, HelperLaunchStage, HelperLauncher,
+    HelperOutput,
 };
 pub use injection_orchestrator::{
     DeferralPolicy, DeferredTarget, InjectionOrchestrator, ProcessAttemptRecord, ProcessOutcome,

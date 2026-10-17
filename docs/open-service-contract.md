@@ -87,8 +87,10 @@ The 레거시 서비스 PASS entries are backed by three trials per architecture
 
 ## Process lifecycle and event recording
 
-The host prefers the immediate process-start WMI trace and falls back to the
-intrinsic creation subscription only when the trace is inaccessible or absent.
+The host first starts the kernel ETW process observer. If ETW is unavailable,
+it connects to WMI, preferring `Win32_ProcessStartTrace` and using the intrinsic
+creation subscription only when that trace is inaccessible or absent. It selects
+the live observer before taking the initial process snapshot.
 Eligible frozen processes are deferred by exact PID and creation time. A helper
 launch failure before resume can also be deferred with bounded backoff; a helper
 that has resumed keeps the existing conservative cleanup rules. Neither deferral

@@ -4,7 +4,7 @@ mod event_sink;
 use event_sink::{discard_events, RecordingEventSink};
 use std::ffi::OsString;
 use std::fs;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use mactype_service_contract::{
     GenerationId, GenerationPointer, MachinePaths, ProfileDigest, RendererActivationDisposition,
@@ -26,10 +26,9 @@ fn test_binding() -> RendererRuntimeBinding {
     )
 }
 use mactype_service_host::{
-    BrokerDisposition, BrokerResult, FixedHelperBroker, FixedModuleProbe, FixedModuleState,
-    HelperInvocation, HelperLaunchError, HelperLaunchStage, HelperLauncher, HelperOutput,
-    InjectionBroker, InjectionRequest, ProcessArchitecture, ProcessIdentity,
-    ProtectedRendererRuntime,
+    BrokerDisposition, BrokerResult, FixedHelperBroker, HelperInvocation, HelperLaunchError,
+    HelperLaunchStage, HelperLauncher, HelperOutput, InjectionBroker, InjectionRequest,
+    ProcessArchitecture, ProcessIdentity, ProtectedRendererRuntime,
 };
 
 fn runtime() -> (tempfile::TempDir, ProtectedRendererRuntime) {
@@ -961,45 +960,6 @@ fn cleanup_unknown_evidence_accepts_only_the_producer_tuple_allowlist() {
     }
 }
 
-/// Answers the module question without a live process, and records what it
-/// was asked, so both branches of the pre-check can be driven from a test.
-struct StubModuleProbe {
-    state: FixedModuleState,
-    asked: Arc<Mutex<Vec<std::path::PathBuf>>>,
-}
-
-impl FixedModuleProbe for StubModuleProbe {
-    fn fixed_module_state(
-        &self,
-        _identity: &ProcessIdentity,
-        module: &std::path::Path,
-    ) -> FixedModuleState {
-        self.asked.lock().unwrap().push(module.to_owned());
-        self.state
-    }
-}
-
-fn broker_with_module_state<'a>(
-    runtime: &ProtectedRendererRuntime,
-    launcher: &'a RecordingLauncher,
-    state: FixedModuleState,
-) -> (
-    FixedHelperBroker<&'a RecordingLauncher>,
-    Arc<Mutex<Vec<std::path::PathBuf>>>,
-) {
-    let asked = Arc::new(Mutex::new(Vec::new()));
-    let broker = FixedHelperBroker::with_module_probe(
-        runtime,
-        launcher,
-        discard_events(),
-        Box::new(StubModuleProbe {
-            state,
-            asked: Arc::clone(&asked),
-        }),
-    );
-    (broker, asked)
-}
-
 fn target(architecture: ProcessArchitecture) -> ProcessIdentity {
     ProcessIdentity {
         pid: 42,
@@ -1010,56 +970,181 @@ fn target(architecture: ProcessArchitecture) -> ProcessIdentity {
 }
 
 #[test]
-fn a_target_that_already_carries_the_renderer_is_skipped_without_a_helper_launch() {
+fn existing_renderer_outcomes_require_the_helpers_activation_evidence() {
     let (_base, runtime) = runtime();
-    let launcher = RecordingLauncher::default();
-    let (broker, asked) = broker_with_module_state(&runtime, &launcher, FixedModuleState::Loaded);
+    for architecture in [ProcessArchitecture::X86, ProcessArchitecture::X64] {
+        let request = InjectionRequest {
+            identity: target(architecture),
+            binding: runtime.binding(),
+        };
+        let module = match architecture {
+            ProcessArchitecture::X86 => "MacType.dll",
+            ProcessArchitecture::X64 => "MacType64.dll",
+        };
+        for (status, code, exit_code, disposition, reason, expected) in [
+            (
+                "injected",
+                "renderer-active",
+                0,
+                RendererActivationDisposition::Active,
+                RendererActivationReason::None,
+                BrokerDisposition::Injected,
+            ),
+            (
+                "skipped",
+                "process-excluded",
+                0,
+                RendererActivationDisposition::QuietSkip,
+                RendererActivationReason::ProcessExcluded,
+                BrokerDisposition::Skipped,
+            ),
+            (
+                "failed",
+                "initialization-failed",
+                3,
+                RendererActivationDisposition::Failed,
+                RendererActivationReason::InitializationFailed,
+                BrokerDisposition::Rejected,
+            ),
+        ] {
+            let evidence = renderer_evidence_hex(
+                &request.identity,
+                request.binding,
+                RendererModuleLoad::AlreadyLoaded,
+                disposition,
+                reason,
+            );
+            let launcher = StaticLauncher {
+                output: Mutex::new(Some(HelperOutput {
+                    exit_code,
+                    stdout: format!(
+                        "{{\"schemaVersion\":2,\"status\":\"{status}\",\"code\":\"{code}\",\"pid\":42,\"sessionId\":2,\"generationId\":\"{}\",\"module\":\"{module}\",\"windowsError\":0,\"cleanupComplete\":true,\"rendererEvidence\":\"{evidence}\"}}",
+                        request.binding.runtime_generation_id(),
+                    )
+                    .into_bytes(),
+                })),
+            };
+            let broker = FixedHelperBroker::new(&runtime, &launcher, discard_events());
 
-    let result = broker.inject(&InjectionRequest {
-        identity: target(ProcessArchitecture::X64),
-        binding: runtime.binding(),
-    });
+            let result = broker.inject(&request);
 
-    assert_eq!(result.disposition, BrokerDisposition::Skipped);
-    assert_eq!(result.code, "module-already-loaded");
-    assert_eq!(result.win32_error, None);
-    assert!(launcher.invocations.lock().unwrap().is_empty());
-    assert_eq!(
-        asked.lock().unwrap().as_slice(),
-        [runtime.assets().root().join("MacType64.dll")]
-    );
+            assert_eq!(result.disposition, expected, "{module}: {status}");
+            assert_eq!(result.code, code);
+            assert_eq!(result.win32_error, None);
+            assert!(launcher.output.lock().unwrap().is_none());
+        }
+    }
 }
 
 #[test]
-fn a_target_without_the_renderer_reaches_the_helper_exactly_as_before() {
+fn an_already_loaded_module_cannot_turn_missing_or_mismatched_evidence_into_success() {
     let (_base, runtime) = runtime();
-    let launcher = RecordingLauncher::default();
-    let (broker, asked) = broker_with_module_state(&runtime, &launcher, FixedModuleState::Absent);
-
-    let result = broker.inject(&InjectionRequest {
-        identity: target(ProcessArchitecture::X86),
-        binding: runtime.binding(),
-    });
-
-    assert_eq!(result.disposition, BrokerDisposition::Injected);
-    assert_eq!(launcher.invocations.lock().unwrap().len(), 1);
-    assert_eq!(
-        asked.lock().unwrap().as_slice(),
-        [runtime.assets().root().join("MacType.dll")]
+    let request = x64_request(&runtime);
+    let wrong_binding = RendererRuntimeBinding::new(
+        *request.binding.runtime_generation_id(),
+        *test_binding().profile_digest(),
     );
+    assert_ne!(wrong_binding, request.binding);
+    let mut wrong_identity = request.identity.clone();
+    wrong_identity.creation_time += 1;
+    for (evidence, expected_code) in [
+        (None, "renderer-evidence-inconsistent"),
+        (
+            Some(renderer_evidence_hex(
+                &request.identity,
+                wrong_binding,
+                RendererModuleLoad::AlreadyLoaded,
+                RendererActivationDisposition::Active,
+                RendererActivationReason::None,
+            )),
+            "renderer-evidence-mismatch",
+        ),
+        (
+            Some(renderer_evidence_hex(
+                &wrong_identity,
+                request.binding,
+                RendererModuleLoad::AlreadyLoaded,
+                RendererActivationDisposition::Active,
+                RendererActivationReason::None,
+            )),
+            "renderer-evidence-mismatch",
+        ),
+    ] {
+        let evidence = serde_json::to_string(&evidence).unwrap();
+        let launcher = StaticLauncher {
+            output: Mutex::new(Some(HelperOutput {
+                exit_code: 0,
+                stdout: format!(
+                    "{{\"schemaVersion\":2,\"status\":\"injected\",\"code\":\"renderer-active\",\"pid\":42,\"sessionId\":2,\"generationId\":\"{}\",\"module\":\"MacType64.dll\",\"windowsError\":0,\"cleanupComplete\":true,\"rendererEvidence\":{evidence}}}",
+                    request.binding.runtime_generation_id(),
+                )
+                .into_bytes(),
+            })),
+        };
+        let broker = FixedHelperBroker::new(&runtime, &launcher, discard_events());
+
+        let result = broker.inject(&request);
+
+        assert_eq!(result.disposition, BrokerDisposition::UncertainIntegrity);
+        assert_eq!(result.code, expected_code);
+        assert!(launcher.output.lock().unwrap().is_none());
+    }
 }
 
 #[test]
-fn a_module_question_that_cannot_be_answered_still_launches_the_helper() {
+fn renderer_verification_preserves_helper_launch_and_cleanup_failures() {
     let (_base, runtime) = runtime();
-    let launcher = RecordingLauncher::default();
-    let (broker, _asked) = broker_with_module_state(&runtime, &launcher, FixedModuleState::Unknown);
+    for (stage, expected, code) in [
+        (
+            HelperLaunchStage::BeforeResume,
+            BrokerDisposition::LaunchFailed,
+            "helper-launch-failed-before-resume",
+        ),
+        (
+            HelperLaunchStage::AfterResume,
+            BrokerDisposition::UncertainCleanup,
+            "helper-launch-failed-cleanup-unknown",
+        ),
+    ] {
+        let launcher = ErrorLauncher {
+            kind: std::io::ErrorKind::PermissionDenied,
+            stage,
+            raw_os_error: Some(5),
+        };
+        let broker = FixedHelperBroker::new(&runtime, &launcher, discard_events());
 
-    let result = broker.inject(&InjectionRequest {
-        identity: target(ProcessArchitecture::X86),
-        binding: runtime.binding(),
-    });
+        let result = broker.inject(&x64_request(&runtime));
 
-    assert_eq!(result.disposition, BrokerDisposition::Injected);
-    assert_eq!(launcher.invocations.lock().unwrap().len(), 1);
+        assert_eq!(result.disposition, expected);
+        assert_eq!(result.code, code);
+        assert_eq!(result.win32_error, Some(5));
+    }
+}
+
+#[test]
+fn request_binding_is_checked_before_renderer_verification() {
+    let (_base, runtime) = runtime();
+    for (binding, code) in [
+        (test_binding(), "runtime-generation-mismatch"),
+        (
+            RendererRuntimeBinding::new(
+                *runtime.binding().runtime_generation_id(),
+                *test_binding().profile_digest(),
+            ),
+            "profile-digest-mismatch",
+        ),
+    ] {
+        let launcher = RecordingLauncher::default();
+        let broker = FixedHelperBroker::new(&runtime, &launcher, discard_events());
+        let request = InjectionRequest {
+            binding,
+            ..x64_request(&runtime)
+        };
+
+        let result = broker.inject(&request);
+
+        assert_eq!(result.disposition, BrokerDisposition::UncertainIntegrity);
+        assert_eq!(result.code, code);
+        assert!(launcher.invocations.lock().unwrap().is_empty());
+    }
 }

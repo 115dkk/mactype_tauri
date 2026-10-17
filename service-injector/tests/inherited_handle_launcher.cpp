@@ -78,27 +78,34 @@ private:
 }  // namespace
 
 int wmain(const int count, wchar_t** values) {
-    if (count < 4) {
-        std::cerr << "usage: inherited-handle-launcher <injector> <handle-pid> <args...>\n";
+    constexpr std::wstring_view no_inherited_handle = L"--no-inherited-handle";
+    if (count < 3 ||
+        (count < 4 && std::wstring_view{values[2]} != no_inherited_handle)) {
+        std::cerr << "usage: inherited-handle-launcher <injector> "
+                     "<handle-pid|--no-inherited-handle> <args...>\n";
         return 125;
     }
+    const bool omit_process_handle = std::wstring_view{values[2]} == no_inherited_handle;
     DWORD handle_pid = 0;
-    if (!parse_pid(values[2], handle_pid)) {
+    if (!omit_process_handle && !parse_pid(values[2], handle_pid)) {
         std::cerr << "invalid handle PID\n";
         return 125;
     }
     constexpr DWORD access = PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION |
                              PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_OPERATION |
                              PROCESS_VM_WRITE | PROCESS_VM_READ | SYNCHRONIZE;
-    const UniqueHandle target{OpenProcess(access, TRUE, handle_pid)};
-    if (!target) {
+    const UniqueHandle target{
+        omit_process_handle ? nullptr : OpenProcess(access, TRUE, handle_pid)};
+    if (!omit_process_handle && !target) {
         std::cerr << "OpenProcess failed: " << GetLastError() << '\n';
         return 125;
     }
 
     std::wstring command = quote(values[1]);
-    command += L" --process-handle ";
-    command += std::to_wstring(reinterpret_cast<std::uintptr_t>(target.get()));
+    if (!omit_process_handle) {
+        command += L" --process-handle ";
+        command += std::to_wstring(reinterpret_cast<std::uintptr_t>(target.get()));
+    }
     for (int index = 3; index < count; ++index) {
         command.push_back(L' ');
         command += quote(values[index]);
@@ -126,7 +133,9 @@ int wmain(const int count, wchar_t** values) {
     startup.hStdOutput = output_write.get();
     startup.hStdError = output_write.get();
     PROCESS_INFORMATION process{};
-    if (!CreateProcessW(values[1], command.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
+    // Keep this fixture headless and prevent an installed renderer's child relay
+    // from modifying the injector under test before its entry point.
+    if (!CreateProcessW(values[1], command.data(), nullptr, nullptr, TRUE, DETACHED_PROCESS,
                         nullptr, nullptr, &startup, &process)) {
         std::cerr << "CreateProcess failed: " << GetLastError() << '\n';
         return 125;

@@ -1,4 +1,5 @@
 #include "../../../renderer/profile_runtime.h"
+#include "../../../renderer/control_message.h"
 
 #include <atomic>
 #include <cstdlib>
@@ -48,6 +49,7 @@ renderer::RendererPolicyCandidate Candidate(
     candidate.raster.useMapping = true;
     candidate.raster.substituteAllFonts = true;
     candidate.raster.gamma = gamma;
+    candidate.admission.displayAffinity = {gamma == 1.25f ? 1 : 2};
     candidate.raster.renderWeight = 1.0f;
     candidate.raster.contrast = 1.0f;
     for (unsigned int value = 0; value < 256; ++value) {
@@ -85,10 +87,141 @@ renderer::RendererPolicyCandidate Candidate(
     return candidate;
 }
 
+
+void TestAdmissionAndReload()
+{
+    renderer::ProfileRuntime runtime;
+    auto candidate = Candidate(1.25f, L"Replacement");
+    candidate.admission.displayAffinity = {1};
+    candidate.admission.excludeFonts = {L"Excluded"};
+    candidate.admission.includeFonts = {L"Included", L"Excluded"};
+    candidate.admission.executableDirectory = L"c:\\apps\\child\\";
+    candidate.admission.excludeModules = {L"C:\\Apps\\"};
+    candidate.admission.includeModules = {L"C:\\Apps\\"};
+    candidate.admission.unloadModules = {L"C:\\Apps\\"};
+    candidate.raster.minHeight = 3;
+    candidate.raster.maxHeight = 90;
+    candidate.raster.clipBoxFix = true;
+    candidate.raster.shadowEnabled = true;
+    candidate.raster.shadowParams = {1, 2, 3, 4};
+    const auto first = runtime.Publish(candidate).snapshot;
+    Require(first && first->display_allowed(1) && !first->display_allowed(2) && first->display_allowed(-1),
+        "display selection must permit unknown displays and only configured known displays");
+    Require(first->font_excluded(L"Excluded") && !first->font_excluded(L"Included") &&
+        first->font_excluded(L"included") && first->font_excluded(L"Other"),
+        "font exclusion takes precedence over the case-sensitive include list");
+    Require(first->process_excluded(false, false, nullptr) && !first->process_unload(false, nullptr),
+        "exclude directories match descendants, while unload directories match exactly");
+    Require(!first->process_excluded(true, false, nullptr) && first->process_excluded(true, true, nullptr),
+        "forced exclusion precedes forced loading outside include-only mode");
+    Require(first->raster().minHeight == 3 && first->raster().maxHeight == 90 &&
+        first->raster().clipBoxFix && first->raster().shadowParams[3] == 4,
+        "GDI limits and raw shadow parameters must be retained in the snapshot");
+
+    candidate.admission.displayAffinity = {2};
+    candidate.admission.includeOnly = true;
+    const auto second = runtime.Publish(candidate).snapshot;
+    Require(second && !second->display_allowed(1) && second->display_allowed(2) &&
+        first->display_allowed(1) && !first->display_allowed(2),
+        "reload replaces affinity rather than accumulating it and leaves retained readers intact");
+    Require(second->process_excluded(false, false, nullptr) && second->process_unload(false, nullptr),
+        "include-only directory rules must not admit descendants");
+    Require(!second->process_excluded(true, true, nullptr) && !second->process_unload(true, nullptr),
+        "include-only process admission preserves the force-load override");
+    Require(second->exe_unload(L"child.exe", true),
+        "legacy child include-only behavior must retain the force-load exclusion result");
+
+    candidate.admission.displayAffinity.clear();
+    candidate.admission.includeModules = {L"Child.EXE"};
+    candidate.admission.unloadModules = {L"Blocked.EXE"};
+    candidate.admission.unityIncludeGames = {L"C:\\Games\\Allowed.exe", L"C:\\Exact\\"};
+    candidate.admission.unityExcludeGames = {L"Blocked.exe"};
+    candidate.hooks.unityFontMode = renderer::UnityFontHookMode::selectedGames;
+    const auto third = runtime.Publish(candidate).snapshot;
+    Require(third && third->display_allowed(1) && third->display_allowed(2) && third->display_allowed(99),
+        "an empty affinity reload must remove every prior display restriction");
+    Require(!third->exe_unload(L"child.exe", false) && third->exe_unload(L"C:\\Child.exe", false),
+        "child inclusion compares the complete supplied executable name case-insensitively");
+    auto loaded = [](const wchar_t* name) { return std::wstring(name) == L"Child.EXE"; };
+    Require(!third->process_excluded(false, false, loaded),
+        "included loaded modules admit the process without mutable parser reads");
+    Require(third->unity_font_enabled_for_executable(L"D:\\Other\\allowed.exe") &&
+        third->unity_font_enabled_for_executable(L"C:\\Exact\\game.exe") &&
+        !third->unity_font_enabled_for_executable(L"C:\\Exact\\child\\game.exe"),
+        "Unity executable basename and exact-directory matching must remain unchanged");
+    Require(first->digest() != second->digest() && second->digest() != third->digest(),
+        "admission changes must contribute to the policy digest");
+
+    candidate.admission.includeOnly = false;
+    candidate.admission.includeFonts.clear();
+    candidate.hooks.unityFontMode = renderer::UnityFontHookMode::allGames;
+    const auto fourth = runtime.Publish(candidate).snapshot;
+    Require(fourth->exe_unload(L"blocked.exe", false) && !fourth->exe_unload(L"blocked.exe", true) &&
+        !fourth->font_excluded(L"Other") && fourth->font_excluded(L"Excluded"),
+        "unload and font exclusion semantics must survive removal of include lists");
+    Require(!fourth->unity_font_enabled_for_executable(L"D:\\blocked.exe") &&
+        fourth->unity_font_enabled_for_executable(L"D:\\allowed.exe"),
+        "all-games Unity policy must honor its immutable exclusion list");
+
+    auto& process = renderer::ProcessProfileRuntime();
+    Require(process.Publish(Candidate(1.0f, L"First")).published(), "process policy setup failed");
+    const auto before = renderer::CurrentRendererPolicy();
+    {
+        const renderer::RendererPolicyScope outer(before);
+        Require(process.Publish(Candidate(2.0f, L"Second")).published(), "policy reload failed");
+        Require(renderer::CurrentRendererPolicy() == before,
+            "nested raster readers must retain the outer call's generation during reload");
+        const renderer::RendererPolicyScope inner(process.Load());
+        Require(renderer::CurrentRendererPolicy() == before,
+            "nested hooks must not replace the outer call's snapshot");
+        bool seesLatest = false;
+        std::thread other([&] { seesLatest = renderer::CurrentRendererPolicy() == process.Load(); });
+        other.join();
+        Require(seesLatest, "a retained call must not pin another thread's generation");
+    }
+    Require(renderer::CurrentRendererPolicy() == process.Load() && renderer::CurrentRendererPolicy() != before,
+        "leaving the outer call must restore current-generation lookup");
+}
+
+void TestControlMessages()
+{
+    using renderer::ControlMessageKind;
+    auto parse = [](const std::string& text) { return renderer::ParseControlMessage(text.data(), text.size()); };
+    for (const char* invalid : {"", "{", "[]", "null", "{}", "{\"command\":1}",
+        "{\"command\":\"unknown\"}", "{\"command\":\"loadprofile\"}",
+        "{\"command\":\"loadprofile\",\"file\":false}",
+        "{\"command\":\"loadprofile\",\"file\":\"\"}",
+        "{\"command\":\"loadprofile\",\"file\":\"a\\u0000b\"}"}) {
+        Require(parse(invalid).kind == ControlMessageKind::invalid,
+            "malformed or wrongly typed control messages must cause no action");
+    }
+    const std::string ping = "{\"command\":\"ping\"}";
+    Require(parse(ping).kind == ControlMessageKind::ping &&
+        parse(ping + '\0').kind == ControlMessageKind::ping,
+        "ping must accept counted and uncounted terminating NULs");
+    Require(parse(ping + '\0' + "garbage").kind == ControlMessageKind::invalid,
+        "an embedded NUL must not conceal trailing input");
+    const auto load = parse("{\"command\":\"loadprofile\",\"file\":\"C:\\\\Temp\\\\preview.ini\"}");
+    Require(load.kind == ControlMessageKind::loadProfile && load.path == "C:\\Temp\\preview.ini",
+        "a valid temporary profile path must remain accepted");
+    Require(renderer::ParseControlMessage(nullptr, 1).kind == ControlMessageKind::invalid &&
+        renderer::ParseControlMessage(ping.data(), renderer::kMaxControlMessageBytes + 1).kind == ControlMessageKind::invalid,
+        "null and oversized payloads must be rejected before any copy");
+    std::string boundary = ping;
+    boundary.resize(renderer::kMaxControlMessageBytes, ' ');
+    Require(parse(boundary).kind == ControlMessageKind::ping, "the documented byte boundary must be accepted");
+    boundary.push_back(' ');
+    Require(parse(boundary).kind == ControlMessageKind::invalid, "the next byte must exceed the bound");
+    Require(parse(std::string(32, '[') + "0" + std::string(32, ']')).kind == ControlMessageKind::invalid,
+        "deeply nested input must be rejected without unbounded parser recursion");
+}
+
 } // namespace
 
 int main()
 {
+    TestAdmissionAndReload();
+    TestControlMessages();
     std::string knownDigest;
     const unsigned char knownBytes[] = {'a', 'b', 'c'};
     Require(renderer::Sha256ProfileDigest(
@@ -269,6 +402,8 @@ int main()
                 renderer::RendererPolicyRef observed = runtime.Load();
                 if (!observed ||
                     observed->raster().generation != observed->generation() ||
+                    !observed->display_allowed(observed->raster().gamma == 1.25f ? 1 : 2) ||
+                    observed->display_allowed(observed->raster().gamma == 1.25f ? 2 : 1) ||
                     observed->font_substitutions()->generation() !=
                         observed->revision()) {
                     coherent.store(false, std::memory_order_release);

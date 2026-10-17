@@ -406,7 +406,8 @@ a nested call on the establishing thread the way the build already refused one,
 and `directwrite-readiness-tests` covers the nested refusal and its thread
 separation alongside the two build races.
 Name-record pruning was removed (a default instance shares IDs 2 and 17 with
-the family), an explicit advertised weight wins over the pinned coordinate so
+the family; the alias identity records are still rewritten as before), an
+explicit advertised weight wins over the pinned coordinate so
 the bold-slot alias keeps its own file, and the manifest became
 `manifest-v2.bin` with the backing size in the value: a hit is validated by
 size and scaler type and a hit whose file no longer opens is dropped and
@@ -416,6 +417,26 @@ the alias collection answered after 265 ms; warm, the poll saw it at 109 to
 140 ms and the first call returned the alias at 109 to 141 ms. VS Code
 started the same way received the alias in its browser process and drew the
 editor's Hangul in Pretendard Variable Medium.
+
+A read-only audit after the merge found four more defects, fixed in the
+follow-up. `GetCachedForFactory` waited on a reference to a vector element
+while the condition variable released the cache mutex, so another factory's
+build growing the vector or a failed build erasing the element left the waiter
+reading freed memory; it now waits on an owned copy. The fallback slots became
+live before the per-factory build entry existed, so a `MapCharacters` in that
+window found nothing to wait on and let the native font through; a
+`BuildReservation` now inserts the entry before the fallback hook, the
+reserving thread's own `GetOrCreate` adopts it, an unconsumed reservation
+completes it as a failure, and a lookup on the reserving thread skips rather
+than waits on itself. The fallback lookup waited up to ten seconds per factory
+source and discarded the timeout silently; one deadline now spans the whole
+mapping call and `alias-collection-wait-timeout` is signalled once. The
+manifest was loaded once per process and rewritten whole from that snapshot,
+so two processes overwrote each other's entries; the state reloads when the
+file changed and a bounded named mutex serializes the read-merge-write across
+processes. The pre-entry probe exercises the collection path only; the two
+fallback windows are covered by the fake-driven readiness tests and by
+reasoning, not by a runtime reproduction.
 
 An injection that lands after the first frame (the open service's remote
 `LoadLibrary`, every elevated target, any child of a parent that was not

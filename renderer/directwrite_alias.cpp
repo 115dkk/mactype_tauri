@@ -28,6 +28,7 @@ struct CacheEntry
 	std::condition_variable ready;
 	AliasFontSet aliases;
 	BuildStatus status = BuildStatus::unexpectedFailure;
+	DWORD reservingThread = 0;
 	bool building = true;
 };
 
@@ -706,20 +707,30 @@ BuildStatus GetOrCreateUnchecked(
 		}
 		if (entry != nullptr)
 		{
-			if (!directwrite_readiness::WaitForBuild(
-					entry, lock, kBuildWaitTimeout, !isBuildingAliases))
-				return isBuildingAliases ? BuildStatus::buildReentrant :
-					BuildStatus::waitTimeout;
-			result = entry->aliases;
-			result.cacheHit = true;
-			return entry->status;
+			if (entry->building &&
+				entry->reservingThread == GetCurrentThreadId())
+			{
+				entry->reservingThread = 0;
+			}
+			else
+			{
+				if (!directwrite_readiness::WaitForBuild(
+						entry, lock, kBuildWaitTimeout, !isBuildingAliases))
+					return isBuildingAliases ? BuildStatus::buildReentrant :
+						BuildStatus::waitTimeout;
+				result = entry->aliases;
+				result.cacheHit = true;
+				return entry->status;
+			}
 		}
-
-		entry = std::make_shared<CacheEntry>();
-		entry->factoryIdentity = factoryIdentity;
-		entry->systemSetIdentity = systemSetIdentity;
-		entry->generation = generation;
-		cache.entries.push_back(entry);
+		else
+		{
+			entry = std::make_shared<CacheEntry>();
+			entry->factoryIdentity = factoryIdentity;
+			entry->systemSetIdentity = systemSetIdentity;
+			entry->generation = generation;
+			cache.entries.push_back(entry);
+		}
 	}
 
 	AliasFontSet built;
@@ -766,6 +777,96 @@ BuildStatus GetOrCreateUnchecked(
 
 } // namespace
 
+BuildReservation::BuildReservation(
+	IDWriteFactory* factory,
+	IDWriteFontSet* systemFontSet) noexcept
+{
+	try
+	{
+		if (isBuildingAliases || IsSubstitutionDisabled())
+			return;
+		CGdippSettings const* settings = CGdippSettings::GetInstance();
+		if (!settings->DelayedInited())
+			return;
+		std::shared_ptr<const renderer::font_substitution::Snapshot> const snapshot =
+			renderer::font_substitution::ProcessRegistry().Load();
+		if (!snapshot || snapshot->rules().empty())
+			return;
+
+		CComPtr<IUnknown> const factoryIdentity = GetIdentity(factory);
+		CComPtr<IUnknown> const systemSetIdentity = GetIdentity(systemFontSet);
+		if (factoryIdentity == nullptr || systemSetIdentity == nullptr)
+			return;
+
+		std::uint64_t const generation = snapshot->generation();
+		AliasCache& cache = GetCache();
+		std::lock_guard<std::mutex> lock(cache.mutex);
+		cache.entries.erase(
+			std::remove_if(
+				cache.entries.begin(), cache.entries.end(),
+				[generation](std::shared_ptr<CacheEntry> const& candidate) {
+					return candidate->generation != generation;
+				}),
+			cache.entries.end());
+		for (std::shared_ptr<CacheEntry> const& candidate : cache.entries)
+		{
+			if (candidate->factoryIdentity == factoryIdentity &&
+				candidate->systemSetIdentity == systemSetIdentity &&
+				candidate->generation == generation)
+				return;
+		}
+
+		std::shared_ptr<CacheEntry> entry = std::make_shared<CacheEntry>();
+		entry->factoryIdentity = factoryIdentity;
+		entry->systemSetIdentity = systemSetIdentity;
+		entry->generation = generation;
+		entry->reservingThread = GetCurrentThreadId();
+		cache.entries.push_back(entry);
+		entry_ = entry;
+	}
+	catch (...)
+	{
+		entry_.reset();
+	}
+}
+
+BuildReservation::~BuildReservation()
+{
+	try
+	{
+		std::shared_ptr<CacheEntry> const entry =
+			std::static_pointer_cast<CacheEntry>(entry_);
+		if (entry == nullptr)
+			return;
+		bool notify = false;
+		{
+			AliasCache& cache = GetCache();
+			std::lock_guard<std::mutex> lock(cache.mutex);
+			if (entry->building &&
+				entry->reservingThread == GetCurrentThreadId())
+			{
+				entry->status = BuildStatus::unexpectedFailure;
+				entry->building = false;
+				entry->reservingThread = 0;
+				cache.entries.erase(
+					std::remove(cache.entries.begin(), cache.entries.end(), entry),
+					cache.entries.end());
+				notify = true;
+			}
+		}
+		if (notify)
+			entry->ready.notify_all();
+	}
+	catch (...)
+	{
+	}
+}
+
+bool BuildReservation::reserved() const noexcept
+{
+	return entry_ != nullptr;
+}
+
 BuildStatus GetOrCreate(
 	IDWriteFactory* factory,
 	IDWriteFontSet* systemFontSet,
@@ -792,6 +893,23 @@ BuildStatus GetCachedForFactory(
 	std::uint64_t substitutionGeneration,
 	AliasFontSet& result) noexcept
 {
+	return GetCachedForFactory(
+		factory, substitutionGeneration, result,
+		std::chrono::steady_clock::now() + BuildWaitTimeout());
+}
+
+std::chrono::milliseconds BuildWaitTimeout() noexcept
+{
+	return std::chrono::duration_cast<std::chrono::milliseconds>(
+		kBuildWaitTimeout);
+}
+
+BuildStatus GetCachedForFactory(
+	IDWriteFactory* factory,
+	std::uint64_t substitutionGeneration,
+	AliasFontSet& result,
+	std::chrono::steady_clock::time_point deadline) noexcept
+{
 	result = {};
 	try
 	{
@@ -800,20 +918,34 @@ BuildStatus GetCachedForFactory(
 			return BuildStatus::unsupportedFactory;
 		AliasCache& cache = GetCache();
 		std::unique_lock<std::mutex> lock(cache.mutex);
-		for (std::shared_ptr<CacheEntry> const& entry : cache.entries)
+		std::shared_ptr<CacheEntry> entry;
+		for (std::shared_ptr<CacheEntry> const& candidate : cache.entries)
 		{
-			if (entry->factoryIdentity != identity ||
-				entry->generation != substitutionGeneration)
-				continue;
-			if (!directwrite_readiness::WaitForBuild(
-					entry, lock, kBuildWaitTimeout, !isBuildingAliases))
-				return isBuildingAliases ? BuildStatus::systemSetUnavailable :
-					BuildStatus::waitTimeout;
-			result = entry->aliases;
-			result.cacheHit = true;
-			return entry->status;
+			if (candidate->factoryIdentity == identity &&
+				candidate->generation == substitutionGeneration)
+			{
+				entry = candidate;
+				break;
+			}
 		}
-		return BuildStatus::systemSetUnavailable;
+		if (entry == nullptr)
+			return BuildStatus::systemSetUnavailable;
+		// The wait releases the cache mutex, and meanwhile another factory's
+		// build may grow the vector or a failed build may erase this element;
+		// only an owned copy keeps the entry alive and off the vector.
+		std::chrono::steady_clock::duration remaining =
+			deadline - std::chrono::steady_clock::now();
+		if (remaining < std::chrono::steady_clock::duration::zero())
+			remaining = std::chrono::steady_clock::duration::zero();
+		bool const mayWait = !isBuildingAliases &&
+			entry->reservingThread != GetCurrentThreadId();
+		if (!directwrite_readiness::WaitForBuild(
+				entry, lock, remaining, mayWait))
+			return mayWait ? BuildStatus::waitTimeout :
+				BuildStatus::systemSetUnavailable;
+		result = entry->aliases;
+		result.cacheHit = true;
+		return entry->status;
 	}
 	catch (std::bad_alloc const&)
 	{

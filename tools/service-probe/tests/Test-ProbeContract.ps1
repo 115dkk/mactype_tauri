@@ -3,11 +3,17 @@ param(
     [ValidateSet('Win32', 'x64')]
     [string] $Architecture = 'x64',
 
-    [string] $BuildRoot = (Join-Path ([System.IO.Path]::GetTempPath()) 'mactype-service-probe-contract')
+    [string] $BuildRoot = (Join-Path ([System.IO.Path]::GetTempPath()) 'mactype-service-probe-contract'),
+
+    [switch] $Interactive
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot '..\..\..\scripts\ci\lib\ProbeDesktop.ps1')
+if (-not $Interactive -and -not (Test-ProbeDesktopContext)) {
+    exit (Invoke-ProbeDesktopScript -ScriptPath $PSCommandPath -Parameters $PSBoundParameters -TimeoutSeconds 1800)
+}
 
 function Assert-Equal {
     param(
@@ -31,9 +37,14 @@ if ($LASTEXITCODE -ne 0) {
     throw "CMake configure failed with exit code $LASTEXITCODE"
 }
 
-& cmake --build $buildDirectory --config Release --target probe-console probe-window probe-spawn-tree probe-timeout-fixture
+& cmake --build $buildDirectory --config Release --target probe-console probe-window probe-spawn-tree probe-timeout-fixture control-message-tests settings-snapshot-tests
 if ($LASTEXITCODE -ne 0) {
     throw "CMake build failed with exit code $LASTEXITCODE"
+}
+
+& ctest --test-dir $buildDirectory -C Release -R '^(control-message|settings-snapshot)-tests$' --output-on-failure --no-tests=error
+if ($LASTEXITCODE -ne 0) {
+    throw "Renderer settings tests failed with exit code $LASTEXITCODE"
 }
 
 New-Item -ItemType Directory -Force $resultDirectory | Out-Null

@@ -38,15 +38,22 @@ $processes = [System.Collections.Generic.List[System.Diagnostics.Process]]::new(
 $fixedModule = Join-Path (Split-Path -Parent $Injector) ([IO.Path]::GetFileName($Module))
 $moduleBackup = "$fixedModule.normal"
 $moduleReplaced = $false
+$testSucceeded = $false
 
 function Wait-ForFile([string] $Path, [System.Diagnostics.Process] $Process) {
+    $timer = [Diagnostics.Stopwatch]::StartNew()
     $deadline = [DateTime]::UtcNow.AddSeconds(5)
     while (-not (Test-Path -LiteralPath $Path) -and
            -not $Process.HasExited -and [DateTime]::UtcNow -lt $deadline) {
         Start-Sleep -Milliseconds 20
     }
     if (-not (Test-Path -LiteralPath $Path)) {
-        throw "Process $($Process.Id) did not publish $Path."
+        $Process.Refresh()
+        $elapsedMs = $timer.ElapsedMilliseconds
+        if ($Process.HasExited) {
+            throw "Process $($Process.Id) exited with code $($Process.ExitCode) after $elapsedMs ms without publishing '$Path'."
+        }
+        throw "Process $($Process.Id) was still running after $elapsedMs ms and did not publish '$Path'."
     }
 }
 
@@ -62,7 +69,10 @@ function Start-Marker([string] $Name, [string] $PreloadModule = '') {
     if ($PreloadModule) {
         $arguments += @('--preload', $PreloadModule)
     }
-    $process = Start-Process -FilePath $Target -ArgumentList $arguments -PassThru
+    $process = Start-Process -FilePath $Target -ArgumentList $arguments -PassThru -NoNewWindow
+    # Windows PowerShell must open the native handle before the child exits;
+    # otherwise ExitCode remains null even after WaitForExit succeeds.
+    [void]$process.Handle
     $processes.Add($process)
     Wait-ForFile -Path $metadataPath -Process $process
     return [pscustomobject]@{
@@ -92,6 +102,23 @@ function Invoke-Broker(
     $exitCode = $LASTEXITCODE
     if ([string]::IsNullOrWhiteSpace([string]$json)) {
         throw "Inherited-handle launcher returned no JSON for PID $handlePidText (exit $exitCode)."
+    }
+    return [pscustomobject]@{
+        ExitCode = $exitCode
+        Json = [string]$json
+        Response = ([string]$json | ConvertFrom-Json)
+    }
+}
+
+function Invoke-WithoutInheritedHandle(
+    [string] $Executable,
+    [string[]] $Arguments
+) {
+    $launcherArguments = @($Executable, '--no-inherited-handle') + $Arguments
+    $json = & $InheritedHandleLauncher $launcherArguments
+    $exitCode = $LASTEXITCODE
+    if ([string]::IsNullOrWhiteSpace([string]$json)) {
+        throw "Inherited-handle launcher returned no JSON for an explicit no-handle request (exit $exitCode)."
     }
     return [pscustomobject]@{
         ExitCode = $exitCode
@@ -184,12 +211,8 @@ try {
         '--session-id', [string]$wrongHandle.Identity.sessionId,
         '--generation-id', $generation
     )
-    $invalidHandleJson = & $Injector $invalidHandleArguments
-    $invalidHandleResponse = [pscustomobject]@{
-        ExitCode = $LASTEXITCODE
-        Json = [string]$invalidHandleJson
-        Response = ([string]$invalidHandleJson | ConvertFrom-Json)
-    }
+    $invalidHandleResponse = Invoke-WithoutInheritedHandle `
+        -Executable $Injector -Arguments $invalidHandleArguments
     Assert-Response $invalidHandleResponse 2 'rejected' 'process-handle-invalid'
 
     $wrongSession = Start-Marker -Name 'wrong-session'
@@ -211,7 +234,8 @@ try {
         Join-Path $env:WINDIR 'System32\cmd.exe'
     }
     $opposite = Start-Process -FilePath $oppositeExecutable `
-        -ArgumentList '/d /c ping -n 10 127.0.0.1 >nul' -PassThru
+        -ArgumentList '/d /c ping -n 10 127.0.0.1 >nul' -PassThru -NoNewWindow
+    [void]$opposite.Handle
     $processes.Add($opposite)
     $opposite.Refresh()
     $oppositeIdentity = [pscustomobject]@{
@@ -235,6 +259,7 @@ try {
     if (-not $slow.Process.HasExited -or $slow.Process.ExitCode -ne 0) {
         throw 'Marker target did not observe the verified late module load.'
     }
+    $testSucceeded = $true
 } finally {
     foreach ($process in $processes) {
         if ($process -and -not $process.HasExited) {
@@ -246,5 +271,29 @@ try {
         Copy-Item -LiteralPath $moduleBackup -Destination $fixedModule -Force
     }
     Remove-Item -LiteralPath $moduleBackup -Force -ErrorAction SilentlyContinue
+    if (-not $testSucceeded -and (Test-Path -LiteralPath $testRoot -PathType Container)) {
+        try {
+            $evidenceFiles = @(Get-ChildItem -LiteralPath $testRoot -File -ErrorAction Stop |
+                Sort-Object Name | Select-Object -First 32)
+            [Console]::Error.WriteLine("Injector integration failure evidence from $testRoot")
+            if ($evidenceFiles.Count -eq 0) {
+                [Console]::Error.WriteLine('  no files were published')
+            }
+            foreach ($evidenceFile in $evidenceFiles) {
+                $content = if ($evidenceFile.Length -eq 0) {
+                    '<empty>'
+                } elseif ($evidenceFile.Length -gt 4096) {
+                    '<content omitted: file exceeds 4096 bytes>'
+                } else {
+                    [IO.File]::ReadAllText($evidenceFile.FullName)
+                }
+                [Console]::Error.WriteLine(
+                    "  $($evidenceFile.Name) ($($evidenceFile.Length) bytes): $content")
+            }
+        } catch {
+            [Console]::Error.WriteLine(
+                "  evidence collection failed: $($_.Exception.Message)")
+        }
+    }
     Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

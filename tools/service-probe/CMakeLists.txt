@@ -51,8 +51,30 @@ target_compile_features(probe-timeout-fixture PRIVATE cxx_std_20)
 target_compile_definitions(probe-timeout-fixture PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 set_target_properties(probe-timeout-fixture PROPERTIES OUTPUT_NAME "probe-timeout-fixture${PROBE_ARCH_SUFFIX}")
 
+add_executable(control-message-tests tests/control_message_tests.cpp)
+target_compile_features(control-message-tests PRIVATE cxx_std_14)
+target_compile_definitions(control-message-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+
+add_executable(settings-snapshot-tests
+  tests/settings_snapshot_tests.cpp
+  ../../hash_list.cpp
+)
+target_compile_features(settings-snapshot-tests PRIVATE cxx_std_14)
+target_compile_definitions(settings-snapshot-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+
+enable_testing()
+find_program(MACTYPE_PROBE_POWERSHELL NAMES pwsh REQUIRED)
+foreach(target control-message-tests settings-snapshot-tests)
+  add_test(NAME ${target} COMMAND "${MACTYPE_PROBE_POWERSHELL}"
+    -NoLogo -NoProfile -NonInteractive -File
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/ci/Invoke-ProbeDesktop.ps1"
+    -Executable $<TARGET_FILE:${target}> -TimeoutSeconds 120
+  )
+  set_tests_properties(${target} PROPERTIES TIMEOUT 150)
+endforeach()
+
 if(MSVC)
-  foreach(target service-probe-common probe-console probe-window probe-spawn-tree probe-timeout-fixture)
+  foreach(target service-probe-common probe-console probe-window probe-spawn-tree probe-timeout-fixture control-message-tests settings-snapshot-tests)
     target_compile_options(${target} PRIVATE /W4 /WX /permissive- /utf-8 /sdl)
   endforeach()
 endif()

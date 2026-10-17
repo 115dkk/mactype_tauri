@@ -28,6 +28,20 @@ import type {
 import type { ControlCenterRuntimeAdapter } from "../runtimeAdapter";
 import { normalizeEvents } from "../../features/events/normalizeEvent";
 
+function stopListening(stop: () => void, view: ViewId, channel: string): void {
+  const reportFailure = (error: unknown): void => {
+    void Promise.resolve().then(() => tauriRuntimeAdapter.reportFrontendFailure(
+      view, `${channel}: ${error instanceof Error ? error.message : String(error)}`,
+    )).catch(() => undefined);
+  };
+  try {
+    // Tauri types unlisten as void but returns a Promise; its JS callback must be removed synchronously.
+    void Promise.resolve(stop()).catch(reportFailure);
+  } catch (error: unknown) {
+    reportFailure(error);
+  }
+}
+
 export const tauriRuntimeAdapter: ControlCenterRuntimeAdapter = {
   loadLaunchContext: () => invoke<LaunchContext>("launch_context"),
 
@@ -88,12 +102,14 @@ export const tauriRuntimeAdapter: ControlCenterRuntimeAdapter = {
     let disposed = false;
     let unlisten: (() => void) | null = null;
     void listen("event-log:changed", () => listener()).then((stop) => {
-      if (disposed) stop();
+      if (disposed) stopListening(stop, "diagnostics", "event-log:changed");
       else unlisten = stop;
-    });
+    }).catch((error: unknown) => tauriRuntimeAdapter.reportFrontendFailure(
+      "diagnostics", `event-log:changed: ${error instanceof Error ? error.message : String(error)}`,
+    ).catch(() => undefined));
     return () => {
       disposed = true;
-      unlisten?.();
+      if (unlisten) stopListening(unlisten, "diagnostics", "event-log:changed");
     };
   },
   exportDiagnostics: () => invoke<string>("export_diagnostics"),
@@ -135,12 +151,14 @@ export const tauriRuntimeAdapter: ControlCenterRuntimeAdapter = {
     let disposed = false;
     let unlisten: (() => void) | null = null;
     void listen<NativePreviewState>("native-preview:state", (event) => listener(event.payload)).then((stop) => {
-      if (disposed) stop();
+      if (disposed) stopListening(stop, "profiles", "native-preview:state");
       else unlisten = stop;
-    });
+    }).catch((error: unknown) => tauriRuntimeAdapter.reportFrontendFailure(
+      "profiles", `native-preview:state: ${error instanceof Error ? error.message : String(error)}`,
+    ).catch(() => undefined));
     return () => {
       disposed = true;
-      unlisten?.();
+      if (unlisten) stopListening(unlisten, "profiles", "native-preview:state");
     };
   },
   previewImageUrl: (path: string) => convertFileSrc(path),

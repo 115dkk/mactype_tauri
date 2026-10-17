@@ -294,6 +294,7 @@ function withGalleryLegacyTrayPolicy(
   const systemInjectionActive = systemModesSupported
     && legacyTray.conflict === "clear"
     && service.backend === "open-source"
+    && service.installation === "current"
     && service.runtime === "running"
     && service.health === "ready"
     && Boolean(current.expectedProfileDigest)

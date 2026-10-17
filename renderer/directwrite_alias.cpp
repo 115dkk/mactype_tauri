@@ -800,20 +800,28 @@ BuildStatus GetCachedForFactory(
 			return BuildStatus::unsupportedFactory;
 		AliasCache& cache = GetCache();
 		std::unique_lock<std::mutex> lock(cache.mutex);
-		for (std::shared_ptr<CacheEntry> const& entry : cache.entries)
+		std::shared_ptr<CacheEntry> entry;
+		for (std::shared_ptr<CacheEntry> const& candidate : cache.entries)
 		{
-			if (entry->factoryIdentity != identity ||
-				entry->generation != substitutionGeneration)
-				continue;
-			if (!directwrite_readiness::WaitForBuild(
-					entry, lock, kBuildWaitTimeout, !isBuildingAliases))
-				return isBuildingAliases ? BuildStatus::systemSetUnavailable :
-					BuildStatus::waitTimeout;
-			result = entry->aliases;
-			result.cacheHit = true;
-			return entry->status;
+			if (candidate->factoryIdentity == identity &&
+				candidate->generation == substitutionGeneration)
+			{
+				entry = candidate;
+				break;
+			}
 		}
-		return BuildStatus::systemSetUnavailable;
+		if (entry == nullptr)
+			return BuildStatus::systemSetUnavailable;
+		// The wait releases the cache mutex, and meanwhile another factory's
+		// build may grow the vector or a failed build may erase this element;
+		// only an owned copy keeps the entry alive and off the vector.
+		if (!directwrite_readiness::WaitForBuild(
+				entry, lock, kBuildWaitTimeout, !isBuildingAliases))
+			return isBuildingAliases ? BuildStatus::systemSetUnavailable :
+				BuildStatus::waitTimeout;
+		result = entry->aliases;
+		result.cacheHit = true;
+		return entry->status;
 	}
 	catch (std::bad_alloc const&)
 	{

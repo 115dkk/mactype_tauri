@@ -358,8 +358,7 @@ FT_Face ReplaceCharacterLookupFace(
 	try
 	{
 		UnityLifecycleState& lifecycle = ProcessUnityLifecycle();
-		auto const redirects = std::atomic_load_explicit(
-			&lifecycle.redirects, std::memory_order_acquire);
+		auto const redirects = lifecycle.redirects.load(std::memory_order_acquire);
 		if (!redirects || redirects->empty() || !lifecycle.faceDoneAttached ||
 			!lifecycle.operational.load(std::memory_order_acquire) ||
 			InterlockedCompareExchange(&g_bHookEnabled, 0, 0) == FALSE)
@@ -371,7 +370,7 @@ FT_Face ReplaceCharacterLookupFace(
 		FaceOpenFunction openFace = nullptr;
 		FaceDoneFunction doneFace = nullptr;
 		{
-			std::lock_guard<std::mutex> cacheLock(
+			std::scoped_lock cacheLock(
 				lifecycle.faceReplacementMutex);
 			if (lifecycle.faceReplacements.IsReplacement(face))
 				return face;
@@ -434,7 +433,7 @@ FT_Face ReplaceCharacterLookupFace(
 		if (result != 0 || replacement == nullptr)
 		{
 			{
-				std::lock_guard<std::mutex> cacheLock(
+				std::scoped_lock cacheLock(
 					lifecycle.faceReplacementMutex);
 				lifecycle.faceReplacements.Abandon(face);
 			}
@@ -464,7 +463,7 @@ FT_Face ReplaceCharacterLookupFace(
 		if (!replacementStreamReadable || customSource)
 		{
 			{
-				std::lock_guard<std::mutex> cacheLock(
+				std::scoped_lock cacheLock(
 					lifecycle.faceReplacementMutex);
 				lifecycle.faceReplacements.Abandon(face);
 			}
@@ -481,7 +480,7 @@ FT_Face ReplaceCharacterLookupFace(
 		bool published = false;
 		bool replacementHasGlyph = false;
 		{
-			std::lock_guard<std::mutex> cacheLock(
+			std::scoped_lock cacheLock(
 				lifecycle.faceReplacementMutex);
 			published = lifecycle.faceReplacements.Publish(face, replacement);
 			if (published)
@@ -520,7 +519,7 @@ FT_Error HookFaceDone(FT_Face face) noexcept
 	renderer::unity::FaceReplacementRegistry::ReleaseResult released;
 	try
 	{
-		std::lock_guard<std::mutex> cacheLock(
+		std::scoped_lock cacheLock(
 			lifecycle.faceReplacementMutex);
 		released = lifecycle.faceReplacements.Release(face);
 	}
@@ -540,7 +539,7 @@ void ClearFaceReplacementCache(UnityLifecycleState& lifecycle) noexcept
 {
 	try
 	{
-		std::lock_guard<std::mutex> lock(lifecycle.faceReplacementMutex);
+		std::scoped_lock lock(lifecycle.faceReplacementMutex);
 		// Unity may still hold a returned replacement pointer after detach. Its
 		// FreeType library outlives the renderer, so only the bookkeeping is cleared.
 		lifecycle.faceReplacements.Clear();
@@ -613,8 +612,7 @@ FT_Error __fastcall HookFaceOpen(
 
 	try
 	{
-		auto const redirects = std::atomic_load_explicit(
-			&ProcessUnityLifecycle().redirects, std::memory_order_acquire);
+		auto const redirects = ProcessUnityLifecycle().redirects.load(std::memory_order_acquire);
 		renderer::unity::FaceOpenPathRedirect redirect;
 		if (!g_skipUnityFaceOpenRedirect &&
 			renderer::unity::CurrentFontRefAllowsFaceRedirect() &&
@@ -677,8 +675,7 @@ int HookTextCoreFontLoad(
 
 	try
 	{
-		auto const redirects = std::atomic_load_explicit(
-			&ProcessUnityLifecycle().redirects, std::memory_order_acquire);
+		auto const redirects = ProcessUnityLifecycle().redirects.load(std::memory_order_acquire);
 		renderer::unity::FaceOpenPathRedirect redirect;
 		if (redirects &&
 			InterlockedCompareExchange(&g_bHookEnabled, 0, 0) != FALSE &&
@@ -726,8 +723,7 @@ FT_Face HookLegacyCharacterLookup(
 		dynamicFontData, fontRef, fallbackFonts, character);
 	std::wstring requestedFamily;
 	renderer::unity::ReadLegacyFontRefFamily(fontRef, requestedFamily);
-	auto const redirects = std::atomic_load_explicit(
-		&ProcessUnityLifecycle().redirects, std::memory_order_acquire);
+	auto const redirects = ProcessUnityLifecycle().redirects.load(std::memory_order_acquire);
 	std::wstring replacementPath;
 	long replacementFaceIndex = 0;
 	bool const mappedFamily = redirects && !requestedFamily.empty() &&
@@ -784,8 +780,7 @@ FT_Face HookLegacyOsFaceResolver(
 	bool mappedFamily = false;
 	if (!requestedFamily.empty())
 	{
-		auto const redirects = std::atomic_load_explicit(
-			&ProcessUnityLifecycle().redirects, std::memory_order_acquire);
+		auto const redirects = ProcessUnityLifecycle().redirects.load(std::memory_order_acquire);
 		std::wstring replacementPath;
 		long replacementFaceIndex = 0;
 		mappedFamily = redirects && redirects->ResolveFamilyFace(
@@ -1187,8 +1182,8 @@ bool AttachUnityRenderer(
 	lifecycle.osFaceResolverAttached = osFaceResolverTarget != nullptr;
 	lifecycle.freeTypeCharIndexAttached = freeTypeCharIndexTarget != nullptr;
 	lifecycle.fontCatalogLoadAttached = fontCatalogLoadTarget != nullptr;
-	std::atomic_store_explicit(
-		&lifecycle.redirects, std::move(redirects), std::memory_order_release);
+	lifecycle.redirects.store(
+		std::move(redirects), std::memory_order_release);
 
 	lifecycle.abi = adapter.abi;
 	lifecycle.unityPlayer = std::move(module);
@@ -1311,7 +1306,7 @@ DWORD WINAPI StartUnityFontHookWorker(LPVOID moduleReference)
 #endif
 	UnityLifecycleState& lifecycle = ProcessUnityLifecycle();
 	{
-		std::lock_guard<std::mutex> lock(lifecycle.mutex);
+		std::scoped_lock lock(lifecycle.mutex);
 		lifecycle.startupSucceeded = succeeded;
 		if (lifecycle.phase == UnityLifecyclePhase::starting)
 		{
@@ -1335,7 +1330,7 @@ DWORD WINAPI StartUnityFontHookWorker(LPVOID moduleReference)
 void StartUnityFontHookLifecycle()
 {
 	UnityLifecycleState& lifecycle = ProcessUnityLifecycle();
-	std::lock_guard<std::mutex> lock(lifecycle.mutex);
+	std::scoped_lock lock(lifecycle.mutex);
 	if (lifecycle.phase == UnityLifecyclePhase::starting ||
 		lifecycle.phase == UnityLifecyclePhase::active ||
 		lifecycle.phase == UnityLifecyclePhase::stopping ||
@@ -1406,7 +1401,7 @@ UnityFontHookStopPreparation PrepareUnityFontHookLifecycleStop(
 	UnityLifecycleState& lifecycle = ProcessUnityLifecycle();
 	HANDLE worker = nullptr;
 	{
-		std::lock_guard<std::mutex> lock(lifecycle.mutex);
+		std::scoped_lock lock(lifecycle.mutex);
 		if (lifecycle.phase == UnityLifecyclePhase::dormant ||
 			lifecycle.phase == UnityLifecyclePhase::stopped)
 			return UnityFontHookStopPreparation::alreadyStopped;
@@ -1431,7 +1426,7 @@ UnityFontHookStopPreparation PrepareUnityFontHookLifecycleStop(
 void AbortUnityFontHookLifecycleStop()
 {
 	UnityLifecycleState& lifecycle = ProcessUnityLifecycle();
-	std::lock_guard<std::mutex> lock(lifecycle.mutex);
+	std::scoped_lock lock(lifecycle.mutex);
 	if (lifecycle.phase != UnityLifecyclePhase::stopping)
 		return;
 	bool workerStillRunning = false;
@@ -1459,7 +1454,7 @@ bool CommitUnityFontHookLifecycleStop()
 {
 	UnityLifecycleState& lifecycle = ProcessUnityLifecycle();
 	{
-		std::lock_guard<std::mutex> lock(lifecycle.mutex);
+		std::scoped_lock lock(lifecycle.mutex);
 		if (lifecycle.phase != UnityLifecyclePhase::stopping)
 			return lifecycle.phase == UnityLifecyclePhase::dormant ||
 				lifecycle.phase == UnityLifecyclePhase::stopped;
@@ -1525,7 +1520,7 @@ bool CommitUnityFontHookLifecycleStop()
 	lifecycle.fontCatalogLoadAttached = false;
 #endif
 
-	std::lock_guard<std::mutex> lock(lifecycle.mutex);
+	std::scoped_lock lock(lifecycle.mutex);
 	lifecycle.startupWorker.reset();
 	lifecycle.evidenceView.reset();
 	lifecycle.evidenceMapping.reset();
@@ -1544,8 +1539,7 @@ bool CommitUnityFontHookLifecycleStop()
 	lifecycle.osFaceResolverRequired = false;
 	lifecycle.substitutionBoundary =
 		renderer::unity::FontSubstitutionBoundary::unavailable;
-	std::atomic_store_explicit(
-		&lifecycle.redirects,
+	lifecycle.redirects.store(
 		std::shared_ptr<const renderer::unity::FontFileRedirectTable>{},
 		std::memory_order_release);
 	lifecycle.stopping.store(false, std::memory_order_release);

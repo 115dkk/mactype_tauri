@@ -279,7 +279,7 @@ public:
 		{
 			TT_OS2 * os2_table = nullptr;
 			FT_Face freetype_face;
-			CCriticalSectionLock __lock(CCriticalSectionLock::CS_MANAGER);
+			CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_MANAGER);
 			if (FTC_Manager_LookupFace(cache_man, reinterpret_cast<FTC_FaceID>(m_id), &freetype_face))
 				return nullptr;
 			os2_table = static_cast<TT_OS2*>(FT_Get_Sfnt_Table(freetype_face, ft_sfnt_os2));
@@ -294,7 +294,7 @@ public:
 		if (m_hashinting==3)
 		{
 			FT_Face freetype_face;
-			CCriticalSectionLock __lock(CCriticalSectionLock::CS_MANAGER);
+			CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_MANAGER);
 			if (FTC_Manager_LookupFace(cache_man, reinterpret_cast<FTC_FaceID>(m_id), &freetype_face))	//查询ft face
 			{
 				m_hashinting = false;
@@ -371,7 +371,7 @@ public:
 	}
 	int GetFTLink(FTC_FaceID** llplink)
 	{
-		CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTLINK);
+		CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_FONTLINK);
 		if (!*face_id_link)
 			Createlink(m_policy);
 		*llplink = face_id_link;
@@ -379,7 +379,7 @@ public:
 	}
 	int GetGGOLink(HFONT** llplink)
 	{
-		CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTLINK);
+		CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_FONTLINK);
 		if (!*ggo_link)
 			Createlink(m_policy);
 		*llplink = ggo_link;
@@ -409,7 +409,7 @@ public:
 	bool EmbeddedBmpExist(int px);
 	void Erase()
 	{
-		CCriticalSectionLock __lock(CCriticalSectionLock::CS_FONTCACHE);
+		CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_FONTCACHE);
 		m_cache.clear();
 	}
 };
@@ -510,8 +510,8 @@ public:
 	void ReloadAll()
 	{
 		//重新载入全部字体，即清空所有字体缓存
-		COwnedCriticalSectionLock __olock(2);
-		CCriticalSectionLock __lock;
+		COwnedCriticalSectionLock ownedSectionLock(2);
+		CCriticalSectionLock sectionLock;
 		renderer::RendererPolicyRef const policy =
 			renderer::CurrentRendererPolicy();
 		if (!policy)

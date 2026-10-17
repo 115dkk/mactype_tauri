@@ -1832,7 +1832,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 
 				gdi32x = chData->GetGDIWidth();
 				*AAList = chData->GetAAMode();
-				CCriticalSectionLock __lock(CCriticalSectionLock::CS_LIBRARY);
+				CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_LIBRARY);
 				FT_Glyph_Ref_Copy(reinterpret_cast<FT_Referenced_Glyph>(chData->GetGlyph(render_mode)), glyph_bitmap);	// cached img-> glyph_bitmap
 				//TRACE(_T("Cache Hit: %wc, size:%d, 0x%8.8X\n"), wch, chData->GetWidth(), glyph_bitmap);
 			}
@@ -1875,7 +1875,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 						}
 						else		//使用freetype进行fontlink
 						{
-							CCriticalSectionLock __lock(CCriticalSectionLock::CS_MANAGER);
+							CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_MANAGER);
 							glyph_index = FTC_CMapCache_Lookup(cmap_cache, FTInfo.face_id_list[j], -1, wch);
 							//glyph_index = FT_Get_Char_Index(FTInfo.GetFace(j), wch);
 						}
@@ -2069,7 +2069,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 				}
 
 				{
-					CCriticalSectionLock __lock(CCriticalSectionLock::CS_MANAGER);
+					CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_MANAGER);
 					FT_Glyph temp_glyph = nullptr;
 					if (FTC_ImageCache_Lookup(
 						image_cache,
@@ -2092,7 +2092,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 
 			}
 			{
-				CCriticalSectionLock __lock(CCriticalSectionLock::CS_LIBRARY);
+				CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_LIBRARY);
 				if (FT_Glyph_Ref_Copy(glyph.get(), glyph_bitmap))
 				{
 					nRet = FALSE;
@@ -2133,7 +2133,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 						&matrix);
 				}
 				{
-					CCriticalSectionLock __lock(CCriticalSectionLock::CS_LIBRARY);
+					CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_LIBRARY);
 					if (bLoadColor && FT_HAS_COLOR(freetype_face)) {
 						// use custom API to get color bitmap
 						if (FT_Glyph_To_BitmapEx(&((*glyph_bitmap)->ft_glyph), render_mode, nullptr, 1, 1, glyph_index, freetype_face)) {
@@ -2287,7 +2287,7 @@ BOOL ForEachGetGlyphGGO(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString
 			if (chData && FTInfo.width == chData->GetWidth()) {
 				gdi32x = chData->GetGDIWidth();
 				*AAList = chData->GetAAMode();
-				CCriticalSectionLock __lock(CCriticalSectionLock::CS_LIBRARY);
+				CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_LIBRARY);
 				FT_Glyph_Ref_Copy(reinterpret_cast<FT_Referenced_Glyph>(chData->GetGlyph(render_mode)), glyph_bitmap);
 			}
 		}
@@ -2426,7 +2426,7 @@ BOOL ForEachGetGlyphGGO(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString
 				//glyph = ggoog;
 			}
 			{
-				CCriticalSectionLock __lock(CCriticalSectionLock::CS_LIBRARY);
+				CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_LIBRARY);
 				if (FT_Glyph_Ref_Copy(glyph.get(), glyph_bitmap))
 				{
 					nRet = FALSE;
@@ -2460,7 +2460,7 @@ BOOL ForEachGetGlyphGGO(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString
 				}
 
 				{
-					CCriticalSectionLock __lock(CCriticalSectionLock::CS_LIBRARY);
+					CCriticalSectionLock sectionLock(CCriticalSectionLock::CS_LIBRARY);
 					if (FT_Glyph_To_Bitmap(&((*glyph_bitmap)->ft_glyph), render_mode, nullptr, 1)) {
 						FT_Done_Ref_Glyph(glyph_bitmap);
 						nRet = false;
@@ -2751,9 +2751,8 @@ BOOL FreeTypeGetGlyph(	//获得所有图形和需要的宽度
 	FT_DRAW_STATE* drState
 )
 {
-	COwnedCriticalSectionLock __lock(1);
+	COwnedCriticalSectionLock ownedSectionLock(1);
 	{
-		//CCriticalSectionLock __lock;
 		if (!FreeTypePrepare(FTInfo))
 			return false;
 	}
@@ -3047,7 +3046,7 @@ static FreeTypeRuntimeResources& GetFreeTypeRuntimeResources()
 }
 
 BOOL FontLInit(void) {
-	CCriticalSectionLock __lock;
+	CCriticalSectionLock sectionLock;
 	FreeTypeRuntimeResources& resources = GetFreeTypeRuntimeResources();
 	if (resources.initialized())
 	{
@@ -3116,7 +3115,7 @@ BOOL FontLInit(void) {
 }
 
 void FontLFree(void) {
-	CCriticalSectionLock __lock;
+	CCriticalSectionLock sectionLock;
 	FreeTypeRuntimeResources& resources = GetFreeTypeRuntimeResources();
 
 	cache_man = nullptr;

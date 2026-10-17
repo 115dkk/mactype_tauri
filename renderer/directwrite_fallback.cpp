@@ -240,7 +240,7 @@ FallbackMapCharactersMethod OriginalMapCharacters(IDWriteFontFallback* fallback)
 {
 	void** const vtable = fallback == nullptr ? nullptr :
 		*reinterpret_cast<void***>(fallback);
-	std::lock_guard<std::mutex> lock(RegistryMutex());
+	std::scoped_lock lock(RegistryMutex());
 	for (FallbackVtableHooks const& hooks : VtableRegistry())
 	{
 		if (hooks.vtable == vtable)
@@ -253,7 +253,7 @@ Fallback1MapCharactersMethod OriginalMapCharacters1(IDWriteFontFallback1* fallba
 {
 	void** const vtable = fallback == nullptr ? nullptr :
 		*reinterpret_cast<void***>(fallback);
-	std::lock_guard<std::mutex> lock(RegistryMutex());
+	std::scoped_lock lock(RegistryMutex());
 	for (FallbackVtableHooks const& hooks : VtableRegistry())
 	{
 		if (hooks.vtable == vtable)
@@ -275,7 +275,7 @@ bool PublishSource(
 	// the registry lock is dropped.
 	FactorySource evicted;
 	{
-		std::lock_guard<std::mutex> lock(RegistryMutex());
+		std::scoped_lock lock(RegistryMutex());
 		std::vector<FactorySource>& registry = SourceRegistry();
 		for (FactorySource& source : registry)
 		{
@@ -299,7 +299,7 @@ bool PublishSource(
 size_t CopySources(std::array<FactorySource, kFactorySourceLimit>& results)
 {
 	size_t count = 0;
-	std::lock_guard<std::mutex> lock(RegistryMutex());
+	std::scoped_lock lock(RegistryMutex());
 	std::vector<FactorySource> const& registry = SourceRegistry();
 	for (auto source = registry.rbegin();
 		source != registry.rend() && count < results.size(); ++source)
@@ -819,7 +819,7 @@ bool HookDirectWriteSystemFallback(
 			return false;
 		}
 		{
-			std::lock_guard<std::mutex> lock(RegistryMutex());
+			std::scoped_lock lock(RegistryMutex());
 			FallbackVtableHooks& fallbackHooks = GetOrAddVtable(fallbackVtable);
 			bool const baseWasPatched = fallbackHooks.mapCharactersPatched;
 			patched = PatchMethod(
@@ -858,7 +858,7 @@ bool HookDirectWriteSystemFallback(
 
 void RestoreDirectWriteFallbackVtableHooks() noexcept
 {
-	std::lock_guard<std::mutex> lock(RegistryMutex());
+	std::scoped_lock lock(RegistryMutex());
 	for (FallbackVtableHooks& hooks : VtableRegistry())
 	{
 		RestoreMethod(
@@ -876,7 +876,7 @@ void ClearDirectWriteFallbackSources() noexcept
 {
 	std::vector<FactorySource> sources;
 	{
-		std::lock_guard<std::mutex> lock(RegistryMutex());
+		std::scoped_lock lock(RegistryMutex());
 		sources.swap(SourceRegistry());
 	}
 	sources.clear();

@@ -69,7 +69,7 @@ template <typename Map, typename Value>
 bool LookupCached(Map& map, const std::wstring& key, Value& value)
 {
 	Catalog& catalog = GetCatalog();
-	std::lock_guard<std::mutex> lock(catalog.mutex);
+	std::scoped_lock lock(catalog.mutex);
 	typename Map::const_iterator const found = map.find(key);
 	if (found == map.end())
 		return false;
@@ -81,7 +81,7 @@ template <typename Map, typename Value>
 void StoreCached(Map& map, const std::wstring& key, const Value& value)
 {
 	Catalog& catalog = GetCatalog();
-	std::lock_guard<std::mutex> lock(catalog.mutex);
+	std::scoped_lock lock(catalog.mutex);
 	map.emplace(key, value);
 }
 
@@ -254,7 +254,7 @@ bool CachedFamilies(std::vector<std::wstring>& families)
 {
 	Catalog& catalog = GetCatalog();
 	{
-		std::lock_guard<std::mutex> lock(catalog.mutex);
+		std::scoped_lock lock(catalog.mutex);
 		if (catalog.familiesListed)
 		{
 			families = catalog.families;
@@ -263,7 +263,7 @@ bool CachedFamilies(std::vector<std::wstring>& families)
 	}
 	if (!EnumerateFamilies(families))
 		return false;
-	std::lock_guard<std::mutex> lock(catalog.mutex);
+	std::scoped_lock lock(catalog.mutex);
 	if (!catalog.familiesListed)
 	{
 		catalog.families = families;
@@ -380,7 +380,7 @@ bool TypographicFamilyFaces(
 void ClearForQuietUnload() noexcept
 {
 	Catalog& catalog = GetCatalog();
-	std::lock_guard<std::mutex> lock(catalog.mutex);
+	std::scoped_lock lock(catalog.mutex);
 	catalog.familiesListed = false;
 	catalog.families.clear();
 	catalog.faces.clear();

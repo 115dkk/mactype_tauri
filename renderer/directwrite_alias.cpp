@@ -897,7 +897,7 @@ BuildStatus GetOrCreateUnchecked(
 	built.status = status;
 
 	{
-		std::lock_guard<std::mutex> lock(cache.mutex);
+		std::scoped_lock lock(cache.mutex);
 		entry->aliases = built;
 		entry->status = status;
 		entry->building = false;
@@ -945,7 +945,7 @@ BuildReservation::BuildReservation(
 
 		std::uint64_t const generation = snapshot->generation();
 		AliasCache& cache = GetCache();
-		std::lock_guard<std::mutex> lock(cache.mutex);
+		std::scoped_lock lock(cache.mutex);
 		cache.entries.erase(
 			std::remove_if(
 				cache.entries.begin(), cache.entries.end(),
@@ -986,7 +986,7 @@ BuildReservation::~BuildReservation()
 		bool notify = false;
 		{
 			AliasCache& cache = GetCache();
-			std::lock_guard<std::mutex> lock(cache.mutex);
+			std::scoped_lock lock(cache.mutex);
 			if (entry->building &&
 				entry->reservingThread == GetCurrentThreadId())
 			{
@@ -1122,7 +1122,7 @@ bool IsAliasCollection(IUnknown* collection) noexcept
 		if (identity == nullptr)
 			return false;
 		AliasCache& cache = GetCache();
-		std::lock_guard<std::mutex> lock(cache.mutex);
+		std::scoped_lock lock(cache.mutex);
 		for (std::shared_ptr<CacheEntry> const& entry : cache.entries)
 		{
 			CComPtr<IUnknown> const aliasIdentity =
@@ -1154,7 +1154,7 @@ void SetCanonicalSource(
 		if (factoryIdentity == nullptr || systemSetIdentity == nullptr)
 			return;
 		AliasCache& cache = GetCache();
-		std::lock_guard<std::mutex> lock(cache.mutex);
+		std::scoped_lock lock(cache.mutex);
 		for (CanonicalSource& source : cache.canonicalSources)
 		{
 			if (source.factoryIdentity == factoryIdentity)
@@ -1182,7 +1182,7 @@ void SetCanonicalSource(
 void ClearCache() noexcept
 {
 	AliasCache& cache = GetCache();
-	std::lock_guard<std::mutex> lock(cache.mutex);
+	std::scoped_lock lock(cache.mutex);
 	cache.entries.clear();
 	cache.canonicalSources.clear();
 }

@@ -145,12 +145,11 @@ bool Sha256ProfileDigest(
 ProfilePublication ProfileRuntime::Publish(
 	RendererPolicyCandidate candidate) noexcept
 {
-	std::lock_guard<std::mutex> lock(publishMutex_);
+	std::scoped_lock lock(publishMutex_);
 	ProfilePublication publication;
 	publication.generation = generation_;
 	publication.revision = revision_;
-	publication.snapshot = std::atomic_load_explicit(
-		&current_, std::memory_order_acquire);
+	publication.snapshot = current_.load(std::memory_order_acquire);
 	if (!IsCompleteCandidate(candidate))
 		return publication;
 
@@ -168,8 +167,7 @@ ProfilePublication ProfileRuntime::Publish(
 			std::move(candidate), generation, revision, substitutions));
 
 		font_substitution::ProcessRegistry().Publish(substitutions);
-		std::atomic_store_explicit(
-			&current_, snapshot, std::memory_order_release);
+		current_.store(snapshot, std::memory_order_release);
 		generation_ = generation;
 		revision_ = revision;
 
@@ -186,7 +184,7 @@ ProfilePublication ProfileRuntime::Publish(
 
 RendererPolicyRef ProfileRuntime::Load() const noexcept
 {
-	return std::atomic_load_explicit(&current_, std::memory_order_acquire);
+	return current_.load(std::memory_order_acquire);
 }
 
 bool ProfileRuntime::MatchesProfileDigest(
@@ -200,9 +198,8 @@ bool ProfileRuntime::MatchesProfileDigest(
 
 void ProfileRuntime::ClearForQuietUnload() noexcept
 {
-	std::lock_guard<std::mutex> lock(publishMutex_);
-	std::atomic_store_explicit(
-		&current_, RendererPolicyRef{}, std::memory_order_release);
+	std::scoped_lock lock(publishMutex_);
+	current_.store(RendererPolicyRef{}, std::memory_order_release);
 	generation_ = 0;
 	revision_ = 0;
 }

@@ -137,7 +137,7 @@ public:
 
 static void _Trace(LPCTSTR pszFormat, ...)
 {
-	CCriticalSectionLock __lock;
+	CCriticalSectionLock sectionLock;
 	va_list argptr;
 	va_start(argptr, pszFormat);
 	//w(v)sprintfは1024文字以上返してこない
@@ -162,7 +162,7 @@ static void _Trace(LPCTSTR pszFormat, ...)
 
 static void _Trace2(LPCTSTR pszFormat, ...)
 {
-	CCriticalSectionLock __lock;
+	CCriticalSectionLock sectionLock;
 	va_list argptr;
 	va_start(argptr, pszFormat);
 	//w(v)sprintfは1024文字以上返してこない

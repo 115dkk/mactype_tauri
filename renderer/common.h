@@ -21,6 +21,7 @@
 #include <functional>
 #include <algorithm>
 #include <cstddef>
+#include <iterator>
 #include <memory>
 #include <vector>
 #include "renderer_raii.h"
@@ -51,7 +52,7 @@
 #include <string>
 using namespace std;
 
-#define FONT_MAGIC_NUMBER 0xA8
+inline constexpr int FONT_MAGIC_NUMBER = 0xA8;
 
 #define ASSERT			_ASSERTE
 #define Assert			_ASSERTE
@@ -86,9 +87,10 @@ FORCEINLINE HINSTANCE GetDLLInstance()
 }
 
 //排他制御
+inline constexpr int MAX_CRITICAL_COUNT = 20;
+
 class CCriticalSectionLock
 {
-#define MAX_CRITICAL_COUNT 20
 private:
 	static renderer_raii::CriticalSection m_cs[MAX_CRITICAL_COUNT];
 	int m_index;
@@ -187,9 +189,9 @@ static void _Trace2_Bin(LPWSTR func, int line, LPVOID lpString, UINT cbString)
 static void _Trace2_Str(LPWSTR func, int line, LPCWSTR lpString, UINT cbString)
 {
 	WCHAR buf[0x1000];
-	UINT len = Min(cbString, countof(buf) - 1);
+	UINT len = Min(cbString, std::size(buf) - 1);
 	lstrcpyn(buf, lpString, len + 1);
-	buf[countof(buf) - 1] = 0;
+	buf[std::size(buf) - 1] = 0;
 	TRACE(_T("%s %d: %d %s\n"), func, line, cbString, buf);
 	LPWSTR p = buf;
 	for (UINT i = 0; i < 32 && i < cbString; ++i) {
@@ -312,8 +314,6 @@ static inline LPWSTR _StrDupAtoW(LPCSTR pszMB, int cchMB = -1, int* pcchWC = nul
 }
 
 // useful macros
-#define NOCOPY(T)					T(const T&); T& operator=(const T&)
-#define countof(array)				(sizeof(array)/sizeof(array[0]))
 #define sizeof_struct(s, m)			(static_cast<int>(offsetof(s, m)) + sizeof((static_cast<s*>(nullptr))->m))
 #ifdef _DEBUG
 #define Verify(expr)				_ASSERTE(expr)

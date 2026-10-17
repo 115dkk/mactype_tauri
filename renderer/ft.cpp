@@ -50,12 +50,12 @@
 
 FT_BitmapGlyphRec empty_glyph = {};//优化控制字
 
-#define FT_BOLD_LOW 15
+constexpr int FT_BOLD_LOW = 15;
 #define IsFontBold(lf)		((lf).lfWeight >= FW_BOLD)
 #define FT_FixedToInt(x)	(FT_RoundFix(x) >> 16)
 #define FT_PosToInt(x)		(((x) + (1 << 5)) >> 6)
-#define RESOLUTION_X 72
-#define RESOLUTION_Y 72
+constexpr int RESOLUTION_X = 72;
+constexpr int RESOLUTION_Y = 72;
 FT_Error New_FT_Outline_Embolden(FT_Outline* outline, FT_Pos str_h, FT_Pos str_v, FT_Int font_size, int bolderMode);
 FT_Error Old_FT_Outline_Embolden(FT_Outline* outline, FT_Pos strength);
 FT_Error Vert_FT_Outline_Embolden(FT_Outline* outline, FT_Pos strength);
@@ -76,7 +76,13 @@ static bool FaceIsBold(FT_Face face)
 
 
 //更新
-#define RGBA(r,g,b,a)          (static_cast<COLORREF>(static_cast<BYTE>(r) | (static_cast<WORD>(static_cast<BYTE>(g)) << 8) | (static_cast<DWORD>(static_cast<BYTE>(b)) << 16) | (static_cast<DWORD>(static_cast<BYTE>(a)) << 24)))
+constexpr COLORREF RGBA(BYTE r, BYTE g, BYTE b, BYTE a) noexcept
+{
+	return static_cast<COLORREF>(static_cast<BYTE>(r) |
+		(static_cast<WORD>(static_cast<BYTE>(g)) << 8) |
+		(static_cast<DWORD>(static_cast<BYTE>(b)) << 16) |
+		(static_cast<DWORD>(static_cast<BYTE>(a)) << 24));
+}
 //!!Snowie
 
 COLORREF GetPaletteColor(HDC hdc, UINT paletteindex)
@@ -526,7 +532,7 @@ COLORREF AlphaBlendColor(
 	return RGB(rd, gd, bd);
 }
 
-typedef struct
+struct FreeTypeGlyphInfo
 {
 	FreeTypeDrawInfo* FTInfo;			//orignal draw information
 	WCHAR wch;							//text to draw
@@ -535,7 +541,8 @@ typedef struct
 	CAlphaBlendColor* solid;
 	CAlphaBlendColor* shadow;	//alpha blender
 	bool bInvertColor;	// invert color for chrome/skia
-} FreeTypeGlyphInfo, * PFreeTypeGlyphInfo;
+};
+using PFreeTypeGlyphInfo = FreeTypeGlyphInfo*;
 
 static FT_Bytes CheckedBitmapRow(
 	const FT_Bitmap& bitmap,
@@ -771,7 +778,7 @@ static void FreeTypeDrawBitmapPixelModeBGRA(FreeTypeGlyphInfo& FTGInfo, int x, i
 	const SIZE cachebufsize = cache.Size();
 	DWORD* const cachebufp = reinterpret_cast<DWORD*>(cache.GetPixels());
 	DWORD* cachebufrowp;
-	typedef COLORREF(*pfnmixer) (COLORREF bkColor, int b, int g, int r, int a);
+	using pfnmixer = COLORREF (*)(COLORREF bkColor, int b, int g, int r, int a);
 
 	pfnmixer mixer = FTGInfo.bInvertColor ? _invert_rgbamixer : _rgbamixer;
 
@@ -3067,9 +3074,9 @@ BOOL FontLInit(void) {
 	renderer_raii::UniqueFreeTypeLibrary library(rawLibrary);
 
 #ifdef INFINALITY
-#define TT_INTERPRETER_VERSION_35  35
-#define TT_INTERPRETER_VERSION_38  38
-#define TT_INTERPRETER_VERSION_40  40
+constexpr int TT_INTERPRETER_VERSION_35 = 35;
+constexpr int TT_INTERPRETER_VERSION_38 = 38;
+constexpr int TT_INTERPRETER_VERSION_40 = 40;
 	FT_UInt     interpreter_version = TT_INTERPRETER_VERSION_38;
 	FT_Property_Set(library.get(), "truetype", "interpreter-version", &interpreter_version);
 #endif

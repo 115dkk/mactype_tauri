@@ -2,13 +2,13 @@
 
 #include <mmsystem.h>	//mmioFOURCC
 #include "renderer_raii.h"
-#define FOURCC_GDIPP	mmioFOURCC('G', 'D', 'I', 'P')
+inline constexpr FOURCC FOURCC_GDIPP = mmioFOURCC('G', 'D', 'I', 'P');
 
-typedef struct {
+struct GDIPP_CREATE_MAGIC {
 	int dummy;
 	FOURCC magic;
 //	BYTE reserved[256];
-} GDIPP_CREATE_MAGIC;
+};
 
 //参照
 //http://www.catch22.net/tuts/undoc01.asp

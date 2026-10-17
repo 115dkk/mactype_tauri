@@ -9,13 +9,13 @@
 #endif
 
 #if 0
-#define FREETYPE_REQCOUNTMAX	10
+constexpr int FREETYPE_REQCOUNTMAX = 10;
 #define GC_TRACE				TRACE
-#define FREETYPE_GC_COUNTER		128
+constexpr int FREETYPE_GC_COUNTER = 128;
 #else
-#define FREETYPE_REQCOUNTMAX	2048//默认4096,每缓存该数量的文字将刷新缓存降低内存占用
+constexpr int FREETYPE_REQCOUNTMAX = 2048;//默认4096,每缓存该数量的文字将刷新缓存降低内存占用
 #define GC_TRACE				NOP_FUNCTION
-#define FREETYPE_GC_COUNTER		1024//刷新缓存后保留文字数量
+constexpr int FREETYPE_GC_COUNTER = 1024;//刷新缓存后保留文字数量
 #endif
 
 FreeTypeFontEngine* g_pFTEngine;
@@ -296,10 +296,10 @@ FreeTypeFontCache::~FreeTypeFontCache()
 
 void FreeTypeFontCache::Compact()
 {
-	//TRACE(_T("FreeTypeFontCache::Compact: %d > %d\n"), countof(m_chars), FREETYPE_GC_COUNTER);
+	//TRACE(_T("FreeTypeFontCache::Compact: %d > %d\n"), std::size(m_chars), FREETYPE_GC_COUNTER);
 	ResetGCCounter();
 #ifdef _USE_ARRAY
-	::Compact(m_glyphs, countof(m_glyphs), FREETYPE_GC_COUNTER);
+	::Compact(m_glyphs, std::size(m_glyphs), FREETYPE_GC_COUNTER);
 #else
 	::CompactMap(m_GlyphCache, m_GlyphCache.size(), FREETYPE_GC_COUNTER);
 #endif
@@ -966,8 +966,8 @@ FT_Face FreeTypeSysFontData::ReleaseFace() noexcept
 // http://kikyou.info/diary/?200510#i10 を参考にした
 #include <freetype/tttables.h>	// FT_TRUETYPE_TABLES_H
 #include <mmsystem.h>	//mmioFOURCC
-#define TVP_TT_TABLE_ttcf	mmioFOURCC('t', 't', 'c', 'f')
-#define TVP_TT_TABLE_name	mmioFOURCC('n', 'a', 'm', 'e')
+constexpr DWORD TVP_TT_TABLE_ttcf = mmioFOURCC('t', 't', 'c', 'f');
+constexpr DWORD TVP_TT_TABLE_name = mmioFOURCC('n', 'a', 'm', 'e');
 
 // Windowsに登録されているフォントのバイナリデータを名称から取得
 FreeTypeSysFontData* FreeTypeSysFontData::CreateInstance(

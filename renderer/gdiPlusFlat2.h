@@ -9,10 +9,9 @@
 
 #define GDIPCONST const
 #define WINGDIPAPI __stdcall
-typedef Status GpStatus;
+using GpStatus = Status;
 
-typedef GpStatus (WINGDIPAPI*
-GdipDrawString)(
+using GdipDrawString = GpStatus (WINGDIPAPI *)(
 			   GpGraphics               *graphics,
 			   GDIPCONST WCHAR          *string,
 			   INT                       length,
@@ -22,34 +21,26 @@ GdipDrawString)(
 			   GDIPCONST GpBrush        *brush
 			   );//绘制文字的函数
 
-typedef GpStatus (WINGDIPAPI*
-GdipGetLogFontW)(GpFont * font, GpGraphics *graphics, LOGFONTW * logfontW);//从GPFont获取Logfont
+using GdipGetLogFontW = GpStatus (WINGDIPAPI *)(GpFont * font, GpGraphics *graphics, LOGFONTW * logfontW);//从GPFont获取Logfont
 
-typedef GpStatus (WINGDIPAPI*
-GdipGetDC)(GpGraphics* graphics, HDC * hdc);	//从GPGraphic获取HDC
+using GdipGetDC = GpStatus (WINGDIPAPI *)(GpGraphics* graphics, HDC * hdc);	//从GPGraphic获取HDC
 
-typedef GpStatus (WINGDIPAPI*
-GdipReleaseDC)(GpGraphics* graphics, HDC hdc);
+using GdipReleaseDC = GpStatus (WINGDIPAPI *)(GpGraphics* graphics, HDC hdc);
 
-typedef GpStatus (WINGDIPAPI*
-GdipGetStringFormatAlign)(GDIPCONST GpStringFormat *format, 
+using GdipGetStringFormatAlign = GpStatus (WINGDIPAPI *)(GDIPCONST GpStringFormat *format,
 						 StringAlignment *align);
 
-typedef GpStatus (WINGDIPAPI*
-GdipGetStringFormatTrimming)(
+using GdipGetStringFormatTrimming = GpStatus (WINGDIPAPI *)(
 							GDIPCONST GpStringFormat *format,
 							StringTrimming       *trimming
 							);	//获取字符串的缩略方式。当字符串长度超过矩形长度时，将使用设置的方式删除中间的部分文字。
 								//转换成GDI后应使用DrawText来模拟。
-typedef GpStatus (WINGDIPAPI*
-GdipGetStringFormatHotkeyPrefix)(GDIPCONST GpStringFormat *format, 
+using GdipGetStringFormatHotkeyPrefix = GpStatus (WINGDIPAPI *)(GDIPCONST GpStringFormat *format,
 								INT *hotkeyPrefix);	//获取&符号的显示方式，隐藏，显示下划线或者不处理&。由DrawText模拟。
 
-typedef GpStatus (WINGDIPAPI*
-GdipGetBrushType)(GpBrush *brush, GpBrushType *type);
+using GdipGetBrushType = GpStatus (WINGDIPAPI *)(GpBrush *brush, GpBrushType *type);
 
-typedef GpStatus (WINGDIPAPI*
-GdipGetSolidFillColor)(GpSolidFill *brush, ARGB *color);	//获取单色Brush的颜色
+using GdipGetSolidFillColor = GpStatus (WINGDIPAPI *)(GpSolidFill *brush, ARGB *color);	//获取单色Brush的颜色
 
 extern GdipDrawString pfnGdipDrawString ;
 extern GdipGetBrushType pfnGdipGetBrushType ;

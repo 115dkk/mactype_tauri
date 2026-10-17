@@ -428,7 +428,7 @@ LONG						g_bHookEnabled;
 #pragma comment(linker, "/base:0x06540000")
 #endif
 
-typedef BOOL(WINAPI *TIsImmersiveProcess)(_In_ HANDLE hProcess);
+using TIsImmersiveProcess = BOOL (WINAPI *)(_In_ HANDLE hProcess);
 
 TIsImmersiveProcess IsUWP = reinterpret_cast<TIsImmersiveProcess>(GetProcAddress(GetModuleHandle(L"user32.dll"), "IsImmersiveProcess"));
 

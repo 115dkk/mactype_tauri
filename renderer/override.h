@@ -50,12 +50,12 @@ public:
 	}
 };
 
-typedef map<HFONT, CFontSubResult*> CFontCache;
-typedef set<HDC> CDCArray;
-typedef map<HDC, HDC> CDCRelationCache;
-typedef map<HDC, HWND> CDCHwndCache;
-typedef map<HDC, int> CDCRefCache;
-typedef map<HPAINTBUFFER, HDC> CPaintBufferCache;
+using CFontCache = map<HFONT, CFontSubResult*>;
+using CDCArray = set<HDC>;
+using CDCRelationCache = map<HDC, HDC>;
+using CDCHwndCache = map<HDC, HWND>;
+using CDCRefCache = map<HDC, int>;
+using CPaintBufferCache = map<HPAINTBUFFER, HDC>;
 
 class CThreadLocalInfo
 {

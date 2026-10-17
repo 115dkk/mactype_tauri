@@ -23,7 +23,7 @@ extern BOOL g_ccbCache;
 extern BOOL g_ccbIndividual;
 extern FTC_Manager    cache_man;
 
-typedef set<CBitmapCache*> CTLSDCArray;
+using CTLSDCArray = set<CBitmapCache*>;
 extern CTLSDCArray TLSDCArray;
 
 LOGFONTW* GetFontNameFromFile(LPCTSTR Filename);
@@ -89,7 +89,7 @@ public:
 class FreeTypeCharData : public FreeTypeMruCounter
 {
 private:
-	typedef CValArray<FreeTypeCharData**>	CharDataArray;
+	using CharDataArray = CValArray<FreeTypeCharData**>;
 	CharDataArray		m_arrSelfChar;	//自分自身の保存元(Char)
 	FreeTypeCharData**	m_ppSelfGlyph;	//(Glyph)
 	UINT				m_glyphindex;	//グリフ番号
@@ -105,7 +105,8 @@ private:
 #ifdef _DEBUG
 	WCHAR				m_wch;			//UCS2文字
 #endif
-	NOCOPY(FreeTypeCharData);
+	FreeTypeCharData(const FreeTypeCharData&) = delete;
+	FreeTypeCharData& operator=(const FreeTypeCharData&) = delete;
 
 	//FT_Bitmap::bufferのサイズを返す
 	static inline int FT_Bitmap_CalcSize(FT_BitmapGlyph gl)
@@ -146,7 +147,7 @@ public:
 };
 class FreeTypeFontCache : public FreeTypeMruCounter, public FreeTypeGCCounter
 {
-	typedef map<int, FreeTypeCharData*> GlyphCache;
+	using GlyphCache = map<int, FreeTypeCharData*>;
 
 private:
 	bool m_active;
@@ -164,7 +165,8 @@ private:
 		return &missingGlyph;
 	}
 #endif
-	NOCOPY(FreeTypeFontCache);
+	FreeTypeFontCache(const FreeTypeFontCache&) = delete;
+	FreeTypeFontCache& operator=(const FreeTypeFontCache&) = delete;
 	void Compact();
 
 	FreeTypeCharData** _GetChar(WCHAR wch)
@@ -254,8 +256,8 @@ private:
 	renderer::RendererPolicyRef m_policy;
 	StringHashFont m_hash;
 	wstring	m_fullname, m_familyname, m_stylename;
-	typedef map<renderer::freetype::RasterCacheKey,
-		std::unique_ptr<FreeTypeFontCache>> CacheArray;
+	using CacheArray = map<renderer::freetype::RasterCacheKey,
+		std::unique_ptr<FreeTypeFontCache>>;
 	CacheArray m_cache;
 	//快速链接
 	FTC_FaceID face_id_link[CFontLinkInfo::FONTMAX * 2 + 1];
@@ -263,7 +265,8 @@ private:
 	bool m_linkinited;
 	int m_linknum;
 	FTC_FaceID m_SimSunID;
-	NOCOPY(FreeTypeFontInfo);
+	FreeTypeFontInfo(const FreeTypeFontInfo&) = delete;
+	FreeTypeFontInfo& operator=(const FreeTypeFontInfo&) = delete;
 	void Compact();
 	void Createlink(const renderer::RendererPolicyRef& policy);
 
@@ -417,9 +420,9 @@ public:
 class FreeTypeFontEngine : public FreeTypeGCCounter
 {
 private:
-	typedef map<myfont, FreeTypeFontInfo*> FontMap;
-	typedef map<wstring, FreeTypeFontInfo*> FullNameMap;
-	typedef vector<FreeTypeFontInfo*> FontList;
+	using FontMap = map<myfont, FreeTypeFontInfo*>;
+	using FullNameMap = map<wstring, FreeTypeFontInfo*>;
+	using FontList = vector<FreeTypeFontInfo*>;
 	//FontListArray	m_arrFontList;
 	int				m_nMaxFaces;
 	int				m_nMemUsed;

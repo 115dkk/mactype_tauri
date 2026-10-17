@@ -33,7 +33,7 @@ bool DrainProcessRendererResourcesOutsideLoaderLock() noexcept;
 #endif
 #endif
 
-#define MACTYPE_VERSION		20220712
+inline constexpr int MACTYPE_VERSION = 20220712;
 
 #define HOOK_MANUALLY HOOK_DEFINE
 #define HOOK_DEFINE(rettype, name, argtype, arglist) \
@@ -111,8 +111,8 @@ private:
 
 };
 
-typedef StringHashT<LF_FACESIZE + 10,true> CFontSubstitutesHash;
-typedef set<wstring> CFontSubstitutesIniArray;
+using CFontSubstitutesHash = StringHashT<LF_FACESIZE + 10,true>;
+using CFontSubstitutesIniArray = set<wstring>;
 
 class CFontSubstitutesInfo : public CSimpleMap<CFontSubstituteData, CFontSubstituteData>
 {
@@ -133,20 +133,20 @@ public:
 	//bool TrySub(LPCTSTR lpFacename) {return m_mfontsub.find(lpFacename)!=m_mfontsub.end(); };
 };
 
-#define SETTING_FONTSUBSTITUTE_DISABLE	(0)
-#define SETTING_FONTSUBSTITUTE_SAFE		(1)
-#define SETTING_FONTSUBSTITUTE_ALL		(2)
+inline constexpr int SETTING_FONTSUBSTITUTE_DISABLE = 0;
+inline constexpr int SETTING_FONTSUBSTITUTE_SAFE = 1;
+inline constexpr int SETTING_FONTSUBSTITUTE_ALL = 2;
 
-#define SETTING_UNITY_FONT_HOOK_OFF       (0)
-#define SETTING_UNITY_FONT_HOOK_SELECTED  (1)
-#define SETTING_UNITY_FONT_HOOK_MOST      (2)
-#define SETTING_UNITY_FONT_HOOK_ALL       (3)
+inline constexpr int SETTING_UNITY_FONT_HOOK_OFF = 0;
+inline constexpr int SETTING_UNITY_FONT_HOOK_SELECTED = 1;
+inline constexpr int SETTING_UNITY_FONT_HOOK_MOST = 2;
+inline constexpr int SETTING_UNITY_FONT_HOOK_ALL = 3;
 
-#define SETTING_WIDTHMODE_GDI32    (0)
-#define SETTING_WIDTHMODE_FREETYPE (1)
+inline constexpr int SETTING_WIDTHMODE_GDI32 = 0;
+inline constexpr int SETTING_WIDTHMODE_FREETYPE = 1;
 
-#define SETTING_FONTLOADER_FREETYPE  (0)
-#define SETTING_FONTLOADER_WIN32     (1)
+inline constexpr int SETTING_FONTLOADER_FREETYPE = 0;
+inline constexpr int SETTING_FONTLOADER_WIN32 = 1;
 
 class CGdippSettings;
 
@@ -256,10 +256,10 @@ private:
 	int  m_nTuneTableB[256];
 	static TCHAR m_szexeName[MAX_PATH+1];
 
-	typedef set<wstring>	FontHashMap;
-	typedef set<wstring>	ModuleHashMap;
-	typedef set<wstring> FontSubSet;
-	typedef CArray<CFontIndividual>	IndividualArray;
+	using FontHashMap = set<wstring>;
+	using ModuleHashMap = set<wstring>;
+	using FontSubSet = set<wstring>;
+	using IndividualArray = CArray<CFontIndividual>;
 	FontHashMap		m_arrExcludeFont;
 	FontHashMap		m_arrIncludeFont;
 	ModuleHashMap	m_arrExcludeModule;
@@ -527,7 +527,7 @@ private:
 		ATTR_HintSmallFont,
 		ATTR_PixelLayout
 	};
-	typedef CArray<CFontIndividual>		IndividualArray;
+	using IndividualArray = CArray<CFontIndividual>;
 public:
 	HRESULT STDMETHODCALLTYPE QueryInterface(
 		/* [in] */ REFIID riid,

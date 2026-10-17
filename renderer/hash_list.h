@@ -6,7 +6,7 @@
 #include <map>
 #include <string>
 
-typedef std::map<std::wstring, LPTSTR> strmap;
+using strmap = std::map<std::wstring, LPTSTR>;
 
 class CHashedStringList
 {

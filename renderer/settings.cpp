@@ -185,22 +185,22 @@ CHashedStringList FontNameCache;
 static const TCHAR c_szGeneral[]  = _T("General");
 static const TCHAR c_szFreeType[] = _T("FreeType");
 static const TCHAR c_szDirectWrite[] = _T("DirectWrite");
-#define HINTING_MIN			0
-#define HINTING_MAX			2
-#define AAMODE_MIN			-1
-#define AAMODE_MAX			6
-#define GAMMAVALUE_MIN		0.0625f
-#define GAMMAVALUE_MAX		20.0f
-#define CONTRAST_MIN		0.0625f
-#define CONTRAST_MAX		10.0f
-#define RENDERWEIGHT_MIN	0.0625f
-#define RENDERWEIGHT_MAX	10.0f
-#define NWEIGHT_MIN			-64
-#define NWEIGHT_MAX			+64
-#define BWEIGHT_MIN			-32
-#define BWEIGHT_MAX			+32
-#define SLANT_MIN			-32
-#define SLANT_MAX			+32
+constexpr int HINTING_MIN = 0;
+constexpr int HINTING_MAX = 2;
+constexpr int AAMODE_MIN = -1;
+constexpr int AAMODE_MAX = 6;
+constexpr float GAMMAVALUE_MIN = 0.0625f;
+constexpr float GAMMAVALUE_MAX = 20.0f;
+constexpr float CONTRAST_MIN = 0.0625f;
+constexpr float CONTRAST_MAX = 10.0f;
+constexpr float RENDERWEIGHT_MIN = 0.0625f;
+constexpr float RENDERWEIGHT_MAX = 10.0f;
+constexpr int NWEIGHT_MIN = -64;
+constexpr int NWEIGHT_MAX = +64;
+constexpr int BWEIGHT_MIN = -32;
+constexpr int BWEIGHT_MAX = +32;
+constexpr int SLANT_MIN = -32;
+constexpr int SLANT_MAX = +32;
 
 CGdippSettings* CGdippSettings::CreateInstance()
 {
@@ -773,7 +773,7 @@ bool CGdippSettings::LoadAppSettings(LPCTSTR lpszFile)
 		TCHAR szShadow[256];
 		CStringTokenizer token;
 		m_bEnableShadow = false;
-		if (!_GetFreeTypeProfileString(_T("Shadow"), _T(""), szShadow, countof(szShadow), lpszFile)
+		if (!_GetFreeTypeProfileString(_T("Shadow"), _T(""), szShadow, std::size(szShadow), lpszFile)
 				|| token.Parse(szShadow) < 3) {
 			goto SKIP;
 		}
@@ -1916,7 +1916,7 @@ bool CFontSubstituteData::initnocheck(LPCTSTR config) {
 	memset(this, 0, sizeof *this);
 
 	TCHAR buf[LF_FACESIZE + 20];
-	StringCchCopy(buf, countof(buf), config);
+	StringCchCopy(buf, std::size(buf), config);
 
 	memset(&m_lf, 0, sizeof m_lf);
 
@@ -1928,7 +1928,7 @@ bool CFontSubstituteData::initnocheck(LPCTSTR config) {
 		}
 	}
 	if (p >= buf) {
-		StringCchCopy(m_lf.lfFaceName, countof(m_lf.lfFaceName), buf);
+		StringCchCopy(m_lf.lfFaceName, std::size(m_lf.lfFaceName), buf);
 		m_lf.lfCharSet = static_cast<BYTE>(_StrToInt(p + 1, 0));
 		m_bCharSet = true;
 	}

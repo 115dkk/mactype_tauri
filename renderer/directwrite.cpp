@@ -2717,13 +2717,13 @@ static bool InitializeDirectWriteLifecycle()
 {
 	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
 	SignalDirectWriteDiagnostic(L"hook-entered");
-	typedef HRESULT (WINAPI *PFN_DWriteCreateFactory)(
+	using PFN_DWriteCreateFactory = HRESULT (WINAPI *)(
 		_In_ DWRITE_FACTORY_TYPE factoryType,
 		_In_ REFIID iid,
 		_COM_Outptr_ IUnknown **factory
 		);
 
-	typedef HRESULT (WINAPI *PFN_D2D1CreateFactory)(
+	using PFN_D2D1CreateFactory = HRESULT (WINAPI *)(
 		D2D1_FACTORY_TYPE factoryType,
 		REFIID riid,
 		const D2D1_FACTORY_OPTIONS* pFactoryOptions,

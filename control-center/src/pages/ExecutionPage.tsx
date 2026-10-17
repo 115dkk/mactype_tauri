@@ -40,7 +40,7 @@ export function ExecutionPage({ ciSmoke = false, onReady }: { ciSmoke?: boolean;
     } catch (caught: unknown) {
       const message = caught instanceof Error ? caught.message : String(caught);
       setError(message);
-      if (ciSmoke) void runtime().reportFrontendFailure("execution", message);
+      if (ciSmoke) void runtime().reportFrontendFailure("execution", message).catch(() => undefined);
     }
   }, [ciSmoke, onReady]);
 

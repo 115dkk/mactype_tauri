@@ -354,11 +354,7 @@ export interface EventLogSummary {
 
 export const fallbackStatus: InstallationStatus = {
   state: "incomplete",
-  root: "C:\\Program Files\\MacType",
-  coreVersion: "1.2025.6.9",
-  findings: [
-    { label: "core32", value: "MacType.dll", ok: true },
-    { label: "core64", value: "MacType64.dll", ok: true },
-    { label: "preview", value: "waiting", ok: false },
-  ],
+  root: null,
+  coreVersion: null,
+  findings: [],
 };

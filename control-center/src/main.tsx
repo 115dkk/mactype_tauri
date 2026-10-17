@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
+import { AppErrorBoundary } from "./app/AppErrorBoundary";
 import { loadThemePreference } from "./app/themePreference";
 import { I18nProvider } from "./i18n/I18nProvider";
 import "./styles/tokens.css";
@@ -17,6 +18,6 @@ if (!root) {
 
 createRoot(root).render(
   <StrictMode>
-    <I18nProvider><App initialTheme={initialTheme} /></I18nProvider>
+    <I18nProvider><AppErrorBoundary><App initialTheme={initialTheme} /></AppErrorBoundary></I18nProvider>
   </StrictMode>,
 );

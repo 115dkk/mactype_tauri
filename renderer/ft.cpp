@@ -1422,7 +1422,15 @@ bool IsSFNTNameMatch(const FT_Face& face, FT_UInt nameID, wstring name) {
 		if (FT_Get_Sfnt_Name(face, i, &sfntName) == 0) {
 			if (sfntName.name_id == nameID) {
 				if (sfntName.string_len > 0 && sfntName.string) {
-					wstring fontName = getSfntName(sfntName);
+					// Macintosh and legacy Windows names are not UTF-8; one that
+					// does not decode is skipped rather than failing the face open.
+					wstring fontName;
+					try {
+						fontName = getSfntName(sfntName);
+					}
+					catch (const std::range_error&) {
+						continue;
+					}
 					if (compareStyle(fontName, name)) {
 						return true;
 					}

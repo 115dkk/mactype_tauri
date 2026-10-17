@@ -1,7 +1,3 @@
-#if defined(_MSC_VER) && defined(_MSVC_LANG) && _MSVC_LANG >= 202002L
-#define _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING
-#endif
-
 #include "profile_runtime.h"
 
 #include <Windows.h>

@@ -245,7 +245,8 @@ BOOL _CreateProcessInternalW(HANDLE hToken, LPCTSTR lpApp, LPTSTR lpCmd, LPSECUR
 	}
 #else
 	wstring exe_name = GetExeName(lpApp, lpCmd);
-	if (!hookCP || (!lpApp && !lpCmd) || (dwFlags & (DEBUG_PROCESS | DEBUG_ONLY_THIS_PROCESS)) || IsExeUnload(exe_name.c_str())) {
+	if (!hookCP || (!lpApp && !lpCmd) || (dwFlags & (DEBUG_PROCESS | DEBUG_ONLY_THIS_PROCESS)) ||
+		IsExeUnload(exe_name.c_str(), renderer::CurrentRendererPolicy())) {
 			return fn(hToken, lpApp, lpCmd, pa, ta, bInherit, dwFlags, lpEnv, lpDir, psi, ppi, hNewToken);
 	}
 	renderer_raii::UniqueMallocMemory<WCHAR> environment(GdippEnvironment(dwFlags, lpEnv));

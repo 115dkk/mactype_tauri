@@ -1808,6 +1808,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 			}
 			goto cont;
 		}
+		{
 		if (!bGlyphIndex && bIsSymbol && !bWindowsLink)
 			wch |= 0xF000;
 		FT_Referenced_Glyph* glyph_bitmap = GlyphArray;
@@ -2194,6 +2195,7 @@ BOOL ForEachGetGlyphFT(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString,
 				pftCache->AddCharData(wch, glyph_index, /*cx*/FTInfo.width, gdi32x, reinterpret_cast<FT_Referenced_BitmapGlyph>(*glyph_bitmap), render_mode, AAMode);
 			}
 		}
+		}
 
 	cont:
 		*Dx = FTInfo.x;		//Dx的位置是下一个字符开始的基准位置，并不是下一个字符开始画的位置
@@ -2246,6 +2248,8 @@ BOOL ForEachGetGlyphGGO(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString
 
 	std::vector<WORD> glyphIndices(static_cast<size_t>(cbString));
 	WORD* gi = glyphIndices.data();
+	int* Dx;
+	int* Dy;
 
 	if (!bGlyphIndex)  	//仅对win32情况进行优化，ft情况另议
 		if (GetGlyphIndices(FTInfo.hdc, lpString, cbString, gi, GGI_MARK_NONEXISTING_GLYPHS) != cbString)
@@ -2254,8 +2258,8 @@ BOOL ForEachGetGlyphGGO(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString
 			goto gdiexit;
 		}
 	//!!Snowie
-	int* Dx = FTInfo.Dx;
-	int* Dy = FTInfo.Dy;
+	Dx = FTInfo.Dx;
+	Dy = FTInfo.Dy;
 	if (!bAllowDefaultLink && FTInfo.face_id_list_num > 1)
 		FTInfo.face_id_list_num--;	//如果是symbol页那就不链接到宋体
 
@@ -2283,6 +2287,7 @@ BOOL ForEachGetGlyphGGO(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString
 				FT_Glyph_Ref_Copy(reinterpret_cast<FT_Referenced_Glyph>(chData->GetGlyph(render_mode)), glyph_bitmap);
 			}
 		}
+		{
 		if (!*glyph_bitmap) {
 			renderer_raii::UniqueReferencedGlyph glyph;
 			bool f_glyph = false;
@@ -2495,6 +2500,7 @@ BOOL ForEachGetGlyphGGO(FreeTypeDrawInfo& FTInfo, LPCTSTR lpString, int cbString
 			else {
 				pftCache->AddCharData(wch, glyph_index, FTInfo.width, gdi32x, reinterpret_cast<FT_Referenced_BitmapGlyph>(*glyph_bitmap), render_mode, AAMode);
 			}
+		}
 		}
 	cont:
 		*Dx = FTInfo.x;

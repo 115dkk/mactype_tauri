@@ -2,6 +2,7 @@
 
 #include "renderer_policy.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -50,7 +51,7 @@ public:
 
 private:
 	mutable std::mutex publishMutex_;
-	RendererPolicyRef current_;
+	std::atomic<RendererPolicyRef> current_;
 	std::uint64_t generation_ = 0;
 	std::uint64_t revision_ = 0;
 };

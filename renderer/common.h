@@ -35,8 +35,6 @@
 #include <dwrite_2.h>
 #include <dwrite_3.h>
 #include <string>
-#include <locale>
-#include <codecvt>
 
 #define for if(0);else for
 

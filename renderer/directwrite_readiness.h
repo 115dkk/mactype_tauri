@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 
 namespace directwrite_readiness {
 
@@ -131,5 +132,13 @@ private:
 
 	bool nested_ = false;
 };
+
+// Counts modern collection calls on this thread, so the legacy hook can tell
+// that DirectWrite answered it through the patched modern slot.
+inline std::uint64_t& ModernCollectionCalls() noexcept
+{
+	static thread_local std::uint64_t calls = 0;
+	return calls;
+}
 
 } // namespace directwrite_readiness

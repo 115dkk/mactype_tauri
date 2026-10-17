@@ -551,6 +551,20 @@ void TestNestedScopeIsRefused()
 
 } // namespace
 
+void TestModernCollectionCallsArePerThread()
+{
+    using directwrite_readiness::ModernCollectionCalls;
+    std::uint64_t const before = ModernCollectionCalls();
+    ++ModernCollectionCalls();
+    Require(ModernCollectionCalls() == before + 1,
+        "a modern call on this thread was not counted");
+    std::uint64_t otherThreadCalls = 1;
+    std::thread other([&] { otherThreadCalls = ModernCollectionCalls(); });
+    other.join();
+    Require(otherThreadCalls == 0,
+        "another thread's count showed this thread's modern call");
+}
+
 int main()
 {
     TestFailureRetrySchedule();
@@ -563,6 +577,7 @@ int main()
     TestAbandonedReservationReleasesWaiter();
     TestFallbackSourcesShareDeadline();
     TestNestedScopeIsRefused();
+    TestModernCollectionCallsArePerThread();
     std::cout << "DirectWrite readiness tests passed.\n";
     return 0;
 }

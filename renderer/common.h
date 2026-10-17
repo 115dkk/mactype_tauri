@@ -157,11 +157,11 @@ static void _Trace(LPCTSTR pszFormat, ...)
 	va_list argptr;
 	va_start(argptr, pszFormat);
 	//w(v)sprintfは1024文字以上返してこない
-	TCHAR szBuffer[10240];
-	wvsprintf(szBuffer, pszFormat, argptr);
+	auto szBuffer = std::make_unique<TCHAR[]>(10240);
+	wvsprintf(szBuffer.get(), pszFormat, argptr);
 	va_end(argptr);
 
-	OutputDebugString(szBuffer);
+	OutputDebugString(szBuffer.get());
 }
 #else	//!_DEBUG
 #define TRACE	NOP_FUNCTION
@@ -502,6 +502,5 @@ public:
 void StartDirectWriteLifecycle();
 bool HookD2D1();
 void HookGdiplus();
-void ChangeFileName(LPWSTR lpSrc, int nSize, LPCWSTR lpNewFileName);
 std::wstring MakeUniqueFontName(const std::wstring& strFullName, const std::wstring& strFamilyName, const std::wstring& strStyleName);
 std::string WstringToString(const std::wstring& str);

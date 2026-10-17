@@ -98,6 +98,10 @@ add_executable(module-name-tests
 target_compile_features(module-name-tests PRIVATE cxx_std_20)
 target_compile_definitions(module-name-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
+add_executable(path-text-tests tests/path_text_tests.cpp)
+target_compile_features(path-text-tests PRIVATE cxx_std_20)
+target_compile_definitions(path-text-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+
 add_executable(directwrite-font-cache-tests
   tests/directwrite_font_cache_tests.cpp
   ../../renderer/virtual_font_cache.cpp
@@ -299,6 +303,7 @@ set(MACTYPE_RENDERER_UNIT_TESTS
   private-freetype-policy-tests
   image-subsystem-tests
   module-name-tests
+  path-text-tests
   directwrite-font-cache-tests
   pe-export-view-tests
   unload-lifecycle-tests
@@ -327,7 +332,7 @@ foreach(target IN LISTS MACTYPE_RENDERER_UNIT_TESTS)
 endforeach()
 
 if(MSVC)
-  foreach(target service-probe-common probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests activation-repaint-tests freetype-runtime-tests private-freetype-policy-tests image-subsystem-tests module-name-tests directwrite-font-cache-tests pe-export-view-tests unload-lifecycle-tests renderer-policy-tests renderer-activation-tests font-substitution-tests bold-face-selection-tests directwrite-virtual-font-tests directwrite-alias-policy-tests directwrite-readiness-tests arrival-evidence-tests gdi-font-identity-tests unity-font-hook-tests unity-font-catalog-probe renderer-profile-probe bold-substitution-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe)
+  foreach(target service-probe-common probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests activation-repaint-tests freetype-runtime-tests private-freetype-policy-tests image-subsystem-tests module-name-tests path-text-tests directwrite-font-cache-tests pe-export-view-tests unload-lifecycle-tests renderer-policy-tests renderer-activation-tests font-substitution-tests bold-face-selection-tests directwrite-virtual-font-tests directwrite-alias-policy-tests directwrite-readiness-tests arrival-evidence-tests gdi-font-identity-tests unity-font-hook-tests unity-font-catalog-probe renderer-profile-probe bold-substitution-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe)
     target_compile_options(${target} PRIVATE /W4 /WX /permissive- /utf-8 /sdl)
   endforeach()
   foreach(target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-profile-probe bold-substitution-probe browser-launch-gate dwritecore-contract-probe relay-policy-probe)

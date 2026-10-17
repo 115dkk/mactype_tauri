@@ -384,6 +384,7 @@ struct SourceEntry
     int factory = 0;
     int generation = 0;
     bool applied = false;
+    int source = 0;
 };
 
 void TestNewestMatchingEntry()
@@ -405,6 +406,31 @@ void TestNewestMatchingEntry()
                 return candidate->factory == 9;
             }),
         "a missing cache match did not return a value-initialized result");
+}
+
+void TestCanonicalSourceEntryWins()
+{
+    // Source 1 replaced source 0, but a build reserved late for source 0 was
+    // inserted after source 1's entry.
+    std::vector<std::shared_ptr<SourceEntry>> entries = {
+        std::make_shared<SourceEntry>(SourceEntry{7, 11, true, 1}),
+        std::make_shared<SourceEntry>(SourceEntry{8, 11, true, 1}),
+        std::make_shared<SourceEntry>(SourceEntry{7, 11, true, 0}),
+    };
+    auto const forFactory = [](std::shared_ptr<SourceEntry> const& candidate) {
+        return candidate->factory == 7 && candidate->generation == 11;
+    };
+    auto const lookup = [&](int canonicalSource) {
+        return directwrite_readiness::CanonicalOrNewestMatching(
+            entries, forFactory,
+            [canonicalSource](std::shared_ptr<SourceEntry> const& candidate) {
+                return candidate->source == canonicalSource;
+            });
+    };
+    Require(lookup(1) == entries.front(),
+        "a late build for a superseded source stood in for the canonical source");
+    Require(lookup(2) == entries.back(),
+        "a canonical source without an entry did not fall back to the newest entry");
 }
 
 void TestModernEntryWaits()
@@ -570,6 +596,7 @@ int main()
     TestFailureRetrySchedule();
     TestFailedBuildRetryPolicy();
     TestNewestMatchingEntry();
+    TestCanonicalSourceEntryWins();
     TestModernEntryWaits();
     TestFallbackWaits();
     TestReservedFallbackWaits();

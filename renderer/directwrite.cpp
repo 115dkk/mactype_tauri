@@ -1463,13 +1463,16 @@ void PublishFactoryAliasSource(
 	CComPtr<IUnknown> const identity = GetFactoryIdentity(factory);
 	if (identity == nullptr || systemSet == nullptr)
 		return;
-	std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
-	for (FactoryAliasSource const& source : GetFactoryAliasSourceRegistry())
 	{
-		if (source.factoryIdentity == identity)
-			return;
+		std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+		for (FactoryAliasSource const& source : GetFactoryAliasSourceRegistry())
+		{
+			if (source.factoryIdentity == identity)
+				return;
+		}
+		GetFactoryAliasSourceRegistry().push_back({identity, systemSet});
 	}
-	GetFactoryAliasSourceRegistry().push_back({identity, systemSet});
+	directwrite_alias::SetCanonicalSource(factory, systemSet, 0);
 }
 
 CComPtr<IDWriteFontSet> GetFactoryAliasSource(IDWriteFactory* factory)
@@ -1544,28 +1547,37 @@ void RefreshFactoryAliasSource(
 		systemSet == nullptr)
 		return;
 
-	std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
-	for (FactoryAliasSource& source : GetFactoryAliasSourceRegistry())
+	std::uint64_t publishedRevision = kNoFactoryAliasSource;
 	{
-		if (source.factoryIdentity == identity)
+		std::lock_guard<std::mutex> lock(GetFactoryAliasVtableMutex());
+		bool registered = false;
+		for (FactoryAliasSource& source : GetFactoryAliasSourceRegistry())
 		{
+			if (source.factoryIdentity != identity)
+				continue;
+			registered = true;
 			// A source published since the stock call began is kept.
 			if (source.revision == expectedRevision)
 			{
 				source.systemSet = systemSet;
 				checkedCollection(source) = collectionIdentity;
-				++source.revision;
+				publishedRevision = ++source.revision;
 			}
-			return;
+			break;
+		}
+		if (!registered && expectedRevision == kNoFactoryAliasSource)
+		{
+			FactoryAliasSource source;
+			source.factoryIdentity = identity;
+			source.systemSet = systemSet;
+			checkedCollection(source) = collectionIdentity;
+			GetFactoryAliasSourceRegistry().push_back(source);
+			publishedRevision = source.revision;
 		}
 	}
-	if (expectedRevision != kNoFactoryAliasSource)
-		return;
-	FactoryAliasSource source;
-	source.factoryIdentity = identity;
-	source.systemSet = systemSet;
-	checkedCollection(source) = collectionIdentity;
-	GetFactoryAliasSourceRegistry().push_back(source);
+	if (publishedRevision != kNoFactoryAliasSource)
+		directwrite_alias::SetCanonicalSource(
+			factory, systemSet, publishedRevision);
 }
 
 FactoryAliasVtableHooks& GetOrAddFactoryAliasVtable(void** vtable)

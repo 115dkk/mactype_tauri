@@ -66,6 +66,26 @@ typename Container::value_type NewestMatching(
 	return typename Container::value_type{};
 }
 
+// The fallback lookup reads the entry built from the factory's canonical
+// source. A build reserved late for a superseded source is inserted after the
+// current one, so insertion order alone would let it stand in for the current
+// source; the newest entry serves only until the canonical source has one.
+template <typename Container, typename Predicate, typename CanonicalPredicate>
+typename Container::value_type CanonicalOrNewestMatching(
+	Container const& entries,
+	Predicate matches,
+	CanonicalPredicate isCanonical)
+{
+	typename Container::value_type const canonical = NewestMatching(
+		entries,
+		[&](typename Container::value_type const& candidate) {
+			return matches(candidate) && isCanonical(candidate);
+		});
+	if (canonical)
+		return canonical;
+	return NewestMatching(entries, matches);
+}
+
 // The caller publishes the candidate before building so every entry point uses
 // one canonical source. A publisher that loses the race reloads the winner.
 template <typename Factory, typename Source, typename GetPublished,

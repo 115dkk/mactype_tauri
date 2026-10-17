@@ -438,6 +438,86 @@ processes. The pre-entry probe exercises the collection path only; the two
 fallback windows are covered by the fake-driven readiness tests and by
 reasoning, not by a runtime reproduction.
 
+Windows Settings then froze on launch and the shell closed it as not responding
+(field log, 2026-10-17, runtime c41f489); it was fine whenever the service was
+stopped. A debugger trace in `SystemSettings.exe` counted 150 alias builds in
+30 s for one factory and one source set, all on the UI thread from
+`TextLayout::MapCharacters` through `FontFallback::FontFallback` into the
+collection hook, 85 to 130 ms each, every one ending `createSetFailed`; the
+cache erased a failed entry, so every `GetSystemFontCollection` call built
+again. The source was the set the original `GetSystemFontSet` returns, which
+`EstablishFactoryAliasSource` falls back to when the modern entry runs first:
+735 faces, 225 of them downloadable and not local. `Build` re-added every
+native face as a bare `AddFontFaceReference`, so `CreateFontSet` had to extract
+each face's properties again and failed with `DWRITE_E_REMOTEFONT` on the
+remote ones (225 `RemoteFontException` throws per build; every file open in
+the build succeeded). A probe without MacType reproduced the failure in a
+normal process and in an AppContainer, and built the legacy collection's set
+(510 local faces) without trouble, which is why Notepad kept its alias and
+Settings never got one. Native faces, downloadable ones included, now go in as
+`IDWriteFontSet1::GetFilteredFonts` subsets through
+`IDWriteFontSetBuilder1::AddFontSet` in source order, so DirectWrite keeps the
+properties it already has instead of reading them again; a downloadable face is
+never aliased. The build keeps two views of the result: the full set answers
+`GetSystemFontSet` and `GetSystemFontCollection(includeDownloadableFonts=TRUE)`,
+and a local-only subset of it answers the legacy collection,
+`includeDownloadableFonts=FALSE` and the fallback mapping, the way the stock
+objects split. A system without those interfaces (Windows 10 before 1709) keeps
+the per-reference path and leaves downloadable faces out. A failed build stays in the cache with a
+retry after 2 s, 15 s and 120 s, after which that factory keeps the stock set
+until its source set or the profile generation changes. The fallback lookup
+reads the entry built from the factory's canonical source, which the cache
+records with its revision whenever the source is published or replaced, and
+the newest entry only until that source has one. Neither a failure retained
+for a superseded source set nor a build reserved late for one (a thread that
+read the previous source just before a replacement inserts its entry after the
+current one) can then stand in for the current source. On `checkForUpdates` the legacy hook
+used to publish the set it received as the factory's source on every call.
+DirectWrite returns a new set object from each collection call, so every such
+call keyed a fresh build, and in a process whose builds fail the retry schedule
+never applied. The set's expiration event cannot stand in for that check: only
+the first system set a process receives carries one, and every object
+DirectWrite returns after the first update check, `GetSystemFontSet` included,
+has none. The system collection object is what stays stable: DirectWrite hands
+back the same one until it builds a new one, which it does on the first update
+check and after a font change. The source therefore records the stock
+collection it was last checked against, one per `includeDownloadableFonts`
+value because those are different objects, and an update check replaces the
+source only when DirectWrite answers with a collection it has not seen. The
+replacement goes through only while the source's revision is the one read
+before the stock call, so two threads that see the same new collection build
+once and an answer that was delayed across a font change cannot roll a newer
+source back. The legacy method answers through the modern slot with the same
+`checkForUpdates` value, so in a process whose alias build succeeds the legacy
+hook only ever sees the alias collection; the check therefore runs in the
+modern hook, where the stock collection is visible, and the legacy hook checks
+only when no modern call ran on its thread during the stock call. An alias
+collection it holds is then never taken for a stock one, even after a profile
+reload has pruned the cache entry that identified it. Before this, a process whose build succeeded never took
+a font change from an update check at all. A process that checks for updates
+now builds once more on its first check and again only after a real change.
+Measured with the service
+stopped and each core loaded by `MacLoader64` before image entry, in a probe
+that asks for `GetSystemFontSet` first the way Settings does: the c41f489 core
+answered `Malgun Gothic` with `MALGUN.TTF` at weight 400 and spent 2,301 ms on
+50 further legacy collection calls and 429 ms on 20 modern ones; the fixed core
+answered with the alias file at weight 500 (Pretendard Variable Medium),
+returned a 758-face set that still carries the downloadable faces, and spent
+0.3 ms and under 0.1 ms.
+Update checks without MacType took 45.8 ms for the first legacy call, 414.8 ms
+for 49 more, 8.5 ms for the first downloadable modern call and 328.4 ms for 20
+alternating legacy and downloadable modern pairs; the fixed core took 84.1 ms,
+412.3 ms, 50.9 ms and 331.4 ms, the one extra build per collection kind
+falling on its first check, against 2,947 ms on c41f489 for 50 legacy update
+checks, and `Malgun Gothic` still resolved to the alias file afterwards.
+
+One behaviour remains, and it is stock DirectWrite's: without
+MacType, DirectWrite answers `GetSystemFontSet` with 735 faces only until the
+process first asks for the legacy collection or checks for updates; from then
+on every system answer, `GetSystemFontSet` included, carries the 510 local
+faces. A source replaced by an update check therefore leaves the full view
+with local faces only, as the stock answer has.
+
 An injection that lands after the first frame (the open service's remote
 `LoadLibrary`, every elevated target, any child of a parent that was not
 hooked) leaves that stock frame on screen until the application repaints on

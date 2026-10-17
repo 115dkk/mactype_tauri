@@ -130,6 +130,42 @@ test("listener cleanup survives unmount before registration resolves", async ({ 
   expect(result.unexpected).toEqual([]);
 });
 
+for (const event of ["event-log:changed", "native-preview:state", "studio:request"]) {
+  for (const delayed of [false, true]) {
+    test(`listener cleanup rejection is contained for ${event} with ${delayed ? "late" : "ready"} registration`, async ({ page }) => {
+      await installRuntimeFaults(page, {
+        view: event === "event-log:changed" ? "diagnostics" : "profiles",
+        holdEvent: delayed ? event : undefined,
+        reject: ["plugin:event|unlisten", "frontend_failed"],
+      });
+      await page.goto("/?gallery=1&lang=en", { waitUntil: "networkidle" });
+      const initial = await runtimeFaultSnapshot(page);
+      const registrations = initial.calls.filter((call) => call.command === "plugin:event|listen" && call.args.event === event);
+      expect(registrations.length).toBeGreaterThan(0);
+      expect(initial.calls.some((call) => call.command === "frontend_ready")).toBe(true);
+      await page.getByRole("button", { name: "Profiles", exact: true }).click();
+      await expect(page.getByRole("heading", { level: 1, name: "Profiles" })).toBeVisible();
+      if (delayed) {
+        expect((await runtimeFaultSnapshot(page)).calls.filter((call) => call.command === "plugin:event|unlisten" && call.args.event === event)).toEqual([]);
+        await page.evaluate(() => window.galleryFaults.releaseListeners());
+      }
+      await expect.poll(async () => (await runtimeFaultSnapshot(page)).calls.filter((call) => call.command === "plugin:event|unlisten" && call.args.event === event).length).toBe(registrations.length);
+      await expect.poll(async () => {
+        const result = await runtimeFaultSnapshot(page);
+        return result.calls.filter((call) => call.command === "frontend_failed").length
+          - result.calls.filter((call) => call.command === "plugin:event|unlisten").length;
+      }).toBe(0);
+      const result = await runtimeFaultSnapshot(page);
+      for (const report of result.calls.filter((call) => call.command === "frontend_failed")) {
+        expect(report.args.message).toContain("fixture:plugin:event|unlisten");
+      }
+      expect(result.unhandled).toEqual([]);
+      expect(result.unexpected).toEqual([]);
+      await expect(page.locator(".app-recovery")).toHaveCount(0);
+    });
+  }
+}
+
 test("gallery injection activation excludes an outdated running ready matching-profile service", () => {
   const ready = galleryExecutionStatus(new URLSearchParams("system-service=ready"));
   expect(ready.systemService.runtime).toBe("running");

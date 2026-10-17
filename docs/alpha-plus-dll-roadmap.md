@@ -454,22 +454,29 @@ remote ones (225 `RemoteFontException` throws per build; every file open in
 the build succeeded). A probe without MacType reproduced the failure in a
 normal process and in an AppContainer, and built the legacy collection's set
 (510 local faces) without trouble, which is why Notepad kept its alias and
-Settings never got one. Non-local faces now stay out of the alias generation,
-which then matches what a successful build already produced whichever set the
-factory published first; native faces go in as `IDWriteFontSet1::GetFilteredFonts`
-subsets through `IDWriteFontSetBuilder1::AddFontSet` in source order, so
-DirectWrite keeps the properties it already has instead of reading them again;
-and a failed build stays in the cache with a retry after 2 s, 15 s and 120 s,
-after which that factory keeps the stock set until its source set or the
-profile generation changes. The legacy hook also no longer publishes an alias
+Settings never got one. Native faces, downloadable ones included, now go in as
+`IDWriteFontSet1::GetFilteredFonts` subsets through
+`IDWriteFontSetBuilder1::AddFontSet` in source order, so DirectWrite keeps the
+properties it already has instead of reading them again; a downloadable face is
+never aliased. The build keeps two views of the result: the full set answers
+`GetSystemFontSet` and `GetSystemFontCollection(includeDownloadableFonts=TRUE)`,
+and a local-only subset of it answers the legacy collection,
+`includeDownloadableFonts=FALSE` and the fallback mapping, the way the stock
+objects split. A system without those interfaces keeps the per-reference path
+and leaves downloadable faces out. A failed build stays in the cache with a
+retry after 2 s, 15 s and 120 s, after which that factory keeps the stock set
+until its source set or the profile generation changes, and the fallback lookup
+reads the newest entry for a factory, so a failure retained for a superseded
+source set cannot hide the current one. The legacy hook also no longer publishes an alias
 collection's set as the factory's source on `checkForUpdates`; doing so would
 have stacked a new generation on every such call. Measured with the service
 stopped and each core loaded by `MacLoader64` before image entry, in a probe
 that asks for `GetSystemFontSet` first the way Settings does: the c41f489 core
 answered `Malgun Gothic` with `MALGUN.TTF` at weight 400 and spent 2,301 ms on
 50 further legacy collection calls and 429 ms on 20 modern ones; the fixed core
-answered with the alias file at weight 500 (Pretendard Variable Medium) and
-spent 0.2 ms and under 0.1 ms.
+answered with the alias file at weight 500 (Pretendard Variable Medium),
+returned a 758-face set that still carries the downloadable faces, and spent
+0.3 ms and under 0.1 ms.
 
 An injection that lands after the first frame (the open service's remote
 `LoadLibrary`, every elevated target, any child of a parent that was not

@@ -917,55 +917,11 @@ emit_dw(0xD0FF);	//call eax
 		static DWORD const pfn = K32GetProcAddressTableEntryRva("LoadLibraryW");
 		if (pfn == 0)
 			return false;
-		/*WCHAR msg[500] = { 0 };
-		wsprintf(msg, L"API paddr: 0x%I64x\r\nOffset: %x\r\nAPI addr: 0x%I64x\r\nKernel32.dll: 0x%I64x\r\nKernelBase: 0x%I64x", (DWORD_PTR)pfn, *(PDWORD)pfn, *(PDWORD)pfn + (DWORD_PTR)GetModuleHandle(L"kernel32.dll"),
-			(DWORD_PTR)GetModuleHandle(L"kernel32.dll"), (DWORD_PTR)GetModuleHandle(L"kernelbase.dll"));
-		MessageBoxW(nullptr, msg, nullptr, MB_OK);*/
-		//	return false;
-		//emit_db(0xEB);
-		//emit_db(0xFE);	// make a dead loop
 
 		emit_db(0x50);		//push rax
 		emit_db(0x51);		//push rcx
 		emit_db(0x52);		//push rdx
 		emit_db(0x53);		//push rbx
-		/*
-#ifdef DEBUG
-		emit_dd(0x28ec8348);
-		emit_db(0x48);
-		emit_db(0x31);
-		emit_db(0xD0);	//xor rax,rax
-		emit_db(0x48);
-		emit_db(0x31);
-		emit_db(0xC9);	//xor rcx,rcx
-		emit_db(0x48);
-		emit_db(0x31);
-		emit_db(0xD2);	//xor rdx,rdx
-		emit_db(0x45);
-		emit_db(0x31);
-		emit_db(0xC0);	//xor r8d,r8d
-		emit_db(0x45);
-		emit_db(0x31);
-		emit_db(0xC9);	//xor r9d,r9d
-
-		emit_db(0x48);		//mov rsi, MessageBoxW
-		emit_db(0xBE);
-		emit_ddp((DWORD_PTR)MessageBoxW);
-		emit_db(0xFF);
-		emit_db(0xD6);
-		emit_dd(0x28c48348);
-#endif*/
-/*
-//Debug function2, Sleep for 10sec.
-		emit_dd(0x28ec8348);
-		emit_db(0x48);		//mov rsi, MessageBoxW
-		emit_db(0xBE);
-		emit_ddp((DWORD_PTR)Sleep);
-		emit_db(0x48); emit_db(0xc7); emit_db(0xc1); emit_db(0x10); emit_db(0x27); emit_db(0x00); emit_db(0x00);
-		emit_db(0xFF);
-		emit_db(0xD6);
-		emit_dd(0x28c48348);
-*/
 
 //shellcode to find imagebase of kernel32.dll (under x64)
 //rax will store the imagebase of kernel32.dll, fast but not reliable. does not work in some scenarios

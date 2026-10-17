@@ -6,9 +6,11 @@
 #include <array>
 #include <atomic>
 #include <bcrypt.h>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <sddl.h>
 #include <utility>
@@ -258,6 +260,501 @@ private:
     bool committed_ = false;
 };
 
+struct ManifestEntry
+{
+    ManifestKey key;
+    ManifestValue value;
+    UINT64 stamp = 0;
+};
+
+struct ManifestState
+{
+    std::mutex mutex;
+    std::wstring path;
+    std::vector<ManifestEntry> entries;
+    bool loaded = false;
+};
+
+// manifest-v2.bin is a bounded little-endian record stream. The explicit
+// version makes format changes fail closed even if a file is renamed.
+constexpr std::array<BYTE, 8> kManifestMagic = {
+    'M', 'T', 'F', 'M', 'A', 'N', 0x0d, 0x0a,
+};
+constexpr UINT32 kManifestVersion = 2;
+constexpr size_t kManifestEntryLimit = 2048;
+constexpr UINT32 kManifestAxisLimit = 64;
+constexpr UINT32 kManifestStringLimit = 32768;
+constexpr UINT64 kManifestFileLimit = 64ULL * 1024ULL * 1024ULL;
+
+ManifestState& GetManifestState()
+{
+    static ManifestState* state = new ManifestState;
+    return *state;
+}
+
+void AppendU32(std::vector<BYTE>& bytes, UINT32 value)
+{
+    for (unsigned int shift = 0; shift != 32; shift += 8)
+        bytes.push_back(static_cast<BYTE>(value >> shift));
+}
+
+void AppendU64(std::vector<BYTE>& bytes, UINT64 value)
+{
+    for (unsigned int shift = 0; shift != 64; shift += 8)
+        bytes.push_back(static_cast<BYTE>(value >> shift));
+}
+
+bool AppendString(std::vector<BYTE>& bytes, std::wstring const& value)
+{
+    if (value.size() > kManifestStringLimit)
+        return false;
+    AppendU32(bytes, static_cast<UINT32>(value.size()));
+    if (!value.empty())
+    {
+        BYTE const* first = reinterpret_cast<BYTE const*>(value.data());
+        bytes.insert(bytes.end(), first, first + value.size() * sizeof(WCHAR));
+    }
+    return true;
+}
+
+class ManifestReader
+{
+public:
+    explicit ManifestReader(std::vector<BYTE> const& bytes) : bytes_(bytes) {}
+
+    bool Skip(size_t count) noexcept
+    {
+        if (count > bytes_.size() - offset_)
+            return false;
+        offset_ += count;
+        return true;
+    }
+
+    bool U32(UINT32& value) noexcept
+    {
+        if (bytes_.size() - offset_ < 4)
+            return false;
+        value = static_cast<UINT32>(bytes_[offset_]) |
+            (static_cast<UINT32>(bytes_[offset_ + 1]) << 8) |
+            (static_cast<UINT32>(bytes_[offset_ + 2]) << 16) |
+            (static_cast<UINT32>(bytes_[offset_ + 3]) << 24);
+        offset_ += 4;
+        return true;
+    }
+
+    bool U64(UINT64& value) noexcept
+    {
+        value = 0;
+        if (bytes_.size() - offset_ < 8)
+            return false;
+        for (unsigned int shift = 0; shift != 64; shift += 8)
+            value |= static_cast<UINT64>(bytes_[offset_++]) << shift;
+        return true;
+    }
+
+    bool String(std::wstring& value)
+    {
+        UINT32 length = 0;
+        if (!U32(length) || length > kManifestStringLimit ||
+            static_cast<size_t>(length) >
+                (bytes_.size() - offset_) / sizeof(WCHAR))
+            return false;
+        value.resize(length);
+        if (length != 0)
+        {
+            memcpy(
+                &value[0], bytes_.data() + offset_,
+                static_cast<size_t>(length) * sizeof(WCHAR));
+        }
+        offset_ += static_cast<size_t>(length) * sizeof(WCHAR);
+        return true;
+    }
+
+    bool finished() const noexcept { return offset_ == bytes_.size(); }
+
+private:
+    std::vector<BYTE> const& bytes_;
+    size_t offset_ = 0;
+};
+
+UINT64 CurrentFileTime() noexcept
+{
+    FILETIME time = {};
+    GetSystemTimeAsFileTime(&time);
+    ULARGE_INTEGER value = {};
+    value.LowPart = time.dwLowDateTime;
+    value.HighPart = time.dwHighDateTime;
+    return value.QuadPart;
+}
+
+bool SameFloat(FLOAT left, FLOAT right) noexcept
+{
+    UINT32 leftBits = 0;
+    UINT32 rightBits = 0;
+    static_assert(sizeof(leftBits) == sizeof(left), "FLOAT size changed");
+    memcpy(&leftBits, &left, sizeof(leftBits));
+    memcpy(&rightBits, &right, sizeof(rightBits));
+    return leftBits == rightBits;
+}
+
+bool SameKey(ManifestKey const& left, ManifestKey const& right) noexcept
+{
+    if (_wcsicmp(left.replacementPath.c_str(), right.replacementPath.c_str()) != 0 ||
+        left.replacementSize != right.replacementSize ||
+        left.replacementLastWriteTime != right.replacementLastWriteTime ||
+        left.faceIndex != right.faceIndex ||
+        left.aliasFamily != right.aliasFamily ||
+        left.overrideWeight != right.overrideWeight ||
+        left.weight != right.weight ||
+        left.profileDigest != right.profileDigest ||
+        left.axes.size() != right.axes.size())
+        return false;
+    for (size_t index = 0; index < left.axes.size(); ++index)
+    {
+        if (left.axes[index].tag != right.axes[index].tag ||
+            !SameFloat(left.axes[index].value, right.axes[index].value))
+            return false;
+    }
+    return true;
+}
+
+bool ReadManifestFile(std::wstring const& path, std::vector<BYTE>& bytes)
+{
+    bytes.clear();
+    renderer_raii::UniqueHandle file = renderer_raii::AdoptHandle(CreateFileW(
+        path.c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
+    if (!file)
+        return false;
+    LARGE_INTEGER size = {};
+    if (!GetFileSizeEx(file.get(), &size) || size.QuadPart < 16 ||
+        static_cast<UINT64>(size.QuadPart) > kManifestFileLimit)
+        return false;
+    bytes.resize(static_cast<size_t>(size.QuadPart));
+    size_t offset = 0;
+    while (offset < bytes.size())
+    {
+        DWORD const wanted = static_cast<DWORD>((std::min)(
+            bytes.size() - offset,
+            static_cast<size_t>((std::numeric_limits<DWORD>::max)())));
+        DWORD received = 0;
+        if (!ReadFile(file.get(), bytes.data() + offset, wanted, &received, nullptr) ||
+            received == 0)
+            return false;
+        offset += received;
+    }
+    return true;
+}
+
+bool ParseManifest(
+    std::vector<BYTE> const& bytes,
+    std::vector<ManifestEntry>& entries)
+{
+    entries.clear();
+    if (bytes.size() < kManifestMagic.size() + 8 ||
+        memcmp(bytes.data(), kManifestMagic.data(), kManifestMagic.size()) != 0)
+        return false;
+    ManifestReader reader(bytes);
+    if (!reader.Skip(kManifestMagic.size()))
+        return false;
+    UINT32 version = 0;
+    UINT32 count = 0;
+    if (!reader.U32(version) || version != kManifestVersion ||
+        !reader.U32(count) || count > kManifestEntryLimit)
+        return false;
+    entries.reserve(count);
+    for (UINT32 entryIndex = 0; entryIndex < count; ++entryIndex)
+    {
+        ManifestEntry entry;
+        UINT32 flags = 0;
+        UINT32 weight = 0;
+        UINT32 axisCount = 0;
+        if (!reader.U64(entry.stamp) ||
+            !reader.U64(entry.value.virtualFontSize) ||
+            !reader.U64(entry.key.replacementSize) ||
+            !reader.U64(entry.key.replacementLastWriteTime) ||
+            !reader.U64(entry.key.profileDigest) ||
+            !reader.U32(entry.key.faceIndex) ||
+            !reader.U32(flags) || !reader.U32(weight) ||
+            !reader.U32(axisCount) || axisCount > kManifestAxisLimit)
+            return false;
+        entry.key.overrideWeight = (flags & 1U) != 0;
+        if ((flags & ~1U) != 0 || weight > 1000)
+            return false;
+        entry.key.weight = static_cast<UINT16>(weight);
+        entry.key.axes.resize(axisCount);
+        for (ManifestAxis& axis : entry.key.axes)
+        {
+            UINT32 bits = 0;
+            if (!reader.U32(axis.tag) || !reader.U32(bits))
+                return false;
+            memcpy(&axis.value, &bits, sizeof(bits));
+            if (!std::isfinite(axis.value))
+                return false;
+        }
+        if (!reader.String(entry.key.replacementPath) ||
+            !reader.String(entry.key.aliasFamily) ||
+            !reader.String(entry.value.virtualFontPath) ||
+            !reader.String(entry.value.family) ||
+            !reader.String(entry.value.subfamily) ||
+            !reader.String(entry.value.fullName) ||
+            !reader.String(entry.value.postScriptName))
+            return false;
+        entries.push_back(std::move(entry));
+    }
+    return reader.finished();
+}
+
+bool SerializeManifest(
+    std::vector<ManifestEntry> const& entries,
+    std::vector<BYTE>& bytes)
+{
+    if (entries.size() > kManifestEntryLimit)
+        return false;
+    bytes.assign(kManifestMagic.begin(), kManifestMagic.end());
+    AppendU32(bytes, kManifestVersion);
+    AppendU32(bytes, static_cast<UINT32>(entries.size()));
+    for (ManifestEntry const& entry : entries)
+    {
+        if (entry.key.axes.size() > kManifestAxisLimit)
+            return false;
+        AppendU64(bytes, entry.stamp);
+        AppendU64(bytes, entry.value.virtualFontSize);
+        AppendU64(bytes, entry.key.replacementSize);
+        AppendU64(bytes, entry.key.replacementLastWriteTime);
+        AppendU64(bytes, entry.key.profileDigest);
+        AppendU32(bytes, entry.key.faceIndex);
+        AppendU32(bytes, entry.key.overrideWeight ? 1U : 0U);
+        AppendU32(bytes, entry.key.weight);
+        AppendU32(bytes, static_cast<UINT32>(entry.key.axes.size()));
+        for (ManifestAxis const& axis : entry.key.axes)
+        {
+            UINT32 bits = 0;
+            memcpy(&bits, &axis.value, sizeof(bits));
+            AppendU32(bytes, axis.tag);
+            AppendU32(bytes, bits);
+        }
+        if (!AppendString(bytes, entry.key.replacementPath) ||
+            !AppendString(bytes, entry.key.aliasFamily) ||
+            !AppendString(bytes, entry.value.virtualFontPath) ||
+            !AppendString(bytes, entry.value.family) ||
+            !AppendString(bytes, entry.value.subfamily) ||
+            !AppendString(bytes, entry.value.fullName) ||
+            !AppendString(bytes, entry.value.postScriptName) ||
+            bytes.size() > kManifestFileLimit)
+            return false;
+    }
+    return true;
+}
+
+void LoadManifest(ManifestState& state, std::wstring const& path)
+{
+    if (state.loaded && state.path == path)
+        return;
+    state.path = path;
+    state.entries.clear();
+    state.loaded = true;
+    std::vector<BYTE> bytes;
+    if (!ReadManifestFile(path, bytes))
+        return;
+    std::vector<ManifestEntry> parsed;
+    if (ParseManifest(bytes, parsed))
+        state.entries = std::move(parsed);
+}
+
+HRESULT WriteManifest(
+    std::wstring const& path,
+    std::vector<ManifestEntry> const& entries)
+{
+    std::vector<BYTE> bytes;
+    if (!SerializeManifest(entries, bytes))
+        return HRESULT_FROM_WIN32(ERROR_FILE_TOO_LARGE);
+    static std::atomic<ULONG> sequence(0);
+    std::wstring temporaryPath = path;
+    temporaryPath.append(L".tmp-");
+    temporaryPath.append(std::to_wstring(GetCurrentProcessId()));
+    temporaryPath.push_back(L'-');
+    temporaryPath.append(std::to_wstring(GetCurrentThreadId()));
+    temporaryPath.push_back(L'-');
+    temporaryPath.append(std::to_wstring(++sequence));
+    PendingCacheFile temporary(std::move(temporaryPath));
+    renderer_raii::UniqueHandle file = renderer_raii::AdoptHandle(CreateFileW(
+        temporary.path(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
+    if (!file)
+        return HRESULT_FROM_WIN32(GetLastError());
+    HRESULT result = WriteAll(file.get(), bytes);
+    if (SUCCEEDED(result) && !FlushFileBuffers(file.get()))
+        result = HRESULT_FROM_WIN32(GetLastError());
+    file.reset();
+    if (FAILED(result))
+        return result;
+    if (!MoveFileExW(
+            temporary.path(), path.c_str(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        return HRESULT_FROM_WIN32(GetLastError());
+    temporary.Commit();
+    return S_OK;
+}
+
+bool IsUsableManifestFile(
+    std::wstring const& path,
+    UINT64 expectedSize) noexcept
+{
+    renderer_raii::UniqueHandle file = renderer_raii::AdoptHandle(CreateFileW(
+        path.c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
+    if (!file || expectedSize < 4)
+        return false;
+    LARGE_INTEGER size = {};
+    if (!GetFileSizeEx(file.get(), &size) || size.QuadPart < 0 ||
+        static_cast<UINT64>(size.QuadPart) != expectedSize)
+        return false;
+    std::array<BYTE, 4> scaler = {};
+    DWORD received = 0;
+    if (!ReadFile(file.get(), scaler.data(), static_cast<DWORD>(scaler.size()),
+            &received, nullptr) || received != scaler.size())
+        return false;
+    constexpr std::array<BYTE, 4> trueType = {0x00, 0x01, 0x00, 0x00};
+    constexpr std::array<BYTE, 4> cff = {'O', 'T', 'T', 'O'};
+    constexpr std::array<BYTE, 4> appleTrueType = {'t', 'r', 'u', 'e'};
+    constexpr std::array<BYTE, 4> collection = {'t', 't', 'c', 'f'};
+    return scaler == trueType || scaler == cff ||
+        scaler == appleTrueType || scaler == collection;
+}
+
+HRESULT ManifestPath(std::wstring& path)
+{
+    HRESULT const result = GetCacheDirectory(path);
+    if (FAILED(result))
+        return result;
+    AppendPathComponent(path, L"manifest-v2.bin");
+    return S_OK;
+}
+
+HRESULT LookupManifestFontImpl(
+    ManifestKey const& key,
+    ManifestValue& value,
+    bool& found)
+{
+    value = {};
+    found = false;
+    if (key.replacementPath.empty() || key.aliasFamily.empty())
+        return S_OK;
+    std::wstring path;
+    if (FAILED(ManifestPath(path)))
+        return S_OK;
+    ManifestState& state = GetManifestState();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    LoadManifest(state, path);
+    for (auto entry = state.entries.begin(); entry != state.entries.end(); ++entry)
+    {
+        if (!SameKey(entry->key, key))
+            continue;
+        if (!IsUsableManifestFile(
+                entry->value.virtualFontPath, entry->value.virtualFontSize))
+        {
+            state.entries.erase(entry);
+            return WriteManifest(path, state.entries);
+        }
+        entry->stamp = CurrentFileTime();
+        value = entry->value;
+        found = true;
+        return S_OK;
+    }
+    return S_OK;
+}
+
+HRESULT StoreManifestFontImpl(
+    ManifestKey const& key,
+    ManifestValue const& value)
+{
+    if (key.replacementPath.empty() || key.aliasFamily.empty() ||
+        value.virtualFontPath.empty() || value.virtualFontSize < 4 ||
+        key.axes.size() > kManifestAxisLimit)
+        return E_INVALIDARG;
+    if (std::any_of(
+            key.axes.begin(), key.axes.end(),
+            [](ManifestAxis const& axis) { return !std::isfinite(axis.value); }))
+        return E_INVALIDARG;
+    std::wstring path;
+    HRESULT result = ManifestPath(path);
+    if (FAILED(result))
+        return result;
+    ManifestState& state = GetManifestState();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    LoadManifest(state, path);
+    ManifestEntry* destination = nullptr;
+    for (ManifestEntry& entry : state.entries)
+    {
+        if (SameKey(entry.key, key))
+        {
+            destination = &entry;
+            break;
+        }
+    }
+    if (destination == nullptr)
+    {
+        state.entries.push_back({});
+        destination = &state.entries.back();
+        destination->key = key;
+    }
+    destination->value = value;
+    destination->stamp = CurrentFileTime();
+    while (state.entries.size() > kManifestEntryLimit)
+    {
+        auto const oldest = std::min_element(
+            state.entries.begin(), state.entries.end(),
+            [](ManifestEntry const& left, ManifestEntry const& right) {
+                return left.stamp < right.stamp;
+            });
+        state.entries.erase(oldest);
+    }
+    return WriteManifest(path, state.entries);
+}
+
+HRESULT DropManifestFontImpl(ManifestKey const& key)
+{
+    if (key.replacementPath.empty() || key.aliasFamily.empty())
+        return S_OK;
+    std::wstring path;
+    HRESULT result = ManifestPath(path);
+    if (FAILED(result))
+        return result;
+    ManifestState& state = GetManifestState();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    LoadManifest(state, path);
+    size_t const before = state.entries.size();
+    state.entries.erase(
+        std::remove_if(
+            state.entries.begin(), state.entries.end(),
+            [&key](ManifestEntry const& entry) {
+                return SameKey(entry.key, key);
+            }),
+        state.entries.end());
+    return state.entries.size() == before ? S_FALSE :
+        WriteManifest(path, state.entries);
+}
+
+HRESULT ReloadManifestForTestsImpl()
+{
+    std::wstring path;
+    HRESULT result = ManifestPath(path);
+    if (FAILED(result))
+        return result;
+    ManifestState fresh;
+    LoadManifest(fresh, path);
+    ManifestState& state = GetManifestState();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    state.path = std::move(fresh.path);
+    state.entries = std::move(fresh.entries);
+    state.loaded = fresh.loaded;
+    return S_OK;
+}
+
 HRESULT PersistFontImpl(
     std::vector<BYTE> const& bytes,
     std::wstring& path)
@@ -458,6 +955,77 @@ HRESULT GetCacheDirectory(std::wstring& path) noexcept
     try
     {
         return GetCacheDirectoryImpl(path);
+    }
+    catch (std::bad_alloc const&)
+    {
+        return E_OUTOFMEMORY;
+    }
+    catch (...)
+    {
+        return E_FAIL;
+    }
+}
+
+HRESULT LookupManifestFont(
+    ManifestKey const& key,
+    ManifestValue& value,
+    bool& found) noexcept
+{
+    value = {};
+    found = false;
+    try
+    {
+        return LookupManifestFontImpl(key, value, found);
+    }
+    catch (std::bad_alloc const&)
+    {
+        return E_OUTOFMEMORY;
+    }
+    catch (...)
+    {
+        return E_FAIL;
+    }
+}
+
+HRESULT StoreManifestFont(
+    ManifestKey const& key,
+    ManifestValue const& value) noexcept
+{
+    try
+    {
+        return StoreManifestFontImpl(key, value);
+    }
+    catch (std::bad_alloc const&)
+    {
+        return E_OUTOFMEMORY;
+    }
+    catch (...)
+    {
+        return E_FAIL;
+    }
+}
+
+HRESULT DropManifestFont(ManifestKey const& key) noexcept
+{
+    try
+    {
+        return DropManifestFontImpl(key);
+    }
+    catch (std::bad_alloc const&)
+    {
+        return E_OUTOFMEMORY;
+    }
+    catch (...)
+    {
+        return E_FAIL;
+    }
+}
+
+HRESULT ReloadManifestForTests() noexcept
+{
+    try
+    {
+        return ReloadManifestForTestsImpl();
     }
     catch (std::bad_alloc const&)
     {

@@ -360,6 +360,63 @@ does not carry alias state in thread-local storage. A collection already
 returned before injection remains an honest older immutable generation;
 diagnostics report that timing instead of mutating retained objects.
 
+Until 2026-10-17 the alias collection became the answer only after the whole
+build had run, because `HookDirectWriteAliasCollection` captured the alias
+source before patching the factory vtables. Measured on this machine with the
+renderer mapped before image entry and a warm virtual-font cache (171 files,
+806 MB): the stock collection answered for 1,171 to 1,344 ms, and an
+application that fetched the collection in its first 62 ms received
+`MALGUN.TTF` Regular for good. Chromium-family hosts (Claude Desktop, VS Code)
+fetch and retain the collection in their browser process within that time and
+hand it to renderers through `DWriteFontProxy`; their renderers held
+`malgun.ttf` and `NotoSansKR-VF.ttf` and no alias file. The factory vtables are
+now patched first and the build runs inside the intercepted call: the first
+answer is the alias generation (first call at 78 ms after factory creation
+returned the alias `Malgun Gothic / Medium / 500`; the readiness poll reports
+94 to 157 ms), a second caller waits on the same build entry for at most 10 s,
+and a nested call on the building thread receives the stock object instead of
+waiting on itself. A persistent manifest in the font cache keys alias outputs by
+replacement file identity, alias names, options, pinned axes and profile digest,
+so `BuildAliasedSfnt` and `PersistFont` run only on a miss (warm build 58 to
+140 ms). Renderer startup before image entry stayed at about 0.5 s with either
+core. The alias file of a variable backing now keeps only the pinned named
+instance: a consumer that re-parses the file sees one family with the Medium
+instance (and its simulated bold), and `GetFirstMatchingFont(400)` returns
+weight 500 instead of the default Regular; `fvar` axes and defaults, `glyf` and
+`gvar` are byte-identical, so the outlines still match the coordinates. What a
+late injection cannot do is replace a collection the application already
+retained; forwarding that retained object's family lookups to the alias
+collection is a separate design (shared vtable, identity check on `this`,
+wholesale forwarding of four methods).
+
+The review round on that change fixed what a read-only audit found and what
+the first pre-entry probe run showed. `HookDWriteFactoryEntry` had taken the
+hook mutex before `GetModuleHandleExW`, an inversion against the loader lock
+that `DllMain` and `GetProcAddress` callers hold; the module reference is now
+acquired first and released outside the mutex. The modern collection and
+font-set entries established the canonical source themselves instead of
+answering with the native object while the source was still unpublished, the
+system-fallback hook moved in front of the build, and `GetCachedForFactory`
+waits on a building entry. With that preamble inside every intercepted call,
+the first hooked probe died with `STATUS_STACK_OVERFLOW`: DirectWrite answers
+an original `GetSystemFontCollection` or `GetSystemFontFallback` call partly
+through its own virtual methods, which are the patched slots, so the preamble
+re-entered itself. `CanonicalSourceScope` in `directwrite_readiness.h` now refuses
+a nested call on the establishing thread the way the build already refused one,
+and `directwrite-readiness-tests` covers the nested refusal and its thread
+separation alongside the two build races.
+Name-record pruning was removed (a default instance shares IDs 2 and 17 with
+the family), an explicit advertised weight wins over the pinned coordinate so
+the bold-slot alias keeps its own file, and the manifest became
+`manifest-v2.bin` with the backing size in the value: a hit is validated by
+size and scaler type and a hit whose file no longer opens is dropped and
+rebuilt once. Measured with the final core mapped before image entry and the
+service stopped: with the manifest deleted and the alias files still present
+the alias collection answered after 265 ms; warm, the poll saw it at 109 to
+140 ms and the first call returned the alias at 109 to 141 ms. VS Code
+started the same way received the alias in its browser process and drew the
+editor's Hangul in Pretendard Variable Medium.
+
 An injection that lands after the first frame (the open service's remote
 `LoadLibrary`, every elevated target, any child of a parent that was not
 hooked) leaves that stock frame on screen until the application repaints on

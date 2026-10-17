@@ -93,6 +93,39 @@ below wherever the two conflict.
   face. Never collapse `Malgun Gothic`, `맑은 고딕`, and their Semilight names
   into the one spelling that matched the profile; conflicting alias rules fail
   closed to the native face.
+- The alias collection must be the first answer. A hooked factory's vtable is
+  patched before the alias build starts, so the first
+  `GetSystemFontCollection`, `GetSystemFontSet` or system-fallback call an
+  application makes waits inside the intercepted method for the build (bounded
+  at 10 s, then the stock object with `alias-collection-wait-timeout`); a
+  nested call on the building thread gets the stock object at once. The
+  `DWriteCreateFactory` detour installs synchronously at attach when
+  `dwrite.dll` is already mapped and from the loader hooks when it loads later.
+  Alias outputs are keyed in a per-user manifest under
+  `%LOCALAPPDATA%\MacType\FontCache` (replacement file identity, alias names,
+  options, pinned axes and profile digest), written atomically, bounded, and
+  ignored when corrupt; a hit counts only while the backing's size and scaler
+  type still match, and a hit whose file no longer opens is dropped and
+  rebuilt once. A warm start answers in well under 250 ms. A
+  variable backing's alias file keeps only the pinned named instance: `fvar`
+  axes and defaults, `glyf` and `gvar` stay byte-identical (moving
+  `fvar.defaultValue` would silently render the default outlines under the new
+  weight), every `name` record stays (a default instance shares IDs 2 and 17
+  with the family and an axis name may share an instance's ID), and `OS/2`
+  weight, width, `fsSelection` and `head.macStyle` follow the pinned
+  coordinates unless the alias advertises an explicit weight, which keeps that
+  weight and its bold bits so a bold-slot alias of a Medium backing stays a
+  distinct file. The source and fallback preamble inside the intercepted call
+  refuses a nested call on its own thread (`CanonicalSourceScope`), because
+  DirectWrite answers the original collection and fallback calls through its
+  own virtual methods, which are the patched slots; the system-fallback hook is
+  installed before the build, and a fallback lookup during a cold build waits
+  for the build like a collection call does. The `DWriteCreateFactory` entry
+  acquires its module reference before taking the hook mutex, since
+  `GetModuleHandleEx` takes the loader lock and the entry is reached from
+  `DllMain` and from `GetProcAddress` callers that already hold it. A collection
+  an application retained before injection stays the honest older generation
+  (`unsupported-late-collection`); do not mutate retained objects.
 - `FreeTypeRuntime` is also the sole Interface for logical bitmap rows and
   one-based face IDs. Render Adapters must use `CheckedBitmapRow`; they never
   reconstruct signed-pitch pointer arithmetic. An `FT_Face` receives a

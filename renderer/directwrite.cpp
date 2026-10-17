@@ -2,6 +2,7 @@
 #include "arrival_evidence.h"
 #include "directwrite_alias.h"
 #include "directwrite_fallback.h"
+#include "directwrite_readiness.h"
 #include "dynCodeHelper.h"
 #include "hookCounter.h"
 #include "hook_lifecycle.h"
@@ -109,6 +110,9 @@ void PublishUnavailableCapability(
 static void SignalDirectWriteDiagnostic(WCHAR const* stage);
 static void SignalDirectWriteFamilyDiagnostic(
 	WCHAR const* stagePrefix, WCHAR const* familyName);
+static void SignalAliasCollectionResult(
+	directwrite_alias::BuildStatus status,
+	directwrite_alias::AliasFontSet const& aliases);
 
 struct ComMethodHooker {
 	// The target function if it has been hooked
@@ -1679,6 +1683,70 @@ Factory3GetSystemFontCollectionMethod GetOriginalModernSystemFontCollection(
 	return nullptr;
 }
 
+CComPtr<IDWriteFontSet> EstablishFactoryAliasSource(
+	IDWriteFactory* factory,
+	IDWriteFactory3* factory3,
+	IDWriteFontSet* candidate = nullptr)
+{
+	if (factory == nullptr || factory3 == nullptr)
+		return nullptr;
+	return directwrite_readiness::EstablishSource(
+		factory,
+		CComPtr<IDWriteFontSet>(candidate),
+		[](IDWriteFactory* owner) {
+			return GetFactoryAliasSource(owner);
+		},
+		[factory3](IDWriteFactory*, CComPtr<IDWriteFontSet>& acquired) {
+			Factory3GetSystemFontSetMethod const original =
+				GetOriginalSystemFontSet(factory3);
+			return original != nullptr &&
+				SUCCEEDED(original(factory3, &acquired)) && acquired != nullptr;
+		},
+		[](IDWriteFactory* owner, CComPtr<IDWriteFontSet> const& source) {
+			PublishFactoryAliasSource(owner, source);
+		});
+}
+
+directwrite_alias::BuildStatus GetCanonicalFactoryAliases(
+	IDWriteFactory3* factory3,
+	directwrite_alias::AliasFontSet& aliases,
+	IDWriteFontSet* candidate = nullptr,
+	IDWriteFontCollection* suppliedCollection = nullptr,
+	bool* fallbackHooked = nullptr)
+{
+	// DirectWrite answers an original collection or fallback call partly
+	// through its own virtual methods, which are the patched slots, so the
+	// source and fallback preamble refuses a nested call on its own thread
+	// the way the build does; without that the first hooked call recursed
+	// until the stack was gone.
+	directwrite_readiness::CanonicalSourceScope const scope;
+	if (scope.nested())
+		return directwrite_alias::BuildStatus::buildReentrant;
+	CComPtr<IDWriteFactory> factory;
+	if (factory3 == nullptr ||
+		FAILED(factory3->QueryInterface(&factory)) || factory == nullptr)
+		return directwrite_alias::BuildStatus::unsupportedFactory;
+
+	CComPtr<IDWriteFontSet> const systemSet =
+		EstablishFactoryAliasSource(factory, factory3, candidate);
+	if (systemSet == nullptr)
+		return directwrite_alias::BuildStatus::systemSetUnavailable;
+
+	CComPtr<IDWriteFontCollection> systemCollection = suppliedCollection;
+	if (systemCollection == nullptr)
+	{
+		FactoryGetSystemFontCollectionMethod const original =
+			GetOriginalSystemFontCollection(factory);
+		if (original != nullptr)
+			original(factory, &systemCollection, FALSE);
+	}
+	bool const hooked = systemCollection != nullptr &&
+		HookDirectWriteSystemFallback(factory, systemCollection);
+	if (fallbackHooked != nullptr)
+		*fallbackHooked = hooked;
+	return directwrite_alias::GetOrCreate(factory, systemSet, aliases);
+}
+
 bool CaptureFactoryAliasSource(IDWriteFactory* factory)
 {
 	if (factory == nullptr)
@@ -1694,17 +1762,19 @@ bool CaptureFactoryAliasSource(IDWriteFactory* factory)
 
 	CComPtr<IDWriteFontCollection1> systemCollection1;
 	CComPtr<IDWriteFontSet> systemSet;
+	CComPtr<IDWriteFactory3> factory3;
 	if (FAILED(systemCollection->QueryInterface(&systemCollection1)) ||
 		systemCollection1 == nullptr ||
-		FAILED(systemCollection1->GetFontSet(&systemSet)) || systemSet == nullptr)
+		FAILED(systemCollection1->GetFontSet(&systemSet)) || systemSet == nullptr ||
+		FAILED(factory->QueryInterface(&factory3)) || factory3 == nullptr)
 		return false;
-	PublishFactoryAliasSource(factory, systemSet);
 
 	directwrite_alias::AliasFontSet aliases;
-	directwrite_alias::BuildStatus const status =
-		directwrite_alias::GetOrCreate(factory, systemSet, aliases);
-	SignalDirectWriteDiagnostic(directwrite_alias::StatusName(status));
-	return HookDirectWriteSystemFallback(factory, systemCollection);
+	bool fallbackHooked = false;
+	directwrite_alias::BuildStatus const status = GetCanonicalFactoryAliases(
+		factory3, aliases, systemSet, systemCollection, &fallbackHooked);
+	SignalAliasCollectionResult(status, aliases);
+	return fallbackHooked;
 }
 
 void RestoreFactoryAliasVtables() noexcept
@@ -1750,10 +1820,11 @@ static bool HookDirectWriteAliasCollection(CComPtr<IDWriteFactory>& factory)
 	HOOK(factory, CreateTextFormat, 15);
 
 	CComPtr<IDWriteFactory3> factory3;
-	if (FAILED(factory->QueryInterface(&factory3)) || factory3 == nullptr)
+	if (FAILED(factory->QueryInterface(&factory3)) || factory3 == nullptr ||
+		!ISHOOKED(CreateTextFormat) ||
+		!PatchFactoryAliasVtables(factory, factory3))
 		return false;
-	return ISHOOKED(CreateTextFormat) && CaptureFactoryAliasSource(factory) &&
-		PatchFactoryAliasVtables(factory, factory3);
+	return CaptureFactoryAliasSource(factory);
 }
 
 static void SeedGdiInteropHooks(CComPtr<IDWriteFactory>& factory)
@@ -1904,6 +1975,7 @@ struct DirectWriteLifecycleState
 	renderer_raii::UniqueHandle cancelEvent;
 	std::vector<renderer_raii::UniqueHandle> diagnosticEvents;
 	std::mutex stateMutex;
+	std::mutex dwriteHookMutex;
 	std::mutex dwriteCoreHookMutex;
 	std::atomic<bool> dwriteCoreWorkerScheduled{false};
 	// Set once the pre-existing-factory worker has hooked the known
@@ -1957,11 +2029,63 @@ static bool HookKnownDirectWriteFactories(
 	return sharedHooked || isolatedHooked;
 }
 
+static bool IsDWriteModule(HMODULE module)
+{
+	// Reached from loader hooks on the loading thread, which may own only a
+	// 64 KB stack.
+	return renderer::module_name::BaseNameEquals(module, L"dwrite.dll");
+}
+
 static bool IsDWriteCoreModule(HMODULE module)
 {
-	// Reached from the LoadLibraryExW, GetProcAddress, and LdrLoadDll hooks on
-	// the loading thread, which may own only a 64 KB stack.
 	return renderer::module_name::BaseNameEquals(module, L"DWriteCore.dll");
+}
+
+static bool HookDWriteFactoryEntry(FARPROC factoryProcedure)
+{
+	if (factoryProcedure == nullptr)
+	{
+		PublishUnavailableCapability(
+			renderer::HookCapability::directWrite, nullptr, true,
+			renderer::CapabilityReason::interfaceUnsupported,
+			ERROR_PROC_NOT_FOUND);
+		return false;
+	}
+
+	// GetModuleHandleEx takes the loader lock. Acquire this reference before the
+	// hook mutex to prevent a loader-lock/hook-mutex inversion with DllMain.
+	HMODULE rawModuleReference = nullptr;
+	GetModuleHandleExW(
+		GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+		reinterpret_cast<LPCWSTR>(factoryProcedure),
+		&rawModuleReference);
+	renderer_raii::UniqueModuleReference moduleReference(rawModuleReference);
+
+	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
+	{
+		std::lock_guard<std::mutex> lock(lifecycle.dwriteHookMutex);
+		if (lifecycle.stopping.load(std::memory_order_acquire))
+			return false;
+		if (ISHOOKED(DWriteCreateFactory))
+		{
+			if (!lifecycle.dwrite)
+				lifecycle.dwrite.swap(moduleReference);
+			return true;
+		}
+
+		SET_VAL(ORIG_DWriteCreateFactory, factoryProcedure);
+		if (InstallDemandHook(
+				renderer::HookCapability::directWrite,
+				reinterpret_cast<void*>(factoryProcedure),
+				hook_demand_DWriteCreateFactory) != NOERROR ||
+			!ISHOOKED(DWriteCreateFactory))
+			return false;
+
+		if (!lifecycle.dwrite)
+			lifecycle.dwrite.swap(moduleReference);
+	}
+	SignalDirectWriteDiagnostic(L"dwrite-entry-hooked");
+	return true;
 }
 
 static bool HookDWriteCoreFactoryEntry(FARPROC factoryProcedure)
@@ -1975,27 +2099,38 @@ static bool HookDWriteCoreFactoryEntry(FARPROC factoryProcedure)
 		return false;
 	}
 
+	// GetModuleHandleEx takes the loader lock. Acquire this reference before the
+	// hook mutex to prevent a loader-lock/hook-mutex inversion with DllMain.
+	HMODULE rawModuleReference = nullptr;
+	GetModuleHandleExW(
+		GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+		reinterpret_cast<LPCWSTR>(factoryProcedure),
+		&rawModuleReference);
+	renderer_raii::UniqueModuleReference moduleReference(rawModuleReference);
+
 	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
-	std::lock_guard<std::mutex> lock(lifecycle.dwriteCoreHookMutex);
-	if (lifecycle.stopping.load(std::memory_order_acquire))
-		return false;
-	if (ISHOOKED(DWriteCoreCreateFactory))
-		return true;
+	{
+		std::lock_guard<std::mutex> lock(lifecycle.dwriteCoreHookMutex);
+		if (lifecycle.stopping.load(std::memory_order_acquire))
+			return false;
+		if (ISHOOKED(DWriteCoreCreateFactory))
+		{
+			if (!lifecycle.dwriteCore)
+				lifecycle.dwriteCore.swap(moduleReference);
+			return true;
+		}
 
-	SET_VAL(ORIG_DWriteCoreCreateFactory, factoryProcedure);
-	if (InstallDemandHook(
-			renderer::HookCapability::directWriteCore,
-			reinterpret_cast<void*>(factoryProcedure),
-			hook_demand_DWriteCoreCreateFactory) != NOERROR ||
-		!ISHOOKED(DWriteCoreCreateFactory))
-		return false;
+		SET_VAL(ORIG_DWriteCoreCreateFactory, factoryProcedure);
+		if (InstallDemandHook(
+				renderer::HookCapability::directWriteCore,
+				reinterpret_cast<void*>(factoryProcedure),
+				hook_demand_DWriteCoreCreateFactory) != NOERROR ||
+			!ISHOOKED(DWriteCoreCreateFactory))
+			return false;
 
-	HMODULE moduleReference = nullptr;
-	if (GetModuleHandleExW(
-			GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-			reinterpret_cast<LPCWSTR>(factoryProcedure),
-			&moduleReference))
-		lifecycle.dwriteCore.reset(moduleReference);
+		if (!lifecycle.dwriteCore)
+			lifecycle.dwriteCore.swap(moduleReference);
+	}
 	SignalDirectWriteDiagnostic(L"dwritecore-entry-hooked");
 	return true;
 }
@@ -2422,6 +2557,51 @@ static renderer_raii::BorrowedModule PinOrLoadRendererModule(
 	return renderer_raii::BorrowedModule(pin.get());
 }
 
+static bool InstallDirectWriteEntryBoundaryHooks()
+{
+	HMODULE const kernelBase = GetModuleHandleW(L"kernelbase.dll");
+	void* const loadLibraryEx = kernelBase == nullptr ? nullptr :
+		GetProcAddress(kernelBase, "LoadLibraryExW");
+	HMODULE const kernel32 = GetModuleHandleW(L"kernel32.dll");
+	void* const getProcAddress = kernel32 == nullptr ? nullptr :
+		GetProcAddress(kernel32, "GetProcAddress");
+	HMODULE const ntdll = GetModuleHandleW(L"ntdll.dll");
+	void* const ldrLoadDll = ntdll == nullptr ? nullptr :
+		GetProcAddress(ntdll, "LdrLoadDll");
+	bool succeeded = true;
+	if (!ISHOOKED(LoadLibraryExW))
+	{
+		SET_VAL(ORIG_LoadLibraryExW, loadLibraryEx);
+		succeeded = InstallDemandHook(
+			renderer::HookCapability::directWriteCore, loadLibraryEx,
+			hook_demand_LoadLibraryExW) == NOERROR && succeeded;
+	}
+	if (!ISHOOKED(GetProcAddress))
+	{
+		SET_VAL(ORIG_GetProcAddress, getProcAddress);
+		succeeded = InstallDemandHook(
+			renderer::HookCapability::directWriteCore, getProcAddress,
+			hook_demand_GetProcAddress) == NOERROR && succeeded;
+	}
+	if (!ISHOOKED(LdrLoadDll))
+	{
+		SET_VAL(ORIG_LdrLoadDll, ldrLoadDll);
+		succeeded = InstallDemandHook(
+			renderer::HookCapability::directWriteCore, ldrLoadDll,
+			hook_demand_LdrLoadDll) == NOERROR && succeeded;
+	}
+
+	HMODULE const dwrite = GetModuleHandleW(L"dwrite.dll");
+	if (dwrite != nullptr)
+	{
+		FARPROC const factory = ORIG_GetProcAddress != nullptr
+			? ORIG_GetProcAddress(dwrite, "DWriteCreateFactory")
+			: GetProcAddress(dwrite, "DWriteCreateFactory");
+		succeeded = HookDWriteFactoryEntry(factory) && succeeded;
+	}
+	return succeeded;
+}
+
 static bool InitializeDirectWriteLifecycle()
 {
 	DirectWriteLifecycleState& lifecycle = GetDirectWriteLifecycleState();
@@ -2446,8 +2626,9 @@ static bool InitializeDirectWriteLifecycle()
 		arrival != nullptr && arrival->dwriteCoreMappedBeforePin;
 	renderer_raii::BorrowedModule d2d1 = PinOrLoadRendererModule(
 		L"d2d1.dll", lifecycle.d2d1);
+	renderer_raii::UniqueModuleReference workerDWrite;
 	renderer_raii::BorrowedModule dw = PinOrLoadRendererModule(
-		L"dwrite.dll", lifecycle.dwrite);
+		L"dwrite.dll", workerDWrite);
 	if (!d2d1 || !dw) {
 		if (!d2d1)
 			PublishUnavailableCapability(
@@ -2464,35 +2645,11 @@ static bool InitializeDirectWriteLifecycle()
 	void* D2D1Factory = GetProcAddress(d2d1.get(), "D2D1CreateFactory");
 	void* D2D1Device = GetProcAddress(d2d1.get(), "D2D1CreateDevice");
 	void* D2D1Context = GetProcAddress(d2d1.get(), "D2D1CreateDeviceContext");
-	void* DWFactory = GetProcAddress(dw.get(), "DWriteCreateFactory");
-	HMODULE const kernelBase = GetModuleHandleW(L"kernelbase.dll");
-	void* const loadLibraryEx = kernelBase == nullptr ? nullptr :
-		GetProcAddress(kernelBase, "LoadLibraryExW");
-	HMODULE const kernel32 = GetModuleHandleW(L"kernel32.dll");
-	void* const getProcAddress = kernel32 == nullptr ? nullptr :
-		GetProcAddress(kernel32, "GetProcAddress");
-	HMODULE const ntdll = GetModuleHandleW(L"ntdll.dll");
-	void* const ldrLoadDll = ntdll == nullptr ? nullptr :
-		GetProcAddress(ntdll, "LdrLoadDll");
+	FARPROC const DWFactory = GetProcAddress(dw.get(), "DWriteCreateFactory");
 	SET_VAL(ORIG_D2D1CreateFactory, D2D1Factory);
 	SET_VAL(ORIG_D2D1CreateDevice, D2D1Device);
 	SET_VAL(ORIG_D2D1CreateDeviceContext, D2D1Context);
-	SET_VAL(ORIG_DWriteCreateFactory, DWFactory);
-	SET_VAL(ORIG_LoadLibraryExW, loadLibraryEx);
-	SET_VAL(ORIG_GetProcAddress, getProcAddress);
-	SET_VAL(ORIG_LdrLoadDll, ldrLoadDll);
-	LONG const directWriteStatus = InstallDemandHook(
-		renderer::HookCapability::directWrite, DWFactory,
-		hook_demand_DWriteCreateFactory);
-	InstallDemandHook(
-		renderer::HookCapability::directWriteCore, loadLibraryEx,
-		hook_demand_LoadLibraryExW);
-	InstallDemandHook(
-		renderer::HookCapability::directWriteCore, getProcAddress,
-		hook_demand_GetProcAddress);
-	InstallDemandHook(
-		renderer::HookCapability::directWriteCore, ldrLoadDll,
-		hook_demand_LdrLoadDll);
+	bool const directWriteHooked = HookDWriteFactoryEntry(DWFactory);
 	InstallDemandHook(
 		renderer::HookCapability::direct2D, D2D1Factory,
 		hook_demand_D2D1CreateFactory);
@@ -2513,7 +2670,7 @@ static bool InitializeDirectWriteLifecycle()
 	{
 		SignalDirectWriteDiagnostic(L"hook-ready");
 	}
-	return directWriteStatus == NOERROR;
+	return directWriteHooked;
 }
 
 static DWORD WINAPI StartDirectWriteLifecycleWorker(LPVOID moduleReference)
@@ -2543,6 +2700,7 @@ void StartDirectWriteLifecycle()
 		lifecycle.phase == DirectWriteLifecyclePhase::active ||
 		lifecycle.phase == DirectWriteLifecyclePhase::stopping)
 		return;
+	InstallDirectWriteEntryBoundaryHooks();
 	if (!lifecycle.cancelEvent)
 		lifecycle.cancelEvent = renderer_raii::AdoptHandle(
 			CreateEventW(nullptr, TRUE, FALSE, nullptr));
@@ -2620,25 +2778,19 @@ static bool IsAliasCollectionApplied(
 		status == directwrite_alias::BuildStatus::appliedWithMissingReplacement;
 }
 
-static void SignalAliasCollectionStatus(
-	directwrite_alias::BuildStatus status)
+static void SignalAliasCollectionResult(
+	directwrite_alias::BuildStatus status,
+	directwrite_alias::AliasFontSet const& aliases)
 {
 	SignalDirectWriteDiagnostic(directwrite_alias::StatusName(status));
-}
-
-static directwrite_alias::BuildStatus GetCanonicalFactoryAliases(
-	IDWriteFactory3* factory3,
-	directwrite_alias::AliasFontSet& aliases)
-{
-	CComPtr<IDWriteFactory> factory;
-	if (factory3 == nullptr ||
-		FAILED(factory3->QueryInterface(&factory)) || factory == nullptr)
-		return directwrite_alias::BuildStatus::unsupportedFactory;
-
-	CComPtr<IDWriteFontSet> const systemSet = GetFactoryAliasSource(factory);
-	if (systemSet == nullptr)
-		return directwrite_alias::BuildStatus::systemSetUnavailable;
-	return directwrite_alias::GetOrCreate(factory, systemSet, aliases);
+	if (aliases.buildMicroseconds == 0 || aliases.cacheHit)
+		return;
+	WCHAR stage[80] = {};
+	if (SUCCEEDED(StringCchPrintfW(
+			stage, ARRAYSIZE(stage), L"alias-build-ms-%llu",
+			static_cast<unsigned long long>(
+				(aliases.buildMicroseconds + 500) / 1000))))
+		SignalDirectWriteDiagnostic(stage);
 }
 
 HRESULT WINAPI IMPL_Factory_GetSystemFontCollection(
@@ -2668,22 +2820,24 @@ HRESULT WINAPI IMPL_Factory_GetSystemFontCollection(
 		FAILED(systemCollection1->GetFontSet(&systemSet)) ||
 		systemSet == nullptr)
 	{
-		SignalAliasCollectionStatus(
-			directwrite_alias::BuildStatus::systemSetUnavailable);
+		SignalDirectWriteDiagnostic(directwrite_alias::StatusName(
+			directwrite_alias::BuildStatus::systemSetUnavailable));
 		*fontCollection = systemCollection.Detach();
 		return result;
 	}
-	CComPtr<IDWriteFontSet> canonicalSystemSet = GetFactoryAliasSource(self);
-	if (canonicalSystemSet == nullptr || checkForUpdates)
+	if (checkForUpdates)
+		PublishFactoryAliasSource(self, systemSet, true);
+	CComPtr<IDWriteFactory3> factory3;
+	if (FAILED(self->QueryInterface(&factory3)) || factory3 == nullptr)
 	{
-		PublishFactoryAliasSource(self, systemSet, checkForUpdates != FALSE);
-		canonicalSystemSet = GetFactoryAliasSource(self);
+		*fontCollection = systemCollection.Detach();
+		return result;
 	}
 
 	directwrite_alias::AliasFontSet aliases;
-	directwrite_alias::BuildStatus const status =
-		directwrite_alias::GetOrCreate(self, canonicalSystemSet, aliases);
-	SignalAliasCollectionStatus(status);
+	directwrite_alias::BuildStatus const status = GetCanonicalFactoryAliases(
+		factory3, aliases, systemSet, systemCollection);
+	SignalAliasCollectionResult(status, aliases);
 	if (IsAliasCollectionApplied(status))
 	{
 		CComPtr<IDWriteFontCollection> aliasCollection;
@@ -2722,7 +2876,7 @@ HRESULT WINAPI IMPL_Factory3_GetSystemFontSet(
 	directwrite_alias::AliasFontSet aliases;
 	directwrite_alias::BuildStatus const status =
 		GetCanonicalFactoryAliases(self, aliases);
-	SignalAliasCollectionStatus(status);
+	SignalAliasCollectionResult(status, aliases);
 	if (IsAliasCollectionApplied(status))
 	{
 		SignalDirectWriteDiagnostic(L"system-font-set-alias-returned");
@@ -2756,8 +2910,8 @@ HRESULT WINAPI IMPL_Factory3_GetSystemFontCollection(
 
 	directwrite_alias::AliasFontSet aliases;
 	directwrite_alias::BuildStatus const status =
-		GetCanonicalFactoryAliases(self, aliases);
-	SignalAliasCollectionStatus(status);
+		GetCanonicalFactoryAliases(self, aliases, nullptr, systemCollection);
+	SignalAliasCollectionResult(status, aliases);
 	if (IsAliasCollectionApplied(status))
 	{
 		SignalDirectWriteDiagnostic(L"modern-system-collection-alias-returned");
@@ -2988,8 +3142,17 @@ HMODULE WINAPI IMPL_LoadLibraryExW(
 	__in DWORD flags)
 {
 	HMODULE const module = ORIG_LoadLibraryExW(fileName, file, flags);
-	if (IsDWriteCoreModule(module))
+	if (IsDWriteModule(module))
+	{
+		FARPROC const factory = ORIG_GetProcAddress != nullptr
+			? ORIG_GetProcAddress(module, "DWriteCreateFactory")
+			: GetProcAddress(module, "DWriteCreateFactory");
+		HookDWriteFactoryEntry(factory);
+	}
+	else if (IsDWriteCoreModule(module))
+	{
 		ScheduleLoadedDWriteCoreHook();
+	}
 	return module;
 }
 
@@ -2999,18 +3162,19 @@ FARPROC WINAPI IMPL_GetProcAddress(
 {
 	FARPROC const procedure = ORIG_GetProcAddress(module, procedureName);
 	if (procedure == nullptr ||
-		reinterpret_cast<ULONG_PTR>(procedureName) <= 0xffff ||
-		strcmp(procedureName, "DWriteCoreCreateFactory") != 0)
+		reinterpret_cast<ULONG_PTR>(procedureName) <= 0xffff)
 		return procedure;
 
-	if (!IsDWriteCoreModule(module))
-		return procedure;
-
-	// Install the entry detour synchronously, then preserve GetProcAddress's
+	// Install entry detours synchronously, then preserve GetProcAddress's
 	// contract by returning the module's real export address. Returning a
 	// MacType implementation address would leave callers holding a pointer into
 	// this DLL after an explicit unload.
-	HookDWriteCoreFactoryEntry(procedure);
+	if (strcmp(procedureName, "DWriteCreateFactory") == 0 &&
+		IsDWriteModule(module))
+		HookDWriteFactoryEntry(procedure);
+	else if (strcmp(procedureName, "DWriteCoreCreateFactory") == 0 &&
+		IsDWriteCoreModule(module))
+		HookDWriteCoreFactoryEntry(procedure);
 	return procedure;
 }
 
@@ -3022,22 +3186,28 @@ LONG WINAPI IMPL_LdrLoadDll(
 {
 	LONG const status = ORIG_LdrLoadDll(
 		pathToFile, dllCharacteristics, moduleFileName, moduleHandle);
-	if (status < 0 || moduleHandle == nullptr || *moduleHandle == nullptr ||
-		!IsDWriteCoreModule(static_cast<HMODULE>(*moduleHandle)))
+	if (status < 0 || moduleHandle == nullptr || *moduleHandle == nullptr)
 		return status;
 
 	// LdrLoadDll has completed its own loader transaction before returning to
-	// this boundary. Patch the concrete app-local export before the caller can
-	// invoke an import-resolved DWriteCore factory. A short worker remains as a
-	// fallback for nested loader transactions, but correctness does not depend
-	// on a bounded startup polling window.
-	FARPROC const factory = ORIG_GetProcAddress != nullptr
-		? ORIG_GetProcAddress(
-			static_cast<HMODULE>(*moduleHandle), "DWriteCoreCreateFactory")
-		: GetProcAddress(
-			static_cast<HMODULE>(*moduleHandle), "DWriteCoreCreateFactory");
-	if (!HookDWriteCoreFactoryEntry(factory))
-		ScheduleLoadedDWriteCoreHook();
+	// this boundary. Patch the concrete export before an import-resolved factory
+	// can run on the loading thread.
+	HMODULE const module = static_cast<HMODULE>(*moduleHandle);
+	if (IsDWriteModule(module))
+	{
+		FARPROC const factory = ORIG_GetProcAddress != nullptr
+			? ORIG_GetProcAddress(module, "DWriteCreateFactory")
+			: GetProcAddress(module, "DWriteCreateFactory");
+		HookDWriteFactoryEntry(factory);
+	}
+	else if (IsDWriteCoreModule(module))
+	{
+		FARPROC const factory = ORIG_GetProcAddress != nullptr
+			? ORIG_GetProcAddress(module, "DWriteCoreCreateFactory")
+			: GetProcAddress(module, "DWriteCoreCreateFactory");
+		if (!HookDWriteCoreFactoryEntry(factory))
+			ScheduleLoadedDWriteCoreHook();
+	}
 	return status;
 }
 

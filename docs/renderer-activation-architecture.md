@@ -171,6 +171,7 @@ a separately versioned diagnostic Interface.
 | Previous location or behavior | Refactored owner |
 | --- | --- |
 | `ProtectedProfileInitializer` and `ProtectedRuntimeAssets` returned unrelated identities | `ProtectedRendererRuntime` constructs `RendererRuntimeBinding` |
+| `HookDirectWriteAliasCollection` built the alias set before patching the factory vtables, so the stock collection answered for about 1.2 s after injection | vtables patched first; `directwrite_alias::GetOrCreate` serializes one build per factory/system-set/generation behind a condition variable (10 s bound, thread-local re-entry returns the stock object); `DWriteCreateFactory` detour installed synchronously at attach and from the loader hooks; alias outputs keyed in `virtual_font_cache` manifest; variable alias files pinned to one named instance in `directwrite_virtual_font`; the source-establishing helpers and `CanonicalSourceScope`, which refuses same-thread re-entry of the preamble, live in `directwrite_readiness.h` and are unit-tested by `directwrite-readiness-tests` |
 | `observer::BrokerResult { disposition, code }` | typed result in `ProcessInjection`; code retained as diagnostic evidence |
 | `helper_broker::parse_output` hand-parsed wire policy | HelperProtocol Adapter backed by the generated contract |
 | `InjectionOrchestrator` parsed retry codes and `-cleanup-unknown` | exhaustive typed outcome and health-impact mapping in `ProcessInjection` |

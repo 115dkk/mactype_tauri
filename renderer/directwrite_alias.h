@@ -24,6 +24,8 @@ enum class BuildStatus
 	addFontFailed,
 	createSetFailed,
 	createCollectionFailed,
+	buildReentrant,
+	waitTimeout,
 };
 
 struct AliasFontSet
@@ -33,7 +35,9 @@ struct AliasFontSet
 	UINT32 substitutionCount = 0;
 	std::uint64_t substitutionGeneration = 0;
 	std::uint64_t substitutionDigest = 0;
+	std::uint64_t buildMicroseconds = 0;
 	BuildStatus status = BuildStatus::noSubstitutions;
+	bool cacheHit = false;
 };
 
 BuildStatus GetOrCreate(

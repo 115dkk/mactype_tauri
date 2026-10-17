@@ -9,6 +9,7 @@
 #include <atlbase.h>
 #include <atlcomcli.h>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -32,6 +33,8 @@ struct AliasOptions
 {
 	bool overrideWeight = false;
 	UINT16 weight = 400;
+	std::uint64_t profileDigest = 0;
+	std::vector<DWRITE_FONT_AXIS_VALUE> axisValues;
 };
 
 // Produces one self-contained SFNT whose glyph and metric tables come from the

@@ -55,8 +55,8 @@ Assert-Contains $cppcheckBuild "`$version -ne 'Cppcheck 2.20.0'" 'Cppcheck build
 Assert-Contains $cppcheckGate "`$version -ne 'Cppcheck 2.20.0'" 'Cppcheck gate no longer verifies version 2.20.0.'
 
 foreach ($token in @(
-    "Project = 'Release|Win32'",
-    "Project = 'Release|x64'",
+    "Project = 'Rel+Detours|Win32'",
+    "Project = 'Rel+Detours|x64'",
     '--enable=warning,performance,portability',
     '--error-exitcode=1',
     '--inline-suppr',

@@ -14,7 +14,139 @@ import {
   transitionGalleryLegacyTrayExit,
   transitionGalleryRunProfile,
 } from "../../control-center/src/app/runtimeAdapters/browserGalleryExecution";
-import type { ExecutionStatus } from "../../control-center/src/app/model";
+import { fallbackStatus, type ExecutionStatus } from "../../control-center/src/app/model";
+import { installRuntimeFaults, runtimeFaultSnapshot } from "./runtimeFaults";
+
+for (const command of ["launch_context", "scan_installation"]) {
+  test(`startup recovery contains ${command} rejection and failed telemetry`, async ({ page }) => {
+    await installRuntimeFaults(page, { reject: [command, "frontend_failed"] });
+    await page.goto("/?gallery=1&lang=en", { waitUntil: "networkidle" });
+    const recovery = page.locator(".app-recovery");
+    await expect(recovery).toBeVisible();
+    await expect(recovery.locator("pre")).toHaveText(`fixture:${command}`);
+    await expect(recovery.getByRole("button")).toHaveCount(2);
+    await expect(page.locator("body")).not.toHaveAttribute("data-rendered", "true");
+    const result = await runtimeFaultSnapshot(page);
+    expect(result.calls.filter((call) => call.command === "frontend_ready")).toEqual([]);
+    const reports = result.calls.filter((call) => call.command === "frontend_failed");
+    expect(reports).toHaveLength(1);
+    expect(reports[0].args.message).toContain(`fixture:${command}`);
+    expect(result.unhandled).toEqual([]);
+    expect(result.unexpected).toEqual([]);
+  });
+}
+
+test("startup rejection after unmount leaves the existing recovery unchanged", async ({ page }) => {
+  await installRuntimeFaults(page, { holdLaunch: true, failRender: true, reject: ["frontend_failed"] });
+  await page.goto("/?gallery=1&lang=en", { waitUntil: "networkidle" });
+  await expect(page.locator(".app-recovery pre")).toHaveText("fixture:render");
+  expect((await runtimeFaultSnapshot(page)).calls.filter((call) => call.command === "launch_context")).toHaveLength(1);
+  await page.evaluate(() => window.galleryFaults.settleLaunch(true));
+  await expect(page.locator(".app-recovery pre")).toHaveText("fixture:render");
+  const result = await runtimeFaultSnapshot(page);
+  expect(result.calls.filter((call) => call.command === "frontend_failed")).toHaveLength(1);
+  expect(result.calls.filter((call) => call.command === "frontend_ready")).toEqual([]);
+  expect(result.unhandled).toEqual([]);
+  expect(result.unexpected).toEqual([]);
+});
+
+test("startup pending status contains no invented installation evidence", async ({ page }) => {
+  expect(fallbackStatus).toEqual({ state: "incomplete", root: null, coreVersion: null, findings: [] });
+  await installRuntimeFaults(page, { holdLaunch: true });
+  await page.goto("/?gallery=1&lang=en", { waitUntil: "networkidle" });
+  await expect(page.locator("body")).not.toHaveAttribute("data-rendered", "true");
+  await expect(page.locator("body")).not.toContainText("1.2025.6.9");
+  expect((await runtimeFaultSnapshot(page)).calls.filter((call) => call.command === "frontend_ready")).toEqual([]);
+  await page.evaluate(() => window.galleryFaults.settleLaunch(false));
+  await expect(page.locator("body")).toHaveAttribute("data-rendered", "true");
+});
+
+for (const fixture of [
+  { name: "overview", options: {}, query: "", command: "frontend_ready" },
+  { name: "tray", options: { ciSmoke: true, trayStart: true }, query: "", command: "frontend_ready" },
+  { name: "profiles", options: { view: "profiles" as const, ciSmoke: true }, query: "", command: "frontend_ready" },
+  { name: "execution", options: { view: "execution" as const, ciSmoke: true }, query: "", command: "frontend_ready" },
+  { name: "studio", options: {}, query: "&window=preview-studio", command: "preview_studio_ready" },
+]) {
+  test(`readiness telemetry rejection is contained for ${fixture.name}`, async ({ page }) => {
+    await installRuntimeFaults(page, { ...fixture.options, reject: [fixture.command] });
+    await page.goto(`/?gallery=1&lang=en${fixture.query}`, { waitUntil: "networkidle" });
+    await expect.poll(async () => (await runtimeFaultSnapshot(page)).calls.some((call) => call.command === fixture.command)).toBe(true);
+    await expect(page.locator(".app-recovery")).toHaveCount(0);
+    const result = await runtimeFaultSnapshot(page);
+    expect(result.calls.filter((call) => call.command === "frontend_failed")).toEqual([]);
+    expect(result.unhandled).toEqual([]);
+    expect(result.unexpected).toEqual([]);
+  });
+}
+
+for (const fixture of [
+  { name: "tray", options: { ciSmoke: true, trayStart: true }, command: "ci_verify_tray_mode" },
+  { name: "studio launch", options: { ciSmoke: true, previewStudioSmoke: true }, command: "open_preview_studio" },
+  { name: "profiles", options: { view: "profiles" as const, ciSmoke: true }, command: "ci_verify_profile_workflow" },
+  { name: "execution", options: { view: "execution" as const, ciSmoke: true }, command: "ci_verify_injection_workflow" },
+]) {
+  test(`workflow failure reporting rejection is contained for ${fixture.name}`, async ({ page }) => {
+    await installRuntimeFaults(page, { ...fixture.options, reject: [fixture.command, "frontend_failed"] });
+    await page.goto("/?gallery=1&lang=en", { waitUntil: "networkidle" });
+    await expect.poll(async () => (await runtimeFaultSnapshot(page)).calls.filter((call) => call.command === "frontend_failed").length).toBe(1);
+    const result = await runtimeFaultSnapshot(page);
+    expect(result.calls.find((call) => call.command === "frontend_failed")?.args.message).toContain(`fixture:${fixture.command}`);
+    expect(result.calls.filter((call) => call.command === "frontend_ready")).toEqual([]);
+    expect(result.unhandled).toEqual([]);
+    expect(result.unexpected).toEqual([]);
+  });
+}
+
+for (const event of ["event-log:changed", "native-preview:state", "studio:request"]) {
+  test(`listener registration failure is reported once and contained for ${event}`, async ({ page }) => {
+    await installRuntimeFaults(page, { view: event === "event-log:changed" ? "diagnostics" : "profiles", rejectEvent: event, reject: ["frontend_failed"] });
+    await page.goto("/?gallery=1&lang=en", { waitUntil: "networkidle" });
+    await expect.poll(async () => (await runtimeFaultSnapshot(page)).calls.some((call) => call.command === "frontend_failed")).toBe(true);
+    const result = await runtimeFaultSnapshot(page);
+    const registrations = result.calls.filter((call) => call.command === "plugin:event|listen" && call.args.event === event);
+    const reports = result.calls.filter((call) => call.command === "frontend_failed");
+    expect(registrations.length).toBeGreaterThan(0);
+    expect(reports).toHaveLength(registrations.length);
+    for (const report of reports) expect(report.args.message).toContain(`fixture:listen:${event}`);
+    expect(result.unhandled).toEqual([]);
+    expect(result.unexpected).toEqual([]);
+  });
+}
+
+test("listener cleanup survives unmount before registration resolves", async ({ page }) => {
+  await installRuntimeFaults(page, { holdLaunch: true, holdEvent: "event-log:changed" });
+  await page.goto("/?gallery=1&lang=en&skin=console", { waitUntil: "networkidle" });
+  await expect.poll(async () => (await runtimeFaultSnapshot(page)).calls.some((call) => call.command === "plugin:event|listen" && call.args.event === "event-log:changed")).toBe(true);
+  await page.evaluate(() => window.galleryFaults.settleLaunch(true));
+  await expect(page.locator(".app-recovery")).toBeVisible();
+  await page.evaluate(() => window.galleryFaults.releaseListeners());
+  await expect.poll(async () => (await runtimeFaultSnapshot(page)).calls.filter((call) => call.command === "plugin:event|unlisten").length).toBeGreaterThan(0);
+  const result = await runtimeFaultSnapshot(page);
+  const registrations = result.calls.filter((call) => call.command === "plugin:event|listen" && call.args.event === "event-log:changed");
+  const removals = result.calls.filter((call) => call.command === "plugin:event|unlisten" && call.args.event === "event-log:changed");
+  expect(removals).toHaveLength(registrations.length);
+  expect(result.unhandled).toEqual([]);
+  expect(result.unexpected).toEqual([]);
+});
+
+test("gallery injection activation excludes an outdated running ready matching-profile service", () => {
+  const ready = galleryExecutionStatus(new URLSearchParams("system-service=ready"));
+  expect(ready.systemService.runtime).toBe("running");
+  expect(ready.systemService.health).toBe("ready");
+  expect(ready.systemService.activeProfileDigest).toBe(ready.expectedProfileDigest);
+  const current = transitionGalleryRunProfile(ready, "ini\\Default.ini", false);
+  expect(current.systemInjectionActive).toBe(true);
+  const outdated = transitionGalleryRunProfile({
+    ...ready,
+    systemService: { ...ready.systemService, installation: "outdated" },
+  }, "ini\\Default.ini", false);
+  expect(outdated.systemModesSupported).toBe(true);
+  expect(outdated.systemService.runtime).toBe("running");
+  expect(outdated.systemService.health).toBe("ready");
+  expect(outdated.systemService.activeProfileDigest).toBe(outdated.expectedProfileDigest);
+  expect(outdated.systemInjectionActive).toBe(false);
+});
 
 const serviceCapabilityCases = JSON.parse(
   fs.readFileSync(path.join(__dirname, "..", "..", "shared", "service-capability-cases.json"), "utf8"),
@@ -2769,6 +2901,20 @@ for (const failure of ["access", "read", "write"] as const) {
     await hideSummaries.check();
     await expect(summaries).toHaveCount(0);
     expect(failures).toEqual([]);
+  });
+}
+
+for (const failure of ["access", "read", "write"] as const) {
+  test(`explicit skin survives localStorage ${failure} failure`, async ({ page }) => {
+    await page.addInitScript((failure) => {
+      const unavailable = () => { throw new DOMException("Storage unavailable", "SecurityError"); };
+      if (failure === "access") Object.defineProperty(window, "localStorage", { get: unavailable });
+      else Object.defineProperty(Storage.prototype, failure === "read" ? "getItem" : "setItem", { value: unavailable });
+    }, failure);
+    await page.goto("/?view=overview&gallery=1&lang=en&skin=console", { waitUntil: "networkidle" });
+    await expect(page.locator("html")).toHaveAttribute("data-skin", "console");
+    await expect(page.locator("body")).toHaveAttribute("data-rendered", "true");
+    await expect(page.locator(".app-recovery")).toHaveCount(0);
   });
 }
 

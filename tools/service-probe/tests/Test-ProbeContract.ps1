@@ -3,11 +3,17 @@ param(
     [ValidateSet('Win32', 'x64')]
     [string] $Architecture = 'x64',
 
-    [string] $BuildRoot = (Join-Path ([System.IO.Path]::GetTempPath()) 'mactype-service-probe-contract')
+    [string] $BuildRoot = (Join-Path ([System.IO.Path]::GetTempPath()) 'mactype-service-probe-contract'),
+
+    [switch] $Interactive
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot '..\..\..\scripts\ci\lib\ProbeDesktop.ps1')
+if (-not $Interactive -and -not (Test-ProbeDesktopContext)) {
+    exit (Invoke-ProbeDesktopScript -ScriptPath $PSCommandPath -Parameters $PSBoundParameters -TimeoutSeconds 1800)
+}
 
 function Assert-Equal {
     param(
@@ -31,88 +37,14 @@ if ($LASTEXITCODE -ne 0) {
     throw "CMake configure failed with exit code $LASTEXITCODE"
 }
 
-& cmake --build $buildDirectory --config Release --target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests freetype-runtime-tests pe-export-view-tests unload-lifecycle-tests renderer-policy-tests private-freetype-policy-tests image-subsystem-tests module-name-tests directwrite-font-cache-tests renderer-activation-tests font-substitution-tests directwrite-alias-policy-tests directwrite-readiness-tests bold-substitution-probe renderer-profile-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe
+& cmake --build $buildDirectory --config Release --target renderer-unit-tests probe-console probe-window probe-spawn-tree probe-timeout-fixture bold-substitution-probe renderer-profile-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe
 if ($LASTEXITCODE -ne 0) {
     throw "CMake build failed with exit code $LASTEXITCODE"
 }
 
-$raiiTestPath = Join-Path $buildDirectory 'Release\renderer-raii-tests.exe'
-foreach ($stackTest in @('module-name-tests', 'directwrite-font-cache-tests')) {
-    & (Join-Path $buildDirectory "Release\$stackTest.exe")
-    if ($LASTEXITCODE -ne 0) {
-        throw "Small-stack regression test failed: $stackTest (exit $LASTEXITCODE)"
-    }
-}
-
-& $raiiTestPath
+& ctest --test-dir $buildDirectory -C Release -L renderer-unit --output-on-failure --no-tests=error
 if ($LASTEXITCODE -ne 0) {
-    throw "Renderer RAII fault-injection tests failed with exit code $LASTEXITCODE"
-}
-
-$hookLifecycleTestPath = Join-Path $buildDirectory 'Release\hook-lifecycle-tests.exe'
-& $hookLifecycleTestPath
-if ($LASTEXITCODE -ne 0) {
-    throw "Hook lifecycle tests failed with exit code $LASTEXITCODE"
-}
-
-$freeTypeRuntimeTestPath = Join-Path $buildDirectory 'Release\freetype-runtime-tests.exe'
-& $freeTypeRuntimeTestPath
-if ($LASTEXITCODE -ne 0) {
-    throw "FreeType runtime ownership tests failed with exit code $LASTEXITCODE"
-}
-
-$peExportViewTestPath = Join-Path $buildDirectory 'Release\pe-export-view-tests.exe'
-& $peExportViewTestPath
-if ($LASTEXITCODE -ne 0) {
-    throw "Checked PE export view tests failed with exit code $LASTEXITCODE"
-}
-
-$unloadLifecycleTestPath = Join-Path $buildDirectory 'Release\unload-lifecycle-tests.exe'
-& $unloadLifecycleTestPath
-if ($LASTEXITCODE -ne 0) {
-    throw "Unload lifecycle tests failed with exit code $LASTEXITCODE"
-}
-
-$rendererPolicyTestPath = Join-Path $buildDirectory 'Release\renderer-policy-tests.exe'
-& $rendererPolicyTestPath
-if ($LASTEXITCODE -ne 0) {
-    throw "Renderer policy publication tests failed with exit code $LASTEXITCODE"
-}
-
-$privateFreeTypePolicyTestPath = Join-Path $buildDirectory 'Release\private-freetype-policy-tests.exe'
-& $privateFreeTypePolicyTestPath
-if ($LASTEXITCODE -ne 0) {
-    throw "Private FreeType admission tests failed with exit code $LASTEXITCODE"
-}
-
-$imageSubsystemTestPath = Join-Path $buildDirectory 'Release\image-subsystem-tests.exe'
-& $imageSubsystemTestPath
-if ($LASTEXITCODE -ne 0) {
-    throw "Image subsystem classification tests failed with exit code $LASTEXITCODE"
-}
-
-$rendererActivationTestPath = Join-Path $buildDirectory 'Release\renderer-activation-tests.exe'
-& $rendererActivationTestPath
-if ($LASTEXITCODE -ne 0) {
-    throw "Renderer activation round-trip tests failed with exit code $LASTEXITCODE"
-}
-
-$fontSubstitutionTestPath = Join-Path $buildDirectory 'Release\font-substitution-tests.exe'
-& $fontSubstitutionTestPath
-if ($LASTEXITCODE -ne 0) {
-    throw "Font substitution snapshot tests failed with exit code $LASTEXITCODE"
-}
-
-$directWriteAliasPolicyTestPath = Join-Path $buildDirectory 'Release\directwrite-alias-policy-tests.exe'
-& $directWriteAliasPolicyTestPath
-if ($LASTEXITCODE -ne 0) {
-    throw "DirectWrite alias policy tests failed with exit code $LASTEXITCODE"
-}
-
-$directWriteReadinessTestPath = Join-Path $buildDirectory 'Release\directwrite-readiness-tests.exe'
-& $directWriteReadinessTestPath
-if ($LASTEXITCODE -ne 0) {
-    throw "DirectWrite readiness tests failed with exit code $LASTEXITCODE"
+    throw "Renderer unit tests failed with exit code $LASTEXITCODE"
 }
 
 $gatePath = Join-Path $buildDirectory "Release\browser-launch-gate$suffix.exe"

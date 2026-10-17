@@ -8,10 +8,16 @@ param(
     [string] $BuildRoot,
 
     [Parameter(Mandatory)]
-    [string] $OpenCoreRoot
+    [string] $OpenCoreRoot,
+
+    [switch] $Interactive
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'lib\ProbeDesktop.ps1')
+if (-not $Interactive -and -not (Test-ProbeDesktopContext)) {
+    exit (Invoke-ProbeDesktopScript -ScriptPath $PSCommandPath -Parameters $PSBoundParameters -TimeoutSeconds 600)
+}
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $resolvedBuildRoot = [IO.Path]::GetFullPath((Join-Path $root $BuildRoot))
 $resolvedOpenCore = (Resolve-Path -LiteralPath $OpenCoreRoot).Path

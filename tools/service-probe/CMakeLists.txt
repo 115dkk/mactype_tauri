@@ -291,6 +291,41 @@ set_target_properties(relay-policy-probe PROPERTIES
   OUTPUT_NAME "relay-policy-probe${PROBE_ARCH_SUFFIX}"
 )
 
+set(MACTYPE_RENDERER_UNIT_TESTS
+  renderer-raii-tests
+  hook-lifecycle-tests
+  activation-repaint-tests
+  freetype-runtime-tests
+  private-freetype-policy-tests
+  image-subsystem-tests
+  module-name-tests
+  directwrite-font-cache-tests
+  pe-export-view-tests
+  unload-lifecycle-tests
+  renderer-policy-tests
+  renderer-activation-tests
+  font-substitution-tests
+  bold-face-selection-tests
+  directwrite-virtual-font-tests
+  directwrite-alias-policy-tests
+  directwrite-readiness-tests
+  arrival-evidence-tests
+  gdi-font-identity-tests
+  unity-font-hook-tests
+)
+
+enable_testing()
+find_program(MACTYPE_PROBE_POWERSHELL NAMES pwsh REQUIRED)
+add_custom_target(renderer-unit-tests DEPENDS ${MACTYPE_RENDERER_UNIT_TESTS})
+foreach(target IN LISTS MACTYPE_RENDERER_UNIT_TESTS)
+  add_test(NAME ${target} COMMAND "${MACTYPE_PROBE_POWERSHELL}"
+    -NoLogo -NoProfile -NonInteractive -File
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/ci/Invoke-ProbeDesktop.ps1"
+    -Executable $<TARGET_FILE:${target}> -TimeoutSeconds 120
+  )
+  set_tests_properties(${target} PROPERTIES LABELS "renderer-unit" TIMEOUT 150)
+endforeach()
+
 if(MSVC)
   foreach(target service-probe-common probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests activation-repaint-tests freetype-runtime-tests private-freetype-policy-tests image-subsystem-tests module-name-tests directwrite-font-cache-tests pe-export-view-tests unload-lifecycle-tests renderer-policy-tests renderer-activation-tests font-substitution-tests bold-face-selection-tests directwrite-virtual-font-tests directwrite-alias-policy-tests directwrite-readiness-tests arrival-evidence-tests gdi-font-identity-tests unity-font-hook-tests unity-font-catalog-probe renderer-profile-probe bold-substitution-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe)
     target_compile_options(${target} PRIVATE /W4 /WX /permissive- /utf-8 /sdl)
@@ -302,7 +337,7 @@ if(MSVC)
     )
   endforeach()
   if(MACTYPE_ENABLE_ASAN)
-    foreach(target renderer-raii-tests hook-lifecycle-tests activation-repaint-tests freetype-runtime-tests private-freetype-policy-tests image-subsystem-tests module-name-tests directwrite-font-cache-tests pe-export-view-tests unload-lifecycle-tests renderer-policy-tests font-substitution-tests bold-face-selection-tests directwrite-virtual-font-tests directwrite-alias-policy-tests directwrite-readiness-tests unity-font-hook-tests)
+    foreach(target IN LISTS MACTYPE_RENDERER_UNIT_TESTS)
       target_compile_options(${target} PRIVATE /fsanitize=address /Zi)
       target_link_options(${target} PRIVATE /INCREMENTAL:NO)
     endforeach()

@@ -3,34 +3,23 @@ param(
     [ValidateSet('Win32', 'x64')]
     [string] $Architecture = 'x64',
 
-    [string] $BuildRoot = 'build/service-probe-asan'
+    [string] $BuildRoot = 'build/service-probe-asan',
+
+    [switch] $Interactive
 )
 
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
+. (Join-Path $PSScriptRoot 'lib\ProbeDesktop.ps1')
+if (-not $Interactive -and -not (Test-ProbeDesktopContext)) {
+    exit (Invoke-ProbeDesktopScript -ScriptPath $PSCommandPath -Parameters $PSBoundParameters -TimeoutSeconds 1800)
+}
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $source = Join-Path $root 'tools\service-probe'
 $build = [IO.Path]::GetFullPath((Join-Path $root "$BuildRoot\$Architecture"))
 
 cmake -S $source -B $build -A $Architecture -DMACTYPE_ENABLE_ASAN=ON
-cmake --build $build --config RelWithDebInfo --target `
-    renderer-raii-tests `
-    hook-lifecycle-tests `
-    activation-repaint-tests `
-    freetype-runtime-tests `
-    pe-export-view-tests `
-    unload-lifecycle-tests `
-    renderer-policy-tests `
-    private-freetype-policy-tests `
-    image-subsystem-tests `
-    module-name-tests `
-    directwrite-font-cache-tests `
-    font-substitution-tests `
-    bold-face-selection-tests `
-    directwrite-virtual-font-tests `
-    directwrite-alias-policy-tests `
-    directwrite-readiness-tests `
-    unity-font-hook-tests
+cmake --build $build --config RelWithDebInfo --target renderer-unit-tests
 
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) {
@@ -57,29 +46,9 @@ $originalAsanOptions = $env:ASAN_OPTIONS
 $env:ASAN_OPTIONS = 'halt_on_error=1:abort_on_error=1:detect_leaks=0'
 $env:PATH = "$asanRuntimeDirectory;$originalPath"
 try {
-    foreach ($test in @(
-        'renderer-raii-tests.exe',
-        'hook-lifecycle-tests.exe',
-        'activation-repaint-tests.exe',
-        'freetype-runtime-tests.exe',
-        'pe-export-view-tests.exe',
-        'unload-lifecycle-tests.exe',
-        'renderer-policy-tests.exe',
-        'private-freetype-policy-tests.exe',
-        'image-subsystem-tests.exe',
-        'module-name-tests.exe',
-        'directwrite-font-cache-tests.exe',
-        'font-substitution-tests.exe',
-        'bold-face-selection-tests.exe',
-        'directwrite-virtual-font-tests.exe',
-        'directwrite-alias-policy-tests.exe',
-        'directwrite-readiness-tests.exe',
-        'unity-font-hook-tests.exe'
-    )) {
-        & (Join-Path $build "RelWithDebInfo\$test")
-        if ($LASTEXITCODE -ne 0) {
-            throw "ASan renderer test failed for $Architecture`: $test (exit $LASTEXITCODE)"
-        }
+    ctest --test-dir $build -C RelWithDebInfo -L renderer-unit --output-on-failure --no-tests=error
+    if ($LASTEXITCODE -ne 0) {
+        throw "ASan renderer tests failed for $Architecture (exit $LASTEXITCODE)"
     }
 } finally {
     $env:ASAN_OPTIONS = $originalAsanOptions

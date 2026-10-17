@@ -313,27 +313,27 @@ void FinishFailedBuild(
 {
     entry.building = false;
     ++entry.failedBuilds;
-    std::chrono::milliseconds delay;
-    entry.retryAllowed = directwrite_readiness::FailureRetryDelay(
-        entry.failedBuilds, delay);
-    if (entry.retryAllowed)
-        entry.retryAfter = now + delay;
+    std::optional<std::chrono::milliseconds> const delay =
+        directwrite_readiness::FailureRetryDelay(entry.failedBuilds);
+    entry.retryAllowed = delay.has_value();
+    if (delay)
+        entry.retryAfter = now + *delay;
 }
 
 void TestFailureRetrySchedule()
 {
-    std::chrono::milliseconds delay;
-    Require(directwrite_readiness::FailureRetryDelay(0, delay) && delay == 2s,
+    using directwrite_readiness::FailureRetryDelay;
+    Require(FailureRetryDelay(0) == std::chrono::milliseconds(2s),
         "failure zero did not use the first retry delay");
-    Require(directwrite_readiness::FailureRetryDelay(1, delay) && delay == 2s,
+    Require(FailureRetryDelay(1) == std::chrono::milliseconds(2s),
         "the first failure did not retry after two seconds");
-    Require(directwrite_readiness::FailureRetryDelay(2, delay) && delay == 15s,
+    Require(FailureRetryDelay(2) == std::chrono::milliseconds(15s),
         "the second failure did not retry after fifteen seconds");
-    Require(directwrite_readiness::FailureRetryDelay(3, delay) && delay == 120s,
+    Require(FailureRetryDelay(3) == std::chrono::milliseconds(120s),
         "the third failure did not retry after two minutes");
-    Require(!directwrite_readiness::FailureRetryDelay(4, delay),
+    Require(!FailureRetryDelay(4),
         "the fourth failure still allowed a retry");
-    Require(!directwrite_readiness::FailureRetryDelay(99, delay),
+    Require(!FailureRetryDelay(99),
         "a later failure still allowed a retry");
 }
 

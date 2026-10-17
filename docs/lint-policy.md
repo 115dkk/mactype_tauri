@@ -27,6 +27,15 @@ or runtime purpose is deleted rather than placed on an exclusion list.
 suppression for Cppcheck 2.20's `missingReturn` template-analysis false
 positive.
 
+On `codex/alpha-plus-dll`, both renderer projects (`gdipp.vcxproj` and
+`macloader.vcxproj`) compile as C++20 (`/std:c++20`, and `/std:c17` for the C
+sources) with `/permissive-` and `/Zc:__cplusplus` in every configuration, so
+two-phase lookup and the other conformance rules apply to the rendering core as
+they do to the preview helper. `/Zc:threadSafeInit-` stays, because the
+renderer runs code under the loader lock. The Cppcheck job reads the language
+level from the project. On other branches the renderer keeps the MSVC default
+language mode.
+
 On ordinary branches, generated files, build output, required third-party
 headers, `renderer/json.hpp`, and dependency trees remain outside first-party source
 linting. On `codex/alpha-plus-dll`, the override above governs every tracked

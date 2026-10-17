@@ -390,7 +390,7 @@ public:
 		//WORD嫬奅僠僃僢僋
 		C_ASSERT((offsetof(opcode_data, dllpath) & 1) == 0);
 
-		register BYTE* p = code;
+		BYTE* p = code;
 
 #define emit_(t,x)	EmitOpcode<t>(p, (x))
 #define emit_db(b)	emit_(BYTE, b)
@@ -698,7 +698,7 @@ emit_db(0xC3);
 		//WORD境界チェック
 		C_ASSERT((offsetof(opcode_data, dllpath) & 1) == 0);
 
-		register BYTE* p = code;
+		BYTE* p = code;
 
 #define emit_(t,x)	EmitOpcode<t>(p, (x))
 #define emit_db(b)	emit_(BYTE, b)
@@ -745,7 +745,7 @@ emit_dw(0xD0FF);	//call eax
 	{
 		C_ASSERT((offsetof(opcode_data, dllpath) & 1) == 0);
 
-		register BYTE* p = code;
+		BYTE* p = code;
 
 #define emit_(t,x)	EmitOpcode<t>(p, (x))
 #define emit_db(b)	emit_(BYTE, b)
@@ -811,7 +811,7 @@ emit_dw(0xD0FF);	//call eax
 		uniDllPath.Length = wcslen(dllpath)*sizeof(WCHAR);
 		uniDllPath.MaximumLength = uniDllPath.Length+2;
 		uniDllPath.Buffer = remoteaddr + static_cast<DWORD64>(offsetof(opcode_data, dllpath));	//prepare PUNICODE_STRING for remote process
-		register BYTE* p = code;
+		BYTE* p = code;
 
 #define emit_(t,x)	EmitOpcode<t>(p, (x))
 #define emit_db(b)	emit_(BYTE, b)
@@ -907,7 +907,7 @@ emit_dw(0xD0FF);	//call eax
 		//WORD境界チェック
 		C_ASSERT((offsetof(opcode_data, dllpath) & 1) == 0);
 
-		register BYTE* p = code;
+		BYTE* p = code;
 #undef emit_ddp
 
 #define emit_(t,x)	EmitOpcode<t>(p, (x))
@@ -1398,9 +1398,11 @@ EXTERN_C BOOL WINAPI GdippInjectDLL(const PROCESS_INFORMATION* ppi)
 			GetEnvironmentVariable(L"MACTYPE_X64ADDR", nullptr, 0);
 			if (GetLastError() == ERROR_ENVVAR_NOT_FOUND) {
 				DWORD64 hNtdll = 0;
-				hNtdll = GetModuleHandle64(L"ntdll.dll");
+				wchar_t ntdllName[] = L"ntdll.dll";
+				hNtdll = GetModuleHandle64(ntdllName);
 				if (hNtdll) {
-					DWORD64 pfnLdrAddr = GetProcAddress64(hNtdll, "LdrLoadDll");
+					char ldrLoadDllName[] = "LdrLoadDll";
+					DWORD64 pfnLdrAddr = GetProcAddress64(hNtdll, ldrLoadDllName);
 					if (pfnLdrAddr) {
 						dwLoaderOffset = static_cast<DWORD>(pfnLdrAddr - hNtdll);
 					}

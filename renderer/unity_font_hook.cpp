@@ -85,7 +85,7 @@ struct UnityLifecycleState final
 	LegacyOsFaceResolverFunction osFaceResolver = nullptr;
 	FreeTypeCharIndexFunction freeTypeCharIndex = nullptr;
 	FontCatalogLoadFunction fontCatalogLoad = nullptr;
-	std::shared_ptr<const renderer::unity::FontFileRedirectTable> redirects;
+	std::atomic<std::shared_ptr<const renderer::unity::FontFileRedirectTable>> redirects;
 #ifdef USE_DETOURS
 	std::mutex faceReplacementMutex;
 	renderer::unity::FaceReplacementRegistry faceReplacements;

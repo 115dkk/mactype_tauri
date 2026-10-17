@@ -2,31 +2,26 @@
 
 #include <chrono>
 #include <cstdint>
+#include <optional>
 
 namespace directwrite_readiness {
 
-// Stores how long a key whose builds keep failing waits before it may build
-// again. False once it has failed often enough that it stays on the stock set.
-// The renderer project builds below C++17, so there is no std::optional here.
-inline bool FailureRetryDelay(
-	unsigned failedBuilds,
-	std::chrono::milliseconds& delay) noexcept
+// How long a key whose builds keep failing waits before it may build again;
+// empty once it has failed often enough that it stays on the stock set.
+[[nodiscard]] inline std::optional<std::chrono::milliseconds> FailureRetryDelay(
+	unsigned failedBuilds) noexcept
 {
 	switch (failedBuilds)
 	{
 	case 0:
 	case 1:
-		delay = std::chrono::seconds(2);
-		return true;
+		return std::chrono::seconds(2);
 	case 2:
-		delay = std::chrono::seconds(15);
-		return true;
+		return std::chrono::seconds(15);
 	case 3:
-		delay = std::chrono::seconds(120);
-		return true;
+		return std::chrono::seconds(120);
 	default:
-		delay = std::chrono::milliseconds::zero();
-		return false;
+		return std::nullopt;
 	}
 }
 

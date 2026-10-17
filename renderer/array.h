@@ -25,11 +25,11 @@ class CArray : public CSimpleArray<T>
 public:
 	T* Begin() const
 	{
-		return m_aT;
+		return this->m_aT;
 	}
 	T* End() const
 	{
-		return m_aT + m_nSize;
+		return this->m_aT + this->m_nSize;
 	}
 };
 
@@ -39,11 +39,11 @@ class CValArray : public CSimpleValArray<T>
 public:
 	T* Begin() const
 	{
-		return m_aT;
+		return this->m_aT;
 	}
 	T* End() const
 	{
-		return m_aT + m_nSize;
+		return this->m_aT + this->m_nSize;
 	}
 };
 

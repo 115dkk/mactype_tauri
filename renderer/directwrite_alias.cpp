@@ -907,11 +907,11 @@ BuildStatus GetOrCreateUnchecked(
 			++entry->failedBuilds;
 			if (!IsPermanentBuildFailure(status))
 			{
-				std::chrono::milliseconds delay;
-				entry->retryAllowed = directwrite_readiness::FailureRetryDelay(
-					entry->failedBuilds, delay);
-				if (entry->retryAllowed)
-					entry->retryAfter = std::chrono::steady_clock::now() + delay;
+				std::optional<std::chrono::milliseconds> const delay =
+					directwrite_readiness::FailureRetryDelay(entry->failedBuilds);
+				entry->retryAllowed = delay.has_value();
+				if (delay)
+					entry->retryAfter = std::chrono::steady_clock::now() + *delay;
 			}
 		}
 	}

@@ -1635,12 +1635,6 @@ EXTERN_C LPWSTR WINAPI GdippEnvironment(DWORD& dwCreationFlags, LPVOID lpEnviron
 	return nullptr;
 #endif
 
-	TCHAR dir[MAX_PATH];
-	int dirlen = GetModuleFileName(GetDLLInstance(), dir, MAX_PATH);
-	LPTSTR lpfilename=dir+dirlen;
-	while (lpfilename>dir && *lpfilename!=_T('\\') && *lpfilename!=_T('/')) --lpfilename;
-	*lpfilename = 0;
-
 	renderer_raii::UniqueMallocMemory<WCHAR> environment;
 	if (lpEnvironment) {
 		if (dwCreationFlags & CREATE_UNICODE_ENVIRONMENT) {
@@ -1667,10 +1661,6 @@ EXTERN_C LPWSTR WINAPI GdippEnvironment(DWORD& dwCreationFlags, LPVOID lpEnviron
 	EnvironmentStrings envs;
 	bool ret = MultiSzToArray(environment.get(), envs);
 	environment.reset();
-
-	/*if (ret) {
-		ret = AddPathEnv(envs, dir, dirlen);
-	}*/
 #ifdef _WIN64
 	{
 		GetEnvironmentVariableW(L"MACTYPE_X64ADDR", nullptr, 0);
@@ -1690,13 +1680,16 @@ EXTERN_C LPWSTR WINAPI GdippEnvironment(DWORD& dwCreationFlags, LPVOID lpEnviron
 #ifdef _DEBUG
 	{
 		renderer_raii::UniqueMallocMemory<WCHAR> tmp(strdupdb(environment.get(), 0));
-		if (tmp) {
+		std::optional<std::wstring> const directory =
+			renderer::path_text::ModuleDirectory(GetDLLInstance());
+		std::size_t const parentEnd =
+			directory ? directory->find_last_of(L'\\') : std::wstring::npos;
+		if (tmp && parentEnd != std::wstring::npos) {
 			LPWSTR tmpe = tmp.get() + strlendb(tmp.get());
-			PathRemoveFileSpec(dir);
 			for (LPWSTR z=tmp.get(); z<tmpe; z++)if(!*z)*z=L'\n';
-			StringCchCatW(dir,MAX_PATH,L"\\");
-			StringCchCatW(dir,MAX_PATH,L"gdienv.txt");
-			auto hf = renderer_raii::AdoptHandle(CreateFileW(dir,GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,0,nullptr));
+			std::wstring const dumpPath =
+				directory->substr(0, parentEnd) + L"\\gdienv.txt";
+			auto hf = renderer_raii::AdoptHandle(CreateFileW(dumpPath.c_str(),GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,0,nullptr));
 			if(hf) {
 				DWORD cb;
 				WORD w = 0xfeff;

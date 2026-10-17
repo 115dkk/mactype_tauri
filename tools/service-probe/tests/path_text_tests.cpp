@@ -5,7 +5,9 @@
 #include <cstdlib>
 #include <iostream>
 #include <span>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -74,6 +76,37 @@ void TestReplaceFileName()
             "an empty file name must leave the directory prefix");
 }
 
+void TestReplaceFileNameFromOverlappingView()
+{
+    using renderer::path_text::ReplaceFileName;
+
+    std::array<wchar_t, 32> path{};
+    constexpr std::wstring_view original = L"C:\\d\\abcdef";
+    std::copy(original.begin(), original.end(), path.begin());
+    path[original.size()] = L'\0';
+    // The source "cdef" starts two characters after the destination, so the
+    // two ranges overlap.
+    std::wstring_view const tail(path.data() + 7, 4);
+    Require(ReplaceFileName(path, tail),
+            "a file name that views the same buffer must be replaced");
+    Require(std::wstring_view(path.data()) == L"C:\\d\\cdef",
+            "an overlapping replacement must copy the original characters");
+}
+
+std::wstring ReferenceModulePath(HMODULE module)
+{
+    std::vector<wchar_t> buffer(16);
+    for (;;)
+    {
+        DWORD const capacity = static_cast<DWORD>(buffer.size());
+        DWORD const length = GetModuleFileNameW(module, buffer.data(), capacity);
+        Require(length != 0, "GetModuleFileNameW must read the test executable path");
+        if (length < capacity)
+            return std::wstring(buffer.data(), length);
+        buffer.resize(buffer.size() * 2);
+    }
+}
+
 void TestModuleDirectory()
 {
     HMODULE const self = GetModuleHandleW(nullptr);
@@ -84,14 +117,11 @@ void TestModuleDirectory()
     Require(directory.has_value(),
             "the test executable directory must be available");
 
-    std::array<wchar_t, MAX_PATH> modulePath{};
-    DWORD const length = GetModuleFileNameW(
-        self, modulePath.data(), static_cast<DWORD>(modulePath.size()));
-    Require(length != 0 && length < modulePath.size(),
-            "the test executable path must fit in MAX_PATH");
-    std::wstring_view const fullPath(modulePath.data(), length);
+    // The reference starts with a 16-character buffer, so it also takes the
+    // growth path that ModuleDirectory needs for paths longer than MAX_PATH.
+    std::wstring const fullPath = ReferenceModulePath(self);
     std::size_t const separator = fullPath.find_last_of(L'\\');
-    Require(separator != std::wstring_view::npos,
+    Require(separator != std::wstring::npos,
             "the test executable path must contain a directory");
     Require(*directory == fullPath.substr(0, separator),
             "ModuleDirectory must return the executable directory");
@@ -104,6 +134,7 @@ void TestModuleDirectory()
 int main()
 {
     TestReplaceFileName();
+    TestReplaceFileNameFromOverlappingView();
     TestModuleDirectory();
     std::cout << "path text tests passed\n";
     return 0;

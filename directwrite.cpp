@@ -1385,7 +1385,7 @@ bool hookDirectWrite(IUnknown ** factory)	//此函数需要改进以判断是否
 		HOOK(pDWriteFactory, GetGdiInterop, 17);
 		const CGdippSettings* pSettings = CGdippSettings::GetInstance();
 		// Windows8/8.1 is too buggy, GDIinterpo doesn't work correctly
-		if (!pSettings->IsWindows81() && !pSettings->IsWindows8() && pSettings->DelayedInited() && pSettings->GetFontSubstitutesInfo().GetSize())
+		if (!pSettings->IsWindows81() && !pSettings->IsWindows8() && pSettings->DelayedInited() && pSettings->HasFontSubstitutes())
 			hookFontCreation(pDWriteFactory);
 		MyDebug(L"DW1 hooked");
 

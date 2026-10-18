@@ -11,6 +11,8 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -298,13 +300,12 @@ int main()
         writeBe16(94 + index * 2, static_cast<unsigned int>(L"Gulim"[index]));
     writeBe16(104, 0xAD74);
     writeBe16(106, 0xB9BC);
-    std::vector<std::wstring> sfntFamilies;
-    Require(renderer::unity::ParseSfntFamilyNames(
-        sfnt.data(), sfnt.size(), sfntFamilies),
+    auto sfntFamilies = renderer::unity::ParseSfntFamilyNames(sfnt);
+    Require(sfntFamilies.has_value(),
         "a bounded SFNT family-name table did not parse");
-    Require(std::any_of(sfntFamilies.begin(), sfntFamilies.end(),
+    Require(std::any_of(sfntFamilies->begin(), sfntFamilies->end(),
         [](const std::wstring& family) { return family == L"Gulim"; }) &&
-        std::any_of(sfntFamilies.begin(), sfntFamilies.end(),
+        std::any_of(sfntFamilies->begin(), sfntFamilies->end(),
         [](const std::wstring& family) { return family == L"굴림"; }),
         "SFNT parsing did not preserve English and Korean family names");
 
@@ -347,46 +348,42 @@ int main()
         (static_cast<std::uint32_t>('h') << 16) |
         (static_cast<std::uint32_t>('t') << 24);
     renderer::unity::AxisValue weightAxis{weightTag, 500.0F};
-    long namedInstance = -1;
-    Require(renderer::unity::ParseSfntNamedInstanceIndex(
-        fvar.data(), fvar.size(), 0, &weightAxis, 1, namedInstance) &&
-        namedInstance == 2,
+    auto parseNamedInstance = [&](std::span<const unsigned char> bytes,
+                                  long baseFaceIndex) {
+        return renderer::unity::ParseSfntNamedInstanceIndex(
+            bytes, baseFaceIndex,
+            std::span<const renderer::unity::AxisValue>(&weightAxis, 1));
+    };
+    auto namedInstance = parseNamedInstance(fvar, 0);
+    Require(namedInstance && *namedInstance == 2,
         "the 500-weight fvar instance did not receive its one-based index");
     weightAxis.value = 400.0F;
-    Require(renderer::unity::ParseSfntNamedInstanceIndex(
-        fvar.data(), fvar.size(), 0, &weightAxis, 1, namedInstance) &&
-        namedInstance == 0,
+    namedInstance = parseNamedInstance(fvar, 0);
+    Require(namedInstance && *namedInstance == 0,
         "the default fvar instance did not keep face index zero");
     weightAxis.value = 450.0F;
-    Require(!renderer::unity::ParseSfntNamedInstanceIndex(
-        fvar.data(), fvar.size(), 0, &weightAxis, 1, namedInstance) &&
-        namedInstance == 0,
+    namedInstance = parseNamedInstance(fvar, 0);
+    Require(!namedInstance,
         "an unmatched fvar coordinate selected a named instance");
     // The rejections below must come from the mutated condition alone, so the
     // coordinate goes back to one the unchanged fixture resolves.
     weightAxis.value = 500.0F;
-    Require(renderer::unity::ParseSfntNamedInstanceIndex(
-        fvar.data(), fvar.size(), 0, &weightAxis, 1, namedInstance) &&
-        namedInstance == 2,
+    namedInstance = parseNamedInstance(fvar, 0);
+    Require(namedInstance && *namedInstance == 2,
         "the unchanged fixture stopped resolving the 500-weight instance");
-    Require(!renderer::unity::ParseSfntNamedInstanceIndex(
-        fvar.data(), fvar.size(), 1, &weightAxis, 1, namedInstance),
+    Require(!parseNamedInstance(fvar, 1),
         "a standalone SFNT accepted a nonzero base face index");
     auto truncatedFvarInstances = fvar;
     truncatedFvarInstances[24] = 0;
     truncatedFvarInstances[25] = 0;
     truncatedFvarInstances[26] = 0;
     truncatedFvarInstances[27] = 51;
-    Require(!renderer::unity::ParseSfntNamedInstanceIndex(
-        truncatedFvarInstances.data(), truncatedFvarInstances.size(), 0,
-        &weightAxis, 1, namedInstance),
+    Require(!parseNamedInstance(truncatedFvarInstances, 0),
         "an fvar instance array extending past its table was accepted");
     auto zeroAxisFvar = fvar;
     zeroAxisFvar[72] = 0;
     zeroAxisFvar[73] = 0;
-    Require(!renderer::unity::ParseSfntNamedInstanceIndex(
-        zeroAxisFvar.data(), zeroAxisFvar.size(), 0,
-        &weightAxis, 1, namedInstance),
+    Require(!parseNamedInstance(zeroAxisFvar, 0),
         "an fvar table with no axes was accepted");
 
     std::vector<unsigned char> ttc(512, 0);
@@ -430,11 +427,12 @@ int main()
     };
     writeTtcFace(32, 256, L"First Face");
     writeTtcFace(128, 320, L"Second Face");
-    std::vector<renderer::unity::SfntFamilyFace> ttcFaces;
-    Require(renderer::unity::ParseSfntFamilyFaces(
-        ttc.data(), ttc.size(), ttcFaces) && ttcFaces.size() == 2 &&
-        ttcFaces[0].family == L"First Face" && ttcFaces[0].faceIndex == 0 &&
-        ttcFaces[1].family == L"Second Face" && ttcFaces[1].faceIndex == 1,
+    auto ttcFaces = renderer::unity::ParseSfntFamilyFaces(ttc);
+    Require(ttcFaces && ttcFaces->size() == 2 &&
+        (*ttcFaces)[0].family == L"First Face" &&
+        (*ttcFaces)[0].faceIndex == 0 &&
+        (*ttcFaces)[1].family == L"Second Face" &&
+        (*ttcFaces)[1].faceIndex == 1,
         "TTC family parsing assigned names to the wrong face index");
 
     std::vector<unsigned char> variableTtc(640, 0);
@@ -487,28 +485,22 @@ int main()
     writeVariableTtcFace(32, 256, {500});
     writeVariableTtcFace(128, 384, {300, 500});
     weightAxis.value = 500.0F;
-    Require(renderer::unity::ParseSfntNamedInstanceIndex(
-        variableTtc.data(), variableTtc.size(), 0,
-        &weightAxis, 1, namedInstance) && namedInstance == 1,
+    namedInstance = parseNamedInstance(variableTtc, 0);
+    Require(namedInstance && *namedInstance == 1,
         "the first TTC face did not resolve its fvar instance");
-    Require(renderer::unity::ParseSfntNamedInstanceIndex(
-        variableTtc.data(), variableTtc.size(), 1,
-        &weightAxis, 1, namedInstance) && namedInstance == 2,
+    namedInstance = parseNamedInstance(variableTtc, 1);
+    Require(namedInstance && *namedInstance == 2,
         "the second TTC face used the first face's fvar instance position");
     std::vector<unsigned char> truncatedTtcHeader(
         variableTtc.begin(), variableTtc.begin() + 16);
-    Require(!renderer::unity::ParseSfntNamedInstanceIndex(
-        truncatedTtcHeader.data(), truncatedTtcHeader.size(), 0,
-        &weightAxis, 1, namedInstance),
+    Require(!parseNamedInstance(truncatedTtcHeader, 0),
         "a TTC header cut before its offset array was accepted");
     auto invalidTtcOffset = variableTtc;
     invalidTtcOffset[16] = 0;
     invalidTtcOffset[17] = 0;
     invalidTtcOffset[18] = 3;
     invalidTtcOffset[19] = 0;
-    Require(!renderer::unity::ParseSfntNamedInstanceIndex(
-        invalidTtcOffset.data(), invalidTtcOffset.size(), 1,
-        &weightAxis, 1, namedInstance),
+    Require(!parseNamedInstance(invalidTtcOffset, 1),
         "a TTC face offset beyond the file was accepted");
 
     renderer::unity::UnityFontEvidenceV1 evidence{};
@@ -607,11 +599,11 @@ int main()
             L"C:\\Fonts\\PretendardVariable.ttf") == 0,
         "Unity font redirect evidence lost its observable contract");
 
-    std::vector<renderer::unity::InstalledFontFace> systemFonts;
-    Require(renderer::unity::EnumerateInstalledFontFaces(systemFonts),
+    auto systemFonts = renderer::unity::EnumerateInstalledFontFaces();
+    Require(systemFonts.has_value(),
         "the installed DirectWrite font catalog was unavailable");
     Require(std::any_of(
-        systemFonts.begin(), systemFonts.end(), [](const auto& font) {
+        systemFonts->begin(), systemFonts->end(), [](const auto& font) {
             return _wcsicmp(font.family.c_str(), L"Segoe UI") == 0 &&
                 font.filePath.size() >= 3 && font.filePath[1] == L':' &&
                 (font.filePath[2] == L'\\' || font.filePath[2] == L'/');
@@ -629,33 +621,29 @@ int main()
         installedFonts, *substitutions);
     Require(redirects && !redirects->empty(),
         "a configured Unity font substitution did not produce a redirect");
-    std::wstring redirectedPath;
-    Require(redirects->Resolve(
-        L"c:/windows/fonts/GULIM.TTC", redirectedPath),
+    auto redirectedPath = redirects->Resolve(L"c:/windows/fonts/GULIM.TTC");
+    Require(redirectedPath.has_value(),
         "the exact configured system font path did not redirect");
-    Require(redirectedPath ==
+    Require(*redirectedPath ==
         L"C:\\Users\\tester\\Fonts\\PretendardVariable.ttf",
         "the configured system font redirected to the wrong file");
-    Require(!redirects->Resolve(L"gulim.ttc", redirectedPath),
+    Require(!redirects->Resolve(L"gulim.ttc"),
         "a relative game asset path was redirected");
-    Require(!redirects->Resolve(
-        L"C:\\Games\\PlagueInc\\gulim.ttc", redirectedPath),
+    Require(!redirects->Resolve(L"C:\\Games\\PlagueInc\\gulim.ttc"),
         "an unrelated game asset with the same filename was redirected");
-    long familyReplacementFaceIndex = 0;
-    Require(redirects->ResolveFamilyFace(
-        L"Gulim", redirectedPath, familyReplacementFaceIndex) &&
-        redirectedPath ==
+    auto familyResolution = redirects->ResolveFamilyFace(L"Gulim");
+    Require(familyResolution && familyResolution->replacementPath ==
             L"C:\\Users\\tester\\Fonts\\PretendardVariable.ttf" &&
-        familyReplacementFaceIndex == 3,
+        familyResolution->replacementFaceIndex == 3,
         "an alternate family alias for the same source face did not resolve");
 
     std::array<unsigned char, 40> inlineFontRef{};
     std::memcpy(inlineFontRef.data(), "Gulim", 5);
     inlineFontRef[24] = 19;
     inlineFontRef[32] = 1;
-    std::wstring legacyFamily;
-    Require(renderer::unity::ReadLegacyFontRefFamily(
-        inlineFontRef.data(), legacyFamily) && legacyFamily == L"Gulim",
+    auto legacyFamily = renderer::unity::ReadLegacyFontRefFamily(
+        inlineFontRef.data());
+    Require(legacyFamily && *legacyFamily == L"Gulim",
         "the exact inline Unity core string ABI did not decode");
     std::array<unsigned char, 40> heapFontRef{};
     const char heapFamily[] = "Malgun Gothic";
@@ -665,13 +653,12 @@ int main()
         sizeof(heapFamilyPointer));
     std::memcpy(heapFontRef.data() + 16, &heapFamilyLength,
         sizeof(heapFamilyLength));
-    Require(renderer::unity::ReadLegacyFontRefFamily(
-        heapFontRef.data(), legacyFamily) &&
-        legacyFamily == L"Malgun Gothic",
+    legacyFamily = renderer::unity::ReadLegacyFontRefFamily(
+        heapFontRef.data());
+    Require(legacyFamily && *legacyFamily == L"Malgun Gothic",
         "the exact heap Unity core string ABI did not decode");
     inlineFontRef[24] = 0xff;
-    Require(!renderer::unity::ReadLegacyFontRefFamily(
-        inlineFontRef.data(), legacyFamily),
+    Require(!renderer::unity::ReadLegacyFontRefFamily(inlineFontRef.data()),
         "an invalid Unity inline-string length was accepted");
     auto familySubstitutions = renderer::font_substitution::Snapshot::Build(
         {{L"Malgun Gothic", L"Pretendard Variable Medium"}}, 2);
@@ -683,12 +670,13 @@ int main()
     };
     auto familyRedirects = renderer::unity::FontFileRedirectTable::Build(
         familyFonts, *familySubstitutions);
-    renderer::unity::FaceOpenPathRedirect familyRedirect;
-    Require(familyRedirects && renderer::unity::ResolveFamilyFaceOpenPath(
-        *familyRedirects, L"Malgun Gothic", familyRedirect) &&
-        familyRedirect.replacementPath ==
+    auto familyRedirect = familyRedirects
+        ? renderer::unity::ResolveFamilyFaceOpenPath(
+            *familyRedirects, L"Malgun Gothic")
+        : std::nullopt;
+    Require(familyRedirect && familyRedirect->replacementPath ==
             L"C:\\Fonts\\PretendardVariable.ttf" &&
-        familyRedirect.replacementFaceIndex == (5L << 16),
+        familyRedirect->replacementFaceIndex == (5L << 16),
         "a face identified only by Malgun Gothic did not resolve its encoded replacement");
 
     std::vector<unsigned char> namedInstanceSfnt(192, 0);
@@ -747,46 +735,47 @@ int main()
     };
     auto namedInstanceRedirects = renderer::unity::FontFileRedirectTable::Build(
         namedInstanceFonts, *namedInstanceSubstitutions);
-    long mediumFaceIndex = 0;
-    long semiBoldFaceIndex = 0;
-    long defaultFaceIndex = -1;
-    std::wstring namedInstanceReplacement;
-    Require(namedInstanceRedirects &&
-        namedInstanceRedirects->ResolveFamilyFace(
-            L"Source Medium", namedInstanceReplacement, mediumFaceIndex) &&
-        namedInstanceRedirects->ResolveFamilyFace(
-            L"Source SemiBold", namedInstanceReplacement, semiBoldFaceIndex) &&
-        namedInstanceRedirects->ResolveFamilyFace(
-            L"Source Default", namedInstanceReplacement, defaultFaceIndex) &&
-        mediumFaceIndex == (5L << 16) &&
-        semiBoldFaceIndex == (6L << 16) &&
-        mediumFaceIndex != semiBoldFaceIndex && defaultFaceIndex == 0,
+    auto mediumResolution = namedInstanceRedirects
+        ? namedInstanceRedirects->ResolveFamilyFace(L"Source Medium")
+        : std::nullopt;
+    auto semiBoldResolution = namedInstanceRedirects
+        ? namedInstanceRedirects->ResolveFamilyFace(L"Source SemiBold")
+        : std::nullopt;
+    auto defaultResolution = namedInstanceRedirects
+        ? namedInstanceRedirects->ResolveFamilyFace(L"Source Default")
+        : std::nullopt;
+    Require(mediumResolution && semiBoldResolution && defaultResolution &&
+        mediumResolution->replacementFaceIndex == (5L << 16) &&
+        semiBoldResolution->replacementFaceIndex == (6L << 16) &&
+        mediumResolution->replacementFaceIndex !=
+            semiBoldResolution->replacementFaceIndex &&
+        defaultResolution->replacementFaceIndex == 0,
         "named instances from one file shared a path-only cached face index");
     DeleteFileW(namedInstancePath.c_str());
 
-    renderer::unity::FaceOpenPathRedirect faceRedirect;
-    Require(renderer::unity::ResolveFaceOpenPath(
-        *redirects, 0x04, "c:/windows/fonts/GULIM.TTC", 2, faceRedirect),
+    auto faceRedirect = renderer::unity::ResolveFaceOpenPath(
+        *redirects, 0x04, "c:/windows/fonts/GULIM.TTC", 2);
+    Require(faceRedirect.has_value(),
         "Unity's pathname face-open request did not resolve");
-    Require(faceRedirect.sourcePath == L"c:/windows/fonts/GULIM.TTC" &&
-        faceRedirect.replacementPath ==
+    Require(faceRedirect->sourcePath == L"c:/windows/fonts/GULIM.TTC" &&
+        faceRedirect->replacementPath ==
             L"C:\\Users\\tester\\Fonts\\PretendardVariable.ttf" &&
-        faceRedirect.replacementUtf8 ==
+        faceRedirect->replacementUtf8 ==
             "C:\\Users\\tester\\Fonts\\PretendardVariable.ttf" &&
-        faceRedirect.replacementFaceIndex == 3,
+        faceRedirect->replacementFaceIndex == 3,
         "the face-open redirect lost its source or UTF-8 replacement path");
     Require(!renderer::unity::ResolveFaceOpenPath(
-        *redirects, 0x04, "c:/windows/fonts/GULIM.TTC", 1, faceRedirect),
+        *redirects, 0x04, "c:/windows/fonts/GULIM.TTC", 1),
         "a different face in the same TTC was redirected");
     Require(!renderer::unity::ResolveFaceOpenPath(
-        *redirects, 0x02, "c:/windows/fonts/GULIM.TTC", 2, faceRedirect),
+        *redirects, 0x02, "c:/windows/fonts/GULIM.TTC", 2),
         "a stream-backed face-open request was redirected");
     Require(!renderer::unity::ResolveFaceOpenPath(
-        *redirects, 0x05, "c:/windows/fonts/GULIM.TTC", 2, faceRedirect),
+        *redirects, 0x05, "c:/windows/fonts/GULIM.TTC", 2),
         "a memory-backed face-open request was redirected");
     const char invalidUtf8[] = {'C', ':', '\\', static_cast<char>(0xff), 0};
     Require(!renderer::unity::ResolveFaceOpenPath(
-        *redirects, 0x04, invalidUtf8, 2, faceRedirect),
+        *redirects, 0x04, invalidUtf8, 2),
         "an invalid UTF-8 face path was redirected");
     Require(renderer::unity::CurrentFontRefAllowsFaceRedirect(),
         "a Unity build without a FontRef resolver lost its compatible fallback");
@@ -812,87 +801,81 @@ int main()
     }
     Require(renderer::unity::CurrentFontRefAllowsFaceRedirect(),
         "leaving the FontRef resolver did not restore the fallback state");
-    renderer::unity::FaceOpenPathRedirect fontLoadRedirect;
-    Require(renderer::unity::ResolveTextCoreFontLoadPath(
-        *redirects, "c:/windows/fonts/GULIM.TTC", 2,
-        fontLoadRedirect),
+    auto fontLoadRedirect = renderer::unity::ResolveTextCoreFontLoadPath(
+        *redirects, "c:/windows/fonts/GULIM.TTC", 2);
+    Require(fontLoadRedirect.has_value(),
         "Unity TextCore's path-based font-load request did not resolve");
-    Require(fontLoadRedirect.sourcePath == L"c:/windows/fonts/GULIM.TTC" &&
-        fontLoadRedirect.replacementPath ==
+    Require(fontLoadRedirect->sourcePath == L"c:/windows/fonts/GULIM.TTC" &&
+        fontLoadRedirect->replacementPath ==
             L"C:\\Users\\tester\\Fonts\\PretendardVariable.ttf" &&
-        fontLoadRedirect.replacementUtf8 ==
+        fontLoadRedirect->replacementUtf8 ==
             "C:\\Users\\tester\\Fonts\\PretendardVariable.ttf" &&
-        fontLoadRedirect.replacementFaceIndex == 3,
+        fontLoadRedirect->replacementFaceIndex == 3,
         "the TextCore font-load redirect lost its path or face index");
     Require(!renderer::unity::ResolveTextCoreFontLoadPath(
-        *redirects, invalidUtf8, 2, fontLoadRedirect),
+        *redirects, invalidUtf8, 2),
         "an invalid UTF-8 TextCore font path was redirected");
 
     Fixture fixture;
-    renderer::unity::ResolvedAdapter resolved{};
-    Require(renderer::unity::ResolveAdapter(
-                fixture.image.data(), fixture.image.size(), &fixture.descriptor, 1, &resolved),
-            "an exact PE/PDB identity did not resolve");
-    Require(resolved.targetRva == 0x2000 &&
-                resolved.faceOpenRva == 0x2080 &&
-                resolved.freeTypeCharIndexRva == 0x2100 &&
-                resolved.fontCatalogLoadRva == 0x2180 &&
-                resolved.faceDoneRva == 0x2200 &&
-                resolved.faceDoneAbi == renderer::unity::FaceDoneAbi::standard &&
-                resolved.abi == renderer::unity::RenderAbi::publicRender &&
-                resolved.faceOpenAbi ==
+    auto resolveFixture = [&](const renderer::unity::AdapterDescriptor& descriptor,
+                              std::size_t mappedSize) {
+        return renderer::unity::ResolveAdapter(
+            std::span<const unsigned char>(fixture.image.data(), mappedSize),
+            std::span<const renderer::unity::AdapterDescriptor>(&descriptor, 1));
+    };
+    auto resolved = resolveFixture(fixture.descriptor, fixture.image.size());
+    Require(resolved.has_value(), "an exact PE/PDB identity did not resolve");
+    Require(resolved->targetRva == 0x2000 &&
+                resolved->faceOpenRva == 0x2080 &&
+                resolved->freeTypeCharIndexRva == 0x2100 &&
+                resolved->fontCatalogLoadRva == 0x2180 &&
+                resolved->faceDoneRva == 0x2200 &&
+                resolved->faceDoneAbi == renderer::unity::FaceDoneAbi::standard &&
+                resolved->abi == renderer::unity::RenderAbi::publicRender &&
+                resolved->faceOpenAbi ==
                     renderer::unity::FaceOpenAbi::unityInternal,
             "the exact descriptor resolved the wrong target");
-    Require(renderer::unity::SelectFontSubstitutionBoundary(resolved) ==
+    Require(renderer::unity::SelectFontSubstitutionBoundary(*resolved) ==
         renderer::unity::FontSubstitutionBoundary::freeTypeFaceOpen,
         "a legacy adapter without TextCore did not select face-open fallback");
-    resolved.fontLoadRva = 0x2100;
-    resolved.fontLoadAbi =
+    resolved->fontLoadRva = 0x2100;
+    resolved->fontLoadAbi =
         renderer::unity::FontLoadAbi::textCorePathSizeFace;
-    Require(renderer::unity::SelectFontSubstitutionBoundary(resolved) ==
+    Require(renderer::unity::SelectFontSubstitutionBoundary(*resolved) ==
         renderer::unity::FontSubstitutionBoundary::textCoreFontLoad,
         "an adapter with TextCore did not prefer the higher font-load boundary");
 
     auto wrongGuid = fixture.descriptor;
     wrongGuid.pdbGuid[0] ^= 0xff;
-    Require(!renderer::unity::ResolveAdapter(
-                fixture.image.data(), fixture.image.size(), &wrongGuid, 1, &resolved),
+    Require(!resolveFixture(wrongGuid, fixture.image.size()),
             "a mismatched PDB identity resolved");
     fixture.image[0x2000] ^= 0xff;
-    Require(!renderer::unity::ResolveAdapter(
-                fixture.image.data(), fixture.image.size(), &fixture.descriptor, 1, &resolved),
+    Require(!resolveFixture(fixture.descriptor, fixture.image.size()),
             "a mismatched function prologue resolved");
     fixture.image[0x2000] ^= 0xff;
     fixture.image[0x2080] ^= 0xff;
-    Require(!renderer::unity::ResolveAdapter(
-                fixture.image.data(), fixture.image.size(), &fixture.descriptor, 1, &resolved),
+    Require(!resolveFixture(fixture.descriptor, fixture.image.size()),
             "a mismatched face-open prologue resolved");
     fixture.image[0x2080] ^= 0xff;
     fixture.image[0x2100] ^= 0xff;
-    Require(!renderer::unity::ResolveAdapter(
-                fixture.image.data(), fixture.image.size(), &fixture.descriptor, 1, &resolved),
+    Require(!resolveFixture(fixture.descriptor, fixture.image.size()),
             "a mismatched FreeType character-index prologue resolved");
     fixture.image[0x2100] ^= 0xff;
     fixture.image[0x2180] ^= 0xff;
-    Require(!renderer::unity::ResolveAdapter(
-                fixture.image.data(), fixture.image.size(), &fixture.descriptor, 1, &resolved),
+    Require(!resolveFixture(fixture.descriptor, fixture.image.size()),
             "a mismatched system-font catalog prologue resolved");
     fixture.image[0x2180] ^= 0xff;
     fixture.image[0x2200] ^= 0xff;
-    Require(!renderer::unity::ResolveAdapter(
-                fixture.image.data(), fixture.image.size(), &fixture.descriptor, 1, &resolved),
+    Require(!resolveFixture(fixture.descriptor, fixture.image.size()),
             "a mismatched face-done prologue resolved");
     fixture.image[0x2200] ^= 0xff;
-    Require(!renderer::unity::ResolveAdapter(
-                fixture.image.data(), 0x1800, &fixture.descriptor, 1, &resolved),
+    Require(!resolveFixture(fixture.descriptor, 0x1800),
             "a truncated mapped image resolved");
 
-    std::size_t productionCount = 0;
-    auto const production =
-        renderer::unity::ProductionAdapterDescriptors(&productionCount);
-    Require(production != nullptr && productionCount != 0,
+    auto const production = renderer::unity::ProductionAdapterDescriptors();
+    Require(!production.empty(),
         "the production Unity adapter catalog is empty");
-    for (std::size_t index = 0; index < productionCount; ++index)
+    for (std::size_t index = 0; index < production.size(); ++index)
     {
         Require(production[index].faceOpenRva != 0 &&
             production[index].faceOpenPrefix != nullptr &&
@@ -901,10 +884,10 @@ int main()
             "a production Unity adapter retained render-only substitution");
     }
     auto const rebelAdapter = std::find_if(
-        production, production + productionCount, [](const auto& adapter) {
+        production.begin(), production.end(), [](const auto& adapter) {
             return std::strcmp(adapter.name, "unity-2022.3.62f3-x64") == 0;
         });
-    Require(rebelAdapter != production + productionCount &&
+    Require(rebelAdapter != production.end() &&
         rebelAdapter->fontLoadRva != 0 &&
         rebelAdapter->fontLoadPrefix != nullptr &&
         rebelAdapter->fontLoadAbi ==
@@ -920,10 +903,10 @@ int main()
         "Rebel's exact Unity adapter did not select the TextCore font-load boundary");
 
     auto const plagueAdapter = std::find_if(
-        production, production + productionCount, [](const auto& adapter) {
+        production.begin(), production.end(), [](const auto& adapter) {
             return std::strcmp(adapter.name, "unity-2019.4.41-x64") == 0;
         });
-    Require(plagueAdapter != production + productionCount &&
+    Require(plagueAdapter != production.end() &&
         plagueAdapter->freeTypeCharIndexRva == 0x00E48FF0 &&
         plagueAdapter->freeTypeCharIndexPrefix != nullptr &&
         plagueAdapter->freeTypeCharIndexAbi ==
@@ -938,10 +921,10 @@ int main()
     // pathname-based legacy catalog, so its adapter must carry the same
     // discovery boundary or Korean fallback text vanishes.
     auto const plague6000Adapter = std::find_if(
-        production, production + productionCount, [](const auto& adapter) {
+        production.begin(), production.end(), [](const auto& adapter) {
             return std::strcmp(adapter.name, "unity-6000.3.21-x64") == 0;
         });
-    Require(plague6000Adapter != production + productionCount &&
+    Require(plague6000Adapter != production.end() &&
         plague6000Adapter->fontCatalogLoadRva == 0x00D9E250 &&
         plague6000Adapter->fontCatalogLoadPrefix != nullptr &&
         plague6000Adapter->fontCatalogLoadAbi ==

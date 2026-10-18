@@ -255,7 +255,7 @@ std::vector<BYTE> Table(std::vector<BYTE> const& font, UINT32 tag, bool verifyCh
         }
         Require(!verifyChecksum ||
                     Read32(font, record + 4) ==
-                        sfnt::TableChecksum(summed.data(), summed.size()),
+                        sfnt::TableChecksum(summed),
                 "a rewritten table must carry its own checksum");
         return table;
     }
@@ -271,9 +271,12 @@ std::wstring Name(std::vector<BYTE> const& font, UINT16 id)
     Require(sfnt::ReadNameTable(Table(font, kName, true), format, records, tags),
             "the rewritten name table must parse");
     for (sfnt::NameRecord const& record : records) {
-        std::wstring value;
-        if (record.id == id && sfnt::DecodeName(record, value)) {
-            return value;
+        if (record.id != id) {
+            continue;
+        }
+        auto value = sfnt::DecodeName(record);
+        if (value) {
+            return std::move(*value);
         }
     }
     Require(false, "an expected name record is missing");
@@ -673,7 +676,7 @@ int wmain(int argc, WCHAR** argv)
             "a bold advertisement must set usWeightClass and BOLD and clear REGULAR");
     Require((Read16(Table(advertised, kHead, true), 44) & 1) != 0,
             "a bold advertisement must set head.macStyle bold");
-    Require(sfnt::TableChecksum(advertised.data(), advertised.size()) == 0xB1B0AFBA,
+    Require(sfnt::TableChecksum(advertised) == 0xB1B0AFBA,
             "the head checksum adjustment must cover the rewritten tables");
     Require(Name(advertised, 1) == L"Alias" && Name(advertised, 16) == L"Alias" &&
                 Name(advertised, 2) == L"Bold" && Name(advertised, 17) == L"Bold" &&

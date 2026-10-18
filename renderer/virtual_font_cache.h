@@ -42,31 +42,32 @@ struct ManifestValue
     std::wstring postScriptName;
 };
 
-HRESULT CompareFile(
+[[nodiscard]] HRESULT CompareFile(
     std::wstring const& path,
     std::vector<BYTE> const& expected,
     bool& exists,
     bool& matches) noexcept;
 
-HRESULT GetCacheDirectory(std::wstring& path) noexcept;
+[[nodiscard]] HRESULT GetCacheDirectory(std::wstring& path) noexcept;
 
-HRESULT GrantSharedReadAccess(std::wstring const& directory) noexcept;
+[[nodiscard]] HRESULT GrantSharedReadAccess(
+    std::wstring const& directory) noexcept;
 
-HRESULT LookupManifestFont(
+[[nodiscard]] HRESULT LookupManifestFont(
     ManifestKey const& key,
     ManifestValue& value,
     bool& found) noexcept;
 
-HRESULT StoreManifestFont(
+[[nodiscard]] HRESULT StoreManifestFont(
     ManifestKey const& key,
     ManifestValue const& value) noexcept;
 
-HRESULT DropManifestFont(ManifestKey const& key) noexcept;
+[[nodiscard]] HRESULT DropManifestFont(ManifestKey const& key) noexcept;
 
 // Forces the next test observation through a newly loaded manifest state.
-HRESULT ReloadManifestForTests() noexcept;
+[[nodiscard]] HRESULT ReloadManifestForTests() noexcept;
 
-HRESULT PersistFont(
+[[nodiscard]] HRESULT PersistFont(
     std::vector<BYTE> const& bytes,
     std::wstring& path) noexcept;
 

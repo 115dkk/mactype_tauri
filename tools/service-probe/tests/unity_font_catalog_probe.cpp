@@ -5,6 +5,8 @@
 
 #include <iostream>
 #include <limits>
+#include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -56,17 +58,21 @@ int wmain(int argc, wchar_t** argv)
         if (module == nullptr)
             return 4;
         std::size_t const mappedSize = MappedImageSize(module);
-        std::size_t descriptorCount = 0;
         auto const descriptors =
-            renderer::unity::ProductionAdapterDescriptors(&descriptorCount);
-        renderer::unity::ResolvedAdapter adapter{};
-        bool const resolved = mappedSize != 0 &&
-            renderer::unity::ResolveAdapter(
-                module, mappedSize, descriptors, descriptorCount, &adapter);
+            renderer::unity::ProductionAdapterDescriptors();
+        std::optional<renderer::unity::ResolvedAdapter> adapter;
+        if (mappedSize != 0)
+        {
+            adapter = renderer::unity::ResolveAdapter(
+                std::span<const unsigned char>(
+                    reinterpret_cast<const unsigned char*>(module), mappedSize),
+                descriptors);
+        }
+        bool const resolved = adapter.has_value();
         if (resolved)
-            std::cout << adapter.name << "\t0x" << std::hex
-                << adapter.targetRva << "\tface=0x"
-                << adapter.faceOpenRva << '\n';
+            std::cout << adapter->name << "\t0x" << std::hex
+                << adapter->targetRva << "\tface=0x"
+                << adapter->faceOpenRva << '\n';
         FreeLibrary(module);
         return resolved ? 0 : 5;
     }
@@ -171,19 +177,21 @@ int wmain(int argc, wchar_t** argv)
             : 8;
     }
 
-    std::vector<renderer::unity::InstalledFontFace> fonts;
-    if (!renderer::unity::EnumerateInstalledFontFaces(fonts))
+    auto fonts = renderer::unity::EnumerateInstalledFontFaces();
+    if (!fonts)
         return 1;
     if (argc == 5 && wcscmp(argv[1], L"--redirect") == 0)
     {
         auto substitutions = renderer::font_substitution::Snapshot::Build(
             {{argv[2], argv[3]}}, 1);
         auto redirects = renderer::unity::FontFileRedirectTable::Build(
-            fonts, *substitutions);
-        std::wstring replacement;
-        if (!redirects || !redirects->Resolve(argv[4], replacement))
+            *fonts, *substitutions);
+        auto replacement = redirects
+            ? redirects->Resolve(argv[4])
+            : std::nullopt;
+        if (!replacement)
             return 3;
-        std::wcout << replacement << L'\n';
+        std::wcout << *replacement << L'\n';
         return 0;
     }
     if (argc == 6 && wcscmp(argv[1], L"--redirect-face") == 0)
@@ -195,21 +203,21 @@ int wmain(int argc, wchar_t** argv)
         auto substitutions = renderer::font_substitution::Snapshot::Build(
             {{argv[2], argv[3]}}, 1);
         auto redirects = renderer::unity::FontFileRedirectTable::Build(
-            fonts, *substitutions);
-        std::wstring replacement;
-        long replacementFaceIndex = 0;
-        if (!redirects || !redirects->ResolveFace(
-            argv[4], sourceFaceIndex,
-            replacement, replacementFaceIndex))
+            *fonts, *substitutions);
+        auto replacement = redirects
+            ? redirects->ResolveFace(argv[4], sourceFaceIndex)
+            : std::nullopt;
+        if (!replacement)
             return 3;
-        std::wcout << replacement << L'\t' << replacementFaceIndex << L'\n';
+        std::wcout << replacement->replacementPath << L'\t'
+            << replacement->replacementFaceIndex << L'\n';
         return 0;
     }
     bool allFound = true;
     for (int argument = 1; argument < argc; ++argument)
     {
         bool found = false;
-        for (const renderer::unity::InstalledFontFace& font : fonts)
+        for (const renderer::unity::InstalledFontFace& font : *fonts)
         {
             if (!EqualOrdinalIgnoreCase(font.family, argv[argument]))
                 continue;

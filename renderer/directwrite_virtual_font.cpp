@@ -282,9 +282,9 @@ std::wstring FindSubfamily(
 				record.encoding != identityRecord.encoding ||
 				record.language != identityRecord.language)
 				continue;
-			std::wstring style;
-			if (DecodeName(record, style) && !style.empty())
-				return style;
+			auto style = DecodeName(record);
+			if (style && !style->empty())
+				return std::move(*style);
 		}
 	}
 	return L"Regular";
@@ -850,7 +850,8 @@ HRESULT BuildAliasedSfnt(
 		size_t const recordOffset = 12 + index * 16;
 		WriteU32(output, recordOffset, table.tag);
 		WriteU32(output, recordOffset + 4,
-			TableChecksum(output.data() + tableOffset, tableLength));
+			TableChecksum(std::span<const BYTE>(
+				output.data() + tableOffset, tableLength)));
 		WriteU32(output, recordOffset + 8, tableOffset);
 		WriteU32(output, recordOffset + 12, tableLength);
 	}
@@ -859,8 +860,7 @@ HRESULT BuildAliasedSfnt(
 	if (output.size() > std::numeric_limits<UINT32>::max())
 		return HRESULT_FROM_WIN32(ERROR_FILE_TOO_LARGE);
 
-	UINT32 const adjustment = kSfntChecksum -
-		TableChecksum(output.data(), output.size());
+	UINT32 const adjustment = kSfntChecksum - TableChecksum(output);
 	WriteU32(output, headOutputOffset + 8, adjustment);
 	return S_OK;
 }
@@ -922,7 +922,9 @@ HRESULT CreateAliasedReference(
 		cache::ManifestKey manifestKey = makeManifestKey();
 		cache::ManifestValue manifestValue;
 		bool manifestHit = false;
-		cache::LookupManifestFont(manifestKey, manifestValue, manifestHit);
+		// A cache read failure rebuilds the alias from its source file.
+		static_cast<void>(
+			cache::LookupManifestFont(manifestKey, manifestValue, manifestHit));
 
 		DWRITE_FONT_SIMULATIONS const simulations =
 			replacementReference->GetSimulations();
@@ -976,7 +978,8 @@ HRESULT CreateAliasedReference(
 					result = analyze(fontFile);
 				if (FAILED(result) || fontFile == nullptr)
 				{
-					cache::DropManifestFont(manifestKey);
+					// Cache cleanup failure does not invalidate a fresh rebuild.
+					static_cast<void>(cache::DropManifestFont(manifestKey));
 					manifestHit = false;
 					rebuiltBrokenHit = true;
 					continue;
@@ -1020,7 +1023,8 @@ HRESULT CreateAliasedReference(
 			if ((FAILED(result) || created == nullptr) &&
 				fromManifest && !rebuiltBrokenHit)
 			{
-				cache::DropManifestFont(manifestKey);
+				// Cache cleanup failure does not invalidate a fresh rebuild.
+				static_cast<void>(cache::DropManifestFont(manifestKey));
 				manifestHit = false;
 				rebuiltBrokenHit = true;
 				continue;
@@ -1028,7 +1032,11 @@ HRESULT CreateAliasedReference(
 			if (FAILED(result) || created == nullptr)
 				return FAILED(result) ? result : E_FAIL;
 			if (!fromManifest)
-				cache::StoreManifestFont(manifestKey, manifestValue);
+			{
+				// The in-memory alias remains usable when manifest persistence fails.
+				static_cast<void>(
+					cache::StoreManifestFont(manifestKey, manifestValue));
+			}
 			reference = created;
 			return S_OK;
 		}

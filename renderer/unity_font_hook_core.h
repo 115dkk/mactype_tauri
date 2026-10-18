@@ -11,6 +11,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -145,6 +147,12 @@ struct FaceOpenPathRedirect final
 	long replacementFaceIndex = 0;
 };
 
+struct FacePathResolution final
+{
+	std::wstring replacementPath;
+	long replacementFaceIndex = 0;
+};
+
 class FaceReplacementRegistry final
 {
 public:
@@ -187,22 +195,17 @@ private:
 class FontFileRedirectTable final
 {
 public:
-	static std::shared_ptr<const FontFileRedirectTable> Build(
+	[[nodiscard]] static std::shared_ptr<const FontFileRedirectTable> Build(
 		const std::vector<InstalledFontFace>& installedFonts,
 		const font_substitution::Snapshot& substitutions) noexcept;
 
-	[[nodiscard]] bool Resolve(
+	[[nodiscard]] std::optional<std::wstring> Resolve(
+		const wchar_t* requestedPath) const noexcept;
+	[[nodiscard]] std::optional<FacePathResolution> ResolveFace(
 		const wchar_t* requestedPath,
-		std::wstring& replacementPath) const noexcept;
-	[[nodiscard]] bool ResolveFace(
-		const wchar_t* requestedPath,
-		long requestedFaceIndex,
-		std::wstring& replacementPath,
-		long& replacementFaceIndex) const noexcept;
-	[[nodiscard]] bool ResolveFamilyFace(
-		const wchar_t* requestedFamily,
-		std::wstring& replacementPath,
-		long& replacementFaceIndex) const noexcept;
+		long requestedFaceIndex) const noexcept;
+	[[nodiscard]] std::optional<FacePathResolution> ResolveFamilyFace(
+		const wchar_t* requestedFamily) const noexcept;
 	[[nodiscard]] bool empty() const noexcept { return redirects_.empty(); }
 
 private:
@@ -224,52 +227,41 @@ private:
 	std::vector<Redirect> redirects_;
 };
 
-bool ResolveAdapter(
-	const void* mappedImage,
-	std::size_t mappedSize,
-	const AdapterDescriptor* descriptors,
-	std::size_t descriptorCount,
-	ResolvedAdapter* resolved) noexcept;
+[[nodiscard]] std::optional<ResolvedAdapter> ResolveAdapter(
+	std::span<const unsigned char> mappedImage,
+	std::span<const AdapterDescriptor> descriptors) noexcept;
 
-bool ResolveFaceOpenPath(
+[[nodiscard]] std::optional<FaceOpenPathRedirect> ResolveFaceOpenPath(
 	const FontFileRedirectTable& redirects,
 	unsigned int openFlags,
 	const char* requestedUtf8,
-	long requestedFaceIndex,
-	FaceOpenPathRedirect& redirect) noexcept;
+	long requestedFaceIndex) noexcept;
 
-bool ResolveTextCoreFontLoadPath(
+[[nodiscard]] std::optional<FaceOpenPathRedirect> ResolveTextCoreFontLoadPath(
 	const FontFileRedirectTable& redirects,
 	const char* requestedUtf8,
-	long requestedFaceIndex,
-	FaceOpenPathRedirect& redirect) noexcept;
+	long requestedFaceIndex) noexcept;
 
-bool ResolveFamilyFaceOpenPath(
+[[nodiscard]] std::optional<FaceOpenPathRedirect> ResolveFamilyFaceOpenPath(
 	const FontFileRedirectTable& redirects,
-	const wchar_t* requestedFamily,
-	FaceOpenPathRedirect& redirect) noexcept;
+	const wchar_t* requestedFamily) noexcept;
 
-bool ReadLegacyFontRefFamily(
-	const void* fontRef,
-	std::wstring& family) noexcept;
+[[nodiscard]] std::optional<std::wstring> ReadLegacyFontRefFamily(
+	const void* fontRef) noexcept;
 
-bool ReadReadableUtf8Path(
-	const char* value,
-	std::string& path) noexcept;
+[[nodiscard]] std::optional<std::string> ReadReadableUtf8Path(
+	const char* value) noexcept;
 
-bool ParseSfntNamedInstanceIndex(
-	const unsigned char* bytes,
-	std::size_t size,
+[[nodiscard]] std::optional<long> ParseSfntNamedInstanceIndex(
+	std::span<const unsigned char> bytes,
 	long baseFaceIndex,
-	const AxisValue* axisValues,
-	std::size_t axisValueCount,
-	long& instanceIndex) noexcept;
+	std::span<const AxisValue> axisValues) noexcept;
 
-FontSubstitutionBoundary SelectFontSubstitutionBoundary(
+[[nodiscard]] FontSubstitutionBoundary SelectFontSubstitutionBoundary(
 	const ResolvedAdapter& adapter) noexcept;
 
-const AdapterDescriptor* ProductionAdapterDescriptors(
-	std::size_t* count) noexcept;
+[[nodiscard]] std::span<const AdapterDescriptor>
+ProductionAdapterDescriptors() noexcept;
 
 bool IsExecutableMemoryRange(const void* address, std::size_t length) noexcept;
 bool IsReadableMemoryRange(const void* address, std::size_t length) noexcept;

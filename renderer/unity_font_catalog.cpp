@@ -10,6 +10,7 @@
 #include <cstring>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <set>
 #include <utility>
 
@@ -20,8 +21,8 @@ using DWriteCreateFactoryFunction = HRESULT (WINAPI*)(
 	DWRITE_FACTORY_TYPE, REFIID, IUnknown**);
 
 bool EqualOrdinalIgnoreCase(
-	const std::wstring& left,
-	const std::wstring& right) noexcept
+	std::wstring_view left,
+	std::wstring_view right) noexcept
 {
 	if (left.size() != right.size() ||
 		left.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)()))
@@ -33,126 +34,103 @@ bool EqualOrdinalIgnoreCase(
 
 void Trim(std::wstring& value);
 
-bool ReadBe16(
-	const unsigned char* bytes,
-	std::size_t size,
-	std::size_t offset,
-	std::uint16_t& value) noexcept
+std::optional<std::uint16_t> ReadBe16(
+	std::span<const unsigned char> bytes,
+	std::size_t offset) noexcept
 {
-	if (bytes == nullptr)
-		return false;
-	auto const read = big_endian::Read16(
-		std::span<const unsigned char>(bytes, size), offset);
-	if (!read)
-		return false;
-	value = *read;
-	return true;
+	return big_endian::Read16(bytes, offset);
 }
 
-bool ReadBe32(
-	const unsigned char* bytes,
-	std::size_t size,
-	std::size_t offset,
-	std::uint32_t& value) noexcept
+std::optional<std::uint32_t> ReadBe32(
+	std::span<const unsigned char> bytes,
+	std::size_t offset) noexcept
 {
-	if (bytes == nullptr)
-		return false;
-	auto const read = big_endian::Read32(
-		std::span<const unsigned char>(bytes, size), offset);
-	if (!read)
-		return false;
-	value = *read;
-	return true;
+	return big_endian::Read32(bytes, offset);
 }
 
 bool AppendSfntFaceNames(
-	const unsigned char* bytes,
-	std::size_t size,
+	std::span<const unsigned char> bytes,
 	std::size_t faceOffset,
 	std::vector<std::wstring>& familyNames)
 {
-	std::uint32_t scaler = 0;
-	std::uint16_t tableCount = 0;
-	if (!ReadBe32(bytes, size, faceOffset, scaler) ||
-		!ReadBe16(bytes, size, faceOffset + 4, tableCount) ||
-		(scaler != 0x00010000 && scaler != 0x4f54544f &&
-		 scaler != 0x74727565 && scaler != 0x74797031) ||
-		tableCount == 0 || tableCount > 4096)
+	auto const scaler = ReadBe32(bytes, faceOffset);
+	auto const tableCount = ReadBe16(bytes, faceOffset + 4);
+	if (!scaler || !tableCount ||
+		(*scaler != 0x00010000 && *scaler != 0x4f54544f &&
+		 *scaler != 0x74727565 && *scaler != 0x74797031) ||
+		*tableCount == 0 || *tableCount > 4096)
 		return false;
 	std::size_t const tableOffset = faceOffset + 12;
 	std::size_t const tableBytes =
-		static_cast<std::size_t>(tableCount) * 16;
-	if (tableOffset > size || tableBytes > size - tableOffset)
+		static_cast<std::size_t>(*tableCount) * 16;
+	if (tableOffset > bytes.size() || tableBytes > bytes.size() - tableOffset)
 		return false;
 	std::uint32_t nameOffset = 0;
 	std::uint32_t nameLength = 0;
-	for (std::uint16_t index = 0; index < tableCount; ++index)
+	for (std::uint16_t index = 0; index < *tableCount; ++index)
 	{
 		std::size_t const record = tableOffset +
 			static_cast<std::size_t>(index) * 16;
-		std::uint32_t tag = 0;
-		if (!ReadBe32(bytes, size, record, tag))
+		auto const tag = ReadBe32(bytes, record);
+		if (!tag)
 			return false;
-		if (tag == 0x6e616d65)
+		if (*tag == 0x6e616d65)
 		{
-			if (!ReadBe32(bytes, size, record + 8, nameOffset) ||
-				!ReadBe32(bytes, size, record + 12, nameLength))
+			auto const offset = ReadBe32(bytes, record + 8);
+			auto const length = ReadBe32(bytes, record + 12);
+			if (!offset || !length)
 				return false;
+			nameOffset = *offset;
+			nameLength = *length;
 			break;
 		}
 	}
-	if (nameOffset == 0 || nameLength < 6 || nameOffset > size ||
-		nameLength > size - nameOffset)
+	if (nameOffset == 0 || nameLength < 6 || nameOffset > bytes.size() ||
+		nameLength > bytes.size() - nameOffset)
 		return false;
-	std::uint16_t format = 0;
-	std::uint16_t count = 0;
-	std::uint16_t stringsOffset = 0;
-	if (!ReadBe16(bytes, size, nameOffset, format) || format > 1 ||
-		!ReadBe16(bytes, size, nameOffset + 2, count) ||
-		!ReadBe16(bytes, size, nameOffset + 4, stringsOffset) ||
-		count == 0 || count > 4096)
+	auto const format = ReadBe16(bytes, nameOffset);
+	auto const count = ReadBe16(bytes, nameOffset + 2);
+	auto const stringsOffset = ReadBe16(bytes, nameOffset + 4);
+	if (!format || *format > 1 || !count || !stringsOffset ||
+		*count == 0 || *count > 4096)
 		return false;
 	std::size_t const recordsOffset = static_cast<std::size_t>(nameOffset) + 6;
-	std::size_t const recordsBytes = static_cast<std::size_t>(count) * 12;
+	std::size_t const recordsBytes = static_cast<std::size_t>(*count) * 12;
 	std::size_t const tableEnd = static_cast<std::size_t>(nameOffset) + nameLength;
 	if (recordsOffset > tableEnd || recordsBytes > tableEnd - recordsOffset ||
-		stringsOffset > nameLength)
+		*stringsOffset > nameLength)
 		return false;
 	bool appended = false;
-	for (std::uint16_t index = 0; index < count; ++index)
+	for (std::uint16_t index = 0; index < *count; ++index)
 	{
 		std::size_t const record = recordsOffset +
 			static_cast<std::size_t>(index) * 12;
-		std::uint16_t platform = 0;
-		std::uint16_t nameId = 0;
-		std::uint16_t length = 0;
-		std::uint16_t offset = 0;
-		if (!ReadBe16(bytes, size, record, platform) ||
-			!ReadBe16(bytes, size, record + 6, nameId) ||
-			!ReadBe16(bytes, size, record + 8, length) ||
-			!ReadBe16(bytes, size, record + 10, offset))
+		auto const platform = ReadBe16(bytes, record);
+		auto const nameId = ReadBe16(bytes, record + 6);
+		auto const length = ReadBe16(bytes, record + 8);
+		auto const offset = ReadBe16(bytes, record + 10);
+		if (!platform || !nameId || !length || !offset)
 			return false;
-		if ((platform != 0 && platform != 3) ||
-			(nameId != 1 && nameId != 16) || length == 0 ||
-			(length & 1) != 0 || length > 4096)
+		if ((*platform != 0 && *platform != 3) ||
+			(*nameId != 1 && *nameId != 16) || *length == 0 ||
+			(*length & 1) != 0 || *length > 4096)
 			continue;
 		std::size_t const stringStart = static_cast<std::size_t>(nameOffset) +
-			stringsOffset + offset;
-		if (stringStart > tableEnd || length > tableEnd - stringStart)
+			*stringsOffset + *offset;
+		if (stringStart > tableEnd || *length > tableEnd - stringStart)
 			continue;
 		std::wstring family;
-		family.reserve(length / 2);
+		family.reserve(*length / 2);
 		bool valid = true;
-		for (std::size_t unit = 0; unit < length; unit += 2)
+		for (std::size_t unit = 0; unit < *length; unit += 2)
 		{
-			std::uint16_t character = 0;
-			if (!ReadBe16(bytes, size, stringStart + unit, character) ||
-				character == 0)
+			auto const character = ReadBe16(bytes, stringStart + unit);
+			if (!character || *character == 0)
 			{
 				valid = false;
 				break;
 			}
-			family.push_back(static_cast<wchar_t>(character));
+			family.push_back(static_cast<wchar_t>(*character));
 		}
 		Trim(family);
 		if (!valid || family.empty())
@@ -245,68 +223,63 @@ void AppendFontInformationalNames(
 	}
 }
 
-bool ReadLocalFilePath(
-	IDWriteFontFile* file,
-	std::wstring& path)
+std::optional<std::wstring> ReadLocalFilePath(IDWriteFontFile* file)
 {
-	path.clear();
 	if (file == nullptr)
-		return false;
+		return std::nullopt;
 	const void* referenceKey = nullptr;
 	UINT32 referenceKeySize = 0;
 	if (FAILED(file->GetReferenceKey(&referenceKey, &referenceKeySize)) ||
 		referenceKey == nullptr || referenceKeySize == 0)
-		return false;
+		return std::nullopt;
 	CComPtr<IDWriteFontFileLoader> loader;
 	if (FAILED(file->GetLoader(&loader)) || !loader)
-		return false;
+		return std::nullopt;
 	CComPtr<IDWriteLocalFontFileLoader> localLoader;
 	if (FAILED(loader->QueryInterface(
 		__uuidof(IDWriteLocalFontFileLoader),
 		reinterpret_cast<void**>(&localLoader))) || !localLoader)
-		return false;
+		return std::nullopt;
 	UINT32 pathLength = 0;
 	if (FAILED(localLoader->GetFilePathLengthFromKey(
 		referenceKey, referenceKeySize, &pathLength)) ||
 		pathLength == 0 || pathLength > 32767)
-		return false;
+		return std::nullopt;
 	std::vector<wchar_t> buffer(static_cast<std::size_t>(pathLength) + 1);
 	if (FAILED(localLoader->GetFilePathFromKey(
 		referenceKey, referenceKeySize, buffer.data(),
 		static_cast<UINT32>(buffer.size()))))
-		return false;
-	path.assign(buffer.data(), pathLength);
-	return true;
+		return std::nullopt;
+	return std::wstring(buffer.data(), pathLength);
 }
 
-bool ReadFontAxisValues(
-	IDWriteFontFace* face,
-	std::vector<AxisValue>& axisValues)
+std::optional<std::vector<AxisValue>> ReadFontAxisValues(
+	IDWriteFontFace* face)
 {
-	axisValues.clear();
 	if (face == nullptr)
-		return false;
+		return std::nullopt;
 	CComPtr<IDWriteFontFace5> face5;
 	if (FAILED(face->QueryInterface(
 		__uuidof(IDWriteFontFace5),
 		reinterpret_cast<void**>(&face5))) || !face5)
-		return false;
+		return std::nullopt;
 	if (!face5->HasVariations())
-		return false;
+		return std::nullopt;
 	UINT32 const axisCount = face5->GetFontAxisValueCount();
 	if (axisCount == 0 || axisCount > 256)
-		return false;
+		return std::nullopt;
 	std::vector<DWRITE_FONT_AXIS_VALUE> directWriteAxes(axisCount);
 	if (FAILED(face5->GetFontAxisValues(
 		directWriteAxes.data(), axisCount)))
-		return false;
+		return std::nullopt;
+	std::vector<AxisValue> axisValues;
 	axisValues.reserve(axisCount);
 	for (const DWRITE_FONT_AXIS_VALUE& axis : directWriteAxes)
 	{
 		axisValues.push_back({
 			static_cast<std::uint32_t>(axis.axisTag), axis.value});
 	}
-	return true;
+	return axisValues;
 }
 
 bool AppendFamilyFiles(
@@ -331,7 +304,8 @@ bool AppendFamilyFiles(
 		if (faceIndex > static_cast<UINT32>((std::numeric_limits<long>::max)()))
 			continue;
 		std::vector<AxisValue> axisValues;
-		ReadFontAxisValues(face, axisValues);
+		if (auto parsedAxes = ReadFontAxisValues(face))
+			axisValues = std::move(*parsedAxes);
 		UINT32 fileCount = 0;
 		if (FAILED(face->GetFiles(&fileCount, nullptr)) ||
 			fileCount == 0 || fileCount > 64)
@@ -350,12 +324,12 @@ bool AppendFamilyFiles(
 		{
 			CComPtr<IDWriteFontFile> file;
 			file.Attach(rawFile);
-			std::wstring path;
-			if (!ReadLocalFilePath(file, path))
+			auto path = ReadLocalFilePath(file);
+			if (!path)
 				continue;
 			for (const std::wstring& name : fontNames)
 				AppendUnique(
-					fonts, name, path, static_cast<long>(faceIndex), axisValues);
+					fonts, name, *path, static_cast<long>(faceIndex), axisValues);
 		}
 	}
 	return true;
@@ -505,12 +479,12 @@ void AppendSfntFile(
 		mapping.get(), FILE_MAP_READ, 0, 0, 0));
 	if (!view)
 		return;
-	std::vector<SfntFamilyFace> faces;
-	if (!ParseSfntFamilyFaces(
+	auto faces = ParseSfntFamilyFaces(std::span<const unsigned char>(
 		static_cast<const unsigned char*>(view.get()),
-		static_cast<std::size_t>(size.QuadPart), faces))
+		static_cast<std::size_t>(size.QuadPart)));
+	if (!faces)
 		return;
-	for (const SfntFamilyFace& face : faces)
+	for (const SfntFamilyFace& face : *faces)
 		AppendUnique(fonts, face.family, path, face.faceIndex);
 }
 
@@ -554,20 +528,18 @@ void AppendSfntCatalog(std::vector<InstalledFontFace>& fonts)
 
 } // namespace
 
-bool ParseSfntFamilyFaces(
-	const unsigned char* bytes,
-	std::size_t size,
-	std::vector<SfntFamilyFace>& familyFaces) noexcept
+std::optional<std::vector<SfntFamilyFace>> ParseSfntFamilyFaces(
+	std::span<const unsigned char> bytes) noexcept
 {
-	familyFaces.clear();
 	try
 	{
-		std::uint32_t signature = 0;
-		if (!ReadBe32(bytes, size, 0, signature))
-			return false;
+		auto const signature = ReadBe32(bytes, 0);
+		if (!signature)
+			return std::nullopt;
+		std::vector<SfntFamilyFace> familyFaces;
 		auto appendFace = [&](std::size_t faceOffset, long faceIndex) {
 			std::vector<std::wstring> names;
-			if (!AppendSfntFaceNames(bytes, size, faceOffset, names))
+			if (!AppendSfntFaceNames(bytes, faceOffset, names))
 				return false;
 			for (std::wstring& name : names)
 			{
@@ -581,45 +553,45 @@ bool ParseSfntFamilyFaces(
 			}
 			return true;
 		};
-		if (signature != 0x74746366)
-			return appendFace(0, 0);
-		std::uint32_t faceCount = 0;
-		if (!ReadBe32(bytes, size, 8, faceCount) ||
-			faceCount == 0 || faceCount > 256 ||
-			12 > size || static_cast<std::size_t>(faceCount) * 4 > size - 12)
-			return false;
-		for (std::uint32_t index = 0; index < faceCount; ++index)
+		if (*signature != 0x74746366)
 		{
-			std::uint32_t faceOffset = 0;
-			if (!ReadBe32(
-				bytes, size, 12 + static_cast<std::size_t>(index) * 4,
-				faceOffset) || faceOffset >= size)
-				return false;
-			if (!appendFace(
-				faceOffset, static_cast<long>(index)))
-				return false;
+			if (!appendFace(0, 0))
+				return std::nullopt;
+			return familyFaces;
 		}
-		return !familyFaces.empty();
+		auto const faceCount = ReadBe32(bytes, 8);
+		if (!faceCount || *faceCount == 0 || *faceCount > 256 ||
+			12 > bytes.size() ||
+			static_cast<std::size_t>(*faceCount) * 4 > bytes.size() - 12)
+			return std::nullopt;
+		for (std::uint32_t index = 0; index < *faceCount; ++index)
+		{
+			auto const faceOffset = ReadBe32(
+				bytes, 12 + static_cast<std::size_t>(index) * 4);
+			if (!faceOffset || *faceOffset >= bytes.size() ||
+				!appendFace(*faceOffset, static_cast<long>(index)))
+				return std::nullopt;
+		}
+		if (familyFaces.empty())
+			return std::nullopt;
+		return familyFaces;
 	}
 	catch (...)
 	{
-		familyFaces.clear();
-		return false;
+		return std::nullopt;
 	}
 }
 
-bool ParseSfntFamilyNames(
-	const unsigned char* bytes,
-	std::size_t size,
-	std::vector<std::wstring>& familyNames) noexcept
+std::optional<std::vector<std::wstring>> ParseSfntFamilyNames(
+	std::span<const unsigned char> bytes) noexcept
 {
-	familyNames.clear();
 	try
 	{
-		std::vector<SfntFamilyFace> faces;
-		if (!ParseSfntFamilyFaces(bytes, size, faces))
-			return false;
-		for (const SfntFamilyFace& face : faces)
+		auto faces = ParseSfntFamilyFaces(bytes);
+		if (!faces)
+			return std::nullopt;
+		std::vector<std::wstring> familyNames;
+		for (const SfntFamilyFace& face : *faces)
 		{
 			if (std::none_of(
 				familyNames.begin(), familyNames.end(),
@@ -628,28 +600,29 @@ bool ParseSfntFamilyNames(
 				}))
 				familyNames.push_back(face.family);
 		}
-		return !familyNames.empty();
+		if (familyNames.empty())
+			return std::nullopt;
+		return familyNames;
 	}
 	catch (...)
 	{
-		familyNames.clear();
-		return false;
+		return std::nullopt;
 	}
 }
 
-bool EnumerateInstalledFontFaces(
-	std::vector<InstalledFontFace>& fonts) noexcept
+std::optional<std::vector<InstalledFontFace>>
+EnumerateInstalledFontFaces() noexcept
 {
-	fonts.clear();
 	try
 	{
+		std::vector<InstalledFontFace> fonts;
 		renderer_raii::UniqueModuleReference dwrite(LoadLibraryW(L"dwrite.dll"));
 		if (!dwrite)
-			return false;
+			return std::nullopt;
 		FARPROC const rawCreateFactory = GetProcAddress(
 			dwrite.get(), "DWriteCreateFactory");
 		if (rawCreateFactory == nullptr)
-			return false;
+			return std::nullopt;
 		DWriteCreateFactoryFunction createFactory = nullptr;
 		static_assert(sizeof(createFactory) == sizeof(rawCreateFactory));
 		std::memcpy(&createFactory, &rawCreateFactory, sizeof(createFactory));
@@ -658,14 +631,14 @@ bool EnumerateInstalledFontFaces(
 		if (FAILED(createFactory(
 			DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
 			reinterpret_cast<IUnknown**>(&factory))) || !factory)
-			return false;
+			return std::nullopt;
 		CComPtr<IDWriteFontCollection> collection;
 		if (FAILED(factory->GetSystemFontCollection(&collection, FALSE)) ||
 			!collection)
-			return false;
+			return std::nullopt;
 		UINT32 const familyCount = collection->GetFontFamilyCount();
 		if (familyCount == 0 || familyCount > 65536)
-			return false;
+			return std::nullopt;
 		for (UINT32 familyIndex = 0; familyIndex < familyCount; ++familyIndex)
 		{
 			CComPtr<IDWriteFontFamily> family;
@@ -675,17 +648,19 @@ bool EnumerateInstalledFontFaces(
 			std::vector<std::wstring> names;
 			if (!ReadFamilyNames(family, names))
 				continue;
-			AppendFamilyFiles(family, names, fonts);
+			// One unusable family does not invalidate the bounded system catalog.
+			static_cast<void>(AppendFamilyFiles(family, names, fonts));
 		}
 		AppendRegisteredFonts(HKEY_LOCAL_MACHINE, fonts);
 		AppendRegisteredFonts(HKEY_CURRENT_USER, fonts);
 		AppendSfntCatalog(fonts);
-		return !fonts.empty();
+		if (fonts.empty())
+			return std::nullopt;
+		return fonts;
 	}
 	catch (...)
 	{
-		fonts.clear();
-		return false;
+		return std::nullopt;
 	}
 }
 

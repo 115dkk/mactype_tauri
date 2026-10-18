@@ -225,7 +225,11 @@ bool ReadTypographicNames(
 	std::vector<BYTE> table(size);
 	if (ORIG_GetFontData(dc.get(), kNameTableTag, 0, table.data(), size) != size)
 		return false;
-	return sfnt::ReadTypographicFamilyNames(table, names);
+	auto read = sfnt::ReadTypographicFamilyNames(table);
+	if (!read)
+		return false;
+	names = std::move(*read);
+	return true;
 }
 
 bool CachedFamilyFaces(const std::wstring& family, std::vector<FaceCandidate>& faces)

@@ -12,6 +12,7 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <sddl.h>
 #include <utility>
 
@@ -168,7 +169,7 @@ HRESULT GetCacheDirectoryImpl(std::wstring& path)
     if (!sharedReadAttempted.exchange(true))
     {
         // Sandboxed callers lack WRITE_DAC; an ordinary process can repair it later.
-        GrantSharedReadAccess(path);
+        static_cast<void>(GrantSharedReadAccess(path));
     }
     return S_OK;
 }
@@ -362,7 +363,7 @@ class ManifestReader
 public:
     explicit ManifestReader(std::vector<BYTE> const& bytes) : bytes_(bytes) {}
 
-    bool Skip(size_t count) noexcept
+    [[nodiscard]] bool Skip(size_t count) noexcept
     {
         if (count > bytes_.size() - offset_)
             return false;
@@ -370,47 +371,50 @@ public:
         return true;
     }
 
-    bool U32(UINT32& value) noexcept
+    [[nodiscard]] std::optional<UINT32> U32() noexcept
     {
         if (bytes_.size() - offset_ < 4)
-            return false;
-        value = static_cast<UINT32>(bytes_[offset_]) |
+            return std::nullopt;
+        UINT32 const value = static_cast<UINT32>(bytes_[offset_]) |
             (static_cast<UINT32>(bytes_[offset_ + 1]) << 8) |
             (static_cast<UINT32>(bytes_[offset_ + 2]) << 16) |
             (static_cast<UINT32>(bytes_[offset_ + 3]) << 24);
         offset_ += 4;
-        return true;
+        return value;
     }
 
-    bool U64(UINT64& value) noexcept
+    [[nodiscard]] std::optional<UINT64> U64() noexcept
     {
-        value = 0;
         if (bytes_.size() - offset_ < 8)
-            return false;
+            return std::nullopt;
+        UINT64 value = 0;
         for (unsigned int shift = 0; shift != 64; shift += 8)
             value |= static_cast<UINT64>(bytes_[offset_++]) << shift;
-        return true;
+        return value;
     }
 
-    bool String(std::wstring& value)
+    [[nodiscard]] std::optional<std::wstring> String()
     {
-        UINT32 length = 0;
-        if (!U32(length) || length > kManifestStringLimit ||
-            static_cast<size_t>(length) >
+        auto const length = U32();
+        if (!length || *length > kManifestStringLimit ||
+            static_cast<size_t>(*length) >
                 (bytes_.size() - offset_) / sizeof(WCHAR))
-            return false;
-        value.resize(length);
-        if (length != 0)
+            return std::nullopt;
+        std::wstring value(*length, L'\0');
+        if (*length != 0)
         {
             memcpy(
-                &value[0], bytes_.data() + offset_,
-                static_cast<size_t>(length) * sizeof(WCHAR));
+                value.data(), bytes_.data() + offset_,
+                static_cast<size_t>(*length) * sizeof(WCHAR));
         }
-        offset_ += static_cast<size_t>(length) * sizeof(WCHAR);
-        return true;
+        offset_ += static_cast<size_t>(*length) * sizeof(WCHAR);
+        return value;
     }
 
-    bool finished() const noexcept { return offset_ == bytes_.size(); }
+    [[nodiscard]] bool finished() const noexcept
+    {
+        return offset_ == bytes_.size();
+    }
 
 private:
     std::vector<BYTE> const& bytes_;
@@ -467,17 +471,17 @@ bool SameFileIdentity(
             left.size == right.size));
 }
 
-bool QueryManifestFileIdentity(
-    std::wstring const& path,
-    ManifestFileIdentity& identity) noexcept
+std::optional<ManifestFileIdentity> QueryManifestFileIdentity(
+    std::wstring const& path) noexcept
 {
-    identity = {};
     WIN32_FILE_ATTRIBUTE_DATA attributes = {};
     if (!GetFileAttributesExW(
             path.c_str(), GetFileExInfoStandard, &attributes))
     {
         DWORD const error = GetLastError();
-        return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
+        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)
+            return ManifestFileIdentity{};
+        return std::nullopt;
     }
     ULARGE_INTEGER size = {};
     size.LowPart = attributes.nFileSizeLow;
@@ -485,10 +489,11 @@ bool QueryManifestFileIdentity(
     ULARGE_INTEGER lastWriteTime = {};
     lastWriteTime.LowPart = attributes.ftLastWriteTime.dwLowDateTime;
     lastWriteTime.HighPart = attributes.ftLastWriteTime.dwHighDateTime;
-    identity.size = size.QuadPart;
-    identity.lastWriteTime = lastWriteTime.QuadPart;
-    identity.exists = true;
-    return true;
+    return ManifestFileIdentity{
+        .lastWriteTime = lastWriteTime.QuadPart,
+        .size = size.QuadPart,
+        .exists = true,
+    };
 }
 
 bool ReadManifestFile(
@@ -535,78 +540,96 @@ bool ReadManifestFile(
     return true;
 }
 
-bool ParseManifest(
-    std::vector<BYTE> const& bytes,
-    std::vector<ManifestEntry>& entries)
+std::optional<std::vector<ManifestEntry>> ParseManifest(
+    std::vector<BYTE> const& bytes)
 {
-    entries.clear();
     if (bytes.size() < kManifestMagic.size() + 8 ||
         memcmp(bytes.data(), kManifestMagic.data(), kManifestMagic.size()) != 0)
-        return false;
+        return std::nullopt;
     ManifestReader reader(bytes);
     if (!reader.Skip(kManifestMagic.size()))
-        return false;
-    UINT32 version = 0;
-    UINT32 count = 0;
-    if (!reader.U32(version) || version != kManifestVersion ||
-        !reader.U32(count) || count > kManifestEntryLimit)
-        return false;
-    entries.reserve(count);
-    for (UINT32 entryIndex = 0; entryIndex < count; ++entryIndex)
+        return std::nullopt;
+    auto const version = reader.U32();
+    auto const count = reader.U32();
+    if (!version || *version != kManifestVersion ||
+        !count || *count > kManifestEntryLimit)
+        return std::nullopt;
+    std::vector<ManifestEntry> entries;
+    entries.reserve(*count);
+    for (UINT32 entryIndex = 0; entryIndex < *count; ++entryIndex)
     {
         ManifestEntry entry;
-        UINT32 flags = 0;
-        UINT32 weight = 0;
-        UINT32 axisCount = 0;
-        if (!reader.U64(entry.stamp) ||
-            !reader.U64(entry.value.virtualFontSize) ||
-            !reader.U64(entry.key.replacementSize) ||
-            !reader.U64(entry.key.replacementLastWriteTime) ||
-            !reader.U64(entry.key.profileDigest) ||
-            !reader.U32(entry.key.faceIndex) ||
-            !reader.U32(flags) || !reader.U32(weight) ||
-            !reader.U32(axisCount) || axisCount > kManifestAxisLimit)
-            return false;
-        entry.key.overrideWeight = (flags & 1U) != 0;
-        if ((flags & ~1U) != 0 || weight > 1000)
-            return false;
-        entry.key.weight = static_cast<UINT16>(weight);
-        entry.key.axes.resize(axisCount);
+        auto const stamp = reader.U64();
+        auto const virtualFontSize = reader.U64();
+        auto const replacementSize = reader.U64();
+        auto const replacementLastWriteTime = reader.U64();
+        auto const profileDigest = reader.U64();
+        auto const faceIndex = reader.U32();
+        auto const flags = reader.U32();
+        auto const weight = reader.U32();
+        auto const axisCount = reader.U32();
+        if (!stamp || !virtualFontSize || !replacementSize ||
+            !replacementLastWriteTime || !profileDigest || !faceIndex ||
+            !flags || !weight || !axisCount || *axisCount > kManifestAxisLimit)
+            return std::nullopt;
+        entry.stamp = *stamp;
+        entry.value.virtualFontSize = *virtualFontSize;
+        entry.key.replacementSize = *replacementSize;
+        entry.key.replacementLastWriteTime = *replacementLastWriteTime;
+        entry.key.profileDigest = *profileDigest;
+        entry.key.faceIndex = *faceIndex;
+        entry.key.overrideWeight = (*flags & 1U) != 0;
+        if ((*flags & ~1U) != 0 || *weight > 1000)
+            return std::nullopt;
+        entry.key.weight = static_cast<UINT16>(*weight);
+        entry.key.axes.resize(*axisCount);
         for (ManifestAxis& axis : entry.key.axes)
         {
-            UINT32 bits = 0;
-            if (!reader.U32(axis.tag) || !reader.U32(bits))
-                return false;
-            memcpy(&axis.value, &bits, sizeof(bits));
+            auto const tag = reader.U32();
+            auto const bits = reader.U32();
+            if (!tag || !bits)
+                return std::nullopt;
+            axis.tag = *tag;
+            memcpy(&axis.value, &*bits, sizeof(*bits));
             if (!std::isfinite(axis.value))
-                return false;
+                return std::nullopt;
         }
-        if (!reader.String(entry.key.replacementPath) ||
-            !reader.String(entry.key.aliasFamily) ||
-            !reader.String(entry.value.virtualFontPath) ||
-            !reader.String(entry.value.family) ||
-            !reader.String(entry.value.subfamily) ||
-            !reader.String(entry.value.fullName) ||
-            !reader.String(entry.value.postScriptName))
-            return false;
+        auto replacementPath = reader.String();
+        auto aliasFamily = reader.String();
+        auto virtualFontPath = reader.String();
+        auto family = reader.String();
+        auto subfamily = reader.String();
+        auto fullName = reader.String();
+        auto postScriptName = reader.String();
+        if (!replacementPath || !aliasFamily || !virtualFontPath || !family ||
+            !subfamily || !fullName || !postScriptName)
+            return std::nullopt;
+        entry.key.replacementPath = std::move(*replacementPath);
+        entry.key.aliasFamily = std::move(*aliasFamily);
+        entry.value.virtualFontPath = std::move(*virtualFontPath);
+        entry.value.family = std::move(*family);
+        entry.value.subfamily = std::move(*subfamily);
+        entry.value.fullName = std::move(*fullName);
+        entry.value.postScriptName = std::move(*postScriptName);
         entries.push_back(std::move(entry));
     }
-    return reader.finished();
+    if (!reader.finished())
+        return std::nullopt;
+    return entries;
 }
 
-bool SerializeManifest(
-    std::vector<ManifestEntry> const& entries,
-    std::vector<BYTE>& bytes)
+std::optional<std::vector<BYTE>> SerializeManifest(
+    std::vector<ManifestEntry> const& entries)
 {
     if (entries.size() > kManifestEntryLimit)
-        return false;
-    bytes.assign(kManifestMagic.begin(), kManifestMagic.end());
+        return std::nullopt;
+    std::vector<BYTE> bytes(kManifestMagic.begin(), kManifestMagic.end());
     AppendU32(bytes, kManifestVersion);
     AppendU32(bytes, static_cast<UINT32>(entries.size()));
     for (ManifestEntry const& entry : entries)
     {
         if (entry.key.axes.size() > kManifestAxisLimit)
-            return false;
+            return std::nullopt;
         AppendU64(bytes, entry.stamp);
         AppendU64(bytes, entry.value.virtualFontSize);
         AppendU64(bytes, entry.key.replacementSize);
@@ -631,25 +654,24 @@ bool SerializeManifest(
             !AppendString(bytes, entry.value.fullName) ||
             !AppendString(bytes, entry.value.postScriptName) ||
             bytes.size() > kManifestFileLimit)
-            return false;
+            return std::nullopt;
     }
-    return true;
+    return bytes;
 }
 
 void LoadManifest(ManifestState& state, std::wstring const& path)
 {
-    ManifestFileIdentity diskIdentity;
-    bool const diskIdentityKnown =
-        QueryManifestFileIdentity(path, diskIdentity);
+    auto const diskIdentity = QueryManifestFileIdentity(path);
+    bool const diskIdentityKnown = diskIdentity.has_value();
     if (state.loaded && state.path == path && state.fileIdentityKnown &&
-        diskIdentityKnown && SameFileIdentity(state.fileIdentity, diskIdentity))
+        diskIdentity && SameFileIdentity(state.fileIdentity, *diskIdentity))
         return;
     state.path = path;
     state.entries.clear();
-    state.fileIdentity = diskIdentity;
+    state.fileIdentity = diskIdentity ? *diskIdentity : ManifestFileIdentity{};
     state.fileIdentityKnown = diskIdentityKnown;
     state.loaded = true;
-    if (diskIdentityKnown && !diskIdentity.exists)
+    if (diskIdentity && !diskIdentity->exists)
         return;
     std::vector<BYTE> bytes;
     ManifestFileIdentity loadedIdentity;
@@ -664,17 +686,16 @@ void LoadManifest(ManifestState& state, std::wstring const& path)
     }
     state.fileIdentity = loadedIdentity;
     state.fileIdentityKnown = true;
-    std::vector<ManifestEntry> parsed;
-    if (ParseManifest(bytes, parsed))
-        state.entries = std::move(parsed);
+    if (auto parsed = ParseManifest(bytes))
+        state.entries = std::move(*parsed);
 }
 
 HRESULT WriteManifest(
     ManifestState& state,
     std::wstring const& path)
 {
-    std::vector<BYTE> bytes;
-    if (!SerializeManifest(state.entries, bytes))
+    auto bytes = SerializeManifest(state.entries);
+    if (!bytes)
         return HRESULT_FROM_WIN32(ERROR_FILE_TOO_LARGE);
     static std::atomic<ULONG> sequence(0);
     std::wstring temporaryPath = path;
@@ -690,7 +711,7 @@ HRESULT WriteManifest(
         FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
     if (!file)
         return HRESULT_FROM_WIN32(GetLastError());
-    HRESULT result = WriteAll(file.get(), bytes);
+    HRESULT result = WriteAll(file.get(), *bytes);
     if (SUCCEEDED(result) && !FlushFileBuffers(file.get()))
         result = HRESULT_FROM_WIN32(GetLastError());
     file.reset();
@@ -701,12 +722,13 @@ HRESULT WriteManifest(
             MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
         return HRESULT_FROM_WIN32(GetLastError());
     temporary.Commit();
-    ManifestFileIdentity writtenIdentity;
-    bool const identityKnown =
-        QueryManifestFileIdentity(path, writtenIdentity) && writtenIdentity.exists;
+    auto const writtenIdentity = QueryManifestFileIdentity(path);
+    bool const identityKnown = writtenIdentity && writtenIdentity->exists;
     state.path = path;
     state.loaded = true;
-    state.fileIdentity = writtenIdentity;
+    state.fileIdentity = writtenIdentity
+        ? *writtenIdentity
+        : ManifestFileIdentity{};
     state.fileIdentityKnown = identityKnown;
     return S_OK;
 }

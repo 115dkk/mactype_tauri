@@ -7,16 +7,19 @@
 #include <Windows.h>
 
 #include <cstddef>
+#include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
 namespace renderer {
 namespace sfnt {
 
-bool CanRead(std::size_t offset, std::size_t length, std::size_t size) noexcept;
+[[nodiscard]] bool CanRead(
+	std::size_t offset, std::size_t length, std::size_t size) noexcept;
 void WriteU16(std::vector<BYTE>& bytes, std::size_t offset, UINT16 value);
 void WriteU32(std::vector<BYTE>& bytes, std::size_t offset, UINT32 value);
-UINT32 TableChecksum(BYTE const* bytes, std::size_t size) noexcept;
+[[nodiscard]] UINT32 TableChecksum(std::span<const BYTE> bytes) noexcept;
 
 struct NameRecord
 {
@@ -32,9 +35,9 @@ struct LanguageTagRecord
 	std::vector<BYTE> value;
 };
 
-bool IsUnicodeNameRecord(NameRecord const& record) noexcept;
-bool DecodeName(NameRecord const& record, std::wstring& value);
-bool ReadNameTable(
+[[nodiscard]] bool IsUnicodeNameRecord(NameRecord const& record) noexcept;
+[[nodiscard]] std::optional<std::wstring> DecodeName(NameRecord const& record);
+[[nodiscard]] bool ReadNameTable(
 	std::vector<BYTE> const& table,
 	UINT16& format,
 	std::vector<NameRecord>& records,
@@ -42,9 +45,8 @@ bool ReadNameTable(
 
 // Every decodable typographic family name (ID 16); the family names (ID 1)
 // when the table has no ID 16 record. Duplicates are removed.
-bool ReadTypographicFamilyNames(
-	std::vector<BYTE> const& table,
-	std::vector<std::wstring>& families);
+[[nodiscard]] std::optional<std::vector<std::wstring>>
+ReadTypographicFamilyNames(std::vector<BYTE> const& table);
 
 } // namespace sfnt
 } // namespace renderer

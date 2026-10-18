@@ -4,6 +4,11 @@ project(mactype_service_probe LANGUAGES CXX)
 
 option(MACTYPE_ENABLE_ASAN "Instrument renderer runtime tests with AddressSanitizer" OFF)
 
+# Renderer sources and headers built here use the renderer's own language mode
+# (stdcpp23 in gdipp.vcxproj). CMake maps cxx_std_23 to /std:c++latest for
+# MSVC, so the option is spelled out.
+set(MACTYPE_RENDERER_CXX_STANDARD /std:c++23preview)
+
 if(NOT WIN32)
   message(FATAL_ERROR "The MacType service probes only support Windows.")
 endif()
@@ -29,7 +34,7 @@ add_library(service-probe-common STATIC
   win32_support.cpp
   win32_support.h
 )
-target_compile_features(service-probe-common PUBLIC cxx_std_20)
+target_compile_options(service-probe-common PUBLIC ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(service-probe-common PUBLIC UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(service-probe-common PUBLIC advapi32 bcrypt dwrite gdi32 shell32 user32 version)
 
@@ -49,19 +54,19 @@ set_target_properties(probe-spawn-tree PROPERTIES OUTPUT_NAME "probe-spawn-tree$
 add_executable(probe-timeout-fixture EXCLUDE_FROM_ALL
   tests/fixtures/timeout_tree.cpp
 )
-target_compile_features(probe-timeout-fixture PRIVATE cxx_std_20)
+target_compile_options(probe-timeout-fixture PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(probe-timeout-fixture PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 set_target_properties(probe-timeout-fixture PROPERTIES OUTPUT_NAME "probe-timeout-fixture${PROBE_ARCH_SUFFIX}")
 
 add_executable(renderer-raii-tests tests/renderer_raii_tests.cpp)
-target_compile_features(renderer-raii-tests PRIVATE cxx_std_20)
+target_compile_options(renderer-raii-tests PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(renderer-raii-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
 add_executable(hook-lifecycle-tests
   tests/hook_lifecycle_tests.cpp
   ../../renderer/hook_lifecycle.cpp
 )
-target_compile_features(hook-lifecycle-tests PRIVATE cxx_std_20)
+target_compile_options(hook-lifecycle-tests PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(hook-lifecycle-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
 add_executable(activation-repaint-tests
@@ -69,55 +74,55 @@ add_executable(activation-repaint-tests
   ../../renderer/activation_repaint.cpp
   ../../renderer/arrival_evidence.cpp
 )
-target_compile_features(activation-repaint-tests PRIVATE cxx_std_20)
+target_compile_options(activation-repaint-tests PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(activation-repaint-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(activation-repaint-tests PRIVATE user32)
 
 add_executable(freetype-runtime-tests tests/freetype_runtime_tests.cpp)
-target_compile_features(freetype-runtime-tests PRIVATE cxx_std_20)
+target_compile_options(freetype-runtime-tests PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(freetype-runtime-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
 add_executable(private-freetype-policy-tests
   tests/private_freetype_policy_tests.cpp
   ../../renderer/private_freetype_policy.cpp
 )
-target_compile_features(private-freetype-policy-tests PRIVATE cxx_std_20)
+target_compile_options(private-freetype-policy-tests PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(private-freetype-policy-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
 add_executable(image-subsystem-tests
   tests/image_subsystem_tests.cpp
   ../../renderer/image_subsystem.cpp
 )
-target_compile_features(image-subsystem-tests PRIVATE cxx_std_20)
+target_compile_options(image-subsystem-tests PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(image-subsystem-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
 add_executable(module-name-tests
   tests/module_name_tests.cpp
   ../../renderer/module_name.cpp
 )
-target_compile_features(module-name-tests PRIVATE cxx_std_20)
+target_compile_options(module-name-tests PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(module-name-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
 add_executable(path-text-tests tests/path_text_tests.cpp)
-target_compile_features(path-text-tests PRIVATE cxx_std_20)
+target_compile_options(path-text-tests PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(path-text-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
 add_executable(directwrite-font-cache-tests
   tests/directwrite_font_cache_tests.cpp
   ../../renderer/virtual_font_cache.cpp
 )
-target_compile_features(directwrite-font-cache-tests PRIVATE cxx_std_20)
+target_compile_options(directwrite-font-cache-tests PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(directwrite-font-cache-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(directwrite-font-cache-tests PRIVATE bcrypt advapi32)
 
 add_executable(startup-debug-probe tests/startup_debug_probe.cpp)
-target_compile_features(startup-debug-probe PRIVATE cxx_std_20)
+target_compile_options(startup-debug-probe PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(startup-debug-probe PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_compile_options(startup-debug-probe PRIVATE /W4 /WX /permissive- /utf-8 /sdl)
 target_link_libraries(startup-debug-probe PRIVATE dbghelp user32 gdi32)
 
 add_executable(startup-stack-fixture tests/startup_stack_fixture.cpp)
-target_compile_features(startup-stack-fixture PRIVATE cxx_std_20)
+target_compile_options(startup-stack-fixture PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(startup-stack-fixture PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_compile_options(startup-stack-fixture PRIVATE /W4 /WX /permissive- /utf-8 /sdl)
 
@@ -125,14 +130,14 @@ add_executable(pe-export-view-tests
   tests/pe_export_view_tests.cpp
   ../../renderer/dll.cpp
 )
-target_compile_features(pe-export-view-tests PRIVATE cxx_std_20)
+target_compile_options(pe-export-view-tests PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(pe-export-view-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
 add_executable(unload-lifecycle-tests
   tests/unload_lifecycle_tests.cpp
   ../../renderer/unload_lifecycle.cpp
 )
-target_compile_features(unload-lifecycle-tests PRIVATE cxx_std_20)
+target_compile_options(unload-lifecycle-tests PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(unload-lifecycle-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
 add_executable(renderer-policy-tests
@@ -141,7 +146,7 @@ add_executable(renderer-policy-tests
   ../../renderer/profile_runtime.cpp
   ../../renderer/font_substitution.cpp
 )
-target_compile_features(renderer-policy-tests PRIVATE cxx_std_20)
+target_compile_options(renderer-policy-tests PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(renderer-policy-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
 add_executable(renderer-activation-tests
@@ -152,21 +157,21 @@ add_executable(renderer-activation-tests
   ../../renderer/profile_runtime.cpp
   ../../renderer/font_substitution.cpp
 )
-target_compile_features(renderer-activation-tests PRIVATE cxx_std_20)
+target_compile_options(renderer-activation-tests PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(renderer-activation-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
 add_executable(font-substitution-tests
   tests/font_substitution_tests.cpp
   ../../renderer/font_substitution.cpp
 )
-target_compile_features(font-substitution-tests PRIVATE cxx_std_20)
+target_compile_options(font-substitution-tests PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(font-substitution-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
 add_executable(bold-face-selection-tests
   tests/bold_face_selection_tests.cpp
   ../../renderer/bold_face_selection.cpp
 )
-target_compile_features(bold-face-selection-tests PRIVATE cxx_std_20)
+target_compile_options(bold-face-selection-tests PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(bold-face-selection-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
 add_executable(directwrite-virtual-font-tests
@@ -175,7 +180,7 @@ add_executable(directwrite-virtual-font-tests
   ../../renderer/sfnt_names.cpp
   ../../renderer/virtual_font_cache.cpp
 )
-target_compile_features(directwrite-virtual-font-tests PRIVATE cxx_std_20)
+target_compile_options(directwrite-virtual-font-tests PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(directwrite-virtual-font-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(directwrite-virtual-font-tests PRIVATE dwrite bcrypt advapi32)
 
@@ -203,20 +208,20 @@ add_executable(directwrite-alias-policy-tests
   ../../renderer/directwrite_alias_policy.cpp
   ../../renderer/font_substitution.cpp
 )
-target_compile_features(directwrite-alias-policy-tests PRIVATE cxx_std_20)
+target_compile_options(directwrite-alias-policy-tests PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(directwrite-alias-policy-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
 add_executable(directwrite-readiness-tests
   tests/directwrite_readiness_tests.cpp
 )
-target_compile_features(directwrite-readiness-tests PRIVATE cxx_std_20)
+target_compile_options(directwrite-readiness-tests PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(directwrite-readiness-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
 add_executable(arrival-evidence-tests
   tests/arrival_evidence_tests.cpp
   ../../renderer/arrival_evidence.cpp
 )
-target_compile_features(arrival-evidence-tests PRIVATE cxx_std_20)
+target_compile_options(arrival-evidence-tests PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(arrival-evidence-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(arrival-evidence-tests PRIVATE user32 gdi32)
 
@@ -225,7 +230,7 @@ add_executable(gdi-font-identity-tests
   ../../renderer/gdi_font_identity.cpp
   ../../renderer/arrival_evidence.cpp
 )
-target_compile_features(gdi-font-identity-tests PRIVATE cxx_std_20)
+target_compile_options(gdi-font-identity-tests PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(gdi-font-identity-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(gdi-font-identity-tests PRIVATE user32 gdi32)
 
@@ -238,7 +243,7 @@ add_executable(unity-font-hook-tests
   ../../renderer/renderer_policy.cpp
   ../../renderer/font_substitution.cpp
 )
-target_compile_features(unity-font-hook-tests PRIVATE cxx_std_20)
+target_compile_options(unity-font-hook-tests PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(unity-font-hook-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
 add_executable(unity-font-catalog-probe
@@ -248,11 +253,11 @@ add_executable(unity-font-catalog-probe
   ../../renderer/unity_font_hook_core.cpp
   ../../renderer/font_substitution.cpp
 )
-target_compile_features(unity-font-catalog-probe PRIVATE cxx_std_20)
+target_compile_options(unity-font-catalog-probe PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(unity-font-catalog-probe PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
 add_executable(renderer-profile-probe tests/renderer_profile_probe.cpp)
-target_compile_features(renderer-profile-probe PRIVATE cxx_std_20)
+target_compile_options(renderer-profile-probe PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(renderer-profile-probe PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 set_target_properties(renderer-profile-probe PROPERTIES
   OUTPUT_NAME "renderer-profile-probe${PROBE_ARCH_SUFFIX}"
@@ -272,13 +277,13 @@ add_library(dwritecore-proxy SHARED
   tests/fixtures/dwritecore_proxy.cpp
   tests/fixtures/dwritecore_proxy.def
 )
-target_compile_features(dwritecore-proxy PRIVATE cxx_std_20)
+target_compile_options(dwritecore-proxy PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(dwritecore-proxy PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(dwritecore-proxy PRIVATE dwrite)
 set_target_properties(dwritecore-proxy PROPERTIES PREFIX "" OUTPUT_NAME "DWriteCore")
 
 add_executable(dwritecore-contract-probe tests/dwritecore_contract_probe.cpp)
-target_compile_features(dwritecore-contract-probe PRIVATE cxx_std_20)
+target_compile_options(dwritecore-contract-probe PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(dwritecore-contract-probe PRIVATE
   UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
 )
@@ -287,7 +292,7 @@ set_target_properties(dwritecore-contract-probe PROPERTIES
 )
 
 add_executable(relay-policy-probe tests/relay_policy_probe.cpp)
-target_compile_features(relay-policy-probe PRIVATE cxx_std_20)
+target_compile_options(relay-policy-probe PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
 target_compile_definitions(relay-policy-probe PRIVATE
   UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
 )

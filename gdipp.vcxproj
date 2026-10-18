@@ -359,6 +359,7 @@
     <ClInclude Include="renderer\module_name.h" />
     <ClInclude Include="renderer\ivs_otft.h" />
     <ClInclude Include="renderer\json.hpp" />
+    <ClInclude Include="renderer\json_include.h" />
     <ClInclude Include="renderer\override.h" />
     <ClInclude Include="renderer\ownedcs.h" />
     <ClInclude Include="renderer\private_freetype_policy.h" />

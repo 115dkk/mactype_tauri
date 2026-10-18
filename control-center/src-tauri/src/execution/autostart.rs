@@ -25,7 +25,9 @@ fn read_registry_string() -> Option<String> {
     let units = registry_wide_units(value.bytes.len())?;
     let mut value = value
         .bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
         .collect::<Vec<_>>();
     debug_assert_eq!(value.len(), units);
@@ -40,7 +42,7 @@ fn read_registry_string() -> Option<String> {
 
 #[cfg(windows)]
 fn registry_wide_units(bytes: usize) -> Option<usize> {
-    ((2..=MAX_VALUE_BYTES).contains(&bytes) && bytes % 2 == 0).then_some(bytes / 2)
+    ((2..=MAX_VALUE_BYTES).contains(&bytes) && bytes.is_multiple_of(2)).then_some(bytes / 2)
 }
 
 #[cfg(all(test, windows))]

@@ -162,7 +162,7 @@ fn validate_export_path(value: &str) -> Result<PathBuf, String> {
 }
 
 fn decode_base64(value: &str) -> Result<Vec<u8>, String> {
-    if value.len() % 4 != 0 {
+    if !value.len().is_multiple_of(4) {
         return Err("preview export base64 must use standard padding".to_owned());
     }
     if value.len() / 4 > (MAX_EXPORT_SIZE / 3) + 2 {
@@ -171,7 +171,7 @@ fn decode_base64(value: &str) -> Result<Vec<u8>, String> {
 
     let bytes = value.as_bytes();
     let mut decoded = Vec::with_capacity(value.len() / 4 * 3);
-    for (block_index, block) in bytes.chunks_exact(4).enumerate() {
+    for (block_index, block) in bytes.as_chunks::<4>().0.iter().enumerate() {
         let final_block = block_index + 1 == bytes.len() / 4;
         let a = base64_value(block[0])?;
         let b = base64_value(block[1])?;

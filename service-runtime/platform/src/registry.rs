@@ -565,11 +565,13 @@ fn bound_error() -> io::Error {
 }
 
 fn decode_string(bytes: &[u8]) -> Option<String> {
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         return None;
     }
     let mut units: Vec<u16> = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
         .collect();
     while units.last() == Some(&0) {
@@ -722,7 +724,9 @@ mod tests {
         assert_eq!(
             String::from_utf16_lossy(
                 &raw.bytes
-                    .chunks_exact(2)
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
                     .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
                     .collect::<Vec<_>>()
             ),

@@ -14,7 +14,9 @@ pub(super) fn decode(bytes: &[u8]) -> Result<(String, TextEncoding, BomKind), St
             return Err("UTF-16LE profile has an odd byte length".to_owned());
         }
         let units = body
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
             .collect::<Vec<_>>();
         return String::from_utf16(&units)
@@ -26,7 +28,9 @@ pub(super) fn decode(bytes: &[u8]) -> Result<(String, TextEncoding, BomKind), St
             return Err("UTF-16BE profile has an odd byte length".to_owned());
         }
         let units = body
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
             .collect::<Vec<_>>();
         return String::from_utf16(&units)

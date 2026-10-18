@@ -36,16 +36,16 @@ pub(crate) fn install(
                 ),
             }
         }
-        if let Some(tray) = app.tray_by_id("main") {
-            if let Err(error) = tray.with_inner_tray_icon(|tray| {
+        if let Some(tray) = app.tray_by_id("main")
+            && let Err(error) = tray.with_inner_tray_icon(|tray| {
                 install_end_session_hook(tray.window_handle() as isize, "tray")
-            }) {
-                crate::diagnostics::record_end_session_hook_failed(
-                    "tray",
-                    "access-inner-tray",
-                    &error.to_string(),
-                );
-            }
+            })
+        {
+            crate::diagnostics::record_end_session_hook_failed(
+                "tray",
+                "access-inner-tray",
+                &error.to_string(),
+            );
         }
     }
     crate::diagnostics::record_app_started();

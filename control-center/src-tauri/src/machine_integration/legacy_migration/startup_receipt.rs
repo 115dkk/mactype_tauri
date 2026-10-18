@@ -244,11 +244,11 @@ pub(super) fn restore_startup_with(
         }
     }
     for (artifact, action) in receipt.entries.iter().zip(actions) {
-        if action == StartupRestoreAction::Restore {
-            if let Err(error) = backend.restore_original(artifact) {
-                backend.mark_restoration(StartupRestorationState::ManualRequired)?;
-                return Err(error);
-            }
+        if action == StartupRestoreAction::Restore
+            && let Err(error) = backend.restore_original(artifact)
+        {
+            backend.mark_restoration(StartupRestorationState::ManualRequired)?;
+            return Err(error);
         }
     }
     backend.mark_restoration(StartupRestorationState::Restored)

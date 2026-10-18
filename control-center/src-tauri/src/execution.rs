@@ -81,13 +81,12 @@ fn record_legacy_tray_observation(
         _ if service.is_some() => Some(("service", None)),
         _ => None,
     };
-    if let Some((kind, process)) = observation {
-        if OBSERVED
+    if let Some((kind, process)) = observation
+        && OBSERVED
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
-        {
-            crate::diagnostics::record_legacy_tray_detected(kind, process.as_deref());
-        }
+    {
+        crate::diagnostics::record_legacy_tray_detected(kind, process.as_deref());
     }
 }
 

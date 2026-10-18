@@ -171,10 +171,10 @@ impl WindowsInstallerBackend {
             ));
         }
         let store = ProfileStore::new(self.paths.clone());
-        if published_default {
-            if let Err(error) = store.rollback() {
-                failures.push(format!("restore profile: {error}"));
-            }
+        if published_default
+            && let Err(error) = store.rollback()
+        {
+            failures.push(format!("restore profile: {error}"));
         }
         match snapshot.open_service {
             OpenServiceObservation::Absent | OpenServiceObservation::OwnedStopped => {

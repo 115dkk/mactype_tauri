@@ -229,18 +229,17 @@ impl<'a> InjectionOrchestrator<'a> {
                 if self.contains_identity(&identity) {
                     return Ok(ProcessOutcome::Duplicate);
                 }
-                if self.inspector.probe_image_subsystem(&identity) == ImageSubsystem::Console {
-                    if let Some(age) = self.inspector.probe_process_age(&identity) {
-                        if age < self.deferral_policy.console_grace {
-                            self.insert_deferred(DeferredTarget {
-                                identity,
-                                reason: DeferralReason::ConsoleGrace,
-                                deferrals: 0,
-                                not_before: now + self.deferral_policy.console_grace - age,
-                            });
-                            return Ok(ProcessOutcome::Deferred);
-                        }
-                    }
+                if self.inspector.probe_image_subsystem(&identity) == ImageSubsystem::Console
+                    && let Some(age) = self.inspector.probe_process_age(&identity)
+                    && age < self.deferral_policy.console_grace
+                {
+                    self.insert_deferred(DeferredTarget {
+                        identity,
+                        reason: DeferralReason::ConsoleGrace,
+                        deferrals: 0,
+                        not_before: now + self.deferral_policy.console_grace - age,
+                    });
+                    return Ok(ProcessOutcome::Deferred);
                 }
                 self.attempt_injection(identity, 0, now)
             }

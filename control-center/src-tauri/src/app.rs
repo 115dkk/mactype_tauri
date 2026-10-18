@@ -23,15 +23,14 @@ pub(crate) struct LaunchContext {
 fn requested_view() -> String {
     let mut args = env::args();
     while let Some(argument) = args.next() {
-        if argument == "--ci-view" {
-            if let Some(value) = args.next() {
-                if matches!(
-                    value.as_str(),
-                    "overview" | "files" | "profiles" | "execution" | "diagnostics"
-                ) {
-                    return value;
-                }
-            }
+        if argument == "--ci-view"
+            && let Some(value) = args.next()
+            && matches!(
+                value.as_str(),
+                "overview" | "files" | "profiles" | "execution" | "diagnostics"
+            )
+        {
+            return value;
         }
     }
     "overview".to_owned()

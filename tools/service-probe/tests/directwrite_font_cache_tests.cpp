@@ -35,15 +35,22 @@ struct Comparison
 DWORD WINAPI CompareOnSmallStack(void* argument)
 {
     auto& comparison = *static_cast<Comparison*>(argument);
-    comparison.result = renderer::virtual_font_cache::CompareFile(
-        comparison.path, comparison.expected,
-        comparison.exists, comparison.matches);
+    auto result = renderer::virtual_font_cache::CompareFile(
+        comparison.path, comparison.expected);
+    if (!result)
+    {
+        comparison.result = result.error();
+        return 0;
+    }
+    comparison.result = S_OK;
+    comparison.exists = result->exists;
+    comparison.matches = result->matches;
     return 0;
 }
 
 void Compare(Comparison& comparison, bool exists, bool matches)
 {
-    // A regression must reset both outputs, not preserve a previous success.
+    // A regression must replace both returned fields, not preserve a previous success.
     comparison.exists = !exists;
     comparison.matches = !matches;
     renderer_raii::UniqueHandle thread = renderer_raii::AdoptHandle(CreateThread(
@@ -340,9 +347,10 @@ void TestManifest(std::vector<BYTE> const&)
     key.profileDigest = 0x1122334455667788ULL;
     key.axes = {{0x74686777, 500.0f}, {0x68746477, 100.0f}};
     cache::ManifestValue value;
-    bool found = true;
-    RequireAcl(cache::ReloadManifestForTests() == S_OK &&
-        cache::LookupManifestFont(key, value, found) == S_OK && !found,
+    RequireAcl(cache::ReloadManifestForTests() == S_OK,
+        "cannot reload the v1 manifest fixture");
+    auto lookup = cache::LookupManifestFont(key);
+    RequireAcl(lookup && !lookup->has_value(),
         "manifest-v1.bin must never be read as a v2 hit");
 
     auto const virtualFont = directory / L"cached.ttf";
@@ -363,14 +371,14 @@ void TestManifest(std::vector<BYTE> const&)
     std::vector<BYTE> const validManifest = ReadFixture(manifestV2);
     RequireAcl(cache::ReloadManifestForTests() == S_OK,
         "cannot parse the written manifest into a fresh state");
-    cache::ManifestValue loaded;
-    found = false;
-    RequireAcl(cache::LookupManifestFont(key, loaded, found) == S_OK && found &&
-        loaded.virtualFontPath == value.virtualFontPath &&
-        loaded.virtualFontSize == value.virtualFontSize &&
-        loaded.family == value.family && loaded.subfamily == value.subfamily &&
-        loaded.fullName == value.fullName &&
-        loaded.postScriptName == value.postScriptName,
+    lookup = cache::LookupManifestFont(key);
+    RequireAcl(lookup && lookup->has_value() &&
+        (**lookup).virtualFontPath == value.virtualFontPath &&
+        (**lookup).virtualFontSize == value.virtualFontSize &&
+        (**lookup).family == value.family &&
+        (**lookup).subfamily == value.subfamily &&
+        (**lookup).fullName == value.fullName &&
+        (**lookup).postScriptName == value.postScriptName,
         "a freshly parsed manifest value did not round-trip every field");
 
     auto const savedManifest = directory / L"manifest-v2.saved";
@@ -389,11 +397,10 @@ void TestManifest(std::vector<BYTE> const&)
     RequireAcl(cache::ReloadManifestForTests() == S_OK,
         "cannot load a fresh state after the manifest changed on disk");
     auto manifestContains = [&](cache::ManifestKey const& candidate) {
-        cache::ManifestValue ignored;
-        bool hit = false;
-        RequireAcl(cache::LookupManifestFont(candidate, ignored, hit) == S_OK,
+        auto result = cache::LookupManifestFont(candidate);
+        RequireAcl(result.has_value(),
             "manifest lookup failed after an external replacement");
-        return hit;
+        return result->has_value();
     };
     RequireAcl(manifestContains(key) && manifestContains(keyC) &&
         !manifestContains(keyB),
@@ -437,9 +444,8 @@ void TestManifest(std::vector<BYTE> const&)
         "the bounded manifest mutex wait damaged the manifest");
 
     auto expectKeyMiss = [&](cache::ManifestKey const& changed) {
-        cache::ManifestValue ignored;
-        bool hit = true;
-        RequireAcl(cache::LookupManifestFont(changed, ignored, hit) == S_OK && !hit,
+        auto result = cache::LookupManifestFont(changed);
+        RequireAcl(result && !result->has_value(),
             "a manifest key field did not participate in lookup");
     };
     cache::ManifestKey changed = key;
@@ -493,8 +499,8 @@ void TestManifest(std::vector<BYTE> const&)
     OverwriteFixture(manifestV2, oversizedCount);
     RequireAcl(cache::ReloadManifestForTests() == S_OK,
         "cannot reload oversized-count manifest fixture");
-    found = true;
-    RequireAcl(cache::LookupManifestFont(key, loaded, found) == S_OK && !found,
+    lookup = cache::LookupManifestFont(key);
+    RequireAcl(lookup && !lookup->has_value(),
         "an oversized manifest record count was accepted");
 
     std::vector<BYTE> oversizedString = validManifest;
@@ -504,8 +510,8 @@ void TestManifest(std::vector<BYTE> const&)
     OverwriteFixture(manifestV2, oversizedString);
     RequireAcl(cache::ReloadManifestForTests() == S_OK,
         "cannot reload oversized-string manifest fixture");
-    found = true;
-    RequireAcl(cache::LookupManifestFont(key, loaded, found) == S_OK && !found,
+    lookup = cache::LookupManifestFont(key);
+    RequireAcl(lookup && !lookup->has_value(),
         "an oversized manifest string was accepted");
 
     OverwriteFixture(manifestV2, validManifest);
@@ -513,11 +519,10 @@ void TestManifest(std::vector<BYTE> const&)
         "cannot restore the valid manifest fixture");
     int rebuilds = 0;
     auto lookupOrRebuild = [&] {
-        cache::ManifestValue candidate;
-        bool hit = false;
-        RequireAcl(cache::LookupManifestFont(key, candidate, hit) == S_OK,
+        auto result = cache::LookupManifestFont(key);
+        RequireAcl(result.has_value(),
             "manifest lookup failed during rebuild test");
-        if (hit)
+        if (result->has_value())
             return;
         ++rebuilds;
         OverwriteFixture(virtualFont, validFont);
@@ -537,8 +542,8 @@ void TestManifest(std::vector<BYTE> const&)
     lookupOrRebuild();
     RequireAcl(rebuilds == 2,
         "a corrupt non-empty manifest backing did not trigger one rebuild");
-    found = false;
-    RequireAcl(cache::LookupManifestFont(key, loaded, found) == S_OK && found,
+    lookup = cache::LookupManifestFont(key);
+    RequireAcl(lookup && lookup->has_value(),
         "the rebuilt manifest backing was not reusable");
 
     std::vector<BYTE> oneEntry = ReadFixture(manifestV2);
@@ -565,11 +570,11 @@ void TestManifest(std::vector<BYTE> const&)
         "cannot reload the evicted manifest");
     cache::ManifestKey oldest = key;
     oldest.profileDigest = 0;
-    found = true;
-    RequireAcl(cache::LookupManifestFont(oldest, loaded, found) == S_OK && !found,
+    lookup = cache::LookupManifestFont(oldest);
+    RequireAcl(lookup && !lookup->has_value(),
         "the oldest entry survived beyond the 2,048-entry bound");
-    found = false;
-    RequireAcl(cache::LookupManifestFont(newest, loaded, found) == S_OK && found &&
+    lookup = cache::LookupManifestFont(newest);
+    RequireAcl(lookup && lookup->has_value() &&
         ReadLe32(ReadFixture(manifestV2), 12) == 2048,
         "manifest eviction did not retain the newest bounded entry");
 
@@ -590,15 +595,14 @@ void TestCacheAcl(std::vector<BYTE> const& fixtureBytes)
     auto const preexisting = directory / L"preexisting.ttf";
     WriteFixture(preexisting, fixtureBytes);
 
-    std::wstring path;
-    RequireAcl(renderer::virtual_font_cache::GetCacheDirectory(path) == S_OK && path == directory.native(),
+    auto path = renderer::virtual_font_cache::GetCacheDirectory();
+    RequireAcl(path && *path == directory.native(),
         "cache directory did not use the isolated fixture");
-    std::wstring persistedPath;
-    RequireAcl(renderer::virtual_font_cache::PersistFont(fixtureBytes, persistedPath) == S_OK,
-        "cannot persist the cache fixture");
-    CheckReadGrants(path, true);
+    auto persistedPath = renderer::virtual_font_cache::PersistFont(fixtureBytes);
+    RequireAcl(persistedPath.has_value(), "cannot persist the cache fixture");
+    CheckReadGrants(*path, true);
     CheckReadGrants(preexisting.native(), false);
-    CheckReadGrants(persistedPath, false);
+    CheckReadGrants(*persistedPath, false);
 
     HANDLE rawToken = nullptr;
     RequireAcl(OpenProcessToken(GetCurrentProcess(),
@@ -616,7 +620,7 @@ void TestCacheAcl(std::vector<BYTE> const& fixtureBytes)
         restricting.data(), &rawRestricted) != FALSE, "cannot create restricted token");
     auto restricted = renderer_raii::AdoptHandle(rawRestricted);
     CheckRestrictedOpen(restricted.get(), preexisting.native(), true);
-    CheckRestrictedOpen(restricted.get(), persistedPath, true);
+    CheckRestrictedOpen(restricted.get(), *persistedPath, true);
 
     auto const controlDirectory = temporary.root / L"control";
     RequireAcl(std::filesystem::create_directory(controlDirectory), "cannot create control directory");
@@ -624,7 +628,7 @@ void TestCacheAcl(std::vector<BYTE> const& fixtureBytes)
     WriteFixture(control, fixtureBytes);
     ProtectControl(control.native(), token.get());
     CheckRestrictedOpen(restricted.get(), control.native(), false);
-    RequireAcl(renderer::virtual_font_cache::GrantSharedReadAccess(path) == S_FALSE,
+    RequireAcl(renderer::virtual_font_cache::GrantSharedReadAccess(*path) == S_FALSE,
         "shared read grants were not idempotent");
 }
 

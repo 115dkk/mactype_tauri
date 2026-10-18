@@ -289,7 +289,7 @@ function Test-OpenServiceWorkflowPolicy {
         -Tokens @(
             'IDWriteFontSetBuilder', 'FindReplacementReference',
             'directwrite_virtual_font::CreateAliasedReference',
-            'builder->AddFontFaceReference(virtualReference)',
+            'builder->AddFontFaceReference(virtualReference->reference)',
             'CreateFontCollectionFromFontSet',
             'DWRITE_FONT_PROPERTY_ID_WIN32_FAMILY_NAME'
         )
@@ -312,7 +312,7 @@ function Test-OpenServiceWorkflowPolicy {
         -TokenMessage "disk-backed virtual font cache is missing required token '{0}'." `
         -Tokens @(
             'BCryptHashData', 'renderer_raii::UniqueHandle', 'MoveFileExW',
-            'HRESULT PersistFont'
+            'std::expected<std::wstring, HRESULT> PersistFont('
         )
 
     $aclFixtureModulePath = Join-Path $Root 'scripts\ci\lib\OpenServiceAclFixture.psm1'

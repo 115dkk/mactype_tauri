@@ -100,43 +100,46 @@ struct ReplacementFileIdentity
 	UINT64 lastWriteTime = 0;
 };
 
-HRESULT ReadReplacementFile(
+struct ReplacementFile
+{
+	std::vector<BYTE> bytes;
+	UINT32 faceIndex = 0;
+	ReplacementFileIdentity identity;
+};
+
+[[nodiscard]] std::expected<ReplacementFile, HRESULT> ReadReplacementFile(
 	IDWriteFontFaceReference* reference,
-	std::vector<BYTE>& bytes,
-	UINT32& faceIndex,
-	ReplacementFileIdentity& identity,
 	bool readBytes)
 {
-	bytes.clear();
-	identity = {};
 	CComPtr<IDWriteFontFile> file;
 	HRESULT result = reference->GetFontFile(&file);
 	if (FAILED(result) || file == nullptr)
-		return FAILED(result) ? result : E_FAIL;
+		return std::unexpected(FAILED(result) ? result : E_FAIL);
 
 	void const* key = nullptr;
 	UINT32 keySize = 0;
 	result = file->GetReferenceKey(&key, &keySize);
 	if (FAILED(result))
-		return result;
+		return std::unexpected(result);
 
 	CComPtr<IDWriteFontFileLoader> fileLoader;
 	result = file->GetLoader(&fileLoader);
 	if (FAILED(result) || fileLoader == nullptr)
-		return FAILED(result) ? result : E_FAIL;
+		return std::unexpected(FAILED(result) ? result : E_FAIL);
 
 	CComPtr<IDWriteFontFileStream> stream;
 	result = fileLoader->CreateStreamFromKey(key, keySize, &stream);
 	if (FAILED(result) || stream == nullptr)
-		return FAILED(result) ? result : E_FAIL;
+		return std::unexpected(FAILED(result) ? result : E_FAIL);
 
 	UINT64 fileSize = 0;
 	result = stream->GetFileSize(&fileSize);
 	if (FAILED(result))
-		return result;
+		return std::unexpected(result);
 	if (fileSize == 0 || fileSize > std::numeric_limits<UINT32>::max())
-		return HRESULT_FROM_WIN32(ERROR_FILE_TOO_LARGE);
+		return std::unexpected(HRESULT_FROM_WIN32(ERROR_FILE_TOO_LARGE));
 
+	ReplacementFileIdentity identity;
 	CComPtr<IDWriteLocalFontFileLoader> localLoader;
 	if (SUCCEEDED(fileLoader->QueryInterface(&localLoader)) &&
 		localLoader != nullptr)
@@ -172,18 +175,23 @@ HRESULT ReadReplacementFile(
 		}
 	}
 
-	faceIndex = reference->GetFontFaceIndex();
-	if (!readBytes)
-		return S_OK;
+	UINT32 const faceIndex = reference->GetFontFaceIndex();
+	std::vector<BYTE> bytes;
+	if (readBytes)
+	{
+		FontFileFragment fragment(stream);
+		result = fragment.Read(0, fileSize);
+		if (FAILED(result) || fragment.get() == nullptr)
+			return std::unexpected(FAILED(result) ? result : E_FAIL);
 
-	FontFileFragment fragment(stream);
-	result = fragment.Read(0, fileSize);
-	if (FAILED(result) || fragment.get() == nullptr)
-		return FAILED(result) ? result : E_FAIL;
-
-	BYTE const* first = static_cast<BYTE const*>(fragment.get());
-	bytes.assign(first, first + static_cast<size_t>(fileSize));
-	return S_OK;
+		BYTE const* first = static_cast<BYTE const*>(fragment.get());
+		bytes.assign(first, first + static_cast<size_t>(fileSize));
+	}
+	return ReplacementFile{
+		.bytes = std::move(bytes),
+		.faceIndex = faceIndex,
+		.identity = std::move(identity),
+	};
 }
 
 bool IsIdentityName(UINT16 id, bool rewriteSubfamily) noexcept
@@ -865,30 +873,27 @@ HRESULT BuildAliasedSfnt(
 	return S_OK;
 }
 
-HRESULT CreateAliasedReference(
+std::expected<AliasedReference, HRESULT> CreateAliasedReference(
 	IDWriteFactory3* factory,
 	IDWriteFontFaceReference* replacementReference,
 	WCHAR const* aliasFamily,
-	CComPtr<IDWriteFontFaceReference>& reference,
-	Identity& identity,
 	AliasOptions const& options)
 {
-	reference.Release();
-	identity = {};
 	if (factory == nullptr || replacementReference == nullptr ||
 		aliasFamily == nullptr ||
 		*aliasFamily == L'\0')
-		return E_INVALIDARG;
+		return std::unexpected(E_INVALIDARG);
 
 	try
 	{
-		std::vector<BYTE> source;
-		UINT32 faceIndex = 0;
-		ReplacementFileIdentity sourceIdentity;
-		HRESULT result = ReadReplacementFile(
-			replacementReference, source, faceIndex, sourceIdentity, false);
-		if (FAILED(result))
-			return result;
+		auto sourceFile = ReadReplacementFile(replacementReference, false);
+		if (!sourceFile)
+			return std::unexpected(sourceFile.error());
+		std::vector<BYTE> source = std::move(sourceFile->bytes);
+		UINT32 faceIndex = sourceFile->faceIndex;
+		ReplacementFileIdentity sourceIdentity = std::move(sourceFile->identity);
+		Identity identity;
+		HRESULT result = S_OK;
 
 		AliasOptions effectiveOptions = options;
 		CComPtr<IDWriteFontFaceReference1> replacementReference1;
@@ -899,7 +904,7 @@ HRESULT CreateAliasedReference(
 			effectiveOptions.axisValues.resize(axisCount);
 			if (axisCount != 0 && FAILED(replacementReference1->GetFontAxisValues(
 					effectiveOptions.axisValues.data(), axisCount)))
-				return E_FAIL;
+				return std::unexpected(E_FAIL);
 		}
 
 		namespace cache = renderer::virtual_font_cache;
@@ -923,8 +928,12 @@ HRESULT CreateAliasedReference(
 		cache::ManifestValue manifestValue;
 		bool manifestHit = false;
 		// A cache read failure rebuilds the alias from its source file.
-		static_cast<void>(
-			cache::LookupManifestFont(manifestKey, manifestValue, manifestHit));
+		auto manifestLookup = cache::LookupManifestFont(manifestKey);
+		if (manifestLookup && manifestLookup->has_value())
+		{
+			manifestValue = std::move(**manifestLookup);
+			manifestHit = true;
+		}
 
 		DWRITE_FONT_SIMULATIONS const simulations =
 			replacementReference->GetSimulations();
@@ -991,25 +1000,28 @@ HRESULT CreateAliasedReference(
 			}
 			else
 			{
-				result = ReadReplacementFile(
-					replacementReference, source, faceIndex, sourceIdentity, true);
-				if (FAILED(result))
-					return result;
+				auto fullSource = ReadReplacementFile(replacementReference, true);
+				if (!fullSource)
+					return std::unexpected(fullSource.error());
+				source = std::move(fullSource->bytes);
+				faceIndex = fullSource->faceIndex;
+				sourceIdentity = std::move(fullSource->identity);
 				manifestKey = makeManifestKey();
 				std::vector<BYTE> aliased;
 				result = BuildAliasedSfnt(
 					source, faceIndex, aliasFamily, effectiveOptions, aliased, identity);
 				if (FAILED(result))
-					return result;
-				result = renderer::virtual_font_cache::PersistFont(aliased, backingPath);
-				if (FAILED(result))
-					return result;
+					return std::unexpected(result);
+				auto persisted = renderer::virtual_font_cache::PersistFont(aliased);
+				if (!persisted)
+					return std::unexpected(persisted.error());
+				backingPath = std::move(*persisted);
 				result = factory->CreateFontFileReference(
 					backingPath.c_str(), nullptr, &fontFile);
 				if (SUCCEEDED(result) && fontFile != nullptr)
 					result = analyze(fontFile);
 				if (FAILED(result) || fontFile == nullptr)
-					return FAILED(result) ? result : E_FAIL;
+					return std::unexpected(FAILED(result) ? result : E_FAIL);
 				manifestValue.virtualFontPath = backingPath;
 				manifestValue.virtualFontSize = static_cast<UINT64>(aliased.size());
 				manifestValue.family = identity.family;
@@ -1030,24 +1042,26 @@ HRESULT CreateAliasedReference(
 				continue;
 			}
 			if (FAILED(result) || created == nullptr)
-				return FAILED(result) ? result : E_FAIL;
+				return std::unexpected(FAILED(result) ? result : E_FAIL);
 			if (!fromManifest)
 			{
 				// The in-memory alias remains usable when manifest persistence fails.
 				static_cast<void>(
 					cache::StoreManifestFont(manifestKey, manifestValue));
 			}
-			reference = created;
-			return S_OK;
+			return AliasedReference{
+				.reference = created,
+				.identity = std::move(identity),
+			};
 		}
 	}
 	catch (std::bad_alloc const&)
 	{
-		return E_OUTOFMEMORY;
+		return std::unexpected(E_OUTOFMEMORY);
 	}
 	catch (...)
 	{
-		return E_FAIL;
+		return std::unexpected(E_FAIL);
 	}
 }
 

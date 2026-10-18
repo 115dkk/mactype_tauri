@@ -7,6 +7,7 @@
 #include <freetype/tttags.h>	// FT_TRUETYPE_TAGS_H
 #include <freetype/ftoutln.h>
 #include <atomic>
+#include <memory>
 #include <vector>
 #include "ftref.h"
 #include "freetype_raii.h"
@@ -147,7 +148,7 @@ public:
 };
 class FreeTypeFontCache : public FreeTypeMruCounter, public FreeTypeGCCounter
 {
-	using GlyphCache = std::map<int, FreeTypeCharData*>;
+	using GlyphCache = std::map<int, std::unique_ptr<FreeTypeCharData>>;
 
 private:
 	bool m_active;
@@ -159,32 +160,27 @@ private:
 	FreeTypeCharData*	m_glyphs[FT_MAX_CHARS];
 #else
 	GlyphCache m_GlyphCache;
-	static FreeTypeCharData** MissingGlyph()
-	{
-		static FreeTypeCharData* missingGlyph = nullptr;
-		return &missingGlyph;
-	}
 #endif
 	FreeTypeFontCache(const FreeTypeFontCache&) = delete;
 	FreeTypeFontCache& operator=(const FreeTypeFontCache&) = delete;
 	void Compact();
 
-	FreeTypeCharData** _GetChar(WCHAR wch)
+	FreeTypeCharData* _GetChar(WCHAR wch)
 	{
 #ifdef _USE_ARRAY
-		return m_chars + wch;
+		return m_chars[wch];
 #else
 		GlyphCache::iterator it=m_GlyphCache.find(wch);
-		return it == m_GlyphCache.end() ? MissingGlyph() : &(it->second);
+		return it == m_GlyphCache.end() ? nullptr : it->second.get();
 #endif
 	}
-	FreeTypeCharData** _GetGlyph(UINT glyph)
+	FreeTypeCharData* _GetGlyph(UINT glyph)
 	{
 #ifdef _USE_ARRAY
-		return m_glyphs + glyph;
+		return m_glyphs[glyph];
 #else
 		GlyphCache::iterator it=m_GlyphCache.find(-static_cast<int>(glyph));
-		return it == m_GlyphCache.end() ? MissingGlyph() : &(it->second);
+		return it == m_GlyphCache.end() ? nullptr : it->second.get();
 #endif
 	}
 
@@ -202,7 +198,7 @@ public:
 
 	FreeTypeCharData* FindChar(WCHAR wch)
 	{
-		FreeTypeCharData* p = *_GetChar(wch);
+		FreeTypeCharData* p = _GetChar(wch);
 		if(p) {
 			p->SetMruCounter(this);
 		}
@@ -211,7 +207,7 @@ public:
 
 	FreeTypeCharData* FindGlyphIndex(UINT glyph)
 	{
-		FreeTypeCharData* p = (glyph & 0xffff0000) ? nullptr : *_GetGlyph(glyph);
+		FreeTypeCharData* p = (glyph & 0xffff0000) ? nullptr : _GetGlyph(glyph);
 		if(p) {
 			p->SetMruCounter(this);
 		}

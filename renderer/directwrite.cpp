@@ -186,14 +186,6 @@ inline HRESULT IfSupport(IUnknown* pUnknown, void(*lpFunc)(Intf*)) {
 
 void Params::CreateParams(IDWriteFactory *dw_factory)
 {
-	IDWriteFactory3* dw3 = nullptr;
-	IDWriteFactory2* dw2 = nullptr;
-	IDWriteFactory1* dw1 = nullptr;
-	IDWriteRenderingParams3* r3 = nullptr;
-	IDWriteRenderingParams2* r2 = nullptr;
-	IDWriteRenderingParams1* r1 = nullptr;
-	IDWriteRenderingParams* r0 = nullptr;
-
 	CComPtr<IDWriteFactory> pDWriteFactory;
 	if (nullptr == dw_factory) {
 		ORIG_DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
@@ -202,59 +194,76 @@ void Params::CreateParams(IDWriteFactory *dw_factory)
 		dw_factory = pDWriteFactory;
 	}
 
-	HRESULT hr = dw_factory->QueryInterface(&dw3);
-	if SUCCEEDED(hr) {
-		hr = dw3->CreateCustomRenderingParams(
-			this->Gamma,
-			this->EnhancedContrast,
-			this->GrayscaleEnhancedContrast,
-			this->ClearTypeLevel,
-			this->PixelGeometry,
-			this->RenderingMode1,
-			this->GridFitMode,
-			&r3);
-		dw3->Release();
+	HRESULT hr = E_FAIL;
+	{
+		CComPtr<IDWriteRenderingParams3> r3;
+		{
+			CComPtr<IDWriteFactory3> dw3;
+			hr = dw_factory->QueryInterface(&dw3);
+			if SUCCEEDED(hr) {
+				hr = dw3->CreateCustomRenderingParams(
+					this->Gamma,
+					this->EnhancedContrast,
+					this->GrayscaleEnhancedContrast,
+					this->ClearTypeLevel,
+					this->PixelGeometry,
+					this->RenderingMode1,
+					this->GridFitMode,
+					&r3);
+			}
+		}
 		if SUCCEEDED(hr) {
-			RenderingParams = r3;
+			RenderingParams = r3.Detach();
 			return;
 		}
 	}
 
-	hr = dw_factory->QueryInterface(&dw2);
-	if SUCCEEDED(hr) {
-		hr = dw2->CreateCustomRenderingParams(
-			this->Gamma,
-			this->EnhancedContrast,
-			this->GrayscaleEnhancedContrast,
-			this->ClearTypeLevel,
-			this->PixelGeometry,
-			this->RenderingMode,
-			this->GridFitMode,
-			&r2);
-		dw2->Release();
+	{
+		CComPtr<IDWriteRenderingParams2> r2;
+		{
+			CComPtr<IDWriteFactory2> dw2;
+			hr = dw_factory->QueryInterface(&dw2);
+			if SUCCEEDED(hr) {
+				hr = dw2->CreateCustomRenderingParams(
+					this->Gamma,
+					this->EnhancedContrast,
+					this->GrayscaleEnhancedContrast,
+					this->ClearTypeLevel,
+					this->PixelGeometry,
+					this->RenderingMode,
+					this->GridFitMode,
+					&r2);
+			}
+		}
 		if SUCCEEDED(hr) {
-			RenderingParams = r2;
+			RenderingParams = r2.Detach();
 			return;
 		}
 	}
 
-	hr = dw_factory->QueryInterface(&dw1);
-	if SUCCEEDED(hr) {
-		hr = dw1->CreateCustomRenderingParams(
-			this->Gamma,
-			this->EnhancedContrast,
-			this->GrayscaleEnhancedContrast,
-			this->ClearTypeLevel,
-			this->PixelGeometry,
-			this->RenderingMode,
-			&r1);
-		dw1->Release();
+	{
+		CComPtr<IDWriteRenderingParams1> r1;
+		{
+			CComPtr<IDWriteFactory1> dw1;
+			hr = dw_factory->QueryInterface(&dw1);
+			if SUCCEEDED(hr) {
+				hr = dw1->CreateCustomRenderingParams(
+					this->Gamma,
+					this->EnhancedContrast,
+					this->GrayscaleEnhancedContrast,
+					this->ClearTypeLevel,
+					this->PixelGeometry,
+					this->RenderingMode,
+					&r1);
+			}
+		}
 		if SUCCEEDED(hr) {
-			RenderingParams = r1;
+			RenderingParams = r1.Detach();
 			return;
 		}
 	}
 
+	CComPtr<IDWriteRenderingParams> r0;
 	hr = dw_factory->CreateCustomRenderingParams(
 		this->Gamma,
 		this->EnhancedContrast,
@@ -263,7 +272,7 @@ void Params::CreateParams(IDWriteFactory *dw_factory)
 		this->RenderingMode,
 		&r0);
 	if (SUCCEEDED(hr)) {
-		RenderingParams = r0;
+		RenderingParams = r0.Detach();
 		return;
 	}
 
@@ -614,7 +623,7 @@ HRESULT WINAPI IMPL_CreateGlyphRunAnalysis(
 	HRESULT hr = E_FAIL;
 	if (FAILED(hr) && renderingMode != DWRITE_RENDERING_MODE_ALIASED) {
 		MyDebug(L"Try DW2");
-		IDWriteFactory2* f;
+		CComPtr<IDWriteFactory2> f;
 		hr = This->QueryInterface(&f);
 		if (SUCCEEDED(hr)) {
 			DWRITE_MATRIX m = {};
@@ -642,7 +651,6 @@ HRESULT WINAPI IMPL_CreateGlyphRunAnalysis(
 				baselineOriginY,
 				glyphRunAnalysis
 				);
-			f->Release();
 		}
 	}
 
@@ -788,7 +796,7 @@ HRESULT WINAPI IMPL_CreateGlyphRunAnalysis2(
 {
 	HRESULT hr = E_FAIL;
 	if (FAILED(hr) && renderingMode != DWRITE_RENDERING_MODE_ALIASED) {
-		IDWriteFactory3* f;
+		CComPtr<IDWriteFactory3> f;
 		hr = This->QueryInterface(&f);
 		if (SUCCEEDED(hr)) {
 			hr = f->CreateGlyphRunAnalysis(
@@ -802,7 +810,6 @@ HRESULT WINAPI IMPL_CreateGlyphRunAnalysis2(
 				baselineOriginY,
 				glyphRunAnalysis
 				);
-			f->Release();
 		}
 	}
 
@@ -999,11 +1006,10 @@ HRESULT WINAPI IMPL_D2D1CreateFactory(
 	HRESULT hr = ORIG_D2D1CreateFactory(factoryType, riid, pFactoryOptions, ppIFactory);
 	if (SUCCEEDED(hr)) {
 		auto pUnknown = reinterpret_cast<IUnknown*>(*ppIFactory);
-		ID2D1Factory* pD2D1Factory;
+		CComPtr<ID2D1Factory> pD2D1Factory;
 		HRESULT hr2 = pUnknown->QueryInterface(&pD2D1Factory);
 		if (SUCCEEDED(hr2)) {
 			HookFactory(pD2D1Factory);
-			pD2D1Factory->Release();
 		}
 	}
 	return hr;

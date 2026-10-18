@@ -174,7 +174,6 @@ void CompactMap(T& pp, int count, int reduce)
 	for (int i=0;i<reducecount;i++) //删除超过FREETYPE_GC_COUNTER之后的缓存
 	{
 		//it->second->Erase();
-		delete it->second;
 		pp.erase(it++);
 	}
 	return;
@@ -313,9 +312,6 @@ void FreeTypeFontCache::Erase()
 	std::for_each(m_chars,  m_chars  + FT_MAX_CHARS, DeleteCharFunc());
 	std::for_each(m_glyphs, m_glyphs + FT_MAX_CHARS, DeleteCharFunc());
 #else
-	GlyphCache::iterator it=m_GlyphCache.begin();
-	for (;it!=m_GlyphCache.end();++it)
-		delete it->second;
 	m_GlyphCache.clear();
 #endif
 }
@@ -330,7 +326,7 @@ void FreeTypeFontCache::AddCharData(WCHAR wch, UINT glyphindex, int width, int g
 	}
 
 #ifdef _USE_ARRAY
-	FreeTypeCharData** ppChar  = _GetChar(wch);
+	FreeTypeCharData** ppChar  = m_chars + wch;
 	if (*ppChar) {
 		(*ppChar)->SetGlyph(render_mode, glyph);
 		(*ppChar)->SetMruCounter(this);
@@ -340,7 +336,7 @@ void FreeTypeFontCache::AddCharData(WCHAR wch, UINT glyphindex, int width, int g
 	GlyphCache::iterator it=m_GlyphCache.find(wch);
 	if (it!=m_GlyphCache.end())	//找到了旧数据
 	{
-		FreeTypeCharData* ppChar  = it->second;
+		FreeTypeCharData* ppChar  = it->second.get();
 		if (ppChar) {
 			ppChar->SetGlyph(render_mode, glyph);
 			ppChar->SetMruCounter(this);
@@ -362,7 +358,7 @@ void FreeTypeFontCache::AddCharData(WCHAR wch, UINT glyphindex, int width, int g
 #ifdef _USE_ARRAY
 	*ppChar = charData.release();
 #else
-	m_GlyphCache[wch] = charData.release();
+	m_GlyphCache[wch] = std::move(charData);
 #endif
 
 }
@@ -379,7 +375,7 @@ void FreeTypeFontCache::AddGlyphData(UINT glyphindex, int width, int gdiWidth, F
 	}
 
 #ifdef _USE_ARRAY
-	FreeTypeCharData** ppGlyph  = _GetGlyph(glyphindex);
+	FreeTypeCharData** ppGlyph  = m_glyphs + glyphindex;
 	if (*ppGlyph) {
 		(*ppGlyph)->SetGlyph(render_mode, glyph);
 		(*ppGlyph)->SetMruCounter(this);
@@ -389,7 +385,7 @@ void FreeTypeFontCache::AddGlyphData(UINT glyphindex, int width, int gdiWidth, F
 	GlyphCache::iterator it=m_GlyphCache.find(-static_cast<int>(glyphindex));
 	if (it!=m_GlyphCache.end())	//找到了旧数据
 	{
-		FreeTypeCharData* ppChar  = it->second;
+		FreeTypeCharData* ppChar  = it->second.get();
 		if (ppChar) {
 			(ppChar)->SetGlyph(render_mode, glyph);
 			(ppChar)->SetMruCounter(this);
@@ -413,7 +409,7 @@ void FreeTypeFontCache::AddGlyphData(UINT glyphindex, int width, int gdiWidth, F
 #ifdef _USE_ARRAY
 	*ppGlyph = charData.release();
 #else
-	m_GlyphCache[-static_cast<int>(glyphindex)] = charData.release();
+	m_GlyphCache[-static_cast<int>(glyphindex)] = std::move(charData);
 #endif
 }
 
@@ -946,7 +942,8 @@ public:
 // cppcheck-suppress uninitMemberVarPrivate
 FreeTypeSysFontData::FreeTypeSysFontData(
 	renderer::freetype::RasterPolicy policy)
-	: m_streamBacking(new FreeTypeStreamBacking), m_policy(std::move(policy))
+	: m_streamBacking(std::make_unique<FreeTypeStreamBacking>()),
+	  m_policy(std::move(policy))
 {
 }
 

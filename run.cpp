@@ -13,7 +13,10 @@
 #include <ShLwApi.h>
 #include <tchar.h>
 #include "renderer/array.h"
+#include "renderer/renderer_raii.h"
 #include <strsafe.h>
+
+#include <string>
 
 // _vsnwprintf用
 #include <wchar.h>		
@@ -84,48 +87,72 @@ HINSTANCE hinstDLL;
 
 
 bool isX64PE(const TCHAR* file_path) {
-	HANDLE hFile = CreateFile(file_path, GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-	if (hFile == INVALID_HANDLE_VALUE) {
+	auto hFile = renderer_raii::AdoptHandle(CreateFile(
+		file_path, GENERIC_READ, 0, nullptr, OPEN_EXISTING,
+		FILE_ATTRIBUTE_NORMAL, nullptr));
+	if (!hFile) {
 		showmsg("Error opening file");
 		return false;
 	}
 
 	IMAGE_DOS_HEADER dosHeader;
 	DWORD bytesRead;
-	if (!ReadFile(hFile, &dosHeader, sizeof(IMAGE_DOS_HEADER), &bytesRead, nullptr)) {
+	if (!ReadFile(hFile.get(), &dosHeader, sizeof(IMAGE_DOS_HEADER), &bytesRead, nullptr)) {
 		showmsg("Error reading file");
-		CloseHandle(hFile);
 		return false;
 	}
 
 	// Check if it's a PE file
 	if (dosHeader.e_magic != IMAGE_DOS_SIGNATURE) {
 		showmsg("Not a PE file");
-		CloseHandle(hFile);
 		return false;
 	}
 
 	IMAGE_NT_HEADERS ntHeaders;
 	// Seek to the PE header offset
-	SetFilePointer(hFile, dosHeader.e_lfanew, nullptr, FILE_BEGIN);
-	if (!ReadFile(hFile, &ntHeaders, sizeof(IMAGE_NT_HEADERS), &bytesRead, nullptr)) {
+	SetFilePointer(hFile.get(), dosHeader.e_lfanew, nullptr, FILE_BEGIN);
+	if (!ReadFile(hFile.get(), &ntHeaders, sizeof(IMAGE_NT_HEADERS), &bytesRead, nullptr)) {
 		showmsg("Error reading PE header");
-		CloseHandle(hFile);
 		return false;
 	}
 
 	if (ntHeaders.FileHeader.Machine == IMAGE_FILE_MACHINE_I386) {
-		CloseHandle(hFile);
 		return false;
 	}
 	else if (ntHeaders.FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64) {
-		CloseHandle(hFile);
 		return true;
 	}
 	else {
-		CloseHandle(hFile);
 		return false;
 	}
+}
+
+static HRESULT BuildMacTypeDllPath(std::string& path) noexcept
+{
+	char modulePath[MAX_PATH] = {};
+	SetLastError(ERROR_SUCCESS);
+	DWORD const length = GetModuleFileNameA(
+		nullptr, modulePath, static_cast<DWORD>(_countof(modulePath)));
+	if (length == 0) {
+		DWORD const error = GetLastError();
+		return HRESULT_FROM_WIN32(
+			error == ERROR_SUCCESS ? ERROR_PATH_NOT_FOUND : error);
+	}
+	if (length >= static_cast<DWORD>(_countof(modulePath)))
+		return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+	if (!PathRemoveFileSpecA(modulePath))
+		return HRESULT_FROM_WIN32(ERROR_BAD_PATHNAME);
+
+	try {
+		path.assign(modulePath);
+		path.append("\\");
+		path.append(MacTypeDllA);
+	}
+	catch (...) {
+		path.clear();
+		return E_OUTOFMEMORY;
+	}
+	return S_OK;
 }
 
 
@@ -230,15 +257,16 @@ static HRESULT HookAndExecute(int show)
 	STARTUPINFO startupInfo = { 0 };
 	startupInfo.cb = sizeof(startupInfo);
 
-	// get current directory and append mactype dll 
-	char path[MAX_PATH] = { 0 };
-	if (GetModuleFileNameA(nullptr, path, _countof(path))) {
-		PathRemoveFileSpecA(path);
-		strcat(path, "\\");
+	// get current directory and append mactype dll
+	std::string path;
+	HRESULT const pathResult = BuildMacTypeDllPath(path);
+	if (FAILED(pathResult)) {
+		free(cmdline);
+		LocalFree(argv);
+		return pathResult;
 	}
-	strcat(path, MacTypeDllA);
 
-	auto ret = DetourCreateProcessWithDllEx(nullptr, cmdline, nullptr, nullptr, false, 0, nullptr, dir, &startupInfo, &processInfo, path, nullptr);
+	auto ret = DetourCreateProcessWithDllEx(nullptr, cmdline, nullptr, nullptr, false, 0, nullptr, dir, &startupInfo, &processInfo, path.c_str(), nullptr);
 
 	free(cmdline);
 	LocalFree(argv);

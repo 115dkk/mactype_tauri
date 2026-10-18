@@ -240,10 +240,10 @@ impl PreviewManager {
     }
 
     pub(super) fn attach_app(&mut self, app: AppHandle) {
-        if let Ok(mut attached) = self.app.lock() {
-            if attached.is_none() {
-                *attached = Some(app);
-            }
+        if let Ok(mut attached) = self.app.lock()
+            && attached.is_none()
+        {
+            *attached = Some(app);
         }
     }
 
@@ -252,10 +252,10 @@ impl PreviewManager {
         let diagnostics = Arc::clone(&self.diagnostics);
         Box::new(move |frame| match parse_native_preview_event(&frame) {
             Ok(state) => {
-                if let Ok(attached) = app.lock() {
-                    if let Some(app) = attached.as_ref() {
-                        let _ = app.emit("native-preview:state", state);
-                    }
+                if let Ok(attached) = app.lock()
+                    && let Some(app) = attached.as_ref()
+                {
+                    let _ = app.emit("native-preview:state", state);
                 }
             }
             Err(line) => {
@@ -419,14 +419,14 @@ impl PreviewManager {
             })
             .unwrap_or_default();
         for engine in [PreviewEngine::Mactype, PreviewEngine::Plain] {
-            if let Some(helper) = &self.slot(engine).helper {
-                if let Ok(entries) = helper.diagnostics.lock() {
-                    result.extend(
-                        entries
-                            .iter()
-                            .map(|entry| format!("[{}] {entry}", engine.as_str())),
-                    );
-                }
+            if let Some(helper) = &self.slot(engine).helper
+                && let Ok(entries) = helper.diagnostics.lock()
+            {
+                result.extend(
+                    entries
+                        .iter()
+                        .map(|entry| format!("[{}] {entry}", engine.as_str())),
+                );
             }
         }
         result

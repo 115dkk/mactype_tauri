@@ -137,12 +137,12 @@ impl<'a> RuntimeActivationTransaction<'a> {
                             .to_owned(),
                     );
                 }
-                if rollback_failures.is_empty() {
-                    if let Err(rollback_error) = self.remove_activation_journal() {
-                        rollback_failures.push(format!(
-                            "activation journal cleanup failed: {rollback_error}"
-                        ));
-                    }
+                if rollback_failures.is_empty()
+                    && let Err(rollback_error) = self.remove_activation_journal()
+                {
+                    rollback_failures.push(format!(
+                        "activation journal cleanup failed: {rollback_error}"
+                    ));
                 }
                 if rollback_failures.is_empty() {
                     return Err(error);
@@ -168,13 +168,12 @@ impl<'a> RuntimeActivationTransaction<'a> {
         let version = activation.activated.version().to_owned();
         let receipt_removed =
             self.finalize_committed_activation(activation.previous.clone(), activation.activated)?;
-        if receipt_removed {
-            if let Err(error) = self
+        if receipt_removed
+            && let Err(error) = self
                 .generation_store()
                 .retain(activation.previous.as_ref(), &version)
-            {
-                eprintln!("runtime retention deferred: {error}");
-            }
+        {
+            eprintln!("runtime retention deferred: {error}");
         }
         Ok(activation.prepared)
     }

@@ -96,10 +96,10 @@ fn launch_elevated_broker(
     };
     // The pipe servers wait on the broker's own process object, so a broker
     // that dies mid-transfer ends the wait at once.
-    if let Some(server) = profile_transfer {
-        if let Err(error) = server.send_to(broker_pid, Some(&process), PROFILE_PIPE_TIMEOUT) {
-            return Err(cleanup_failure(&error, terminate_broker_process(&process)));
-        }
+    if let Some(server) = profile_transfer
+        && let Err(error) = server.send_to(broker_pid, Some(&process), PROFILE_PIPE_TIMEOUT)
+    {
+        return Err(cleanup_failure(&error, terminate_broker_process(&process)));
     }
     let broker_result =
         match result_transfer.receive_from(broker_pid, Some(&process), BROKER_TIMEOUT) {

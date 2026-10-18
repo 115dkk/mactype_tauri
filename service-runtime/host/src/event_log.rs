@@ -424,12 +424,11 @@ impl HostEventLoggerState {
             &params,
             detail.as_deref(),
             &[],
-        ) {
-            if !self.write_error_reported {
-                let error = error.to_string().replace(['\r', '\n'], " ");
-                eprintln!("recording the service event log failed: {error}");
-                self.write_error_reported = true;
-            }
+        ) && !self.write_error_reported
+        {
+            let error = error.to_string().replace(['\r', '\n'], " ");
+            eprintln!("recording the service event log failed: {error}");
+            self.write_error_reported = true;
         }
     }
 }

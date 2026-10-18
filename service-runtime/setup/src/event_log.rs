@@ -99,13 +99,13 @@ fn write(
 }
 
 fn report_write_error(result: Result<(), String>) {
-    if let Err(error) = result {
-        if !WRITE_ERROR_REPORTED.swap(true, Ordering::AcqRel) {
-            eprintln!(
-                "recording the setup event log failed: {}",
-                error.replace(['\r', '\n'], " ")
-            );
-        }
+    if let Err(error) = result
+        && !WRITE_ERROR_REPORTED.swap(true, Ordering::AcqRel)
+    {
+        eprintln!(
+            "recording the setup event log failed: {}",
+            error.replace(['\r', '\n'], " ")
+        );
     }
 }
 

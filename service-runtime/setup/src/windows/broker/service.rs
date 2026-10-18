@@ -164,10 +164,10 @@ pub(super) fn repair(context: &BrokerContext) -> Result<String, SetupError> {
         if let Err(restoration) = runtime_recovery::recover(&context.paths, &context.manager) {
             return Err(combine_operation_and_restore_error(operation, restoration));
         }
-        if plan.0.contains(&RepairStep::StartReady) {
-            if let Err(restoration) = context.manager.start_and_wait_ready() {
-                return Err(combine_operation_and_restore_error(operation, restoration));
-            }
+        if plan.0.contains(&RepairStep::StartReady)
+            && let Err(restoration) = context.manager.start_and_wait_ready()
+        {
+            return Err(combine_operation_and_restore_error(operation, restoration));
         }
         crate::event_log::rollback_completed("service");
         return Err(operation);

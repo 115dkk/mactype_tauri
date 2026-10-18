@@ -3,7 +3,7 @@ name = "mactype-control-center"
 version = "0.1.0"
 description = "Open control center for MacType"
 authors = ["MacType contributors"]
-edition = "2021"
+edition = "2024"
 rust-version = "1.99"
 
 [lib]

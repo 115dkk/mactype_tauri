@@ -241,6 +241,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: '1.99.0'
           components: rustfmt, clippy
 
       - uses: microsoft/setup-msbuild@v3

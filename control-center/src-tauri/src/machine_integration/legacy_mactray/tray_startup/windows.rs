@@ -836,7 +836,7 @@ fn observe_startup_folder(
 }
 
 fn decode_registry_string(raw: &[u8]) -> Result<String, StructuredServiceError> {
-    if raw.is_empty() || raw.len() % 2 != 0 || raw.len() > MAX_REGISTRY_VALUE_BYTES {
+    if raw.is_empty() || !raw.len().is_multiple_of(2) || raw.len() > MAX_REGISTRY_VALUE_BYTES {
         return Err(error(
             "legacy-tray-startup-registry-string-invalid",
             "a Run string has an invalid bounded UTF-16 byte sequence",
@@ -844,7 +844,9 @@ fn decode_registry_string(raw: &[u8]) -> Result<String, StructuredServiceError> 
         ));
     }
     let mut units = raw
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
         .collect::<Vec<_>>();
     while units.last() == Some(&0) {

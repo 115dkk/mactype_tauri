@@ -85,7 +85,7 @@ fn module_paths(process: &Process) -> io::Result<Vec<String>> {
     {
         return Err(io::Error::last_os_error());
     }
-    if needed > capacity || needed as usize % size_of::<HMODULE>() != 0 {
+    if needed > capacity || !(needed as usize).is_multiple_of(size_of::<HMODULE>()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "the process module list does not fill whole module handles",

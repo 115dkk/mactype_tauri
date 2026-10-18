@@ -65,6 +65,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: control-center/pnpm-lock.yaml
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.99.0'
 
       - name: Install frontend dependencies
         working-directory: control-center

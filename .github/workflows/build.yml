@@ -166,6 +166,7 @@ jobs:
           cache-dependency-path: control-center/pnpm-lock.yaml
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: '1.99.0'
           components: rustfmt, clippy
       - uses: microsoft/setup-msbuild@v3
       - uses: actions/download-artifact@v8
@@ -309,6 +310,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: control-center/pnpm-lock.yaml
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.99.0'
       - uses: microsoft/setup-msbuild@v3
       - uses: actions/download-artifact@v8
         with:
@@ -462,6 +465,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: '1.99.0'
           components: rustfmt, clippy
       - name: Verify target-scoped Rust advisory exceptions
         shell: pwsh

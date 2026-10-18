@@ -48,6 +48,8 @@ jobs:
           }
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.99.0'
       - uses: microsoft/setup-msbuild@v3
       - name: Build fixed open core and service injectors
         shell: pwsh

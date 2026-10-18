@@ -122,4 +122,50 @@ foreach ($token in @(
     Assert-Contains $document $token "Alpha first-party lint policy is missing: $token"
 }
 
+# MSVC ignores an unknown /std value with warning D9002 and falls back to C++14,
+# so the language mode is pinned in the project files rather than inferred
+# from a successful build.
+$loaderProject = Read-RepositoryFile 'macloader.vcxproj'
+foreach ($entry in @(
+    @{ Name = 'gdipp.vcxproj'; Content = $project },
+    @{ Name = 'macloader.vcxproj'; Content = $loaderProject }
+)) {
+    $standards = @([regex]::Matches(
+        $entry.Content,
+        '<LanguageStandard>(?<value>[^<]*)</LanguageStandard>'
+    ) | ForEach-Object { $_.Groups['value'].Value })
+    $configurations = [regex]::Matches(
+        $entry.Content,
+        '<ItemDefinitionGroup Condition='
+    ).Count
+    if ($standards.Count -ne $configurations -or
+        @($standards | Where-Object { $_ -ne 'stdcpp23' }).Count -ne 0) {
+        throw "$($entry.Name) must compile every configuration with LanguageStandard stdcpp23."
+    }
+}
+
+$probeBuild = Read-RepositoryFile 'tools\service-probe\CMakeLists.txt'
+Assert-Contains $probeBuild 'set(MACTYPE_RENDERER_CXX_STANDARD /std:c++23preview)' `
+    'Renderer tests no longer compile in the renderer language mode.'
+if ($probeBuild -match 'target_compile_features\([^)]*cxx_std_\d+') {
+    throw 'Renderer tests must use MACTYPE_RENDERER_CXX_STANDARD; CMake maps cxx_std_23 to /std:c++latest.'
+}
+
+# Cppcheck (2.21, newer than the pinned 2.20) reports `if consteval` as a
+# syntax error and stops analyzing the translation unit.
+$firstPartyCpp = @(
+    Get-ChildItem -LiteralPath (Join-Path $root 'renderer') -File -Include '*.cpp', '*.h' -Recurse
+    Get-Item -LiteralPath (Join-Path $root 'run.cpp')
+    Get-ChildItem -LiteralPath (Join-Path $root 'tools\service-probe') -File -Include '*.cpp', '*.h' -Recurse |
+        Where-Object { $_.FullName -notmatch '[\\/]build[\\/]' }
+)
+foreach ($file in $firstPartyCpp) {
+    if ((Get-Content -LiteralPath $file.FullName -Raw) -match '\bif\s*!?\s*consteval\b') {
+        throw "Cppcheck cannot parse if consteval: $($file.FullName.Substring($root.Length + 1))"
+    }
+}
+
+Assert-Contains $lintPolicy 'compile as C++23 (`/std:c++23preview`' `
+    'Alpha lint policy no longer documents the renderer language mode.'
+
 Write-Host 'Alpha rendering-core lint policy passed.'

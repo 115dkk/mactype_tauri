@@ -28,13 +28,26 @@ suppression for Cppcheck 2.20's `missingReturn` template-analysis false
 positive.
 
 On `codex/alpha-plus-dll`, both renderer projects (`gdipp.vcxproj` and
-`macloader.vcxproj`) compile as C++20 (`/std:c++20`, and `/std:c17` for the C
-sources) with `/permissive-` and `/Zc:__cplusplus` in every configuration, so
-two-phase lookup and the other conformance rules apply to the rendering core as
-they do to the preview helper. `/Zc:threadSafeInit-` stays, because the
-renderer runs code under the loader lock. The Cppcheck job reads the language
-level from the project. On other branches the renderer keeps the MSVC default
-language mode.
+`macloader.vcxproj`) compile as C++23 (`/std:c++23preview`, MSBuild
+`LanguageStandard` `stdcpp23`, and `/std:c17` for the C sources) with
+`/permissive-` and `/Zc:__cplusplus` in every configuration, so two-phase
+lookup and the other conformance rules apply to the rendering core as they do
+to the preview helper. `/Zc:threadSafeInit-` stays, because the renderer runs
+code under the loader lock. MSVC 17.14 and 18 offer C++23 only as this preview
+mode; the renderer exports no C++ ABI and links the CRT statically, so the
+mode's missing ABI guarantee reaches no other module. MSVC ignores an unknown
+`/std` value with warning D9002 and compiles as C++14, so
+`scripts/ci/Test-AlphaBranchPolicy.ps1` pins `stdcpp23` in every configuration
+of both projects. The renderer tests in `tools/service-probe` compile renderer
+sources and headers in the same mode through `MACTYPE_RENDERER_CXX_STANDARD`;
+`cxx_std_23` is not used there because CMake maps it to `/std:c++latest`.
+The Cppcheck job reads the language level from the project. Cppcheck 2.21,
+newer than the pinned 2.20, still reports `if consteval` as a syntax error and
+stops analyzing that translation unit, so first-party code does not use it;
+C++23 adoption here means library features such as `std::expected` and
+`std::to_underlying`. The preview helper, the service injector and the other
+CMake trees stay on C++20. On other branches the renderer keeps the MSVC
+default language mode.
 
 `gdipp.vcxproj` carries two configurations per platform on this branch:
 `Rel+Detours`, which every package and gate uses, and `Debug`, an unoptimized

@@ -345,81 +345,62 @@ void AppendLocalizedNames(
 	}
 }
 
-void AppendInformationalNames(
-	IDWriteFont* font,
-	DWRITE_INFORMATIONAL_STRING_ID id,
-	std::vector<std::wstring>& names)
+template<typename Font>
+void ReadInformationalFamilyNames(Font* font, directwrite_alias::SourceFamilyNames& names)
 {
-	CComPtr<IDWriteLocalizedStrings> strings;
-	BOOL exists = FALSE;
-	if (SUCCEEDED(font->GetInformationalStrings(id, &strings, &exists)) &&
-		exists && strings != nullptr)
-		AppendLocalizedNames(strings, names);
+	auto const append = [&](DWRITE_INFORMATIONAL_STRING_ID id,
+		std::vector<std::wstring>& group) {
+		CComPtr<IDWriteLocalizedStrings> strings;
+		BOOL exists = FALSE;
+		if (SUCCEEDED(font->GetInformationalStrings(id, &strings, &exists)) &&
+			exists && strings != nullptr)
+			AppendLocalizedNames(strings, group);
+	};
+	append(DWRITE_INFORMATIONAL_STRING_WIN32_FAMILY_NAMES, names.win32);
+	append(DWRITE_INFORMATIONAL_STRING_WEIGHT_STRETCH_STYLE_FAMILY_NAME, names.weightStretchStyle);
+	append(DWRITE_INFORMATIONAL_STRING_TYPOGRAPHIC_FAMILY_NAMES, names.typographic);
 }
 
-// A fallback font can expose different localized, Win32, typographic, and
-// weight/stretch/style family names. Keep all of them in the policy decision.
-bool ReadMappedFontNames(IDWriteFont* font, std::vector<std::wstring>& names)
+bool ReadMappedFontNames(IDWriteFont* font, directwrite_alias::SourceFamilyNames& names)
 {
-	names.clear();
-	CComPtr<IDWriteFontFamily> family;
-	CComPtr<IDWriteLocalizedStrings> localized;
-	if (SUCCEEDED(font->GetFontFamily(&family)) && family != nullptr &&
-		SUCCEEDED(family->GetFamilyNames(&localized)) && localized != nullptr)
-		AppendLocalizedNames(localized, names);
-	AppendInformationalNames(
-		font, DWRITE_INFORMATIONAL_STRING_TYPOGRAPHIC_FAMILY_NAMES, names);
-	AppendInformationalNames(
-		font, DWRITE_INFORMATIONAL_STRING_WIN32_FAMILY_NAMES, names);
-
+	names = {};
+	ReadInformationalFamilyNames(font, names);
 	CComPtr<IDWriteFont3> font3;
 	CComPtr<IDWriteFontFace3> face3;
-	localized.Release();
 	if (SUCCEEDED(font->QueryInterface(&font3)) && font3 != nullptr &&
 		SUCCEEDED(font3->CreateFontFace(&face3)) && face3 != nullptr)
+		ReadInformationalFamilyNames(face3.p, names);
+	if (names.empty())
 	{
-		if (SUCCEEDED(face3->GetFamilyNames(&localized)) && localized != nullptr)
-			AppendLocalizedNames(localized, names);
-		for (DWRITE_INFORMATIONAL_STRING_ID const id : {
-			DWRITE_INFORMATIONAL_STRING_TYPOGRAPHIC_FAMILY_NAMES,
-			DWRITE_INFORMATIONAL_STRING_WIN32_FAMILY_NAMES})
-		{
-			localized.Release();
-			BOOL exists = FALSE;
-			if (SUCCEEDED(face3->GetInformationalStrings(
-					id, &localized, &exists)) && exists && localized != nullptr)
-				AppendLocalizedNames(localized, names);
-		}
+		CComPtr<IDWriteFontFamily> family;
+		CComPtr<IDWriteLocalizedStrings> localized;
+		if (SUCCEEDED(font->GetFontFamily(&family)) && family != nullptr &&
+			SUCCEEDED(family->GetFamilyNames(&localized)) && localized != nullptr)
+			AppendLocalizedNames(localized, names.weightStretchStyle);
 	}
 	return !names.empty();
 }
 
 bool ReadMappedFaceNames(
 	IDWriteFontFace5* face,
-	std::vector<std::wstring>& names,
+	directwrite_alias::SourceFamilyNames& names,
 	DWRITE_FONT_WEIGHT& weight,
 	DWRITE_FONT_STRETCH& stretch,
 	DWRITE_FONT_STYLE& style)
 {
-	names.clear();
+	names = {};
 	CComPtr<IDWriteFontFace3> face3;
 	if (FAILED(face->QueryInterface(&face3)) || face3 == nullptr)
 		return false;
 	weight = face3->GetWeight();
 	stretch = face3->GetStretch();
 	style = face3->GetStyle();
-	CComPtr<IDWriteLocalizedStrings> strings;
-	if (SUCCEEDED(face3->GetFamilyNames(&strings)) && strings != nullptr)
-		AppendLocalizedNames(strings, names);
-	for (DWRITE_INFORMATIONAL_STRING_ID const id : {
-		DWRITE_INFORMATIONAL_STRING_TYPOGRAPHIC_FAMILY_NAMES,
-		DWRITE_INFORMATIONAL_STRING_WIN32_FAMILY_NAMES})
+	ReadInformationalFamilyNames(face3.p, names);
+	if (names.empty())
 	{
-		strings.Release();
-		BOOL exists = FALSE;
-		if (SUCCEEDED(face3->GetInformationalStrings(id, &strings, &exists)) &&
-			exists && strings != nullptr)
-			AppendLocalizedNames(strings, names);
+		CComPtr<IDWriteLocalizedStrings> strings;
+		if (SUCCEEDED(face3->GetFamilyNames(&strings)) && strings != nullptr)
+			AppendLocalizedNames(strings, names.weightStretchStyle);
 	}
 	return !names.empty();
 }
@@ -574,7 +555,7 @@ bool TryMapAliasFont(
 	if (!ResolveAliasContext(
 			baseCollection, snapshot, aliasCollection))
 		return false;
-	std::vector<std::wstring> names;
+	directwrite_alias::SourceFamilyNames names;
 	directwrite_alias::FallbackAliasResolution resolution;
 	TextSpan span;
 	if (!ReadMappedFontNames(mappedFont, names) ||
@@ -604,7 +585,7 @@ bool TryMapAliasFace(
 	if (!ResolveAliasContext(
 			baseCollection, snapshot, aliasCollection))
 		return false;
-	std::vector<std::wstring> names;
+	directwrite_alias::SourceFamilyNames names;
 	DWRITE_FONT_WEIGHT weight = DWRITE_FONT_WEIGHT_NORMAL;
 	DWRITE_FONT_STRETCH stretch = DWRITE_FONT_STRETCH_NORMAL;
 	DWRITE_FONT_STYLE style = DWRITE_FONT_STYLE_NORMAL;

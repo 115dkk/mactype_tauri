@@ -34,8 +34,15 @@ On `codex/alpha-plus-dll`, both renderer projects (`gdipp.vcxproj` and
 `LanguageStandard` `stdcpp23`, and `/std:c17` for the C sources) with
 `/permissive-` and `/Zc:__cplusplus` in every configuration, so two-phase
 lookup and the other conformance rules apply to the rendering core as they do
-to the preview helper. `/Zc:threadSafeInit-` stays, because the renderer runs
-code under the loader lock. MSVC 17.14 and 18 offer C++23 only as this preview
+to the preview helper. Thread-safe static initialization stays on in every
+configuration: the Win32 configurations used to disable it with
+`/Zc:threadSafeInit-` (an old Windows XP accommodation; x64 never did), and a
+second thread that reached a function-local static while the first was still
+initializing it read a null pointer, which crashed x86 processes whose existing
+DirectWrite factory was hooked while the application was using it. Static
+initializers that run under the loader lock must not call loader functions, so
+a thread waiting on such an initializer never waits for the lock its
+initializer needs. MSVC 17.14 and 18 offer C++23 only as this preview
 mode; the renderer exports no C++ ABI and links the CRT statically, so the
 mode's missing ABI guarantee reaches no other module. MSVC ignores an unknown
 `/std` value with warning D9002 and compiles as C++14, so

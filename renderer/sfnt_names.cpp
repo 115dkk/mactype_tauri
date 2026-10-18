@@ -28,16 +28,16 @@ void WriteU32(std::vector<BYTE>& bytes, std::size_t offset, UINT32 value)
 	bytes[offset + 3] = static_cast<BYTE>(value);
 }
 
-UINT32 TableChecksum(BYTE const* bytes, std::size_t size) noexcept
+UINT32 TableChecksum(std::span<const BYTE> bytes) noexcept
 {
 	UINT32 checksum = 0;
-	for (std::size_t offset = 0; offset < size; offset += 4)
+	for (std::size_t offset = 0; offset < bytes.size(); offset += 4)
 	{
 		UINT32 word = 0;
 		for (std::size_t byteIndex = 0; byteIndex < 4; ++byteIndex)
 		{
 			word <<= 8;
-			if (offset + byteIndex < size)
+			if (offset + byteIndex < bytes.size())
 				word |= bytes[offset + byteIndex];
 		}
 		checksum += word;
@@ -50,13 +50,13 @@ bool IsUnicodeNameRecord(NameRecord const& record) noexcept
 	return record.platform == 0 || record.platform == 3;
 }
 
-bool DecodeName(NameRecord const& record, std::wstring& value)
+std::optional<std::wstring> DecodeName(NameRecord const& record)
 {
-	value.clear();
+	std::wstring value;
 	if (IsUnicodeNameRecord(record))
 	{
 		if ((record.value.size() & 1) != 0)
-			return false;
+			return std::nullopt;
 		value.reserve(record.value.size() / 2);
 		for (std::size_t offset = 0; offset < record.value.size(); offset += 2)
 		{
@@ -64,22 +64,24 @@ bool DecodeName(NameRecord const& record, std::wstring& value)
 				(static_cast<UINT16>(record.value[offset]) << 8) |
 				static_cast<UINT16>(record.value[offset + 1])));
 		}
-		return true;
+		return value;
 	}
 	if (record.platform != 1 || record.value.empty())
-		return false;
+		return std::nullopt;
 
 	int const required = MultiByteToWideChar(
 		CP_MACCP, 0,
 		reinterpret_cast<char const*>(record.value.data()),
 		static_cast<int>(record.value.size()), nullptr, 0);
 	if (required <= 0)
-		return false;
+		return std::nullopt;
 	value.resize(static_cast<std::size_t>(required));
-	return MultiByteToWideChar(
-		CP_MACCP, 0,
-		reinterpret_cast<char const*>(record.value.data()),
-		static_cast<int>(record.value.size()), &value[0], required) == required;
+	if (MultiByteToWideChar(
+			CP_MACCP, 0,
+			reinterpret_cast<char const*>(record.value.data()),
+			static_cast<int>(record.value.size()), value.data(), required) != required)
+		return std::nullopt;
+	return value;
 }
 
 bool ReadNameTable(
@@ -152,39 +154,39 @@ bool ReadNameTable(
 	return true;
 }
 
-bool ReadTypographicFamilyNames(
-	std::vector<BYTE> const& table,
-	std::vector<std::wstring>& families)
+std::optional<std::vector<std::wstring>> ReadTypographicFamilyNames(
+	std::vector<BYTE> const& table)
 {
-	families.clear();
 	UINT16 format = 0;
 	std::vector<NameRecord> records;
 	std::vector<LanguageTagRecord> languageTags;
 	if (!ReadNameTable(table, format, records, languageTags))
-		return false;
+		return std::nullopt;
+	std::vector<std::wstring> families;
 	for (UINT16 const wanted : std::array<UINT16, 2>{{16, 1}})
 	{
 		for (NameRecord const& record : records)
 		{
-			std::wstring family;
-			if (record.id != wanted || !DecodeName(record, family) ||
-				family.empty())
+			if (record.id != wanted)
+				continue;
+			auto family = DecodeName(record);
+			if (!family || family->empty())
 				continue;
 			bool const known = std::any_of(
 				families.begin(), families.end(),
 				[&](std::wstring const& existing) {
 					return CompareStringOrdinal(
 						existing.c_str(), static_cast<int>(existing.size()),
-						family.c_str(), static_cast<int>(family.size()),
+						family->c_str(), static_cast<int>(family->size()),
 						TRUE) == CSTR_EQUAL;
 				});
 			if (!known)
-				families.push_back(std::move(family));
+				families.push_back(std::move(*family));
 		}
 		if (!families.empty())
-			return true;
+			return families;
 	}
-	return false;
+	return std::nullopt;
 }
 
 } // namespace sfnt

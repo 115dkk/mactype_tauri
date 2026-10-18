@@ -19,6 +19,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -364,7 +365,7 @@ FT_Face ReplaceCharacterLookupFace(
 			InterlockedCompareExchange(&g_bHookEnabled, 0, 0) == FALSE)
 			return face;
 
-		renderer::unity::FaceOpenPathRedirect redirect;
+		std::optional<renderer::unity::FaceOpenPathRedirect> redirect;
 		FT_StreamRec sourceStream{};
 		FT_Library library = nullptr;
 		FaceOpenFunction openFace = nullptr;
@@ -399,9 +400,11 @@ FT_Face ReplaceCharacterLookupFace(
 				return face;
 			std::wstring nativeFamily;
 			ReadUnityFaceFamilyName(face, nativeFamily);
-			if (nativeFamily.empty() ||
-				!renderer::unity::ResolveFamilyFaceOpenPath(
-					*redirects, nativeFamily.c_str(), redirect))
+			if (nativeFamily.empty())
+				return face;
+			redirect = renderer::unity::ResolveFamilyFaceOpenPath(
+				*redirects, nativeFamily.c_str());
+			if (!redirect)
 				return face;
 
 			if (auto* const evidence = UnityEvidence())
@@ -418,7 +421,7 @@ FT_Face ReplaceCharacterLookupFace(
 		FT_Open_Args arguments{};
 		arguments.flags = FT_OPEN_PATHNAME;
 		arguments.pathname = const_cast<FT_String*>(
-			redirect.replacementUtf8.c_str());
+			redirect->replacementUtf8.c_str());
 		FT_Face replacement = nullptr;
 		FT_Error result = 0;
 		{
@@ -427,7 +430,7 @@ FT_Face ReplaceCharacterLookupFace(
 			// failures, so holding the registry mutex here would deadlock this thread.
 			result = openFace(
 				library, &arguments,
-				static_cast<FT_Long>(redirect.replacementFaceIndex),
+				static_cast<FT_Long>(redirect->replacementFaceIndex),
 				&replacement, 0);
 		}
 		if (result != 0 || replacement == nullptr)
@@ -439,7 +442,7 @@ FT_Face ReplaceCharacterLookupFace(
 			}
 			if (auto* const evidence = UnityEvidence())
 				renderer::unity::RecordUnityFontFaceReplacement(
-					*evidence, false, redirect.replacementPath.c_str());
+					*evidence, false, redirect->replacementPath.c_str());
 			return face;
 		}
 
@@ -472,7 +475,7 @@ FT_Face ReplaceCharacterLookupFace(
 			{
 				if (auto* const evidence = UnityEvidence())
 					renderer::unity::RecordUnityFontFaceReplacement(
-						*evidence, false, redirect.replacementPath.c_str());
+						*evidence, false, redirect->replacementPath.c_str());
 			}
 			return face;
 		}
@@ -495,7 +498,7 @@ FT_Face ReplaceCharacterLookupFace(
 		if (auto* const evidence = UnityEvidence())
 		{
 			renderer::unity::RecordUnityFontFaceReplacement(
-				*evidence, true, redirect.replacementPath.c_str());
+				*evidence, true, redirect->replacementPath.c_str());
 			if (replacementHasGlyph)
 				renderer::unity::RecordUnityFontFaceReplacementHit(
 					*evidence);
@@ -613,36 +616,36 @@ FT_Error __fastcall HookFaceOpen(
 	try
 	{
 		auto const redirects = ProcessUnityLifecycle().redirects.load(std::memory_order_acquire);
-		renderer::unity::FaceOpenPathRedirect redirect;
+		std::optional<renderer::unity::FaceOpenPathRedirect> redirect;
 		if (!g_skipUnityFaceOpenRedirect &&
 			renderer::unity::CurrentFontRefAllowsFaceRedirect() &&
 			arguments != nullptr && redirects &&
 			InterlockedCompareExchange(&g_bHookEnabled, 0, 0) != FALSE &&
 			ProcessUnityLifecycle().operational.load(
 				std::memory_order_acquire) &&
-			renderer::unity::ResolveFaceOpenPath(
+			(redirect = renderer::unity::ResolveFaceOpenPath(
 				*redirects, arguments->flags, arguments->pathname,
-				faceIndex, redirect))
+				faceIndex)))
 		{
 			FT_Open_Args redirectedArguments = *arguments;
 			redirectedArguments.pathname = const_cast<FT_String*>(
-				redirect.replacementUtf8.c_str());
+				redirect->replacementUtf8.c_str());
 			renderer::unity::UnityFontEvidenceV1* const evidence =
 				UnityEvidence();
 			if (evidence != nullptr)
 				renderer::unity::RecordUnityFontFileOpen(
-					*evidence, redirect.sourcePath.c_str());
+					*evidence, redirect->sourcePath.c_str());
 			FT_Error const redirectedResult = original(
 				library, &redirectedArguments,
-				static_cast<FT_Long>(redirect.replacementFaceIndex),
+				static_cast<FT_Long>(redirect->replacementFaceIndex),
 				face, testMacFonts);
 			bool const redirected = redirectedResult == 0 &&
 				face != nullptr && *face != nullptr;
 			if (evidence != nullptr)
 			{
 				renderer::unity::RecordUnityFontRedirect(
-					*evidence, redirect.sourcePath.c_str(),
-					redirect.replacementPath.c_str(), redirected);
+					*evidence, redirect->sourcePath.c_str(),
+					redirect->replacementPath.c_str(), redirected);
 				if (redirected)
 				{
 					FT_Face const redirectedFace = *face;
@@ -676,27 +679,27 @@ int HookTextCoreFontLoad(
 	try
 	{
 		auto const redirects = ProcessUnityLifecycle().redirects.load(std::memory_order_acquire);
-		renderer::unity::FaceOpenPathRedirect redirect;
+		std::optional<renderer::unity::FaceOpenPathRedirect> redirect;
 		if (redirects &&
 			InterlockedCompareExchange(&g_bHookEnabled, 0, 0) != FALSE &&
 			ProcessUnityLifecycle().operational.load(
 				std::memory_order_acquire) &&
-			renderer::unity::ResolveTextCoreFontLoadPath(
-				*redirects, requestedPath, faceIndex, redirect))
+			(redirect = renderer::unity::ResolveTextCoreFontLoadPath(
+				*redirects, requestedPath, faceIndex)))
 		{
 			renderer::unity::UnityFontEvidenceV1* const evidence =
 				UnityEvidence();
 			if (evidence != nullptr)
 				renderer::unity::RecordUnityFontFileOpen(
-					*evidence, redirect.sourcePath.c_str());
+					*evidence, redirect->sourcePath.c_str());
 			int const redirectedResult = original(
-				redirect.replacementUtf8.c_str(), pointSize,
-				static_cast<int>(redirect.replacementFaceIndex));
+				redirect->replacementUtf8.c_str(), pointSize,
+				static_cast<int>(redirect->replacementFaceIndex));
 			bool const redirected = redirectedResult == 0;
 			if (evidence != nullptr)
 				renderer::unity::RecordUnityFontRedirect(
-					*evidence, redirect.sourcePath.c_str(),
-					redirect.replacementPath.c_str(), redirected);
+					*evidence, redirect->sourcePath.c_str(),
+					redirect->replacementPath.c_str(), redirected);
 			if (redirected)
 				return redirectedResult;
 		}
@@ -721,16 +724,13 @@ FT_Face HookLegacyCharacterLookup(
 		return nullptr;
 	FT_Face face = original(
 		dynamicFontData, fontRef, fallbackFonts, character);
-	std::wstring requestedFamily;
-	renderer::unity::ReadLegacyFontRefFamily(fontRef, requestedFamily);
+	auto requestedFamily = renderer::unity::ReadLegacyFontRefFamily(fontRef);
 	auto const redirects = ProcessUnityLifecycle().redirects.load(std::memory_order_acquire);
-	std::wstring replacementPath;
-	long replacementFaceIndex = 0;
-	bool const mappedFamily = redirects && !requestedFamily.empty() &&
-		redirects->ResolveFamilyFace(
-			requestedFamily.c_str(), replacementPath,
-			replacementFaceIndex);
-	renderer::unity::FontRefSelection const selection = requestedFamily.empty()
+	std::optional<renderer::unity::FacePathResolution> familyRedirect;
+	if (redirects && requestedFamily)
+		familyRedirect = redirects->ResolveFamilyFace(requestedFamily->c_str());
+	bool const mappedFamily = familyRedirect.has_value();
+	renderer::unity::FontRefSelection const selection = !requestedFamily
 		? renderer::unity::FontRefSelection::undecoded
 		: (mappedFamily
 			? renderer::unity::FontRefSelection::mappedFamily
@@ -756,7 +756,7 @@ FT_Face HookLegacyCharacterLookup(
 			*evidence, face != nullptr, glyphIndex, sampleKoreanGlyph);
 		renderer::unity::RecordUnityFontCharacterLookup(
 			*evidence,
-			requestedFamily.empty() ? nullptr : requestedFamily.c_str(),
+			requestedFamily ? requestedFamily->c_str() : nullptr,
 			mappedFamily, character, face != nullptr,
 			glyphIndex, sampleKoreanGlyph,
 			resolvedFaceFamily.empty()
@@ -775,19 +775,17 @@ FT_Face HookLegacyOsFaceResolver(
 		ProcessUnityLifecycle().osFaceResolver;
 	if (original == nullptr)
 		return nullptr;
-	std::wstring requestedFamily;
-	renderer::unity::ReadLegacyFontRefFamily(fontRef, requestedFamily);
-	bool mappedFamily = false;
-	if (!requestedFamily.empty())
+	auto requestedFamily = renderer::unity::ReadLegacyFontRefFamily(fontRef);
+	std::optional<renderer::unity::FacePathResolution> familyRedirect;
+	if (requestedFamily)
 	{
-		auto const redirects = ProcessUnityLifecycle().redirects.load(std::memory_order_acquire);
-		std::wstring replacementPath;
-		long replacementFaceIndex = 0;
-		mappedFamily = redirects && redirects->ResolveFamilyFace(
-			requestedFamily.c_str(), replacementPath,
-			replacementFaceIndex);
+		auto const redirects = ProcessUnityLifecycle().redirects.load(
+			std::memory_order_acquire);
+		if (redirects)
+			familyRedirect = redirects->ResolveFamilyFace(requestedFamily->c_str());
 	}
-	renderer::unity::FontRefSelection const selection = requestedFamily.empty()
+	bool const mappedFamily = familyRedirect.has_value();
+	renderer::unity::FontRefSelection const selection = !requestedFamily
 		? renderer::unity::FontRefSelection::undecoded
 		: (mappedFamily
 			? renderer::unity::FontRefSelection::mappedFamily
@@ -804,7 +802,7 @@ FT_Face HookLegacyOsFaceResolver(
 			: 0;
 		renderer::unity::RecordUnityFontOsFaceResolution(
 			*evidence,
-			requestedFamily.empty() ? nullptr : requestedFamily.c_str(),
+			requestedFamily ? requestedFamily->c_str() : nullptr,
 			mappedFamily,
 			face != nullptr,
 			sampleKoreanGlyph,
@@ -1239,12 +1237,13 @@ bool InitializeUnityFontHook()
 			ERROR_BAD_EXE_FORMAT, 0, true);
 		return false;
 	}
-	std::size_t descriptorCount = 0;
-	const renderer::unity::AdapterDescriptor* const descriptors =
-		renderer::unity::ProductionAdapterDescriptors(&descriptorCount);
-	renderer::unity::ResolvedAdapter adapter{};
-	if (!renderer::unity::ResolveAdapter(
-			module.get(), mappedSize, descriptors, descriptorCount, &adapter))
+	auto const descriptors =
+		renderer::unity::ProductionAdapterDescriptors();
+	auto adapter = renderer::unity::ResolveAdapter(
+		std::span<const unsigned char>(
+			reinterpret_cast<const unsigned char*>(module.get()), mappedSize),
+		descriptors);
+	if (!adapter)
 	{
 		PublishUnityCapability(
 			false, renderer::CapabilityReason::interfaceUnsupported,
@@ -1258,13 +1257,13 @@ bool InitializeUnityFontHook()
 		policy->font_substitutions() &&
 		!policy->font_substitutions()->rules().empty())
 	{
-		std::vector<renderer::unity::InstalledFontFace> installedFonts;
-		if (renderer::unity::EnumerateInstalledFontFaces(installedFonts))
+		auto installedFonts = renderer::unity::EnumerateInstalledFontFaces();
+		if (installedFonts)
 			redirects = renderer::unity::FontFileRedirectTable::Build(
-				installedFonts, *policy->font_substitutions());
+				*installedFonts, *policy->font_substitutions());
 	}
 	if (redirects && !redirects->empty() &&
-		renderer::unity::SelectFontSubstitutionBoundary(adapter) ==
+		renderer::unity::SelectFontSubstitutionBoundary(*adapter) ==
 			renderer::unity::FontSubstitutionBoundary::unavailable)
 	{
 		PublishUnityCapability(
@@ -1276,7 +1275,7 @@ bool InitializeUnityFontHook()
 	if (ProcessUnityLifecycle().stopping.load(std::memory_order_acquire))
 		return false;
 	return AttachUnityRenderer(
-		ProcessUnityLifecycle(), std::move(module), adapter,
+		ProcessUnityLifecycle(), std::move(module), *adapter,
 		std::move(redirects));
 }
 

@@ -2,7 +2,8 @@
 
 #include "unity_font_hook_core.h"
 
-#include <cstddef>
+#include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -14,17 +15,13 @@ struct SfntFamilyFace final
 	long faceIndex = 0;
 };
 
-bool EnumerateInstalledFontFaces(
-	std::vector<InstalledFontFace>& fonts) noexcept;
+[[nodiscard]] std::optional<std::vector<InstalledFontFace>>
+EnumerateInstalledFontFaces() noexcept;
 
-bool ParseSfntFamilyNames(
-	const unsigned char* bytes,
-	std::size_t size,
-	std::vector<std::wstring>& familyNames) noexcept;
+[[nodiscard]] std::optional<std::vector<std::wstring>> ParseSfntFamilyNames(
+	std::span<const unsigned char> bytes) noexcept;
 
-bool ParseSfntFamilyFaces(
-	const unsigned char* bytes,
-	std::size_t size,
-	std::vector<SfntFamilyFace>& familyFaces) noexcept;
+[[nodiscard]] std::optional<std::vector<SfntFamilyFace>> ParseSfntFamilyFaces(
+	std::span<const unsigned char> bytes) noexcept;
 
 }} // namespace renderer::unity

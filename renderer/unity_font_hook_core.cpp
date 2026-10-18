@@ -12,6 +12,7 @@
 #include <iterator>
 #include <limits>
 #include <set>
+#include <string_view>
 
 namespace renderer { namespace unity {
 namespace {
@@ -21,60 +22,36 @@ constexpr unsigned char kPixelModeLcd = 5;
 constexpr unsigned char kPixelModeLcdVertical = 6;
 constexpr std::uint64_t kMaximumBitmapBytes = 64ULL * 1024ULL * 1024ULL;
 
-bool ReadBigEndian16(
-	const unsigned char* bytes,
-	std::size_t size,
-	std::size_t offset,
-	std::uint16_t& value) noexcept
+std::optional<std::uint16_t> ReadBigEndian16(
+	std::span<const unsigned char> bytes,
+	std::size_t offset) noexcept
 {
-	if (bytes == nullptr)
-		return false;
-	auto const read = big_endian::Read16(
-		std::span<const unsigned char>(bytes, size), offset);
-	if (!read)
-		return false;
-	value = *read;
-	return true;
+	return big_endian::Read16(bytes, offset);
 }
 
-bool ReadBigEndian32(
-	const unsigned char* bytes,
-	std::size_t size,
-	std::size_t offset,
-	std::uint32_t& value) noexcept
+std::optional<std::uint32_t> ReadBigEndian32(
+	std::span<const unsigned char> bytes,
+	std::size_t offset) noexcept
 {
-	if (bytes == nullptr)
-		return false;
-	auto const read = big_endian::Read32(
-		std::span<const unsigned char>(bytes, size), offset);
-	if (!read)
-		return false;
-	value = *read;
-	return true;
+	return big_endian::Read32(bytes, offset);
 }
 
-bool ReadSfntTag(
-	const unsigned char* bytes,
-	std::size_t size,
-	std::size_t offset,
-	std::uint32_t& value) noexcept
+std::optional<std::uint32_t> ReadSfntTag(
+	std::span<const unsigned char> bytes,
+	std::size_t offset) noexcept
 {
-	if (bytes == nullptr)
-		return false;
-	auto const read = big_endian::Read32(
-		std::span<const unsigned char>(bytes, size), offset);
+	auto const read = big_endian::Read32(bytes, offset);
 	if (!read)
-		return false;
-	value = ((*read & 0x000000ffU) << 24) |
+		return std::nullopt;
+	return ((*read & 0x000000ffU) << 24) |
 		((*read & 0x0000ff00U) << 8) |
 		((*read & 0x00ff0000U) >> 8) |
 		((*read & 0xff000000U) >> 24);
-	return true;
 }
 
 bool EqualOrdinalIgnoreCase(
-	const std::wstring& left,
-	const std::wstring& right) noexcept
+	std::wstring_view left,
+	std::wstring_view right) noexcept
 {
 	if (left.size() != right.size() ||
 		left.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)()))
@@ -84,14 +61,11 @@ bool EqualOrdinalIgnoreCase(
 		right.data(), static_cast<int>(right.size()), TRUE) == CSTR_EQUAL;
 }
 
-bool NormalizeAbsolutePath(
-	const wchar_t* value,
-	std::wstring& normalized)
+std::optional<std::wstring> NormalizeAbsolutePath(const wchar_t* value)
 {
-	normalized.clear();
 	if (value == nullptr || *value == L'\0')
-		return false;
-	normalized.assign(value);
+		return std::nullopt;
+	std::wstring normalized(value);
 	std::replace(normalized.begin(), normalized.end(), L'/', L'\\');
 	if (normalized.compare(0, 4, L"\\\\?\\") == 0)
 	{
@@ -107,66 +81,70 @@ bool NormalizeAbsolutePath(
 	bool const uncAbsolute = normalized.size() >= 3 &&
 		normalized[0] == L'\\' && normalized[1] == L'\\' &&
 		normalized[2] != L'\\';
-	return driveAbsolute || uncAbsolute;
+	if (!driveAbsolute && !uncAbsolute)
+		return std::nullopt;
+	return normalized;
 }
 
-bool Utf8PathToWide(const char* value, std::wstring& converted)
+std::optional<std::wstring> Utf8PathToWide(const char* value)
 {
-	converted.clear();
 	if (value == nullptr)
-		return false;
+		return std::nullopt;
 	constexpr std::size_t kMaximumPathBytes = 32768;
 	std::size_t const length = strnlen_s(value, kMaximumPathBytes);
 	if (length == 0 || length == kMaximumPathBytes ||
 		length > static_cast<std::size_t>((std::numeric_limits<int>::max)()))
-		return false;
+		return std::nullopt;
 	int const required = MultiByteToWideChar(
 		CP_UTF8, MB_ERR_INVALID_CHARS, value, static_cast<int>(length),
 		nullptr, 0);
 	if (required <= 0)
-		return false;
-	converted.resize(static_cast<std::size_t>(required));
-	return MultiByteToWideChar(
-		CP_UTF8, MB_ERR_INVALID_CHARS, value, static_cast<int>(length),
-		&converted[0], required) == required;
+		return std::nullopt;
+	std::wstring converted(static_cast<std::size_t>(required), L'\0');
+	if (MultiByteToWideChar(
+			CP_UTF8, MB_ERR_INVALID_CHARS, value, static_cast<int>(length),
+			converted.data(), required) != required)
+		return std::nullopt;
+	return converted;
 }
 
-bool WidePathToUtf8(const std::wstring& value, std::string& converted)
+std::optional<std::string> WidePathToUtf8(std::wstring_view value)
 {
-	converted.clear();
 	if (value.empty() ||
 		value.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)()))
-		return false;
+		return std::nullopt;
 	int const required = WideCharToMultiByte(
 		CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
 		static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
 	if (required <= 0)
-		return false;
-	converted.resize(static_cast<std::size_t>(required));
-	return WideCharToMultiByte(
-		CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
-		static_cast<int>(value.size()), &converted[0], required,
-		nullptr, nullptr) == required;
+		return std::nullopt;
+	std::string converted(static_cast<std::size_t>(required), '\0');
+	if (WideCharToMultiByte(
+			CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
+			static_cast<int>(value.size()), converted.data(), required,
+			nullptr, nullptr) != required)
+		return std::nullopt;
+	return converted;
 }
 
 std::vector<InstalledFontFace> PathsForFamily(
 	const std::vector<InstalledFontFace>& installedFonts,
-	const std::wstring& family)
+	std::wstring_view family)
 {
 	std::vector<InstalledFontFace> paths;
 	for (const InstalledFontFace& font : installedFonts)
 	{
 		if (!EqualOrdinalIgnoreCase(font.family, family))
 			continue;
-		std::wstring normalized;
-		if (!NormalizeAbsolutePath(font.filePath.c_str(), normalized))
+		auto normalized = NormalizeAbsolutePath(font.filePath.c_str());
+		if (!normalized)
 			continue;
 		if (std::none_of(paths.begin(), paths.end(), [&](const InstalledFontFace& path) {
 				return path.faceIndex == font.faceIndex &&
-					EqualOrdinalIgnoreCase(path.filePath, normalized);
+					EqualOrdinalIgnoreCase(path.filePath, *normalized);
 			}))
 			paths.push_back({
-				font.family, std::move(normalized), font.faceIndex,
+				font.family, std::move(*normalized), font.faceIndex,
 				font.axisValues});
 	}
 	return paths;
@@ -181,9 +159,9 @@ std::vector<std::wstring> FamiliesForFace(
 	{
 		if (font.faceIndex != requestedFace.faceIndex)
 			continue;
-		std::wstring normalized;
-		if (!NormalizeAbsolutePath(font.filePath.c_str(), normalized) ||
-			!EqualOrdinalIgnoreCase(normalized, requestedFace.filePath))
+		auto normalized = NormalizeAbsolutePath(font.filePath.c_str());
+		if (!normalized ||
+			!EqualOrdinalIgnoreCase(*normalized, requestedFace.filePath))
 			continue;
 		if (std::none_of(
 			families.begin(), families.end(), [&](const std::wstring& existing) {
@@ -367,12 +345,12 @@ constexpr AdapterDescriptor kProductionDescriptors[] = {
 	 FaceDoneAbi::standard},
 };
 
-bool CheckedAdd(std::size_t left, std::size_t right, std::size_t* result) noexcept
+std::optional<std::size_t> CheckedAdd(
+	std::size_t left, std::size_t right) noexcept
 {
-	if (result == nullptr || right > std::numeric_limits<std::size_t>::max() - left)
-		return false;
-	*result = left + right;
-	return true;
+	if (right > std::numeric_limits<std::size_t>::max() - left)
+		return std::nullopt;
+	return left + right;
 }
 
 bool IsReadableProtection(DWORD protection) noexcept
@@ -465,35 +443,31 @@ struct NamedInstanceFileCacheEntry final
 	std::vector<NamedInstanceFaceIndexCacheEntry> resolvedIndices;
 };
 
-bool ReadFontFileBytes(
-	const std::wstring& path,
-	std::vector<unsigned char>& bytes)
+std::optional<std::vector<unsigned char>> ReadFontFileBytes(
+	const std::wstring& path)
 {
-	bytes.clear();
 	renderer_raii::UniqueHandle file(CreateFileW(
 		path.c_str(), GENERIC_READ,
 		FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
 		nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
 	if (!file)
-		return false;
+		return std::nullopt;
 	LARGE_INTEGER fileSize{};
 	constexpr LONGLONG kMaximumVariableFontBytes = 64LL * 1024LL * 1024LL;
 	if (!GetFileSizeEx(file.get(), &fileSize) || fileSize.QuadPart <= 0 ||
 		fileSize.QuadPart > kMaximumVariableFontBytes ||
 		static_cast<ULONGLONG>(fileSize.QuadPart) >
 			(std::numeric_limits<std::size_t>::max)())
-		return false;
-	bytes.resize(static_cast<std::size_t>(fileSize.QuadPart));
+		return std::nullopt;
+	std::vector<unsigned char> bytes(
+		static_cast<std::size_t>(fileSize.QuadPart));
 	DWORD bytesRead = 0;
 	if (!ReadFile(
 		file.get(), bytes.data(), static_cast<DWORD>(bytes.size()),
 		&bytesRead, nullptr) ||
 		bytesRead != static_cast<DWORD>(bytes.size()))
-	{
-		bytes.clear();
-		return false;
-	}
-	return true;
+		return std::nullopt;
+	return bytes;
 }
 
 bool EqualAxisValues(
@@ -531,7 +505,10 @@ long ResolveReplacementFaceIndex(
 	{
 		cache.push_back({replacement.filePath});
 		file = std::prev(cache.end());
-		file->bytesAvailable = ReadFontFileBytes(file->path, file->bytes);
+		auto bytes = ReadFontFileBytes(file->path);
+		file->bytesAvailable = bytes.has_value();
+		if (bytes)
+			file->bytes = std::move(*bytes);
 	}
 	auto const cached = std::find_if(
 		file->resolvedIndices.begin(), file->resolvedIndices.end(),
@@ -543,16 +520,15 @@ long ResolveReplacementFaceIndex(
 		return cached->resolvedFaceIndex;
 
 	long resolvedFaceIndex = replacement.faceIndex;
-	long namedInstance = 0;
-	if (file->bytesAvailable &&
-		ParseSfntNamedInstanceIndex(
-			file->bytes.data(), file->bytes.size(), replacement.faceIndex,
-			sortedAxisValues.data(), sortedAxisValues.size(), namedInstance) &&
-		namedInstance != 0)
+	std::optional<long> namedInstance;
+	if (file->bytesAvailable)
+		namedInstance = ParseSfntNamedInstanceIndex(
+			file->bytes, replacement.faceIndex, sortedAxisValues);
+	if (namedInstance && *namedInstance != 0)
 	{
 		unsigned long const encoded =
 			static_cast<unsigned long>(replacement.faceIndex) |
-			(static_cast<unsigned long>(namedInstance) << 16);
+			(static_cast<unsigned long>(*namedInstance) << 16);
 		if (encoded <=
 			static_cast<unsigned long>((std::numeric_limits<long>::max)()))
 			resolvedFaceIndex = static_cast<long>(encoded);
@@ -562,11 +538,17 @@ long ResolveReplacementFaceIndex(
 	return resolvedFaceIndex;
 }
 
+struct CodeViewIdentity final
+{
+	std::array<unsigned char, 16> guid{};
+	DWORD age = 0;
+};
+
 class MappedImageView final
 {
 public:
-	MappedImageView(const void* bytes, std::size_t size) noexcept
-		: bytes_(static_cast<const unsigned char*>(bytes)), size_(size)
+	explicit MappedImageView(std::span<const unsigned char> bytes) noexcept
+		: bytes_(bytes.data()), size_(bytes.size())
 	{
 		valid_ = Initialize();
 	}
@@ -602,14 +584,11 @@ public:
 		return false;
 	}
 
-	bool ReadCodeView(
-		std::array<unsigned char, 16>* guid,
-		DWORD* age) const noexcept
+	std::optional<CodeViewIdentity> ReadCodeView() const noexcept
 	{
-		if (!valid_ || guid == nullptr || age == nullptr ||
-			debugDirectory_.VirtualAddress == 0 ||
+		if (!valid_ || debugDirectory_.VirtualAddress == 0 ||
 			debugDirectory_.Size < sizeof(IMAGE_DEBUG_DIRECTORY))
-			return false;
+			return std::nullopt;
 		std::size_t const count =
 			debugDirectory_.Size / sizeof(IMAGE_DEBUG_DIRECTORY);
 		for (std::size_t index = 0; index < count; ++index)
@@ -619,7 +598,7 @@ public:
 				debugDirectory_.VirtualAddress +
 					static_cast<DWORD>(index * sizeof(entry)),
 				&entry, sizeof(entry)))
-				return false;
+				return std::nullopt;
 			if (entry.Type != IMAGE_DEBUG_TYPE_CODEVIEW ||
 				entry.SizeOfData < 24 || entry.AddressOfRawData == 0)
 				continue;
@@ -627,11 +606,16 @@ public:
 			if (!CopyRva(entry.AddressOfRawData, codeView.data(), codeView.size()) ||
 				std::memcmp(codeView.data(), "RSDS", 4) != 0)
 				continue;
-			std::copy_n(codeView.data() + 4, guid->size(), guid->begin());
-			std::memcpy(age, codeView.data() + 20, sizeof(*age));
-			return true;
+			std::array<unsigned char, 16> guid{};
+			std::copy_n(codeView.data() + 4, guid.size(), guid.begin());
+			DWORD age = 0;
+			std::memcpy(&age, codeView.data() + 20, sizeof(age));
+			return CodeViewIdentity{
+				.guid = guid,
+				.age = age,
+			};
 		}
-		return false;
+		return std::nullopt;
 	}
 
 private:
@@ -651,20 +635,18 @@ private:
 	}
 
 	template <typename OptionalHeader>
-	bool ReadOptionalHeader(
-		std::size_t optionalOffset, WORD sizeOfOptionalHeader,
-		DWORD* sizeOfHeaders) noexcept
+	std::optional<DWORD> ReadOptionalHeader(
+		std::size_t optionalOffset, WORD sizeOfOptionalHeader) noexcept
 	{
 		if (sizeOfOptionalHeader < sizeof(OptionalHeader))
-			return false;
+			return std::nullopt;
 		OptionalHeader optional{};
 		if (!Read(optionalOffset, &optional, sizeof(optional)) ||
 			optional.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_DEBUG)
-			return false;
+			return std::nullopt;
 		imageSize_ = optional.SizeOfImage;
-		*sizeOfHeaders = optional.SizeOfHeaders;
 		debugDirectory_ = optional.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
-		return true;
+		return optional.SizeOfHeaders;
 	}
 
 	bool Initialize() noexcept
@@ -678,45 +660,44 @@ private:
 		if (!Read(ntOffset, &signature, sizeof(signature)) ||
 			signature != IMAGE_NT_SIGNATURE)
 			return false;
-		std::size_t fileHeaderOffset = 0;
-		if (!CheckedAdd(ntOffset, sizeof(signature), &fileHeaderOffset))
+		auto const fileHeaderOffset = CheckedAdd(ntOffset, sizeof(signature));
+		if (!fileHeaderOffset)
 			return false;
 		IMAGE_FILE_HEADER file{};
-		if (!Read(fileHeaderOffset, &file, sizeof(file)) ||
+		if (!Read(*fileHeaderOffset, &file, sizeof(file)) ||
 			file.NumberOfSections == 0 ||
 			(file.Characteristics & IMAGE_FILE_EXECUTABLE_IMAGE) == 0)
 			return false;
 		machine_ = file.Machine;
 		timestamp_ = file.TimeDateStamp;
-		std::size_t optionalOffset = 0;
-		if (!CheckedAdd(fileHeaderOffset, sizeof(file), &optionalOffset))
+		auto const optionalOffset = CheckedAdd(*fileHeaderOffset, sizeof(file));
+		if (!optionalOffset)
 			return false;
 		WORD magic = 0;
-		if (!Read(optionalOffset, &magic, sizeof(magic)))
+		if (!Read(*optionalOffset, &magic, sizeof(magic)))
 			return false;
-		DWORD sizeOfHeaders = 0;
-		bool optionalHeaderRead = false;
+		std::optional<DWORD> sizeOfHeaders;
 		if (magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
-			optionalHeaderRead = ReadOptionalHeader<IMAGE_OPTIONAL_HEADER32>(
-				optionalOffset, file.SizeOfOptionalHeader, &sizeOfHeaders);
+			sizeOfHeaders = ReadOptionalHeader<IMAGE_OPTIONAL_HEADER32>(
+				*optionalOffset, file.SizeOfOptionalHeader);
 		else if (magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
-			optionalHeaderRead = ReadOptionalHeader<IMAGE_OPTIONAL_HEADER64>(
-				optionalOffset, file.SizeOfOptionalHeader, &sizeOfHeaders);
-		if (!optionalHeaderRead)
+			sizeOfHeaders = ReadOptionalHeader<IMAGE_OPTIONAL_HEADER64>(
+				*optionalOffset, file.SizeOfOptionalHeader);
+		if (!sizeOfHeaders)
 			return false;
-		if (imageSize_ == 0 || imageSize_ > size_ || sizeOfHeaders == 0 ||
-			sizeOfHeaders > imageSize_)
+		if (imageSize_ == 0 || imageSize_ > size_ || *sizeOfHeaders == 0 ||
+			*sizeOfHeaders > imageSize_)
 			return false;
 		if (debugDirectory_.VirtualAddress == 0 || debugDirectory_.Size == 0 ||
 			debugDirectory_.VirtualAddress >= imageSize_ ||
 			debugDirectory_.Size > imageSize_ - debugDirectory_.VirtualAddress)
 			return false;
-		sectionTableOffset_ = optionalOffset + file.SizeOfOptionalHeader;
+		sectionTableOffset_ = *optionalOffset + file.SizeOfOptionalHeader;
 		sectionCount_ = file.NumberOfSections;
 		std::size_t const sectionBytes =
 			static_cast<std::size_t>(sectionCount_) * sizeof(IMAGE_SECTION_HEADER);
-		if (sectionTableOffset_ > sizeOfHeaders ||
-			sectionBytes > sizeOfHeaders - sectionTableOffset_ ||
+		if (sectionTableOffset_ > *sizeOfHeaders ||
+			sectionBytes > *sizeOfHeaders - sectionTableOffset_ ||
 			sectionTableOffset_ > size_ || sectionBytes > size_ - sectionTableOffset_)
 			return false;
 		return true;
@@ -837,120 +818,106 @@ bool FaceReplacementRegistry::IsReplacement(const void* face) const noexcept
 	return replacementFaces_.find(face) != replacementFaces_.end();
 }
 
-bool ParseSfntNamedInstanceIndex(
-	const unsigned char* bytes,
-	std::size_t size,
+std::optional<long> ParseSfntNamedInstanceIndex(
+	std::span<const unsigned char> bytes,
 	long baseFaceIndex,
-	const AxisValue* axisValues,
-	std::size_t axisValueCount,
-	long& instanceIndex) noexcept
+	std::span<const AxisValue> axisValues) noexcept
 {
-	instanceIndex = 0;
 	try
 	{
-		if (bytes == nullptr || size < 12 || baseFaceIndex < 0 ||
-			(axisValues == nullptr && axisValueCount != 0))
-			return false;
-		std::uint32_t scaler = 0;
-		if (!ReadBigEndian32(bytes, size, 0, scaler))
-			return false;
+		if (bytes.size() < 12 || baseFaceIndex < 0)
+			return std::nullopt;
+		auto scaler = ReadBigEndian32(bytes, 0);
+		if (!scaler)
+			return std::nullopt;
 		std::size_t sfntOffset = 0;
-		if (scaler == 0x74746366)
+		if (*scaler == 0x74746366)
 		{
-			std::uint32_t fontCount = 0;
-			if (!ReadBigEndian32(bytes, size, 8, fontCount) ||
-				fontCount == 0 || fontCount > 4096 ||
-				static_cast<unsigned long>(baseFaceIndex) >= fontCount)
-				return false;
+			auto const fontCount = ReadBigEndian32(bytes, 8);
+			if (!fontCount || *fontCount == 0 || *fontCount > 4096 ||
+				static_cast<unsigned long>(baseFaceIndex) >= *fontCount)
+				return std::nullopt;
 			std::size_t const offsetsBytes =
-				static_cast<std::size_t>(fontCount) * 4;
-			if (offsetsBytes > size - 12)
-				return false;
-			std::uint32_t faceOffset = 0;
-			if (!ReadBigEndian32(
-					bytes, size,
-					12 + static_cast<std::size_t>(baseFaceIndex) * 4,
-					faceOffset) ||
-				faceOffset > size || 12 > size - faceOffset)
-				return false;
-			sfntOffset = faceOffset;
+				static_cast<std::size_t>(*fontCount) * 4;
+			if (offsetsBytes > bytes.size() - 12)
+				return std::nullopt;
+			auto const faceOffset = ReadBigEndian32(
+				bytes, 12 + static_cast<std::size_t>(baseFaceIndex) * 4);
+			if (!faceOffset || *faceOffset > bytes.size() ||
+				12 > bytes.size() - *faceOffset)
+				return std::nullopt;
+			sfntOffset = *faceOffset;
 		}
 		else if (baseFaceIndex != 0)
-			return false;
+			return std::nullopt;
 
-		std::uint16_t tableCount = 0;
-		if (!ReadBigEndian32(bytes, size, sfntOffset, scaler) ||
-			!ReadBigEndian16(bytes, size, sfntOffset + 4, tableCount) ||
-			(scaler != 0x00010000 && scaler != 0x4F54544F &&
-			 scaler != 0x74727565 && scaler != 0x74797031) ||
-			tableCount == 0 || tableCount > 4096)
-			return false;
+		scaler = ReadBigEndian32(bytes, sfntOffset);
+		auto const tableCount = ReadBigEndian16(bytes, sfntOffset + 4);
+		if (!scaler || !tableCount ||
+			(*scaler != 0x00010000 && *scaler != 0x4F54544F &&
+			 *scaler != 0x74727565 && *scaler != 0x74797031) ||
+			*tableCount == 0 || *tableCount > 4096)
+			return std::nullopt;
 		std::size_t const tableDirectoryBytes =
-			static_cast<std::size_t>(tableCount) * 16;
+			static_cast<std::size_t>(*tableCount) * 16;
 		std::size_t const tableDirectoryOffset = sfntOffset + 12;
-		if (tableDirectoryOffset > size ||
-			tableDirectoryBytes > size - tableDirectoryOffset)
-			return false;
+		if (tableDirectoryOffset > bytes.size() ||
+			tableDirectoryBytes > bytes.size() - tableDirectoryOffset)
+			return std::nullopt;
 
 		std::size_t fvarOffset = 0;
 		std::size_t fvarLength = 0;
-		for (std::uint16_t table = 0; table < tableCount; ++table)
+		for (std::uint16_t table = 0; table < *tableCount; ++table)
 		{
 			std::size_t const record = tableDirectoryOffset +
 				static_cast<std::size_t>(table) * 16;
-			std::uint32_t tag = 0;
-			if (!ReadBigEndian32(bytes, size, record, tag))
-				return false;
-			if (tag != 0x66766172)
+			auto const tag = ReadBigEndian32(bytes, record);
+			if (!tag)
+				return std::nullopt;
+			if (*tag != 0x66766172)
 				continue;
-			std::uint32_t offset = 0;
-			std::uint32_t length = 0;
-			if (!ReadBigEndian32(bytes, size, record + 8, offset) ||
-				!ReadBigEndian32(bytes, size, record + 12, length) ||
-				length < 16 || offset > size || length > size - offset)
-				return false;
-			fvarOffset = offset;
-			fvarLength = length;
+			auto const offset = ReadBigEndian32(bytes, record + 8);
+			auto const length = ReadBigEndian32(bytes, record + 12);
+			if (!offset || !length || *length < 16 ||
+				*offset > bytes.size() || *length > bytes.size() - *offset)
+				return std::nullopt;
+			fvarOffset = *offset;
+			fvarLength = *length;
 			break;
 		}
 		if (fvarLength == 0)
-			return false;
+			return std::nullopt;
 
-		std::uint16_t majorVersion = 0;
-		std::uint16_t minorVersion = 0;
-		std::uint16_t axesArrayOffset = 0;
-		std::uint16_t reserved = 0;
-		std::uint16_t axisCount = 0;
-		std::uint16_t axisSize = 0;
-		std::uint16_t instanceCount = 0;
-		std::uint16_t instanceSize = 0;
-		if (!ReadBigEndian16(bytes, size, fvarOffset, majorVersion) ||
-			!ReadBigEndian16(bytes, size, fvarOffset + 2, minorVersion) ||
-			!ReadBigEndian16(bytes, size, fvarOffset + 4, axesArrayOffset) ||
-			!ReadBigEndian16(bytes, size, fvarOffset + 6, reserved) ||
-			!ReadBigEndian16(bytes, size, fvarOffset + 8, axisCount) ||
-			!ReadBigEndian16(bytes, size, fvarOffset + 10, axisSize) ||
-			!ReadBigEndian16(bytes, size, fvarOffset + 12, instanceCount) ||
-			!ReadBigEndian16(bytes, size, fvarOffset + 14, instanceSize) ||
-			majorVersion != 1 || minorVersion > 0 || reserved != 2 ||
-			axesArrayOffset < 16 || axisCount == 0 || axisSize < 20 ||
-			instanceCount == 0 || instanceCount > 0x7FFF)
-			return false;
+		auto const majorVersion = ReadBigEndian16(bytes, fvarOffset);
+		auto const minorVersion = ReadBigEndian16(bytes, fvarOffset + 2);
+		auto const axesArrayOffset = ReadBigEndian16(bytes, fvarOffset + 4);
+		auto const reserved = ReadBigEndian16(bytes, fvarOffset + 6);
+		auto const axisCount = ReadBigEndian16(bytes, fvarOffset + 8);
+		auto const axisSize = ReadBigEndian16(bytes, fvarOffset + 10);
+		auto const instanceCount = ReadBigEndian16(bytes, fvarOffset + 12);
+		auto const instanceSize = ReadBigEndian16(bytes, fvarOffset + 14);
+		if (!majorVersion || !minorVersion || !axesArrayOffset || !reserved ||
+			!axisCount || !axisSize || !instanceCount || !instanceSize ||
+			*majorVersion != 1 || *minorVersion > 0 || *reserved != 2 ||
+			*axesArrayOffset < 16 || *axisCount == 0 || *axisSize < 20 ||
+			*instanceCount == 0 || *instanceCount > 0x7FFF)
+			return std::nullopt;
 		std::size_t const coordinateBytes =
-			static_cast<std::size_t>(axisCount) * 4;
-		if (instanceSize != coordinateBytes + 4 &&
-			instanceSize != coordinateBytes + 6)
-			return false;
+			static_cast<std::size_t>(*axisCount) * 4;
+		if (*instanceSize != coordinateBytes + 4 &&
+			*instanceSize != coordinateBytes + 6)
+			return std::nullopt;
 		std::size_t const axesBytes =
-			static_cast<std::size_t>(axisCount) * axisSize;
+			static_cast<std::size_t>(*axisCount) * *axisSize;
 		std::size_t const instancesBytes =
-			static_cast<std::size_t>(instanceCount) * instanceSize;
-		if (axesArrayOffset > fvarLength || axesBytes > fvarLength - axesArrayOffset)
-			return false;
-		std::size_t const instancesOffset = axesArrayOffset + axesBytes;
+			static_cast<std::size_t>(*instanceCount) * *instanceSize;
+		if (*axesArrayOffset > fvarLength ||
+			axesBytes > fvarLength - *axesArrayOffset)
+			return std::nullopt;
+		std::size_t const instancesOffset = *axesArrayOffset + axesBytes;
 		if (instancesOffset > fvarLength ||
 			instancesBytes > fvarLength - instancesOffset)
-			return false;
+			return std::nullopt;
 
 		struct Axis final
 		{
@@ -959,54 +926,51 @@ bool ParseSfntNamedInstanceIndex(
 			float requestedValue = 0.0F;
 		};
 		std::vector<Axis> axes;
-		axes.reserve(axisCount);
-		for (std::uint16_t axis = 0; axis < axisCount; ++axis)
+		axes.reserve(*axisCount);
+		for (std::uint16_t axis = 0; axis < *axisCount; ++axis)
 		{
-			std::size_t const record = fvarOffset + axesArrayOffset +
-				static_cast<std::size_t>(axis) * axisSize;
-			std::uint32_t tag = 0;
-			std::uint32_t minimumBits = 0;
-			std::uint32_t defaultBits = 0;
-			std::uint32_t maximumBits = 0;
-			if (!ReadSfntTag(bytes, size, record, tag) ||
-				!ReadBigEndian32(bytes, size, record + 4, minimumBits) ||
-				!ReadBigEndian32(bytes, size, record + 8, defaultBits) ||
-				!ReadBigEndian32(bytes, size, record + 12, maximumBits))
-				return false;
-			std::int32_t const minimum = static_cast<std::int32_t>(minimumBits);
-			std::int32_t const defaultValue = static_cast<std::int32_t>(defaultBits);
-			std::int32_t const maximum = static_cast<std::int32_t>(maximumBits);
+			std::size_t const record = fvarOffset + *axesArrayOffset +
+				static_cast<std::size_t>(axis) * *axisSize;
+			auto const tag = ReadSfntTag(bytes, record);
+			auto const minimumBits = ReadBigEndian32(bytes, record + 4);
+			auto const defaultBits = ReadBigEndian32(bytes, record + 8);
+			auto const maximumBits = ReadBigEndian32(bytes, record + 12);
+			if (!tag || !minimumBits || !defaultBits || !maximumBits)
+				return std::nullopt;
+			std::int32_t const minimum = static_cast<std::int32_t>(*minimumBits);
+			std::int32_t const defaultValue =
+				static_cast<std::int32_t>(*defaultBits);
+			std::int32_t const maximum = static_cast<std::int32_t>(*maximumBits);
 			if (minimum > defaultValue || defaultValue > maximum)
-				return false;
+				return std::nullopt;
 			float requested = static_cast<float>(defaultValue) / 65536.0F;
-			for (std::size_t value = 0; value < axisValueCount; ++value)
+			for (const AxisValue& value : axisValues)
 			{
-				if (axisValues[value].tag == tag)
+				if (value.tag == *tag)
 				{
-					requested = axisValues[value].value;
+					requested = value.value;
 					break;
 				}
 			}
 			if (!std::isfinite(requested))
-				return false;
-			axes.push_back({tag, defaultValue, requested});
+				return std::nullopt;
+			axes.push_back({*tag, defaultValue, requested});
 		}
 
-		for (std::uint16_t instance = 0; instance < instanceCount; ++instance)
+		for (std::uint16_t instance = 0; instance < *instanceCount; ++instance)
 		{
 			std::size_t const record = fvarOffset + instancesOffset +
-				static_cast<std::size_t>(instance) * instanceSize;
+				static_cast<std::size_t>(instance) * *instanceSize;
 			bool matches = true;
 			bool defaults = true;
-			for (std::uint16_t axis = 0; axis < axisCount; ++axis)
+			for (std::uint16_t axis = 0; axis < *axisCount; ++axis)
 			{
-				std::uint32_t coordinateBits = 0;
-				if (!ReadBigEndian32(
-					bytes, size, record + 4 + static_cast<std::size_t>(axis) * 4,
-					coordinateBits))
-					return false;
+				auto const coordinateBits = ReadBigEndian32(
+					bytes, record + 4 + static_cast<std::size_t>(axis) * 4);
+				if (!coordinateBits)
+					return std::nullopt;
 				std::int32_t const coordinate =
-					static_cast<std::int32_t>(coordinateBits);
+					static_cast<std::int32_t>(*coordinateBits);
 				float const coordinateValue =
 					static_cast<float>(coordinate) / 65536.0F;
 				if (std::fabs(coordinateValue - axes[axis].requestedValue) > 0.5F)
@@ -1016,17 +980,13 @@ bool ParseSfntNamedInstanceIndex(
 			}
 			if (!matches)
 				continue;
-			instanceIndex = defaults
-				? 0
-				: static_cast<long>(instance) + 1;
-			return true;
+			return defaults ? 0 : static_cast<long>(instance) + 1;
 		}
 	}
 	catch (...)
 	{
-		instanceIndex = 0;
 	}
-	return false;
+	return std::nullopt;
 }
 
 std::shared_ptr<const FontFileRedirectTable> FontFileRedirectTable::Build(
@@ -1126,82 +1086,71 @@ std::shared_ptr<const FontFileRedirectTable> FontFileRedirectTable::Build(
 	}
 }
 
-bool FontFileRedirectTable::Resolve(
-	const wchar_t* requestedPath,
-	std::wstring& replacementPath) const noexcept
+std::optional<std::wstring> FontFileRedirectTable::Resolve(
+	const wchar_t* requestedPath) const noexcept
 {
 	try
 	{
-		replacementPath.clear();
-		std::wstring normalized;
-		if (!NormalizeAbsolutePath(requestedPath, normalized))
-			return false;
+		auto normalized = NormalizeAbsolutePath(requestedPath);
+		if (!normalized)
+			return std::nullopt;
+		std::wstring replacementPath;
 		for (const auto& redirect : redirects_)
 		{
-			if (EqualOrdinalIgnoreCase(redirect.sourcePath, normalized))
+			if (EqualOrdinalIgnoreCase(redirect.sourcePath, *normalized))
 			{
 				if (replacementPath.empty())
 					replacementPath = redirect.replacementPath;
 				else if (!EqualOrdinalIgnoreCase(
 					replacementPath, redirect.replacementPath))
-				{
-					replacementPath.clear();
-					return false;
-				}
+					return std::nullopt;
 			}
 		}
-		return !replacementPath.empty();
+		if (replacementPath.empty())
+			return std::nullopt;
+		return replacementPath;
 	}
 	catch (...)
 	{
-		replacementPath.clear();
+		return std::nullopt;
 	}
-	return false;
 }
 
-bool FontFileRedirectTable::ResolveFace(
+std::optional<FacePathResolution> FontFileRedirectTable::ResolveFace(
 	const wchar_t* requestedPath,
-	long requestedFaceIndex,
-	std::wstring& replacementPath,
-	long& replacementFaceIndex) const noexcept
+	long requestedFaceIndex) const noexcept
 {
-	replacementPath.clear();
-	replacementFaceIndex = 0;
 	try
 	{
-		std::wstring normalized;
-		if (!NormalizeAbsolutePath(requestedPath, normalized))
-			return false;
+		auto normalized = NormalizeAbsolutePath(requestedPath);
+		if (!normalized)
+			return std::nullopt;
 		for (const Redirect& redirect : redirects_)
 		{
 			if (redirect.sourceFaceIndex == requestedFaceIndex &&
-				EqualOrdinalIgnoreCase(redirect.sourcePath, normalized))
+				EqualOrdinalIgnoreCase(redirect.sourcePath, *normalized))
 			{
-				replacementPath = redirect.replacementPath;
-				replacementFaceIndex = redirect.replacementFaceIndex;
-				return true;
+				return FacePathResolution{
+					.replacementPath = redirect.replacementPath,
+					.replacementFaceIndex = redirect.replacementFaceIndex,
+				};
 			}
 		}
 	}
 	catch (...)
 	{
-		replacementPath.clear();
-		replacementFaceIndex = 0;
 	}
-	return false;
+	return std::nullopt;
 }
 
-bool FontFileRedirectTable::ResolveFamilyFace(
-	const wchar_t* requestedFamily,
-	std::wstring& replacementPath,
-	long& replacementFaceIndex) const noexcept
+std::optional<FacePathResolution> FontFileRedirectTable::ResolveFamilyFace(
+	const wchar_t* requestedFamily) const noexcept
 {
 	try
 	{
-		replacementPath.clear();
-		replacementFaceIndex = 0;
 		if (requestedFamily == nullptr || *requestedFamily == L'\0')
-			return false;
+			return std::nullopt;
+		FacePathResolution resolution;
 		for (const Redirect& redirect : redirects_)
 		{
 			bool const matches = std::any_of(
@@ -1211,119 +1160,107 @@ bool FontFileRedirectTable::ResolveFamilyFace(
 				});
 			if (!matches)
 				continue;
-			if (replacementPath.empty())
+			if (resolution.replacementPath.empty())
 			{
-				replacementPath = redirect.replacementPath;
-				replacementFaceIndex = redirect.replacementFaceIndex;
+				resolution.replacementPath = redirect.replacementPath;
+				resolution.replacementFaceIndex = redirect.replacementFaceIndex;
 			}
-			else if (replacementFaceIndex != redirect.replacementFaceIndex ||
+			else if (resolution.replacementFaceIndex !=
+					redirect.replacementFaceIndex ||
 				!EqualOrdinalIgnoreCase(
-					replacementPath, redirect.replacementPath))
-			{
-				replacementPath.clear();
-				replacementFaceIndex = 0;
-				return false;
-			}
+					resolution.replacementPath, redirect.replacementPath))
+				return std::nullopt;
 		}
-		return !replacementPath.empty();
+		if (resolution.replacementPath.empty())
+			return std::nullopt;
+		return resolution;
 	}
 	catch (...)
 	{
-		replacementPath.clear();
-		replacementFaceIndex = 0;
-		return false;
+		return std::nullopt;
 	}
 }
 
-bool ResolveTextCoreFontLoadPath(
+std::optional<FaceOpenPathRedirect> ResolveTextCoreFontLoadPath(
 	const FontFileRedirectTable& redirects,
 	const char* requestedUtf8,
-	long requestedFaceIndex,
-	FaceOpenPathRedirect& redirect) noexcept
+	long requestedFaceIndex) noexcept
 {
 	try
 	{
-		FaceOpenPathRedirect candidate;
-		if (!Utf8PathToWide(requestedUtf8, candidate.sourcePath) ||
-			!redirects.ResolveFace(
-				candidate.sourcePath.c_str(), requestedFaceIndex,
-				candidate.replacementPath,
-				candidate.replacementFaceIndex) ||
-			!WidePathToUtf8(
-				candidate.replacementPath, candidate.replacementUtf8))
-		{
-			redirect = {};
-			return false;
-		}
-		redirect = std::move(candidate);
-		return true;
+		auto sourcePath = Utf8PathToWide(requestedUtf8);
+		if (!sourcePath)
+			return std::nullopt;
+		auto resolution = redirects.ResolveFace(
+			sourcePath->c_str(), requestedFaceIndex);
+		if (!resolution)
+			return std::nullopt;
+		auto replacementUtf8 = WidePathToUtf8(resolution->replacementPath);
+		if (!replacementUtf8)
+			return std::nullopt;
+		return FaceOpenPathRedirect{
+			.sourcePath = std::move(*sourcePath),
+			.replacementPath = std::move(resolution->replacementPath),
+			.replacementUtf8 = std::move(*replacementUtf8),
+			.replacementFaceIndex = resolution->replacementFaceIndex,
+		};
 	}
 	catch (...)
 	{
-		redirect = {};
-		return false;
+		return std::nullopt;
 	}
 }
 
-bool ResolveFamilyFaceOpenPath(
+std::optional<FaceOpenPathRedirect> ResolveFamilyFaceOpenPath(
 	const FontFileRedirectTable& redirects,
-	const wchar_t* requestedFamily,
-	FaceOpenPathRedirect& redirect) noexcept
+	const wchar_t* requestedFamily) noexcept
 {
 	try
 	{
-		FaceOpenPathRedirect candidate;
-		if (!redirects.ResolveFamilyFace(
-			requestedFamily, candidate.replacementPath,
-			candidate.replacementFaceIndex) ||
-			!WidePathToUtf8(
-				candidate.replacementPath, candidate.replacementUtf8))
-		{
-			redirect = {};
-			return false;
-		}
-		redirect = std::move(candidate);
-		return true;
+		auto resolution = redirects.ResolveFamilyFace(requestedFamily);
+		if (!resolution)
+			return std::nullopt;
+		auto replacementUtf8 = WidePathToUtf8(resolution->replacementPath);
+		if (!replacementUtf8)
+			return std::nullopt;
+		return FaceOpenPathRedirect{
+			.replacementPath = std::move(resolution->replacementPath),
+			.replacementUtf8 = std::move(*replacementUtf8),
+			.replacementFaceIndex = resolution->replacementFaceIndex,
+		};
 	}
 	catch (...)
 	{
-		redirect = {};
-		return false;
+		return std::nullopt;
 	}
 }
 
 // A private FreeType face open only carries a pathname when its flags select
 // that source; everything after that check is the same resolution the
 // TextCore font load performs.
-bool ResolveFaceOpenPath(
+std::optional<FaceOpenPathRedirect> ResolveFaceOpenPath(
 	const FontFileRedirectTable& redirects,
 	unsigned int openFlags,
 	const char* requestedUtf8,
-	long requestedFaceIndex,
-	FaceOpenPathRedirect& redirect) noexcept
+	long requestedFaceIndex) noexcept
 {
 	constexpr unsigned int kOpenSourceMask = 0x07;
 	constexpr unsigned int kOpenPathname = 0x04;
 	if ((openFlags & kOpenSourceMask) != kOpenPathname)
-	{
-		redirect = {};
-		return false;
-	}
+		return std::nullopt;
 	return ResolveTextCoreFontLoadPath(
-		redirects, requestedUtf8, requestedFaceIndex, redirect);
+		redirects, requestedUtf8, requestedFaceIndex);
 }
 
-bool ReadLegacyFontRefFamily(
-	const void* fontRef,
-	std::wstring& family) noexcept
+std::optional<std::wstring> ReadLegacyFontRefFamily(
+	const void* fontRef) noexcept
 {
-	family.clear();
 	try
 	{
 		constexpr std::size_t kObjectSize = 40;
 		constexpr std::size_t kMaximumFamilyBytes = 32767;
 		if (!IsMemoryRange(fontRef, kObjectSize, IsReadableProtection))
-			return false;
+			return std::nullopt;
 		std::array<unsigned char, kObjectSize> object{};
 		std::memcpy(object.data(), fontRef, object.size());
 		const char* data = nullptr;
@@ -1333,7 +1270,7 @@ bool ReadLegacyFontRefFamily(
 			std::int8_t const remaining =
 				static_cast<std::int8_t>(object[24]);
 			if (remaining < 0 || remaining > 24)
-				return false;
+				return std::nullopt;
 			length = 24 - static_cast<std::size_t>(remaining);
 			data = reinterpret_cast<const char*>(object.data());
 		}
@@ -1343,53 +1280,52 @@ bool ReadLegacyFontRefFamily(
 			std::memcpy(&length, object.data() + 16, sizeof(length));
 			if (data == nullptr || length > kMaximumFamilyBytes ||
 				!IsMemoryRange(data, length, IsReadableProtection))
-				return false;
+				return std::nullopt;
 		}
 		if (length == 0 || length > kMaximumFamilyBytes ||
 			std::memchr(data, '\0', length) != nullptr)
-			return false;
+			return std::nullopt;
 		std::string utf8(data, length);
 		utf8.push_back('\0');
-		return Utf8PathToWide(utf8.c_str(), family);
+		return Utf8PathToWide(utf8.c_str());
 	}
 	catch (...)
 	{
-		family.clear();
-		return false;
+		return std::nullopt;
 	}
 }
 
-bool ReadReadableUtf8Path(
-	const char* value,
-	std::string& path) noexcept
+std::optional<std::string> ReadReadableUtf8Path(
+	const char* value) noexcept
 {
-	path.clear();
 	try
 	{
 		if (value == nullptr)
-			return false;
+			return std::nullopt;
+		std::string path;
 		constexpr std::size_t kMaximumPathBytes = 32767;
 		std::uintptr_t const base = reinterpret_cast<std::uintptr_t>(value);
 		for (std::size_t offset = 0; offset <= kMaximumPathBytes; ++offset)
 		{
 			if (offset > std::numeric_limits<std::uintptr_t>::max() - base)
-				return false;
+				return std::nullopt;
 			const char* const current = reinterpret_cast<const char*>(base + offset);
 			if (!IsMemoryRange(current, 1, IsReadableProtection))
-				return false;
+				return std::nullopt;
 			char const character = *current;
 			if (character == '\0')
-				return !path.empty();
+				return path.empty()
+					? std::nullopt
+					: std::optional<std::string>(std::move(path));
 			if (offset == kMaximumPathBytes)
-				return false;
+				return std::nullopt;
 			path.push_back(character);
 		}
 	}
 	catch (...)
 	{
-		path.clear();
 	}
-	return false;
+	return std::nullopt;
 }
 
 FontSubstitutionBoundary SelectFontSubstitutionBoundary(
@@ -1404,191 +1340,186 @@ FontSubstitutionBoundary SelectFontSubstitutionBoundary(
 	return FontSubstitutionBoundary::unavailable;
 }
 
-bool ResolveAdapter(
-	const void* mappedImage,
-	std::size_t mappedSize,
-	const AdapterDescriptor* descriptors,
-	std::size_t descriptorCount,
-	ResolvedAdapter* resolved) noexcept
+std::optional<ResolvedAdapter> ResolveAdapter(
+	std::span<const unsigned char> mappedImage,
+	std::span<const AdapterDescriptor> descriptors) noexcept
 {
-	if (descriptors == nullptr || descriptorCount == 0 || resolved == nullptr)
-		return false;
-	MappedImageView const image(mappedImage, mappedSize);
+	if (mappedImage.empty() || descriptors.empty())
+		return std::nullopt;
+	MappedImageView const image(mappedImage);
 	if (!image.valid())
-		return false;
-	std::array<unsigned char, 16> guid{};
-	DWORD age = 0;
-	if (!image.ReadCodeView(&guid, &age))
-		return false;
+		return std::nullopt;
+	auto const codeView = image.ReadCodeView();
+	if (!codeView)
+		return std::nullopt;
 
 	const AdapterDescriptor* match = nullptr;
-	for (std::size_t index = 0; index < descriptorCount; ++index)
+	for (const AdapterDescriptor& candidate : descriptors)
 	{
-		const AdapterDescriptor& candidate = descriptors[index];
 		if (candidate.machine != image.machine() ||
 			candidate.timestamp != image.timestamp() ||
 			candidate.imageSize != image.image_size() ||
-			candidate.pdbGuid != guid || candidate.pdbAge != age)
+			candidate.pdbGuid != codeView->guid ||
+			candidate.pdbAge != codeView->age)
 			continue;
 		if (match != nullptr || candidate.targetPrefix == nullptr ||
 			!image.IsExecutableRva(candidate.targetRva, candidate.targetPrefix->size()))
-			return false;
+			return std::nullopt;
 		std::array<unsigned char, 32> prefix{};
 		if (!image.CopyRva(candidate.targetRva, prefix.data(), prefix.size()) ||
 			prefix != *candidate.targetPrefix)
-			return false;
+			return std::nullopt;
 		bool const hasFaceOpen = candidate.faceOpenRva != 0;
 		if (hasFaceOpen != (candidate.faceOpenPrefix != nullptr) ||
 			hasFaceOpen !=
 				(candidate.faceOpenAbi != FaceOpenAbi::unavailable))
-			return false;
+			return std::nullopt;
 		if (hasFaceOpen)
 		{
 			if (!image.IsExecutableRva(
 				candidate.faceOpenRva, candidate.faceOpenPrefix->size()))
-				return false;
+				return std::nullopt;
 			std::array<unsigned char, 32> faceOpenPrefix{};
 			if (!image.CopyRva(
 				candidate.faceOpenRva, faceOpenPrefix.data(),
 				faceOpenPrefix.size()) ||
 				faceOpenPrefix != *candidate.faceOpenPrefix)
-				return false;
+				return std::nullopt;
 		}
 		bool const hasFontLoad = candidate.fontLoadRva != 0;
 		if (hasFontLoad != (candidate.fontLoadPrefix != nullptr) ||
 			hasFontLoad !=
 				(candidate.fontLoadAbi != FontLoadAbi::unavailable))
-			return false;
+			return std::nullopt;
 		if (hasFontLoad)
 		{
 			if (!image.IsExecutableRva(
 				candidate.fontLoadRva, candidate.fontLoadPrefix->size()))
-				return false;
+				return std::nullopt;
 			std::array<unsigned char, 32> fontLoadPrefix{};
 			if (!image.CopyRva(
 				candidate.fontLoadRva, fontLoadPrefix.data(),
 				fontLoadPrefix.size()) ||
 				fontLoadPrefix != *candidate.fontLoadPrefix)
-				return false;
+				return std::nullopt;
 		}
 		bool const hasCharacterLookup = candidate.characterLookupRva != 0;
 		if (hasCharacterLookup != (candidate.characterLookupPrefix != nullptr) ||
 			hasCharacterLookup !=
 				(candidate.characterLookupAbi != CharacterLookupAbi::unavailable))
-			return false;
+			return std::nullopt;
 		if (hasCharacterLookup)
 		{
 			if (!image.IsExecutableRva(
 				candidate.characterLookupRva,
 				candidate.characterLookupPrefix->size()))
-				return false;
+				return std::nullopt;
 			std::array<unsigned char, 32> characterLookupPrefix{};
 			if (!image.CopyRva(
 				candidate.characterLookupRva, characterLookupPrefix.data(),
 				characterLookupPrefix.size()) ||
 				characterLookupPrefix != *candidate.characterLookupPrefix)
-				return false;
+				return std::nullopt;
 		}
 		bool const hasOsFaceResolver = candidate.osFaceResolverRva != 0;
 		if (hasOsFaceResolver != (candidate.osFaceResolverPrefix != nullptr) ||
 			hasOsFaceResolver !=
 				(candidate.osFaceResolverAbi != CharacterLookupAbi::unavailable))
-			return false;
+			return std::nullopt;
 		if (hasOsFaceResolver)
 		{
 			if (!image.IsExecutableRva(
 				candidate.osFaceResolverRva,
 				candidate.osFaceResolverPrefix->size()))
-				return false;
+				return std::nullopt;
 			std::array<unsigned char, 32> osFaceResolverPrefix{};
 			if (!image.CopyRva(
 				candidate.osFaceResolverRva, osFaceResolverPrefix.data(),
 				osFaceResolverPrefix.size()) ||
 				osFaceResolverPrefix != *candidate.osFaceResolverPrefix)
-				return false;
+				return std::nullopt;
 		}
 		bool const hasFreeTypeCharIndex = candidate.freeTypeCharIndexRva != 0;
 		if (hasFreeTypeCharIndex !=
 				(candidate.freeTypeCharIndexPrefix != nullptr) ||
 			hasFreeTypeCharIndex !=
 				(candidate.freeTypeCharIndexAbi != FreeTypeCharIndexAbi::unavailable))
-			return false;
+			return std::nullopt;
 		if (hasFreeTypeCharIndex)
 		{
 			if (!image.IsExecutableRva(
 				candidate.freeTypeCharIndexRva,
 				candidate.freeTypeCharIndexPrefix->size()))
-				return false;
+				return std::nullopt;
 			std::array<unsigned char, 32> freeTypeCharIndexPrefix{};
 			if (!image.CopyRva(
 				candidate.freeTypeCharIndexRva,
 				freeTypeCharIndexPrefix.data(), freeTypeCharIndexPrefix.size()) ||
 				freeTypeCharIndexPrefix != *candidate.freeTypeCharIndexPrefix)
-				return false;
+				return std::nullopt;
 		}
 		bool const hasFontCatalogLoad = candidate.fontCatalogLoadRva != 0;
 		if (hasFontCatalogLoad !=
 				(candidate.fontCatalogLoadPrefix != nullptr) ||
 			hasFontCatalogLoad !=
 				(candidate.fontCatalogLoadAbi != FontCatalogLoadAbi::unavailable))
-			return false;
+			return std::nullopt;
 		if (hasFontCatalogLoad)
 		{
 			if (!image.IsExecutableRva(
 				candidate.fontCatalogLoadRva,
 				candidate.fontCatalogLoadPrefix->size()))
-				return false;
+				return std::nullopt;
 			std::array<unsigned char, 32> fontCatalogLoadPrefix{};
 			if (!image.CopyRva(
 				candidate.fontCatalogLoadRva,
 				fontCatalogLoadPrefix.data(), fontCatalogLoadPrefix.size()) ||
 				fontCatalogLoadPrefix != *candidate.fontCatalogLoadPrefix)
-				return false;
+				return std::nullopt;
 		}
 		bool const hasFaceDone = candidate.faceDoneRva != 0;
 		if (hasFaceDone != (candidate.faceDonePrefix != nullptr) ||
 			hasFaceDone != (candidate.faceDoneAbi != FaceDoneAbi::unavailable))
-			return false;
+			return std::nullopt;
 		if (hasFaceDone)
 		{
 			if (!image.IsExecutableRva(
 				candidate.faceDoneRva, candidate.faceDonePrefix->size()))
-				return false;
+				return std::nullopt;
 			std::array<unsigned char, 32> faceDonePrefix{};
 			if (!image.CopyRva(
 				candidate.faceDoneRva, faceDonePrefix.data(),
 				faceDonePrefix.size()) ||
 				faceDonePrefix != *candidate.faceDonePrefix)
-				return false;
+				return std::nullopt;
 		}
 		match = &candidate;
 	}
 	if (match == nullptr)
-		return false;
-	resolved->name = match->name;
-	resolved->targetRva = match->targetRva;
-	resolved->faceOpenRva = match->faceOpenRva;
-	resolved->fontLoadRva = match->fontLoadRva;
-	resolved->characterLookupRva = match->characterLookupRva;
-	resolved->osFaceResolverRva = match->osFaceResolverRva;
-	resolved->freeTypeCharIndexRva = match->freeTypeCharIndexRva;
-	resolved->fontCatalogLoadRva = match->fontCatalogLoadRva;
-	resolved->faceDoneRva = match->faceDoneRva;
-	resolved->abi = match->abi;
-	resolved->faceOpenAbi = match->faceOpenAbi;
-	resolved->fontLoadAbi = match->fontLoadAbi;
-	resolved->characterLookupAbi = match->characterLookupAbi;
-	resolved->osFaceResolverAbi = match->osFaceResolverAbi;
-	resolved->freeTypeCharIndexAbi = match->freeTypeCharIndexAbi;
-	resolved->fontCatalogLoadAbi = match->fontCatalogLoadAbi;
-	resolved->faceDoneAbi = match->faceDoneAbi;
-	return true;
+		return std::nullopt;
+	return ResolvedAdapter{
+		.name = match->name,
+		.targetRva = match->targetRva,
+		.faceOpenRva = match->faceOpenRva,
+		.fontLoadRva = match->fontLoadRva,
+		.characterLookupRva = match->characterLookupRva,
+		.osFaceResolverRva = match->osFaceResolverRva,
+		.freeTypeCharIndexRva = match->freeTypeCharIndexRva,
+		.fontCatalogLoadRva = match->fontCatalogLoadRva,
+		.faceDoneRva = match->faceDoneRva,
+		.abi = match->abi,
+		.faceOpenAbi = match->faceOpenAbi,
+		.fontLoadAbi = match->fontLoadAbi,
+		.characterLookupAbi = match->characterLookupAbi,
+		.osFaceResolverAbi = match->osFaceResolverAbi,
+		.freeTypeCharIndexAbi = match->freeTypeCharIndexAbi,
+		.fontCatalogLoadAbi = match->fontCatalogLoadAbi,
+		.faceDoneAbi = match->faceDoneAbi,
+	};
 }
 
-const AdapterDescriptor* ProductionAdapterDescriptors(std::size_t* count) noexcept
+std::span<const AdapterDescriptor> ProductionAdapterDescriptors() noexcept
 {
-	if (count != nullptr)
-		*count = _countof(kProductionDescriptors);
 	return kProductionDescriptors;
 }
 

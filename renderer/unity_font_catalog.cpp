@@ -2,6 +2,7 @@
 
 #include "renderer_raii.h"
 
+#include <atlbase.h>
 #include <dwrite_3.h>
 
 #include <algorithm>
@@ -13,47 +14,6 @@
 
 namespace renderer { namespace unity {
 namespace {
-
-template <typename T>
-class ComOwner final
-{
-public:
-	ComOwner() = default;
-	~ComOwner() { reset(); }
-	ComOwner(const ComOwner&) = delete;
-	ComOwner& operator=(const ComOwner&) = delete;
-	ComOwner(ComOwner&& other) noexcept : value_(other.release()) {}
-	ComOwner& operator=(ComOwner&& other) noexcept
-	{
-		if (this != &other)
-			reset(other.release());
-		return *this;
-	}
-
-	T* get() const noexcept { return value_; }
-	T* operator->() const noexcept { return value_; }
-	explicit operator bool() const noexcept { return value_ != nullptr; }
-	T** put() noexcept
-	{
-		reset();
-		return &value_;
-	}
-	void reset(T* value = nullptr) noexcept
-	{
-		if (value_ != nullptr)
-			value_->Release();
-		value_ = value;
-	}
-	T* release() noexcept
-	{
-		T* const value = value_;
-		value_ = nullptr;
-		return value;
-	}
-
-private:
-	T* value_ = nullptr;
-};
 
 using DWriteCreateFactoryFunction = HRESULT (WINAPI*)(
 	DWRITE_FACTORY_TYPE, REFIID, IUnknown**);
@@ -257,10 +217,10 @@ bool ReadFamilyNames(
 	IDWriteFontFamily* family,
 	std::vector<std::wstring>& names)
 {
-	ComOwner<IDWriteLocalizedStrings> localized;
+	CComPtr<IDWriteLocalizedStrings> localized;
 	return family != nullptr &&
-		SUCCEEDED(family->GetFamilyNames(localized.put())) && localized &&
-		AppendLocalizedStrings(localized.get(), names);
+		SUCCEEDED(family->GetFamilyNames(&localized)) && localized &&
+		AppendLocalizedStrings(localized, names);
 }
 
 void AppendFontInformationalNames(
@@ -273,11 +233,11 @@ void AppendFontInformationalNames(
 	};
 	for (DWRITE_INFORMATIONAL_STRING_ID const kind : nameKinds)
 	{
-		ComOwner<IDWriteLocalizedStrings> localized;
+		CComPtr<IDWriteLocalizedStrings> localized;
 		BOOL exists = FALSE;
 		if (SUCCEEDED(font->GetInformationalStrings(
-			kind, localized.put(), &exists)) && exists && localized)
-			AppendLocalizedStrings(localized.get(), names);
+			kind, &localized, &exists)) && exists && localized)
+			AppendLocalizedStrings(localized, names);
 	}
 }
 
@@ -293,13 +253,13 @@ bool ReadLocalFilePath(
 	if (FAILED(file->GetReferenceKey(&referenceKey, &referenceKeySize)) ||
 		referenceKey == nullptr || referenceKeySize == 0)
 		return false;
-	ComOwner<IDWriteFontFileLoader> loader;
-	if (FAILED(file->GetLoader(loader.put())) || !loader)
+	CComPtr<IDWriteFontFileLoader> loader;
+	if (FAILED(file->GetLoader(&loader)) || !loader)
 		return false;
-	ComOwner<IDWriteLocalFontFileLoader> localLoader;
+	CComPtr<IDWriteLocalFontFileLoader> localLoader;
 	if (FAILED(loader->QueryInterface(
 		__uuidof(IDWriteLocalFontFileLoader),
-		reinterpret_cast<void**>(localLoader.put()))) || !localLoader)
+		reinterpret_cast<void**>(&localLoader))) || !localLoader)
 		return false;
 	UINT32 pathLength = 0;
 	if (FAILED(localLoader->GetFilePathLengthFromKey(
@@ -322,10 +282,10 @@ bool ReadFontAxisValues(
 	axisValues.clear();
 	if (face == nullptr)
 		return false;
-	ComOwner<IDWriteFontFace5> face5;
+	CComPtr<IDWriteFontFace5> face5;
 	if (FAILED(face->QueryInterface(
 		__uuidof(IDWriteFontFace5),
-		reinterpret_cast<void**>(face5.put()))) || !face5)
+		reinterpret_cast<void**>(&face5))) || !face5)
 		return false;
 	if (!face5->HasVariations())
 		return false;
@@ -355,19 +315,19 @@ bool AppendFamilyFiles(
 		return false;
 	for (UINT32 fontIndex = 0; fontIndex < fontCount; ++fontIndex)
 	{
-		ComOwner<IDWriteFont> font;
-		if (FAILED(family->GetFont(fontIndex, font.put())) || !font)
+		CComPtr<IDWriteFont> font;
+		if (FAILED(family->GetFont(fontIndex, &font)) || !font)
 			continue;
 		std::vector<std::wstring> fontNames = names;
-		AppendFontInformationalNames(font.get(), fontNames);
-		ComOwner<IDWriteFontFace> face;
-		if (FAILED(font->CreateFontFace(face.put())) || !face)
+		AppendFontInformationalNames(font, fontNames);
+		CComPtr<IDWriteFontFace> face;
+		if (FAILED(font->CreateFontFace(&face)) || !face)
 			continue;
 		UINT32 const faceIndex = face->GetIndex();
 		if (faceIndex > static_cast<UINT32>((std::numeric_limits<long>::max)()))
 			continue;
 		std::vector<AxisValue> axisValues;
-		ReadFontAxisValues(face.get(), axisValues);
+		ReadFontAxisValues(face, axisValues);
 		UINT32 fileCount = 0;
 		if (FAILED(face->GetFiles(&fileCount, nullptr)) ||
 			fileCount == 0 || fileCount > 64)
@@ -376,16 +336,18 @@ bool AppendFamilyFiles(
 		if (FAILED(face->GetFiles(&fileCount, rawFiles.data())))
 		{
 			for (IDWriteFontFile* rawFile : rawFiles)
-				if (rawFile != nullptr)
-					rawFile->Release();
+			{
+				CComPtr<IDWriteFontFile> file;
+				file.Attach(rawFile);
+			}
 			continue;
 		}
 		for (IDWriteFontFile* rawFile : rawFiles)
 		{
-			ComOwner<IDWriteFontFile> file;
-			file.reset(rawFile);
+			CComPtr<IDWriteFontFile> file;
+			file.Attach(rawFile);
 			std::wstring path;
-			if (!ReadLocalFilePath(file.get(), path))
+			if (!ReadLocalFilePath(file, path))
 				continue;
 			for (const std::wstring& name : fontNames)
 				AppendUnique(
@@ -688,13 +650,13 @@ bool EnumerateInstalledFontFaces(
 		static_assert(sizeof(createFactory) == sizeof(rawCreateFactory));
 		std::memcpy(&createFactory, &rawCreateFactory, sizeof(createFactory));
 
-		ComOwner<IDWriteFactory> factory;
+		CComPtr<IDWriteFactory> factory;
 		if (FAILED(createFactory(
 			DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
-			reinterpret_cast<IUnknown**>(factory.put()))) || !factory)
+			reinterpret_cast<IUnknown**>(&factory))) || !factory)
 			return false;
-		ComOwner<IDWriteFontCollection> collection;
-		if (FAILED(factory->GetSystemFontCollection(collection.put(), FALSE)) ||
+		CComPtr<IDWriteFontCollection> collection;
+		if (FAILED(factory->GetSystemFontCollection(&collection, FALSE)) ||
 			!collection)
 			return false;
 		UINT32 const familyCount = collection->GetFontFamilyCount();
@@ -702,14 +664,14 @@ bool EnumerateInstalledFontFaces(
 			return false;
 		for (UINT32 familyIndex = 0; familyIndex < familyCount; ++familyIndex)
 		{
-			ComOwner<IDWriteFontFamily> family;
-			if (FAILED(collection->GetFontFamily(familyIndex, family.put())) ||
+			CComPtr<IDWriteFontFamily> family;
+			if (FAILED(collection->GetFontFamily(familyIndex, &family)) ||
 				!family)
 				continue;
 			std::vector<std::wstring> names;
-			if (!ReadFamilyNames(family.get(), names))
+			if (!ReadFamilyNames(family, names))
 				continue;
-			AppendFamilyFiles(family.get(), names, fonts);
+			AppendFamilyFiles(family, names, fonts);
 		}
 		AppendRegisteredFonts(HKEY_LOCAL_MACHINE, fonts);
 		AppendRegisteredFonts(HKEY_CURRENT_USER, fonts);

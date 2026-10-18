@@ -2,6 +2,10 @@ const ALIAS_RETURN_STAGES = Object.freeze([
   'legacy-system-collection-alias-returned',
   'system-font-set-alias-returned',
   'modern-system-collection-alias-returned',
+  'factory6-system-font-set-alias-returned',
+  'factory6-system-collection-alias-returned',
+  'factory7-system-font-set-alias-returned',
+  'factory7-system-collection-alias-returned',
 ]);
 
 export function classifyDirectWriteGeneration(result, hasInjectionBoundary) {

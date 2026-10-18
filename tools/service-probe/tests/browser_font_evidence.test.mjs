@@ -3,7 +3,11 @@ import test from 'node:test';
 
 import { classifyDirectWriteGeneration } from '../browser_font_evidence.mjs';
 
-function evidence({ aliasReturned, replacementObserved }) {
+function evidence({
+  aliasReturned,
+  replacementObserved,
+  factory6CollectionAliasReturned = false,
+}) {
   return {
     controlsDistinct: true,
     sourceChanged: replacementObserved,
@@ -17,6 +21,15 @@ function evidence({ aliasReturned, replacementObserved }) {
           'legacy-system-collection-alias-returned': false,
           'system-font-set-alias-returned': false,
           'modern-system-collection-alias-returned': aliasReturned,
+          'factory6-system-font-set-called': false,
+          'factory6-system-font-set-alias-returned': false,
+          'factory6-system-collection-called': false,
+          'factory6-system-collection-alias-returned':
+            factory6CollectionAliasReturned,
+          'factory7-system-font-set-called': false,
+          'factory7-system-font-set-alias-returned': false,
+          'factory7-system-collection-called': false,
+          'factory7-system-collection-alias-returned': false,
         },
         renderer: {},
         utility: {},
@@ -46,6 +59,25 @@ test('MacLoader Chromium consumes the returned alias generation', () => {
   assert.deepEqual(
     classifyDirectWriteGeneration(
       evidence({ aliasReturned: true, replacementObserved: true }),
+      true,
+    ),
+    {
+      aliasSnapshotPreparedObserved: true,
+      aliasCollectionReturnedObserved: true,
+      aliasGenerationConsumedObserved: true,
+      retainedStockGenerationObserved: false,
+    },
+  );
+});
+
+test('a factory6 collection alias return consumes the generation', () => {
+  assert.deepEqual(
+    classifyDirectWriteGeneration(
+      evidence({
+        aliasReturned: false,
+        replacementObserved: true,
+        factory6CollectionAliasReturned: true,
+      }),
       true,
     ),
     {

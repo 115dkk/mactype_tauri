@@ -1113,25 +1113,120 @@ BuildStatus GetCachedForFactory(
 	}
 }
 
-bool IsAliasCollection(IUnknown* collection) noexcept
+HRESULT GetOrCreateTypographicCollection(
+	IDWriteFactory6* factory,
+	AliasFontSet const& aliases,
+	bool includeDownloadableFonts,
+	IDWriteFontCollection2** collection) noexcept
+{
+	if (collection == nullptr)
+		return E_POINTER;
+	*collection = nullptr;
+	try
+	{
+		CComPtr<IUnknown> const factoryIdentity = GetIdentity(factory);
+		CComPtr<IDWriteFontSet> const aliasSet = includeDownloadableFonts ?
+			aliases.downloadableFontSet : aliases.fontSet;
+		if (factoryIdentity == nullptr || aliasSet == nullptr)
+			return E_INVALIDARG;
+
+		std::shared_ptr<CacheEntry> entry;
+		CComPtr<IDWriteFontCollection2> cached;
+		AliasCache& cache = GetCache();
+		{
+			std::scoped_lock lock(cache.mutex);
+			for (std::shared_ptr<CacheEntry> const& candidate : cache.entries)
+			{
+				CComPtr<IDWriteFontSet> const candidateSet =
+					includeDownloadableFonts ?
+						candidate->aliases.downloadableFontSet :
+						candidate->aliases.fontSet;
+				if (candidate->factoryIdentity == factoryIdentity &&
+					candidate->generation == aliases.substitutionGeneration &&
+					candidateSet == aliasSet)
+				{
+					entry = candidate;
+					cached = includeDownloadableFonts ?
+						candidate->aliases.downloadableTypographicCollection :
+						candidate->aliases.typographicCollection;
+					break;
+				}
+			}
+		}
+		if (entry == nullptr)
+			return E_UNEXPECTED;
+		if (cached != nullptr)
+			return cached.CopyTo(collection);
+
+		CComPtr<IDWriteFontCollection2> created;
+		HRESULT const createResult = factory->CreateFontCollectionFromFontSet(
+			aliasSet,
+			DWRITE_FONT_FAMILY_MODEL_TYPOGRAPHIC,
+			&created);
+		if (FAILED(createResult) || created == nullptr)
+			return FAILED(createResult) ? createResult : E_UNEXPECTED;
+
+		{
+			std::scoped_lock lock(cache.mutex);
+			CComPtr<IDWriteFontCollection2>& published =
+				includeDownloadableFonts ?
+					entry->aliases.downloadableTypographicCollection :
+					entry->aliases.typographicCollection;
+			if (published == nullptr)
+				published = created;
+			cached = published;
+		}
+		return cached.CopyTo(collection);
+	}
+	catch (std::bad_alloc const&)
+	{
+		return E_OUTOFMEMORY;
+	}
+	catch (...)
+	{
+		return E_UNEXPECTED;
+	}
+}
+
+bool MatchesAliasCollection(
+	IUnknown* collection,
+	AliasFontSet const& aliases) noexcept
 {
 	try
 	{
 		CComPtr<IUnknown> const identity = GetIdentity(collection);
 		if (identity == nullptr)
 			return false;
+		std::array<IUnknown*, 4> const candidates = {
+			aliases.collection,
+			aliases.downloadableCollection,
+			aliases.typographicCollection,
+			aliases.downloadableTypographicCollection,
+		};
+		for (IUnknown* candidate : candidates)
+		{
+			CComPtr<IUnknown> const candidateIdentity = GetIdentity(candidate);
+			if (candidateIdentity != nullptr && candidateIdentity == identity)
+				return true;
+		}
+	}
+	catch (...)
+	{
+	}
+	return false;
+}
+
+bool IsAliasCollection(IUnknown* collection) noexcept
+{
+	try
+	{
+		if (collection == nullptr)
+			return false;
 		AliasCache& cache = GetCache();
 		std::scoped_lock lock(cache.mutex);
 		for (std::shared_ptr<CacheEntry> const& entry : cache.entries)
 		{
-			CComPtr<IUnknown> const aliasIdentity =
-				GetIdentity(entry->aliases.collection);
-			if (aliasIdentity != nullptr && aliasIdentity == identity)
-				return true;
-			CComPtr<IUnknown> const downloadableIdentity =
-				GetIdentity(entry->aliases.downloadableCollection);
-			if (downloadableIdentity != nullptr &&
-				downloadableIdentity == identity)
+			if (MatchesAliasCollection(collection, entry->aliases))
 				return true;
 		}
 	}

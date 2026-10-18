@@ -1,5 +1,6 @@
 #include "unity_font_hook_core.h"
 
+#include "big_endian.h"
 #include "freetype_runtime.h"
 #include "renderer_raii.h"
 
@@ -26,11 +27,13 @@ bool ReadBigEndian16(
 	std::size_t offset,
 	std::uint16_t& value) noexcept
 {
-	if (bytes == nullptr || offset > size || 2 > size - offset)
+	if (bytes == nullptr)
 		return false;
-	value = static_cast<std::uint16_t>(
-		(static_cast<std::uint16_t>(bytes[offset]) << 8) |
-		bytes[offset + 1]);
+	auto const read = big_endian::Read16(
+		std::span<const unsigned char>(bytes, size), offset);
+	if (!read)
+		return false;
+	value = *read;
 	return true;
 }
 
@@ -40,12 +43,13 @@ bool ReadBigEndian32(
 	std::size_t offset,
 	std::uint32_t& value) noexcept
 {
-	if (bytes == nullptr || offset > size || 4 > size - offset)
+	if (bytes == nullptr)
 		return false;
-	value = (static_cast<std::uint32_t>(bytes[offset]) << 24) |
-		(static_cast<std::uint32_t>(bytes[offset + 1]) << 16) |
-		(static_cast<std::uint32_t>(bytes[offset + 2]) << 8) |
-		bytes[offset + 3];
+	auto const read = big_endian::Read32(
+		std::span<const unsigned char>(bytes, size), offset);
+	if (!read)
+		return false;
+	value = *read;
 	return true;
 }
 
@@ -55,12 +59,16 @@ bool ReadSfntTag(
 	std::size_t offset,
 	std::uint32_t& value) noexcept
 {
-	if (bytes == nullptr || offset > size || 4 > size - offset)
+	if (bytes == nullptr)
 		return false;
-	value = static_cast<std::uint32_t>(bytes[offset]) |
-		(static_cast<std::uint32_t>(bytes[offset + 1]) << 8) |
-		(static_cast<std::uint32_t>(bytes[offset + 2]) << 16) |
-		(static_cast<std::uint32_t>(bytes[offset + 3]) << 24);
+	auto const read = big_endian::Read32(
+		std::span<const unsigned char>(bytes, size), offset);
+	if (!read)
+		return false;
+	value = ((*read & 0x000000ffU) << 24) |
+		((*read & 0x0000ff00U) << 8) |
+		((*read & 0x00ff0000U) >> 8) |
+		((*read & 0xff000000U) >> 24);
 	return true;
 }
 

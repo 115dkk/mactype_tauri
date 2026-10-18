@@ -14,9 +14,6 @@ namespace renderer {
 namespace sfnt {
 
 bool CanRead(std::size_t offset, std::size_t length, std::size_t size) noexcept;
-// The caller proves the range with CanRead first.
-UINT16 ReadU16(std::vector<BYTE> const& bytes, std::size_t offset);
-UINT32 ReadU32(std::vector<BYTE> const& bytes, std::size_t offset);
 void WriteU16(std::vector<BYTE>& bytes, std::size_t offset, UINT16 value);
 void WriteU32(std::vector<BYTE>& bytes, std::size_t offset, UINT32 value);
 UINT32 TableChecksum(BYTE const* bytes, std::size_t size) noexcept;

@@ -2,7 +2,11 @@
 #ifndef CRC32_H
 #define CRC32_H
 
-static unsigned int crc32_tab[] = {
+#include <array>
+#include <cstddef>
+#include <cstdint>
+
+inline constexpr std::array<std::uint32_t, 256> crc32_tab = {
 	0x00000000, 0x77073096, 0xee0e612c, 0x990951ba, 0x076dc419, 0x706af48f,
 	0xe963a535, 0x9e6495a3,    0x0edb8832, 0x79dcb8a4, 0xe0d5e91e, 0x97d2d988,
 	0x09b64c2b, 0x7eb17cbd, 0xe7b82d07, 0x90bf1d91, 0x1db71064, 0x6ab020f2,
@@ -50,7 +54,8 @@ static unsigned int crc32_tab[] = {
 class crc32
 {
 public:
-	static const unsigned int getCrc32(unsigned int crc, const void *buf, int size) {
+	static unsigned int getCrc32(
+		unsigned int crc, const void *buf, std::size_t size) noexcept {
 		const unsigned char *p;
 		p = static_cast<const unsigned char*>(buf);
 		crc = crc ^ ~0U;

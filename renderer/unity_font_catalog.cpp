@@ -1,5 +1,6 @@
 #include "unity_font_catalog.h"
 
+#include "big_endian.h"
 #include "renderer_raii.h"
 
 #include <atlbase.h>
@@ -38,11 +39,13 @@ bool ReadBe16(
 	std::size_t offset,
 	std::uint16_t& value) noexcept
 {
-	if (bytes == nullptr || offset > size || 2 > size - offset)
+	if (bytes == nullptr)
 		return false;
-	value = static_cast<std::uint16_t>(
-		(static_cast<std::uint16_t>(bytes[offset]) << 8) |
-		bytes[offset + 1]);
+	auto const read = big_endian::Read16(
+		std::span<const unsigned char>(bytes, size), offset);
+	if (!read)
+		return false;
+	value = *read;
 	return true;
 }
 
@@ -52,12 +55,13 @@ bool ReadBe32(
 	std::size_t offset,
 	std::uint32_t& value) noexcept
 {
-	if (bytes == nullptr || offset > size || 4 > size - offset)
+	if (bytes == nullptr)
 		return false;
-	value = (static_cast<std::uint32_t>(bytes[offset]) << 24) |
-		(static_cast<std::uint32_t>(bytes[offset + 1]) << 16) |
-		(static_cast<std::uint32_t>(bytes[offset + 2]) << 8) |
-		bytes[offset + 3];
+	auto const read = big_endian::Read32(
+		std::span<const unsigned char>(bytes, size), offset);
+	if (!read)
+		return false;
+	value = *read;
 	return true;
 }
 

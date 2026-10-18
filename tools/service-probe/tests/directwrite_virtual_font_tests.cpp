@@ -1,13 +1,19 @@
+#include "../../../renderer/big_endian.h"
+#include "../../../renderer/crc32.h"
 #include "../../../renderer/directwrite_virtual_font.h"
 #include "../../../renderer/sfnt_names.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -20,6 +26,7 @@
 
 namespace {
 
+namespace big_endian = renderer::big_endian;
 namespace sfnt = renderer::sfnt;
 
 void Require(bool condition, char const* message)
@@ -28,6 +35,72 @@ void Require(bool condition, char const* message)
         std::cerr << message << '\n';
         std::exit(1);
     }
+}
+
+UINT16 Read16(std::vector<BYTE> const& bytes, std::size_t offset)
+{
+    auto const value = big_endian::Read16(bytes, offset);
+    Require(value.has_value(), "a test read escaped its buffer");
+    return *value;
+}
+
+UINT32 Read32(std::vector<BYTE> const& bytes, std::size_t offset)
+{
+    auto const value = big_endian::Read32(bytes, offset);
+    Require(value.has_value(), "a test read escaped its buffer");
+    return *value;
+}
+
+void TestBigEndianReader()
+{
+    std::span<const unsigned char> const empty;
+    Require(big_endian::CanRead(empty, 0, 0),
+        "an empty span must allow an empty read");
+    Require(!big_endian::Read16(empty, 0) && !big_endian::Read32(empty, 0),
+        "an empty span must reject integer reads");
+
+    constexpr std::array<unsigned char, 16> bytes = {
+        0x00, 0x00, 0xff, 0xff,
+        0x00, 0x00, 0x00, 0x00,
+        0xff, 0xff, 0xff, 0xff,
+        0x12, 0x34, 0x56, 0x78,
+    };
+    Require(big_endian::CanRead(bytes, bytes.size(), 0) &&
+            !big_endian::CanRead(bytes, bytes.size(), 1),
+        "offset equal to size must allow only an empty read");
+    Require(!big_endian::Read16(bytes, bytes.size()) &&
+            !big_endian::Read32(bytes, bytes.size()),
+        "offset equal to size must reject integer reads");
+    Require(!big_endian::Read16(bytes, bytes.size() - 1),
+        "a 16-bit read must reject size minus one");
+    Require(!big_endian::Read32(bytes, bytes.size() - 3),
+        "a 32-bit read must reject size minus three");
+    constexpr std::size_t maximum = (std::numeric_limits<std::size_t>::max)();
+    Require(!big_endian::CanRead(bytes, maximum, 1) &&
+            !big_endian::Read16(bytes, maximum) &&
+            !big_endian::Read32(bytes, maximum),
+        "SIZE_MAX must be rejected without overflow");
+
+    auto const zero16 = big_endian::Read16(bytes, 0);
+    auto const maximum16 = big_endian::Read16(bytes, 2);
+    auto const zero32 = big_endian::Read32(bytes, 4);
+    auto const maximum32 = big_endian::Read32(bytes, 8);
+    auto const sequence16 = big_endian::Read16(bytes, 12);
+    auto const sequence32 = big_endian::Read32(bytes, 12);
+    Require(zero16 && *zero16 == 0 &&
+            maximum16 && *maximum16 == 0xffffU &&
+            zero32 && *zero32 == 0 &&
+            maximum32 && *maximum32 == 0xffffffffU &&
+            sequence16 && *sequence16 == 0x1234U &&
+            sequence32 && *sequence32 == 0x12345678U,
+        "the reader must preserve the full integer range and byte order");
+}
+
+void TestCrc32()
+{
+    constexpr char text[] = "123456789";
+    Require(crc32::getCrc32(0, text, sizeof(text) - 1) == 0xcbf43926U,
+        "CRC-32 changed for the standard check string");
 }
 
 constexpr UINT32 kOs2 = 0x4F532F32;
@@ -166,14 +239,14 @@ std::vector<BYTE> VariableSfnt()
 
 std::vector<BYTE> Table(std::vector<BYTE> const& font, UINT32 tag, bool verifyChecksum)
 {
-    UINT16 const count = sfnt::ReadU16(font, 4);
+    UINT16 const count = Read16(font, 4);
     for (UINT16 index = 0; index < count; ++index) {
         std::size_t const record = 12 + static_cast<std::size_t>(index) * 16;
-        if (sfnt::ReadU32(font, record) != tag) {
+        if (Read32(font, record) != tag) {
             continue;
         }
-        UINT32 const offset = sfnt::ReadU32(font, record + 8);
-        UINT32 const length = sfnt::ReadU32(font, record + 12);
+        UINT32 const offset = Read32(font, record + 8);
+        UINT32 const length = Read32(font, record + 12);
         Require(sfnt::CanRead(offset, length, font.size()), "table escapes the font");
         std::vector<BYTE> table(font.begin() + offset, font.begin() + offset + length);
         std::vector<BYTE> summed = table;
@@ -181,7 +254,7 @@ std::vector<BYTE> Table(std::vector<BYTE> const& font, UINT32 tag, bool verifyCh
             sfnt::WriteU32(summed, 8, 0);
         }
         Require(!verifyChecksum ||
-                    sfnt::ReadU32(font, record + 4) ==
+                    Read32(font, record + 4) ==
                         sfnt::TableChecksum(summed.data(), summed.size()),
                 "a rewritten table must carry its own checksum");
         return table;
@@ -509,14 +582,14 @@ int RewriteVariableFile(WCHAR const* input, WCHAR const* output, UINT16 weight)
 
     std::vector<BYTE> const sourceFvar = Table(source, kFvar, false);
     std::vector<BYTE> const rewrittenFvar = Table(rewritten, kFvar, true);
-    UINT16 const sourceAxesOffset = sfnt::ReadU16(sourceFvar, 4);
-    UINT16 const rewrittenAxesOffset = sfnt::ReadU16(rewrittenFvar, 4);
-    UINT16 const axisCount = sfnt::ReadU16(sourceFvar, 8);
-    UINT16 const axisSize = sfnt::ReadU16(sourceFvar, 10);
+    UINT16 const sourceAxesOffset = Read16(sourceFvar, 4);
+    UINT16 const rewrittenAxesOffset = Read16(rewrittenFvar, 4);
+    UINT16 const axisCount = Read16(sourceFvar, 8);
+    UINT16 const axisSize = Read16(sourceFvar, 10);
     size_t const axesBytes = static_cast<size_t>(axisCount) * axisSize;
     Require(sourceAxesOffset == rewrittenAxesOffset &&
-            sfnt::ReadU16(rewrittenFvar, 8) == axisCount &&
-            sfnt::ReadU16(rewrittenFvar, 10) == axisSize &&
+            Read16(rewrittenFvar, 8) == axisCount &&
+            Read16(rewrittenFvar, 10) == axisSize &&
             sfnt::CanRead(sourceAxesOffset, axesBytes, sourceFvar.size()) &&
             sfnt::CanRead(rewrittenAxesOffset, axesBytes, rewrittenFvar.size()) &&
             std::equal(
@@ -524,12 +597,12 @@ int RewriteVariableFile(WCHAR const* input, WCHAR const* output, UINT16 weight)
                 sourceFvar.begin() + sourceAxesOffset + axesBytes,
                 rewrittenFvar.begin() + rewrittenAxesOffset),
         "fvar axis records or defaults changed while pinning");
-    Require(sfnt::ReadU16(rewrittenFvar, 12) == 1,
+    Require(Read16(rewrittenFvar, 12) == 1,
         "the rewritten fvar table does not contain one named instance");
     std::vector<ExpectedAxis> expectedAxes;
     for (UINT16 axisIndex = 0; axisIndex < axisCount; ++axisIndex)
     {
-        UINT32 const tag = sfnt::ReadU32(
+        UINT32 const tag = Read32(
             rewrittenFvar, rewrittenAxesOffset +
                 static_cast<size_t>(axisIndex) * axisSize);
         auto const option = std::find_if(
@@ -571,6 +644,8 @@ int wmain(int argc, WCHAR** argv)
     Require(argc == 1,
         "usage: directwrite-virtual-font-tests.exe [font-file] | "
         "--rewrite-variable input output weight");
+    TestBigEndianReader();
+    TestCrc32();
 #ifndef MACTYPE_PROBE_HAVE_FREETYPE
     ValidateFreeType(nullptr, {});
 #endif
@@ -583,7 +658,7 @@ int wmain(int argc, WCHAR** argv)
                 identity.family == L"Alias",
             "the plain alias must build");
     Require(Table(plain, kOs2, true) == Table(source, kOs2, false) &&
-                sfnt::ReadU16(Table(plain, kHead, true), 44) == 0,
+                Read16(Table(plain, kHead, true), 44) == 0,
             "an alias without a weight override must keep OS/2 and head bytes");
 
     font::AliasOptions bold;
@@ -594,9 +669,9 @@ int wmain(int argc, WCHAR** argv)
                 source, 0, L"Alias", bold, advertised, identity)),
             "the weight-advertising alias must build");
     std::vector<BYTE> const os2 = Table(advertised, kOs2, true);
-    Require(sfnt::ReadU16(os2, 4) == 700 && sfnt::ReadU16(os2, 62) == 0x0020,
+    Require(Read16(os2, 4) == 700 && Read16(os2, 62) == 0x0020,
             "a bold advertisement must set usWeightClass and BOLD and clear REGULAR");
-    Require((sfnt::ReadU16(Table(advertised, kHead, true), 44) & 1) != 0,
+    Require((Read16(Table(advertised, kHead, true), 44) & 1) != 0,
             "a bold advertisement must set head.macStyle bold");
     Require(sfnt::TableChecksum(advertised.data(), advertised.size()) == 0xB1B0AFBA,
             "the head checksum adjustment must cover the rewritten tables");
@@ -622,8 +697,8 @@ int wmain(int argc, WCHAR** argv)
     bold.weight = 400;
     Require(SUCCEEDED(font::BuildAliasedSfnt(
                 advertised, 0, L"Alias", bold, plain, identity)) &&
-                sfnt::ReadU16(Table(plain, kOs2, true), 62) == 0x0040 &&
-                (sfnt::ReadU16(Table(plain, kHead, true), 44) & 1) == 0,
+                Read16(Table(plain, kOs2, true), 62) == 0x0040 &&
+                (Read16(Table(plain, kHead, true), 44) & 1) == 0,
             "a regular advertisement must clear the bold flags again");
     Require(Name(plain, 2) == L"Bold",
             "a regular advertisement must leave the subfamily names alone");
@@ -645,25 +720,25 @@ int wmain(int argc, WCHAR** argv)
                 variableSource, 0, L"Alias", pinned, pinnedAlias, identity)),
             "the pinned variable alias must build");
     std::vector<BYTE> const pinnedFvar = Table(pinnedAlias, kFvar, true);
-    Require(sfnt::ReadU16(pinnedFvar, 12) == 1 && pinnedFvar.size() == 70 &&
-                sfnt::ReadU16(pinnedFvar, 56) == 258 &&
-                sfnt::ReadU32(pinnedFvar, 60) == (500U << 16) &&
-                sfnt::ReadU32(pinnedFvar, 64) == (100U << 16),
+    Require(Read16(pinnedFvar, 12) == 1 && pinnedFvar.size() == 70 &&
+                Read16(pinnedFvar, 56) == 258 &&
+                Read32(pinnedFvar, 60) == (500U << 16) &&
+                Read32(pinnedFvar, 64) == (100U << 16),
             "fvar must retain only the pinned named instance without moving its axes");
     Require(HasName(pinnedAlias, 2) && HasName(pinnedAlias, 17) &&
                 HasName(pinnedAlias, 256) && HasName(pinnedAlias, 257) &&
                 HasName(pinnedAlias, 258) && HasName(pinnedAlias, 259) &&
                 HasName(pinnedAlias, 260) && HasName(pinnedAlias, 261) &&
-                sfnt::ReadU16(pinnedFvar, 34) == 2,
+                Read16(pinnedFvar, 34) == 2,
             "pinning removed shared or unused name records");
     Require(Table(pinnedAlias, kGlyf, true) == Table(variableSource, kGlyf, false) &&
                 Table(pinnedAlias, kGvar, true) == Table(variableSource, kGvar, false),
             "pinning a variable alias must leave glyf and gvar bytes unchanged");
     std::vector<BYTE> const pinnedOs2 = Table(pinnedAlias, kOs2, true);
-    Require(sfnt::ReadU16(pinnedOs2, 4) == 500 &&
-                sfnt::ReadU16(pinnedOs2, 6) == 5 &&
-                (sfnt::ReadU16(pinnedOs2, 62) & 0x0020) == 0 &&
-                (sfnt::ReadU16(Table(pinnedAlias, kHead, true), 44) & 1) == 0,
+    Require(Read16(pinnedOs2, 4) == 500 &&
+                Read16(pinnedOs2, 6) == 5 &&
+                (Read16(pinnedOs2, 62) & 0x0020) == 0 &&
+                (Read16(Table(pinnedAlias, kHead, true), 44) & 1) == 0,
             "pinned axes must set OS/2 weight and width and head bold state");
 
     font::AliasOptions pinnedBold = pinned;
@@ -674,9 +749,9 @@ int wmain(int argc, WCHAR** argv)
                 variableSource, 0, L"Alias", pinnedBold, pinnedBoldAlias, identity)),
             "the pinned bold-advertised alias must build");
     std::vector<BYTE> const pinnedBoldOs2 = Table(pinnedBoldAlias, kOs2, true);
-    Require(sfnt::ReadU16(pinnedBoldOs2, 4) == 700 &&
-                (sfnt::ReadU16(pinnedBoldOs2, 62) & 0x0020) != 0 &&
-                (sfnt::ReadU16(Table(pinnedBoldAlias, kHead, true), 44) & 1) != 0 &&
+    Require(Read16(pinnedBoldOs2, 4) == 700 &&
+                (Read16(pinnedBoldOs2, 62) & 0x0020) != 0 &&
+                (Read16(Table(pinnedBoldAlias, kHead, true), 44) & 1) != 0 &&
                 pinnedBoldAlias != pinnedAlias,
             "an explicit weight override was replaced by the pinned coordinate");
 

@@ -14,6 +14,7 @@
 #include <array>
 #include <cstddef>
 #include <iomanip>
+#include <iostream>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -322,8 +323,10 @@ enum class SystemCollectionMode {
   factory3,
   factory6_weight_stretch_style,
   factory6_typographic,
+  factory6_typographic_local,
   factory7_weight_stretch_style,
   factory7_typographic,
+  factory7_typographic_local,
   factory6_font_set,
   factory7_font_set,
 };
@@ -344,6 +347,7 @@ bool SupportsSystemCollectionMode(IDWriteFactory* factory,
   }
   if (mode == SystemCollectionMode::factory6_weight_stretch_style ||
       mode == SystemCollectionMode::factory6_typographic ||
+      mode == SystemCollectionMode::factory6_typographic_local ||
       mode == SystemCollectionMode::factory6_font_set) {
     IDWriteFactory6* raw_factory6 = nullptr;
     const HRESULT result = factory->QueryInterface(&raw_factory6);
@@ -390,6 +394,7 @@ bool AcquireSystemFontCollection(
   }
   if (mode == SystemCollectionMode::factory6_weight_stretch_style ||
       mode == SystemCollectionMode::factory6_typographic ||
+      mode == SystemCollectionMode::factory6_typographic_local ||
       mode == SystemCollectionMode::factory6_font_set) {
     IDWriteFactory6* raw_factory6 = nullptr;
     const HRESULT factory_result = factory->QueryInterface(&raw_factory6);
@@ -416,17 +421,20 @@ bool AcquireSystemFontCollection(
       }
       return true;
     }
+    const BOOL include_downloadable_fonts =
+        mode == SystemCollectionMode::factory6_typographic_local ? FALSE : TRUE;
     const DWRITE_FONT_FAMILY_MODEL family_model =
-        mode == SystemCollectionMode::factory6_typographic
+        mode == SystemCollectionMode::factory6_typographic ||
+                mode == SystemCollectionMode::factory6_typographic_local
             ? DWRITE_FONT_FAMILY_MODEL_TYPOGRAPHIC
             : DWRITE_FONT_FAMILY_MODEL_WEIGHT_STRETCH_STYLE;
     IDWriteFontCollection2* raw_collection = nullptr;
     const HRESULT collection_result = factory6->GetSystemFontCollection(
-        TRUE, family_model, &raw_collection);
+        include_downloadable_fonts, family_model, &raw_collection);
     UniqueCom<IDWriteFontCollection2> first(raw_collection);
     IDWriteFontCollection2* raw_repeated_collection = nullptr;
     const HRESULT repeated_result = factory6->GetSystemFontCollection(
-        TRUE, family_model, &raw_repeated_collection);
+        include_downloadable_fonts, family_model, &raw_repeated_collection);
     UniqueCom<IDWriteFontCollection2> repeated(raw_repeated_collection);
     if (FAILED(collection_result) || first == nullptr ||
         FAILED(repeated_result) || repeated == nullptr) {
@@ -466,13 +474,16 @@ bool AcquireSystemFontCollection(
     }
     return true;
   }
+  const BOOL include_downloadable_fonts =
+      mode == SystemCollectionMode::factory7_typographic_local ? FALSE : TRUE;
   const DWRITE_FONT_FAMILY_MODEL family_model =
-      mode == SystemCollectionMode::factory7_typographic
+      mode == SystemCollectionMode::factory7_typographic ||
+              mode == SystemCollectionMode::factory7_typographic_local
           ? DWRITE_FONT_FAMILY_MODEL_TYPOGRAPHIC
           : DWRITE_FONT_FAMILY_MODEL_WEIGHT_STRETCH_STYLE;
   IDWriteFontCollection3* raw_collection = nullptr;
   const HRESULT collection_result = factory7->GetSystemFontCollection(
-      TRUE, family_model, &raw_collection);
+      include_downloadable_fonts, family_model, &raw_collection);
   collection.reset(raw_collection);
   if (FAILED(collection_result) || collection == nullptr) {
     error = L"IDWriteFactory7::GetSystemFontCollection failed";
@@ -556,6 +567,390 @@ std::wstring ResolveDirectWriteFamily(
     retained_face->reset(face.release());
   }
   return resolved.lfFaceName;
+}
+
+struct GlyphRunAxisObservation final {
+  std::wstring family;
+  std::wstring face;
+  FLOAT weight = 0.0F;
+  bool has_weight = false;
+  bool has_variations = false;
+};
+
+bool ReadLocalizedValue(IDWriteLocalizedStrings* values, const UINT32 index,
+                        std::wstring& value) {
+  if (values == nullptr || index >= values->GetCount()) {
+    return false;
+  }
+  UINT32 length = 0;
+  if (FAILED(values->GetStringLength(index, &length))) {
+    return false;
+  }
+  value.assign(static_cast<std::size_t>(length) + 1U, L'\0');
+  if (FAILED(values->GetString(index, value.data(), length + 1U))) {
+    value.clear();
+    return false;
+  }
+  value.resize(length);
+  return true;
+}
+
+bool ReadPreferredLocalizedValue(IDWriteLocalizedStrings* values,
+                                 std::wstring& value) {
+  if (values == nullptr || values->GetCount() == 0) {
+    return false;
+  }
+  UINT32 index = 0;
+  BOOL locale_exists = FALSE;
+  if (FAILED(values->FindLocaleName(L"en-us", &index, &locale_exists))) {
+    return false;
+  }
+  return ReadLocalizedValue(values, locale_exists == FALSE ? 0 : index, value) &&
+         !value.empty();
+}
+
+bool ReadFaceAxisObservation(IDWriteFontFace* face,
+                             GlyphRunAxisObservation& observation) {
+  IDWriteFontFace5* raw_face5 = nullptr;
+  const HRESULT face_result =
+      face == nullptr ? E_INVALIDARG : face->QueryInterface(&raw_face5);
+  UniqueCom<IDWriteFontFace5> face5(raw_face5);
+  if (FAILED(face_result) || face5 == nullptr) {
+    return false;
+  }
+
+  IDWriteLocalizedStrings* raw_names = nullptr;
+  const HRESULT names_result = face5->GetFamilyNames(&raw_names);
+  UniqueCom<IDWriteLocalizedStrings> names(raw_names);
+  if (FAILED(names_result) || names == nullptr || names->GetCount() == 0) {
+    return false;
+  }
+  if (!ReadPreferredLocalizedValue(names.get(), observation.family)) {
+    return false;
+  }
+  IDWriteLocalizedStrings* raw_face_names = nullptr;
+  const HRESULT face_names_result = face5->GetFaceNames(&raw_face_names);
+  UniqueCom<IDWriteLocalizedStrings> face_names(raw_face_names);
+  if (FAILED(face_names_result) ||
+      !ReadPreferredLocalizedValue(face_names.get(), observation.face)) {
+    return false;
+  }
+
+  const UINT32 axis_count = face5->GetFontAxisValueCount();
+  std::vector<DWRITE_FONT_AXIS_VALUE> axes(axis_count);
+  if (axis_count != 0 &&
+      FAILED(face5->GetFontAxisValues(axes.data(), axis_count))) {
+    return false;
+  }
+  for (const DWRITE_FONT_AXIS_VALUE& axis : axes) {
+    if (axis.axisTag == DWRITE_FONT_AXIS_TAG_WEIGHT) {
+      observation.weight = axis.value;
+      observation.has_weight = true;
+      break;
+    }
+  }
+  observation.has_variations = face5->HasVariations() != FALSE;
+  return observation.has_weight;
+}
+
+class GlyphRunAxisRecorder final : public IDWriteTextRenderer {
+ public:
+  IFACEMETHODIMP QueryInterface(REFIID iid, void** object) override {
+    if (object == nullptr) {
+      return E_POINTER;
+    }
+    if (iid == __uuidof(IUnknown) ||
+        iid == __uuidof(IDWritePixelSnapping) ||
+        iid == __uuidof(IDWriteTextRenderer)) {
+      *object = static_cast<IDWriteTextRenderer*>(this);
+      AddRef();
+      return S_OK;
+    }
+    *object = nullptr;
+    return E_NOINTERFACE;
+  }
+
+  IFACEMETHODIMP_(ULONG) AddRef() override {
+    return static_cast<ULONG>(InterlockedIncrement(&references_));
+  }
+
+  IFACEMETHODIMP_(ULONG) Release() override {
+    const LONG remaining = InterlockedDecrement(&references_);
+    if (remaining == 0) {
+      delete this;
+    }
+    return static_cast<ULONG>(remaining);
+  }
+
+  IFACEMETHODIMP IsPixelSnappingDisabled(void*, BOOL* is_disabled) override {
+    if (is_disabled == nullptr) {
+      return E_POINTER;
+    }
+    *is_disabled = FALSE;
+    return S_OK;
+  }
+
+  IFACEMETHODIMP GetCurrentTransform(void*, DWRITE_MATRIX* transform) override {
+    if (transform == nullptr) {
+      return E_POINTER;
+    }
+    *transform = DWRITE_MATRIX{1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F};
+    return S_OK;
+  }
+
+  IFACEMETHODIMP GetPixelsPerDip(void*, FLOAT* pixels_per_dip) override {
+    if (pixels_per_dip == nullptr) {
+      return E_POINTER;
+    }
+    *pixels_per_dip = 1.0F;
+    return S_OK;
+  }
+
+  IFACEMETHODIMP DrawGlyphRun(
+      void*, FLOAT, FLOAT, DWRITE_MEASURING_MODE,
+      const DWRITE_GLYPH_RUN* glyph_run,
+      const DWRITE_GLYPH_RUN_DESCRIPTION*, IUnknown*) override {
+    GlyphRunAxisObservation observation;
+    if (glyph_run == nullptr ||
+        !ReadFaceAxisObservation(glyph_run->fontFace, observation)) {
+      return E_FAIL;
+    }
+    observations_.push_back(std::move(observation));
+    return S_OK;
+  }
+
+  IFACEMETHODIMP DrawUnderline(void*, FLOAT, FLOAT,
+                               const DWRITE_UNDERLINE*, IUnknown*) override {
+    return S_OK;
+  }
+
+  IFACEMETHODIMP DrawStrikethrough(
+      void*, FLOAT, FLOAT, const DWRITE_STRIKETHROUGH*, IUnknown*) override {
+    return S_OK;
+  }
+
+  IFACEMETHODIMP DrawInlineObject(void*, FLOAT, FLOAT, IDWriteInlineObject*,
+                                  BOOL, BOOL, IUnknown*) override {
+    return S_OK;
+  }
+
+  const std::vector<GlyphRunAxisObservation>& observations() const noexcept {
+    return observations_;
+  }
+
+ private:
+  ~GlyphRunAxisRecorder() = default;
+
+  LONG references_ = 1;
+  std::vector<GlyphRunAxisObservation> observations_;
+};
+
+bool ObserveLayoutAxis(IDWriteFactory* factory,
+                       const SystemCollectionMode collection_mode,
+                       const std::wstring_view source_family,
+                       const FLOAT requested_weight,
+                       GlyphRunAxisObservation& observation,
+                       std::wstring& error) {
+  UniqueCom<IDWriteFontCollection> collection;
+  if (!AcquireSystemFontCollection(factory, collection_mode, collection,
+                                   error)) {
+    return false;
+  }
+
+  const std::wstring family_name(source_family);
+  IDWriteTextFormat* raw_format = nullptr;
+  const HRESULT format_result = factory->CreateTextFormat(
+      family_name.c_str(), collection.get(), DWRITE_FONT_WEIGHT_NORMAL,
+      DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 18.0F, L"en-us",
+      &raw_format);
+  UniqueCom<IDWriteTextFormat> format(raw_format);
+  if (FAILED(format_result) || format == nullptr) {
+    error = L"CreateTextFormat failed for the axis-pin probe";
+    return false;
+  }
+
+  constexpr std::wstring_view text = L"A";
+  IDWriteTextLayout* raw_layout = nullptr;
+  const HRESULT layout_result = factory->CreateTextLayout(
+      text.data(), static_cast<UINT32>(text.size()), format.get(), 128.0F,
+      64.0F, &raw_layout);
+  UniqueCom<IDWriteTextLayout> layout(raw_layout);
+  if (FAILED(layout_result) || layout == nullptr) {
+    error = L"CreateTextLayout failed for the axis-pin probe";
+    return false;
+  }
+
+  IDWriteTextLayout4* raw_layout4 = nullptr;
+  const HRESULT layout4_result = layout->QueryInterface(&raw_layout4);
+  UniqueCom<IDWriteTextLayout4> layout4(raw_layout4);
+  if (FAILED(layout4_result) || layout4 == nullptr) {
+    error = L"IDWriteTextLayout4 is unavailable for the axis-pin probe";
+    return false;
+  }
+  const DWRITE_FONT_AXIS_VALUE axis_value = {
+      DWRITE_FONT_AXIS_TAG_WEIGHT, requested_weight};
+  const DWRITE_TEXT_RANGE range = {0, static_cast<UINT32>(text.size())};
+  if (FAILED(layout4->SetFontAxisValues(&axis_value, 1, range))) {
+    error = L"IDWriteTextLayout4::SetFontAxisValues failed";
+    return false;
+  }
+
+  UniqueCom<GlyphRunAxisRecorder> recorder(new GlyphRunAxisRecorder());
+  const HRESULT draw_result = layout->Draw(nullptr, recorder.get(), 0.0F, 0.0F);
+  if (FAILED(draw_result) || recorder->observations().size() != 1) {
+    error = L"IDWriteTextLayout::Draw did not produce one axis observation";
+    return false;
+  }
+  observation = recorder->observations().front();
+  return true;
+}
+
+void PrintLayoutAxisObservation(const std::wstring_view model,
+                                const FLOAT requested_weight,
+                                const GlyphRunAxisObservation& observation) {
+  std::wostringstream output;
+  output << L"axis-pin model=" << model << L" requested-wght="
+         << std::fixed << std::setprecision(1) << requested_weight
+         << L" face-family=\"" << observation.family << L"\" face-name=\""
+         << observation.face << L"\" face-wght=" << observation.weight << L'\n';
+  std::wcout << output.str();
+}
+
+bool ResolveFontSetNamedInstance(IDWriteFactory* factory,
+                                 const std::wstring_view family,
+                                 GlyphRunAxisObservation& observation) {
+  IDWriteFactory3* raw_factory3 = nullptr;
+  const HRESULT factory_result = factory->QueryInterface(&raw_factory3);
+  UniqueCom<IDWriteFactory3> factory3(raw_factory3);
+  if (FAILED(factory_result) || factory3 == nullptr) {
+    return false;
+  }
+  IDWriteFontSet* raw_system_set = nullptr;
+  const HRESULT set_result = factory3->GetSystemFontSet(&raw_system_set);
+  UniqueCom<IDWriteFontSet> system_set(raw_system_set);
+  if (FAILED(set_result) || system_set == nullptr) {
+    return false;
+  }
+
+  const std::wstring family_name(family);
+  constexpr std::array<DWRITE_FONT_PROPERTY_ID, 3> family_properties = {
+      DWRITE_FONT_PROPERTY_ID_WEIGHT_STRETCH_STYLE_FAMILY_NAME,
+      DWRITE_FONT_PROPERTY_ID_TYPOGRAPHIC_FAMILY_NAME,
+      DWRITE_FONT_PROPERTY_ID_WIN32_FAMILY_NAME,
+  };
+  for (const DWRITE_FONT_PROPERTY_ID property_id : family_properties) {
+    const DWRITE_FONT_PROPERTY property = {
+        property_id, family_name.c_str(), nullptr};
+    IDWriteFontSet* raw_matches = nullptr;
+    const HRESULT match_result =
+        system_set->GetMatchingFonts(&property, 1, &raw_matches);
+    UniqueCom<IDWriteFontSet> matches(raw_matches);
+    if (FAILED(match_result) || matches == nullptr ||
+        matches->GetFontCount() == 0) {
+      continue;
+    }
+    IDWriteFontFaceReference* raw_reference = nullptr;
+    const HRESULT reference_result =
+        matches->GetFontFaceReference(0, &raw_reference);
+    UniqueCom<IDWriteFontFaceReference> reference(raw_reference);
+    IDWriteFontFace3* raw_face = nullptr;
+    const HRESULT face_result =
+        FAILED(reference_result) || reference == nullptr
+            ? E_UNEXPECTED
+            : reference->CreateFontFace(&raw_face);
+    UniqueCom<IDWriteFontFace3> face(raw_face);
+    return SUCCEEDED(face_result) && face != nullptr &&
+           ReadFaceAxisObservation(face.get(), observation);
+  }
+  return false;
+}
+
+bool ObservePinnedAxisLayouts(const std::wstring_view source_family,
+                              const std::wstring_view replacement_family,
+                              void* directwrite_factory,
+                              std::wstring& error) {
+  constexpr std::wstring_view fixture_source = L"Arial";
+  constexpr std::wstring_view fixture_replacement = L"Bahnschrift SemiBold";
+  if (_wcsicmp(std::wstring(source_family).c_str(), fixture_source.data()) != 0 ||
+      _wcsicmp(std::wstring(replacement_family).c_str(),
+               fixture_replacement.data()) != 0) {
+    return true;
+  }
+
+  IDWriteFactory* factory = static_cast<IDWriteFactory*>(directwrite_factory);
+  IDWriteFactory* raw_factory = nullptr;
+  UniqueCom<IDWriteFactory> owned_factory;
+  if (factory == nullptr) {
+    const HRESULT factory_result = DWriteCreateFactory(
+        DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+        reinterpret_cast<IUnknown**>(&raw_factory));
+    owned_factory.reset(raw_factory);
+    if (FAILED(factory_result) || owned_factory == nullptr) {
+      error = L"DWriteCreateFactory failed for the axis-pin probe";
+      return false;
+    }
+    factory = owned_factory.get();
+  }
+
+  GlyphRunAxisObservation named_instance;
+  {
+    FontSubstitutionSwitch disabled;
+    if (!ResolveFontSetNamedInstance(factory, replacement_family,
+                                     named_instance) ||
+        !named_instance.has_variations || named_instance.weight != 600.0F) {
+      error = L"Bahnschrift SemiBold is not a variable wght=600 named instance";
+      return false;
+    }
+  }
+
+  struct CollectionProbe final {
+    SystemCollectionMode mode;
+    std::wstring_view name;
+    bool must_pin;
+  };
+  constexpr std::array<CollectionProbe, 5> collection_probes = {{
+      {SystemCollectionMode::legacy,
+       L"weight/stretch/style with explicit axis values, not pinned (known "
+       L"limitation)",
+       false},
+      {SystemCollectionMode::factory6_typographic_local,
+       L"typographic-slot-51-local", true},
+      {SystemCollectionMode::factory6_typographic,
+       L"typographic-slot-51-downloadable", true},
+      {SystemCollectionMode::factory7_typographic_local,
+       L"typographic-slot-56-local", true},
+      {SystemCollectionMode::factory7_typographic,
+       L"typographic-slot-56-downloadable", true},
+  }};
+  constexpr std::array<FLOAT, 2> requested_weights = {400.0F, 700.0F};
+  const std::wstring source_name(source_family);
+  for (const CollectionProbe& collection_probe : collection_probes) {
+    if ((collection_probe.mode == SystemCollectionMode::factory7_typographic ||
+         collection_probe.mode ==
+             SystemCollectionMode::factory7_typographic_local) &&
+        !SupportsSystemCollectionMode(factory, collection_probe.mode)) {
+      continue;
+    }
+    for (const FLOAT requested_weight : requested_weights) {
+      GlyphRunAxisObservation observation;
+      if (!ObserveLayoutAxis(factory, collection_probe.mode, source_family,
+                             requested_weight, observation, error)) {
+        return false;
+      }
+      PrintLayoutAxisObservation(collection_probe.name, requested_weight,
+                                 observation);
+      if (collection_probe.must_pin &&
+          (_wcsicmp(observation.family.c_str(), source_name.c_str()) != 0 ||
+           observation.weight != named_instance.weight)) {
+        std::wostringstream message;
+        message << L"Axis pin changed for " << collection_probe.name
+                << L" at requested wght " << requested_weight;
+        error = message.str();
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 class AnalysisSource final : public IDWriteTextAnalysisSource {
@@ -1473,6 +1868,11 @@ FontSubstitutionObservation ObserveFontSubstitution(
   if (SupportsSystemCollectionMode(
           factory, SystemCollectionMode::factory6_typographic)) {
     merge_modern_observation(observe_typographic_fallback());
+  }
+  if (!ObservePinnedAxisLayouts(source_family, replacement_family,
+                                directwrite_factory, error)) {
+    result.active_source_fingerprint.clear();
+    return result;
   }
   if (result.direct_write.active_source_family.empty() ||
       indexed.active_source_family.empty() ||

@@ -3134,6 +3134,23 @@ static void SignalAliasCollectionResult(
 		SignalDirectWriteDiagnostic(stage);
 }
 
+static void SignalTypographicCollectionResult(
+	directwrite_alias::TypographicCollectionStatus status)
+{
+	switch (status)
+	{
+	case directwrite_alias::TypographicCollectionStatus::builderUnavailable:
+		SignalDirectWriteDiagnostic(
+			L"alias-typographic-static-builder-unavailable");
+		break;
+	case directwrite_alias::TypographicCollectionStatus::staticBuildFailed:
+		SignalDirectWriteDiagnostic(L"alias-typographic-static-build-failed");
+		break;
+	case directwrite_alias::TypographicCollectionStatus::pinned:
+		break;
+	}
+}
+
 HRESULT WINAPI IMPL_Factory_GetSystemFontCollection(
 	IDWriteFactory* self,
 	IDWriteFontCollection** fontCollection,
@@ -3360,8 +3377,13 @@ HRESULT WINAPI IMPL_Factory6_GetSystemFontCollection(
 		}
 		else if (fontFamilyModel == DWRITE_FONT_FAMILY_MODEL_TYPOGRAPHIC)
 		{
+			directwrite_alias::TypographicCollectionStatus typographicStatus =
+				directwrite_alias::TypographicCollectionStatus::pinned;
 			aliasResult = directwrite_alias::GetOrCreateTypographicCollection(
-				self, aliases, includeDownloadableFonts != FALSE, fontCollection);
+				self, aliases, includeDownloadableFonts != FALSE, fontCollection,
+				&typographicStatus);
+			if (SUCCEEDED(aliasResult))
+				SignalTypographicCollectionResult(typographicStatus);
 		}
 		if (SUCCEEDED(aliasResult) && *fontCollection != nullptr)
 		{
@@ -3464,8 +3486,13 @@ HRESULT WINAPI IMPL_Factory7_GetSystemFontCollection(
 		}
 		else if (fontFamilyModel == DWRITE_FONT_FAMILY_MODEL_TYPOGRAPHIC)
 		{
+			directwrite_alias::TypographicCollectionStatus typographicStatus =
+				directwrite_alias::TypographicCollectionStatus::pinned;
 			aliasResult = directwrite_alias::GetOrCreateTypographicCollection(
-				self, aliases, includeDownloadableFonts != FALSE, &aliasCollection);
+				self, aliases, includeDownloadableFonts != FALSE, &aliasCollection,
+				&typographicStatus);
+			if (SUCCEEDED(aliasResult))
+				SignalTypographicCollectionResult(typographicStatus);
 		}
 		if (SUCCEEDED(aliasResult) && aliasCollection != nullptr)
 			aliasResult = aliasCollection->QueryInterface(fontCollection);

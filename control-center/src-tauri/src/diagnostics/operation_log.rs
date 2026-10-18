@@ -270,7 +270,7 @@ fn valid_event(record: &EventRecord) -> bool {
         && record
             .detail
             .as_ref()
-            .map_or(true, |detail| detail.len() <= MAX_EVENT_DETAIL_BYTES)
+            .is_none_or(|detail| detail.len() <= MAX_EVENT_DETAIL_BYTES)
 }
 
 fn convert_operation(entry: OperationLogEntry) -> EventRecord {

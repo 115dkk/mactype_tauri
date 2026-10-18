@@ -8,11 +8,11 @@ use serde::{Deserialize, Serialize};
 mod receipt;
 mod recovery;
 
-use crate::runtime_installer::deployment::{verify_existing_payload, write_synced, LoadedPayload};
 use crate::runtime_installer::RuntimeInstaller;
+use crate::runtime_installer::deployment::{LoadedPayload, verify_existing_payload, write_synced};
 use crate::storage::{
-    atomic_write, create_protected_directory, read_bounded_regular_file, reject_reparse_ancestors,
-    temporary_nonce, SetupError,
+    SetupError, atomic_write, create_protected_directory, read_bounded_regular_file,
+    reject_reparse_ancestors, temporary_nonce,
 };
 use receipt::{
     read_runtime_directory_receipt, remove_repair_directory, remove_verified_backup_directory,

@@ -2,8 +2,8 @@ use std::fs;
 use std::path::Path;
 
 use mactype_service_platform::{
-    interactive_processes, known_folder_path, process_session_id, read_shortcut, ComApartment,
-    ComThreading, KnownFolder, RegistryKey, RegistryRoot, RegistryValueData, RegistryView,
+    ComApartment, ComThreading, KnownFolder, RegistryKey, RegistryRoot, RegistryValueData,
+    RegistryView, interactive_processes, known_folder_path, process_session_id, read_shortcut,
 };
 
 use crate::ConflictObservation;

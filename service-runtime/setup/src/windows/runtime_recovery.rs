@@ -25,15 +25,15 @@ fn inspect_binding(
     match manager.observe_fixed_service() {
         OpenServiceObservation::Absent => Ok(RuntimeServiceBinding::Absent),
         OpenServiceObservation::OwnedStopped | OpenServiceObservation::OwnedRunning => {
-            if let Some(candidate) = candidate {
-                if manager.owned_service_points_to(candidate)? {
-                    return Ok(RuntimeServiceBinding::Candidate);
-                }
+            if let Some(candidate) = candidate
+                && manager.owned_service_points_to(candidate)?
+            {
+                return Ok(RuntimeServiceBinding::Candidate);
             }
-            if let Some(previous) = previous {
-                if manager.owned_service_points_to(previous)? {
-                    return Ok(RuntimeServiceBinding::Previous);
-                }
+            if let Some(previous) = previous
+                && manager.owned_service_points_to(previous)?
+            {
+                return Ok(RuntimeServiceBinding::Previous);
             }
             Err(SetupError::CleanupUnknown(
                 "owned service image matches neither side of the runtime activation receipt"

@@ -68,10 +68,9 @@ fn user_writable_or_relative_roots_are_rejected() {
             r"C:\Users\person\AppData\Local\MacType",
         ),
     ] {
-        assert!(MachinePaths::from_trusted_os_roots(
-            Path::new(program_files),
-            Path::new(program_data)
-        )
-        .is_err());
+        assert!(
+            MachinePaths::from_trusted_os_roots(Path::new(program_files), Path::new(program_data))
+                .is_err()
+        );
     }
 }

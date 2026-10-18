@@ -116,7 +116,7 @@ fn module_paths(process: &Process) -> io::Result<Vec<String>> {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "a loaded module path is not valid Unicode",
-                ))
+                ));
             }
         }
     }
@@ -188,7 +188,7 @@ fn starts_with_ignore_case(text: &str, prefix: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalized_module_path, process_module_presence, ModulePresence};
+    use super::{ModulePresence, normalized_module_path, process_module_presence};
 
     #[test]
     fn the_two_device_namespace_spellings_reduce_to_the_ordinary_path() {

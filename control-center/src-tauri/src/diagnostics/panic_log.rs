@@ -363,23 +363,31 @@ mod tests {
         assert!(event.params["message"].starts_with("fixture-message-"));
         assert!(event.params["location"].starts_with("fixture.rs:17:9"));
         assert!(event.params["thread"].starts_with("fixture-thread-"));
-        assert!(event
-            .detail
-            .as_deref()
-            .is_some_and(|detail| detail.contains("fixture-backtrace")));
+        assert!(
+            event
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("fixture-backtrace"))
+        );
         assert!(event.code.len() <= MAX_EVENT_CODE_BYTES);
         assert!(event.params.len() <= MAX_EVENT_PARAMS);
-        assert!(event
-            .params
-            .iter()
-            .all(|(key, value)| key.len() <= MAX_EVENT_PARAM_BYTES
-                && value.len() <= MAX_EVENT_PARAM_BYTES));
-        assert!(event
-            .detail
-            .as_ref()
-            .is_some_and(|detail| detail.len() <= MAX_EVENT_DETAIL_BYTES));
-        assert!(fs::metadata(root.join(operation_log::LOG_FILE_NAME))
-            .is_ok_and(|metadata| metadata.len() <= MAX_EVENT_LOG_BYTES));
+        assert!(
+            event
+                .params
+                .iter()
+                .all(|(key, value)| key.len() <= MAX_EVENT_PARAM_BYTES
+                    && value.len() <= MAX_EVENT_PARAM_BYTES)
+        );
+        assert!(
+            event
+                .detail
+                .as_ref()
+                .is_some_and(|detail| detail.len() <= MAX_EVENT_DETAIL_BYTES)
+        );
+        assert!(
+            fs::metadata(root.join(operation_log::LOG_FILE_NAME))
+                .is_ok_and(|metadata| metadata.len() <= MAX_EVENT_LOG_BYTES)
+        );
         let _ = fs::remove_dir_all(root);
     }
 

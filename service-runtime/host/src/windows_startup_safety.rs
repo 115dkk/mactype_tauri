@@ -3,7 +3,7 @@ mod service_registry;
 
 use std::path::Path;
 
-use mactype_service_contract::{effective_service_name, StructuredServiceError};
+use mactype_service_contract::{StructuredServiceError, effective_service_name};
 use mactype_service_platform::RegistryView;
 
 use crate::StartupSafetySnapshot;

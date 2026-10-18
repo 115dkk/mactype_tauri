@@ -1,13 +1,12 @@
 use std::mem::{align_of, offset_of, size_of};
 
 use mactype_service_contract::{
-    ProfileDigest, RendererActivationContractError, RendererActivationDisposition,
-    RendererActivationEvidenceV1, RendererActivationReason, RendererArchitecture,
-    RendererCapability, RendererCapabilitySet, RendererModuleLoad, RendererProcessIdentity,
-    RendererRuntimeBinding, RuntimeGenerationId, PROFILE_DIGEST_TEXT_BYTES,
-    RENDERER_ACTIVATION_EVIDENCE_V1_SIZE, RENDERER_ACTIVATION_QUERY_EXPORT,
-    RENDERER_ACTIVATION_SCHEMA_VERSION, RENDERER_CAPABILITY_KNOWN_MASK,
-    RUNTIME_GENERATION_TEXT_BYTES,
+    PROFILE_DIGEST_TEXT_BYTES, ProfileDigest, RENDERER_ACTIVATION_EVIDENCE_V1_SIZE,
+    RENDERER_ACTIVATION_QUERY_EXPORT, RENDERER_ACTIVATION_SCHEMA_VERSION,
+    RENDERER_CAPABILITY_KNOWN_MASK, RUNTIME_GENERATION_TEXT_BYTES, RendererActivationContractError,
+    RendererActivationDisposition, RendererActivationEvidenceV1, RendererActivationReason,
+    RendererArchitecture, RendererCapability, RendererCapabilitySet, RendererModuleLoad,
+    RendererProcessIdentity, RendererRuntimeBinding, RuntimeGenerationId,
 };
 
 fn binding() -> RendererRuntimeBinding {
@@ -195,9 +194,11 @@ fn canonical_enum_and_code_mappings_round_trip() {
         RendererCapability::FontSubstitution,
     ] {
         assert_eq!(RendererCapability::from_code(value.code()), Some(value));
-        assert!(RendererCapabilitySet::from_bits(value.bit())
-            .unwrap()
-            .contains(value));
+        assert!(
+            RendererCapabilitySet::from_bits(value.bit())
+                .unwrap()
+                .contains(value)
+        );
     }
     assert_eq!(
         RendererCapabilitySet::from_bits(RENDERER_CAPABILITY_KNOWN_MASK)

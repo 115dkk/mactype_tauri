@@ -6,7 +6,7 @@ use std::fs;
 
 use mactype_service_contract::{GenerationId, GenerationPointer, ProfileCatalog, SourceMetadata};
 use mactype_service_host::{
-    ProtectedRendererRuntime, ACTIVE_PROFILE_ABSENT_CODE, RUNTIME_PROFILE_ABSENT_CODE,
+    ACTIVE_PROFILE_ABSENT_CODE, ProtectedRendererRuntime, RUNTIME_PROFILE_ABSENT_CODE,
 };
 
 #[test]

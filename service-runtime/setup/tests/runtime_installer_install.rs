@@ -187,9 +187,11 @@ fn verified_runtime_accepts_only_the_five_manifest_files_plus_generated_mactype_
         b"unsigned",
     )
     .unwrap();
-    assert!(installer
-        .deploy_with_health_check(&payload, |_| Ok(()))
-        .is_err());
+    assert!(
+        installer
+            .deploy_with_health_check(&payload, |_| Ok(()))
+            .is_err()
+    );
 }
 
 #[test]
@@ -245,9 +247,11 @@ fn runtime_staging_cleanup_never_deletes_an_unexpected_entry() {
     let unexpected = stale.join("do-not-delete.txt");
     fs::write(&unexpected, b"operator file").unwrap();
 
-    assert!(RuntimeInstaller::new(paths)
-        .deploy_with_health_check(&payload(base.path(), "0.2.0", b"service-v2"), |_| Ok(()))
-        .is_err());
+    assert!(
+        RuntimeInstaller::new(paths)
+            .deploy_with_health_check(&payload(base.path(), "0.2.0", b"service-v2"), |_| Ok(()))
+            .is_err()
+    );
 
     assert!(unexpected.exists());
 }
@@ -266,9 +270,11 @@ fn staging_failure_does_not_register_a_partial_generation() {
 
     assert!(result.is_err());
     assert!(!paths.runtime_versions().join("0.2.0").exists());
-    assert!(!paths
-        .service_root()
-        .join("runtime-receipts")
-        .join("0.2.0.json")
-        .exists());
+    assert!(
+        !paths
+            .service_root()
+            .join("runtime-receipts")
+            .join("0.2.0.json")
+            .exists()
+    );
 }

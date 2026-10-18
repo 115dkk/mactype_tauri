@@ -1,4 +1,4 @@
-use super::{hash, ProfileDocument, TextEncoding};
+use super::{ProfileDocument, TextEncoding, hash};
 use std::{
     fs,
     path::Path,

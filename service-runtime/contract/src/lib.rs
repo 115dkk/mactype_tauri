@@ -16,51 +16,49 @@ mod runtime_activation;
 mod service_configuration;
 mod unity;
 
-pub use broker::{parse_broker_command, BrokerCommand, BrokerCommandError};
+pub use broker::{BrokerCommand, BrokerCommandError, parse_broker_command};
 pub use console_process::ConsoleProcessPolicy;
 pub use health::{
-    ArchitectureInjectionTelemetry, ComponentReadiness, HealthContractError, HealthReport,
-    HealthState, InjectionArchitecture, InjectionSuccess, InjectionTelemetry, ReadinessReport,
-    StructuredServiceError, HEALTH_PROTOCOL_VERSION,
+    ArchitectureInjectionTelemetry, ComponentReadiness, HEALTH_PROTOCOL_VERSION,
+    HealthContractError, HealthReport, HealthState, InjectionArchitecture, InjectionSuccess,
+    InjectionTelemetry, ReadinessReport, StructuredServiceError,
 };
 pub use manifest::{
-    runtime_generation_id, sha256_digest, verify_runtime_manifest, ManifestError,
-    VerifiedRuntimeManifest, IMMUTABLE_RUNTIME_FILES, MAX_RUNTIME_FILE_BYTES,
-    RUNTIME_MANIFEST_SCHEMA,
+    IMMUTABLE_RUNTIME_FILES, MAX_RUNTIME_FILE_BYTES, ManifestError, RUNTIME_MANIFEST_SCHEMA,
+    VerifiedRuntimeManifest, runtime_generation_id, sha256_digest, verify_runtime_manifest,
 };
 pub use migration_pin::{
-    MigrationPinError, MigrationPinnedRuntime, MigrationRuntimePin,
     MAX_MIGRATION_RUNTIME_PIN_BYTES, MAX_PINNED_RUNTIMES, MIGRATION_RUNTIME_PIN_SCHEMA,
+    MigrationPinError, MigrationPinnedRuntime, MigrationRuntimePin,
 };
 pub use paths::{MachinePathError, MachinePaths};
 pub use private_freetype::PrivateFreeTypePolicy;
 pub use profile::{
-    validate_protected_renderer_profile, GenerationId, GenerationPointer, ProfileCatalog,
-    ProfileError, ProtectedRendererProfileError, SourceMetadata, MAX_PROFILE_BYTES,
-    MAX_PROFILE_POINTER_BYTES, PROFILE_POINTER_SCHEMA,
+    GenerationId, GenerationPointer, MAX_PROFILE_BYTES, MAX_PROFILE_POINTER_BYTES,
+    PROFILE_POINTER_SCHEMA, ProfileCatalog, ProfileError, ProtectedRendererProfileError,
+    SourceMetadata, validate_protected_renderer_profile,
 };
 pub use renderer_activation::{
-    ProfileDigest, RendererActivationContractError, RendererActivationDisposition,
-    RendererActivationEvidenceV1, RendererActivationReason, RendererArchitecture,
-    RendererCapability, RendererCapabilitySet, RendererModuleLoad, RendererProcessIdentity,
-    RendererRuntimeBinding, RuntimeGenerationId, PROFILE_DIGEST_CANONICAL_CHARS,
-    PROFILE_DIGEST_PREFIX, PROFILE_DIGEST_TEXT_BYTES, RENDERER_ACTIVATION_EVIDENCE_V1_SIZE,
-    RENDERER_ACTIVATION_QUERY_EXPORT, RENDERER_ACTIVATION_SCHEMA_VERSION,
-    RENDERER_CAPABILITY_KNOWN_MASK, RUNTIME_GENERATION_CANONICAL_CHARS,
-    RUNTIME_GENERATION_TEXT_BYTES,
+    PROFILE_DIGEST_CANONICAL_CHARS, PROFILE_DIGEST_PREFIX, PROFILE_DIGEST_TEXT_BYTES,
+    ProfileDigest, RENDERER_ACTIVATION_EVIDENCE_V1_SIZE, RENDERER_ACTIVATION_QUERY_EXPORT,
+    RENDERER_ACTIVATION_SCHEMA_VERSION, RENDERER_CAPABILITY_KNOWN_MASK,
+    RUNTIME_GENERATION_CANONICAL_CHARS, RUNTIME_GENERATION_TEXT_BYTES,
+    RendererActivationContractError, RendererActivationDisposition, RendererActivationEvidenceV1,
+    RendererActivationReason, RendererArchitecture, RendererCapability, RendererCapabilitySet,
+    RendererModuleLoad, RendererProcessIdentity, RendererRuntimeBinding, RuntimeGenerationId,
 };
 pub use runtime_activation::{
+    LEGACY_RUNTIME_ACTIVATION_SCHEMA, MAX_RUNTIME_ACTIVATION_RECEIPT_BYTES,
+    MAX_RUNTIME_POINTER_BYTES, ParsedRuntimeActivationReceipt, RUNTIME_ACTIVATION_SCHEMA,
+    RUNTIME_POINTER_SCHEMA, RuntimeActivationContractError, RuntimeActivationPhase,
+    RuntimeActivationReceipt, RuntimeGenerationPointer, UNCOMMITTED_RUNTIME_ACTIVATION_SCHEMA,
     parse_runtime_activation_receipt, valid_runtime_version_component,
-    ParsedRuntimeActivationReceipt, RuntimeActivationContractError, RuntimeActivationPhase,
-    RuntimeActivationReceipt, RuntimeGenerationPointer, LEGACY_RUNTIME_ACTIVATION_SCHEMA,
-    MAX_RUNTIME_ACTIVATION_RECEIPT_BYTES, MAX_RUNTIME_POINTER_BYTES, RUNTIME_ACTIVATION_SCHEMA,
-    RUNTIME_POINTER_SCHEMA, UNCOMMITTED_RUNTIME_ACTIVATION_SCHEMA,
 };
 pub use service_configuration::{
+    FIXED_ACCOUNT, FIXED_ERROR_CONTROL, FIXED_SERVICE_TYPE, FIXED_START_TYPE,
+    ObservedServiceConfiguration, SERVICE_DISPLAY_NAME, ServiceConfigurationDrift,
     owned_service_identity, service_configuration_drift, service_image_matches_protected_contract,
-    service_image_matches_protected_layout, ObservedServiceConfiguration,
-    ServiceConfigurationDrift, FIXED_ACCOUNT, FIXED_ERROR_CONTROL, FIXED_SERVICE_TYPE,
-    FIXED_START_TYPE, SERVICE_DISPLAY_NAME,
+    service_image_matches_protected_layout,
 };
 pub use unity::{UnityFontHookMode, UnityFontHookPolicy};
 
@@ -85,4 +83,4 @@ pub const fn effective_health_pipe_name() -> &'static str {
         HEALTH_PIPE_NAME
     }
 }
-pub use appinit::{appinit_mactype_conflict, AppInitValueError};
+pub use appinit::{AppInitValueError, appinit_mactype_conflict};

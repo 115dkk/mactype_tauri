@@ -1,7 +1,7 @@
 #[path = "support/event_sink.rs"]
 mod event_sink;
 
-use event_sink::{discard_events, RecordingEventSink};
+use event_sink::{RecordingEventSink, discard_events};
 use std::ffi::OsString;
 use std::fs;
 use std::sync::Mutex;

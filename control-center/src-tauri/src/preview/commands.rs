@@ -1,10 +1,10 @@
 use super::{
-    installation::{collect_installation, InstallationStatus},
-    render::{
-        render_preview, set_native_preview as send_native_preview, NativePreviewOptions,
-        NativePreviewState, PreviewResult, PreviewSample,
-    },
     PreviewEngine, PreviewState,
+    installation::{InstallationStatus, collect_installation},
+    render::{
+        NativePreviewOptions, NativePreviewState, PreviewResult, PreviewSample, render_preview,
+        set_native_preview as send_native_preview,
+    },
 };
 use crate::installation_root;
 use std::{collections::BTreeMap, env};

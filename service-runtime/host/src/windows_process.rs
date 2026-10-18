@@ -4,13 +4,13 @@ use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mactype_service_contract::StructuredServiceError;
-use mactype_service_platform::{process_session_id, MachineKind, Process, ProcessAccess};
+use mactype_service_platform::{MachineKind, Process, ProcessAccess, process_session_id};
 use windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER;
 
 use crate::generated_unity_anticheat_catalog::{
     ANTI_CHEAT_TOP_LEVEL_EXACT, ANTI_CHEAT_TOP_LEVEL_PREFIXES,
 };
-use crate::image_subsystem::{read_image_subsystem, ImageSubsystem};
+use crate::image_subsystem::{ImageSubsystem, read_image_subsystem};
 use crate::{
     BinarySignaturePolicy, DynamicCodePolicy, InspectionEvidence, PrivateFreeTypeClassification,
     ProcessArchitecture, ProcessIdentity, ProcessInspection, ProcessInspectionError,

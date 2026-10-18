@@ -8,8 +8,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mactype_service_contract::{
-    RendererActivationDisposition, RendererActivationEvidenceV1, RendererArchitecture,
-    RendererModuleLoad, RendererRuntimeBinding, RENDERER_ACTIVATION_EVIDENCE_V1_SIZE,
+    RENDERER_ACTIVATION_EVIDENCE_V1_SIZE, RendererActivationDisposition,
+    RendererActivationEvidenceV1, RendererArchitecture, RendererModuleLoad, RendererRuntimeBinding,
 };
 
 use crate::observer::{

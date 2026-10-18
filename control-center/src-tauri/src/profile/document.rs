@@ -1,13 +1,13 @@
 use super::{
+    AdvancedProfile, IndividualSetting, IniNode, LineEnding, ProfileDocument, ProfileLists,
+    ProfileSnapshot, ShadowSetting,
     bold_substitution::canonical_pairs,
     codec::{decode, detect_line_ending, original_legacy_lines, split_lines},
     identity::identify_profile,
-    AdvancedProfile, IndividualSetting, IniNode, LineEnding, ProfileDocument, ProfileLists,
-    ProfileSnapshot, ShadowSetting,
 };
 use crate::{
     bounded_io::read_bounded_file,
-    generated_settings::{SettingDefinition, SETTINGS},
+    generated_settings::{SETTINGS, SettingDefinition},
 };
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, path::Path, path::PathBuf};

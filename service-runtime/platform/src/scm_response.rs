@@ -6,7 +6,7 @@ use std::mem::{align_of, size_of};
 
 use windows_sys::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER;
 
-use crate::bounded_read::{probe_word_aligned, CallOutcome, ProbeError, WordAlignedBuffer};
+use crate::bounded_read::{CallOutcome, ProbeError, WordAlignedBuffer, probe_word_aligned};
 
 /// The largest response any SCM query may hand back. `QueryServiceConfigW`
 /// documents 8 KiB; the Config2 levels are larger, so one generous cap
@@ -281,10 +281,12 @@ mod tests {
         let response = ScmResponse::from_words(vec![11, 22, 33], 3 * size_of::<usize>());
         let pointer = response.storage.as_ptr().cast::<usize>();
         assert_eq!(response.array(pointer, 3, 3).unwrap(), [11, 22, 33]);
-        assert!(response
-            .array::<usize>(std::ptr::null(), 0, 0)
-            .unwrap()
-            .is_empty());
+        assert!(
+            response
+                .array::<usize>(std::ptr::null(), 0, 0)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -293,19 +295,27 @@ mod tests {
         let start = response.start();
         let end = response.end();
 
-        assert!(response
-            .array::<usize>((start - size_of::<usize>()) as *const usize, 1, 1)
-            .is_err());
+        assert!(
+            response
+                .array::<usize>((start - size_of::<usize>()) as *const usize, 1, 1)
+                .is_err()
+        );
         assert!(response.array::<usize>(end as *const usize, 1, 1).is_err());
-        assert!(response
-            .array::<usize>((start + 1) as *const usize, 1, 1)
-            .is_err());
-        assert!(response
-            .array(response.storage.as_ptr().cast::<usize>(), 3, 3)
-            .is_err());
-        assert!(response
-            .array(response.storage.as_ptr().cast::<usize>(), 2, 1)
-            .is_err());
+        assert!(
+            response
+                .array::<usize>((start + 1) as *const usize, 1, 1)
+                .is_err()
+        );
+        assert!(
+            response
+                .array(response.storage.as_ptr().cast::<usize>(), 3, 3)
+                .is_err()
+        );
+        assert!(
+            response
+                .array(response.storage.as_ptr().cast::<usize>(), 2, 1)
+                .is_err()
+        );
     }
 
     #[test]

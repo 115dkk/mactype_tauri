@@ -1,10 +1,10 @@
 use std::fs;
 
 use mactype_service_contract::{
+    FIXED_ACCOUNT, FIXED_ERROR_CONTROL, FIXED_SERVICE_TYPE, FIXED_START_TYPE,
+    ObservedServiceConfiguration, SERVICE_DISPLAY_NAME, ServiceConfigurationDrift,
     owned_service_identity, service_configuration_drift, service_image_matches_protected_contract,
-    service_image_matches_protected_layout, ObservedServiceConfiguration,
-    ServiceConfigurationDrift, FIXED_ACCOUNT, FIXED_ERROR_CONTROL, FIXED_SERVICE_TYPE,
-    FIXED_START_TYPE, SERVICE_DISPLAY_NAME,
+    service_image_matches_protected_layout,
 };
 
 struct TemporaryDirectory(std::path::PathBuf);

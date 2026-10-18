@@ -16,25 +16,25 @@ use windows_sys::Win32::Security::{
 };
 use windows_sys::Win32::System::Services::{
     ChangeServiceConfig2W, ChangeServiceConfigW, CloseServiceHandle, ControlService,
-    CreateServiceW, DeleteService, OpenSCManagerW, OpenServiceW, QueryServiceConfig2W,
-    QueryServiceConfigW, QueryServiceObjectSecurity, QueryServiceStatusEx,
-    SetServiceObjectSecurity, StartServiceW, QUERY_SERVICE_CONFIGW, SC_ACTION, SC_ACTION_NONE,
-    SC_ACTION_OWN_RESTART, SC_ACTION_REBOOT, SC_ACTION_RESTART, SC_ACTION_RUN_COMMAND, SC_HANDLE,
-    SC_MANAGER_CONNECT, SC_MANAGER_CREATE_SERVICE, SC_STATUS_PROCESS_INFO, SERVICE_ALL_ACCESS,
-    SERVICE_AUTO_START, SERVICE_CHANGE_CONFIG, SERVICE_CONFIG_DELAYED_AUTO_START_INFO,
-    SERVICE_CONFIG_DESCRIPTION, SERVICE_CONFIG_FAILURE_ACTIONS,
-    SERVICE_CONFIG_FAILURE_ACTIONS_FLAG, SERVICE_CONFIG_PRESHUTDOWN_INFO,
-    SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO, SERVICE_CONFIG_SERVICE_SID_INFO,
-    SERVICE_CONFIG_TRIGGER_INFO, SERVICE_CONTINUE_PENDING, SERVICE_CONTROL_STOP,
-    SERVICE_DELAYED_AUTO_START_INFO, SERVICE_DESCRIPTIONW, SERVICE_ERROR_NORMAL,
-    SERVICE_FAILURE_ACTIONSW, SERVICE_FAILURE_ACTIONS_FLAG, SERVICE_NO_CHANGE, SERVICE_PAUSED,
-    SERVICE_PAUSE_PENDING, SERVICE_PRESHUTDOWN_INFO, SERVICE_QUERY_CONFIG, SERVICE_QUERY_STATUS,
-    SERVICE_REQUIRED_PRIVILEGES_INFOW, SERVICE_RUNNING, SERVICE_SID_INFO, SERVICE_START,
-    SERVICE_START_PENDING, SERVICE_STATUS, SERVICE_STATUS_PROCESS, SERVICE_STOP, SERVICE_STOPPED,
-    SERVICE_STOP_PENDING, SERVICE_TRIGGER_INFO, SERVICE_WIN32_OWN_PROCESS,
+    CreateServiceW, DeleteService, OpenSCManagerW, OpenServiceW, QUERY_SERVICE_CONFIGW,
+    QueryServiceConfig2W, QueryServiceConfigW, QueryServiceObjectSecurity, QueryServiceStatusEx,
+    SC_ACTION, SC_ACTION_NONE, SC_ACTION_OWN_RESTART, SC_ACTION_REBOOT, SC_ACTION_RESTART,
+    SC_ACTION_RUN_COMMAND, SC_HANDLE, SC_MANAGER_CONNECT, SC_MANAGER_CREATE_SERVICE,
+    SC_STATUS_PROCESS_INFO, SERVICE_ALL_ACCESS, SERVICE_AUTO_START, SERVICE_CHANGE_CONFIG,
+    SERVICE_CONFIG_DELAYED_AUTO_START_INFO, SERVICE_CONFIG_DESCRIPTION,
+    SERVICE_CONFIG_FAILURE_ACTIONS, SERVICE_CONFIG_FAILURE_ACTIONS_FLAG,
+    SERVICE_CONFIG_PRESHUTDOWN_INFO, SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO,
+    SERVICE_CONFIG_SERVICE_SID_INFO, SERVICE_CONFIG_TRIGGER_INFO, SERVICE_CONTINUE_PENDING,
+    SERVICE_CONTROL_STOP, SERVICE_DELAYED_AUTO_START_INFO, SERVICE_DESCRIPTIONW,
+    SERVICE_ERROR_NORMAL, SERVICE_FAILURE_ACTIONS_FLAG, SERVICE_FAILURE_ACTIONSW,
+    SERVICE_NO_CHANGE, SERVICE_PAUSE_PENDING, SERVICE_PAUSED, SERVICE_PRESHUTDOWN_INFO,
+    SERVICE_QUERY_CONFIG, SERVICE_QUERY_STATUS, SERVICE_REQUIRED_PRIVILEGES_INFOW, SERVICE_RUNNING,
+    SERVICE_SID_INFO, SERVICE_START, SERVICE_START_PENDING, SERVICE_STATUS, SERVICE_STATUS_PROCESS,
+    SERVICE_STOP, SERVICE_STOP_PENDING, SERVICE_STOPPED, SERVICE_TRIGGER_INFO,
+    SERVICE_WIN32_OWN_PROCESS, SetServiceObjectSecurity, StartServiceW,
 };
 
-use crate::bounded_read::{probe_bytes, CallOutcome, ProbeError};
+use crate::bounded_read::{CallOutcome, ProbeError, probe_bytes};
 use crate::scm_response::ScmResponse;
 use crate::security::SelfRelativeSecurityDescriptor;
 use crate::wide::{multi_string, wide_null};
@@ -1021,8 +1021,8 @@ mod tests {
     use windows_sys::Win32::System::Services::QUERY_SERVICE_CONFIGW;
 
     use super::{
-        parse_config, query_service_security_bytes, FailureActionKind, ServiceAccess,
-        ServiceControlManager, ServiceManagerAccess, ServiceState, MAX_SECURITY_DESCRIPTOR_BYTES,
+        FailureActionKind, MAX_SECURITY_DESCRIPTOR_BYTES, ServiceAccess, ServiceControlManager,
+        ServiceManagerAccess, ServiceState, parse_config, query_service_security_bytes,
     };
     use crate::bounded_read::CallOutcome;
     use crate::scm_response::ScmResponse;
@@ -1189,10 +1189,12 @@ mod tests {
             .unwrap()
             .expect("the Windows Event Log service exists");
 
-        assert!(service
-            .description()
-            .unwrap()
-            .is_some_and(|text| !text.is_empty()));
+        assert!(
+            service
+                .description()
+                .unwrap()
+                .is_some_and(|text| !text.is_empty())
+        );
         service.failure_actions().unwrap();
         service.failure_actions_on_non_crash_failures().unwrap();
         service.delayed_auto_start().unwrap();
@@ -1220,13 +1222,15 @@ mod tests {
         let config = service.config().unwrap();
         assert!(config.image_path.to_ascii_lowercase().contains("svchost"));
         assert!(!config.display_name.is_empty());
-        assert!(manager
-            .open(
-                "mactype-platform-missing-service",
-                ServiceAccess::QueryStatus
-            )
-            .unwrap()
-            .is_none());
+        assert!(
+            manager
+                .open(
+                    "mactype-platform-missing-service",
+                    ServiceAccess::QueryStatus
+                )
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -1239,9 +1243,11 @@ mod tests {
         let config = service.config().unwrap();
 
         assert!(config.dependencies.len() >= 2);
-        assert!(config
-            .dependencies
-            .iter()
-            .any(|dependency| dependency.eq_ignore_ascii_case("NSI")));
+        assert!(
+            config
+                .dependencies
+                .iter()
+                .any(|dependency| dependency.eq_ignore_ascii_case("NSI"))
+        );
     }
 }

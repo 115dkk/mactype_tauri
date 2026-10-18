@@ -1,8 +1,8 @@
 #[cfg(test)]
 use super::storage::replace_file;
 use super::{
-    document::validate_entry, LegacyProfileCandidate, ProfileDocument,
-    MAX_PROFILE_DIRECTORY_ENTRIES,
+    LegacyProfileCandidate, MAX_PROFILE_DIRECTORY_ENTRIES, ProfileDocument,
+    document::validate_entry,
 };
 use crate::{bounded_io::read_bounded_file, installation_root};
 use std::{

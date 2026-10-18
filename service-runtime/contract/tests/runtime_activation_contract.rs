@@ -1,7 +1,7 @@
 use mactype_service_contract::{
-    parse_runtime_activation_receipt, ParsedRuntimeActivationReceipt, RuntimeActivationPhase,
-    RuntimeActivationReceipt, RuntimeGenerationPointer, MAX_RUNTIME_ACTIVATION_RECEIPT_BYTES,
-    MAX_RUNTIME_POINTER_BYTES,
+    MAX_RUNTIME_ACTIVATION_RECEIPT_BYTES, MAX_RUNTIME_POINTER_BYTES,
+    ParsedRuntimeActivationReceipt, RuntimeActivationPhase, RuntimeActivationReceipt,
+    RuntimeGenerationPointer, parse_runtime_activation_receipt,
 };
 
 #[test]
@@ -38,12 +38,13 @@ fn activation_contract_rejects_unsafe_versions_unknown_fields_and_oversized_inpu
         br#"{"schema":3,"phase":"committed","previous":null,"activated":{"schema":1,"version":"0.2.0"},"foreign":true}"#
     )
     .is_err());
-    assert!(parse_runtime_activation_receipt(&vec![
-        b'x';
-        MAX_RUNTIME_ACTIVATION_RECEIPT_BYTES as usize
-            + 1
-    ])
-    .is_err());
+    assert!(
+        parse_runtime_activation_receipt(&vec![
+            b'x';
+            MAX_RUNTIME_ACTIVATION_RECEIPT_BYTES as usize + 1
+        ])
+        .is_err()
+    );
     assert!(
         RuntimeGenerationPointer::parse(&vec![b'x'; MAX_RUNTIME_POINTER_BYTES as usize + 1])
             .is_err()

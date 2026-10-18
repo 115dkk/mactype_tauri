@@ -1,6 +1,6 @@
 use super::{
-    helper::PreviewManager, installation::collect_installation, PreviewDiagnosticSnapshot,
-    PreviewState,
+    PreviewDiagnosticSnapshot, PreviewState, helper::PreviewManager,
+    installation::collect_installation,
 };
 
 impl PreviewState {

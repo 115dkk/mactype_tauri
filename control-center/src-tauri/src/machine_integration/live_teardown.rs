@@ -10,10 +10,10 @@ use super::legacy_mactray::{
     ServiceRuntimeState,
 };
 use super::legacy_migration::{
-    disable_startup_scope, prepare_backup, remove_after_verified, restore_startup_scope, rollback,
-    stop_legacy, RemovalVerification, StartupReceiptScope,
+    RemovalVerification, StartupReceiptScope, disable_startup_scope, prepare_backup,
+    remove_after_verified, restore_startup_scope, rollback, stop_legacy,
 };
-use super::{execute_machine_action_with, MachineAction, MachineBackend};
+use super::{MachineAction, MachineBackend, execute_machine_action_with};
 use crate::service_contract::{
     HealthState, InstallationState, RuntimeState, ServiceBackend, SystemServiceStatus,
 };

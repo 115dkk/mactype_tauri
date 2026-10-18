@@ -153,15 +153,13 @@ impl ProfileDocument {
                 suffix,
                 raw,
             } = node
+                && section.eq_ignore_ascii_case(target_section)
+                && key.eq_ignore_ascii_case(key_name)
             {
-                if section.eq_ignore_ascii_case(target_section)
-                    && key.eq_ignore_ascii_case(key_name)
-                {
-                    *value = rendered.clone();
-                    *raw = format!("{prefix}{separator}{rendered}{suffix}");
-                    self.dirty_keys.insert(dirty_key.to_owned());
-                    return;
-                }
+                *value = rendered.clone();
+                *raw = format!("{prefix}{separator}{rendered}{suffix}");
+                self.dirty_keys.insert(dirty_key.to_owned());
+                return;
             }
         }
         let ending = self.ending();

@@ -1,7 +1,7 @@
-use super::super::{ProfileTransferToken, PROFILE_TRANSFER_NONCE_BYTES};
+use super::super::{PROFILE_TRANSFER_NONCE_BYTES, ProfileTransferToken};
 #[cfg(test)]
 use mactype_service_platform::cancelled_pipe_operations;
-use mactype_service_platform::{system_random_bytes, PipeError, PipeWait, Process};
+use mactype_service_platform::{PipeError, PipeWait, Process, system_random_bytes};
 use std::time::{Duration, Instant};
 
 pub(in crate::machine_integration::open_service) const PROFILE_PIPE_TIMEOUT: Duration =
@@ -59,8 +59,8 @@ pub(super) fn map_pipe_error(error: PipeError, operation: &str, no_progress: &st
     }
 }
 
-pub(in crate::machine_integration::open_service) fn random_profile_transfer_nonce(
-) -> Result<[u8; PROFILE_TRANSFER_NONCE_BYTES], String> {
+pub(in crate::machine_integration::open_service) fn random_profile_transfer_nonce()
+-> Result<[u8; PROFILE_TRANSFER_NONCE_BYTES], String> {
     let mut nonce = [0_u8; PROFILE_TRANSFER_NONCE_BYTES];
     system_random_bytes(&mut nonce)
         .map_err(|error| format!("generating the profile transfer nonce failed: {error}"))?;

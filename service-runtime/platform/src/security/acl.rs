@@ -8,7 +8,7 @@ use std::ptr::{self, NonNull};
 use windows_sys::Win32::Foundation::LocalFree;
 use windows_sys::Win32::Security::Authorization::ConvertStringSidToSidW;
 use windows_sys::Win32::Security::{
-    GetLengthSid, IsValidSid, ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, PSID,
+    ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, GetLengthSid, IsValidSid, PSID,
 };
 
 use crate::wide::wide_null;

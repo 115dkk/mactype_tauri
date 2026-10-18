@@ -1,13 +1,13 @@
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 
-use mactype_service_contract::{GenerationId, ProfileCatalog, SourceMetadata, MAX_PROFILE_BYTES};
+use mactype_service_contract::{GenerationId, MAX_PROFILE_BYTES, ProfileCatalog, SourceMetadata};
 use serde::Serialize;
 
 use super::ProfileStore;
 use crate::storage::{
-    create_protected_directory, read_bounded_directory, read_bounded_regular_file,
-    reject_reparse_ancestors, temporary_nonce, SetupError,
+    SetupError, create_protected_directory, read_bounded_directory, read_bounded_regular_file,
+    reject_reparse_ancestors, temporary_nonce,
 };
 
 #[derive(Serialize)]

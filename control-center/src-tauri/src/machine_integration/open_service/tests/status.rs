@@ -183,26 +183,30 @@ fn live_ready_is_authoritative_only_when_the_pipe_server_pid_matches_scm() {
         Some("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned()),
     );
 
-    assert!(select_service_health(
-        RuntimeState::Running,
-        4242,
-        Some(LiveHealthReport {
-            server_pid: 7331,
-            report: ready.clone(),
-        }),
-        None,
-    )
-    .is_none());
-    assert!(select_service_health(
-        RuntimeState::Running,
-        4242,
-        Some(LiveHealthReport {
-            server_pid: 4242,
-            report: ready,
-        }),
-        None,
-    )
-    .is_some());
+    assert!(
+        select_service_health(
+            RuntimeState::Running,
+            4242,
+            Some(LiveHealthReport {
+                server_pid: 7331,
+                report: ready.clone(),
+            }),
+            None,
+        )
+        .is_none()
+    );
+    assert!(
+        select_service_health(
+            RuntimeState::Running,
+            4242,
+            Some(LiveHealthReport {
+                server_pid: 4242,
+                report: ready,
+            }),
+            None,
+        )
+        .is_some()
+    );
 }
 
 #[test]

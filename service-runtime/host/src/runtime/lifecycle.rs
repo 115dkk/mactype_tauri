@@ -1,6 +1,6 @@
 use mactype_service_contract::{
-    HealthReport, HealthState, InjectionTelemetry, ReadinessReport, RendererRuntimeBinding,
-    StructuredServiceError, HEALTH_PROTOCOL_VERSION,
+    HEALTH_PROTOCOL_VERSION, HealthReport, HealthState, InjectionTelemetry, ReadinessReport,
+    RendererRuntimeBinding, StructuredServiceError,
 };
 
 use super::{
@@ -8,8 +8,8 @@ use super::{
     StopSignal,
 };
 use crate::{
-    HostEvent, ServiceStatus, StatusReporter, ACTIVE_PROFILE_ABSENT_CODE,
-    RUNTIME_PROFILE_ABSENT_CODE,
+    ACTIVE_PROFILE_ABSENT_CODE, HostEvent, RUNTIME_PROFILE_ABSENT_CODE, ServiceStatus,
+    StatusReporter,
 };
 
 const ERROR_SERVICE_SPECIFIC_ERROR: u32 = 1066;

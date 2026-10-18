@@ -1,7 +1,7 @@
 use super::{
+    IniNode, ProfileDocument,
     codec::{encode, encode_preserving_legacy_lines, original_legacy_lines},
     document::{hash, validate_entry},
-    IniNode, ProfileDocument,
 };
 use crate::bounded_io::read_bounded_file;
 use std::{

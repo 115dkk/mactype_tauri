@@ -1,6 +1,6 @@
 use mactype_service_contract::{
-    validate_protected_renderer_profile, ConsoleProcessPolicy, PrivateFreeTypePolicy,
-    ProtectedRendererProfileError, UnityFontHookMode, UnityFontHookPolicy,
+    ConsoleProcessPolicy, PrivateFreeTypePolicy, ProtectedRendererProfileError, UnityFontHookMode,
+    UnityFontHookPolicy, validate_protected_renderer_profile,
 };
 
 #[test]

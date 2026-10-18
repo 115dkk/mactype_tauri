@@ -1,6 +1,6 @@
 use std::path::{Component, Path};
 
-use mactype_service_contract::{parse_broker_command, BrokerCommand, BrokerCommandError};
+use mactype_service_contract::{BrokerCommand, BrokerCommandError, parse_broker_command};
 
 use crate::SetupError;
 

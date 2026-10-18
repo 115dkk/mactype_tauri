@@ -8,7 +8,6 @@ mod tray_startup;
 
 #[cfg(test)]
 use model::ServiceTriggerConfiguration;
-use model::{require_stable_migration_state, snapshot_trigger_configuration};
 pub(crate) use model::{
     FailureAction, FailureActionsConfiguration, LegacyScmSnapshot, SecurityDescriptorSnapshot,
     ServiceConfiguration, ServiceExtendedConfiguration,
@@ -18,24 +17,25 @@ pub(crate) use model::{
     LegacyTrayConflictState, LegacyTrayProcessState, LegacyTrayStartupEntry,
     LegacyTrayStartupSource, LegacyTrayStartupState, LegacyTrayStatus,
 };
+use model::{require_stable_migration_state, snapshot_trigger_configuration};
 #[cfg(test)]
 use ownership::{classify_configuration, owned_service_configuration};
 use ownership::{is_trusted_mactray_layout, status_from_configuration, with_capabilities};
 #[cfg(test)]
 use restore_contract::SERVICE_RESTORE_ORDER;
 use restore_contract::{
-    perform_service_configuration_restore, verify_restored_configuration,
-    ServiceConfigurationRestorer, ServiceRestoreStep,
+    ServiceConfigurationRestorer, ServiceRestoreStep, perform_service_configuration_restore,
+    verify_restored_configuration,
 };
 #[cfg(test)]
 use std::path::Path;
 use std::path::PathBuf;
 #[cfg(test)]
-use tray_exit::{request_tray_exit_with, LegacyTrayExitBackend, LegacyTrayExitOutcome};
+use tray_exit::{LegacyTrayExitBackend, LegacyTrayExitOutcome, request_tray_exit_with};
 pub(crate) use tray_process::observe_tray_process;
 #[cfg(test)]
 use tray_process::{
-    classify_tray_process_inventory, LegacyTrayProcessIdentity, LegacyTrayProcessObservation,
+    LegacyTrayProcessIdentity, LegacyTrayProcessObservation, classify_tray_process_inventory,
 };
 
 pub(crate) fn tray_status() -> LegacyTrayStatus {
@@ -46,20 +46,20 @@ pub(crate) fn tray_status() -> LegacyTrayStatus {
 }
 
 pub(crate) use startup_coordinator::{
-    disable_legacy_tray_startup_with, LegacyTrayStartupCoordinator,
+    LegacyTrayStartupCoordinator, disable_legacy_tray_startup_with,
 };
-pub(crate) use tray_exit::{request_tray_exit, LegacyTrayExitRequest};
+pub(crate) use tray_exit::{LegacyTrayExitRequest, request_tray_exit};
+pub(crate) use tray_startup::{
+    LegacyTrayStartupArtifact, LegacyTrayStartupLocator, LegacyTrayStartupScope,
+    StartupRestoreAction, observe_owned_tray_startup, plan_startup_restore,
+    read_tray_startup_artifact_bytes, remove_tray_startup_artifact_exact,
+    restore_tray_startup_artifact_if_absent, same_windows_path,
+};
 #[cfg(test)]
 use tray_startup::{
-    classify_startup_command, classify_startup_inventory, is_legacy_tray_startup_candidate,
-    startup_source_requires_current_user_sid, LegacyTrayStartupObservation,
-    StartupTargetClassification,
-};
-pub(crate) use tray_startup::{
-    observe_owned_tray_startup, plan_startup_restore, read_tray_startup_artifact_bytes,
-    remove_tray_startup_artifact_exact, restore_tray_startup_artifact_if_absent, same_windows_path,
-    LegacyTrayStartupArtifact, LegacyTrayStartupLocator, LegacyTrayStartupScope,
-    StartupRestoreAction,
+    LegacyTrayStartupObservation, StartupTargetClassification, classify_startup_command,
+    classify_startup_inventory, is_legacy_tray_startup_candidate,
+    startup_source_requires_current_user_sid,
 };
 
 #[cfg(windows)]

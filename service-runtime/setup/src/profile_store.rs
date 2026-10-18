@@ -3,13 +3,13 @@ mod journal;
 mod pointer;
 
 use mactype_service_contract::{
-    GenerationId, GenerationPointer, MachinePaths, ProfileCatalog, SourceMetadata,
-    MAX_PROFILE_POINTER_BYTES,
+    GenerationId, GenerationPointer, MAX_PROFILE_POINTER_BYTES, MachinePaths, ProfileCatalog,
+    SourceMetadata,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::profile_bridge::{MaterializedProfileClearError, ProfileRuntimeBridge};
-use crate::storage::{reject_reparse_ancestors, SetupError};
+use crate::storage::{SetupError, reject_reparse_ancestors};
 
 const LEGACY_PROFILE_ACTIVATION_SCHEMA: u32 = 1;
 const PROFILE_ACTIVATION_SCHEMA: u32 = 2;

@@ -1,12 +1,12 @@
 use super::{
     super::{
+        BROKER_SWITCH, BROKER_TRANSFER_SWITCH, BrokerResultDisposition, BrokerResultMessage,
+        SystemServiceAction,
         action_failure::{ActionBlocker, ActionFailure, RollbackOutcome},
         profile_transfer::{
-            profile_transfer_nonce_text, BrokerResultPipeServer, ProfilePipeServer,
-            PROFILE_PIPE_TIMEOUT,
+            BrokerResultPipeServer, PROFILE_PIPE_TIMEOUT, ProfilePipeServer,
+            profile_transfer_nonce_text,
         },
-        BrokerResultDisposition, BrokerResultMessage, SystemServiceAction, BROKER_SWITCH,
-        BROKER_TRANSFER_SWITCH,
     },
     installed_package::service_package,
     process::{combine_broker_cleanup_error, terminate_broker_process},
@@ -96,10 +96,10 @@ fn launch_elevated_broker(
     };
     // The pipe servers wait on the broker's own process object, so a broker
     // that dies mid-transfer ends the wait at once.
-    if let Some(server) = profile_transfer {
-        if let Err(error) = server.send_to(broker_pid, Some(&process), PROFILE_PIPE_TIMEOUT) {
-            return Err(cleanup_failure(&error, terminate_broker_process(&process)));
-        }
+    if let Some(server) = profile_transfer
+        && let Err(error) = server.send_to(broker_pid, Some(&process), PROFILE_PIPE_TIMEOUT)
+    {
+        return Err(cleanup_failure(&error, terminate_broker_process(&process)));
     }
     let broker_result =
         match result_transfer.receive_from(broker_pid, Some(&process), BROKER_TIMEOUT) {
@@ -240,8 +240,8 @@ mod tests {
         broker_channel_failure, interpret_broker_exit, with_service_package_before_elevation,
     };
     use crate::machine_integration::open_service::{
-        action_failure::{ActionBlocker, ActionFailureKind, AppInitConflictContext},
         BrokerResultDisposition, BrokerResultMessage,
+        action_failure::{ActionBlocker, ActionFailureKind, AppInitConflictContext},
     };
     use std::{cell::Cell, path::PathBuf};
 

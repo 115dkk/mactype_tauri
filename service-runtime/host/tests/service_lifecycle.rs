@@ -14,10 +14,9 @@ use mactype_service_contract::{
     RendererRuntimeBinding, RuntimeGenerationId, StructuredServiceError,
 };
 use mactype_service_host::{
-    CompositeHealthPublisher, FileHealthPublisher, HealthPublisher, InitializedRuntime,
-    RuntimeDriver, RuntimeHealthReporter, RuntimeInitializer, ScmState, ServiceRuntime,
-    ServiceStatus, StatusReporter, StopSignal, ACTIVE_PROFILE_ABSENT_CODE,
-    RUNTIME_PROFILE_ABSENT_CODE,
+    ACTIVE_PROFILE_ABSENT_CODE, CompositeHealthPublisher, FileHealthPublisher, HealthPublisher,
+    InitializedRuntime, RUNTIME_PROFILE_ABSENT_CODE, RuntimeDriver, RuntimeHealthReporter,
+    RuntimeInitializer, ScmState, ServiceRuntime, ServiceStatus, StatusReporter, StopSignal,
 };
 
 const PROFILE: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -228,16 +227,18 @@ fn absent_profile_states_end_the_start_with_a_clean_stop() {
 fn invalid_runtime_file_set_still_fails_the_start() {
     let recorder = Recorder::default();
 
-    assert!(ServiceRuntime::new("0.2.0", discard_events())
-        .run(
-            &recorder,
-            &recorder,
-            &ErrorInitializer {
-                code: "runtime-file-set-invalid",
-            },
-            &ImmediateStop,
-        )
-        .is_err());
+    assert!(
+        ServiceRuntime::new("0.2.0", discard_events())
+            .run(
+                &recorder,
+                &recorder,
+                &ErrorInitializer {
+                    code: "runtime-file-set-invalid",
+                },
+                &ImmediateStop,
+            )
+            .is_err()
+    );
 
     let state = recorder.state.lock().unwrap();
     assert_eq!(
@@ -286,16 +287,18 @@ fn invalid_runtime_file_set_still_fails_the_start() {
 #[test]
 fn initialization_failure_never_reports_running_or_ready() {
     let recorder = Recorder::default();
-    assert!(ServiceRuntime::new("0.2.0", discard_events())
-        .run(
-            &recorder,
-            &recorder,
-            &ErrorInitializer {
-                code: "profile-invalid",
-            },
-            &ImmediateStop,
-        )
-        .is_err());
+    assert!(
+        ServiceRuntime::new("0.2.0", discard_events())
+            .run(
+                &recorder,
+                &recorder,
+                &ErrorInitializer {
+                    code: "profile-invalid",
+                },
+                &ImmediateStop,
+            )
+            .is_err()
+    );
     let state = recorder.state.lock().unwrap();
     assert!(state.events.contains(&"health:Failed".to_owned()));
     assert!(state.events.contains(&"scm:Stopped".to_owned()));
@@ -374,9 +377,11 @@ fn every_lifecycle_reporter_fault_attempts_failed_health_and_stopped_with_error(
     ] {
         let recorder = FaultRecorder::new(fault);
 
-        assert!(ServiceRuntime::new("0.2.0", discard_events())
-            .run(&recorder, &recorder, &ReadyInitializer, &ImmediateStop)
-            .is_err());
+        assert!(
+            ServiceRuntime::new("0.2.0", discard_events())
+                .run(&recorder, &recorder, &ReadyInitializer, &ImmediateStop)
+                .is_err()
+        );
 
         let events = recorder.events.lock().unwrap();
         assert!(events.contains(&"health:Failed".to_owned()), "{events:?}");
@@ -405,9 +410,11 @@ fn incomplete_required_readiness_is_reported_as_failed_before_exit() {
     }
 
     let recorder = Recorder::default();
-    assert!(ServiceRuntime::new("0.2.0", discard_events())
-        .run(&recorder, &recorder, &IncompleteInitializer, &ImmediateStop)
-        .is_err());
+    assert!(
+        ServiceRuntime::new("0.2.0", discard_events())
+            .run(&recorder, &recorder, &IncompleteInitializer, &ImmediateStop)
+            .is_err()
+    );
     let state = recorder.state.lock().unwrap();
     assert!(state.events.contains(&"health:Failed".to_owned()));
     assert!(state.events.contains(&"scm:Stopped".to_owned()));
@@ -443,12 +450,14 @@ fn composite_health_publisher_updates_pipe_and_persisted_snapshot_together() {
     composite.publish(&report).unwrap();
 
     assert_eq!(FileHealthPublisher::read(&path).unwrap(), report);
-    assert!(recorder
-        .state
-        .lock()
-        .unwrap()
-        .events
-        .contains(&"health:Ready".to_owned()));
+    assert!(
+        recorder
+            .state
+            .lock()
+            .unwrap()
+            .events
+            .contains(&"health:Ready".to_owned())
+    );
 }
 
 #[test]
@@ -599,16 +608,18 @@ fn driver_error_after_requested_stop_reports_clean_stop_with_terminal_error() {
 fn driver_error_without_requested_stop_reports_failure() {
     let recorder = Recorder::default();
 
-    assert!(ServiceRuntime::new("0.2.0", discard_events())
-        .run(
-            &recorder,
-            &recorder,
-            &FailingDriverInitializer {
-                wait_for_stop: false,
-            },
-            &ImmediateStop,
-        )
-        .is_err());
+    assert!(
+        ServiceRuntime::new("0.2.0", discard_events())
+            .run(
+                &recorder,
+                &recorder,
+                &FailingDriverInitializer {
+                    wait_for_stop: false,
+                },
+                &ImmediateStop,
+            )
+            .is_err()
+    );
 
     let state = recorder.state.lock().unwrap();
     let failure = state.reports.last().unwrap();
@@ -684,10 +695,12 @@ fn driven_graceful_stop_replaces_degraded_with_terminal_unknown_before_scm_stopp
     assert!(ran.load(Ordering::Acquire));
     let live_state = live.state.lock().unwrap();
     let status_state = status.state.lock().unwrap();
-    assert!(live_state
-        .reports
-        .iter()
-        .any(|report| report.health == HealthState::Degraded));
+    assert!(
+        live_state
+            .reports
+            .iter()
+            .any(|report| report.health == HealthState::Degraded)
+    );
     let terminal = live_state.reports.last().unwrap();
     assert_eq!(terminal.health, HealthState::Unknown);
     assert_eq!(terminal.readiness, ReadinessReport::not_required());

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 
-use mactype_service_contract::{sha256_digest, MachinePaths};
+use mactype_service_contract::{MachinePaths, sha256_digest};
 use mactype_service_setup::FixedPayload;
 
 pub(crate) fn test_paths() -> (tempfile::TempDir, MachinePaths) {

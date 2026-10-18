@@ -3,7 +3,7 @@
 use std::io::Read;
 
 use mactype_service_contract::{BrokerCommand, MAX_PROFILE_BYTES};
-use mactype_service_setup::{parse_setup_command, SetupCommand, SetupError};
+use mactype_service_setup::{SetupCommand, SetupError, parse_setup_command};
 
 const SETUP_FAILURE_EXIT_CODE: i32 = 1;
 const SETUP_ROLLBACK_FAILURE_EXIT_CODE: i32 = 3;

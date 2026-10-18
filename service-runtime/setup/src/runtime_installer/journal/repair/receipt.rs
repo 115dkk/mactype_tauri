@@ -3,13 +3,13 @@ use std::fs;
 use std::path::Path;
 
 use mactype_service_contract::{
-    sha256_digest, IMMUTABLE_RUNTIME_FILES, MAX_PROFILE_BYTES, MAX_RUNTIME_FILE_BYTES,
+    IMMUTABLE_RUNTIME_FILES, MAX_PROFILE_BYTES, MAX_RUNTIME_FILE_BYTES, sha256_digest,
 };
 
 use super::RuntimeDirectoryReceipt;
 use crate::profile_bridge::GENERATED_PROFILE_NAME;
 use crate::storage::{
-    read_bounded_directory, read_bounded_regular_file, reject_reparse_ancestors, SetupError,
+    SetupError, read_bounded_directory, read_bounded_regular_file, reject_reparse_ancestors,
 };
 
 pub(super) fn valid_runtime_directory_receipt(receipt: &RuntimeDirectoryReceipt) -> bool {

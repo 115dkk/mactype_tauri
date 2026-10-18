@@ -70,11 +70,13 @@ fn helpers_and_dlls_are_selected_only_from_the_active_protected_runtime_generati
         generation.join("mactype-injector64.exe")
     );
     assert_eq!(assets.generation_id().as_str().len(), 64);
-    assert!(assets
-        .generation_id()
-        .as_str()
-        .bytes()
-        .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()));
+    assert!(
+        assets
+            .generation_id()
+            .as_str()
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    );
 }
 
 #[test]

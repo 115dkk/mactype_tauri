@@ -16,9 +16,9 @@ use inspector_support::{InspectorResponse, ScriptedInspector};
 use mactype_service_contract::{ConsoleProcessPolicy, PrivateFreeTypePolicy, UnityFontHookPolicy};
 use mactype_service_host::{
     BinarySignaturePolicy, BrokerDisposition, BrokerResult, DeferralReason, DynamicCodePolicy,
-    ImageSubsystem, InspectionEvidence, ProcessIdentity, ProcessInspection, ProcessOrchestrator,
-    ProcessOutcome, SessionChange, SystemCallDisablePolicy, TargetLifecycle, TargetLiveness,
-    MAX_DEFERRED_TARGETS, TARGET_VANISHED_RESULT_CODE,
+    ImageSubsystem, InspectionEvidence, MAX_DEFERRED_TARGETS, ProcessIdentity, ProcessInspection,
+    ProcessOrchestrator, ProcessOutcome, SessionChange, SystemCallDisablePolicy,
+    TARGET_VANISHED_RESULT_CODE, TargetLifecycle, TargetLiveness,
 };
 
 fn target(pid: u32) -> ProcessIdentity {

@@ -17,7 +17,7 @@ use crate::injection_orchestrator::{
     RetryScheduler,
 };
 use crate::observer::{
-    subscribe_process_creation, InjectionBroker, ProcessArchitecture, ProcessEventSource,
+    InjectionBroker, ProcessArchitecture, ProcessEventSource, subscribe_process_creation,
 };
 use crate::runtime::{InitializedRuntime, RuntimeDriver, RuntimeHealthReporter, StopSignal};
 use crate::target_validation::ProcessInspector;

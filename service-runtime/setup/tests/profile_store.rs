@@ -1,9 +1,9 @@
 use std::fs;
 #[cfg(feature = "ci-test-adapter")]
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use mactype_service_contract::{
-    GenerationPointer, MachinePaths, ProfileCatalog, SourceMetadata, MAX_PROFILE_BYTES,
+    GenerationPointer, MAX_PROFILE_BYTES, MachinePaths, ProfileCatalog, SourceMetadata,
 };
 use mactype_service_setup::{ProfileStore, SetupError};
 
@@ -253,9 +253,11 @@ fn profile_staging_cleanup_never_deletes_an_unexpected_entry() {
     let unexpected = stale.join("do-not-delete.txt");
     fs::write(&unexpected, b"operator file").unwrap();
 
-    assert!(ProfileStore::new(paths)
-        .publish_and_activate(&bytes, source("must fail closed"))
-        .is_err());
+    assert!(
+        ProfileStore::new(paths)
+            .publish_and_activate(&bytes, source("must fail closed"))
+            .is_err()
+    );
 
     assert!(unexpected.exists());
 }
@@ -268,9 +270,11 @@ fn active_profile_pointer_must_be_a_bounded_regular_file() {
 
     let error = ProfileStore::new(paths).active_generation().unwrap_err();
 
-    assert!(error
-        .to_string()
-        .contains("profile pointer is not a bounded regular file"));
+    assert!(
+        error
+            .to_string()
+            .contains("profile pointer is not a bounded regular file")
+    );
 }
 
 #[test]
@@ -283,9 +287,11 @@ fn active_runtime_pointer_must_be_a_bounded_regular_file_before_materialization(
         .publish_and_activate(&profile("1.25"), source("bounded runtime pointer"))
         .unwrap_err();
 
-    assert!(error
-        .to_string()
-        .contains("active runtime pointer is not a bounded regular file"));
+    assert!(
+        error
+            .to_string()
+            .contains("active runtime pointer is not a bounded regular file")
+    );
 }
 
 #[test]
@@ -319,11 +325,13 @@ fn first_profile_rollback_restores_the_absent_profile_state() {
     assert!(!paths.active_profile().exists());
     assert!(!paths.previous_profile().exists());
     assert!(!runtime.join("MacType.ini").exists());
-    assert!(paths
-        .profile_generations()
-        .join(generation.directory_name())
-        .join("profile.ini")
-        .is_file());
+    assert!(
+        paths
+            .profile_generations()
+            .join(generation.directory_name())
+            .join("profile.ini")
+            .is_file()
+    );
 }
 
 #[test]
@@ -614,9 +622,11 @@ fn failed_materialization_restores_profile_pointers_and_previous_adjacent_bytes(
         .open(runtime.join("MacType.ini"))
         .unwrap();
 
-    assert!(store
-        .publish_and_activate(&profile("1.4"), source("second"))
-        .is_err());
+    assert!(
+        store
+            .publish_and_activate(&profile("1.4"), source("second"))
+            .is_err()
+    );
 
     assert_eq!(read_pointer(paths.active_profile()).generation(), &first);
     assert!(!paths.previous_profile().exists());
@@ -745,13 +755,17 @@ fn invalid_publish_and_tampered_rollback_preserve_active_pointer() {
     let first = store
         .publish_and_activate(&first_bytes, source("first"))
         .unwrap();
-    assert!(store
-        .publish_and_activate(b"invalid", source("bad"))
-        .is_err());
+    assert!(
+        store
+            .publish_and_activate(b"invalid", source("bad"))
+            .is_err()
+    );
     assert_eq!(read_pointer(paths.active_profile()).generation(), &first);
-    assert!(store
-        .publish_and_activate(&vec![b'x'; MAX_PROFILE_BYTES + 1], source("oversized"))
-        .is_err());
+    assert!(
+        store
+            .publish_and_activate(&vec![b'x'; MAX_PROFILE_BYTES + 1], source("oversized"))
+            .is_err()
+    );
     assert_eq!(read_pointer(paths.active_profile()).generation(), &first);
     assert_eq!(fs::read(runtime.join("MacType.ini")).unwrap(), first_bytes);
 

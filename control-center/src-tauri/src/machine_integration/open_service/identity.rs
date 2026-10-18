@@ -75,15 +75,14 @@ pub(super) fn select_service_health(
     if !matches!(runtime, RuntimeState::Running | RuntimeState::Stopped) {
         return None;
     }
-    if runtime == RuntimeState::Running {
-        if let Some(live) =
+    if runtime == RuntimeState::Running
+        && let Some(live) =
             live.filter(|live| scm_process_id != 0 && live.server_pid == scm_process_id)
-        {
-            return Some(SelectedHealth {
-                report: live.report,
-                live: true,
-            });
-        }
+    {
+        return Some(SelectedHealth {
+            report: live.report,
+            live: true,
+        });
     }
     persisted
         .filter(|report| {

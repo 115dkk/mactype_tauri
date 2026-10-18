@@ -1,6 +1,6 @@
 use super::{
-    designation::{designation_plan_with_package, designation_status_with},
     DesignationPlan, MachineAction, MachineBackend,
+    designation::{designation_plan_with_package, designation_status_with},
 };
 use crate::{
     machine_integration::open_service::action_failure::{
@@ -48,14 +48,14 @@ pub(super) fn publish_profile_transaction_with(
         backend.execute(MachineAction::Stop, None)?;
     }
     if let Err(error) = backend.execute(MachineAction::PublishProfile, Some(profile)) {
-        if before.runtime == crate::service_contract::RuntimeState::Running {
-            if let Err(restart) = backend.execute(MachineAction::Start, None) {
-                return Err(error
-                    .append_detail(format!(
-                        "; machine integration cleanup is unknown because the prior service could not be restarted: {restart}"
-                    ))
-                    .with_rollback(RollbackOutcome::Failed));
-            }
+        if before.runtime == crate::service_contract::RuntimeState::Running
+            && let Err(restart) = backend.execute(MachineAction::Start, None)
+        {
+            return Err(error
+                .append_detail(format!(
+                    "; machine integration cleanup is unknown because the prior service could not be restarted: {restart}"
+                ))
+                .with_rollback(RollbackOutcome::Failed));
         }
         return Err(error);
     }

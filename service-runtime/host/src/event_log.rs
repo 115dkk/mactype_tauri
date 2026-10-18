@@ -1,11 +1,11 @@
 #![forbid(unsafe_code)]
 
 use mactype_service_contract::{
+    HealthState, StructuredServiceError,
     event_log::{
         EventArea, EventLogWriter, EventSeverity, EventSource, EventThrottle,
         MAX_EVENT_DETAIL_BYTES,
     },
-    HealthState, StructuredServiceError,
 };
 use std::{
     collections::BTreeMap,
@@ -424,12 +424,11 @@ impl HostEventLoggerState {
             &params,
             detail.as_deref(),
             &[],
-        ) {
-            if !self.write_error_reported {
-                let error = error.to_string().replace(['\r', '\n'], " ");
-                eprintln!("recording the service event log failed: {error}");
-                self.write_error_reported = true;
-            }
+        ) && !self.write_error_reported
+        {
+            let error = error.to_string().replace(['\r', '\n'], " ");
+            eprintln!("recording the service event log failed: {error}");
+            self.write_error_reported = true;
         }
     }
 }

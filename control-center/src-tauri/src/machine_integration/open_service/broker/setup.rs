@@ -1,11 +1,11 @@
 use super::{
     super::{
+        SystemServiceAction,
         action_failure::{
             ActionBlocker, ActionFailure, AppInitConflictContext, LegacyServiceBlockContext,
             RollbackOutcome,
         },
         windows::query,
-        SystemServiceAction,
     },
     installed_package::current_service_package,
 };
@@ -102,8 +102,8 @@ pub(super) fn run_setup_typed(
     run_setup_process(verb, profile)
 }
 
-pub(in crate::machine_integration::open_service) fn run_restore_pinned_runtime(
-) -> Result<(), String> {
+pub(in crate::machine_integration::open_service) fn run_restore_pinned_runtime()
+-> Result<(), String> {
     run_setup_process("restore-runtime", None).map_err(|failure| failure.to_string())
 }
 
@@ -233,12 +233,16 @@ mod tests {
             "ignored status output",
         );
 
-        assert!(failure
-            .detail
-            .contains("setup broker start failed with exit code 1"));
-        assert!(failure
-            .detail
-            .contains("CreateServiceW failed with Win32 5"));
+        assert!(
+            failure
+                .detail
+                .contains("setup broker start failed with exit code 1")
+        );
+        assert!(
+            failure
+                .detail
+                .contains("CreateServiceW failed with Win32 5")
+        );
         assert!(!failure.detail.contains("ignored status output"));
         assert_eq!(
             failure.rollback,

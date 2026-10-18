@@ -7,10 +7,10 @@ mod support;
 
 use std::cell::Cell;
 use std::fs;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use mactype_service_contract::{
-    parse_runtime_activation_receipt, RuntimeActivationPhase, SourceMetadata,
+    RuntimeActivationPhase, SourceMetadata, parse_runtime_activation_receipt,
 };
 use mactype_service_setup::{
     FixedPayload, ProfileStore, RuntimeInstaller, RuntimeServiceBinding, SetupError,
@@ -148,9 +148,11 @@ fn interrupted_prepare_rolls_scm_and_pointer_back_to_the_previous_runtime() {
             },
             |candidate, previous| {
                 assert!(candidate.ends_with("0.3.0\\mactype-service.exe"));
-                assert!(previous
-                    .expect("upgrade rollback requires the previous service image")
-                    .ends_with("0.2.0\\mactype-service.exe"));
+                assert!(
+                    previous
+                        .expect("upgrade rollback requires the previous service image")
+                        .ends_with("0.2.0\\mactype-service.exe")
+                );
                 scm_binding.set(RuntimeServiceBinding::Previous);
                 Ok(())
             },
@@ -235,9 +237,11 @@ fn invalid_manifest_never_changes_the_active_runtime() {
     )
     .unwrap();
     let invalid = FixedPayload::from_test_root(invalid_root).unwrap();
-    assert!(installer
-        .deploy_with_health_check(&invalid, |_| Ok(()))
-        .is_err());
+    assert!(
+        installer
+            .deploy_with_health_check(&invalid, |_| Ok(()))
+            .is_err()
+    );
     assert_eq!(active_version(paths.runtime_pointer()), "0.2.0");
 }
 

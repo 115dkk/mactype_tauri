@@ -14,21 +14,21 @@ use std::ffi::c_void;
 use std::io;
 use std::mem::size_of;
 use std::ptr::null;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use windows_sys::core::GUID;
 use windows_sys::Win32::Foundation::{ERROR_ALREADY_EXISTS, ERROR_SUCCESS};
 use windows_sys::Win32::System::Diagnostics::Etw::{
-    CloseTrace, ControlTraceW, EnableTraceEx2, OpenTraceW, ProcessTrace, StartTraceW,
-    CONTROLTRACE_HANDLE, EVENT_CONTROL_CODE_ENABLE_PROVIDER, EVENT_RECORD,
-    EVENT_TRACE_CONTROL_STOP, EVENT_TRACE_LOGFILEW, EVENT_TRACE_PROPERTIES,
-    EVENT_TRACE_REAL_TIME_MODE, PROCESSTRACE_HANDLE, PROCESS_TRACE_MODE_EVENT_RECORD,
-    PROCESS_TRACE_MODE_REAL_TIME, TRACE_LEVEL_INFORMATION, WNODE_FLAG_TRACED_GUID,
+    CONTROLTRACE_HANDLE, CloseTrace, ControlTraceW, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
+    EVENT_RECORD, EVENT_TRACE_CONTROL_STOP, EVENT_TRACE_LOGFILEW, EVENT_TRACE_PROPERTIES,
+    EVENT_TRACE_REAL_TIME_MODE, EnableTraceEx2, OpenTraceW, PROCESS_TRACE_MODE_EVENT_RECORD,
+    PROCESS_TRACE_MODE_REAL_TIME, PROCESSTRACE_HANDLE, ProcessTrace, StartTraceW,
+    TRACE_LEVEL_INFORMATION, WNODE_FLAG_TRACED_GUID,
 };
+use windows_sys::core::GUID;
 
 use crate::wide::wide_null;
 
@@ -466,7 +466,7 @@ impl TraceProperties {
 /// running. A Toolhelp snapshot answers that in a single call.
 pub fn running_process_ids() -> io::Result<Vec<u32>> {
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
         TH32CS_SNAPPROCESS,
     };
 
@@ -502,10 +502,10 @@ pub fn running_process_ids() -> io::Result<Vec<u32>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_process_start_id, guid_equals, running_process_ids, TraceProperties};
+    use super::{TraceProperties, decode_process_start_id, guid_equals, running_process_ids};
     use std::mem::size_of;
-    use windows_sys::core::GUID;
     use windows_sys::Win32::System::Diagnostics::Etw::EVENT_TRACE_PROPERTIES;
+    use windows_sys::core::GUID;
 
     #[test]
     fn a_process_start_payload_yields_its_leading_process_id() {

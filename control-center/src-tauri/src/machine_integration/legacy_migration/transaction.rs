@@ -5,8 +5,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-pub(in crate::machine_integration) fn prepare_backup(
-) -> Result<MigrationReceipt, crate::machine_integration::open_service::action_failure::ActionFailure>
+pub(in crate::machine_integration) fn prepare_backup()
+-> Result<MigrationReceipt, crate::machine_integration::open_service::action_failure::ActionFailure>
 {
     let status = legacy_mactray::status(crate::machine_integration::registry_conflict_detected());
     require_owned_legacy_service(&status)?;

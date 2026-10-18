@@ -7,12 +7,12 @@ use windows_sys::Win32::Foundation::{
     ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_NO_MORE_ITEMS, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS,
 };
 use windows_sys::Win32::System::Registry::{
-    RegCloseKey, RegDeleteValueW, RegEnumValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
     HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_QUERY_VALUE, KEY_READ, KEY_SET_VALUE,
-    KEY_WOW64_32KEY, KEY_WOW64_64KEY, REG_DWORD, REG_EXPAND_SZ, REG_SZ,
+    KEY_WOW64_32KEY, KEY_WOW64_64KEY, REG_DWORD, REG_EXPAND_SZ, REG_SZ, RegCloseKey,
+    RegDeleteValueW, RegEnumValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
 };
 
-use crate::bounded_read::{retry_bytes, CallOutcome, RetryError};
+use crate::bounded_read::{CallOutcome, RetryError, retry_bytes};
 use crate::wide::wide_null;
 
 const MAX_VALUE_NAME_UNITS: usize = 16_384;
@@ -587,14 +587,14 @@ mod tests {
 
     use windows_sys::Win32::Foundation::{ERROR_MORE_DATA, ERROR_SUCCESS};
     use windows_sys::Win32::System::Registry::{
-        RegCreateKeyExW, RegDeleteKeyW, HKEY_CURRENT_USER, KEY_READ, KEY_WRITE, REG_BINARY,
-        REG_OPTION_NON_VOLATILE,
+        HKEY_CURRENT_USER, KEY_READ, KEY_WRITE, REG_BINARY, REG_OPTION_NON_VOLATILE,
+        RegCreateKeyExW, RegDeleteKeyW,
     };
 
     use super::{
-        decode_string, read_enumerated_bytes, read_enumerated_raw_bytes, read_raw_bytes,
-        DeleteValueOutcome, RegistryKey, RegistryRoot, RegistryValueData, RegistryView,
-        MAX_VALUE_BYTES,
+        DeleteValueOutcome, MAX_VALUE_BYTES, RegistryKey, RegistryRoot, RegistryValueData,
+        RegistryView, decode_string, read_enumerated_bytes, read_enumerated_raw_bytes,
+        read_raw_bytes,
     };
     use crate::bounded_read::CallOutcome;
     use crate::wide::wide_null;
@@ -611,10 +611,11 @@ mod tests {
         let product = key.read_string_units("ProductName").unwrap().unwrap();
         assert!(!product.is_empty());
         assert!(!key.read_string("ProductName").unwrap().unwrap().is_empty());
-        assert!(key
-            .read_dword("CurrentMajorVersionNumber")
-            .unwrap()
-            .is_some());
+        assert!(
+            key.read_dword("CurrentMajorVersionNumber")
+                .unwrap()
+                .is_some()
+        );
         assert!(key.read_dword("ProductName").is_err());
         assert_eq!(key.read_dword("mactype-platform-missing").unwrap(), None);
         let values = key.values().unwrap();
@@ -625,13 +626,15 @@ mod tests {
 
     #[test]
     fn a_missing_key_is_none_not_an_error() {
-        assert!(RegistryKey::open(
-            RegistryRoot::CurrentUser,
-            r"SOFTWARE\mactype-platform-missing-key",
-            RegistryView::Native32,
-        )
-        .unwrap()
-        .is_none());
+        assert!(
+            RegistryKey::open(
+                RegistryRoot::CurrentUser,
+                r"SOFTWARE\mactype-platform-missing-key",
+                RegistryView::Native32,
+            )
+            .unwrap()
+            .is_none()
+        );
     }
 
     #[test]
@@ -738,9 +741,11 @@ mod tests {
         );
         let values = key.values_raw(64, 64).unwrap();
         assert!(values.iter().any(|value| value.name == "text"));
-        assert!(values
-            .iter()
-            .any(|value| value.name == "bytes" && value.bytes == [1, 2, 3, 4]));
+        assert!(
+            values
+                .iter()
+                .any(|value| value.name == "bytes" && value.bytes == [1, 2, 3, 4])
+        );
         assert_eq!(
             key.delete_value("bytes").unwrap(),
             DeleteValueOutcome::Deleted

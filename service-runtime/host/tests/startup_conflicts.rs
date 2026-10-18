@@ -6,14 +6,16 @@ fn only_stopped_or_absent_legacy_without_appinit_and_with_owned_image_is_safe() 
         LegacyServiceRuntimeState::Absent,
         LegacyServiceRuntimeState::Stopped,
     ] {
-        assert!(StartupSafetySnapshot {
-            app_init32_enabled: false,
-            app_init64_enabled: false,
-            legacy_state: legacy,
-            open_service_image_owned: true,
-        }
-        .validate()
-        .is_ok());
+        assert!(
+            StartupSafetySnapshot {
+                app_init32_enabled: false,
+                app_init64_enabled: false,
+                legacy_state: legacy,
+                open_service_image_owned: true,
+            }
+            .validate()
+            .is_ok()
+        );
     }
 
     for conflicting_snapshot in [

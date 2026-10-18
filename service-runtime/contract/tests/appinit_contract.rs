@@ -8,13 +8,15 @@ fn wide(value: &str) -> Vec<u16> {
 fn appinit_conflicts_only_when_enabled_value_names_a_mactype_dll() {
     assert!(!appinit_mactype_conflict(true, Some(&wide(r"C:\Other\OtherHook.dll"))).unwrap());
     assert!(!appinit_mactype_conflict(false, Some(&wide(r"C:\MacType\MacType64.dll"))).unwrap());
-    assert!(appinit_mactype_conflict(
-        true,
-        Some(&wide(
-            r#""C:\Program Files\MacType\MacType64.dll",Other.dll"#
-        )),
-    )
-    .unwrap());
+    assert!(
+        appinit_mactype_conflict(
+            true,
+            Some(&wide(
+                r#""C:\Program Files\MacType\MacType64.dll",Other.dll"#
+            )),
+        )
+        .unwrap()
+    );
     assert!(!appinit_mactype_conflict(true, None).unwrap());
     assert!(!appinit_mactype_conflict(true, Some(&[0])).unwrap());
 }

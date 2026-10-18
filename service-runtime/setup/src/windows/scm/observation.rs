@@ -1,10 +1,10 @@
 use std::path::Path;
 
-use mactype_service_contract::{owned_service_identity, LEGACY_SERVICE_NAME};
+use mactype_service_contract::{LEGACY_SERVICE_NAME, owned_service_identity};
 use mactype_service_platform::{ServiceAccess, ServiceState};
 
-use super::configuration::{observed_configuration, quoted_image_path};
 use super::ServiceManager;
+use super::configuration::{observed_configuration, quoted_image_path};
 use crate::{ConflictObservation, OpenServiceObservation, SetupError};
 
 fn classify_fixed_service(

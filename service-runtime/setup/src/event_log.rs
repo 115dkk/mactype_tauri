@@ -99,13 +99,13 @@ fn write(
 }
 
 fn report_write_error(result: Result<(), String>) {
-    if let Err(error) = result {
-        if !WRITE_ERROR_REPORTED.swap(true, Ordering::AcqRel) {
-            eprintln!(
-                "recording the setup event log failed: {}",
-                error.replace(['\r', '\n'], " ")
-            );
-        }
+    if let Err(error) = result
+        && !WRITE_ERROR_REPORTED.swap(true, Ordering::AcqRel)
+    {
+        eprintln!(
+            "recording the setup event log failed: {}",
+            error.replace(['\r', '\n'], " ")
+        );
     }
 }
 
@@ -125,7 +125,7 @@ fn writer() -> Result<EventLogWriter, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mactype_service_contract::{event_log::read_events, BrokerCommand};
+    use mactype_service_contract::{BrokerCommand, event_log::read_events};
 
     #[test]
     fn setup_failure_keeps_stage_and_redacts_profile_bytes() {
@@ -146,11 +146,13 @@ mod tests {
         let event = read_events(std::slice::from_ref(&path), 1).pop().unwrap();
         assert_eq!(event.params["command"], "publish-profile");
         assert_eq!(event.params["stage"], "machine runtime operation failed");
-        assert!(event
-            .detail
-            .as_deref()
-            .unwrap()
-            .contains("[redacted-profile]"));
+        assert!(
+            event
+                .detail
+                .as_deref()
+                .unwrap()
+                .contains("[redacted-profile]")
+        );
         let disk = std::fs::read_to_string(path).unwrap();
         assert!(!disk.contains("Secret=private"));
         assert!(!disk.contains("00112233445566778899aabbccddeeff"));

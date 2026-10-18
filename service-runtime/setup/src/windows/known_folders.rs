@@ -1,5 +1,5 @@
 use mactype_service_contract::MachinePaths;
-use mactype_service_platform::{known_folder_path, KnownFolder};
+use mactype_service_platform::{KnownFolder, known_folder_path};
 
 use crate::SetupError;
 

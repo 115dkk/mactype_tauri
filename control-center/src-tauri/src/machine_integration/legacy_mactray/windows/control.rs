@@ -34,7 +34,7 @@ pub(super) fn query(registry_conflict: bool) -> LegacyServiceStatus {
     let manager = match ServiceControlManager::connect(ServiceManagerAccess::Connect) {
         Ok(manager) => manager,
         Err(error) => {
-            return inaccessible(win32_code(&error), trusted_available, registry_conflict)
+            return inaccessible(win32_code(&error), trusted_available, registry_conflict);
         }
     };
     let service = match manager.open("MacType", ServiceAccess::QueryStatusAndConfig) {
@@ -47,7 +47,7 @@ pub(super) fn query(registry_conflict: bool) -> LegacyServiceStatus {
                 None,
                 trusted_available,
                 registry_conflict,
-            )
+            );
         }
         Err(error) => {
             let code = win32_code(&error);
@@ -195,7 +195,7 @@ fn delete_owned_service() -> Result<(), String> {
     let service = match open_for(ServiceAccess::Delete) {
         Ok(service) => service,
         Err(ERROR_SERVICE_DOES_NOT_EXIST | ERROR_SERVICE_MARKED_FOR_DELETE) => {
-            return wait_until_absent()
+            return wait_until_absent();
         }
         Err(code) => return Err(format!("OpenServiceW for deletion failed with {code}")),
     };

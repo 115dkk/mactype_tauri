@@ -2,10 +2,10 @@ use mactype_service_contract::{MachinePaths, StructuredServiceError};
 use std::sync::Arc;
 
 use crate::{
-    initialize_process_orchestration, EtwProcessEventSource, FixedHelperBroker, HostEvent,
-    HostEventSink, InitializedRuntime, LiveObserver, ProcessEventSource,
-    ProtectedProfileInitializer, ProtectedRuntimeAssets, RuntimeInitializer, WindowsHelperLauncher,
-    WindowsProcessInspector, WindowsStartupSafety, WmiProcessEventSource, PROCESS_START_SESSION,
+    EtwProcessEventSource, FixedHelperBroker, HostEvent, HostEventSink, InitializedRuntime,
+    LiveObserver, PROCESS_START_SESSION, ProcessEventSource, ProtectedProfileInitializer,
+    ProtectedRuntimeAssets, RuntimeInitializer, WindowsHelperLauncher, WindowsProcessInspector,
+    WindowsStartupSafety, WmiProcessEventSource, initialize_process_orchestration,
 };
 
 pub struct WindowsOpenServiceInitializer {

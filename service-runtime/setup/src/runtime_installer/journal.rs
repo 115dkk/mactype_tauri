@@ -3,8 +3,8 @@ mod repair;
 mod transition;
 
 use mactype_service_contract::{
-    RuntimeActivationReceipt, RuntimeGenerationPointer, MAX_RUNTIME_ACTIVATION_RECEIPT_BYTES,
-    MAX_RUNTIME_POINTER_BYTES,
+    MAX_RUNTIME_ACTIVATION_RECEIPT_BYTES, MAX_RUNTIME_POINTER_BYTES, RuntimeActivationReceipt,
+    RuntimeGenerationPointer,
 };
 
 use crate::storage::SetupError;

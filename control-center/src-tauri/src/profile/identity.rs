@@ -1,4 +1,4 @@
-use super::{legacy::user_profile_root, ProfileLocation};
+use super::{ProfileLocation, legacy::user_profile_root};
 use crate::installation_root;
 use std::{
     fs::{self, OpenOptions},

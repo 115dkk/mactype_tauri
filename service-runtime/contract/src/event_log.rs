@@ -273,15 +273,15 @@ impl EventThrottle {
         {
             return false;
         }
-        if !self.entries.contains_key(key) && self.entries.len() >= 256 {
-            if let Some(oldest) = self
+        if !self.entries.contains_key(key)
+            && self.entries.len() >= 256
+            && let Some(oldest) = self
                 .entries
                 .iter()
                 .min_by_key(|(_, instant)| **instant)
                 .map(|(key, _)| key.clone())
-            {
-                self.entries.remove(&oldest);
-            }
+        {
+            self.entries.remove(&oldest);
         }
         self.entries.insert(key.to_owned(), now);
         true

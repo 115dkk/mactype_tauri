@@ -1,5 +1,5 @@
 use mactype_service_host::{
-    validate_host_arguments, ServiceControl, ACCEPTED_CONTROL_MASK, SERVICE_STOP_WAIT_HINT_MS,
+    ACCEPTED_CONTROL_MASK, SERVICE_STOP_WAIT_HINT_MS, ServiceControl, validate_host_arguments,
 };
 
 const _: () = assert!(SERVICE_STOP_WAIT_HINT_MS >= 25_000);

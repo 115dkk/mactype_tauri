@@ -1,7 +1,7 @@
 use mactype_service_contract::event_log::{
-    profile_file_name, sanitize_text, EventArea, EventLogWriter, EventRecord, EventSeverity,
-    EventSource, EVENT_LOG_BACKUPS, EVENT_LOG_SCHEMA_VERSION, MAX_EVENT_CODE_BYTES,
-    MAX_EVENT_DETAIL_BYTES, MAX_EVENT_LOG_BYTES, MAX_EVENT_PARAMS, MAX_EVENT_PARAM_BYTES,
+    EVENT_LOG_BACKUPS, EVENT_LOG_SCHEMA_VERSION, EventArea, EventLogWriter, EventRecord,
+    EventSeverity, EventSource, MAX_EVENT_CODE_BYTES, MAX_EVENT_DETAIL_BYTES, MAX_EVENT_LOG_BYTES,
+    MAX_EVENT_PARAM_BYTES, MAX_EVENT_PARAMS, profile_file_name, sanitize_text,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -396,8 +396,14 @@ fn render_preflight(preflight: &InstallationPreflightDiagnostics) -> String {
     let yes_no = |value| if value { "yes" } else { "no" };
     format!(
         "Expected installed Control Center: {}\nCurrent executable: {}\nExpected executable exists: {:?}\nInstalled Control Center: {}\nCurrent bundle: {}\nSelected service package: {}\nSetup broker: {}\nRuntime manifest: {}\nRuntime payload: {}\nElevation attempted: {}\nElevated revalidation: {}\nMachine state changed: {}\nRollback required: {}",
-        preflight.expected_installed_control_center.as_deref().unwrap_or("not registered"),
-        preflight.current_executable.as_deref().unwrap_or("unavailable"),
+        preflight
+            .expected_installed_control_center
+            .as_deref()
+            .unwrap_or("not registered"),
+        preflight
+            .current_executable
+            .as_deref()
+            .unwrap_or("unavailable"),
         preflight.expected_executable_exists,
         preflight.installed_control_center,
         preflight.current_bundle.replace('-', " "),

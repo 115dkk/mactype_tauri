@@ -8,11 +8,10 @@ fn marker_layout_explicitly_rejects_native_arm64() {
         IMAGE_FILE_MACHINE_UNKNOWN,
     };
 
-    assert!(windows::marker_x64_system_directory(
-        IMAGE_FILE_MACHINE_UNKNOWN,
-        IMAGE_FILE_MACHINE_ARM64,
-    )
-    .is_err());
+    assert!(
+        windows::marker_x64_system_directory(IMAGE_FILE_MACHINE_UNKNOWN, IMAGE_FILE_MACHINE_ARM64,)
+            .is_err()
+    );
     assert_eq!(
         windows::marker_x64_system_directory(IMAGE_FILE_MACHINE_UNKNOWN, IMAGE_FILE_MACHINE_AMD64,)
             .unwrap(),

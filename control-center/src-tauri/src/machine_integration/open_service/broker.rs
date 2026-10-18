@@ -15,25 +15,25 @@ pub(super) use installed_package::{
 pub(super) use path_guard::reject_reparse_ancestors;
 #[cfg(test)]
 pub(super) use process::{
-    combine_broker_cleanup_error, terminate_broker_process_with, BrokerProcessControl,
-    BrokerTermination,
+    BrokerProcessControl, BrokerTermination, combine_broker_cleanup_error,
+    terminate_broker_process_with,
 };
 use setup::{designate_and_hold, publish_and_activate, run_setup_typed};
 pub(super) use setup::{fixed_setup_path, run_restore_pinned_runtime, run_setup};
 
 use super::{
+    BrokerResultMessage, ProfileTransferToken, SystemServiceAction,
     action_failure::{
         ActionBlocker, ActionFailure, AppInitConflictContext, LegacyServiceBlockContext,
         LegacyTrayBlockContext,
     },
     migrate_from_legacy,
     profile_transfer::{
-        receive_profile_from_pipe_bounded, BrokerResultPipeWriter, KillOnCloseJob,
-        PROFILE_PIPE_TIMEOUT,
+        BrokerResultPipeWriter, KillOnCloseJob, PROFILE_PIPE_TIMEOUT,
+        receive_profile_from_pipe_bounded,
     },
     remove_legacy_after_verification,
     windows::SystemMigrationBackend,
-    BrokerResultMessage, ProfileTransferToken, SystemServiceAction,
 };
 
 pub(super) fn run_privileged(

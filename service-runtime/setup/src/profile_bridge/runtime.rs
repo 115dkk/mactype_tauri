@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 
-use mactype_service_contract::{valid_runtime_version_component, MAX_RUNTIME_POINTER_BYTES};
+use mactype_service_contract::{MAX_RUNTIME_POINTER_BYTES, valid_runtime_version_component};
 use serde::Deserialize;
 
 use super::ProfileRuntimeBridge;
-use crate::storage::{read_bounded_regular_file, reject_reparse_ancestors, SetupError};
+use crate::storage::{SetupError, read_bounded_regular_file, reject_reparse_ancestors};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

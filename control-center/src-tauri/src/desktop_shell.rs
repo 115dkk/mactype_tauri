@@ -9,9 +9,9 @@ use std::{
     time::{Duration, SystemTime},
 };
 use tauri::{
+    App, AppHandle, Emitter, Manager, Window, WindowEvent, Wry,
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    App, AppHandle, Emitter, Manager, Window, WindowEvent, Wry,
 };
 
 enum TrayBackgroundAction {
@@ -36,16 +36,16 @@ pub(crate) fn install(
                 ),
             }
         }
-        if let Some(tray) = app.tray_by_id("main") {
-            if let Err(error) = tray.with_inner_tray_icon(|tray| {
+        if let Some(tray) = app.tray_by_id("main")
+            && let Err(error) = tray.with_inner_tray_icon(|tray| {
                 install_end_session_hook(tray.window_handle() as isize, "tray")
-            }) {
-                crate::diagnostics::record_end_session_hook_failed(
-                    "tray",
-                    "access-inner-tray",
-                    &error.to_string(),
-                );
-            }
+            })
+        {
+            crate::diagnostics::record_end_session_hook_failed(
+                "tray",
+                "access-inner-tray",
+                &error.to_string(),
+            );
         }
     }
     crate::diagnostics::record_app_started();
@@ -65,11 +65,11 @@ pub(crate) fn handle_window_event(window: &Window<Wry>, event: &WindowEvent) {
     if window.label() != "main" {
         return;
     }
-    if let WindowEvent::CloseRequested { api, .. } = event {
-        if env::var_os("MACTYPE_CI_SMOKE_FILE").is_none() {
-            api.prevent_close();
-            let _ = window.hide();
-        }
+    if let WindowEvent::CloseRequested { api, .. } = event
+        && env::var_os("MACTYPE_CI_SMOKE_FILE").is_none()
+    {
+        api.prevent_close();
+        let _ = window.hide();
     }
 }
 

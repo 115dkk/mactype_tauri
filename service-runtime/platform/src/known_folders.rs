@@ -6,13 +6,13 @@ use std::os::windows::ffi::OsStringExt;
 use std::path::PathBuf;
 use std::ptr::null_mut;
 
-use windows_sys::core::GUID;
 use windows_sys::Win32::System::Com::CoTaskMemFree;
 use windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW;
 use windows_sys::Win32::UI::Shell::{
     FOLDERID_LocalAppData, FOLDERID_ProgramData, FOLDERID_ProgramFiles, FOLDERID_Startup,
-    FOLDERID_Windows, SHGetKnownFolderPath, KF_FLAG_DEFAULT,
+    FOLDERID_Windows, KF_FLAG_DEFAULT, SHGetKnownFolderPath,
 };
+use windows_sys::core::GUID;
 
 use crate::wide::bounded_units;
 
@@ -108,7 +108,7 @@ pub fn system_directory() -> io::Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{known_folder_path, system_directory, KnownFolder};
+    use super::{KnownFolder, known_folder_path, system_directory};
 
     #[test]
     fn machine_folders_resolve_to_absolute_directories() {
@@ -125,12 +125,16 @@ mod tests {
 
     #[test]
     fn local_app_data_and_system_directory_resolve() {
-        assert!(known_folder_path(KnownFolder::LocalAppData)
-            .unwrap()
-            .is_dir());
+        assert!(
+            known_folder_path(KnownFolder::LocalAppData)
+                .unwrap()
+                .is_dir()
+        );
         let system = system_directory().unwrap();
-        assert!(system
-            .file_name()
-            .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("System32")));
+        assert!(
+            system
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("System32"))
+        );
     }
 }

@@ -1,7 +1,7 @@
 use mactype_service_contract::{GenerationId, SourceMetadata};
 
-use super::preflight::validate_mode_matches_profile;
 use super::WindowsInstallerBackend;
+use super::preflight::validate_mode_matches_profile;
 use crate::storage::create_protected_directory;
 use crate::{
     BootstrapPlan, BootstrapPreflight, BootstrapProfileMode, FixedPayload, OpenServiceObservation,
@@ -154,10 +154,8 @@ impl WindowsInstallerBackend {
             ));
         }
         let store = ProfileStore::new(self.paths.clone());
-        if published_default {
-            if let Err(error) = store.rollback() {
-                failures.push(format!("restore profile: {error}"));
-            }
+        if published_default && let Err(error) = store.rollback() {
+            failures.push(format!("restore profile: {error}"));
         }
         match snapshot.open_service {
             OpenServiceObservation::Absent | OpenServiceObservation::OwnedStopped => {}

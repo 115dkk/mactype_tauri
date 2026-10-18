@@ -2,7 +2,7 @@ use std::io;
 use std::time::Duration;
 
 use mactype_service_contract::StructuredServiceError;
-use mactype_service_platform::{running_process_ids, ProcessStartEvent, ProcessStartTrace};
+use mactype_service_platform::{ProcessStartEvent, ProcessStartTrace, running_process_ids};
 
 use crate::ProcessEventSource;
 

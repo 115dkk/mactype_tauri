@@ -1,10 +1,10 @@
 use super::{
+    AdvancedProfile, IndividualSetting, LegacyProfileCandidate, MAX_PROFILE_DIRECTORY_ENTRIES,
+    ProfileDocument, ProfileEntry, ProfileLocation, ProfileSnapshot, ProfileState,
     identity::identify_profile,
     legacy::{
         discover_legacy_profile_at, find_default_profile, import_profile_to, user_profile_root,
     },
-    AdvancedProfile, IndividualSetting, LegacyProfileCandidate, ProfileDocument, ProfileEntry,
-    ProfileLocation, ProfileSnapshot, ProfileState, MAX_PROFILE_DIRECTORY_ENTRIES,
 };
 use crate::{bounded_io::read_bounded_file, execution, installation_root};
 use std::{env, fs, path::Path, path::PathBuf};

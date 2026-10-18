@@ -64,16 +64,20 @@ fn uninstall_refuses_an_unsigned_service_root_entry_without_deleting_owned_files
 
     let error = installer.remove_receipted_installation().unwrap_err();
 
-    assert!(error
-        .to_string()
-        .contains("unexpected service runtime entry"));
+    assert!(
+        error
+            .to_string()
+            .contains("unexpected service runtime entry")
+    );
     assert!(foreign.is_file());
     assert!(paths.runtime_pointer().is_file());
-    assert!(paths
-        .runtime_versions()
-        .join("0.2.0")
-        .join("mactype-service.exe")
-        .is_file());
+    assert!(
+        paths
+            .runtime_versions()
+            .join("0.2.0")
+            .join("mactype-service.exe")
+            .is_file()
+    );
 }
 
 #[test]

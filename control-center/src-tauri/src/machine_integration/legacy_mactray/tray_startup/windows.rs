@@ -1,8 +1,8 @@
 use super::*;
 use mactype_service_platform::{
-    current_user_sid_string, expand_environment_strings, file_attributes, known_folder_path,
-    read_shortcut, ComApartment, ComThreading, DeleteValueOutcome, KnownFolder, RegistryKey,
-    RegistryRoot, RegistryView,
+    ComApartment, ComThreading, DeleteValueOutcome, KnownFolder, RegistryKey, RegistryRoot,
+    RegistryView, current_user_sid_string, expand_environment_strings, file_attributes,
+    known_folder_path, read_shortcut,
 };
 use std::{
     ffi::OsStr,

@@ -106,9 +106,11 @@ fn tampered_migration_pin_generation_defers_cleanup_and_cannot_be_restored() {
         br#"{"schema":1,"version":"0.1.0"}"#,
     )
     .unwrap();
-    assert!(installer
-        .restore_pinned_current_with_health_check(|_| Ok(()))
-        .is_err());
+    assert!(
+        installer
+            .restore_pinned_current_with_health_check(|_| Ok(()))
+            .is_err()
+    );
 }
 
 #[test]
@@ -131,11 +133,13 @@ fn retention_preserves_an_old_generation_with_an_unexpected_entry() {
         .deploy_with_health_check(&payload(base.path(), "0.3.0", b"service-v3"), |_| Ok(()))
         .unwrap();
 
-    assert!(paths
-        .runtime_versions()
-        .join("0.1.0")
-        .join("operator.bin")
-        .exists());
+    assert!(
+        paths
+            .runtime_versions()
+            .join("0.1.0")
+            .join("operator.bin")
+            .exists()
+    );
 }
 
 #[test]

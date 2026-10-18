@@ -42,33 +42,33 @@ mod wts;
 
 pub use clipboard::set_clipboard_unicode_text;
 pub use com::{ComApartment, ComThreading};
-pub use end_session::{end_session_action, install_end_session_exit_hook, EndSessionAction};
+pub use end_session::{EndSessionAction, end_session_action, install_end_session_exit_hook};
 pub use environment::expand_environment_strings;
-pub use etw::{running_process_ids, ProcessStartEvent, ProcessStartTrace};
+pub use etw::{ProcessStartEvent, ProcessStartTrace, running_process_ids};
 pub use event::ManualResetEvent;
 pub use file::{
-    delay_delete_until_reboot, file_attributes, is_reparse_point, mark_open_file_for_deletion,
-    replace_file, replace_file_preserving_attributes, validate_path_chain,
-    validate_path_chain_with, PathChainError,
+    PathChainError, delay_delete_until_reboot, file_attributes, is_reparse_point,
+    mark_open_file_for_deletion, replace_file, replace_file_preserving_attributes,
+    validate_path_chain, validate_path_chain_with,
 };
 pub use gdi::installed_font_families;
 pub use handle::{OwnedHandle, WaitOutcome};
 pub use job::{JobLimits, JobObject};
-pub use known_folders::{known_folder_path, system_directory, KnownFolder};
+pub use known_folders::{KnownFolder, known_folder_path, system_directory};
 pub use launch::{
-    anonymous_pipe, null_device, read_bounded, ProcessLaunch, StandardHandles, SuspendedChild,
+    ProcessLaunch, StandardHandles, SuspendedChild, anonymous_pipe, null_device, read_bounded,
 };
-pub use module_inventory::{process_module_presence, ModulePresence};
+pub use module_inventory::{ModulePresence, process_module_presence};
 pub use mutex::{MutexAcquisition, NamedMutex};
 pub use pipe::{
-    cancelled_pipe_operations, named_pipe_server_process_id, ConnectOutcome, NamedPipeClient,
-    NamedPipeServer, OverlappedPipeClient, OverlappedPipeServer, PipeAccess, PipeDirection,
-    PipeError, PipeWait,
+    ConnectOutcome, NamedPipeClient, NamedPipeServer, OverlappedPipeClient, OverlappedPipeServer,
+    PipeAccess, PipeDirection, PipeError, PipeWait, cancelled_pipe_operations,
+    named_pipe_server_process_id,
 };
 pub use process::{
-    process_session_id, terminate_current_process, MachineKind, Process, ProcessAccess,
-    ProcessBinarySignatureMitigation, ProcessDynamicCodeMitigation, ProcessLifecycleFlags,
-    ProcessMachine,
+    MachineKind, Process, ProcessAccess, ProcessBinarySignatureMitigation,
+    ProcessDynamicCodeMitigation, ProcessLifecycleFlags, ProcessMachine, process_session_id,
+    terminate_current_process,
 };
 pub use random::system_random_bytes;
 pub use registry::{
@@ -81,20 +81,20 @@ pub use scm::{
     ServiceStatusSnapshot, StartOutcome, StopOutcome, TriggerInfo,
 };
 pub use security::{
-    current_token_is_member_of, current_user_sid_string, AclValidationError, AllowedAce,
-    LocalSecurityDescriptor, OwnedSid, PrivilegeGuard, SecurityAclError, SecurityDescriptor,
-    SelfRelativeSecurityDescriptor, ValidatedDacl, ValidatedSid,
+    AclValidationError, AllowedAce, LocalSecurityDescriptor, OwnedSid, PrivilegeGuard,
+    SecurityAclError, SecurityDescriptor, SelfRelativeSecurityDescriptor, ValidatedDacl,
+    ValidatedSid, current_token_is_member_of, current_user_sid_string,
 };
 pub use service_control::{
-    register_control_handler, report_status, run_service_dispatcher, RawServiceStatus,
-    ServiceControlCallback, ServiceStatusHandle,
+    RawServiceStatus, ServiceControlCallback, ServiceStatusHandle, register_control_handler,
+    report_status, run_service_dispatcher,
 };
-pub use shell_link::{read_shortcut, ShortcutTarget};
+pub use shell_link::{ShortcutTarget, read_shortcut};
 pub use window::{
-    register_window_message, send_notify_message, top_level_windows, TopLevelWindow, WindowHandle,
+    TopLevelWindow, WindowHandle, register_window_message, send_notify_message, top_level_windows,
 };
 pub use wmi::{
     WmiConnection, WmiEnumerator, WmiError, WmiLocator, WmiNamespace, WmiObject, WmiPropertyError,
     WmiPropertyStep,
 };
-pub use wts::{interactive_processes, SessionProcess};
+pub use wts::{SessionProcess, interactive_processes};

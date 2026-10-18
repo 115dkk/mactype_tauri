@@ -235,12 +235,16 @@ fn migration_acl_uses_fixed_system32_tool_and_sid_grants() {
     assert_eq!(program, PathBuf::from(r"C:\Windows\System32\icacls.exe"));
     assert_eq!(arguments[0], target.as_os_str());
     assert!(arguments.iter().any(|value| value == "*S-1-5-18:(OI)(CI)F"));
-    assert!(arguments
-        .iter()
-        .any(|value| value == "*S-1-5-32-544:(OI)(CI)F"));
-    assert!(arguments
-        .iter()
-        .any(|value| value == "*S-1-5-32-545:(OI)(CI)RX"));
+    assert!(
+        arguments
+            .iter()
+            .any(|value| value == "*S-1-5-32-544:(OI)(CI)F")
+    );
+    assert!(
+        arguments
+            .iter()
+            .any(|value| value == "*S-1-5-32-545:(OI)(CI)RX")
+    );
 }
 
 #[test]
@@ -552,29 +556,35 @@ fn startup_receipt_rejects_scope_mixing_duplicate_locators_and_sid_mismatch() {
         receipted_startup_artifact(LegacyTrayStartupSource::CurrentUserRun64, "MacTypeTray");
     let machine =
         receipted_startup_artifact(LegacyTrayStartupSource::LocalMachineRun64, "MacTypeTray");
-    assert!(build_startup_receipt(
-        StartupReceiptScope::CurrentUser,
-        "S-1-5-21-1000",
-        vec![machine],
-        5678,
-    )
-    .is_err());
-    assert!(build_startup_receipt(
-        StartupReceiptScope::CurrentUser,
-        "S-1-5-21-1000",
-        vec![current.clone(), current.clone()],
-        5678,
-    )
-    .is_err());
+    assert!(
+        build_startup_receipt(
+            StartupReceiptScope::CurrentUser,
+            "S-1-5-21-1000",
+            vec![machine],
+            5678,
+        )
+        .is_err()
+    );
+    assert!(
+        build_startup_receipt(
+            StartupReceiptScope::CurrentUser,
+            "S-1-5-21-1000",
+            vec![current.clone(), current.clone()],
+            5678,
+        )
+        .is_err()
+    );
     let mut wrong_sid = current;
     wrong_sid.user_sid = "S-1-5-21-2000".to_owned();
-    assert!(build_startup_receipt(
-        StartupReceiptScope::CurrentUser,
-        "S-1-5-21-1000",
-        vec![wrong_sid],
-        5678,
-    )
-    .is_err());
+    assert!(
+        build_startup_receipt(
+            StartupReceiptScope::CurrentUser,
+            "S-1-5-21-1000",
+            vec![wrong_sid],
+            5678,
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -634,22 +644,28 @@ fn identical_recapture_reuses_the_pending_receipt_without_timestamp_replacement(
 #[test]
 fn current_user_restore_cli_accepts_one_fixed_switch_and_no_arguments() {
     use std::ffi::OsString;
-    assert!(user_restore_requested_from_arguments([
-        OsString::from("control-center.exe"),
-        OsString::from("--restore-current-user-legacy-tray-autostart"),
-    ])
-    .unwrap());
-    assert!(!user_restore_requested_from_arguments([
-        OsString::from("control-center.exe"),
-        OsString::from("--ordinary-launch"),
-    ])
-    .unwrap());
-    assert!(user_restore_requested_from_arguments([
-        OsString::from("control-center.exe"),
-        OsString::from("--restore-current-user-legacy-tray-autostart"),
-        OsString::from(r"HKCU\arbitrary"),
-    ])
-    .is_err());
+    assert!(
+        user_restore_requested_from_arguments([
+            OsString::from("control-center.exe"),
+            OsString::from("--restore-current-user-legacy-tray-autostart"),
+        ])
+        .unwrap()
+    );
+    assert!(
+        !user_restore_requested_from_arguments([
+            OsString::from("control-center.exe"),
+            OsString::from("--ordinary-launch"),
+        ])
+        .unwrap()
+    );
+    assert!(
+        user_restore_requested_from_arguments([
+            OsString::from("control-center.exe"),
+            OsString::from("--restore-current-user-legacy-tray-autostart"),
+            OsString::from(r"HKCU\arbitrary"),
+        ])
+        .is_err()
+    );
 }
 
 #[derive(Default)]

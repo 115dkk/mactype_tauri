@@ -1,5 +1,5 @@
-use super::super::{document::validate_entry, AdvancedProfile, IndividualSetting, ShadowSetting};
-use crate::generated_settings::{SettingDefinition, SettingValueType, SETTINGS};
+use super::super::{AdvancedProfile, IndividualSetting, ShadowSetting, document::validate_entry};
+use crate::generated_settings::{SETTINGS, SettingDefinition, SettingValueType};
 use std::collections::BTreeSet;
 
 pub(super) struct RenderedSettingValue {

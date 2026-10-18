@@ -48,9 +48,9 @@ fn is_under_directory(path: &str, root: &str) -> bool {
 
 #[cfg(windows)]
 mod windows {
-    use super::{is_under_directory, order_candidates, ManualLaunchCandidate};
+    use super::{ManualLaunchCandidate, is_under_directory, order_candidates};
     use mactype_service_platform::{
-        interactive_processes, process_session_id, top_level_windows, Process, ProcessAccess,
+        Process, ProcessAccess, interactive_processes, process_session_id, top_level_windows,
     };
     use std::{collections::HashMap, env};
 

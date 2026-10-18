@@ -68,8 +68,8 @@ pub(in crate::windows::scm) fn configure_metadata(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_metadata_configuration, service_metadata_plan, MetadataConfigurationAdapter,
-        ServiceMetadataOperation,
+        MetadataConfigurationAdapter, ServiceMetadataOperation, apply_metadata_configuration,
+        service_metadata_plan,
     };
     use crate::SetupError;
 
@@ -128,9 +128,11 @@ mod tests {
 
             let error = apply_metadata_configuration(&mut adapter).unwrap_err();
 
-            assert!(error
-                .to_string()
-                .contains(&format!("metadata operation {fail_at} failed")));
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("metadata operation {fail_at} failed"))
+            );
             assert_eq!(adapter.attempted, service_metadata_plan()[..=fail_at]);
         }
     }

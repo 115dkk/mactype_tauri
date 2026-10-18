@@ -1,7 +1,7 @@
 use super::super::*;
 use mactype_service_platform::{
-    known_folder_path, KnownFolder, ServiceAccess, ServiceControlManager, ServiceHandle,
-    ServiceManagerAccess, ServiceState,
+    KnownFolder, ServiceAccess, ServiceControlManager, ServiceHandle, ServiceManagerAccess,
+    ServiceState, known_folder_path,
 };
 use std::path::PathBuf;
 use windows_sys::Win32::Foundation::{ERROR_INVALID_DATA, ERROR_SERVICE_DOES_NOT_EXIST};

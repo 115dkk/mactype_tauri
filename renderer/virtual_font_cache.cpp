@@ -47,15 +47,14 @@ using UniqueAlgorithmProvider =
     std::unique_ptr<void, AlgorithmProviderCloser>;
 using UniqueHash = std::unique_ptr<void, HashCloser>;
 
-HRESULT HashBytes(
-    std::vector<BYTE> const& bytes,
-    std::array<BYTE, 32>& digest)
+[[nodiscard]] std::expected<std::array<BYTE, 32>, HRESULT> HashBytes(
+    std::vector<BYTE> const& bytes)
 {
     BCRYPT_ALG_HANDLE rawAlgorithm = nullptr;
     NTSTATUS status = BCryptOpenAlgorithmProvider(
         &rawAlgorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0);
     if (!BCRYPT_SUCCESS(status))
-        return HRESULT_FROM_NT(status);
+        return std::unexpected(HRESULT_FROM_NT(status));
     UniqueAlgorithmProvider algorithm(rawAlgorithm);
 
     DWORD objectSize = 0;
@@ -64,7 +63,8 @@ HRESULT HashBytes(
         algorithm.get(), BCRYPT_OBJECT_LENGTH,
         reinterpret_cast<PUCHAR>(&objectSize), sizeof(objectSize), &copied, 0);
     if (!BCRYPT_SUCCESS(status) || copied != sizeof(objectSize))
-        return BCRYPT_SUCCESS(status) ? E_FAIL : HRESULT_FROM_NT(status);
+        return std::unexpected(
+            BCRYPT_SUCCESS(status) ? E_FAIL : HRESULT_FROM_NT(status));
 
     std::vector<BYTE> hashObject(objectSize);
     BCRYPT_HASH_HANDLE rawHash = nullptr;
@@ -73,17 +73,20 @@ HRESULT HashBytes(
         hashObject.empty() ? nullptr : hashObject.data(), objectSize,
         nullptr, 0, 0);
     if (!BCRYPT_SUCCESS(status))
-        return HRESULT_FROM_NT(status);
+        return std::unexpected(HRESULT_FROM_NT(status));
     UniqueHash hash(rawHash);
 
     status = BCryptHashData(
         hash.get(), const_cast<PUCHAR>(bytes.data()),
         static_cast<ULONG>(bytes.size()), 0);
     if (!BCRYPT_SUCCESS(status))
-        return HRESULT_FROM_NT(status);
+        return std::unexpected(HRESULT_FROM_NT(status));
+    std::array<BYTE, 32> digest = {};
     status = BCryptFinishHash(
         hash.get(), digest.data(), static_cast<ULONG>(digest.size()), 0);
-    return BCRYPT_SUCCESS(status) ? S_OK : HRESULT_FROM_NT(status);
+    if (!BCRYPT_SUCCESS(status))
+        return std::unexpected(HRESULT_FROM_NT(status));
+    return digest;
 }
 
 std::wstring HexDigest(std::array<BYTE, 32> const& digest)
@@ -112,28 +115,33 @@ HRESULT EnsureDirectory(std::wstring const& path)
     return S_OK;
 }
 
-HRESULT ReadEnvironmentVariable(
-    WCHAR const* name,
-    std::wstring& value)
+[[nodiscard]] std::expected<std::wstring, HRESULT> ReadEnvironmentVariable(
+    WCHAR const* name)
 {
-    value.clear();
     for (unsigned int attempt = 0; attempt < 3; ++attempt)
     {
         DWORD const required = GetEnvironmentVariableW(name, nullptr, 0);
         if (required == 0)
-            return HRESULT_FROM_WIN32(GetLastError());
+        {
+            DWORD const error = GetLastError();
+            if (error == ERROR_SUCCESS)
+                return std::wstring();
+            return std::unexpected(HRESULT_FROM_WIN32(error));
+        }
         std::vector<WCHAR> buffer(required);
         DWORD const copied = GetEnvironmentVariableW(
             name, buffer.data(), static_cast<DWORD>(buffer.size()));
         if (copied == 0)
-            return HRESULT_FROM_WIN32(GetLastError());
-        if (copied < buffer.size())
         {
-            value.assign(buffer.data(), copied);
-            return S_OK;
+            DWORD const error = GetLastError();
+            if (error == ERROR_SUCCESS)
+                return std::wstring();
+            return std::unexpected(HRESULT_FROM_WIN32(error));
         }
+        if (copied < buffer.size())
+            return std::wstring(buffer.data(), copied);
     }
-    return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+    return std::unexpected(HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER));
 }
 
 void AppendPathComponent(std::wstring& path, WCHAR const* component)
@@ -143,45 +151,46 @@ void AppendPathComponent(std::wstring& path, WCHAR const* component)
     path.append(component);
 }
 
-HRESULT GetCacheDirectoryImpl(std::wstring& path)
+[[nodiscard]] std::expected<std::wstring, HRESULT> GetCacheDirectoryImpl()
 {
-    HRESULT result = ReadEnvironmentVariable(L"LOCALAPPDATA", path);
-    if (FAILED(result) || path.empty())
+    auto environment = ReadEnvironmentVariable(L"LOCALAPPDATA");
+    std::wstring path;
+    if (environment && !environment->empty())
+    {
+        path = std::move(*environment);
+    }
+    else
     {
         std::array<WCHAR, MAX_PATH + 1> temporary = {};
         DWORD const length = GetTempPathW(
             static_cast<DWORD>(temporary.size()), temporary.data());
         if (length == 0 || length >= temporary.size())
-            return HRESULT_FROM_WIN32(
-                length == 0 ? GetLastError() : ERROR_INSUFFICIENT_BUFFER);
+            return std::unexpected(HRESULT_FROM_WIN32(
+                length == 0 ? GetLastError() : ERROR_INSUFFICIENT_BUFFER));
         path.assign(temporary.data(), length);
     }
 
     AppendPathComponent(path, L"MacType");
-    result = EnsureDirectory(path);
+    HRESULT result = EnsureDirectory(path);
     if (FAILED(result))
-        return result;
+        return std::unexpected(result);
     AppendPathComponent(path, L"FontCache");
     result = EnsureDirectory(path);
     if (FAILED(result))
-        return result;
+        return std::unexpected(result);
     static std::atomic<bool> sharedReadAttempted(false);
     if (!sharedReadAttempted.exchange(true))
     {
         // Sandboxed callers lack WRITE_DAC; an ordinary process can repair it later.
         static_cast<void>(GrantSharedReadAccess(path));
     }
-    return S_OK;
+    return path;
 }
 
-HRESULT CompareFileImpl(
+[[nodiscard]] std::expected<FileComparison, HRESULT> CompareFileImpl(
     std::wstring const& path,
-    std::vector<BYTE> const& expected,
-    bool& exists,
-    bool& matches)
+    std::vector<BYTE> const& expected)
 {
-    exists = false;
-    matches = false;
     renderer_raii::UniqueHandle file = renderer_raii::AdoptHandle(
         CreateFileW(
             path.c_str(), GENERIC_READ,
@@ -192,16 +201,15 @@ HRESULT CompareFileImpl(
     {
         DWORD const error = GetLastError();
         if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)
-            return S_OK;
-        return HRESULT_FROM_WIN32(error);
+            return FileComparison{.exists = false, .matches = false};
+        return std::unexpected(HRESULT_FROM_WIN32(error));
     }
-    exists = true;
 
     LARGE_INTEGER size = {};
     if (!GetFileSizeEx(file.get(), &size))
-        return HRESULT_FROM_WIN32(GetLastError());
+        return std::unexpected(HRESULT_FROM_WIN32(GetLastError()));
     if (size.QuadPart != static_cast<LONGLONG>(expected.size()))
-        return S_OK;
+        return FileComparison{.exists = true, .matches = false};
 
     std::vector<BYTE> buffer(kCompareChunkBytes);
     size_t offset = 0;
@@ -211,14 +219,13 @@ HRESULT CompareFileImpl(
             buffer.size(), expected.size() - offset));
         DWORD received = 0;
         if (!ReadFile(file.get(), buffer.data(), wanted, &received, nullptr))
-            return HRESULT_FROM_WIN32(GetLastError());
+            return std::unexpected(HRESULT_FROM_WIN32(GetLastError()));
         if (received != wanted ||
             memcmp(buffer.data(), expected.data() + offset, wanted) != 0)
-            return S_OK;
+            return FileComparison{.exists = true, .matches = false};
         offset += received;
     }
-    matches = true;
-    return S_OK;
+    return FileComparison{.exists = true, .matches = true};
 }
 
 HRESULT WriteAll(HANDLE file, std::vector<BYTE> const& bytes)
@@ -760,31 +767,27 @@ bool IsUsableManifestFile(
         scaler == appleTrueType || scaler == collection;
 }
 
-HRESULT ManifestPath(std::wstring& path)
+[[nodiscard]] std::expected<std::wstring, HRESULT> ManifestPath()
 {
-    HRESULT const result = GetCacheDirectory(path);
-    if (FAILED(result))
-        return result;
-    AppendPathComponent(path, L"manifest-v2.bin");
-    return S_OK;
+    auto path = GetCacheDirectory();
+    if (!path)
+        return std::unexpected(path.error());
+    AppendPathComponent(*path, L"manifest-v2.bin");
+    return std::move(*path);
 }
 
-HRESULT LookupManifestFontImpl(
-    ManifestKey const& key,
-    ManifestValue& value,
-    bool& found)
+[[nodiscard]] std::expected<std::optional<ManifestValue>, HRESULT>
+LookupManifestFontImpl(ManifestKey const& key)
 {
-    value = {};
-    found = false;
     if (key.replacementPath.empty() || key.aliasFamily.empty())
-        return S_OK;
-    std::wstring path;
-    if (FAILED(ManifestPath(path)))
-        return S_OK;
+        return std::optional<ManifestValue>();
+    auto path = ManifestPath();
+    if (!path)
+        return std::optional<ManifestValue>();
     ManifestProcessLock processLock;
     ManifestState& state = GetManifestState();
     std::scoped_lock lock(state.mutex);
-    LoadManifest(state, path);
+    LoadManifest(state, *path);
     for (auto entry = state.entries.begin(); entry != state.entries.end(); ++entry)
     {
         if (!SameKey(entry->key, key))
@@ -793,14 +796,15 @@ HRESULT LookupManifestFontImpl(
                 entry->value.virtualFontPath, entry->value.virtualFontSize))
         {
             state.entries.erase(entry);
-            return WriteManifest(state, path);
+            HRESULT const result = WriteManifest(state, *path);
+            if (FAILED(result))
+                return std::unexpected(result);
+            return std::optional<ManifestValue>();
         }
         entry->stamp = CurrentFileTime();
-        value = entry->value;
-        found = true;
-        return S_OK;
+        return std::optional<ManifestValue>(entry->value);
     }
-    return S_OK;
+    return std::optional<ManifestValue>();
 }
 
 HRESULT StoreManifestFontImpl(
@@ -815,14 +819,13 @@ HRESULT StoreManifestFontImpl(
             key.axes.begin(), key.axes.end(),
             [](ManifestAxis const& axis) { return !std::isfinite(axis.value); }))
         return E_INVALIDARG;
-    std::wstring path;
-    HRESULT result = ManifestPath(path);
-    if (FAILED(result))
-        return result;
+    auto path = ManifestPath();
+    if (!path)
+        return path.error();
     ManifestProcessLock processLock;
     ManifestState& state = GetManifestState();
     std::scoped_lock lock(state.mutex);
-    LoadManifest(state, path);
+    LoadManifest(state, *path);
     ManifestEntry* destination = nullptr;
     for (ManifestEntry& entry : state.entries)
     {
@@ -849,21 +852,20 @@ HRESULT StoreManifestFontImpl(
             });
         state.entries.erase(oldest);
     }
-    return WriteManifest(state, path);
+    return WriteManifest(state, *path);
 }
 
 HRESULT DropManifestFontImpl(ManifestKey const& key)
 {
     if (key.replacementPath.empty() || key.aliasFamily.empty())
         return S_OK;
-    std::wstring path;
-    HRESULT result = ManifestPath(path);
-    if (FAILED(result))
-        return result;
+    auto path = ManifestPath();
+    if (!path)
+        return path.error();
     ManifestProcessLock processLock;
     ManifestState& state = GetManifestState();
     std::scoped_lock lock(state.mutex);
-    LoadManifest(state, path);
+    LoadManifest(state, *path);
     size_t const before = state.entries.size();
     state.entries.erase(
         std::remove_if(
@@ -873,17 +875,16 @@ HRESULT DropManifestFontImpl(ManifestKey const& key)
             }),
         state.entries.end());
     return state.entries.size() == before ? S_FALSE :
-        WriteManifest(state, path);
+        WriteManifest(state, *path);
 }
 
 HRESULT ReloadManifestForTestsImpl()
 {
-    std::wstring path;
-    HRESULT result = ManifestPath(path);
-    if (FAILED(result))
-        return result;
+    auto path = ManifestPath();
+    if (!path)
+        return path.error();
     ManifestState fresh;
-    LoadManifest(fresh, path);
+    LoadManifest(fresh, *path);
     ManifestState& state = GetManifestState();
     std::scoped_lock lock(state.mutex);
     state.path = std::move(fresh.path);
@@ -894,25 +895,23 @@ HRESULT ReloadManifestForTestsImpl()
     return S_OK;
 }
 
-HRESULT PersistFontImpl(
-    std::vector<BYTE> const& bytes,
-    std::wstring& path)
+[[nodiscard]] std::expected<std::wstring, HRESULT> PersistFontImpl(
+    std::vector<BYTE> const& bytes)
 {
-    std::array<BYTE, 32> digest = {};
-    HRESULT result = HashBytes(bytes, digest);
-    if (FAILED(result))
-        return result;
+    auto digest = HashBytes(bytes);
+    if (!digest)
+        return std::unexpected(digest.error());
 
-    std::wstring directory;
-    result = GetCacheDirectory(directory);
-    if (FAILED(result))
-        return result;
+    auto directory = GetCacheDirectory();
+    if (!directory)
+        return std::unexpected(directory.error());
 
-    std::wstring const stem = HexDigest(digest);
+    std::wstring const stem = HexDigest(*digest);
     static std::atomic<ULONG> sequence(0);
+    std::wstring path;
     for (unsigned int attempt = 0; attempt < 32; ++attempt)
     {
-        path = directory;
+        path = *directory;
         AppendPathComponent(path, stem.c_str());
         if (attempt != 0)
         {
@@ -923,14 +922,12 @@ HRESULT PersistFontImpl(
         }
         path.append(L".ttf");
 
-        bool exists = false;
-        bool matches = false;
-        result = CompareFile(path, bytes, exists, matches);
-        if (FAILED(result))
-            return result;
-        if (matches)
-            return S_OK;
-        if (exists)
+        auto comparison = CompareFile(path, bytes);
+        if (!comparison)
+            return std::unexpected(comparison.error());
+        if (comparison->matches)
+            return path;
+        if (comparison->exists)
             continue;
 
         std::wstring temporaryPath = path;
@@ -949,31 +946,31 @@ HRESULT PersistFontImpl(
         {
             if (GetLastError() == ERROR_FILE_EXISTS)
                 continue;
-            return HRESULT_FROM_WIN32(GetLastError());
+            return std::unexpected(HRESULT_FROM_WIN32(GetLastError()));
         }
-        result = WriteAll(file.get(), bytes);
+        HRESULT result = WriteAll(file.get(), bytes);
         if (SUCCEEDED(result) && !FlushFileBuffers(file.get()))
             result = HRESULT_FROM_WIN32(GetLastError());
         file.reset();
         if (FAILED(result))
-            return result;
+            return std::unexpected(result);
 
         if (MoveFileExW(
                 temporary.path(), path.c_str(), MOVEFILE_WRITE_THROUGH))
         {
             temporary.Commit();
-            return S_OK;
+            return path;
         }
         DWORD const moveError = GetLastError();
-        result = CompareFile(path, bytes, exists, matches);
-        if (SUCCEEDED(result) && matches)
-            return S_OK;
-        if (FAILED(result))
-            return result;
+        comparison = CompareFile(path, bytes);
+        if (comparison && comparison->matches)
+            return path;
+        if (!comparison)
+            return std::unexpected(comparison.error());
         if (moveError != ERROR_ALREADY_EXISTS && moveError != ERROR_FILE_EXISTS)
-            return HRESULT_FROM_WIN32(moveError);
+            return std::unexpected(HRESULT_FROM_WIN32(moveError));
     }
-    return HRESULT_FROM_WIN32(ERROR_TOO_MANY_NAMES);
+    return std::unexpected(HRESULT_FROM_WIN32(ERROR_TOO_MANY_NAMES));
 }
 
 } // namespace
@@ -1067,62 +1064,54 @@ HRESULT GrantSharedReadAccess(std::wstring const& directory) noexcept
     }
 }
 
-HRESULT CompareFile(
+std::expected<FileComparison, HRESULT> CompareFile(
     std::wstring const& path,
-    std::vector<BYTE> const& expected,
-    bool& exists,
-    bool& matches) noexcept
+    std::vector<BYTE> const& expected) noexcept
 {
-    exists = false;
-    matches = false;
     try
     {
-        return CompareFileImpl(path, expected, exists, matches);
+        return CompareFileImpl(path, expected);
     }
     catch (std::bad_alloc const&)
     {
-        return E_OUTOFMEMORY;
+        return std::unexpected(E_OUTOFMEMORY);
     }
     catch (...)
     {
-        return E_FAIL;
+        return std::unexpected(E_FAIL);
     }
 }
 
-HRESULT GetCacheDirectory(std::wstring& path) noexcept
+std::expected<std::wstring, HRESULT> GetCacheDirectory() noexcept
 {
     try
     {
-        return GetCacheDirectoryImpl(path);
+        return GetCacheDirectoryImpl();
     }
     catch (std::bad_alloc const&)
     {
-        return E_OUTOFMEMORY;
+        return std::unexpected(E_OUTOFMEMORY);
     }
     catch (...)
     {
-        return E_FAIL;
+        return std::unexpected(E_FAIL);
     }
 }
 
-HRESULT LookupManifestFont(
-    ManifestKey const& key,
-    ManifestValue& value,
-    bool& found) noexcept
+std::expected<std::optional<ManifestValue>, HRESULT>
+LookupManifestFont(ManifestKey const& key) noexcept
 {
-    value = {};
-    found = false;
     try
     {
-        return LookupManifestFontImpl(key, value, found);
+        return LookupManifestFontImpl(key);
     }
     catch (std::bad_alloc const&)
     {
-        return E_OUTOFMEMORY;
+        return std::unexpected(E_OUTOFMEMORY);
     }
     catch (...)
     {
-        return E_FAIL;
+        return std::unexpected(E_FAIL);
     }
 }
 
@@ -1176,21 +1165,20 @@ HRESULT ReloadManifestForTests() noexcept
     }
 }
 
-HRESULT PersistFont(
-    std::vector<BYTE> const& bytes,
-    std::wstring& path) noexcept
+std::expected<std::wstring, HRESULT> PersistFont(
+    std::vector<BYTE> const& bytes) noexcept
 {
     try
     {
-        return PersistFontImpl(bytes, path);
+        return PersistFontImpl(bytes);
     }
     catch (std::bad_alloc const&)
     {
-        return E_OUTOFMEMORY;
+        return std::unexpected(E_OUTOFMEMORY);
     }
     catch (...)
     {
-        return E_FAIL;
+        return std::unexpected(E_FAIL);
     }
 }
 

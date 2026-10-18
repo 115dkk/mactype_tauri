@@ -150,17 +150,16 @@ bool ReadFaceTraits(IDWriteFontFaceReference* reference, FaceTraits& traits)
 	return true;
 }
 
-HRESULT FindFamilySet(
+[[nodiscard]] std::expected<CComPtr<IDWriteFontSet>, HRESULT> FindFamilySet(
 	IDWriteFontSet* systemFontSet,
 	WCHAR const* family,
-	FaceTraits const& traits,
-	CComPtr<IDWriteFontSet>& matched)
+	FaceTraits const& traits)
 {
-	matched.Release();
+	CComPtr<IDWriteFontSet> matched;
 	HRESULT result = systemFontSet->GetMatchingFonts(
 		family, traits.weight, traits.stretch, traits.style, &matched);
 	if (SUCCEEDED(result) && matched != nullptr && matched->GetFontCount() != 0)
-		return S_OK;
+		return matched;
 
 	for (DWRITE_FONT_PROPERTY_ID const familyProperty : kFamilyPropertyIds)
 	{
@@ -172,10 +171,9 @@ HRESULT FindFamilySet(
 		matched.Release();
 		result = systemFontSet->GetMatchingFonts(&property, 1, &matched);
 		if (SUCCEEDED(result) && matched != nullptr && matched->GetFontCount() != 0)
-			return S_OK;
+			return matched;
 	}
-	matched.Release();
-	return FAILED(result) ? result : DWRITE_E_NOFONT;
+	return std::unexpected(FAILED(result) ? result : DWRITE_E_NOFONT);
 }
 
 struct FaceCandidates
@@ -276,14 +274,14 @@ CComPtr<IDWriteFontFaceReference> SelectPairedFace(
 	std::wstring const& pairedFamily,
 	FaceTraits const& source)
 {
-	CComPtr<IDWriteFontSet> pairedSet;
-	if (FAILED(FindFamilySet(
-			systemFontSet, pairedFamily.c_str(), source, pairedSet)))
+	auto pairedSet = FindFamilySet(
+		systemFontSet, pairedFamily.c_str(), source);
+	if (!pairedSet)
 		return nullptr;
 	FaceCandidates candidates;
-	CollectCandidates(pairedSet, &source.stretch, candidates);
+	CollectCandidates(*pairedSet, &source.stretch, candidates);
 	if (candidates.faces.empty())
-		CollectCandidates(pairedSet, nullptr, candidates);
+		CollectCandidates(*pairedSet, nullptr, candidates);
 	return CandidateReference(
 		candidates,
 		renderer::bold_face_selection::SelectNearestWeight(
@@ -304,38 +302,48 @@ struct ReplacementChoice
 // the font set builder drops a simulation attached to an aliased reference, so
 // that alias keeps the backing's own weight and DirectWrite simulates bold
 // for the missing slot.
-HRESULT FindReplacementReference(
+[[nodiscard]] std::expected<ReplacementChoice, HRESULT>
+FindReplacementReference(
 	IDWriteFontSet* systemFontSet,
 	FaceTraits const& source,
 	renderer::font_substitution::Snapshot const& snapshot,
-	std::wstring const& replacementFamily,
-	ReplacementChoice& choice)
+	std::wstring const& replacementFamily)
 {
 	namespace substitution = renderer::font_substitution;
-	choice = {};
-	choice.options.profileDigest = snapshot.digest();
+	ReplacementChoice choice{
+		.reference = {},
+		.options = {.profileDigest = snapshot.digest()},
+	};
 
-	CComPtr<IDWriteFontSet> replacementSet;
+	auto replacementSet = FindFamilySet(
+		systemFontSet,
+		replacementFamily.c_str(),
+		renderer::bold_face_selection::IsBoldClassWeight(
+			static_cast<int>(source.weight)) ?
+			FaceTraits{.weight = DWRITE_FONT_WEIGHT_NORMAL,
+				.stretch = source.stretch, .style = source.style} :
+			source);
+	if (!replacementSet)
+		return std::unexpected(replacementSet.error());
+
 	if (!renderer::bold_face_selection::IsBoldClassWeight(
 			static_cast<int>(source.weight)))
 	{
-		HRESULT const result = FindFamilySet(
-			systemFontSet, replacementFamily.c_str(), source, replacementSet);
+		HRESULT const result =
+			(*replacementSet)->GetFontFaceReference(0, &choice.reference);
 		if (FAILED(result))
-			return result;
-		return replacementSet->GetFontFaceReference(0, &choice.reference);
+			return std::unexpected(result);
+		return ReplacementChoice{
+			.reference = std::move(choice.reference),
+			.options = std::move(choice.options),
+		};
 	}
 
-	FaceTraits regular = source;
-	regular.weight = DWRITE_FONT_WEIGHT_NORMAL;
-	HRESULT result = FindFamilySet(
-		systemFontSet, replacementFamily.c_str(), regular, replacementSet);
-	if (FAILED(result))
-		return result;
 	CComPtr<IDWriteFontFaceReference> baseReference;
-	result = replacementSet->GetFontFaceReference(0, &baseReference);
+	HRESULT const result =
+		(*replacementSet)->GetFontFaceReference(0, &baseReference);
 	if (FAILED(result) || baseReference == nullptr)
-		return FAILED(result) ? result : DWRITE_E_NOFONT;
+		return std::unexpected(FAILED(result) ? result : DWRITE_E_NOFONT);
 
 	bool synthetic = false;
 	substitution::BoldPlan const plan = snapshot.PlanBold(
@@ -344,7 +352,7 @@ HRESULT FindReplacementReference(
 	{
 	case substitution::BoldAction::sameFamilyFace:
 		choice.reference = SelectSameFamilyBoldFace(
-			systemFontSet, replacementSet, baseReference, source);
+			systemFontSet, *replacementSet, baseReference, source);
 		synthetic = choice.reference == nullptr;
 		break;
 	case substitution::BoldAction::pairedFamily:
@@ -365,7 +373,10 @@ HRESULT FindReplacementReference(
 	}
 	if (choice.reference == nullptr)
 		choice.reference = baseReference;
-	return S_OK;
+	return ReplacementChoice{
+		.reference = std::move(choice.reference),
+		.options = std::move(choice.options),
+	};
 }
 
 struct NativeFace
@@ -443,37 +454,32 @@ void AddSyntheticBoldSlots(
 	{
 		FaceTraits traits = observations.traits[slot.templateFace];
 		traits.weight = DWRITE_FONT_WEIGHT_BOLD;
-		ReplacementChoice replacement;
-		HRESULT const found = FindReplacementReference(
+		auto replacement = FindReplacementReference(
 			systemFontSet,
 			traits,
 			snapshot,
-			observations.faces[slot.templateFace].replacementFamily,
-			replacement);
-		if (FAILED(found) || replacement.reference == nullptr)
+			observations.faces[slot.templateFace].replacementFamily);
+		if (!replacement || replacement->reference == nullptr)
 		{
 			missingReplacement = true;
 			continue;
 		}
-		if (!replacement.options.overrideWeight)
+		if (!replacement->options.overrideWeight)
 			continue;
 		std::vector<CComPtr<IDWriteFontFaceReference>> boldReferences;
 		for (std::wstring const& familyName : slot.familyNames)
 		{
-			CComPtr<IDWriteFontFaceReference> boldReference;
-			directwrite_virtual_font::Identity identity;
-			if (FAILED(directwrite_virtual_font::CreateAliasedReference(
-					factory3,
-					replacement.reference,
-					familyName.c_str(),
-					boldReference,
-					identity,
-					replacement.options)))
+			auto boldReference = directwrite_virtual_font::CreateAliasedReference(
+				factory3,
+				replacement->reference,
+				familyName.c_str(),
+				replacement->options);
+			if (!boldReference)
 			{
 				boldReferences.clear();
 				break;
 			}
-			boldReferences.push_back(boldReference);
+			boldReferences.push_back(boldReference->reference);
 		}
 		if (boldReferences.empty())
 		{
@@ -619,15 +625,12 @@ BuildStatus Build(
 
 		FaceTraits sourceTraits;
 		ReadFaceTraits(sourceReference, sourceTraits);
-		ReplacementChoice replacement;
-		HRESULT substitutionResult = FindReplacementReference(
+		auto replacement = FindReplacementReference(
 			systemFontSet,
 			sourceTraits,
 			*snapshot,
-			familyResolution.replacementFamily,
-			replacement);
-		bool complete = SUCCEEDED(substitutionResult) &&
-			replacement.reference != nullptr;
+			familyResolution.replacementFamily);
+		bool complete = replacement && replacement->reference != nullptr;
 		if (complete)
 		{
 			if (FAILED(nativeFaces.Flush()))
@@ -635,24 +638,20 @@ BuildStatus Build(
 			for (const std::wstring& sourceAlias :
 				familyResolution.sourceAliases)
 			{
-				CComPtr<IDWriteFontFaceReference> virtualReference;
-				directwrite_virtual_font::Identity identity;
-				substitutionResult =
+				auto virtualReference =
 					directwrite_virtual_font::CreateAliasedReference(
 						factory3,
-						replacement.reference,
+						replacement->reference,
 						sourceAlias.c_str(),
-						virtualReference,
-						identity,
-						replacement.options);
-				if (FAILED(substitutionResult))
+						replacement->options);
+				if (!virtualReference)
 				{
 					emptyResultStatus = BuildStatus::virtualFontFailed;
 					complete = false;
 					break;
 				}
-				substitutionResult =
-					builder->AddFontFaceReference(virtualReference);
+				HRESULT const substitutionResult =
+					builder->AddFontFaceReference(virtualReference->reference);
 				if (FAILED(substitutionResult))
 				{
 					emptyResultStatus = BuildStatus::aliasReferenceRejected;

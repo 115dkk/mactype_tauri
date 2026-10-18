@@ -7,6 +7,8 @@
 #include <Windows.h>
 
 #include <cstdint>
+#include <expected>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -42,21 +44,23 @@ struct ManifestValue
     std::wstring postScriptName;
 };
 
-[[nodiscard]] HRESULT CompareFile(
-    std::wstring const& path,
-    std::vector<BYTE> const& expected,
-    bool& exists,
-    bool& matches) noexcept;
+struct FileComparison
+{
+    bool exists = false;
+    bool matches = false;
+};
 
-[[nodiscard]] HRESULT GetCacheDirectory(std::wstring& path) noexcept;
+[[nodiscard]] std::expected<FileComparison, HRESULT> CompareFile(
+    std::wstring const& path,
+    std::vector<BYTE> const& expected) noexcept;
+
+[[nodiscard]] std::expected<std::wstring, HRESULT> GetCacheDirectory() noexcept;
 
 [[nodiscard]] HRESULT GrantSharedReadAccess(
     std::wstring const& directory) noexcept;
 
-[[nodiscard]] HRESULT LookupManifestFont(
-    ManifestKey const& key,
-    ManifestValue& value,
-    bool& found) noexcept;
+[[nodiscard]] std::expected<std::optional<ManifestValue>, HRESULT>
+LookupManifestFont(ManifestKey const& key) noexcept;
 
 [[nodiscard]] HRESULT StoreManifestFont(
     ManifestKey const& key,
@@ -67,9 +71,8 @@ struct ManifestValue
 // Forces the next test observation through a newly loaded manifest state.
 [[nodiscard]] HRESULT ReloadManifestForTests() noexcept;
 
-[[nodiscard]] HRESULT PersistFont(
-    std::vector<BYTE> const& bytes,
-    std::wstring& path) noexcept;
+[[nodiscard]] std::expected<std::wstring, HRESULT> PersistFont(
+    std::vector<BYTE> const& bytes) noexcept;
 
 } // namespace virtual_font_cache
 } // namespace renderer

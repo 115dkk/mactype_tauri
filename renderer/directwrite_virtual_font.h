@@ -10,6 +10,7 @@
 #include <atlcomcli.h>
 
 #include <cstdint>
+#include <expected>
 #include <string>
 #include <vector>
 
@@ -37,17 +38,21 @@ struct AliasOptions
 	std::vector<DWRITE_FONT_AXIS_VALUE> axisValues;
 };
 
+struct AliasedReference
+{
+	CComPtr<IDWriteFontFaceReference> reference;
+	Identity identity;
+};
+
 // Produces one self-contained SFNT whose glyph and metric tables come from the
 // replacement face while every OpenType naming record describes the alias.
 // The returned reference is native DirectWrite state backed by an immutable,
 // content-addressed local file. Standard DirectWrite file identity can therefore
 // cross renderer-process boundaries without a MacType loader or proxy object.
-HRESULT CreateAliasedReference(
+[[nodiscard]] std::expected<AliasedReference, HRESULT> CreateAliasedReference(
 	IDWriteFactory3* factory,
 	IDWriteFontFaceReference* replacementReference,
 	WCHAR const* aliasFamily,
-	CComPtr<IDWriteFontFaceReference>& reference,
-	Identity& identity,
 	AliasOptions const& options = AliasOptions());
 
 // The SFNT rewrite behind CreateAliasedReference, exposed for tests.

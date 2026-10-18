@@ -10,6 +10,7 @@ use super::{
 };
 use crate::storage::{
     SetupError, read_bounded_directory, read_bounded_regular_file, reject_reparse_ancestors,
+    retry_profile_file_operation,
 };
 
 const GENERATED_PROFILE_TEMP_PREFIX: &str = ".MacType.ini.new-";
@@ -208,13 +209,15 @@ fn remove_exact_materialized_profile(
         FILE_SHARE_READ,
     };
 
-    let mut file = OpenOptions::new()
-        .access_mode(FILE_GENERIC_READ | DELETE)
-        .share_mode(FILE_SHARE_READ)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(path)
-        .map_err(cleanup_unknown_io)
-        .map_err(MaterializedProfileClearError::Unchanged)?;
+    let mut file = retry_profile_file_operation(|| {
+        OpenOptions::new()
+            .access_mode(FILE_GENERIC_READ | DELETE)
+            .share_mode(FILE_SHARE_READ)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)
+    })
+    .map_err(cleanup_unknown_io)
+    .map_err(MaterializedProfileClearError::Unchanged)?;
     let metadata = file
         .metadata()
         .map_err(cleanup_unknown_io)
@@ -260,7 +263,7 @@ fn remove_exact_materialized_profile(
             ),
         ));
     }
-    fs::remove_file(path)
+    retry_profile_file_operation(|| fs::remove_file(path))
         .map_err(cleanup_unknown_io)
         .map_err(MaterializedProfileClearError::Unknown)
 }
@@ -299,7 +302,52 @@ pub(super) fn remove_interrupted_generated_profile_writes(
                 "generated runtime profile temporary path is not a regular file".to_owned(),
             ));
         }
-        fs::remove_file(path)?;
+        retry_profile_file_operation(|| fs::remove_file(&path))?;
     }
     Ok(())
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    use tempfile::tempdir;
+    use windows_sys::Win32::Foundation::GENERIC_READ;
+    use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+
+    use super::*;
+
+    #[test]
+    fn exact_generated_profile_removal_retries_until_reader_releases_its_handle() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join(GENERATED_PROFILE_NAME);
+        let expected = b"[General]\nHookChildProcesses=1\n";
+        fs::write(&path, expected).unwrap();
+        let held_path = path.clone();
+        let (ready_tx, ready_rx) = mpsc::sync_channel(0);
+        let holder = thread::spawn(move || {
+            let file = OpenOptions::new()
+                .access_mode(GENERIC_READ)
+                .share_mode(FILE_SHARE_READ)
+                .open(held_path)
+                .expect("failed to open the generated profile with renderer-compatible sharing");
+            ready_tx
+                .send(())
+                .expect("failed to report the held generated-profile handle");
+            thread::sleep(Duration::from_millis(300));
+            drop(file);
+        });
+        ready_rx
+            .recv()
+            .expect("generated-profile holder stopped before reporting readiness");
+
+        let result = remove_exact_materialized_profile(&path, expected);
+
+        holder.join().unwrap();
+        assert!(result.is_ok(), "generated profile removal failed");
+        assert!(!path.exists());
+    }
 }

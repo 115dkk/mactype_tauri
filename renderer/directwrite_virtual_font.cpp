@@ -1051,6 +1051,7 @@ std::expected<AliasedReference, HRESULT> CreateAliasedReference(
 			}
 			return AliasedReference{
 				.reference = created,
+				.axisValues = std::move(effectiveOptions.axisValues),
 				.identity = std::move(identity),
 			};
 		}

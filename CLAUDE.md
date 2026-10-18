@@ -116,7 +116,16 @@ below wherever the two conflict.
   weight, width, `fsSelection` and `head.macStyle` follow the pinned
   coordinates unless the alias advertises an explicit weight, which keeps that
   weight and its bold bits so a bold-slot alias of a Medium backing stays a
-  distinct file. The source and fallback preamble inside the intercepted call
+  distinct file. The `IDWriteFactory6`/`IDWriteFactory7` system font set and
+  collection methods answer from the same generation; a collection in the
+  typographic family model (Windows XAML text uses it with explicit `wght` and
+  `opsz` axis values) is built from a set in which each virtual alias is a
+  static instance at its pinned coordinates (`IDWriteFontSetBuilder2::AddFont`
+  with single-point axis ranges), so a layout's axis values never move an alias
+  off its pin. The weight/stretch/style set is not rebuilt that way, so an
+  application that passes explicit axis values with it still re-instances a
+  variable backing; that is a known limitation. The source and fallback
+  preamble inside the intercepted call
   refuses a nested call on its own thread (`CanonicalSourceScope`), because
   DirectWrite answers the original collection and fallback calls through its
   own virtual methods, which are the patched slots; the system-fallback hook is

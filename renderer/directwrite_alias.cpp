@@ -438,6 +438,19 @@ void ObserveUnresolvedFaces(
 	observations.unresolved.clear();
 }
 
+void RememberVirtualAlias(
+	std::vector<directwrite_virtual_font::AliasedReference>& aliases,
+	directwrite_virtual_font::AliasedReference&& alias)
+{
+	for (directwrite_virtual_font::AliasedReference const& existing : aliases)
+	{
+		if (existing.reference != nullptr && alias.reference != nullptr &&
+			existing.reference->Equals(alias.reference))
+			return;
+	}
+	aliases.push_back(std::move(alias));
+}
+
 void AddSyntheticBoldSlots(
 	IDWriteFactory3* factory3,
 	IDWriteFontSetBuilder* builder,
@@ -445,6 +458,7 @@ void AddSyntheticBoldSlots(
 	renderer::font_substitution::Snapshot const& snapshot,
 	BuildObservations const& observations,
 	AliasFontSet& result,
+	std::vector<directwrite_virtual_font::AliasedReference>& virtualAliases,
 	bool& missingReplacement)
 {
 	std::vector<SyntheticBoldSlot> slots;
@@ -466,7 +480,7 @@ void AddSyntheticBoldSlots(
 		}
 		if (!replacement->options.overrideWeight)
 			continue;
-		std::vector<CComPtr<IDWriteFontFaceReference>> boldReferences;
+		std::vector<directwrite_virtual_font::AliasedReference> boldReferences;
 		for (std::wstring const& familyName : slot.familyNames)
 		{
 			auto boldReference = directwrite_virtual_font::CreateAliasedReference(
@@ -479,7 +493,7 @@ void AddSyntheticBoldSlots(
 				boldReferences.clear();
 				break;
 			}
-			boldReferences.push_back(boldReference->reference);
+			boldReferences.push_back(std::move(*boldReference));
 		}
 		if (boldReferences.empty())
 		{
@@ -487,13 +501,15 @@ void AddSyntheticBoldSlots(
 			continue;
 		}
 		bool added = true;
-		for (CComPtr<IDWriteFontFaceReference> const& boldReference : boldReferences)
+		for (directwrite_virtual_font::AliasedReference& boldReference :
+			boldReferences)
 		{
-			if (FAILED(builder->AddFontFaceReference(boldReference)))
+			if (FAILED(builder->AddFontFaceReference(boldReference.reference)))
 			{
 				added = false;
 				break;
 			}
+			RememberVirtualAlias(virtualAliases, std::move(boldReference));
 		}
 		if (!added)
 		{
@@ -587,6 +603,7 @@ BuildStatus Build(
 	bool resolvedRule = false;
 	BuildStatus emptyResultStatus = BuildStatus::replacementUnavailable;
 	BuildObservations observations;
+	std::vector<directwrite_virtual_font::AliasedReference> virtualAliases;
 	UINT32 const fontCount = systemFontSet->GetFontCount();
 	for (UINT32 index = 0; index < fontCount; ++index)
 	{
@@ -658,6 +675,7 @@ BuildStatus Build(
 					complete = false;
 					break;
 				}
+				RememberVirtualAlias(virtualAliases, std::move(*virtualReference));
 			}
 		}
 		Observe(
@@ -688,6 +706,7 @@ BuildStatus Build(
 			*snapshot,
 			observations,
 			result,
+			virtualAliases,
 			missingReplacement);
 	}
 
@@ -737,6 +756,9 @@ BuildStatus Build(
 		result.downloadableCollection == nullptr)
 		return BuildStatus::createCollectionFailed;
 
+	result.virtualAliases = std::make_shared<const std::vector<
+		directwrite_virtual_font::AliasedReference>>(
+			std::move(virtualAliases));
 	result.status = missingReplacement ?
 		BuildStatus::appliedWithMissingReplacement : BuildStatus::applied;
 	return result.status;
@@ -917,6 +939,128 @@ BuildStatus GetOrCreateUnchecked(
 	entry->ready.notify_all();
 	result = built;
 	return status;
+}
+
+bool IsFontSetBuilder2Unavailable(HRESULT result) noexcept
+{
+	return result == E_NOINTERFACE || result == E_NOTIMPL ||
+		result == HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
+}
+
+directwrite_virtual_font::AliasedReference const* FindVirtualAlias(
+	IDWriteFontFaceReference* reference,
+	std::vector<directwrite_virtual_font::AliasedReference> const& aliases) noexcept
+{
+	if (reference == nullptr)
+		return nullptr;
+	for (directwrite_virtual_font::AliasedReference const& alias : aliases)
+	{
+		if (alias.reference != nullptr && reference->Equals(alias.reference))
+			return &alias;
+	}
+	return nullptr;
+}
+
+HRESULT AddPinnedAlias(
+	IDWriteFontSetBuilder2* builder,
+	directwrite_virtual_font::AliasedReference const& alias)
+{
+	if (builder == nullptr || alias.reference == nullptr ||
+		alias.identity.family.empty() || alias.identity.subfamily.empty() ||
+		alias.identity.fullName.empty() || alias.identity.postScriptName.empty())
+		return E_INVALIDARG;
+
+	CComPtr<IDWriteFontFile> fontFile;
+	HRESULT const fileResult = alias.reference->GetFontFile(&fontFile);
+	if (FAILED(fileResult) || fontFile == nullptr)
+		return FAILED(fileResult) ? fileResult : E_UNEXPECTED;
+
+	std::vector<DWRITE_FONT_AXIS_RANGE> ranges;
+	ranges.reserve(alias.axisValues.size());
+	for (DWRITE_FONT_AXIS_VALUE const& axis : alias.axisValues)
+		ranges.push_back({axis.axisTag, axis.value, axis.value});
+
+	std::array<DWRITE_FONT_PROPERTY, 7> const properties = {{
+		{DWRITE_FONT_PROPERTY_ID_WEIGHT_STRETCH_STYLE_FAMILY_NAME,
+			alias.identity.family.c_str(), nullptr},
+		{DWRITE_FONT_PROPERTY_ID_TYPOGRAPHIC_FAMILY_NAME,
+			alias.identity.family.c_str(), nullptr},
+		{DWRITE_FONT_PROPERTY_ID_WEIGHT_STRETCH_STYLE_FACE_NAME,
+			alias.identity.subfamily.c_str(), nullptr},
+		{DWRITE_FONT_PROPERTY_ID_TYPOGRAPHIC_FACE_NAME,
+			alias.identity.subfamily.c_str(), nullptr},
+		{DWRITE_FONT_PROPERTY_ID_FULL_NAME,
+			alias.identity.fullName.c_str(), nullptr},
+		{DWRITE_FONT_PROPERTY_ID_WIN32_FAMILY_NAME,
+			alias.identity.family.c_str(), nullptr},
+		{DWRITE_FONT_PROPERTY_ID_POSTSCRIPT_NAME,
+			alias.identity.postScriptName.c_str(), nullptr},
+	}};
+	DWRITE_FONT_AXIS_VALUE const* const axisValues = alias.axisValues.empty() ?
+		nullptr : alias.axisValues.data();
+	DWRITE_FONT_AXIS_RANGE const* const axisRanges = ranges.empty() ?
+		nullptr : ranges.data();
+	return builder->AddFont(
+		fontFile,
+		alias.reference->GetFontFaceIndex(),
+		alias.reference->GetSimulations(),
+		axisValues,
+		static_cast<UINT32>(alias.axisValues.size()),
+		axisRanges,
+		static_cast<UINT32>(ranges.size()),
+		properties.data(),
+		static_cast<UINT32>(properties.size()));
+}
+
+HRESULT BuildPinnedTypographicSet(
+	IDWriteFontSetBuilder2* builder,
+	IDWriteFontSet* source,
+	std::vector<directwrite_virtual_font::AliasedReference> const& aliases,
+	IDWriteFontSet** result)
+{
+	if (builder == nullptr || source == nullptr || result == nullptr)
+		return E_INVALIDARG;
+	*result = nullptr;
+
+	CComPtr<IDWriteFontSetBuilder1> builder1;
+	builder->QueryInterface(&builder1);
+	CComPtr<IDWriteFontSet1> source1;
+	source->QueryInterface(&source1);
+	NativeFaceRun nativeFaces(builder, builder1, source1);
+	if (aliases.empty())
+		return E_UNEXPECTED;
+	std::vector<bool> matchedAliases(aliases.size(), false);
+	UINT32 const count = source->GetFontCount();
+	for (UINT32 index = 0; index < count; ++index)
+	{
+		CComPtr<IDWriteFontFaceReference> reference;
+		HRESULT const referenceResult =
+			source->GetFontFaceReference(index, &reference);
+		if (FAILED(referenceResult) || reference == nullptr)
+			return FAILED(referenceResult) ? referenceResult : E_UNEXPECTED;
+		auto const* const alias = FindVirtualAlias(reference, aliases);
+		if (alias == nullptr)
+		{
+			HRESULT const keepResult = nativeFaces.Keep(index, reference);
+			if (FAILED(keepResult))
+				return keepResult;
+			continue;
+		}
+		matchedAliases[static_cast<size_t>(alias - aliases.data())] = true;
+		HRESULT const flushResult = nativeFaces.Flush();
+		if (FAILED(flushResult))
+			return flushResult;
+		HRESULT const addResult = AddPinnedAlias(builder, *alias);
+		if (FAILED(addResult))
+			return addResult;
+	}
+	if (std::find(matchedAliases.begin(), matchedAliases.end(), false) !=
+		matchedAliases.end())
+		return E_UNEXPECTED;
+	HRESULT const flushResult = nativeFaces.Flush();
+	if (FAILED(flushResult))
+		return flushResult;
+	return builder->CreateFontSet(result);
 }
 
 } // namespace
@@ -1117,11 +1261,13 @@ HRESULT GetOrCreateTypographicCollection(
 	IDWriteFactory6* factory,
 	AliasFontSet const& aliases,
 	bool includeDownloadableFonts,
-	IDWriteFontCollection2** collection) noexcept
+	IDWriteFontCollection2** collection,
+	TypographicCollectionStatus* typographicStatus) noexcept
 {
-	if (collection == nullptr)
+	if (collection == nullptr || typographicStatus == nullptr)
 		return E_POINTER;
 	*collection = nullptr;
+	*typographicStatus = TypographicCollectionStatus::pinned;
 	try
 	{
 		CComPtr<IUnknown> const factoryIdentity = GetIdentity(factory);
@@ -1132,6 +1278,8 @@ HRESULT GetOrCreateTypographicCollection(
 
 		std::shared_ptr<CacheEntry> entry;
 		CComPtr<IDWriteFontCollection2> cached;
+		TypographicCollectionStatus cachedStatus =
+			TypographicCollectionStatus::pinned;
 		AliasCache& cache = GetCache();
 		{
 			std::scoped_lock lock(cache.mutex);
@@ -1149,6 +1297,9 @@ HRESULT GetOrCreateTypographicCollection(
 					cached = includeDownloadableFonts ?
 						candidate->aliases.downloadableTypographicCollection :
 						candidate->aliases.typographicCollection;
+					cachedStatus = includeDownloadableFonts ?
+						candidate->aliases.downloadableTypographicCollectionStatus :
+						candidate->aliases.typographicCollectionStatus;
 					break;
 				}
 			}
@@ -1156,11 +1307,51 @@ HRESULT GetOrCreateTypographicCollection(
 		if (entry == nullptr)
 			return E_UNEXPECTED;
 		if (cached != nullptr)
+		{
+			*typographicStatus = cachedStatus;
 			return cached.CopyTo(collection);
+		}
+
+		TypographicCollectionStatus createdStatus =
+			TypographicCollectionStatus::pinned;
+		CComPtr<IDWriteFontSet> collectionSet;
+		if (aliases.virtualAliases == nullptr || aliases.virtualAliases->empty())
+		{
+			collectionSet = aliasSet;
+		}
+		else
+		{
+			CComPtr<IDWriteFontSetBuilder2> builder;
+			HRESULT const builderResult = factory->CreateFontSetBuilder(&builder);
+			if (SUCCEEDED(builderResult) && builder != nullptr)
+			{
+				HRESULT const setResult = BuildPinnedTypographicSet(
+					builder, aliasSet, *aliases.virtualAliases, &collectionSet);
+				if (FAILED(setResult) || collectionSet == nullptr)
+				{
+					collectionSet = aliasSet;
+					createdStatus =
+						TypographicCollectionStatus::staticBuildFailed;
+				}
+				else
+				{
+					createdStatus = TypographicCollectionStatus::pinned;
+				}
+			}
+			else if (IsFontSetBuilder2Unavailable(builderResult))
+			{
+				collectionSet = aliasSet;
+				createdStatus = TypographicCollectionStatus::builderUnavailable;
+			}
+			else
+			{
+				return FAILED(builderResult) ? builderResult : E_UNEXPECTED;
+			}
+		}
 
 		CComPtr<IDWriteFontCollection2> created;
 		HRESULT const createResult = factory->CreateFontCollectionFromFontSet(
-			aliasSet,
+			collectionSet,
 			DWRITE_FONT_FAMILY_MODEL_TYPOGRAPHIC,
 			&created);
 		if (FAILED(createResult) || created == nullptr)
@@ -1172,10 +1363,19 @@ HRESULT GetOrCreateTypographicCollection(
 				includeDownloadableFonts ?
 					entry->aliases.downloadableTypographicCollection :
 					entry->aliases.typographicCollection;
+			TypographicCollectionStatus& publishedStatus =
+				includeDownloadableFonts ?
+					entry->aliases.downloadableTypographicCollectionStatus :
+					entry->aliases.typographicCollectionStatus;
 			if (published == nullptr)
+			{
 				published = created;
+				publishedStatus = createdStatus;
+			}
 			cached = published;
+			cachedStatus = publishedStatus;
 		}
+		*typographicStatus = cachedStatus;
 		return cached.CopyTo(collection);
 	}
 	catch (std::bad_alloc const&)

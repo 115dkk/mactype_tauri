@@ -1,10 +1,12 @@
 #pragma once
 
 #include "common.h"
+#include "directwrite_virtual_font.h"
 
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace directwrite_alias {
 
@@ -30,6 +32,13 @@ enum class BuildStatus
 	waitTimeout,
 };
 
+enum class TypographicCollectionStatus
+{
+	pinned,
+	builderUnavailable,
+	staticBuildFailed,
+};
+
 struct AliasFontSet
 {
 	CComPtr<IDWriteFontSet> fontSet;
@@ -38,6 +47,12 @@ struct AliasFontSet
 	CComPtr<IDWriteFontCollection1> downloadableCollection;
 	CComPtr<IDWriteFontCollection2> typographicCollection;
 	CComPtr<IDWriteFontCollection2> downloadableTypographicCollection;
+	std::shared_ptr<const std::vector<directwrite_virtual_font::AliasedReference>>
+		virtualAliases;
+	TypographicCollectionStatus typographicCollectionStatus =
+		TypographicCollectionStatus::pinned;
+	TypographicCollectionStatus downloadableTypographicCollectionStatus =
+		TypographicCollectionStatus::pinned;
 	UINT32 substitutionCount = 0;
 	std::uint64_t substitutionGeneration = 0;
 	std::uint64_t substitutionDigest = 0;
@@ -83,7 +98,8 @@ HRESULT GetOrCreateTypographicCollection(
 	IDWriteFactory6* factory,
 	AliasFontSet const& aliases,
 	bool includeDownloadableFonts,
-	IDWriteFontCollection2** collection) noexcept;
+	IDWriteFontCollection2** collection,
+	TypographicCollectionStatus* typographicStatus) noexcept;
 
 // Records the factory's canonical alias source for the fallback lookup. A
 // revision below the one already recorded is ignored, so publications that

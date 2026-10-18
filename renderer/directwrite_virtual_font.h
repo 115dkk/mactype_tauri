@@ -41,6 +41,7 @@ struct AliasOptions
 struct AliasedReference
 {
 	CComPtr<IDWriteFontFaceReference> reference;
+	std::vector<DWRITE_FONT_AXIS_VALUE> axisValues;
 	Identity identity;
 };
 

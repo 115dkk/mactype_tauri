@@ -36,6 +36,8 @@ struct AliasFontSet
 	CComPtr<IDWriteFontSet> downloadableFontSet;
 	CComPtr<IDWriteFontCollection1> collection;
 	CComPtr<IDWriteFontCollection1> downloadableCollection;
+	CComPtr<IDWriteFontCollection2> typographicCollection;
+	CComPtr<IDWriteFontCollection2> downloadableTypographicCollection;
 	UINT32 substitutionCount = 0;
 	std::uint64_t substitutionGeneration = 0;
 	std::uint64_t substitutionDigest = 0;
@@ -72,6 +74,16 @@ BuildStatus GetOrCreate(
 
 // True when collection is one of the alias collections this process built.
 bool IsAliasCollection(IUnknown* collection) noexcept;
+
+bool MatchesAliasCollection(
+	IUnknown* collection,
+	AliasFontSet const& aliases) noexcept;
+
+HRESULT GetOrCreateTypographicCollection(
+	IDWriteFactory6* factory,
+	AliasFontSet const& aliases,
+	bool includeDownloadableFonts,
+	IDWriteFontCollection2** collection) noexcept;
 
 // Records the factory's canonical alias source for the fallback lookup. A
 // revision below the one already recorded is ignored, so publications that

@@ -317,11 +317,174 @@ bool HashSha256(const std::byte* bytes, const std::size_t size,
   return true;
 }
 
-std::wstring ResolveDirectWriteFamily(const std::wstring_view family,
-                                      void* directwrite_factory,
-                                      const bool use_modern_collection,
-                                      UniqueCom<IDWriteFontFace>* retained_face,
-                                      std::wstring& error) {
+enum class SystemCollectionMode {
+  legacy,
+  factory3,
+  factory6_weight_stretch_style,
+  factory6_typographic,
+  factory7_weight_stretch_style,
+  factory7_typographic,
+  factory6_font_set,
+  factory7_font_set,
+};
+
+bool SupportsSystemCollectionMode(IDWriteFactory* factory,
+                                  const SystemCollectionMode mode) {
+  if (factory == nullptr) {
+    return false;
+  }
+  if (mode == SystemCollectionMode::legacy) {
+    return true;
+  }
+  if (mode == SystemCollectionMode::factory3) {
+    IDWriteFactory3* raw_factory3 = nullptr;
+    const HRESULT result = factory->QueryInterface(&raw_factory3);
+    UniqueCom<IDWriteFactory3> factory3(raw_factory3);
+    return SUCCEEDED(result) && factory3 != nullptr;
+  }
+  if (mode == SystemCollectionMode::factory6_weight_stretch_style ||
+      mode == SystemCollectionMode::factory6_typographic ||
+      mode == SystemCollectionMode::factory6_font_set) {
+    IDWriteFactory6* raw_factory6 = nullptr;
+    const HRESULT result = factory->QueryInterface(&raw_factory6);
+    UniqueCom<IDWriteFactory6> factory6(raw_factory6);
+    return SUCCEEDED(result) && factory6 != nullptr;
+  }
+  IDWriteFactory7* raw_factory7 = nullptr;
+  const HRESULT result = factory->QueryInterface(&raw_factory7);
+  UniqueCom<IDWriteFactory7> factory7(raw_factory7);
+  return SUCCEEDED(result) && factory7 != nullptr;
+}
+
+bool AcquireSystemFontCollection(
+    IDWriteFactory* factory, const SystemCollectionMode mode,
+    UniqueCom<IDWriteFontCollection>& collection, std::wstring& error) {
+  collection.reset();
+  if (mode == SystemCollectionMode::legacy) {
+    IDWriteFontCollection* raw_collection = nullptr;
+    const HRESULT result =
+        factory->GetSystemFontCollection(&raw_collection);
+    collection.reset(raw_collection);
+    if (FAILED(result) || collection == nullptr) {
+      error = L"IDWriteFactory::GetSystemFontCollection failed";
+      return false;
+    }
+    return true;
+  }
+  if (mode == SystemCollectionMode::factory3) {
+    IDWriteFactory3* raw_factory3 = nullptr;
+    const HRESULT factory_result = factory->QueryInterface(&raw_factory3);
+    UniqueCom<IDWriteFactory3> factory3(raw_factory3);
+    IDWriteFontCollection1* raw_collection = nullptr;
+    const HRESULT result =
+        FAILED(factory_result) || factory3 == nullptr
+            ? E_NOINTERFACE
+            : factory3->GetSystemFontCollection(
+                  TRUE, &raw_collection, FALSE);
+    collection.reset(raw_collection);
+    if (FAILED(result) || collection == nullptr) {
+      error = L"IDWriteFactory3::GetSystemFontCollection failed";
+      return false;
+    }
+    return true;
+  }
+  if (mode == SystemCollectionMode::factory6_weight_stretch_style ||
+      mode == SystemCollectionMode::factory6_typographic ||
+      mode == SystemCollectionMode::factory6_font_set) {
+    IDWriteFactory6* raw_factory6 = nullptr;
+    const HRESULT factory_result = factory->QueryInterface(&raw_factory6);
+    UniqueCom<IDWriteFactory6> factory6(raw_factory6);
+    if (FAILED(factory_result) || factory6 == nullptr) {
+      error = L"IDWriteFactory6 is unavailable";
+      return false;
+    }
+    if (mode == SystemCollectionMode::factory6_font_set) {
+      IDWriteFontSet1* raw_set = nullptr;
+      const HRESULT set_result = factory6->GetSystemFontSet(TRUE, &raw_set);
+      UniqueCom<IDWriteFontSet1> set(raw_set);
+      IDWriteFontCollection2* raw_collection = nullptr;
+      const HRESULT collection_result =
+          FAILED(set_result) || set == nullptr
+              ? E_UNEXPECTED
+              : factory6->CreateFontCollectionFromFontSet(
+                    set.get(), DWRITE_FONT_FAMILY_MODEL_WEIGHT_STRETCH_STYLE,
+                    &raw_collection);
+      collection.reset(raw_collection);
+      if (FAILED(collection_result) || collection == nullptr) {
+        error = L"IDWriteFactory6 font-set collection failed";
+        return false;
+      }
+      return true;
+    }
+    const DWRITE_FONT_FAMILY_MODEL family_model =
+        mode == SystemCollectionMode::factory6_typographic
+            ? DWRITE_FONT_FAMILY_MODEL_TYPOGRAPHIC
+            : DWRITE_FONT_FAMILY_MODEL_WEIGHT_STRETCH_STYLE;
+    IDWriteFontCollection2* raw_collection = nullptr;
+    const HRESULT collection_result = factory6->GetSystemFontCollection(
+        TRUE, family_model, &raw_collection);
+    UniqueCom<IDWriteFontCollection2> first(raw_collection);
+    IDWriteFontCollection2* raw_repeated_collection = nullptr;
+    const HRESULT repeated_result = factory6->GetSystemFontCollection(
+        TRUE, family_model, &raw_repeated_collection);
+    UniqueCom<IDWriteFontCollection2> repeated(raw_repeated_collection);
+    if (FAILED(collection_result) || first == nullptr ||
+        FAILED(repeated_result) || repeated == nullptr) {
+      error = L"IDWriteFactory6::GetSystemFontCollection failed";
+      return false;
+    }
+    if (first.get() != repeated.get()) {
+      error = L"IDWriteFactory6 system collection pointer changed";
+      return false;
+    }
+    collection.reset(first.release());
+    return true;
+  }
+
+  IDWriteFactory7* raw_factory7 = nullptr;
+  const HRESULT factory_result = factory->QueryInterface(&raw_factory7);
+  UniqueCom<IDWriteFactory7> factory7(raw_factory7);
+  if (FAILED(factory_result) || factory7 == nullptr) {
+    error = L"IDWriteFactory7 is unavailable";
+    return false;
+  }
+  if (mode == SystemCollectionMode::factory7_font_set) {
+    IDWriteFontSet2* raw_set = nullptr;
+    const HRESULT set_result = factory7->GetSystemFontSet(TRUE, &raw_set);
+    UniqueCom<IDWriteFontSet2> set(raw_set);
+    IDWriteFontCollection2* raw_collection = nullptr;
+    const HRESULT collection_result =
+        FAILED(set_result) || set == nullptr
+            ? E_UNEXPECTED
+            : factory7->CreateFontCollectionFromFontSet(
+                  set.get(), DWRITE_FONT_FAMILY_MODEL_WEIGHT_STRETCH_STYLE,
+                  &raw_collection);
+    collection.reset(raw_collection);
+    if (FAILED(collection_result) || collection == nullptr) {
+      error = L"IDWriteFactory7 font-set collection failed";
+      return false;
+    }
+    return true;
+  }
+  const DWRITE_FONT_FAMILY_MODEL family_model =
+      mode == SystemCollectionMode::factory7_typographic
+          ? DWRITE_FONT_FAMILY_MODEL_TYPOGRAPHIC
+          : DWRITE_FONT_FAMILY_MODEL_WEIGHT_STRETCH_STYLE;
+  IDWriteFontCollection3* raw_collection = nullptr;
+  const HRESULT collection_result = factory7->GetSystemFontCollection(
+      TRUE, family_model, &raw_collection);
+  collection.reset(raw_collection);
+  if (FAILED(collection_result) || collection == nullptr) {
+    error = L"IDWriteFactory7::GetSystemFontCollection failed";
+    return false;
+  }
+  return true;
+}
+
+std::wstring ResolveDirectWriteFamily(
+    const std::wstring_view family, void* directwrite_factory,
+    const SystemCollectionMode collection_mode,
+    UniqueCom<IDWriteFontFace>* retained_face, std::wstring& error) {
   IDWriteFactory* factory = static_cast<IDWriteFactory*>(directwrite_factory);
   IDWriteFactory* raw_factory = nullptr;
   UniqueCom<IDWriteFactory> owned_factory;
@@ -338,33 +501,9 @@ std::wstring ResolveDirectWriteFamily(const std::wstring_view family,
   }
   const std::wstring family_name(family);
   UniqueCom<IDWriteFontCollection> collection;
-  if (use_modern_collection) {
-    IDWriteFactory3* raw_factory3 = nullptr;
-    const HRESULT factory3_result = factory->QueryInterface(&raw_factory3);
-    UniqueCom<IDWriteFactory3> factory3(raw_factory3);
-    IDWriteFontCollection1* raw_modern_collection = nullptr;
-    const HRESULT collection_result =
-        FAILED(factory3_result) || factory3 == nullptr
-            ? E_NOINTERFACE
-            : factory3->GetSystemFontCollection(
-                  TRUE, &raw_modern_collection, FALSE);
-    if (FAILED(collection_result) || raw_modern_collection == nullptr) {
-      if (raw_modern_collection != nullptr) {
-        raw_modern_collection->Release();
-      }
-      error = L"IDWriteFactory3::GetSystemFontCollection failed";
-      return {};
-    }
-    collection.reset(raw_modern_collection);
-  } else {
-    IDWriteFontCollection* raw_collection = nullptr;
-    const HRESULT collection_result =
-        factory->GetSystemFontCollection(&raw_collection);
-    collection.reset(raw_collection);
-    if (FAILED(collection_result) || collection == nullptr) {
-      error = L"IDWriteFactory::GetSystemFontCollection failed";
-      return {};
-    }
+  if (!AcquireSystemFontCollection(
+          factory, collection_mode, collection, error)) {
+    return {};
   }
   IDWriteFontCollection1* raw_collection1 = nullptr;
   collection->QueryInterface(&raw_collection1);
@@ -410,6 +549,166 @@ std::wstring ResolveDirectWriteFamily(const std::wstring_view family,
   }
   LOGFONTW resolved{};
   if (FAILED(interop->ConvertFontFaceToLOGFONT(face.get(), &resolved))) {
+    error = L"IDWriteGdiInterop::ConvertFontFaceToLOGFONT failed";
+    return {};
+  }
+  if (retained_face != nullptr) {
+    retained_face->reset(face.release());
+  }
+  return resolved.lfFaceName;
+}
+
+class AnalysisSource final : public IDWriteTextAnalysisSource {
+ public:
+  explicit AnalysisSource(std::wstring text) : text_(std::move(text)) {}
+
+  IFACEMETHODIMP QueryInterface(REFIID iid, void** object) override {
+    if (object == nullptr) {
+      return E_POINTER;
+    }
+    if (iid == __uuidof(IUnknown) ||
+        iid == __uuidof(IDWriteTextAnalysisSource)) {
+      *object = static_cast<IDWriteTextAnalysisSource*>(this);
+      AddRef();
+      return S_OK;
+    }
+    *object = nullptr;
+    return E_NOINTERFACE;
+  }
+
+  IFACEMETHODIMP_(ULONG) AddRef() override {
+    return static_cast<ULONG>(InterlockedIncrement(&references_));
+  }
+
+  IFACEMETHODIMP_(ULONG) Release() override {
+    const LONG remaining = InterlockedDecrement(&references_);
+    if (remaining == 0) {
+      delete this;
+    }
+    return static_cast<ULONG>(remaining);
+  }
+
+  IFACEMETHODIMP GetTextAtPosition(UINT32 position, const wchar_t** text,
+                                   UINT32* length) override {
+    if (text == nullptr || length == nullptr) {
+      return E_POINTER;
+    }
+    if (position >= text_.size()) {
+      *text = nullptr;
+      *length = 0;
+      return S_OK;
+    }
+    *text = text_.c_str() + position;
+    *length = static_cast<UINT32>(text_.size() - position);
+    return S_OK;
+  }
+
+  IFACEMETHODIMP GetTextBeforePosition(UINT32 position, const wchar_t** text,
+                                       UINT32* length) override {
+    if (text == nullptr || length == nullptr) {
+      return E_POINTER;
+    }
+    const UINT32 available = static_cast<UINT32>(
+        (std::min)(static_cast<std::size_t>(position), text_.size()));
+    *text = available == 0 ? nullptr : text_.c_str();
+    *length = available;
+    return S_OK;
+  }
+
+  IFACEMETHODIMP_(DWRITE_READING_DIRECTION)
+  GetParagraphReadingDirection() override {
+    return DWRITE_READING_DIRECTION_LEFT_TO_RIGHT;
+  }
+
+  IFACEMETHODIMP GetLocaleName(UINT32 position, UINT32* length,
+                               const wchar_t** locale) override {
+    if (length == nullptr || locale == nullptr) {
+      return E_POINTER;
+    }
+    *length = position >= text_.size()
+                  ? 0
+                  : static_cast<UINT32>(text_.size() - position);
+    *locale = L"en-us";
+    return S_OK;
+  }
+
+  IFACEMETHODIMP GetNumberSubstitution(
+      UINT32 position, UINT32* length,
+      IDWriteNumberSubstitution** substitution) override {
+    if (length == nullptr || substitution == nullptr) {
+      return E_POINTER;
+    }
+    *length = position >= text_.size()
+                  ? 0
+                  : static_cast<UINT32>(text_.size() - position);
+    *substitution = nullptr;
+    return S_OK;
+  }
+
+ private:
+  ~AnalysisSource() = default;
+
+  LONG references_ = 1;
+  std::wstring text_;
+};
+
+std::wstring ResolveTypographicFallbackFamily(
+    const std::wstring_view family, void* directwrite_factory,
+    UniqueCom<IDWriteFontFace>* retained_face, std::wstring& error) {
+  IDWriteFactory* factory = static_cast<IDWriteFactory*>(directwrite_factory);
+  if (factory == nullptr) {
+    error = L"DirectWrite factory is unavailable";
+    return {};
+  }
+  UniqueCom<IDWriteFontCollection> collection;
+  if (!AcquireSystemFontCollection(
+          factory, SystemCollectionMode::factory6_typographic,
+          collection, error)) {
+    return {};
+  }
+  IDWriteFactory2* raw_factory2 = nullptr;
+  const HRESULT factory_result = factory->QueryInterface(&raw_factory2);
+  UniqueCom<IDWriteFactory2> factory2(raw_factory2);
+  IDWriteFontFallback* raw_fallback = nullptr;
+  const HRESULT fallback_result =
+      FAILED(factory_result) || factory2 == nullptr
+          ? E_NOINTERFACE
+          : factory2->GetSystemFontFallback(&raw_fallback);
+  UniqueCom<IDWriteFontFallback> fallback(raw_fallback);
+  if (FAILED(fallback_result) || fallback == nullptr) {
+    error = L"IDWriteFactory2::GetSystemFontFallback failed";
+    return {};
+  }
+
+  const std::wstring text = L"A";
+  UniqueCom<AnalysisSource> source(new AnalysisSource(text));
+  IDWriteFont* raw_font = nullptr;
+  UINT32 mapped_length = 0;
+  FLOAT scale = 0.0F;
+  const std::wstring family_name(family);
+  const HRESULT map_result = fallback->MapCharacters(
+      source.get(), 0, static_cast<UINT32>(text.size()), collection.get(),
+      family_name.c_str(), DWRITE_FONT_WEIGHT_NORMAL,
+      DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+      &mapped_length, &raw_font, &scale);
+  UniqueCom<IDWriteFont> font(raw_font);
+  if (FAILED(map_result) || font == nullptr || mapped_length != text.size()) {
+    error = L"IDWriteFontFallback::MapCharacters failed";
+    return {};
+  }
+  IDWriteFontFace* raw_face = nullptr;
+  const HRESULT face_result = font->CreateFontFace(&raw_face);
+  UniqueCom<IDWriteFontFace> face(raw_face);
+  if (FAILED(face_result) || face == nullptr) {
+    error = L"IDWriteFont::CreateFontFace failed";
+    return {};
+  }
+  IDWriteGdiInterop* raw_interop = nullptr;
+  const HRESULT interop_result = factory->GetGdiInterop(&raw_interop);
+  UniqueCom<IDWriteGdiInterop> interop(raw_interop);
+  LOGFONTW resolved{};
+  if (FAILED(interop_result) || interop == nullptr ||
+      FAILED(interop->ConvertFontFaceToLOGFONT(face.get(), &resolved))) {
     error = L"IDWriteGdiInterop::ConvertFontFaceToLOGFONT failed";
     return {};
   }
@@ -908,7 +1207,7 @@ FontSubstitutionObservation ObserveFontSubstitution(
       result.active_source_fingerprint ==
           result.disabled_replacement_fingerprint;
 
-  const auto observe_direct_write = [&](const bool use_modern_collection) {
+  const auto observe_direct_write = [&](const SystemCollectionMode mode) {
     DirectWriteSubstitutionObservation observation;
     std::wstring repeated_disabled_source_family;
     std::wstring repeated_disabled_replacement_family;
@@ -916,30 +1215,30 @@ FontSubstitutionObservation ObserveFontSubstitution(
     {
       FontSubstitutionSwitch disabled;
       static_cast<void>(ResolveDirectWriteFamily(
-          source_family, directwrite_factory, use_modern_collection, nullptr,
+          source_family, directwrite_factory, mode, nullptr,
           error));
       observation.disabled_source_family = ResolveDirectWriteFamily(
-          source_family, directwrite_factory, use_modern_collection, nullptr,
+          source_family, directwrite_factory, mode, nullptr,
           error);
       observation.disabled_replacement_family = ResolveDirectWriteFamily(
-          replacement_family, directwrite_factory, use_modern_collection,
+          replacement_family, directwrite_factory, mode,
           &disabled_replacement_face, error);
       repeated_disabled_source_family = ResolveDirectWriteFamily(
-          source_family, directwrite_factory, use_modern_collection, nullptr,
+          source_family, directwrite_factory, mode, nullptr,
           error);
       repeated_disabled_replacement_family = ResolveDirectWriteFamily(
-          replacement_family, directwrite_factory, use_modern_collection,
+          replacement_family, directwrite_factory, mode,
           nullptr, error);
     }
     static_cast<void>(ResolveDirectWriteFamily(
-        source_family, directwrite_factory, use_modern_collection, nullptr,
+        source_family, directwrite_factory, mode, nullptr,
         error));
     UniqueCom<IDWriteFontFace> active_source_face;
     observation.active_source_family = ResolveDirectWriteFamily(
-        source_family, directwrite_factory, use_modern_collection,
+        source_family, directwrite_factory, mode,
         &active_source_face, error);
     const std::wstring repeated_active_source_family = ResolveDirectWriteFamily(
-        source_family, directwrite_factory, use_modern_collection, nullptr,
+        source_family, directwrite_factory, mode, nullptr,
         error);
     if (observation.disabled_source_family.empty() ||
         observation.disabled_replacement_family.empty() ||
@@ -957,6 +1256,52 @@ FontSubstitutionObservation ObserveFontSubstitution(
         disabled_replacement_face.get(), active_source_face.get());
     observation.replacement_observed =
         observation.controls_stable && observation.replacement_geometry_coherent &&
+        _wcsicmp(observation.active_source_family.c_str(),
+                 observation.disabled_source_family.c_str()) == 0;
+    return observation;
+  };
+  const auto observe_typographic_fallback = [&]() {
+    DirectWriteSubstitutionObservation observation;
+    std::wstring repeated_disabled_source_family;
+    std::wstring repeated_disabled_replacement_family;
+    UniqueCom<IDWriteFontFace> disabled_replacement_face;
+    {
+      FontSubstitutionSwitch disabled;
+      observation.disabled_source_family = ResolveTypographicFallbackFamily(
+          source_family, directwrite_factory, nullptr, error);
+      observation.disabled_replacement_family =
+          ResolveTypographicFallbackFamily(
+              replacement_family, directwrite_factory,
+              &disabled_replacement_face, error);
+      repeated_disabled_source_family = ResolveTypographicFallbackFamily(
+          source_family, directwrite_factory, nullptr, error);
+      repeated_disabled_replacement_family =
+          ResolveTypographicFallbackFamily(
+              replacement_family, directwrite_factory, nullptr, error);
+    }
+    UniqueCom<IDWriteFontFace> active_source_face;
+    observation.active_source_family = ResolveTypographicFallbackFamily(
+        source_family, directwrite_factory, &active_source_face, error);
+    const std::wstring repeated_active_source_family =
+        ResolveTypographicFallbackFamily(
+            source_family, directwrite_factory, nullptr, error);
+    if (observation.disabled_source_family.empty() ||
+        observation.disabled_replacement_family.empty() ||
+        observation.active_source_family.empty()) {
+      return observation;
+    }
+    observation.controls_stable =
+        _wcsicmp(observation.disabled_source_family.c_str(),
+                 repeated_disabled_source_family.c_str()) == 0 &&
+        _wcsicmp(observation.disabled_replacement_family.c_str(),
+                 repeated_disabled_replacement_family.c_str()) == 0 &&
+        _wcsicmp(observation.active_source_family.c_str(),
+                 repeated_active_source_family.c_str()) == 0;
+    observation.replacement_geometry_coherent = FontGeometryEqual(
+        disabled_replacement_face.get(), active_source_face.get());
+    observation.replacement_observed =
+        observation.controls_stable &&
+        observation.replacement_geometry_coherent &&
         _wcsicmp(observation.active_source_family.c_str(),
                  observation.disabled_source_family.c_str()) == 0;
     return observation;
@@ -1053,7 +1398,8 @@ FontSubstitutionObservation ObserveFontSubstitution(
       indexed.virtual_name_table_coherent &&
       indexed.resource_round_trip_coherent &&
       indexed.replacement_geometry_coherent;
-  result.direct_write = observe_direct_write(false);
+  result.direct_write =
+      observe_direct_write(SystemCollectionMode::legacy);
   DirectWriteSubstitutionObservation& font_set =
       result.direct_write_font_set_collection;
   std::wstring repeated_disabled_font_set_source;
@@ -1093,7 +1439,41 @@ FontSubstitutionObservation ObserveFontSubstitution(
       font_set.controls_stable && font_set.replacement_geometry_coherent &&
       _wcsicmp(font_set.active_source_family.c_str(),
                font_set.disabled_source_family.c_str()) == 0;
-  result.direct_write_modern_collection = observe_direct_write(true);
+  DirectWriteSubstitutionObservation& modern =
+      result.direct_write_modern_collection;
+  modern = observe_direct_write(SystemCollectionMode::factory3);
+  const auto merge_modern_observation =
+      [&modern](const DirectWriteSubstitutionObservation& observation) {
+        modern.controls_stable =
+            modern.controls_stable && observation.controls_stable;
+        modern.replacement_geometry_coherent =
+            modern.replacement_geometry_coherent &&
+            observation.replacement_geometry_coherent;
+        modern.replacement_observed =
+            modern.replacement_observed && observation.replacement_observed;
+        if (observation.active_source_family.empty()) {
+          modern.active_source_family.clear();
+        }
+      };
+  IDWriteFactory* const factory =
+      static_cast<IDWriteFactory*>(directwrite_factory);
+  constexpr std::array<SystemCollectionMode, 6> modern_modes = {
+      SystemCollectionMode::factory6_weight_stretch_style,
+      SystemCollectionMode::factory6_typographic,
+      SystemCollectionMode::factory6_font_set,
+      SystemCollectionMode::factory7_weight_stretch_style,
+      SystemCollectionMode::factory7_typographic,
+      SystemCollectionMode::factory7_font_set,
+  };
+  for (const SystemCollectionMode mode : modern_modes) {
+    if (SupportsSystemCollectionMode(factory, mode)) {
+      merge_modern_observation(observe_direct_write(mode));
+    }
+  }
+  if (SupportsSystemCollectionMode(
+          factory, SystemCollectionMode::factory6_typographic)) {
+    merge_modern_observation(observe_typographic_fallback());
+  }
   if (result.direct_write.active_source_family.empty() ||
       indexed.active_source_family.empty() ||
       indexed.retained_generation_descriptor_family.empty() ||

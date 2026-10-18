@@ -151,7 +151,11 @@ function Test-OpenServiceWorkflowPolicy {
             'unsupportedLateCollectionObserved',
             'legacy-system-collection-alias-returned',
             'system-font-set-alias-returned',
-            'modern-system-collection-alias-returned', 'firefoxLaunchGate',
+            'modern-system-collection-alias-returned',
+            'factory6-system-font-set-alias-returned',
+            'factory6-system-collection-alias-returned',
+            'factory7-system-font-set-alias-returned',
+            'factory7-system-collection-alias-returned', 'firefoxLaunchGate',
             'MACTYPE_BROWSER_GATE_TARGET', 'MACTYPE_BROWSER_GATE_PID_FILE',
             'chromiumLoader', 'launchChromiumWithProductLoader',
             'productLoaderBoundaryObserved'
@@ -168,7 +172,11 @@ function Test-OpenServiceWorkflowPolicy {
             'aliasGenerationConsumedObserved', 'retainedStockGenerationObserved',
             'legacy-system-collection-alias-returned',
             'system-font-set-alias-returned',
-            'modern-system-collection-alias-returned'
+            'modern-system-collection-alias-returned',
+            'factory6-system-font-set-alias-returned',
+            'factory6-system-collection-alias-returned',
+            'factory7-system-font-set-alias-returned',
+            'factory7-system-collection-alias-returned'
         )
 
     $browserEvidenceTestPath = Join-Path $Root 'tools\service-probe\tests\browser_font_evidence.test.mjs'

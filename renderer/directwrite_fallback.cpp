@@ -310,23 +310,15 @@ size_t CopySources(std::array<FactorySource, kFactorySourceLimit>& results)
 bool IsAllowedCollection(
 	IDWriteFontCollection* collection,
 	FactorySource const& source,
-	IDWriteFontCollection* aliasCollection,
-	IDWriteFontCollection* downloadableAliasCollection)
+	directwrite_alias::AliasFontSet const& aliases)
 {
 	if (collection == nullptr)
 		return true;
 	CComPtr<IUnknown> const collectionIdentity = Identity(collection);
 	if (collectionIdentity == nullptr)
 		return false;
-	if (collectionIdentity == source.systemCollectionIdentity)
-		return true;
-	CComPtr<IUnknown> const aliasIdentity = Identity(aliasCollection);
-	if (aliasIdentity != nullptr && collectionIdentity == aliasIdentity)
-		return true;
-	CComPtr<IUnknown> const downloadableIdentity =
-		Identity(downloadableAliasCollection);
-	return downloadableIdentity != nullptr &&
-		collectionIdentity == downloadableIdentity;
+	return collectionIdentity == source.systemCollectionIdentity ||
+		directwrite_alias::MatchesAliasCollection(collection, aliases);
 }
 
 void AppendLocalizedNames(
@@ -559,11 +551,7 @@ bool ResolveAliasContext(
 		CComPtr<IDWriteFontCollection> candidate;
 		if (FAILED(aliases.collection->QueryInterface(&candidate)) ||
 			candidate == nullptr ||
-			!IsAllowedCollection(
-				baseCollection,
-				source,
-				candidate,
-				aliases.downloadableCollection))
+			!IsAllowedCollection(baseCollection, source, aliases))
 			continue;
 		aliasCollection = candidate;
 		return true;

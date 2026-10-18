@@ -15,6 +15,32 @@
 #include <string>
 #include <vector>
 
+// The renderer keeps its RS3 platform baseline. These RS4 ABI declarations
+// let QueryInterface select Factory7 without raising that baseline.
+MIDL_INTERFACE("DC7EAD19-E54C-43AF-B2DA-4E2B79BA3F7F")
+IDWriteFontSet2Compat : public IDWriteFontSet1
+{
+	STDMETHOD_(HANDLE, GetExpirationEvent)() PURE;
+};
+
+MIDL_INTERFACE("A4D055A6-F9E3-4E25-93B7-9E309F3AF8E9")
+IDWriteFontCollection3Compat : public IDWriteFontCollection2
+{
+	STDMETHOD_(HANDLE, GetExpirationEvent)() PURE;
+};
+
+MIDL_INTERFACE("35D0E0B3-9076-4D2E-A016-A91B568A06B4")
+IDWriteFactory7Compat : public IDWriteFactory6
+{
+	STDMETHOD(GetSystemFontSet)(
+		BOOL includeDownloadableFonts,
+		IDWriteFontSet2Compat** fontSet) PURE;
+	STDMETHOD(GetSystemFontCollection)(
+		BOOL includeDownloadableFonts,
+		DWRITE_FONT_FAMILY_MODEL fontFamilyModel,
+		IDWriteFontCollection3Compat** fontCollection) PURE;
+};
+
 void MyDebug(const TCHAR *sz, ...)
 {
 #ifdef DEBUG
@@ -1396,6 +1422,14 @@ using Factory3GetSystemFontSetMethod = HRESULT (WINAPI *)(
 	IDWriteFactory3*, IDWriteFontSet**);
 using Factory3GetSystemFontCollectionMethod = HRESULT (WINAPI *)(
 	IDWriteFactory3*, BOOL, IDWriteFontCollection1**, BOOL);
+using Factory6GetSystemFontSetMethod = HRESULT (WINAPI *)(
+	IDWriteFactory6*, BOOL, IDWriteFontSet1**);
+using Factory6GetSystemFontCollectionMethod = HRESULT (WINAPI *)(
+	IDWriteFactory6*, BOOL, DWRITE_FONT_FAMILY_MODEL, IDWriteFontCollection2**);
+using Factory7GetSystemFontSetMethod = HRESULT (WINAPI *)(
+	IDWriteFactory7Compat*, BOOL, IDWriteFontSet2Compat**);
+using Factory7GetSystemFontCollectionMethod = HRESULT (WINAPI *)(
+	IDWriteFactory7Compat*, BOOL, DWRITE_FONT_FAMILY_MODEL, IDWriteFontCollection3Compat**);
 
 HRESULT WINAPI IMPL_Factory_GetSystemFontCollection(
 	IDWriteFactory*, IDWriteFontCollection**, BOOL);
@@ -1403,12 +1437,27 @@ HRESULT WINAPI IMPL_Factory3_GetSystemFontSet(
 	IDWriteFactory3*, IDWriteFontSet**);
 HRESULT WINAPI IMPL_Factory3_GetSystemFontCollection(
 	IDWriteFactory3*, BOOL, IDWriteFontCollection1**, BOOL);
+HRESULT WINAPI IMPL_Factory6_GetSystemFontSet(
+	IDWriteFactory6*, BOOL, IDWriteFontSet1**);
+HRESULT WINAPI IMPL_Factory6_GetSystemFontCollection(
+	IDWriteFactory6*, BOOL, DWRITE_FONT_FAMILY_MODEL, IDWriteFontCollection2**);
+HRESULT WINAPI IMPL_Factory7_GetSystemFontSet(
+	IDWriteFactory7Compat*, BOOL, IDWriteFontSet2Compat**);
+HRESULT WINAPI IMPL_Factory7_GetSystemFontCollection(
+	IDWriteFactory7Compat*, BOOL, DWRITE_FONT_FAMILY_MODEL, IDWriteFontCollection3Compat**);
 
 namespace {
 
+// IUnknown occupies slots 0-2; Factory, Factory1, Factory2, Factory3,
+// Factory4, Factory5, Factory6, and Factory7 end at 23, 25, 30, 39, 42,
+// 47, 54, and 56 respectively in dwrite_3.h.
 constexpr size_t kFactoryGetSystemFontCollectionSlot = 3;
 constexpr size_t kFactory3GetSystemFontSetSlot = 35;
 constexpr size_t kFactory3GetSystemFontCollectionSlot = 38;
+constexpr size_t kFactory6GetSystemFontSetSlot = 50;
+constexpr size_t kFactory6GetSystemFontCollectionSlot = 51;
+constexpr size_t kFactory7GetSystemFontSetSlot = 55;
+constexpr size_t kFactory7GetSystemFontCollectionSlot = 56;
 
 struct FactoryAliasVtableHooks
 {
@@ -1416,9 +1465,17 @@ struct FactoryAliasVtableHooks
 	FactoryGetSystemFontCollectionMethod getSystemFontCollection = nullptr;
 	Factory3GetSystemFontSetMethod getSystemFontSet = nullptr;
 	Factory3GetSystemFontCollectionMethod getModernSystemFontCollection = nullptr;
+	Factory6GetSystemFontSetMethod getSystemFontSet1 = nullptr;
+	Factory6GetSystemFontCollectionMethod getSystemFontCollection2 = nullptr;
+	Factory7GetSystemFontSetMethod getSystemFontSet2 = nullptr;
+	Factory7GetSystemFontCollectionMethod getSystemFontCollection3 = nullptr;
 	bool getSystemFontCollectionPatched = false;
 	bool getSystemFontSetPatched = false;
 	bool getModernSystemFontCollectionPatched = false;
+	bool getSystemFontSet1Patched = false;
+	bool getSystemFontCollection2Patched = false;
+	bool getSystemFontSet2Patched = false;
+	bool getSystemFontCollection3Patched = false;
 };
 
 struct FactoryAliasSource
@@ -1682,22 +1739,48 @@ bool PatchFactoryAliasVtables(
 {
 	if (factory == nullptr || factory3 == nullptr)
 		return false;
+	CComPtr<IDWriteFactory6> factory6;
+	factory->QueryInterface(&factory6);
+	CComPtr<IDWriteFactory7Compat> factory7;
+	factory->QueryInterface(&factory7);
 	void** const factoryVtable = *reinterpret_cast<void***>(factory);
 	void** const factory3Vtable = *reinterpret_cast<void***>(factory3);
-	if (factoryVtable == nullptr || factory3Vtable == nullptr)
+	void** const factory6Vtable = factory6 == nullptr ? nullptr :
+		*reinterpret_cast<void***>(factory6.p);
+	void** const factory7Vtable = factory7 == nullptr ? nullptr :
+		*reinterpret_cast<void***>(factory7.p);
+	if (factoryVtable == nullptr || factory3Vtable == nullptr ||
+		(factory6 != nullptr && factory6Vtable == nullptr) ||
+		(factory7 != nullptr && factory7Vtable == nullptr))
 		return false;
 
 	std::scoped_lock lock(GetFactoryAliasVtableMutex());
 	GetOrAddFactoryAliasVtable(factoryVtable);
 	GetOrAddFactoryAliasVtable(factory3Vtable);
+	if (factory6Vtable != nullptr)
+		GetOrAddFactoryAliasVtable(factory6Vtable);
+	if (factory7Vtable != nullptr)
+		GetOrAddFactoryAliasVtable(factory7Vtable);
 	FactoryAliasVtableHooks& factoryHooks =
 		GetOrAddFactoryAliasVtable(factoryVtable);
 	FactoryAliasVtableHooks& factory3Hooks =
 		GetOrAddFactoryAliasVtable(factory3Vtable);
+	FactoryAliasVtableHooks* const factory6Hooks = factory6Vtable == nullptr ?
+		nullptr : &GetOrAddFactoryAliasVtable(factory6Vtable);
+	FactoryAliasVtableHooks* const factory7Hooks = factory7Vtable == nullptr ?
+		nullptr : &GetOrAddFactoryAliasVtable(factory7Vtable);
 	bool const baseWasPatched = factoryHooks.getSystemFontCollectionPatched;
 	bool const setWasPatched = factory3Hooks.getSystemFontSetPatched;
 	bool const modernWasPatched =
 		factory3Hooks.getModernSystemFontCollectionPatched;
+	bool const set1WasPatched = factory6Hooks != nullptr &&
+		factory6Hooks->getSystemFontSet1Patched;
+	bool const collection2WasPatched = factory6Hooks != nullptr &&
+		factory6Hooks->getSystemFontCollection2Patched;
+	bool const set2WasPatched = factory7Hooks != nullptr &&
+		factory7Hooks->getSystemFontSet2Patched;
+	bool const collection3WasPatched = factory7Hooks != nullptr &&
+		factory7Hooks->getSystemFontCollection3Patched;
 	bool const patched = PatchFactoryVtableMethod(
 			factoryHooks,
 			kFactoryGetSystemFontCollectionSlot,
@@ -1715,10 +1798,64 @@ bool PatchFactoryAliasVtables(
 			kFactory3GetSystemFontCollectionSlot,
 			&IMPL_Factory3_GetSystemFontCollection,
 			factory3Hooks.getModernSystemFontCollection,
-			factory3Hooks.getModernSystemFontCollectionPatched);
+			factory3Hooks.getModernSystemFontCollectionPatched) &&
+		(factory6Hooks == nullptr ||
+			(PatchFactoryVtableMethod(
+				*factory6Hooks,
+				kFactory6GetSystemFontSetSlot,
+				&IMPL_Factory6_GetSystemFontSet,
+				factory6Hooks->getSystemFontSet1,
+				factory6Hooks->getSystemFontSet1Patched) &&
+			PatchFactoryVtableMethod(
+				*factory6Hooks,
+				kFactory6GetSystemFontCollectionSlot,
+				&IMPL_Factory6_GetSystemFontCollection,
+				factory6Hooks->getSystemFontCollection2,
+				factory6Hooks->getSystemFontCollection2Patched))) &&
+		(factory7Hooks == nullptr ||
+			(PatchFactoryVtableMethod(
+				*factory7Hooks,
+				kFactory7GetSystemFontSetSlot,
+				&IMPL_Factory7_GetSystemFontSet,
+				factory7Hooks->getSystemFontSet2,
+				factory7Hooks->getSystemFontSet2Patched) &&
+			PatchFactoryVtableMethod(
+				*factory7Hooks,
+				kFactory7GetSystemFontCollectionSlot,
+				&IMPL_Factory7_GetSystemFontCollection,
+				factory7Hooks->getSystemFontCollection3,
+				factory7Hooks->getSystemFontCollection3Patched)));
 	if (patched)
 		return true;
 
+	if (factory7Hooks != nullptr && !collection3WasPatched)
+		RestoreFactoryVtableMethod(
+			*factory7Hooks,
+			kFactory7GetSystemFontCollectionSlot,
+			&IMPL_Factory7_GetSystemFontCollection,
+			factory7Hooks->getSystemFontCollection3,
+			factory7Hooks->getSystemFontCollection3Patched);
+	if (factory7Hooks != nullptr && !set2WasPatched)
+		RestoreFactoryVtableMethod(
+			*factory7Hooks,
+			kFactory7GetSystemFontSetSlot,
+			&IMPL_Factory7_GetSystemFontSet,
+			factory7Hooks->getSystemFontSet2,
+			factory7Hooks->getSystemFontSet2Patched);
+	if (factory6Hooks != nullptr && !collection2WasPatched)
+		RestoreFactoryVtableMethod(
+			*factory6Hooks,
+			kFactory6GetSystemFontCollectionSlot,
+			&IMPL_Factory6_GetSystemFontCollection,
+			factory6Hooks->getSystemFontCollection2,
+			factory6Hooks->getSystemFontCollection2Patched);
+	if (factory6Hooks != nullptr && !set1WasPatched)
+		RestoreFactoryVtableMethod(
+			*factory6Hooks,
+			kFactory6GetSystemFontSetSlot,
+			&IMPL_Factory6_GetSystemFontSet,
+			factory6Hooks->getSystemFontSet1,
+			factory6Hooks->getSystemFontSet1Patched);
 	if (!modernWasPatched)
 		RestoreFactoryVtableMethod(
 			factory3Hooks,
@@ -1780,6 +1917,62 @@ Factory3GetSystemFontCollectionMethod GetOriginalModernSystemFontCollection(
 	{
 		if (hooks.vtable == vtable)
 			return hooks.getModernSystemFontCollection;
+	}
+	return nullptr;
+}
+
+Factory6GetSystemFontSetMethod GetOriginalFactory6SystemFontSet(
+	IDWriteFactory6* factory)
+{
+	void** const vtable = factory == nullptr ? nullptr :
+		*reinterpret_cast<void***>(factory);
+	std::scoped_lock lock(GetFactoryAliasVtableMutex());
+	for (FactoryAliasVtableHooks const& hooks : GetFactoryAliasVtableRegistry())
+	{
+		if (hooks.vtable == vtable)
+			return hooks.getSystemFontSet1;
+	}
+	return nullptr;
+}
+
+Factory6GetSystemFontCollectionMethod GetOriginalFactory6SystemFontCollection(
+	IDWriteFactory6* factory)
+{
+	void** const vtable = factory == nullptr ? nullptr :
+		*reinterpret_cast<void***>(factory);
+	std::scoped_lock lock(GetFactoryAliasVtableMutex());
+	for (FactoryAliasVtableHooks const& hooks : GetFactoryAliasVtableRegistry())
+	{
+		if (hooks.vtable == vtable)
+			return hooks.getSystemFontCollection2;
+	}
+	return nullptr;
+}
+
+Factory7GetSystemFontSetMethod GetOriginalFactory7SystemFontSet(
+	IDWriteFactory7Compat* factory)
+{
+	void** const vtable = factory == nullptr ? nullptr :
+		*reinterpret_cast<void***>(factory);
+	std::scoped_lock lock(GetFactoryAliasVtableMutex());
+	for (FactoryAliasVtableHooks const& hooks : GetFactoryAliasVtableRegistry())
+	{
+		if (hooks.vtable == vtable)
+			return hooks.getSystemFontSet2;
+	}
+	return nullptr;
+}
+
+Factory7GetSystemFontCollectionMethod GetOriginalFactory7SystemFontCollection(
+	IDWriteFactory7Compat* factory)
+{
+	void** const vtable = factory == nullptr ? nullptr :
+		*reinterpret_cast<void***>(factory);
+	std::scoped_lock lock(GetFactoryAliasVtableMutex());
+	for (FactoryAliasVtableHooks const& hooks : GetFactoryAliasVtableRegistry())
+	{
+		if (hooks.vtable == vtable)
+			return hooks.getSystemFontCollection3;
 	}
 	return nullptr;
 }
@@ -1884,27 +2077,57 @@ bool CaptureFactoryAliasSource(IDWriteFactory* factory)
 void RestoreFactoryAliasVtables() noexcept
 {
 	std::scoped_lock lock(GetFactoryAliasVtableMutex());
-	for (FactoryAliasVtableHooks& hooks : GetFactoryAliasVtableRegistry())
-	{
+	std::vector<FactoryAliasVtableHooks>& registry =
+		GetFactoryAliasVtableRegistry();
+	for (FactoryAliasVtableHooks& hooks : registry)
+		RestoreFactoryVtableMethod(
+			hooks,
+			kFactory7GetSystemFontCollectionSlot,
+			&IMPL_Factory7_GetSystemFontCollection,
+			hooks.getSystemFontCollection3,
+			hooks.getSystemFontCollection3Patched);
+	for (FactoryAliasVtableHooks& hooks : registry)
+		RestoreFactoryVtableMethod(
+			hooks,
+			kFactory7GetSystemFontSetSlot,
+			&IMPL_Factory7_GetSystemFontSet,
+			hooks.getSystemFontSet2,
+			hooks.getSystemFontSet2Patched);
+	for (FactoryAliasVtableHooks& hooks : registry)
+		RestoreFactoryVtableMethod(
+			hooks,
+			kFactory6GetSystemFontCollectionSlot,
+			&IMPL_Factory6_GetSystemFontCollection,
+			hooks.getSystemFontCollection2,
+			hooks.getSystemFontCollection2Patched);
+	for (FactoryAliasVtableHooks& hooks : registry)
+		RestoreFactoryVtableMethod(
+			hooks,
+			kFactory6GetSystemFontSetSlot,
+			&IMPL_Factory6_GetSystemFontSet,
+			hooks.getSystemFontSet1,
+			hooks.getSystemFontSet1Patched);
+	for (FactoryAliasVtableHooks& hooks : registry)
 		RestoreFactoryVtableMethod(
 			hooks,
 			kFactory3GetSystemFontCollectionSlot,
 			&IMPL_Factory3_GetSystemFontCollection,
 			hooks.getModernSystemFontCollection,
 			hooks.getModernSystemFontCollectionPatched);
+	for (FactoryAliasVtableHooks& hooks : registry)
 		RestoreFactoryVtableMethod(
 			hooks,
 			kFactory3GetSystemFontSetSlot,
 			&IMPL_Factory3_GetSystemFontSet,
 			hooks.getSystemFontSet,
 			hooks.getSystemFontSetPatched);
+	for (FactoryAliasVtableHooks& hooks : registry)
 		RestoreFactoryVtableMethod(
 			hooks,
 			kFactoryGetSystemFontCollectionSlot,
 			&IMPL_Factory_GetSystemFontCollection,
 			hooks.getSystemFontCollection,
 			hooks.getSystemFontCollectionPatched);
-	}
 }
 
 void ClearFactoryAliasSources() noexcept
@@ -3049,6 +3272,215 @@ HRESULT WINAPI IMPL_Factory3_GetSystemFontCollection(
 		SignalDirectWriteDiagnostic(L"modern-system-collection-alias-returned");
 		return (includeDownloadableFonts ?
 			aliases.downloadableCollection : aliases.collection).CopyTo(fontCollection);
+	}
+	*fontCollection = systemCollection.Detach();
+	return result;
+}
+
+HRESULT WINAPI IMPL_Factory6_GetSystemFontSet(
+	IDWriteFactory6* self,
+	BOOL includeDownloadableFonts,
+	IDWriteFontSet1** fontSet)
+{
+	HCounter counter;
+	SignalDirectWriteDiagnostic(L"factory6-system-font-set-called");
+	if (fontSet == nullptr)
+		return E_POINTER;
+	*fontSet = nullptr;
+
+	Factory6GetSystemFontSetMethod const original =
+		GetOriginalFactory6SystemFontSet(self);
+	if (original == nullptr)
+		return E_UNEXPECTED;
+	CComPtr<IDWriteFontSet1> systemSet;
+	HRESULT const result = original(self, includeDownloadableFonts, &systemSet);
+	if (FAILED(result) || systemSet == nullptr)
+		return result;
+
+	directwrite_alias::AliasFontSet aliases;
+	directwrite_alias::BuildStatus const status =
+		GetCanonicalFactoryAliases(self, aliases);
+	SignalAliasCollectionResult(status, aliases);
+	if (IsAliasCollectionApplied(status))
+	{
+		CComPtr<IDWriteFontSet> const aliasSet = includeDownloadableFonts ?
+			aliases.downloadableFontSet : aliases.fontSet;
+		HRESULT const aliasResult = aliasSet == nullptr ? E_UNEXPECTED :
+			aliasSet->QueryInterface(fontSet);
+		if (SUCCEEDED(aliasResult) && *fontSet != nullptr)
+		{
+			SignalDirectWriteDiagnostic(
+				L"factory6-system-font-set-alias-returned");
+			return aliasResult;
+		}
+		SignalDirectWriteDiagnostic(directwrite_alias::StatusName(
+			directwrite_alias::BuildStatus::unsupportedFactory));
+	}
+	*fontSet = systemSet.Detach();
+	return result;
+}
+
+HRESULT WINAPI IMPL_Factory6_GetSystemFontCollection(
+	IDWriteFactory6* self,
+	BOOL includeDownloadableFonts,
+	DWRITE_FONT_FAMILY_MODEL fontFamilyModel,
+	IDWriteFontCollection2** fontCollection)
+{
+	HCounter counter;
+	SignalDirectWriteDiagnostic(L"factory6-system-collection-called");
+	if (fontCollection == nullptr)
+		return E_POINTER;
+	*fontCollection = nullptr;
+
+	Factory6GetSystemFontCollectionMethod const original =
+		GetOriginalFactory6SystemFontCollection(self);
+	if (original == nullptr)
+		return E_UNEXPECTED;
+	++directwrite_readiness::ModernCollectionCalls();
+	CComPtr<IDWriteFontCollection2> systemCollection;
+	HRESULT const result = original(
+		self, includeDownloadableFonts, fontFamilyModel, &systemCollection);
+	if (FAILED(result) || systemCollection == nullptr)
+		return result;
+
+	directwrite_alias::AliasFontSet aliases;
+	directwrite_alias::BuildStatus const status =
+		GetCanonicalFactoryAliases(self, aliases, nullptr, systemCollection);
+	SignalAliasCollectionResult(status, aliases);
+	if (IsAliasCollectionApplied(status))
+	{
+		HRESULT aliasResult = E_INVALIDARG;
+		if (fontFamilyModel == DWRITE_FONT_FAMILY_MODEL_WEIGHT_STRETCH_STYLE)
+		{
+			CComPtr<IDWriteFontCollection1> const aliasCollection =
+				includeDownloadableFonts ?
+					aliases.downloadableCollection : aliases.collection;
+			aliasResult = aliasCollection == nullptr ? E_UNEXPECTED :
+				aliasCollection->QueryInterface(fontCollection);
+		}
+		else if (fontFamilyModel == DWRITE_FONT_FAMILY_MODEL_TYPOGRAPHIC)
+		{
+			aliasResult = directwrite_alias::GetOrCreateTypographicCollection(
+				self, aliases, includeDownloadableFonts != FALSE, fontCollection);
+		}
+		if (SUCCEEDED(aliasResult) && *fontCollection != nullptr)
+		{
+			SignalDirectWriteDiagnostic(
+				L"factory6-system-collection-alias-returned");
+			return aliasResult;
+		}
+		if (fontFamilyModel == DWRITE_FONT_FAMILY_MODEL_WEIGHT_STRETCH_STYLE ||
+			fontFamilyModel == DWRITE_FONT_FAMILY_MODEL_TYPOGRAPHIC)
+		{
+			SignalDirectWriteDiagnostic(directwrite_alias::StatusName(
+				directwrite_alias::BuildStatus::unsupportedFactory));
+		}
+	}
+	*fontCollection = systemCollection.Detach();
+	return result;
+}
+
+HRESULT WINAPI IMPL_Factory7_GetSystemFontSet(
+	IDWriteFactory7Compat* self,
+	BOOL includeDownloadableFonts,
+	IDWriteFontSet2Compat** fontSet)
+{
+	HCounter counter;
+	SignalDirectWriteDiagnostic(L"factory7-system-font-set-called");
+	if (fontSet == nullptr)
+		return E_POINTER;
+	*fontSet = nullptr;
+
+	Factory7GetSystemFontSetMethod const original =
+		GetOriginalFactory7SystemFontSet(self);
+	if (original == nullptr)
+		return E_UNEXPECTED;
+	CComPtr<IDWriteFontSet2Compat> systemSet;
+	HRESULT const result = original(self, includeDownloadableFonts, &systemSet);
+	if (FAILED(result) || systemSet == nullptr)
+		return result;
+
+	directwrite_alias::AliasFontSet aliases;
+	directwrite_alias::BuildStatus const status =
+		GetCanonicalFactoryAliases(self, aliases);
+	SignalAliasCollectionResult(status, aliases);
+	if (IsAliasCollectionApplied(status))
+	{
+		CComPtr<IDWriteFontSet> const aliasSet = includeDownloadableFonts ?
+			aliases.downloadableFontSet : aliases.fontSet;
+		HRESULT const aliasResult = aliasSet == nullptr ? E_UNEXPECTED :
+			aliasSet->QueryInterface(fontSet);
+		if (SUCCEEDED(aliasResult) && *fontSet != nullptr)
+		{
+			SignalDirectWriteDiagnostic(
+				L"factory7-system-font-set-alias-returned");
+			return aliasResult;
+		}
+		SignalDirectWriteDiagnostic(directwrite_alias::StatusName(
+			directwrite_alias::BuildStatus::unsupportedFactory));
+	}
+	*fontSet = systemSet.Detach();
+	return result;
+}
+
+HRESULT WINAPI IMPL_Factory7_GetSystemFontCollection(
+	IDWriteFactory7Compat* self,
+	BOOL includeDownloadableFonts,
+	DWRITE_FONT_FAMILY_MODEL fontFamilyModel,
+	IDWriteFontCollection3Compat** fontCollection)
+{
+	HCounter counter;
+	SignalDirectWriteDiagnostic(L"factory7-system-collection-called");
+	if (fontCollection == nullptr)
+		return E_POINTER;
+	*fontCollection = nullptr;
+
+	Factory7GetSystemFontCollectionMethod const original =
+		GetOriginalFactory7SystemFontCollection(self);
+	if (original == nullptr)
+		return E_UNEXPECTED;
+	++directwrite_readiness::ModernCollectionCalls();
+	CComPtr<IDWriteFontCollection3Compat> systemCollection;
+	HRESULT const result = original(
+		self, includeDownloadableFonts, fontFamilyModel, &systemCollection);
+	if (FAILED(result) || systemCollection == nullptr)
+		return result;
+
+	directwrite_alias::AliasFontSet aliases;
+	directwrite_alias::BuildStatus const status =
+		GetCanonicalFactoryAliases(self, aliases, nullptr, systemCollection);
+	SignalAliasCollectionResult(status, aliases);
+	if (IsAliasCollectionApplied(status))
+	{
+		CComPtr<IDWriteFontCollection2> aliasCollection;
+		HRESULT aliasResult = E_INVALIDARG;
+		if (fontFamilyModel == DWRITE_FONT_FAMILY_MODEL_WEIGHT_STRETCH_STYLE)
+		{
+			CComPtr<IDWriteFontCollection1> const collection1 =
+				includeDownloadableFonts ?
+					aliases.downloadableCollection : aliases.collection;
+			aliasResult = collection1 == nullptr ? E_UNEXPECTED :
+				collection1->QueryInterface(&aliasCollection);
+		}
+		else if (fontFamilyModel == DWRITE_FONT_FAMILY_MODEL_TYPOGRAPHIC)
+		{
+			aliasResult = directwrite_alias::GetOrCreateTypographicCollection(
+				self, aliases, includeDownloadableFonts != FALSE, &aliasCollection);
+		}
+		if (SUCCEEDED(aliasResult) && aliasCollection != nullptr)
+			aliasResult = aliasCollection->QueryInterface(fontCollection);
+		if (SUCCEEDED(aliasResult) && *fontCollection != nullptr)
+		{
+			SignalDirectWriteDiagnostic(
+				L"factory7-system-collection-alias-returned");
+			return aliasResult;
+		}
+		if (fontFamilyModel == DWRITE_FONT_FAMILY_MODEL_WEIGHT_STRETCH_STYLE ||
+			fontFamilyModel == DWRITE_FONT_FAMILY_MODEL_TYPOGRAPHIC)
+		{
+			SignalDirectWriteDiagnostic(directwrite_alias::StatusName(
+				directwrite_alias::BuildStatus::unsupportedFactory));
+		}
 	}
 	*fontCollection = systemCollection.Detach();
 	return result;

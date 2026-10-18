@@ -25,7 +25,9 @@ analysis. A first-party file that has no build reference, include reference,
 or runtime purpose is deleted rather than placed on an exclusion list.
 `renderer/json.hpp` is required third-party source and retains a narrow documented
 suppression for Cppcheck 2.20's `missingReturn` template-analysis false
-positive.
+positive. First-party code includes it through `renderer/json_include.h`, which
+disables only MSVC warning C5311 around it: version 3.10.5 declares
+`operator "" _json`, a spelling C++23 deprecates, and MSVC 19.51 reports it.
 
 On `codex/alpha-plus-dll`, both renderer projects (`gdipp.vcxproj` and
 `macloader.vcxproj`) compile as C++23 (`/std:c++23preview`, MSBuild

@@ -1,4 +1,5 @@
 #include "directwrite_virtual_font.h"
+#include "big_endian.h"
 #include "sfnt_names.h"
 #include "virtual_font_cache.h"
 
@@ -50,14 +51,14 @@ bool IsBoldWeightClass(UINT16 weight) noexcept
 	return weight >= 600;
 }
 
+using renderer::big_endian::Read16;
+using renderer::big_endian::Read32;
 using renderer::sfnt::CanRead;
 using renderer::sfnt::DecodeName;
 using renderer::sfnt::IsUnicodeNameRecord;
 using renderer::sfnt::LanguageTagRecord;
 using renderer::sfnt::NameRecord;
 using renderer::sfnt::ReadNameTable;
-using renderer::sfnt::ReadU16;
-using renderer::sfnt::ReadU32;
 using renderer::sfnt::TableChecksum;
 using renderer::sfnt::WriteU16;
 using renderer::sfnt::WriteU32;
@@ -537,11 +538,11 @@ bool BuildPinnedFvar(
 {
 	if (original.size() < 16)
 		return false;
-	UINT16 const axesOffset = ReadU16(original, 4);
-	UINT16 const axisCount = ReadU16(original, 8);
-	UINT16 const axisSize = ReadU16(original, 10);
-	UINT16 const instanceCount = ReadU16(original, 12);
-	UINT16 const instanceSize = ReadU16(original, 14);
+	UINT16 const axesOffset = *Read16(original, 4);
+	UINT16 const axisCount = *Read16(original, 8);
+	UINT16 const axisSize = *Read16(original, 10);
+	UINT16 const instanceCount = *Read16(original, 12);
+	UINT16 const instanceSize = *Read16(original, 14);
 	if (axisCount == 0 || axisSize < 20 || instanceCount == 0 ||
 		instanceSize < 4 + static_cast<size_t>(axisCount) * 4 ||
 		!CanRead(axesOffset, static_cast<size_t>(axisCount) * axisSize,
@@ -559,7 +560,7 @@ bool BuildPinnedFvar(
 	{
 		size_t const axisOffset = static_cast<size_t>(axesOffset) +
 			static_cast<size_t>(axisIndex) * axisSize;
-		UINT32 const tag = ReadU32(original, axisOffset);
+		UINT32 const tag = *Read32(original, axisOffset);
 		bool found = false;
 		for (DWRITE_FONT_AXIS_VALUE const& axis : options.axisValues)
 		{
@@ -583,7 +584,7 @@ bool BuildPinnedFvar(
 		for (UINT16 axisIndex = 0; axisIndex < axisCount; ++axisIndex)
 		{
 			std::int32_t const coordinate = static_cast<std::int32_t>(
-				ReadU32(original, instanceOffset + 4 +
+				*Read32(original, instanceOffset + 4 +
 					static_cast<size_t>(axisIndex) * 4));
 			if (coordinate != pinned[axisIndex])
 			{
@@ -637,7 +638,7 @@ bool IsScalerType(UINT32 value) noexcept
 void AdvertiseOs2Weight(std::vector<BYTE>& table, UINT16 weight)
 {
 	WriteU16(table, kOs2WeightClassOffset, weight);
-	UINT16 selection = ReadU16(table, kOs2SelectionOffset);
+	UINT16 selection = *Read16(table, kOs2SelectionOffset);
 	if (IsBoldWeightClass(weight))
 	{
 		selection = static_cast<UINT16>(
@@ -659,7 +660,7 @@ void AdvertiseOs2Width(std::vector<BYTE>& table, UINT16 width)
 
 void AdvertiseHeadWeight(std::vector<BYTE>& table, UINT16 weight)
 {
-	UINT16 macStyle = ReadU16(table, kHeadMacStyleOffset);
+	UINT16 macStyle = *Read16(table, kHeadMacStyleOffset);
 	macStyle = IsBoldWeightClass(weight) ?
 		static_cast<UINT16>(macStyle | kHeadMacStyleBold) :
 		static_cast<UINT16>(macStyle & ~kHeadMacStyleBold);
@@ -681,17 +682,17 @@ HRESULT BuildAliasedSfnt(
 		return DWRITE_E_FILEFORMAT;
 
 	size_t faceOffset = 0;
-	UINT32 scalerType = ReadU32(source, 0);
+	UINT32 scalerType = *Read32(source, 0);
 	if (scalerType == kTagCollection)
 	{
-		UINT32 const faceCount = ReadU32(source, 8);
+		UINT32 const faceCount = *Read32(source, 8);
 		if (faceIndex >= faceCount ||
 			!CanRead(12, static_cast<size_t>(faceCount) * 4, source.size()))
 			return DWRITE_E_FILEFORMAT;
-		faceOffset = ReadU32(source, 12 + static_cast<size_t>(faceIndex) * 4);
+		faceOffset = *Read32(source, 12 + static_cast<size_t>(faceIndex) * 4);
 		if (!CanRead(faceOffset, 12, source.size()))
 			return DWRITE_E_FILEFORMAT;
-		scalerType = ReadU32(source, faceOffset);
+		scalerType = *Read32(source, faceOffset);
 	}
 	else if (faceIndex != 0)
 	{
@@ -700,7 +701,7 @@ HRESULT BuildAliasedSfnt(
 	if (!IsScalerType(scalerType))
 		return DWRITE_E_FILEFORMAT;
 
-	UINT16 const sourceTableCount = ReadU16(source, faceOffset + 4);
+	UINT16 const sourceTableCount = *Read16(source, faceOffset + 4);
 	if (sourceTableCount == 0 || sourceTableCount > 4096 ||
 		!CanRead(faceOffset + 12,
 			static_cast<size_t>(sourceTableCount) * 16, source.size()))
@@ -713,9 +714,9 @@ HRESULT BuildAliasedSfnt(
 		size_t const recordOffset = faceOffset + 12 +
 			static_cast<size_t>(index) * 16;
 		SfntTable table;
-		table.tag = ReadU32(source, recordOffset);
-		table.sourceOffset = ReadU32(source, recordOffset + 8);
-		table.sourceLength = ReadU32(source, recordOffset + 12);
+		table.tag = *Read32(source, recordOffset);
+		table.sourceOffset = *Read32(source, recordOffset + 8);
+		table.sourceLength = *Read32(source, recordOffset + 12);
 		if (!CanRead(table.sourceOffset, table.sourceLength, source.size()))
 			return DWRITE_E_FILEFORMAT;
 		if (table.tag != kTagDsig)

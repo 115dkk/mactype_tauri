@@ -1,5 +1,7 @@
 #include "sfnt_names.h"
 
+#include "big_endian.h"
+
 #include <algorithm>
 #include <array>
 #include <utility>
@@ -10,21 +12,6 @@ namespace sfnt {
 bool CanRead(std::size_t offset, std::size_t length, std::size_t size) noexcept
 {
 	return offset <= size && length <= size - offset;
-}
-
-UINT16 ReadU16(std::vector<BYTE> const& bytes, std::size_t offset)
-{
-	return static_cast<UINT16>(
-		(static_cast<UINT16>(bytes[offset]) << 8) |
-		static_cast<UINT16>(bytes[offset + 1]));
-}
-
-UINT32 ReadU32(std::vector<BYTE> const& bytes, std::size_t offset)
-{
-	return (static_cast<UINT32>(bytes[offset]) << 24) |
-		(static_cast<UINT32>(bytes[offset + 1]) << 16) |
-		(static_cast<UINT32>(bytes[offset + 2]) << 8) |
-		static_cast<UINT32>(bytes[offset + 3]);
 }
 
 void WriteU16(std::vector<BYTE>& bytes, std::size_t offset, UINT16 value)
@@ -103,11 +90,11 @@ bool ReadNameTable(
 {
 	if (!CanRead(0, 6, table.size()))
 		return false;
-	format = ReadU16(table, 0);
+	format = *big_endian::Read16(table, 0);
 	if (format > 1)
 		return false;
-	UINT16 const count = ReadU16(table, 2);
-	UINT16 const stringOffset = ReadU16(table, 4);
+	UINT16 const count = *big_endian::Read16(table, 2);
+	UINT16 const stringOffset = *big_endian::Read16(table, 4);
 	std::size_t const recordsEnd = 6 + static_cast<std::size_t>(count) * 12;
 	if (!CanRead(6, static_cast<std::size_t>(count) * 12, table.size()) ||
 		stringOffset < recordsEnd || stringOffset > table.size())
@@ -118,12 +105,12 @@ bool ReadNameTable(
 	{
 		std::size_t const offset = 6 + static_cast<std::size_t>(index) * 12;
 		NameRecord record;
-		record.platform = ReadU16(table, offset);
-		record.encoding = ReadU16(table, offset + 2);
-		record.language = ReadU16(table, offset + 4);
-		record.id = ReadU16(table, offset + 6);
-		UINT16 const length = ReadU16(table, offset + 8);
-		UINT16 const valueOffset = ReadU16(table, offset + 10);
+		record.platform = *big_endian::Read16(table, offset);
+		record.encoding = *big_endian::Read16(table, offset + 2);
+		record.language = *big_endian::Read16(table, offset + 4);
+		record.id = *big_endian::Read16(table, offset + 6);
+		UINT16 const length = *big_endian::Read16(table, offset + 8);
+		UINT16 const valueOffset = *big_endian::Read16(table, offset + 10);
 		std::size_t const absolute =
 			static_cast<std::size_t>(stringOffset) + valueOffset;
 		if (!CanRead(absolute, length, table.size()))
@@ -138,7 +125,7 @@ bool ReadNameTable(
 	{
 		if (!CanRead(recordsEnd, 2, table.size()))
 			return false;
-		UINT16 const countTags = ReadU16(table, recordsEnd);
+		UINT16 const countTags = *big_endian::Read16(table, recordsEnd);
 		std::size_t const tagsOffset = recordsEnd + 2;
 		if (!CanRead(tagsOffset, static_cast<std::size_t>(countTags) * 4,
 				table.size()) ||
@@ -149,8 +136,8 @@ bool ReadNameTable(
 		{
 			std::size_t const offset =
 				tagsOffset + static_cast<std::size_t>(index) * 4;
-			UINT16 const length = ReadU16(table, offset);
-			UINT16 const valueOffset = ReadU16(table, offset + 2);
+			UINT16 const length = *big_endian::Read16(table, offset);
+			UINT16 const valueOffset = *big_endian::Read16(table, offset + 2);
 			std::size_t const absolute =
 				static_cast<std::size_t>(stringOffset) + valueOffset;
 			if (!CanRead(absolute, length, table.size()))

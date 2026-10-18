@@ -324,6 +324,7 @@
   <ItemGroup>
     <ClInclude Include="renderer\activation_repaint.h" />
     <ClInclude Include="renderer\array.h" />
+    <ClInclude Include="renderer\big_endian.h" />
     <ClInclude Include="renderer\cache.h" />
     <ClInclude Include="renderer\child_process_relay.h" />
     <ClInclude Include="renderer\common.h" />

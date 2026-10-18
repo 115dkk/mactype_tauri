@@ -257,7 +257,9 @@ std::string WstringToString(const std::wstring& str)
 // make a unique name with fullname + crc32_of_fullname + familyname +stylename
 std::wstring MakeUniqueFontName(const std::wstring& strFullName, const std::wstring& strFamilyName, const std::wstring& strStyleName)
 {
-	return strFullName + to_wstring(crc32::getCrc32(0, strFullName.c_str(), strFullName.length() * sizeof(WCHAR))) + strFamilyName + strStyleName;
+	std::size_t const byteLength = strFullName.size() * sizeof(WCHAR);
+	return strFullName + to_wstring(crc32::getCrc32(
+		0, strFullName.c_str(), byteLength)) + strFamilyName + strStyleName;
 }
 
 #ifndef Assert

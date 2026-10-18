@@ -10,7 +10,7 @@
 #include <VersionHelpers.h>
 #include <freetype/ftmodapi.h>
 #include <IniParser/ParseIni.h>
-#include "json.hpp"
+#include "json_include.h"
 #include <thread>
 
 using json = nlohmann::json;

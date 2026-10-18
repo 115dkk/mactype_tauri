@@ -142,6 +142,14 @@ foreach ($entry in @(
         @($standards | Where-Object { $_ -ne 'stdcpp23' }).Count -ne 0) {
         throw "$($entry.Name) must compile every configuration with LanguageStandard stdcpp23."
     }
+    # Without thread-safe statics a second thread that reaches a function-local
+    # static during the first thread's initialization reads it before it is
+    # assigned. The Win32 renderer crashed this way in 2026-10 when the
+    # existing-factory hook worker and the application thread entered the
+    # alias cache together.
+    if ($entry.Content -match '/Zc:threadSafeInit-') {
+        throw "$($entry.Name) must not disable thread-safe static initialization (/Zc:threadSafeInit-)."
+    }
 }
 
 $probeBuild = Read-RepositoryFile 'tools\service-probe\CMakeLists.txt'

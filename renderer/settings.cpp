@@ -1577,6 +1577,7 @@ void ApplySubstitutionBoldPolicy(
 		substitution::BoldPlan const plan =
 			snapshot.PlanBold(family, static_cast<int>(original.lfWeight));
 		bool const italic = original.lfItalic != 0;
+		std::vector<selection::FaceCandidate> faces;
 		switch (plan.action)
 		{
 		case substitution::BoldAction::unchanged:
@@ -1587,33 +1588,29 @@ void ApplySubstitutionBoldPolicy(
 			return;
 		case substitution::BoldAction::sameFamilyFace:
 		{
-			auto familyFaces =
-				renderer::gdi_family_catalog::FamilyFaces(family.c_str());
-			if (!familyFaces)
+			if (!renderer::gdi_family_catalog::FamilyFaces(family.c_str(), faces))
 				return;
 			const selection::FaceCandidate* const base =
-				selection::SelectNearestWeight(*familyFaces, FW_NORMAL, italic);
+				selection::SelectNearestWeight(faces, FW_NORMAL, italic);
 			if (base == nullptr)
 				return;
 			int const baseWeight = base->weight;
-			auto faces = renderer::gdi_family_catalog::TypographicFamilyFaces(
-				family.c_str());
-			if (!faces)
+			if (!renderer::gdi_family_catalog::TypographicFamilyFaces(
+					family.c_str(), faces))
 				return;
 			const selection::FaceCandidate* const chosen = selection::SelectBoldFace(
-				*faces, baseWeight, static_cast<int>(original.lfWeight), italic);
+				faces, baseWeight, static_cast<int>(original.lfWeight), italic);
 			if (chosen != nullptr)
 				SetSubstitutedFace(lf, vertical, chosen->gdiFamily, chosen->weight);
 			return;
 		}
 		case substitution::BoldAction::pairedFamily:
 		{
-			auto faces = renderer::gdi_family_catalog::FamilyFaces(
-				plan.pairedFamily.c_str());
-			const selection::FaceCandidate* const chosen = faces
-				? selection::SelectNearestWeight(
-					*faces, static_cast<int>(original.lfWeight), italic)
-				: nullptr;
+			const selection::FaceCandidate* chosen = nullptr;
+			if (renderer::gdi_family_catalog::FamilyFaces(
+					plan.pairedFamily.c_str(), faces))
+				chosen = selection::SelectNearestWeight(
+					faces, static_cast<int>(original.lfWeight), italic);
 			if (chosen == nullptr ||
 				!SetSubstitutedFace(lf, vertical, chosen->gdiFamily, chosen->weight))
 				lf.lfWeight = FW_NORMAL;

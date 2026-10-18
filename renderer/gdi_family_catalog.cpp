@@ -8,7 +8,6 @@
 #include <mutex>
 #include <set>
 #include <string>
-#include <string_view>
 #include <utility>
 
 namespace renderer {
@@ -22,24 +21,28 @@ constexpr DWORD kNameTableTag = 0x656d616e;
 constexpr DWORD kMaximumNameTableBytes = 16u * 1024u * 1024u;
 
 int CompareNoCase(
-	std::wstring_view left,
-	std::wstring_view right) noexcept
+	const wchar_t* left,
+	std::size_t leftLength,
+	const wchar_t* right,
+	std::size_t rightLength) noexcept
 {
 	return CompareStringOrdinal(
-		left.data(), static_cast<int>(left.size()),
-		right.data(), static_cast<int>(right.size()), TRUE);
+		left, static_cast<int>(leftLength),
+		right, static_cast<int>(rightLength), TRUE);
 }
 
-bool EqualNoCase(std::wstring_view left, std::wstring_view right) noexcept
+bool EqualNoCase(const std::wstring& left, const std::wstring& right) noexcept
 {
-	return CompareNoCase(left, right) == CSTR_EQUAL;
+	return CompareNoCase(left.c_str(), left.size(), right.c_str(), right.size()) ==
+		CSTR_EQUAL;
 }
 
 struct NoCaseLess
 {
 	bool operator()(const std::wstring& left, const std::wstring& right) const noexcept
 	{
-		return CompareNoCase(left, right) == CSTR_LESS_THAN;
+		return CompareNoCase(
+			left.c_str(), left.size(), right.c_str(), right.size()) == CSTR_LESS_THAN;
 	}
 };
 
@@ -62,16 +65,16 @@ Catalog& GetCatalog()
 	return *catalog;
 }
 
-template <typename Map>
-std::optional<typename Map::mapped_type> LookupCached(
-	Map& map, const std::wstring& key)
+template <typename Map, typename Value>
+bool LookupCached(Map& map, const std::wstring& key, Value& value)
 {
 	Catalog& catalog = GetCatalog();
 	std::scoped_lock lock(catalog.mutex);
 	typename Map::const_iterator const found = map.find(key);
 	if (found == map.end())
-		return std::nullopt;
-	return found->second;
+		return false;
+	value = found->second;
+	return true;
 }
 
 template <typename Map, typename Value>
@@ -153,137 +156,134 @@ int CALLBACK CollectFamily(
 	return 1;
 }
 
-std::optional<std::vector<FaceCandidate>> EnumerateFaces(
-	const std::wstring& family)
+bool EnumerateFaces(const std::wstring& family, std::vector<FaceCandidate>& faces)
 {
+	faces.clear();
 	LOGFONTW query = {};
 	query.lfCharSet = DEFAULT_CHARSET;
 	if (family.empty() ||
 		FAILED(StringCchCopyW(query.lfFaceName, LF_FACESIZE, family.c_str())))
-		return std::nullopt;
+		return false;
 	renderer_raii::UniqueDeviceContext dc(CreateCompatibleDC(nullptr));
 	if (!dc)
-		return std::nullopt;
-	std::vector<FaceCandidate> faces;
+		return false;
 	FaceEnumeration enumeration;
 	enumeration.family = &family;
 	enumeration.faces = &faces;
 	EnumFontFamiliesExW(
 		dc.get(), &query, CollectFace, reinterpret_cast<LPARAM>(&enumeration), 0);
 	if (enumeration.failed)
-		return std::nullopt;
-	return faces;
+		faces.clear();
+	return !enumeration.failed;
 }
 
-std::optional<std::vector<std::wstring>> EnumerateFamilies()
+bool EnumerateFamilies(std::vector<std::wstring>& families)
 {
+	families.clear();
 	LOGFONTW query = {};
 	query.lfCharSet = DEFAULT_CHARSET;
 	renderer_raii::UniqueDeviceContext dc(CreateCompatibleDC(nullptr));
 	if (!dc)
-		return std::nullopt;
+		return false;
 	std::set<std::wstring, NoCaseLess> unique;
 	FamilyEnumeration enumeration;
 	enumeration.families = &unique;
 	EnumFontFamiliesExW(
 		dc.get(), &query, CollectFamily, reinterpret_cast<LPARAM>(&enumeration), 0);
 	if (enumeration.failed)
-		return std::nullopt;
-	return std::vector<std::wstring>(unique.begin(), unique.end());
+		return false;
+	families.assign(unique.begin(), unique.end());
+	return true;
 }
 
 // The font is realised with FONT_MAGIC_NUMBER so the CreateFontIndirect hook
 // passes it through unsubstituted, and the name table is read through the
 // original GetFontData because the hooked one reports the substituted names.
-std::optional<std::vector<std::wstring>> ReadTypographicNames(
-	const std::wstring& family)
+bool ReadTypographicNames(
+	const std::wstring& family,
+	std::vector<std::wstring>& names)
 {
+	names.clear();
 	LOGFONTW request = {};
 	request.lfCharSet = DEFAULT_CHARSET;
 	request.lfWeight = FW_NORMAL;
 	request.lfClipPrecision = FONT_MAGIC_NUMBER;
 	if (family.empty() ||
 		FAILED(StringCchCopyW(request.lfFaceName, LF_FACESIZE, family.c_str())))
-		return std::nullopt;
+		return false;
 	renderer_raii::UniqueFont font(CreateFontIndirectW(&request));
 	renderer_raii::UniqueDeviceContext dc(CreateCompatibleDC(nullptr));
 	if (!font || !dc)
-		return std::nullopt;
+		return false;
 	auto selected = renderer_raii::SelectObject(
 		dc.get(), static_cast<HFONT>(font.get()));
 	if (!selected)
-		return std::nullopt;
+		return false;
 	DWORD const size = ORIG_GetFontData(dc.get(), kNameTableTag, 0, nullptr, 0);
 	if (size == GDI_ERROR || size == 0 || size > kMaximumNameTableBytes)
-		return std::nullopt;
+		return false;
 	std::vector<BYTE> table(size);
 	if (ORIG_GetFontData(dc.get(), kNameTableTag, 0, table.data(), size) != size)
-		return std::nullopt;
-	return sfnt::ReadTypographicFamilyNames(table);
+		return false;
+	auto read = sfnt::ReadTypographicFamilyNames(table);
+	if (!read)
+		return false;
+	names = std::move(*read);
+	return true;
 }
 
-std::optional<std::vector<FaceCandidate>> CachedFamilyFaces(
-	const std::wstring& family)
+bool CachedFamilyFaces(const std::wstring& family, std::vector<FaceCandidate>& faces)
 {
 	Catalog& catalog = GetCatalog();
-	auto faces = LookupCached(catalog.faces, family);
-	if (!faces)
-	{
-		faces = EnumerateFaces(family);
-		if (!faces)
-			return std::nullopt;
-		StoreCached(catalog.faces, family, *faces);
-	}
-	return faces->empty() ? std::nullopt : std::move(faces);
+	if (LookupCached(catalog.faces, family, faces))
+		return !faces.empty();
+	if (!EnumerateFaces(family, faces))
+		return false;
+	StoreCached(catalog.faces, family, faces);
+	return !faces.empty();
 }
 
-std::optional<std::vector<std::wstring>> CachedTypographicNames(
-	const std::wstring& family)
+bool CachedTypographicNames(const std::wstring& family, std::vector<std::wstring>& names)
 {
 	Catalog& catalog = GetCatalog();
-	auto names = LookupCached(catalog.typographicNames, family);
-	if (!names)
-	{
-		names = ReadTypographicNames(family);
-		if (!names)
-		{
-			std::vector<std::wstring> empty;
-			StoreCached(catalog.typographicNames, family, empty);
-			return std::nullopt;
-		}
-		StoreCached(catalog.typographicNames, family, *names);
-	}
-	return names->empty() ? std::nullopt : std::move(names);
+	if (LookupCached(catalog.typographicNames, family, names))
+		return !names.empty();
+	if (!ReadTypographicNames(family, names))
+		names.clear();
+	StoreCached(catalog.typographicNames, family, names);
+	return !names.empty();
 }
 
-std::optional<std::vector<std::wstring>> CachedFamilies()
+bool CachedFamilies(std::vector<std::wstring>& families)
 {
 	Catalog& catalog = GetCatalog();
 	{
 		std::scoped_lock lock(catalog.mutex);
 		if (catalog.familiesListed)
-			return catalog.families;
+		{
+			families = catalog.families;
+			return true;
+		}
 	}
-	auto families = EnumerateFamilies();
-	if (!families)
-		return std::nullopt;
+	if (!EnumerateFamilies(families))
+		return false;
 	std::scoped_lock lock(catalog.mutex);
 	if (!catalog.familiesListed)
 	{
-		catalog.families = *families;
+		catalog.families = families;
 		catalog.familiesListed = true;
 	}
-	return families;
+	return true;
 }
 
-bool NamePrefixMatches(
-	std::wstring_view family, std::wstring_view name) noexcept
+bool NamePrefixMatches(const std::wstring& family, const std::wstring& name) noexcept
 {
 	if (name.empty() || family.size() < name.size())
 		return false;
 	if (family.size() > name.size() && family[name.size()] != L' ')
 		return false;
-	return CompareNoCase(family.substr(0, name.size()), name) == CSTR_EQUAL;
+	return CompareNoCase(family.c_str(), name.size(), name.c_str(), name.size()) ==
+		CSTR_EQUAL;
 }
 
 bool SharesName(
@@ -301,78 +301,83 @@ bool SharesName(
 	return false;
 }
 
-std::optional<std::vector<FaceCandidate>> BuildTypographicFaces(
-	const std::wstring& family)
+bool BuildTypographicFaces(
+	const std::wstring& family,
+	std::vector<FaceCandidate>& faces)
 {
-	auto faces = CachedFamilyFaces(family);
-	if (!faces)
-		return std::nullopt;
-	auto names = CachedTypographicNames(family);
-	if (!names)
-		return faces;
-	auto families = CachedFamilies();
-	if (!families)
-		return faces;
-	for (const std::wstring& candidate : *families)
+	faces.clear();
+	if (!CachedFamilyFaces(family, faces))
+		return false;
+	std::vector<std::wstring> names;
+	if (!CachedTypographicNames(family, names))
+		return true;
+	std::vector<std::wstring> families;
+	if (!CachedFamilies(families))
+		return true;
+	std::vector<std::wstring> candidateNames;
+	std::vector<FaceCandidate> candidateFaces;
+	for (const std::wstring& candidate : families)
 	{
 		if (EqualNoCase(candidate, family))
 			continue;
 		bool prefixed = false;
-		for (const std::wstring& name : *names)
+		for (const std::wstring& name : names)
 			prefixed = prefixed || NamePrefixMatches(candidate, name);
-		if (!prefixed)
+		if (!prefixed ||
+			!CachedTypographicNames(candidate, candidateNames) ||
+			!SharesName(names, candidateNames) ||
+			!CachedFamilyFaces(candidate, candidateFaces))
 			continue;
-		auto candidateNames = CachedTypographicNames(candidate);
-		if (!candidateNames || !SharesName(*names, *candidateNames))
-			continue;
-		auto candidateFaces = CachedFamilyFaces(candidate);
-		if (!candidateFaces)
-			continue;
-		faces->insert(
-			faces->end(), candidateFaces->begin(), candidateFaces->end());
+		faces.insert(faces.end(), candidateFaces.begin(), candidateFaces.end());
 	}
-	return faces;
+	return true;
 }
 
 } // namespace
 
-std::optional<std::vector<FaceCandidate>> FamilyFaces(
-	const wchar_t* gdiFamily) noexcept
+bool FamilyFaces(
+	const wchar_t* gdiFamily,
+	std::vector<FaceCandidate>& faces) noexcept
 {
 	try
 	{
+		faces.clear();
 		if (gdiFamily == nullptr || *gdiFamily == L'\0')
-			return std::nullopt;
-		return CachedFamilyFaces(gdiFamily);
+			return false;
+		return CachedFamilyFaces(gdiFamily, faces);
 	}
 	catch (...)
 	{
-		return std::nullopt;
+		faces.clear();
+		return false;
 	}
 }
 
-std::optional<std::vector<FaceCandidate>> TypographicFamilyFaces(
-	const wchar_t* gdiFamily) noexcept
+bool TypographicFamilyFaces(
+	const wchar_t* gdiFamily,
+	std::vector<FaceCandidate>& faces) noexcept
 {
 	try
 	{
+		faces.clear();
 		if (gdiFamily == nullptr || *gdiFamily == L'\0')
-			return std::nullopt;
+			return false;
 		std::wstring const family(gdiFamily);
 		Catalog& catalog = GetCatalog();
-		auto faces = LookupCached(catalog.typographicFaces, family);
-		if (!faces)
+		if (LookupCached(catalog.typographicFaces, family, faces))
+			return !faces.empty();
+		if (!BuildTypographicFaces(family, faces))
 		{
-			faces = BuildTypographicFaces(family);
-			if (!faces)
-				return std::nullopt;
-			StoreCached(catalog.typographicFaces, family, *faces);
+			faces.clear();
+			return false;
 		}
-		return faces->empty() ? std::nullopt : std::move(faces);
+		StoreCached(catalog.typographicFaces, family, faces);
+		return !faces.empty();
 	}
 	catch (...)
 	{
-		return std::nullopt;
+		faces.clear();
+		return false;
 	}
 }
 

@@ -6,7 +6,7 @@ mod event_sink;
 mod inspector_support;
 
 use broker_support::ScriptedBroker;
-use event_sink::{discard_events, RecordingEventSink};
+use event_sink::{RecordingEventSink, discard_events};
 use inspector_support::{InspectorResponse, ScriptedInspector};
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -14,17 +14,17 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use mactype_service_contract::{
-    event_log::read_events, ConsoleProcessPolicy, PrivateFreeTypePolicy, ProfileDigest,
-    RendererRuntimeBinding, RuntimeGenerationId, StructuredServiceError, UnityFontHookPolicy,
+    ConsoleProcessPolicy, PrivateFreeTypePolicy, ProfileDigest, RendererRuntimeBinding,
+    RuntimeGenerationId, StructuredServiceError, UnityFontHookPolicy, event_log::read_events,
 };
 use mactype_service_host::{
-    initialize_process_orchestration, subscribe_process_creation, BinarySignaturePolicy,
-    BrokerDisposition, BrokerResult, DynamicCodePolicy, HostEvent, HostEventSink, ImageSubsystem,
-    InjectionBroker, InjectionRequest, InspectionEvidence, PrivateFreeTypeClassification,
+    BinarySignaturePolicy, BrokerDisposition, BrokerResult, DynamicCodePolicy, HostEvent,
+    HostEventSink, ImageSubsystem, InjectionBroker, InjectionRequest, InspectionEvidence,
+    MAX_TRACKED_PROCESS_RESULTS, PROCESS_CREATION_QUERY, PrivateFreeTypeClassification,
     ProcessArchitecture, ProcessEventSource, ProcessIdentity, ProcessInspection,
     ProcessInspectionError, ProcessInspector, ProcessOrchestrator, ProcessOutcome, RetryPolicy,
-    RetryScheduler, SessionChange, SystemCallDisablePolicy, TargetLifecycle, TargetLiveness,
-    MAX_TRACKED_PROCESS_RESULTS, PROCESS_CREATION_QUERY, TARGET_VANISHED_RESULT_CODE,
+    RetryScheduler, SessionChange, SystemCallDisablePolicy, TARGET_VANISHED_RESULT_CODE,
+    TargetLifecycle, TargetLiveness, initialize_process_orchestration, subscribe_process_creation,
 };
 
 const PROFILE_DIGEST: &str =
@@ -889,12 +889,14 @@ fn process_result_memory_is_bounded_and_evicts_the_oldest_identity() {
         MAX_TRACKED_PROCESS_RESULTS
     );
     assert!(orchestrator.last_result(1, 1).is_none());
-    assert!(orchestrator
-        .last_result(
-            MAX_TRACKED_PROCESS_RESULTS as u32 + 1,
-            MAX_TRACKED_PROCESS_RESULTS as u64 + 1,
-        )
-        .is_some());
+    assert!(
+        orchestrator
+            .last_result(
+                MAX_TRACKED_PROCESS_RESULTS as u32 + 1,
+                MAX_TRACKED_PROCESS_RESULTS as u64 + 1,
+            )
+            .is_some()
+    );
 }
 
 #[test]
@@ -1588,7 +1590,9 @@ fn injection_summary_flushes_each_elapsed_window_and_resets_its_counts() {
         summaries[1].params.get("injected").map(String::as_str),
         Some("1")
     );
-    assert!(summaries
-        .iter()
-        .all(|summary| summary.params.get("failed").map(String::as_str) == Some("0")));
+    assert!(
+        summaries
+            .iter()
+            .all(|summary| summary.params.get("failed").map(String::as_str) == Some("0"))
+    );
 }

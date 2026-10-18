@@ -23,8 +23,8 @@ use crate::target_validation::{
 use crate::{HostEvent, HostEventSink};
 
 pub use model::{
-    DeferralPolicy, DeferredTarget, ProcessAttemptRecord, ProcessOutcome, RetryPolicy,
-    RetryScheduler, SessionChange, MAX_DEFERRED_TARGETS, MAX_TRACKED_PROCESS_RESULTS,
+    DeferralPolicy, DeferredTarget, MAX_DEFERRED_TARGETS, MAX_TRACKED_PROCESS_RESULTS,
+    ProcessAttemptRecord, ProcessOutcome, RetryPolicy, RetryScheduler, SessionChange,
 };
 
 /// The bounded target-result code recorded when an untrustworthy cleanup

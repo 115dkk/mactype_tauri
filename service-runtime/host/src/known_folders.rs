@@ -1,7 +1,7 @@
 use std::io;
 
 use mactype_service_contract::MachinePaths;
-use mactype_service_platform::{known_folder_path, KnownFolder};
+use mactype_service_platform::{KnownFolder, known_folder_path};
 
 pub fn machine_paths() -> io::Result<MachinePaths> {
     let program_files = known_folder_path(KnownFolder::ProgramFiles)?;

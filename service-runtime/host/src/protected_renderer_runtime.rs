@@ -6,8 +6,8 @@ use mactype_service_contract::{
 };
 
 use crate::profile_runtime::{
-    ensure_activation_state_is_stable, read_active_profile_pointer, read_active_runtime_pointer,
-    ProtectedProfileSnapshot,
+    ProtectedProfileSnapshot, ensure_activation_state_is_stable, read_active_profile_pointer,
+    read_active_runtime_pointer,
 };
 use crate::runtime_assets::ProtectedRuntimeAssets;
 

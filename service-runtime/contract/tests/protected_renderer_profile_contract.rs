@@ -1,6 +1,6 @@
 use mactype_service_contract::{
-    validate_protected_renderer_profile, ProfileCatalog, ProtectedRendererProfileError,
-    SourceMetadata,
+    ProfileCatalog, ProtectedRendererProfileError, SourceMetadata,
+    validate_protected_renderer_profile,
 };
 
 fn metadata() -> SourceMetadata {

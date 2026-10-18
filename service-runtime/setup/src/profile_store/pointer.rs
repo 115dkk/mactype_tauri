@@ -2,9 +2,9 @@ use std::fs;
 
 use mactype_service_contract::{GenerationId, GenerationPointer};
 
-use super::{ProfileStore, MAX_POINTER_BYTES};
+use super::{MAX_POINTER_BYTES, ProfileStore};
 use crate::storage::{
-    atomic_write, read_bounded_regular_file, reject_reparse_ancestors, SetupError,
+    SetupError, atomic_write, read_bounded_regular_file, reject_reparse_ancestors,
 };
 
 impl ProfileStore {

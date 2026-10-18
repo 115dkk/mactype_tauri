@@ -430,9 +430,7 @@ mod tests {
                 "the legacy MacTray tray mode blocks this service change",
             ),
             (
-                ActionBlocker::LegacyServiceStillInstalled(
-                    LegacyServiceBlockContext::ApplyProfile,
-                ),
+                ActionBlocker::LegacyServiceStillInstalled(LegacyServiceBlockContext::ApplyProfile),
                 "a legacy MacType service is still installed; migrate it before applying the profile",
             ),
             (

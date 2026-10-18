@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::fs;
 
 use mactype_service_contract::{
-    sha256_digest, MachinePaths, MigrationPinnedRuntime, MigrationRuntimePin,
-    IMMUTABLE_RUNTIME_FILES,
+    IMMUTABLE_RUNTIME_FILES, MachinePaths, MigrationPinnedRuntime, MigrationRuntimePin,
+    sha256_digest,
 };
 
 pub(crate) fn pin_runtime_generation(paths: &MachinePaths, nonce: &str, version: &str) {

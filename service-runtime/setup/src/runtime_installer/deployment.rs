@@ -6,15 +6,15 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use mactype_service_contract::{
-    verify_runtime_manifest, VerifiedRuntimeManifest, MAX_PROFILE_BYTES, MAX_RUNTIME_FILE_BYTES,
+    MAX_PROFILE_BYTES, MAX_RUNTIME_FILE_BYTES, VerifiedRuntimeManifest, verify_runtime_manifest,
 };
 
-use super::generation_store::RuntimeGenerationStore;
 use super::FixedPayload;
+use super::generation_store::RuntimeGenerationStore;
 use crate::profile_bridge::GENERATED_PROFILE_NAME;
 use crate::storage::{
-    create_protected_directory, read_bounded_directory, read_bounded_regular_file,
-    reject_reparse_ancestors, temporary_nonce, SetupError,
+    SetupError, create_protected_directory, read_bounded_directory, read_bounded_regular_file,
+    reject_reparse_ancestors, temporary_nonce,
 };
 
 const MAX_MANIFEST_BYTES: u64 = 64 * 1024;

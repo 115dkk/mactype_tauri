@@ -213,12 +213,16 @@ fn incomplete_current_bundle_diagnostics_keep_installed_and_current_states_disti
     let failure = service_package_preflight_for_layouts(&program_files, None, &current_executable)
         .unwrap_err();
 
-    assert!(failure
-        .error
-        .contains("complete Integration/Developer bundle"));
-    assert!(!failure
-        .error
-        .contains("registered MacType Control Center installation"));
+    assert!(
+        failure
+            .error
+            .contains("complete Integration/Developer bundle")
+    );
+    assert!(
+        !failure
+            .error
+            .contains("registered MacType Control Center installation")
+    );
     assert_eq!(failure.diagnostics.installed_control_center, "missing");
     assert_eq!(failure.diagnostics.current_bundle, "incomplete");
     assert_eq!(failure.diagnostics.selected_service_package, "none");
@@ -425,12 +429,14 @@ fn elevated_broker_requires_one_transfer_token_for_every_action() {
         privileged_request_from_arguments([executable.clone()]).unwrap(),
         None
     );
-    assert!(privileged_request_from_arguments([
-        executable.clone(),
-        OsString::from(BROKER_SWITCH),
-        OsString::from("publish-profile"),
-    ])
-    .is_err());
+    assert!(
+        privileged_request_from_arguments([
+            executable.clone(),
+            OsString::from(BROKER_SWITCH),
+            OsString::from("publish-profile"),
+        ])
+        .is_err()
+    );
     let request = privileged_request_from_arguments([
         executable.clone(),
         OsString::from(BROKER_SWITCH),
@@ -463,21 +469,25 @@ fn elevated_broker_requires_one_transfer_token_for_every_action() {
     .unwrap();
     assert_eq!(start.action, SystemServiceAction::Start);
     assert_eq!(start.transfer.server_pid, 4242);
-    assert!(privileged_request_from_arguments([
-        executable.clone(),
-        OsString::from(BROKER_SWITCH),
-        OsString::from("unknown"),
-    ])
-    .is_err());
-    assert!(privileged_request_from_arguments([
-        executable,
-        OsString::from(BROKER_SWITCH),
-        OsString::from("publish-profile"),
-        OsString::from("--broker-transfer-v1"),
-        OsString::from("0"),
-        OsString::from("00112233445566778899AABBCCDDEEFF"),
-    ])
-    .is_err());
+    assert!(
+        privileged_request_from_arguments([
+            executable.clone(),
+            OsString::from(BROKER_SWITCH),
+            OsString::from("unknown"),
+        ])
+        .is_err()
+    );
+    assert!(
+        privileged_request_from_arguments([
+            executable,
+            OsString::from(BROKER_SWITCH),
+            OsString::from("publish-profile"),
+            OsString::from("--broker-transfer-v1"),
+            OsString::from("0"),
+            OsString::from("00112233445566778899AABBCCDDEEFF"),
+        ])
+        .is_err()
+    );
 }
 
 #[test]
@@ -507,12 +517,14 @@ fn legacy_tray_autostart_broker_accepts_only_two_fixed_verbs_with_a_transfer_tok
         .unwrap();
         assert_eq!(request.action, action);
         assert_eq!(request.transfer.server_pid, 4242);
-        assert!(privileged_request_from_arguments([
-            executable.clone(),
-            OsString::from(BROKER_SWITCH),
-            OsString::from(verb),
-            OsString::from(r"HKLM\arbitrary"),
-        ])
-        .is_err());
+        assert!(
+            privileged_request_from_arguments([
+                executable.clone(),
+                OsString::from(BROKER_SWITCH),
+                OsString::from(verb),
+                OsString::from(r"HKLM\arbitrary"),
+            ])
+            .is_err()
+        );
     }
 }

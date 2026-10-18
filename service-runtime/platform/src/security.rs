@@ -15,21 +15,21 @@ use std::path::Path;
 use std::ptr::{self, NonNull};
 
 use windows_sys::Win32::Foundation::{
-    LocalFree, SetLastError, ERROR_INSUFFICIENT_BUFFER, ERROR_NOT_ALL_ASSIGNED, ERROR_SUCCESS, LUID,
+    ERROR_INSUFFICIENT_BUFFER, ERROR_NOT_ALL_ASSIGNED, ERROR_SUCCESS, LUID, LocalFree, SetLastError,
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
-    GetNamedSecurityInfoW, GetSecurityInfo, TreeSetNamedSecurityInfoW, SDDL_REVISION_1,
-    SE_FILE_OBJECT, SE_KERNEL_OBJECT, TREE_SEC_INFO_RESET,
+    GetNamedSecurityInfoW, GetSecurityInfo, SDDL_REVISION_1, SE_FILE_OBJECT, SE_KERNEL_OBJECT,
+    TREE_SEC_INFO_RESET, TreeSetNamedSecurityInfoW,
 };
 use windows_sys::Win32::Security::{
-    AdjustTokenPrivileges, CheckTokenMembership, GetSecurityDescriptorControl,
-    GetSecurityDescriptorDacl, GetSecurityDescriptorLength, GetSecurityDescriptorOwner,
-    GetTokenInformation, IsValidSecurityDescriptor, LookupPrivilegeValueW, TokenUser,
-    DACL_SECURITY_INFORMATION, LUID_AND_ATTRIBUTES, OWNER_SECURITY_INFORMATION,
-    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES,
-    SE_DACL_PROTECTED, SE_PRIVILEGE_ENABLED, SE_SELF_RELATIVE, TOKEN_ADJUST_PRIVILEGES,
-    TOKEN_PRIVILEGES, TOKEN_QUERY, TOKEN_USER,
+    AdjustTokenPrivileges, CheckTokenMembership, DACL_SECURITY_INFORMATION,
+    GetSecurityDescriptorControl, GetSecurityDescriptorDacl, GetSecurityDescriptorLength,
+    GetSecurityDescriptorOwner, GetTokenInformation, IsValidSecurityDescriptor,
+    LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, OWNER_SECURITY_INFORMATION,
+    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, SE_DACL_PROTECTED,
+    SE_PRIVILEGE_ENABLED, SE_SELF_RELATIVE, SECURITY_ATTRIBUTES, TOKEN_ADJUST_PRIVILEGES,
+    TOKEN_PRIVILEGES, TOKEN_QUERY, TOKEN_USER, TokenUser,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
@@ -37,7 +37,7 @@ pub use acl::{
     AclValidationError, AllowedAce, OwnedSid, SecurityAclError, ValidatedDacl, ValidatedSid,
 };
 
-use crate::bounded_read::{probe_word_aligned, CallOutcome, ProbeError, WordAlignedBuffer};
+use crate::bounded_read::{CallOutcome, ProbeError, WordAlignedBuffer, probe_word_aligned};
 use crate::handle::OwnedHandle;
 use crate::wide::{bounded_units, wide_null, wide_path};
 
@@ -532,8 +532,8 @@ mod tests {
     use windows_sys::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER;
 
     use super::{
-        current_user_sid_string, query_token_user, LocalSecurityDescriptor, OwnedSid,
-        PrivilegeGuard, SecurityDescriptor, MAX_TOKEN_INFORMATION_BYTES,
+        LocalSecurityDescriptor, MAX_TOKEN_INFORMATION_BYTES, OwnedSid, PrivilegeGuard,
+        SecurityDescriptor, current_user_sid_string, query_token_user,
     };
     use crate::bounded_read::CallOutcome;
 

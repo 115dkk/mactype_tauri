@@ -1,6 +1,6 @@
 use super::{
-    designation::{designation_plan_with_package, designation_status_with},
     DesignationPlan, MachineAction, MachineBackend,
+    designation::{designation_plan_with_package, designation_status_with},
 };
 use crate::{
     machine_integration::open_service::action_failure::{

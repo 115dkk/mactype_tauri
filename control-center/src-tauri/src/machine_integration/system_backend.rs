@@ -1,6 +1,6 @@
 use super::{
-    appinit::appinit_conflict, legacy_mactray, open_service, LegacyTrayStatus, MachineAction,
-    MachineBackend,
+    LegacyTrayStatus, MachineAction, MachineBackend, appinit::appinit_conflict, legacy_mactray,
+    open_service,
 };
 use crate::service_contract::SystemServiceStatus;
 

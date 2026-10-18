@@ -5,7 +5,7 @@ use std::ptr::null_mut;
 
 use windows_sys::Win32::Foundation::LPARAM;
 use windows_sys::Win32::Graphics::Gdi::{
-    CreateCompatibleDC, DeleteDC, EnumFontFamiliesExW, DEFAULT_CHARSET, HDC, LF_FACESIZE, LOGFONTW,
+    CreateCompatibleDC, DEFAULT_CHARSET, DeleteDC, EnumFontFamiliesExW, HDC, LF_FACESIZE, LOGFONTW,
     TEXTMETRICW,
 };
 

@@ -3,10 +3,10 @@ use std::path::PathBuf;
 
 use mactype_service_contract::{RuntimeActivationPhase, RuntimeActivationReceipt};
 
-use super::{activation_receipt_bytes, validate_runtime_pointer, RuntimePointer};
+use super::{RuntimePointer, activation_receipt_bytes, validate_runtime_pointer};
 use crate::runtime_installer::activation_transaction::RuntimeActivationTransaction;
 use crate::storage::{
-    atomic_write, read_bounded_regular_file, reject_reparse_ancestors, SetupError,
+    SetupError, atomic_write, read_bounded_regular_file, reject_reparse_ancestors,
 };
 
 impl RuntimeActivationTransaction<'_> {

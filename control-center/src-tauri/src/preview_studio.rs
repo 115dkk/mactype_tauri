@@ -3,8 +3,8 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Mutex,
+        atomic::{AtomicUsize, Ordering},
     },
 };
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};

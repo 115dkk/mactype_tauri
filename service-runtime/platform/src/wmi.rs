@@ -7,19 +7,19 @@
 
 use std::time::Duration;
 
-use windows::core::{IUnknown, Interface, BSTR, PCWSTR};
 use windows::Win32::Foundation::RPC_E_TOO_LATE;
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeSecurity, CoSetProxyBlanket, CLSCTX_INPROC_SERVER, EOAC_NONE,
+    CLSCTX_INPROC_SERVER, CoCreateInstance, CoInitializeSecurity, CoSetProxyBlanket, EOAC_NONE,
     RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE,
 };
 use windows::Win32::System::Rpc::{RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE};
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::System::Wmi::{
-    IEnumWbemClassObject, IWbemClassObject, IWbemLocator, IWbemServices, WbemLocator,
-    WBEM_E_ACCESS_DENIED, WBEM_E_INVALID_CLASS, WBEM_FLAG_FORWARD_ONLY,
-    WBEM_FLAG_RETURN_IMMEDIATELY, WBEM_S_FALSE, WBEM_S_TIMEDOUT,
+    IEnumWbemClassObject, IWbemClassObject, IWbemLocator, IWbemServices, WBEM_E_ACCESS_DENIED,
+    WBEM_E_INVALID_CLASS, WBEM_FLAG_FORWARD_ONLY, WBEM_FLAG_RETURN_IMMEDIATELY, WBEM_S_FALSE,
+    WBEM_S_TIMEDOUT, WbemLocator,
 };
+use windows::core::{BSTR, IUnknown, Interface, PCWSTR};
 
 /// A COM failure, reduced to its `HRESULT`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -285,7 +285,7 @@ mod tests {
     use windows::Win32::Foundation::{RPC_E_DISCONNECTED, S_OK};
     use windows::Win32::System::Wmi::{WBEM_E_CALL_CANCELLED, WBEM_S_FALSE, WBEM_S_TIMEDOUT};
 
-    use super::{interpret_next_result, WmiError};
+    use super::{WmiError, interpret_next_result};
 
     #[test]
     fn next_result_distinguishes_objects_timeouts_and_failures() {

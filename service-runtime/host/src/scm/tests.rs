@@ -1,6 +1,6 @@
 use super::*;
-use crate::session_event_queue::{SessionEventQueue, SESSION_EVENT_QUEUE_CAPACITY};
 use crate::SessionChange;
+use crate::session_event_queue::{SESSION_EVENT_QUEUE_CAPACITY, SessionEventQueue};
 
 #[test]
 fn crash_once_adapter_accepts_only_the_fixed_marker_payload() {

@@ -1,7 +1,7 @@
 use super::*;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
 use mactype_service_contract::{ProfileDigest, RendererRuntimeBinding, RuntimeGenerationId};

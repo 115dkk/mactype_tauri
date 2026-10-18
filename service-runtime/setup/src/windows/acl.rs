@@ -13,8 +13,8 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_ALL_ACCESS, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ,
 };
 
-use crate::storage::reject_reparse_ancestors;
 use crate::SetupError;
+use crate::storage::reject_reparse_ancestors;
 
 const MACHINE_TREE_SDDL: &str = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)(A;OICI;GRGX;;;AC)(A;OICI;GRGX;;;S-1-15-2-2)";
 const SYSTEM_SID: &str = "S-1-5-18";
@@ -285,10 +285,10 @@ impl ExpectedSids {
 mod tests {
     use mactype_service_contract::BrokerCommand;
     #[cfg(feature = "ci-test-adapter")]
-    use mactype_service_contract::{sha256_digest, MachinePaths};
-    #[cfg(feature = "ci-test-adapter")]
-    use mactype_service_platform::{current_token_is_member_of, OwnedSid};
+    use mactype_service_contract::{MachinePaths, sha256_digest};
     use mactype_service_platform::{LocalSecurityDescriptor, SecurityDescriptor};
+    #[cfg(feature = "ci-test-adapter")]
+    use mactype_service_platform::{OwnedSid, current_token_is_member_of};
     #[cfg(feature = "ci-test-adapter")]
     use std::collections::BTreeMap;
     use std::path::{Path, PathBuf};
@@ -302,10 +302,10 @@ mod tests {
     #[cfg(feature = "ci-test-adapter")]
     use super::ADMINISTRATORS_SID;
     use super::{
-        ace_applies_to_current_object, harden_machine_directory, harden_machine_directory_observed,
-        is_read_execute_mask, verify_protected_acl, ExpectedSids, HardeningObservation,
-        FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, GENERIC_EXECUTE, GENERIC_READ, INHERIT_ONLY_ACE,
-        MACHINE_TREE_SDDL,
+        ExpectedSids, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, GENERIC_EXECUTE, GENERIC_READ,
+        HardeningObservation, INHERIT_ONLY_ACE, MACHINE_TREE_SDDL, ace_applies_to_current_object,
+        harden_machine_directory, harden_machine_directory_observed, is_read_execute_mask,
+        verify_protected_acl,
     };
 
     const BASE_ACL: &str = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)(A;OICI;GRGX;;;AC)(A;OICI;GRGX;;;S-1-15-2-2)";
@@ -630,9 +630,11 @@ mod tests {
             let error = verify_acl_fixture(sddl)
                 .expect_err("inherit-only trusted writer ACE must not satisfy root access");
 
-            assert!(error
-                .to_string()
-                .contains("does not match SYSTEM/Admin Full"));
+            assert!(
+                error
+                    .to_string()
+                    .contains("does not match SYSTEM/Admin Full")
+            );
         }
     }
 

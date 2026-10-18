@@ -6,9 +6,9 @@ use mactype_service_contract::MachinePaths;
 
 use super::{known_folders, machine_lock, runtime_recovery, scm};
 use crate::{
-    run_install_bootstrap_with, run_uninstall_owned_with, BootstrapOutcome, BootstrapPlan,
-    BootstrapPreflight, BootstrapStartPolicy, InstallBootstrapBackend, OpenServiceObservation,
-    RuntimeInstaller, SetupError, UninstallBackend, UninstallOutcome,
+    BootstrapOutcome, BootstrapPlan, BootstrapPreflight, BootstrapStartPolicy,
+    InstallBootstrapBackend, OpenServiceObservation, RuntimeInstaller, SetupError,
+    UninstallBackend, UninstallOutcome, run_install_bootstrap_with, run_uninstall_owned_with,
 };
 
 pub fn run_bootstrap(policy: BootstrapStartPolicy) -> Result<BootstrapOutcome, SetupError> {

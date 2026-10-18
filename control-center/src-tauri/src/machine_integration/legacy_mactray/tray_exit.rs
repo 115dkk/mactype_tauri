@@ -122,7 +122,7 @@ fn request_official_exit(
         open_process, process_creation_time, process_image_path, process_session_id,
         trusted_mactray_process_path,
     };
-    use mactype_service_platform::{register_window_message, send_notify_message, WaitOutcome};
+    use mactype_service_platform::{WaitOutcome, register_window_message, send_notify_message};
     use std::time::Duration;
 
     let process = open_process(expected.pid).map_err(format_service_error)?;

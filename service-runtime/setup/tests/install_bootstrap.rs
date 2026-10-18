@@ -1,9 +1,9 @@
 use mactype_service_setup::{
-    parse_setup_command, protected_installer_broker_layout, run_install_bootstrap_with,
-    run_uninstall_owned_with, BootstrapBlocker, BootstrapOutcome, BootstrapPlan,
-    BootstrapPreflight, BootstrapProfileMode, BootstrapStartPolicy, ConflictObservation,
-    InstallBootstrapBackend, OpenServiceObservation, ProtectedProfileObservation,
-    ProtectedRuntimeObservation, SetupCommand, SetupError, UninstallBackend, UninstallOutcome,
+    BootstrapBlocker, BootstrapOutcome, BootstrapPlan, BootstrapPreflight, BootstrapProfileMode,
+    BootstrapStartPolicy, ConflictObservation, InstallBootstrapBackend, OpenServiceObservation,
+    ProtectedProfileObservation, ProtectedRuntimeObservation, SetupCommand, SetupError,
+    UninstallBackend, UninstallOutcome, parse_setup_command, protected_installer_broker_layout,
+    run_install_bootstrap_with, run_uninstall_owned_with,
 };
 use std::path::Path;
 
@@ -516,9 +516,11 @@ fn uninstall_does_not_report_success_when_owned_service_removal_fails() {
 
     assert_eq!(backend.remove_calls, 1);
     assert!(error.to_string().contains("simulated removal failure"));
-    assert!(error
-        .to_string()
-        .contains("owned installation removal failed"));
+    assert!(
+        error
+            .to_string()
+            .contains("owned installation removal failed")
+    );
 }
 
 #[test]

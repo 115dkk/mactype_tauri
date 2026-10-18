@@ -1,5 +1,5 @@
 use super::*;
-use encoding_rs::{Encoding, BIG5, GB18030, SHIFT_JIS, WINDOWS_1252};
+use encoding_rs::{BIG5, Encoding, GB18030, SHIFT_JIS, WINDOWS_1252};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -284,9 +284,11 @@ fn export_includes_unsaved_edits_without_clearing_them() {
 
     document.export_to(&destination).unwrap();
 
-    assert!(String::from_utf8(fs::read(&destination).unwrap())
-        .unwrap()
-        .contains("NormalWeight=6"));
+    assert!(
+        String::from_utf8(fs::read(&destination).unwrap())
+            .unwrap()
+            .contains("NormalWeight=6")
+    );
     let snapshot = document.snapshot();
     assert_eq!(snapshot.path, path.to_string_lossy());
     assert!(snapshot.dirty_keys.contains(&"normal_weight".to_owned()));
@@ -412,10 +414,12 @@ fn duplicate_preserves_encoded_profile_and_refuses_overwrite() {
     let parent = path.parent().unwrap();
     let mut copy = document.duplicate_in(parent, &name).unwrap();
     assert_eq!(copy.encoded().unwrap(), document.encoded().unwrap());
-    assert!(document
-        .duplicate_in(parent, &name)
-        .unwrap_err()
-        .contains("already exists"));
+    assert!(
+        document
+            .duplicate_in(parent, &name)
+            .unwrap_err()
+            .contains("already exists")
+    );
     copy.set_value("normal_weight", 7.0).unwrap();
     copy.save().unwrap();
     let reopened = ProfileDocument::open(&copy.path).unwrap();
@@ -760,8 +764,10 @@ fn advanced_edit_replaces_bold_pairs_and_preserves_other_sections() {
     ];
     document.update_advanced(advanced).unwrap();
     let rendered = String::from_utf8(document.encoded().unwrap()).unwrap();
-    assert!(rendered
-        .contains("[FontSubstitutesBold]\r\nInter=Inter Bold\r\nNoto Sans=Noto Sans Bold\r\n"));
+    assert!(
+        rendered
+            .contains("[FontSubstitutesBold]\r\nInter=Inter Bold\r\nNoto Sans=Noto Sans Bold\r\n")
+    );
     assert!(!rendered.contains("Old Bold"));
     assert!(rendered.contains("[FontSubstitutes]\r\nArial=Inter\r\nTahoma=Noto Sans\r\n"));
     assert!(rendered.contains("[UnityInclude]\r\nselected-game.exe\r\n"));

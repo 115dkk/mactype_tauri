@@ -9,9 +9,9 @@ use std::{
     time::{Duration, SystemTime},
 };
 use tauri::{
+    App, AppHandle, Emitter, Manager, Window, WindowEvent, Wry,
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    App, AppHandle, Emitter, Manager, Window, WindowEvent, Wry,
 };
 
 enum TrayBackgroundAction {

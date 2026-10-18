@@ -1,9 +1,9 @@
 use super::super::{
+    AdvancedProfile, IndividualSetting, ShadowSetting,
     bold_substitution::{canonical_pairs, parse_pair},
     document::validate_entry,
-    AdvancedProfile, IndividualSetting, ShadowSetting,
 };
-use crate::generated_settings::{SettingDefinition, SettingValueType, SETTINGS};
+use crate::generated_settings::{SETTINGS, SettingDefinition, SettingValueType};
 use std::collections::BTreeSet;
 
 pub(super) struct RenderedSettingValue {

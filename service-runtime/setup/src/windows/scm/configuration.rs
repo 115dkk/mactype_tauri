@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use mactype_service_contract::{
-    owned_service_identity, service_image_matches_protected_contract, ObservedServiceConfiguration,
+    ObservedServiceConfiguration, owned_service_identity, service_image_matches_protected_contract,
 };
 use mactype_service_platform::ServiceConfig;
 
@@ -59,9 +59,9 @@ pub(super) fn service_configuration_matches_owned_contract(
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_service_binary, ObservedServiceConfiguration};
+    use super::{ObservedServiceConfiguration, validate_service_binary};
     use mactype_service_contract::{
-        service_configuration_drift, FIXED_ERROR_CONTROL, FIXED_SERVICE_TYPE, FIXED_START_TYPE,
+        FIXED_ERROR_CONTROL, FIXED_SERVICE_TYPE, FIXED_START_TYPE, service_configuration_drift,
     };
     use windows_sys::Win32::System::Services::{
         SERVICE_AUTO_START, SERVICE_ERROR_NORMAL, SERVICE_WIN32_OWN_PROCESS,

@@ -1,5 +1,5 @@
 use super::{BomKind, LineEnding, TextEncoding};
-use encoding_rs::{Encoding, BIG5, EUC_KR, GB18030, SHIFT_JIS, WINDOWS_1252};
+use encoding_rs::{BIG5, EUC_KR, Encoding, GB18030, SHIFT_JIS, WINDOWS_1252};
 
 pub(super) type OriginalLegacyLines = Vec<(String, Vec<u8>)>;
 

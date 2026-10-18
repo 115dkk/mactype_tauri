@@ -1,11 +1,11 @@
 #![forbid(unsafe_code)]
 
 use mactype_service_contract::{
+    HealthState, StructuredServiceError,
     event_log::{
         EventArea, EventLogWriter, EventSeverity, EventSource, EventThrottle,
         MAX_EVENT_DETAIL_BYTES,
     },
-    HealthState, StructuredServiceError,
 };
 use std::{
     collections::BTreeMap,

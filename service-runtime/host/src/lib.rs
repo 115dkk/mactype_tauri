@@ -41,7 +41,7 @@ mod windows_wmi;
 
 #[cfg(windows)]
 pub use etw_observer::{
-    EtwProcessEventSource, ETW_OBSERVER_OVERFLOW_CODE, ETW_OBSERVER_STOPPED_CODE,
+    ETW_OBSERVER_OVERFLOW_CODE, ETW_OBSERVER_STOPPED_CODE, EtwProcessEventSource,
     PROCESS_START_SESSION,
 };
 pub use event_log::{HostEvent, HostEventLogger, HostEventSink, LiveObserver};
@@ -51,22 +51,22 @@ pub use helper_broker::{
     HelperOutput,
 };
 pub use injection_orchestrator::{
-    DeferralPolicy, DeferredTarget, InjectionOrchestrator, ProcessAttemptRecord, ProcessOutcome,
-    RetryPolicy, RetryScheduler, SessionChange, MAX_DEFERRED_TARGETS, MAX_TRACKED_PROCESS_RESULTS,
-    TARGET_VANISHED_RESULT_CODE,
+    DeferralPolicy, DeferredTarget, InjectionOrchestrator, MAX_DEFERRED_TARGETS,
+    MAX_TRACKED_PROCESS_RESULTS, ProcessAttemptRecord, ProcessOutcome, RetryPolicy, RetryScheduler,
+    SessionChange, TARGET_VANISHED_RESULT_CODE,
 };
 #[cfg(windows)]
-pub use named_pipe::{NamedPipeHealthPublisher, HEALTH_PIPE_SECURITY_SDDL};
+pub use named_pipe::{HEALTH_PIPE_SECURITY_SDDL, NamedPipeHealthPublisher};
 pub type ProcessOrchestrator<'a> = InjectionOrchestrator<'a>;
 pub use image_subsystem::ImageSubsystem;
 pub use observer::{
-    subscribe_process_creation, BrokerDisposition, BrokerResult, InjectionBroker, InjectionRequest,
-    ProcessArchitecture, ProcessEventSource, ProcessIdentity, FALLBACK_PROCESS_CREATION_QUERY,
-    MAX_BROKER_DIAGNOSTIC_CODE_BYTES, PROCESS_CREATION_QUERY,
+    BrokerDisposition, BrokerResult, FALLBACK_PROCESS_CREATION_QUERY, InjectionBroker,
+    InjectionRequest, MAX_BROKER_DIAGNOSTIC_CODE_BYTES, PROCESS_CREATION_QUERY,
+    ProcessArchitecture, ProcessEventSource, ProcessIdentity, subscribe_process_creation,
 };
 pub use orchestration_runtime::{
-    initialize_process_orchestration, initialize_process_orchestration_with_profile_policies,
-    ObserverRecoveryPolicy,
+    ObserverRecoveryPolicy, initialize_process_orchestration,
+    initialize_process_orchestration_with_profile_policies,
 };
 pub use profile_runtime::ACTIVE_PROFILE_ABSENT_CODE;
 pub use protected_renderer_runtime::ProtectedRendererRuntime;
@@ -76,12 +76,12 @@ pub use runtime::{
 };
 pub use runtime_assets::{ProtectedRuntimeAssets, RUNTIME_PROFILE_ABSENT_CODE};
 pub use startup_safety::{LegacyServiceRuntimeState, StartupSafetySnapshot};
-pub use status::{ScmState, ServiceStatus, StatusReporter, SERVICE_STOP_WAIT_HINT_MS};
+pub use status::{SERVICE_STOP_WAIT_HINT_MS, ScmState, ServiceStatus, StatusReporter};
 pub use target_validation::{
-    is_relay_root, BinarySignaturePolicy, DeferralReason, DynamicCodePolicy, InspectionEvidence,
+    BinarySignaturePolicy, DeferralReason, DynamicCodePolicy, InspectionEvidence,
     PrivateFreeTypeClassification, ProcessInspection, ProcessInspectionError, ProcessInspector,
     ProcessSkipReason, ProcessTargetDecision, ProcessTargetValidator, SystemCallDisablePolicy,
-    TargetLifecycle, TargetLiveness, UnityProcessClassification,
+    TargetLifecycle, TargetLiveness, UnityProcessClassification, is_relay_root,
 };
 #[cfg(windows)]
 pub use windows_helper_launcher::WindowsHelperLauncher;
@@ -119,4 +119,4 @@ pub fn run_service_process() -> std::io::Result<()> {
         "the service host requires Windows SCM",
     ))
 }
-pub use control::{ServiceControl, ACCEPTED_CONTROL_MASK};
+pub use control::{ACCEPTED_CONTROL_MASK, ServiceControl};

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use mactype_service_contract::{
-    MigrationPinnedRuntime, MigrationRuntimePin, IMMUTABLE_RUNTIME_FILES,
+    IMMUTABLE_RUNTIME_FILES, MigrationPinnedRuntime, MigrationRuntimePin,
 };
 
 fn runtime(version: &str) -> MigrationPinnedRuntime {
@@ -39,11 +39,13 @@ fn migration_pin_is_nonce_bound_and_contains_only_exact_hashed_runtime_files() {
     assert!(serde_json::from_value::<MigrationRuntimePin>(unknown).is_err());
 
     assert!(MigrationRuntimePin::new("UPPERCASE".to_owned(), vec![runtime("0.1.0")]).is_err());
-    assert!(MigrationRuntimePin::new(
-        "00112233445566778899aabbccddeeff".to_owned(),
-        vec![runtime("0.1.0"), runtime("0.1.0")],
-    )
-    .is_err());
+    assert!(
+        MigrationRuntimePin::new(
+            "00112233445566778899aabbccddeeff".to_owned(),
+            vec![runtime("0.1.0"), runtime("0.1.0")],
+        )
+        .is_err()
+    );
 
     let mut incomplete: serde_json::Value = serde_json::to_value(runtime("0.1.0")).unwrap();
     incomplete["files"]

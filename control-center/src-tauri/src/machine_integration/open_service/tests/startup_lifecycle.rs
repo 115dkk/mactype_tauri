@@ -1,6 +1,7 @@
 use super::super::{
+    StartupReceiptRestorer, SystemServiceAction,
     action_failure::{ActionBlocker, ActionFailure, InstallationPreflightKind},
-    finish_action_with_startup_receipts, StartupReceiptRestorer, SystemServiceAction,
+    finish_action_with_startup_receipts,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -91,12 +92,14 @@ fn failed_installation_preflight_does_not_run_startup_restoration() {
 #[test]
 fn failed_legacy_migration_restores_both_startup_jurisdictions() {
     let mut backend = restorer();
-    assert!(finish_action_with_startup_receipts(
-        &mut backend,
-        SystemServiceAction::MigrateFromLegacy,
-        Err(ActionFailure::internal("migration failed")),
-    )
-    .is_err());
+    assert!(
+        finish_action_with_startup_receipts(
+            &mut backend,
+            SystemServiceAction::MigrateFromLegacy,
+            Err(ActionFailure::internal("migration failed")),
+        )
+        .is_err()
+    );
     assert_eq!(backend.events, [Event::RestoreMachine, Event::RestoreUser]);
 }
 
@@ -135,11 +138,13 @@ fn restoration_attempts_every_scope_and_preserves_all_errors() {
 #[test]
 fn unrelated_action_results_do_not_touch_legacy_startup_receipts() {
     let mut backend = restorer();
-    assert!(finish_action_with_startup_receipts(
-        &mut backend,
-        SystemServiceAction::Upgrade,
-        Err(ActionFailure::internal("upgrade failed")),
-    )
-    .is_err());
+    assert!(
+        finish_action_with_startup_receipts(
+            &mut backend,
+            SystemServiceAction::Upgrade,
+            Err(ActionFailure::internal("upgrade failed")),
+        )
+        .is_err()
+    );
     assert!(backend.events.is_empty());
 }

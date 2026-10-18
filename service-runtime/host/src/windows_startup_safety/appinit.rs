@@ -1,6 +1,6 @@
 use std::io;
 
-use mactype_service_contract::{appinit_mactype_conflict, StructuredServiceError};
+use mactype_service_contract::{StructuredServiceError, appinit_mactype_conflict};
 use mactype_service_platform::{RegistryKey, RegistryRoot, RegistryView};
 use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};
 

@@ -19,9 +19,11 @@ fn broker_result_frame_preserves_a_multistage_failure_chain() {
     assert_eq!(decoded, result);
     assert_eq!(decoded.disposition, BrokerResultDisposition::Failure);
     assert!(decoded.error_chain.contains("CreateServiceW"));
-    assert!(decoded
-        .error_chain
-        .contains("legacy service restore completed"));
+    assert!(
+        decoded
+            .error_chain
+            .contains("legacy service restore completed")
+    );
 }
 
 #[test]
@@ -98,11 +100,13 @@ fn profile_transfer_frame_is_versioned_bounded_nonce_bound_and_hashed() {
     }
     assert!(decode_profile_transfer_frame(&frame, &[0x6b; PROFILE_TRANSFER_NONCE_BYTES]).is_err());
     assert!(encode_profile_transfer_frame(&[], &nonce).is_err());
-    assert!(encode_profile_transfer_frame(
-        &vec![0_u8; mactype_service_contract::MAX_PROFILE_BYTES + 1],
-        &nonce,
-    )
-    .is_err());
+    assert!(
+        encode_profile_transfer_frame(
+            &vec![0_u8; mactype_service_contract::MAX_PROFILE_BYTES + 1],
+            &nonce,
+        )
+        .is_err()
+    );
 }
 
 #[cfg(windows)]
@@ -140,25 +144,28 @@ fn profile_pipe_is_first_instance_peer_bound_and_bounded_by_time() {
     let attacker = std::thread::spawn(move || {
         windows::receive_profile_from_pipe_bounded(&token, std::time::Duration::from_secs(2))
     });
-    assert!(attacked
-        .send_to(
-            std::process::id().wrapping_add(1),
-            None,
-            std::time::Duration::from_secs(2),
-        )
-        .is_err());
+    assert!(
+        attacked
+            .send_to(
+                std::process::id().wrapping_add(1),
+                None,
+                std::time::Duration::from_secs(2),
+            )
+            .is_err()
+    );
     assert!(attacker.join().unwrap().is_err());
     drop(windows::ProfilePipeServer::create_with_nonce(payload, attacked_nonce).unwrap());
 
     let idle_nonce = [0x6e; PROFILE_TRANSFER_NONCE_BYTES];
     let idle = windows::ProfilePipeServer::create_with_nonce(payload, idle_nonce).unwrap();
-    assert!(idle
-        .send_to(
+    assert!(
+        idle.send_to(
             std::process::id(),
             None,
             std::time::Duration::from_millis(25),
         )
-        .is_err());
+        .is_err()
+    );
     drop(windows::ProfilePipeServer::create_with_nonce(payload, idle_nonce).unwrap());
 
     let stalled_nonce = [0x7f; PROFILE_TRANSFER_NONCE_BYTES];

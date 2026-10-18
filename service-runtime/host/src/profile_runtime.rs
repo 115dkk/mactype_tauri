@@ -4,14 +4,14 @@ use std::io;
 use std::path::Path;
 
 use mactype_service_contract::{
-    parse_runtime_activation_receipt, validate_protected_renderer_profile, ConsoleProcessPolicy,
-    GenerationId, GenerationPointer, MachinePaths, ParsedRuntimeActivationReceipt,
+    ConsoleProcessPolicy, GenerationId, GenerationPointer, MAX_PROFILE_BYTES,
+    MAX_RUNTIME_ACTIVATION_RECEIPT_BYTES, MachinePaths, ParsedRuntimeActivationReceipt,
     PrivateFreeTypePolicy, ProfileDigest, RuntimeActivationPhase, RuntimeGenerationPointer,
-    StructuredServiceError, UnityFontHookPolicy, MAX_PROFILE_BYTES,
-    MAX_RUNTIME_ACTIVATION_RECEIPT_BYTES,
+    StructuredServiceError, UnityFontHookPolicy, parse_runtime_activation_receipt,
+    validate_protected_renderer_profile,
 };
 
-use crate::protected_path::{has_reparse_ancestor, read_bounded_regular_file, MAX_POINTER_BYTES};
+use crate::protected_path::{MAX_POINTER_BYTES, has_reparse_ancestor, read_bounded_regular_file};
 
 pub const ACTIVE_PROFILE_ABSENT_CODE: &str = "active-profile-absent";
 

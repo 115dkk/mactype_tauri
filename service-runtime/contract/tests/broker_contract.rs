@@ -1,4 +1,4 @@
-use mactype_service_contract::{parse_broker_command, BrokerCommand};
+use mactype_service_contract::{BrokerCommand, parse_broker_command};
 
 #[test]
 fn broker_accepts_only_fixed_verbs_without_arguments() {

@@ -125,8 +125,10 @@ mod tests {
         bytes.extend_from_slice(&1_u64.to_le_bytes());
         bytes.extend_from_slice(&((MAX_JSON + 1) as u32).to_le_bytes());
         bytes.extend_from_slice(&0_u32.to_le_bytes());
-        assert!(read_frame(&mut bytes.as_slice())
-            .unwrap_err()
-            .contains("size limit"));
+        assert!(
+            read_frame(&mut bytes.as_slice())
+                .unwrap_err()
+                .contains("size limit")
+        );
     }
 }

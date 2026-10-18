@@ -6,7 +6,7 @@ use mactype_service_platform::{
     WmiPropertyStep,
 };
 
-use crate::{ProcessEventSource, FALLBACK_PROCESS_CREATION_QUERY};
+use crate::{FALLBACK_PROCESS_CREATION_QUERY, ProcessEventSource};
 
 const PROCESS_SNAPSHOT_QUERY: &str = "SELECT ProcessID FROM Win32_Process";
 const SNAPSHOT_ROW_TIMEOUT: Duration = Duration::from_millis(5_000);
@@ -122,7 +122,7 @@ impl ProcessEventSource for WmiProcessEventSource {
                         "wmi-snapshot-failed",
                         "the initial Win32_Process snapshot could not be read",
                         error,
-                    ))
+                    ));
                 }
             };
             let pid = extract_process_id_property(&process)?;
@@ -151,7 +151,7 @@ impl ProcessEventSource for WmiProcessEventSource {
                     "wmi-observer-failed",
                     "the WMI process observer failed while waiting for an event",
                     error,
-                ))
+                ));
             }
         };
         match self.event_kind {

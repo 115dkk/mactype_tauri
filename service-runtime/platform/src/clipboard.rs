@@ -4,12 +4,12 @@ use std::io;
 use std::ptr::{copy_nonoverlapping, null_mut};
 
 use windows_sys::Win32::Foundation::{
-    GetLastError, GlobalFree, SetLastError, ERROR_SUCCESS, HGLOBAL,
+    ERROR_SUCCESS, GetLastError, GlobalFree, HGLOBAL, SetLastError,
 };
 use windows_sys::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
 };
-use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+use windows_sys::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
 use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
 
 struct ClipboardGuard;
@@ -153,7 +153,7 @@ mod tests {
     use std::ptr::null_mut;
     use std::time::Duration;
 
-    use windows_sys::Win32::Foundation::{GetLastError, ERROR_ACCESS_DENIED};
+    use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, GetLastError};
     use windows_sys::Win32::System::DataExchange::{
         CloseClipboard, GetClipboardData, OpenClipboard,
     };

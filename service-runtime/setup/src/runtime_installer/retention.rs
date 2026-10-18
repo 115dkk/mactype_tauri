@@ -6,16 +6,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use mactype_service_contract::{
-    valid_runtime_version_component, IMMUTABLE_RUNTIME_FILES, MAX_PINNED_RUNTIMES,
+    IMMUTABLE_RUNTIME_FILES, MAX_PINNED_RUNTIMES, valid_runtime_version_component,
 };
 
 use super::deferred_delete::{remove_directory_or_defer, remove_file_or_defer};
 use super::generation_store::RuntimeGenerationStore;
-use super::journal::{validate_runtime_pointer, RuntimePointer, MAX_POINTER_BYTES};
+use super::journal::{MAX_POINTER_BYTES, RuntimePointer, validate_runtime_pointer};
 use crate::profile_bridge::GENERATED_PROFILE_NAME;
 use crate::storage::{
-    atomic_write, read_bounded_directory, read_bounded_regular_file, reject_reparse_ancestors,
-    SetupError,
+    SetupError, atomic_write, read_bounded_directory, read_bounded_regular_file,
+    reject_reparse_ancestors,
 };
 
 impl RuntimeGenerationStore<'_> {

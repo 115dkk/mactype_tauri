@@ -5,7 +5,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use mactype_service_contract::HealthReport;
-use mactype_service_host::{HealthPublisher, NamedPipeHealthPublisher, HEALTH_PIPE_SECURITY_SDDL};
+use mactype_service_host::{HEALTH_PIPE_SECURITY_SDDL, HealthPublisher, NamedPipeHealthPublisher};
 use mactype_service_platform::NamedPipeClient;
 
 #[test]

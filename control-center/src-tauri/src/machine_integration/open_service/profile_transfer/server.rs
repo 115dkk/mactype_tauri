@@ -1,5 +1,5 @@
 use super::{
-    super::{encode_profile_transfer_frame, ProfileTransferToken, PROFILE_TRANSFER_NONCE_BYTES},
+    super::{PROFILE_TRANSFER_NONCE_BYTES, ProfileTransferToken, encode_profile_transfer_frame},
     shared::*,
 };
 use mactype_service_platform::{OverlappedPipeServer, PipeDirection, Process, SecurityDescriptor};

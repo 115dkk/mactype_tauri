@@ -1,4 +1,4 @@
-use super::super::{read_bounded_regular_file, HealthReport, LiveHealthReport};
+use super::super::{HealthReport, LiveHealthReport, read_bounded_regular_file};
 use mactype_service_contract::effective_health_pipe_name;
 use std::{fs, io::Read, path::Path, time::Duration};
 

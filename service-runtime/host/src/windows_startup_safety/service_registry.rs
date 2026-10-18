@@ -1,6 +1,6 @@
 use std::io;
 
-use mactype_service_contract::{StructuredServiceError, LEGACY_SERVICE_NAME};
+use mactype_service_contract::{LEGACY_SERVICE_NAME, StructuredServiceError};
 use mactype_service_platform::{
     ServiceAccess, ServiceControlManager, ServiceHandle, ServiceManagerAccess, ServiceState,
 };
@@ -51,7 +51,7 @@ impl ServiceManager {
                     "legacy-service-inspection-failed",
                     "the legacy service state could not be inspected",
                     &error,
-                ))
+                ));
             }
         };
         let status = service.status().map_err(|error| {

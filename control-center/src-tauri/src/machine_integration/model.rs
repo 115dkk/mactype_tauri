@@ -1,5 +1,5 @@
-use super::open_service;
 use super::LegacyTrayStatus;
+use super::open_service;
 use crate::service_contract::{ServiceManagementPackageState, SystemServiceStatus};
 use serde::{Deserialize, Serialize};
 

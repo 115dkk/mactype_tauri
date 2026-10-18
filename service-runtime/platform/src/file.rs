@@ -11,10 +11,10 @@ use std::path::{Component, Path, PathBuf};
 use std::ptr::null;
 
 use windows_sys::Win32::Storage::FileSystem::{
-    FileDispositionInfo, GetFileAttributesW, MoveFileExW, ReplaceFileW, SetFileInformationByHandle,
-    FILE_ATTRIBUTE_REPARSE_POINT, FILE_DISPOSITION_INFO, INVALID_FILE_ATTRIBUTES,
-    MOVEFILE_DELAY_UNTIL_REBOOT, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
-    REPLACEFILE_WRITE_THROUGH,
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_DISPOSITION_INFO, FileDispositionInfo, GetFileAttributesW,
+    INVALID_FILE_ATTRIBUTES, MOVEFILE_DELAY_UNTIL_REBOOT, MOVEFILE_REPLACE_EXISTING,
+    MOVEFILE_WRITE_THROUGH, MoveFileExW, REPLACEFILE_WRITE_THROUGH, ReplaceFileW,
+    SetFileInformationByHandle,
 };
 
 use crate::wide::wide_path;
@@ -237,9 +237,9 @@ pub fn mark_open_file_for_deletion(file: &File) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        file_attributes, is_reparse_point, mark_open_file_for_deletion, replace_file,
-        replace_file_preserving_attributes, validate_path_chain, validate_path_chain_with,
-        PathChainError,
+        PathChainError, file_attributes, is_reparse_point, mark_open_file_for_deletion,
+        replace_file, replace_file_preserving_attributes, validate_path_chain,
+        validate_path_chain_with,
     };
     use std::{
         io,

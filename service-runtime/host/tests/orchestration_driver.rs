@@ -4,7 +4,7 @@ mod event_sink;
 #[path = "support/recorder.rs"]
 mod recorder_support;
 
-use event_sink::{discard_events, RecordingEventSink};
+use event_sink::{RecordingEventSink, discard_events};
 use std::collections::VecDeque;
 use std::io;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -17,13 +17,13 @@ use mactype_service_contract::{
     UnityFontHookPolicy,
 };
 use mactype_service_host::{
-    initialize_process_orchestration, initialize_process_orchestration_with_profile_policies,
     BinarySignaturePolicy, BrokerDisposition, BrokerResult, DynamicCodePolicy, HealthPublisher,
     InitializedRuntime, InjectionBroker, InjectionRequest, InspectionEvidence,
     ObserverRecoveryPolicy, ProcessArchitecture, ProcessEventSource, ProcessIdentity,
     ProcessInspection, ProcessInspectionError, ProcessInspector, RuntimeInitializer,
     ServiceRuntime, SessionChange, StopSignal, SystemCallDisablePolicy, TargetLifecycle,
-    TargetLiveness,
+    TargetLiveness, initialize_process_orchestration,
+    initialize_process_orchestration_with_profile_policies,
 };
 
 use recorder_support::Recorder;
@@ -363,9 +363,11 @@ fn observer_failure_resubscribes_and_reconciles_the_missed_snapshot() {
                 && report.readiness.observer == ComponentReadiness::Failed
         })
         .unwrap();
-    assert!(reports[degraded_index + 1..]
-        .iter()
-        .any(|report| report.health == HealthState::Ready));
+    assert!(
+        reports[degraded_index + 1..]
+            .iter()
+            .any(|report| report.health == HealthState::Ready)
+    );
 }
 
 #[test]
@@ -570,9 +572,11 @@ fn frozen_runtime_target_waits_without_broker_or_degraded_health_then_injects_on
 
     assert_eq!(requests.lock().unwrap().len(), 1);
     let reports = recorder.reports();
-    assert!(reports
-        .iter()
-        .all(|report| report.health != HealthState::Degraded));
+    assert!(
+        reports
+            .iter()
+            .all(|report| report.health != HealthState::Degraded)
+    );
     assert_eq!(
         reports
             .iter()
@@ -912,9 +916,11 @@ fn conflicting_mactype_module_stays_process_local_and_global_ready() {
         .unwrap();
 
     let reports = recorder.reports();
-    assert!(reports
-        .iter()
-        .all(|report| report.health != HealthState::Degraded));
+    assert!(
+        reports
+            .iter()
+            .all(|report| report.health != HealthState::Degraded)
+    );
     let latest = reports
         .iter()
         .rev()
@@ -964,9 +970,11 @@ fn invalid_helper_response_degrades_its_generation_then_next_success_recovers_re
     let error = degraded.last_error.as_ref().unwrap();
     assert_eq!(error.code, "injection-helper-response-integrity-unknown");
     assert!(error.message.contains("pid=42"));
-    assert!(error
-        .message
-        .contains(&format!("generation={RUNTIME_GENERATION}")));
+    assert!(
+        error
+            .message
+            .contains(&format!("generation={RUNTIME_GENERATION}"))
+    );
     let latest = reports
         .iter()
         .rev()

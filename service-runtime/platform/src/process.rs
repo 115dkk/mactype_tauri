@@ -10,8 +10,8 @@ use std::time::Duration;
 use windows_sys::Wdk::System::SystemServices::PROCESS_EXTENDED_BASIC_INFORMATION;
 use windows_sys::Wdk::System::Threading::{NtQueryInformationProcess, ProcessBasicInformation};
 use windows_sys::Win32::Foundation::{
-    DuplicateHandle, RtlNtStatusToDosError, DUPLICATE_SAME_ACCESS, ERROR_ACCESS_DENIED,
-    ERROR_INVALID_DATA, ERROR_MR_MID_NOT_FOUND, FILETIME, STATUS_ACCESS_DENIED, STILL_ACTIVE,
+    DUPLICATE_SAME_ACCESS, DuplicateHandle, ERROR_ACCESS_DENIED, ERROR_INVALID_DATA,
+    ERROR_MR_MID_NOT_FOUND, FILETIME, RtlNtStatusToDosError, STATUS_ACCESS_DENIED, STILL_ACTIVE,
 };
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
@@ -25,15 +25,15 @@ use windows_sys::Win32::System::SystemServices::{
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, GetExitCodeProcess, GetProcessId, GetProcessInformation,
     GetProcessMitigationPolicy, GetProcessTimes, IsProcessCritical, IsWow64Process2, OpenProcess,
-    ProcessDynamicCodePolicy, ProcessProtectionLevelInfo, ProcessSignaturePolicy,
-    ProcessSystemCallDisablePolicy, QueryFullProcessImageNameW, TerminateProcess,
     PROCESS_ALL_ACCESS, PROCESS_CREATE_THREAD, PROCESS_NAME_WIN32,
     PROCESS_PROTECTION_LEVEL_INFORMATION, PROCESS_QUERY_INFORMATION,
     PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE,
-    PROTECTION_LEVEL_NONE,
+    PROTECTION_LEVEL_NONE, ProcessDynamicCodePolicy, ProcessProtectionLevelInfo,
+    ProcessSignaturePolicy, ProcessSystemCallDisablePolicy, QueryFullProcessImageNameW,
+    TerminateProcess,
 };
 
-use windows_sys::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
+use windows_sys::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
 
 use crate::handle::{OwnedHandle, WaitOutcome};
 use crate::wide::{wide_null, wide_path};
@@ -580,8 +580,8 @@ mod tests {
     use windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER;
 
     use super::{
-        decode_lifecycle_flags, process_session_id, MachineKind, Process, ProcessAccess,
-        ProcessLifecycleFlags,
+        MachineKind, Process, ProcessAccess, ProcessLifecycleFlags, decode_lifecycle_flags,
+        process_session_id,
     };
     use crate::handle::WaitOutcome;
     use crate::job::JobObject;

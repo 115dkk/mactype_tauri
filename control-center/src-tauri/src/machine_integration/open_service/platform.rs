@@ -5,17 +5,17 @@ use health::{read_health, read_persisted_health};
 
 use super::{
     identity::core_service_capabilities,
-    windows::{machine_roots, RuntimePointer},
+    windows::{RuntimePointer, machine_roots},
     *,
 };
 use mactype_service_contract::{
-    owned_service_identity, service_configuration_drift, valid_runtime_version_component,
-    HealthState as ContractHealthState, ObservedServiceConfiguration, MAX_RUNTIME_POINTER_BYTES,
-    SERVICE_NAME,
+    HealthState as ContractHealthState, MAX_RUNTIME_POINTER_BYTES, ObservedServiceConfiguration,
+    SERVICE_NAME, owned_service_identity, service_configuration_drift,
+    valid_runtime_version_component,
 };
 use mactype_service_platform::{
-    known_folder_path, KnownFolder, ServiceAccess, ServiceControlManager, ServiceManagerAccess,
-    ServiceState,
+    KnownFolder, ServiceAccess, ServiceControlManager, ServiceManagerAccess, ServiceState,
+    known_folder_path,
 };
 use windows_sys::Win32::Foundation::ERROR_SERVICE_MARKED_FOR_DELETE;
 
@@ -39,8 +39,8 @@ fn runtime_state(state: ServiceState) -> RuntimeState {
     }
 }
 
-pub(in crate::machine_integration::open_service) fn running_service_process_id(
-) -> Result<u32, String> {
+pub(in crate::machine_integration::open_service) fn running_service_process_id()
+-> Result<u32, String> {
     let manager = ServiceControlManager::connect(ServiceManagerAccess::Connect)
         .map_err(|error| error.to_string())?;
     let service = manager

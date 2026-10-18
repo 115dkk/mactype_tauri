@@ -1,6 +1,6 @@
 use mactype_service_contract::{
-    ComponentReadiness, HealthReport, HealthState, InjectionArchitecture, InjectionSuccess,
-    ReadinessReport, StructuredServiceError, HEALTH_PIPE_NAME, HEALTH_PROTOCOL_VERSION,
+    ComponentReadiness, HEALTH_PIPE_NAME, HEALTH_PROTOCOL_VERSION, HealthReport, HealthState,
+    InjectionArchitecture, InjectionSuccess, ReadinessReport, StructuredServiceError,
 };
 
 const PROFILE: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";

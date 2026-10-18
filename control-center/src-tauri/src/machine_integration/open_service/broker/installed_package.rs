@@ -1,17 +1,17 @@
 use super::{
     super::{
         action_failure::{
-            InstallationPreflightKind, INSTALLATION_INCOMPLETE_PREFIX,
-            INSTALLATION_REQUIRED_PREFIX, INSTALLATION_UNTRUSTED_PREFIX,
+            INSTALLATION_INCOMPLETE_PREFIX, INSTALLATION_REQUIRED_PREFIX,
+            INSTALLATION_UNTRUSTED_PREFIX, InstallationPreflightKind,
         },
         file_guard::read_bounded_regular_file,
-        runtime::{parse_bundled_runtime_manifest, MAX_BUNDLED_MANIFEST_BYTES},
+        runtime::{MAX_BUNDLED_MANIFEST_BYTES, parse_bundled_runtime_manifest},
     },
     path_guard::reject_reparse_ancestors,
 };
 use crate::diagnostics::InstallationPreflightDiagnostics;
 use mactype_service_platform::{
-    known_folder_path, KnownFolder, RegistryKey, RegistryRoot, RegistryView,
+    KnownFolder, RegistryKey, RegistryRoot, RegistryView, known_folder_path,
 };
 use std::{
     collections::BTreeMap,
@@ -495,8 +495,8 @@ pub(in crate::machine_integration::open_service) fn service_package_preflight_fo
     )
 }
 
-pub(in crate::machine_integration::open_service) fn service_package(
-) -> Result<ServicePackage, InstallationPreflightFailure> {
+pub(in crate::machine_integration::open_service) fn service_package()
+-> Result<ServicePackage, InstallationPreflightFailure> {
     let current_executable =
         std::env::current_exe().map_err(|error| untrusted(error, diagnostics(None)))?;
     let installed = (|| {
@@ -516,8 +516,8 @@ pub(in crate::machine_integration::open_service) fn service_package(
     fallback_to_current_package(installed, &current_executable)
 }
 
-pub(in crate::machine_integration::open_service) fn current_service_package(
-) -> Result<ServicePackage, InstallationPreflightFailure> {
+pub(in crate::machine_integration::open_service) fn current_service_package()
+-> Result<ServicePackage, InstallationPreflightFailure> {
     let current_executable =
         std::env::current_exe().map_err(|error| untrusted(error, diagnostics(None)))?;
     resolve_elevated_current_package(&current_executable)

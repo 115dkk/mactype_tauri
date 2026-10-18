@@ -26,15 +26,15 @@ fn program_data_root() -> Result<PathBuf, String> {
 }
 
 #[cfg(windows)]
-pub(in crate::machine_integration::legacy_migration) fn expected_installation_root(
-) -> Result<PathBuf, String> {
+pub(in crate::machine_integration::legacy_migration) fn expected_installation_root()
+-> Result<PathBuf, String> {
     let program_files = known_folder(mactype_service_platform::KnownFolder::ProgramFiles)?;
     Ok(program_files.join("MacType"))
 }
 
 #[cfg(not(windows))]
-pub(in crate::machine_integration::legacy_migration) fn expected_installation_root(
-) -> Result<PathBuf, String> {
+pub(in crate::machine_integration::legacy_migration) fn expected_installation_root()
+-> Result<PathBuf, String> {
     Err("legacy SCM migration is available only on Windows".to_owned())
 }
 
@@ -182,8 +182,8 @@ pub(in crate::machine_integration::legacy_migration) fn export_service_registry(
     Err("legacy SCM migration is available only on Windows".to_owned())
 }
 
-pub(in crate::machine_integration::legacy_migration) fn migration_storage_root(
-) -> Result<PathBuf, String> {
+pub(in crate::machine_integration::legacy_migration) fn migration_storage_root()
+-> Result<PathBuf, String> {
     let program_data = program_data_root()?;
     let storage = program_data
         .join("MacType")
@@ -196,8 +196,8 @@ pub(in crate::machine_integration::legacy_migration) fn migration_storage_root(
     Ok(storage)
 }
 
-pub(in crate::machine_integration::legacy_migration) fn create_migration_storage_root(
-) -> Result<PathBuf, String> {
+pub(in crate::machine_integration::legacy_migration) fn create_migration_storage_root()
+-> Result<PathBuf, String> {
     let program_data = program_data_root()?;
     let storage = secure_create_tree(
         &program_data,

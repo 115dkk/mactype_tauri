@@ -7,7 +7,7 @@ mod support;
 
 use std::fs;
 
-use mactype_service_contract::{SourceMetadata, MAX_PINNED_RUNTIMES, MAX_RUNTIME_FILE_BYTES};
+use mactype_service_contract::{MAX_PINNED_RUNTIMES, MAX_RUNTIME_FILE_BYTES, SourceMetadata};
 use mactype_service_setup::{ProfileStore, RuntimeInstaller};
 
 use pin_support::pin_runtime_generation;
@@ -35,9 +35,11 @@ fn active_profile_pointer_is_bounded_before_runtime_materialization() {
         .deploy_with_health_check(&payload(base.path(), "0.2.0", b"service"), |_| Ok(()))
         .unwrap_err();
 
-    assert!(error
-        .to_string()
-        .contains("active profile pointer is not a bounded regular file"));
+    assert!(
+        error
+            .to_string()
+            .contains("active profile pointer is not a bounded regular file")
+    );
 }
 
 #[test]
@@ -51,9 +53,11 @@ fn fixed_payload_rejects_entry_count_before_loading_an_unexpected_file() {
         .deploy_with_health_check(&fixed, |_| Ok(()))
         .unwrap_err();
 
-    assert!(error
-        .to_string()
-        .contains("payload entry count exceeds the fixed limit"));
+    assert!(
+        error
+            .to_string()
+            .contains("payload entry count exceeds the fixed limit")
+    );
 }
 
 #[test]
@@ -79,9 +83,11 @@ fn existing_runtime_file_is_bounded_before_hash_verification() {
         .deploy_with_health_check(&fixed, |_| Ok(()))
         .unwrap_err();
 
-    assert!(error
-        .to_string()
-        .contains("installed runtime file is not a bounded regular file"));
+    assert!(
+        error
+            .to_string()
+            .contains("installed runtime file is not a bounded regular file")
+    );
 }
 
 #[test]
@@ -97,9 +103,11 @@ fn runtime_receipt_verification_rejects_entry_overflow_at_the_fixed_boundary() {
 
     let error = installer.inspect_current_stable().unwrap_err();
 
-    assert!(error
-        .to_string()
-        .contains("runtime generation entry count exceeds the fixed limit"));
+    assert!(
+        error
+            .to_string()
+            .contains("runtime generation entry count exceeds the fixed limit")
+    );
 }
 
 #[test]
@@ -118,9 +126,11 @@ fn migration_pinned_runtime_rejects_entry_overflow_at_the_fixed_boundary() {
         .restore_pinned_current_with_health_check(|_| Ok(()))
         .unwrap_err();
 
-    assert!(error
-        .to_string()
-        .contains("pinned runtime entry count exceeds the fixed limit"));
+    assert!(
+        error
+            .to_string()
+            .contains("pinned runtime entry count exceeds the fixed limit")
+    );
 }
 
 #[test]
@@ -136,9 +146,11 @@ fn uninstall_rejects_runtime_generation_count_overflow_before_verification() {
 
     let error = installer.remove_receipted_installation().unwrap_err();
 
-    assert!(error
-        .to_string()
-        .contains("runtime generation count exceeds the fixed limit"));
+    assert!(
+        error
+            .to_string()
+            .contains("runtime generation count exceeds the fixed limit")
+    );
 }
 
 #[test]
@@ -155,7 +167,9 @@ fn uninstall_rejects_runtime_receipt_count_overflow_before_set_comparison() {
 
     let error = installer.remove_receipted_installation().unwrap_err();
 
-    assert!(error
-        .to_string()
-        .contains("runtime receipt count exceeds the fixed limit"));
+    assert!(
+        error
+            .to_string()
+            .contains("runtime receipt count exceeds the fixed limit")
+    );
 }

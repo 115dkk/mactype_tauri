@@ -4,18 +4,18 @@ use std::time::Duration;
 
 use mactype_service_contract::StructuredServiceError;
 use mactype_service_platform::{
-    register_control_handler, report_status, ManualResetEvent, RawServiceStatus,
-    ServiceStatusHandle, WaitOutcome,
+    ManualResetEvent, RawServiceStatus, ServiceStatusHandle, WaitOutcome, register_control_handler,
+    report_status,
 };
 use windows_sys::Win32::Foundation::ERROR_SUCCESS;
 use windows_sys::Win32::System::Services::{
-    SERVICE_RUNNING, SERVICE_START_PENDING, SERVICE_STOPPED, SERVICE_STOP_PENDING,
+    SERVICE_RUNNING, SERVICE_START_PENDING, SERVICE_STOP_PENDING, SERVICE_STOPPED,
 };
 
 use crate::session_event_queue::SessionEventQueue;
 use crate::{
-    ScmState, ServiceControl, ServiceStatus, SessionChange, StatusReporter, StopSignal,
-    ACCEPTED_CONTROL_MASK, SERVICE_STOP_WAIT_HINT_MS,
+    ACCEPTED_CONTROL_MASK, SERVICE_STOP_WAIT_HINT_MS, ScmState, ServiceControl, ServiceStatus,
+    SessionChange, StatusReporter, StopSignal,
 };
 
 /// The stop event, shared between the SCM control handler that sets it and

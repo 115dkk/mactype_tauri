@@ -1,7 +1,7 @@
 use std::thread;
 use std::time::{Duration, Instant};
 
-use mactype_service_contract::{effective_health_pipe_name, HealthReport, HealthState};
+use mactype_service_contract::{HealthReport, HealthState, effective_health_pipe_name};
 use mactype_service_platform::NamedPipeClient;
 
 use crate::SetupError;

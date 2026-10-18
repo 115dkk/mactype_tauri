@@ -17,14 +17,14 @@ pub(crate) use appinit::registry_conflict_detected;
 #[cfg(test)]
 use designation::designate_run_profile_with;
 use designation::execute_designation_plan_with;
-pub(crate) use designation::{designation_plan, profile_publication_supported, DesignationPlan};
+pub(crate) use designation::{DesignationPlan, designation_plan, profile_publication_supported};
 #[cfg(test)]
 pub(crate) use legacy_mactray::LegacyTrayStartupState;
-#[cfg(test)]
-use legacy_mactray::{disable_legacy_tray_startup_with, LegacyTrayStartupCoordinator};
 pub(crate) use legacy_mactray::{
     LegacyTrayConflictState, LegacyTrayExitRequest, LegacyTrayProcessState, LegacyTrayStatus,
 };
+#[cfg(test)]
+use legacy_mactray::{LegacyTrayStartupCoordinator, disable_legacy_tray_startup_with};
 pub use model::DesignationEffect;
 use model::MachineBackend;
 pub(crate) use model::{MachineAction, MachineStatus, PublicMachineAction, TrayLoginState};

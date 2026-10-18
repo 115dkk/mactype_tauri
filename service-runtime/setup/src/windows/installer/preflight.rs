@@ -3,9 +3,9 @@ use mactype_service_contract::{GenerationId, MachinePaths};
 use super::WindowsInstallerBackend;
 use crate::storage::reject_reparse_ancestors;
 use crate::{
-    protected_installer_broker_layout, BootstrapPreflight, BootstrapProfileMode,
-    OpenServiceObservation, ProfileStore, ProtectedProfileObservation, ProtectedRuntimeObservation,
-    RuntimeInstaller, SetupError,
+    BootstrapPreflight, BootstrapProfileMode, OpenServiceObservation, ProfileStore,
+    ProtectedProfileObservation, ProtectedRuntimeObservation, RuntimeInstaller, SetupError,
+    protected_installer_broker_layout,
 };
 
 impl WindowsInstallerBackend {

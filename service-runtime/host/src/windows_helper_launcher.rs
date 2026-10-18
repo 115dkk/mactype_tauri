@@ -8,14 +8,14 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use mactype_service_platform::{
-    anonymous_pipe, null_device, read_bounded, JobObject, OwnedHandle, Process, ProcessAccess,
-    ProcessLaunch, StandardHandles, SuspendedChild, WaitOutcome,
+    JobObject, OwnedHandle, Process, ProcessAccess, ProcessLaunch, StandardHandles, SuspendedChild,
+    WaitOutcome, anonymous_pipe, null_device, read_bounded,
 };
 use windows_sys::Win32::Foundation::{ERROR_CANCELLED, STILL_ACTIVE};
 
 use crate::{
-    helper_broker::MAX_HELPER_OUTPUT_BYTES, HelperInvocation, HelperLaunchError, HelperLauncher,
-    HelperOutput,
+    HelperInvocation, HelperLaunchError, HelperLauncher, HelperOutput,
+    helper_broker::MAX_HELPER_OUTPUT_BYTES,
 };
 
 const TERMINATION_CONFIRMATION: Duration = Duration::from_millis(250);
@@ -174,7 +174,7 @@ fn wait_for_helper(
             Ok(WaitOutcome::Abandoned) => {
                 return Err(HelperLaunchError::after_resume(io::Error::other(
                     "unexpected helper wait result",
-                )))
+                )));
             }
             Err(error) => return Err(HelperLaunchError::after_resume(error)),
         }
@@ -218,7 +218,7 @@ fn confirm_terminated(child: &Process, deadline: Instant) -> io::Result<()> {
             Ok(WaitOutcome::Signaled) => return Ok(()),
             Ok(WaitOutcome::TimedOut) => continue,
             Ok(WaitOutcome::Abandoned) => {
-                return Err(io::Error::other("unexpected helper cleanup wait result"))
+                return Err(io::Error::other("unexpected helper cleanup wait result"));
             }
             Err(error) => return Err(error),
         }

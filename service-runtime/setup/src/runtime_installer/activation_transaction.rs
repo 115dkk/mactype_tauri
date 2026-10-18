@@ -10,12 +10,12 @@ use std::path::Path;
 
 use mactype_service_contract::MachinePaths;
 
-use super::generation_store::RuntimeGenerationStore;
-use super::journal::{validate_runtime_pointer, RuntimePointer, MAX_POINTER_BYTES};
 use super::InstalledRuntime;
+use super::generation_store::RuntimeGenerationStore;
+use super::journal::{MAX_POINTER_BYTES, RuntimePointer, validate_runtime_pointer};
 use crate::profile_bridge::ProfileRuntimeBridge;
 use crate::storage::{
-    atomic_write, read_bounded_regular_file, reject_reparse_ancestors, SetupError,
+    SetupError, atomic_write, read_bounded_regular_file, reject_reparse_ancestors,
 };
 
 pub(super) struct RuntimeActivationTransaction<'a> {
@@ -252,9 +252,11 @@ mod tests {
             Err(error) => error,
         };
 
-        assert!(error
-            .to_string()
-            .contains("commit runtime activation receipt"));
+        assert!(
+            error
+                .to_string()
+                .contains("commit runtime activation receipt")
+        );
         assert_eq!(
             fs::read(paths.runtime_pointer()).unwrap(),
             previous.to_bytes().unwrap()

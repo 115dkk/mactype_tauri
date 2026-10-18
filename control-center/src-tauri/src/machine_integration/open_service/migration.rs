@@ -36,7 +36,7 @@ pub(super) trait MigrationBackend {
         profile: &[u8],
     ) -> Result<(), String>;
     fn activate_open_service(&mut self, snapshot: &Self::OpenServiceSnapshot)
-        -> Result<(), String>;
+    -> Result<(), String>;
     fn strict_ready(&mut self, expected_digest: &str) -> Result<bool, String>;
     fn verify_injection_smoke(&mut self, expected_digest: &str) -> Result<bool, String>;
     fn complete_migration(&mut self, snapshot: &Self::OpenServiceSnapshot) -> Result<(), String>;

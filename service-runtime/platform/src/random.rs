@@ -4,7 +4,7 @@ use std::io;
 use std::ptr::null_mut;
 
 use windows_sys::Win32::Security::Cryptography::{
-    BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+    BCRYPT_USE_SYSTEM_PREFERRED_RNG, BCryptGenRandom,
 };
 
 /// Fills `buffer` with bytes from the system-preferred cryptographic RNG.

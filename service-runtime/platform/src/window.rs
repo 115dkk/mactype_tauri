@@ -2,11 +2,11 @@
 
 use std::io;
 
-use windows_sys::Win32::Foundation::{GetLastError, SetLastError, ERROR_SUCCESS, HWND, LPARAM};
+use windows_sys::Win32::Foundation::{ERROR_SUCCESS, GetLastError, HWND, LPARAM, SetLastError};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetDesktopWindow, GetTopWindow, GetWindowLongW, GetWindowTextW,
+    EnumWindows, GWL_EXSTYLE, GetDesktopWindow, GetTopWindow, GetWindowLongW, GetWindowTextW,
     GetWindowThreadProcessId, IsWindowVisible, RegisterWindowMessageW, SendNotifyMessageW,
-    GWL_EXSTYLE, WS_EX_TOOLWINDOW,
+    WS_EX_TOOLWINDOW,
 };
 
 use crate::wide::wide_null;

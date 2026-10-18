@@ -10,21 +10,21 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{
-    ERROR_FILE_NOT_FOUND, ERROR_IO_PENDING, ERROR_NOT_FOUND, ERROR_NO_DATA, ERROR_PIPE_BUSY,
+    ERROR_FILE_NOT_FOUND, ERROR_IO_PENDING, ERROR_NO_DATA, ERROR_NOT_FOUND, ERROR_PIPE_BUSY,
     ERROR_PIPE_CONNECTED, ERROR_PIPE_LISTENING, HANDLE, STATUS_PENDING, TRUE, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, ReadFile, WriteFile, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_FIRST_PIPE_INSTANCE,
-    FILE_FLAG_OVERLAPPED, FILE_GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, PIPE_ACCESS_INBOUND,
-    PIPE_ACCESS_OUTBOUND, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
+    CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED,
+    FILE_GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, PIPE_ACCESS_INBOUND, PIPE_ACCESS_OUTBOUND,
+    ReadFile, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT, WriteFile,
+};
+use windows_sys::Win32::System::IO::{
+    CancelIoEx, GetOverlappedResult, GetOverlappedResultEx, OVERLAPPED,
 };
 use windows_sys::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, GetNamedPipeClientProcessId,
     GetNamedPipeServerProcessId, PIPE_NOWAIT, PIPE_READMODE_BYTE, PIPE_READMODE_MESSAGE,
     PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_TYPE_MESSAGE,
-};
-use windows_sys::Win32::System::IO::{
-    CancelIoEx, GetOverlappedResult, GetOverlappedResultEx, OVERLAPPED,
 };
 
 use crate::event::ManualResetEvent;
@@ -603,13 +603,14 @@ fn win32_code(error: &io::Error) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{Duration, Instant};
 
     use super::{
-        cancelled_pipe_operations, ConnectOutcome, NamedPipeClient, NamedPipeServer,
-        OverlappedPipeClient, OverlappedPipeServer, PipeAccess, PipeDirection, PipeError, PipeWait,
+        ConnectOutcome, NamedPipeClient, NamedPipeServer, OverlappedPipeClient,
+        OverlappedPipeServer, PipeAccess, PipeDirection, PipeError, PipeWait,
+        cancelled_pipe_operations,
     };
     use crate::process::Process;
     use crate::security::SecurityDescriptor;

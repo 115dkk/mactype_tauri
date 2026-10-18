@@ -1,8 +1,8 @@
 use super::super::legacy_mactray::{
-    observe_owned_tray_startup, plan_startup_restore, read_tray_startup_artifact_bytes,
-    remove_tray_startup_artifact_exact, restore_tray_startup_artifact_if_absent,
     LegacyTrayStartupArtifact, LegacyTrayStartupLocator, LegacyTrayStartupScope,
-    LegacyTrayStartupSource, StartupRestoreAction,
+    LegacyTrayStartupSource, StartupRestoreAction, observe_owned_tray_startup,
+    plan_startup_restore, read_tray_startup_artifact_bytes, remove_tray_startup_artifact_exact,
+    restore_tray_startup_artifact_if_absent,
 };
 use super::storage::{
     atomic_json, create_migration_storage_root, migration_storage_root, read_json_bounded_under,

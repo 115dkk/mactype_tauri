@@ -4,14 +4,14 @@ use std::path::PathBuf;
 use mactype_service_contract::GenerationPointer;
 
 use super::{
-    LegacyProfileActivationJournal, ProfileActivationJournal, ProfileActivationPhase, ProfileStore,
-    LEGACY_PROFILE_ACTIVATION_SCHEMA, MAX_ACTIVATION_JOURNAL_BYTES, PROFILE_ACTIVATION_SCHEMA,
+    LEGACY_PROFILE_ACTIVATION_SCHEMA, LegacyProfileActivationJournal, MAX_ACTIVATION_JOURNAL_BYTES,
+    PROFILE_ACTIVATION_SCHEMA, ProfileActivationJournal, ProfileActivationPhase, ProfileStore,
 };
 use crate::profile_bridge::{
     MaterializedProfileClearError, MaterializedProfileObservation, ProfileRuntimeBridge,
 };
 use crate::storage::{
-    atomic_write, read_bounded_regular_file, reject_reparse_ancestors, SetupError,
+    SetupError, atomic_write, read_bounded_regular_file, reject_reparse_ancestors,
 };
 
 impl ProfileStore {

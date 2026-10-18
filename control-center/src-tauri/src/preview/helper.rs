@@ -1,9 +1,9 @@
 use super::{
+    PreviewEngine,
     protocol::{
-        read_frame, write_frame, Frame, HELLO, HELLO_ACK, NATIVE_PREVIEW_STATE, SHUTDOWN, VERSION,
+        Frame, HELLO, HELLO_ACK, NATIVE_PREVIEW_STATE, SHUTDOWN, VERSION, read_frame, write_frame,
     },
     render::NativePreviewState,
-    PreviewEngine,
 };
 use mactype_service_contract::event_log::EventSeverity;
 use serde::Deserialize;
@@ -13,7 +13,7 @@ use std::{
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
-    sync::{mpsc, Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
     thread,
     time::Duration,
 };

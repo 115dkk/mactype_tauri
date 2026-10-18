@@ -1,5 +1,5 @@
 use super::super::model::*;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Write},

@@ -2,11 +2,11 @@ mod operation_log;
 
 use crate::preview::{PreviewDiagnosticSnapshot, PreviewState};
 use mactype_service_contract::event_log::{
-    read_events, EventArea, EventRecord, EventSeverity, EventSource,
+    EventArea, EventRecord, EventSeverity, EventSource, read_events,
 };
 pub(crate) use operation_log::{
-    record_activity, record_operation_failure, ActivityKind, InstallationPreflightDiagnostics,
-    OperationFailure,
+    ActivityKind, InstallationPreflightDiagnostics, OperationFailure, record_activity,
+    record_operation_failure,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -609,9 +609,11 @@ mod tests {
             .map(|entry| entry.unwrap())
             .collect::<Vec<_>>();
         assert!(files.len() <= 5, "rotation created too many files");
-        assert!(files
-            .iter()
-            .all(|entry| entry.metadata().unwrap().len() <= 512 * 1024));
+        assert!(
+            files
+                .iter()
+                .all(|entry| entry.metadata().unwrap().len() <= 512 * 1024)
+        );
         let event = operation_log::read_all_at(&root).pop().unwrap();
         assert_eq!(
             event.params.get("stage").map(String::as_str),
@@ -655,9 +657,11 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(activities.len(), 6);
         assert_eq!(activities[5].params["profile"], "Profile-5.ini");
-        assert!(activities
-            .iter()
-            .all(|event| !event.params["profile"].contains("Secret")));
+        assert!(
+            activities
+                .iter()
+                .all(|event| !event.params["profile"].contains("Secret"))
+        );
         let disk = fs::read_to_string(root.join("control-center.log")).unwrap();
         assert!(!disk.contains(r"C:\Users\Secret"));
         fs::remove_dir_all(root).unwrap();

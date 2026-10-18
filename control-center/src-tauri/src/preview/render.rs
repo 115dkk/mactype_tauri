@@ -1,10 +1,10 @@
 use super::{
+    PreviewEngine,
     helper::PreviewManager,
     protocol::{
         HIDE_NATIVE_PREVIEW, NATIVE_PREVIEW_STATE, PREVIEW_RENDERED, RENDER_PREVIEW,
         SHOW_NATIVE_PREVIEW,
     },
-    PreviewEngine,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, path::Path};

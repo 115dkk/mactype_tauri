@@ -1,11 +1,11 @@
 use std::fs;
 use std::path::Path;
 
+use super::RuntimeDirectoryReceipt;
 use super::receipt::{
     remove_receipted_runtime_directory, remove_verified_backup_directory,
     runtime_directory_matches, verify_runtime_directory_receipt,
 };
-use super::RuntimeDirectoryReceipt;
 use crate::SetupError;
 
 pub(super) fn recover_prepared_repair(

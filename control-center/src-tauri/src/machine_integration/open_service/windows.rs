@@ -1,8 +1,8 @@
 use super::*;
 use mactype_service_contract::{
-    runtime_generation_id, sha256_digest, InjectionArchitecture, MachinePaths,
-    MigrationPinnedRuntime, MigrationRuntimePin, IMMUTABLE_RUNTIME_FILES,
-    MAX_MIGRATION_RUNTIME_PIN_BYTES, MAX_PROFILE_BYTES, MAX_RUNTIME_FILE_BYTES,
+    IMMUTABLE_RUNTIME_FILES, InjectionArchitecture, MAX_MIGRATION_RUNTIME_PIN_BYTES,
+    MAX_PROFILE_BYTES, MAX_RUNTIME_FILE_BYTES, MachinePaths, MigrationPinnedRuntime,
+    MigrationRuntimePin, runtime_generation_id, sha256_digest,
 };
 use mactype_service_platform::{KnownFolder, MachineKind, Process, ProcessAccess};
 use serde::Deserialize;
@@ -26,15 +26,15 @@ use windows_sys::Win32::{
 };
 
 #[cfg(test)]
+pub(super) use super::profile_transfer::{BrokerResultPipeServer, BrokerResultPipeWriter};
+#[cfg(test)]
 pub(super) use super::profile_transfer::{
-    profile_pipe_reap_count, receive_profile_from_pipe_bounded, reset_profile_pipe_reap_count,
-    KillOnCloseJob, ProfilePipeServer, PROFILE_PIPE_SDDL,
+    KillOnCloseJob, PROFILE_PIPE_SDDL, ProfilePipeServer, profile_pipe_reap_count,
+    receive_profile_from_pipe_bounded, reset_profile_pipe_reap_count,
 };
 pub(super) use super::profile_transfer::{
     profile_transfer_nonce_text, random_profile_transfer_nonce,
 };
-#[cfg(test)]
-pub(super) use super::profile_transfer::{BrokerResultPipeServer, BrokerResultPipeWriter};
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -62,7 +62,7 @@ pub(super) fn machine_roots() -> Result<(PathBuf, PathBuf), String> {
 use rollback::rollback_open_service_snapshot;
 #[cfg(test)]
 pub(super) use rollback::{
-    plan_file_rollback, plan_generation_cleanup, remove_empty_directory, FileRollbackAction,
+    FileRollbackAction, plan_file_rollback, plan_generation_cleanup, remove_empty_directory,
 };
 
 #[cfg(test)]
@@ -72,8 +72,8 @@ pub(super) use smoke::system_removal_verification;
 
 #[cfg(test)]
 pub(super) use super::broker::{
-    combine_broker_cleanup_error, terminate_broker_process_with, BrokerProcessControl,
-    BrokerTermination,
+    BrokerProcessControl, BrokerTermination, combine_broker_cleanup_error,
+    terminate_broker_process_with,
 };
 use super::broker::{
     fixed_setup_path, reject_reparse_ancestors, run_restore_pinned_runtime, run_setup,

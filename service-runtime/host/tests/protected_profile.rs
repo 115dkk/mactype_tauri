@@ -7,8 +7,8 @@ use mactype_service_contract::{
     ComponentReadiness, GenerationPointer, ProfileCatalog, SourceMetadata,
 };
 use mactype_service_host::{
-    ProtectedProfileInitializer, RuntimeInitializer, ACTIVE_PROFILE_ABSENT_CODE,
-    RUNTIME_PROFILE_ABSENT_CODE,
+    ACTIVE_PROFILE_ABSENT_CODE, ProtectedProfileInitializer, RUNTIME_PROFILE_ABSENT_CODE,
+    RuntimeInitializer,
 };
 
 use protected_tree_support::ProtectedTree;

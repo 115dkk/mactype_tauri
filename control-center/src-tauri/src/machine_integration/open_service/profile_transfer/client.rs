@@ -1,7 +1,7 @@
 use super::{
     super::{
-        decode_profile_transfer_frame, ProfileTransferToken, PROFILE_TRANSFER_HEADER_BYTES,
-        PROFILE_TRANSFER_MAGIC, PROFILE_TRANSFER_VERSION,
+        PROFILE_TRANSFER_HEADER_BYTES, PROFILE_TRANSFER_MAGIC, PROFILE_TRANSFER_VERSION,
+        ProfileTransferToken, decode_profile_transfer_frame,
     },
     shared::*,
 };

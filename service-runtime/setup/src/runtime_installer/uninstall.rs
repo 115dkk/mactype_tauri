@@ -3,15 +3,15 @@ use std::fs;
 use std::path::PathBuf;
 
 use mactype_service_contract::{
-    valid_runtime_version_component, HealthReport, MAX_PINNED_RUNTIMES,
+    HealthReport, MAX_PINNED_RUNTIMES, valid_runtime_version_component,
 };
 
+use super::RuntimeInstaller;
 use super::deferred_delete::{defer_directory, remove_directory_or_defer, remove_file_or_defer};
 use super::generation_store::RuntimeGenerationStore;
-use super::journal::{validate_runtime_pointer, MAX_POINTER_BYTES};
-use super::RuntimeInstaller;
+use super::journal::{MAX_POINTER_BYTES, validate_runtime_pointer};
 use crate::storage::{
-    read_bounded_directory, read_bounded_regular_file, reject_reparse_ancestors, SetupError,
+    SetupError, read_bounded_directory, read_bounded_regular_file, reject_reparse_ancestors,
 };
 
 const MAX_HEALTH_SNAPSHOT_BYTES: u64 = 16 * 1024;

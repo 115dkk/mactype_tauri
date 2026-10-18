@@ -2,7 +2,7 @@ use super::super::*;
 use crate::machine_integration::open_service::identity::core_service_capabilities;
 use crate::{
     machine_integration::{
-        legacy_mactray, status::project_new_service_capabilities, LegacyTrayConflictState,
+        LegacyTrayConflictState, legacy_mactray, status::project_new_service_capabilities,
     },
     service_contract::{
         HealthState, InstallationState, RuntimeState, ServiceBackend,

@@ -4,7 +4,7 @@ use std::io;
 use std::ptr::null_mut;
 
 use windows_sys::Win32::System::RemoteDesktop::{
-    WTSEnumerateProcessesW, WTSFreeMemory, WTS_PROCESS_INFOW,
+    WTS_PROCESS_INFOW, WTSEnumerateProcessesW, WTSFreeMemory,
 };
 
 use crate::wide::bounded_string;

@@ -196,10 +196,10 @@ fn validate_profile(bytes: &[u8]) -> Result<(), ProfileError> {
     if bytes.starts_with(&[0xff, 0xfe]) || bytes.starts_with(&[0xfe, 0xff]) {
         let little_endian = bytes.starts_with(&[0xff, 0xfe]);
         let body = &bytes[2..];
-        if body.len() % 2 != 0 {
+        if !body.len().is_multiple_of(2) {
             return Err(ProfileError::InvalidIni);
         }
-        let units = body.chunks_exact(2).map(|pair| {
+        let units = body.as_chunks::<2>().0.iter().map(|pair| {
             if little_endian {
                 u16::from_le_bytes([pair[0], pair[1]])
             } else {

@@ -106,7 +106,7 @@ impl ScmResponse {
                 "SCM response array pointer is outside the response",
             ));
         }
-        if address % align_of::<T>() != 0 {
+        if !address.is_multiple_of(align_of::<T>()) {
             return Err(invalid_data("SCM response array pointer is misaligned"));
         }
         let byte_length = size_of::<T>()
@@ -132,7 +132,7 @@ impl ScmResponse {
         if address < self.start() || address >= self.end() {
             return Err(invalid_data("UTF-16 pointer is outside the SCM response"));
         }
-        if address % align_of::<u16>() != 0 {
+        if !address.is_multiple_of(align_of::<u16>()) {
             return Err(invalid_data("UTF-16 pointer is misaligned"));
         }
 

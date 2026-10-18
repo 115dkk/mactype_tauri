@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
 
 use mactype_service_contract::{
-    valid_runtime_version_component, MachinePaths, RuntimeGenerationPointer, StructuredServiceError,
+    MachinePaths, RuntimeGenerationPointer, StructuredServiceError, valid_runtime_version_component,
 };
 
-use crate::protected_path::{has_reparse_ancestor, read_bounded_regular_file, MAX_POINTER_BYTES};
+use crate::protected_path::{MAX_POINTER_BYTES, has_reparse_ancestor, read_bounded_regular_file};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ActiveRuntimeGeneration {

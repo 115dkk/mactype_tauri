@@ -12,9 +12,9 @@ use event_sink_support::discard_events;
 use std::time::{Duration, Instant};
 
 use mactype_service_host::{
-    BrokerDisposition, BrokerResult, DeferralReason, InspectedProcess, ProcessFacts,
-    ProcessIdentity, ProcessOrchestrator, ProcessOutcome, SessionChange, TargetLifecycle,
-    TargetLiveness, MAX_DEFERRED_TARGETS, TARGET_VANISHED_RESULT_CODE,
+    BrokerDisposition, BrokerResult, DeferralReason, InspectedProcess, MAX_DEFERRED_TARGETS,
+    ProcessFacts, ProcessIdentity, ProcessOrchestrator, ProcessOutcome, SessionChange,
+    TARGET_VANISHED_RESULT_CODE, TargetLifecycle, TargetLiveness,
 };
 
 fn binding() -> String {

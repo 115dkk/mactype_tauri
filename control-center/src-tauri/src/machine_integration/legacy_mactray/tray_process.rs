@@ -7,8 +7,8 @@ use std::path::Path;
 
 #[cfg(windows)]
 use mactype_service_platform::{
-    interactive_processes, is_reparse_point, process_session_id as platform_process_session_id,
-    Process, ProcessAccess,
+    Process, ProcessAccess, interactive_processes, is_reparse_point,
+    process_session_id as platform_process_session_id,
 };
 
 #[derive(Clone, Debug, PartialEq)]

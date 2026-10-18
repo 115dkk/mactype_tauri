@@ -5,9 +5,9 @@ use mactype_service_contract::{
 };
 
 use crate::{
-    subscribe_process_creation, HostEvent, HostEventSink, InitializedRuntime, InjectionBroker,
-    ProcessArchitecture, ProcessEventSource, ProcessInspector, RetryScheduler, RuntimeDriver,
-    RuntimeHealthReporter, StopSignal,
+    HostEvent, HostEventSink, InitializedRuntime, InjectionBroker, ProcessArchitecture,
+    ProcessEventSource, ProcessInspector, RetryScheduler, RuntimeDriver, RuntimeHealthReporter,
+    StopSignal, subscribe_process_creation,
 };
 
 const MAX_TOLERATED_CONSECUTIVE_HEALTH_REPORT_FAILURES: usize = 20;

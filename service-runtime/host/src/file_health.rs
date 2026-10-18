@@ -8,8 +8,8 @@ use mactype_service_contract::HealthReport;
 #[cfg(windows)]
 use mactype_service_platform::replace_file;
 
-use crate::protected_path::{has_reparse_ancestor, read_bounded_contents};
 use crate::HealthPublisher;
+use crate::protected_path::{has_reparse_ancestor, read_bounded_contents};
 
 const MAX_HEALTH_SNAPSHOT_BYTES: u64 = 16 * 1024;
 const MAX_SERVICE_ROOT_ENTRIES: usize = 4096;

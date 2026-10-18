@@ -1,7 +1,7 @@
 use std::io;
 
 use mactype_service_contract::StructuredServiceError;
-use mactype_service_platform::{process_session_id, MachineKind, Process, ProcessAccess};
+use mactype_service_platform::{MachineKind, Process, ProcessAccess, process_session_id};
 use windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER;
 
 use crate::{

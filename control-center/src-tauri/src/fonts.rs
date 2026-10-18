@@ -45,9 +45,11 @@ mod tests {
     fn installed_families_are_detected_and_deduplicated() {
         let families = installed_families().unwrap();
         assert!(!families.is_empty());
-        assert!(families
-            .iter()
-            .all(|name| !name.is_empty() && !name.starts_with('@')));
+        assert!(
+            families
+                .iter()
+                .all(|name| !name.is_empty() && !name.starts_with('@'))
+        );
         assert!(families.windows(2).all(|pair| pair[0] < pair[1]));
     }
 }

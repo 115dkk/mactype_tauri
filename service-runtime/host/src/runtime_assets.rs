@@ -4,8 +4,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use mactype_service_contract::{
-    runtime_generation_id, MachinePaths, StructuredServiceError, IMMUTABLE_RUNTIME_FILES,
-    MAX_PROFILE_BYTES, MAX_RUNTIME_FILE_BYTES,
+    IMMUTABLE_RUNTIME_FILES, MAX_PROFILE_BYTES, MAX_RUNTIME_FILE_BYTES, MachinePaths,
+    StructuredServiceError, runtime_generation_id,
 };
 
 use crate::active_generation::{self, ActiveRuntimeGeneration};
@@ -190,7 +190,7 @@ fn service_error(code: &str, message: &str, win32_error: Option<i32>) -> Structu
 mod tests {
     use std::ffi::OsString;
 
-    use super::{validate_runtime_file_names, REQUIRED_RUNTIME_FILES, RUNTIME_PROFILE_ABSENT_CODE};
+    use super::{REQUIRED_RUNTIME_FILES, RUNTIME_PROFILE_ABSENT_CODE, validate_runtime_file_names};
 
     fn validate(names: &[&str]) -> Result<(), mactype_service_contract::StructuredServiceError> {
         validate_runtime_file_names(names.iter().map(|name| Ok(OsString::from(name))))

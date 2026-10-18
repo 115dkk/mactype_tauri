@@ -1,5 +1,5 @@
 use mactype_service_contract::{
-    GenerationPointer, ProfileCatalog, ProfileError, SourceMetadata, MAX_PROFILE_BYTES,
+    GenerationPointer, MAX_PROFILE_BYTES, ProfileCatalog, ProfileError, SourceMetadata,
 };
 
 fn profile(gamma: &str) -> Vec<u8> {

@@ -1,12 +1,12 @@
 use super::{
     super::{
+        BROKER_SWITCH, BROKER_TRANSFER_SWITCH, BrokerResultDisposition, BrokerResultMessage,
+        SystemServiceAction,
         action_failure::{ActionBlocker, ActionFailure, RollbackOutcome},
         profile_transfer::{
-            profile_transfer_nonce_text, BrokerResultPipeServer, ProfilePipeServer,
-            PROFILE_PIPE_TIMEOUT,
+            BrokerResultPipeServer, PROFILE_PIPE_TIMEOUT, ProfilePipeServer,
+            profile_transfer_nonce_text,
         },
-        BrokerResultDisposition, BrokerResultMessage, SystemServiceAction, BROKER_SWITCH,
-        BROKER_TRANSFER_SWITCH,
     },
     installed_package::service_package,
     process::{combine_broker_cleanup_error, terminate_broker_process},
@@ -240,8 +240,8 @@ mod tests {
         broker_channel_failure, interpret_broker_exit, with_service_package_before_elevation,
     };
     use crate::machine_integration::open_service::{
-        action_failure::{ActionBlocker, ActionFailureKind, AppInitConflictContext},
         BrokerResultDisposition, BrokerResultMessage,
+        action_failure::{ActionBlocker, ActionFailureKind, AppInitConflictContext},
     };
     use std::{cell::Cell, path::PathBuf};
 

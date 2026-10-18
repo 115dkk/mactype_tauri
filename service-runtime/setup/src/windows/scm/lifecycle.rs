@@ -3,8 +3,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use mactype_service_contract::{
-    effective_service_name, owned_service_identity, service_configuration_drift, HealthReport,
-    HealthState, SERVICE_DISPLAY_NAME,
+    HealthReport, HealthState, SERVICE_DISPLAY_NAME, effective_service_name,
+    owned_service_identity, service_configuration_drift,
 };
 use mactype_service_platform::{
     Process, ProcessAccess, ServiceAccess, ServiceConfig, ServiceHandle, ServiceState,
@@ -19,9 +19,9 @@ use super::configuration::{
     service_configuration_matches_owned_contract, validate_service_binary,
 };
 use super::health::wait_for_ready_health;
-use super::{ServiceManager, HEALTH_TIMEOUT, STATE_TIMEOUT};
-use crate::storage::read_bounded_regular_file;
+use super::{HEALTH_TIMEOUT, STATE_TIMEOUT, ServiceManager};
 use crate::SetupError;
+use crate::storage::read_bounded_regular_file;
 
 const MAX_PERSISTED_HEALTH_BYTES: u64 = 16 * 1024;
 /// Reconfiguration must also carry `SERVICE_START`, which the restart-on-failure
@@ -132,7 +132,7 @@ fn capture_service_process(
         match Process::open(pid, ProcessAccess::Synchronize) {
             Ok(process) => match observe_process_identity(pid, &service.status()?)? {
                 ProcessIdentityObservation::Stopped | ProcessIdentityObservation::Same => {
-                    return Ok(Some((pid, process)))
+                    return Ok(Some((pid, process)));
                 }
                 ProcessIdentityObservation::Changed(_) => {
                     wait_before_process_capture_retry(deadline)?
@@ -149,7 +149,7 @@ fn capture_service_process(
             Err(error) => {
                 return Err(SetupError::Runtime(format!(
                     "could not capture the service process identity before stopping: {error}"
-                )))
+                )));
             }
         }
     }
@@ -518,8 +518,8 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use mactype_service_contract::{
-        HealthReport, HealthState, InjectionTelemetry, ReadinessReport, StructuredServiceError,
-        HEALTH_PROTOCOL_VERSION,
+        HEALTH_PROTOCOL_VERSION, HealthReport, HealthState, InjectionTelemetry, ReadinessReport,
+        StructuredServiceError,
     };
     use mactype_service_platform::{
         Process, ProcessAccess, ServiceConfig, ServiceState, ServiceStatusSnapshot,
@@ -530,10 +530,10 @@ mod tests {
     };
 
     use super::{
+        AbsenceObservation, AbsencePollAction, ProcessIdentityObservation, RECONFIGURE_ACCESS,
         absence_poll_action, ensure_captured_configuration_unchanged, observe_process_identity,
         process_capture_target, stopped_before_expected_state_error, stopping_process_is_complete,
-        wait_for_process_exit, AbsenceObservation, AbsencePollAction, ProcessIdentityObservation,
-        RECONFIGURE_ACCESS,
+        wait_for_process_exit,
     };
 
     const PROCESS_EXIT_CHILD_ENV: &str = "MACTYPE_SETUP_PROCESS_EXIT_CHILD";
@@ -590,8 +590,10 @@ mod tests {
         let error = ensure_captured_configuration_unchanged(&captured, &changed).unwrap_err();
         let message = error.to_string();
 
-        assert!(message
-            .contains("the fixed service configuration changed after ownership was verified"));
+        assert!(
+            message
+                .contains("the fixed service configuration changed after ownership was verified")
+        );
         assert!(message.contains(&format!(
             "start_type changed ({SERVICE_AUTO_START} -> {SERVICE_DEMAND_START})"
         )));
@@ -680,9 +682,11 @@ mod tests {
 
         let error = stopping_process_is_complete(41, &replacement).unwrap_err();
 
-        assert!(error
-            .to_string()
-            .contains("process identity changed while stopping"));
+        assert!(
+            error
+                .to_string()
+                .contains("process identity changed while stopping")
+        );
     }
 
     #[test]
@@ -709,9 +713,11 @@ mod tests {
             AbsencePollAction::Complete
         );
         let error = absence_poll_action(AbsenceObservation::DeletePending, true).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("service name remained delete-pending"));
+        assert!(
+            error
+                .to_string()
+                .contains("service name remained delete-pending")
+        );
     }
 
     #[test]

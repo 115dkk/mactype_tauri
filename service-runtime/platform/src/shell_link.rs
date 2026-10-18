@@ -2,11 +2,11 @@
 
 use std::path::Path;
 
-use windows::core::{IUnknown, Interface, PCWSTR};
 use windows::Win32::System::Com::{
-    CoCreateInstance, IPersistFile, CLSCTX_INPROC_SERVER, STGM_READ,
+    CLSCTX_INPROC_SERVER, CoCreateInstance, IPersistFile, STGM_READ,
 };
-use windows::Win32::UI::Shell::{IShellLinkW, ShellLink, SLGP_RAWPATH};
+use windows::Win32::UI::Shell::{IShellLinkW, SLGP_RAWPATH, ShellLink};
+use windows::core::{IUnknown, Interface, PCWSTR};
 
 use crate::wide::{nul_terminated, wide_path};
 

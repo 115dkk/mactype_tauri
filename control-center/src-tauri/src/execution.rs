@@ -16,18 +16,18 @@ mod storage;
 
 pub use crate::machine_integration::DesignationEffect;
 use autostart::autostart_value;
-use process_candidates::list_manual_launch_candidates_impl;
 pub use process_candidates::ManualLaunchCandidate;
+use process_candidates::list_manual_launch_candidates_impl;
 #[cfg(test)]
 use runtime::prepare_runtime_at;
 pub(crate) use runtime::record_system_injection_choice;
+pub use runtime::{AppliedProfile, apply_profile};
 use runtime::{active_runtime, active_system_profile_payload, system_injection_paused};
-pub use runtime::{apply_profile, AppliedProfile};
+pub use session::{SessionTarget, session_targets};
 use session::{
     launch_registered_targets_impl, launch_with_mactype_impl, register_session_target_impl,
     remove_session_target_impl,
 };
-pub use session::{session_targets, SessionTarget};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -482,8 +482,8 @@ fn service_start_profile_at(
     runtime::active_profile_payload_for(&active)
 }
 
-pub(crate) fn observe_machine_on_tray_login(
-) -> Result<crate::machine_integration::TrayLoginState, String> {
+pub(crate) fn observe_machine_on_tray_login()
+-> Result<crate::machine_integration::TrayLoginState, String> {
     let root = installation_root();
     let observation = observe_profile(root.as_deref());
     Ok(crate::machine_integration::tray_login(
@@ -901,9 +901,11 @@ mod tests {
             ..held
         };
         assert!(held_json.contains("\"effect\":\"next-start\""));
-        assert!(serde_json::to_string(&live)
-            .unwrap()
-            .contains("\"effect\":\"live\""));
+        assert!(
+            serde_json::to_string(&live)
+                .unwrap()
+                .contains("\"effect\":\"live\"")
+        );
     }
 
     #[test]

@@ -244,7 +244,7 @@ mod tests {
     use std::mem::{align_of, size_of};
 
     use super::{
-        probe_bytes, probe_word_aligned, retry_bytes, CallOutcome, ProbeError, RetryError,
+        CallOutcome, ProbeError, RetryError, probe_bytes, probe_word_aligned, retry_bytes,
     };
 
     fn more_data() -> CallOutcome {

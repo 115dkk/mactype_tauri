@@ -7,11 +7,11 @@ mod support;
 
 use std::cell::Cell;
 use std::fs;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use mactype_service_contract::{
-    parse_runtime_activation_receipt, RuntimeActivationPhase, RuntimeActivationReceipt,
-    RuntimeGenerationPointer,
+    RuntimeActivationPhase, RuntimeActivationReceipt, RuntimeGenerationPointer,
+    parse_runtime_activation_receipt,
 };
 use mactype_service_setup::{RuntimeInstaller, RuntimeServiceBinding, SetupError};
 
@@ -365,12 +365,16 @@ fn schema_one_recovery_derives_the_exact_candidate_from_the_active_pointer() {
     let recovered = installer
         .recover_interrupted_activation_with_service_binding(
             |candidate, previous| {
-                assert!(candidate
-                    .expect("legacy post-switch receipt must derive a candidate")
-                    .ends_with("0.3.0\\mactype-service.exe"));
-                assert!(previous
-                    .expect("legacy upgrade receipt retains its previous pointer")
-                    .ends_with("0.2.0\\mactype-service.exe"));
+                assert!(
+                    candidate
+                        .expect("legacy post-switch receipt must derive a candidate")
+                        .ends_with("0.3.0\\mactype-service.exe")
+                );
+                assert!(
+                    previous
+                        .expect("legacy upgrade receipt retains its previous pointer")
+                        .ends_with("0.2.0\\mactype-service.exe")
+                );
                 Ok(binding.get())
             },
             |_, _| {
@@ -403,9 +407,11 @@ fn schema_one_before_pointer_switch_accepts_only_the_exact_previous_binding() {
         .recover_interrupted_activation_with_service_binding(
             |candidate, previous| {
                 assert!(candidate.is_none());
-                assert!(previous
-                    .expect("legacy pre-switch upgrade retains the previous binding")
-                    .ends_with("0.2.0\\mactype-service.exe"));
+                assert!(
+                    previous
+                        .expect("legacy pre-switch upgrade retains the previous binding")
+                        .ends_with("0.2.0\\mactype-service.exe")
+                );
                 Ok(RuntimeServiceBinding::Previous)
             },
             |_, _| panic!("an exact previous binding needs no mutation"),

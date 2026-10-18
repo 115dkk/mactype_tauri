@@ -3,8 +3,8 @@ use super::{
     common::{open_for, query_configuration, win32_code},
     control::{create_service_configuration, query, stop},
     snapshot::{
-        query_extended_configuration, service_has_triggers, MAX_FAILURE_ACTIONS,
-        MAX_REQUIRED_PRIVILEGES, MAX_SECURITY_DESCRIPTOR_BYTES,
+        MAX_FAILURE_ACTIONS, MAX_REQUIRED_PRIVILEGES, MAX_SECURITY_DESCRIPTOR_BYTES,
+        query_extended_configuration, service_has_triggers,
     },
 };
 use mactype_service_platform::{

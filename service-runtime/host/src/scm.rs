@@ -6,13 +6,12 @@ mod crash_adapter;
 mod tests;
 
 use std::io;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
 use mactype_service_contract::{
-    effective_health_pipe_name, effective_service_name, HealthReport, HealthState,
-    InjectionTelemetry, MachinePaths, ReadinessReport, StructuredServiceError,
-    HEALTH_PROTOCOL_VERSION,
+    HEALTH_PROTOCOL_VERSION, HealthReport, HealthState, InjectionTelemetry, MachinePaths,
+    ReadinessReport, StructuredServiceError, effective_health_pipe_name, effective_service_name,
 };
 use mactype_service_platform::run_service_dispatcher;
 

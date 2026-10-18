@@ -2,13 +2,13 @@ mod cleanup;
 mod runtime;
 
 use mactype_service_contract::{
-    GenerationId, GenerationPointer, MachinePaths, ProfileCatalog, SourceMetadata,
-    MAX_PROFILE_BYTES, MAX_PROFILE_POINTER_BYTES,
+    GenerationId, GenerationPointer, MAX_PROFILE_BYTES, MAX_PROFILE_POINTER_BYTES, MachinePaths,
+    ProfileCatalog, SourceMetadata,
 };
 
 use self::cleanup::remove_interrupted_generated_profile_writes;
 use crate::storage::{
-    atomic_write, read_bounded_regular_file, reject_reparse_ancestors, SetupError,
+    SetupError, atomic_write, read_bounded_regular_file, reject_reparse_ancestors,
 };
 
 pub(crate) const GENERATED_PROFILE_NAME: &str = "MacType.ini";

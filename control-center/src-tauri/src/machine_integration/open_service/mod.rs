@@ -15,36 +15,36 @@ use broker::{
 };
 
 use action_failure::{
-    ActionBlocker, ActionFailure, ActionFailureKind, InstallationPreflightKind, RollbackOutcome,
-    INTERNAL_OPERATION_FAILURE_PREFIX,
+    ActionBlocker, ActionFailure, ActionFailureKind, INTERNAL_OPERATION_FAILURE_PREFIX,
+    InstallationPreflightKind, RollbackOutcome,
 };
 use broker_result::{
-    decode_broker_result_frame, encode_broker_result_frame, BrokerResultDisposition,
-    BrokerResultMessage, BROKER_RESULT_HEADER_BYTES, BROKER_RESULT_MAGIC, BROKER_RESULT_VERSION,
-    MAX_BROKER_RESULT_BYTES,
+    BROKER_RESULT_HEADER_BYTES, BROKER_RESULT_MAGIC, BROKER_RESULT_VERSION,
+    BrokerResultDisposition, BrokerResultMessage, MAX_BROKER_RESULT_BYTES,
+    decode_broker_result_frame, encode_broker_result_frame,
 };
 use file_guard::{read_bounded_regular_file, reject_reparse_chain};
 use identity::{
-    classify_owned_installation, configured_service_binary, same_path, select_service_health,
-    validated_reveal_binary, LiveHealthReport,
+    LiveHealthReport, classify_owned_installation, configured_service_binary, same_path,
+    select_service_health, validated_reveal_binary,
 };
 #[cfg(test)]
 use legacy_status::legacy_migration_available;
-pub(crate) use legacy_status::{legacy_status, LegacyMacTrayStatus};
+pub(crate) use legacy_status::{LegacyMacTrayStatus, legacy_status};
 pub(crate) use request::SystemServiceAction;
 use request::{
+    BROKER_SWITCH, BROKER_TRANSFER_SWITCH, PROFILE_TRANSFER_HEADER_BYTES, PROFILE_TRANSFER_MAGIC,
+    PROFILE_TRANSFER_NONCE_BYTES, PROFILE_TRANSFER_VERSION, ProfileTransferToken,
     decode_profile_transfer_frame, encode_profile_transfer_frame,
-    privileged_request_from_arguments, ProfileTransferToken, BROKER_SWITCH, BROKER_TRANSFER_SWITCH,
-    PROFILE_TRANSFER_HEADER_BYTES, PROFILE_TRANSFER_MAGIC, PROFILE_TRANSFER_NONCE_BYTES,
-    PROFILE_TRANSFER_VERSION,
+    privileged_request_from_arguments,
 };
 #[cfg(test)]
 use runtime::bundled_runtime_version;
 use runtime::{
-    bundled_service_binary, parse_bundled_runtime_manifest, BundledRuntimeManifest,
-    MAX_BUNDLED_MANIFEST_BYTES,
+    BundledRuntimeManifest, MAX_BUNDLED_MANIFEST_BYTES, bundled_service_binary,
+    parse_bundled_runtime_manifest,
 };
-use startup_lifecycle::{finish_action_with_startup_receipts, StartupReceiptRestorer};
+use startup_lifecycle::{StartupReceiptRestorer, finish_action_with_startup_receipts};
 
 fn management_package_state_from_kind(
     kind: InstallationPreflightKind,
@@ -292,8 +292,8 @@ fn absent_status() -> SystemServiceStatus {
 }
 
 use migration::{
-    migrate_from_legacy, migration_activation_actions, remove_legacy_after_verification,
-    MigrationBackend, MigrationVerification,
+    MigrationBackend, MigrationVerification, migrate_from_legacy, migration_activation_actions,
+    remove_legacy_after_verification,
 };
 #[cfg(windows)]
 mod broker;

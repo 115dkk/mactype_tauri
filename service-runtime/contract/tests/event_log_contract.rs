@@ -1,6 +1,6 @@
 use mactype_service_contract::event_log::{
-    read_events, sanitize_text, EventArea, EventLogWriter, EventRecord, EventSeverity, EventSource,
-    EventThrottle, EVENT_LOG_BACKUPS, MAX_EVENT_LOG_BYTES,
+    EVENT_LOG_BACKUPS, EventArea, EventLogWriter, EventRecord, EventSeverity, EventSource,
+    EventThrottle, MAX_EVENT_LOG_BYTES, read_events, sanitize_text,
 };
 use std::{
     collections::BTreeMap,
@@ -39,9 +39,11 @@ fn three_hundred_writes_keep_bounded_rotation() {
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
     assert!(files.len() <= EVENT_LOG_BACKUPS + 1);
-    assert!(files
-        .iter()
-        .all(|entry| entry.metadata().unwrap().len() <= MAX_EVENT_LOG_BYTES));
+    assert!(
+        files
+            .iter()
+            .all(|entry| entry.metadata().unwrap().len() <= MAX_EVENT_LOG_BYTES)
+    );
     assert_eq!(read_events(&[path], 1)[0].ts, 299);
     fs::remove_dir_all(root).unwrap();
 }

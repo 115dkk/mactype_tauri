@@ -3,16 +3,16 @@ use std::io::Read;
 use std::path::Path;
 
 use mactype_service_contract::{
-    parse_runtime_activation_receipt, ParsedRuntimeActivationReceipt, RuntimeActivationPhase,
+    ParsedRuntimeActivationReceipt, RuntimeActivationPhase, parse_runtime_activation_receipt,
 };
 
 use super::{
-    validate_runtime_pointer, RuntimePointer, MAX_ACTIVATION_JOURNAL_BYTES, MAX_POINTER_BYTES,
+    MAX_ACTIVATION_JOURNAL_BYTES, MAX_POINTER_BYTES, RuntimePointer, validate_runtime_pointer,
 };
 use crate::profile_bridge::ProfileRuntimeBridge;
 use crate::runtime_installer::activation_transaction::RuntimeActivationTransaction;
 use crate::runtime_installer::{InstalledRuntime, RuntimeServiceBinding};
-use crate::storage::{atomic_write, read_bounded_regular_file, SetupError};
+use crate::storage::{SetupError, atomic_write, read_bounded_regular_file};
 
 impl RuntimeActivationTransaction<'_> {
     pub(in crate::runtime_installer) fn recover(

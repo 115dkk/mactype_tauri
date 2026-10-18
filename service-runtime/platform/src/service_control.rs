@@ -13,9 +13,9 @@ use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 use windows_sys::Win32::Foundation::ERROR_SUCCESS;
 use windows_sys::Win32::System::RemoteDesktop::WTSSESSION_NOTIFICATION;
 use windows_sys::Win32::System::Services::{
-    RegisterServiceCtrlHandlerExW, SetServiceStatus, StartServiceCtrlDispatcherW,
-    SERVICE_CONTROL_SESSIONCHANGE, SERVICE_STATUS, SERVICE_STATUS_HANDLE, SERVICE_TABLE_ENTRYW,
-    SERVICE_WIN32_OWN_PROCESS,
+    RegisterServiceCtrlHandlerExW, SERVICE_CONTROL_SESSIONCHANGE, SERVICE_STATUS,
+    SERVICE_STATUS_HANDLE, SERVICE_TABLE_ENTRYW, SERVICE_WIN32_OWN_PROCESS, SetServiceStatus,
+    StartServiceCtrlDispatcherW,
 };
 
 use crate::wide::wide_null;
@@ -173,7 +173,7 @@ unsafe extern "system" fn control_trampoline(
 
 #[cfg(test)]
 mod tests {
-    use super::{report_status, RawServiceStatus};
+    use super::{RawServiceStatus, report_status};
 
     #[test]
     fn reporting_before_registration_is_a_not_connected_error() {

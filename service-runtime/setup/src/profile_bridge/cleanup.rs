@@ -5,11 +5,11 @@ use std::path::Path;
 use mactype_service_contract::{GenerationId, MAX_PROFILE_BYTES};
 
 use super::{
-    MaterializedProfileClearError, MaterializedProfileObservation, ProfileRuntimeBridge,
-    GENERATED_PROFILE_NAME,
+    GENERATED_PROFILE_NAME, MaterializedProfileClearError, MaterializedProfileObservation,
+    ProfileRuntimeBridge,
 };
 use crate::storage::{
-    read_bounded_directory, read_bounded_regular_file, reject_reparse_ancestors, SetupError,
+    SetupError, read_bounded_directory, read_bounded_regular_file, reject_reparse_ancestors,
 };
 
 const GENERATED_PROFILE_TEMP_PREFIX: &str = ".MacType.ini.new-";

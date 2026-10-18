@@ -11,11 +11,11 @@ mod storage;
 mod windows;
 
 pub use install_bootstrap::{
-    parse_setup_command, protected_installer_broker_layout, run_install_bootstrap_with,
-    run_uninstall_owned_with, BootstrapBlocker, BootstrapOutcome, BootstrapPlan,
-    BootstrapPreflight, BootstrapProfileMode, BootstrapStartPolicy, ConflictObservation,
-    InstallBootstrapBackend, OpenServiceObservation, ProtectedProfileObservation,
-    ProtectedRuntimeObservation, SetupCommand, UninstallBackend, UninstallOutcome,
+    BootstrapBlocker, BootstrapOutcome, BootstrapPlan, BootstrapPreflight, BootstrapProfileMode,
+    BootstrapStartPolicy, ConflictObservation, InstallBootstrapBackend, OpenServiceObservation,
+    ProtectedProfileObservation, ProtectedRuntimeObservation, SetupCommand, UninstallBackend,
+    UninstallOutcome, parse_setup_command, protected_installer_broker_layout,
+    run_install_bootstrap_with, run_uninstall_owned_with,
 };
 pub use profile_store::ProfileStore;
 pub use runtime_installer::{

@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use mactype_service_contract::{
-    runtime_generation_id, sha256_digest, verify_runtime_manifest, ManifestError,
-    IMMUTABLE_RUNTIME_FILES,
+    IMMUTABLE_RUNTIME_FILES, ManifestError, runtime_generation_id, sha256_digest,
+    verify_runtime_manifest,
 };
 
 fn package() -> BTreeMap<String, Vec<u8>> {

@@ -6,21 +6,20 @@ mod broker_support;
 #[path = "support/inspector.rs"]
 mod inspector_support;
 
-use event_sink_support::{discard_events, RecordingEventSink};
+use event_sink_support::{RecordingEventSink, discard_events};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use mactype_service_contract::event_log::read_events;
 use mactype_service_contract::StructuredServiceError;
+use mactype_service_contract::event_log::read_events;
 use mactype_service_host::{
-    initialize_process_orchestration, subscribe_process_creation, BrokerDisposition, BrokerResult,
-    HostEvent, HostEventSink, InjectionBroker, InjectionRequest, InspectedProcess,
-    ProcessArchitecture, ProcessEventSource, ProcessFacts, ProcessIdentity, ProcessInspector,
-    ProcessOrchestrator, ProcessOutcome, RetryPolicy, RetryScheduler, SessionChange,
-    TargetLiveness, MAX_TRACKED_PROCESS_RESULTS, PROCESS_CREATION_QUERY,
-    TARGET_VANISHED_RESULT_CODE,
+    BrokerDisposition, BrokerResult, HostEvent, HostEventSink, InjectionBroker, InjectionRequest,
+    InspectedProcess, MAX_TRACKED_PROCESS_RESULTS, PROCESS_CREATION_QUERY, ProcessArchitecture,
+    ProcessEventSource, ProcessFacts, ProcessIdentity, ProcessInspector, ProcessOrchestrator,
+    ProcessOutcome, RetryPolicy, RetryScheduler, SessionChange, TARGET_VANISHED_RESULT_CODE,
+    TargetLiveness, initialize_process_orchestration, subscribe_process_creation,
 };
 
 use broker_support::ScriptedBroker;
@@ -589,12 +588,14 @@ fn process_result_memory_is_bounded_and_evicts_the_oldest_identity() {
         MAX_TRACKED_PROCESS_RESULTS
     );
     assert!(orchestrator.last_result(1, 1).is_none());
-    assert!(orchestrator
-        .last_result(
-            MAX_TRACKED_PROCESS_RESULTS as u32 + 1,
-            MAX_TRACKED_PROCESS_RESULTS as u64 + 1,
-        )
-        .is_some());
+    assert!(
+        orchestrator
+            .last_result(
+                MAX_TRACKED_PROCESS_RESULTS as u32 + 1,
+                MAX_TRACKED_PROCESS_RESULTS as u64 + 1,
+            )
+            .is_some()
+    );
 }
 
 #[test]
@@ -1273,7 +1274,9 @@ fn injection_summary_flushes_each_elapsed_window_and_resets_its_counts() {
         summaries[1].params.get("injected").map(String::as_str),
         Some("1")
     );
-    assert!(summaries
-        .iter()
-        .all(|summary| summary.params.get("failed").map(String::as_str) == Some("0")));
+    assert!(
+        summaries
+            .iter()
+            .all(|summary| summary.params.get("failed").map(String::as_str) == Some("0"))
+    );
 }

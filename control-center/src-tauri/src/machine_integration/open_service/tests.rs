@@ -7,11 +7,12 @@ mod status;
 mod windows_safety;
 
 use super::{
+    SystemServiceAction,
     action_failure::{
         ActionBlocker, ActionFailure, AppInitConflictContext, LegacyServiceBlockContext,
         LegacyTrayBlockContext, RollbackOutcome,
     },
-    operation_failure_metadata, SystemServiceAction,
+    operation_failure_metadata,
 };
 
 #[test]

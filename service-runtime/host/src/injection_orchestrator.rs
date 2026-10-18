@@ -1,7 +1,7 @@
 mod model;
 
-use crate::target_validation::DeferralReason;
 use crate::TargetLifecycle;
+use crate::target_validation::DeferralReason;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
@@ -17,8 +17,8 @@ use crate::{
 };
 
 pub use model::{
-    DeferralPolicy, DeferredTarget, ProcessAttemptRecord, ProcessOutcome, RetryPolicy,
-    RetryScheduler, SessionChange, MAX_DEFERRED_TARGETS, MAX_TRACKED_PROCESS_RESULTS,
+    DeferralPolicy, DeferredTarget, MAX_DEFERRED_TARGETS, MAX_TRACKED_PROCESS_RESULTS,
+    ProcessAttemptRecord, ProcessOutcome, RetryPolicy, RetryScheduler, SessionChange,
 };
 
 /// The bounded target-result code recorded when an untrustworthy cleanup

@@ -3,8 +3,8 @@
 use std::fs;
 
 use mactype_service_contract::{
-    owned_service_identity, service_configuration_drift, service_image_matches_protected_contract,
-    ObservedServiceConfiguration,
+    ObservedServiceConfiguration, owned_service_identity, service_configuration_drift,
+    service_image_matches_protected_contract,
 };
 
 #[test]

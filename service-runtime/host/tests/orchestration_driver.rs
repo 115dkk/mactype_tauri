@@ -17,11 +17,11 @@ use mactype_service_contract::{
     ComponentReadiness, HealthReport, HealthState, StructuredServiceError,
 };
 use mactype_service_host::{
-    initialize_process_orchestration, initialize_process_orchestration_with_observer_recovery,
     BrokerDisposition, BrokerResult, HealthPublisher, InitializedRuntime, InjectionBroker,
     InjectionRequest, InspectedProcess, ObserverRecoveryPolicy, ProcessArchitecture,
     ProcessEventSource, ProcessFacts, ProcessIdentity, ProcessInspector, RuntimeInitializer,
-    ServiceRuntime, SessionChange, StopSignal, TargetLiveness,
+    ServiceRuntime, SessionChange, StopSignal, TargetLiveness, initialize_process_orchestration,
+    initialize_process_orchestration_with_observer_recovery,
 };
 
 use inspector_support::{InspectorResponse, ScriptedInspector};
@@ -353,9 +353,11 @@ fn observer_failure_resubscribes_and_reconciles_the_missed_snapshot() {
                 && report.readiness.observer == ComponentReadiness::Failed
         })
         .unwrap();
-    assert!(reports[degraded_index + 1..]
-        .iter()
-        .any(|report| report.health == HealthState::Ready));
+    assert!(
+        reports[degraded_index + 1..]
+            .iter()
+            .any(|report| report.health == HealthState::Ready)
+    );
 }
 
 #[test]
@@ -794,9 +796,11 @@ fn conflicting_mactype_module_stays_process_local_and_global_ready() {
         .unwrap();
 
     let reports = recorder.reports();
-    assert!(reports
-        .iter()
-        .all(|report| report.health != HealthState::Degraded));
+    assert!(
+        reports
+            .iter()
+            .all(|report| report.health != HealthState::Degraded)
+    );
     let latest = reports
         .iter()
         .rev()
@@ -845,9 +849,11 @@ fn invalid_helper_response_degrades_its_generation_then_next_success_recovers_re
     let error = degraded.last_error.as_ref().unwrap();
     assert_eq!(error.code, "injection-helper-response-integrity-unknown");
     assert!(error.message.contains("pid=42"));
-    assert!(error
-        .message
-        .contains(&format!("generation={RUNTIME_GENERATION}")));
+    assert!(
+        error
+            .message
+            .contains(&format!("generation={RUNTIME_GENERATION}"))
+    );
     let latest = reports
         .iter()
         .rev()

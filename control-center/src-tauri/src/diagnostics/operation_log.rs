@@ -225,7 +225,7 @@ fn append_synchronously_at(root: &Path, record: &EventRecord) -> Result<PathBuf,
     let incoming = u64::try_from(line.len()).map_err(|error| error.to_string())?;
     if current
         .checked_add(incoming)
-        .map_or(true, |total| total > MAX_EVENT_LOG_BYTES)
+        .is_none_or(|total| total > MAX_EVENT_LOG_BYTES)
     {
         return Err("event record exceeds the event-log byte limit".to_owned());
     }
@@ -322,7 +322,7 @@ fn valid_event(record: &EventRecord) -> bool {
         && record
             .detail
             .as_ref()
-            .map_or(true, |detail| detail.len() <= MAX_EVENT_DETAIL_BYTES)
+            .is_none_or(|detail| detail.len() <= MAX_EVENT_DETAIL_BYTES)
 }
 
 fn convert_operation(entry: OperationLogEntry) -> EventRecord {

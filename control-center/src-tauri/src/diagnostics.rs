@@ -240,12 +240,12 @@ pub(crate) fn list_events(
             filter
                 .severities
                 .as_ref()
-                .map_or(true, |values| values.contains(&event.severity))
+                .is_none_or(|values| values.contains(&event.severity))
                 && filter
                     .areas
                     .as_ref()
-                    .map_or(true, |values| values.contains(&event.area))
-                && filter.since_unix_ms.map_or(true, |since| event.ts >= since)
+                    .is_none_or(|values| values.contains(&event.area))
+                && filter.since_unix_ms.is_none_or(|since| event.ts >= since)
         })
         .collect::<Vec<_>>();
     let start = events.len().saturating_sub(maximum);

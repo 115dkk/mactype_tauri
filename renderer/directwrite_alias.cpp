@@ -116,19 +116,20 @@ void AppendLocalizedFamilies(
 void ReadSourceFamilyNames(
 	IDWriteFontSet* systemFontSet,
 	UINT32 index,
-	std::vector<std::wstring>& names)
+	SourceFamilyNames& names)
 {
-	names.clear();
-	for (DWRITE_FONT_PROPERTY_ID const familyProperty : kFamilyPropertyIds)
-	{
+	names = {};
+	auto const append = [&](DWRITE_FONT_PROPERTY_ID property,
+		std::vector<std::wstring>& group) {
 		BOOL exists = FALSE;
-		CComPtr<IDWriteLocalizedStrings> familyNames;
-		if (FAILED(systemFontSet->GetPropertyValues(
-				index, familyProperty, &exists, &familyNames)) ||
-			!exists || familyNames == nullptr)
-			continue;
-		AppendLocalizedFamilies(familyNames, names);
-	}
+		CComPtr<IDWriteLocalizedStrings> localized;
+		if (SUCCEEDED(systemFontSet->GetPropertyValues(
+				index, property, &exists, &localized)) && exists && localized != nullptr)
+			AppendLocalizedFamilies(localized, group);
+	};
+	append(DWRITE_FONT_PROPERTY_ID_WIN32_FAMILY_NAME, names.win32);
+	append(DWRITE_FONT_PROPERTY_ID_WEIGHT_STRETCH_STYLE_FAMILY_NAME, names.weightStretchStyle);
+	append(DWRITE_FONT_PROPERTY_ID_TYPOGRAPHIC_FAMILY_NAME, names.typographic);
 }
 
 struct FaceTraits
@@ -627,7 +628,7 @@ BuildStatus Build(
 			sourceReference->GetLocality() != DWRITE_LOCALITY_LOCAL)
 			continue;
 
-		std::vector<std::wstring> sourceNames;
+		SourceFamilyNames sourceNames;
 		ReadSourceFamilyNames(systemFontSet, index, sourceNames);
 		FamilyAliasResolution familyResolution;
 		if (!ResolveFamilyAliases(sourceNames, *snapshot, familyResolution))
@@ -635,7 +636,7 @@ BuildStatus Build(
 			if (FAILED(nativeFaces.Keep(index, sourceReference)))
 				return BuildStatus::addFontFailed;
 			if (!sourceNames.empty())
-				observations.unresolved.push_back({index, std::move(sourceNames)});
+				observations.unresolved.push_back({index, sourceNames.All()});
 			continue;
 		}
 		resolvedRule = true;

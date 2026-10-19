@@ -141,48 +141,87 @@ bool PlanSyntheticBoldSlots(
 	}
 }
 
-bool ResolveFallbackAlias(
-	const std::vector<std::wstring>& mappedFontNames,
+bool SourceFamilyNames::empty() const noexcept
+{
+	return win32.empty() && weightStretchStyle.empty() && typographic.empty();
+}
+
+std::vector<std::wstring> SourceFamilyNames::All() const
+{
+	std::vector<std::wstring> names;
+	for (auto const* group : {&win32, &weightStretchStyle, &typographic})
+	{
+		for (auto const& name : *group)
+		{
+			if (!name.empty() && !ContainsName(names, name))
+				names.push_back(name);
+		}
+	}
+	return names;
+}
+
+bool ResolveFamilyAliases(
+	const SourceFamilyNames& sourceNames,
 	const renderer::font_substitution::Snapshot& substitutions,
-	FallbackAliasResolution& resolution) noexcept
+	FamilyAliasResolution& resolution) noexcept
 {
 	try
 	{
-		FallbackAliasResolution candidate;
-		bool matched = false;
-		for (const std::wstring& name : mappedFontNames)
+		FamilyAliasResolution candidate;
+		std::vector<std::wstring> const* const groups[] = {
+			&sourceNames.win32,
+			&sourceNames.weightStretchStyle,
+			&sourceNames.typographic,
+		};
+		FallbackAliasResolution matches[3];
+		for (std::size_t index = 0; index < 3; ++index)
 		{
-			if (name.empty())
-				continue;
-			renderer::font_substitution::Resolution const resolved =
-				substitutions.Resolve({name, DEFAULT_CHARSET});
-			if (resolved.status ==
-				renderer::font_substitution::ResolutionStatus::noMatch)
-				continue;
-			if (resolved.status !=
-					renderer::font_substitution::ResolutionStatus::applied ||
-				!resolved.matched)
+			auto& match = matches[index];
+			for (auto const& name : *groups[index])
 			{
-				resolution = {};
-				return false;
+				if (name.empty())
+					continue;
+				auto const resolved = substitutions.Resolve({name, DEFAULT_CHARSET});
+				if (resolved.status == renderer::font_substitution::ResolutionStatus::noMatch)
+					continue;
+				if (resolved.status != renderer::font_substitution::ResolutionStatus::applied ||
+					!resolved.matched ||
+					(!match.matchedSourceName.empty() &&
+						!EqualOrdinalIgnoreCase(match.replacementFamily, resolved.family)))
+				{
+					resolution = {};
+					return false;
+				}
+				if (match.matchedSourceName.empty())
+				{
+					match.matchedSourceName = name;
+					match.replacementFamily = resolved.family;
+				}
 			}
-			if (!matched)
+			if (candidate.matchedSourceName.empty() && !match.matchedSourceName.empty())
 			{
-				candidate.matchedSourceName = name;
-				candidate.replacementFamily = resolved.family;
-				matched = true;
-			}
-			else if (!EqualOrdinalIgnoreCase(
-					candidate.replacementFamily, resolved.family))
-			{
-				resolution = {};
-				return false;
+				candidate.matchedSourceName = match.matchedSourceName;
+				candidate.replacementFamily = match.replacementFamily;
 			}
 		}
-		if (!matched)
+		if (candidate.matchedSourceName.empty())
 		{
 			resolution = {};
 			return false;
+		}
+		for (std::size_t index = 0; index < 3; ++index)
+		{
+			auto const& match = matches[index];
+			// Exclude every localized spelling of a differently mapped family.
+			// Keeping an unmatched spelling would leak a subfamily into that family.
+			if (!match.matchedSourceName.empty() &&
+				!EqualOrdinalIgnoreCase(candidate.replacementFamily, match.replacementFamily))
+				continue;
+			for (auto const& name : *groups[index])
+			{
+				if (!name.empty() && !ContainsName(candidate.sourceAliases, name))
+					candidate.sourceAliases.push_back(name);
+			}
 		}
 		resolution = std::move(candidate);
 		return true;
@@ -194,71 +233,20 @@ bool ResolveFallbackAlias(
 	}
 }
 
-bool ResolveFamilyAliases(
-	const std::vector<std::wstring>& sourceAliases,
+bool ResolveFallbackAlias(
+	const SourceFamilyNames& mappedFontNames,
 	const renderer::font_substitution::Snapshot& substitutions,
-	FamilyAliasResolution& resolution) noexcept
+	FallbackAliasResolution& resolution) noexcept
 {
-	try
-	{
-		FamilyAliasResolution candidate;
-		for (const std::wstring& alias : sourceAliases)
-		{
-			if (alias.empty())
-				continue;
-			bool duplicate = false;
-			for (const std::wstring& existing : candidate.sourceAliases)
-			{
-				if (EqualOrdinalIgnoreCase(existing, alias))
-				{
-					duplicate = true;
-					break;
-				}
-			}
-			if (!duplicate)
-				candidate.sourceAliases.push_back(alias);
-		}
-
-		bool matched = false;
-		for (const std::wstring& alias : candidate.sourceAliases)
-		{
-			renderer::font_substitution::Resolution const resolved =
-				substitutions.Resolve({alias, DEFAULT_CHARSET});
-			if (resolved.status ==
-				renderer::font_substitution::ResolutionStatus::noMatch)
-				continue;
-			if (resolved.status !=
-				renderer::font_substitution::ResolutionStatus::applied ||
-				!resolved.matched)
-			{
-				resolution = {};
-				return false;
-			}
-			if (!matched)
-			{
-				candidate.replacementFamily = resolved.family;
-				matched = true;
-			}
-			else if (!EqualOrdinalIgnoreCase(
-				candidate.replacementFamily, resolved.family))
-			{
-				resolution = {};
-				return false;
-			}
-		}
-		if (!matched || candidate.sourceAliases.empty())
-		{
-			resolution = {};
-			return false;
-		}
-		resolution = std::move(candidate);
-		return true;
-	}
-	catch (...)
+	FamilyAliasResolution family;
+	if (!ResolveFamilyAliases(mappedFontNames, substitutions, family))
 	{
 		resolution = {};
 		return false;
 	}
+	resolution.matchedSourceName = std::move(family.matchedSourceName);
+	resolution.replacementFamily = std::move(family.replacementFamily);
+	return true;
 }
 
 } // namespace directwrite_alias

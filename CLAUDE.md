@@ -91,8 +91,10 @@ below wherever the two conflict.
   and Win32 family names. If any name selects a substitution, the immutable
   alias collection must preserve every non-conflicting name for that same
   face. Never collapse `Malgun Gothic`, `맑은 고딕`, and their Semilight names
-  into the one spelling that matched the profile; conflicting alias rules fail
-  closed to the native face.
+  into the one spelling that matched the profile. An explicit Win32 subfamily
+  rule takes precedence over WWS and typographic family rules; a differently
+  mapped group contributes none of its localized aliases to that face.
+  Conflicting localized rules within one group fail closed to the native face.
 - The alias collection must be the first answer. A hooked factory's vtable is
   patched before the alias build starts, so the first
   `GetSystemFontCollection`, `GetSystemFontSet` or system-fallback call an

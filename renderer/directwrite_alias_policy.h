@@ -8,8 +8,21 @@
 
 namespace directwrite_alias {
 
+// Localized names remain grouped by family model. A Win32 subfamily rule
+// takes precedence over a broader WWS or typographic family rule.
+struct SourceFamilyNames final
+{
+	std::vector<std::wstring> win32;
+	std::vector<std::wstring> weightStretchStyle;
+	std::vector<std::wstring> typographic;
+
+	bool empty() const noexcept;
+	std::vector<std::wstring> All() const;
+};
+
 struct FamilyAliasResolution final
 {
+	std::wstring matchedSourceName;
 	std::wstring replacementFamily;
 	std::vector<std::wstring> sourceAliases;
 };
@@ -21,12 +34,12 @@ struct FallbackAliasResolution final
 };
 
 bool ResolveFamilyAliases(
-	const std::vector<std::wstring>& sourceAliases,
+	const SourceFamilyNames& sourceNames,
 	const renderer::font_substitution::Snapshot& substitutions,
 	FamilyAliasResolution& resolution) noexcept;
 
 bool ResolveFallbackAlias(
-	const std::vector<std::wstring>& mappedFontNames,
+	const SourceFamilyNames& mappedFontNames,
 	const renderer::font_substitution::Snapshot& substitutions,
 	FallbackAliasResolution& resolution) noexcept;
 

@@ -107,6 +107,69 @@ void TestSyntheticBoldSlots()
     }).empty(), "a family without any alias received a synthesized bold");
 }
 
+void TestFamilyModelPrecedence()
+{
+    directwrite_alias::SourceFamilyNames names{
+        {L"Malgun Gothic Semilight", L"맑은 고딕 Semilight"},
+        {L"Malgun Gothic", L"맑은 고딕"},
+        {L"Malgun Gothic", L"맑은 고딕"},
+    };
+    auto rules = renderer::font_substitution::Snapshot::Build({
+        Rule(L"맑은 고딕", L"Pretendard Variable Medium"),
+        Rule(L"맑은 고딕 Semilight", L"Pretendard Variable SemiBold"),
+    }, 5);
+    directwrite_alias::FamilyAliasResolution family;
+    Require(directwrite_alias::ResolveFamilyAliases(names, *rules, family) &&
+        family.replacementFamily == L"Pretendard Variable SemiBold" &&
+        family.sourceAliases == names.win32,
+        "a specific Win32 rule did not exclude every differently mapped family spelling");
+    directwrite_alias::FallbackAliasResolution fallback;
+    Require(directwrite_alias::ResolveFallbackAlias(names, *rules, fallback) &&
+        fallback.matchedSourceName == L"맑은 고딕 Semilight" &&
+        fallback.replacementFamily == family.replacementFamily,
+        "fallback and collection disagree on a specific Win32 family rule");
+
+    auto broadOnly = renderer::font_substitution::Snapshot::Build({
+        Rule(L"맑은 고딕", L"Pretendard Variable Medium"),
+    }, 6);
+    Require(directwrite_alias::ResolveFamilyAliases(names, *broadOnly, family) &&
+        family.replacementFamily == L"Pretendard Variable Medium" &&
+        family.sourceAliases == names.All(),
+        "a broad family rule failed to preserve an unmapped Win32 subfamily");
+
+    auto localizedConflict = renderer::font_substitution::Snapshot::Build({
+        Rule(L"맑은 고딕 Semilight", L"Pretendard Variable SemiBold"),
+        Rule(L"Malgun Gothic", L"Noto Sans KR"),
+        Rule(L"맑은 고딕", L"Pretendard Variable Medium"),
+    }, 7);
+    Require(!directwrite_alias::ResolveFamilyAliases(names, *localizedConflict, family) &&
+        family.sourceAliases.empty() && family.replacementFamily.empty() &&
+        !directwrite_alias::ResolveFallbackAlias(names, *localizedConflict, fallback) &&
+        fallback.matchedSourceName.empty(),
+        "family precedence concealed conflicting localized rules in a broader group");
+
+    auto cyclicBroad = renderer::font_substitution::Snapshot::Build({
+        Rule(L"맑은 고딕 Semilight", L"Pretendard Variable SemiBold"),
+        Rule(L"맑은 고딕", L"Cycle"),
+        Rule(L"Cycle", L"맑은 고딕"),
+    }, 8);
+    Require(!directwrite_alias::ResolveFamilyAliases(names, *cyclicBroad, family),
+        "family precedence concealed a cyclic broader rule");
+
+    names.win32.clear();
+    names.weightStretchStyle = {L"WWS Name"};
+    auto wwsRules = renderer::font_substitution::Snapshot::Build({
+        Rule(L"WWS Name", L"WWS Replacement"),
+        Rule(L"맑은 고딕", L"Typographic Replacement"),
+    }, 9);
+    Require(directwrite_alias::ResolveFamilyAliases(names, *wwsRules, family) &&
+        family.replacementFamily == L"WWS Replacement" &&
+        family.sourceAliases == names.weightStretchStyle,
+        "a typographic rule overrode the more specific WWS family rule");
+    Require(!directwrite_alias::ResolveFamilyAliases({}, *wwsRules, family),
+        "empty source names produced an alias");
+}
+
 } // namespace
 
 int main()
@@ -116,7 +179,7 @@ int main()
     }, 1);
     directwrite_alias::FamilyAliasResolution resolution;
     Require(directwrite_alias::ResolveFamilyAliases(
-        {L"Malgun Gothic", L"맑은 고딕", L"MALGUN GOTHIC"},
+        {{L"Malgun Gothic", L"맑은 고딕", L"MALGUN GOTHIC"}, {}, {}},
         *substitutions, resolution),
         "a localized family rule did not resolve its DirectWrite face");
     Require(resolution.replacementFamily == L"Pretendard Variable" &&
@@ -129,12 +192,12 @@ int main()
         Rule(L"맑은 고딕", L"Pretendard Variable"),
         Rule(L"맑은 고딕 Semilight", L"Pretendard Variable"),
     }, 2);
-    Require(directwrite_alias::ResolveFamilyAliases({
+    Require(directwrite_alias::ResolveFamilyAliases({{
         L"Malgun Gothic Semilight",
         L"맑은 고딕 Semilight",
         L"Malgun Gothic",
         L"맑은 고딕",
-    }, *semilight, resolution) && resolution.sourceAliases.size() == 4,
+    }, {}, {}}, *semilight, resolution) && resolution.sourceAliases.size() == 4,
         "a semilight face lost its Win32 or typographic family aliases");
 
     auto conflicting = renderer::font_substitution::Snapshot::Build({
@@ -142,7 +205,7 @@ int main()
         Rule(L"맑은 고딕", L"Pretendard Variable"),
     }, 3);
     Require(!directwrite_alias::ResolveFamilyAliases(
-        {L"Malgun Gothic", L"맑은 고딕"}, *conflicting, resolution),
+        {{L"Malgun Gothic", L"맑은 고딕"}, {}, {}}, *conflicting, resolution),
         "conflicting localized rules silently selected one replacement");
 
     auto cycle = renderer::font_substitution::Snapshot::Build({
@@ -150,25 +213,26 @@ int main()
         Rule(L"Pretendard Variable", L"맑은 고딕"),
     }, 4);
     Require(!directwrite_alias::ResolveFamilyAliases(
-        {L"Malgun Gothic", L"맑은 고딕"}, *cycle, resolution),
+        {{L"Malgun Gothic", L"맑은 고딕"}, {}, {}}, *cycle, resolution),
         "a cyclic substitution produced a DirectWrite alias");
 
     directwrite_alias::FallbackAliasResolution fallback;
     Require(directwrite_alias::ResolveFallbackAlias(
-        {L"Malgun Gothic", L"맑은 고딕"}, *substitutions, fallback) &&
+        {{L"Malgun Gothic", L"맑은 고딕"}, {}, {}}, *substitutions, fallback) &&
         fallback.matchedSourceName == L"맑은 고딕" &&
         fallback.replacementFamily == L"Pretendard Variable",
         "fallback selection did not preserve the name that matched the snapshot");
     Require(!directwrite_alias::ResolveFallbackAlias(
-        {L"Segoe UI", L"Segoe UI Variable"}, *substitutions, fallback),
+        {{L"Segoe UI", L"Segoe UI Variable"}, {}, {}}, *substitutions, fallback),
         "fallback selection matched a family without a substitution rule");
     Require(!directwrite_alias::ResolveFallbackAlias(
-        {L"Malgun Gothic", L"맑은 고딕"}, *conflicting, fallback),
+        {{L"Malgun Gothic", L"맑은 고딕"}, {}, {}}, *conflicting, fallback),
         "fallback selection accepted conflicting names for one mapped face");
     Require(!directwrite_alias::ResolveFallbackAlias(
-        {L"Malgun Gothic", L"맑은 고딕"}, *cycle, fallback),
+        {{L"Malgun Gothic", L"맑은 고딕"}, {}, {}}, *cycle, fallback),
         "fallback selection accepted a cyclic substitution");
 
     TestSyntheticBoldSlots();
+    TestFamilyModelPrecedence();
     return 0;
 }

@@ -48,6 +48,15 @@
 #      are self-contained and model-invocable, so nothing has to be unlocked
 #      before the session can run them. .github/audit-skills on
 #      codex/alpha-plus-dll is no longer read.
+#   5. A push path to codex/alpha-plus-dll for the commit-baseline job.
+#      TECH_DEBT_AUDIT.md is committed to that branch after every audit and
+#      is the next audit's baseline: tech-debt-audit reads the file in the
+#      repository root as the previous run, keeps its TD-NN IDs and lists
+#      what was resolved since. The job checks out with the RELEASE_DEPLOY_KEY
+#      secret when the repository has one (a deploy key gets past a ruleset
+#      that requires checks) and with the workflow token otherwise. Neither
+#      credential is given to the audit job, where the Claude session has a
+#      shell.
 #
 # The job provisions the whole buildable surface, renderer included, because
 # on this branch the renderer is a modified fork rather than an inherited
@@ -320,6 +329,13 @@ jobs:
 
       - name: Run combined audit
         run: |
+          # TECH_DEBT_AUDIT.md in the checkout is the previous audit, which
+          # the commit-baseline job committed (requirement 5). The skill reads
+          # it as its baseline and overwrites it, so remember its blob: a
+          # session that never writes a new report must not pass on the old
+          # file.
+          BASELINE_BLOB=$(git hash-object TECH_DEBT_AUDIT.md 2>/dev/null || echo none)
+
           # Any of these outranks federation in the CLI and would bill
           # something other than the federated service account.
           unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN
@@ -468,9 +484,11 @@ jobs:
 
           PART 2: Tech Debt Audit
           Run /115dkk-skills:tech-debt-audit.
-          Write the deliverable to TECH_DEBT_AUDIT.md in the repository
-          root as the skill specifies, with severity, effort estimates, and
-          its 'looks bad but is fine' section.
+          TECH_DEBT_AUDIT.md in the repository root, when present, is the
+          previous audit, committed by this workflow: read it as the
+          skill's baseline. Write the new deliverable over it as the skill
+          specifies, with severity, effort estimates, and its 'looks bad
+          but is fine' section.
           " > combined-audit-report.md 2>&1
           CLAUDE_EXIT=$?
           set -e
@@ -498,6 +516,12 @@ jobs:
               exit 1
             fi
           done
+
+          if [ "$(git hash-object TECH_DEBT_AUDIT.md)" = "$BASELINE_BLOB" ]; then
+            echo "::error::The audit session left the baseline TECH_DEBT_AUDIT.md unchanged."
+            cat combined-audit-report.md
+            exit 1
+          fi
 
       - name: Create GitHub Issue or summary
         env:
@@ -645,3 +669,63 @@ jobs:
           git tag "$AUDIT_TAG"
           git push origin "$AUDIT_TAG"
           echo "Tagged: $AUDIT_TAG"
+
+  commit-baseline:
+    # Commits this run's TECH_DEBT_AUDIT.md to codex/alpha-plus-dll as the
+    # next audit's baseline (requirement 5 in the header). It runs only after
+    # the audit job finished, deliverables checked, issue filed and
+    # checkpoint tagged.
+    needs: audit
+    runs-on: ubuntu-latest
+    # Write access for the token fallback; with RELEASE_DEPLOY_KEY set the
+    # push goes over SSH with that key instead.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.AUDIT_REF }}
+          # Full history, so the rebase onto a branch that moved meanwhile has
+          # its merge base.
+          fetch-depth: 0
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+          persist-credentials: true
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: "alpha-audit-report-${{ github.run_id }}"
+          path: ${{ runner.temp }}/audit-report
+
+      - name: Commit TECH_DEBT_AUDIT.md as the next baseline
+        run: |
+          set -euo pipefail
+
+          cp "$RUNNER_TEMP/audit-report/TECH_DEBT_AUDIT.md" TECH_DEBT_AUDIT.md
+          if git ls-files --error-unmatch TECH_DEBT_AUDIT.md >/dev/null 2>&1 \
+            && git diff --quiet -- TECH_DEBT_AUDIT.md; then
+            echo "TECH_DEBT_AUDIT.md is unchanged; nothing to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add TECH_DEBT_AUDIT.md
+          # [skip ci] keeps this push from starting the branch's workflows on
+          # a commit that only touches this report. The audit's change
+          # detection ignores *.md, so it does not trigger the next audit
+          # either.
+          git commit -m "docs(audit): refresh the tech debt audit baseline [skip ci]" \
+            -m "TECH_DEBT_AUDIT.md from Alpha Audit run ${{ github.run_id }}, committed as the next audit's baseline."
+
+          for attempt in 1 2 3; do
+            git fetch origin "$AUDIT_REF"
+            if git rebase FETCH_HEAD && git push origin "HEAD:$AUDIT_REF"; then
+              echo "Committed the baseline as $(git rev-parse HEAD)."
+              exit 0
+            fi
+            git rebase --abort 2>/dev/null || true
+            echo "::warning::Baseline push attempt ${attempt} failed; retrying."
+            sleep 5
+          done
+          echo "::error::Could not push TECH_DEBT_AUDIT.md to $AUDIT_REF after 3 attempts."
+          exit 1

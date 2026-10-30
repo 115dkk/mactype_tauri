@@ -11,34 +11,24 @@
 # codex/alpha-plus-dll: the tree it checks out and the change-detection list
 # in .github/audit-pathspecs.txt. Nothing here analyses main. The audit skills
 # are not vendored anywhere: they come from the 115dkk-skills plugin
-# (requirement 4).
+# (requirement 3).
 #
 # Like every other fork CI workflow, this file must never be cherry-picked
 # onto codex/upstream-pr-prep.
 #
 # Requirements:
-#   1. A Claude Console federation rule for GitHub Actions (Settings >
-#      Workload identity > Connect workload). The session pays from Claude
-#      API credit through Workload Identity Federation: this run's GitHub
-#      OIDC token is exchanged for a short-lived Anthropic token, so no key
-#      is stored. Match the rule to this file and nothing wider:
-#        subject   repo:115dkk/mactype_tauri:ref:refs/heads/main
-#        claims    repository_owner_id = 33408534
-#                  workflow_ref = 115dkk/mactype_tauri/.github/workflows/alpha-audit.yml@refs/heads/main
-#        audience  left empty (https://api.anthropic.com)
-#        CEL       claims.event_name in ["schedule", "workflow_dispatch"]
-#      Leave the token lifetime at its default: the GitHub token lives about
-#      five minutes and Anthropic caps its own token at twice that, which
-#      is why the audit step keeps rewriting the token file.
-#   2. Repository Actions variables (identifiers, not secrets):
-#      ANTHROPIC_FEDERATION_RULE_ID (fdrl_...), ANTHROPIC_ORGANIZATION_ID
-#      (the organization UUID) and ANTHROPIC_SERVICE_ACCOUNT_ID (svac_...).
-#      ANTHROPIC_WORKSPACE_ID only when the rule covers more than one
-#      workspace. ALPHA_AUDIT_MODEL only to replace the default
-#      claude-mythos-5-1, for example when the organization has no access
-#      to it.
-#   3. Actions workflow permissions set to "Read and write permissions".
-#   4. Nothing vendored for the skills. Each run installs the 115dkk-skills
+#   1. CLAUDE_CODE_OAUTH_TOKEN under repository Actions secrets, made with
+#      `claude setup-token` while signed in to the subscription account
+#      enrolled in Anthropic's Cyber Verification Program (CVP). The session
+#      runs on claude-mythos-5-1 and draws on that subscription. The code
+#      under audit is a hooking and injection engine, and the run of
+#      2026-10-22, on claude-fable-5-1 through API credit, was stopped
+#      partway by Fable's [cyber] safeguard; CVP relaxes those safeguards for
+#      verified defenders. The ANTHROPIC_* and ALPHA_AUDIT_MODEL repository
+#      variables and the Console federation rule for this file date from the
+#      API period and are no longer read.
+#   2. Actions workflow permissions set to "Read and write permissions".
+#   3. Nothing vendored for the skills. Each run installs the 115dkk-skills
 #      plugin from the default branch of its marketplace, 115dkk/agent-skills
 #      (public, so no token), and the prompt calls
 #      /115dkk-skills:improve-codebase-architecture and
@@ -48,7 +38,7 @@
 #      are self-contained and model-invocable, so nothing has to be unlocked
 #      before the session can run them. .github/audit-skills on
 #      codex/alpha-plus-dll is no longer read.
-#   5. A push path to codex/alpha-plus-dll for the commit-baseline job.
+#   4. A push path to codex/alpha-plus-dll for the commit-baseline job.
 #      TECH_DEBT_AUDIT.md is committed to that branch after every audit and
 #      is the next audit's baseline: tech-debt-audit reads the file in the
 #      repository root as the previous run, keeps its TD-NN IDs and lists
@@ -160,87 +150,9 @@ jobs:
         # Git Bash, which is also what Claude Code's own shell tool reaches
         # for on Windows. Every run step below stays POSIX-shaped.
         shell: bash
-    # Only this job asks GitHub for an OIDC token. A job-level block replaces
-    # the workflow-level one, so the two grants it already needed are repeated.
-    permissions:
-      contents: write
-      issues: write
-      id-token: write
     env:
-      ANTHROPIC_FEDERATION_RULE_ID: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
-      ANTHROPIC_ORGANIZATION_ID: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
-      ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
-      ANTHROPIC_WORKSPACE_ID: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
-      AUDIT_MODEL: ${{ vars.ALPHA_AUDIT_MODEL || 'claude-mythos-5-1' }}
+      AUDIT_MODEL: claude-mythos-5-1
     steps:
-      # Ahead of the hour of provisioning below, so a missing variable, a rule
-      # that does not match this run or a model the organization cannot use
-      # fails in seconds instead of after the build. Its exchange also passes
-      # the Console's connection test.
-      - name: Verify workload identity federation
-        run: |
-          set -euo pipefail
-
-          for name in ANTHROPIC_FEDERATION_RULE_ID ANTHROPIC_ORGANIZATION_ID ANTHROPIC_SERVICE_ACCOUNT_ID; do
-            if [ -z "${!name:-}" ]; then
-              echo "::error::Repository variable $name is not set. See Requirements at the top of alpha-audit.yml."
-              exit 1
-            fi
-          done
-
-          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
-            echo "::error::GitHub offered no OIDC token. The audit job needs the id-token: write permission."
-            exit 1
-          fi
-
-          # Only ever applied to a JWT and an opaque access token, neither of
-          # which can hold a quote or an escape.
-          json_string() {
-            tr -d '\r\n' | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p"
-          }
-
-          identity_token=$(curl -fsS --retry 3 \
-            -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://api.anthropic.com" | json_string value)
-          if [ -z "$identity_token" ]; then
-            echo "::error::GitHub's OIDC response carried no token."
-            exit 1
-          fi
-          echo "::add-mask::$identity_token"
-
-          workspace_field=""
-          if [ -n "${ANTHROPIC_WORKSPACE_ID:-}" ]; then
-            workspace_field=$(printf ', "workspace_id": "%s"' "$ANTHROPIC_WORKSPACE_ID")
-          fi
-          response=$(mktemp)
-          status=$(curl -sS -o "$response" -w '%{http_code}' https://api.anthropic.com/v1/oauth/token \
-            -H "content-type: application/json" \
-            -d "$(printf '{"grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer", "assertion": "%s", "federation_rule_id": "%s", "organization_id": "%s", "service_account_id": "%s"%s}' \
-              "$identity_token" "$ANTHROPIC_FEDERATION_RULE_ID" "$ANTHROPIC_ORGANIZATION_ID" \
-              "$ANTHROPIC_SERVICE_ACCOUNT_ID" "$workspace_field")")
-          access_token=$(json_string access_token < "$response")
-          if [ "$status" != 200 ] || [ -z "$access_token" ]; then
-            echo "::error::The federation exchange was refused (HTTP $status). The Console records the reason under Workload identity > Authentication events."
-            cat "$response"
-            exit 1
-          fi
-          echo "::add-mask::$access_token"
-
-          # A one-line request on the audit model, so an organization that
-          # cannot use it finds out now. Costs a fraction of a cent.
-          status=$(curl -sS -o "$response" -w '%{http_code}' https://api.anthropic.com/v1/messages \
-            -H "authorization: Bearer $access_token" \
-            -H "anthropic-version: 2023-06-01" \
-            -H "content-type: application/json" \
-            -d "$(printf '{"model": "%s", "max_tokens": 128, "output_config": {"effort": "low"}, "messages": [{"role": "user", "content": "Reply with OK."}]}' "$AUDIT_MODEL")")
-          if [ "$status" != 200 ]; then
-            echo "::error::$AUDIT_MODEL refused a one-line request (HTTP $status). If the organization cannot use it, set the ALPHA_AUDIT_MODEL repository variable, for example to claude-fable-5-1."
-            cat "$response"
-            exit 1
-          fi
-          rm -f "$response"
-          echo "Federation exchange succeeded and $AUDIT_MODEL answered."
-
       - uses: actions/checkout@v7
         with:
           ref: codex/alpha-plus-dll
@@ -255,6 +167,53 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: control-center/pnpm-lock.yaml
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      # Ahead of the hour of provisioning below, so a missing or expired token
+      # or an account that cannot use the audit model fails in a minute
+      # instead of after the build. The subscription token goes to this step
+      # and the audit step only, never to the dependency builds and package
+      # installs in between.
+      - name: Verify Claude subscription credentials
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+            echo "::error::CLAUDE_CODE_OAUTH_TOKEN secret is not configured. See Requirements at the top of alpha-audit.yml."
+            exit 1
+          fi
+
+          # Either of these outranks the subscription token in the CLI.
+          unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN
+
+          # A one-line request on the audit model with no tools, pinned like
+          # the audit itself, so an account without access fails here rather
+          # than being answered by another model. It runs from an empty
+          # directory so the checkout's CLAUDE.md and project settings stay
+          # out of it.
+          check_dir="$(cygpath -u "$RUNNER_TEMP")/model-check"
+          mkdir -p "$check_dir"
+          cd "$check_dir"
+          set +e
+          claude \
+            --model "$AUDIT_MODEL" \
+            --settings "{\"availableModels\": [\"$AUDIT_MODEL\"]}" \
+            --tools "" \
+            --max-turns 1 \
+            --output-format json \
+            -p "Reply with OK." > "$check_dir/result.json" 2> "$check_dir/stderr.txt"
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ] || ! jq -e '.is_error == false' < "$check_dir/result.json" > /dev/null 2>&1; then
+            echo "::error::$AUDIT_MODEL refused a one-line request on the subscription token (exit $status). The token must come from the CVP subscription account and must not have expired."
+            cat "$check_dir/result.json" "$check_dir/stderr.txt"
+            exit 1
+          fi
+          echo "$AUDIT_MODEL answered on the subscription token."
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -271,9 +230,6 @@ jobs:
         shell: pwsh
         run: .github/scripts/Build-OpenCore.ps1
 
-      - name: Install Claude Code
-        run: npm install -g @anthropic-ai/claude-code
-
       - name: Install frontend dependencies
         working-directory: control-center
         run: pnpm install --frozen-lockfile
@@ -284,7 +240,7 @@ jobs:
           set -euo pipefail
 
           # Both audit skills come from the 115dkk-skills plugin, fetched
-          # fresh on every run (requirement 4 in the header).
+          # fresh on every run (requirement 3 in the header).
           claude plugin marketplace add 115dkk/agent-skills
           claude plugin install 115dkk-skills@115dkk
           PLUGIN_PATH=$(claude plugin list --json | jq -er '.[] | select(.id == "115dkk-skills@115dkk" and .enabled) | .installPath')
@@ -328,70 +284,35 @@ jobs:
           fi
 
       - name: Run combined audit
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
           # TECH_DEBT_AUDIT.md in the checkout is the previous audit, which
-          # the commit-baseline job committed (requirement 5). The skill reads
+          # the commit-baseline job committed (requirement 4). The skill reads
           # it as its baseline and overwrites it, so remember its blob: a
           # session that never writes a new report must not pass on the old
           # file.
           BASELINE_BLOB=$(git hash-object TECH_DEBT_AUDIT.md 2>/dev/null || echo none)
 
-          # Any of these outranks federation in the CLI and would bill
-          # something other than the federated service account.
-          unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN
+          # Either of these outranks the subscription token in the CLI and
+          # would bill something other than the CVP subscription account.
+          unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN
 
-          # The CLI exchanges the GitHub OIDC token in this file itself and
-          # re-reads the file whenever it refreshes its Anthropic token, at
-          # most ten minutes later. A GitHub token lives about five minutes
-          # and is accepted once, so a background loop writes a fresh one
-          # every three minutes for as long as the session runs. The loop's
-          # output goes to a file rather than this step's log pipe, which a
-          # leftover sleep would otherwise hold open.
-          token_dir="$(cygpath -u "$RUNNER_TEMP")/anthropic-wif"
-          mkdir -p "$token_dir"
-          ANTHROPIC_IDENTITY_TOKEN_FILE="$(cygpath -m "$token_dir")/identity-token"
-          export ANTHROPIC_IDENTITY_TOKEN_FILE
-
-          write_identity_token() {
-            curl -fsS --retry 3 \
-              -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-              "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://api.anthropic.com" \
-              | tr -d '\r\n' \
-              | sed -n 's/.*"value"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
-              > "$token_dir/identity-token.next" || return 1
-            [ -s "$token_dir/identity-token.next" ] || return 1
-            mv -f "$token_dir/identity-token.next" "$token_dir/identity-token"
-          }
-
-          write_identity_token
-          (
-            while sleep 180; do
-              write_identity_token ||
-                echo "::warning::Could not refresh the GitHub OIDC token; the next attempt is in three minutes."
-            done
-          ) > "$token_dir/refresh.log" 2>&1 &
-          refresh_pid=$!
-          stop_identity_refresh() {
-            kill "$refresh_pid" 2>/dev/null || true
-            cat "$token_dir/refresh.log" 2>/dev/null || true
-          }
-          trap stop_identity_refresh EXIT
-
-          # The audit runs on Mythos 5.1 unless ALPHA_AUDIT_MODEL names
-          # another model. The availableModels restriction dates from the
-          # Fable 5.1 pin, whose safety classifiers could silently re-run a
-          # flagged request on Opus 4.8 and keep the session there; it stays,
-          # naming the audit model, so the session can never drift to another
-          # model: anything that would switch models ends with an explicit
-          # error instead, and no tokens are spent elsewhere. Availability
-          # fallback is opt-in through --fallback-model and stays unset.
+          # The audit runs on Mythos 5.1. The availableModels restriction
+          # dates from the Fable 5.1 pin, whose safety classifiers could
+          # silently re-run a flagged request on Opus 4.8 and keep the session
+          # there; it stays, naming the audit model, so the session can never
+          # drift to another model: anything that would switch models ends
+          # with an explicit error instead, and no tokens are spent elsewhere.
+          # Availability fallback is opt-in through --fallback-model and stays
+          # unset.
           set +e
           claude \
             --model "$AUDIT_MODEL" \
             --effort xhigh \
             --settings "{\"availableModels\": [\"$AUDIT_MODEL\"]}" \
             --permission-mode auto \
-            --max-turns 100 \
+            --max-turns 150 \
             -p "
           You will perform two analyses in sequence within this single
           session. Each part writes its deliverable to its own Markdown
@@ -672,7 +593,7 @@ jobs:
 
   commit-baseline:
     # Commits this run's TECH_DEBT_AUDIT.md to codex/alpha-plus-dll as the
-    # next audit's baseline (requirement 5 in the header). It runs only after
+    # next audit's baseline (requirement 4 in the header). It runs only after
     # the audit job finished, deliverables checked, issue filed and
     # checkpoint tagged.
     needs: audit

@@ -284,6 +284,7 @@ jobs:
           fi
 
       - name: Run combined audit
+        id: audit
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
@@ -443,6 +444,36 @@ jobs:
             cat combined-audit-report.md
             exit 1
           fi
+
+      # A session that fails late (turn limit, a refused request, the job
+      # timeout) has already spent most of its budget, and every step below
+      # is skipped, so whatever it wrote would leave with the runner. Keep
+      # it under a separate name; commit-baseline never sees this artifact.
+      # The checkout's TECH_DEBT_AUDIT.md is the previous baseline until the
+      # session rewrites it, so it goes in only when it differs from HEAD.
+      - name: Keep partial audit output
+        if: always() && (steps.audit.outcome == 'failure' || steps.audit.outcome == 'cancelled')
+        run: |
+          out="$RUNNER_TEMP/audit-partial"
+          mkdir -p "$out"
+          for f in combined-audit-report.md change-summary.txt ARCHITECTURE_AUDIT.md; do
+            if [ -s "$f" ]; then cp "$f" "$out/"; fi
+          done
+          if [ -s TECH_DEBT_AUDIT.md ] &&
+             { ! git ls-files --error-unmatch TECH_DEBT_AUDIT.md >/dev/null 2>&1 ||
+               ! git diff --quiet HEAD -- TECH_DEBT_AUDIT.md; }; then
+            cp TECH_DEBT_AUDIT.md "$out/"
+          fi
+          ls -l "$out"
+
+      - name: Upload partial audit output
+        if: always() && (steps.audit.outcome == 'failure' || steps.audit.outcome == 'cancelled')
+        uses: actions/upload-artifact@v7
+        with:
+          name: "alpha-audit-partial-${{ github.run_id }}"
+          path: ${{ runner.temp }}/audit-partial/
+          if-no-files-found: ignore
+          retention-days: 90
 
       - name: Create GitHub Issue or summary
         env:

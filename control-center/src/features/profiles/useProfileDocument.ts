@@ -7,7 +7,7 @@ import { settingsSchema } from "../../generated/settings";
 import { fileName, managedProfileFor, matchesAppliedProfile, profileNameStem, reservedProfileNameCharacters } from "./profileEditorUtils";
 import type { I18nValue } from "../../i18n/i18n";
 
-type ProfileCommand = "undo" | "redo" | "discard" | "save" | "save-as" | "designate" | "open" | "import" | "export" | "reveal" | "start";
+type ProfileCommand = "undo" | "redo" | "discard" | "save" | "save-as" | "designate" | "apply" | "open" | "import" | "export" | "reveal" | "start";
 
 /* What a completed save still owes the service. "designate" follows a save as,
    which leaves a profile the service has never seen; "apply-to-service"
@@ -251,19 +251,21 @@ export function useProfileDocument(t: I18nValue["t"], { page = "profiles", disco
 
   /* One command, two framings. "designate" makes this profile the run profile;
      "apply-to-service" republishes the run profile the user has just edited. */
+  const designateOpenProfile = async (intent: ProfileFollowUp) => {
+    const designated = await runtime().designateOpenProfile();
+    setAppliedProfile(designated.sourceProfile);
+    setDesignationEffect(designated.effect);
+    setExecution(await runtime().loadExecutionStatus());
+    const live = designated.effect === "live";
+    const key = intent === "apply-to-service"
+      ? (live ? "profiles.appliedLive" : "profiles.appliedNextStart")
+      : (live ? "profiles.designatedLive" : "profiles.designatedNextStart");
+    return t(key, { name: fileName(designated.sourceProfile) });
+  };
+
   const designateProfile = async (intent: ProfileFollowUp = "designate") => {
     if (!profile || recoveryRequired || dirtyKeys.length > 0) return;
-    await runCommand("designate", async () => {
-      const designated = await runtime().designateOpenProfile();
-      setAppliedProfile(designated.sourceProfile);
-      setDesignationEffect(designated.effect);
-      setExecution(await runtime().loadExecutionStatus());
-      const live = designated.effect === "live";
-      const key = intent === "apply-to-service"
-        ? (live ? "profiles.appliedLive" : "profiles.appliedNextStart")
-        : (live ? "profiles.designatedLive" : "profiles.designatedNextStart");
-      return t(key, { name: fileName(designated.sourceProfile) });
-    }, (caught) => operationErrorMessage(caught, t));
+    await runCommand("designate", () => designateOpenProfile(intent), (caught) => operationErrorMessage(caught, t));
   };
 
   const saveProfileAs = async (requestedName: string) => {
@@ -348,11 +350,54 @@ export function useProfileDocument(t: I18nValue["t"], { page = "profiles", disco
   const busy = pendingEdits > 0 || command !== null;
   const dirtyCount = dirtyKeys.length;
 
+  /* Apply is the editor's single route to the service: it saves unsaved edits
+     and designates the open profile, which republishes it when it already is
+     the run profile. It stays enabled while the service is behind this
+     document: unsaved edits, another run profile, a save the service has not
+     received, or a running service on bytes other than the run profile's. */
+  const isRunProfile = profile !== null && matchesAppliedProfile(profile, appliedProfile);
+  const serviceBehind = followUp !== null
+    || execution?.runProfilePublication !== "published"
+    || Boolean(execution.expectedProfileDigest
+      && execution.systemService.activeProfileDigest
+      && execution.systemService.activeProfileDigest !== execution.expectedProfileDigest);
+  const applyPending = dirtyCount > 0 || !isRunProfile || serviceBehind;
+  const applyBlockedByReadOnly = dirtyCount > 0 && profile?.canSave === false;
+  const canApply = profile !== null && !busy && !recoveryRequired && !applyBlockedByReadOnly && applyPending;
+  const applyDescription = applyBlockedByReadOnly
+    ? t("profiles.readOnly")
+    : !applyPending
+      ? t("profiles.applyUpToDate")
+      : t(isRunProfile ? "profiles.applyDescription" : "profiles.applyAsRunProfileDescription");
+
+  /* A save that lands before the designation fails leaves its follow-up
+     recorded, so the same button retries only the designation. */
+  const applyProfile = async () => {
+    if (!canApply) return;
+    const intent: ProfileFollowUp = isRunProfile ? "apply-to-service" : "designate";
+    const unsaved = dirtyCount > 0;
+    await runCommand("apply", async () => {
+      if (unsaved) {
+        const saved = await runtime().saveProfile();
+        if (!saved) throw new Error(t("profiles.none"));
+        applySnapshot(saved);
+        setProfiles(await runtime().listProfiles());
+        setFollowUp(intent);
+      }
+      const message = await designateOpenProfile(intent);
+      setFollowUp(null);
+      return message;
+    }, (caught) => operationErrorMessage(caught, t));
+  };
+
   return {
     appliedProfile,
+    applyDescription,
+    applyPending,
+    applyProfile,
+    canApply,
     chooseProfile,
     designationEffect,
-    followUp,
     offerStart,
     profiles,
     profileNameVerdict,

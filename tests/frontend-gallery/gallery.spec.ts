@@ -612,19 +612,22 @@ test.describe("shared profile editor categories and collections remain interacti
       await undo.click();
       await expect(redo).toBeEnabled();
       await redo.click();
-      const slot = page.locator(".profile-history-actions .designate");
-      await expect(slot).toHaveCount(0);
+      // No run profile is set, so Apply stays available as the way to make this
+      // document the run profile, before and after a plain save.
+      const apply = page.getByRole("toolbar", { name: "프로필 편집 작업" }).getByRole("button", { name: "적용", exact: true });
+      await expect(apply).toBeEnabled();
       await page.getByRole("button", { name: "저장", exact: true }).click();
       await expect(page.locator(".profile-message")).toContainText("저장했습니다");
-      await expect(slot).toHaveCount(0);
+      await expect(apply).toBeEnabled();
       await page.getByRole("button", { name: "다른 이름으로 저장", exact: true }).click();
       const copyDialog = page.getByRole("dialog", { name: "다른 이름으로 저장", exact: true });
       await copyDialog.getByRole("textbox", { name: "새 프로필 이름" }).fill(`Gallery edited copy ${skin}`);
       await copyDialog.getByRole("button", { name: "저장", exact: true }).click();
       await expect(copyDialog).toHaveCount(0);
-      await expect(page.getByRole("button", { name: "실행 프로필로 지정", exact: true })).toBeEnabled();
-      await page.getByRole("button", { name: "실행 프로필로 지정", exact: true }).click();
+      await expect(apply).toBeEnabled();
+      await apply.click();
       await expect(page.locator(".profile-message")).toContainText("실행 프로필로 지정했습니다");
+      await expect(apply).toBeDisabled();
       await firstSelect.selectOption(initialOption);
       await expect(discard).toBeEnabled();
       await discard.click();
@@ -1070,7 +1073,7 @@ test.describe("shared settings navigation restores the legacy Wizard and Tuner h
       await expect(page.locator("main").getByRole("button", { name: "힌팅", exact: true })).toBeVisible();
       await page.locator("main").getByRole("button", { name: "실행 프로필 지정", exact: true }).click();
       await expect(page.getByRole("button", { name: "진행" })).toHaveCount(0);
-      await expect(page.locator(".guided-apply-card .designate")).toHaveCount(0);
+      await expect(page.locator(".guided-apply-card").getByRole("button", { name: "적용", exact: true })).toBeDisabled();
       await expect(page.getByRole("button", { name: "다른 이름으로 저장", exact: true })).toBeEnabled();
       await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-guided-apply-ko.png`), fullPage: true });
 
@@ -1475,7 +1478,7 @@ test.describe("shared a rejected profile mutation requires an explicit snapshot 
       const boldWeight = page.locator(".setting-row").filter({ hasText: "Bold weight" }).locator('input[type="number"]');
       const save = page.getByRole("button", { name: "Save", exact: true });
       const saveAs = page.getByRole("button", { name: "Save as", exact: true });
-      const followUp = page.locator(".profile-history-actions .designate");
+      const apply = page.getByRole("toolbar", { name: "Profile editing actions" }).getByRole("button", { name: "Apply", exact: true });
 
       await normalWeight.fill("12");
       await normalWeight.press("Tab");
@@ -1485,19 +1488,19 @@ test.describe("shared a rejected profile mutation requires an explicit snapshot 
       await expect(page.getByText("Gallery profile mutation failed.", { exact: true })).toBeVisible();
       await expect(save).toBeDisabled();
       await expect(saveAs).toBeDisabled();
-      await expect(followUp).toHaveCount(0);
+      await expect(apply).toBeDisabled();
 
       await boldWeight.fill("8");
       await boldWeight.press("Tab");
       await expect(save).toBeDisabled();
       await expect(saveAs).toBeDisabled();
-      await expect(followUp).toHaveCount(0);
+      await expect(apply).toBeDisabled();
 
       await page.getByRole("button", { name: "Discard changes", exact: true }).click();
       await expect(normalWeight).toHaveValue("0");
       await expect(boldWeight).toHaveValue("0");
       await expect(saveAs).toBeEnabled();
-      await expect(followUp).toHaveCount(0);
+      await expect(apply).toBeDisabled();
     });
   }
 });
@@ -1605,15 +1608,27 @@ test.describe("shared writable profiles save to the original and apply by portab
       await setting.selectOption(alternate);
 
       const save = page.getByRole("button", { name: "Save", exact: true });
-      const apply = page.getByRole("button", { name: "Apply to service", exact: true });
+      const apply = page.getByRole("toolbar", { name: "Profile editing actions" }).getByRole("button", { name: "Apply", exact: true });
+      const restarted = "Restarted the service on the settings you saved. Apps without MacType, open now or later, get them; reopen apps that already had MacType to switch them over.";
       await expect(save).toBeEnabled();
-      await expect(page.locator(".profile-history-actions .designate")).toHaveCount(0);
+      await expect(apply).toBeEnabled();
+      await expect(apply).toHaveAttribute("title", /^Saves your changes and applies them to the service in one step\./);
       await save.click();
       await expect(page.locator(".profile-message")).toContainText("Saved Default.ini");
       await expect(apply).toBeEnabled();
       await expect(page.getByRole("button", { name: "Set as run profile", exact: true })).toHaveCount(0);
       await apply.click();
-      await expect(page.locator(".profile-message")).toContainText("Restarted the service on the settings you saved. Apps without MacType, open now or later, get them; reopen apps that already had MacType to switch them over.");
+      await expect(page.locator(".profile-message")).toContainText(restarted);
+      await expect(apply).toBeDisabled();
+      await expect(apply).toHaveAttribute("title", "The run profile already has these settings.");
+
+      // One click from an unsaved edit: Apply writes the file and republishes it.
+      await setting.selectOption(initial);
+      await expect(apply).toBeEnabled();
+      await apply.click();
+      await expect(page.locator(".profile-message")).toContainText(restarted);
+      await expect(save).toBeDisabled();
+      await expect(apply).toBeDisabled();
 
       await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-profile-direct-save-apply-en.png`), fullPage: true });
     });
@@ -1637,8 +1652,10 @@ test.describe("shared read-only profiles require Save as before apply", () => {
       if (!alternate) throw new Error("A read-only profile setting needs an alternate gallery value");
       await setting.selectOption(alternate);
 
+      const apply = page.getByRole("toolbar", { name: "Profile editing actions" }).getByRole("button", { name: "Apply", exact: true });
       await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
-      await expect(page.getByRole("button", { name: "Set as run profile", exact: true })).toHaveCount(0);
+      await expect(apply).toBeDisabled();
+      await expect(apply).toHaveAttribute("title", /^The original file cannot be written\./);
       await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-profile-read-only-save-as-required-en.png`), fullPage: true });
       await page.getByRole("button", { name: "Save as", exact: true }).click();
       await page.getByRole("textbox", { name: "New profile name" }).fill(`Review copy ${skin}`);
@@ -1646,7 +1663,8 @@ test.describe("shared read-only profiles require Save as before apply", () => {
 
       await expect(page.locator("main code").filter({ hasText: /Default[.]ini|Review copy/ }).first()).toContainText(`Review copy ${skin}.ini`);
       await expect(page.locator(".profile-message")).toContainText(`Saved as Profiles\\Review copy ${skin}.ini`);
-      await expect(page.getByRole("button", { name: "Set as run profile", exact: true })).toBeEnabled();
+      await expect(apply).toBeEnabled();
+      await expect(apply).toHaveAttribute("title", /^Saves your changes and sets this profile as the run profile in one step\./);
       await page.screenshot({ path: path.join(galleryRoot, `${testInfo.project.name}-${skin}-profile-read-only-save-as-en.png`), fullPage: true });
     });
   }
@@ -1716,38 +1734,49 @@ test("Save As advances the suggested name past a managed profile collision", asy
   await expect(dialog.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
 });
 
-test("guided saving offers only the outstanding follow-up and clears it after an edit", async ({ page }) => {
+test("guided Apply saves and applies in one click, then hands over to starting the service", async ({ page }) => {
   await page.goto("/?view=profiles&gallery=1&lang=ko&service-runtime=stopped", { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "단계별 설정", exact: true }).click();
   await page.locator(".settings-index").getByRole("button", { name: "실행 프로필 지정", exact: true }).click();
   const card = page.locator(".guided-apply-card");
-  await expect(card.locator(".designate")).toHaveCount(0);
+  const apply = card.getByRole("button", { name: "적용", exact: true });
+  const startNow = card.getByRole("button", { name: "지금 서비스 시작", exact: true });
+  const appliedNextStart = "저장한 설정을 실행 프로필에 반영했습니다. 서비스를 시작하면 이 설정으로 실행됩니다.";
+  await expect(card.getByRole("button")).toHaveText(["프리뷰", "프로필 저장", "다른 이름으로 저장", "적용"]);
+  await expect(apply).toBeDisabled();
   await card.getByRole("button", { name: "다른 이름으로 저장", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "다른 이름으로 저장", exact: true });
   await dialog.getByRole("textbox", { name: "새 프로필 이름" }).fill("Guided copy");
   await dialog.getByRole("button", { name: "저장", exact: true }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(card.getByRole("button")).toHaveText(["프리뷰", "프로필 저장", "다른 이름으로 저장", "실행 프로필로 지정"]);
-  await card.getByRole("button", { name: "실행 프로필로 지정", exact: true }).click();
-  await expect(card.getByRole("button", { name: "지금 서비스 시작", exact: true })).toBeEnabled();
+  await expect(apply).toBeEnabled();
+  await apply.click();
+  await expect(page.locator(".profile-message")).toContainText("실행 프로필로 지정했습니다");
+  await expect(startNow).toBeEnabled();
+  await expect(apply).toHaveCount(0);
+
+  // An unsaved edit retires the start offer, and one Apply click saves it and
+  // publishes it for the next start.
   await page.locator(".settings-index").getByRole("button", { name: "기본 렌더링", exact: true }).click();
   const choice = page.locator('.guided-choice input:not(:checked)').first();
   await choice.check();
   await page.locator(".settings-index").getByRole("button", { name: "실행 프로필 지정", exact: true }).click();
-  await expect(card.locator(".designate")).toHaveCount(0);
-  await card.getByRole("button", { name: "프로필 저장", exact: true }).click();
-  const apply = card.getByRole("button", { name: "서비스에 적용", exact: true });
+  await expect(startNow).toHaveCount(0);
   await expect(apply).toBeEnabled();
-  await expect(card.getByRole("button", { name: "실행 프로필로 지정", exact: true })).toHaveCount(0);
+  await apply.click();
+  await expect(page.locator(".profile-message")).toHaveText(appliedNextStart);
+  await expect(card.getByRole("button", { name: "프로필 저장", exact: true })).toBeDisabled();
+  await expect(startNow).toBeEnabled();
+
+  // Saving first still leaves Apply owing the service the saved bytes.
   await page.locator(".settings-index").getByRole("button", { name: "기본 렌더링", exact: true }).click();
-  await choice.check();
+  await page.locator('.guided-choice input:not(:checked)').first().check();
   await page.locator(".settings-index").getByRole("button", { name: "실행 프로필 지정", exact: true }).click();
-  await expect(card.locator(".designate")).toHaveCount(0);
   await card.getByRole("button", { name: "프로필 저장", exact: true }).click();
   await expect(apply).toBeEnabled();
   await apply.click();
-  await expect(page.locator(".profile-message")).toHaveText("저장한 설정을 실행 프로필에 반영했습니다. 서비스를 시작하면 이 설정으로 실행됩니다.");
-  await expect(card.getByRole("button", { name: "지금 서비스 시작", exact: true })).toBeEnabled();
+  await expect(page.locator(".profile-message")).toHaveText(appliedNextStart);
+  await expect(startNow).toBeEnabled();
 });
 
 test("known legacy-selected profiles open directly without an import detour", async ({ page }, testInfo) => {
@@ -2059,8 +2088,10 @@ for (const entry of [
       await dialog.getByRole("textbox", { name: "New profile name" }).fill("Publish failure copy");
       await dialog.getByRole("button", { name: "Save", exact: true }).click();
       await expect(dialog).toHaveCount(0);
+      await page.getByRole("toolbar", { name: "Profile editing actions" }).getByRole("button", { name: "Apply", exact: true }).click();
+    } else {
+      await page.getByRole("button", { name: "Set as run profile", exact: true }).first().click();
     }
-    await page.getByRole("button", { name: "Set as run profile", exact: true }).first().click();
 
     await expect(page.getByText("The operation failed. Check the diagnostics log for details.", { exact: true })).toBeVisible();
     await expect(page.getByText(/control-center-internal-operation-failed/)).toHaveCount(0);

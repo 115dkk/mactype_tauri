@@ -312,7 +312,7 @@ jobs:
             --effort xhigh \
             --settings "{\"availableModels\": [\"$AUDIT_MODEL\"]}" \
             --permission-mode auto \
-            --max-turns 100 \
+            --max-turns 150 \
             -p "
           You will perform two analyses in sequence within this single
           session. Each part writes its deliverable to its own Markdown

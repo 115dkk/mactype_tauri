@@ -1,4 +1,4 @@
-import { BadgeCheck, ListRestart, Play, Redo2, RotateCcw, Save, SaveAll, Search, Undo2, Upload } from "lucide-react";
+import { ListRestart, Play, Redo2, RotateCcw, Save, SaveAll, Search, Undo2, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ProfileNameDialog } from "../components/ProfileNameDialog";
 import { Hint } from "../components/Hint";
@@ -62,8 +62,11 @@ export function ProfilesPage({ ciSmoke = false, mode = "all", onPreviewReady }: 
   const {
     addIndividual,
     advanced,
-    designateProfile,
+    applyDescription,
+    applyPending,
+    applyProfile,
     busy,
+    canApply,
     changeSetting,
     command: profileCommand,
     commitAdvanced,
@@ -72,7 +75,6 @@ export function ProfilesPage({ ciSmoke = false, mode = "all", onPreviewReady }: 
     dirtyKeys,
     discard,
     error: documentError,
-    followUp,
     individuals,
     offerStart,
     startServiceNow,
@@ -259,9 +261,9 @@ export function ProfilesPage({ ciSmoke = false, mode = "all", onPreviewReady }: 
           <button className="button secondary compact-action" disabled={!profile || busy || recoveryRequired} onClick={resetDefaults} title={t("profiles.resetDefaultsDescription")} type="button"><ListRestart aria-hidden="true" size={14} /> {t("profiles.resetDefaults")}</button>
           <button className="button secondary compact-action" disabled={!profile || !profile.canSave || dirtyCount === 0 || busy || recoveryRequired} data-dirty={dirtyCount > 0} onClick={() => void saveCurrentProfile()} type="button"><Save aria-hidden="true" size={14} /> {profileCommand === "save" ? t("profiles.saving") : t("profiles.save")}</button>
           <button className="button secondary compact-action" disabled={!profile || busy || recoveryRequired} onClick={() => setNameDialogOpen(true)} type="button"><SaveAll aria-hidden="true" size={14} /> {t("files.saveAs")}</button>
-          {followUp === "designate" && <button className="button designate compact-action" disabled={!profile || dirtyCount > 0 || busy || recoveryRequired} onClick={() => void designateProfile()} title={dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button"><BadgeCheck aria-hidden="true" size={14} /> {profileCommand === "designate" ? t("profiles.designating") : t("profiles.designate")}</button>}
-          {followUp === "apply-to-service" && <button className="button designate compact-action" disabled={!profile || dirtyCount > 0 || busy || recoveryRequired} onClick={() => void designateProfile("apply-to-service")} title={t("profiles.applyToServiceDescription")} type="button"><Upload aria-hidden="true" size={14} /> {profileCommand === "designate" ? t("profiles.applyingToService") : t("profiles.applyToService")}</button>}
-          {!followUp && offerStart && <button className="button designate compact-action" disabled={busy} onClick={() => void startServiceNow()} type="button"><Play aria-hidden="true" size={14} /> {profileCommand === "start" ? t("execution.serviceWorking") : t("files.startServiceNow")}</button>}
+          {offerStart && !applyPending
+            ? <button className="button designate compact-action" disabled={busy} onClick={() => void startServiceNow()} type="button"><Play aria-hidden="true" size={14} /> {profileCommand === "start" ? t("execution.serviceWorking") : t("files.startServiceNow")}</button>
+            : <button className="button designate compact-action" disabled={!canApply} onClick={() => void applyProfile()} title={applyDescription} type="button"><Upload aria-hidden="true" size={14} /> {profileCommand === "apply" ? t("profiles.applyingToService") : t("profiles.apply")}</button>}
         </div>}
       </header>
 
@@ -279,7 +281,7 @@ export function ProfilesPage({ ciSmoke = false, mode = "all", onPreviewReady }: 
           <div className="settings-form">
             <div className="section-heading"><h2><Hint content={mode === "guided" ? t("guided.guidance") : query ? t("profiles.searchDescription", { query }) : activeDefinition.description}>{mode === "guided" ? activeGuidedLabel : query ? t("profiles.searchResults") : activeDefinition.label}</Hint></h2></div>
 
-            {mode === "guided" && <GuidedSettings activeStep={activeGuidedStep} advanced={advanced} busy={guidedBusy} canRedoStep={stepHistory.canRedo(activeGuidedStep)} canSave={profile?.canSave ?? false} canUndoStep={stepHistory.canUndo(activeGuidedStep)} designating={profileCommand === "designate"} dirtyCount={dirtyCount} dirtyKeys={dirtyKeys} followUp={followUp} fontFace={fontFace} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} onAdvancedCommit={(next) => void commitAdvanced(next)} onApply={(intent) => void designateProfile(intent)} onFontFaceChange={setFontFace} onPreview={showPreview} onRedoStep={redoStepEdit} onSave={() => void saveCurrentProfile()} offerStart={offerStart} onSaveAs={() => setNameDialogOpen(true)} onStartService={() => void startServiceNow()} onSettingChange={changeGuidedSetting} onSettingPreview={previewSetting} onStepChange={setActiveGuidedStep} onUndoStep={undoStepEdit} profileName={profile?.displayPath ?? null} profilePath={profile?.path ?? null} savedValues={savedValues} settings={settingsSchema} starting={profileCommand === "start"} t={t} values={values} />}
+            {mode === "guided" && <GuidedSettings activeStep={activeGuidedStep} advanced={advanced} busy={guidedBusy} canRedoStep={stepHistory.canRedo(activeGuidedStep)} canSave={profile?.canSave ?? false} canUndoStep={stepHistory.canUndo(activeGuidedStep)} applyDescription={applyDescription} applying={profileCommand === "apply"} canApply={canApply} dirtyCount={dirtyCount} dirtyKeys={dirtyKeys} fontFace={fontFace} fontFamilies={fontFamilies} fontOptionLabel={fontOptionLabel} onAdvancedCommit={(next) => void commitAdvanced(next)} onApply={() => void applyProfile()} onFontFaceChange={setFontFace} onPreview={showPreview} onRedoStep={redoStepEdit} onSave={() => void saveCurrentProfile()} offerStart={offerStart && !applyPending} onSaveAs={() => setNameDialogOpen(true)} onStartService={() => void startServiceNow()} onSettingChange={changeGuidedSetting} onSettingPreview={previewSetting} onStepChange={setActiveGuidedStep} onUndoStep={undoStepEdit} profileName={profile?.displayPath ?? null} profilePath={profile?.path ?? null} savedValues={savedValues} settings={settingsSchema} starting={profileCommand === "start"} t={t} values={values} />}
 
             {mode === "all" && query && <SearchSettings dirtyKeys={dirtyKeys} onChange={changeSetting} onPreviewChange={previewSetting} savedValues={savedValues} settings={filteredSettings} t={t} values={values} />}
             {mode === "all" && !query && activeGroup === "basic" && <BasicSettings dirtyKeys={dirtyKeys} onChange={changeSetting} onPreviewChange={previewSetting} savedValues={savedValues} settings={filteredSettings} t={t} values={values} />}

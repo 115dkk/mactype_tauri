@@ -1,5 +1,4 @@
-import { ArrowLeft, ArrowRight, BadgeCheck, Eye, ListRestart, Play, Redo2, RotateCcw, Save, SaveAll, Undo2, Upload } from "lucide-react";
-import type { ProfileFollowUp } from "../../features/profiles/useProfileDocument";
+import { ArrowLeft, ArrowRight, Eye, ListRestart, Play, Redo2, RotateCcw, Save, SaveAll, Undo2, Upload } from "lucide-react";
 import type { AdvancedProfile } from "../../app/model";
 import type { SettingDefinition } from "../../generated/settings";
 import type { I18nValue, MessageKey } from "../../i18n/i18n";
@@ -10,20 +9,21 @@ import { stepSupportsHistory, guidedScaleBySettingId, guidedSettingIdsByStep, gu
 interface GuidedSettingsProps {
   activeStep: GuidedStepId;
   advanced: AdvancedProfile;
+  applyDescription: string;
+  applying: boolean;
   busy: boolean;
+  canApply: boolean;
   canRedoStep: boolean;
   canSave: boolean;
   canUndoStep: boolean;
-  designating: boolean;
   dirtyCount: number;
   dirtyKeys: ReadonlyArray<string>;
-  followUp: ProfileFollowUp | null;
   fontFace: string;
   fontFamilies: ReadonlyArray<string>;
   fontOptionLabel: (font: string) => string;
   offerStart: boolean;
   onAdvancedCommit: (profile: AdvancedProfile) => void;
-  onApply: (intent: ProfileFollowUp) => void;
+  onApply: () => void;
   onFontFaceChange: (font: string) => void;
   onPreview: () => void;
   onRedoStep: () => void;
@@ -46,14 +46,15 @@ interface GuidedSettingsProps {
 export function GuidedSettings({
   activeStep,
   advanced,
+  applyDescription,
+  applying,
   busy,
+  canApply,
   canRedoStep,
   canSave,
   canUndoStep,
-  designating,
   dirtyCount,
   dirtyKeys,
-  followUp,
   fontFace,
   fontFamilies,
   fontOptionLabel,
@@ -157,9 +158,9 @@ export function GuidedSettings({
               <button className="button secondary" onClick={onPreview} type="button"><Eye aria-hidden="true" size={16} /> {t("profiles.preview")}</button>
               <button className="button secondary" disabled={busy || dirtyCount === 0 || !canSave} data-dirty={dirtyCount > 0} onClick={onSave} type="button"><Save aria-hidden="true" size={16} /> {t("guided.saveProfile")}</button>
               <button className="button secondary" disabled={busy} onClick={onSaveAs} type="button"><SaveAll aria-hidden="true" size={16} /> {t("files.saveAs")}</button>
-              {followUp === "designate" && <button className="button designate" disabled={busy || dirtyCount > 0} onClick={() => onApply("designate")} title={dirtyCount > 0 ? t("profiles.saveBeforeDesignate") : undefined} type="button"><BadgeCheck aria-hidden="true" size={16} /> {designating ? t("profiles.designating") : t("profiles.designate")}</button>}
-              {followUp === "apply-to-service" && <button className="button designate" disabled={busy || dirtyCount > 0} onClick={() => onApply("apply-to-service")} title={t("profiles.applyToServiceDescription")} type="button"><Upload aria-hidden="true" size={16} /> {designating ? t("profiles.applyingToService") : t("profiles.applyToService")}</button>}
-              {!followUp && offerStart && <button className="button designate" disabled={busy} onClick={onStartService} type="button"><Play aria-hidden="true" size={16} /> {starting ? t("execution.serviceWorking") : t("files.startServiceNow")}</button>}
+              {offerStart
+                ? <button className="button designate" disabled={busy} onClick={onStartService} type="button"><Play aria-hidden="true" size={16} /> {starting ? t("execution.serviceWorking") : t("files.startServiceNow")}</button>
+                : <button className="button designate" disabled={busy || !canApply} onClick={onApply} title={applyDescription} type="button"><Upload aria-hidden="true" size={16} /> {applying ? t("profiles.applyingToService") : t("profiles.apply")}</button>}
             </div>
           </section>
         )}

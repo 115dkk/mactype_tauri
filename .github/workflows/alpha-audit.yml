@@ -20,7 +20,7 @@
 #   1. CLAUDE_CODE_OAUTH_TOKEN under repository Actions secrets, made with
 #      `claude setup-token` while signed in to the subscription account
 #      enrolled in Anthropic's Cyber Verification Program (CVP). The session
-#      runs on claude-mythos-5-1 and draws on that subscription. The code
+#      runs on claude-mythos-5-2 and draws on that subscription. The code
 #      under audit is a hooking and injection engine, and the run of
 #      2026-10-22, on claude-fable-5-1 through API credit, was stopped
 #      partway by Fable's [cyber] safeguard; CVP relaxes those safeguards for
@@ -151,7 +151,9 @@ jobs:
         # for on Windows. Every run step below stays POSIX-shaped.
         shell: bash
     env:
-      AUDIT_MODEL: claude-mythos-5-1
+      # Claude Code knows this model from 2.1.321 on; the CLI install below
+      # is unpinned, so every run gets a release that has it.
+      AUDIT_MODEL: claude-mythos-5-2
     steps:
       - uses: actions/checkout@v7
         with:
@@ -299,7 +301,7 @@ jobs:
           # would bill something other than the CVP subscription account.
           unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN
 
-          # The audit runs on Mythos 5.1. The availableModels restriction
+          # The audit runs on Mythos 5.2. The availableModels restriction
           # dates from the Fable 5.1 pin, whose safety classifiers could
           # silently re-run a flagged request on Opus 4.8 and keep the session
           # there; it stays, naming the audit model, so the session can never

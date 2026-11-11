@@ -266,6 +266,19 @@ HOOK_MANUALLY(HRESULT, CreateTextFormat, (
 			  ), (self, fontFamilyName, fontCollection, fontWeight, fontStyle,
 				  fontStretch, fontSize, localeName, textFormat))
 
+HOOK_MANUALLY(HRESULT, ConvertFontToLOGFONT, (
+			  IDWriteGdiInterop* This,
+			  IDWriteFont* font,
+			  LOGFONTW* logFont,
+			  BOOL* isSystemFont
+			  ), (This, font, logFont, isSystemFont))
+
+HOOK_MANUALLY(HRESULT, ConvertFontFaceToLOGFONT, (
+			  IDWriteGdiInterop* This,
+			  IDWriteFontFace* font,
+			  LOGFONTW* logFont
+			  ), (This, font, logFont))
+
 HOOK_MANUALLY(HRESULT, CreateBitmapRenderTarget, (
 			  IDWriteGdiInterop* This,
 			  HDC hdc,

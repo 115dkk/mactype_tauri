@@ -138,6 +138,9 @@
     <ClCompile Include="renderer\gdi_font_identity.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="renderer\profile_text.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="renderer\directwrite_virtual_font.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -302,6 +305,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="renderer\gdi_font_identity.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="renderer\profile_text.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="renderer\directwrite_virtual_font.h">

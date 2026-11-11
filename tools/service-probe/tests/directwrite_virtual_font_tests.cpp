@@ -145,7 +145,10 @@ std::vector<BYTE> NameTable(
     return table;
 }
 
-std::vector<BYTE> Sfnt(bool withOs2, std::wstring const& style = L"Medium")
+std::vector<BYTE> Sfnt(
+    bool withOs2,
+    std::wstring const& style = L"Medium",
+    std::vector<std::pair<int, std::wstring>> const& extraNames = {})
 {
     std::vector<std::pair<UINT32, std::vector<BYTE>>> tables;
     if (withOs2) {
@@ -155,7 +158,7 @@ std::vector<BYTE> Sfnt(bool withOs2, std::wstring const& style = L"Medium")
         tables.emplace_back(kOs2, os2);
     }
     tables.emplace_back(kHead, std::vector<BYTE>(54, 0));
-    tables.emplace_back(kName, NameTable(style));
+    tables.emplace_back(kName, NameTable(style, extraNames));
     std::vector<BYTE> font(12 + tables.size() * 16, 0);
     sfnt::WriteU32(font, 0, 0x00010000);
     sfnt::WriteU16(font, 4, static_cast<UINT16>(tables.size()));
@@ -637,6 +640,31 @@ int RewriteVariableFile(WCHAR const* input, WCHAR const* output, UINT16 weight)
 
 } // namespace
 
+void TestAliasFamilyFromNameTable()
+{
+    namespace font = directwrite_virtual_font;
+    auto const alias = font::AliasFamilyFromNameTable(
+        NameTable(L"Medium", {{3, L"Src-Medium;MacTypeAlias;00c0ffee"}}));
+    Require(alias && *alias == L"Src",
+        "an alias reports its bare family name to GDI");
+    Require(!font::AliasFamilyFromNameTable(NameTable(L"Medium")),
+        "a font without a unique identifier is not an alias");
+    Require(!font::AliasFamilyFromNameTable(
+                NameTable(L"Medium", {{3, L"Src-Medium;Version 1.000"}})),
+        "a foreign unique identifier is not an alias");
+    Require(!font::AliasFamilyFromNameTable({}),
+        "an empty name table is not an alias");
+    font::Identity identity;
+    std::vector<BYTE> rewritten;
+    Require(SUCCEEDED(font::BuildAliasedSfnt(
+            Sfnt(true, L"Medium", {{3, L"Src-Medium;Version 1.000"}}), 0, L"Alias",
+            font::AliasOptions(), rewritten, identity)),
+        "the alias with a unique identifier must build");
+    auto const built = font::AliasFamilyFromNameTable(Table(rewritten, kName, true));
+    Require(built && *built == L"Alias",
+        "the builder marks the alias that the GDI interop hook recognises");
+}
+
 int wmain(int argc, WCHAR** argv)
 {
     if (argc == 2)
@@ -649,6 +677,7 @@ int wmain(int argc, WCHAR** argv)
         "--rewrite-variable input output weight");
     TestBigEndianReader();
     TestCrc32();
+    TestAliasFamilyFromNameTable();
 #ifndef MACTYPE_PROBE_HAVE_FREETYPE
     ValidateFreeType(nullptr, {});
 #endif

@@ -16,7 +16,7 @@ BOOL IsExeUnload(LPCTSTR executableName);
 namespace {
 
 constexpr DWORD kUnsupportedCreationFlags =
-    DEBUG_PROCESS | DEBUG_ONLY_THIS_PROCESS | DETACHED_PROCESS |
+    DEBUG_PROCESS | DEBUG_ONLY_THIS_PROCESS |
     CREATE_PROTECTED_PROCESS | CREATE_SECURE_PROCESS;
 constexpr DWORD kHelperTimeoutMilliseconds = 5'000;
 constexpr DWORD kRelayHelperQuietSkipBase = 0x2000'0000;
@@ -612,6 +612,30 @@ InjectionAttempt InjectFixedModule(VerifiedChild const& process) noexcept
     }
 }
 
+// DETACHED_PROCESS only withholds a console, and a GUI image ignores it.
+// LibreOffice's soffice.exe starts soffice.bin with it, so treating the flag
+// as unsupported left soffice.bin to the service's late injection, which
+// arrives after its first fonts exist and mixes stock and substituted
+// HFONTs. A detached console image keeps the old bypass; unreadable evidence
+// counts as console, which is that same old behavior.
+bool IsDetachedConsoleChild(HANDLE process) noexcept
+{
+    try
+    {
+        std::vector<WCHAR> image(32'768, L'\0');
+        DWORD length = static_cast<DWORD>(image.size());
+        if (!QueryFullProcessImageNameW(process, 0, image.data(), &length) ||
+            length == 0 || length >= static_cast<DWORD>(image.size()))
+            return true;
+        image[static_cast<size_t>(length)] = L'\0';
+        return renderer::image_subsystem::Classify(image.data()) !=
+            renderer::image_subsystem::ImageSubsystem::gui;
+    }
+    catch (...)
+    {
+        return true;
+    }
+}
 class SuspendedChildObligation final
 {
 public:
@@ -807,12 +831,14 @@ ChildInjectionTransactionResult ExecuteVerifiedChildInjection(
         call.processInformation,
         (call.creationFlags & CREATE_SUSPENDED) != 0);
     VerifiedChild target{};
-    InjectionAttempt attempt = CaptureVerifiedChild(
-        *call.processInformation, target)
-        ? InjectFixedModule(target)
-        : RelayFailure(
+    InjectionAttempt attempt = !CaptureVerifiedChild(*call.processInformation, target)
+        ? RelayFailure(
             ChildRelayReason::identityUnavailable,
-            ERROR_INVALID_PARAMETER);
+            ERROR_INVALID_PARAMETER)
+        : (call.creationFlags & DETACHED_PROCESS) != 0 &&
+                IsDetachedConsoleChild(target.process)
+            ? QuietSkip(ChildRelayReason::unsupportedCreationMode)
+            : InjectFixedModule(target);
     obligation.Complete(attempt, creationError, result);
     return result;
 }

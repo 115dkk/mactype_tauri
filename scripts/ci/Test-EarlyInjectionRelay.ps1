@@ -34,6 +34,7 @@ $suffix = if ($Architecture -eq 'x64') { '64' } else { '32' }
 $coreName = if ($Architecture -eq 'x64') { 'MacType64.dll' } else { 'MacType.dll' }
 $probe = Join-Path $resolvedBuildRoot "$Architecture\Release\probe-spawn-tree$suffix.exe"
 $policyProbe = Join-Path $resolvedBuildRoot "$Architecture\Release\relay-policy-probe$suffix.exe"
+$policyGuiChild = Join-Path $resolvedBuildRoot "$Architecture\Release\relay-policy-gui-child$suffix.exe"
 if ($CrossArchitecture -and $Architecture -ne 'x64') {
     throw 'Cross-architecture relay evidence must start from the x64 probe.'
 }
@@ -43,7 +44,7 @@ $packageNames = if ($CrossArchitecture) {
 } else {
     @($coreName)
 }
-$requiredInputs = @($probe, $policyProbe) + @($packageNames | ForEach-Object {
+$requiredInputs = @($probe, $policyProbe, $policyGuiChild) + @($packageNames | ForEach-Object {
     Join-Path $resolvedCoreRoot $_
 })
 if ($CrossArchitecture) {
@@ -165,7 +166,7 @@ foreach ($node in $retiredTree.nodes) {
 
 & $policyProbe $stagedCore
 if ($LASTEXITCODE -ne 0) {
-    throw "PID-local mitigation relay contract failed for $Architecture with exit code $LASTEXITCODE"
+    throw "PID-local mitigation or detached-child relay contract failed for $Architecture with exit code $LASTEXITCODE"
 }
 
 $consoleRuntime = Join-Path $fullOutputRoot 'console-skip-runtime'
@@ -247,6 +248,7 @@ if ($unityProfile -ceq $privateProfile) {
 )
 $unityPolicyProbe = Join-Path $unityTarget ([IO.Path]::GetFileName($policyProbe))
 Copy-Item -LiteralPath $policyProbe -Destination $unityPolicyProbe
+Copy-Item -LiteralPath $policyGuiChild -Destination (Join-Path $unityTarget ([IO.Path]::GetFileName($policyGuiChild)))
 [IO.File]::WriteAllBytes(
     (Join-Path $unityTarget 'UnityPlayer.dll'),
     [Text.Encoding]::ASCII.GetBytes('Unity fixture')

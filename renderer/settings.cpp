@@ -7,6 +7,7 @@
 #include "bold_face_selection.h"
 #include "gdi_family_catalog.h"
 #include "profile_runtime.h"
+#include "profile_text.h"
 #include <stdlib.h>
 #include <freetype/ftmodapi.h>
 #ifdef INFINALITY
@@ -88,8 +89,16 @@ bool LoadStableProfileDocument(
 			bytes.data(), bytes.size(), stable.digest))
 		return false;
 
+	// Parse the bytes that were hashed. IniParser's own file loader decodes a
+	// legacy profile with CP_ACP, which is UTF-8 in processes whose manifest
+	// declares activeCodePage UTF-8 (LibreOffice), and loses every rule there.
+	std::wstring text;
+	if (!renderer::profile_text::Decode(
+			bytes.data(), bytes.size(),
+			renderer::profile_text::SystemAnsiCodePage(), text))
+		return false;
 	document.Clear();
-	return document.LoadFromFile(path) && stable.Unchanged();
+	return document.LoadFromStringW(text.c_str()) && stable.Unchanged();
 }
 
 bool BuildMainProfilePath(

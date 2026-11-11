@@ -69,8 +69,10 @@ std::wstring Quote(const std::wstring& value) {
 
 bool LaunchChild(const std::filesystem::path& self,
                  const std::wstring& module_name, const bool prohibit_dynamic,
-                 const bool expect_present) {
-  std::wstring command = Quote(self.wstring()) + L" --child --module " +
+                 const bool expect_present, const DWORD extra_flags = 0,
+                 const bool gui_child = false) {
+  std::wstring command = Quote(self.wstring()) +
+                        (gui_child ? L" --module " : L" --child --module ") +
                          Quote(module_name) +
                          (expect_present ? L" --expect-present"
                                          : L" --expect-absent");
@@ -82,7 +84,7 @@ bool LaunchChild(const std::filesystem::path& self,
   STARTUPINFOW ordinary{};
   ordinary.cb = sizeof(ordinary);
   AttributeList attributes;
-  DWORD flags = CREATE_UNICODE_ENVIRONMENT;
+  DWORD flags = CREATE_UNICODE_ENVIRONMENT | extra_flags;
   LPSTARTUPINFOW startup = &ordinary;
   if (prohibit_dynamic) {
     if (!attributes.Initialize(
@@ -167,6 +169,24 @@ int wmain(const int argc, wchar_t** argv) {
           self, module_name, false,
           !expect_private_freetype_skip && !expect_console_skip)) {
     return 5;
+  }
+  if (!expect_private_freetype_skip && !expect_console_skip) {
+    // DETACHED_PROCESS withholds only a console: a detached console image
+    // keeps the relay bypass, and a detached GUI image is relayed before its
+    // entry point, as soffice.exe starts soffice.bin.
+    if (!LaunchChild(self, module_name, false, false, DETACHED_PROCESS)) {
+      return 6;
+    }
+    std::wstring gui_name = self.filename().wstring();
+    const std::wstring probe_stem = L"relay-policy-probe";
+    if (gui_name.compare(0, probe_stem.size(), probe_stem) != 0) {
+      return 2;
+    }
+    gui_name.replace(0, probe_stem.size(), L"relay-policy-gui-child");
+    if (!LaunchChild(self.parent_path() / gui_name, module_name, false, true,
+                     DETACHED_PROCESS, true)) {
+      return 7;
+    }
   }
   return 0;
 }

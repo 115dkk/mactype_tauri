@@ -314,6 +314,15 @@ set_target_properties(relay-policy-probe PROPERTIES
   OUTPUT_NAME "relay-policy-probe${PROBE_ARCH_SUFFIX}"
 )
 
+add_executable(relay-policy-gui-child WIN32 tests/relay_policy_gui_child.cpp)
+target_compile_options(relay-policy-gui-child PRIVATE ${MACTYPE_RENDERER_CXX_STANDARD})
+target_compile_definitions(relay-policy-gui-child PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_link_libraries(relay-policy-gui-child PRIVATE shell32)
+set_target_properties(relay-policy-gui-child PROPERTIES
+  OUTPUT_NAME "relay-policy-gui-child${PROBE_ARCH_SUFFIX}"
+)
+add_dependencies(relay-policy-probe relay-policy-gui-child)
+
 set(MACTYPE_RENDERER_UNIT_TESTS
   renderer-raii-tests
   hook-lifecycle-tests
@@ -352,10 +361,10 @@ foreach(target IN LISTS MACTYPE_RENDERER_UNIT_TESTS)
 endforeach()
 
 if(MSVC)
-  foreach(target service-probe-common probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests activation-repaint-tests freetype-runtime-tests private-freetype-policy-tests image-subsystem-tests module-name-tests path-text-tests directwrite-font-cache-tests pe-export-view-tests unload-lifecycle-tests renderer-policy-tests renderer-activation-tests font-substitution-tests bold-face-selection-tests directwrite-virtual-font-tests directwrite-alias-policy-tests directwrite-readiness-tests arrival-evidence-tests gdi-font-identity-tests profile-text-tests unity-font-hook-tests unity-font-catalog-probe renderer-profile-probe bold-substitution-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe)
+  foreach(target service-probe-common probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-raii-tests hook-lifecycle-tests activation-repaint-tests freetype-runtime-tests private-freetype-policy-tests image-subsystem-tests module-name-tests path-text-tests directwrite-font-cache-tests pe-export-view-tests unload-lifecycle-tests renderer-policy-tests renderer-activation-tests font-substitution-tests bold-face-selection-tests directwrite-virtual-font-tests directwrite-alias-policy-tests directwrite-readiness-tests arrival-evidence-tests gdi-font-identity-tests profile-text-tests unity-font-hook-tests unity-font-catalog-probe renderer-profile-probe bold-substitution-probe browser-launch-gate dwritecore-proxy dwritecore-contract-probe relay-policy-probe relay-policy-gui-child)
     target_compile_options(${target} PRIVATE /W4 /WX /permissive- /utf-8 /sdl)
   endforeach()
-  foreach(target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-profile-probe bold-substitution-probe browser-launch-gate dwritecore-contract-probe relay-policy-probe)
+  foreach(target probe-console probe-window probe-spawn-tree probe-timeout-fixture renderer-profile-probe bold-substitution-probe browser-launch-gate dwritecore-contract-probe relay-policy-probe relay-policy-gui-child)
     target_link_options(${target} PRIVATE
       /MANIFEST:EMBED
       "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/probe.manifest"

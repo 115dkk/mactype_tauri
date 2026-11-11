@@ -3,6 +3,7 @@
 #include "directwrite_alias.h"
 #include "directwrite_fallback.h"
 #include "directwrite_readiness.h"
+#include "directwrite_virtual_font.h"
 #include "dynCodeHelper.h"
 #include "hookCounter.h"
 #include "hook_lifecycle.h"
@@ -12,8 +13,10 @@
 #include <array>
 #include <atomic>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
+#include <strsafe.h>
 
 // The renderer keeps its RS3 platform baseline. These RS4 ABI declarations
 // let QueryInterface select Factory7 without raising that baseline.
@@ -742,11 +745,75 @@ HRESULT WINAPI IMPL_GetGdiInterop(
 	if (SUCCEEDED(hr) && gdiInterop != nullptr && *gdiInterop != nullptr) {
 		static bool loaded = [&] {
 			CComPtr<IDWriteGdiInterop> gdip = *gdiInterop;
+			HOOK(gdip, ConvertFontToLOGFONT, 4);
+			HOOK(gdip, ConvertFontFaceToLOGFONT, 5);
 			HOOK(gdip, CreateBitmapRenderTarget, 7);
 			return true;
 		}();
 	}
 	MyDebug(L"IMPL_GetGdiInterop hooked");
+	return hr;
+}
+
+// Applications that enumerate DirectWrite and hand the result to GDI (the
+// LibreOffice printer path shapes with the DirectWrite face and draws its
+// glyph ids through the HFONT made from this LOGFONT) must reach the alias's
+// replacement on both sides, so an alias reports its bare family name.
+static void ReportAliasFamilyToGdi(IDWriteFontFace* face, LOGFONTW* logFont)
+{
+	if (face == nullptr || logFont == nullptr)
+		return;
+	void const* data = nullptr;
+	UINT32 size = 0;
+	void* context = nullptr;
+	BOOL exists = FALSE;
+	if (FAILED(face->TryGetFontTable(
+			DWRITE_MAKE_OPENTYPE_TAG('n', 'a', 'm', 'e'), &data, &size, &context, &exists)))
+		return;
+	if (!exists || data == nullptr || size == 0)
+	{
+		face->ReleaseFontTable(context);
+		return;
+	}
+	std::optional<std::wstring> family;
+	try
+	{
+		BYTE const* const bytes = static_cast<BYTE const*>(data);
+		family = directwrite_virtual_font::AliasFamilyFromNameTable(
+			std::vector<BYTE>(bytes, bytes + size));
+	}
+	catch (...)
+	{
+	}
+	face->ReleaseFontTable(context);
+	if (family && family->size() < LF_FACESIZE)
+		StringCchCopyW(logFont->lfFaceName, LF_FACESIZE, family->c_str());
+}
+
+HRESULT WINAPI IMPL_ConvertFontToLOGFONT(
+	IDWriteGdiInterop* This,
+	IDWriteFont* font,
+	LOGFONTW* logFont,
+	BOOL* isSystemFont)
+{
+	HRESULT const hr = ORIG_ConvertFontToLOGFONT(This, font, logFont, isSystemFont);
+	if (SUCCEEDED(hr) && font != nullptr)
+	{
+		CComPtr<IDWriteFontFace> face;
+		if (SUCCEEDED(font->CreateFontFace(&face)))
+			ReportAliasFamilyToGdi(face, logFont);
+	}
+	return hr;
+}
+
+HRESULT WINAPI IMPL_ConvertFontFaceToLOGFONT(
+	IDWriteGdiInterop* This,
+	IDWriteFontFace* font,
+	LOGFONTW* logFont)
+{
+	HRESULT const hr = ORIG_ConvertFontFaceToLOGFONT(This, font, logFont);
+	if (SUCCEEDED(hr))
+		ReportAliasFamilyToGdi(font, logFont);
 	return hr;
 }
 

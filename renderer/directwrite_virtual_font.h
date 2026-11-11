@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -55,6 +56,15 @@ struct AliasedReference
 	IDWriteFontFaceReference* replacementReference,
 	WCHAR const* aliasFamily,
 	AliasOptions const& options = AliasOptions());
+
+// The family name (ID 1) of a font whose unique identifier (ID 3) this module
+// rewrote, or nothing for any other font; an alias of a replacement without an
+// ID 3 record carries no marker and is reported as DirectWrite reports it. IDWriteGdiInterop::ConvertFontToLOGFONT reports
+// an alias at a non-RIBBI weight as "<family> <subfamily>", a face GDI has
+// never registered; the bare family is the name GDI substitution resolves to
+// the same replacement. The Windows English record wins, then the first one.
+[[nodiscard]] std::optional<std::wstring> AliasFamilyFromNameTable(
+	std::vector<BYTE> const& nameTable);
 
 // The SFNT rewrite behind CreateAliasedReference, exposed for tests.
 HRESULT BuildAliasedSfnt(

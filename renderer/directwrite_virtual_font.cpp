@@ -27,6 +27,8 @@ constexpr UINT32 MakeTag(char a, char b, char c, char d) noexcept
 }
 
 constexpr UINT32 kTagCollection = MakeTag('t', 't', 'c', 'f');
+// Every unique identifier (name ID 3) this module writes carries this token.
+constexpr WCHAR kAliasUniqueIdMarker[] = L";MacTypeAlias;";
 constexpr UINT32 kTagCff = MakeTag('O', 'T', 'T', 'O');
 constexpr UINT32 kTagTrueType = 0x00010000;
 constexpr UINT32 kTagTrue = MakeTag('t', 'r', 'u', 'e');
@@ -374,7 +376,7 @@ std::wstring IdentityValue(
 	case 21:
 		return identity.family;
 	case 3:
-		return identity.postScriptName + L";MacTypeAlias;" + HexHash(familyHash);
+		return identity.postScriptName + kAliasUniqueIdMarker + HexHash(familyHash);
 	case 2:
 	case 17:
 		return identity.subfamily;
@@ -677,6 +679,37 @@ void AdvertiseHeadWeight(std::vector<BYTE>& table, UINT16 weight)
 
 } // namespace
 
+std::optional<std::wstring> AliasFamilyFromNameTable(std::vector<BYTE> const& nameTable)
+{
+	UINT16 format = 0;
+	std::vector<NameRecord> records;
+	std::vector<LanguageTagRecord> languageTags;
+	if (!ReadNameTable(nameTable, format, records, languageTags))
+		return std::nullopt;
+	bool alias = false;
+	std::optional<std::wstring> english;
+	std::optional<std::wstring> first;
+	for (NameRecord const& record : records)
+	{
+		if (!IsUnicodeNameRecord(record) || (record.id != 1 && record.id != 3))
+			continue;
+		std::optional<std::wstring> value = DecodeName(record);
+		if (!value || value->empty())
+			continue;
+		if (record.id == 3)
+		{
+			alias = alias || value->find(kAliasUniqueIdMarker) != std::wstring::npos;
+			continue;
+		}
+		if (!first)
+			first = *value;
+		if (!english && record.platform == 3 && record.language == 0x0409)
+			english = std::move(*value);
+	}
+	if (!alias)
+		return std::nullopt;
+	return english ? english : first;
+}
 HRESULT BuildAliasedSfnt(
 	std::vector<BYTE> const& source,
 	UINT32 faceIndex,

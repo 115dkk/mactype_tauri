@@ -170,13 +170,15 @@ int wmain(const int argc, wchar_t** argv) {
           !expect_private_freetype_skip && !expect_console_skip)) {
     return 5;
   }
+  // DETACHED_PROCESS withholds only a console: a detached child is relayed
+  // like any other, as soffice.exe starts its console-subsystem soffice.bin,
+  // and SkipConsoleProcesses still skips a detached console image.
+  if (!expect_private_freetype_skip &&
+      !LaunchChild(self, module_name, false, !expect_console_skip,
+                   DETACHED_PROCESS)) {
+    return 6;
+  }
   if (!expect_private_freetype_skip && !expect_console_skip) {
-    // DETACHED_PROCESS withholds only a console: a detached console image
-    // keeps the relay bypass, and a detached GUI image is relayed before its
-    // entry point, as soffice.exe starts soffice.bin.
-    if (!LaunchChild(self, module_name, false, false, DETACHED_PROCESS)) {
-      return 6;
-    }
     std::wstring gui_name = self.filename().wstring();
     const std::wstring probe_stem = L"relay-policy-probe";
     if (gui_name.compare(0, probe_stem.size(), probe_stem) != 0) {

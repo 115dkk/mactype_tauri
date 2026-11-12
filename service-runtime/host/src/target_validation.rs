@@ -11,6 +11,12 @@ use crate::image_subsystem::ImageSubsystem;
 use crate::observer::ProcessIdentity;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConsoleAttachment {
+    Attached,
+    Detached,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetLiveness {
     Alive,
     Vanished,
@@ -147,6 +153,12 @@ pub trait ProcessInspector {
     }
 
     fn probe_process_age(&self, identity: &ProcessIdentity) -> Option<Duration> {
+        let _ = identity;
+        None
+    }
+
+    /// Whether a console-subsystem image has a console. `None` means unknown, and callers keep the grace.
+    fn probe_console_attachment(&self, identity: &ProcessIdentity) -> Option<ConsoleAttachment> {
         let _ = identity;
         None
     }

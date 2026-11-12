@@ -5,8 +5,8 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use mactype_service_host::{
-    ImageSubsystem, PrivateFreeTypeClassification, ProcessIdentity, ProcessInspection,
-    ProcessInspectionError, ProcessInspector, TargetLifecycle, TargetLiveness,
+    ConsoleAttachment, ImageSubsystem, PrivateFreeTypeClassification, ProcessIdentity,
+    ProcessInspection, ProcessInspectionError, ProcessInspector, TargetLifecycle, TargetLiveness,
     UnityProcessClassification,
 };
 
@@ -19,6 +19,7 @@ pub(crate) struct InspectorResponse {
     private_freetype: PrivateFreeTypeClassification,
     subsystem: ImageSubsystem,
     process_age: Option<Duration>,
+    console_attachment: Option<ConsoleAttachment>,
 }
 
 impl InspectorResponse {
@@ -31,6 +32,7 @@ impl InspectorResponse {
             private_freetype: PrivateFreeTypeClassification::NotDetected,
             subsystem: ImageSubsystem::Unavailable,
             process_age: None,
+            console_attachment: None,
         }
     }
 
@@ -43,6 +45,7 @@ impl InspectorResponse {
             private_freetype: PrivateFreeTypeClassification::Unavailable,
             subsystem: ImageSubsystem::Unavailable,
             process_age: None,
+            console_attachment: None,
         }
     }
 
@@ -71,6 +74,14 @@ impl InspectorResponse {
 
     pub(crate) const fn with_process_age(mut self, process_age: Option<Duration>) -> Self {
         self.process_age = process_age;
+        self
+    }
+
+    pub(crate) const fn with_console_attachment(
+        mut self,
+        console_attachment: Option<ConsoleAttachment>,
+    ) -> Self {
+        self.console_attachment = console_attachment;
         self
     }
 }
@@ -179,5 +190,10 @@ impl ProcessInspector for ScriptedInspector {
     fn probe_process_age(&self, identity: &ProcessIdentity) -> Option<Duration> {
         self.active_response(identity)
             .and_then(|response| response.process_age)
+    }
+
+    fn probe_console_attachment(&self, identity: &ProcessIdentity) -> Option<ConsoleAttachment> {
+        self.active_response(identity)
+            .and_then(|response| response.console_attachment)
     }
 }

@@ -67,7 +67,7 @@ pub use pipe::{
     named_pipe_server_process_id,
 };
 pub use process::{
-    MachineKind, Process, ProcessAccess, ProcessBinarySignatureMitigation,
+    ConsoleAttachment, MachineKind, Process, ProcessAccess, ProcessBinarySignatureMitigation,
     ProcessDynamicCodeMitigation, ProcessLifecycleFlags, ProcessMachine,
     ProcessSystemCallDisableMitigation, process_session_id, terminate_current_process,
 };

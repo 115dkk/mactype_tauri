@@ -12,10 +12,10 @@ use crate::generated_unity_anticheat_catalog::{
 };
 use crate::image_subsystem::{ImageSubsystem, read_image_subsystem};
 use crate::{
-    BinarySignaturePolicy, DynamicCodePolicy, InspectionEvidence, PrivateFreeTypeClassification,
-    ProcessArchitecture, ProcessIdentity, ProcessInspection, ProcessInspectionError,
-    ProcessInspector, SystemCallDisablePolicy, TargetLifecycle, TargetLiveness,
-    UnityProcessClassification,
+    BinarySignaturePolicy, ConsoleAttachment, DynamicCodePolicy, InspectionEvidence,
+    PrivateFreeTypeClassification, ProcessArchitecture, ProcessIdentity, ProcessInspection,
+    ProcessInspectionError, ProcessInspector, SystemCallDisablePolicy, TargetLifecycle,
+    TargetLiveness, UnityProcessClassification,
 };
 
 const MAX_UNITY_INSTALLATION_ENTRIES: usize = 4_096;
@@ -201,6 +201,24 @@ impl ProcessInspector for WindowsProcessInspector {
             return None;
         }
         process_age_from_filetime(identity.creation_time, SystemTime::now())
+    }
+
+    fn probe_console_attachment(&self, identity: &ProcessIdentity) -> Option<ConsoleAttachment> {
+        let process = Process::open(identity.pid, ProcessAccess::ModuleInventory).ok()?;
+        if process.creation_time().ok()? != identity.creation_time {
+            return None;
+        }
+        process
+            .console_attachment()
+            .ok()
+            .map(|attachment| match attachment {
+                mactype_service_platform::ConsoleAttachment::Attached => {
+                    ConsoleAttachment::Attached
+                }
+                mactype_service_platform::ConsoleAttachment::Detached => {
+                    ConsoleAttachment::Detached
+                }
+            })
     }
 }
 
@@ -479,6 +497,23 @@ mod tests {
         assert_eq!(
             probe_windows_target_liveness(&different_creation_time),
             TargetLiveness::Vanished
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn console_attachment_probe_rejects_a_reused_pid() {
+        let inspector = WindowsProcessInspector::new();
+        let own_identity = inspector.inspect(std::process::id()).unwrap().identity;
+        assert!(inspector.probe_console_attachment(&own_identity).is_some());
+
+        let different_creation_time = ProcessIdentity {
+            creation_time: own_identity.creation_time.wrapping_add(1),
+            ..own_identity
+        };
+        assert_eq!(
+            inspector.probe_console_attachment(&different_creation_time),
+            None
         );
     }
 

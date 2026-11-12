@@ -17,8 +17,8 @@ use crate::observer::{
     ProcessIdentity,
 };
 use crate::target_validation::{
-    DeferralReason, InspectionEvidence, ProcessInspector, ProcessSkipReason, ProcessTargetDecision,
-    ProcessTargetValidator, TargetLifecycle, TargetLiveness,
+    ConsoleAttachment, DeferralReason, InspectionEvidence, ProcessInspector, ProcessSkipReason,
+    ProcessTargetDecision, ProcessTargetValidator, TargetLifecycle, TargetLiveness,
 };
 use crate::{HostEvent, HostEventSink};
 
@@ -232,6 +232,8 @@ impl<'a> InjectionOrchestrator<'a> {
                 if self.inspector.probe_image_subsystem(&identity) == ImageSubsystem::Console
                     && let Some(age) = self.inspector.probe_process_age(&identity)
                     && age < self.deferral_policy.console_grace
+                    && self.inspector.probe_console_attachment(&identity)
+                        != Some(ConsoleAttachment::Detached)
                 {
                     self.insert_deferred(DeferredTarget {
                         identity,

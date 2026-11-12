@@ -78,10 +78,11 @@ pub use runtime_assets::{ProtectedRuntimeAssets, RUNTIME_PROFILE_ABSENT_CODE};
 pub use startup_safety::{LegacyServiceRuntimeState, StartupSafetySnapshot};
 pub use status::{SERVICE_STOP_WAIT_HINT_MS, ScmState, ServiceStatus, StatusReporter};
 pub use target_validation::{
-    BinarySignaturePolicy, DeferralReason, DynamicCodePolicy, InspectionEvidence,
-    PrivateFreeTypeClassification, ProcessInspection, ProcessInspectionError, ProcessInspector,
-    ProcessSkipReason, ProcessTargetDecision, ProcessTargetValidator, SystemCallDisablePolicy,
-    TargetLifecycle, TargetLiveness, UnityProcessClassification, is_relay_root,
+    BinarySignaturePolicy, ConsoleAttachment, DeferralReason, DynamicCodePolicy,
+    InspectionEvidence, PrivateFreeTypeClassification, ProcessInspection, ProcessInspectionError,
+    ProcessInspector, ProcessSkipReason, ProcessTargetDecision, ProcessTargetValidator,
+    SystemCallDisablePolicy, TargetLifecycle, TargetLiveness, UnityProcessClassification,
+    is_relay_root,
 };
 #[cfg(windows)]
 pub use windows_helper_launcher::WindowsHelperLauncher;

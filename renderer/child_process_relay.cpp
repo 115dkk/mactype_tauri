@@ -4,11 +4,13 @@
 #include "image_subsystem.h"
 #include "private_freetype_policy.h"
 #include "renderer_raii.h"
+#include "runtime_pointer.h"
 #include "settings.h"
 #include "../shared/hook_compatibility.h"
 
 #include <cstdio>
 #include <string>
+#include <utility>
 #include <vector>
 
 BOOL IsExeUnload(LPCTSTR executableName);
@@ -375,7 +377,15 @@ bool FixedModulePath(bool target32Bit, std::wstring& target) noexcept
         DWORD const profileAttributes = GetFileAttributesW(profile.c_str());
         if (profileAttributes == INVALID_FILE_ATTRIBUTES ||
             (profileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
-            return false;
+        {
+            // A superseded service generation relays through the current one.
+            std::wstring currentDirectory;
+            if (coreBuild ||
+                !renderer::runtime_pointer::CurrentRuntimeDirectory(
+                    directory, currentDirectory))
+                return false;
+            directory = std::move(currentDirectory);
+        }
         WCHAR const* const targetName = target32Bit
             ? (coreBuild ? L"MacType.Core.dll" : L"MacType.dll")
             : (coreBuild ? L"MacType64.Core.dll" : L"MacType64.dll");
@@ -470,14 +480,13 @@ bool OppositeArchitectureRundll32(std::wstring& path) noexcept
 }
 
 InjectionAttempt InjectWithMatchingHelper(
-    VerifiedChild const& target) noexcept
+    VerifiedChild const& target,
+    std::wstring const& modulePath) noexcept
 {
     try
     {
-        std::wstring modulePath;
         std::wstring helperPath;
-        if (!FixedModulePath(target.target32Bit, modulePath) ||
-            !OppositeArchitectureRundll32(helperPath))
+        if (!OppositeArchitectureRundll32(helperPath))
             return RelayFailure(
                 ChildRelayReason::fixedGenerationUnavailable,
                 ERROR_FILE_NOT_FOUND);
@@ -600,7 +609,7 @@ InjectionAttempt InjectFixedModule(VerifiedChild const& process) noexcept
                 ERROR_NO_UNICODE_TRANSLATION);
         bool const current32Bit = sizeof(void*) == 4;
         if (process.target32Bit != current32Bit)
-            return InjectWithMatchingHelper(process);
+            return InjectWithMatchingHelper(process, module);
         LPCSTR modules[] = {ansi.c_str()};
         if (DetourUpdateProcessWithDll(process.process, modules, 1) != FALSE)
             return Injected();

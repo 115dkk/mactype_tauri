@@ -8,12 +8,13 @@ async function source(path) {
   return readFile(new URL(path, root), 'utf8');
 }
 
-test('HookChildProcesses relays only the fixed generation DLL before child entry', async () => {
-  const [hookList, hook, relay, relayHeader, spawnTree] = await Promise.all([
+test('HookChildProcesses resolves the relay generation before child entry', async () => {
+  const [hookList, hook, relay, relayHeader, runtimePointer, spawnTree] = await Promise.all([
     source('renderer/hooklist.h'),
     source('renderer/hook.cpp'),
     source('renderer/child_process_relay.cpp'),
     source('renderer/child_process_relay.h'),
+    source('renderer/runtime_pointer.cpp'),
     source('tools/service-probe/spawn_tree.cpp'),
   ]);
 
@@ -27,6 +28,9 @@ test('HookChildProcesses relays only the fixed generation DLL before child entry
   assert.match(relay, /MacType64(?:\.Core)?\.dll/);
   assert.match(relay, /MacType(?:\.Core)?\.dll/);
   assert.match(relay, /MacType\.ini/);
+  assert.match(relay, /CurrentRuntimeDirectory/);
+  assert.match(runtimePointer, /current\.json/);
+  assert.match(runtimePointer, /FILE_SHARE_DELETE/);
   assert.match(relay, /ProcessDynamicCodePolicy/);
   assert.match(relay, /ProcessSignaturePolicy/);
   assert.match(relay, /shared\/hook_compatibility\.h/);

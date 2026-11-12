@@ -114,6 +114,9 @@
     <ClCompile Include="renderer\renderer_policy.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="renderer\runtime_pointer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="renderer\settings.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -260,6 +263,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="renderer\renderer_policy.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="renderer\runtime_pointer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="renderer\resource.h">

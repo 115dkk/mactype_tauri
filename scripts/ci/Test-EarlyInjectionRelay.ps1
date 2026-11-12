@@ -111,12 +111,27 @@ foreach ($node in $tree.nodes) {
     }
 }
 
-$retiredRuntime = Join-Path $fullOutputRoot 'retired-runtime'
-New-Item -ItemType Directory -Path $retiredRuntime | Out-Null
+$serviceRoot = Join-Path $fullOutputRoot 'service'
+$currentVersion = '0.2.0+relay-current'
+$currentRuntime = Join-Path $serviceRoot "bin\$currentVersion"
+$retiredRuntime = Join-Path $serviceRoot 'bin\retired'
+New-Item -ItemType Directory -Path $currentRuntime, $retiredRuntime | Out-Null
 foreach ($packageName in $packageNames) {
-    Copy-Item -LiteralPath (Join-Path $resolvedCoreRoot $packageName) `
+    $sourcePackage = Join-Path $resolvedCoreRoot $packageName
+    Copy-Item -LiteralPath $sourcePackage `
+        -Destination (Join-Path $currentRuntime $packageName)
+    Copy-Item -LiteralPath $sourcePackage `
         -Destination (Join-Path $retiredRuntime $packageName)
 }
+Copy-Item -LiteralPath $resolvedProfile `
+    -Destination (Join-Path $currentRuntime 'MacType.ini')
+$currentPointer = Join-Path $serviceRoot 'current.json'
+$currentPointerContent = '{"schema":1,"version":"' + $currentVersion + '"}'
+[IO.File]::WriteAllText(
+    $currentPointer,
+    $currentPointerContent,
+    [Text.UTF8Encoding]::new($false)
+)
 $retiredProfile = Join-Path $retiredRuntime 'MacType.ini'
 Copy-Item -LiteralPath $resolvedProfile -Destination $retiredProfile
 $retiredCore = Join-Path $retiredRuntime $coreName
@@ -150,17 +165,30 @@ foreach ($node in $retiredTree.nodes) {
         throw "Retired-generation node artifact is missing for $Architecture`: $($node.role)"
     }
     $observation = Get-Content -LiteralPath $node.artifact -Raw | ConvertFrom-Json
+    if (-not $observation.mactypeModuleLoaded) {
+        throw "Retired-generation $($node.role) did not load MacType for $Architecture"
+    }
     if ($node.role -eq 'parent') {
-        if (-not $observation.mactypeModuleLoaded) {
-            throw "Retired-generation parent did not load MacType for $Architecture"
+        $expectedModulePath = $retiredCore
+    } else {
+        $expectedArchitecture = if ($CrossArchitecture -and $node.role -eq 'child') {
+            'x86'
+        } elseif ($Architecture -eq 'x64') {
+            'x64'
+        } else {
+            'x86'
         }
-        if (-not [System.IO.Path]::GetFullPath($observation.mactypeModulePath).Equals(
-            [System.IO.Path]::GetFullPath($retiredCore),
-            [StringComparison]::OrdinalIgnoreCase)) {
-            throw "Retired-generation parent loaded the wrong module for $Architecture"
+        $expectedCurrentCore = if ($expectedArchitecture -eq 'x64') {
+            'MacType64.dll'
+        } else {
+            'MacType.dll'
         }
-    } elseif ($observation.mactypeModuleLoaded) {
-        throw "Retired generation propagated into the $($node.role) process for $Architecture"
+        $expectedModulePath = Join-Path $currentRuntime $expectedCurrentCore
+    }
+    if (-not [System.IO.Path]::GetFullPath($observation.mactypeModulePath).Equals(
+        [System.IO.Path]::GetFullPath($expectedModulePath),
+        [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Retired-generation $($node.role) loaded the wrong module for $Architecture`: $($observation.mactypeModulePath)"
     }
 }
 
@@ -259,4 +287,4 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $relayKind = if ($CrossArchitecture) { 'x64/x86 mixed' } else { $Architecture }
-Write-Host "Early child relay loaded the fixed generation in the $relayKind tree, stopped at a retired profile boundary, and quietly skipped explicitly blocked, console, or private-FreeType processes."
+Write-Host "Early child relay loaded the current generation from a retired parent in the $relayKind tree and quietly skipped explicitly blocked, console, or private-FreeType processes."

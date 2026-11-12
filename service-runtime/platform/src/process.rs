@@ -2,7 +2,7 @@
 
 use std::ffi::OsStr;
 use std::io;
-use std::mem::size_of;
+use std::mem::{offset_of, size_of};
 use std::os::windows::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -14,6 +14,7 @@ use windows_sys::Win32::Foundation::{
     ERROR_MR_MID_NOT_FOUND, FILETIME, RtlNtStatusToDosError, STATUS_ACCESS_DENIED, STILL_ACTIVE,
 };
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
+use windows_sys::Win32::System::Diagnostics::Debug::ReadProcessMemory;
 use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows_sys::Win32::System::SystemInformation::{
     IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_I386, IMAGE_FILE_MACHINE_UNKNOWN,
@@ -25,7 +26,7 @@ use windows_sys::Win32::System::SystemServices::{
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, GetExitCodeProcess, GetProcessId, GetProcessInformation,
     GetProcessMitigationPolicy, GetProcessTimes, IsProcessCritical, IsWow64Process2, OpenProcess,
-    PROCESS_ALL_ACCESS, PROCESS_CREATE_THREAD, PROCESS_NAME_WIN32,
+    PEB, PROCESS_ALL_ACCESS, PROCESS_BASIC_INFORMATION, PROCESS_CREATE_THREAD, PROCESS_NAME_WIN32,
     PROCESS_PROTECTION_LEVEL_INFORMATION, PROCESS_QUERY_INFORMATION,
     PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE,
     PROTECTION_LEVEL_NONE, ProcessDynamicCodePolicy, ProcessProtectionLevelInfo,
@@ -39,6 +40,27 @@ use crate::handle::{OwnedHandle, WaitOutcome};
 use crate::wide::{wide_null, wide_path};
 
 const MAX_IMAGE_PATH_UNITS: usize = 32_768;
+const PEB_PROCESS_PARAMETERS_OFFSET: usize = offset_of!(PEB, ProcessParameters);
+// ConsoleHandle follows four ULONGs; windows-sys hides it in Reserved2.
+// https://www.vergiliusproject.com/kernels/x64/windows-11/24h2/_RTL_USER_PROCESS_PARAMETERS
+const PROCESS_PARAMETERS_CONSOLE_HANDLE_OFFSET: usize = 0x10;
+
+/// Whether a process has a console or is starting with one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConsoleAttachment {
+    Attached,
+    Detached,
+}
+
+fn decode_console_attachment(handle: usize) -> ConsoleAttachment {
+    // -1 is CONSOLE_DETACHED_PROCESS; -2 (new console) and -3 (no window)
+    // still request a console and must keep the short-lived-tool grace.
+    if handle == 0 || handle == usize::MAX {
+        ConsoleAttachment::Detached
+    } else {
+        ConsoleAttachment::Attached
+    }
+}
 
 /// The exact access a process handle is opened with. Each variant is a fixed
 /// rights set the service needs; there is no way to request arbitrary rights.
@@ -345,6 +367,75 @@ impl Process {
         }))
     }
 
+    /// Reads the native PEB's console attachment, including for WOW64 targets
+    /// when called by the 64-bit service. Requires query and VM-read rights.
+    pub fn console_attachment(&self) -> io::Result<ConsoleAttachment> {
+        let mut information = PROCESS_BASIC_INFORMATION::default();
+        let mut returned = 0_u32;
+        // SAFETY: the handle is live; both out pointers refer to local values,
+        // and the buffer size is exactly that of `information`.
+        let status = unsafe {
+            NtQueryInformationProcess(
+                self.handle.as_raw(),
+                ProcessBasicInformation,
+                (&mut information as *mut PROCESS_BASIC_INFORMATION).cast(),
+                size_of::<PROCESS_BASIC_INFORMATION>() as u32,
+                &mut returned,
+            )
+        };
+        if status < 0 {
+            // SAFETY: the conversion accepts the status from the native query
+            // and takes no pointers.
+            let mut code = unsafe { RtlNtStatusToDosError(status) };
+            if code == 0 || code == ERROR_MR_MID_NOT_FOUND || code == u32::MAX {
+                code = if status == STATUS_ACCESS_DENIED {
+                    ERROR_ACCESS_DENIED
+                } else {
+                    ERROR_INVALID_DATA
+                };
+            }
+            return Err(io::Error::from_raw_os_error(code as i32));
+        }
+        if returned < size_of::<PROCESS_BASIC_INFORMATION>() as u32 {
+            return Err(io::Error::from_raw_os_error(ERROR_INVALID_DATA as i32));
+        }
+        let parameters = self.read_remote_word(
+            information.PebBaseAddress as usize,
+            PEB_PROCESS_PARAMETERS_OFFSET,
+        )?;
+        let console_handle =
+            self.read_remote_word(parameters, PROCESS_PARAMETERS_CONSOLE_HANDLE_OFFSET)?;
+        Ok(decode_console_attachment(console_handle))
+    }
+
+    fn read_remote_word(&self, base: usize, offset: usize) -> io::Result<usize> {
+        let address = base
+            .checked_add(offset)
+            .filter(|_| base != 0)
+            .ok_or_else(|| io::Error::from_raw_os_error(ERROR_INVALID_DATA as i32))?;
+        let mut bytes = [0_u8; size_of::<usize>()];
+        let mut read = 0;
+        // SAFETY: the remote address is never dereferenced locally. The OS
+        // validates it; `bytes` and `read` are writable local buffers of the
+        // specified sizes and the process handle stays live throughout.
+        if unsafe {
+            ReadProcessMemory(
+                self.handle.as_raw(),
+                address as *const std::ffi::c_void,
+                bytes.as_mut_ptr().cast(),
+                bytes.len(),
+                &mut read,
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        if read != bytes.len() {
+            return Err(io::Error::from_raw_os_error(ERROR_INVALID_DATA as i32));
+        }
+        Ok(usize::from_ne_bytes(bytes))
+    }
+
     /// `Some(code)` once the process has exited, `None` while it still runs.
     pub fn exit_code(&self) -> io::Result<Option<u32>> {
         let mut exit_code = 0_u32;
@@ -575,13 +666,16 @@ pub fn terminate_current_process(exit_code: u32) -> io::Error {
 
 #[cfg(test)]
 mod tests {
+    use std::os::windows::process::CommandExt;
     use std::time::Duration;
 
     use windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER;
+    use windows_sys::Win32::System::Console::GetConsoleCP;
+    use windows_sys::Win32::System::Threading::{CREATE_NO_WINDOW, DETACHED_PROCESS};
 
     use super::{
-        MachineKind, Process, ProcessAccess, ProcessLifecycleFlags, decode_lifecycle_flags,
-        process_session_id,
+        ConsoleAttachment, MachineKind, Process, ProcessAccess, ProcessLifecycleFlags,
+        decode_console_attachment, decode_lifecycle_flags, process_session_id,
     };
     use crate::handle::WaitOutcome;
     use crate::job::JobObject;
@@ -610,6 +704,77 @@ mod tests {
         );
         child.wait().unwrap();
         assert!(Process::open(std::process::id(), ProcessAccess::AsSpawned).is_err());
+    }
+
+    fn child_console_attachment(flags: u32) -> std::io::Result<ConsoleAttachment> {
+        let mut child = std::process::Command::new("ping.exe")
+            .args(["-n", "30", "127.0.0.1"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .creation_flags(flags)
+            .spawn()?;
+        let attachment = Process::open(child.id(), ProcessAccess::ModuleInventory)
+            .and_then(|process| process.console_attachment());
+        // Reap the child even when the probe failed, before any test assertion.
+        let killed = child.kill();
+        let waited = child.wait();
+        killed?;
+        waited?;
+        attachment
+    }
+
+    #[test]
+    fn a_detached_console_child_reports_no_console() {
+        assert_eq!(
+            child_console_attachment(DETACHED_PROCESS).unwrap(),
+            ConsoleAttachment::Detached
+        );
+    }
+
+    #[test]
+    fn a_no_window_console_child_reports_attached() {
+        // SAFETY: GetConsoleCP takes no arguments and reads this process's
+        // console code page; it does not attach, create, or show a console.
+        if unsafe { GetConsoleCP() } == 0 {
+            eprintln!("skipping attached-child assertion: the test process has no console");
+            return;
+        }
+        assert_eq!(
+            child_console_attachment(CREATE_NO_WINDOW).unwrap(),
+            ConsoleAttachment::Attached
+        );
+    }
+
+    #[test]
+    fn console_attachment_decoder_keeps_new_and_no_window_consoles_attached() {
+        for handle in [0, usize::MAX] {
+            assert_eq!(
+                decode_console_attachment(handle),
+                ConsoleAttachment::Detached
+            );
+        }
+        for handle in [usize::MAX - 1, usize::MAX - 2, 0x100] {
+            assert_eq!(
+                decode_console_attachment(handle),
+                ConsoleAttachment::Attached
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn native_peb_console_offsets_match_the_x64_layout() {
+        assert_eq!(super::PEB_PROCESS_PARAMETERS_OFFSET, 0x20);
+        assert_eq!(super::PROCESS_PARAMETERS_CONSOLE_HANDLE_OFFSET, 0x10);
+    }
+
+    #[test]
+    fn console_attachment_preserves_unreadable_memory_as_an_error() {
+        let process = Process::open(std::process::id(), ProcessAccess::QueryLimited).unwrap();
+        assert!(process.console_attachment().is_err());
+        assert!(process.read_remote_word(0, 0x10).is_err());
+        assert!(process.read_remote_word(usize::MAX, 0x10).is_err());
     }
 
     #[test]

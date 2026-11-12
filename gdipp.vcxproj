@@ -309,6 +309,7 @@
     <ClCompile Include="renderer\profile_runtime.cpp" />
     <ClCompile Include="renderer\renderer_activation.cpp" />
     <ClCompile Include="renderer\renderer_policy.cpp" />
+    <ClCompile Include="renderer\runtime_pointer.cpp" />
     <ClCompile Include="renderer\settings.cpp" />
     <ClCompile Include="renderer\unload_lifecycle.cpp" />
     <ClCompile Include="renderer\unload_providers.cpp" />
@@ -369,6 +370,7 @@
     <ClInclude Include="renderer\renderer_activation.h" />
     <ClInclude Include="renderer\renderer_policy.h" />
     <ClInclude Include="renderer\resource.h" />
+    <ClInclude Include="renderer\runtime_pointer.h" />
     <ClInclude Include="renderer\settings.h" />
     <ClInclude Include="shared\hook_compatibility.h" />
     <ClInclude Include="renderer\stdint.h" />

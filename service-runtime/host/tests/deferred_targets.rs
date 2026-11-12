@@ -15,9 +15,9 @@ use identity_support::{binding, identity};
 use inspector_support::{InspectorResponse, ScriptedInspector};
 use mactype_service_contract::{ConsoleProcessPolicy, PrivateFreeTypePolicy, UnityFontHookPolicy};
 use mactype_service_host::{
-    BinarySignaturePolicy, BrokerDisposition, BrokerResult, DeferralReason, DynamicCodePolicy,
-    ImageSubsystem, InspectionEvidence, MAX_DEFERRED_TARGETS, ProcessIdentity, ProcessInspection,
-    ProcessOrchestrator, ProcessOutcome, SessionChange, SystemCallDisablePolicy,
+    BinarySignaturePolicy, BrokerDisposition, BrokerResult, ConsoleAttachment, DeferralReason,
+    DynamicCodePolicy, ImageSubsystem, InspectionEvidence, MAX_DEFERRED_TARGETS, ProcessIdentity,
+    ProcessInspection, ProcessOrchestrator, ProcessOutcome, SessionChange, SystemCallDisablePolicy,
     TARGET_VANISHED_RESULT_CODE, TargetLifecycle, TargetLiveness,
 };
 
@@ -133,6 +133,60 @@ fn fresh_console_target_waits_only_for_the_remaining_grace_then_injects() {
     assert_eq!(broker.request_count(), 1);
     assert_eq!(inspector.liveness_probes().len(), 1);
     assert!(orchestrator.deferred_targets().is_empty());
+}
+
+#[test]
+fn fresh_detached_console_target_injects_without_grace() {
+    let target = target(42);
+    let inspector = ScriptedInspector::new([(
+        target.pid,
+        InspectorResponse::inspected(inspection(target), TargetLifecycle::Running)
+            .with_subsystem(ImageSubsystem::Console)
+            .with_process_age(Some(Duration::from_millis(750)))
+            .with_console_attachment(Some(ConsoleAttachment::Detached)),
+    )]);
+    let broker = ScriptedBroker::new([broker_result(
+        BrokerDisposition::Injected,
+        "renderer-active",
+    )]);
+    let mut orchestrator =
+        ProcessOrchestrator::new(900, binding(), &inspector, &broker, discard_events());
+
+    assert_eq!(
+        orchestrator.handle_pid_at(42, Instant::now()).unwrap(),
+        ProcessOutcome::Injected
+    );
+    assert_eq!(broker.request_count(), 1);
+    assert!(orchestrator.deferred_targets().is_empty());
+}
+
+#[test]
+fn fresh_attached_or_unknown_console_target_keeps_the_grace() {
+    for attachment in [Some(ConsoleAttachment::Attached), None] {
+        let target = target(42);
+        let inspector = ScriptedInspector::new([(
+            target.pid,
+            InspectorResponse::inspected(inspection(target), TargetLifecycle::Running)
+                .with_subsystem(ImageSubsystem::Console)
+                .with_process_age(Some(Duration::from_millis(750)))
+                .with_console_attachment(attachment),
+        )]);
+        let broker = ScriptedBroker::new([]);
+        let mut orchestrator =
+            ProcessOrchestrator::new(900, binding(), &inspector, &broker, discard_events());
+        let start = Instant::now();
+
+        assert_eq!(
+            orchestrator.handle_pid_at(42, start).unwrap(),
+            ProcessOutcome::Deferred,
+            "attachment={attachment:?}"
+        );
+        assert_eq!(broker.request_count(), 0);
+        let deferred = orchestrator.deferred_targets();
+        assert_eq!(deferred.len(), 1);
+        assert_eq!(deferred[0].reason, DeferralReason::ConsoleGrace);
+        assert_eq!(deferred[0].not_before, start + Duration::from_millis(1_250));
+    }
 }
 
 #[test]

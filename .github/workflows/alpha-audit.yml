@@ -74,6 +74,10 @@ on:
         description: 'Run even if no relevant code changed'
         type: boolean
         default: false
+      quota_probe:
+        description: 'Only probe what the subscription token can read about plan usage (no audit)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -138,9 +142,81 @@ jobs:
             echo "should_audit=true" >> "$GITHUB_OUTPUT"
           fi
 
+  # TEMPORARY: finds out whether the setup-token credential can read the
+  # weekly Fable meter. Removed before merge.
+  quota-probe:
+    if: inputs.quota_probe
+    runs-on: ubuntu-latest
+    env:
+      AUDIT_MODEL: claude-mythos-5-2
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Probe plan usage
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          set -uo pipefail
+          unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN
+          # The log is public: drop e-mail addresses and UUIDs.
+          redact() { sed -E 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/<email>/g; s/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/<uuid>/g'; }
+          dir="$RUNNER_TEMP/quota-probe"
+          mkdir -p "$dir"
+          cd "$dir"
+          claude --version
+
+          echo "::group::auth status (keys and method only)"
+          claude auth status 2>&1 | jq -c '{authMethod, apiProvider, subscriptionType, keys: keys}' 2>&1 | redact
+          echo "::endgroup::"
+
+          echo "::group::one-line request on $AUDIT_MODEL, stream-json"
+          claude --model "$AUDIT_MODEL" \
+            --settings "{\"availableModels\": [\"$AUDIT_MODEL\"]}" \
+            --tools "" --max-turns 1 \
+            --output-format stream-json --verbose \
+            -p "Reply with OK." > probe.jsonl 2> probe.err
+          echo "exit $?"
+          echo "-- message types"
+          jq -r '.type + (if .subtype then "/" + .subtype else "" end)' probe.jsonl | sort | uniq -c
+          echo "-- rate_limit_event lines"
+          jq -c 'select(.type == "rate_limit_event")' probe.jsonl | redact
+          echo "-- result"
+          jq -c 'select(.type == "result") | {is_error, subtype, result, terminal_reason, keys: keys}' probe.jsonl | redact
+          echo "-- stderr"
+          redact < probe.err | tail -20
+          echo "::endgroup::"
+
+          SID=$(jq -r 'select(.type == "result") | .session_id' probe.jsonl | head -1)
+
+          for mode in resumed fresh; do
+            echo "::group::/usage ($mode), stream-json"
+            if [ "$mode" = resumed ] && [ -n "$SID" ]; then
+              claude --resume "$SID" --output-format stream-json --verbose -p "/usage" > "usage-$mode.jsonl" 2> "usage-$mode.err"
+            else
+              claude --output-format stream-json --verbose -p "/usage" > "usage-$mode.jsonl" 2> "usage-$mode.err"
+            fi
+            echo "exit $?"
+            jq -r '.type + (if .subtype then "/" + .subtype else "" end)' "usage-$mode.jsonl" | sort | uniq -c
+            echo "-- assistant messages: keys, usage_report, text"
+            jq -c 'select(.type == "assistant") | {keys: keys, usage_report}' "usage-$mode.jsonl" | redact
+            jq -r 'select(.type == "assistant") | .message.content[]? | .text? // empty' "usage-$mode.jsonl" | redact
+            echo "-- result"
+            jq -r 'select(.type == "result") | .result // empty' "usage-$mode.jsonl" | redact
+            echo "-- rate_limit_event lines"
+            jq -c 'select(.type == "rate_limit_event")' "usage-$mode.jsonl" | redact
+            echo "-- stderr"
+            redact < "usage-$mode.err" | tail -20
+            echo "::endgroup::"
+          done
+
   audit:
     needs: check-changes
-    if: needs.check-changes.outputs.should_audit == 'true'
+    if: needs.check-changes.outputs.should_audit == 'true' && !inputs.quota_probe
     # Same image the rest of this repository's Windows jobs use, so the
     # toolchain the session finds is the toolchain CI builds with.
     runs-on: windows-2022
